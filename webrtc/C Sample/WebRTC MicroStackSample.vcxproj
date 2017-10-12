@@ -1,0 +1,135 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{CE62CBEE-DAA8-4E5E-AAAA-1F6FC291AB94}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>WebRTCMicroStackSample</RootNamespace>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;MICROSTACK_NO_STDAFX;WINSOCK2;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);MICROSTACK_TLS_DETECT;_REMOTELOGGING;_REMOTELOGGINGSERVER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\openssl\include\openssl;..\..\openssl\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExceptionHandling>Async</ExceptionHandling>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>..\..\openssl\libstatic\libcrypto32MTd.lib;..\..\openssl\libstatic\libssl32MTd.lib;Crypt32.lib;DbgHelp.lib;ws2_32.lib;Iphlpapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>copy "$(ProjectDir)webrtcsample.html" "$(OutputPath)"
+copy "$(ProjectDir)webrtcpassivesample.html" "$(OutputPath)"
+copy "$(ProjectDir)websocketsample.html" "$(OutputPath)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;MICROSTACK_NO_STDAFX;WINSOCK2;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);MICROSTACK_TLS_DETECT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\..\openssl\include\openssl;..\..\openssl\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExceptionHandling>Async</ExceptionHandling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>..\..\openssl\libstatic\libcrypto32MT.lib;..\..\openssl\libstatic\libssl32MT.lib;Crypt32.lib;DbgHelp.lib;ws2_32.lib;Iphlpapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>copy "$(ProjectDir)webrtcsample.html" "$(OutputPath)"
+copy "$(ProjectDir)webrtcpassivesample.html" "$(OutputPath)"
+copy "$(ProjectDir)websocketsample.html" "$(OutputPath)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <Text Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\microstack\ILibCrypto.h" />
+    <ClInclude Include="..\..\microstack\ILibRemoteLogging.h" />
+    <ClInclude Include="..\..\microstack\ILibAsyncServerSocket.h" />
+    <ClInclude Include="..\..\microstack\ILibAsyncSocket.h" />
+    <ClInclude Include="..\..\microstack\ILibAsyncUDPSocket.h" />
+    <ClInclude Include="..\..\microstack\ILibParsers.h" />
+    <ClInclude Include="..\..\microstack\ILibWebClient.h" />
+    <ClInclude Include="..\..\microstack\ILibWebRTC.h" />
+    <ClInclude Include="..\..\microstack\ILibWebServer.h" />
+    <ClInclude Include="..\..\microstack\ILibWrapperWebRTC.h" />
+    <ClInclude Include="SimpleRendezvousServer.h" />
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="targetver.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\microstack\ILibCrypto.c" />
+    <ClCompile Include="..\..\microstack\ILibRemoteLogging.c" />
+    <ClCompile Include="..\..\microstack\ILibAsyncServerSocket.c" />
+    <ClCompile Include="..\..\microstack\ILibAsyncSocket.c" />
+    <ClCompile Include="..\..\microstack\ILibAsyncUDPSocket.c" />
+    <ClCompile Include="..\..\microstack\ILibParsers.c" />
+    <ClCompile Include="..\..\microstack\ILibWebClient.c" />
+    <ClCompile Include="..\..\microstack\ILibWebRTC.c" />
+    <ClCompile Include="..\..\microstack\ILibWebServer.c" />
+    <ClCompile Include="..\..\microstack\ILibWrapperWebRTC.c" />
+    <ClCompile Include="SimpleRendezvousServer.c" />
+    <ClCompile Include="WebRTC_MicroStackSample.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="websocketsample.html" />
+    <None Include="webrtcpassivesample.html" />
+    <None Include="webrtcsample.html" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

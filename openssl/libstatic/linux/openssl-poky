@@ -1,0 +1,18 @@
+#
+# Copy and run this in the OpenSSL directory for x86 Galileo compatible OpenSSL stack
+#
+export PATH=/home/default/Public/Galileo/arduino-1.5.3/hardware/tools/sysroots/x86_64-pokysdk-linux/usr/bin/i586-poky-linux-uclibc/:$PATH
+export CC="/home/default/Public/Galileo/arduino-1.5.3/hardware/tools/sysroots/x86_64-pokysdk-linux/usr/bin/i586-poky-linux-uclibc/i586-poky-linux-uclibc-gcc --sysroot=/home/default/Public/Galileo/arduino-1.5.3/hardware/tools/sysroots/i586-poky-linux-uclibc"
+
+# --sysroot=/home/default/Public/Galileo/arduino-1.5.3/hardware/tools/sysroots/i586-poky-linux-uclibc
+
+cd ../openssl
+make clean
+./Configure linux-generic32 no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-threads no-hw no-err no-dso no-shared -no-asm no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-ec no-ecdsa no-seed no-camellia no-dso no-bf no-cast no-md2 no-mdc2
+make depend
+sed 's/ -O3 / -Os -m32 /g' Makefile > t
+rm Makefile
+mv t Makefile
+make
+cp *.a ../openssl-static/poky
+cd ..

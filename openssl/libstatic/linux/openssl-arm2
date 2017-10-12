@@ -1,0 +1,16 @@
+#
+# Copy and run this in the OpenSSL directory for ARM compatible OpenSSL stack
+#
+# export PATH=/home/default/Public/ToolChains/LinuxArm/bin/:$PATH
+export CC=arm-linux-gnueabi-gcc
+
+cd ../openssl
+make clean
+./Configure linux-generic32 no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-threads no-hw no-err no-dso no-shared -no-asm no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-ec no-ecdsa no-seed no-camellia no-dso no-bf no-cast no-md2 no-mdc2
+make depend
+sed 's/ -O3 / -Os /g' Makefile > t
+rm Makefile
+mv t Makefile
+make
+cp *.a ../openssl-static/arm2
+cd ..

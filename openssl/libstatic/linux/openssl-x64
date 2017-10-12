@@ -1,0 +1,12 @@
+#
+# Copy and run this in the OpenSSL directory for Intel x86 64bit compatible OpenSSL stack
+#
+cd ../openssl
+./Configure linux-x86_64 no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-threads no-hw no-err no-dso no-shared -no-asm no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-ec no-ecdsa no-seed no-camellia no-dso no-bf no-cast no-md2 no-mdc2
+make depend
+sed 's/ -O3 / -O3 /g' Makefile > t
+rm Makefile
+mv t Makefile
+make
+cp *.a ../openssl-static/x86-64
+cd ..

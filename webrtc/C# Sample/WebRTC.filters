@@ -1,0 +1,78 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Microstack">
+      <UniqueIdentifier>{3f87ffbb-0dd7-47e0-b7cc-d27495c5e526}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core">
+      <UniqueIdentifier>{29d8d56d-879a-4e7e-bb14-1f56896a8a74}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="MicrostackWrapper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Microstack\ILibAsyncSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="Microstack\ILibAsyncUDPSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="Microstack\ILibParsers.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="Microstack\ILibWebClient.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="core\utils.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="Microstack\ILibWebRTC.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="stdafx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MicrostackWrapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="dllmain.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Microstack\ILibAsyncSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="Microstack\ILibAsyncUDPSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="Microstack\ILibParsers.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="Microstack\ILibWebServer.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="core\utils.c">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="Microstack\ILibWebRTC.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

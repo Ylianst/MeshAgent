@@ -1,0 +1,264 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\meshcore\agentcore.c" />
+    <ClCompile Include="..\meshcore\KVM\Windows\input.c" />
+    <ClCompile Include="..\meshcore\KVM\Windows\kvm.c" />
+    <ClCompile Include="..\meshcore\KVM\Windows\tile.cpp" />
+    <ClCompile Include="..\meshcore\meshinfo.c" />
+    <ClCompile Include="..\microlms\heci\HECIWin.c" />
+    <ClCompile Include="..\microlms\heci\LMEConnection.c" />
+    <ClCompile Include="..\microlms\heci\PTHICommand.c" />
+    <ClCompile Include="..\microlms\lms\ILibLMS.c" />
+    <ClCompile Include="..\microscript\duktape.c" />
+    <ClCompile Include="..\microscript\ILibAsyncSocket_Duktape.c" />
+    <ClCompile Include="..\microscript\ILibDuktapeModSearch.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_Debugger.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_Dgram.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_DuplexStream.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_EncryptionStream.c" />
+    <ClCompile Include="..\microscript\ILibduktape_EventEmitter.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_fs.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_GenericMarshal.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_Helpers.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_http.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_MemoryStream.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_net.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_NetworkMonitor.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_Polyfills.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_ProcessPipe.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_ReadableStream.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_ScriptContainer.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_SHA256.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_SimpleDataStore.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_WebRTC.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_WritableStream.c" />
+    <ClCompile Include="..\microscript\ILibParsers_Duktape.c" />
+    <ClCompile Include="..\microscript\ILibWebClient_Duktape.c" />
+    <ClCompile Include="..\microscript\ILibWebServer_Duktape.c" />
+    <ClCompile Include="..\microstack\ILibAsyncServerSocket.c" />
+    <ClCompile Include="..\microstack\ILibAsyncSocket.c" />
+    <ClCompile Include="..\microstack\ILibAsyncUDPSocket.c" />
+    <ClCompile Include="..\microstack\ILibCrypto.c" />
+    <ClCompile Include="..\microstack\ILibIPAddressMonitor.c" />
+    <ClCompile Include="..\microstack\ILibMulticastSocket.c" />
+    <ClCompile Include="..\microstack\ILibParsers.c" />
+    <ClCompile Include="..\microstack\ILibProcessPipe.c" />
+    <ClCompile Include="..\microstack\ILibRemoteLogging.c" />
+    <ClCompile Include="..\microstack\ILibSimpleDataStore.c" />
+    <ClCompile Include="..\microstack\ILibWebClient.c" />
+    <ClCompile Include="..\microstack\ILibWebRTC.c" />
+    <ClCompile Include="..\microstack\ILibWebServer.c" />
+    <ClCompile Include="..\microstack\ILibWrapperWebRTC.c" />
+    <ClCompile Include="main.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\meshcore\agentcore.h" />
+    <ClInclude Include="..\meshcore\KVM\Windows\input.h" />
+    <ClInclude Include="..\meshcore\KVM\Windows\kvm.h" />
+    <ClInclude Include="..\meshcore\KVM\Windows\tile.h" />
+    <ClInclude Include="..\meshcore\meshdefines.h" />
+    <ClInclude Include="..\meshcore\meshinfo.h" />
+    <ClInclude Include="..\microlms\heci\HECIWin.h" />
+    <ClInclude Include="..\microlms\heci\HECI_if.h" />
+    <ClInclude Include="..\microlms\heci\LMEConnection.h" />
+    <ClInclude Include="..\microlms\heci\LMS_if.h" />
+    <ClInclude Include="..\microlms\heci\LMS_if_constants.h" />
+    <ClInclude Include="..\microlms\heci\mei.h" />
+    <ClInclude Include="..\microlms\heci\PTHICommand.h" />
+    <ClInclude Include="..\microlms\heci\StatusCodeDefinitions.h" />
+    <ClInclude Include="..\microlms\lms\ILibLMS-WebSite.h" />
+    <ClInclude Include="..\microlms\lms\ILibLMS.h" />
+    <ClInclude Include="..\microscript\duktape.h" />
+    <ClInclude Include="..\microscript\duk_config.h" />
+    <ClInclude Include="..\microscript\ILibAsyncSocket_Duktape.h" />
+    <ClInclude Include="..\microscript\ILibDuktapeModSearch.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_Debugger.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_Dgram.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_DuplexStream.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_EncryptionStream.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_EventEmitter.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_fs.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_GenericMarshal.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_Helpers.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_http.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_net.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_NetworkMonitor.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_Polyfills.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_ProcessPipe.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_ReadableStream.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_ScriptContainer.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_SHA256.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_SimpleDataStore.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_WebRTC.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_WritableStream.h" />
+    <ClInclude Include="..\microscript\ILibParsers_Duktape.h" />
+    <ClInclude Include="..\microscript\ILibWebClient_Duktape.h" />
+    <ClInclude Include="..\microscript\ILibWebServer_Duktape.h" />
+    <ClInclude Include="..\microstack\ILibAsyncServerSocket.h" />
+    <ClInclude Include="..\microstack\ILibAsyncSocket.h" />
+    <ClInclude Include="..\microstack\ILibAsyncUDPSocket.h" />
+    <ClInclude Include="..\microstack\ILibCrypto.h" />
+    <ClInclude Include="..\microstack\ILibIPAddressMonitor.h" />
+    <ClInclude Include="..\microstack\ILibMulticastSocket.h" />
+    <ClInclude Include="..\microstack\ILibParsers.h" />
+    <ClInclude Include="..\microstack\ILibProcessPipe.h" />
+    <ClInclude Include="..\microstack\ILibRemoteLogging.h" />
+    <ClInclude Include="..\microstack\ILibSimpleDataStore.h" />
+    <ClInclude Include="..\microstack\ILibWebClient.h" />
+    <ClInclude Include="..\microstack\ILibWebRTC.h" />
+    <ClInclude Include="..\microstack\ILibWebServer.h" />
+    <ClInclude Include="..\microstack\ILibWrapperWebRTC.h" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="MeshConsole.rc" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{E377F156-BAED-4086-B534-3CC43164607A}</ProjectGuid>
+    <RootNamespace>MicrostackDuktape</RootNamespace>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>$(ProjectName)64</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>$(ProjectName)64</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>MESH_AGENTID=1;NOLMSCOMMANDER;_DEBUG;MICROSTACK_PROXY;_LINKVM;DUK_OPT_DEBUGGER_SUPPORT;DUK_OPT_INTERRUPT_COUNTER;WIN32;WINSOCK2;_WINSOCK_DEPRECATED_NO_WARNINGS;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);MICROSTACK_TLS_DETECT;MICROSTACK_NO_STDAFX;_REMOTELOGGING;_REMOTELOGGINGSERVER;ILibChain_WATCHDOG_TIMEOUT=600000;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\openssl\include;..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <ExceptionHandling>Async</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>SetupAPI.lib;Crypt32.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;..\openssl\libstatic\libcrypto32MTd.lib;..\openssl\libstatic\libssl32MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>MESH_AGENTID=1;NOLMSCOMMANDER;MICROSTACK_PROXY;_LINKVM;WIN32;WINSOCK2;_WINSOCK_DEPRECATED_NO_WARNINGS;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);MICROSTACK_TLS_DETECT;MICROSTACK_NO_STDAFX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\openssl\include;..\</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ExceptionHandling>Async</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>SetupAPI.lib;Crypt32.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;..\openssl\libstatic\libcrypto32MT.lib;..\openssl\libstatic\libssl32MT.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>MESH_AGENTID=2;NOLMSCOMMANDER;MICROSTACK_PROXY;_DEBUG;WIN32;WIN64;WINSOCK2;_WINSOCK_DEPRECATED_NO_WARNINGS;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);MICROSTACK_TLS_DETECT;MICROSTACK_NO_STDAFX;_REMOTELOGGING;_REMOTELOGGINGSERVER;ILibChain_WATCHDOG_TIMEOUT=600000;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\openssl\include;..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <ExceptionHandling>Async</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>SetupAPI.lib;Crypt32.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;..\openssl\libstatic\libcrypto64MTd.lib;..\openssl\libstatic\libssl64MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+      <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>MESH_AGENTID=2;NOLMSCOMMANDER;MICROSTACK_PROXY;_LINKVM;WIN32;WIN64;WINSOCK2;_WINSOCK_DEPRECATED_NO_WARNINGS;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);MICROSTACK_TLS_DETECT;MICROSTACK_NO_STDAFX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>..\openssl\include;..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ExceptionHandling>Async</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>SetupAPI.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;Crypt32.lib;ws2_32.lib;..\openssl\libstatic\libcrypto64MT.lib;..\openssl\libstatic\libssl64MT.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
+      <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

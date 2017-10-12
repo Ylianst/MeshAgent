@@ -1,0 +1,112 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="main.c" />
+    <ClCompile Include="stdafx.cpp" />
+    <ClCompile Include="..\heci\HECIWin.c">
+      <Filter>MEI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\heci\PTHICommand.c">
+      <Filter>MEI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\heci\LMEConnection.c">
+      <Filter>MEI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibAsyncSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibParsers.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibWebClient.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibWebServer.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibAsyncServerSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\sha1.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\md5.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibCrypto.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\lms\ILibLMS.c">
+      <Filter>LMS</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="..\heci\HECI_if.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\heci\HECIWin.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\heci\PTHICommand.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\heci\StatusCodeDefinitions.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\heci\LMEConnection.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\heci\LMS_if.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\heci\LMS_if_constants.h">
+      <Filter>MEI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibWebServer.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibAsyncServerSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibAsyncSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibParsers.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibWebClient.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\sha1.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\md5.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibCrypto.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\lms\ILibLMS.h">
+      <Filter>LMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\lms\ILibLMS-WebSite.h">
+      <Filter>LMS</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="MEI">
+      <UniqueIdentifier>{5878a0ef-e109-42f4-a6d2-8e20a623b275}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Microstack">
+      <UniqueIdentifier>{24205618-7a0a-4260-916f-f08e93a87031}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="LMS">
+      <UniqueIdentifier>{83d6353d-960a-4869-9928-e164bcfa5c22}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,9 @@
+rm ./arm/*
+rm ./arm2/*
+rm ./mips/*
+rm ./mipsel/*
+rm ./pogo/*
+rm ./poky/*
+rm ./poky64/*
+rm ./x86-64/*
+rm ./x86/*

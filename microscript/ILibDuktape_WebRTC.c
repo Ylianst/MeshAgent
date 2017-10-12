@@ -1,0 +1,538 @@
+/*
+Copyright 2006 - 2017 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+
+
+#ifdef WIN32
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#endif
+
+#include "ILibDuktape_WebRTC.h"
+#include "microstack/ILibParsers.h"
+#include "ILibDuktape_Helpers.h"
+#include "ILibDuktapeModSearch.h"
+#include "ILibDuktape_EventEmitter.h"
+#include "ILibDuktape_DuplexStream.h"
+
+#ifndef MICROSTACK_NOTLS
+#include "microstack/ILibWebRTC.h"
+#include "microstack/ILibWrapperWebRTC.h"
+
+
+#define ILibDuktape_WebRTC_ConnectionFactoryPtr		"\xFF_WebRTC_ConnectionFactoryPtr"
+#define ILibDuktape_WebRTC_ConnectionPtr			"\xFF_WebRTC_ConnectionPtr"
+#define ILibDuktape_WebRTC_DataChannelPtr			"\xFF_WebRTC_DataChannelPtr"
+extern void ILibWrapper_WebRTC_ConnectionFactory_RemoveFromChain(ILibWrapper_WebRTC_ConnectionFactory factory);
+
+typedef struct ILibWebRTC_Duktape_Handlers
+{
+	duk_context *ctx;
+	void *ConnectionObject;
+	ILibDuktape_EventEmitter *emitter;
+
+	void *OnConnect;
+	void *OnDataChannel;
+	void *OnConnectionSendOK;
+	void *OnCandidate;
+	void *OnDisconnect;
+}ILibWebRTC_Duktape_Handlers;
+typedef struct ILibDuktape_WebRTC_DataChannel
+{
+	ILibWrapper_WebRTC_DataChannel *dataChannel;
+	duk_context *ctx;
+	ILibDuktape_EventEmitter *emitter;
+	ILibDuktape_DuplexStream *stream;
+	void *OnAck;
+}ILibDuktape_WebRTC_DataChannel;
+
+extern void* ILibWrapper_WebRTC_Connection_GetStunModule(ILibWrapper_WebRTC_Connection connection);
+
+
+duk_ret_t ILibWebRTC_Duktape_ConnectionFactory_SetTurn(duk_context *ctx)
+{
+	char *host = Duktape_GetStringPropertyValue(ctx, 0, "Host", NULL);
+	int	 port = Duktape_GetIntPropertyValue(ctx, 0, "Port", 3478);
+	duk_size_t usernameLen;
+	char *username = Duktape_GetStringPropertyValueEx(ctx, 0, "Username", NULL, &usernameLen);
+	duk_size_t passwordLen;
+	char *password = Duktape_GetStringPropertyValueEx(ctx, 0, "Password", "", &passwordLen);
+	ILibWebRTC_TURN_ConnectFlags flags = (ILibWebRTC_TURN_ConnectFlags)Duktape_GetIntPropertyValue(ctx, 0, "Mode", (int)ILibWebRTC_TURN_ENABLED);
+	struct sockaddr_in6* server;
+	ILibWrapper_WebRTC_ConnectionFactory factory;
+
+	if (host == NULL || username == NULL) { duk_push_string(ctx, "Invalid TURN Parameters"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	server = Duktape_IPAddress4_FromString(host, (unsigned short)port);
+
+	duk_push_this(ctx);
+	factory = Duktape_GetPointerProperty(ctx, -1, "FactoryPtr");
+	
+	ILibWrapper_WebRTC_ConnectionFactory_SetTurnServer(factory, server, username, (int)usernameLen, password, (int)passwordLen, flags);
+	return 0;
+}
+
+duk_idx_t ILibWebRTC_Duktape_Connection_AddRemoteCandidate(duk_context *ctx)
+{
+	char *username;
+	struct sockaddr_in6 *candidate = NULL;
+	ILibWrapper_WebRTC_Connection connection;
+
+	duk_push_this(ctx);														// [connection]
+	duk_get_prop_string(ctx, -1, "ConnectionPtr");							// [connection][ptr]
+	connection = (ILibWrapper_WebRTC_Connection*)duk_to_pointer(ctx, -1);
+	if (strcmp(Duktape_GetStringPropertyValue(ctx, 0, "Family", "IPv4"), "IPv4") == 0)
+	{
+		candidate = Duktape_IPAddress4_FromString(Duktape_GetStringPropertyValue(ctx, 0, "Address", "127.0.0.1"), (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "Port", 65535));
+	}
+	username = ILibWrapper_WebRTC_Connection_GetLocalUsername(connection);
+	ILibORTC_AddRemoteCandidate(ILibWrapper_WebRTC_Connection_GetStunModule(connection), username, candidate);
+	return 0;
+}
+
+
+/*------------------------------------------------------------------------------------------*/
+
+
+ILibWrapper_WebRTC_Connection ILibDuktape_WebRTC_Native_GetConnection(duk_context *ctx)
+{
+	ILibWrapper_WebRTC_Connection retVal = NULL;
+	duk_push_this(ctx);													// [this]
+	duk_get_prop_string(ctx, -1, ILibDuktape_WebRTC_ConnectionPtr);		// [this][connection]
+	retVal = (ILibWrapper_WebRTC_Connection)duk_get_pointer(ctx, -1);
+	duk_pop_2(ctx);														// ...
+	return retVal;
+}
+ILibTransport_DoneState ILibDuktape_WebRTC_DataChannel_Stream_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)user;
+	if (ptrs->dataChannel != NULL)
+	{
+		return(ILibWrapper_WebRTC_DataChannel_Send(ptrs->dataChannel, buffer, bufferLen));
+	}
+	else
+	{
+		return(ILibTransport_DoneState_ERROR);
+	}
+}
+void ILibDuktape_WebRTC_DataChannel_Stream_EndSink(ILibDuktape_DuplexStream *stream, void *user)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)user;
+	if (ptrs->dataChannel != NULL)
+	{
+		ILibWrapper_WebRTC_DataChannel_Close(ptrs->dataChannel);
+	}
+}
+void ILibDuktape_WebRTC_DataChannel_Stream_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)user;
+	if (ptrs->dataChannel != NULL)
+	{
+		void *sctpSession = ((void**)ptrs->dataChannel->parent)[0];
+		ILibSCTP_Pause(sctpSession);
+	}
+}
+void ILibDuktape_WebRTC_DataChannel_Stream_ResumeSink(ILibDuktape_DuplexStream *sender, void *user)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)user;
+	if (ptrs->dataChannel != NULL)
+	{
+		void *sctpSession = ((void**)ptrs->dataChannel->parent)[0];
+		ILibSCTP_Resume(sctpSession);
+	}
+}
+void ILibDuktape_WebRTC_OnDataChannelSendOK(void *dataChannel)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)((ILibWrapper_WebRTC_DataChannel*)dataChannel)->userData;
+	if (ptrs != NULL) { ILibDuktape_DuplexStream_Ready(ptrs->stream); }
+}
+void ILibDuktape_WebRTC_DataChannel_OnClose(struct ILibWrapper_WebRTC_DataChannel* dataChannel)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)dataChannel->userData;
+	if (ptrs != NULL) 
+	{ 
+		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream); 
+		ptrs->dataChannel = NULL; 
+	}
+}
+void ILibDuktape_WebRTC_DataChannel_OnData(struct ILibWrapper_WebRTC_DataChannel* dataChannel, char* data, int dataLen, int dataType)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)dataChannel->userData;
+	if (ptrs != NULL) { ILibDuktape_DuplexStream_WriteData(ptrs->stream, data, dataLen); }
+}
+duk_ret_t ILibDuktape_WebRTC_DataChannel_Finalizer(duk_context *ctx)
+{
+	duk_get_prop_string(ctx, 0, ILibDuktape_WebRTC_DataChannelPtr);
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)Duktape_GetBuffer(ctx, -1, NULL);
+	if (ptrs->dataChannel != NULL)
+	{
+		ptrs->dataChannel->userData = NULL;
+		ILibWrapper_WebRTC_DataChannel_Close(ptrs->dataChannel);
+	}
+
+	return 0;
+}
+void ILibDuktape_WebRTC_DataChannel_PUSH(duk_context *ctx, ILibWrapper_WebRTC_DataChannel *dataChannel)
+{
+	if (dataChannel == NULL) { duk_push_null(ctx); return; }
+	if (dataChannel->userData != NULL) { duk_push_heapptr(((ILibDuktape_WebRTC_DataChannel*)dataChannel->userData)->ctx, ((ILibDuktape_WebRTC_DataChannel*)dataChannel->userData)->emitter->object); return; }
+	ILibDuktape_WebRTC_DataChannel *ptrs;
+
+	dataChannel->TransportSendOKPtr = ILibDuktape_WebRTC_OnDataChannelSendOK;
+	dataChannel->OnClosed = ILibDuktape_WebRTC_DataChannel_OnClose;
+	dataChannel->OnRawData = ILibDuktape_WebRTC_DataChannel_OnData;
+
+	duk_push_object(ctx);														// [dataChannel]
+	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_WebRTC_DataChannel));			// [dataChannel][buffer]
+	ptrs = (ILibDuktape_WebRTC_DataChannel*)Duktape_GetBuffer(ctx, -1, NULL);
+	dataChannel->userData = ptrs;
+	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_DataChannelPtr);			// [dataChannel]
+	ptrs->dataChannel = dataChannel;
+	ptrs->ctx = ctx;
+	ptrs->emitter = ILibDuktape_EventEmitter_Create(ctx);
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_WebRTC_DataChannel_Finalizer);
+
+	duk_push_string(ctx, dataChannel->channelName);
+	duk_put_prop_string(ctx, -2, "name");
+	duk_push_int(ctx, dataChannel->streamId);
+	duk_put_prop_string(ctx, -2, "id");
+
+	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "ack", &(ptrs->OnAck));
+	ptrs->stream = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_WebRTC_DataChannel_Stream_WriteSink, ILibDuktape_WebRTC_DataChannel_Stream_EndSink,
+		ILibDuktape_WebRTC_DataChannel_Stream_PauseSink, ILibDuktape_WebRTC_DataChannel_Stream_ResumeSink, ptrs);
+}
+
+duk_ret_t ILibDuktape_WebRTC_ConnectionFactory_Finalizer(duk_context *ctx)
+{
+	void *chain = Duktape_GetChain(ctx);
+	ILibWrapper_WebRTC_ConnectionFactory factory;
+	duk_get_prop_string(ctx, 0, ILibDuktape_WebRTC_ConnectionFactoryPtr);
+	factory = (ILibWrapper_WebRTC_ConnectionFactory)duk_get_pointer(ctx, -1);
+
+	if (factory != NULL && ILibIsChainBeingDestroyed(chain) == 0)
+	{
+		ILibWrapper_WebRTC_ConnectionFactory_RemoveFromChain(factory);
+	}
+
+	return 0;
+}
+void ILibDuktape_WebRTC_OnConnection(ILibWrapper_WebRTC_Connection connection, int connected)
+{
+	ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)ILibMemory_GetExtraMemory(connection, ILibMemory_WebRTC_Connection_CONTAINERSIZE);
+	if (ptrs->OnConnect != NULL && connected != 0)
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->OnConnect);				// [func]
+		duk_push_heapptr(ptrs->ctx, ptrs->ConnectionObject);		// [func][this]
+		if (duk_pcall_method(ptrs->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "webrtc.connection.onConnect(): "); }
+		duk_pop(ptrs->ctx);											// ...
+	}
+	else if (ptrs->OnDisconnect != NULL && connected == 0)
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->OnDisconnect);			// [func]
+		duk_push_heapptr(ptrs->ctx, ptrs->ConnectionObject);		// [func][this]
+		if (duk_pcall_method(ptrs->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "webrtc.connection.onConnect(): "); }
+		duk_pop(ptrs->ctx);											// ...
+	}
+}
+
+void ILibDuktape_WebRTC_OnDataChannel(ILibWrapper_WebRTC_Connection connection, ILibWrapper_WebRTC_DataChannel *dataChannel)
+{
+	ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)ILibMemory_GetExtraMemory(connection, ILibMemory_WebRTC_Connection_CONTAINERSIZE);
+
+	if (ptrs->OnDataChannel != NULL)
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->OnDataChannel);			// [func]
+		duk_push_heapptr(ptrs->ctx, ptrs->ConnectionObject);		// [func][this]
+		ILibDuktape_WebRTC_DataChannel_PUSH(ptrs->ctx, dataChannel);// [func][this][dataChannel]
+		if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "webrtc.connection.onDataChannel(): "); }
+		duk_pop(ptrs->ctx);											// ...
+	}
+}
+
+void ILibDuktape_WebRTC_offer_onCandidate(ILibWrapper_WebRTC_Connection connection, struct sockaddr_in6* candidate)
+{
+	ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)ILibMemory_GetExtraMemory(connection, ILibMemory_WebRTC_Connection_CONTAINERSIZE);
+	if (ptrs->OnCandidate != NULL)
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->OnCandidate);			// [func]
+		duk_push_heapptr(ptrs->ctx, ptrs->ConnectionObject);	// [func][this]
+		ILibDuktape_SockAddrToOptions(ptrs->ctx, candidate);	// [func][this][options]
+		if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "webrtc.connection.onCandidate(): "); }
+		duk_pop(ptrs->ctx);										// ...
+	}
+}
+duk_ret_t ILibDuktape_WebRTC_generateOffer(duk_context *ctx)
+{
+	ILibWrapper_WebRTC_Connection connection = ILibDuktape_WebRTC_Native_GetConnection(ctx);
+
+	char *offer = ILibWrapper_WebRTC_Connection_GenerateOffer(connection, ILibDuktape_WebRTC_offer_onCandidate);
+	if (offer != NULL)
+	{
+		duk_push_string(ctx, offer);
+		free(offer);
+	}
+	else
+	{
+		duk_push_null(ctx);
+	}
+	return 1;
+}
+duk_ret_t ILibDuktape_WebRTC_setOffer(duk_context *ctx)
+{
+	ILibWrapper_WebRTC_Connection connection = ILibDuktape_WebRTC_Native_GetConnection(ctx);
+
+	if (!duk_is_string(ctx, 0)) { return(ILibDuktape_Error(ctx, "webrtc.connection.setOffer(): Invalid Parameter")); }
+	duk_size_t offerLen;
+	char *offer;
+	char *counterOffer;
+
+	offer = (char*)duk_get_lstring(ctx, 0, &offerLen);
+	counterOffer = ILibWrapper_WebRTC_Connection_SetOffer(connection, offer, (int)offerLen, ILibDuktape_WebRTC_offer_onCandidate);
+	if (counterOffer != NULL)
+	{
+		duk_push_string(ctx, counterOffer);
+		free(counterOffer);
+	}
+	else
+	{
+		duk_push_null(ctx);
+	}
+	return 1;
+}
+void ILibDuktape_WebRTC_DataChannel_OnAck(struct ILibWrapper_WebRTC_DataChannel* dataChannel)
+{
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)dataChannel->userData;
+	if (ptrs->OnAck != NULL)
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->OnAck);			// [func]
+		duk_push_heapptr(ptrs->ctx, ptrs->emitter->object);	// [func][this]
+		if (duk_pcall_method(ptrs->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "webrtc.dataChannel.onAck(): "); };
+		duk_pop(ptrs->ctx);									// ...
+	}
+}
+duk_ret_t ILibDuktape_WebRTC_createDataChannel(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx);
+	ILibWrapper_WebRTC_DataChannel *retVal;
+	ILibWrapper_WebRTC_Connection connection = ILibDuktape_WebRTC_Native_GetConnection(ctx);
+
+	duk_size_t nameLen;
+	char *name;
+	int stream = -1;
+	int i;
+	void *OnAck = NULL;
+
+	name = (char*)duk_get_lstring(ctx, 0, &nameLen);
+
+	for (i = 1; i < nargs; ++i)
+	{
+		if (duk_is_number(ctx, i)) { stream = duk_require_int(ctx, i); }
+		if (duk_is_function(ctx, i)) { OnAck = duk_require_heapptr(ctx, i); }
+	}
+
+	if (stream < 0)
+	{
+		retVal = ILibWrapper_WebRTC_DataChannel_Create(connection, name, (int)nameLen, ILibDuktape_WebRTC_DataChannel_OnAck);
+	}
+	else
+	{
+		retVal = ILibWrapper_WebRTC_DataChannel_CreateEx(connection, name, (int)nameLen, (unsigned short)stream, ILibDuktape_WebRTC_DataChannel_OnAck);
+	}
+
+	ILibDuktape_WebRTC_DataChannel_PUSH(ctx, retVal);
+	if (OnAck != NULL)
+	{
+		ILibDuktape_EventEmitter_AddOnce(((ILibDuktape_WebRTC_DataChannel*)retVal->userData)->emitter, "ack", OnAck);
+	}
+	return 1;
+}
+duk_ret_t  ILibDuktape_WebRTC_addRemoteCandidate(duk_context *ctx)
+{
+	//ILibWrapper_WebRTC_Connection connection = ILibDuktape_WebRTC_Native_GetConnection(ctx);
+	//ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)ILibMemory_GetExtraMemory(connection, ILibMemory_WebRTC_Connection_CONTAINERSIZE);
+
+
+	return(ILibDuktape_Error(ctx, "webrtc.connection.addRemoteCandidate(): Not Supported Yet"));
+}
+duk_ret_t ILibDuktape_WebRTC_closeDataChannels(duk_context *ctx)
+{
+	ILibWrapper_WebRTC_Connection connection = ILibDuktape_WebRTC_Native_GetConnection(ctx);
+
+	ILibWrapper_WebRTC_Connection_CloseAllDataChannels(connection);
+	return 0;
+}
+duk_ret_t ILibDuktape_WebRTC_Connection_Finalizer(duk_context *ctx)
+{
+	ILibWrapper_WebRTC_Connection connection;
+	duk_get_prop_string(ctx, 0, ILibDuktape_WebRTC_ConnectionPtr);
+	connection = (ILibWrapper_WebRTC_Connection)duk_get_pointer(ctx, -1);
+	if (connection == NULL) { return 0; }
+
+	if (ILibWrapper_WebRTC_Connection_IsConnected(connection) != 0)
+	{
+		ILibWrapper_WebRTC_Connection_CloseAllDataChannels(connection);
+		ILibWrapper_WebRTC_Connection_Disconnect(connection);
+	}
+
+	return 0;
+}
+duk_ret_t ILibDuktape_WebRTC_CreateConnection(duk_context *ctx)
+{
+	ILibWebRTC_Duktape_Handlers *ptrs;
+	ILibWrapper_WebRTC_Connection connection;
+	ILibWrapper_WebRTC_ConnectionFactory factory;
+	duk_push_this(ctx);																// [factory]
+	duk_get_prop_string(ctx, -1, ILibDuktape_WebRTC_ConnectionFactoryPtr);
+	factory = (ILibWrapper_WebRTC_ConnectionFactory)duk_get_pointer(ctx, -1);
+
+	duk_push_object(ctx);															// [factory][connection]
+	connection = ILibWrapper_WebRTC_ConnectionFactory_CreateConnection2(factory, ILibDuktape_WebRTC_OnConnection, ILibDuktape_WebRTC_OnDataChannel, NULL, sizeof(ILibWebRTC_Duktape_Handlers));
+	ptrs = (ILibWebRTC_Duktape_Handlers*)ILibMemory_GetExtraMemory(connection, ILibMemory_WebRTC_Connection_CONTAINERSIZE);
+	ptrs->ctx = ctx;
+	ptrs->ConnectionObject = duk_get_heapptr(ctx, -1);
+	ptrs->emitter = ILibDuktape_EventEmitter_Create(ctx);
+
+	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "candidate", &(ptrs->OnCandidate));
+	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "dataChannel", &(ptrs->OnDataChannel));
+	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "connected", &(ptrs->OnConnect));
+	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "disconnected", &(ptrs->OnDisconnect));
+
+	duk_push_pointer(ctx, connection);												// [factory][connection][ptr]
+	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_ConnectionPtr);					// [factory][connection]
+
+	duk_push_int(ctx, ILibWrapper_WebRTC_Connection_GetID(connection));				// [factory][connection][id]
+	duk_put_prop_string(ctx, -2, "ID");												// [factory][connection]
+
+	ILibDuktape_CreateInstanceMethod(ctx, "generateOffer", ILibDuktape_WebRTC_generateOffer, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "setOffer", ILibDuktape_WebRTC_setOffer, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "createDataChannel", ILibDuktape_WebRTC_createDataChannel, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "closeDataChannels", ILibDuktape_WebRTC_closeDataChannels, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "addRemoteCandidate", ILibDuktape_WebRTC_addRemoteCandidate, 1);
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_WebRTC_Connection_Finalizer);
+
+	return 1;
+}
+void ILibDuktape_WebRTC_Push(duk_context *ctx, void *chain)
+{
+	ILibWrapper_WebRTC_ConnectionFactory factory;
+
+	duk_push_object(ctx);																// [factory]
+	factory = ILibWrapper_WebRTC_ConnectionFactory_CreateConnectionFactory(chain, 0);
+	duk_push_pointer(ctx, factory);														// [factory][ptr]
+	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_ConnectionFactoryPtr);				// [factory]
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_WebRTC_ConnectionFactory_Finalizer);
+
+	ILibDuktape_CreateInstanceMethod(ctx, "createConnection", ILibDuktape_WebRTC_CreateConnection, 0);
+}
+void ILibDuktape_WebRTC_Init(duk_context * ctx)
+{
+	ILibDuktape_ModSearch_AddHandler(ctx, "ILibWebRTC", ILibDuktape_WebRTC_Push);
+	Duktape_CreateEnum(ctx, "ILibWebRTC_TURN_ConnectModes", (char*[]) { "DISABLED", "ENABLED", "ALWAYS_RELAY" }, (int[]) { 0, 1, 2 }, 3);
+}
+#else
+void ILibDuktape_WebRTC_Init(duk_context * ctx)
+{
+	Duktape_CreateEnum(ctx, "ILibWebRTC_TURN_ConnectModes", (char*[]) { "DISABLED", "ENABLED", "ALWAYS_RELAY" }, (int[]) { 0, 1, 2 }, 3);
+}
+#endif
+
+#ifdef __DOXY__
+/*!
+\brief WebRTC Connection Factory. <b>Note:</b> To use, must <b>require('ILibWebRTC')</b>
+*/
+class ILibWebRTC
+{
+public:
+	/*!
+	\brief Creates a new unconnected peer Connection object.
+	\return <Connection> Unconnected Connection
+	*/
+	static Connection createConnection();
+
+	/*!
+	\implements EventEmitter
+	\brief WebRTC Connection
+	*/
+	class Connection
+	{
+	public:
+		/*!
+		\brief Event emitted when a connection candidate is found
+		\param options <Object>\n
+		<b>host</b> Host Name or IP Address of the candidate\n
+		<b>port</b> Port Number of the candidate\n
+		*/
+		void candidate;
+		/*!
+		\brief Event emitted when a DataChannel is created
+		\param channel DataChannel
+		*/
+		void dataChannel;
+		/*!
+		\brief Event emitted when a peer connection is established
+		*/
+		void connected;
+		/*!
+		\brief Event emitted when a peer connection is severed
+		*/
+		void disconnected;
+
+		/*!
+		\brief Generates a WebRTC SDP Offer.
+		\return \<String\|NULL\> On succes, the SDP offer is returned, otherwise NULL.
+		*/
+		String generateOffer();
+		/*!
+		\brief Sets the remote WebRTC SDP Offer
+		\return \<String\|NULL\> On success, returns the counter WebRTC SDP offer, otherwise NULL.
+		*/
+		String setOffer(offer);
+		/*!
+		\brief Creates a WebRTC DataChannel instance
+		\param friendlyName \<String\> Friendly name to associate with the new DataChannel
+		\param streamNumber <integer> Optional. If specified, uses the desired stream number. Otherwise, one will be auto-generated.
+		\param callback <func> Optional. If specified, will be added as one time listener to DataChannel.ack event.
+		\return DataChannel instance
+		*/
+		DataChannel createDataChannel(friendlyName[, streamNumber][, callback]);
+		/*!
+		\brief Closes all DataChannel instances associated with this Connection.
+		*/
+		void closeDataChannels();
+		ILibDuktape_CreateInstanceMethod(ctx, "addRemoteCandidate", ILibDuktape_WebRTC_addRemoteCandidate, 1);
+	};
+	/*!
+	\implements EventEmitter
+	\implements DuplexStream
+	\brief WebRTC Data Channel
+	*/
+	class DataChannel
+	{
+	public:
+		/*!
+		\brief WebRTC Stream ID
+		*/
+		integer id;
+		/*!
+		\brief WebRTC DataChannel Friendly Name
+		*/
+		String name;
+		/*!
+		\brief Event emitted when the connected peer ACK's this DataChannel creation
+		*/
+		void ack;
+	};
+};
+#endif

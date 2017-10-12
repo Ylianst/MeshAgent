@@ -1,0 +1,19 @@
+make clean
+make linux ARCHID=5
+make clean
+make linux ARCHID=6
+make clean
+make linux ARCHID=7
+make clean
+make linux ARCHID=9
+make clean
+make linux ARCHID=13
+make clean
+make linux ARCHID=15
+make clean
+make linux ARCHID=18
+make clean
+make linux ARCHID=19
+make clean
+make linux ARCHID=20
+make clean

@@ -1,0 +1,362 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav</Extensions>
+    </Filter>
+    <Filter Include="Microstack">
+      <UniqueIdentifier>{75ed1bbd-b6b1-4867-9f66-2da5b6ad082d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Microscript">
+      <UniqueIdentifier>{d3b5275c-5fb4-406e-a5b2-e24e2b3a60b1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Meshcore">
+      <UniqueIdentifier>{867ca42f-0151-42e8-9dcd-728b129c5767}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Meshcore\KVM">
+      <UniqueIdentifier>{074ddd93-a67c-44e2-b7d9-b84549b60522}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="MicroLMS">
+      <UniqueIdentifier>{555848d8-baf6-4cf1-94d6-935c78f6fd48}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="MeshService.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="MeshService.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="firewall.cpp" />
+    <ClCompile Include="ServiceMain.c" />
+    <ClCompile Include="..\microscript\duktape.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibAsyncSocket_Duktape.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_Debugger.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_DuplexStream.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_GenericMarshal.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_Helpers.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_http.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_net.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_ReadableStream.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_SimpleDataStore.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_WritableStream.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktapeModSearch.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibParsers_Duktape.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibWebClient_Duktape.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibWebServer_Duktape.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibAsyncServerSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibAsyncSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibAsyncUDPSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibParsers.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibProcessPipe.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibRemoteLogging.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibSimpleDataStore.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibWebClient.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibWebRTC.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibWebServer.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibWrapperWebRTC.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\agentcore.c">
+      <Filter>Meshcore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\signcheck.c">
+      <Filter>Meshcore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_ProcessPipe.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_fs.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_SHA256.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_EncryptionStream.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\KVM\Windows\input.c">
+      <Filter>Meshcore\KVM</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\KVM\Windows\kvm.c">
+      <Filter>Meshcore\KVM</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\KVM\Windows\tile.cpp">
+      <Filter>Meshcore\KVM</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibduktape_EventEmitter.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibCrypto.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_Polyfills.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_WebRTC.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microlms\lms\ILibLMS.c">
+      <Filter>MicroLMS</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microlms\heci\HECIWin.c">
+      <Filter>MicroLMS</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microlms\heci\LMEConnection.c">
+      <Filter>MicroLMS</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microlms\heci\PTHICommand.c">
+      <Filter>MicroLMS</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibMulticastSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\meshinfo.c">
+      <Filter>Meshcore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_Dgram.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_ScriptContainer.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_MemoryStream.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_NetworkMonitor.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibIPAddressMonitor.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\microscript\duk_config.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\duktape.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibAsyncSocket_Duktape.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_Debugger.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_DuplexStream.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_GenericMarshal.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_Helpers.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_http.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_net.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_ReadableStream.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_SimpleDataStore.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_WritableStream.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktapeModSearch.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibParsers_Duktape.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibWebClient_Duktape.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibWebServer_Duktape.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibAsyncServerSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibAsyncSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibAsyncUDPSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibParsers.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibProcessPipe.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibRemoteLogging.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibSimpleDataStore.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibWebClient.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibWebRTC.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibWebServer.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibWrapperWebRTC.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\agentcore.h">
+      <Filter>Meshcore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\meshdefines.h">
+      <Filter>Meshcore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\signcheck.h">
+      <Filter>Meshcore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_ProcessPipe.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_fs.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_SHA256.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_EncryptionStream.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\KVM\Windows\input.h">
+      <Filter>Meshcore\KVM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\KVM\Windows\kvm.h">
+      <Filter>Meshcore\KVM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\KVM\Windows\tile.h">
+      <Filter>Meshcore\KVM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_EventEmitter.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibCrypto.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_Polyfills.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_WebRTC.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\lms\ILibLMS.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\lms\ILibLMS-WebSite.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\HECI_if.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\HECIWin.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\LMEConnection.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\LMS_if.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\LMS_if_constants.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\mei.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\PTHICommand.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microlms\heci\StatusCodeDefinitions.h">
+      <Filter>MicroLMS</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibMulticastSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="..\meshcore\meshinfo.h">
+      <Filter>Meshcore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_Dgram.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_ScriptContainer.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_NetworkMonitor.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibIPAddressMonitor.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
