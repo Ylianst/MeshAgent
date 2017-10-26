@@ -696,7 +696,7 @@ int main(int argc, char* argv[])
 	if (argc > 2 && memcmp(argv[1], "-faddr", 6) == 0)
 	{
 		uint64_t addrOffset;
-		util_hexToBuf(argv[2] + 2, strnlen_s(argv[2], 130) - 2, (char*)&addrOffset);
+		util_hexToBuf(argv[2] + 2, (int)strnlen_s(argv[2], 130) - 2, (char*)&addrOffset);
 		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), addrOffset);
 		printf("%s", ILibScratchPad);
 		return(0);

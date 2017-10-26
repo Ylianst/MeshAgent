@@ -8,6 +8,7 @@
 
 #define ILibDuktape_MD5_PTR						"\xFF_MD5PTR"
 #define ILibDuktape_SHA256_PTR					"\xFF_SHA256PTR"
+#define ILibDuktape_SHA512_PTR					"\xFF_SHA512PTR"
 #define ILibDuktape_SHA256_SIGNER_PTR			"\xFF_SHA256_SIGNER_PTR"
 #define ILibDuktape_SHA256_SIGNER_CERT			"\xFF_SHA256_SIGNER_CERT"
 #define ILibDuktape_SHA256_SIGNER_CERT_ALLOC	"\xFF_SHA256_SIGNER_CERT_ALLOC"
@@ -25,6 +26,16 @@ typedef struct ILibDuktape_SHA256_Data
 	char buffer[33];
 	SHA256_CTX shctx;
 }ILibDuktape_SHA256_Data;
+typedef struct ILibDuktape_SHA512_Data
+{
+	duk_context *ctx;
+
+	void *object;
+	void *OnHash;
+	void *OnHashString;
+	char buffer[65];
+	SHA512_CTX shctx;
+}ILibDuktape_SHA512_Data;
 typedef struct ILibDuktape_MD5_Data
 {
 	duk_context *ctx;
@@ -51,11 +62,22 @@ duk_ret_t ILibDuktape_SHA256_Finalizer(duk_context *ctx)
 {
 	return 0;
 }
+duk_ret_t ILibDuktape_SHA384_Finalizer(duk_context *ctx)
+{
+	return 0;
+}
 ILibTransport_DoneState ILibDuktape_SHA256_Write(struct ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_SHA256_Data *data = (ILibDuktape_SHA256_Data*)user;
 
 	SHA256_Update(&(data->shctx), buffer, bufferLen);
+	return(ILibTransport_DoneState_COMPLETE);
+}
+ILibTransport_DoneState ILibDuktape_SHA384_Write(struct ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user)
+{
+	ILibDuktape_SHA512_Data *data = (ILibDuktape_SHA512_Data*)user;
+
+	SHA384_Update(&(data->shctx), buffer, bufferLen);
 	return(ILibTransport_DoneState_COMPLETE);
 }
 void ILibDuktape_SHA256_End(struct ILibDuktape_WritableStream *stream, void *user)
@@ -82,6 +104,36 @@ void ILibDuktape_SHA256_End(struct ILibDuktape_WritableStream *stream, void *use
 		duk_push_heapptr(data->ctx, data->OnHashString);					// [func]
 		duk_push_heapptr(data->ctx, data->object);							// [func][this]
 		duk_push_string(data->ctx, util_tohex(data->buffer, 32, ILibScratchPad));	// [func][this][hashString]
+		if (duk_pcall_method(data->ctx, 1) != 0)							// [retVal]
+		{
+			ILibDuktape_Process_UncaughtException(data->ctx);
+		}
+		duk_pop(data->ctx);													// ...
+	}
+}
+void ILibDuktape_SHA384_End(struct ILibDuktape_WritableStream *stream, void *user)
+{
+	ILibDuktape_SHA512_Data *data = (ILibDuktape_SHA512_Data*)user;
+	data->buffer[48] = 0;
+	SHA384_Final((unsigned char*)data->buffer, &(data->shctx));
+
+	if (data->ctx != NULL && data->OnHash != NULL)
+	{
+		duk_push_heapptr(data->ctx, data->OnHash);				// [func]
+		duk_push_heapptr(data->ctx, data->object);				// [func][this]
+		duk_push_external_buffer(data->ctx);					// [func][this][hash]
+		duk_config_buffer(data->ctx, -1, data->buffer, 48);
+		if (duk_pcall_method(data->ctx, 1) != 0)				// [retVal]
+		{
+			ILibDuktape_Process_UncaughtException(data->ctx);
+		}
+		duk_pop(data->ctx);										// ...
+	}
+	if (data->ctx != NULL && data->OnHashString != NULL)
+	{
+		duk_push_heapptr(data->ctx, data->OnHashString);					// [func]
+		duk_push_heapptr(data->ctx, data->object);							// [func][this]
+		duk_push_string(data->ctx, util_tohex(data->buffer, 48, ILibScratchPad));	// [func][this][hashString]
 		if (duk_pcall_method(data->ctx, 1) != 0)							// [retVal]
 		{
 			ILibDuktape_Process_UncaughtException(data->ctx);
@@ -268,7 +320,35 @@ duk_ret_t ILibDuktape_SHA256_syncHash(duk_context *ctx)
 	}
 	return(1);
 }
+duk_ret_t ILibDuktape_SHA384_syncHash(duk_context *ctx)
+{
+	ILibDuktape_SHA512_Data *data;
+	duk_size_t bufferLen;
+	char *buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
 
+	duk_push_this(ctx);													// [sha]
+	duk_get_prop_string(ctx, -1, ILibDuktape_SHA512_PTR);
+	data = (ILibDuktape_SHA512_Data*)Duktape_GetBuffer(ctx, -1, NULL);
+
+	SHA384_Init(&(data->shctx));
+	SHA384_Update(&(data->shctx), buffer, bufferLen);
+	SHA384_Final((unsigned char*)data->buffer, &(data->shctx));
+	data->buffer[48] = 0;
+
+	duk_push_current_function(ctx);
+	duk_get_prop_string(ctx, -1, "strRet");
+	if (duk_get_boolean(ctx, -1) == 0)
+	{
+		duk_push_external_buffer(ctx);
+		duk_config_buffer(ctx, -1, data->buffer, 48);
+	}
+	else
+	{
+		util_tohex(data->buffer, 48, ILibScratchPad);
+		duk_push_string(ctx, ILibScratchPad);
+	}
+	return(1);
+}
 
 ILibTransport_DoneState ILibDuktape_MD5_Write(struct ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user)
 {
@@ -388,10 +468,42 @@ duk_ret_t ILibDuktape_SHA256_Create(duk_context *ctx)
 
 	return(1);
 }
+duk_ret_t ILibDuktape_SHA384_Create(duk_context *ctx)
+{
+	ILibDuktape_SHA512_Data *data;
+	ILibDuktape_EventEmitter *emitter;
+
+	duk_push_object(ctx);											// [sha]
+	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_SHA512_Data));	// [sha][buffer]
+	data = (ILibDuktape_SHA512_Data*)Duktape_GetBuffer(ctx, -1, NULL);
+	duk_put_prop_string(ctx, -2, ILibDuktape_SHA512_PTR);			// [sha]
+	emitter = ILibDuktape_EventEmitter_Create(ctx);
+
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_SHA384_Finalizer);
+
+	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 0, "syncHash", ILibDuktape_SHA384_syncHash, 1);
+	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 1, "syncHashString", ILibDuktape_SHA384_syncHash, 1);
+
+	ILibDuktape_EventEmitter_CreateEvent(emitter, "hash", &(data->OnHash));
+	ILibDuktape_EventEmitter_CreateEvent(emitter, "hashString", &(data->OnHashString));
+
+	data->ctx = ctx;
+	data->object = duk_get_heapptr(ctx, -1);
+	SHA384_Init(&(data->shctx));
+
+	ILibDuktape_WritableStream_Init(ctx, ILibDuktape_SHA384_Write, ILibDuktape_SHA384_End, data);
+
+	return(1);
+}
 void ILibDuktape_SHA256_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);															// [sha]
 	ILibDuktape_CreateInstanceMethod(ctx, "create", ILibDuktape_SHA256_Create, 0);
+}
+void ILibDuktape_SHA384_PUSH(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);															// [sha]
+	ILibDuktape_CreateInstanceMethod(ctx, "create", ILibDuktape_SHA384_Create, 0);
 }
 void ILibDuktape_MD5_PUSH(duk_context *ctx, void *chain)
 {
@@ -404,6 +516,7 @@ void ILibDuktape_SHA256_Init(duk_context * ctx)
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA256Stream_Signer", ILibDuktape_SHA256_SIGNER_PUSH);
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA256Stream_Verifier", ILibDuktape_SHA256_VERIFY_PUSH);
+	ILibDuktape_ModSearch_AddHandler(ctx, "SHA384Stream", ILibDuktape_SHA384_PUSH);
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA256Stream", ILibDuktape_SHA256_PUSH);
 	ILibDuktape_ModSearch_AddHandler(ctx, "MD5Stream", ILibDuktape_MD5_PUSH);
 #endif

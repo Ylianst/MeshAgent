@@ -360,8 +360,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILibTime_Serialize(time_t timeVal);
 	long long ILibGetUptime();
 
-	unsigned long long ILibHTONLL(unsigned long long v);
-	unsigned long long ILibNTOHLL(unsigned long long v);
+	uint64_t ILibHTONLL(uint64_t v);
+	uint64_t ILibNTOHLL(uint64_t v);
 
 	typedef void* ILibReaderWriterLock;
 	ILibReaderWriterLock ILibReaderWriterLock_Create();

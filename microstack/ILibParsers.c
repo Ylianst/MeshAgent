@@ -130,13 +130,13 @@ int dbg_GetCount()
 	return(malloc_counter);
 }
 
-unsigned long long ILibHTONLL(unsigned long long v)
+uint64_t ILibHTONLL(uint64_t v)
 {
-	{ union { unsigned long lv[2]; unsigned long long llv; } u; u.lv[0] = htonl(v >> 32); u.lv[1] = htonl(v & 0xFFFFFFFFULL); return u.llv; }
+	{ union { uint32_t lv[2]; uint64_t llv; } u; u.lv[0] = htonl(v >> 32); u.lv[1] = htonl(v & 0xFFFFFFFFULL); return u.llv; }
 }
-unsigned long long ILibNTOHLL(unsigned long long v)
+uint64_t ILibNTOHLL(uint64_t v)
 {
-	{ union { unsigned long lv[2]; unsigned long long llv; } u; u.llv = v; return ((unsigned long long)ntohl(u.lv[0]) << 32) | (unsigned long long)ntohl(u.lv[1]); }
+	{ union { uint32_t lv[2]; uint64_t llv; } u; u.llv = v; return ((uint64_t)ntohl(u.lv[0]) << 32) | (uint64_t)ntohl(u.lv[1]); }
 }
 
 //! Returns X where 2^X = Specified Integer
@@ -5024,6 +5024,7 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 	int TempStringLength, TempStringLength2;
 	unsigned short lport;
 	char* laddr = NULL;
+	int laddrLen = 0;
 
 	ILibParseUriResult retVal = ILibParseUriResult_UNKNOWN_SCHEME;
 
@@ -5097,6 +5098,7 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 			if ((laddr = (char*)malloc(TempStringLength2 + 2)) == NULL) ILIBCRITICALEXIT(254);
 			memcpy_s(laddr, TempStringLength2 + 2, result3->FirstResult->data, TempStringLength2 + 1);
 			(laddr)[TempStringLength2 + 1] = '\0';
+			laddrLen = TempStringLength2 + 1;
 		}
 	}
 	else
@@ -5106,6 +5108,7 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 		if ((laddr = (char*)malloc(TempStringLength2 + 1)) == NULL) ILIBCRITICALEXIT(254);
 		memcpy_s(laddr, TempStringLength2 + 1, result3->FirstResult->data, TempStringLength2);
 		(laddr)[TempStringLength2] = '\0';
+		laddrLen = TempStringLength2;
 	}
 
 	// Cleanup
@@ -5121,8 +5124,25 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 		if (laddr != NULL && laddr[0] == '[')
 		{
 			// IPv6
+			int pct = ILibString_LastIndexOf(laddr, laddrLen, "%", 1);
+			laddr[laddrLen - 1] = 0;
+
+			if (pct > 0)
+			{
+				laddr[pct] = 0;
+				pct = atoi(laddr + pct + 1);
+			}
+			else
+			{
+				pct = -1;
+			}
+
 			AddrStruct->sin6_family = AF_INET6;
 			ILibInet_pton(AF_INET6, laddr + 1, &(AddrStruct->sin6_addr));
+			if (pct >= 0)
+			{
+				AddrStruct->sin6_scope_id = pct;
+			}
 			AddrStruct->sin6_port = (unsigned short)htons(lport);
 		}
 		else
@@ -5205,12 +5225,15 @@ struct packetheader* ILibClonePacket(struct packetheader *packet)
 	n = packet->FirstField;
 	while (n!=NULL)
 	{
-		ILibAddHeaderLine(
-			RetVal,
-			n->Field,
-			n->FieldLength,
-			n->FieldData,
-			n->FieldDataLength);
+		if (ILibHasEntry(packet->HeaderTable, n->Field, n->FieldLength) != 0)
+		{
+			ILibAddHeaderLine(
+				RetVal,
+				n->Field,
+				n->FieldLength,
+				n->FieldData,
+				n->FieldDataLength);
+		}
 		n = n->NextField;
 	}
 	return RetVal;
@@ -8560,7 +8583,7 @@ char* ILibInet_ntop2(struct sockaddr* addr, char *dst, size_t dstsize)
 		ILibInet_ntop(AF_INET6, &((struct sockaddr_in6*)addr)->sin6_addr, dst, dstsize);
 		if (((struct sockaddr_in6*)addr)->sin6_scope_id != 0)
 		{
-			int dstLen = strnlen_s(dst, dstsize);
+			int dstLen = (int)strnlen_s(dst, dstsize);
 			sprintf_s(dst + dstLen, dstsize - dstLen, "%%%u", ((struct sockaddr_in6*)addr)->sin6_scope_id);
 		}
 		return(dst);
@@ -8694,6 +8717,17 @@ int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, in
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
+
+#ifndef WIN32
+	if (hostname[0] == '[')
+	{
+		int hostnameLen = strnlen_s(hostname, 4096);
+		char *newHost = alloca(hostnameLen);
+		memcpy_s(newHost, hostnameLen, hostname + 1, hostnameLen - 2);
+		newHost[hostnameLen - 2] = 0;
+		hostname = newHost;
+	}
+#endif
 
 	r = getaddrinfo(hostname, service, &hints, &result);
 	if (r != 0) { if (result != NULL) { freeaddrinfo(result); } return r; }

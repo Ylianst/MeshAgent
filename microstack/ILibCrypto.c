@@ -45,7 +45,7 @@ void  __fastcall util_md5hex(char* data, int datalen, char *out)
 	MD5_Update(&mdContext, (unsigned char *)data, datalen);
 	MD5_Final(digest, &mdContext);
 
-	for (i = 0; i < HALF_NONCE_SIZE; i++)
+	for (i = 0; i < sizeof(digest); i++)
 	{
 		*(temp++) = utils_HexTable2[(unsigned char)digest[i] >> 4];
 		*(temp++) = utils_HexTable2[(unsigned char)digest[i] & 0x0F];
@@ -61,7 +61,6 @@ void  __fastcall util_sha1(char* data, int datalen, char* result)
 	SHA1_Final((unsigned char*)result, &c);
 	result[20] = 0;
 }
-
 void  __fastcall util_sha256(char* data, int datalen, char* result)
 {
 	SHA256_CTX c;
@@ -69,10 +68,17 @@ void  __fastcall util_sha256(char* data, int datalen, char* result)
 	SHA256_Update(&c, data, datalen);
 	SHA256_Final((unsigned char*)result, &c);
 }
-int   __fastcall util_sha256file(char* filename, char* result)
+void  __fastcall util_sha384(char* data, int datalen, char* result)
+{
+	SHA512_CTX c;
+	SHA384_Init(&c);
+	SHA384_Update(&c, data, datalen);
+	SHA384_Final((unsigned char*)result, &c);
+}
+int   __fastcall util_sha384file(char* filename, char* result)
 {
 	FILE *pFile = NULL;
-	SHA256_CTX c;
+	SHA512_CTX c;
 	size_t len = 0;
 	char *buf = NULL;
 
@@ -83,14 +89,14 @@ int   __fastcall util_sha256file(char* filename, char* result)
 	pFile = fopen(filename, "rb");
 #endif
 	if (pFile == NULL) goto error;
-	SHA256_Init(&c);
+	SHA384_Init(&c);
 	if ((buf = (char*)malloc(4096)) == NULL) goto error;
-	while ((len = fread(buf, 1, 4096, pFile)) > 0) SHA256_Update(&c, buf, len);
+	while ((len = fread(buf, 1, 4096, pFile)) > 0) SHA384_Update(&c, buf, len);
 	free(buf);
 	buf = NULL;
 	fclose(pFile);
 	pFile = NULL;
-	SHA256_Final((unsigned char*)result, &c);
+	SHA384_Final((unsigned char*)result, &c);
 	return 0;
 
 error:
@@ -608,7 +614,7 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 	{
 		// Computer the hash of the public key
 		//util_sha256((char*)x->cert_info->key->public_key->data, x->cert_info->key->public_key->length, hash); // OpenSSL 1.0
-		X509_pubkey_digest(x, EVP_sha256(), (unsigned char*)hash, (unsigned int*)&hashlen); // OpenSSL 1.1
+		X509_pubkey_digest(x, EVP_sha384(), (unsigned char*)hash, (unsigned int*)&hashlen); // OpenSSL 1.1
 
 		util_tohex(hash, UTIL_HASHSIZE, nameStr);
 		X509_NAME_add_entry_by_txt(cname, "CN", MBSTRING_ASC, (unsigned char*)nameStr, -1, -1, 0);
@@ -632,7 +638,7 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 		//util_add_ext(x, NID_netscape_cert_type, "sslCA");
 		//util_add_ext(x, NID_netscape_comment, "example comment extension");
 
-		if (!X509_sign(x, pk, EVP_sha256())) goto err;
+		if (!X509_sign(x, pk, EVP_sha384())) goto err;
 	}
 	else
 	{
@@ -662,7 +668,7 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 			X509_EXTENSION_free(ex);
 		}
 
-		if (!X509_sign(x, rootcert->pkey, EVP_sha256())) goto err;
+		if (!X509_sign(x, rootcert->pkey, EVP_sha384())) goto err;
 	}
 
 	cert->x509 = x;
@@ -679,7 +685,7 @@ int __fastcall util_keyhash(struct util_cert cert, char* result)
 	int hashlen = UTIL_HASHSIZE;
 	if (cert.x509 == NULL) return -1;
 	//util_sha256((char*)(cert.x509->cert_info->key->public_key->data), cert.x509->cert_info->key->public_key->length, result); // OpenSSL 1.0
-	X509_pubkey_digest(cert.x509, EVP_sha256(), (unsigned char*)result,(unsigned int *) &hashlen); // OpenSSL 1.1
+	X509_pubkey_digest(cert.x509, EVP_sha384(), (unsigned char*)result,(unsigned int *) &hashlen); // OpenSSL 1.1
 	return 0;
 }
 
@@ -688,7 +694,7 @@ int __fastcall util_keyhash2(X509* cert, char* result)
 	int hashlen = UTIL_HASHSIZE;
 	if (cert == NULL) return -1;
 	//util_sha256((char*)(cert->cert_info->key->public_key->data), cert->cert_info->key->public_key->length, result);  // OpenSSL 1.0
-	X509_pubkey_digest(cert, EVP_sha256(), (unsigned char*)result, (unsigned int*)&hashlen); // OpenSSL 1.1
+	X509_pubkey_digest(cert, EVP_sha384(), (unsigned char*)result, (unsigned int*)&hashlen); // OpenSSL 1.1
 	return 0;
 }
 
@@ -703,7 +709,7 @@ int __fastcall util_sign(struct util_cert cert, char* data, int datalen, char** 
 	if (datalen <= UTIL_HASHSIZE) return 0;
 
 	// Add hash of the certificate to start of data
-	X509_digest(cert.x509, EVP_sha256(), (unsigned char*)data, &hashsize);
+	X509_digest(cert.x509, EVP_sha384(), (unsigned char*)data, &hashsize);
 
 	// Sign the block
 	in = BIO_new_mem_buf(data, datalen);

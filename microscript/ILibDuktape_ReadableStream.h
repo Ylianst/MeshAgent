@@ -42,7 +42,7 @@ typedef struct ILibDuktape_readableStream
 	void *OnEnd;
 	void *extBuffer;
 	char *extBuffer_buffer;
-	int extBuffer_bufferLen;
+	int extBuffer_bufferLen, extBuffer_Reserved;
 
 	void *user;
 	ILibDuktape_readableStream_nextWriteablePipe *nextWriteable;
@@ -54,7 +54,7 @@ typedef struct ILibDuktape_readableStream
 #else
 	int pipe_pendingCount;				// No Atomic Built-ins... Use a Mutex
 #endif
-
+	int bypassValue;
 	int paused;
 	void *paused_data;
 	ILibDuktape_readableStream_PauseResumeHandler PauseHandler;
@@ -65,8 +65,10 @@ typedef struct ILibDuktape_readableStream
 ILibDuktape_readableStream* ILibDuktape_InitReadableStream(duk_context *ctx, ILibDuktape_readableStream_PauseResumeHandler OnPause, ILibDuktape_readableStream_PauseResumeHandler OnResume, void *user);
 #define ILibDuktape_ReadableStream_Init(ctx, OnPause, OnResume, user) ILibDuktape_InitReadableStream(ctx, OnPause, OnResume, user)
 #define ILibDuktape_readableStream_SetPauseResumeHandlers(stream, PauseFunc, ResumeFunc, userObj) ((ILibDuktape_readableStream*)stream)->PauseHandler = PauseFunc; ((ILibDuktape_readableStream*)stream)->ResumeHandler = ResumeFunc; ((ILibDuktape_readableStream*)stream)->user = userObj;
-int ILibDuktape_readableStream_WriteData(ILibDuktape_readableStream *stream, char* buffer, int bufferLen);
+
+int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, int streamReserved, char* buffer, int bufferLen);
 int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream);
+#define ILibDuktape_readableStream_WriteData(stream, buffer, bufferLen) ILibDuktape_readableStream_WriteDataEx(stream, 0, buffer, bufferLen)
 void ILibDuktape_readableStream_Closed(ILibDuktape_readableStream *stream);
 
 #endif

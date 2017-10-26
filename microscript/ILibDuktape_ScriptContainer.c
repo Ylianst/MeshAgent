@@ -211,8 +211,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Exit(duk_context *ctx)
 	tmp = (void**)ILibMemory_Allocate(sizeof(void*), 0, NULL, NULL);
 	tmp[0] = ctx;
 	ILibLifeTime_Add(ILibGetBaseTimer(Duktape_GetChain(ctx)), tmp, 0, ILibDuktape_ScriptContainer_Process_ExitCallback, NULL);
-
-	return 0;
+	return(ILibDuktape_Error(ctx, "Process.exit() forced script termination"));
 }
 
 
@@ -339,7 +338,7 @@ SCRIPT_ENGINE_SETTINGS *ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx
 	duk_get_prop_string(ctx, -1, "process");										// [g][process]
 	duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_ArgArray);		// [g][process][array]
 
-	int i, count = duk_get_length(ctx, -1);
+	int i, count = (int)duk_get_length(ctx, -1);
 	for (i = 0; i < count; ++i)
 	{
 		duk_get_prop_index(ctx, -1, i);												// [g][process][array][index]
@@ -369,7 +368,7 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_EN
 
 void *ILibDuktape_ScriptContainer_Engine_malloc(void *udata, duk_size_t size)
 {
-	return(ILibMemory_Allocate(size, 0, NULL, NULL));
+	return(ILibMemory_Allocate((int)size, 0, NULL, NULL));
 }
 void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_size_t size)
 {
@@ -837,7 +836,7 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 			char *moduleName = Duktape_GetStringPropertyValue(slave->ctx, -1, "name", NULL);
 			char *module = Duktape_GetStringPropertyValueEx(slave->ctx, -1, "module", NULL, &moduleLen);
 
-			ILibDuktape_ModSearch_AddModule(slave->ctx, moduleName, module, moduleLen);
+			ILibDuktape_ModSearch_AddModule(slave->ctx, moduleName, module, (int)moduleLen);
 			ILibRemoteLogging_printf(ILibChainGetLogger(slave->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshAgent_Slave: Added module %s", moduleName);
 
 			break;
@@ -850,7 +849,7 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 			if (duk_has_prop_string(codec, -1, "argv"))
 			{
 				duk_get_prop_string(codec, -1, "argv");							// [json][argv]
-				int i, argLen = duk_get_length(codec, -1);
+				int i, argLen = (int)duk_get_length(codec, -1);
 				if (argLen > 0)
 				{
 					if ((argLen + 1) * sizeof(void*) > sizeof(ILibScratchPad))
@@ -922,7 +921,7 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 				{
 					// Execute String
 					execData = (char*)Duktape_GetStringPropertyValueEx(slave->ctx, -1, "string", NULL, &execDataLen);
-					if (ILibDuktape_ScriptContainer_CompileJavaScript(slave->ctx, execData, execDataLen) == 0 && ILibDuktape_ScriptContainer_ExecuteByteCode(slave->ctx) == 0)
+					if (ILibDuktape_ScriptContainer_CompileJavaScript(slave->ctx, execData, (int)execDataLen) == 0 && ILibDuktape_ScriptContainer_ExecuteByteCode(slave->ctx) == 0)
 					{
 						// Success
 						duk_push_object(slave->ctx);										// [json][retJSON]
@@ -964,7 +963,7 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 				{
 					// Execute Path
 					execData = (char*)Duktape_GetStringPropertyValueEx(slave->ctx, -1, "path", NULL, &execDataLen);
-					if (ILibDuktape_ScriptContainer_CompileJavaScript_FromFile(slave->ctx, execData, execDataLen) == 0 && ILibDuktape_ScriptContainer_ExecuteByteCode(slave->ctx))
+					if (ILibDuktape_ScriptContainer_CompileJavaScript_FromFile(slave->ctx, execData, (int)execDataLen) == 0 && ILibDuktape_ScriptContainer_ExecuteByteCode(slave->ctx))
 					{
 						// SUCCESS
 						duk_push_object(slave->ctx);										// [json][retJSON]
@@ -1224,10 +1223,10 @@ duk_ret_t ILibDuktape_ScriptContainer_ExecuteString(duk_context *ctx)
 	duk_json_encode(ctx, -1);										
 	buffer = (char*)duk_get_lstring(ctx, -1, &bufferLen);
 
-	((int*)header)[0] = bufferLen + 4;
+	((int*)header)[0] = (int)bufferLen + 4;
 
 	ILibProcessPipe_Process_WriteStdIn(master->child, header, 4, ILibTransport_MemoryOwnership_USER);
-	ILibProcessPipe_Process_WriteStdIn(master->child, buffer, bufferLen, ILibTransport_MemoryOwnership_USER);
+	ILibProcessPipe_Process_WriteStdIn(master->child, buffer, (int)bufferLen, ILibTransport_MemoryOwnership_USER);
 
 	return(0);
 }
@@ -1490,7 +1489,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 
 	duk_swap_top(ctx, -2);										// [json][container]
 
-	((int*)header)[0] = bufferLen + 4;
+	((int*)header)[0] = (int)bufferLen + 4;
 	ILibProcessPipe_Process_AddHandlers(master->child, SCRIPT_ENGINE_PIPE_BUFFER_SIZE, ILibDuktape_ScriptContainer_ExitSink, ILibDuktape_ScriptContainer_StdOutSink, ILibDuktape_ScriptContainer_StdErrSink, ILibDuktape_ScriptContainer_SendOkSink, master);
 	ILibProcessPipe_Process_WriteStdIn(master->child, header, sizeof(header), ILibTransport_MemoryOwnership_USER);
 	ILibProcessPipe_Process_WriteStdIn(master->child, buffer, (int)bufferLen, ILibTransport_MemoryOwnership_USER);

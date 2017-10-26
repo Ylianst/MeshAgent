@@ -397,6 +397,8 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 	void *j = ILibDuktape_GetProcessObject(ctx);
 	ILibDuktape_EventEmitter *emitter;
 
+	if (strcmp(errmsg, "Process.exit() forced script termination") == 0) { return; }
+
 	duk_push_heapptr(ctx, j);															// [process]
 	emitter = ILibDuktape_EventEmitter_GetEmitter_fromCurrent(ctx);
 	duk_pop(ctx);																		// ...

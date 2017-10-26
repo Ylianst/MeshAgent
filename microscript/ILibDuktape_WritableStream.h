@@ -44,6 +44,7 @@ typedef struct ILibDuktape_WritableStream
 	ILibDuktape_WritableStream_EndHandler EndSink;
 	ILibDuktape_WritableStream_PipeHandler PipeSink;
 	void *WriteSink_User;
+	int Reserved;
 } ILibDuktape_WritableStream;
 
 #define ILibDuktape_WritableStream_WSPTRS				"\xFF_WritableStream_PTRS"

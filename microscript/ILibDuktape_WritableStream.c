@@ -157,6 +157,8 @@ duk_ret_t ILibDuktape_WritableStream_Write(duk_context *ctx)
 	char *buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
 	int cbIndex = 0;
 
+	stream->Reserved = duk_is_string(ctx, 0) ? 1 : 0;
+
 	for (cbIndex = 1; cbIndex < nargs; ++cbIndex)
 	{
 		if (duk_is_function(ctx, cbIndex)) { break; }

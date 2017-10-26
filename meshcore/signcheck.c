@@ -86,7 +86,7 @@ int signcheck_verifysign(char* filename, int upgrade)
 			{
 				if ((psProvCert = WTHelperGetProvCertFromChain(psProvSigner, 0)) != 0)
 				{
-					util_sha256((char*)(psProvCert->pCert->pbCertEncoded), psProvCert->pCert->cbCertEncoded, hash);
+					util_sha384((char*)(psProvCert->pCert->pbCertEncoded), psProvCert->pCert->cbCertEncoded, hash);
 					for (i = 0; (int)i < TrustedCertificatesCount; i++) if (memcmp(TrustedCertificates[i], hash, 32) == 0) found = 1;
 				}
 			}
@@ -132,7 +132,7 @@ int signcheck_verifysign(char* filename, int upgrade)
 	int endblock[4];
 	char* signatureblock = NULL;
 	int signatureblocklen = 0;
-	SHA256_CTX c;
+	SHA512_CTX c;
 	char *buf = NULL;
 	char *hashs = NULL;
 	int hashslen;
@@ -188,26 +188,26 @@ int signcheck_verifysign(char* filename, int upgrade)
 	if (agentid != g_agentid) { ILIBMESSAGE("BAD-ARCH-CHECK"); fclose(pFile); return 0; }
 
 	// Seek to the start and hash the entire file except for the signature stuff at the end
-	SHA256_Init(&c);
+	SHA384_Init(&c);
 	if (fseek(pFile, 0, SEEK_SET)) goto error;
 	i = totallen - (size_t)(endblock[0] + 16);
 	if ((buf = (char*)malloc(4096)) == NULL) goto error;
-	while ((i > 0) && (len = fread(buf, 1, i > 4096 ? 4096 : i, pFile)) > 0) { SHA256_Update(&c, buf, len); i -= len; }
+	while ((i > 0) && (len = fread(buf, 1, i > 4096 ? 4096 : i, pFile)) > 0) { SHA384_Update(&c, buf, len); i -= len; }
 	free(buf);
 	if (i != 0) goto error;
-	SHA256_Final((unsigned char*)totalfilehash, &c);
+	SHA384_Final((unsigned char*)totalfilehash, &c);
 
 	// Check that the file hash is the same as the second hash in the hash block
-	if (memcmp(hashs + 32, totalfilehash, 32) != 0) goto error;
+	if (memcmp(hashs + 48, totalfilehash, 48) != 0) goto error;
 
 	// Get the public certificate block
 	certbuflen = util_to_cer(cert, &certbuf);
 
 	// Compute the certificate key hash
-	util_sha256(certbuf, certbuflen, certhash);
+	util_sha384(certbuf, certbuflen, certhash);
 
 	// Check if the certificate is trusted
-	for (j = 0; j < TrustedCertificatesCount; j++) if (memcmp(TrustedCertificates[j], certhash, 32) == 0) found = 1;
+	for (j = 0; j < TrustedCertificatesCount; j++) if (memcmp(TrustedCertificates[j], certhash, 48) == 0) found = 1;
 
 error:
 	// Clean up

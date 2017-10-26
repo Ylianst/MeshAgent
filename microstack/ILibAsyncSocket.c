@@ -1831,8 +1831,8 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 			{
 				// OpenSSL returned an error
 				TRY_TO_SEND = 0;
-				bytesSent = SSL_get_error(module->ssl, bytesSent);
-				if (bytesSent != SSL_ERROR_WANT_WRITE  && bytesSent != SSL_ERROR_WANT_READ)
+				int sslerr = SSL_get_error(module->ssl, -1);
+				if (sslerr != SSL_ERROR_WANT_WRITE  && sslerr != SSL_ERROR_WANT_READ)
 				{
 					// There was an error sending
 					ILibAsyncSocket_ClearPendingSend(socketModule);
@@ -1848,7 +1848,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 		if (module->PendingSend_Head == NULL && bytesSent != -1) { TriggerSendOK = 1; }
 		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 2, module);)
 		sem_post(&(module->SendLock));
-		if (TriggerSendOK != 0)
+		if (TriggerSendOK != 0 && (module->ssl == NULL || module->SSLConnect != 0))
 		{
 			module->OnSendOK(module, module->user);
 			if (module->Transport.SendOkPtr != NULL) { module->Transport.SendOkPtr(module); }

@@ -63,7 +63,46 @@ void BreakSink(int s)
 
 int main(int argc, char **argv)
 {
+	// Check if .JS file is integrated with executable
+	FILE *tmpFile;
+	char *integratedJavaScript = NULL;
+	int integratedJavaScriptLen = 0;
+#ifdef WIN32
+	if (ILibString_EndsWith(argv[0], -1, ".exe", 4) == 0)
+	{
+		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", argv[0]);
+		tmpFile = fopen(ILibScratchPad, "rb");
+	}
+	else
+	{
+		tmpFile = fopen(argv[0], "rb");
+	}
+#else
+	tmpFile = fopen(argv[0], "rb");
+#endif
+	
+	if (tmpFile != NULL)
+	{
+		fseek(tmpFile, 0, SEEK_END);
+		fseek(tmpFile, ftell(tmpFile) - 4, SEEK_SET);
+		ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
+		fseek(tmpFile, 0, SEEK_END);
+		if (ftell(tmpFile) == ntohl(((int*)ILibScratchPad)[0]))
+		{
+			fseek(tmpFile, ftell(tmpFile) - 8, SEEK_SET);
+			ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
+			integratedJavaScriptLen = ntohl(((int*)ILibScratchPad)[0]);
+			integratedJavaScript = ILibMemory_Allocate(1+integratedJavaScriptLen, 0, NULL, NULL);
+			fseek(tmpFile, 0, SEEK_END);
+			fseek(tmpFile, ftell(tmpFile) - 8 - integratedJavaScriptLen, SEEK_SET);
+			ignore_result(fread(integratedJavaScript, 1, integratedJavaScriptLen, tmpFile));
+			integratedJavaScript[integratedJavaScriptLen] = 0;
+		}
+		fclose(tmpFile);
+	}
+
 	int retCode = 0;
+
 	if (argc > 2 && memcmp(argv[1], "-faddr", 6) == 0)
 	{
 		uint64_t addrOffset;
@@ -73,20 +112,22 @@ int main(int argc, char **argv)
 		return(0);
 	}
 
-	if (argc >= 2 && strnlen_s(argv[1], 9) >= 8 && strncmp(argv[1], "-update:",8) == 0)
+	if (integratedJavaScriptLen == 0)
 	{
-		/*
-		// If in OSX, attempt to clean up the KVM slave process.
-		#if defined(__APPLE__) && defined(_DAEMON) && defined(_LINKVM)
-		installOsx(0);
-		#endif
-		*/
+		if (argc >= 2 && strnlen_s(argv[1], 9) >= 8 && strncmp(argv[1], "-update:", 8) == 0)
+		{
+			/*
+			// If in OSX, attempt to clean up the KVM slave process.
+			#if defined(__APPLE__) && defined(_DAEMON) && defined(_LINKVM)
+			installOsx(0);
+			#endif
+			*/
 
-		// -update:"C:\Users\Public\Downloads\MeshManageability\Debug\MeshConsol2.exe"
-		MeshAgent_PerformSelfUpdate(argv[0], argv[1] + 8, argc, argv);
-		return 0;
+			// -update:"C:\Users\Public\Downloads\MeshManageability\Debug\MeshConsol2.exe"
+			MeshAgent_PerformSelfUpdate(argv[0], argv[1] + 8, argc, argv);
+			return 0;
+		}
 	}
-
 #ifdef WIN32
 	_CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 	SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
@@ -110,6 +151,8 @@ int main(int argc, char **argv)
 	__try
 	{
 		agentHost = MeshAgent_Create();
+		agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
+		agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
 		while (MeshAgent_Start(agentHost, argc, argv) != 0);
 		retCode = agentHost->exitCode;
 		MeshAgent_Destroy(agentHost);
@@ -121,6 +164,8 @@ int main(int argc, char **argv)
 	_CrtDumpMemoryLeaks();
 #else
 	agentHost = MeshAgent_Create();
+	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
+	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);
 	retCode = agentHost->exitCode;
 	MeshAgent_Destroy(agentHost);

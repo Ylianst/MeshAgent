@@ -40,7 +40,7 @@ ILibHashtable ILibDuktape_NetworkMonitor_CreateTable(duk_context *ctx)
 		while (duk_next(ctx, -1, 1))
 		{
 			// [networkInterfaces][enum][adapter][array]
-			int count = duk_get_length(ctx, -1);
+			int count = (int)duk_get_length(ctx, -1);
 			for (i = 0; i < count; ++i)
 			{
 				duk_get_prop_index(ctx, -1, i);				// [networkInterfaces][enum][adapter][array][obj]
@@ -48,7 +48,7 @@ ILibHashtable ILibDuktape_NetworkMonitor_CreateTable(duk_context *ctx)
 				{
 					duk_get_prop_string(ctx, -1, "address");// [networkInterfaces][enum][adapter][array][obj][address]
 					buffer = (char*)duk_get_lstring(ctx, -1, &bufferLen);
-					ILibHashtable_Put(retVal, NULL, buffer, bufferLen, (void*)0x01);
+					ILibHashtable_Put(retVal, NULL, buffer, (int)bufferLen, (void*)0x01);
 					duk_pop(ctx);							//  [networkInterfaces][enum][adapter][array][obj]
 				}
 				duk_pop(ctx);								//  [networkInterfaces][enum][adapter][array]

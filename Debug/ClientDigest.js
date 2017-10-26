@@ -1,14 +1,39 @@
 var http = require('http');
-var agent = require('MeshAgent');
 var server = "";
 var req = "";
 var gtunnel = "";
 var digest = require('http-digest').create("bryan", "roe");
 
-agent.on('Connected', function (connectState)
+console.log("Starting Digest Test (Agent Connected)");
+//server = http.createServer({ "MeshAgent": agent, "requestCert": true, "checkClientIdentity": onVerifyClient }, OnRequest);
+server = http.createServer(OnRequest);
+server.listen(9093);
+
+server.on('upgrade', OnServerUpgrade);
+
+function OnServerUpgrade(imsg, sck, head)
 {
-    console.log("Connection State = " + connectState.toString());
-    console.log("Connected: " + this.ServerUrl);
+    if(imsg.Digest_IsAuthenticated('www.meshcentral.com')==1)
+    {
+        var uname = imsg.Digest_GetUsername();
+        console.log("Digest Username was: " + uname);
+        if(uname == 'bryan' && imsg.Digest_ValidatePassword('roe')==1)
+        {
+            sck.upgradeWebSocket();
+        }
+        else
+        {
+            console.log("Bad Username/Password");
+            sck.end();
+        }
+    }
+    else
+    {
+        console.log("Sending Unauthorized");
+        imsg.Digest_SendUnauthorized('www.meshcentral.com', 'oops');
+    }
+}
+
 
     //gtunnel = require('global-tunnel');
     //gtunnel.initialize({ host: "proxy.jf.intel.com", port: 911 });
@@ -25,11 +50,12 @@ agent.on('Connected', function (connectState)
     digest.http = require('http');
     //digest.get("http://127.0.0.1:9093/", function (imsg) { console.log(imsg.statusCode == 200 ? "SUCCESS!" : "FAIL!"); });
     //digest.request({ protocol: "http:", method: "GET", host: "127.0.0.1", path: "/", port: 9093 }, function (imsg) { console.log(imsg.statusCode == 200 ? "SUCCESS!" : "FAIL!"); }).end();
-    var req = digest.request({ MeshAgent: agent, protocol: "wss:", method: "GET", host: "127.0.0.1", path: "/", port: 9093, checkServerIdentity:onVerifyServer }, function (imsg) { console.log(imsg.statusCode == 200 ? "SUCCESS!" : "FAIL!"); });
+    var req = digest.request({ protocol: "ws:", method: "GET", host: "127.0.0.1", path: "/", port: 9093 }, function (imsg) { console.log(imsg.statusCode == 200 ? "SUCCESS!" : "FAIL!"); });
 
     req.on('upgrade', function (res, sk, h) { console.log("Upgraded to WebSocket!"); });
+    req.on('error', function () { console.log("Error occured"); });
     req.end();
-});
+
 
 function OnAlt(imsg)
 {
@@ -39,17 +65,7 @@ function OnGoogle(imsg)
 {
     console.log("Response Code = " + imsg.statusCode);
 }
-agent.Ready = function()
-{
-    console.log("Starting Digest Test (Agent Connected)");
-    //server = http.createServer({ "MeshAgent": agent, "requestCert": true, "checkClientIdentity": onVerifyClient }, OnRequest);
-    server = http.createServer({ "MeshAgent": agent }, OnRequest);
-    server.listen(9093);
 
-    //req = http.request({ "protocol":"ws:", "hostname": "127.0.0.1", "port": 9093, "method": "GET", "path": "/", "MeshAgent": agent }, OnResponse);
-    //req.upgrade = OnWebSocket;
-    //req.end();
-}
 
 function OnWebSocket(msg, s, head)
 {

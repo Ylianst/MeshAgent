@@ -17,8 +17,6 @@
 #define ILibDuktape_EventEmitter_Hook					((void*)0xEEEE)
 #define ILibDuktape_EventEmitter_GlobalListenerCount	"\xFF_EventEmitter_GlobalListenerCount"
 
-void ILibDuktape_EventEmitter_ClearListenersSink(void *chain, void *eventList);
-
 #ifdef __DOXY__
 
 
@@ -94,7 +92,14 @@ public:
 };
 
 #endif
-
+ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromObject(duk_context *ctx, void *objHeapptr)
+{
+	ILibDuktape_EventEmitter *retVal = NULL;
+	duk_push_heapptr(ctx, objHeapptr);						// [obj]
+	retVal = ILibDuktape_EventEmitter_GetEmitter(ctx, -1);
+	duk_pop(ctx);											// ...
+	return(retVal);
+}
 void ILibDuktape_EventEmitter_FinalizerEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)user;
@@ -166,8 +171,9 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	int nargs = duk_get_top(ctx);
 	ILibDuktape_EventEmitter *data;
 	void *node, *nextNode, *func, *dispatcher;
-	int i, count;
+	int i, j, count;
 	void **hptr;
+	void **emitList;
 
 	duk_push_this(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_TempObject);	// [this][tmp]
@@ -183,17 +189,19 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	dispatcher = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_SetterFunc, name, (int)nameLen);
 	if (dispatcher == NULL) { return ILibDuktape_Error(ctx, "EventEmitter.emit(): Internal Error with event '%s'", name); }
 
+
+	// Copy the list, so we can enumerate with local memory, so the list can be manipulated while we are dispatching
+#ifdef WIN32
+	emitList = (void**)_alloca(((unsigned int)ILibLinkedList_GetCount(eventList) + 1) * sizeof(void*));
+#else
+	emitList = (void**)alloca(((unsigned int)ILibLinkedList_GetCount(eventList) + 1) * sizeof(void*));
+#endif
 	node = ILibLinkedList_GetNode_Head(eventList);
+	i = 0;
 	while (node != NULL)
 	{
 		nextNode = ILibLinkedList_GetNextNode(node);
-		func = ILibLinkedList_GetDataFromNode(node);
-		duk_push_heapptr(ctx, func);						// [func]
-		duk_push_heapptr(ctx, self);						// [func][this]
-		for (i = 1; i < nargs; ++i)
-		{
-			duk_dup(ctx, i);								// [func][this][...args...]
-		}
+		emitList[i++] = ILibLinkedList_GetDataFromNode(node);
 
 		if (((int*)ILibLinkedList_GetExtendedMemory(node))[0] == 1)
 		{
@@ -201,15 +209,11 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 			ILibLinkedList_Remove(node);
 			data->totalListeners[0]--;
 		}
-
-		if (duk_pcall_method(ctx, nargs-1) != 0)
-		{
-			return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' threw an exception: %s", name, duk_safe_to_string(ctx, -1)));
-		}
-		duk_pop(ctx);										// ...
 		node = nextNode;
 	}
+	emitList[i] = NULL;
 
+	// If no more listeners, we can set the hptr to NULL
 	if (ILibLinkedList_GetCount(eventList) == 0)
 	{
 		duk_push_heapptr(ctx, dispatcher);									// [dispatcher]
@@ -224,6 +228,24 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 		}
 		duk_pop_2(ctx);														// ...
 	}
+
+	// Now that we have all the housekeeping stuff out of the way, we can actually dispatch our events
+	i = 0;
+	while ((func = emitList[i++]) != NULL)
+	{
+		duk_push_heapptr(ctx, func);						// [func]
+		duk_push_heapptr(ctx, self);						// [func][this]
+		for (j = 1; j < nargs; ++j)
+		{
+			duk_dup(ctx, j);								// [func][this][...args...]
+		}
+		if (duk_pcall_method(ctx, nargs - 1) != 0)
+		{
+			return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' threw an exception: %s", name, duk_safe_to_string(ctx, -1)));
+		}
+		duk_pop(ctx);										// ...
+	}
+
 	return 0;
 }
 int ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr)
@@ -272,7 +294,10 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	data = (ILibDuktape_EventEmitter*)Duktape_GetBuffer(ctx, -1, NULL);
 
 	eventList = ILibHashtable_Get(data->eventTable, NULL, propName, (int)propNameLen);
-	if (eventList == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.on(): Event '%s' not found", propName)); }
+	if (eventList == NULL) 
+	{ 
+		return(ILibDuktape_Error(ctx, "EventEmitter.on(): Event '%s' not found", propName)); 
+	}
 	dispatcher = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_SetterFunc, propName, (int)propNameLen);
 	if (dispatcher == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.on(): Internal error with Event '%s'", propName)); }
 
@@ -371,8 +396,7 @@ duk_ret_t ILibDuktape_EventEmitter_removeAllListeners(duk_context *ctx)
 			duk_pop(ctx);													// [dispatcher][hptrList]
 		}
 
-		//Use this callback, just in case we were called from an event dispatch. Don't want to clear it during a dispatch, cause we'll crash
-		ILibChain_RunOnMicrostackThreadEx(Duktape_GetChain(ctx), ILibDuktape_EventEmitter_ClearListenersSink, eventList);
+		ILibLinkedList_Clear(eventList);
 		emitter->totalListeners[0] = 0;
 	}
 	return(0);
@@ -429,15 +453,12 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 
 	return retVal;
 }
-void ILibDuktape_EventEmitter_ClearListenersSink(void *chain, void *eventList)
-{
-	ILibLinkedList_Clear(eventList);
-}
+
 void ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_HookHandler handler)
 {
-	if (ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_Hook, eventName, strnlen_s(eventName, 255)) == NULL && handler != NULL)
+	if (ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_Hook, eventName, (int)strnlen_s(eventName, 255)) == NULL && handler != NULL)
 	{
-		ILibHashtable_Put(emitter->eventTable, ILibDuktape_EventEmitter_Hook, eventName, strnlen_s(eventName, 255), handler);
+		ILibHashtable_Put(emitter->eventTable, ILibDuktape_EventEmitter_Hook, eventName, (int)strnlen_s(eventName, 255), handler);
 	}
 }
 duk_ret_t ILibDuktape_EventEmitter_SetEvent(duk_context *ctx)
@@ -479,8 +500,7 @@ duk_ret_t ILibDuktape_EventEmitter_SetEvent(duk_context *ctx)
 			duk_pop(ctx);													// [dispatcher][hptrList]
 		}
 
-		//Use this callback, just in case we were called from an event dispatch. Don't want to clear it during a dispatch
-		ILibChain_RunOnMicrostackThread(Duktape_GetChain(ctx), ILibDuktape_EventEmitter_ClearListenersSink, eventList);
+		ILibLinkedList_Clear(eventList);
 	}
 	else
 	{
@@ -629,7 +649,7 @@ void ILibDuktape_EventEmitter_RemoveEventHeapptr(ILibDuktape_EventEmitter *emitt
 		if (heapptr != NULL)
 		{
 			duk_get_prop_string(emitter->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);						// [dispatcher][hptrList]
-			count = duk_get_length(emitter->ctx, -1);
+			count = (int)duk_get_length(emitter->ctx, -1);
 			for (i = 0; i < count; ++i)
 			{
 				duk_get_prop_index(emitter->ctx, -1, i);													// [dispatcher][hptrList][hptr]

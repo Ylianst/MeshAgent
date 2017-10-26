@@ -128,7 +128,11 @@ void ILibAsyncServerSocket_OnInterruptSink(ILibAsyncSocket_SocketModule socketMo
 	struct ILibAsyncServerSocket_Data *data = (struct ILibAsyncServerSocket_Data*)user;
 	if (data == NULL) return;
 	if (data->module->OnInterrupt != NULL) data->module->OnInterrupt(data->module, socketModule, data->user);
-	free(user);
+	if (ILibAsyncSocket_GetUser(socketModule) != NULL)
+	{
+		free(user);
+		ILibAsyncSocket_SetUser(socketModule, NULL);
+	}
 }
 //
 // Chain PreSelect handler
@@ -421,9 +425,14 @@ void ILibAsyncServerSocket_OnDisconnectSink(ILibAsyncSocket_SocketModule socketM
 	// Pass this Disconnect event up
 	if (data == NULL) return;
 	if (data->module->OnDisconnect != NULL) data->module->OnDisconnect(data->module, socketModule, data->user);
+	if (ILibAsyncSocket_GetUser(socketModule) != NULL)
+	{
+		free(data);
+		ILibAsyncSocket_SetUser(socketModule, NULL);
+	}
 
 	// If the chain is shutting down, we need to free some resources
-	if (ILibIsChainBeingDestroyed(data->module->ChainLink.ParentChain) == 0) { free(data); data = NULL; }
+	//if (ILibIsChainBeingDestroyed(data->module->ChainLink.ParentChain) == 0) { free(data); data = NULL; }
 }
 // 
 // Internal method dispatched by the OnSendOK event of the underlying ILibAsyncSocket

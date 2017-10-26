@@ -17,7 +17,7 @@ limitations under the License.
 #if !defined(__MeshDefines__)
 #define __MeshDefined__
 
-#define UTIL_HASHSIZE 32
+#define UTIL_HASHSIZE 48
 #define MESH_AGENT_PORT 16990					 //!< Default Mesh Agent Port
 #define MESH_AGENT_STUN_PORT 16991				 //!< Default Mesh Agent STUN Port
 #define MESH_AGENT_VERSION 1					 //!< Used for self-update system.

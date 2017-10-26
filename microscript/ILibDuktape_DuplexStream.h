@@ -42,6 +42,7 @@ typedef void(*ILibDuktape_DuplexStream_PauseResumeHandler)(ILibDuktape_DuplexStr
 
 #define ILibDuktape_DuplexStream_Ready(duplexStream) ILibDuktape_WritableStream_Ready((duplexStream)->writableStream)
 #define ILibDuktape_DuplexStream_WriteData(duplexStream, buffer, bufferLen) ILibDuktape_readableStream_WriteData((duplexStream)->readableStream, buffer, bufferLen)
+#define ILibDuktape_DuplexStream_WriteDataEx(duplexStream, streamReserved, buffer, bufferLen) ILibDuktape_readableStream_WriteDataEx((duplexStream)->readableStream, streamReserved, buffer, bufferLen)
 #define ILibDuktape_DuplexStream_WriteEnd(duplexStream) ILibDuktape_readableStream_WriteEnd((duplexStream)->readableStream)
 #define ILibDuktape_DuplexStream_Closed(duplexStream) ILibDuktape_readableStream_Closed((duplexStream)->readableStream)
 

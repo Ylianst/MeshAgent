@@ -56,15 +56,6 @@ struct ILibMulticastSocket_StateModule
 	int AddressListLengthV4;
 	int* IndexListV6;
 	int IndexListLenV6;
-
-	// Sockets used to sent and receive messages
-	#if defined(WIN32) || defined(_WIN32_WCE)
-		SOCKET NOTIFY_SEND_socks;
-		SOCKET NOTIFY_SEND_socks6;
-	#else
-		int NOTIFY_SEND_socks;
-		int NOTIFY_SEND_socks6;
-	#endif
 };
 
 // Received a UDP packet on the IPv4 socket, process it.
@@ -219,43 +210,15 @@ void ILibMulticastSocket_BroadcastUdpPacketV4(struct ILibMulticastSocket_StateMo
 		if (localif == NULL || ((struct sockaddr_in*)localif)->sin_addr.s_addr == module->AddressListV4[i].sin_addr.s_addr)
 #endif
 		{
-			if (module->NOTIFY_SEND_socks != 0)
+			#ifndef NACL
+			if (module->UDPServers[i] != NULL)
 			{
-				#if (!defined(_WIN32_WCE) || (defined(_WIN32_WCE) && _WIN32_WCE>=400)) && !defined(NACL)
-				setsockopt(module->NOTIFY_SEND_socks, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&(module->AddressListV4[i].sin_addr), sizeof(struct in_addr));
-				for (j = 0; j < count; j++) sendto(module->NOTIFY_SEND_socks, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
-				#else
-				for (j = 0; j < count; j++) sendto(module->NOTIFY_SEND_socks, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
-				#endif
+				socket = ILibAsyncUDPSocket_GetSocket(module->UDPServer);
+				setsockopt(socket, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&(module->AddressListV4[i].sin_addr), sizeof(struct in_addr));
+				setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&(module->TTL), sizeof(int));
+				for (j = 0; j < count; j++) sendto(socket, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
 			}
-			else
-			{
-				#if (!defined(_WIN32_WCE) || (defined(_WIN32_WCE) && _WIN32_WCE>=400)) && !defined(NACL)
-				if (module->UDPServers[i] != NULL)
-				{
-					socket = ILibAsyncUDPSocket_GetSocket(module->UDPServers[i]);
-					setsockopt(socket, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&(module->AddressListV4[i].sin_addr), sizeof(struct in_addr));
-					for (j = 0; j < count; j++) sendto(socket, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
-				}
-				#else
-				for (j=0;j<count;j++) sendto(socket, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
-				#endif
-			}
-		}
-	}
-	if (i == 0)
-	{
-		if (module->NOTIFY_SEND_socks != 0)
-		{
-			struct in_addr tmp;
-			tmp.s_addr = addr->sin_addr.s_addr;
-			addr->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-#if (!defined(_WIN32_WCE) || (defined(_WIN32_WCE) && _WIN32_WCE>=400)) && !defined(NACL)
-			for (j = 0; j < count; j++) sendto(module->NOTIFY_SEND_socks, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
-#else
-			for (j = 0; j < count; j++) sendto(module->NOTIFY_SEND_socks, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in));
-#endif
-			addr->sin_addr.s_addr = tmp.s_addr;
+			#endif			
 		}
 	}
 }
@@ -270,14 +233,11 @@ void ILibMulticastSocket_BroadcastUdpPacketV6(struct ILibMulticastSocket_StateMo
 	// TODO: Consider the local interface
 	UNREFERENCED_PARAMETER( localif );
 
-	if (module->NOTIFY_SEND_socks6 == 0) return;
 	for(i = 0; i < module->IndexListLenV6; i++)
 	{
-		#if (!defined(_WIN32_WCE) || (defined(_WIN32_WCE) && _WIN32_WCE>=400)) && !defined(NACL)
-		setsockopt(module->NOTIFY_SEND_socks6, IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char*)&(module->IndexListV6[i]), 4);
-		for (j=0;j<count;j++) sendto(module->NOTIFY_SEND_socks6, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in6));
-		#else
-		for (j=0;j<count;j++) sendto(module->NOTIFY_SEND_socks6, data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in6));
+		#ifndef NACL
+		setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer6), IPPROTO_IPV6, IPV6_MULTICAST_IF, (const char*)&(module->IndexListV6[i]), 4);
+		for (j=0;j<count;j++) sendto(ILibAsyncUDPSocket_GetSocket(module->UDPServer6), data, datalen, 0, (struct sockaddr*)addr, sizeof(struct sockaddr_in6));
 		#endif
 	}
 }
@@ -301,8 +261,8 @@ void ILibMulticastSocket_BroadcastIF(struct ILibMulticastSocket_StateModule *mod
 // Perform unicast transmit using this socket.
 int ILibMulticastSocket_Unicast(struct ILibMulticastSocket_StateModule *module, struct sockaddr* target, char* data, int datalen)
 {
-	if (target->sa_family == AF_INET6) return sendto(module->NOTIFY_SEND_socks6, data, datalen, 0, target, INET_SOCKADDR_LENGTH(target->sa_family));
-	if (target->sa_family == AF_INET) return sendto(module->NOTIFY_SEND_socks, data, datalen, 0, target, INET_SOCKADDR_LENGTH(target->sa_family));
+	if (target->sa_family == AF_INET6) return sendto(ILibAsyncUDPSocket_GetSocket(module->UDPServer6), data, datalen, 0, target, INET_SOCKADDR_LENGTH(target->sa_family));
+	if (target->sa_family == AF_INET) return sendto(ILibAsyncUDPSocket_GetSocket(module->UDPServer), data, datalen, 0, target, INET_SOCKADDR_LENGTH(target->sa_family));
 	return -1;
 }
 
@@ -315,7 +275,6 @@ void ILibMulticastSocket_Destroy(void *object)
 // Create a new MulticastSocket module. This module handles all send and receive traffic for IPv4 and IPv6 on a given multicast group.
 struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, int BufferSize, unsigned short LocalPort, struct sockaddr_in *MulticastAddr, struct sockaddr_in6 *MulticastAddr6, ILibAsyncUDPSocket_OnData OnData, void *user, int loopback)
 {
-	int optval = 1;
 	struct sockaddr_in addr4;
 	struct sockaddr_in6 addr6;
 	struct ILibMulticastSocket_StateModule* module;
@@ -355,17 +314,13 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 		module->UDPServer = ILibAsyncUDPSocket_CreateEx(Chain, 0, (struct sockaddr*)&addr4, ILibAsyncUDPSocket_Reuse_SHARED, UDPSocket_OnDataV4, NULL, module);
 		if (module->UDPServer == NULL) { free(module); PRINTERROR(); return NULL; }
 
-		// Set TTL, Reuse, Loop flags assumed to already be set
-		module->NOTIFY_SEND_socks = ILibAsyncUDPSocket_GetSocket(module->UDPServer);
-#ifdef NACL
 
-
-#else
-		if (setsockopt(module->NOTIFY_SEND_socks, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&(module->TTL), sizeof(int)) != 0) {ILIBCRITICALERREXIT(253);}
-		if (setsockopt(module->NOTIFY_SEND_socks, IPPROTO_IP, IP_MULTICAST_LOOP, (const char*)&(module->Loopback), sizeof(int)) != 0) {ILIBCRITICALERREXIT(253);}
+#ifndef NACL
+		if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer), IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&(module->TTL), sizeof(int)) != 0) {ILIBCRITICALERREXIT(253);}
+		if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer), IPPROTO_IP, IP_MULTICAST_LOOP, (const char*)&(module->Loopback), sizeof(int)) != 0) {ILIBCRITICALERREXIT(253);}
 		
 		// Allow IPv4 Broadcast on this socket
-		if (setsockopt(module->NOTIFY_SEND_socks, SOL_SOCKET, SO_BROADCAST, (char*)&optval, 4) != 0) ILIBCRITICALERREXIT(253);
+		//if (setsockopt(module->NOTIFY_SEND_socks, SOL_SOCKET, SO_BROADCAST, (char*)&optval, 4) != 0) ILIBCRITICALERREXIT(253);
 #endif
 
 
@@ -382,12 +337,9 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 			if (module->MulticastAddr6.sin6_port == 0) module->MulticastAddr6.sin6_port = htons(LocalPort);
 
 			// Set TTL, IPv6, Loop and Reuse flags assumed to already be set
-			module->NOTIFY_SEND_socks6 = ILibAsyncUDPSocket_GetSocket(module->UDPServer6);
-#ifdef NACL
-
-#else
-			if (setsockopt(module->NOTIFY_SEND_socks6, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char*)&(module->TTL), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
-			if (setsockopt(module->NOTIFY_SEND_socks6, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char*)&(module->Loopback), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
+#ifndef NACL
+			if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer6), IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char*)&(module->TTL), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
+			if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer6), IPPROTO_IPV6, IPV6_MULTICAST_LOOP, (const char*)&(module->Loopback), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
 #endif
 		}
 	}
@@ -407,8 +359,8 @@ void ILibSetTTL(void *vmodule, int ttl)
 #ifdef NACL
 
 #else
-	if (module->NOTIFY_SEND_socks != 0 && setsockopt(module->NOTIFY_SEND_socks, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&(module->TTL), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
-	if (module->NOTIFY_SEND_socks6 != 0 && setsockopt(module->NOTIFY_SEND_socks6, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char*)&(module->TTL), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
+	if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer), IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&(module->TTL), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
+	if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer6), IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (const char*)&(module->TTL), sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
 #endif
 }
 
@@ -435,7 +387,7 @@ void ILibMulticastSocket_WakeOnLan(void *module, char* mac)
 	for (i = 0; i < 2; i++)
 	{
 		// IPv4 Broadcast, works only in the same subnet
-		sendto(((struct ILibMulticastSocket_StateModule*)module)->NOTIFY_SEND_socks, ILibScratchPad, 102, 0, (const struct sockaddr*)&addr4, sizeof(struct sockaddr_in));
+		sendto(ILibAsyncUDPSocket_GetSocket(((struct ILibMulticastSocket_StateModule*)module)->UDPServer), ILibScratchPad, 102, 0, (const struct sockaddr*)&addr4, sizeof(struct sockaddr_in));
 
 		// IPv4 & IPv6 Multicast. Only works if the machine still is subscribed to SSDP messages (S1 or S3 usualy), but has out-of-subnet range.
 		ILibMulticastSocket_Broadcast((struct ILibMulticastSocket_StateModule*)module, ILibScratchPad, 102, 1);

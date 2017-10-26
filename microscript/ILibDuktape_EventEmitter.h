@@ -19,6 +19,7 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx);
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter(duk_context *ctx, duk_idx_t i);
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromThis(duk_context *ctx);
 #define ILibDuktape_EventEmitter_GetEmitter_fromCurrent(ctx) ILibDuktape_EventEmitter_GetEmitter(ctx, -1)
+ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromObject(duk_context *ctx, void *objHeapptr);
 
 void ILibDuktape_EventEmitter_Init(duk_context *ctx);
 void ILibDuktape_EventEmitter_RemoveAll(ILibDuktape_EventEmitter *emitter);															// Removes all event handlers/dispatchers

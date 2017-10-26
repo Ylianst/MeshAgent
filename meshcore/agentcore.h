@@ -88,13 +88,13 @@ typedef enum AgentIdentifiers
 // Commands with an id that starts with '{' (123, 0x7B) are reserved for JSON commands, that is commands 31488 (0x7B00) to 31743 (0x7BFF)
 typedef enum MeshCommands_Binary
 {
-	MeshCommand_AuthRequest				= 1,    // Server web certificate public key sha256 hash + agent or server nonce
+	MeshCommand_AuthRequest				= 1,    // Server web certificate public key sha384 hash + agent or server nonce
 	MeshCommand_AuthVerify				= 2,    // Agent or server signature
 	MeshCommand_AuthInfo				= 3,	// Agent information
 	MeshCommand_AuthConfirm             = 4,	// Server confirm to the agent that is it authenticated
 	MeshCommand_CoreModule				= 10,	// New core modules to be used instead of the old one, if empty, remove the core module
-	MeshCommand_CoreModuleHash			= 11,	// Request/return the SHA256 hash of the core module
-	MeshCommand_AgentHash				= 12,	// Request/return the SHA256 hash of the agent executable
+	MeshCommand_CoreModuleHash			= 11,	// Request/return the SHA384 hash of the core module
+	MeshCommand_AgentHash				= 12,	// Request/return the SHA384 hash of the agent executable
 	MeshCommand_AgentUpdate				= 13,   // Indicate the start and end of the mesh agent binary transfer
 	MeshCommand_AgentUpdateBlock		= 14,   // Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server
 	MeshCommand_AgentTag				= 15	// Send the mesh agent tag to the server
@@ -149,6 +149,8 @@ typedef struct MeshAgentHostContainer
 	int slaveMode;
 
 	duk_context *meshCoreCtx;
+	char *meshCoreCtx_embeddedScript;
+	int meshCoreCtx_embeddedScriptLen;
 	MeshAgentDuktapePtrs *DuktapeMeshBindings;
 	ILibProcessPipe_Manager *pipeManager;
 

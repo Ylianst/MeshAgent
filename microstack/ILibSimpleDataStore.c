@@ -18,6 +18,9 @@ limitations under the License.
 #include "ILibCrypto.h"
 #ifndef WIN32
 #include <sys/file.h>
+#include <unistd.h>
+#else
+#include <io.h>
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -25,7 +28,8 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
-#define SHA256HASHSIZE 32
+
+#define SHA384HASHSIZE 48
 
 #ifdef _WIN64
 	#define ILibSimpleDataStore_GetPosition(filePtr) _ftelli64(filePtr)
@@ -52,7 +56,7 @@ typedef struct ILibSimpleDataStore_Root
  4 Bytes	- Node size
  4 Bytes	- Key length
  4 Bytes	- Value length
-32 Bytes	- SHA256 hash check value
+48 Bytes	- SHA384 hash check value
 Variable	- Key
 Variable	- Value
 ------------------------------------------ */
@@ -62,7 +66,7 @@ typedef struct ILibSimpleDataStore_RecordHeader
 	int nodeSize;
 	int keyLen;
 	int valueLength;
-	char hash[SHA256HASHSIZE];
+	char hash[SHA384HASHSIZE];
 } ILibSimpleDataStore_RecordHeader;
 
 typedef struct ILibSimpleDataStore_RecordNode
@@ -70,7 +74,7 @@ typedef struct ILibSimpleDataStore_RecordNode
 	int nodeSize;
 	int keyLen;
 	int valueLength;
-	char valueHash[SHA256HASHSIZE];
+	char valueHash[SHA384HASHSIZE];
 	DS_Long valueOffset;
 	char key[];
 } ILibSimpleDataStore_RecordNode;
@@ -78,14 +82,14 @@ typedef struct ILibSimpleDataStore_RecordNode
 typedef struct ILibSimpleDataStore_TableEntry
 {
 	int valueLength;
-	char valueHash[SHA256HASHSIZE];
+	char valueHash[SHA384HASHSIZE];
 	DS_Long valueOffset;
 } ILibSimpleDataStore_TableEntry;
 
 const int ILibMemory_SimpleDataStore_CONTAINERSIZE = sizeof(ILibSimpleDataStore_Root);
 
-// Perform a SHA256 hash of some data
-void ILibSimpleDataStore_SHA256(char *data, int datalen, char* result) { util_sha256(data, datalen, result); }
+// Perform a SHA384 hash of some data
+void ILibSimpleDataStore_SHA384(char *data, int datalen, char* result) { util_sha384(data, datalen, result); }
 
 // Write a key/value pair to file, the hash is already calculated
 DS_Long ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* value, int valueLen, char* hash)
@@ -98,7 +102,7 @@ DS_Long ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* va
 	header->nodeSize = htonl(sizeof(ILibSimpleDataStore_RecordNode) + keyLen + valueLen);
 	header->keyLen = htonl(keyLen);
 	header->valueLength = htonl(valueLen);
-	if (hash != NULL) { memcpy_s(header->hash, sizeof(header->hash), hash, SHA256HASHSIZE); } else { memset(header->hash, 0, SHA256HASHSIZE); }
+	if (hash != NULL) { memcpy_s(header->hash, sizeof(header->hash), hash, SHA384HASHSIZE); } else { memset(header->hash, 0, SHA384HASHSIZE); }
 
 	if (fwrite(headerBytes, 1, sizeof(ILibSimpleDataStore_RecordNode), f)) {}
 	if (fwrite(key, 1, keyLen, f)) {}
@@ -111,9 +115,9 @@ DS_Long ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* va
 // Read the next record in the file
 ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDataStore_Root *root)
 {
-	SHA256_CTX c;
+	SHA512_CTX c;
 	char data[4096];
-	char result[SHA256HASHSIZE];
+	char result[SHA384HASHSIZE];
 	int i, bytesLeft;
 	ILibSimpleDataStore_RecordNode *node = (ILibSimpleDataStore_RecordNode*)(root->scratchPad );
 
@@ -137,28 +141,25 @@ ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDat
 	// Validate Data, in 4k chunks at a time
 	bytesLeft = node->valueLength;
 
-	// Hash SHA256 the data
-	SHA256_Init(&c);
+	// Hash SHA384 the data
+	SHA384_Init(&c);
 	while (bytesLeft > 0)
 	{
 		i = (int)fread(data, 1, bytesLeft > 4096 ? 4096 : bytesLeft, root->dataFile);
 		if (i <= 0) { bytesLeft = 0; break; }
-		SHA256_Update(&c, data, i);
+		SHA384_Update(&c, data, i);
 		bytesLeft -= i;
 	}
-	SHA256_Final((unsigned char*)result, &c);
+	SHA384_Final((unsigned char*)result, &c);
 	if (node->valueLength > 0)
 	{
 		// Check the hash
-		if (memcmp(node->valueHash, result, SHA256HASHSIZE) == 0) {
+		if (memcmp(node->valueHash, result, SHA384HASHSIZE) == 0) {
 			return node; // Data is correct
 		}
 		return NULL; // Data is corrupt
 	}
-	else
-	{
-		return(node);
-	}
+	return node;
 }
 
 // ???
@@ -192,7 +193,7 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 		{
 			// If the value is not empty, we need to create/overwrite this value in memory
 			if (entry == NULL) { entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
-			memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->valueHash, SHA256HASHSIZE);
+			memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->valueHash, SHA384HASHSIZE);
 			entry->valueLength = node->valueLength;
 			entry->valueOffset = node->valueOffset;
 			ILibHashtable_Put(root->keyTable, NULL, node->key, node->keyLen, entry);
@@ -231,6 +232,14 @@ FILE* ILibSimpleDataStore_OpenFileEx(char* filePath, int forceTruncateIfNonZero)
 }
 #define ILibSimpleDataStore_OpenFile(filePath) ILibSimpleDataStore_OpenFileEx(filePath, 0)
 
+int ILibSimpleDataStore_Exists(char *filePath)
+{
+#ifdef WIN32
+	return(_access(filePath, 0) == 0 ? 1 : 0);
+#else
+	return(access(filePath, 0) == 0 ? 1 : 0);
+#endif
+}
 // Open the data store file. Optionally allocate spare user memory
 __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx(char* filePath, int userExtraMemorySize)
 {
@@ -265,19 +274,19 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 // Store a key/value pair in the data store
 __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen)
 {
-	char hash[SHA256HASHSIZE];
+	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
-	ILibSimpleDataStore_SHA256(value, valueLen, hash); // Hash the value
+	ILibSimpleDataStore_SHA384(value, valueLen, hash); // Hash the value
 
 	// Create a new record for the key and value
 	if (entry == NULL) {
 		entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
 	else {
-		if (memcmp(entry->valueHash, hash, SHA256HASHSIZE) == 0) { return 0; }
+		if (memcmp(entry->valueHash, hash, SHA384HASHSIZE) == 0) { return 0; }
 	}
 
-	memcpy_s(entry->valueHash, sizeof(entry->valueHash), hash, SHA256HASHSIZE);
+	memcpy_s(entry->valueHash, sizeof(entry->valueHash), hash, SHA384HASHSIZE);
 	entry->valueLength = valueLen;
 	entry->valueOffset = ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, value, valueLen, entry->valueHash); // Write the key and value
 	root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile); // Update the size of the data store;
@@ -289,7 +298,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 // Get a value from the data store given a key
 __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char *buffer, int bufferLen)
 {
-	char hash[32];
+	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 
@@ -298,14 +307,14 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 	{
 		if (ILibSimpleDataStore_SeekPosition(root->dataFile, entry->valueOffset, SEEK_SET) != 0) return 0; // Seek to the position of the value in the data store
 		if (fread(buffer, 1, entry->valueLength, root->dataFile) == 0) return 0; // Read the value into the buffer
-		util_sha256(buffer, entry->valueLength, hash); // Compute the hash of the read value
-		if (memcmp(hash, entry->valueHash, SHA256HASHSIZE) != 0) return 0; // Check the hash, return 0 if not valid
+		util_sha384(buffer, entry->valueLength, hash); // Compute the hash of the read value
+		if (memcmp(hash, entry->valueHash, SHA384HASHSIZE) != 0) return 0; // Check the hash, return 0 if not valid
 		if (bufferLen > entry->valueLength) { buffer[entry->valueLength] = 0; } // Add a zero at the end to be nice, if the buffer can take it.
 	}
 	return entry->valueLength;
 }
 
-// Get the reference to the SHA256 hash value from the datastore for a given a key.
+// Get the reference to the SHA384 hash value from the datastore for a given a key.
 __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;

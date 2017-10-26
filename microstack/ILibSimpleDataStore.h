@@ -44,6 +44,9 @@ typedef void(*ILibSimpleDataStore_KeyEnumerationHandler)(ILibSimpleDataStore sen
 __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx(char* filePath, int userExtraMemorySize);
 #define ILibSimpleDataStore_Create(filePath) ILibSimpleDataStore_CreateEx(filePath, 0)
 
+// Check if the data store exists
+int ILibSimpleDataStore_Exists(char *filePath);
+
 // Close the data store.
 __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore);
 

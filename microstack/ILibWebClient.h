@@ -241,6 +241,7 @@ void ILibWebClient_ResetUserObjects(ILibWebClient_StateObject webstate, void *us
 ILibWebClient_RequestToken ILibWebClient_GetRequestToken_FromStateObject(ILibWebClient_StateObject WebStateObject);
 ILibWebClient_StateObject ILibWebClient_GetStateObjectFromRequestToken(ILibWebClient_RequestToken token);
 void **ILibWebClient_RequestToken_GetUserObjects(ILibWebClient_RequestToken tok);
+void **ILibWebClient_RequestToken_GetUserObjects_Tail(ILibWebClient_RequestToken tok);
 
 void ILibWebClient_Parse_ContentRange(char *contentRange, int *Start, int *End, int *TotalLength);
 enum ILibWebClient_Range_Result ILibWebClient_Parse_Range(char *Range, long *Start, long *Length, long TotalLength);

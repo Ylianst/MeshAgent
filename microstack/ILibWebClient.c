@@ -201,6 +201,7 @@ struct ILibWebClient_ChunkData
 typedef struct ILibWebClientDataObject
 {
 	int IsWebSocket;
+	int IsOrphan;
 	int PipelineFlag;
 	int ActivityCounter;
 	struct sockaddr_in6 remote;
@@ -680,6 +681,12 @@ void ILibWebClient_FinishedResponse(ILibAsyncSocket_SocketModule socketModule, s
 
 	// Only continue if this is a client calling this
 	if (wcdo->Server != 0) return;
+	if (wcdo->IsOrphan != 0)
+	{
+		ILibWebClient_DestroyWebClientDataObject(wcdo);
+		return;
+	}
+
 
 	// The current request was cancelled, so it can't really be finished, so we
 	// need to skip this, because otherwise we will end up duplicating some calls.
@@ -2205,22 +2212,29 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 					ILibWebClient_DestroyWebRequest(wr);
 				}
 			}
-			ILibWebClient_FinishedResponse(socketModule,wcdo);	
-
-			SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnDisconnect", 7, wcdo->Parent);)
-			sem_wait(&(wcdo->Parent->QLock));
-			wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
-			SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnDisconnect", 8, wcdo->Parent);)
-			sem_post(&(wcdo->Parent->QLock));
-			if (wr == NULL) 
-			{ 
-				if (wcdo->IsWebSocket != 0)
-				{
-					// This was a websocket, so we must destroy the WCDO object, because it won't be destroyed anywhere else
-					ILibWebClient_DestroyWebClientDataObject(wcdo);
-				}
-				return; 
+			if (wcdo->IsOrphan != 0 || wcdo->IsWebSocket != 0)
+			{
+				ILibWebClient_FinishedResponse(socketModule, wcdo);
+				return;
 			}
+			else
+			{
+				ILibWebClient_FinishedResponse(socketModule, wcdo);
+			}
+			//SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnDisconnect", 7, wcdo->Parent);)
+			//sem_wait(&(wcdo->Parent->QLock));
+			//wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
+			//SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnDisconnect", 8, wcdo->Parent);)
+			//sem_post(&(wcdo->Parent->QLock));
+			//if (wr == NULL) 
+			//{ 
+			//	if (wcdo->IsWebSocket != 0)
+			//	{
+			//		// This was a websocket, so we must destroy the WCDO object, because it won't be destroyed anywhere else
+			//		ILibWebClient_DestroyWebClientDataObject(wcdo);
+			//	}
+			//	return; 
+			//}
 		}
 
 		// Make Another Connection and Continue
@@ -2233,7 +2247,7 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 void ILibWebClient_OnInterrupt(ILibAsyncSocket_SocketModule socketModule, void *user)
 {
 	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)user;
-	if (wcdo->IsWebSocket != 0)
+	if (wcdo->IsWebSocket != 0 || wcdo->IsOrphan != 0)
 	{
 		ILibWebClient_DestroyWebClientDataObject(wcdo);
 	}
@@ -2570,6 +2584,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequest(
 				// We need to remove our WCDO from the DataTable, because this WCDO will no longer service HTTP requests
 				// after it is converted into a WebSocket. If we remove it from this table, then a future web request will create a new WCDO object
 				ILibDeleteEntry(wcm->DataTable, requestToken, tokenLength);
+				wcdo->IsOrphan = 1;
 				//ILibHashtable_Put(wcm->WebSocketTable, NULL, (char*)&wcdo, sizeof(void*), wcdo);
 				break;
 			}
@@ -3154,6 +3169,16 @@ void **ILibWebClient_RequestToken_GetUserObjects(ILibWebClient_RequestToken tok)
 	wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
 	if (wr != NULL) { return(&(wr->user1)); } else { return(NULL); }
 }
+void **ILibWebClient_RequestToken_GetUserObjects_Tail(ILibWebClient_RequestToken tok)
+{
+	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)ILibWebClient_GetStateObjectFromRequestToken(tok);
+	struct ILibWebRequest *wr;
+
+	if (wcdo == NULL) return(NULL);
+	wr = (struct ILibWebRequest*)ILibQueue_PeekTail(wcdo->RequestQueue);
+	if (wr != NULL) { return(&(wr->user1)); }
+	else { return(NULL); }
+}
 
 /*! \fn ILibWebClient_StateObject ILibWebClient_GetStateObjectFromRequestToken(ILibWebClient_RequestToken token)
 	\brief Obtain the user object that was associated with a request, from the request token
@@ -3212,7 +3237,7 @@ ILibTransport_DoneState ILibWebClient_StreamRequestBody(
 
 	char hex[16];
 	int hexLen;
-	ILibTransport_DoneState result = ILibTransport_DoneState_ERROR;
+	ILibTransport_DoneState result = ILibTransport_DoneState_INCOMPLETE;
 	
 	if (t != NULL && t->wcdo != NULL)
 	{

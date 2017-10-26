@@ -114,6 +114,18 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	}
 	return 1;
 }
+duk_ret_t ILibDuktape_Polyfills_Buffer_readInt32BE(duk_context *ctx)
+{
+	int offset = duk_require_int(ctx, 0);
+	char *buffer;
+	duk_size_t bufferLen;
+
+	duk_push_this(ctx);
+	buffer = Duktape_GetBuffer(ctx, -1, &bufferLen);
+
+	duk_push_int(ctx, ntohl(((int*)(buffer + offset))[0]));
+	return(1);
+}
 void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 {
 	// Polyfill 'Buffer.slice'
@@ -122,6 +134,8 @@ void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "prototype");									// [g][Duktape][Buffer][prototype]
 	duk_push_c_function(ctx, ILibDuktape_Pollyfills_Buffer_slice, DUK_VARARGS);	// [g][Duktape][Buffer][prototype][func]
 	duk_put_prop_string(ctx, -2, "slice");										// [g][Duktape][Buffer][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_readInt32BE, DUK_VARARGS);
+	duk_put_prop_string(ctx, -2, "readInt32BE");
 	duk_pop_3(ctx);																// [g]
 
 	// Polyfill 'Buffer.toString()
@@ -159,7 +173,27 @@ duk_ret_t ILibDuktape_Polyfills_String_startsWith(duk_context *ctx)
 
 	return 1;
 }
+duk_ret_t ILibDuktape_Polyfills_String_endsWith(duk_context *ctx)
+{
+	duk_size_t tokenLen;
+	char *token = Duktape_GetBuffer(ctx, 0, &tokenLen);
+	char *buffer;
+	duk_size_t bufferLen;
 
+	duk_push_this(ctx);
+	buffer = Duktape_GetBuffer(ctx, -1, &bufferLen);
+	
+	if (ILibString_EndsWith(buffer, (int)bufferLen, token, (int)tokenLen) != 0)
+	{
+		duk_push_true(ctx);
+	}
+	else
+	{
+		duk_push_false(ctx);
+	}
+
+	return 1;
+}
 void ILibDuktape_Polyfills_String(duk_context *ctx)
 {
 	// Polyfill 'String.startsWith'
@@ -167,6 +201,8 @@ void ILibDuktape_Polyfills_String(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "prototype");										// [string][proto]
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_startsWith, DUK_VARARGS);	// [string][proto][func]
 	duk_put_prop_string(ctx, -2, "startsWith");										// [string][proto]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_endsWith, DUK_VARARGS);	// [string][proto][func]
+	duk_put_prop_string(ctx, -2, "endsWith");										// [string][proto]
 	duk_pop_2(ctx);
 }
 duk_ret_t ILibDuktape_Polyfills_Console_log(duk_context *ctx)
@@ -189,6 +225,32 @@ duk_ret_t ILibDuktape_Polyfills_Console_log(duk_context *ctx)
 	printf("\n");
 	return 0;
 }
+duk_ret_t ILibDuktape_Polyfills_Console_enableWebLog(duk_context *ctx)
+{
+#ifdef _REMOTELOGGING
+	void *chain = Duktape_GetChain(ctx);
+	int port = duk_require_int(ctx, 0);
+	duk_size_t pLen;
+	if (duk_peval_string(ctx, "process.argv0") != 0) { return(ILibDuktape_Error(ctx, "console.enableWebLog(): Couldn't fetch argv0")); }
+	char *p = (char*)duk_get_lstring(ctx, -1, &pLen);
+	if (ILibString_EndsWith(p, (int)pLen, ".js", 3) != 0)
+	{
+		memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), p, pLen - 3);
+		sprintf_s(ILibScratchPad2 + (pLen - 3), sizeof(ILibScratchPad2) - 3, ".wlg");
+	}
+	else if (ILibString_EndsWith(p, (int)pLen, ".exe", 3) != 0)
+	{
+		memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), p, pLen - 4);
+		sprintf_s(ILibScratchPad2 + (pLen - 3), sizeof(ILibScratchPad2) - 4, ".wlg");
+	}
+	else
+	{
+		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s.wlg", p);
+	}
+	ILibStartDefaultLoggerEx(chain, (unsigned short)port, ILibScratchPad2);
+#endif
+	return (0);
+}
 void ILibDuktape_Polyfills_Console(duk_context *ctx)
 {
 	// Polyfill console.log()
@@ -204,6 +266,9 @@ void ILibDuktape_Polyfills_Console(duk_context *ctx)
 	}
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_Console_log, DUK_VARARGS);		// [g][console][log]
 	duk_put_prop_string(ctx, -2, "log");											// [g][console]
+
+	ILibDuktape_CreateInstanceMethod(ctx, "enableWebLog", ILibDuktape_Polyfills_Console_enableWebLog, 1);
+
 	duk_pop(ctx);																	// [g]
 }
 duk_ret_t ILibDuktape_ntohl(duk_context *ctx)
@@ -391,7 +456,7 @@ duk_ret_t ILibDuktape_Polyfills_addModule(duk_context *ctx)
 	char *module = (char*)Duktape_GetBuffer(ctx, 1, &moduleLen);
 	char *moduleName = (char*)duk_require_string(ctx, 0);
 
-	if (ILibDuktape_ModSearch_AddModule(ctx, moduleName, module, moduleLen) != 0)
+	if (ILibDuktape_ModSearch_AddModule(ctx, moduleName, module, (int)moduleLen) != 0)
 	{
 		return(ILibDuktape_Error(ctx, "Cannot add module: %s", moduleName));
 	}

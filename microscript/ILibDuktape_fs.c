@@ -125,11 +125,11 @@ char* ILibDuktape_fs_fixLinuxPath(char *path)
 	int len = end;
 	if (end > (sizeof(ILibDuktape_fs_linuxPath)-1)) { return(NULL); }
 
-	if (path[0] == '/') { start = 1; }	else { ++len; }
+	//if (path[0] == '/') { start = 1; }	else { ++len; }
 	if (path[end - 1] == '*') { --end; --len; }
 
 	ILibDuktape_fs_linuxPath[0] = '/';
-	memcpy_s(ILibDuktape_fs_linuxPath + 1, sizeof(ILibDuktape_fs_linuxPath) - 1, path + start, end);
+	memcpy_s(ILibDuktape_fs_linuxPath, sizeof(ILibDuktape_fs_linuxPath), path + start, end);
 	ILibDuktape_fs_linuxPath[len] = 0;	// Klocwork is being retarded, as it is too stupid to notice the size check at the top of this func
 	return(ILibDuktape_fs_linuxPath);
 }
@@ -1319,7 +1319,7 @@ public:
 	Array<String> readdirSync(path[, options]);
 	/*!
 	\brief Returns a new WritableStream
-	\param path \<String]> 
+	\param path \<String\> 
 	\param options <Object> has the following defaults:\n
 	<b>flags</b> \<String\> 'w'\n
 	<b>encoding</b> \<String\> 'utf8'\n

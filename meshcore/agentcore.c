@@ -109,6 +109,66 @@ typedef struct ScriptContainerSettings
 	void *nUncaughtExceptionUser;
 	char ContextGuid[sizeof(JS_ENGINE_CONTEXT) + 1];
 }ScriptContainerSettings;
+
+#pragma pack(push, 1)
+typedef struct MeshCommand_BinaryPacket_AuthRequest
+{
+	unsigned short command;
+	char serverHash[UTIL_HASHSIZE];
+	char serverNonce[UTIL_HASHSIZE];
+}MeshCommand_BinaryPacket_AuthRequest;
+typedef struct MeshCommand_BinaryPacket_AuthVerify_Header
+{
+	unsigned short command;
+	unsigned short certLen;
+	char data[];
+}MeshCommand_BinaryPacket_AuthVerify_Header;
+typedef struct MeshCommand_BinaryPacket_AuthVerify
+{
+	char *cert;
+	unsigned short certLen;
+	char *signature;
+	unsigned short signatureLen;
+}MeshCommand_BinaryPacket_AuthVerify;
+typedef enum MeshCommand_AuthInfo_PlatformType
+{
+	MeshCommand_AuthInfo_PlatformType_DESKTOP	= 1,
+	MeshCommand_AuthInfo_PlatformType_LAPTOP	= 2,
+	MeshCommand_AuthInfo_PlatformType_MOBILE	= 3,
+	MeshCommand_AuthInfo_PlatformType_SERVER	= 4,
+	MeshCommand_AuthInfo_PlatformType_DISK		= 5,
+	MeshCommand_AuthInfo_PlatformType_ROUTER	= 6
+}MeshCommand_BinaryPacket_AuthInfo_PlatformType;
+typedef enum MeshCommand_AuthInfo_CapabilitiesMask
+{
+	MeshCommand_AuthInfo_CapabilitiesMask_DESKTOP	= 0x01,
+	MeshCommand_AuthInfo_CapabilitiesMask_TERMINAL	= 0x02,
+	MeshCommand_AuthInfo_CapabilitiesMask_FILES		= 0x04,
+	MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE	= 0x08,
+	MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT= 0x10
+}MeshCommand_AuthInfo_CapabilitiesMask;
+typedef struct MeshCommand_BinaryPacket_AuthInfo
+{
+	unsigned short command;
+	unsigned int infoVersion;
+	unsigned int agentId;
+	unsigned int agentVersion;
+	unsigned int platformType;
+	char MeshID[UTIL_HASHSIZE];
+	unsigned int capabilities;
+	unsigned short hostnameLen;
+	char hostname[];
+}MeshCommand_BinaryPacket_AuthInfo;
+typedef struct MeshCommand_BinaryPacket_CoreModule
+{
+	unsigned short command;
+	unsigned short request;
+	char coreModuleHash[UTIL_HASHSIZE];
+	char coreModule[];
+}MeshCommand_BinaryPacket_CoreModule;
+#pragma pack(pop)
+
+
 #define ScriptContainerSettingsKey			"\xFF_ScriptContainerSettings"
 
 ScriptContainerSettings* ScriptEngine_GetSettings(duk_context *ctx)
@@ -375,14 +435,14 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 
 	// Check if this is a Mesh Server discovery packet and it is for our server
 	// It will have this form: "MeshCentral2|f5a50091028fe2c122434cbcbd2709a7ec10369295e5a0e43db8853a413d89df|wss://~:443/agent.ashx"
-	if ((bufferLength > 78) && (memcmp(buffer, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad, sizeof(ILibScratchPad))) == 65) && (memcmp(ILibScratchPad, buffer + 13, 64) == 0)) {
+	if ((bufferLength > 78) && (memcmp(buffer, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad, sizeof(ILibScratchPad))) == 97) && (memcmp(ILibScratchPad, buffer + 13, 96) == 0)) {
 		// We have a match, set the server URL correctly.
 		if (agentHost->multicastServerUrl != NULL) { free(agentHost->multicastServerUrl); agentHost->multicastServerUrl = NULL; }
 		if ((agentHost->multicastServerUrl = (char*)malloc(bufferLength - 78 + 128)) == NULL) { ILIBCRITICALEXIT(254); }
 
 		buffer[bufferLength] = 0;
 		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad));
-		sprintf_s(agentHost->multicastServerUrl, bufferLength - 78 + 128, buffer + 78, ILibScratchPad2);
+		sprintf_s(agentHost->multicastServerUrl, bufferLength - 78 + 128, buffer + 78 + 32, ILibScratchPad2);
 
 		//printf("FoundServer: %s\r\n", agentHost->multicastServerUrl);
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
@@ -562,7 +622,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertificate(duk_context *ctx)
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating JS TLS Certificate");
 #endif
 
-	len = util_mkCert(NULL, &(cert), 2048, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
+	len = util_mkCert(NULL, &(cert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
 	len = util_to_p12(cert, passphrase, &data);
 
 	duk_push_fixed_buffer(ctx, len);
@@ -1030,7 +1090,7 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 
 		do
 		{
-			if (util_mkCert(NULL, &(agent->selfcert), 2048, 10000, "MeshNodeCertificate", CERTIFICATE_ROOT, NULL) == 0) return -1;
+			if (util_mkCert(NULL, &(agent->selfcert), 3072, 10000, "MeshNodeCertificate", CERTIFICATE_ROOT, NULL) == 0) return -1;
 			util_keyhash(agent->selfcert, agent->g_selfid);
 
 		} while (((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
@@ -1060,14 +1120,14 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 
 	// Generate a new TLS certificate
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating TLS Certificate");
-	len = util_mkCert(&(agent->selfcert), &(agent->selftlscert), 2048, 10000, "localhost", CERTIFICATE_TLS_SERVER, NULL);
+	len = util_mkCert(&(agent->selfcert), &(agent->selftlscert), 3072, 10000, "localhost", CERTIFICATE_TLS_SERVER, NULL);
 	len = util_to_p12(agent->selftlscert, "hidden", &str);
 	ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, len);
 	util_free(str);
 
 	// Generate a new TLS client certificate
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating TLS Client Certificate");
-	len = util_mkCert(&(agent->selfcert), &(agent->selftlsclientcert), 2048, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
+	len = util_mkCert(&(agent->selfcert), &(agent->selftlsclientcert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
 	len = util_to_p12(agent->selftlsclientcert, "hidden", &str);
 	ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsClientCert", 21, str, len);
 	util_free(str);
@@ -1291,96 +1351,107 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		switch (command)
 		{
 		case MeshCommand_AuthRequest: // This is basic authentication information from the server, we need to sign this and return the signature.
-			if (cmdLen == 66) {
-				int signLen, certlen;
-				SHA256_CTX c;
+			if (cmdLen == sizeof(MeshCommand_BinaryPacket_AuthRequest))
+			{
+				MeshCommand_BinaryPacket_AuthRequest *AuthRequest = (MeshCommand_BinaryPacket_AuthRequest*)cmd;
+				int signLen;
+				SHA512_CTX c;
 				EVP_PKEY *evp_prikey;
 				RSA *rsa_prikey;
-				char *certDer = ILibScratchPad2 + 4;
 
 				// Hash the server's web certificate and check if it matches the one in the auth request
 				util_keyhash2(peer, ILibScratchPad2); // Hash the server certificate public key and place it
 
-				if (memcmp(ILibScratchPad2, cmd + 2, UTIL_HASHSIZE) != 0) { printf("Bad server certificate hash\r\n"); break; } // TODO: Disconnect
-				memcpy_s(agent->serverNonce, sizeof(agent->serverNonce), cmd + 34, UTIL_HASHSIZE);
+				if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) { printf("Bad server certificate hash\r\n"); break; } // TODO: Disconnect
+				memcpy_s(agent->serverNonce, sizeof(agent->serverNonce), AuthRequest->serverNonce, sizeof(AuthRequest->serverNonce));
 
 				// Place our certificate in the response
-				((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AuthVerify); // MeshCommand_AuthVerify (2), agent certificate in ASN1 format
-				certlen = i2d_X509(agent->selfcert.x509, (unsigned char **)&certDer); // Place the agent root certificate in DER form
-				((unsigned short*)ILibScratchPad2)[1] = htons(certlen); // Place the size of the certificate
+				MeshCommand_BinaryPacket_AuthVerify_Header *rav = (MeshCommand_BinaryPacket_AuthVerify_Header*)ILibScratchPad2;
+				rav->command = htons(MeshCommand_AuthVerify);										// MeshCommand_AuthVerify (2), agent certificate in ASN1 format
+				char *certDer = (char*)rav->data;
 
+				rav->certLen = htons(i2d_X509(agent->selfcert.x509, (unsigned char **)&certDer));	// Place the agent root certificate in DER form
+																					
 				// Use our agent root private key to sign the ServerWebHash + ServerNonce + AgentNonce
-				SHA256_Init(&c);
+				SHA384_Init(&c);
 				util_keyhash2(peer, ILibScratchPad);
-				SHA256_Update(&c, cmd + 2, UTIL_HASHSIZE); // Server web hash
-				SHA256_Update(&c, agent->serverNonce, UTIL_HASHSIZE); // Server nonce
-				SHA256_Update(&c, agent->agentNonce, UTIL_HASHSIZE); // Agent nonce
-				SHA256_Final((unsigned char*)ILibScratchPad, &c);
+				SHA384_Update(&c, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)); // Server web hash
+				SHA384_Update(&c, agent->serverNonce, UTIL_HASHSIZE); // Server nonce
+				SHA384_Update(&c, agent->agentNonce, UTIL_HASHSIZE); // Agent nonce
+				SHA384_Final((unsigned char*)ILibScratchPad, &c);
 
 				// Place the signature & send
 				evp_prikey = agent->selfcert.pkey;
 				rsa_prikey = EVP_PKEY_get1_RSA(evp_prikey);
-				signLen = 65535 - (4 + certlen);
-				if (RSA_sign(NID_sha256, (unsigned char*)ILibScratchPad, UTIL_HASHSIZE, (unsigned char*)(ILibScratchPad2 + 4 + certlen), (unsigned int*)&signLen, rsa_prikey) == 1) 
+				signLen = sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) - rav->certLen;
+				if (RSA_sign(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_HASHSIZE, (unsigned char*)(rav->data + rav->certLen), (unsigned int*)&signLen, rsa_prikey) == 1) 
 				{
 					// Signature succesful, send the result to the server
-					ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 4 + certlen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+					ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rav, sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + rav->certLen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 				}
 				RSA_free(rsa_prikey);
-				
 			}
 			break;
 		case MeshCommand_AuthVerify: // This is the signature from the server. We need to check everything is ok.
 			if (cmdLen > 8)
 			{
-				unsigned short certlen = ntohs(((unsigned short*)cmd)[1]);
-				if (cmdLen > (4 + certlen)) {
-					int platformType = 1, hashlen = UTIL_HASHSIZE;
-					SHA256_CTX c;
+				MeshCommand_BinaryPacket_AuthVerify_Header *avh = (MeshCommand_BinaryPacket_AuthVerify_Header*)cmd;
+#ifdef WIN32
+				MeshCommand_BinaryPacket_AuthVerify *AuthVerify = (MeshCommand_BinaryPacket_AuthVerify*)_alloca(sizeof(MeshCommand_BinaryPacket_AuthVerify));
+#else
+				MeshCommand_BinaryPacket_AuthVerify *AuthVerify = (MeshCommand_BinaryPacket_AuthVerify*)alloca(sizeof(MeshCommand_BinaryPacket_AuthVerify));
+#endif
+				AuthVerify->cert = avh->data;
+				AuthVerify->certLen = ntohs(avh->certLen);
+				AuthVerify->signature = avh->data + AuthVerify->certLen;
+				AuthVerify->signatureLen = (unsigned short)(cmdLen - (int)(sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + AuthVerify->certLen));
+
+				if (cmdLen > (int)(sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + AuthVerify->certLen))
+				{
+					int hashlen = UTIL_HASHSIZE;
+					SHA512_CTX c;
 					X509* serverCert = NULL;
 					EVP_PKEY *evp_pubkey;
 					RSA *rsa_pubkey;
-					char* ptr = cmd + 4;
 
 					// Get the server certificate
-					if (!d2i_X509(&serverCert, (const unsigned char**)&ptr, certlen)) { printf("Invalid server certificate\r\n"); break; } // TODO: Disconnect
+					if (!d2i_X509(&serverCert, (const unsigned char**)&AuthVerify->cert, AuthVerify->certLen)) { printf("Invalid server certificate\r\n"); break; } // TODO: Disconnect
 
 					// Check if this certificate public key hash matches what we want
-					// util_sha256((char*)(serverCert->cert_info->key->public_key->data), serverCert->cert_info->key->public_key->length, ILibScratchPad); // OpenSSL 1.0
-					X509_pubkey_digest(serverCert, EVP_sha256(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1
+					X509_pubkey_digest(serverCert, EVP_sha384(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1
 					if (memcmp(ILibScratchPad, agent->serverHash, UTIL_HASHSIZE) != 0) { printf("Server certificate mismatch\r\n"); break; } // TODO: Disconnect
 
 					// Compute the authentication hash
-					SHA256_Init(&c);
+					SHA384_Init(&c);
 					util_keyhash2(peer, ILibScratchPad);
-					SHA256_Update(&c, ILibScratchPad, UTIL_HASHSIZE);
-					SHA256_Update(&c, agent->agentNonce, UTIL_HASHSIZE);
-					SHA256_Update(&c, agent->serverNonce, UTIL_HASHSIZE);
-					SHA256_Final((unsigned char*)ILibScratchPad, &c);
+					SHA384_Update(&c, ILibScratchPad, UTIL_HASHSIZE);
+					SHA384_Update(&c, agent->agentNonce, UTIL_HASHSIZE);
+					SHA384_Update(&c, agent->serverNonce, UTIL_HASHSIZE);
+					SHA384_Final((unsigned char*)ILibScratchPad, &c);
 
 					// Verify the hash signature using the server certificate
 					evp_pubkey = X509_get_pubkey(serverCert);
 					rsa_pubkey = EVP_PKEY_get1_RSA(evp_pubkey);
-					if (RSA_verify(NID_sha256, (unsigned char*)ILibScratchPad, UTIL_HASHSIZE, (unsigned char*)(cmd + 4 + certlen), cmdLen - (4 + certlen), rsa_pubkey) == 1) 
+					if (RSA_verify(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_HASHSIZE, (unsigned char*)AuthVerify->signature, AuthVerify->signatureLen, rsa_pubkey) == 1) 
 					{
 						int hostnamelen = (int)strnlen_s(agent->hostname, sizeof(agent->hostname));
 						// Server signature verified, we are good to go.
 						agent->serverAuthState += 1;
 
 						// Send to the server information about this agent (TODO: Replace this with a struct)
-						if ((agent->batteryState != MeshAgentHost_BatteryInfo_NONE) && (agent->batteryState != MeshAgentHost_BatteryInfo_UNKNOWN)) { platformType = 2; } // If a battery is present, select laptop icon
-						((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AuthInfo);		// MeshCommand_AuthInfo (3), agent information
-						((unsigned int*)(ILibScratchPad2 + 2))[0] = htonl(1);						// Agent information version
-						((unsigned int*)(ILibScratchPad2 + 6))[0] = htonl(MESH_AGENTID);			// Agent Identifier
-						((unsigned int*)(ILibScratchPad2 + 10))[0] = htonl(agent->version);			// Agent Version
-						((unsigned int*)(ILibScratchPad2 + 14))[0] = htonl(platformType);			// Platfrom Type: This is the icon: 1 = Desktop, 2 = Laptop, 3 = Mobile, 4 = Server, 5 = Disk, 6 = Router
-						memcpy_s(ILibScratchPad2 + 18, sizeof(ILibScratchPad2) - 18, agent->meshId, UTIL_HASHSIZE);					// MeshId, taken from the agent settings
-						((unsigned int*)(ILibScratchPad2 + 50))[0] = htonl(8 + 16);					// Capabilities of the agent(bitmask) : 1 = Desktop, 2 = Terminal, 4 = Files, 8 = Console, 16 = JavaScript
-						((unsigned short*)ILibScratchPad2 + 54)[0] = htons(hostnamelen);			// Hostname length
-						memcpy_s(ILibScratchPad2 + 56, sizeof(ILibScratchPad2) - 56, agent->hostname, hostnamelen);					// Hostname
+						MeshCommand_BinaryPacket_AuthInfo *info = (MeshCommand_BinaryPacket_AuthInfo*)ILibScratchPad2;
+						info->command = htons(MeshCommand_AuthInfo);
+						info->infoVersion = htonl(1);
+						info->agentId = htonl(MESH_AGENTID);
+						info->agentVersion = htonl(agent->version);
+						info->platformType = htonl(((agent->batteryState != MeshAgentHost_BatteryInfo_NONE) && (agent->batteryState != MeshAgentHost_BatteryInfo_UNKNOWN)) ? MeshCommand_AuthInfo_PlatformType_LAPTOP : MeshCommand_AuthInfo_PlatformType_DESKTOP);
+						memcpy_s(info->MeshID, sizeof(info->MeshID), agent->meshId, sizeof(agent->meshId));
+						info->capabilities = htonl(MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT);
+						info->hostnameLen = htons(hostnamelen);
+						memcpy_s(info->hostname, sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthInfo), agent->hostname, hostnamelen);
 						
 						// Send mesh agent information to the server
-						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 56 + hostnamelen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)info, sizeof(MeshCommand_BinaryPacket_AuthInfo) + hostnamelen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 						agent->retryTime = 0;
 						printf("Connected.\n");
 						if (agent->serverAuthState == 3) { MeshServer_ServerAuthenticated(WebStateObject, agent); }
@@ -1472,20 +1543,22 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_CoreModule:        // New core modules to be used instead of the old one, if empty, remove the core module
 		{
 			char *coreException = NULL;
+			MeshCommand_BinaryPacket_CoreModule *cm = (MeshCommand_BinaryPacket_CoreModule*)cmd;
 
 			// If the agent is running with a local core, ignore this command
 			if (agent->localScript != 0) break;
 
-			if (cmdLen > 36) // Setup a new mesh core. Command is: cmdid + requestid + sha256hash + javascript
+			if (cmdLen > sizeof(MeshCommand_BinaryPacket_CoreModule)) // Setup a new mesh core. 
 			{
 				char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule"); // Get the reference to the SHA256 hash for the currently running code
-				if (hashref == NULL || memcmp(hashref, cmd + 4, 32) != 0) 
+				if (hashref == NULL || memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
 				{														
 					// If server sends us the same core, just do nothing.
 					// Server sent us a new core, start by storing it in the data store
-					ILibSimpleDataStore_PutEx(agent->masterDb, "CoreModule", 10, cmd + 36, cmdLen - 36);	// Store the JavaScript in the data store
+					ILibSimpleDataStore_PutEx(agent->masterDb, "CoreModule", 10, cm->coreModule, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule));	// Store the JavaScript in the data store
 					hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");					// Get the reference to the SHA256 hash
-					if (memcmp(hashref, cmd + 4, 32) != 0) {												// Check the hash for sanity
+					if (memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
+					{																						// Check the hash for sanity
 																											// Something went wrong, clear the data store
 						ILibSimpleDataStore_Delete(agent->masterDb, "CoreModule");
 
@@ -1495,9 +1568,10 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						ScriptEngine_Stop(agent, MeshAgent_JavaCore_ContextGuid);
 
 						// Tell the server we are no longer running a core module
-						((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_CoreModuleHash);			// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
-						((unsigned short*)ILibScratchPad2)[1] = htons(requestid);							// Request id
-						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+						MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
+						rcm->command = htons(MeshCommand_CoreModuleHash);									// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+						rcm->request = htons(requestid);													// Request id
+						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 						break;
 					}
 
@@ -1506,7 +1580,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					//printf("CORE: Restart\r\n");
 					ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
 						ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Restart");
-					if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, cmd + 40, cmdLen - 40)) != NULL)
+					if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, cm->coreModule + 4, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule) - 4)) != NULL)
 					{
 						ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
 							ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Error: %s", coreException);
@@ -1518,12 +1592,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				}
 
 				// Create the server confirmation message that we are running the new core
+				MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
 				((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_CoreModuleHash);					// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
 				((unsigned short*)ILibScratchPad2)[1] = htons(requestid);									// Request id
 				memcpy_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, hashref, UTIL_HASHSIZE);			// SHA256 hash
 
 				// Send the confirmation to the server
-				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 36, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, sizeof(MeshCommand_BinaryPacket_CoreModule), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 			}
 			else if (cmdLen == 4)
 			{
@@ -1536,9 +1611,10 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				ScriptEngine_Stop(agent, MeshAgent_JavaCore_ContextGuid);
 
 				// Confirm to the server that we are not running any core
-				((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_CoreModuleHash);					// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
-				((unsigned short*)ILibScratchPad2)[1] = htons(requestid);									// Request id
-				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+				MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
+				rcm->command = htons(MeshCommand_CoreModuleHash);											// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+				rcm->request = htons(requestid);															// Request id
+				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 			}
 			break;
 		}
@@ -1552,12 +1628,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			if (agent->localScript != 0) break;
 
 			// Confirm to the server what core we are running
-			((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_CoreModuleHash);						// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
-			((unsigned short*)ILibScratchPad2)[1] = htons(requestid);                                       // Request id
-			if (hashref != NULL) { memcpy_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, hashref, UTIL_HASHSIZE); len += 32; }
+			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
+			rcm->command = htons(MeshCommand_CoreModuleHash);										// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+			rcm->request = htons(requestid);														// Request id
+			if (hashref != NULL) { memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), hashref, UTIL_HASHSIZE); len = sizeof(MeshCommand_BinaryPacket_CoreModule); }
 
 			// Send the confirmation to the server
-			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, len, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, len, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 
 			break;
 		}
@@ -1567,12 +1644,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 			// This is a request for the hash of the agent binary
 			// Built the response that includes our self hash
-			((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AgentHash);						// MeshCommand_AgentHash (12), SHA256 hash of the agent executable
-			((unsigned short*)ILibScratchPad2)[1] = htons(requestid);									// Request id
-			memcpy_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, agent->agentHash, UTIL_HASHSIZE);// SHA256 hash of the agent executable
+			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
+			rcm->command = htons(MeshCommand_AgentHash);						// MeshCommand_AgentHash (12), SHA256 hash of the agent executable
+			rcm->request = htons(requestid);									// Request id
+			memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), agent->agentHash, UTIL_HASHSIZE);// SHA256 hash of the agent executable
 
 			// Send the self hash back to the server
-			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 36, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, sizeof(MeshCommand_BinaryPacket_CoreModule), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 
 			break;
 		}
@@ -1583,15 +1661,18 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 #else
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update");
 #endif
-			char updateFileHash[32];
+			char updateFileHash[UTIL_HASHSIZE];
+			MeshCommand_BinaryPacket_CoreModule *cm = (MeshCommand_BinaryPacket_CoreModule*)cmd;
 
 			if (cmdLen == 4) {
 				// Indicates the start of the agent update transfer
 				util_deletefile(updateFilePath);
-			} else if (cmdLen == 36) {
+			} else if (cmdLen == sizeof(MeshCommand_BinaryPacket_CoreModule)) 
+			{
 				// Indicates the end of the agent update transfer
-				// Check the SHA256 hash of the received file against the file we got.
-				if ((util_sha256file(updateFilePath, updateFileHash) == 0) && (memcmp(updateFileHash, cmd + 4, 32) == 0)) {
+				// Check the SHA384 hash of the received file against the file we got.
+				if ((util_sha384file(updateFilePath, updateFileHash) == 0) && (memcmp(updateFileHash, cm->coreModuleHash, sizeof(cm->coreModuleHash)) == 0)) 
+				{
 					printf("UPDATE: End OK\r\n");
 					// Check the file signature & version number
 					//if (signcheck_verifysign(updateFilePath, 1))
@@ -1697,13 +1778,15 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			agent->serverConnectionState = 2;
 
 			// Start authentication by sending a auth nonce & server TLS cert hash.
-			// Send 256 bits SHA256 hash of TLS cert public key + 256 bits nonce
-			util_random(32, agent->agentNonce); // Generate a new mesh agent connection nonce
-			((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AuthRequest); // MeshCommand_AuthRequest (1), server hash + nonce
-			util_keyhash2(peer, ILibScratchPad2 + 2); // Hash the server certificate public key and place it
+			// Send 384 bits SHA384 hash of TLS cert public key + 384 bits nonce
+			util_random(sizeof(agent->agentNonce), agent->agentNonce);				// Generate a new mesh agent connection nonce
+			MeshCommand_BinaryPacket_AuthRequest *ar = (MeshCommand_BinaryPacket_AuthRequest*)ILibScratchPad2;
+
+			ar->command = htons(MeshCommand_AuthRequest);			// MeshCommand_AuthRequest (1), server hash + nonce
+			util_keyhash2(peer, ar->serverHash);					// Hash the server certificate public key and place it
 			if (peer != NULL) { X509_free(peer); }
-			memcpy_s(ILibScratchPad2 + 34, sizeof(ILibScratchPad2) - 34, agent->agentNonce, UTIL_HASHSIZE); // Place our mesh agent nonce
-			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 66, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+			memcpy_s(ar->serverNonce, sizeof(ar->serverNonce), agent->agentNonce, sizeof(agent->agentNonce)); // Place our mesh agent nonce
+			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)ar, sizeof(MeshCommand_BinaryPacket_AuthRequest), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 #endif
 			break;
 		}
@@ -1812,10 +1895,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		if (agent->multicastServerUrl != NULL) {
 			serverUrl = agent->multicastServerUrl;
-			serverUrlLen = strlen(serverUrl);
+			serverUrlLen = (int)strlen(serverUrl);
 		} else {
 			// Multicast discovery packet to try to find our server
-			if ((agent->multicastDiscovery != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 65)) { ILibMulticastSocket_Broadcast(agent->multicastDiscovery, ILibScratchPad2, 64, 1); }
+			if ((agent->multicastDiscovery != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) { ILibMulticastSocket_Broadcast(agent->multicastDiscovery, ILibScratchPad2, 96, 1); }
 			ILibDestructParserResults(rs);
 			MeshServer_Connect(agent);
 			return;
@@ -2100,12 +2183,13 @@ void MeshAgent_Slave(MeshAgentHostContainer *agentHost)
 void MeshAgent_ChainEnd(void *chain, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
-	duk_destroy_heap(agent->meshCoreCtx);
+	if (agent->meshCoreCtx != NULL) { duk_destroy_heap(agent->meshCoreCtx); }
 }
 
 void MeshAgent_RunScriptOnly_Finalizer(duk_context *ctx, void *user)
 {
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
+	agentHost->meshCoreCtx = NULL;
 	if (ILibIsChainBeingDestroyed(agentHost->chain) == 0)
 	{
 		MeshAgent_Stop(agentHost);
@@ -2557,77 +2641,93 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	int connectAgent = 0;
 	int pathLen = 0;
 
-	// Get the full path name of the JavaScript file
-#ifdef WIN32
-	pathLen = GetFullPathName(argv[1], sizeof(ILibScratchPad2), ILibScratchPad2, NULL);
-#else
-	if (realpath(argv[1], ILibScratchPad2) != NULL) { pathLen = strnlen_s(ILibScratchPad2, PATH_MAX); }
-#endif
-
-	// Try to load the JavaScript file from disk, if fail, return
-	jsFileLen = ILibReadFileFromDiskEx(&jsFile, ILibScratchPad2);
-	if (jsFileLen == 0) { printf("ERROR loading %s\n", ILibScratchPad2); return; }
-
-	// We need to pass the JavaScript full path to the JavaScript runtime as the first argument. Set the up here.
-	scriptArgs = (char**)ILibMemory_Allocate((1 + argc) * sizeof(char*), 1 + pathLen, NULL, (void**)&jsPath);		// KLOCWORK is being dumb, becuase ILibScratchpad2 is gauranteed to be NULL terminated
-	strncpy_s(jsPath, ILibMemory_GetExtraMemorySize(jsPath), ILibScratchPad2, ILibMemory_GetExtraMemorySize(jsPath));
-	scriptArgs[0] = jsPath;
-
-#ifdef WIN32
-	i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "\\", 1);
-#else
-	i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "/", 1);
-#endif
-	ILibScratchPad2[i] = 0;
-#ifdef WIN32
-	SetCurrentDirectory(ILibScratchPad2);
-#else
-	ignore_result(chdir(ILibScratchPad2));
-#endif
-
-	// Parse arguments. Handle the ones we can, others will be passed to the JavaScript engine. 
-	for (i = 2; i < argc; ++i)
+	if (agentHost->meshCoreCtx_embeddedScript == NULL)
 	{
-		if(agentHost->masterDb == NULL && strncmp(argv[i], "--script-db", 11) == 0 && ((i + 1) < argc))
+		// Get the full path name of the JavaScript file
+#ifdef WIN32
+		pathLen = GetFullPathName(argv[1], sizeof(ILibScratchPad2), ILibScratchPad2, NULL);
+#else
+		if (realpath(argv[1], ILibScratchPad2) != NULL) { pathLen = strnlen_s(ILibScratchPad2, PATH_MAX); }
+#endif
+
+		// Try to load the JavaScript file from disk, if fail, return
+		jsFileLen = ILibReadFileFromDiskEx(&jsFile, ILibScratchPad2);
+		if (jsFileLen == 0) { printf("ERROR loading %s\n", ILibScratchPad2); return; }
+
+		// We need to pass the JavaScript full path to the JavaScript runtime as the first argument. Set the up here.
+		scriptArgs = (char**)ILibMemory_Allocate((1 + argc) * sizeof(char*), 1 + pathLen, NULL, (void**)&jsPath);		// KLOCWORK is being dumb, becuase ILibScratchpad2 is gauranteed to be NULL terminated
+		strncpy_s(jsPath, ILibMemory_GetExtraMemorySize(jsPath), ILibScratchPad2, ILibMemory_GetExtraMemorySize(jsPath));
+		scriptArgs[0] = jsPath;
+
+#ifdef WIN32
+		i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "\\", 1);
+#else
+		i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "/", 1);
+#endif
+		ILibScratchPad2[i] = 0;
+#ifdef WIN32
+		SetCurrentDirectory(ILibScratchPad2);
+#else
+		ignore_result(chdir(ILibScratchPad2));
+#endif
+
+		// Parse arguments. Handle the ones we can, others will be passed to the JavaScript engine. 
+		for (i = 2; i < argc; ++i)
 		{
-			// Specify DB file path
-			agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, argv[i + 1]));
-			++i;
-		}
-		else if (strncmp(argv[i], "--script-flags", 14) == 0 && ((i + 1) < argc))
-		{
-			// JS Permissions (see .h for values)
-			if (ntohs(((unsigned short*)argv[i + 1])[0]) == HEX_IDENTIFIER)
+			if (agentHost->masterDb == NULL && strncmp(argv[i], "--script-db", 11) == 0 && ((i + 1) < argc))
 			{
-				int xlen = (int)strnlen_s(argv[i + 1], 32);
-				if (xlen <= 10)
-				{
-					util_hexToBuf(argv[i + 1] + 2, xlen - 2, (char*)&secFlags);
-					secFlags = ntohl(secFlags);
-				}
+				// Specify DB file path
+				agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, argv[i + 1]));
 				++i;
 			}
-		}
-		else if (strncmp(argv[i], "--script-timeout", 16) == 0 && ((i + 1) < argc))
-		{
-			// Seconds before watchdog termination, 0 for unlimited
-			execTimeout = (unsigned int)atoi(argv[i + 1]);
-			++i;
-		}
-		else if (strncmp(argv[i], "--script-connect", 16) == 0)
-		{
-			// Connect to MeshCentral
-			connectAgent = 1;
-			if (agentHost->masterDb == NULL)
+			else if (strncmp(argv[i], "--script-flags", 14) == 0 && ((i + 1) < argc))
 			{
-				agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
+				// JS Permissions (see .h for values)
+				if (ntohs(((unsigned short*)argv[i + 1])[0]) == HEX_IDENTIFIER)
+				{
+					int xlen = (int)strnlen_s(argv[i + 1], 32);
+					if (xlen <= 10)
+					{
+						util_hexToBuf(argv[i + 1] + 2, xlen - 2, (char*)&secFlags);
+						secFlags = ntohl(secFlags);
+					}
+					++i;
+				}
+			}
+			else if (strncmp(argv[i], "--script-timeout", 16) == 0 && ((i + 1) < argc))
+			{
+				// Seconds before watchdog termination, 0 for unlimited
+				execTimeout = (unsigned int)atoi(argv[i + 1]);
+				++i;
+			}
+			else if (strncmp(argv[i], "--script-connect", 16) == 0)
+			{
+				// Connect to MeshCentral
+				connectAgent = 1;
+				if (agentHost->masterDb == NULL)
+				{
+					agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
+				}
+			}
+			else
+			{
+				// Unhandled arguments, passed to JavaScript
+				scriptArgs[sx++] = argv[i];
 			}
 		}
-		else
+	}
+	else
+	{
+		// Embedded JavaScript
+		jsFile = agentHost->meshCoreCtx_embeddedScript;
+		jsFileLen = agentHost->meshCoreCtx_embeddedScriptLen;
+		scriptArgs = (char**)ILibMemory_Allocate((1 + argc) * sizeof(char*), 0, NULL, NULL);
+		for (i = 1; i < argc; ++i)
 		{
-			// Unhandled arguments, passed to JavaScript
-			scriptArgs[sx++] = argv[i];
+			scriptArgs[i] = argv[i];
 		}
+		scriptArgs[i] = NULL;
+		scriptArgs[0] = agentHost->exePath;
 	}
 
 	// Start the JavaScript engine, run the loaded .js file
@@ -2639,8 +2739,11 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 
 	if (ILibDuktape_ScriptContainer_CompileJavaScript(agentHost->meshCoreCtx, jsFile, jsFileLen) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
 	{
-		// Error
-		ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+		if (strcmp(duk_safe_to_string(agentHost->meshCoreCtx, -1), "Process.exit() forced script termination") != 0)
+		{
+			// Error
+			ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+		}
 		duk_pop(agentHost->meshCoreCtx);
 	}
 
@@ -2701,22 +2804,25 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	exePath[x] = 0;
 #endif
 
-	// Perform a self SHA256 Hash
-	util_sha256file(agentHost->exePath, agentHost->agentHash);
+	// Perform a self SHA384 Hash
+	util_sha384file(agentHost->exePath, agentHost->agentHash);
 
 #ifdef _REMOTELOGGINGSERVER
 	{
 		int len;
-		if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")); }
-		if (agentHost->masterDb != NULL)
+		if (agentHost->masterDb == NULL && ILibSimpleDataStore_Exists(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")) != 0)
 		{
-			if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "enableILibRemoteLogging", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
+			agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
+			if (agentHost->masterDb != NULL)
 			{
-				ILibScratchPad[len] = 0;
-				ILibStartDefaultLoggerEx(agentHost->chain, (unsigned short)atoi(ILibScratchPad), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
+				if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "enableILibRemoteLogging", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
+				{
+					ILibScratchPad[len] = 0;
+					ILibStartDefaultLoggerEx(agentHost->chain, (unsigned short)atoi(ILibScratchPad), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
+				}
+				ILibSimpleDataStore_Close(agentHost->masterDb);
+				agentHost->masterDb = NULL;
 			}
-			ILibSimpleDataStore_Close(agentHost->masterDb);
-			agentHost->masterDb = NULL;
 		}
 	}
 #endif
@@ -2740,7 +2846,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	void *reserved[] = { agentHost, &paramLen, param };
 
 	// Check to see if we are running as just a JavaScript Engine
-	if (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) 
+	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0))
 	{ 
 		// We are acting as a scripting engine
 		ILibChain_RunOnMicrostackThreadEx(agentHost->chain, MeshAgent_ScriptMode_Dispatched, reserved);

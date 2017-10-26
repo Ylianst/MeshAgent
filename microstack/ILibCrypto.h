@@ -17,7 +17,8 @@ int   __fastcall util_hexToint(char *hexString, int hexStringLength);
 int __fastcall util_hexToBuf(char *hexString, int hexStringLength, char* output);
 
 void  __fastcall util_sha256(char* data, int datalen, char* result);
-int   __fastcall util_sha256file(char* filename, char* result);
+void  __fastcall util_sha384(char* data, int datalen, char* result);
+int   __fastcall util_sha384file(char* filename, char* result);
 
 // File and data methods
 size_t __fastcall util_writefile(char* filename, char* data, int datalen);
@@ -34,9 +35,8 @@ BOOL util_CopyFile(_In_ LPCSTR lpExistingFileName, _In_ LPCSTR lpNewFileName, _I
 void  __fastcall util_random(int length, char* result);
 void  __fastcall util_randomtext(int length, char* result);
 
-#define UTIL_HASHSIZE     32
-#define NONCE_SIZE        32
-#define HALF_NONCE_SIZE   16
+#define UTIL_HASHSIZE     48
+#define NONCE_SIZE        48
 
 #ifdef MICROSTACK_NOTLS
 #include "md5.h"

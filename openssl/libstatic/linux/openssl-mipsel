@@ -7,7 +7,7 @@ export PATH=/home/default/Public/PTV1000-GPL/mips-4.3/bin:$PATH
 export CC=/home/default/Public/PTV1000-GPL/mips-4.3/bin/mips-linux-gnu-gcc
 
 cd ../openssl
-./Configure linux-mipsel no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-threads no-hw no-err no-dso no-shared -no-asm no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-ec no-ecdsa no-seed no-camellia no-dso no-bf no-cast no-md2 no-mdc2
+./Configure linux-mipsel no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-threads no-hw no-err no-dso no-shared -no-asm no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-dso no-bf no-cast no-md2 no-mdc2
 make depend
 sed 's/ -O3 / -Os -EL /g' Makefile > t
 rm Makefile

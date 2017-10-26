@@ -1,0 +1,120 @@
+<html>
+<head>
+    <title>WebRTC Test Application</title>
+</head>
+<body onload="start()">
+    <span id="statustext"></span>
+
+    <script type="text/javascript">
+        var configuration = { "iceServers": [] };
+        var connection = null;
+        var datachannel = null;
+        var currentanswer = null;
+        var wsocket = null;
+        var decoder = new TextDecoder('utf-8');
+        var sdp = null;
+
+        function start()
+        {
+            debug("Connecting signaling channel...");
+            wsocket = new WebSocket("ws://127.0.0.1:8585/control");
+            wsocket.binaryType = "arraybuffer";
+            wsocket.onopen = function (evt)
+            {
+                debug("Web Socket Connection established...");
+                startWebRTC();
+            }
+            wsocket.onmessage = function (evt)
+            {
+                //var cmd = JSON.parse(decoder.decode(new Uint8Array(evt.data)));
+                var cmd = JSON.parse(evt.data);
+                if (cmd.cmd == 'offer')
+                {
+                    debug("Received WebRTC Offer...");
+                
+                    var ax = null;
+                    if (typeof mozRTCSessionDescription !== 'undefined') { ax = new mozRTCSessionDescription({ type: "answer", sdp: cmd.data }) } else { ax = new RTCSessionDescription({ type: "answer", sdp: cmd.data }) }
+                    connection.setRemoteDescription(ax, onSetRemoteDescriptionDone, onError);
+                }  
+            }
+        }
+
+        function onSetRemoteDescriptionDone()
+        {
+            //connection.createAnswer(onAnswerDone, onError);
+        }
+        function onAnswerDone(answer)
+        {
+            //wsocket.send(JSON.stringify({ cmd: 'offer', data: answer.sdp }));
+            sdp = answer.sdp;
+            connection.setLocalDescription(answer, onSetLocalDescriptionDone, onError);
+        }
+
+        function startWebRTC()
+        {
+            debug("Initiating WebRTC...");
+            if (connection != null) { debug("Error!"); return; }
+            if (typeof mozRTCPeerConnection !== 'undefined') { connection = new mozRTCPeerConnection(configuration); }
+            else if (typeof RTCPeerConnection !== 'undefined') { connection = new RTCPeerConnection(configuration); }
+            else if (typeof webkitRTCPeerConnection !== 'undefined') { connection = new webkitRTCPeerConnection(configuration); }
+            else return false;
+
+            connection.ondatachannel = onDataChannel
+            connection.onicecandidate = onIceCandidate;
+
+            datachannel = connection.createDataChannel("browserDataChannel", {});
+            datachannel.onmessage = function (event) { debug("Remote: " + event.data); };
+            datachannel.onopen = function () { debug("browserDataChannel Connected."); };
+            datachannel.onclose = function (event) { debug("DataChannel was closed by remote"); }
+
+            connection.createOffer(onOfferDone, onError, { mandatory: { OfferToReceiveAudio: false, OfferToReceiveVideo: false } });
+        }
+        function onOfferDone(offer)
+        {
+            // debug(offer.sdp);
+            currentoffer = offer;
+            connection.setLocalDescription(offer, onSetLocalDescriptionDone, onError);
+            sdp = currentoffer.sdp;
+        }
+        function onDataChannel(event)
+        {
+            debug("Data Channel ("+ event.channel.label + ") connected");
+            datachannel = event.channel;
+            datachannel.binaryType = "arraybuffer";
+            datachannel.onmessage = function (msg)
+            {
+                try
+                {
+                    datachannel.send(msg.data.byteLength.toString());
+                }
+                catch(e)
+                {
+                    debug(e.toString());
+                    debug(msg.data.toString());
+                }
+            };
+        }
+
+        function onIceCandidate(e)
+        {
+            if (e.candidate == null) {
+                if (sdp == null) { debug('error'); return; }
+                wsocket.send(JSON.stringify({ cmd: 'offer', data: sdp }));
+            }
+            else
+            {
+                sdp += ("a=" + e.candidate.candidate + "\r\n");
+            }
+        }
+
+        function onSetLocalDescriptionDone() { }
+        function onError(e) { if (e.message) debug(e.message); else debug(e); }
+        function debug(msg) { document.getElementById("statustext").innerHTML += (msg + "\r\n"); }
+
+
+
+    </script>
+</body>
+
+
+</html>
