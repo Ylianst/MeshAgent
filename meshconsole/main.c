@@ -192,7 +192,6 @@ int main(int argc, char **argv)
 		}
 		defsettings_str = ILibMemory_Allocate(DEFSETTINGS_MAXLEN, 0, NULL, NULL);
 		snprintf(defsettings_str, DEFSETTINGS_MAXLEN,"var defsettings = {\n\tusername: '%s',\n\tpassword: '%s'\n};\n", username, password);
-		fprintf(stdout,"\n%s\n",defsettings_str);
 		defsettings_strlen = strlen(defsettings_str);
 		// prepend the defsettings_str to integratedJavaScript
 		if (integratedJavaScriptLen >0) 
