@@ -57,7 +57,11 @@ limitations under the License.
 
 #include "ILibDuktape_SHA256.h"
 #include "ILibDuktape_EncryptionStream.h"
+#include "ILibDuktape_ChildProcess.h"
 
+#ifdef _POSIX
+extern char **environ;
+#endif
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
 #define ILibDuktape_ScriptContainer_MasterPtr		"\xFF_ScriptContainer_MasterPtr"
 #define ILibDuktape_ScriptContainer_SlavePtr		"\xFF_ScriptContainer_SlavePtr"
@@ -183,6 +187,58 @@ void ILibDuktape_ScriptContainer_Slave_OnBrokenPipe(ILibProcessPipe_Pipe sender)
 	ILibStopChain(((ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0])->chain);
 }
 
+
+void ILibDuktape_ScriptContainer_CheckEmbedded(char **argv, char **script, int *scriptLen)
+{
+	// Check if .JS file is integrated with executable
+	FILE *tmpFile;
+	char *integratedJavaScript = NULL;
+	int integratedJavaScriptLen = 0;
+#ifdef WIN32
+	if (ILibString_EndsWith(argv[0], -1, ".exe", 4) == 0)
+	{
+		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", argv[0]);
+		tmpFile = fopen(ILibScratchPad, "rb");
+	}
+	else
+	{
+		tmpFile = fopen(argv[0], "rb");
+	}
+#else
+	tmpFile = fopen(argv[0], "rb");
+#endif
+
+	if (tmpFile != NULL)
+	{
+		fseek(tmpFile, 0, SEEK_END);
+		fseek(tmpFile, ftell(tmpFile) - 4, SEEK_SET);
+		ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
+		fseek(tmpFile, 0, SEEK_END);
+		if (ftell(tmpFile) == ntohl(((int*)ILibScratchPad)[0]))
+		{
+			fseek(tmpFile, ftell(tmpFile) - 8, SEEK_SET);
+			ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
+			integratedJavaScriptLen = ntohl(((int*)ILibScratchPad)[0]);
+			integratedJavaScript = ILibMemory_Allocate(1 + integratedJavaScriptLen, 0, NULL, NULL);
+			fseek(tmpFile, 0, SEEK_END);
+			fseek(tmpFile, ftell(tmpFile) - 8 - integratedJavaScriptLen, SEEK_SET);
+			ignore_result(fread(integratedJavaScript, 1, integratedJavaScriptLen, tmpFile));
+			integratedJavaScript[integratedJavaScriptLen] = 0;
+		}
+		fclose(tmpFile);
+	}
+	*script = integratedJavaScript;
+	*scriptLen = integratedJavaScriptLen;
+}
+
+
+
+
+
+
+
+
+
 // Polyfill process object: 
 void ILibDuktape_ScriptContainer_Process_ExitCallback(void *obj)
 {
@@ -247,6 +303,49 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Argv(duk_context *ctx)
 	return 1;
 }
 
+duk_ret_t ILibDuktape_ScriptContainer_Process_env(duk_context *ctx)
+{
+	duk_push_object(ctx);																// [env]
+
+#ifdef WIN32
+	int i;
+	char *envStrings = GetEnvironmentStringsA();
+	int envStringsLen = ILibString_IndexOf(envStrings, INT_MAX, "\0\0", 2);
+	if (envStringsLen > 0)
+	{
+		parser_result *r = ILibParseString(envStrings, 0, envStringsLen, "\0", 1);
+		parser_result_field *f = r->FirstResult;
+		while (f != NULL)
+		{
+			i = ILibString_IndexOf(f->data, f->datalength, "=", 1);
+			if (i > 0)
+			{																			// [env]
+				duk_push_lstring(ctx, f->data, i);										// [env][key]
+				duk_push_string(ctx, f->data + i + 1);									// [env][key][val]
+				duk_put_prop(ctx, -3);													// [env]
+			}
+			f = f->NextResult;
+		}
+		ILibDestructParserResults(r);
+	}
+	FreeEnvironmentStringsA(envStrings);
+#elif defined(_POSIX)
+	for (char **env = environ; *env; ++env)
+	{
+		int envLen = (int)strnlen_s(*env, INT_MAX);
+		int i = ILibString_IndexOf(*env, envLen, "=", 1);
+		if (i > 0)
+		{
+			duk_push_lstring(ctx, *env, i);
+			duk_push_string(ctx, *env + i + 1);
+			duk_put_prop(ctx, -3);
+		}
+	}
+#endif
+
+	return(1);
+}
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -254,6 +353,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 
 	duk_push_global_object(ctx);														// [g]
 	duk_push_object(ctx);																// [g][process]
+	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
+
 #if defined(WIN32)																		// [g][process][platform]
 	duk_push_string(ctx, "win32");
 #elif defined(__APPLE__)
@@ -262,6 +363,19 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_push_string(ctx, "linux");
 #endif
 	duk_put_prop_string(ctx, -2, "platform");											// [g][process]
+
+	duk_push_heap_stash(ctx);															// [g][process][stash]
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_ExePath))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_ExePath);				// [g][process][stash][path]
+		duk_swap_top(ctx, -2);															// [g][process][path][stash]
+		duk_pop(ctx);																	// [g][process][path]
+		ILibDuktape_CreateReadonlyProperty(ctx, "execPath");							// [g][process]
+	}
+	else
+	{
+		duk_pop(ctx);																	// [g][process]
+	}
 
 	if (argList != NULL)
 	{
@@ -691,7 +805,7 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENG
 		ILibDuktape_DGram_Init(ctx);						// Datagram Sockets
 	}
 	if ((securityFlags & SCRIPT_ENGINE_NO_GENERIC_MARSHAL_ACCESS) == 0) { ILibDuktape_GenericMarshal_init(ctx); }
-	if ((securityFlags & SCRIPT_ENGINE_NO_PROCESS_SPAWNING) == 0) { ILibDuktape_ProcessPipe_Init(ctx, chain); }
+	if ((securityFlags & SCRIPT_ENGINE_NO_PROCESS_SPAWNING) == 0) { ILibDuktape_ProcessPipe_Init(ctx, chain); ILibDuktape_ChildProcess_Init(ctx); }
 	if ((securityFlags & SCRIPT_ENGINE_NO_FILE_SYSTEM_ACCESS) == 0) { ILibDuktape_fs_init(ctx); }
 
 

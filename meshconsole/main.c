@@ -29,6 +29,8 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
+#include "microscript/ILibDuktape_ScriptContainer.h"
+
 MeshAgentHostContainer *agentHost = NULL;
 
 #ifdef WIN32
@@ -64,44 +66,11 @@ void BreakSink(int s)
 int main(int argc, char **argv)
 {
 	// Check if .JS file is integrated with executable
-	FILE *tmpFile;
 	char *integratedJavaScript = NULL;
 	int integratedJavaScriptLen = 0;
-#ifdef WIN32
-	if (ILibString_EndsWith(argv[0], -1, ".exe", 4) == 0)
-	{
-		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", argv[0]);
-		tmpFile = fopen(ILibScratchPad, "rb");
-	}
-	else
-	{
-		tmpFile = fopen(argv[0], "rb");
-	}
-#else
-	tmpFile = fopen(argv[0], "rb");
-#endif
-	
-	if (tmpFile != NULL)
-	{
-		fseek(tmpFile, 0, SEEK_END);
-		fseek(tmpFile, ftell(tmpFile) - 4, SEEK_SET);
-		ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
-		fseek(tmpFile, 0, SEEK_END);
-		if (ftell(tmpFile) == ntohl(((int*)ILibScratchPad)[0]))
-		{
-			fseek(tmpFile, ftell(tmpFile) - 8, SEEK_SET);
-			ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
-			integratedJavaScriptLen = ntohl(((int*)ILibScratchPad)[0]);
-			integratedJavaScript = ILibMemory_Allocate(1+integratedJavaScriptLen, 0, NULL, NULL);
-			fseek(tmpFile, 0, SEEK_END);
-			fseek(tmpFile, ftell(tmpFile) - 8 - integratedJavaScriptLen, SEEK_SET);
-			ignore_result(fread(integratedJavaScript, 1, integratedJavaScriptLen, tmpFile));
-			integratedJavaScript[integratedJavaScriptLen] = 0;
-		}
-		fclose(tmpFile);
-	}
-
 	int retCode = 0;
+
+	ILibDuktape_ScriptContainer_CheckEmbedded(argv, &integratedJavaScript, &integratedJavaScriptLen);
 
 	if (argc > 2 && memcmp(argv[1], "-faddr", 6) == 0)
 	{

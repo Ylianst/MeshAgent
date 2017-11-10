@@ -4,11 +4,15 @@ var req = "";
 var gtunnel = "";
 var digest = require('http-digest').create("bryan", "roe");
 
+console.log("Process.execPath = " + process.execPath);
 console.log("Starting POST Digest Test");
 
 
 server = http.createServer(OnRequest);
 server.listen(9093);
+
+console.log("Server Address", server._address());
+
 server.on('upgrade', OnServerUpgrade);
 server.on('checkContinue', OnCheckContinue);
 //server.on('checkContinue', OnCheckContinue_NoDigest);

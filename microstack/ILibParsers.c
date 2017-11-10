@@ -210,6 +210,7 @@ struct HashNode_Root
 {
 	struct HashNode *Root;
 	int CaseInSensitive;
+	void *Reserved;
 	sem_t LOCK;
 };
 struct HashNode
@@ -1063,7 +1064,30 @@ typedef struct ILibBaseChain
 }ILibBaseChain;
 
 const int ILibMemory_CHAIN_CONTAINERSIZE = sizeof(ILibBaseChain);
+void* ILibMemory_AllocateA_InitMem(void *buffer, size_t bufferLen)
+{
+	char *retVal = ((char*)buffer + 8 + sizeof(void*));
+	
+	((int*)(retVal - 4))[0] = (int)(bufferLen - 8 - sizeof(void*));	// Size
+	((void**)(retVal - 4 - sizeof(void*)))[0] = retVal;				// Next
+	((int*)buffer)[0] = (int)bufferLen;								// RawSize
 
+	memset(retVal, 0, bufferLen - 8 - sizeof(void*));
+	return((void*)retVal);
+}
+void* ILibMemory_AllocateA_Get(void *buffer, size_t sz)
+{
+	char *retVal = NULL;
+
+	if (ILibMemory_AllocateA_Size(buffer) > (int)sz)
+	{
+		retVal = ILibMemory_AllocateA_Next(buffer);
+		ILibMemory_AllocateA_Size(buffer) -= (int)sz;
+		ILibMemory_AllocateA_Next(buffer) = (char*)ILibMemory_AllocateA_Next(buffer) + (int)sz;
+	}
+
+	return(retVal);
+}
 void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory)
 {
 	char* retVal = (char*)malloc(containerSize + extraMemorySize + (extraMemorySize > 0 ? 4 : 0));
@@ -3671,26 +3695,47 @@ void ILibHashTree_GetValueEx(void *tree_enumerator, char **key, int *keyLength, 
 \brief Creates an empty ILibHashTree, whose keys are <B>case sensitive</B>.
 \return An empty ILibHashTree
 */
-void* ILibInitHashTree()
+void* ILibInitHashTreeEx(void *ReservedMemory)
 {
 	struct HashNode_Root *Root;
 	struct HashNode *RetVal;
-	if ((Root = (struct  HashNode_Root*)malloc(sizeof(struct HashNode_Root))) == NULL) ILIBCRITICALEXIT(254);
-	if ((RetVal = (struct HashNode*)malloc(sizeof(struct HashNode))) == NULL) ILIBCRITICALEXIT(254);
-	memset(RetVal, 0, sizeof(struct HashNode));
-	memset(Root, 0, sizeof(struct HashNode_Root));
+
+	if (ReservedMemory != NULL)
+	{
+		if (ILibMemory_AllocateA_Size(ReservedMemory) > sizeof(struct HashNode_Root) + sizeof(struct HashNode))
+		{
+			Root = (struct HashNode_Root*)ILibMemory_AllocateA_Get(ReservedMemory, sizeof(struct HashNode_Root));
+			RetVal = (struct HashNode*)ILibMemory_AllocateA_Get(ReservedMemory, sizeof(struct HashNode));
+			if (Root == NULL || RetVal == NULL) { ILIBCRITICALEXIT(254); }
+			memset(RetVal, 0, sizeof(struct HashNode));
+			memset(Root, 0, sizeof(struct HashNode_Root));
+			Root->Reserved = ReservedMemory;
+		}
+		else
+		{
+			return(NULL);
+		}
+	}
+	else
+	{
+		if ((Root = (struct  HashNode_Root*)malloc(sizeof(struct HashNode_Root))) == NULL) ILIBCRITICALEXIT(254);
+		if ((RetVal = (struct HashNode*)malloc(sizeof(struct HashNode))) == NULL) ILIBCRITICALEXIT(254);
+		memset(RetVal, 0, sizeof(struct HashNode));
+		memset(Root, 0, sizeof(struct HashNode_Root));
+	}
+
 	Root->Root = RetVal;
-	sem_init(&(Root->LOCK), 0, 1);
+	if (ReservedMemory == NULL) { sem_init(&(Root->LOCK), 0, 1); }
 	return(Root);
 }
 /*! \fn void* ILibInitHashTree_CaseInSensitive()
 \brief Creates an empty ILibHashTree, whose keys are <B>case insensitive</B>.
 \return An empty ILibHashTree
 */
-void* ILibInitHashTree_CaseInSensitive()
+void* ILibInitHashTree_CaseInSensitiveEx(void *ReservedMemory)
 {
-	struct HashNode_Root *Root = (struct  HashNode_Root*)ILibInitHashTree();
-	Root->CaseInSensitive = 1;
+	struct HashNode_Root *Root = (struct  HashNode_Root*)ILibInitHashTreeEx(ReservedMemory);
+	if (Root != NULL) { Root->CaseInSensitive = 1; }
 	return(Root);
 }
 
@@ -3865,11 +3910,11 @@ struct HashNode* ILibFindEntry(void *hashtree, void *key, int keylength, int cre
 			//
 			// If there is no match, and the create flag is set, we need to create an entry
 			//
-			if ((current->Next = (struct HashNode*)malloc(sizeof(struct HashNode))) == NULL) ILIBCRITICALEXIT(254);
+			if ((current->Next = (struct HashNode*)(root->Reserved == NULL ? (malloc(sizeof(struct HashNode))) : ILibMemory_AllocateA_Get(root->Reserved, sizeof(struct HashNode)))) == NULL) ILIBCRITICALEXIT(254);
 			memset(current->Next,0,sizeof(struct HashNode));
 			current->Next->Prev = current;
 			current->Next->KeyHash = HashValue;
-			if ((current->Next->KeyValue = (void*)malloc(keylength + 1)) == NULL) ILIBCRITICALEXIT(254);
+			if ((current->Next->KeyValue = (root->Reserved == NULL ? (void*)malloc(keylength + 1) : ILibMemory_AllocateA_Get(root->Reserved, keylength + 1))) == NULL) ILIBCRITICALEXIT(254);
 			memcpy_s(current->Next->KeyValue, keylength + 1, key ,keylength);
 			current->Next->KeyValue[keylength] = 0; 
 			current->Next->KeyLength = keylength;
@@ -5171,17 +5216,18 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 \brief Creates an empty packetheader structure
 \return An empty packet
 */
-struct packetheader *ILibCreateEmptyPacket()
+struct packetheader *ILibCreateEmptyPacketEx(void *ReservedMemory)
 {
-	struct packetheader *RetVal;
-	if ((RetVal = (struct packetheader*)malloc(sizeof(struct packetheader))) == NULL) ILIBCRITICALEXIT(254);
+	ILibHTTPPacket *RetVal = ReservedMemory == NULL ? (ILibHTTPPacket*)malloc(sizeof(ILibHTTPPacket)) : (ILibHTTPPacket*)ILibMemory_AllocateA_Get(ReservedMemory, sizeof(ILibHTTPPacket));
+	if (RetVal == NULL) { ILIBCRITICALEXIT(254); }
 	memset(RetVal,0,sizeof(struct packetheader));
 
+	RetVal->ReservedMemory = ReservedMemory;
 	RetVal->UserAllocStrings = -1;
 	RetVal->StatusCode = -1;
 	RetVal->Version = "1.0";
 	RetVal->VersionLength = 3;
-	RetVal->HeaderTable = ILibInitHashTree_CaseInSensitive();
+	RetVal->HeaderTable = ILibInitHashTree_CaseInSensitiveEx(ReservedMemory);
 
 	return RetVal;
 }
@@ -5285,16 +5331,32 @@ void ILibSetDirective(struct packetheader *packet, char* Directive, int Directiv
 	if (DirectiveLength < 0)DirectiveLength = (int)strnlen_s(Directive, 255);
 	if (DirectiveObjLength < 0)DirectiveObjLength = (int)strnlen_s(DirectiveObj, 255);
 
-	if ((packet->Directive = (char*)malloc(DirectiveLength+1)) == NULL) ILIBCRITICALEXIT(254);
+	if (packet->ReservedMemory != NULL)
+	{
+		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (DirectiveLength + DirectiveObjLength + 2))
+		{
+			packet->Directive = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveLength + 1);
+			packet->DirectiveObj = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveObjLength + 1);
+		}
+		else
+		{
+			ILIBCRITICALEXIT(254);
+		}
+	}
+	else
+	{
+		if ((packet->Directive = (char*)malloc(DirectiveLength + 1)) == NULL) ILIBCRITICALEXIT(254);
+		if ((packet->DirectiveObj = (char*)malloc(DirectiveObjLength + 1)) == NULL) ILIBCRITICALEXIT(254);
+		packet->UserAllocStrings = -1;
+	}
+	
 	memcpy_s(packet->Directive, DirectiveLength + 1, Directive,DirectiveLength);
 	packet->Directive[DirectiveLength] = '\0';
 	packet->DirectiveLength = DirectiveLength;
-
-	if ((packet->DirectiveObj = (char*)malloc(DirectiveObjLength+1)) == NULL) ILIBCRITICALEXIT(254);
+	
 	memcpy_s(packet->DirectiveObj, DirectiveObjLength + 1, DirectiveObj, DirectiveObjLength);
 	packet->DirectiveObj[DirectiveObjLength] = '\0';
 	packet->DirectiveObjLength = DirectiveObjLength;
-	packet->UserAllocStrings = -1;
 }
 
 void ILibHTTPPacket_Stash_Put(ILibHTTPPacket *packet, char* key, int keyLen, void *data)
@@ -5335,26 +5397,41 @@ void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, int F
 	struct packetheader_field_node *node;
 	if (FieldNameLength < 0) { FieldNameLength = (int)strnlen_s(FieldName, 255); }
 	if (FieldDataLength < 0) { FieldDataLength = (int)strnlen_s(FieldData, 255); }
+	if (packet->ReservedMemory != NULL)
+	{
+		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (sizeof(struct packetheader_field_node) + FieldNameLength + FieldDataLength + 2))
+		{
+			node = (packetheader_field_node*)ILibMemory_AllocateA_Get(packet->ReservedMemory, sizeof(packetheader_field_node));
+			node->Field = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)FieldNameLength + 1);
+			node->FieldData = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)FieldDataLength + 1);
+		}
+		else
+		{
+			return;
+		}
+	}
+	else
+	{
+		//
+		// Create the Header Node
+		//
+		if ((node = (struct packetheader_field_node*)malloc(sizeof(struct packetheader_field_node))) == NULL) ILIBCRITICALEXIT(254);
+		node->UserAllocStrings = -1;
+		if ((node->Field = (char*)malloc(FieldNameLength + 1)) == NULL) ILIBCRITICALEXIT(254);
+		if ((node->FieldData = (char*)malloc(FieldDataLength + 1)) == NULL) ILIBCRITICALEXIT(254);
+	}
 
-	//
-	// Create the Header Node
-	//
-	if ((node = (struct packetheader_field_node*)malloc(sizeof(struct packetheader_field_node))) == NULL) ILIBCRITICALEXIT(254);
-	node->UserAllocStrings = -1;
-	if ((node->Field = (char*)malloc(FieldNameLength+1)) == NULL) ILIBCRITICALEXIT(254);
 	memcpy_s(node->Field, FieldNameLength + 1, (char*)FieldName, FieldNameLength);
 	node->Field[FieldNameLength] = '\0';
 	node->FieldLength = FieldNameLength;
 
-	if ((node->FieldData = (char*)malloc(FieldDataLength+1)) == NULL) ILIBCRITICALEXIT(254);
 	memcpy_s(node->FieldData, FieldDataLength + 1, (char*)FieldData, FieldDataLength);
 	node->FieldData[FieldDataLength] = '\0';
 	node->FieldDataLength = FieldDataLength;
-
 	node->NextField = NULL;
 
-	ILibAddEntryEx(packet->HeaderTable,node->Field,node->FieldLength,node->FieldData,node->FieldDataLength);
-
+	if (packet->HeaderTable != NULL) { ILibAddEntryEx(packet->HeaderTable, node->Field, node->FieldLength, node->FieldData, node->FieldDataLength); }
+	
 	//
 	// And attach it to the linked list
 	//

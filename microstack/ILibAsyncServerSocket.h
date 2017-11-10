@@ -134,6 +134,7 @@ void ILibAsyncServerSocket_StopListening(ILibAsyncServerSocket_ServerModule modu
 void ILibAsyncServerSocket_ResumeListening(ILibAsyncServerSocket_ServerModule module);
 
 unsigned short ILibAsyncServerSocket_GetPortNumber(ILibAsyncServerSocket_ServerModule ServerSocketModule);
+void ILibAsyncServerSocket_GetLocal(ILibAsyncServerSocket_ServerModule ServerSocketModule, struct sockaddr* addr, size_t addrLen);
 
 /*! \def ILibAsyncServerSocket_Send
 	\brief Sends data onto the TCP stream

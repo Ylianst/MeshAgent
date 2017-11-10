@@ -136,7 +136,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		// Run the MicroLMS Service
 		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 		Chain = ILibCreateChain();
-		MicroLMS = ILibLMS_Create(Chain, selfexe);
+		MicroLMS = ILibLMS_Create(Chain, selfexe, NULL);
 		if (MicroLMS != NULL)
 		{
 			printf("Starting MicroLMS.\r\n");
@@ -580,7 +580,7 @@ int main(int argc, char* argv[])
 	{
 		// Run as an command line application
 		Chain = ILibCreateChain();
-		MicroLMS = ILibLMS_Create(Chain, selfexe);
+		MicroLMS = ILibLMS_Create(Chain, selfexe, NULL);
 		if (MicroLMS != NULL)
 		{
 #ifdef NOCOMMANDER

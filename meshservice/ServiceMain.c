@@ -35,6 +35,8 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "meshcore/agentcore.h"
 
+#include "microscript/ILibDuktape_ScriptContainer.h"
+
 #ifndef _MINCORE
 // #include "../kvm/kvm.h"
 int SetupWindowsFirewall(wchar_t* processname);
@@ -702,6 +704,10 @@ int main(int argc, char* argv[])
 		return(0);
 	}
 
+	char *integratedJavaScript;
+	int integragedJavaScriptLen;
+	ILibDuktape_ScriptContainer_CheckEmbedded(argv, &integratedJavaScript, &integragedJavaScriptLen);
+
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
 	// Process extra switches
@@ -759,7 +765,7 @@ int main(int argc, char* argv[])
 		return 0;
 	}
 #else
-	else if (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "--slave") == 0)))
+	else if (integratedJavaScript != NULL || (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "--slave") == 0))))
 	{
 		// Run the mesh agent in console mode, since the agent is compiled for windows service, the KVM will not work right. This is only good for testing.
 		SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
@@ -767,6 +773,8 @@ int main(int argc, char* argv[])
 		__try
 		{
 			agent = MeshAgent_Create();
+			agent->meshCoreCtx_embeddedScript = integratedJavaScript;
+			agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
 			MeshAgent_Start(agent, argc, argv);
 			retCode = agent->exitCode;
 			MeshAgent_Destroy(agent);

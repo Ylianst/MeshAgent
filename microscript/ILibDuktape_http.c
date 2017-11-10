@@ -35,6 +35,7 @@ limitations under the License.
 #include "ILibDuktape_DuplexStream.h"
 #include "ILibDuktape_EventEmitter.h"
 #include "microstack/ILibCrypto.h"
+#include "microstack/ILibRemoteLogging.h"
 
 #define HTTP_SERVER_PTR					"\xFF_ServerPtr"
 #define HTTP_WEBCLIENT_MGR				"_RequestManagerPtr"
@@ -52,13 +53,20 @@ limitations under the License.
 #define HTTP_STREAM_WRAPPER_BUFSIZE		4096
 #define HTTP_CLIENTREQUEST_PARAMETER	"\xFF_http_clientRequest_parameter"
 #define CLIENTREQUEST_HTTP				"\xFF_clientRequest_HTTP"
+#define CLIENTREQUEST_SOCKET_WCDO		"\xFF_clientRequest_SOCKET_WCDO"
 #define HTTP_INCOMINGMSG_WebStateObject	"\xFF_incomingMessage_WebStateObject"
 #define DIGEST_USERNAME					"\xFF_DigestUsername"
 #define DIGEST_PASSWORD					"\xFF_DigestPassword"
+#define DIGEST_WCDO						"\xFF_DIGEST_WCDO"
 #define HTTP_DIGEST						"\xFF_HTTP_DIGEST"
 #define DIGEST_CLIENT_REQUEST			"\xFF_DIGEST_CLIENT_REQUEST"
 #define HTTP_CLIENTREQUEST_DATAPTR		"\xFF_CLIENTREQUEST_DATAPTR"
 #define CLIENTREQUEST_EVENT_NAME		"\xFF_CLIENTREQUEST_EVENT_NAME"
+#define CLIENTREQUEST_IMSG_RSPTR		"\xFF_CLIENTREQUEST_IMSG_RSPTR"
+#define DIGESTCLIENTREQUEST_END_CALLED	"\xFF_DIGESTCLIENTREQUEST_END_CALLED"
+#define DIGESTCLIENTREQUEST_CONTINUE	"\xFF_DIGESTCLIENTREQUEST_CONTINUE"
+#define DIGESTCLIENTREQUEST_TmpBuffer	"\xFF_DIGESTCLIENTREQUEST_TmpBuffer"
+#define DIGESTCLIENTREQUEST_DIGEST		"\xFF_DIGESTCLIENTREQUEST_DIGEST"
 
 extern duk_idx_t ILibWebServer_DukTape_Push_ILibWebServerSession(duk_context *ctx, ILibWebServer_Session *session);
 void* ILibDuktape_http_request_PUSH_clientRequest(duk_context *ctx, ILibWebClient_RequestToken token, int isWebSocket);
@@ -84,6 +92,7 @@ typedef struct ILibDuktape_http_requestClient_callbacks
 	void *requestStream;
 	void *OnReceive;
 	void *OnContinue;
+	void *OnSocket;
 #ifndef MICROSTACK_NOTLS
 	int rejectUnauthorized;
 	void *checkServerIdentity;
@@ -954,6 +963,33 @@ duk_ret_t ILibDuktape_http_server_tlsSettings_Finalizer(duk_context *ctx)
 {
 	return 0;
 }
+duk_ret_t ILibDuktape_http_server_address(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	if (!duk_has_prop_string(ctx, -1, HTTP_SERVER_PTR))
+	{
+		return(ILibDuktape_Error(ctx, "http.server.address(): Not listening"));
+	}
+	duk_get_prop_string(ctx, -1, HTTP_SERVER_PTR);
+	ILibAsyncServerSocket_ServerModule s = ILibWebServer_GetServerSocketModule((ILibWebServer_ServerToken)duk_get_pointer(ctx, -1));
+	struct sockaddr_in6 local;
+	memset(&local, 0, sizeof(struct sockaddr_in6));
+
+	ILibAsyncServerSocket_GetLocal(s, (struct sockaddr*)&local, sizeof(struct sockaddr_in6));
+	if (local.sin6_family == AF_UNSPEC) { return(ILibDuktape_Error(ctx, "net.server.address(): call to getsockname() failed")); }
+
+	duk_push_object(ctx);
+	duk_push_string(ctx, local.sin6_family == AF_INET6 ? "IPv6" : "IPv4");
+	duk_put_prop_string(ctx, -2, "family");
+
+	duk_push_int(ctx, (int)ntohs(local.sin6_port));
+	duk_put_prop_string(ctx, -2, "port");
+
+	duk_push_string(ctx, ILibRemoteLogging_ConvertAddress((struct sockaddr*)&local));
+	duk_put_prop_string(ctx, -2, "address");
+
+	return(1);
+}
 duk_ret_t ILibDuktape_http_createServer(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -1060,6 +1096,7 @@ duk_ret_t ILibDuktape_http_createServer(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_http_server_listen, DUK_VARARGS);	// [http][server][func]
 	duk_put_prop_string(ctx, -2, "listen");									// [http][server]
 
+	ILibDuktape_CreateInstanceMethod(ctx, "_address", ILibDuktape_http_server_address, 0);
 	return 1;
 }
 
@@ -1096,15 +1133,13 @@ void ILibDuktape_http_request_OnResponse(ILibWebClient_StateObject WebStateObjec
 		{
 			if (ctx != NULL)
 			{
-				duk_push_heapptr(ctx, ptrs->OnReceive);				// [func]
-				duk_push_heapptr(ctx, ptrs->clientRequest);			// [func][this]
-				duk_del_prop_string(ctx, -1, HTTP_REQUEST_TOKEN_PTR);						// (Prevents crash in Request Finalizer)
-				duk_push_null(ctx);									// [func][this][null]
-				if (duk_pcall_method(ctx, 1) != 0)					// [retVal]
-				{
-					ILibDuktape_Process_UncaughtException(ctx);
-				}
-				duk_pop(ctx);										// ...
+				duk_push_heapptr(ctx, ptrs->clientRequest);										// [clientRequest]
+				duk_get_prop_string(ctx, -1, "emit");											// [clientRequest][emit]
+				duk_swap_top(ctx, -2);															// [emit][this]
+				duk_push_string(ctx, "error");													// [emit][this][error]
+				duk_push_error_object(ctx, DUK_ERR_ERROR, "Socket was unexpectedly closed");	// [emit][this][error][err]
+				if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.request.OnError(): "); }
+				duk_pop(ctx);																	// ...
 			}
 			return;
 		}
@@ -1147,6 +1182,7 @@ void ILibDuktape_http_request_OnResponse(ILibWebClient_StateObject WebStateObjec
 	{
 		duk_push_heapptr(ctx, ptrs->clientRequest);							// [clientRequest]
 		duk_del_prop_string(ctx, -1, HTTP_REQUEST_TOKEN_PTR);
+		duk_del_prop_string(ctx, -1, HTTP_REQUEST_USER_PTR);
 		ILibDuktape_EventEmitter_RemoveAll(ILibDuktape_EventEmitter_GetEmitter(ctx, -1));
 		duk_pop(ctx);														// ...
 	}
@@ -1479,8 +1515,27 @@ void ILibDuktape_http_webSocket_onSendOk(ILibWebClient_StateObject sender, void 
 		ILibDuktape_DuplexStream_Ready(ptrs->stream);
 	}
 }
+void ILibDuktape_http_request_idleTimeout(ILibAsyncSocket_SocketModule sender, void *user)
+{
+	ILibWebClient_RequestToken token = ILibWebClient_GetRequestToken_FromStateObject(user);
+	void ** u = ILibWebClient_RequestToken_GetUserObjects(token);
+
+	if (u[1] != NULL && ((ILibDuktape_http_request_dataType*)u[1])->STRUCT_TYPE == ILibDuktape_http_request_dataType_request &&
+		((ILibDuktape_http_requestClient_callbacks*)u[1])->clientRequest != NULL)
+	{
+		duk_context *ctx = (duk_context*)u[0];
+		ILibDuktape_http_requestClient_callbacks *cb = (ILibDuktape_http_requestClient_callbacks*)u[1];
+		duk_push_heapptr(ctx, cb->clientRequest);			// [clientRequest]
+		duk_get_prop_string(ctx, -1, "emit");				// [clientRequest][emit]
+		duk_swap_top(ctx, -2);								// [emit][this]
+		duk_push_string(ctx, "timeout");					// [emit][this][timeout]
+		if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.clientRequest.onTimeout(): "); }
+		duk_pop(ctx);
+	}
+}
 duk_ret_t ILibDuktape_http_request(duk_context *ctx)
 {
+	union { int i; void*p; }u;
 	ILibHTTPPacket *packet;
 	char *host;
 	duk_size_t hostLen;
@@ -1509,6 +1564,10 @@ duk_ret_t ILibDuktape_http_request(duk_context *ctx)
 	{
 		duk_get_prop_string(ctx, -1, HTTP_WEBCLIENT_MGR);
 		wcm = (ILibWebClient_RequestManager)duk_to_pointer(ctx, -1);
+		if (protocol == ILibWebClient_RequestToken_USE_HTTPS)
+		{
+			ILibWebClient_EnableHTTPS(wcm, NULL, NULL, ILibDuktape_http_request_tls_verify);
+		}
 	}
 	else
 	{
@@ -1589,7 +1648,6 @@ duk_ret_t ILibDuktape_http_request(duk_context *ctx)
 
 	if (isWebSocket != 0)
 	{
-		union { int i; void*p; }u;
 		int len;
 		char value[32];
 		char nonce[16];
@@ -1605,6 +1663,13 @@ duk_ret_t ILibDuktape_http_request(duk_context *ctx)
 		ILibAddHeaderLine(packet, "Sec-WebSocket-Version", -1, "13", -1);
 		ILibHTTPPacket_Stash_Put(packet, "_WebSocketBufferSize", -1, u.p);
 		ILibHTTPPacket_Stash_Put(packet, "_WebSocketOnSendOK", -1, ILibDuktape_http_webSocket_onSendOk);
+	}
+
+	u.i = Duktape_GetIntPropertyValue(ctx, 0, "timeout", 0);
+	if (u.i > 0)
+	{
+		ILibHTTPPacket_Stash_Put(packet, "_idleTimeout", -1, u.p);
+		ILibHTTPPacket_Stash_Put(packet, "_idleTimeoutHandler", -1, ILibDuktape_http_request_idleTimeout);
 	}
 
 	if (duk_has_prop_string(ctx, 0, "headers"))
@@ -1750,16 +1815,77 @@ duk_ret_t ILibDuktape_http_request_no_op(duk_context *ctx)
 {
 	return 0;
 }
+void ILibDuktape_http_request_connect(ILibWebClient_RequestToken token)
+{
+	ILibWebClient_StateObject wcdo = ILibWebClient_GetStateObjectFromRequestToken(token);
+	void **user = ILibWebClient_RequestToken_GetUserObjects(token);
+	duk_context *ctx = (duk_context*)user[0];
+	ILibDuktape_http_requestClient_callbacks *ptr = (ILibDuktape_http_requestClient_callbacks*)user[1];
+	if (ctx != NULL && ptr != NULL && ptr->OnSocket != NULL)
+	{
+		duk_push_object(ctx);														// [socket]
+		duk_push_pointer(ctx, wcdo);												// [socket][wcdo]
+		duk_put_prop_string(ctx, -2, CLIENTREQUEST_SOCKET_WCDO);					// [socket]
+		duk_push_heapptr(ctx, ptr->clientRequest);									// [socket][clientRequest]
+		duk_dup(ctx, -2);															// [socket][clientRequest][socket]
+		ILibDuktape_CreateReadonlyProperty(ctx, "socket");							// [socket][clientRequest]
+		duk_pop(ctx);																// [socket]
+
+		duk_push_heapptr(ctx, ptr->clientRequest);									// [socket][clientRequest]
+		ILibDuktape_Push_ObjectStash(ctx);											// [socket][clientRequest][stash]
+		duk_dup(ctx, -3);															// [socket][clientRequest][stash][socket]
+		duk_put_prop_string(ctx, -2, Duktape_GetStashKey(wcdo));					// [socket][clientRequest][stash]
+		duk_pop_2(ctx);																// [socket]
+
+		ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_Create(ctx);
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "end");
+		duk_push_heapptr(ctx, ptr->OnSocket);										// [socket][OnSocket]
+		duk_push_heapptr(ctx, ptr->clientRequest);									// [socket][OnSocket][this]
+		duk_dup(ctx, -3);															// [socket][OnSocket][this][socket]
+		if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.request_connect.onSocket(): "); }
+		duk_pop_2(ctx);																// ...
+	}
+}
+void ILibDuktape_http_request_disconnect(ILibWebClient_RequestToken token)
+{
+	ILibWebClient_StateObject wcdo = ILibWebClient_GetStateObjectFromRequestToken(token);
+	char *key = Duktape_GetStashKey(wcdo);
+	void **user = ILibWebClient_RequestToken_GetUserObjects(token);
+	if (user == NULL) { return; }
+	duk_context *ctx = (duk_context*)user[0];
+	ILibDuktape_http_requestClient_callbacks *ptr = (ILibDuktape_http_requestClient_callbacks*)user[1];
+	if (ctx != NULL && ptr != NULL)
+	{
+		duk_push_heapptr(ctx, ptr->clientRequest);									// [clientRequest]
+		ILibDuktape_Push_ObjectStash(ctx);											// [clientRequest][stash]
+		if (duk_has_prop_string(ctx, -1, key))
+		{
+			duk_get_prop_string(ctx, -1, key);										// [clientRequest][stash][socket]
+			duk_get_prop_string(ctx, -1, "emit");									// [clientRequest][stash][socket][emit]
+			duk_swap_top(ctx, -2);													// [clientRequest][stash][emit][this]
+			duk_push_string(ctx, "end");											// [clientRequest][stash][emit][this][end]
+			if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.request_disconnect(): "); }
+			duk_pop(ctx);															// [clientRequest][stash]
+			duk_del_prop_string(ctx, -2, key);
+		}
+		duk_pop_2(ctx);																// ...
+	}
+}
 void* ILibDuktape_http_request_PUSH_clientRequest(duk_context *ctx, ILibWebClient_RequestToken token, int isWebSocket)
 {
 	ILibDuktape_EventEmitter *emitter = NULL;
-	void **user = ILibWebClient_RequestToken_GetUserObjects_Tail(token);
+	void **user = ILibWebClient_RequestToken_GetUserObjects(token);
 
 	if (user[1] != NULL && ((ILibDuktape_http_request_dataType*)user[1])->STRUCT_TYPE == ILibDuktape_http_request_dataType_request && 
 		((ILibDuktape_http_requestClient_callbacks*)user[1])->clientRequest != NULL)
 	{
 		duk_push_heapptr(ctx, ((ILibDuktape_http_requestClient_callbacks*)user[1])->clientRequest);
 		return(user[1]);
+	}
+
+	if (isWebSocket == 0)
+	{
+		ILibWebClient_RequestToken_ConnectionHandler_Set(token, ILibDuktape_http_request_connect, ILibDuktape_http_request_disconnect);
 	}
 
 	duk_push_object(ctx);															// [obj]
@@ -1783,6 +1909,9 @@ void* ILibDuktape_http_request_PUSH_clientRequest(duk_context *ctx, ILibWebClien
 	{ 
 		ILibDuktape_EventEmitter_CreateEvent(emitter, "response", &(((ILibDuktape_http_requestClient_callbacks*)user[1])->OnReceive));
 		ILibDuktape_EventEmitter_CreateEvent(emitter, "continue", &(((ILibDuktape_http_requestClient_callbacks*)user[1])->OnContinue));
+		ILibDuktape_EventEmitter_CreateEvent(emitter, "socket", &(((ILibDuktape_http_requestClient_callbacks*)user[1])->OnSocket));
+
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "timeout");
 		((ILibDuktape_http_requestClient_callbacks*)user[1])->requestStream = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_http_request_write, ILibDuktape_http_request_end, token);
 		((ILibDuktape_http_requestClient_callbacks*)user[1])->clientRequest = duk_get_heapptr(ctx, -1);
 	}
@@ -2433,6 +2562,14 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response2(duk_context *ctx)
 		duk_dup(ctx, 0);						// [emit][this][response][imsg]
 		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http-digest: Error dispatching response event"); }
 	}
+	else
+	{
+		duk_get_prop_string(ctx, -1, "emit");	// [digestClientRequest][emit]
+		duk_swap_top(ctx, -2);					// [emit][this]
+		duk_push_string(ctx, "error");			// [emit][this][response]
+		duk_dup(ctx, 0);						// [emit][this][response][imsg]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http-digest: Error dispatching response event"); }
+	}
 
 	return(0);
 }
@@ -2469,15 +2606,81 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_propagateEvent(duk_context *ctx)
 }
 
 extern void* ILibWebClient_Digest_GenerateTable(ILibWebClient_StateObject state);
+void ILibDuktape_httpDigest_clientRequest_IncomingMessage_PauseHandler(ILibDuktape_readableStream *sender, void *user)
+{
+	duk_push_heapptr(sender->ctx, user);			// [imsg]
+	duk_get_prop_string(sender->ctx, -1, "pause");	// [imsg][pause]
+	duk_swap_top(sender->ctx, -2);					// [pause][this]
+	if (duk_pcall_method(sender->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(sender->ctx, "ILibDuktape_httpDigest_clientRequest_IncomingMessage_PauseHandler: Error Invoking Pause on ClientRequest: "); }
+	duk_pop(sender->ctx);							// ...
+}
+void ILibDuktape_httpDigest_clientRequest_IncomingMessage_ResumeHandler(ILibDuktape_readableStream *sender, void *user)
+{
+	duk_push_heapptr(sender->ctx, user);			// [imsg]
+	duk_get_prop_string(sender->ctx, -1, "resume");	// [imsg][pause]
+	duk_swap_top(sender->ctx, -2);					// [pause][this]
+	if (duk_pcall_method(sender->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(sender->ctx, "ILibDuktape_httpDigest_clientRequest_IncomingMessage_ResumeHandler: Error Invoking Resume on ClientRequest: "); }
+	duk_pop(sender->ctx);							// ...
+}
+duk_ret_t ILibDuktape_httpDigest_clientRequest_OnData(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	duk_get_prop_string(ctx, -1, CLIENTREQUEST_IMSG_RSPTR);
+	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)duk_get_pointer(ctx, -1);
+	duk_size_t bufferLen;
+	char *buffer;
+
+	buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
+	ILibDuktape_readableStream_WriteData(rs, buffer, (int)bufferLen);
+
+	return(0);
+}
+duk_ret_t ILibDuktape_httpDigest_clientRequest_OnEnd(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	duk_get_prop_string(ctx, -1, CLIENTREQUEST_IMSG_RSPTR);
+	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)duk_get_pointer(ctx, -1);
+	ILibDuktape_readableStream_WriteEnd(rs);
+	return(0);
+}
+
+duk_ret_t ILibDuktape_httpDigest_http_request_socketEvent_end(duk_context *ctx)
+{
+	duk_push_this(ctx);										// [socket]
+	duk_get_prop_string(ctx, -1, CLIENTREQUEST_SOCKET_WCDO);// [socket][wcdo]
+	duk_get_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);	// [socket][wcdo][digest]
+	duk_get_prop_string(ctx, -1, DIGEST_WCDO);				// [socket][wcdo][digest][wcdo]
+	if (duk_get_pointer(ctx, -1) == duk_get_pointer(ctx, -3))
+	{
+		duk_del_prop_string(ctx, -2, DIGEST_WCDO);
+	}
+	return(0);
+}
+duk_ret_t ILibDuktape_httpDigest_http_request_socketEvent(duk_context *ctx)
+{
+	duk_push_this(ctx);											// [clientRequest]
+	duk_get_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST);		// [clientRequest][digestClientRequest]
+	duk_get_prop_string(ctx, -1, DIGESTCLIENTREQUEST_DIGEST);	// [clientRequest][digestClientRequest][digest]
+	duk_get_prop_string(ctx, 0, CLIENTREQUEST_SOCKET_WCDO);		// [clientRequest][digestClientRequest][digest][wcdo]
+	duk_put_prop_string(ctx, -2, DIGEST_WCDO);					// [clientRequest][digestClientRequest][digest]
+
+	duk_dup(ctx, 0);											// [clientRequest][digestClientRequest][digest][socket]
+	duk_swap_top(ctx, -2);										// [clientRequest][digestClientRequest][socket][digest]
+	duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);		// [clientRequest][digestClientRequest][socket]
+
+	ILibDuktape_EventEmitter_AddOnceEx(ILibDuktape_EventEmitter_GetEmitter(ctx, 0), "end", ILibDuktape_httpDigest_http_request_socketEvent_end, 0);
+	return(0);
+}
+
 duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 {
 	ILibHTTPPacket *packet;
 	ILibWebClient_StateObject wcdo;
 	char *username, *password;
-	int tmpLen = 0;
 	char *uri = NULL;
 	void *digestClientPtr;
 	void *paramPtr = NULL;
+	void *cr_self;
 
 	duk_push_current_function(ctx);													
 	duk_get_prop_string(ctx, -1, "digestClientRequest");							
@@ -2494,7 +2697,8 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 	if (packet->StatusCode == 401)
 	{
 		duk_push_heapptr(ctx, digestClientPtr);						// [digestClientRequest]
-		if (duk_has_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST))
+		int endCalledAlready = Duktape_GetBooleanProperty(ctx, -1, DIGESTCLIENTREQUEST_END_CALLED, 0);
+		if (endCalledAlready == 0 && duk_has_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST))
 		{
 			duk_get_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST);	// [digestClientRequest][clientRequest]
 			duk_get_prop_string(ctx, -1, "end");					// [digestClientRequest][clientRequest][end]
@@ -2508,16 +2712,14 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 		duk_get_prop_string(ctx, 0, HTTP_INCOMINGMSG_WebStateObject);
 		wcdo = (ILibWebClient_StateObject)duk_get_pointer(ctx, -1);
 
-		int freePath = 0;
-		char *method, *path;
-		char result1[33];
-		char result2[33];
-		char result3[33];
-		void* table = ILibWebClient_Digest_GenerateTable(wcdo);
-		char* realm = (char*)ILibGetEntry(table, "realm", 5);
-		char* nonce = (char*)ILibGetEntry(table, "nonce", 5);
-		char* opaque = (char*)ILibGetEntry(table, "opaque", 6);
-		ILibDestroyHashTree(table);
+		duk_size_t methodLen, pathLen;
+		int authLen;
+		char *method, *path, *auth;
+
+		void *ReservedMemory = ILibMemory_AllocateA(8000);
+		ILibHTTPPacket *pk = ILibCreateEmptyPacketEx(ReservedMemory);
+		pk->Version = "1.1";
+		pk->VersionLength = 3;
 
 		duk_push_this(ctx);												// [clientRequest]
 		duk_get_prop_string(ctx, -1, HTTP_CLIENTREQUEST_PARAMETER);		// [clientRequest][param]
@@ -2528,31 +2730,25 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 			unsigned short tmpPort;
 			uri = (char*)duk_get_string(ctx, -1);
 			ILibParseUri(uri, &tmpHost, &tmpPort, &path, NULL);
-			tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s", (method = "GET"), path);
-			util_md5hex(ILibScratchPad2, tmpLen, result2);
+			ILibSetDirective(pk, "GET", 3, path, -1);
+
 			free(tmpHost);
-			freePath = 1;
+			free(path);
 		}
 		else
 		{
-			tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s", (method = Duktape_GetStringPropertyValue(ctx, -1, "method", "GET")), (path = Duktape_GetStringPropertyValue(ctx, -1, "path", "/")));
-			util_md5hex(ILibScratchPad2, tmpLen, result2);
+			method = (char*)Duktape_GetStringPropertyValueEx(ctx, -1, "method", "GET", &methodLen);
+			path = (char*)Duktape_GetStringPropertyValueEx(ctx, -1, "path", "/", &pathLen);
+			ILibSetDirective(pk, method, (int)methodLen, path, (int)pathLen);
 			paramPtr = duk_get_heapptr(ctx, -1);
 		}
 
-		tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s:%s", username, realm, password);
-		util_md5hex(ILibScratchPad2, tmpLen, result1);
+		ILibWebClient_GenerateAuthenticationHeader(wcdo, pk, username, password);
+		auth = ILibGetHeaderLineEx(pk, "Authorization", 13, &authLen);
 
-		tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s:%s", result1, nonce, result2);
-		util_md5hex(ILibScratchPad2, tmpLen, result3);
-
-		tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"%s\", opaque=\"%s\", response=\"%s\"", username, realm, nonce, path, opaque, result3);
+		duk_push_this(ctx);																		// [clientReqeust]
+		duk_get_prop_string(ctx, -1, CLIENTREQUEST_HTTP);										// [clientReqeust][http]
 		
-		duk_push_this(ctx);																			// [clientReqeust]
-		duk_get_prop_string(ctx, -1, CLIENTREQUEST_HTTP);											// [clientReqeust][http]
-		if (freePath != 0) { free(path); }
-		
-
 		if (paramPtr == NULL)
 		{
 			duk_get_prop_string(ctx, -1, "get");												// [clientRequest][http][get]
@@ -2566,6 +2762,7 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 			duk_get_prop_string(ctx, -1, "request");											// [clientRequest][http][request]
 			duk_swap_top(ctx, -2);																// [clientRequest][request][this]
 			duk_push_heapptr(ctx, paramPtr);													// [clientRequest][request][this][options]
+			duk_del_prop_string(ctx, -1, "timeout");
 		}
 
 		if(!duk_has_prop_string(ctx, -1, "headers")) 
@@ -2577,15 +2774,17 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 			duk_get_prop_string(ctx, -1, "headers");											// [clientReqeust][get][this][options][headers]
 		}
 																			
-		duk_push_lstring(ctx, ILibScratchPad2, tmpLen);											// [clientReqeust][get][this][options][headers][Auth]
+		duk_push_lstring(ctx, auth, authLen);													// [clientReqeust][get][this][options][headers][Auth]
 		duk_put_prop_string(ctx, -2, "Authorization");											// [clientReqeust][get][this][options][headers]
 		duk_put_prop_string(ctx, -2, "headers");												// [clientReqeust][get][this][options]
 		duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_response2, DUK_VARARGS);	// [clientReqeust][get][this][options][callback]
 		duk_push_heapptr(ctx, digestClientPtr);													// [clientReqeust][get][this][options][callback][digestClientRequest]
 		duk_put_prop_string(ctx, -2, "digestClientRequest");									// [clientReqeust][get][this][options][callback]
 		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "digest_onResponse: Error Invoking http.get"); }
-
-
+		
+		duk_push_heapptr(ctx, digestClientPtr);													// [clientRequest][digestClientRequest]
+		duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);									// [clientRequest]
+		ILibDuktape_EventEmitter_AddOnceEx2(ctx, -1, "socket", ILibDuktape_httpDigest_http_request_socketEvent, 1);
 
 		duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_propagateEvent, DUK_VARARGS);	// [clientReqeust][EventDispatcher]
 		duk_push_heapptr(ctx, digestClientPtr);														// [clientReqeust][EventDispatcher][digestClientRequest]
@@ -2612,17 +2811,87 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 		ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter_GetEmitter(ctx, -2), "continue", duk_get_heapptr(ctx, -1));
 		duk_pop(ctx);																				// [clientReqeust]
 
+		duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_propagateEvent, DUK_VARARGS);	// [clientReqeust][EventDispatcher]
+		duk_push_heapptr(ctx, digestClientPtr);														// [clientReqeust][EventDispatcher][digestClientRequest]
+		duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);										// [clientReqeust][EventDispatcher]
+		duk_push_string(ctx, "timeout");															// [clientReqeust][EventDispatcher][eventName]
+		duk_put_prop_string(ctx, -2, CLIENTREQUEST_EVENT_NAME);										// [clientReqeust][EventDispatcher]
+		ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter_GetEmitter(ctx, -2), "timeout", duk_get_heapptr(ctx, -1));
+		duk_pop(ctx);																				// [clientReqeust]
+
 		duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_onDrain, DUK_VARARGS);		// [clientReqeust][onDrain]
 		duk_push_heapptr(ctx, digestClientPtr);														// [clientReqeust][onDrain][digestClientRequest]
 		duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);										// [clientReqeust][onDrain]
 		ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter_GetEmitter(ctx, -2), "drain", duk_get_heapptr(ctx, -1));
 		duk_pop(ctx);																				// [clientReqeust]
 
+		if (endCalledAlready != 0)
+		{
+			duk_push_heapptr(ctx, digestClientPtr);
+			if (duk_has_prop_string(ctx, -1, DIGESTCLIENTREQUEST_TmpBuffer))
+			{
+				duk_get_prop_string(ctx, -1, DIGESTCLIENTREQUEST_TmpBuffer);						// [clientReqeust][digestClientRequest][buffer]
+				duk_swap_top(ctx, -2);																// [clientRequesat][buffer][digestClientRequest]
+				duk_pop(ctx);																		// [clientRequest][buffer]
+				duk_dup(ctx, -2);																	// [clientRequest][buffer][clientRequest]
+				duk_get_prop_string(ctx, -1, "write");												// [clientRequest][buffer][clientRequest][write]
+				duk_swap_top(ctx, -2);																// [clientRequest][buffer][write][this]
+				duk_swap(ctx, -3, -2);																// [clientRequest][write][buffer][this]
+				duk_swap_top(ctx, -2);																// [clientReqeust][write][this][buffer]
+				if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpDigest.clientRequest.onResponse(): Error calling clientRequest.write(): "); }
+				duk_pop(ctx);																		// [clientRequest]
+			}
+			else
+			{
+				duk_pop(ctx);																		// [clientRequest]
+			}
+
+			duk_dup(ctx, -1);																		// [clientReqeust][clientReqeust]
+			duk_get_prop_string(ctx, -1, "end");													// [clientReqeust][clientReqeust][end]
+			duk_swap_top(ctx, -2);																	// [clientReqeust][end][this]
+			if (duk_pcall_method(ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpDigest.onResponse(): Error invoking ClientRequest.end(): "); }
+			duk_pop(ctx);																			// [clientRequest]
+		}
+
 		duk_push_heapptr(ctx, digestClientPtr);														// [clientRequest][digestClientRequest]
 		duk_swap_top(ctx, -2);																		// [digestClientRequest][clientRequest]
 		duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);										// [digestClientRequest]
 	}
+	else
+	{
+		duk_dup(ctx, 0);
+		cr_self = duk_get_heapptr(ctx, -1);
+		duk_pop(ctx);
 
+		duk_push_heapptr(ctx, digestClientPtr);								// [digestClientRequest]
+		duk_get_prop_string(ctx, -1, "emit");								// [digestClientRequest][emit]
+		duk_swap_top(ctx, -2);												// [emit][this]
+		duk_push_string(ctx, "response");									// [emit][this][response]
+		ILibDuktape_http_server_PUSH_IncomingMessage(ctx, packet, NULL);	// [emit][this][response][imsg]
+		ILibDuktape_readableStream *rs = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_httpDigest_clientRequest_IncomingMessage_PauseHandler, ILibDuktape_httpDigest_clientRequest_IncomingMessage_ResumeHandler, cr_self);
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "digestClientRequest.onResponse(): "); }
+		duk_pop(ctx);														// ...
+
+		duk_dup(ctx, 0);																	// [imsg]
+		duk_get_prop_string(ctx, -1, "on");													// [imsg][on]
+		duk_swap_top(ctx, -2);																// [on][this]
+		duk_push_string(ctx, "data");														// [on][this][data]
+		duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_OnData, DUK_VARARGS);	// [on][this][data][func]
+		duk_push_pointer(ctx, rs);															// [on][this][data][func][ptr]
+		duk_put_prop_string(ctx, -2, CLIENTREQUEST_IMSG_RSPTR);								// [on][this][data][func]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "digestClientRequst.onResponse(): Error attaching event to clientRequest.on('data'): "); }
+		duk_pop(ctx);
+
+		duk_dup(ctx, 0);																	// [imsg]
+		duk_get_prop_string(ctx, -1, "on");													// [imsg][on]
+		duk_swap_top(ctx, -2);																// [on][this]
+		duk_push_string(ctx, "end");														// [on][this][end]
+		duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_OnEnd, DUK_VARARGS);	// [on][this][end][func]
+		duk_push_pointer(ctx, rs);															// [on][this][end][func][ptr]
+		duk_put_prop_string(ctx, -2, CLIENTREQUEST_IMSG_RSPTR);								// [on][this][end][func]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "digestClientRequst.onResponse(): Error attaching event to clientRequest.on('end'): "); }
+		duk_pop(ctx);
+	}
 	return(0);
 }
 duk_ret_t ILibDuktape_httpDigest_clientRequest_setter(duk_context *ctx)
@@ -2673,7 +2942,31 @@ ILibTransport_DoneState ILibDuktape_httpDigest_http_request_WriteHandler(struct 
 	ILibTransport_DoneState retVal = ILibTransport_DoneState_ERROR;
 
 	duk_context *ctx = stream->ctx;
-	duk_push_heapptr(ctx, stream->obj);							// [digestClientRequest]
+	duk_push_heapptr(ctx, stream->obj);										// [digestClientRequest]
+
+	if (Duktape_GetBooleanProperty(ctx, -1, DIGESTCLIENTREQUEST_CONTINUE, 0) == 0)
+	{
+		duk_size_t bufLen;
+		char *tmpBuffer;
+
+		if (duk_has_prop_string(ctx, -1, DIGESTCLIENTREQUEST_TmpBuffer))
+		{
+			duk_get_prop_string(ctx, -1, DIGESTCLIENTREQUEST_TmpBuffer);	// [digestClientRequest][oldBuffer]
+			bufLen = duk_get_length(ctx, -1);
+			duk_resize_buffer(ctx, -1, bufLen + bufferLen);
+			tmpBuffer = (char*)Duktape_GetBuffer(ctx, -1, &bufLen);
+			memcpy_s(tmpBuffer + bufLen - (size_t)bufferLen, (size_t)bufferLen, buffer, (size_t)bufferLen);
+			duk_pop(ctx);													// [digestClientRequest]
+		}
+		else
+		{
+			duk_push_dynamic_buffer(ctx, (duk_size_t)bufferLen);			// [digestClientRequest][buffer]
+			tmpBuffer = (char*)Duktape_GetBuffer(ctx, -1, &bufLen);
+			duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_TmpBuffer);	// [digestClientRequest]
+			memcpy_s(tmpBuffer, bufLen, buffer, (size_t)bufferLen);
+		}
+	}
+
 	if (duk_has_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST))
 	{
 		duk_get_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST);	// [digestClientRequest][clientRequest]
@@ -2710,6 +3003,9 @@ void ILibDuktape_httpDigest_http_request_DoneHandler(struct ILibDuktape_Writable
 	duk_context *ctx = stream->ctx;
 
 	duk_push_heapptr(ctx, stream->obj);							// [digestClientRequest]
+	duk_push_true(ctx);
+	duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_END_CALLED);
+
 	if (duk_has_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST))
 	{
 		duk_get_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST);	// [digestClientRequest][clientRequest]
@@ -2722,16 +3018,33 @@ void ILibDuktape_httpDigest_http_request_DoneHandler(struct ILibDuktape_Writable
 	}
 	duk_pop(ctx);												// ...
 }
+duk_ret_t ILibDuktape_httpDigest_http_request_continueOccured(duk_context *ctx)
+{
+	duk_push_this(ctx);						// [digestClientRequest]
+	duk_push_true(ctx);
+	duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_CONTINUE);
+	return(0);
+}
+
 duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
 	void *clientRequest = NULL;
 	ILibDuktape_EventEmitter *emitter;
 	ILibDuktape_EventEmitter *crEmitter;
+	char *username = NULL;
+	char *password = NULL;
 
 	duk_push_current_function(ctx);				// [func]
 	duk_get_prop_string(ctx, -1, "isGet");		// [func][isGet]
 	duk_push_this(ctx);							// [func][isGet][digest]
+
+	duk_get_prop_string(ctx, -1, DIGEST_USERNAME);	// [func][isGet][digest][username]
+	duk_get_prop_string(ctx, -2, DIGEST_PASSWORD);	// [func][isGet][digest][username][password]
+	username = (char*)duk_get_string(ctx, -2);
+	password = (char*)duk_get_string(ctx, -1);
+	duk_pop_2(ctx);									// [func][isGet][digest]
+
 	duk_get_prop_string(ctx, -1, HTTP_DIGEST);	// [func][isGet][digest][http]
 	if (duk_get_int(ctx, -3) != 0)
 	{
@@ -2744,6 +3057,46 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	duk_swap_top(ctx, -2);						// [func][isGet][digest][get/request][this]
 	duk_dup(ctx, 0);							// [func][isGet][digest][get/request][this][param1]
 
+	//
+	// Check to see if we can insert Auth Headers, in case we already authenticated
+	//
+	if (duk_has_prop_string(ctx, -4, DIGEST_WCDO))
+	{
+		void *wcdo = NULL;
+		ILibHTTPPacket *pk = ILibCreateEmptyPacketEx(ILibMemory_AllocateA(4096));
+		duk_size_t methodLen, pathLen;
+		char *method, *path;
+		pk->Version = "1.1";
+		pk->VersionLength = 3;
+		method = (char*)Duktape_GetStringPropertyValueEx(ctx, -1, "method", "GET", &methodLen);
+		path = (char*)Duktape_GetStringPropertyValueEx(ctx, -1, "path", "/", &pathLen);
+		ILibSetDirective(pk, method, (int)methodLen, path, (int)pathLen);
+
+		duk_get_prop_string(ctx, -4, DIGEST_WCDO);
+		wcdo = duk_get_pointer(ctx, -1);
+		duk_pop(ctx);
+
+		ILibWebClient_GenerateAuthenticationHeader(wcdo, pk, username, password);
+		char *auth = ILibGetHeaderLine(pk, "Authorization", 13);
+		if (auth != NULL)
+		{
+			if (duk_has_prop_string(ctx, -1, "headers"))			// [func][isGet][digest][get/request][this][param1]
+			{
+				duk_get_prop_string(ctx, -1, "headers");			// [func][isGet][digest][get/request][this][param1][headers]
+			}
+			else
+			{
+				duk_push_object(ctx);								// [func][isGet][digest][get/request][this][param1][headers]
+				duk_dup(ctx, -1);									// [func][isGet][digest][get/request][this][param1][headers][headers]
+				duk_put_prop_string(ctx, -3, "headers");			// [func][isGet][digest][get/request][this][param1][headers]
+			}
+			duk_push_string(ctx, auth);								// [func][isGet][digest][get/request][this][param1][headers][auth]
+			duk_put_prop_string(ctx, -2, "Authorization");			// [func][isGet][digest][get/request][this][param1][headers]
+			duk_pop(ctx);											// [func][isGet][digest][get/request][this][param1]
+		}
+	}
+
+
 	if (duk_pcall_method(ctx, 1) != 0) { duk_throw(ctx); return(DUK_RET_ERROR); }
 																							// [clientRequest]
 	clientRequest = duk_get_heapptr(ctx, -1);
@@ -2755,6 +3108,8 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_response, DUK_VARARGS);	// [once][this][response][method] 
 	
 	duk_push_object(ctx);																	// [once][this][response][method][digest-clientRequest]
+	duk_push_this(ctx);																		// [once][this][response][method][digest-clientRequest][digest]
+	duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_DIGEST);								// [once][this][response][method][digest-clientRequest]
 	duk_push_heapptr(ctx, clientRequest);													// [once][this][response][method][digest-clientRequest][clientRequest]
 	duk_dup(ctx, -2);																		// [once][this][response][method][digest-clientRequest][clientRequest][digest-clientRequest]
 	duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);									// [once][this][response][method][digest-clientRequest][clientRequest]
@@ -2764,7 +3119,11 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "upgrade");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "continue");
-	
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "timeout");
+
+	ILibDuktape_EventEmitter_AddOnceEx(emitter, "continue", ILibDuktape_httpDigest_http_request_continueOccured, 0);
+	ILibDuktape_EventEmitter_AddOnceEx(crEmitter, "socket", ILibDuktape_httpDigest_http_request_socketEvent, 1);
+
 	ILibDuktape_WritableStream_Init(ctx, ILibDuktape_httpDigest_http_request_WriteHandler, ILibDuktape_httpDigest_http_request_DoneHandler, NULL);
 
 	if (nargs > 1 && duk_is_function(ctx, 1))
@@ -2801,6 +3160,14 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	duk_push_string(ctx, "continue");															// [digestClientRequest][EventDispatcher][eventName]
 	duk_put_prop_string(ctx, -2, CLIENTREQUEST_EVENT_NAME);										// [digestClientRequest][EventDispatcher]
 	ILibDuktape_EventEmitter_AddOnce(crEmitter, "continue", duk_get_heapptr(ctx, -1));			// [digestClientRequest][EventDispatcher]
+	duk_pop(ctx);																				// [digestClientRequest]
+
+	duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_propagateEvent, DUK_VARARGS);	// [digestClientRequest][EventDispatcher]
+	duk_dup(ctx, -2);																			// [digestClientRequest][EventDispatcher][digestClientRequest]
+	duk_put_prop_string(ctx, -2, DIGEST_CLIENT_REQUEST);										// [digestClientRequest][EventDispatcher]
+	duk_push_string(ctx, "timeout");															// [digestClientRequest][EventDispatcher][eventName]
+	duk_put_prop_string(ctx, -2, CLIENTREQUEST_EVENT_NAME);										// [digestClientRequest][EventDispatcher]
+	ILibDuktape_EventEmitter_AddOnce(crEmitter, "timeout", duk_get_heapptr(ctx, -1));			// [digestClientRequest][EventDispatcher]
 	duk_pop(ctx);																				// [digestClientRequest]
 
 	duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_onDrain, DUK_VARARGS);		// [digestClientRequest][onDrain]

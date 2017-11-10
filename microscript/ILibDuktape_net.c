@@ -24,6 +24,7 @@ limitations under the License.
 #include "microstack/ILibAsyncSocket.h"
 #include "microstack/ILibCrypto.h"
 #include "microstack/ILibAsyncServerSocket.h"
+#include "microstack/ILibRemoteLogging.h"
 
 typedef struct ILibDuktape_net_socket
 {
@@ -264,6 +265,7 @@ duk_ret_t ILibDuktape_net_socket_address(duk_context *ctx)
 	duk_push_string(ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_put_prop_string(ctx, -2, "address");
 	
+
 	return 1;
 }
 
@@ -918,6 +920,29 @@ duk_ret_t ILibDuktape_net_server_Finalizer(duk_context *ctx)
 
 	return 0;
 }
+duk_ret_t ILibDuktape_net_server_address(duk_context *ctx)
+{
+	duk_push_this(ctx);															// [server]
+	duk_get_prop_string(ctx, -1, ILibDuktape_net_Server_buffer);				// [server][buffer]
+	ILibDuktape_net_server *server = (ILibDuktape_net_server*)Duktape_GetBuffer(ctx, -1, NULL);
+	struct sockaddr_in6 local;
+	memset(&local, 0, sizeof(struct sockaddr_in6));
+
+	ILibAsyncServerSocket_GetLocal(server->server, (struct sockaddr*)&local, sizeof(struct sockaddr_in6));
+	if (local.sin6_family == AF_UNSPEC) { return(ILibDuktape_Error(ctx, "net.server.address(): call to getsockname() failed")); }
+
+	duk_push_object(ctx);
+	duk_push_string(ctx, local.sin6_family == AF_INET6 ? "IPv6" : "IPv4");
+	duk_put_prop_string(ctx, -2, "family");
+
+	duk_push_int(ctx, (int)ntohs(local.sin6_port));
+	duk_put_prop_string(ctx, -2, "port");
+
+	duk_push_string(ctx, ILibRemoteLogging_ConvertAddress((struct sockaddr*)&local));
+	duk_put_prop_string(ctx, -2, "address");
+
+	return(1);
+}
 duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -939,6 +964,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "listening", &(server->OnListening));
 
 	ILibDuktape_CreateInstanceMethod(ctx, "listen", ILibDuktape_net_server_listen, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "address", ILibDuktape_net_server_address, 0);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_net_server_Finalizer);
 
 	for (i = 0; i < 2 && i < nargs; ++i)

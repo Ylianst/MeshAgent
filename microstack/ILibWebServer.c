@@ -1910,7 +1910,10 @@ int ILibWebServer_GetLocalInterface(struct ILibWebServer_Session *session, struc
 	return ILibAsyncSocket_GetLocalInterface(ILibWebServer_Session_GetSystemData(session)->ConnectionToken, localAddress);
 }
 
-
+ILibAsyncServerSocket_ServerModule ILibWebServer_GetServerSocketModule(ILibWebServer_ServerToken server)
+{
+	return(((ILibWebServer_StateModule*)server)->ServerSocket);
+}
 
 /*! \fn ILibWebServer_RegisterVirtualDirectory(ILibWebServer_ServerToken WebServerToken, char *vd, int vdLength, ILibWebServer_VirtualDirectory OnVirtualDirectory, void *user)
 \brief Registers a Virtual Directory with the ILibWebServer

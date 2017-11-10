@@ -140,6 +140,7 @@ typedef struct SCRIPT_ENGINE_SETTINGS
 }SCRIPT_ENGINE_SETTINGS;
 
 
+void ILibDuktape_ScriptContainer_CheckEmbedded(char **argv, char **script, int *scriptLen);
 void ILibDuktape_ScriptContainer_InitMaster(void *chain, char *exePath, ILibProcessPipe_Manager manager);
 int ILibDuktape_ScriptContainer_StartSlave(void *chain, ILibProcessPipe_Manager manager);
 

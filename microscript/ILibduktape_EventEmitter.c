@@ -261,6 +261,39 @@ int ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter *emitter, char *ev
 
 	return retVal;
 }
+int ILibDuktape_EventEmitter_AddOnceEx2(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func, duk_idx_t funcArgs)
+{
+	int retVal = 1;
+
+	duk_dup(ctx, idx);																				// [obj]
+	ILibDuktape_Push_ObjectStash(ctx);																// [obj][stash]
+	duk_push_c_function(ctx, func, funcArgs);														// [obj][stash][func]
+	duk_dup(ctx, -1);																				// [obj][stash][func][func]
+	duk_put_prop_string(ctx, -3, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));					// [obj][stash][func]
+	duk_get_prop_string(ctx, -3, "once");															// [obj][stash][func][once]
+	duk_swap(ctx, -3, -1);																			// [obj][once][func][stash]
+	duk_swap(ctx, -4, -3);																			// [once][this][func][stash]
+	duk_pop(ctx);																					// [once][this][func]
+	duk_push_string(ctx, eventName);																// [once][this][func][eventName]
+	duk_swap_top(ctx, -2);																			// [once][this][eventName][func]
+	retVal = duk_pcall_method(ctx, 2);																// [retVal]
+	duk_pop(ctx);																					// ...
+
+	return(retVal);
+}
+int ILibDuktape_EventEmitter_AddOnceEx(ILibDuktape_EventEmitter *emitter, char *eventName, duk_c_function func, duk_idx_t funcArgs)
+{
+	int retVal = 1;
+
+	duk_push_heapptr(emitter->ctx, emitter->object);												// [obj]
+	ILibDuktape_Push_ObjectStash(emitter->ctx);														// [obj][stash]
+
+	duk_push_c_function(emitter->ctx, func, funcArgs);												// [obj][stash][func]
+	retVal = ILibDuktape_EventEmitter_AddOnce(emitter, eventName, duk_get_heapptr(emitter->ctx, -1));
+	duk_put_prop_string(emitter->ctx, -2, Duktape_GetStashKey(duk_get_heapptr(emitter->ctx, -1)));	// [obj][stash]
+	duk_pop_2(emitter->ctx);																		// ...
+	return(retVal);
+}
 int ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr)
 {
 	int retVal = 1;

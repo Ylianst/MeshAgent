@@ -31,6 +31,7 @@
     <ClCompile Include="..\microscript\duktape.c" />
     <ClCompile Include="..\microscript\ILibAsyncSocket_Duktape.c" />
     <ClCompile Include="..\microscript\ILibDuktapeModSearch.c" />
+    <ClCompile Include="..\microscript\ILibDuktape_ChildProcess.c" />
     <ClCompile Include="..\microscript\ILibDuktape_Debugger.c" />
     <ClCompile Include="..\microscript\ILibDuktape_Dgram.c" />
     <ClCompile Include="..\microscript\ILibDuktape_DuplexStream.c" />
@@ -91,6 +92,7 @@
     <ClInclude Include="..\microscript\duk_config.h" />
     <ClInclude Include="..\microscript\ILibAsyncSocket_Duktape.h" />
     <ClInclude Include="..\microscript\ILibDuktapeModSearch.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Debugger.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Dgram.h" />
     <ClInclude Include="..\microscript\ILibDuktape_DuplexStream.h" />

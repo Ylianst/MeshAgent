@@ -133,6 +133,7 @@ typedef void(*ILibWebClient_OnResponse)(ILibWebClient_StateObject WebStateObject
 	\param user2 User2 object that was associated with this connection
 */
 typedef void(*ILibWebClient_OnSendOK)(ILibWebClient_StateObject sender, void *user1, void *user2);
+typedef void(*ILibWebClient_OnConnectHandler)(ILibWebClient_RequestToken sender);
 /*! \typedef ILibWebClient_OnDisconnect
 	\brief Handler for when the session has disconnected
 	\param sender The \a ILibWebClient_StateObject that has been disconnected
@@ -241,7 +242,8 @@ void ILibWebClient_ResetUserObjects(ILibWebClient_StateObject webstate, void *us
 ILibWebClient_RequestToken ILibWebClient_GetRequestToken_FromStateObject(ILibWebClient_StateObject WebStateObject);
 ILibWebClient_StateObject ILibWebClient_GetStateObjectFromRequestToken(ILibWebClient_RequestToken token);
 void **ILibWebClient_RequestToken_GetUserObjects(ILibWebClient_RequestToken tok);
-void **ILibWebClient_RequestToken_GetUserObjects_Tail(ILibWebClient_RequestToken tok);
+
+void ILibWebClient_RequestToken_ConnectionHandler_Set(ILibWebClient_RequestToken tok, ILibWebClient_OnConnectHandler OnConnect, ILibWebClient_OnConnectHandler OnDisconnect);
 
 void ILibWebClient_Parse_ContentRange(char *contentRange, int *Start, int *End, int *TotalLength);
 enum ILibWebClient_Range_Result ILibWebClient_Parse_Range(char *Range, long *Start, long *Length, long TotalLength);

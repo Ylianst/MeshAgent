@@ -83,4 +83,6 @@ void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName);
 void *ILibDuktape_Memory_Alloc(duk_context *ctx, duk_size_t size);
 void ILibDuktape_Helper_AddHeapFinalizer(duk_context *ctx, ILibDuktape_HelperEvent handler, void *user);
 
+void ILibDuktape_Push_ObjectStash(duk_context *ctx);
+
 #endif

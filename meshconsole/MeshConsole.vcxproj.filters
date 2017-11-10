@@ -187,6 +187,9 @@
     <ClInclude Include="..\microscript\ILibDuktape_NetworkMonitor.h">
       <Filter>Microscript</Filter>
     </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\microscript\duktape.c">
@@ -335,6 +338,9 @@
       <Filter>Microstack</Filter>
     </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_NetworkMonitor.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_ChildProcess.c">
       <Filter>Microscript</Filter>
     </ClCompile>
   </ItemGroup>

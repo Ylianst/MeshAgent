@@ -962,7 +962,7 @@ void ILibAsyncSocket_ConnectToProxy(void* socketModule, struct sockaddr *localIn
 	ILibAsyncSocket_ConnectTo(socketModule, localInterface, remoteAddress, InterruptPtr, user);
 }
 #endif
-
+#ifndef MICROSTACK_NOTLS
 ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocketModule *Reader)
 {
 	int j;
@@ -1019,7 +1019,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 	sem_post(&(Reader->SendLock));
 	return retVal;
 }
-
+#endif
 //
 // Internal method called when data is ready to be processed on an ILibAsyncSocket
 //
@@ -1342,10 +1342,10 @@ void ILibAsyncSocket_SetUser3(ILibAsyncSocket_SocketModule socketModule, int use
 	((struct ILibAsyncSocketModule*)socketModule)->user3 = user3;
 }
 
-void ILibAsyncSocket_SetTimeout(ILibAsyncSocket_SocketModule socketModule, int timeoutSeconds, ILibAsyncSocket_TimeoutHandler timeoutHandler)
+void ILibAsyncSocket_SetTimeoutEx(ILibAsyncSocket_SocketModule socketModule, int timeoutMilliseconds, ILibAsyncSocket_TimeoutHandler timeoutHandler)
 {
 	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
-	module->timeout_milliSeconds = timeoutSeconds * 1000;
+	module->timeout_milliSeconds = timeoutMilliseconds;
 	module->timeout_handler = timeoutHandler;
 }
 
@@ -1848,7 +1848,11 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 		if (module->PendingSend_Head == NULL && bytesSent != -1) { TriggerSendOK = 1; }
 		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 2, module);)
 		sem_post(&(module->SendLock));
+#ifndef MICROSTACK_NOTLS
 		if (TriggerSendOK != 0 && (module->ssl == NULL || module->SSLConnect != 0))
+#else
+		if (TriggerSendOK != 0)
+#endif
 		{
 			module->OnSendOK(module, module->user);
 			if (module->Transport.SendOkPtr != NULL) { module->Transport.SendOkPtr(module); }

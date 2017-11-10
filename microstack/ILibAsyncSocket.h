@@ -234,7 +234,8 @@ int ILibAsyncSocket_IsIPv6LinkLocal(struct sockaddr *LocalAddress);
 int ILibAsyncSocket_IsModuleIPv6LinkLocal(ILibAsyncSocket_SocketModule module);
 
 typedef void(*ILibAsyncSocket_TimeoutHandler)(ILibAsyncSocket_SocketModule module, void *user);
-void ILibAsyncSocket_SetTimeout(ILibAsyncSocket_SocketModule module, int timeoutSeconds, ILibAsyncSocket_TimeoutHandler timeoutHandler);
+void ILibAsyncSocket_SetTimeoutEx(ILibAsyncSocket_SocketModule module, int timeoutMilliseconds, ILibAsyncSocket_TimeoutHandler timeoutHandler);
+#define ILibAsyncSocket_SetTimeout(module, timeoutSeconds, timeoutHandler) ILibAsyncSocket_SetTimeoutEx(module, timeoutSeconds*1000, timeoutHandler)
 
 #ifndef MICROSTACK_NOTLS
 X509 *ILibAsyncSocket_SslGetCert(ILibAsyncSocket_SocketModule socketModule);

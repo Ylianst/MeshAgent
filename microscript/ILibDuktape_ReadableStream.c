@@ -386,10 +386,13 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 		else
 		{
 			// Need to PAUSE, and context switch to Chain Thread, so we can dispatch into JavaScript
-			if (stream->paused == 0 && stream->PauseHandler != NULL) { stream->paused = 1; stream->PauseHandler(stream, stream->user); }
+			sem_wait(&(stream->pipeLock));
 			stream->extBuffer_Reserved = streamReserved;
 			stream->extBuffer_buffer = buffer;
 			stream->extBuffer_bufferLen = bufferLen;
+			sem_post(&(stream->pipeLock));
+
+			if (stream->paused == 0 && stream->PauseHandler != NULL) { stream->paused = 1; stream->PauseHandler(stream, stream->user); }
 			ILibChain_RunOnMicrostackThread(stream->chain, ILibDuktape_readableStream_WriteData_OnData_ChainThread, stream);
 		}
 	}

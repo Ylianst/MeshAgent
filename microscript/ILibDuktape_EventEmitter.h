@@ -30,7 +30,10 @@ void ILibDuktape_EventEmitter_RemoveEventHeapptr(ILibDuktape_EventEmitter *emitt
 int ILibDuktape_EventEmitter_AddEventHeapptr(ILibDuktape_EventEmitter *emitter, char *eventName, void **heapptr);					// Add Callback after the fact
 int ILibDuktape_EventEmitter_AddSink(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_Handler handler);	// Add Native Event Handler
 int ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);							// Add native event handler 'once'
+int ILibDuktape_EventEmitter_AddOnceEx(ILibDuktape_EventEmitter *emitter, char *eventName, duk_c_function func, duk_idx_t funcArgs);
+int ILibDuktape_EventEmitter_AddOnceEx2(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func, duk_idx_t funcArgs);
 int ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);								// Add native event handler
+
 
 void ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_HookHandler handler);
 

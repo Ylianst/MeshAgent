@@ -111,6 +111,11 @@ typedef struct ScriptContainerSettings
 }ScriptContainerSettings;
 
 #pragma pack(push, 1)
+typedef struct MeshCommand_BinaryPacket_ServerId
+{
+	unsigned short command;
+	char serverId[UTIL_HASHSIZE];
+}MeshCommand_BinaryPacket_ServerId;
 typedef struct MeshCommand_BinaryPacket_AuthRequest
 {
 	unsigned short command;
@@ -1087,12 +1092,10 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 	{
 		// Generate a new random node certificate
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating new Node Certificate");
-
 		do
 		{
 			if (util_mkCert(NULL, &(agent->selfcert), 3072, 10000, "MeshNodeCertificate", CERTIFICATE_ROOT, NULL) == 0) return -1;
 			util_keyhash(agent->selfcert, agent->g_selfid);
-
 		} while (((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...g_selfid = %s", ILibRemoteLogging_ConvertToHex(agent->g_selfid, (int)sizeof(agent->g_selfid)));
 	}
@@ -1361,7 +1364,6 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 				// Hash the server's web certificate and check if it matches the one in the auth request
 				util_keyhash2(peer, ILibScratchPad2); // Hash the server certificate public key and place it
-
 				if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) { printf("Bad server certificate hash\r\n"); break; } // TODO: Disconnect
 				memcpy_s(agent->serverNonce, sizeof(agent->serverNonce), AuthRequest->serverNonce, sizeof(AuthRequest->serverNonce));
 
@@ -1418,8 +1420,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					if (!d2i_X509(&serverCert, (const unsigned char**)&AuthVerify->cert, AuthVerify->certLen)) { printf("Invalid server certificate\r\n"); break; } // TODO: Disconnect
 
 					// Check if this certificate public key hash matches what we want
-					X509_pubkey_digest(serverCert, EVP_sha384(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1
-					if (memcmp(ILibScratchPad, agent->serverHash, UTIL_HASHSIZE) != 0) { printf("Server certificate mismatch\r\n"); break; } // TODO: Disconnect
+					X509_pubkey_digest(serverCert, EVP_sha384(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA384
+					if (memcmp(ILibScratchPad, agent->serverHash, UTIL_HASHSIZE) != 0) {
+						X509_pubkey_digest(serverCert, EVP_sha256(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA256 (For older .mshx policy file)
+						if (memcmp(ILibScratchPad, agent->serverHash, 32) != 0) {
+							printf("Server certificate mismatch\r\n"); break; // TODO: Disconnect
+						}
+					}
 
 					// Compute the authentication hash
 					SHA384_Init(&c);
@@ -1440,6 +1447,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 						// Send to the server information about this agent (TODO: Replace this with a struct)
 						MeshCommand_BinaryPacket_AuthInfo *info = (MeshCommand_BinaryPacket_AuthInfo*)ILibScratchPad2;
+						memset(info, 0, sizeof(MeshCommand_BinaryPacket_AuthInfo)); // Required because if hash are SHA256, they will not fully fill the struct.
 						info->command = htons(MeshCommand_AuthInfo);
 						info->infoVersion = htonl(1);
 						info->agentId = htonl(MESH_AGENTID);
@@ -1777,6 +1785,12 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			agent->serverAuthState = 0; // We are not authenticated. Bitmask: 1 = Server Auth, 2 = Agent Auth.
 			agent->serverConnectionState = 2;
 
+			// Send the ServerID to the server, this is useful for the server to use the correct certificate to authenticate.
+			MeshCommand_BinaryPacket_ServerId *serveridcmd = (MeshCommand_BinaryPacket_ServerId*)ILibScratchPad2;
+			serveridcmd->command = htons(MeshCommand_ServerId);
+			memcpy_s(serveridcmd->serverId, sizeof(serveridcmd->serverId), agent->serverHash, sizeof(agent->serverHash)); // Place our mesh agent nonce
+			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)serveridcmd, sizeof(MeshCommand_BinaryPacket_ServerId), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+
 			// Start authentication by sending a auth nonce & server TLS cert hash.
 			// Send 384 bits SHA384 hash of TLS cert public key + 384 bits nonce
 			util_random(sizeof(agent->agentNonce), agent->agentNonce);				// Generate a new mesh agent connection nonce
@@ -1977,11 +1991,14 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		return;
 	}
 
+	memset(agent->serverHash, 0, sizeof(agent->serverHash));
 	util_hexToBuf(f->data, f->datalength, agent->serverHash);
 	ILibDestructParserResults(rs);
-
-	if (ILibSimpleDataStore_Get(agent->masterDb, "MeshID", ILibScratchPad, sizeof(ILibScratchPad)) == 0) { printf("MeshID entry not found in Db!\n"); return; }
-	memcpy_s(agent->meshId, sizeof(agent->meshId), ILibScratchPad, UTIL_HASHSIZE);
+	
+	len = ILibSimpleDataStore_Get(agent->masterDb, "MeshID", ILibScratchPad, sizeof(ILibScratchPad));
+	if ((len != 32) && (len != 48)) { printf("MeshID entry not found in db or bad size.\n"); return; } // Make sure MeshID is both present and SHA256 or SHA384.
+	memset(agent->meshId, 0, sizeof(agent->meshId)); // Clear the meshid first in case we copy SHA256
+	memcpy_s(agent->meshId, sizeof(agent->meshId), ILibScratchPad, len); // Copy the correct length
 
 #ifndef MICROSTACK_NOTLS
 	util_keyhash(agent->selfcert, agent->g_selfid); // Compute our own identifier using our certificate
@@ -2393,6 +2410,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 
 	// Check to see if we need to import a settings file
+	importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx"));
 	importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
 
 #ifdef WIN32

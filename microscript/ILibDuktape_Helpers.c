@@ -37,7 +37,21 @@ struct sockaddr_in6 duktape_internalAddress;
 #define ILibDuktape_EventEmitter_Table						"\xFF_EventEmitterTable"
 #define ILibDuktape_Process_ExitCode						"\xFF_ExitCode"
 #define ILibDuktape_Memory_AllocTable						"\xFF_MemoryAllocTable"
+#define ILibDuktape_ObjectStashKey							"\xFF_ObjectStashKey"
 
+void ILibDuktape_Push_ObjectStash(duk_context *ctx)
+{
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_ObjectStashKey))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_ObjectStashKey);	// [obj][stash]
+	}
+	else
+	{
+		duk_push_object(ctx);										// [obj][stash]
+		duk_dup(ctx, -1);											// [obj][stash][stash]
+		duk_put_prop_string(ctx, -3, ILibDuktape_ObjectStashKey);	// [obj][stash]
+	}
+}
 duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...)
 {
 	char dest[4096];
@@ -444,27 +458,15 @@ void ILibDuktape_Process_UncaughtException(duk_context *ctx)
 char* Duktape_GetContextGuidHex(duk_context *ctx)
 {
 	char *retVal = NULL;
-	char *guid;
-	duk_size_t guidLength;
-	int i;
 
-	duk_push_heap_stash(ctx);									// [stash]
-	if (duk_has_prop_string(ctx, -1, CONTEXT_GUID_BUFFER))
+	duk_push_heap_stash(ctx);												// [stash]
+	if (duk_has_prop_string(ctx, -1, "\xFF_ScriptContainerSettings_DB"))
 	{
-		duk_get_prop_string(ctx, -1, CONTEXT_GUID_BUFFER);		// [stash][str]
-		guid = (char*)Duktape_GetBuffer(ctx, -1, &guidLength);
-		for (i = (int)guidLength-1; i > 1 && guid[i] == 0; --i)
-		{
-		}
-		util_tohex(guid, (int)guidLength, ILibScratchPad);
-		duk_pop(ctx);										// [stash]
-		for (i = ((int)guidLength * 2) - 1; i > 1 && ILibScratchPad[i] == 48; --i)
-		{
-		}
-		retVal = ILibScratchPad;
-		retVal[i] = 0;
+		duk_get_prop_string(ctx, -1, "\xFF_ScriptContainerSettings_DB");	// [stash][db]
+		if (duk_get_pointer(ctx, -1) != NULL) { retVal = "0"; }
+		duk_pop(ctx);														// [stash]
 	}
-	duk_pop(ctx);											// ...
+	duk_pop(ctx);															// ...
 	return retVal;
 }
 void *Duktape_GetChain(duk_context *ctx)

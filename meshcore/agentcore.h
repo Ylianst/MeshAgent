@@ -92,6 +92,7 @@ typedef enum MeshCommands_Binary
 	MeshCommand_AuthVerify				= 2,    // Agent or server signature
 	MeshCommand_AuthInfo				= 3,	// Agent information
 	MeshCommand_AuthConfirm             = 4,	// Server confirm to the agent that is it authenticated
+	MeshCommand_ServerId				= 5,	// Optional, agent sends the expected serverid to the server. Useful if the server has many server certificates.
 	MeshCommand_CoreModule				= 10,	// New core modules to be used instead of the old one, if empty, remove the core module
 	MeshCommand_CoreModuleHash			= 11,	// Request/return the SHA384 hash of the core module
 	MeshCommand_AgentHash				= 12,	// Request/return the SHA384 hash of the agent executable

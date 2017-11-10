@@ -197,6 +197,7 @@ ILibWebServer_ServerToken ILibWebServer_CreateEx(void *Chain, int MaxConnections
 ILibExportMethod ILibWebServer_ServerToken ILibWebServer_CreateEx2(void *Chain, int MaxConnections, unsigned short PortNumber, int loopbackFlag, ILibWebServer_Session_OnSession OnSession, int ExtraMemorySize, void *User);
 #define ILibWebServer_Create(Chain, MaxConnections, PortNumber, OnSession, User) ILibWebServer_CreateEx(Chain, MaxConnections, PortNumber, INADDR_ANY, OnSession, User)
 #define ILibWebServer_Create2(Chain, MaxConnections, PortNumber, OnSession, ExtraMemorySize, User) ILibWebServer_CreateEx2(Chain, MaxConnections, PortNumber, INADDR_ANY, OnSession, ExtraMemorySize, User)
+ILibAsyncServerSocket_ServerModule ILibWebServer_GetServerSocketModule(ILibWebServer_ServerToken server);
 
 void ILibWebServer_StopListener(ILibWebServer_ServerToken server);
 void ILibWebServer_RestartListener(ILibWebServer_ServerToken server);

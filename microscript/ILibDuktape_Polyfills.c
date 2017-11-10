@@ -81,7 +81,17 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	char *buffer;
 	int bufferLen;
 
-	if (!(nargs == 2 && duk_is_string(ctx, 0) && duk_is_string(ctx, 1)))
+	if (nargs == 1)
+	{
+		str = (char*)duk_get_lstring(ctx, 0, &strlength);
+		duk_push_fixed_buffer(ctx, strlength + 1);
+		buffer = Duktape_GetBuffer(ctx, -1, NULL);
+		memcpy_s(buffer, strlength + 1, str, strlength);
+		buffer[strlength] = 0;
+		duk_push_buffer_object(ctx, -1, 0, strlength+1, DUK_BUFOBJ_ARRAYBUFFER);
+		return(1);
+	}
+	else if(!(nargs == 2 && duk_is_string(ctx, 0) && duk_is_string(ctx, 1)))
 	{
 		duk_push_string(ctx, "Buffer.from(): Usage not supported yet.");
 		duk_throw(ctx);
@@ -97,14 +107,14 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 		duk_push_fixed_buffer(ctx, ILibBase64DecodeLength((int)strlength));
 		buffer = Duktape_GetBuffer(ctx, -1, NULL);
 		bufferLen = ILibBase64Decode((unsigned char*)str, (int)strlength, (unsigned char**)&buffer);
-		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_DUKTAPE_BUFFER);
+		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_ARRAYBUFFER);
 	}
 	else if (strcmp(encoding, "hex") == 0)
 	{
 		duk_push_fixed_buffer(ctx, strlength / 2);
 		buffer = Duktape_GetBuffer(ctx, -1, NULL);
 		bufferLen = util_hexToBuf(str, (int)strlength, buffer);
-		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_DUKTAPE_BUFFER);
+		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_ARRAYBUFFER);
 	}
 	else
 	{
@@ -219,7 +229,25 @@ duk_ret_t ILibDuktape_Polyfills_Console_log(duk_context *ctx)
 		else
 		{
 			duk_dup(ctx, i);
-			printf("%s%s", (i == 0 ? "" : ", "), duk_to_string(ctx, -1));
+			if (strcmp("[object Object]", duk_to_string(ctx, -1)) == 0)
+			{
+				duk_pop(ctx);
+				duk_dup(ctx, i);
+				printf("%s", (i == 0 ? "{" : ", {"));
+				duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);
+				int propNum = 0;
+				while (duk_next(ctx, -1, 1))
+				{
+					printf("%s%s: %s", ((propNum++ == 0) ? " " : ", "), (char*)duk_to_string(ctx, -2), (char*)duk_to_string(ctx, -1));
+					duk_pop_2(ctx);
+				}
+				duk_pop(ctx);
+				printf(" }");
+			}
+			else
+			{
+				printf("%s%s", (i == 0 ? "" : ", "), duk_to_string(ctx, -1));
+			}
 		}
 	}
 	printf("\n");

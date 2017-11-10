@@ -184,6 +184,9 @@
     <ClCompile Include="..\microstack\ILibIPAddressMonitor.c">
       <Filter>Microstack</Filter>
     </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_ChildProcess.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
@@ -357,6 +360,9 @@
     </ClInclude>
     <ClInclude Include="..\microstack\ILibIPAddressMonitor.h">
       <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h">
+      <Filter>Microscript</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

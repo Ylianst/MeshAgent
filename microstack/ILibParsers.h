@@ -224,17 +224,13 @@ long ILibGetTimeStamp();
 #endif
 
 #ifndef strnlen_s
-#define strnlen_s(source, maxCount) (strlen(source) < (maxCount) ? strlen(source) : (maxCount))
+#define strnlen_s(source, maxCount) (strlen(source) < (maxCount) ? strlen(source) : ((size_t)(maxCount)))
 #endif
 
 #ifndef sprintf_s
 #define ILib_need_sprintf_s
 #include <stdarg.h>
 	int sprintf_s(void *dest, size_t destSize, char *format, ...);
-#endif
-
-#ifndef strnlen_s
-#define strnlen_s(source, maxLen) strnlen(source, maxLen)
 #endif
 
 #endif
@@ -305,6 +301,18 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibChain_Link* ILibChain_Link_Allocate(int structSize, int extraMemorySize);
 	int ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link);
 
+#ifdef WIN32
+	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_InitMem(_alloca(8+bufferLen+sizeof(void*)), (size_t)(8+bufferLen+sizeof(void*)))
+#else
+	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_InitMem(alloca(8+bufferLen+sizeof(void*)), (size_t)(8+bufferLen+sizeof(void*)))
+#endif
+	#define ILibMemory_AllocateA_Size(buffer)		(((int*)((char*)(buffer)-4))[0])
+	#define ILibMemory_AllocateA_Next(buffer)		(((void**)((char*)(buffer)-4-sizeof(void*)))[0])
+	#define ILibMemory_AllocateA_Raw(buffer)		((void*)((char*)(buffer)-4-sizeof(void*)-4))
+	#define ILibMemory_AllocateA_RawSize(buffer)	(((int*)((char*)(buffer)-4-sizeof(void*)-4))[0])
+
+	void* ILibMemory_AllocateA_Get(void *buffer, size_t sz);
+	void* ILibMemory_AllocateA_InitMem(void *buffer, size_t bufferLen);
 	void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory);
 	int ILibMemory_GetExtraMemorySize(void* extraMemory);
 	ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, int containerSize);
@@ -534,6 +542,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		*/
 
 		void *Reserved;
+		char *ReservedMemory;
 
 		int DirectiveObjLength;
 		/*! \var StatusCode
@@ -1049,9 +1058,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	\b Note: Duplicate key entries will be overwritten.
 	*@{
 	*/
-
-	void* ILibInitHashTree();
-	void* ILibInitHashTree_CaseInSensitive();
+	#define ILibInitHashTree() ILibInitHashTreeEx(NULL)
+	void* ILibInitHashTreeEx(void *ReservedMemory);
+	void* ILibInitHashTree_CaseInSensitiveEx(void *ReservedMemory);
+	#define ILibInitHashTree_CaseInSensitive() ILibInitHashTree_CaseInSensitiveEx(NULL)
 	void ILibDestroyHashTree(void *tree);
 	int ILibHasEntry(void *hashtree, char* key, int keylength);
 	void ILibAddEntry(void* hashtree, char* key, int keylength, void *value);
@@ -1187,7 +1197,8 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	/* Packet Methods */
 
-	struct packetheader *ILibCreateEmptyPacket();
+	struct packetheader *ILibCreateEmptyPacketEx(void *ReservedMemory);
+	#define ILibCreateEmptyPacket() ILibCreateEmptyPacketEx(NULL)
 	void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, int FieldNameLength, const char* FieldData, int FieldDataLength);
 	void ILibDeleteHeaderLine(struct packetheader *packet, char* FieldName, int FieldNameLength);
 	void ILibHTTPPacket_Stash_Put(ILibHTTPPacket *packet, char* key, int keyLen, void *data);

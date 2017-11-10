@@ -39,6 +39,7 @@ SOURCES += microscript/ILibWebServer_Duktape.c microscript/ILibDuktape_SimpleDat
 SOURCES += microscript/ILibDuktape_ProcessPipe.c microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c
 SOURCES += microscript/ILibDuktape_ScriptContainer.c microscript/ILibDuktape_MemoryStream.c microscript/ILibDuktape_NetworkMonitor.c
+SOURCES += microscript/ILibDuktape_ChildProcess.c
 
 # Mesh Agent core
 SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c

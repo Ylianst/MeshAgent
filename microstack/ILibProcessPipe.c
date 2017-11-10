@@ -109,6 +109,7 @@ typedef struct ILibProcessPipe_Process_Object
 	ILibProcessPipe_Process_ExitHandler exitHandler;
 #ifdef WIN32
 	HANDLE hProcess;
+	int hProcess_needAdd;
 #endif
 	void *chain;
 }ILibProcessPipe_Process_Object;
@@ -153,6 +154,7 @@ ILibProcessPipe_Pipe ILibProcessPipe_Process_GetStdOut(ILibProcessPipe_Process p
 }
 
 #ifdef WIN32
+BOOL ILibProcessPipe_Process_OnExit(HANDLE event, void* user);
 typedef struct ILibProcessPipe_WaitHandle
 {
 	ILibProcessPipe_Manager_Object *parent;
@@ -203,6 +205,7 @@ void ILibProcessPipe_WaitHandle_AddEx(ILibProcessPipe_Manager mgr, ILibProcessPi
 	{
 		// We're on the same thread, so we can just add it in
 		ILibLinkedList_AddTail(manager->ActivePipes, waitHandle);
+
 		SetEvent(manager->updateEvent);
 	}
 	else
@@ -221,7 +224,6 @@ void ILibProcessPipe_WaitHandle_Add(ILibProcessPipe_Manager mgr, HANDLE event, v
 	waitHandle->event = event;
 	waitHandle->user = user;
 	waitHandle->callback = callback;
-
 
 	ILibProcessPipe_WaitHandle_AddEx(mgr, waitHandle);
 }
@@ -740,9 +742,9 @@ void ILibProcessPipe_Pipe_SwapBuffers(ILibProcessPipe_Pipe obj, char* newBuffer,
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)obj;
 
 	*oldBuffer = pipeObject->buffer;
-	*oldBufferLen = pipeObject->bufferSize;
-	*oldBufferReadOffset = pipeObject->readOffset;
-	*oldBufferTotalBytesRead = pipeObject->totalRead;
+	if (oldBufferLen != NULL) { *oldBufferLen = pipeObject->bufferSize; }
+	if (oldBufferReadOffset != NULL) { *oldBufferReadOffset = pipeObject->readOffset; }
+	if (oldBufferTotalBytesRead != NULL) { *oldBufferTotalBytesRead = pipeObject->totalRead; }
 
 	pipeObject->buffer = newBuffer;
 	pipeObject->bufferSize = newBufferLen;
@@ -1129,6 +1131,11 @@ void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject)
 	else
 	{
 		ILibProcessPipe_Pipe_ResumeEx(p);
+		if (p->mProcess != NULL && p->mProcess->hProcess_needAdd != 0)
+		{
+			p->mProcess->hProcess_needAdd = 0;
+			ILibProcessPipe_WaitHandle_Add(p->manager, p->mProcess->hProcess, p->mProcess, ILibProcessPipe_Process_OnExit);
+		}
 	}
 #else
 	ILibProcessPipe_Pipe_ResumeEx(p);
@@ -1231,6 +1238,7 @@ void ILibProcessPipe_Process_PipeHandler_StdIn(void *user1, void *user2)
 
 	if (sendOk != NULL) sendOk(j, j->userObject);
 }
+
 #ifdef WIN32
 void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 {
@@ -1241,9 +1249,9 @@ void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 	result = GetExitCodeProcess(j->hProcess, &exitCode);
 	j->exiting = 1;
 	j->exitHandler(j, exitCode, j->userObject);
-	j->exiting = 0;
+	j->exiting ^= 1;
 
-	ILibProcessPipe_Process_Destroy(j);
+	if (j->exiting == 0) { ILibProcessPipe_Process_Destroy(j); }
 }
 BOOL ILibProcessPipe_Process_OnExit(HANDLE event, void* user)
 {
@@ -1251,15 +1259,21 @@ BOOL ILibProcessPipe_Process_OnExit(HANDLE event, void* user)
 
 	UNREFERENCED_PARAMETER(event);
 	ILibProcessPipe_WaitHandle_Remove(j->parent, j->hProcess);
-
-	if (j->exitHandler != NULL)
+	if (j->stdOut->PAUSED != 0 || j->stdErr->PAUSED != 0)
 	{
-		// Everyone's lifes is made easier, by context switching to chain thread before making this call
-		ILibChain_RunOnMicrostackThread(j->parent->ChainLink.ParentChain, ILibProcessPipe_Process_OnExit_ChainSink, user);
+		j->hProcess_needAdd = 1;
 	}
 	else
 	{
-		ILibProcessPipe_Process_Destroy(j);
+		if (j->exitHandler != NULL)
+		{
+			// Everyone's lifes is made easier, by context switching to chain thread before making this call
+			ILibChain_RunOnMicrostackThread(j->parent->ChainLink.ParentChain, ILibProcessPipe_Process_OnExit_ChainSink, user);
+		}
+		else
+		{
+			ILibProcessPipe_Process_Destroy(j);
+		}
 	}
 	return(FALSE);
 }

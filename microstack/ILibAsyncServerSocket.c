@@ -715,6 +715,14 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemory(v
 	return RetVal;
 }
 
+void ILibAsyncServerSocket_GetLocal(ILibAsyncServerSocket_ServerModule ServerSocketModule, struct sockaddr* addr, size_t addrLen)
+{
+	socklen_t ssize = (socklen_t)addrLen;
+	if (getsockname(((struct ILibAsyncServerSocketModule*)ServerSocketModule)->ListenSocket, addr, &ssize) != 0)
+	{
+		((struct sockaddr_in6*)addr)->sin6_family = AF_UNSPEC;
+	}
+}
 /*! \fn ILibAsyncServerSocket_GetPortNumber(ILibAsyncServerSocket_ServerModule ServerSocketModule)
 \brief Returns the port number the server is bound to
 \param ServerSocketModule The ILibAsyncServer to query
