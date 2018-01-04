@@ -31,6 +31,59 @@ limitations under the License.
 
 MeshAgentHostContainer *agentHost = NULL;
 
+#include <stdio.h>
+#include <string.h>
+
+#ifdef _WIN32
+#include <conio.h>
+#include <ctype.h>
+#include <tchar.h>
+#endif
+
+#ifdef _POSIX
+#include <ctype.h>
+#include <string.h>
+#include <termios.h>
+char _getch() {
+               char cbuf = 0;
+               struct termios old = { 0 };
+               fflush(stdout);
+               if (tcgetattr(0, &old) < 0) perror("Failed to get termios setting");
+               old.c_lflag &= ~ICANON;   
+               old.c_lflag &= ~ECHO;     
+               old.c_cc[VMIN] = 1;         
+               old.c_cc[VTIME] = 0;         
+               if (tcsetattr(0, TCSANOW, &old) < 0) perror("Setting ICANON failed");
+               if (read(0, &cbuf, 1) < 0) perror("read()");
+               old.c_lflag |= ICANON;    
+               old.c_lflag |= ECHO;      
+               if (tcsetattr(0, TCSADRAIN, &old) < 0) perror("Faield to revert termios setting");
+               return cbuf;
+}
+#endif
+#define USERNAME_MAXLEN 32
+#define PASSWORD_MAXLEN 32
+#define DEFSETTINGS_MAXLEN 96
+
+
+
+/*
+G* Get password from console
+*/
+char * getpass_noecho(char* buffer, char *prompt) {
+               char ch;
+               int len = 0;
+
+               printf("%s", prompt);
+               while (len<PASSWORD_MAXLEN - 1) {
+                              ch = _getch();
+                              if (ch == '\r' || ch == '\n') break;
+                              buffer[len++] = ch;
+               }
+               return buffer;
+}
+
+
 #ifdef WIN32
 BOOL CtrlHandler(DWORD fdwCtrlType)
 {
@@ -67,6 +120,12 @@ int main(int argc, char **argv)
 	FILE *tmpFile;
 	char *integratedJavaScript = NULL;
 	int integratedJavaScriptLen = 0;
+
+	char *username = NULL;
+	char *password = NULL;
+	char *defsettings_str = NULL;
+	int defsettings_strlen = 0;
+
 #ifdef WIN32
 	if (ILibString_EndsWith(argv[0], -1, ".exe", 4) == 0)
 	{
@@ -102,7 +161,6 @@ int main(int argc, char **argv)
 	}
 
 	int retCode = 0;
-
 	if (argc > 2 && memcmp(argv[1], "-faddr", 6) == 0)
 	{
 		uint64_t addrOffset;
@@ -110,6 +168,45 @@ int main(int argc, char **argv)
 		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), addrOffset);
 		printf("%s", ILibScratchPad);
 		return(0);
+	}
+	// get user and password
+	if (argc > 2 && memcmp(argv[1], "-username",9) == 0)
+	{
+		// it must be followed with username, -password and optionally password
+		if (argc >=4 && memcmp(argv[3], "-password",9) == 0) 
+		{
+			username = ILibMemory_Allocate(1+USERNAME_MAXLEN, 0, NULL, NULL);
+			memcpy_s((void *)username, USERNAME_MAXLEN, argv[2], USERNAME_MAXLEN);
+			if (argc > 4)
+			{
+				// after password is assumed to be the password string
+				password = ILibMemory_Allocate(1+PASSWORD_MAXLEN, 0, NULL, NULL);
+				memcpy_s((void *)password, PASSWORD_MAXLEN, argv[4], PASSWORD_MAXLEN);
+
+			} else {
+				password = ILibMemory_Allocate(1+PASSWORD_MAXLEN, 0, NULL, NULL);
+				password = getpass_noecho(password, "Password: ");
+			}
+		} else {
+			fprintf(stderr, "Options -username must be followed by username, option -password and optionally the password.\n");
+		}
+		defsettings_str = ILibMemory_Allocate(DEFSETTINGS_MAXLEN, 0, NULL, NULL);
+		snprintf(defsettings_str, DEFSETTINGS_MAXLEN,"var defsettings = {\n\tusername: '%s',\n\tpassword: '%s'\n};\n", username, password);
+		defsettings_strlen = strlen(defsettings_str);
+		// prepend the defsettings_str to integratedJavaScript
+		if (integratedJavaScriptLen >0) 
+		{	
+			int tmplen = defsettings_strlen + integratedJavaScriptLen + 1;
+			char * tmpbuf = ILibMemory_Allocate(tmplen, 0, NULL, NULL);
+			snprintf(tmpbuf, tmplen, "%s%s", defsettings_str, integratedJavaScript);
+			tmpbuf[tmplen - 1] = 0;
+			free(defsettings_str);	
+			free(integratedJavaScript);
+			integratedJavaScript = tmpbuf;
+			integratedJavaScriptLen = strlen(tmpbuf);
+		} else {
+			free(defsettings_str);	
+		}
 	}
 
 	if (integratedJavaScriptLen == 0)
