@@ -29,7 +29,7 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
-#define ILibDuktape_ModSearch_ModuleFile	"0xFF"
+#define ILibDuktape_ModSearch_ModuleFile	(void*)0xFF
 
 int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, int moduleLen)
 {

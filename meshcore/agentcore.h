@@ -17,9 +17,6 @@ limitations under the License.
 #ifndef __AGENTCORE__
 #define __AGENTCORE__
 
-#ifdef MICROSTACK_NOTLS
-#define UTIL_HASHSIZE 32
-#endif
 
 typedef char JS_ENGINE_CONTEXT[16];
 
@@ -49,7 +46,6 @@ typedef char JS_ENGINE_CONTEXT[16];
 #include "microscript/ILibDuktapeModSearch.h"
 #include "microscript/ILibDuktape_GenericMarshal.h"
 #include "microscript/ILibDuktape_SimpleDataStore.h"
-#include "microscript/ILibDuktape_ProcessPipe.h"
 #include "microscript/ILibDuktape_fs.h"
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibCrypto.h"
@@ -169,23 +165,25 @@ typedef struct MeshAgentHostContainer
 	int serverIndex;
 	int retryTime;
 	MeshAgentHost_BatteryInfo batteryState;
-	char meshId[UTIL_HASHSIZE];
+	char meshId[UTIL_SHA384_HASHSIZE];
 	int performSelfUpdate;
 	int disableUpdate;
 
-	char agentHash[UTIL_HASHSIZE];
-	char serverHash[UTIL_HASHSIZE];
+	char agentHash[UTIL_SHA384_HASHSIZE];
+	char serverHash[UTIL_SHA384_HASHSIZE];
 #ifndef MICROSTACK_NOTLS
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
 	struct util_cert selftlsclientcert;
-	char serverWebHash[UTIL_HASHSIZE];
-	char serverNonce[UTIL_HASHSIZE];
-	char agentNonce[UTIL_HASHSIZE];
-	int serverAuthState;
+	char serverWebHash[UTIL_SHA384_HASHSIZE];
 #endif
+
+	char serverNonce[UTIL_SHA384_HASHSIZE];
+	char agentNonce[UTIL_SHA384_HASHSIZE];
+	int serverAuthState;
+
 	int controlChannel_idleTimeout_seconds;
-	char g_selfid[UTIL_HASHSIZE];
+	char g_selfid[UTIL_SHA384_HASHSIZE];
 	void* microLMS;
 	void* multicastDiscovery;
 	char* multicastServerUrl;

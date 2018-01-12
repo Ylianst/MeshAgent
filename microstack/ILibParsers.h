@@ -306,10 +306,10 @@ int ILibIsRunningOnChainThread(void* chain);
 #else
 	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_InitMem(alloca(8+bufferLen+sizeof(void*)), (size_t)(8+bufferLen+sizeof(void*)))
 #endif
-	#define ILibMemory_AllocateA_Size(buffer)		(((int*)((char*)(buffer)-4))[0])
+	#define ILibMemory_AllocateA_Size(buffer)		(((unsigned int*)((char*)(buffer)-4))[0])
 	#define ILibMemory_AllocateA_Next(buffer)		(((void**)((char*)(buffer)-4-sizeof(void*)))[0])
 	#define ILibMemory_AllocateA_Raw(buffer)		((void*)((char*)(buffer)-4-sizeof(void*)-4))
-	#define ILibMemory_AllocateA_RawSize(buffer)	(((int*)((char*)(buffer)-4-sizeof(void*)-4))[0])
+	#define ILibMemory_AllocateA_RawSize(buffer)	(((unsigned int*)((char*)(buffer)-4-sizeof(void*)-4))[0])
 
 	void* ILibMemory_AllocateA_Get(void *buffer, size_t sz);
 	void* ILibMemory_AllocateA_InitMem(void *buffer, size_t bufferLen);

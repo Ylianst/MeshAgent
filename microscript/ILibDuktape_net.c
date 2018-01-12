@@ -39,7 +39,12 @@ typedef struct ILibDuktape_net_socket
 	void *OnError;
 	void *OnTimeout;
 	void *OnSetTimeout;
+	int unshiftBytes;
 	ILibDuktape_EventEmitter *emitter;
+#ifndef MICROSTACK_NOTLS
+	SSL_CTX *ssl_ctx;
+	SSL *ssl;
+#endif
 }ILibDuktape_net_socket;
 
 typedef struct ILibDuktape_net_server
@@ -49,7 +54,6 @@ typedef struct ILibDuktape_net_server
 	ILibAsyncServerSocket_ServerModule server;
 	ILibDuktape_EventEmitter *emitter;
 	void *OnClose;
-	void *OnConnection;
 	void *OnListening;
 	void *OnError;
 }ILibDuktape_net_server;
@@ -61,27 +65,43 @@ typedef struct ILibDuktape_net_server_session
 	ILibDuktape_EventEmitter *emitter;
 	ILibDuktape_DuplexStream *stream;
 
+	int unshiftBytes;
+
 	void *OnTimeout;
 }ILibDuktape_net_server_session;
 
+int ILibDuktape_TLS_ctx2socket = -1;
+int ILibDuktape_TLS_ctx2server = -1;
+
+#define ILibDuktape_SecureContext2CertBuffer	"\xFF_SecureContext2CertBuffer"
+#define ILibDuktape_SecureContext2SSLCTXPTR		"\xFF_SecureContext2SSLCTXPTR"
 #define ILibDuktape_GlobalTunnel_DataPtr		"\xFF_GlobalTunnel_DataPtr"
 #define ILibDuktape_GlobalTunnel_Stash			"global-tunnel"
 #define ILibDuktape_net_Server_buffer			"\xFF_FixedBuffer"
 #define ILibDuktape_net_Server_Session_buffer	"\xFF_SessionFixedBuffer"
 #define ILibDuktape_net_socket_ptr				"\xFF_SocketPtr"
+#define ILibDuktape_SERVER2ContextTable			"\xFF_Server2ContextTable"
+#define ILibDuktape_SERVER2OPTIONS				"\xFF_ServerToOptions"
+#define ILibDuktape_SERVER2LISTENOPTIONS		"\xFF_ServerToListenOptions"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
 // Prototypes
 void ILibDuktape_net_socket_PUSH(duk_context *ctx, ILibAsyncSocket_SocketModule module);
 #ifndef MICROSTACK_NOTLS
-extern void ILibDuktape_X509_PUSH(duk_context *ctx, X509* cert);
+duk_ret_t ILibDuktape_tls_server_addContext(duk_context *ctx);
 #endif
+
 void ILibDuktape_net_socket_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncSocket_OnInterrupt* OnInterrupt, void **user, int *PAUSE)
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
-	if (ILibDuktape_DuplexStream_WriteData((ILibDuktape_DuplexStream*)ptrs->duplexStream, buffer + *p_beginPointer, endPointer - *p_beginPointer) != 0) { *PAUSE = 1; }
-	else { *p_beginPointer = endPointer; }
+	if (ILibDuktape_DuplexStream_WriteData((ILibDuktape_DuplexStream*)ptrs->duplexStream, buffer + *p_beginPointer, endPointer - *p_beginPointer) != 0) 
+	{ 
+		*PAUSE = 1; 
+	}
+
+	*p_beginPointer = endPointer - ptrs->unshiftBytes;
+	ptrs->unshiftBytes = 0;
 }
 void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Connected, void *user)
 {
@@ -109,13 +129,24 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 		duk_put_prop_string(ptrs->ctx, -2, "remoteFamily");																// [sock]
 		duk_push_int(ptrs->ctx, (int)ntohs(local.sin6_port));															// [sock][remotePort]
 		duk_put_prop_string(ptrs->ctx, -2, "remotePort");																// [sock]
-
 		duk_pop(ptrs->ctx);																								// ...
 
+#ifndef MICROSTACK_NOTLS
+		if (ptrs->ssl != NULL)
+		{
+			duk_push_heapptr(ptrs->ctx, ptrs->object);									// [socket]
+			duk_get_prop_string(ptrs->ctx, -1, "emit");									// [socket][emit]
+			duk_swap_top(ptrs->ctx, -2);												// [emit][this]
+			duk_push_string(ptrs->ctx, "secureConnect");								// [emit][this][secureConnect]
+			if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "tls.socket.OnSecureConnect(): "); }
+			duk_pop(ptrs->ctx);															// ...
+			return;
+		}
+#endif
 		if (ptrs->OnConnect != NULL)
 		{
 			duk_push_heapptr(ptrs->ctx, ptrs->OnConnect);			// [func]
-			ILibDuktape_net_socket_PUSH(ptrs->ctx, socketModule);	// [func][this]
+			duk_push_heapptr(ptrs->ctx, ptrs->object);				// [func][this]
 			if (duk_pcall_method(ptrs->ctx, 0) != 0)				// [retVal]
 			{
 				ILibDuktape_Process_UncaughtException(ptrs->ctx);
@@ -141,14 +172,17 @@ void ILibDuktape_net_socket_OnDisconnect(ILibAsyncSocket_SocketModule socketModu
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
 	
-	duk_push_heapptr(ptrs->ctx, ptrs->object);			// [sock]
-	duk_push_string(ptrs->ctx, "0.0.0.0");				// [sock][localAddr]
-	duk_put_prop_string(ptrs->ctx, -2, "localAddress");	// [sock]
-	duk_push_undefined(ptrs->ctx);						// [sock][remoteAddr]
-	duk_put_prop_string(ptrs->ctx, -2, "remoteAddress");// [sock]
-	duk_pop(ptrs->ctx);									// ...
+	if (ILibDuktape_IsPointerValid(ptrs->chain, ptrs->object))
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->object);			// [sock]
+		duk_push_string(ptrs->ctx, "0.0.0.0");				// [sock][localAddr]
+		duk_put_prop_string(ptrs->ctx, -2, "localAddress");	// [sock]
+		duk_push_undefined(ptrs->ctx);						// [sock][remoteAddr]
+		duk_put_prop_string(ptrs->ctx, -2, "remoteAddress");// [sock]
+		duk_pop(ptrs->ctx);									// ...
 
-	ILibDuktape_DuplexStream_Closed((ILibDuktape_DuplexStream*)ptrs->duplexStream);
+		ILibDuktape_DuplexStream_Closed((ILibDuktape_DuplexStream*)ptrs->duplexStream);
+	}
 }
 void ILibDuktape_net_socket_OnSendOK(ILibAsyncSocket_SocketModule socketModule, void *user)
 {
@@ -174,6 +208,17 @@ void ILibDuktape_net_socket_ResumeHandler(ILibDuktape_DuplexStream *sender, void
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)user;
 	ILibAsyncSocket_Resume(ptrs->socketModule);
+}
+duk_ret_t ILibDuktape_net_socket_connect_errorDispatch(duk_context *ctx)
+{
+	duk_dup(ctx, 0);																		// [socket]
+	duk_get_prop_string(ctx, -1, "emit");													// [socket][emit]
+	duk_swap_top(ctx, -2);																	// [emit][this]
+	duk_push_string(ctx, "error");															// [emit][this][error]
+	duk_dup(ctx, 1);																		// [emit][this][error][err]
+	duk_call_method(ctx, 2);
+	duk_pop(ctx);																			// ...
+	return(0);
 }
 duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 {
@@ -221,14 +266,35 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		}
 	}
 
+	duk_push_heapptr(ptrs->ctx, ptrs->object);				// [socket]
+	duk_push_string(ctx, host);								// [socket][host]
+	ILibDuktape_CreateReadonlyProperty(ctx, "remoteHost");	// [socket]
+	duk_pop(ctx);											// ...
+
 	ILibResolveEx(host, (unsigned short)port, &dest);
-	ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&dest, NULL, ptrs);
+	if (dest.sin6_family == AF_UNSPEC)
+	{
+		// Can't resolve... Delay event emit, until next event loop, because if app called net.createConnection(), they don't have the socket yet
+		duk_push_heapptr(ctx, ptrs->object);													// [socket]																
+		duk_push_global_object(ctx);															// [socket][g]
+		duk_get_prop_string(ctx, -1, "setImmediate");											// [socket][g][immediate]
+		duk_swap_top(ctx, -2);																	// [socket][immediate][this]
+		duk_push_c_function(ctx, ILibDuktape_net_socket_connect_errorDispatch, DUK_VARARGS);	// [socket][immediate][this][callback]
+		duk_dup(ctx, -4);																		// [socket][immediate][this][callback][socket]
+		duk_push_error_object(ptrs->ctx, DUK_ERR_ERROR, "Cannot Resolve Hostname: %s", host);	// [socket][immediate][this][callback][socket][err]
+		if (duk_pcall_method(ptrs->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "socket.connect(): "); }
+		duk_put_prop_string(ptrs->ctx, -2, "\xFF_Immediate");									// [socket]
+		duk_pop(ptrs->ctx);
+	}
+	else
+	{
+		ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&dest, NULL, ptrs);
 
-	duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
-	duk_push_true(ptrs->ctx);									// [socket][connecting]
-	duk_put_prop_string(ptrs->ctx, -2, "connecting");			// [socket]
-	duk_pop(ptrs->ctx);											// ...
-
+		duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
+		duk_push_true(ptrs->ctx);									// [socket][connecting]
+		duk_put_prop_string(ptrs->ctx, -2, "connecting");			// [socket]
+		duk_pop(ptrs->ctx);											// ...
+	}
 	return 0;
 }
 
@@ -290,13 +356,16 @@ duk_ret_t ILibDuktape_net_socket_setTimeout(duk_context *ctx)
 	ptrs = (ILibDuktape_net_socket*)duk_to_pointer(ctx, -1);
 	duk_pop(ctx);												// [socks]
 
-	if (timeout < 1000) { return(ILibDuktape_Error(ctx, "net.socket.setTimeout(): Error, timeout must be > 1000ms. Timeout was %d ms", timeout)); }
 	if (nargs > 1 && duk_is_function(ctx, 1))
 	{
 		ILibDuktape_EventEmitter_AddOnce(ptrs->emitter, "timeout", duk_require_heapptr(ctx, 1));
 	}
-
-	ILibAsyncSocket_SetTimeout(ptrs->socketModule, timeout / 1000, ILibDuktape_net_socket_timeoutSink);
+	if (timeout == 0)
+	{
+		// Disable
+		ILibDuktape_EventEmitter_RemoveAllListeners(ptrs->emitter, "timeout");
+	}
+	ILibAsyncSocket_SetTimeoutEx(ptrs->socketModule, timeout, timeout != 0 ? ILibDuktape_net_socket_timeoutSink : NULL);
 	return 0;
 }
 duk_ret_t ILibDuktape_net_socket_finalizer(duk_context *ctx)
@@ -309,21 +378,32 @@ duk_ret_t ILibDuktape_net_socket_finalizer(duk_context *ctx)
 	if (ptrs->socketModule != NULL)
 	{
 		if (ILibAsyncSocket_IsConnected(ptrs->socketModule) != 0) { ILibAsyncSocket_Disconnect(ptrs->socketModule); }
+#ifndef MICROSTACK_NOTLS
+		if (ptrs->ssl_ctx != NULL) { SSL_CTX_free(ptrs->ssl_ctx); ptrs->ssl_ctx = NULL; }
+#endif
 		ILibChain_SafeRemove(chain, ptrs->socketModule);
 	}
 
 	return 0;
 }
+int ILibDuktape_net_socket_unshift(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user)
+{
+	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)user;
+	ptrs->unshiftBytes = unshiftBytes;
+	return(unshiftBytes);
+}
 void ILibDuktape_net_socket_PUSH(duk_context *ctx, ILibAsyncSocket_SocketModule module)
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)module)->ExtraMemoryPtr;
-	if (ptrs->object != NULL)
+	if (ptrs != NULL && ptrs->object != NULL)
 	{
 		duk_push_heapptr(ctx, ptrs->object);
 		return;
 	}
 
 	duk_push_object(ctx);										// [obj]
+	ILibDuktape_WriteID(ctx, "net.socket");
+	ILibDuktape_PointerValidation_Init(ctx);
 	ptrs->ctx = ctx;
 	ptrs->chain = ((ILibChain_Link*)module)->ParentChain;
 	ptrs->object = duk_get_heapptr(ctx, -1);
@@ -341,7 +421,7 @@ void ILibDuktape_net_socket_PUSH(duk_context *ctx, ILibAsyncSocket_SocketModule 
 	duk_put_prop_string(ctx, -2, "remoteAddress");
 
 	ptrs->emitter = ILibDuktape_EventEmitter_Create(ctx);
-	ptrs->duplexStream = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_net_socket_WriteHandler, ILibDuktape_net_socket_EndHandler, ILibDuktape_net_socket_PauseHandler, ILibDuktape_net_socket_ResumeHandler, ptrs);
+	ptrs->duplexStream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_net_socket_WriteHandler, ILibDuktape_net_socket_EndHandler, ILibDuktape_net_socket_PauseHandler, ILibDuktape_net_socket_ResumeHandler, ILibDuktape_net_socket_unshift, ptrs);
 
 	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "close", &(ptrs->OnClose));
 	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "connect", &(ptrs->OnConnect));
@@ -406,344 +486,13 @@ duk_ret_t ILibDuktape_net_createConnection(duk_context *ctx)
 	duk_push_this(ctx);
 	duk_del_prop_string(ctx, -1, ILibDuktape_net_socket_ptr);
 	duk_push_heapptr(ctx, ptrs->object);
-	return 1;
-}
-
-#ifndef MICROSTACK_NOTLS
-typedef struct ILibDuktape_net_sslStream_ptr
-{
-	duk_context *ctx;
-	SSL_CTX *sslctx;
-	SSL* ssl;
-	void *sslStream_object;
-	void *sslStream_en_object;
-	void *OnVerify;
-	void *OnConnected;
-	int handshake;
-	int rejectUnauthorized;
-	ILibDuktape_DuplexStream *ds_clear;
-	ILibDuktape_DuplexStream *ds_encrypted;
-	int encrypted_processingLoop;
-	int decrypted_processingLoop;
-	char encryptedBuffer[4096];
-	char decryptedBuffer[4096];
-}ILibDuktape_net_sslStream_ptr;
-#define ILibDuktape_net_sslStream_key		"\xFF_sslStreamPtr"
-int ILibDuktape_net_sslStream_sslIndex = -1;
-
-void ILibDuktape_net_sslStream_encryptedReadLoop(ILibDuktape_net_sslStream_ptr *ptrs)
-{
-	int j;
-	if (ptrs->encrypted_processingLoop == 0)
+	if (duk_is_object(ctx, 0))
 	{
-		ptrs->encrypted_processingLoop = 1;
-		while (ptrs->ds_encrypted->readableStream->paused == 0 && BIO_ctrl_pending(SSL_get_wbio(ptrs->ssl)) > 0)
-		{
-			// Data is pending in the write buffer, send it out
-			j = BIO_read(SSL_get_wbio(ptrs->ssl), ptrs->encryptedBuffer, sizeof(ptrs->encryptedBuffer));
-			ILibDuktape_DuplexStream_WriteData(ptrs->ds_encrypted, ptrs->encryptedBuffer, j);
-		}
-		ptrs->encrypted_processingLoop = 0;
-	}
-}
-int ILibDuktape_net_sslStream_decryptedReadLoop(ILibDuktape_net_sslStream_ptr *ptrs)
-{
-	int retVal = 0;
-	int i = -1;
-	if (ptrs->decrypted_processingLoop == 0)
-	{
-		ptrs->decrypted_processingLoop = 1;
-		while (ptrs->ds_clear->readableStream->paused == 0 && (i = SSL_read(ptrs->ssl, ptrs->decryptedBuffer, sizeof(ptrs->decryptedBuffer)))>0)
-		{
-			// We got new TLS/DTLS data
-			ILibDuktape_DuplexStream_WriteData(ptrs->ds_clear, ptrs->decryptedBuffer, i);
-		}
-		if (i == 0)
-		{
-			// Session Closed
-			retVal = 1;
-		}
-		ptrs->decrypted_processingLoop = 0;	// Compiler Warning is wrong here... This is to prevent re-entrancy problems, because DuplexStream_WriteData() can end up calling back in
-	}
-	return retVal;
-}
-ILibTransport_DoneState ILibDuktape_net_sslStream_writeSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
-{
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)user;
-
-	SSL_write(ptrs->ssl, buffer, bufferLen);
-	ILibDuktape_net_sslStream_encryptedReadLoop(ptrs);
-	return(ptrs->ds_encrypted->readableStream->paused == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE);
-}
-ILibTransport_DoneState ILibDuktape_net_sslStream_en_writeSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
-{
-	int err;
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)user;
-	ILibTransport_DoneState retVal = ILibTransport_DoneState_ERROR;
-
-	BIO_write(SSL_get_rbio(ptrs->ssl), buffer, bufferLen);
-	if (ptrs->handshake == 0)
-	{
-		switch (SSL_do_handshake(ptrs->ssl))
-		{
-		case 0:
-			// Handshake Failed!
-			while ((err = ERR_get_error()) != 0)
-			{
-				ERR_error_string_n(err, ILibScratchPad, sizeof(ILibScratchPad));
-			}
-			// TODO: We should probably do something
-			break;
-		case 1:
-			ptrs->handshake = 1;
-			retVal = ILibTransport_DoneState_COMPLETE;
-			if (ptrs->OnConnected != NULL)
-			{
-				duk_push_heapptr(ptrs->ctx, ptrs->OnConnected);				// [func]
-				duk_push_heapptr(ptrs->ctx, ptrs->sslStream_object);		// [func][this]
-				if (duk_pcall_method(ptrs->ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
-				duk_pop(ptrs->ctx);											// ...
-			}
-			break;
-		default:
-			// SSL_WANT_READ most likely, so do nothing for now
-			retVal = ILibTransport_DoneState_COMPLETE;
-			break;
-		}
-	}
-	else
-	{
-		retVal = ILibDuktape_net_sslStream_decryptedReadLoop(ptrs) != 0 ? ILibTransport_DoneState_ERROR : (ptrs->ds_clear->readableStream->paused == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE);
-	}
-
-	ILibDuktape_net_sslStream_encryptedReadLoop(ptrs);
-	return retVal;
-}
-void ILibDuktape_net_sslStream_endSink(ILibDuktape_DuplexStream *stream, void *user)
-{
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)user;
-	ILibDuktape_DuplexStream_WriteEnd(ptrs->ds_encrypted);
-}
-void ILibDuktape_net_sslStream_en_endSink(ILibDuktape_DuplexStream *stream, void *user)
-{
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)user;
-	ILibDuktape_DuplexStream_WriteEnd(ptrs->ds_clear);
-}
-void ILibDutkape_net_sslStream_pauseSink(ILibDuktape_DuplexStream *sender, void *user)
-{
-
-}
-void ILibDuktape_net_sslStream_en_pauseSink(ILibDuktape_DuplexStream *sender, void *user)
-{
-
-}
-void ILibDuktape_net_sslStream_resumeSink(ILibDuktape_DuplexStream *sender, void *user)
-{
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)user;
-	if (ILibDuktape_net_sslStream_decryptedReadLoop(ptrs) == 0)
-	{
-		if (ptrs->ds_clear->readableStream->paused == 0) { ILibDuktape_DuplexStream_Ready(ptrs->ds_encrypted); }
-	}
-	else
-	{
-		// TLS Session was closed
-	}
-}
-void ILibDuktape_net_sslStream_en_resumeSink(ILibDuktape_DuplexStream *sender, void *user)
-{
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)user;
-
-	ILibDuktape_net_sslStream_encryptedReadLoop(ptrs);
-	if (ptrs->ds_encrypted->readableStream->paused == 0) { ILibDuktape_DuplexStream_Ready(ptrs->ds_clear); }
-}
-int ILibDuktape_net_sslStream_verifyServer(int preverify_ok, X509_STORE_CTX *ctx)
-{
-	STACK_OF(X509) *certChain = X509_STORE_CTX_get_chain(ctx);
-	SSL *ssl = (SSL*)X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
-	ILibDuktape_net_sslStream_ptr *ptrs = (ILibDuktape_net_sslStream_ptr*)SSL_get_ex_data(ssl, ILibDuktape_net_sslStream_sslIndex);
-	int i;
-	int retVal = 0;
-
-	if (ptrs->rejectUnauthorized != 0) { return(preverify_ok); }
-	else { retVal = 0; }
-
-	if (ptrs->OnVerify == NULL) { return 1; }
-
-	duk_push_heapptr(ptrs->ctx, ptrs->OnVerify);											// [func]
-	duk_push_heapptr(ptrs->ctx, ptrs->sslStream_object);									// [func][this]
-	duk_push_array(ptrs->ctx);																// [func][this][certs]
-	for (i = 0; i < sk_X509_num(certChain); ++i)
-	{
-		ILibDuktape_X509_PUSH(ptrs->ctx, sk_X509_value(certChain, i));						// [func][this][certs][cert]
-		duk_put_prop_index(ptrs->ctx, -2, i);												// [func][this][certs]
-	}
-	if (duk_pcall_method(ptrs->ctx, 1) != 0) { retVal = 0; } else { retVal = 1; }
-	return retVal;
-}
-duk_ret_t ILibDuktape_net_sslStream_Finalizer(duk_context *ctx)
-{
-	ILibDuktape_net_sslStream_ptr *ptrs;
-	duk_get_prop_string(ctx, 0, ILibDuktape_net_sslStream_key);
-	ptrs = (ILibDuktape_net_sslStream_ptr*)Duktape_GetBuffer(ctx, -1, NULL);
-
-	if (ptrs->ssl != NULL) { SSL_free(ptrs->ssl); }
-	if (ptrs->sslctx != NULL) { SSL_CTX_free(ptrs->sslctx); }
-
-	return 0;
-}
-duk_ret_t ILibDuktape_net_sslStream_create(duk_context *ctx)
-{
-	int nargs = duk_get_top(ctx);
-	ILibDuktape_DuplexStream *ds, *en;
-	ILibDuktape_net_sslStream_ptr *ptrs;
-	BIO *read, *write;
-	int status, i;
-	int isClient;
-	struct util_cert *leafCert = NULL;
-	struct util_cert *nonLeafCert = NULL;
-
-	duk_push_current_function(ctx);
-	duk_get_prop_string(ctx, -1, "clientMode");
-	isClient = duk_get_int(ctx, -1);
-
-	duk_push_object(ctx);																// [sslStream]
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_net_sslStream_ptr));					// [sslStream][buffer]
-	ptrs = (ILibDuktape_net_sslStream_ptr*)Duktape_GetBuffer(ctx, -1, NULL);
-	duk_put_prop_string(ctx, -2, ILibDuktape_net_sslStream_key);						// [sslStream]
-	memset(ptrs, 0, sizeof(ILibDuktape_net_sslStream_ptr));
-	ILibDuktape_CreateEventWithSetter(ctx, "connected", "\xFF_connected", &(ptrs->OnConnected));
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_net_sslStream_Finalizer);
-	ptrs->sslStream_object = duk_get_heapptr(ctx, -1);
-
-
-	if (nargs > 1)
-	{
-		ptrs->rejectUnauthorized = Duktape_GetIntPropertyValue(ctx, 1, "rejectUnauthorized", 0);
-		if (duk_has_prop_string(ctx, 1, "verify"))
-		{
-			duk_get_prop_string(ctx, 1, "verify");										// [sslStream][OnVerify]
-			ptrs->OnVerify = duk_get_heapptr(ctx, -1);
-			duk_put_prop_string(ctx, -2, "\xFF_OnVerify");								// [sslStream]
-		}
-		if (duk_has_prop_string(ctx, 1, "MeshAgent"))
-		{
-			duk_get_prop_string(ctx, 1, "MeshAgent");									// [sslStream][MeshAgent]
-			if (isClient == 0)
-			{
-				duk_get_prop_string(ctx, -1, ILibDuktape_MeshAgent_Cert_Server);		// [sslStream][MeshAgent][cert]
-				leafCert = (struct util_cert*)duk_get_pointer(ctx, -1);
-				duk_pop_2(ctx);															// [sslStream]
-			}
-			else
-			{
-				duk_get_prop_string(ctx, -1, ILibDuktape_MeshAgent_Cert_Client);		// [sslStream][MeshAgent][clientCert]
-				duk_get_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_NonLeaf);		// [sslStream][MeshAgent][clientCert][nonLeafCert]
-				leafCert = (struct util_cert*)duk_get_pointer(ctx, -2);
-				nonLeafCert = (struct util_cert*)duk_get_pointer(ctx, -1);
-				duk_pop_3(ctx);															// [sslStream]
-			}
-		}
-		if (duk_has_prop_string(ctx, 1, "pfx") && duk_has_prop_string(ctx, 1, "passphrase"))
-		{
-			char *pfx;
-			duk_size_t pfxLen;
-			char *pwd;
-
-			duk_get_prop_string(ctx, 1, "pfx");											// [sslStream][pfx]
-			pfx = Duktape_GetBuffer(ctx, -1, &pfxLen);
-			duk_get_prop_string(ctx, 1, "passphrase");									// [sslStream][pfx][pwd]
-			pwd = (char*)duk_get_string(ctx, -1);
-			util_from_p12(pfx, (int)pfxLen, pwd, leafCert);
-
-			duk_pop_2(ctx);																// [sslStream]
-		}
-	}
-
-	ds = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_net_sslStream_writeSink, ILibDuktape_net_sslStream_endSink, ILibDutkape_net_sslStream_pauseSink, ILibDuktape_net_sslStream_resumeSink, ptrs);
-	duk_push_object(ctx);																// [sslStream][encryptedStream]
-	ptrs->sslStream_en_object = duk_get_heapptr(ctx, -1);
-	en = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_net_sslStream_en_writeSink, ILibDuktape_net_sslStream_en_endSink, ILibDuktape_net_sslStream_en_pauseSink, ILibDuktape_net_sslStream_en_resumeSink, ptrs);
-	duk_put_prop_string(ctx, -2, "\xFF_internalStream");								// [sslStream]
-
-	ptrs->ds_clear = ds;
-	ptrs->ds_encrypted = en;
-	ptrs->ctx = ctx;
-	ptrs->sslctx = isClient != 0 ? SSL_CTX_new(SSLv23_client_method()) : SSL_CTX_new(SSLv23_server_method());
-	SSL_CTX_set_options(ptrs->sslctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
-	SSL_CTX_set_verify(ptrs->sslctx, isClient != 0 ? SSL_VERIFY_PEER : SSL_VERIFY_CLIENT_ONCE, ILibDuktape_net_sslStream_verifyServer); // Ask for authentication
-	
-	if (leafCert != NULL)
-	{
-		SSL_CTX_use_certificate(ptrs->sslctx, leafCert->x509);
-		SSL_CTX_use_PrivateKey(ptrs->sslctx, leafCert->pkey);
-
-		if (nonLeafCert != NULL)
-		{
-			SSL_CTX_add_extra_chain_cert(ptrs->sslctx, X509_dup(nonLeafCert->x509));
-		}
-	}
-
-	ptrs->ssl = SSL_new(ptrs->sslctx);
-	if (ILibDuktape_net_sslStream_sslIndex < 0)
-	{
-		ILibDuktape_net_sslStream_sslIndex = SSL_get_ex_new_index(0, "ILibDuktape_net_sslstream index", NULL, NULL, NULL);
-	}
-	SSL_set_ex_data(ptrs->ssl, ILibDuktape_net_sslStream_sslIndex, ptrs);
-	
-	duk_dup(ctx, 0);									// [input]
-	duk_get_prop_string(ctx, -1, "pipe");				// [input][pipe]
-	duk_swap_top(ctx, -2);								// [pipe][input/this]
-	duk_push_heapptr(ctx, ptrs->sslStream_en_object);	// [pipe][input/this][stream]
-	if (duk_pcall_method(ctx, 1) != 0)
-	{
-		duk_push_string(ctx, "sslStream: Could not pipe with input stream");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
-	}
-	duk_pop(ctx);
-
-	duk_push_heapptr(ctx, ptrs->sslStream_en_object);	// [stream]
-	duk_get_prop_string(ctx, -1, "pipe");				// [stream][pipe]
-	duk_swap_top(ctx, -2);								// [pipe][stream/this]
-	duk_dup(ctx, 0);									// [pipe][stream/this][input]
-	if (duk_pcall_method(ctx, 1) != 0)
-	{
-		duk_push_string(ctx, "sslSTream: Could not pipe the input stream");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
-	}
-	duk_pop(ctx);
-
-	// Set up the memory-buffer BIOs
-	read = BIO_new(BIO_s_mem());
-	write = BIO_new(BIO_s_mem());
-	BIO_set_mem_eof_return(read, -1);
-	BIO_set_mem_eof_return(write, -1);
-	SSL_set_bio(ptrs->ssl, read, write);
-
-	if (isClient != 0)
-	{
-		SSL_set_connect_state(ptrs->ssl);
-		status = SSL_do_handshake(ptrs->ssl);
-		if (status <= 0) { status = SSL_get_error(ptrs->ssl, (int)status); }
-
-		if (status == SSL_ERROR_WANT_READ)
-		{
-			while (BIO_ctrl_pending(write) > 0)
-			{
-				i = BIO_read(write, ptrs->encryptedBuffer, sizeof(ptrs->encryptedBuffer));
-				ILibDuktape_DuplexStream_WriteData(ptrs->ds_encrypted, ptrs->encryptedBuffer, i);
-			}
-			// We're going to drop out now, becuase we need to check for received data
-		}
-	}
-	else
-	{
-		SSL_set_accept_state(ptrs->ssl);
+		duk_dup(ctx, 0);
+		duk_put_prop_string(ctx, -2, ILibDuktape_SOCKET2OPTIONS);
 	}
 	return 1;
 }
-#endif
 
 ILibTransport_DoneState ILibDuktape_net_server_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
@@ -779,35 +528,61 @@ duk_ret_t ILibDuktape_net_server_socket_Finalizer(duk_context *ctx)
 
 	return 0;
 }
+int ILibDuktape_net_server_unshiftSink(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user)
+{
+	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
+	session->unshiftBytes = unshiftBytes;
+	return(unshiftBytes);
+}
 void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void **user)
 {
 	ILibDuktape_net_server *ptr = (ILibDuktape_net_server*)((void**)ILibMemory_GetExtraMemory(AsyncServerSocketModule, ILibMemory_ASYNCSERVERSOCKET_CONTAINERSIZE))[0];
 	ILibDuktape_net_server_session *session;
+	int isTLS = ILibAsyncSocket_IsUsingTls(ConnectionToken);
 
-	if (ptr->OnConnection != NULL)
-	{
-		duk_push_heapptr(ptr->ctx, ptr->OnConnection);										// [func]
-		duk_push_heapptr(ptr->ctx, ptr->self);												// [func][this]
-		duk_push_object(ptr->ctx);															// [func][this][socket]
-		ILibDuktape_CreateFinalizer(ptr->ctx, ILibDuktape_net_server_socket_Finalizer);
-		duk_push_fixed_buffer(ptr->ctx, sizeof(ILibDuktape_net_server_session));			// [func][this][socket][buffer]
-		session = (ILibDuktape_net_server_session*)Duktape_GetBuffer(ptr->ctx, -1, NULL);
-		memset(session, 0, sizeof(ILibDuktape_net_server_session));
-		duk_put_prop_string(ptr->ctx, -2, ILibDuktape_net_Server_Session_buffer);			// [func][this][socket]
-		*user = session;
-		session->ctx = ptr->ctx;
-		session->connection = ConnectionToken;
-		session->self = duk_get_heapptr(ptr->ctx, -1);
-		session->emitter = ILibDuktape_EventEmitter_Create(ptr->ctx);
+	duk_push_heapptr(ptr->ctx, ptr->self);																					// [server]
 
-		ILibDuktape_EventEmitter_CreateEvent(session->emitter, "timeout", &(session->OnTimeout));
+	duk_get_prop_string(ptr->ctx, -1, "emit");																				// [server][emit]
+	duk_swap_top(ptr->ctx, -2);																								// [emit][this]
+	duk_push_string(ptr->ctx, isTLS ? "secureConnection" : "connection");													// [emit][this][connection]
 
-		session->stream = ILibDuktape_DuplexStream_Init(ptr->ctx, ILibDuktape_net_server_WriteSink, ILibDuktape_net_server_EndSink,
-			ILibDuktape_net_server_PauseSink, ILibDuktape_net_server_ResumeSink, session);
+	duk_push_object(ptr->ctx);																								// [emit][this][connection][socket]
+	ILibDuktape_WriteID(ptr->ctx, isTLS ? "tls.serverSocketConnection" : "net.serverSocketConnection");
+	ILibDuktape_CreateFinalizer(ptr->ctx, ILibDuktape_net_server_socket_Finalizer);
+	duk_push_fixed_buffer(ptr->ctx, sizeof(ILibDuktape_net_server_session));												// [emit][this][connection][socket][buffer]
+	session = (ILibDuktape_net_server_session*)Duktape_GetBuffer(ptr->ctx, -1, NULL);
+	memset(session, 0, sizeof(ILibDuktape_net_server_session));
+	duk_put_prop_string(ptr->ctx, -2, ILibDuktape_net_Server_Session_buffer);												// [emit][this][connection][socket]
 
-		if (duk_pcall_method(ptr->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptr->ctx, "net.server.OnConnect(): Exception"); }
-		duk_pop(ptr->ctx);																	// ...
-	}
+	struct sockaddr_in6 local;
+	ILibAsyncSocket_GetLocalInterface(ConnectionToken, (struct sockaddr*)&local);
+	duk_push_string(ptr->ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));			// [emit][this][connection][sock][localAddr]
+	duk_put_prop_string(ptr->ctx, -2, "localAddress");																		// [emit][this][connection][sock]
+	duk_push_int(ptr->ctx, (int)ntohs(local.sin6_port));																	// [emit][this][connection][sock][port]
+	duk_put_prop_string(ptr->ctx, -2, "localPort");																			// [emit][this][connection][sock]
+	ILibAsyncSocket_GetRemoteInterface(ConnectionToken, (struct sockaddr*)&local);
+	duk_push_string(ptr->ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));			// [emit][this][connection][sock][remoteAddr]
+	duk_put_prop_string(ptr->ctx, -2, "remoteAddress");																		// [emit][this][connection][sock]
+	duk_push_string(ptr->ctx, local.sin6_family == AF_INET6 ? "IPv6" : "IPv4");												// [emit][this][connection][sock][remoteFamily]
+	duk_put_prop_string(ptr->ctx, -2, "remoteFamily");																		// [emit][this][connection][sock]
+	duk_push_int(ptr->ctx, (int)ntohs(local.sin6_port));																	// [emit][this][connection][sock][remotePort]
+	duk_put_prop_string(ptr->ctx, -2, "remotePort");																		// [emit][this][connection][sock]
+
+
+	*user = session;
+	session->ctx = ptr->ctx;
+	session->connection = ConnectionToken;
+	session->self = duk_get_heapptr(ptr->ctx, -1);
+	session->emitter = ILibDuktape_EventEmitter_Create(ptr->ctx);
+		
+
+	ILibDuktape_EventEmitter_CreateEvent(session->emitter, "timeout", &(session->OnTimeout));
+
+	session->stream = ILibDuktape_DuplexStream_InitEx(ptr->ctx, ILibDuktape_net_server_WriteSink, ILibDuktape_net_server_EndSink,
+		ILibDuktape_net_server_PauseSink, ILibDuktape_net_server_ResumeSink, ILibDuktape_net_server_unshiftSink, session);
+
+	if (duk_pcall_method(ptr->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptr->ctx, (isTLS ? "tls.server.OnSecureConnection(): Exception" : "net.server.OnConnect(): Exception")); }
+	duk_pop(ptr->ctx);																	// ...
 }
 void ILibDuktape_net_server_OnDisconnect(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void *user)
 {
@@ -818,8 +593,9 @@ void ILibDuktape_net_server_OnReceive(ILibAsyncServerSocket_ServerModule AsyncSe
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)*user;
 	
+	session->unshiftBytes = 0;
 	ILibDuktape_DuplexStream_WriteData(session->stream, buffer + *p_beginPointer, endPointer);
-	*p_beginPointer = endPointer;
+	*p_beginPointer = endPointer - session->unshiftBytes;
 }
 void ILibDuktape_net_server_OnInterrupt(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void *user)
 {
@@ -835,62 +611,103 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	ILibDuktape_net_server *server = NULL;
 	int i;
 
-	unsigned short port = 80;
+	unsigned short port = 0;
 	int backlog = 0;
 	struct sockaddr_in6 local;
 	int maxConnections = 10;
 	int initalBufferSize = 4096;
-
+	char *host;
 	memset(&local, 0, sizeof(struct sockaddr_in6));
 
 	duk_push_this(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_net_Server_buffer);
 	server = (ILibDuktape_net_server*)Duktape_GetBuffer(ctx, -1, NULL);
 
-	if (duk_is_object(ctx, 0))
+	if (nargs == 0 || !duk_is_object(ctx, 0))
 	{
-		// Options
-		port = (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
-		backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", 64);
-		if (nargs > 1 && duk_is_function(ctx, 1))
+		duk_push_this(ctx);															// [server]
+		duk_get_prop_string(ctx, -1, "listen");										// [server][listen]
+		duk_swap_top(ctx, -2);														// [listen][this]
+		duk_push_object(ctx);														// [listen][this][Options]
+
+		// let's call listen again, using an Options object
+		if (nargs > 0 && duk_is_number(ctx, 0))
 		{
-			// Callback
-			ILibDuktape_EventEmitter_AddOn(server->emitter, "listening", duk_require_heapptr(ctx, 1));
+			duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "port");					// [listen][this][Options]
+			for (i = 1; i < nargs; ++i)
+			{
+				if (duk_is_number(ctx, i)) { duk_dup(ctx, i); duk_put_prop_string(ctx, -2, "backlog"); }
+				if (duk_is_string(ctx, i)) { duk_dup(ctx, i); duk_put_prop_string(ctx, -2, "host"); }
+				if (duk_is_function(ctx, i)) { duk_dup(ctx, i); break; }			// [listen][this][Options][callback]
+			}
+			duk_call_method(ctx, i < nargs ? 2 : 1);
+			return(1);
+		}
+		else
+		{
+			duk_call_method(ctx, 1);
+			return(1);
+		}
+	}
+
+	// If we are here, we were called with an Options Object
+	duk_push_this(ctx);													// [server]
+	duk_dup(ctx, 0);													// [server][Options]
+	duk_put_prop_string(ctx, -2, ILibDuktape_SERVER2LISTENOPTIONS);		// [server]
+
+	port = (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
+	backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", 64);
+	host = Duktape_GetStringPropertyValue(ctx, 0, "host", NULL);
+	if (nargs > 1 && duk_is_function(ctx, 1))
+	{
+		// Callback
+		ILibDuktape_EventEmitter_AddOn(server->emitter, "listening", duk_require_heapptr(ctx, 1));
+	}
+	if (host != NULL)
+	{
+		ILibResolveEx(host, port, &local);
+		if (local.sin6_family == AF_UNSPEC)
+		{
+			return(ILibDuktape_Error(ctx, "Socket.listen(): Could not resolve host: '%s'", host));
 		}
 	}
 	else
 	{
-		for (i = 0; i < nargs; ++i)
-		{
-			if (duk_is_number(ctx, i))
-			{
-				if (i == 0)
-				{
-					// Port
-					port = (unsigned short)duk_get_int(ctx, i);
-				}
-				else
-				{
-					// Backlog
-					backlog = duk_get_int(ctx, i);
-				}
-			}
-			if (duk_is_function(ctx, i)) { ILibDuktape_EventEmitter_AddOn(server->emitter, "listening", duk_require_heapptr(ctx, i)); }
-			if (duk_is_string(ctx, i))
-			{
-				ILibResolveEx((char*)duk_require_string(ctx, i), port, &local);
-				if (local.sin6_family == AF_UNSPEC)
-				{
-					return(ILibDuktape_Error(ctx, "server.listen(): Unknown Host '%s'", duk_require_string(ctx, i)));
-				}
-			}
-		}
+		local.sin6_family = AF_INET;
+		local.sin6_port = htons(port);
 	}
 
-	server->server = ILibCreateAsyncServerSocketModuleWithMemory(Duktape_GetChain(ctx), maxConnections, port, initalBufferSize, 0,
+	server->server = ILibCreateAsyncServerSocketModuleWithMemoryEx(Duktape_GetChain(ctx), maxConnections, initalBufferSize, (struct sockaddr*)&local,
 		ILibDuktape_net_server_OnConnect, ILibDuktape_net_server_OnDisconnect, ILibDuktape_net_server_OnReceive,
 		ILibDuktape_net_server_OnInterrupt, ILibDuktape_net_server_OnSendOK, sizeof(void*), sizeof(void*));
+	if (server->server == NULL)
+	{
+		return(ILibDuktape_Error(ctx, "server.listen(): Failed to bind"));
+	}
+
 	((void**)ILibMemory_GetExtraMemory(server->server, ILibMemory_ASYNCSERVERSOCKET_CONTAINERSIZE))[0] = server;
+	ILibAsyncServerSocket_SetTag(server->server, server);
+#ifndef MICROSTACK_NOTLS
+	{
+		duk_push_this(ctx);												// [server]
+		if (duk_has_prop_string(ctx, -1, "addContext"))
+		{
+			duk_get_prop_string(ctx, -1, "addContext");					// [server][addContext]
+			duk_swap_top(ctx, -2);										// [addContext][this]
+			duk_push_string(ctx, "*");									// [addContext][this][*]
+			duk_eval_string(ctx, "require('tls');");					// [addContext][this][*][tls]
+			duk_get_prop_string(ctx, -1, "createSecureContext");		// [addContext][this][*][tls][createSecureContext]
+			duk_swap_top(ctx, -2);										// [addContext][this][*][createSecureContext][this]
+			duk_get_prop_string(ctx, -4, ILibDuktape_SERVER2OPTIONS);	// [addContext][this][*][createSecureContext][this][options]
+			duk_call_method(ctx, 1);									// [addContext][this][*][secureContext]
+			duk_call_method(ctx, 2); duk_pop(ctx);						// ...
+		}
+		else
+		{
+			duk_pop(ctx);												// ...
+		}
+	}
+#endif
 
 	if (server->OnListening != NULL)
 	{
@@ -943,13 +760,25 @@ duk_ret_t ILibDuktape_net_server_address(duk_context *ctx)
 
 	return(1);
 }
+
 duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
 	int i;
 	ILibDuktape_net_server *server;
 
+	duk_push_current_function(ctx);
+	int isTLS = Duktape_GetIntPropertyValue(ctx, -1, "tls", 0);
+	duk_pop(ctx);
+
 	duk_push_object(ctx);														// [server]
+	ILibDuktape_WriteID(ctx, isTLS ? "tls.Server" : "net.Server");
+	if (nargs > 0 && duk_is_object(ctx, 0))
+	{
+		duk_dup(ctx, 0);														// [server][Options]
+		duk_put_prop_string(ctx, -2, ILibDuktape_SERVER2OPTIONS);				// [server]
+	}
+
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_net_server));					// [server][fbuffer]
 	server = (ILibDuktape_net_server*)Duktape_GetBuffer(ctx, -1, NULL);
 	memset(server, 0, sizeof(ILibDuktape_net_server));
@@ -959,7 +788,17 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 	server->ctx = ctx;
 	server->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "close", &(server->OnClose));
-	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "connection", &(server->OnConnection));
+	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "connection");
+#ifndef MICROSTACK_NOTLS
+	if (isTLS)
+	{
+		ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "secureConnection");
+		ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "tlsClientError");
+		ILibDuktape_CreateInstanceMethod(ctx, "addContext", ILibDuktape_tls_server_addContext, 2);
+		duk_push_object(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_SERVER2ContextTable);
+		if (ILibDuktape_TLS_ctx2server < 0) { ILibDuktape_TLS_ctx2server = SSL_get_ex_new_index(0, "ILibDuktape_TLS_Server index", NULL, NULL, NULL); }
+	}
+#endif
 	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "error", &(server->OnError));
 	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "listening", &(server->OnListening));
 
@@ -972,7 +811,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 		if (duk_is_function(ctx, i))
 		{
 			// Callback
-			ILibDuktape_EventEmitter_AddOn(server->emitter, "connection", duk_require_heapptr(ctx, i));
+			ILibDuktape_EventEmitter_AddOn(server->emitter, isTLS ? "secureConnection" : "connection", duk_require_heapptr(ctx, i));
 		}
 		if (duk_is_object(ctx, i))
 		{
@@ -985,6 +824,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 void ILibDuktape_net_PUSH_net(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);														// [net]
+	ILibDuktape_WriteID(ctx, "net");
 	duk_push_pointer(ctx, chain);												// [net][chain]
 	duk_put_prop_string(ctx, -2, "chain");										// [net]
 	duk_push_c_function(ctx, ILibDuktape_net_socket_constructor, DUK_VARARGS);	// [net][constructor]
@@ -993,14 +833,9 @@ void ILibDuktape_net_PUSH_net(duk_context *ctx, void *chain)
 	duk_dup(ctx, -2);															// [net][constructor][net]
 	duk_put_prop_string(ctx, -2, "net");										// [net][constructor]
 	duk_put_prop_string(ctx, -2, "socket");										// [net]
-	ILibDuktape_CreateInstanceMethod(ctx, "createServer", ILibDuktape_net_createServer, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "tls", 0, "createServer", ILibDuktape_net_createServer, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createConnection", ILibDuktape_net_createConnection, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_net_createConnection, DUK_VARARGS);
-
-#ifndef MICROSTACK_NOTLS
-	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "clientMode", 1, "createClientSslStream", ILibDuktape_net_sslStream_create, DUK_VARARGS);
-	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "clientMode", 0, "createServerSslStream", ILibDuktape_net_sslStream_create, DUK_VARARGS);
-#endif
 }
 duk_ret_t ILibDuktape_globalTunnel_end(duk_context *ctx)
 {
@@ -1099,10 +934,360 @@ ILibDuktape_globalTunnel_data* ILibDuktape_GetGlobalTunnel(duk_context *ctx)
 	return retVal;
 }
 
+
+#ifndef MICROSTACK_NOTLS
+SSL_CTX* ILibDuktape_TLS_SecureContext_GetCTX(duk_context *ctx, void *secureContext)
+{
+	SSL_CTX *retVal = NULL;
+
+	duk_push_heapptr(ctx, secureContext);																// [context]
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_SecureContext2SSLCTXPTR))
+	{
+		retVal = (SSL_CTX*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_SecureContext2SSLCTXPTR);
+	}
+	duk_pop(ctx);																						// ...
+	return(retVal);
+}
+void ILibDuktape_TLS_X509_PUSH(duk_context *ctx, X509* cert)
+{
+	char hash[UTIL_SHA384_HASHSIZE];
+	char fingerprint[150];
+
+	util_keyhash2(cert, hash);
+	util_tohex2(hash, UTIL_SHA384_HASHSIZE, fingerprint);
+
+	duk_push_object(ctx);							// [cert]
+	duk_push_string(ctx, fingerprint);				// [cert][fingerprint]
+	duk_put_prop_string(ctx, -2, "fingerprint");	// [cert]
+}
+int ILibDuktape_TLS_verify(int preverify_ok, X509_STORE_CTX *storectx)
+{
+	STACK_OF(X509) *certChain = X509_STORE_CTX_get_chain(storectx);
+	SSL *ssl = (SSL*)X509_STORE_CTX_get_ex_data(storectx, SSL_get_ex_data_X509_STORE_CTX_idx());
+	ILibDuktape_net_socket *data = (ILibDuktape_net_socket*)SSL_get_ex_data(ssl, ILibDuktape_TLS_ctx2socket);
+
+	int i;
+	int retVal = 0;
+
+	duk_push_heapptr(data->ctx, data->object);													// [Socket]
+	duk_get_prop_string(data->ctx, -1, ILibDuktape_SOCKET2OPTIONS);								// [Socket][Options]
+	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1)) { duk_pop_2(data->ctx); return(preverify_ok); }
+	void *OnVerify = Duktape_GetHeapptrProperty(data->ctx, -1, "checkServerIdentity");
+
+	if (OnVerify == NULL) { return(1); }
+
+	duk_push_heapptr(data->ctx, OnVerify);													// [func]
+	duk_push_heapptr(data->ctx, data->object);												// [func][this]
+	duk_push_array(data->ctx);																// [func][this][certs]
+	for (i = 0; i < sk_X509_num(certChain); ++i)
+	{
+		ILibDuktape_TLS_X509_PUSH(data->ctx, sk_X509_value(certChain, i));					// [func][this][certs][cert]
+		duk_put_prop_index(data->ctx, -2, i);												// [func][this][certs]
+	}
+	retVal = duk_pcall_method(data->ctx, 1) == 0 ? 1 : 0;									// [undefined]
+	duk_pop(data->ctx);																		// ...
+	return retVal;
+}
+int ILibDuktape_TLS_server_verify(int preverify_ok, X509_STORE_CTX *storectx)
+{
+	STACK_OF(X509) *certChain = X509_STORE_CTX_get_chain(storectx);
+	SSL *ssl = (SSL*)X509_STORE_CTX_get_ex_data(storectx, SSL_get_ex_data_X509_STORE_CTX_idx());
+	ILibDuktape_net_server *data = (ILibDuktape_net_server*)SSL_get_ex_data(ssl, ILibDuktape_TLS_ctx2server);
+
+	int i;
+	int retVal = 0;
+
+	duk_push_heapptr(data->ctx, data->self);													// [Server]
+	duk_get_prop_string(data->ctx, -1, ILibDuktape_SERVER2OPTIONS);								// [Server][Options]
+	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1)) { duk_pop_2(data->ctx); return(preverify_ok); }
+	void *OnVerify = Duktape_GetHeapptrProperty(data->ctx, -1, "checkClientIdentity");
+
+	if (OnVerify == NULL) { return(1); }
+
+	duk_push_heapptr(data->ctx, OnVerify);													// [func]
+	duk_push_heapptr(data->ctx, data->self);												// [func][this]
+	duk_push_array(data->ctx);																// [func][this][certs]
+	for (i = 0; i < sk_X509_num(certChain); ++i)
+	{
+		ILibDuktape_TLS_X509_PUSH(data->ctx, sk_X509_value(certChain, i));					// [func][this][certs][cert]
+		duk_put_prop_index(data->ctx, -2, i);												// [func][this][certs]
+	}
+	retVal = duk_pcall_method(data->ctx, 1) == 0 ? 1 : 0;									// [undefined]
+	duk_pop(data->ctx);																		// ...
+	return retVal;
+}
+void ILibDuktape_tls_server_OnSSL(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, void *ConnectionToken, SSL* ctx, void **user)
+{
+	ILibDuktape_net_server *server = (ILibDuktape_net_server*)ILibAsyncServerSocket_GetTag(AsyncServerSocketModule);
+
+	if (ctx != NULL && ILibDuktape_TLS_ctx2server)
+	{
+		SSL_set_ex_data(ctx, ILibDuktape_TLS_ctx2server, server);
+	}
+}
+static int ILibDuktape_tls_server_sniCallback(SSL *s, int *ad, void *arg)
+{
+	const char *servername = SSL_get_servername(s, TLSEXT_NAMETYPE_host_name);
+	ILibDuktape_net_server *data = (ILibDuktape_net_server*)SSL_get_ex_data(s, ILibDuktape_TLS_ctx2server);
+
+	duk_push_heapptr(data->ctx, data->self);								// [server]
+	duk_get_prop_string(data->ctx, -1, ILibDuktape_SERVER2ContextTable);	// [server][table]
+	if (duk_has_prop_string(data->ctx, -1, servername))
+	{
+		duk_get_prop_string(data->ctx, -1, servername);						// [server][table][secureContext]
+		SSL_CTX *newCTX = ILibDuktape_TLS_SecureContext_GetCTX(data->ctx, duk_get_heapptr(data->ctx, -1));
+		if (newCTX != NULL)
+		{
+			SSL_set_SSL_CTX(s, newCTX);
+		}
+		duk_pop(data->ctx);													// [server][table]
+	}
+	duk_pop_2(data->ctx);													// ...
+	return(SSL_TLSEXT_ERR_OK);
+}
+duk_ret_t ILibDuktape_tls_server_addContext(duk_context *ctx)
+{
+	duk_size_t hostLen;
+	char *host = (char*)duk_get_lstring(ctx, 0, &hostLen);
+	void *context = duk_require_heapptr(ctx, 1);
+
+	duk_push_this(ctx);												// [server]
+	duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2ContextTable);	// [server][table]
+	duk_dup(ctx, 0);												// [server][table][host]
+	duk_dup(ctx, 1);												// [server][table][host][context]
+	duk_put_prop(ctx, -3);											// [server][table]
+
+	if (hostLen == 1 && strncasecmp(host, "*", 1) == 0)
+	{
+		// Default CTX
+		SSL_CTX *ssl_ctx = ILibDuktape_TLS_SecureContext_GetCTX(ctx, context);
+		duk_get_prop_string(ctx, -2, ILibDuktape_SERVER2OPTIONS);	// [server][table][options]
+		if (Duktape_GetBooleanProperty(ctx, -1, "requestCert", 0) || Duktape_GetHeapptrProperty(ctx, -1, "checkClientIdentity")!=NULL)
+		{
+			SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE, ILibDuktape_TLS_server_verify);
+		}
+		duk_get_prop_string(ctx, -3, ILibDuktape_net_Server_buffer);// [server][table][options][buffer]
+		ILibDuktape_net_server *server = (ILibDuktape_net_server*)Duktape_GetBuffer(ctx, -1, NULL);
+		if (server->server != NULL)
+		{
+#ifdef MICROSTACK_TLS_DETECT
+			ILibAsyncServerSocket_SetSSL_CTX(server->server, ssl_ctx, 1);
+#else
+			ILibAsyncServerSocket_SetSSL_CTX(server->server, ssl_ctx);
+#endif
+			ILibAsyncServerSocket_SSL_SetSink(server->server, ILibDuktape_tls_server_OnSSL);
+		}
+		SSL_CTX_set_tlsext_servername_callback(ssl_ctx, ILibDuktape_tls_server_sniCallback);
+	}
+
+	return(0);
+}
+void ILibDuktape_TLS_connect_resolveError(duk_context *ctx, void ** args, int argsLen)
+{
+	ILibDuktape_net_socket *data = (ILibDuktape_net_socket*)args[0];
+
+	duk_push_heapptr(ctx, data->object);									// [socket]
+	duk_get_prop_string(ctx, -2, "emit");									// [socket][emit]
+	duk_swap_top(ctx, -2);													// [emit][this]
+	duk_dup(ctx, -3);														// [emit][this]
+	duk_push_string(ctx, "error");											// [emit][this][error]
+	duk_push_heapptr(ctx, args[1]);											// [emit][this][error][err]
+	if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "tls.socket.OnError(): "); }
+	duk_pop(ctx);
+}
+duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx), i;
+	if (nargs > 0 && duk_is_number(ctx, 0))
+	{
+		// tls.connect(port[, host][, options][, callback])
+		// let's convert to the other overload
+		duk_push_this(ctx);							// [TLS]
+		duk_get_prop_string(ctx, -1, "connect");	// [TLS][connect]
+		duk_swap_top(ctx, -2);						// [connect][this]
+		for (i = 1; i < nargs; ++i)
+		{
+			if (duk_is_object(ctx, i))
+			{
+				duk_dup(ctx, i);					// [connect][this][Options]
+				break;
+			}
+		}
+		if (i == nargs) { duk_push_object(ctx); }	// [connect][this][Options]
+		duk_dup(ctx, 0);							// [connect][this][Options][port]
+		duk_put_prop_string(ctx, -2, "port");
+		if (nargs > 1 && duk_is_string(ctx, 1))
+		{
+			duk_dup(ctx, 1);						// [connect][this][Options][host]
+		}
+		else
+		{
+			duk_push_string(ctx, "127.0.0.1");		// [connect][this][Options][host]
+		}
+		duk_put_prop_string(ctx, -2, "host");		// [connect][this][Options]
+		for (i = 1; i < nargs; ++i)
+		{
+			if (duk_is_function(ctx, i))
+			{
+				duk_dup(ctx, i);					// [connect][this][Options][callback]
+				break;
+			}
+		}
+		duk_call_method(ctx, i == nargs ? 1 : 2);	// [socket]
+		return(1);
+	}
+
+	// tls.connect(options[, callback])
+	ILibAsyncSocket_SocketModule module = ILibCreateAsyncSocketModuleWithMemory(Duktape_GetChain(ctx), 4096, ILibDuktape_net_socket_OnData, ILibDuktape_net_socket_OnConnect, ILibDuktape_net_socket_OnDisconnect, ILibDuktape_net_socket_OnSendOK, sizeof(ILibDuktape_net_socket));
+	ILibDuktape_net_socket *data = (ILibDuktape_net_socket*)((ILibChain_Link*)module)->ExtraMemoryPtr;
+
+	data->ssl_ctx = SSL_CTX_new(SSLv23_client_method());
+	SSL_CTX_set_options(data->ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */ 
+
+	if (ILibDuktape_TLS_ctx2socket < 0)
+	{
+		ILibDuktape_TLS_ctx2socket = SSL_get_ex_new_index(0, "ILibDuktape_TLS index", NULL, NULL, NULL);
+	}
+
+	ILibDuktape_net_socket_PUSH(ctx, module);													// [socket]
+	ILibDuktape_WriteID(ctx, "tls.socket");
+	duk_dup(ctx, 0);																			// [socket][options]
+	duk_put_prop_string(ctx, -2, ILibDuktape_SOCKET2OPTIONS);									// [socket]
+	ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "secureConnect");
+	if (nargs > 0 && duk_is_function(ctx, 1))
+	{
+		ILibDuktape_EventEmitter_AddOnce(data->emitter, "secureConnect", duk_require_heapptr(ctx, 1));
+	}
+
+	char *host = Duktape_GetStringPropertyValue(ctx, 0, "host", "127.0.0.1");
+	int port = Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
+	struct sockaddr_in6 dest;
+	struct sockaddr_in6 proxy;
+	memset(&dest, 0, sizeof(struct sockaddr_in6));
+	memset(&proxy, 0, sizeof(struct sockaddr_in6));
+
+	if (duk_has_prop_string(ctx, 0, "proxy"))
+	{
+		duk_get_prop_string(ctx, 0, "proxy");
+		ILibResolveEx(Duktape_GetStringPropertyValue(ctx, -1, "host", NULL), (unsigned short)Duktape_GetIntPropertyValue(ctx, -1, "port", 0), &proxy);
+		duk_pop(ctx);
+	}
+	ILibResolveEx(host, (unsigned short)port, &dest);
+	if (dest.sin6_family == AF_UNSPEC || (duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
+	{
+		// Can't resolve... Delay event emit, until next event loop, because if app called net.createConnection(), they don't have the socket yet
+		duk_push_error_object(ctx, DUK_ERR_ERROR, "tls.socket.connect(): Cannot resolve host '%s'", host);
+		ILibDuktape_Immediate(ctx, (void*[]) { data, duk_get_heapptr(ctx, -1) }, 2, ILibDuktape_TLS_connect_resolveError);
+		duk_pop(ctx);																			// [socket]
+	}
+	else
+	{
+		if (duk_has_prop_string(ctx, 0, "proxy"))
+		{
+			duk_get_prop_string(ctx, 0, "proxy");
+			ILibAsyncSocket_ConnectToProxy(data->socketModule, NULL, (struct sockaddr*)&dest, (struct sockaddr*)&proxy, Duktape_GetStringPropertyValue(ctx, -1, "username", NULL), Duktape_GetStringPropertyValue(ctx, -1, "password", NULL), NULL, data);
+			duk_pop(ctx);
+		}
+		else
+		{
+			ILibAsyncSocket_ConnectTo(data->socketModule, NULL, (struct sockaddr*)&dest, NULL, data);
+		}
+		data->ssl = ILibAsyncSocket_SetSSLContext(data->socketModule, data->ssl_ctx, ILibAsyncSocket_TLS_Mode_Client);
+		SSL_set_ex_data(data->ssl, ILibDuktape_TLS_ctx2socket, data);
+		SSL_set_tlsext_host_name(data->ssl, host);
+	}
+	return(1);
+}
+duk_ret_t ILibDuktape_TLS_secureContext_Finalizer(duk_context *ctx)
+{
+	SSL_CTX_free(ILibDuktape_TLS_SecureContext_GetCTX(ctx, duk_require_heapptr(ctx, 0)));
+
+	duk_get_prop_string(ctx, 0, ILibDuktape_SecureContext2CertBuffer);
+	struct util_cert *cert = (struct util_cert*)Duktape_GetBuffer(ctx, -1, NULL);
+	util_freecert(cert);
+	return(0);
+}
+duk_ret_t ILibDuktape_TLS_createSecureContext(duk_context *ctx)
+{
+	duk_push_object(ctx);																	// [secureContext]
+	duk_push_fixed_buffer(ctx, sizeof(struct util_cert));									// [secureContext][cert]
+	struct util_cert *cert = (struct util_cert*)Duktape_GetBuffer(ctx, -1, NULL);			
+	duk_put_prop_string(ctx, -2, ILibDuktape_SecureContext2CertBuffer);						// [secureContext]
+	memset(cert, 0, sizeof(struct util_cert));
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_TLS_secureContext_Finalizer);
+
+	duk_size_t secureProtocolLen;
+	char *secureProtocol = (char*)Duktape_GetStringPropertyValueEx(ctx, 0, "secureProtocol", "SSLv23_server_method", &secureProtocolLen);
+	SSL_CTX *ssl_ctx = NULL;
+
+	if (secureProtocolLen == 20 && strncmp(secureProtocol, "SSLv23_server_method", 20) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(SSLv23_server_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	}
+	else if (secureProtocolLen == 11 && strncmp(secureProtocol, "DTLS_method", 11) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(DTLS_method());
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "tls.createSecureContext(): secureProtocol[%s] not supported at this time", secureProtocol));
+	}
+	duk_push_pointer(ctx, ssl_ctx); duk_put_prop_string(ctx, -2, ILibDuktape_SecureContext2SSLCTXPTR);
+
+	if (duk_has_prop_string(ctx, 0, "pfx") && duk_has_prop_string(ctx, 0, "passphrase"))
+	{
+		duk_get_prop_string(ctx, 0, "pfx");													// [secureContext][pfx]
+		duk_size_t pfxLen;
+		char *pfx = (char*)Duktape_GetBuffer(ctx, -1, &pfxLen);
+		if (util_from_p12(pfx, (int)pfxLen, Duktape_GetStringPropertyValue(ctx, 0, "passphrase", ""), cert) == 0)
+		{
+			// Failed to load certificate
+			return(ILibDuktape_Error(ctx, "tls.createSecureContext(): Invalid passphrase"));
+		}
+		duk_pop(ctx);
+		SSL_CTX_use_certificate(ssl_ctx, cert->x509);
+		SSL_CTX_use_PrivateKey(ssl_ctx, cert->pkey);
+	}
+
+	return(1);
+}
+duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)
+{
+	char *passphrase = (char*)duk_require_string(ctx, 0);
+	int len;
+	struct util_cert cert;
+	char *data;
+
+	len = util_mkCert(NULL, &(cert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
+	len = util_to_p12(cert, passphrase, &data);
+
+	duk_push_fixed_buffer(ctx, len);
+	memcpy_s((void*)Duktape_GetBuffer(ctx, -1, NULL), len, data, len);
+	duk_push_buffer_object(ctx, -1, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);
+
+	util_free(data);
+	util_freecert(&cert);
+	return 1;
+}
+void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);				// [TLS]
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "tls", 1, "createServer", ILibDuktape_net_createServer, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_TLS_connect, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "createSecureContext", ILibDuktape_TLS_createSecureContext, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, 1);
+}
+#endif
+
 void ILibDuktape_net_init(duk_context * ctx, void * chain)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "net", ILibDuktape_net_PUSH_net);
 	ILibDuktape_ModSearch_AddHandler(ctx, "global-tunnel", ILibDuktape_globalTunnel_PUSH);
+#ifndef MICROSTACK_NOTLS
+	ILibDuktape_ModSearch_AddHandler(ctx, "tls", ILibDuktape_tls_PUSH);
+#endif
 }
 
 

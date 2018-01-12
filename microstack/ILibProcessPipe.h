@@ -50,6 +50,7 @@ typedef enum ILibProcessPipe_Pipe_ReaderHandleType
 	ILibProcessPipe_Pipe_ReaderHandleType_NotOverLapped = 0,	//!< Spawn a I/O processing thread
 	ILibProcessPipe_Pipe_ReaderHandleType_Overlapped = 1		//!< Use Overlapped I/O
 }ILibProcessPipe_Pipe_ReaderHandleType;
+HANDLE ILibProcessPipe_Manager_GetWorkerThread(ILibProcessPipe_Manager mgr);
 #endif
 
 ILibTransport_DoneState ILibProcessPipe_Pipe_Write(ILibProcessPipe_Pipe writePipe, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership);

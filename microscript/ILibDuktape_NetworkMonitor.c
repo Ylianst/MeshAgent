@@ -108,13 +108,13 @@ void ILibDuktape_NetworkMonitor_EventSink(ILibIPAddressMonitor sender, void *use
 }
 duk_ret_t ILibDuktape_NetworkMonitor_Finalizer(duk_context *ctx)
 {
-	if (ILibIsChainBeingDestroyed(Duktape_GetChain(ctx)) != 0) { return(0); }
 	duk_get_prop_string(ctx, 0, ILibDuktape_NetworkMonitor_PTR);
 
 	ILibDuktape_NetworkMonitor *nm = (ILibDuktape_NetworkMonitor*)Duktape_GetBuffer(ctx, -1, NULL);
-	ILibChain_SafeRemoveEx(Duktape_GetChain(ctx), nm->addressMonitor);
-
 	if (nm->addressTable != NULL) { ILibHashtable_Destroy(nm->addressTable); }
+
+	if (ILibIsChainBeingDestroyed(Duktape_GetChain(ctx)) != 0) { return(0); }
+	ILibChain_SafeRemoveEx(Duktape_GetChain(ctx), nm->addressMonitor);
 
 	return(0);
 }

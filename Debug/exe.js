@@ -5,6 +5,39 @@ var js;
 var sz = new Buffer(8);
 var exeLen = 0;
 
+var i;
+var dependency = [];
+var addOn = null;
+for (i = 1; i < process.argv.length; ++i)
+{
+    if(process.argv[i].startsWith('-i'))
+    {
+        try
+        {
+            dependency.push({ name:process.argv[i].slice(2,process.argv[i].indexOf('.js')), base64: fs.readFileSync(process.argv[i].slice(2)).toString('base64') });
+            process._argv.splice(i, 1);
+            i = 0;
+        }
+        catch(e)
+        {
+            console.log(e);
+            process.exit();
+        }
+    }
+}
+
+if (dependency.length > 0)
+{
+    console.log("\nIntegrating Dependencies:")
+    addOn = "";
+    for(i=0;i<dependency.length;++i)
+    {
+        addOn += ("addModule('" + dependency[i].name + "', Buffer.from('" + dependency[i].base64 + "', 'base64'));\n");
+        console.log("   " + dependency[i].name);
+    }
+    console.log("");
+}
+
 if (process.argv0.endsWith('.js'))
 {
     console.log("Non-integrated executable");
@@ -47,6 +80,7 @@ else
     console.log("Original Binary Size: " + exeLen);
 }
 
+if (addOn != null) { js = Buffer.concat([Buffer.from(addOn), js]); }
 console.log("JavaScript Length: " + js.length);
 w.write(exe.slice(0, exeLen), OnWroteExe);
 

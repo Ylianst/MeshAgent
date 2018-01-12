@@ -257,35 +257,36 @@ void kvm_send_display_list(ILibKVM_WriteHandler writeHandler, void *reserved)
 
 	// Not looked at the number of screens yet
 	if (SCREEN_COUNT == -1) return;
-
+	char *buffer = ILibMemory_AllocateA((5 + SCREEN_COUNT) * 2);
+	memset(buffer, 0xFF, ILibMemory_AllocateA_Size(buffer));
 	// Send the list of possible displays to remote
 	if (SCREEN_COUNT == 0 || SCREEN_COUNT == 1)
 	{
 		// Only one display, send empty
-		((unsigned short*)ILibScratchPad2)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);		// Write the type
-		((unsigned short*)ILibScratchPad2)[1] = (unsigned short)htons((unsigned short)(10 + (2 * SCREEN_COUNT)));	// Write the size
-		((unsigned short*)ILibScratchPad2)[2] = (unsigned short)htons((unsigned short)(0));							// Screen Count
-		((unsigned short*)ILibScratchPad2)[2] = (unsigned short)htons((unsigned short)(0));							// Selected Screen
+		((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);		// Write the type
+		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(8));					// Write the size
+		((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)(0));							// Screen Count
+		((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)(0));							// Selected Screen
 
-		writeHandler(ILibScratchPad2, (10 + (2 * SCREEN_COUNT)), reserved);
+		writeHandler(buffer, 8, reserved);
 	}
 	else
 	{
 		// Many displays
-		((unsigned short*)ILibScratchPad2)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);		// Write the type
-		((unsigned short*)ILibScratchPad2)[1] = (unsigned short)htons((unsigned short)(10 + (2 * SCREEN_COUNT)));	// Write the size
-		((unsigned short*)ILibScratchPad2)[2] = (unsigned short)htons((unsigned short)(SCREEN_COUNT + 1));			// Screen Count
-		((unsigned short*)ILibScratchPad2)[3] = (unsigned short)htons((unsigned short)(-1));						// Possible Screen (ALL)
+		((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);		// Write the type
+		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(10 + (2 * SCREEN_COUNT)));	// Write the size
+		((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)(SCREEN_COUNT + 1));			// Screen Count
+		((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)(-1));						// Possible Screen (ALL)
 		for (i = 0; i < SCREEN_COUNT; i++) {
-			((unsigned short*)ILibScratchPad2)[4 + i] = (unsigned short)htons((unsigned short)(i + 1));				// Possible Screen
+			((unsigned short*)buffer)[4 + i] = (unsigned short)htons((unsigned short)(i + 1));				// Possible Screen
 		}
 		if (SCREEN_SEL == 0) {
-			((unsigned short*)ILibScratchPad2)[4 + i] = (unsigned short)htons((unsigned short)(-1));				// Selected Screen (All)
+			((unsigned short*)buffer)[4 + i] = (unsigned short)htons((unsigned short)(-1));				// Selected Screen (All)
 		} else {
-			((unsigned short*)ILibScratchPad2)[4 + i] = (unsigned short)htons((unsigned short)(SCREEN_SEL));		// Selected Screen
+			((unsigned short*)buffer)[4 + i] = (unsigned short)htons((unsigned short)(SCREEN_SEL));		// Selected Screen
 		}
 
-		writeHandler(ILibScratchPad2, (10 + (2 * SCREEN_COUNT)), reserved);
+		writeHandler(buffer, (10 + (2 * SCREEN_COUNT)), reserved);
 	}
 }
 
@@ -378,6 +379,7 @@ void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *r
 
 			if (SCREEN_X != x || SCREEN_Y != y || SCREEN_WIDTH != w || SCREEN_HEIGHT != h || SCALING_FACTOR != SCALING_FACTOR_NEW)
 			{
+				printf("RESOLUTION CHANGED! (supposedly)\n");
 				SCREEN_X = x;
 				SCREEN_Y = y;
 				SCREEN_WIDTH = w;
@@ -617,6 +619,32 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 	return size;
 }
 
+typedef struct kvm_data_handler
+{
+	ILibKVM_WriteHandler handler;
+	void *reserved;
+	int len;
+	char buffer[];
+}kvm_data_handler;
+
+//void __stdcall kvm_relay_feeddata_ex_APC(ULONG_PTR data)
+//{
+//	kvm_data_handler *k = (kvm_data_handler*)data;
+//
+//	k->handler(k->buffer, k->len, k->reserved);
+//	free((void*)data);
+//}
+//ILibTransport_DoneState kvm_relay_feeddata_ex(char *buf, int len, void *reserved)
+//{
+//	kvm_data_handler *data = (kvm_data_handler*)ILibMemory_Allocate(sizeof(kvm_data_handler) + len, 0, NULL, NULL);
+//	data->handler = (ILibKVM_WriteHandler)((void**)reserved)[0];
+//	data->reserved = ((void**)reserved)[1];
+//	data->len = len;
+//	memcpy_s(data->buffer, len, buf, len);
+//
+//	QueueUserAPC((PAPCFUNC)kvm_relay_feeddata_ex_APC, kvmthread, (ULONG_PTR)data);
+//}
+
 // Feed network data into the KVM. Return the number of bytes consumed.
 // This method consumes as many input commands as it can.
 int kvm_relay_feeddata(char* buf, int len, ILibKVM_WriteHandler writeHandler, void *reserved)
@@ -633,6 +661,7 @@ int kvm_relay_feeddata(char* buf, int len, ILibKVM_WriteHandler writeHandler, vo
 #else
 	int len2 = 0;
 	int ptr = 0;
+	//while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, kvm_relay_feeddata_ex, (void*[]) {writeHandler, reserved})) != 0) { ptr += len2; }
 	while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, writeHandler, reserved)) != 0) { ptr += len2; }
 	return ptr;
 #endif
@@ -889,7 +918,7 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 
 		// We can't go full speed here, we need to slow this down.
 		height = FRAME_RATE_TIMER;
-		while (!g_shutdown && height > 0) { if (height > 50) { height -= 50; Sleep(50); } else { Sleep(height); height = 0; } }
+		while (!g_shutdown && height > 0) { if (height > 50) { height -= 50; Sleep(50); } else { Sleep(height); height = 0; } SleepEx(0, TRUE); }
 	}
 
 	KVMDEBUG("kvm_server_mainloop / end3", (int)GetCurrentThreadId());

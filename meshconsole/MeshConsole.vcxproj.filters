@@ -13,18 +13,12 @@
     <Filter Include="Meshcore\KVM">
       <UniqueIdentifier>{ab71a2fa-eafc-44d7-9c35-62f7d60fee6a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="MicroLMS">
-      <UniqueIdentifier>{aeb98903-4a96-453a-8c67-7a824d947bcc}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\duktape.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microscript\ILibAsyncSocket_Duktape.h">
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_Debugger.h">
@@ -105,9 +99,6 @@
     <ClInclude Include="..\meshcore\meshdefines.h">
       <Filter>Meshcore</Filter>
     </ClInclude>
-    <ClInclude Include="..\microscript\ILibDuktape_ProcessPipe.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_fs.h">
       <Filter>Microscript</Filter>
     </ClInclude>
@@ -141,36 +132,6 @@
     <ClInclude Include="..\microscript\ILibDuktape_WebRTC.h">
       <Filter>Microscript</Filter>
     </ClInclude>
-    <ClInclude Include="..\microlms\lms\ILibLMS.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\lms\ILibLMS-WebSite.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\HECI_if.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\HECIWin.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\LMEConnection.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\LMS_if.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\LMS_if_constants.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\mei.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\PTHICommand.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microlms\heci\StatusCodeDefinitions.h">
-      <Filter>MicroLMS</Filter>
-    </ClInclude>
     <ClInclude Include="..\microstack\ILibMulticastSocket.h">
       <Filter>Microstack</Filter>
     </ClInclude>
@@ -190,12 +151,12 @@
     <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h">
       <Filter>Microscript</Filter>
     </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_HECI.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\microscript\duktape.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microscript\ILibAsyncSocket_Duktape.c">
       <Filter>Microscript</Filter>
     </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_Debugger.c">
@@ -274,9 +235,6 @@
       <Filter>Meshcore</Filter>
     </ClCompile>
     <ClCompile Include="main.c" />
-    <ClCompile Include="..\microscript\ILibDuktape_ProcessPipe.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_fs.c">
       <Filter>Microscript</Filter>
     </ClCompile>
@@ -310,18 +268,6 @@
     <ClCompile Include="..\microscript\ILibDuktape_WebRTC.c">
       <Filter>Microscript</Filter>
     </ClCompile>
-    <ClCompile Include="..\microlms\lms\ILibLMS.c">
-      <Filter>MicroLMS</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microlms\heci\HECIWin.c">
-      <Filter>MicroLMS</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microlms\heci\LMEConnection.c">
-      <Filter>MicroLMS</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microlms\heci\PTHICommand.c">
-      <Filter>MicroLMS</Filter>
-    </ClCompile>
     <ClCompile Include="..\microstack\ILibMulticastSocket.c">
       <Filter>Microstack</Filter>
     </ClCompile>
@@ -341,6 +287,12 @@
       <Filter>Microscript</Filter>
     </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_ChildProcess.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_HECI.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_HttpStream.c">
       <Filter>Microscript</Filter>
     </ClCompile>
   </ItemGroup>

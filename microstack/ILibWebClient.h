@@ -257,9 +257,7 @@ void* ILibWebClient_GetChainFromWebStateObject(ILibWebClient_StateObject wcdo);
 
 typedef enum ILibWebClient_RequestToken_HTTPS
 {
-#ifndef MICROSTACK_NOTLS
 	ILibWebClient_RequestToken_USE_HTTPS = 0,
-#endif
 	ILibWebClient_RequestToken_USE_HTTP = 1
 }ILibWebClient_RequestToken_HTTPS;
 
@@ -267,6 +265,7 @@ typedef enum ILibWebClient_RequestToken_HTTPS
 void ILibWebClient_SetTLS(ILibWebClient_RequestManager manager, void *ssl_ctx, ILibWebClient_OnSslConnection OnSslConnection);
 int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_cert* leafCert, X509* nonLeafCert, ILibWebClient_OnHttpsConnection OnHttpsConnection);
 void ILibWebClient_Request_SetHTTPS(ILibWebClient_RequestToken reqToken, ILibWebClient_RequestToken_HTTPS requestMode);
+void ILibWebClient_Request_SetSNI(ILibWebClient_RequestToken reqToken, char *host, int hostLen);
 #endif
 
 // Added methods

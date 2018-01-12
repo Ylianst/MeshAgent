@@ -5104,9 +5104,17 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 	TempStringLength2 = TempStringLength-result2->FirstResult->datalength;
 	if (Path != NULL)
 	{
-		if ((*Path = (char*)malloc(TempStringLength2 + 1)) == NULL) ILIBCRITICALEXIT(254);
-		memcpy_s(*Path, TempStringLength2 + 1, TempString + (result2->FirstResult->datalength), TempStringLength2);
-		(*Path)[TempStringLength2] = '\0';
+		if ((*Path = (char*)malloc(TempStringLength2 + 2)) == NULL) ILIBCRITICALEXIT(254);
+		if (TempStringLength2 == 0)
+		{
+			(*Path)[0] = '/';
+			(*Path)[1] = '\0';
+		}
+		else
+		{
+			memcpy_s(*Path, TempStringLength2 + 2, TempString + (result2->FirstResult->datalength), TempStringLength2);
+			(*Path)[TempStringLength2] = '\0';
+		}
 	}
 
 	// Parse Port Number
@@ -5333,7 +5341,7 @@ void ILibSetDirective(struct packetheader *packet, char* Directive, int Directiv
 
 	if (packet->ReservedMemory != NULL)
 	{
-		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (DirectiveLength + DirectiveObjLength + 2))
+		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (unsigned int)(DirectiveLength + DirectiveObjLength + 2))
 		{
 			packet->Directive = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveLength + 1);
 			packet->DirectiveObj = (char*)ILibMemory_AllocateA_Get(packet->ReservedMemory, (size_t)DirectiveObjLength + 1);

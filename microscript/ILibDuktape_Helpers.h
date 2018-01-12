@@ -32,6 +32,10 @@ typedef void(*ILibDuktape_HelperEvent)(duk_context *ctx, void *user);
 #define ILibDuktape_MeshAgent_Cert_Server					"\xFF_selftlscert"
 #define CONTEXT_GUID_BUFFER									"_CONTEXT_GUID"
 #define ILibDuktape_Context_Chain							"\xFF_chainptr"
+#define ILibDuktape_OBJID									"_ObjectID"
+
+#define ILibDuktape_CR2HTTP									"\xFF_CR2HTTP"
+#define ILibDuktape_CR2Options								"\xFF_CR2Options"
 
 char* Duktape_GetContextGuidHex(duk_context *ctx);
 void *Duktape_GetChain(duk_context *ctx);
@@ -62,6 +66,7 @@ int ILibDuktape_Process_GetExitCode(duk_context *ctx);
 
 void ILibDuktape_CreateEventWithGetter(duk_context *ctx, char *propName, duk_c_function getterMethod);
 void ILibDuktape_CreateEventWithGetterEx(duk_context *ctx, char *propName, void *heapptr);
+void ILibDuktape_CreateEventWithGetterAndCustomProperty(duk_context *ctx, char *customPropName, char *propName, duk_c_function getterMethod);
 void ILibDuktape_CreateEventWithSetter(duk_context *ctx, char *propName, char *propNamePtr, void **hptr);
 void ILibDuktape_CreateEventWithSetterEx(duk_context *ctx, char *propName, duk_c_function setterMethod);
 void ILibDuktape_CreateEventWithGetterAndSetter(duk_context *ctx, char *propName, char *propNamePtr, void **hptr, duk_c_function getterMethod);
@@ -74,6 +79,9 @@ void ILibDuktape_CreateEventWithGetterAndSetterWithMetaData(duk_context *ctx, ch
 #define ILibDuktape_CreateInstanceMethodWithBooleanProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_c_function(context, funcImpl, numArgs);duk_push_boolean(context, propValue);duk_put_prop_string(ctx, -2, propName);duk_put_prop_string(ctx, -2, methodName);
 #define ILibDuktape_CreateInstanceMethodWithIntProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_c_function(context, funcImpl, numArgs);duk_push_int(context, propValue);duk_put_prop_string(ctx, -2, propName);duk_put_prop_string(ctx, -2, methodName);
 #define ILibDuktape_CreateInstanceMethodWithNumberProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_c_function(context, funcImpl, numArgs);duk_push_number(context, (propValue));duk_put_prop_string(ctx, -2, propName);duk_put_prop_string(ctx, -2, methodName);
+void ILibDuktape_CreateInstanceMethodWithProperties(duk_context *ctx, char *funcName, duk_c_function funcImpl, duk_idx_t numArgs, unsigned int propertyCount, ...);
+duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val);
+
 void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodName, duk_c_function impl, duk_idx_t argCount);
 void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr);
 void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName);
@@ -81,8 +89,21 @@ void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName);
 #define ILibDuktape_CreateFinalizer(context, funcImpl) 	duk_push_c_function(context, funcImpl, 1); duk_set_finalizer(context, -2);														
 
 void *ILibDuktape_Memory_Alloc(duk_context *ctx, duk_size_t size);
+void *ILibDuktape_Memory_AllocEx(duk_context *ctx, duk_idx_t index, duk_size_t size);
 void ILibDuktape_Helper_AddHeapFinalizer(duk_context *ctx, ILibDuktape_HelperEvent handler, void *user);
 
 void ILibDuktape_Push_ObjectStash(duk_context *ctx);
+
+void ILibDuktape_PointerValidation_Init(duk_context *ctx);
+void ILibDuktape_ValidatePointer(void *chain, void *ptr);
+void ILibDuktape_InValidatePointer(void *chain, void *ptr);
+int ILibDuktape_IsPointerValid(void *chain, void *ptr);
+#define ILibDuktape_ValidateHeapPointer(ctx, objIdx) ILibDuktape_ValidatePointer(Duktape_GetChain(ctx), duk_get_heapptr(ctx, objIdx))
+#define ILibDuktape_InValidateHeapPointer(ctx, objIdx) ILibDuktape_InValidatePointer(Duktape_GetChain(ctx), duk_get_heapptr(ctx, objIdx))
+
+typedef void(*ILibDuktape_ImmediateHandler)(duk_context *ctx, void ** args, int argsLen);
+void ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback);
+
+#define ILibDuktape_WriteID(ctx, id) duk_push_string(ctx, id);duk_put_prop_string(ctx, -2, ILibDuktape_OBJID)
 
 #endif

@@ -235,6 +235,7 @@ duk_ret_t ILibDuktape_WritableStream_End(duk_context *ctx)
 				duk_dup(ctx, 2);								// [stream][flush]
 				duk_put_prop_string(ctx, -2, "_Finish");		// [stream]
 			}
+			stream->endBytes = (int)bufferLen;
 			if (stream->WriteSink(stream, buffer, (int)bufferLen, stream->WriteSink_User) == ILibTransport_DoneState_INCOMPLETE)
 			{
 				// Incomplete, wait for SendOK
@@ -265,11 +266,40 @@ duk_ret_t ILibDuktape_WritableStream_End_Getter(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_WritableStream_End, DUK_VARARGS);
 	return 1;
 }
+duk_ret_t ILibDuktape_WritableStream_UnPipeSink(duk_context *ctx)
+{
+	duk_dup(ctx, 0);
+	duk_push_this(ctx);
+	//printf("UNPIPE: [%s] => X => [%s]\n", Duktape_GetStringPropertyValue(ctx, -2, ILibDuktape_OBJID, "unknown"), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown"));
+	return(0);
+}
+duk_ret_t ILibDuktape_WritableStream_PipeSink(duk_context *ctx)
+{
+	ILibDuktape_WritableStream *ws;
+	duk_push_this(ctx);													// [writable]
+	duk_get_prop_string(ctx, -1, ILibDuktape_WritableStream_WSPTRS);
+	ws = (ILibDuktape_WritableStream*)Duktape_GetBuffer(ctx, -1, NULL);
+
+	if (duk_has_prop_string(ctx, 0, "\xFF_ReadableStream_PTRS"))
+	{
+		duk_get_prop_string(ctx, 0, "\xFF_ReadableStream_PTRS");	// [writable][rs]
+		ws->pipedReadable_native = (struct ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
+	}
+	ws->pipedReadable = duk_get_heapptr(ctx, 0);
+	
+	duk_dup(ctx, 0);
+	duk_push_this(ctx);
+	//printf("PIPE: [%s] => [%s]\n", Duktape_GetStringPropertyValue(ctx, -2, ILibDuktape_OBJID, "unknown"), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown"));
+
+	return(0);
+}
+
 ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, ILibDuktape_WritableStream_WriteHandler WriteHandler, ILibDuktape_WritableStream_EndHandler EndHandler, void *user)
 {
 	ILibDuktape_WritableStream *retVal;
 	ILibDuktape_EventEmitter *emitter;
 
+	ILibDuktape_PointerValidation_Init(ctx);
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_WritableStream));			// [obj][buffer]
 	retVal = (ILibDuktape_WritableStream*)Duktape_GetBuffer(ctx, -1, NULL);	// [obj][buffer]
 	memset(retVal, 0, sizeof(ILibDuktape_WritableStream));
@@ -283,7 +313,8 @@ ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, IL
 	retVal->WriteSink_User = user;
 
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "pipe", &(retVal->OnPipe));
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "pipe");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "unpipe");
 	ILibDuktape_EventEmitter_CreateEvent(emitter, "drain", &(retVal->OnDrain));
 	ILibDuktape_EventEmitter_CreateEvent(emitter, "finish", &(retVal->OnFinish));
 	ILibDuktape_EventEmitter_CreateEvent(emitter, "error", &(retVal->OnError));
@@ -291,5 +322,7 @@ ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, IL
 	ILibDuktape_CreateInstanceMethod(ctx, "write", ILibDuktape_WritableStream_Write, DUK_VARARGS);
 	ILibDuktape_CreateEventWithGetter(ctx, "end", ILibDuktape_WritableStream_End_Getter);
 
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "pipe", ILibDuktape_WritableStream_PipeSink);
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "unpipe", ILibDuktape_WritableStream_UnPipeSink);
 	return retVal;
 }

@@ -59,8 +59,8 @@ typedef struct
 	struct util_cert selftlscert;
 	struct util_cert selftlsclientcert;
 	SSL_CTX* ctx;
-	char tlsServerCertThumbprint[32];
-	char g_selfid[UTIL_HASHSIZE];
+	char tlsServerCertThumbprint[UTIL_SHA256_HASHSIZE];
+	char g_selfid[UTIL_SHA256_HASHSIZE];
 
 	ILibWebRTC_TURN_ConnectFlags mTurnSetting;
 	struct sockaddr_in6 mTurnServer;

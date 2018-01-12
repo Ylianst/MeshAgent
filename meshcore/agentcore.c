@@ -41,11 +41,6 @@ limitations under the License.
 #include "microscript/ILibDuktape_ScriptContainer.h"
 #include "../microstack/ILibIPAddressMonitor.h"
 
-
-#ifndef _NOHECI
-#include "microlms/lms/ILibLMS.h"
-#endif
-
 #ifdef _POSIX
 #include <sys/stat.h>
 #endif
@@ -114,13 +109,13 @@ typedef struct ScriptContainerSettings
 typedef struct MeshCommand_BinaryPacket_ServerId
 {
 	unsigned short command;
-	char serverId[UTIL_HASHSIZE];
+	char serverId[UTIL_SHA384_HASHSIZE];
 }MeshCommand_BinaryPacket_ServerId;
 typedef struct MeshCommand_BinaryPacket_AuthRequest
 {
 	unsigned short command;
-	char serverHash[UTIL_HASHSIZE];
-	char serverNonce[UTIL_HASHSIZE];
+	char serverHash[UTIL_SHA384_HASHSIZE];
+	char serverNonce[UTIL_SHA384_HASHSIZE];
 }MeshCommand_BinaryPacket_AuthRequest;
 typedef struct MeshCommand_BinaryPacket_AuthVerify_Header
 {
@@ -159,7 +154,7 @@ typedef struct MeshCommand_BinaryPacket_AuthInfo
 	unsigned int agentId;
 	unsigned int agentVersion;
 	unsigned int platformType;
-	char MeshID[UTIL_HASHSIZE];
+	char MeshID[UTIL_SHA384_HASHSIZE];
 	unsigned int capabilities;
 	unsigned short hostnameLen;
 	char hostname[];
@@ -168,7 +163,7 @@ typedef struct MeshCommand_BinaryPacket_CoreModule
 {
 	unsigned short command;
 	unsigned short request;
-	char coreModuleHash[UTIL_HASHSIZE];
+	char coreModuleHash[UTIL_SHA384_HASHSIZE];
 	char coreModule[];
 }MeshCommand_BinaryPacket_CoreModule;
 #pragma pack(pop)
@@ -735,16 +730,20 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 {
 	// Peer disconnected the data channel
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
-	duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
-	duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
-	duk_pop(ptrs->ctx);											// ...
+	if (ptrs->ctx != NULL)
+	{
+		duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
+		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
+		duk_pop(ptrs->ctx);											// ...
 
-	memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
+		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
+	}
 	kvm_cleanup();
 }
 
 void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
+	//printf("KVM/PAUSE\n");
 #ifdef _POSIX
 	ILibProcessPipe_Pipe_Pause(((RemoteDesktop_Ptrs*)user)->kvmPipe);
 #else
@@ -753,6 +752,8 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 }
 void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *sender, void *user)
 {
+	//printf("KVM/RESUME\n");
+
 #ifdef _POSIX
 	ILibProcessPipe_Pipe_Resume(((RemoteDesktop_Ptrs*)user)->kvmPipe);
 #else
@@ -777,7 +778,7 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 	}
 	return 0;
 }
-void ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(ILibDuktape_readableStream *stream, void *user)
+void ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(ILibDuktape_readableStream *stream, void *wstream, void *user)
 {
 #ifdef _LINKVM
 #ifdef WIN32
@@ -792,6 +793,11 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(ILibDuktape_readableStream *st
 #endif
 }
 #endif
+
+int ILibDuktape_MeshAgent_remoteDesktop_unshiftSink(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user)
+{
+	return(0);
+}
 
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 {
@@ -816,6 +822,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	duk_pop(ctx);
 
 	duk_push_object(ctx);										// [MeshAgent][RemoteDesktop]
+	ILibDuktape_WriteID(ctx, "MeshAgent.kvmSession");
 	duk_dup(ctx, -1);											// [MeshAgent][RemoteDesktop][RemoteDesktop]
 	duk_put_prop_string(ctx, -3, REMOTE_DESKTOP_STREAM);		// [MeshAgent][RemoteDesktop]
 	duk_push_fixed_buffer(ctx, sizeof(RemoteDesktop_Ptrs));		// [MeshAgent][RemoteDesktop][buffer]
@@ -825,7 +832,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	ptrs->MeshAgentObject = duk_get_heapptr(ctx, -2);
 	ptrs->ctx = ctx;
 	ptrs->object = duk_get_heapptr(ctx, -1);
-	ptrs->stream = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_MeshAgent_RemoteDesktop_WriteSink, ILibDuktape_MeshAgent_RemoteDesktop_EndSink, ILibDuktape_MeshAgent_RemoteDesktop_PauseSink, ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink, ptrs);
+	ptrs->stream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_MeshAgent_RemoteDesktop_WriteSink, ILibDuktape_MeshAgent_RemoteDesktop_EndSink, ILibDuktape_MeshAgent_RemoteDesktop_PauseSink, ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink, ILibDuktape_MeshAgent_remoteDesktop_unshiftSink, ptrs);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MeshAgent_RemoteDesktop_Finalizer);
 	ptrs->stream->readableStream->PipeHookHandler = ILibDuktape_MeshAgent_RemoteDesktop_PipeHook;
 
@@ -868,24 +875,7 @@ duk_ret_t ILibDuktape_MeshAgent_ConnectedServer(duk_context *ctx)
 	}
 	return 1;
 }
-#ifndef _NOHECI
-duk_ret_t ILibDuktape_MeshAgent_MEInfo(duk_context *ctx)
-{
-	char *data;
-	int len = ILibLMS_GetMeInformation(&data, 0);
-	if (len > 0)
-	{
-		duk_push_lstring(ctx, data, len);
-		duk_json_decode(ctx, -1);
-		free(data);
-	}
-	else
-	{
-		duk_push_null(ctx);
-	}
-	return 1;
-}
-#endif
+
 duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 {
 	char *data;
@@ -931,7 +921,24 @@ duk_ret_t ILibDuktape_MeshAgent_ServerUrl(duk_context *ctx)
 	duk_push_string(ctx, agent->serveruri);						// [MeshAgent][ptr][uri]
 	return(1);
 }
+duk_ret_t ILibDuktape_MeshAgent_isControlChannelConnected(duk_context *ctx)
+{
+	duk_push_this(ctx);								// [agent]
+	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);	// [agent][ptr]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
 
+	duk_push_boolean(ctx, agent->serverAuthState == 3 ? 1 : 0);
+	return(1);
+}
+duk_ret_t ILibDuktape_MeshAgent_eval(duk_context *ctx)
+{
+	duk_size_t evalStrLen;
+	char *evalStr = duk_get_lstring(ctx, 0, &evalStrLen);
+
+	printf("eval(): %s\n", evalStr);
+	duk_eval_string(ctx, evalStr);
+	return(1);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -985,6 +992,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_CreateEvent(emitter, "Ready", &(ptrs->OnReady));
 		ILibDuktape_EventEmitter_CreateEvent(emitter, "Connected", &(ptrs->OnConnect));
 
+		ILibDuktape_CreateEventWithGetter(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected);
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
 		ILibDuktape_CreateEventWithGetter(ctx, "ConnectedServer", ILibDuktape_MeshAgent_ConnectedServer);
 		ILibDuktape_CreateEventWithGetter(ctx, "ServerUrl", ILibDuktape_MeshAgent_ServerUrl);
@@ -1001,15 +1009,9 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 0);
 #endif
 
-#ifdef _NOHECI
-		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasHECI", 0);
-#else
-		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasHECI", 1);
-		ILibDuktape_CreateEventWithGetter(ctx, "MEInfo", ILibDuktape_MeshAgent_MEInfo);
-		ILibDuktape_EventEmitter_CreateEventEx(emitter, "lmsNotification");
-#endif
 		ILibDuktape_CreateEventWithGetter(ctx, "NetInfo", ILibDuktape_MeshAgent_NetInfo);
 		ILibDuktape_CreateInstanceMethod(ctx, "ExecPowerState", ILibDuktape_MeshAgent_ExecPowerState, DUK_VARARGS);
+		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 	}
@@ -1265,6 +1267,10 @@ duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID)
 
 	duk_destroy_heap(oldCtx);
 	agent->meshCoreCtx = newCtx;
+	if (agent->proxyServer != NULL)
+	{
+		memcpy_s(&(ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx)->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
+	}
 
 	return(newCtx);
 }
@@ -1378,15 +1384,15 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				SHA384_Init(&c);
 				util_keyhash2(peer, ILibScratchPad);
 				SHA384_Update(&c, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)); // Server web hash
-				SHA384_Update(&c, agent->serverNonce, UTIL_HASHSIZE); // Server nonce
-				SHA384_Update(&c, agent->agentNonce, UTIL_HASHSIZE); // Agent nonce
+				SHA384_Update(&c, agent->serverNonce, UTIL_SHA384_HASHSIZE); // Server nonce
+				SHA384_Update(&c, agent->agentNonce, UTIL_SHA384_HASHSIZE); // Agent nonce
 				SHA384_Final((unsigned char*)ILibScratchPad, &c);
 
 				// Place the signature & send
 				evp_prikey = agent->selfcert.pkey;
 				rsa_prikey = EVP_PKEY_get1_RSA(evp_prikey);
 				signLen = sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) - rav->certLen;
-				if (RSA_sign(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_HASHSIZE, (unsigned char*)(rav->data + rav->certLen), (unsigned int*)&signLen, rsa_prikey) == 1) 
+				if (RSA_sign(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_SHA384_HASHSIZE, (unsigned char*)(rav->data + rav->certLen), (unsigned int*)&signLen, rsa_prikey) == 1)
 				{
 					// Signature succesful, send the result to the server
 					ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rav, sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + rav->certLen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
@@ -1410,7 +1416,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 				if (cmdLen > (int)(sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + AuthVerify->certLen))
 				{
-					int hashlen = UTIL_HASHSIZE;
+					int hashlen = UTIL_SHA384_HASHSIZE;
 					SHA512_CTX c;
 					X509* serverCert = NULL;
 					EVP_PKEY *evp_pubkey;
@@ -1421,7 +1427,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 					// Check if this certificate public key hash matches what we want
 					X509_pubkey_digest(serverCert, EVP_sha384(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA384
-					if (memcmp(ILibScratchPad, agent->serverHash, UTIL_HASHSIZE) != 0) {
+					if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA384_HASHSIZE) != 0) {
 						X509_pubkey_digest(serverCert, EVP_sha256(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA256 (For older .mshx policy file)
 						if (memcmp(ILibScratchPad, agent->serverHash, 32) != 0) {
 							printf("Server certificate mismatch\r\n"); break; // TODO: Disconnect
@@ -1431,15 +1437,15 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					// Compute the authentication hash
 					SHA384_Init(&c);
 					util_keyhash2(peer, ILibScratchPad);
-					SHA384_Update(&c, ILibScratchPad, UTIL_HASHSIZE);
-					SHA384_Update(&c, agent->agentNonce, UTIL_HASHSIZE);
-					SHA384_Update(&c, agent->serverNonce, UTIL_HASHSIZE);
+					SHA384_Update(&c, ILibScratchPad, UTIL_SHA384_HASHSIZE);
+					SHA384_Update(&c, agent->agentNonce, UTIL_SHA384_HASHSIZE);
+					SHA384_Update(&c, agent->serverNonce, UTIL_SHA384_HASHSIZE);
 					SHA384_Final((unsigned char*)ILibScratchPad, &c);
 
 					// Verify the hash signature using the server certificate
 					evp_pubkey = X509_get_pubkey(serverCert);
 					rsa_pubkey = EVP_PKEY_get1_RSA(evp_pubkey);
-					if (RSA_verify(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_HASHSIZE, (unsigned char*)AuthVerify->signature, AuthVerify->signatureLen, rsa_pubkey) == 1) 
+					if (RSA_verify(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_SHA384_HASHSIZE, (unsigned char*)AuthVerify->signature, AuthVerify->signatureLen, rsa_pubkey) == 1)
 					{
 						int hostnamelen = (int)strnlen_s(agent->hostname, sizeof(agent->hostname));
 						// Server signature verified, we are good to go.
@@ -1447,7 +1453,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 						// Send to the server information about this agent (TODO: Replace this with a struct)
 						MeshCommand_BinaryPacket_AuthInfo *info = (MeshCommand_BinaryPacket_AuthInfo*)ILibScratchPad2;
-						memset(info, 0, sizeof(MeshCommand_BinaryPacket_AuthInfo)); // Required because if hash are SHA256, they will not fully fill the struct.
+						memset(info, 0, sizeof(MeshCommand_BinaryPacket_AuthInfo)); // Required because if hash are SHA384, they will not fully fill the struct.
 						info->command = htons(MeshCommand_AuthInfo);
 						info->infoVersion = htonl(1);
 						info->agentId = htonl(MESH_AGENTID);
@@ -1558,13 +1564,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 			if (cmdLen > sizeof(MeshCommand_BinaryPacket_CoreModule)) // Setup a new mesh core. 
 			{
-				char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule"); // Get the reference to the SHA256 hash for the currently running code
+				char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule"); // Get the reference to the SHA384 hash for the currently running code
 				if (hashref == NULL || memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
 				{														
 					// If server sends us the same core, just do nothing.
 					// Server sent us a new core, start by storing it in the data store
 					ILibSimpleDataStore_PutEx(agent->masterDb, "CoreModule", 10, cm->coreModule, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule));	// Store the JavaScript in the data store
-					hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");					// Get the reference to the SHA256 hash
+					hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");					// Get the reference to the SHA384 hash
 					if (memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
 					{																						// Check the hash for sanity
 																											// Something went wrong, clear the data store
@@ -1577,7 +1583,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 						// Tell the server we are no longer running a core module
 						MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
-						rcm->command = htons(MeshCommand_CoreModuleHash);									// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+						rcm->command = htons(MeshCommand_CoreModuleHash);									// MeshCommand_CoreModuleHash (11), SHA384 hash of the code module
 						rcm->request = htons(requestid);													// Request id
 						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 						break;
@@ -1601,9 +1607,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 				// Create the server confirmation message that we are running the new core
 				MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
-				((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_CoreModuleHash);					// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+				((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_CoreModuleHash);					// MeshCommand_CoreModuleHash (11), SHA384 hash of the code module
 				((unsigned short*)ILibScratchPad2)[1] = htons(requestid);									// Request id
-				memcpy_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, hashref, UTIL_HASHSIZE);			// SHA256 hash
+				memcpy_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, hashref, UTIL_SHA384_HASHSIZE);			// SHA384 hash
 
 				// Send the confirmation to the server
 				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, sizeof(MeshCommand_BinaryPacket_CoreModule), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
@@ -1620,16 +1626,16 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 				// Confirm to the server that we are not running any core
 				MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
-				rcm->command = htons(MeshCommand_CoreModuleHash);											// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+				rcm->command = htons(MeshCommand_CoreModuleHash);											// MeshCommand_CoreModuleHash (11), SHA384 hash of the code module
 				rcm->request = htons(requestid);															// Request id
 				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 			}
 			break;
 		}
-		case MeshCommand_CoreModuleHash: // Request/return the SHA256 hash of the core module
+		case MeshCommand_CoreModuleHash: // Request/return the SHA384 hash of the core module
 		{
 			// Tell the server what core module we are running
-			char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");						// Get the reference to the SHA256 hash
+			char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");						// Get the reference to the SHA384 hash
 			int len = 4;
 
 			// If the agent is running with a local core, ignore this command
@@ -1637,9 +1643,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 			// Confirm to the server what core we are running
 			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
-			rcm->command = htons(MeshCommand_CoreModuleHash);										// MeshCommand_CoreModuleHash (11), SHA256 hash of the code module
+			rcm->command = htons(MeshCommand_CoreModuleHash);										// MeshCommand_CoreModuleHash (11), SHA384 hash of the code module
 			rcm->request = htons(requestid);														// Request id
-			if (hashref != NULL) { memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), hashref, UTIL_HASHSIZE); len = sizeof(MeshCommand_BinaryPacket_CoreModule); }
+			if (hashref != NULL) { memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), hashref, UTIL_SHA384_HASHSIZE); len = sizeof(MeshCommand_BinaryPacket_CoreModule); }
 
 			// Send the confirmation to the server
 			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, len, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
@@ -1653,9 +1659,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			// This is a request for the hash of the agent binary
 			// Built the response that includes our self hash
 			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
-			rcm->command = htons(MeshCommand_AgentHash);						// MeshCommand_AgentHash (12), SHA256 hash of the agent executable
+			rcm->command = htons(MeshCommand_AgentHash);						// MeshCommand_AgentHash (12), SHA384 hash of the agent executable
 			rcm->request = htons(requestid);									// Request id
-			memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), agent->agentHash, UTIL_HASHSIZE);// SHA256 hash of the agent executable
+			memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), agent->agentHash, UTIL_SHA384_HASHSIZE);// SHA384 hash of the agent executable
 
 			// Send the self hash back to the server
 			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, sizeof(MeshCommand_BinaryPacket_CoreModule), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
@@ -1669,7 +1675,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 #else
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update");
 #endif
-			char updateFileHash[UTIL_HASHSIZE];
+			char updateFileHash[UTIL_SHA384_HASHSIZE];
 			MeshCommand_BinaryPacket_CoreModule *cm = (MeshCommand_BinaryPacket_CoreModule*)cmd;
 
 			if (cmdLen == 4) {
@@ -1717,7 +1723,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			}
 
 			// Confirm we got a mesh agent update block
-			((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AgentUpdateBlock);             // MeshCommand_AgentHash (14), SHA256 hash of the agent executable
+			((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AgentUpdateBlock);             // MeshCommand_AgentHash (14), SHA384 hash of the agent executable
 			((unsigned short*)ILibScratchPad2)[1] = htons(requestid);                                // Request id
 			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 
@@ -1740,7 +1746,7 @@ void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject
 {
 #ifdef _REMOTELOGGING
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
-	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Poing");
+	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
 #endif
 }
 void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int InterruptFlag, struct packetheader *header, char *bodyBuffer, int *beginPointer, int endPointer, ILibWebClient_ReceiveStatus recvStatus, void *user1, void *user2, int *PAUSE)
@@ -2010,7 +2016,6 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	ILibAddHeaderLine(req, "Host", 4, host, (int)strnlen_s(host, serverUrlLen));
 
 	free(path);
-	free(host);
 
 	if (meshServer.sin6_family != AF_UNSPEC)
 	{
@@ -2018,6 +2023,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
 #ifndef MICROSTACK_NOTLS
 		ILibWebClient_Request_SetHTTPS(reqToken, result == ILibParseUriResult_TLS ? ILibWebClient_RequestToken_USE_HTTPS : ILibWebClient_RequestToken_USE_HTTP);
+		ILibWebClient_Request_SetSNI(reqToken, host, (int)strnlen_s(host, serverUrlLen));
 #endif
 		if ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
 		{
@@ -2045,6 +2051,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		ILibDestructPacket(req);
 	}
+	free(host);
 }
 void MeshServer_Connect(MeshAgentHostContainer *agent)
 {
@@ -2214,67 +2221,8 @@ void MeshAgent_RunScriptOnly_Finalizer(duk_context *ctx, void *user)
 }
 void MeshAgent_CoreModule_UncaughtException(duk_context *ctx, char *msg, void *user)
 {
+	printf("JavaCore UncaughtException: %s\n", msg);
 }
-
-#ifndef _NOHECI
-void MicroLMS_OnNotificationEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
-{
-	struct cimAlertIndication *values = (struct cimAlertIndication*)((void**)user)[0];
-	char *xml = (char*)((void**)user)[1];
-	int xmllen = ((int*)((void**)user)[2])[0];
-
-	if (Key1 == NULL && ((SCRIPT_ENGINE_ISOLATION*)Data)->reserved != 0)
-	{
-		// This is a regular Duktape Context
-		ILibDuktape_EventEmitter *emitter = MeshAgent_GetEventEmitter_FromCTX((duk_context*)Data);
-		if (emitter != NULL)
-		{
-			duk_push_heapptr(emitter->ctx, emitter->object);												// [MeshAgent]
-			duk_get_prop_string(emitter->ctx, -1, "emit");													// [MeshAgent][emit]
-			duk_swap_top(emitter->ctx, -2);																	// [emit][this]
-			duk_push_string(emitter->ctx, "lmsNotification");												// [emit][this][event]
-			duk_push_object(emitter->ctx);																	// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, values->MessageID.data, values->MessageID.dataLen);				// [emit][this][event][obj][msgId]
-			duk_put_prop_string(emitter->ctx, -2, "messageId");												// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, values->IndicationTime.data, values->IndicationTime.dataLen);	// [emit][this][event][obj][time]
-			duk_put_prop_string(emitter->ctx, -2, "indicationTime");										// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, values->MessageArguments.data, values->MessageArguments.dataLen);// [emit][this][event][obj][msg]
-			duk_put_prop_string(emitter->ctx, -2, "messageArguments");										// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, xml, xmllen);													// [emit][this][event][obj][rawXML]
-			duk_put_prop_string(emitter->ctx, -2, "rawXML");												// [emit][this][event][obj]
-			if (duk_pcall_method(emitter->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(emitter->ctx, "MeshAgent.onLmsNotification(): Error "); }
-			duk_pop(emitter->ctx);																			// ...
-		}
-	}
-}
-void MicroLMS_OnNotification(void *module, struct cimAlertIndication *values, char* xml, int xmllen) 
-{
-	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)((void**)ILibMemory_GetExtraMemory(module, ILibMemory_ILibLMS_CONTAINERSIZE))[0];
-	if (agent->meshCoreCtx != NULL)
-	{
-		ILibDuktape_EventEmitter *emitter = MeshAgent_GetEventEmitter_FromCTX(agent->meshCoreCtx);
-		if (emitter != NULL)
-		{
-			duk_push_heapptr(emitter->ctx, emitter->object);												// [MeshAgent]
-			duk_get_prop_string(emitter->ctx, -1, "emit");													// [MeshAgent][emit]
-			duk_swap_top(emitter->ctx, -2);																	// [emit][this]
-			duk_push_string(emitter->ctx, "lmsNotification");												// [emit][this][event]
-			duk_push_object(emitter->ctx);																	// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, values->MessageID.data, values->MessageID.dataLen);				// [emit][this][event][obj][msgId]
-			duk_put_prop_string(emitter->ctx, -2, "messageId");												// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, values->IndicationTime.data, values->IndicationTime.dataLen);	// [emit][this][event][obj][time]
-			duk_put_prop_string(emitter->ctx, -2, "indicationTime");										// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, values->MessageArguments.data, values->MessageArguments.dataLen);// [emit][this][event][obj][msg]
-			duk_put_prop_string(emitter->ctx, -2, "messageArguments");										// [emit][this][event][obj]
-			duk_push_lstring(emitter->ctx, xml, xmllen);													// [emit][this][event][obj][rawXML]
-			duk_put_prop_string(emitter->ctx, -2, "rawXML");												// [emit][this][event][obj]
-			if (duk_pcall_method(emitter->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(emitter->ctx, "MeshAgent.onLmsNotification(): Error "); }
-			duk_pop(emitter->ctx);																			// ...
-		}
-	}
-}
-#endif
-
 void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, void *user)
 {
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
@@ -2395,20 +2343,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (str != NULL) { ILibSimpleDataStore_PutEx(agentHost->masterDb, "WebProxy", 8, str, len); free(str); } else { ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "WebProxy", 8); }
 	}
 
-#ifndef _NOHECI
-#ifdef WIN32
-	// Check if the LMS service is installed in the service manager
-	if (GetServiceState(TEXT("LMS")) == 100) {
-		// If not, setup MicroLMS (Intel AMT interface service) if it's needed
-		if ((agentHost->microLMS = ILibLMS_CreateEx(agentHost->chain, agentHost->exePath, MicroLMS_OnNotification, sizeof(void*))) != NULL) MSG("MicroLMS activated\r\n");
-	}
-#else
-	// Setup MicroLMS (Intel AMT interface service) if it's needed
-	if ((agentHost->microLMS = ILibLMS_CreateEx(agentHost->chain, agentHost->exePath, MicroLMS_OnNotification, sizeof(void*))) != NULL) MSG("MicroLMS activated\r\n");
-#endif
-	if (agentHost->microLMS != NULL) { ((void**)ILibMemory_GetExtraMemory(agentHost->microLMS, ILibMemory_ILibLMS_CONTAINERSIZE))[0] = agentHost; }
-#endif
-
 	// Check to see if we need to import a settings file
 	importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx"));
 	importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
@@ -2427,11 +2361,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 		{
 			// Save the NodeId
-			util_tohex(agentHost->g_selfid, UTIL_HASHSIZE, ILibScratchPad);
+			util_tohex(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, ILibScratchPad);
 			RegSetValueExA(hKey, "NodeId", 0, REG_SZ, ILibScratchPad, (int)strlen(ILibScratchPad));
 
 			// Save the AgentHash
-			util_tohex(agentHost->agentHash, UTIL_HASHSIZE, ILibScratchPad);
+			util_tohex(agentHost->agentHash, UTIL_SHA384_HASHSIZE, ILibScratchPad);
 			RegSetValueExA(hKey, "AgentHash", 0, REG_SZ, ILibScratchPad, (int)strlen(ILibScratchPad));
 
 			// Save a bunch of values in the registry

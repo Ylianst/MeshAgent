@@ -23,16 +23,19 @@ limitations under the License.
 struct ILibDuktape_WritableStream;
 typedef ILibTransport_DoneState(*ILibDuktape_WritableStream_WriteHandler)(struct ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user);
 typedef void(*ILibDuktape_WritableStream_EndHandler)(struct ILibDuktape_WritableStream *stream, void *user);
-typedef void(*ILibDuktape_WriteableStream_WriteFlushNative)(struct ILibDuktape_WritableStream *stream, void *user);
+typedef int(*ILibDuktape_WriteableStream_WriteFlushNative)(struct ILibDuktape_WritableStream *stream, void *user);
 typedef void(*ILibDuktape_WritableStream_PipeHandler)(struct ILibDuktape_WritableStream *stream, void *readableSource, void *user);
+
+struct ILibDuktape_readableStream;
 
 typedef struct ILibDuktape_WritableStream
 {
+	int JSCreated;
 	duk_context *ctx;
 	void *obj;
 	void *OnDrain;
 	void *OnWriteFlush;
-	void *OnPipe;
+
 	ILibDuktape_WriteableStream_WriteFlushNative OnWriteFlushEx;
 	void *OnWriteFlushEx_User;
 
@@ -42,8 +45,12 @@ typedef struct ILibDuktape_WritableStream
 
 	ILibDuktape_WritableStream_WriteHandler WriteSink;
 	ILibDuktape_WritableStream_EndHandler EndSink;
-	ILibDuktape_WritableStream_PipeHandler PipeSink;
+
+	void *pipedReadable;
+	struct ILibDuktape_readableStream* pipedReadable_native;
+
 	void *WriteSink_User;
+	int endBytes;
 	int Reserved;
 } ILibDuktape_WritableStream;
 

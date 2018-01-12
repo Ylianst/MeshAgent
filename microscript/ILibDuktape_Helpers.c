@@ -245,6 +245,15 @@ void ILibDuktape_CreateEventWithGetter(duk_context *ctx, char *propName, duk_c_f
 	duk_push_c_function(ctx, getterMethod, 1);														// [obj][prop][getFunc]
 	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);								// [obj]
 }
+void ILibDuktape_CreateEventWithGetterAndCustomProperty(duk_context *ctx, char *customPropName, char *propName, duk_c_function getterMethod)
+{
+	duk_push_string(ctx, propName);																	// [obj][customProp][prop]
+	duk_push_c_function(ctx, getterMethod, 1);														// [obj][customProp][prop][getFunc]
+	duk_dup(ctx, -3);																				// [obj][customProp][prop][getFunc][customProp]
+	duk_put_prop_string(ctx, -2, customPropName);													// [obj][customProp][prop][getFunc]
+	duk_remove(ctx, -3);																			// [obj][prop][getFunc]
+	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);								// [obj]
+}
 
 void ILibDuktape_CreateEventWithGetterAndSetterEx(duk_context *ctx, char *propName, duk_c_function getterMethod, duk_c_function setterMethod)
 {
@@ -597,3 +606,127 @@ void *ILibDuktape_Memory_Alloc(duk_context *ctx, duk_size_t size)
 
 	return(retVal);
 }
+void *ILibDuktape_Memory_AllocEx(duk_context *ctx, duk_idx_t index, duk_size_t size)
+{
+	char *retVal = NULL;
+
+	duk_dup(ctx, index);											// [object]
+	ILibDuktape_Push_ObjectStash(ctx);								// [object][stash]
+	duk_push_fixed_buffer(ctx, size);								// [object][stash][buffer]
+	retVal = (char*)Duktape_GetBuffer(ctx, -1, NULL);
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(retVal));		// [object][stash]
+	duk_pop_2(ctx);													// ...
+	return(retVal);
+}
+void ILibDuktape_ValidatePointer(void *chain, void *ptr)
+{
+	ILibHashtable_Put(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0, (void*)0xFFFF);
+}
+void ILibDuktape_InValidatePointer(void *chain, void *ptr)
+{
+	ILibHashtable_Remove(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0);
+}
+int ILibDuktape_IsPointerValid(void *chain, void *ptr)
+{
+	return(ILibHashtable_Get(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0) == NULL ? 0 : 1);
+}
+void ILibDuktape_PointerValidation_Finalizer(duk_context *ctx, void *obj)
+{
+	void *chain = Duktape_GetChain(ctx);
+	ILibDuktape_InValidatePointer(chain, obj);
+}
+void ILibDuktape_PointerValidation_Init(duk_context *ctx)
+{
+	void *chain = Duktape_GetChain(ctx);
+	if (!ILibDuktape_IsPointerValid(chain, duk_get_heapptr(ctx, -1)))
+	{
+		// Not set up yet, so set it up
+		ILibDuktape_ValidatePointer(chain, duk_get_heapptr(ctx, -1));
+		ILibDuktape_CreateIndependentFinalizer(ctx, ILibDuktape_PointerValidation_Finalizer);
+	}
+}
+duk_ret_t ILibDuktape_Immediate_Sink(duk_context *ctx)
+{
+	ILibDuktape_ImmediateHandler userCallback = (ILibDuktape_ImmediateHandler)duk_get_pointer(ctx, 0);
+	void **args = NULL;
+	int argsLen, i;
+
+	duk_push_this(ctx);													// [immediate]
+	duk_dup(ctx, 1);													// [immediate][array]
+	if ((argsLen = (int)duk_get_length(ctx, -1)) > 0)
+	{
+		args = ILibMemory_AllocateA(sizeof(void*)*argsLen);
+		for (i = 0; i < argsLen; ++i)
+		{
+			duk_get_prop_index(ctx, -1, i);								// [immediate][array][arg]
+			args[i] = duk_get_pointer(ctx, -1);
+			duk_pop(ctx);												// [immediate][array]
+		}
+	}
+
+	duk_push_heap_stash(ctx);											// [immediate][array][stash]
+	duk_del_prop_string(ctx, -1, Duktape_GetStashKey(duk_get_heapptr(ctx, -3)));
+
+	if (userCallback != NULL) { userCallback(ctx, args, argsLen); }
+	return(0);
+}
+void ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback)
+{
+	int i = 0;
+	duk_push_global_object(ctx);										// [g]
+	duk_get_prop_string(ctx, -1, "setImmediate");						// [g][setImmediate]
+	duk_swap_top(ctx, -2);												// [setImmediate][this]
+	duk_push_c_function(ctx, ILibDuktape_Immediate_Sink, DUK_VARARGS);	// [setImmediate][this][func]
+	duk_push_pointer(ctx, callback);									// [setImmediate][this][func][userFunc]
+	duk_push_array(ctx);												// [setImmediate][this][func][userFunc][array]
+
+	while (args[i] != NULL && i < argsLen)
+	{
+		duk_get_prop_string(ctx, -1, "push");							// [setImmediate][this][func][userFunc][array][push]
+		duk_dup(ctx, -2);												// [setImmediate][this][func][userFunc][array][push][this]
+		duk_push_pointer(ctx, args[i]);									// [setImmediate][this][func][userFunc][array][push][this][val]
+		if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Immediate => Array.push(): "); }
+		duk_pop(ctx);													// [setImmediate][this][func][userFunc][array]
+		++i;
+	}
+
+	if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Immediate => immediate(): "); duk_pop(ctx); return; }
+
+																				// [immediate]
+	duk_push_heap_stash(ctx);													// [immediate][stash]
+	duk_swap_top(ctx, -2);														// [stash][immediate]
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));// [stash]
+	duk_pop(ctx);																// ...
+}
+void ILibDuktape_CreateInstanceMethodWithProperties(duk_context *ctx, char *funcName, duk_c_function funcImpl, duk_idx_t numArgs, unsigned int propertyCount, ...)
+{
+	unsigned int i;
+	char *name;
+	duk_idx_t valueIndex;
+	
+	duk_push_c_function(ctx, funcImpl, numArgs);		// [func]
+
+	va_list vlist;
+	va_start(vlist, propertyCount);
+	for (i = 0; i < propertyCount; ++i)
+	{
+		name = va_arg(vlist, char*);
+		valueIndex = va_arg(vlist, duk_idx_t);
+
+		duk_dup(ctx, valueIndex);						// [func][value]
+		duk_put_prop_string(ctx, -2, name);				// [func]
+	}
+	va_end(vlist);
+
+	while (propertyCount-- > 0) { duk_remove(ctx, -2); }
+
+	duk_put_prop_string(ctx, -2, funcName);
+}
+duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val)
+{
+	return(duk_push_int(ctx, val), duk_get_top_index(ctx));
+}
+
+
+
+

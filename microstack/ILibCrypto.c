@@ -21,6 +21,7 @@
 #else
 #include "md5.h"
 #include "sha1.h"
+#include "microstack/sha.h"
 #include <time.h>
 #endif
 
@@ -561,10 +562,10 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 	X509_NAME *cname = NULL;
 	X509 **x509p = NULL;
 	EVP_PKEY **pkeyp = NULL;
-	int hashlen = UTIL_HASHSIZE;
-	char hash[UTIL_HASHSIZE];
+	int hashlen = UTIL_SHA384_HASHSIZE;
+	char hash[UTIL_SHA384_HASHSIZE];
 	char serial[8];
-	char nameStr[(UTIL_HASHSIZE * 2) + 2];
+	char nameStr[(UTIL_SHA384_HASHSIZE * 2) + 2];
 	BIGNUM *oBigNbr;
 
 	CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
@@ -616,7 +617,7 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 		//util_sha256((char*)x->cert_info->key->public_key->data, x->cert_info->key->public_key->length, hash); // OpenSSL 1.0
 		X509_pubkey_digest(x, EVP_sha384(), (unsigned char*)hash, (unsigned int*)&hashlen); // OpenSSL 1.1
 
-		util_tohex(hash, UTIL_HASHSIZE, nameStr);
+		util_tohex(hash, UTIL_SHA384_HASHSIZE, nameStr);
 		X509_NAME_add_entry_by_txt(cname, "CN", MBSTRING_ASC, (unsigned char*)nameStr, -1, -1, 0);
 	}
 	else
@@ -682,7 +683,7 @@ err:
 
 int __fastcall util_keyhash(struct util_cert cert, char* result)
 {
-	int hashlen = UTIL_HASHSIZE;
+	int hashlen = UTIL_SHA384_HASHSIZE;
 	if (cert.x509 == NULL) return -1;
 	//util_sha256((char*)(cert.x509->cert_info->key->public_key->data), cert.x509->cert_info->key->public_key->length, result); // OpenSSL 1.0
 	X509_pubkey_digest(cert.x509, EVP_sha384(), (unsigned char*)result,(unsigned int *) &hashlen); // OpenSSL 1.1
@@ -691,7 +692,7 @@ int __fastcall util_keyhash(struct util_cert cert, char* result)
 
 int __fastcall util_keyhash2(X509* cert, char* result)
 {
-	int hashlen = UTIL_HASHSIZE;
+	int hashlen = UTIL_SHA384_HASHSIZE;
 	if (cert == NULL) return -1;
 	//util_sha256((char*)(cert->cert_info->key->public_key->data), cert->cert_info->key->public_key->length, result);  // OpenSSL 1.0
 	X509_pubkey_digest(cert, EVP_sha384(), (unsigned char*)result, (unsigned int*)&hashlen); // OpenSSL 1.1
@@ -702,11 +703,11 @@ int __fastcall util_keyhash2(X509* cert, char* result)
 int __fastcall util_sign(struct util_cert cert, char* data, int datalen, char** signature)
 {
 	int size = 0;
-	unsigned int hashsize = UTIL_HASHSIZE;
+	unsigned int hashsize = UTIL_SHA384_HASHSIZE;
 	BIO *in = NULL;
 	PKCS7 *message = NULL;
 	*signature = NULL;
-	if (datalen <= UTIL_HASHSIZE) return 0;
+	if (datalen <= UTIL_SHA384_HASHSIZE) return 0;
 
 	// Add hash of the certificate to start of data
 	X509_digest(cert.x509, EVP_sha384(), (unsigned char*)data, &hashsize);
@@ -730,7 +731,7 @@ int __fastcall util_verify(char* signature, int signlen, struct util_cert* cert,
 	BIO *out = NULL;
 	PKCS7 *message = NULL;
 	char* data2 = NULL;
-	char hash[UTIL_HASHSIZE];
+	char hash[UTIL_SHA256_HASHSIZE];
 	STACK_OF(X509) *st = NULL;
 
 	cert->x509 = NULL;
@@ -750,7 +751,7 @@ int __fastcall util_verify(char* signature, int signlen, struct util_cert* cert,
 
 	// If data block contains less than 32 bytes, fail.
 	size = (unsigned int)BIO_get_mem_data(out, &data2);
-	if (size <= UTIL_HASHSIZE) goto error;
+	if (size <= UTIL_SHA256_HASHSIZE) goto error;
 
 	// Copy the data block
 	*data = (char*)malloc(size + 1);
@@ -764,11 +765,11 @@ int __fastcall util_verify(char* signature, int signlen, struct util_cert* cert,
 	sk_X509_free(st);
 
 	// Get a full certificate hash of the signer
-	r = UTIL_HASHSIZE;
+	r = UTIL_SHA256_HASHSIZE;
 	X509_digest(cert->x509, EVP_sha256(), (unsigned char*)hash, &r);
 
 	// Check certificate hash with first 32 bytes of data.
-	if (memcmp(hash, *data, UTIL_HASHSIZE) != 0) goto error;
+	if (memcmp(hash, *data, UTIL_SHA256_HASHSIZE) != 0) goto error;
 
 	// Approved, cleanup and return.
 	BIO_free(out);

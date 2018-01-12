@@ -1229,6 +1229,7 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	duk_push_fixed_buffer(ctx, (duk_size_t)fileLen);
 	ignore_result(fread(Duktape_GetBuffer(ctx, -1, NULL), 1, (size_t)fileLen, f));
 	fclose(f);
+	duk_push_buffer_object(ctx, -1, 0, (duk_size_t)fileLen, DUK_BUFOBJ_NODEJS_BUFFER);
 
 	return(1);
 }

@@ -376,6 +376,29 @@ duk_ret_t ILibDuktape_DGram_setTTL(duk_context *ctx)
 {
 	return ILibDuktape_Error(ctx, "Not implemented");
 }
+duk_ret_t ILibDuktape_DGram_setMulticastInterface(duk_context *ctx)
+{
+	ILibDuktape_DGRAM_DATA *ptrs = ILibDuktape_DGram_GetPTR(ctx);
+	struct sockaddr_in addr;
+	char *str = (char*)duk_require_string(ctx, 0);
+
+	memset(&addr, 0, sizeof(struct sockaddr_in));
+	ILibInet_pton(AF_INET, str, &(addr.sin_addr));
+
+	ILibAsyncUDPSocket_SetMulticastInterface(ptrs->mSocket, (struct sockaddr*)&addr);
+	return(0);
+}
+duk_ret_t ILibDuktape_Dgram_socket_close(duk_context *ctx)
+{
+	if (duk_get_top(ctx) > 0 && duk_is_function(ctx, 0)) { ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx), "close", duk_require_heapptr(ctx, 0)); }
+	
+	duk_push_this(ctx);												// [socket]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DGRAM_SOCKET_NATIVE);	// [socket][ptr]
+	ILibDuktape_DGRAM_DATA *data = (ILibDuktape_DGRAM_DATA*)Duktape_GetBuffer(ctx, -1, NULL);
+	ILibAsyncSocket_Disconnect(data->mSocket);
+	
+	return(0);
+}
 duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 {
 	ILibDuktape_DGRAM_Config config = ILibDuktape_DGRAM_Config_NONE;
@@ -397,6 +420,7 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 
 	/**************************************************************************************/
 	duk_push_object(ctx);												// [socket]
+	ILibDuktape_WriteID(ctx, "dgram.socket");
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Dgram_Finalizer);		
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_DGRAM_DATA));			// [socket][native]
 	ptrs = (ILibDuktape_DGRAM_DATA*)Duktape_GetBuffer(ctx, -1, NULL);
@@ -420,10 +444,13 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethodWithStringProperty(ctx, ILibDuktape_DGRAM_MULTICAST_MEMBERSHIP_TYPE, "add", "addMembership", ILibDuktape_DGram_multicastMembership, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethodWithStringProperty(ctx, ILibDuktape_DGRAM_MULTICAST_MEMBERSHIP_TYPE, "remove", "dropMembership", ILibDuktape_DGram_multicastMembership, DUK_VARARGS);
 
+
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "close", ILibDuktape_Dgram_socket_close, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "send", ILibDuktape_DGram_send, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "setBroadcast", ILibDuktape_DGram_setBroadcast, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "setMulticastLoopback", ILibDuktape_DGram_setMulticastLoopback, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setMulticastTTL", ILibDuktape_DGram_setMulticastTTL, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "setMulticastInterface", ILibDuktape_DGram_setMulticastInterface, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setTTL", ILibDuktape_DGram_setTTL, 1);
 
 	return 1;

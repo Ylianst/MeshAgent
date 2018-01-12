@@ -48,9 +48,11 @@ int ClearWindowsFirewall(wchar_t* processname);
 #define _CRTDBG_MAP_ALLOC
 #endif
 
-TCHAR* serviceFile = TEXT("Mesh Agent v2");
-TCHAR* serviceName = TEXT("Mesh Agent v2 background service");
+TCHAR* serviceFile = TEXT("Mesh Agent");
+TCHAR* serviceFileOld = TEXT("Mesh Agent v2");
+TCHAR* serviceName = TEXT("Mesh Agent background service");
 TCHAR* serviceDesc = TEXT("Remote monitoring and management service.");
+
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle = 0;
 INT_PTR CALLBACK DialogHandler(HWND, UINT, WPARAM, LPARAM);
@@ -261,14 +263,14 @@ BOOL InstallService()
 	return r;
 }
 
-int UninstallService()
+int UninstallService(TCHAR* serviceName)
 {
 	int r = 0;
 	SC_HANDLE serviceControlManager = OpenSCManager( 0, 0, SC_MANAGER_CONNECT);
 
 	if (serviceControlManager)
 	{
-		SC_HANDLE service = OpenService( serviceControlManager, serviceFile, SERVICE_QUERY_STATUS | DELETE );
+		SC_HANDLE service = OpenService( serviceControlManager, serviceName, SERVICE_QUERY_STATUS | DELETE );
 		if (service)
 		{
 			SERVICE_STATUS serviceStatusEx;
@@ -457,7 +459,8 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 
 	// Stop and remove the service
 	StopService(serviceFile);
-	UninstallService();
+	UninstallService(serviceFile);
+	UninstallService(serviceFileOld);
 
 	// Get our own executable
 	selfexelen = GetModuleFileNameA(NULL, selfexe, _MAX_PATH);
@@ -843,7 +846,8 @@ int main(int argc, char* argv[])
 	{
 		// Setup the service
 		StopService(serviceFile);
-		UninstallService();
+		UninstallService(serviceFile);
+		UninstallService(serviceFileOld);
 		if (InstallService() == TRUE) { printf("Mesh agent installed"); } else { printf("Failed to install mesh agent"); }
 
 #ifndef _MINCORE
@@ -872,7 +876,8 @@ int main(int argc, char* argv[])
 		StopService(serviceFile);
 
 		// Remove the service
-		i = UninstallService();
+		UninstallService(serviceFileOld);
+		i = UninstallService(serviceFile);
 		if (i == 0) { printf("Failed to uninstall mesh agent"); }
 		else if (i == 1) { printf("Mesh agent uninstalled"); }
 		else if (i == 2) { printf("Mesh agent still running"); }
@@ -1042,6 +1047,7 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
+		UninstallService(serviceFileOld);
 		if (argc > 1)
 		{
 			// See if we need to run as a script engine

@@ -81,6 +81,7 @@ duk_ret_t ILibDuktape_MemoryStream_buffer(duk_context *ctx)
 
 	duk_push_external_buffer(ctx);
 	duk_config_buffer(ctx, -1, ms->buffer, ms->bufferLen);
+	duk_push_buffer_object(ctx, -1, 0, ms->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 
 	return(1);
 }
@@ -93,6 +94,43 @@ duk_ret_t ILibDuktape_MemoryStream_Finalizer(duk_context *ctx)
 	return(0);
 }
 
+duk_ret_t ILibDuktape_MemoryStream_writeBE(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	int size = Duktape_GetIntPropertyValue(ctx, -1, "size", 0);
+	char buffer[16];
+	int value = duk_require_int(ctx, 0);
+
+	switch (size)
+	{
+		case 1:
+			buffer[0] = (char)value;
+			break;
+		case 2:
+			((unsigned short*)buffer)[0] = htons((unsigned short)value);
+			break;
+		case 4:
+			((unsigned int*)buffer)[0] = htonl((unsigned int)value);
+			break;
+		default:
+			break;
+	}
+
+	if (size > 0)
+	{
+		duk_push_this(ctx);							// [ms]
+		duk_get_prop_string(ctx, -1, "write");		// [ms][write]
+		duk_swap_top(ctx, -2);						// [write][this]
+		duk_push_external_buffer(ctx);				// [write][this][buffer]
+		duk_config_buffer(ctx, -1, buffer, size);
+		duk_call_method(ctx, 1);					// [retVal]
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "MemoryStream.writeBE() Unknown Error"));
+	}
+}
 duk_ret_t ILibDuktape_MemoryStream_new(duk_context *ctx)
 {
 	int initial = duk_get_top(ctx) > 0 ? duk_require_int(ctx, 0) : 4096;
@@ -110,6 +148,11 @@ duk_ret_t ILibDuktape_MemoryStream_new(duk_context *ctx)
 	ms->s = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_MemoryStream_OnWrite, ILibDuktape_MemoryStream_OnEnd, NULL, NULL, ms);
 	ILibDuktape_CreateEventWithGetter(ctx, "buffer", ILibDuktape_MemoryStream_buffer);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MemoryStream_Finalizer);
+
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "size", 4, "writeUInt32BE", ILibDuktape_MemoryStream_writeBE, 1);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "size", 2, "writeUInt16BE", ILibDuktape_MemoryStream_writeBE, 1);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "size", 1, "writeUInt8", ILibDuktape_MemoryStream_writeBE, 1);
+
 	return(1);
 }
 void ILibDuktape_MemoryStream_PUSH(duk_context *ctx, void *chain)

@@ -41,7 +41,7 @@ void CALLBACK ILibIPAddressMonitor_dispatch(
 	IN DWORD dwFlags
 )
 {
-	if (dwError == 0)
+	if (dwError == 0 && lpOverlapped->hEvent != NULL)
 	{
 		_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)lpOverlapped->hEvent;
 		ILibChain_RunOnMicrostackThread(obj->chainLink.ParentChain, ILibIPAddressMonitor_MicrostackThreadDispatch, obj);
@@ -60,6 +60,7 @@ void ILibIPAddressMonitor_Destroy(void *object)
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
 
 #ifdef WIN32
+	obj->reserved.hEvent = NULL;
 	closesocket(obj->mSocket);
 	obj->mSocket = INVALID_SOCKET;
 #elif defined(_POSIX)

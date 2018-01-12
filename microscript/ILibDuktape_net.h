@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "microstack/ILibParsers.h"
 
+#define ILibDuktape_SOCKET2OPTIONS	"\xFF_NET_SOCKET2OPTIONS"
 void ILibDuktape_net_init(duk_context *ctx, void *chain);
 
 typedef struct ILibDuktape_globalTunnel_data

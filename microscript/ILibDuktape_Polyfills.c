@@ -1,11 +1,15 @@
 #include "duktape.h"
 #include "ILibDuktape_Helpers.h"
 #include "ILibDuktapeModSearch.h"
+#include "ILibDuktape_DuplexStream.h"
+#include "ILibDuktape_EventEmitter.h"
 #include "../microstack/ILibParsers.h"
 #include "../microstack/ILibCrypto.h"
 
 
 #define ILibDuktape_Timer_Ptrs			"\xFF_DuktapeTimer_PTRS"
+#define ILibDuktape_Queue_Ptr			"\xFF_Queue"
+
 
 duk_ret_t ILibDuktape_Pollyfills_Buffer_slice(duk_context *ctx)
 {
@@ -63,6 +67,13 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 			util_tohex(buffer, (int)bufferLen, tmpBuffer);
 			duk_push_string(ctx, tmpBuffer);
 		}
+		else if (strcmp(cType, "hex:") == 0)
+		{
+			duk_push_fixed_buffer(ctx, 1 + (bufferLen * 3));
+			tmpBuffer = Duktape_GetBuffer(ctx, -1, NULL);
+			util_tohex2(buffer, (int)bufferLen, tmpBuffer);
+			duk_push_string(ctx, tmpBuffer);
+		}
 		else
 		{
 			duk_push_string(ctx, "buffer.toString(): Unrecognized parameter");
@@ -84,11 +95,10 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	if (nargs == 1)
 	{
 		str = (char*)duk_get_lstring(ctx, 0, &strlength);
-		duk_push_fixed_buffer(ctx, strlength + 1);
+		duk_push_fixed_buffer(ctx, strlength);
 		buffer = Duktape_GetBuffer(ctx, -1, NULL);
-		memcpy_s(buffer, strlength + 1, str, strlength);
-		buffer[strlength] = 0;
-		duk_push_buffer_object(ctx, -1, 0, strlength+1, DUK_BUFOBJ_ARRAYBUFFER);
+		memcpy_s(buffer, strlength, str, strlength);
+		duk_push_buffer_object(ctx, -1, 0, strlength, DUK_BUFOBJ_NODEJS_BUFFER);
 		return(1);
 	}
 	else if(!(nargs == 2 && duk_is_string(ctx, 0) && duk_is_string(ctx, 1)))
@@ -107,14 +117,14 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 		duk_push_fixed_buffer(ctx, ILibBase64DecodeLength((int)strlength));
 		buffer = Duktape_GetBuffer(ctx, -1, NULL);
 		bufferLen = ILibBase64Decode((unsigned char*)str, (int)strlength, (unsigned char**)&buffer);
-		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_ARRAYBUFFER);
+		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 	}
 	else if (strcmp(encoding, "hex") == 0)
 	{
 		duk_push_fixed_buffer(ctx, strlength / 2);
 		buffer = Duktape_GetBuffer(ctx, -1, NULL);
 		bufferLen = util_hexToBuf(str, (int)strlength, buffer);
-		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_ARRAYBUFFER);
+		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 	}
 	else
 	{
@@ -136,31 +146,55 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_readInt32BE(duk_context *ctx)
 	duk_push_int(ctx, ntohl(((int*)(buffer + offset))[0]));
 	return(1);
 }
+duk_ret_t ILibDuktape_Polyfills_Buffer_alloc(duk_context *ctx)
+{
+	int sz = duk_require_int(ctx, 0);
+	duk_push_fixed_buffer(ctx, sz);
+	char *buffer = Duktape_GetBuffer(ctx, -1, NULL);
+	memset(buffer, 0, sz);
+	duk_push_buffer_object(ctx, -1, 0, sz, DUK_BUFOBJ_NODEJS_BUFFER);
+	return(1);
+}
 void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 {
 	// Polyfill 'Buffer.slice'
-	duk_get_prop_string(ctx, -1, "Duktape");									// [g][Duktape]
-	duk_get_prop_string(ctx, -1, "Buffer");										// [g][Duktape][Buffer]
-	duk_get_prop_string(ctx, -1, "prototype");									// [g][Duktape][Buffer][prototype]
-	duk_push_c_function(ctx, ILibDuktape_Pollyfills_Buffer_slice, DUK_VARARGS);	// [g][Duktape][Buffer][prototype][func]
-	duk_put_prop_string(ctx, -2, "slice");										// [g][Duktape][Buffer][prototype]
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_readInt32BE, DUK_VARARGS);
-	duk_put_prop_string(ctx, -2, "readInt32BE");
-	duk_pop_3(ctx);																// [g]
+	duk_get_prop_string(ctx, -1, "Duktape");										// [g][Duktape]
+	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Duktape][Buffer]
+	duk_get_prop_string(ctx, -1, "prototype");										// [g][Duktape][Buffer][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Pollyfills_Buffer_slice, DUK_VARARGS);		// [g][Duktape][Buffer][prototype][func]
+	duk_put_prop_string(ctx, -2, "slice");											// [g][Duktape][Buffer][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_readInt32BE, DUK_VARARGS);// [g][Duktape][Buffer][prototype][func]
+	duk_put_prop_string(ctx, -2, "readInt32BE");									// [g][Duktape][Buffer][prototype]
+	duk_pop_3(ctx);																	// [g]
 
 	// Polyfill 'Buffer.toString()
-	duk_get_prop_string(ctx, -1, "Duktape");									// [g][Duktape]
-	duk_get_prop_string(ctx, -1, "Buffer");										// [g][Duktape][Buffer]
-	duk_get_prop_string(ctx, -1, "prototype");									// [g][Duktape][Buffer][prototype]
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);// [g][Duktape][Buffer][prototype][func]
-	duk_put_prop_string(ctx, -2, "toString");									// [g][Duktape][Buffer][prototype]
-	duk_pop_3(ctx);																// [g]
-																					
+	duk_get_prop_string(ctx, -1, "Duktape");										// [g][Duktape]
+	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Duktape][Buffer]
+	duk_get_prop_string(ctx, -1, "prototype");										// [g][Duktape][Buffer][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);	// [g][Duktape][Buffer][prototype][func]
+	duk_put_prop_string(ctx, -2, "toString");										// [g][Duktape][Buffer][prototype]
+	duk_pop_3(ctx);																	// [g]
+																						
 	// Polyfill Buffer.from()
-	duk_get_prop_string(ctx, -1, "Buffer");										// [g][Buffer]
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_from, DUK_VARARGS);	// [g][Buffer][func]
-	duk_put_prop_string(ctx, -2, "from");										// [g][Buffer]
-	duk_pop(ctx);
+	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Buffer]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_from, DUK_VARARGS);		// [g][Buffer][func]
+	duk_put_prop_string(ctx, -2, "from");											// [g][Buffer]
+	duk_pop(ctx);																	// [g]
+
+	// Polyfill Buffer.alloc() for Node Buffers)
+	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Buffer]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_alloc, DUK_VARARGS);		// [g][Buffer][func]
+	duk_put_prop_string(ctx, -2, "alloc");											// [g][Buffer]
+	duk_pop(ctx);																	// [g]
+
+
+	// Polyfill Buffer.toString() for Node Buffers
+	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Buffer]
+	duk_get_prop_string(ctx, -1, "prototype");										// [g][Buffer][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);	// [g][Buffer][prototype][func]
+	duk_put_prop_string(ctx, -2, "toString");										// [g][Buffer][prototype]
+	duk_pop_2(ctx);																	// [g]
+
 }
 duk_ret_t ILibDuktape_Polyfills_String_startsWith(duk_context *ctx)
 {
@@ -379,6 +413,7 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 {
 	ILibDuktape_Timer *ptrs = (ILibDuktape_Timer*)obj;
 	int argCount, i;
+	duk_context *ctx = ptrs->ctx;
 
 	if (ptrs->timerType == ILibDuktape_Timer_Type_INTERVAL)
 	{
@@ -397,7 +432,7 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 	}
 	duk_pop(ptrs->ctx);											// [func][this][...arg...]
 	if (duk_pcall_method(ptrs->ctx, argCount) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "timers.onElapsed() callback handler"); }
-	duk_pop(ptrs->ctx);											// ...
+	duk_pop(ctx);												// ...
 }
 duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 {
@@ -490,8 +525,245 @@ duk_ret_t ILibDuktape_Polyfills_addModule(duk_context *ctx)
 	}
 	return(0);
 }
+duk_ret_t ILibDuktape_Queue_Finalizer(duk_context *ctx)
+{
+	duk_get_prop_string(ctx, 0, ILibDuktape_Queue_Ptr);
+	ILibQueue_Destroy((ILibQueue)duk_get_pointer(ctx, -1));
+	return(0);
+}
+duk_ret_t ILibDuktape_Queue_EnQueue(duk_context *ctx)
+{
+	ILibQueue Q;
+	int i;
+	int nargs = duk_get_top(ctx);
+	duk_push_this(ctx);																// [queue]
+	duk_get_prop_string(ctx, -1, ILibDuktape_Queue_Ptr);							// [queue][ptr]
+	Q = (ILibQueue)duk_get_pointer(ctx, -1);
+	duk_pop(ctx);																	// [queue]
+
+	ILibDuktape_Push_ObjectStash(ctx);												// [queue][stash]
+	duk_push_array(ctx);															// [queue][stash][array]
+	for (i = 0; i < nargs; ++i)
+	{
+		duk_dup(ctx, i);															// [queue][stash][array][arg]
+		duk_put_prop_index(ctx, -2, i);												// [queue][stash][array]
+	}
+	ILibQueue_EnQueue(Q, duk_get_heapptr(ctx, -1));
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));	// [queue][stash]
+	return(0);
+}
+duk_ret_t ILibDuktape_Queue_DeQueue(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	duk_get_prop_string(ctx, -1, "peek");
+	int peek = duk_get_int(ctx, -1);
+
+	duk_push_this(ctx);										// [Q]
+	duk_get_prop_string(ctx, -1, ILibDuktape_Queue_Ptr);	// [Q][ptr]
+	ILibQueue Q = (ILibQueue)duk_get_pointer(ctx, -1);
+	void *h = peek == 0 ? ILibQueue_DeQueue(Q) : ILibQueue_PeekQueue(Q);
+	if (h == NULL) { return(ILibDuktape_Error(ctx, "Queue is empty")); }
+	duk_pop(ctx);											// [Q]
+	ILibDuktape_Push_ObjectStash(ctx);						// [Q][stash]
+	duk_push_heapptr(ctx, h);								// [Q][stash][array]
+	int length = (int)duk_get_length(ctx, -1);
+	int i;
+	for (i = 0; i < length; ++i)
+	{
+		duk_get_prop_index(ctx, -i - 1, i);				   // [Q][stash][array][args]
+	}
+	if (peek == 0) { duk_del_prop_string(ctx, -length - 2, Duktape_GetStashKey(h)); }
+	return(length);
+}
+
+duk_ret_t ILibDuktape_Queue_new(duk_context *ctx)
+{
+	duk_push_object(ctx);									// [queue]
+	duk_push_pointer(ctx, ILibQueue_Create());				// [queue][ptr]
+	duk_put_prop_string(ctx, -2, ILibDuktape_Queue_Ptr);	// [queue]
+
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Queue_Finalizer);
+	ILibDuktape_CreateInstanceMethod(ctx, "enQueue", ILibDuktape_Queue_EnQueue, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "peek", 0, "deQueue", ILibDuktape_Queue_DeQueue, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "peek", 1, "peekQueue", ILibDuktape_Queue_DeQueue, DUK_VARARGS);
+
+	return(1);
+}
+void ILibDuktape_Queue_Push(duk_context *ctx, void* chain)
+{
+	duk_push_c_function(ctx, ILibDuktape_Queue_new, 0);
+}
+
+typedef struct ILibDuktape_DynamicBuffer_data
+{
+	int start;
+	int end;
+	int unshiftBytes;
+	char *buffer;
+	int bufferLen;
+}ILibDuktape_DynamicBuffer_data;
+
+typedef struct ILibDuktape_DynamicBuffer_ContextSwitchData
+{
+	void *chain;
+	void *heapptr;
+	ILibDuktape_DuplexStream *stream;
+	ILibDuktape_DynamicBuffer_data *data;
+	int bufferLen;
+	char buffer[];
+}ILibDuktape_DynamicBuffer_ContextSwitchData;
+
+ILibTransport_DoneState ILibDuktape_DynamicBuffer_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user);
+void ILibDuktape_DynamicBuffer_WriteSink_ChainThread(void *chain, void *user)
+{
+	ILibDuktape_DynamicBuffer_ContextSwitchData *data = (ILibDuktape_DynamicBuffer_ContextSwitchData*)user;
+	if (ILibDuktape_IsPointerValid(chain, data->heapptr) != 0)
+	{
+		ILibDuktape_DynamicBuffer_WriteSink(data->stream, data->buffer, data->bufferLen, data->data);
+		ILibDuktape_DuplexStream_Ready(data->stream);
+	}
+	free(user);
+}
+ILibTransport_DoneState ILibDuktape_DynamicBuffer_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
+{
+	ILibDuktape_DynamicBuffer_data *data = (ILibDuktape_DynamicBuffer_data*)user;
+	if (ILibIsRunningOnChainThread(stream->readableStream->chain) == 0)
+	{
+		ILibDuktape_DynamicBuffer_ContextSwitchData *tmp = (ILibDuktape_DynamicBuffer_ContextSwitchData*)ILibMemory_Allocate(sizeof(ILibDuktape_DynamicBuffer_ContextSwitchData) + bufferLen, 0, NULL, NULL);
+		tmp->chain = stream->readableStream->chain;
+		tmp->heapptr = stream->ParentObject;
+		tmp->stream = stream;
+		tmp->data = data;
+		tmp->bufferLen = bufferLen;
+		memcpy_s(tmp->buffer, bufferLen, buffer, bufferLen);
+		ILibChain_RunOnMicrostackThread(tmp->chain, ILibDuktape_DynamicBuffer_WriteSink_ChainThread, tmp);
+		return(ILibTransport_DoneState_INCOMPLETE);
+	}
+
+
+	if ((data->bufferLen - data->start - data->end) < bufferLen)
+	{
+		if (data->end > 0)
+		{
+			// Move the buffer first
+			memmove_s(data->buffer, data->bufferLen, data->buffer + data->start, data->end);
+			data->start = 0;
+		}
+		if ((data->bufferLen - data->end) < bufferLen)
+		{
+			// Need to resize buffer first
+			int tmpSize = data->bufferLen;
+			while ((tmpSize - data->end) < bufferLen)
+			{
+				tmpSize += 4096;
+			}
+			data->buffer = (char*)realloc(data->buffer, tmpSize);
+			data->bufferLen = tmpSize;
+		}
+	}
+
+
+	memcpy_s(data->buffer + data->start + data->end, data->bufferLen - data->start - data->end, buffer, bufferLen);
+	data->end += bufferLen;
+
+	int unshifted = 0;
+	do
+	{
+		duk_push_heapptr(stream->readableStream->ctx, stream->ParentObject);		// [ds]
+		duk_get_prop_string(stream->readableStream->ctx, -1, "emit");				// [ds][emit]
+		duk_swap_top(stream->readableStream->ctx, -2);								// [emit][this]
+		duk_push_string(stream->readableStream->ctx, "readable");					// [emit][this][readable]
+		if (duk_pcall_method(stream->readableStream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(stream->readableStream->ctx, "DynamicBuffer.WriteSink => readable(): "); }
+		duk_pop(stream->readableStream->ctx);										// ...
+
+		ILibDuktape_DuplexStream_WriteData(stream, data->buffer + data->start, data->end);
+		if (data->unshiftBytes == 0)
+		{
+			// All the data was consumed
+			data->start = data->end = 0;
+		}
+		else
+		{
+			unshifted = (data->end - data->unshiftBytes);
+			if (unshifted > 0)
+			{
+				data->start += unshifted;
+				data->end = data->unshiftBytes;
+				data->unshiftBytes = 0;
+			}
+		}
+	} while (unshifted != 0);
+
+	return(ILibTransport_DoneState_COMPLETE);
+}
+void ILibDuktape_DynamicBuffer_EndSink(ILibDuktape_DuplexStream *stream, void *user)
+{
+	ILibDuktape_DuplexStream_WriteEnd(stream);
+}
+duk_ret_t ILibDuktape_DynamicBuffer_Finalizer(duk_context *ctx)
+{
+	ILibDuktape_InValidateHeapPointer(ctx, 0);
+	duk_get_prop_string(ctx, 0, "\xFF_buffer");
+	ILibDuktape_DynamicBuffer_data *data = (ILibDuktape_DynamicBuffer_data*)Duktape_GetBuffer(ctx, -1, NULL);
+	free(data->buffer);
+	return(0);
+}
+
+int ILibDuktape_DynamicBuffer_unshift(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user)
+{
+	ILibDuktape_DynamicBuffer_data *data = (ILibDuktape_DynamicBuffer_data*)user;
+	data->unshiftBytes = unshiftBytes;
+	return(unshiftBytes);
+}
+duk_ret_t ILibDuktape_DynamicBuffer_read(duk_context *ctx)
+{
+	ILibDuktape_DynamicBuffer_data *data;
+	duk_push_this(ctx);															// [DynamicBuffer]
+	duk_get_prop_string(ctx, -1, "\xFF_buffer");								// [DynamicBuffer][buffer]
+	data = (ILibDuktape_DynamicBuffer_data*)Duktape_GetBuffer(ctx, -1, NULL);
+	duk_push_external_buffer(ctx);												// [DynamicBuffer][buffer][extBuffer]
+	duk_config_buffer(ctx, -1, data->buffer + data->start, data->bufferLen - (data->start + data->end));
+	duk_push_buffer_object(ctx, -1, 0, data->bufferLen - (data->start + data->end), DUK_BUFOBJ_NODEJS_BUFFER);
+	return(1);
+}
+duk_ret_t ILibDuktape_DynamicBuffer_new(duk_context *ctx)
+{
+	ILibDuktape_DynamicBuffer_data *data;
+	int initSize = 4096;
+	if (duk_get_top(ctx) != 0)
+	{
+		initSize = duk_require_int(ctx, 0);
+	}
+
+	duk_push_object(ctx);					// [stream]
+	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_DynamicBuffer_data));
+	data = (ILibDuktape_DynamicBuffer_data*)Duktape_GetBuffer(ctx, -1, NULL);
+	memset(data, 0, sizeof(ILibDuktape_DynamicBuffer_data));
+	duk_put_prop_string(ctx, -2, "\xFF_buffer");
+
+	data->bufferLen = initSize;
+	data->buffer = (char*)malloc(initSize);
+
+	ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_DynamicBuffer_WriteSink, ILibDuktape_DynamicBuffer_EndSink, NULL, NULL, ILibDuktape_DynamicBuffer_unshift, data);
+	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_GetEmitter(ctx, -1), "readable");
+	ILibDuktape_CreateInstanceMethod(ctx, "read", ILibDuktape_DynamicBuffer_read, DUK_VARARGS);
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_DynamicBuffer_Finalizer);
+	ILibDuktape_ValidateHeapPointer(ctx, -1);
+
+	return(1);
+}
+
+void ILibDuktape_DynamicBuffer_Push(duk_context *ctx, void *chain)
+{
+	duk_push_c_function(ctx, ILibDuktape_DynamicBuffer_new, DUK_VARARGS);
+}
+
+
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
+	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
+	ILibDuktape_ModSearch_AddHandler(ctx, "DynamicBuffer", ILibDuktape_DynamicBuffer_Push);
+
 	// Global Polyfills
 	duk_push_global_object(ctx);													// [g]
 

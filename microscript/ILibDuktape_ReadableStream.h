@@ -24,12 +24,14 @@ limitations under the License.
 
 struct ILibDuktape_readableStream;
 typedef void(*ILibDuktape_readableStream_PauseResumeHandler)(struct ILibDuktape_readableStream *sender, void *user);
-typedef void(*ILibDuktape_readableStream_MethodHookHandler)(struct ILibDuktape_readableStream *sender, void *user);
+typedef void(*ILibDuktape_readableStream_MethodHookHandler)(struct ILibDuktape_readableStream *sender, void *writableStream, void *user);
+typedef int(*ILibDuktape_readableStream_UnShiftHandler)(struct ILibDuktape_readableStream *sender, int unshiftBytes, void *user);
+
 typedef struct ILibDuktape_readableStream_nextWriteablePipe
 {
 	void *writableStream;
 	void *nativeWritable;
-	struct ILibDuktape_readableStream_nextWriteablePipe *next;
+	struct ILibDuktape_readableStream_nextWriteablePipe *previous, *next;
 }ILibDuktape_readableStream_nextWriteablePipe;
 
 typedef struct ILibDuktape_readableStream
@@ -40,11 +42,9 @@ typedef struct ILibDuktape_readableStream
 	void *OnClose;
 	void *OnData;
 	void *OnEnd;
-	void *extBuffer;
-	char *extBuffer_buffer;
-	int extBuffer_bufferLen, extBuffer_Reserved;
 
 	void *user;
+	void *pipeArray;
 	ILibDuktape_readableStream_nextWriteablePipe *nextWriteable;
 	sem_t pipeLock;
 #if defined(WIN32)
@@ -54,16 +54,21 @@ typedef struct ILibDuktape_readableStream
 #else
 	int pipe_pendingCount;				// No Atomic Built-ins... Use a Mutex
 #endif
+	int pipeInProgress;
+	int unpipeInProgress;
 	int bypassValue;
+	int noPropagateEnd;
 	int paused;
 	void *paused_data;
 	ILibDuktape_readableStream_PauseResumeHandler PauseHandler;
 	ILibDuktape_readableStream_PauseResumeHandler ResumeHandler;
 	ILibDuktape_readableStream_MethodHookHandler PipeHookHandler;
+	ILibDuktape_readableStream_UnShiftHandler UnshiftHandler;
 }ILibDuktape_readableStream;
 
-ILibDuktape_readableStream* ILibDuktape_InitReadableStream(duk_context *ctx, ILibDuktape_readableStream_PauseResumeHandler OnPause, ILibDuktape_readableStream_PauseResumeHandler OnResume, void *user);
-#define ILibDuktape_ReadableStream_Init(ctx, OnPause, OnResume, user) ILibDuktape_InitReadableStream(ctx, OnPause, OnResume, user)
+ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, ILibDuktape_readableStream_PauseResumeHandler OnPause, ILibDuktape_readableStream_PauseResumeHandler OnResume, ILibDuktape_readableStream_UnShiftHandler OnUnshift, void *user);
+#define ILibDuktape_InitReadableStream(ctx, OnPause, OnResume, user) ILibDuktape_ReadableStream_InitEx(ctx, OnPause, OnResume, NULL, user)
+#define ILibDuktape_ReadableStream_Init(ctx, OnPause, OnResume, user) ILibDuktape_ReadableStream_InitEx(ctx, OnPause, OnResume, NULL, user)
 #define ILibDuktape_readableStream_SetPauseResumeHandlers(stream, PauseFunc, ResumeFunc, userObj) ((ILibDuktape_readableStream*)stream)->PauseHandler = PauseFunc; ((ILibDuktape_readableStream*)stream)->ResumeHandler = ResumeFunc; ((ILibDuktape_readableStream*)stream)->user = userObj;
 
 int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, int streamReserved, char* buffer, int bufferLen);

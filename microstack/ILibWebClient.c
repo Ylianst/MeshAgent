@@ -247,6 +247,7 @@ typedef struct ILibWebClientDataObject
 
 #ifndef MICROSTACK_NOTLS
 	ILibWebClient_RequestToken_HTTPS requestMode;
+	char *sniHost;
 #endif
 
 	char* CertificateHashPtr; // Points to the certificate hash (next field) if set
@@ -342,7 +343,15 @@ void ILibWebClient_DestroyWebRequest(struct ILibWebRequest *wr)
 
 	if (wr == NULL) return;
 	if (wr != NULL && wr->connectionCloseWasSpecified != 0 && wr->DisconnectSink != NULL) { wr->DisconnectSink(wr->requestToken); }
-	if (wr->buffered != NULL) { free(wr->buffered); }
+	if (wr->buffered != NULL) 
+	{
+		while (wr->buffered != NULL)
+		{
+			ILibWebRequest_buffer * rb = wr->buffered->next;
+			free(wr->buffered);
+			wr->buffered = rb;
+		}
+	}
 	if (wr->streamedState != NULL)
 	{
 		while (ILibQueue_IsEmpty(wr->streamedState->BufferQueue) == 0)
@@ -472,6 +481,9 @@ void ILibWebClient_DestroyWebClientDataObject(ILibWebClient_StateObject token)
 
 	ILibQueue_Destroy(wcdo->RequestQueue);
 	if (wcdo->DigestData != NULL) { free(ILibMemory_AllocateA_Raw(wcdo->DigestData)); }
+#ifndef MICROSTACK_NOTLS
+	if (wcdo->sniHost != NULL) { free(wcdo->sniHost); }
+#endif
 	free(wcdo);
 }
 
@@ -739,8 +751,11 @@ void ILibWebClient_FinishedResponse(ILibAsyncSocket_SocketModule socketModule, s
 		SEM_TRACK(WebClient_TrackLock("ILibWebClient_FinishedResponse", 1, wcdo->Parent);)
 		sem_wait(&(wcdo->Parent->QLock));
 		wr = (struct ILibWebRequest*)ILibQueue_DeQueue(wcdo->RequestQueue);
-		wr->connectionCloseWasSpecified = 2;
-		ILibWebClient_DestroyWebRequest(wr);
+		if (wr != NULL)
+		{
+			wr->connectionCloseWasSpecified = 2;
+			ILibWebClient_DestroyWebRequest(wr);
+		}
 		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_FinishedResponse", 2, wcdo->Parent);)
 		sem_post(&(wcdo->Parent->QLock));
 		return;
@@ -795,12 +810,12 @@ void ILibWebClient_FinishedResponse(ILibAsyncSocket_SocketModule socketModule, s
 				//
 				ILibAsyncSocket_Send(wcdo->SOCK, wr->Buffer[i], wr->BufferLength[i], ILibAsyncSocket_MemoryOwnership_STATIC);
 			}
-			while (wr->buffered != NULL)
+
+			b = wr->buffered;
+			while (b != NULL)
 			{
-				b = wr->buffered->next;
-				ILibAsyncSocket_Send(wcdo->SOCK, wr->buffered->buffer, wr->buffered->bufferLength, ILibAsyncSocket_MemoryOwnership_USER);
-				free(wr->buffered);
-				wr->buffered = b;
+				ILibAsyncSocket_Send(wcdo->SOCK, b->buffer, b->bufferLength, ILibAsyncSocket_MemoryOwnership_USER);
+				b = b->next;
 			}
 		}
 	}
@@ -1140,7 +1155,7 @@ void ILibWebClient_ProcessChunk(ILibAsyncSocket_SocketModule socketModule, struc
 								wcdo->NeedFlush = 0;
 								ILibWebClient_FinishedResponse_Server(wcdo);
 							}
-							if (ILibAsyncSocket_IsFree(socketModule)==0)
+							if (socketModule==NULL || ILibAsyncSocket_IsFree(socketModule)==0)
 							{
 								//
 								// Free the resources associated with this chunk
@@ -1556,7 +1571,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 					wcdo->source.sin_addr.s_addr = ILibAsyncSocket_GetRemoteInterface(socketModule);
 					wcdo->source.sin_port = htons(ILibAsyncSocket_GetRemotePort(socketModule));
 					*/
-					ILibAsyncSocket_GetRemoteInterface(socketModule, (struct sockaddr*)(&wcdo->source));
+					if (socketModule != NULL) { ILibAsyncSocket_GetRemoteInterface(socketModule, (struct sockaddr*)(&wcdo->source)); }
 
 					wcdo->HeaderLength = i + 4;
 					wcdo->WaitForClose = 1;
@@ -1654,7 +1669,14 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 						}
 						if (wcdo->header->StatusCode >= 100 && wcdo->header->StatusCode <= 199)
 						{
-							if (wcdo->header->StatusCode == 101 && wr->requestToken->WebSocketKey != NULL)
+							if (wr->requestToken == NULL)
+							{
+								int zro = 0;
+								if (wr->OnResponse != NULL) { wr->OnResponse(wcdo, 0, wcdo->header, NULL, &zro, 0, ILibWebClient_ReceiveStatus_Connection_Established, wr->user1, wr->user2, &(wcdo->PAUSE)); }
+								*p_beginPointer += wcdo->HeaderLength;
+								return;
+							}
+							else if (wcdo->header->StatusCode == 101 && wr->requestToken->WebSocketKey != NULL)
 							{
 								// WebSocket
 								char* skey = ILibGetHeaderLine(wcdo->header, "Sec-WebSocket-Accept", 20);
@@ -1812,7 +1834,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 											wr->user2,
 											&(wcdo->PAUSE));
 									}
-									if (ILibAsyncSocket_IsFree(socketModule)==0)
+									if (socketModule==NULL || ILibAsyncSocket_IsFree(socketModule)==0)
 									{
 										wcdo->HeaderLength = 0;
 										*p_beginPointer = i+4+zero;
@@ -1856,31 +1878,28 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 										wr->user1,
 										wr->user2,
 										&(wcdo->PAUSE));
-									if (ILibAsyncSocket_IsFree(socketModule)!=0)
+									if (wcdo->FinHeader == 0)
+									{
+										//
+										// The user sent a response already, so advance the
+										// beginPointer and return.
+										//
+										// If the user sent a response, and it wasn't in relation to a 100 Continue, then the 
+										// user is in ERROR, because the done flag is not set here, which means that
+										// the entire request did not get received yet. Simply answering the request
+										// without receiving the entire request, without closing the socket is in
+										// VIOLATION of the http specification. 
+										//
+										*p_beginPointer = i + 4;
+										return;
+									}
+									if (socketModule != NULL && ILibAsyncSocket_IsFree(socketModule)!=0)
 									{
 										//
 										// The user closed the socket, so just return
 										//
 										return;
-									}
-									else
-									{
-										if (wcdo->FinHeader==0)
-										{
-											//
-											// The user sent a response already, so advance the
-											// beginPointer and return.
-											//
-											// If the user sent a response, and it wasn't in relation to a 100 Continue, then the 
-											// user is in ERROR, because the done flag is not set here, which means that
-											// the entire request did not get received yet. Simply answering the request
-											// without receiving the entire request, without closing the socket is in
-											// VIOLATION of the http specification. 
-											//
-											*p_beginPointer = i + 4;
-											return;
-										}
-									}
+									}						
 								}
 								
 								
@@ -1950,7 +1969,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 					wr->user2,
 					&(wcdo->PAUSE));
 			}
-			if (ILibAsyncSocket_IsFree(socketModule)==0)
+			if (socketModule==NULL || ILibAsyncSocket_IsFree(socketModule)==0)
 			{
 				if (wcdo->WaitForClose==0)
 				{
@@ -1979,7 +1998,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 		}
 //{{{ <--REMOVE_THIS_FOR_HTTP/1.0_ONLY_SUPPORT }}}
 	}
-	if (ILibAsyncSocket_IsFree(socketModule)==0)
+	if (socketModule==NULL || ILibAsyncSocket_IsFree(socketModule)==0)
 	{
 		//
 		// If the user said to pause this connection, do so
@@ -2054,12 +2073,11 @@ void ILibWebClient_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Conn
 				ILibAsyncSocket_Send(socketModule, r->Buffer[i], r->BufferLength[i], (enum ILibAsyncSocket_MemoryOwnership)-1);
 			}
 
-			while (r->buffered != NULL)
+			b = r->buffered;
+			while (b != NULL)
 			{
-				ILibAsyncSocket_Send(socketModule, r->buffered->buffer, r->buffered->bufferLength, ILibAsyncSocket_MemoryOwnership_USER);
-				b = r->buffered;
-				r->buffered = r->buffered->next;
-				free(b);
+				ILibAsyncSocket_Send(socketModule, b->buffer, b->bufferLength, ILibAsyncSocket_MemoryOwnership_USER);
+				b = b->next;
 			}
 			if (r->streamedState != NULL)
 			{
@@ -2214,27 +2232,6 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 				wr->user2,
 				&(wcdo->PAUSE));
 			
-			if (ILibAsyncSocket_IsFree(socketModule) != 0)
-			{
-				//
-				// If the underlying socket is gone, then Finished Response won't clear
-				// the pending request
-				//
-				SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnDisconnect", 5, wcdo->Parent);)
-				sem_wait(&(wcdo->Parent->QLock));
-				wr = (struct ILibWebRequest*)ILibQueue_DeQueue(wcdo->RequestQueue);
-				SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnDisconnect", 6, wcdo->Parent);)
-				sem_post(&(wcdo->Parent->QLock));
-				if (wr != NULL)
-				{
-					if (wcdo->IsWebSocket != 0)
-					{
-						free(((ILibWebClient_WebSocketState*)wr->Buffer[0])->WebSocketFragmentBuffer);
-					}
-					wr->connectionCloseWasSpecified = 2;
-					ILibWebClient_DestroyWebRequest(wr);
-				}
-			}
 			if (wcdo->IsOrphan != 0 || wcdo->IsWebSocket != 0)
 			{
 				ILibWebClient_FinishedResponse(socketModule, wcdo);
@@ -2244,20 +2241,6 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 			{
 				ILibWebClient_FinishedResponse(socketModule, wcdo);
 			}
-			//SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnDisconnect", 7, wcdo->Parent);)
-			//sem_wait(&(wcdo->Parent->QLock));
-			//wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
-			//SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnDisconnect", 8, wcdo->Parent);)
-			//sem_post(&(wcdo->Parent->QLock));
-			//if (wr == NULL) 
-			//{ 
-			//	if (wcdo->IsWebSocket != 0)
-			//	{
-			//		// This was a websocket, so we must destroy the WCDO object, because it won't be destroyed anywhere else
-			//		ILibWebClient_DestroyWebClientDataObject(wcdo);
-			//	}
-			//	return; 
-			//}
 		}
 
 		// Make Another Connection and Continue
@@ -2357,7 +2340,7 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 					#ifndef MICROSTACK_NOTLS
 					if (wcm->ssl_ctx != NULL && wcdo->requestMode == ILibWebClient_RequestToken_USE_HTTPS)
 					{
-						SSL* ssl = ILibAsyncSocket_SetSSLContext(wcdo->SOCK, wcm->ssl_ctx, 0);
+						SSL* ssl = ILibAsyncSocket_SetSSLContextEx(wcdo->SOCK, wcm->ssl_ctx, 0, wcdo->sniHost);
 						if (ssl != NULL && ILibWebClientDataObjectIndex >= 0)
 						{
 							SSL_set_ex_data(ssl, ILibWebClientDataObjectIndex, wcdo);
@@ -3256,7 +3239,7 @@ ILibTransport_DoneState ILibWebClient_StreamRequestBody(
 	
 	if (t != NULL && t->wcdo != NULL)
 	{
-		wr = (struct ILibWebRequest*)ILibQueue_PeekTail(t->wcdo->RequestQueue);
+		wr = t->parent;
 		if (t->wcdo->SOCK == NULL || ILibQueue_GetCount(t->wcdo->RequestQueue)>1)
 		{
 			// Connection not established yet, so buffer the data
@@ -3582,6 +3565,12 @@ int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_
 void ILibWebClient_Request_SetHTTPS(ILibWebClient_RequestToken reqToken, ILibWebClient_RequestToken_HTTPS requestMode)
 {
 	((struct ILibWebClientDataObject*)ILibWebClient_GetStateObjectFromRequestToken(reqToken))->requestMode = requestMode;
+}
+void ILibWebClient_Request_SetSNI(ILibWebClient_RequestToken reqToken, char *host, int hostLen)
+{
+	((struct ILibWebClientDataObject*)ILibWebClient_GetStateObjectFromRequestToken(reqToken))->sniHost = ILibMemory_Allocate(hostLen + 1, 0, NULL, NULL);
+	memcpy_s(((struct ILibWebClientDataObject*)ILibWebClient_GetStateObjectFromRequestToken(reqToken))->sniHost, hostLen, host, hostLen);
+	((struct ILibWebClientDataObject*)ILibWebClient_GetStateObjectFromRequestToken(reqToken))->sniHost[hostLen] = 0;
 }
 #endif
 

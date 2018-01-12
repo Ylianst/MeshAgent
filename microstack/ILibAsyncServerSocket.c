@@ -621,33 +621,38 @@ void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule se
 */
 ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemory(void *Chain, int MaxConnections, unsigned short PortNumber, int initialBufferSize, int loopbackFlag, ILibAsyncServerSocket_OnConnect OnConnect, ILibAsyncServerSocket_OnDisconnect OnDisconnect, ILibAsyncServerSocket_OnReceive OnReceive, ILibAsyncServerSocket_OnInterrupt OnInterrupt, ILibAsyncServerSocket_OnSendOK OnSendOK, int ServerUserMappedMemorySize, int SessionUserMappedMemorySize)
 {
-	int i;
-	int ra = 1;
-	int off = 0;
-	int receivingAddressLength = sizeof(struct sockaddr_in6);
 	struct sockaddr_in6 localif;
-	struct sockaddr_in6 localAddress;
-	struct ILibAsyncServerSocketModule *RetVal;
-
 	memset(&localif, 0, sizeof(struct sockaddr_in6));
+
 	if (loopbackFlag != 2 && ILibDetectIPv6Support())
 	{
 		// Setup the IPv6 any or loopback address, this socket will also work for IPv4 traffic on IPv6 stack
 		localif.sin6_family = AF_INET6;
-		localif.sin6_addr = (loopbackFlag != 0?in6addr_loopback:in6addr_any);
+		localif.sin6_addr = (loopbackFlag != 0 ? in6addr_loopback : in6addr_any);
 		localif.sin6_port = htons(PortNumber);
 	}
 	else
 	{
 		// IPv4-only detected
 		localif.sin6_family = AF_INET;
-#ifdef WINSOCK2
-		((struct sockaddr_in*)&localif)->sin_addr.S_un.S_addr = htonl((loopbackFlag != 0?INADDR_LOOPBACK:INADDR_ANY));
+#ifdef WIN32
+		((struct sockaddr_in*)&localif)->sin_addr.S_un.S_addr = htonl((loopbackFlag != 0 ? INADDR_LOOPBACK : INADDR_ANY));
 #else 
-		((struct sockaddr_in*)&localif)->sin_addr.s_addr = htonl((loopbackFlag != 0?INADDR_LOOPBACK:INADDR_ANY));
+		((struct sockaddr_in*)&localif)->sin_addr.s_addr = htonl((loopbackFlag != 0 ? INADDR_LOOPBACK : INADDR_ANY));
 #endif
 		((struct sockaddr_in*)&localif)->sin_port = htons(PortNumber);
 	}
+
+	return(ILibCreateAsyncServerSocketModuleWithMemoryEx(Chain, MaxConnections, initialBufferSize, (struct sockaddr*)&localif, OnConnect, OnDisconnect, OnReceive, OnInterrupt, OnSendOK, ServerUserMappedMemorySize, SessionUserMappedMemorySize));
+}
+ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx(void *Chain, int MaxConnections, int initialBufferSize, struct sockaddr *local, ILibAsyncServerSocket_OnConnect OnConnect, ILibAsyncServerSocket_OnDisconnect OnDisconnect, ILibAsyncServerSocket_OnReceive OnReceive, ILibAsyncServerSocket_OnInterrupt OnInterrupt, ILibAsyncServerSocket_OnSendOK OnSendOK, int ServerUserMappedMemorySize, int SessionUserMappedMemorySize)
+{
+	int i;
+	int ra = 1;
+	int off = 0;
+	int receivingAddressLength = sizeof(struct sockaddr_in6);
+	struct ILibAsyncServerSocketModule *RetVal;
+	struct sockaddr_in6 localAddress;
 
 	// Instantiate a new AsyncServer module
 	RetVal = (struct ILibAsyncServerSocketModule*)ILibChain_Link_Allocate(sizeof(struct ILibAsyncServerSocketModule), ServerUserMappedMemorySize);
@@ -664,15 +669,14 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemory(v
 	RetVal->MaxConnection = MaxConnections;
 	RetVal->AsyncSockets = (void**)malloc(MaxConnections * sizeof(void*));
 	if (RetVal->AsyncSockets == NULL) { free(RetVal); ILIBMARKPOSITION(253); return NULL; }
-	RetVal->portNumber = (unsigned short)PortNumber;
-	RetVal->loopbackFlag = loopbackFlag;
-	RetVal->initialPortNumber = PortNumber;
-
+	RetVal->portNumber = ntohs(((struct sockaddr_in6*)local)->sin6_port);
+	RetVal->initialPortNumber = RetVal->portNumber;
+	
 	// Get our listening socket
-	if ((RetVal->ListenSocket = socket(localif.sin6_family, SOCK_STREAM, IPPROTO_TCP)) == -1) { free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	if ((RetVal->ListenSocket = socket(((struct sockaddr_in6*)local)->sin6_family, SOCK_STREAM, IPPROTO_TCP)) == -1) { free(RetVal->AsyncSockets); free(RetVal); return 0; }
 
 	// Setup the IPv6 & IPv4 support on same socket
-	if (localif.sin6_family == AF_INET6) if (setsockopt(RetVal->ListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) ILIBCRITICALERREXIT(253);
+	if (((struct sockaddr_in6*)local)->sin6_family == AF_INET6) if (setsockopt(RetVal->ListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) ILIBCRITICALERREXIT(253);
 
 #ifdef SO_NOSIGPIPE
 	setsockopt(RetVal->ListenSocket, SOL_SOCKET, SO_NOSIGPIPE, (void*)&ra, sizeof(int));  // Turn off SIGPIPE if writing to disconnected socket
@@ -688,9 +692,9 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemory(v
 
 	// Bind the socket
 #if defined(WIN32)
-	if (bind(RetVal->ListenSocket, (struct sockaddr*)&localif, INET_SOCKADDR_LENGTH(localif.sin6_family)) != 0) { closesocket(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	if (bind(RetVal->ListenSocket, local, INET_SOCKADDR_LENGTH(((struct sockaddr_in6*)local)->sin6_family)) != 0) { closesocket(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
 #else
-	if (bind(RetVal->ListenSocket, (struct sockaddr*)&localif, INET_SOCKADDR_LENGTH(localif.sin6_family)) != 0) { close(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	if (bind(RetVal->ListenSocket, local, INET_SOCKADDR_LENGTH(((struct sockaddr_in6*)local)->sin6_family)) != 0) { close(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
 #endif
 
 	// Fetch the local port number

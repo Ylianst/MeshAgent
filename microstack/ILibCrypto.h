@@ -35,18 +35,31 @@ BOOL util_CopyFile(_In_ LPCSTR lpExistingFileName, _In_ LPCSTR lpNewFileName, _I
 void  __fastcall util_random(int length, char* result);
 void  __fastcall util_randomtext(int length, char* result);
 
-#define UTIL_HASHSIZE     48
-#define NONCE_SIZE        48
+#define UTIL_MD5_HASHSIZE		16
+#define UTIL_SHA1_HASHSIZE		20
+#define UTIL_SHA256_HASHSIZE	32
+#define UTIL_SHA384_HASHSIZE    48
+#define UTIL_SHA512_HASHSIZE	64
 
 #ifdef MICROSTACK_NOTLS
 #include "md5.h"
 #include "sha1.h"
-#include "microstack/SHA256.h"
+#include "microstack/SHA.h"
 
-#define SHA256_CTX struct sha256_ctx
-#define SHA256_Init(ctx) __sha256_init_ctx(ctx)
-#define SHA256_Update(ctx, data, len) __sha256_process_bytes(data, len, ctx)
-#define SHA256_Final(md, ctx) __sha256_finish_ctx(ctx, md)
+#define SHA256_CTX SHA256Context
+#define SHA512_CTX SHA512Context
+
+#define SHA256_Init(ctx) SHA256Reset (ctx)
+#define SHA256_Update(ctx, data, len) SHA256Input(ctx, (uint8_t*)data, len)
+#define SHA256_Final(md, ctx) SHA256Result (ctx, md)
+
+#define SHA384_Init(ctx) SHA384Reset (ctx)
+#define SHA384_Update(ctx, data, len) SHA384Input(ctx, (uint8_t*)data, len)
+#define SHA384_Final(md, ctx) SHA384Result (ctx, md)
+
+#define SHA512_Init(ctx) SHA512Reset (ctx)
+#define SHA512_Update(ctx, data, len) SHA512Input(ctx, (uint8_t*)data, len)
+#define SHA512_Final(md, ctx) SHA512Result (ctx, md)
 #endif
 
 

@@ -162,6 +162,10 @@ typedef struct ILibProcessPipe_WaitHandle
 	void *user;
 	ILibProcessPipe_WaitHandle_Handler callback;
 }ILibProcessPipe_WaitHandle;
+HANDLE ILibProcessPipe_Manager_GetWorkerThread(ILibProcessPipe_Manager mgr)
+{
+	return(((ILibProcessPipe_Manager_Object*)mgr)->workerThread);
+}
 
 int ILibProcessPipe_Manager_WindowsWaitHandles_Remove_Comparer(void *source, void *matchWith)
 {
@@ -181,6 +185,7 @@ void __stdcall ILibProcessPipe_WaitHandle_Remove_APC(ULONG_PTR obj)
 		waiter = (ILibProcessPipe_WaitHandle*)ILibLinkedList_GetDataFromNode(node);
 		free(waiter);
 		ILibLinkedList_Remove(node); 
+		SetEvent(manager->updateEvent);
 	}
 	free((void*)obj);
 }
@@ -497,21 +502,36 @@ ILibProcessPipe_PipeObject* ILibProcessPipe_CreatePipe(ILibProcessPipe_Manager m
 	return retVal;
 }
 
-void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
+#ifdef WIN32
+void __stdcall ILibProcessPipe_Process_Destroy_WinRunThread(ULONG_PTR obj)
 {
+	ILibProcessPipe_Process_Object *p = (ILibProcessPipe_Process_Object*)obj;
 	if (p->exiting != 0) { return; }
 	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
 	free(p);
 }
-#ifndef WIN32
-void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_PipeObject* sender)
+#endif
+void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 {
-	ILibProcessPipe_Process_Object *p = sender->mProcess;
+#ifdef WIN32
+	// We can't destroy this now, because we're on the MicrostackThread. We must destroy this on the WindowsRunLoop Thread.
+	QueueUserAPC((PAPCFUNC)ILibProcessPipe_Process_Destroy_WinRunThread, p->parent->workerThread, (ULONG_PTR)p);
+#else
+	if (p->exiting != 0) { return; }
+	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
+	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
+	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
+	free(p);
+#endif
+}
+#ifndef WIN32
+void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_Pipe sender)
+{
+	ILibProcessPipe_Process_Object *p = ((ILibProcessPipe_PipeObject*)sender)->mProcess;
 	int status;
-
-	if (ILibIsRunningOnChainThread(sender->manager->ChainLink.ParentChain) != 0)
+	if (ILibIsRunningOnChainThread(((ILibProcessPipe_PipeObject*)sender)->manager->ChainLink.ParentChain) != 0)
 	{
 		// This was called from the Reader
 		if (p->exitHandler != NULL)
@@ -685,13 +705,14 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx2(ILibProcessPipe_
 		retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
 		retVal->stdIn->mProcess = retVal;
 		retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
+		ILibProcessPipe_Pipe_SetBrokenPipeHandler(retVal->stdOut, ILibProcessPipe_Process_BrokenPipeSink);
 		retVal->stdOut->mProcess = retVal;
 	}
 	else
 	{
 		retVal->stdIn = ILibProcessPipe_CreatePipe(pipeManager, 4096, NULL, extraMemorySize);
 		retVal->stdIn->mProcess = retVal;
-		retVal->stdOut = ILibProcessPipe_CreatePipe(pipeManager, 4096, &ILibProcessPipe_Process_BrokenPipeSink, extraMemorySize);
+		retVal->stdOut = ILibProcessPipe_CreatePipe(pipeManager, 4096, (ILibProcessPipe_GenericBrokenPipeHandler) ILibProcessPipe_Process_BrokenPipeSink, extraMemorySize);
 		retVal->stdOut->mProcess = retVal;
 		pid = vfork();
 	}
@@ -859,7 +880,6 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 
 #endif
 		ILibLinkedList_Remove(ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject));
-
 		if (pipeObject->brokenPipeHandler != NULL) 
 		{
 			((ILibProcessPipe_GenericBrokenPipeHandler)pipeObject->brokenPipeHandler)(pipeObject); 
@@ -1240,6 +1260,11 @@ void ILibProcessPipe_Process_PipeHandler_StdIn(void *user1, void *user2)
 }
 
 #ifdef WIN32
+void __stdcall ILibProcessPipe_Process_OnExit_ChainSink_DestroySink(ULONG_PTR obj)
+{
+	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)obj;
+	if (j->exiting == 0) { ILibProcessPipe_Process_Destroy(j); }
+}
 void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 {
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)user;
@@ -1250,8 +1275,9 @@ void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 	j->exiting = 1;
 	j->exitHandler(j, exitCode, j->userObject);
 	j->exiting ^= 1;
-
-	if (j->exiting == 0) { ILibProcessPipe_Process_Destroy(j); }
+	
+	// We can't destroy this now, because we're on the MicrostackThread. We must destroy this on the WindowsRunLoop Thread.
+	QueueUserAPC((PAPCFUNC)ILibProcessPipe_Process_OnExit_ChainSink_DestroySink, j->parent->workerThread, (ULONG_PTR)j);
 }
 BOOL ILibProcessPipe_Process_OnExit(HANDLE event, void* user)
 {

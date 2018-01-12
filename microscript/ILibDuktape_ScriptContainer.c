@@ -40,7 +40,6 @@ limitations under the License.
 #include "ILibDuktape_EventEmitter.h"
 #include "ILibDuktape_Helpers.h"
 #include "../microstack/ILibParsers.h"
-#include "../microstack/ILibProcessPipe.h"
 #include "../microstack/ILibRemoteLogging.h"
 #include "../microstack/ILibCrypto.h"
 
@@ -49,7 +48,6 @@ limitations under the License.
 #include "ILibDuktape_WebRTC.h"
 #include "ILibDuktape_Dgram.h"
 #include "ILibDuktape_GenericMarshal.h"
-#include "ILibDuktape_ProcessPipe.h"
 #include "ILibDuktape_fs.h"
 #include "ILibDuktape_Polyfills.h"
 #include "ILibDuktape_SimpleDataStore.h"
@@ -58,6 +56,7 @@ limitations under the License.
 #include "ILibDuktape_SHA256.h"
 #include "ILibDuktape_EncryptionStream.h"
 #include "ILibDuktape_ChildProcess.h"
+#include "ILibDuktape_HECI.h"
 
 #ifdef _POSIX
 extern char **environ;
@@ -198,11 +197,11 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **argv, char **script, int *
 	if (ILibString_EndsWith(argv[0], -1, ".exe", 4) == 0)
 	{
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", argv[0]);
-		tmpFile = fopen(ILibScratchPad, "rb");
+		fopen_s(&tmpFile, ILibScratchPad, "rb");
 	}
 	else
 	{
-		tmpFile = fopen(argv[0], "rb");
+		fopen_s(&tmpFile, argv[0], "rb");
 	}
 #else
 	tmpFile = fopen(argv[0], "rb");
@@ -290,15 +289,23 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Argv0(duk_context *ctx)
 // Polyfill process object: 
 duk_ret_t ILibDuktape_ScriptContainer_Process_Argv(duk_context *ctx)
 {
+	duk_push_current_function(ctx);
+	int readOnly = Duktape_GetIntPropertyValue(ctx, -1, "readOnly", 0);
+
 	duk_push_this(ctx);																	// [process]
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_ArgArray))
 	{
 		duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_ArgArray);		// [process][array]
-		duk_dup(ctx, -1);																// [process][array][array]
+		if (readOnly != 0) { duk_dup(ctx, -1); }										// [process][array][array]
 	}
 	else
 	{
 		duk_push_array(ctx);															// [process][array]
+		if (readOnly == 0)
+		{
+			duk_dup(ctx, -1);															// [process][array][array]
+			duk_put_prop_string(ctx, -3, ILibDuktape_ScriptContainer_Process_ArgArray);	// [process][array]
+		}
 	}
 	return 1;
 }
@@ -404,7 +411,10 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
 
 	ILibDuktape_CreateEventWithGetter(ctx, "argv0", ILibDuktape_ScriptContainer_Process_Argv0);
-	ILibDuktape_CreateEventWithGetter(ctx, "argv", ILibDuktape_ScriptContainer_Process_Argv);
+	duk_push_int(ctx, 1);
+	ILibDuktape_CreateEventWithGetterAndCustomProperty(ctx, "readOnly", "argv", ILibDuktape_ScriptContainer_Process_Argv);
+	duk_push_int(ctx, 0);
+	ILibDuktape_CreateEventWithGetterAndCustomProperty(ctx, "readOnly", "_argv", ILibDuktape_ScriptContainer_Process_Argv);
 
 	duk_put_prop_string(ctx, -2, "process");											// [g]
 	duk_pop(ctx);																		// ...
@@ -762,7 +772,7 @@ void ILibDuktape_ScriptContainer_OS_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "os", ILibDuktape_ScriptContainer_OS_Push);
 }
-
+extern void ILibDuktape_HttpStream_Init(duk_context *ctx);
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
 {
 	duk_context *ctx = duk_create_heap(ILibDuktape_ScriptContainer_Engine_malloc, ILibDuktape_ScriptContainer_Engine_realloc, ILibDuktape_ScriptContainer_Engine_free, NULL, ILibDuktape_ScriptContainer_Engine_fatal);
@@ -800,12 +810,19 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENG
 	if ((securityFlags & SCRIPT_ENGINE_NO_NETWORK_ACCESS) == 0)
 	{
 		ILibDuktape_WebRTC_Init(ctx);						// WebRTC library (browser api)
-		ILibDuktape_http_init(ctx, chain);					// HTTP library (node api)
+		ILibDuktape_http_init(ctx, chain);					// HTTP-Digest library (node api)
 		ILibDuktape_net_init(ctx, chain);					// Network library (node api)
 		ILibDuktape_DGram_Init(ctx);						// Datagram Sockets
+		ILibDuktape_HttpStream_Init(ctx);					// HTTP Library (node api)
 	}
 	if ((securityFlags & SCRIPT_ENGINE_NO_GENERIC_MARSHAL_ACCESS) == 0) { ILibDuktape_GenericMarshal_init(ctx); }
-	if ((securityFlags & SCRIPT_ENGINE_NO_PROCESS_SPAWNING) == 0) { ILibDuktape_ProcessPipe_Init(ctx, chain); ILibDuktape_ChildProcess_Init(ctx); }
+	if ((securityFlags & SCRIPT_ENGINE_NO_PROCESS_SPAWNING) == 0) 
+	{ 
+		ILibDuktape_ChildProcess_Init(ctx); 
+#ifndef _NOHECI
+		ILibDuktape_HECI_Init(ctx); 
+#endif
+	}
 	if ((securityFlags & SCRIPT_ENGINE_NO_FILE_SYSTEM_ACCESS) == 0) { ILibDuktape_fs_init(ctx); }
 
 

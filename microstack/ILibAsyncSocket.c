@@ -1960,7 +1960,7 @@ void ILibAsyncSocket_ModuleOnConnect(ILibAsyncSocket_SocketModule socketModule)
 	\param ssl_ctx SSL_CTX Context object
 	\param server ILibAsyncSocket_TLS_Mode Configuration
 */
-SSL* ILibAsyncSocket_SetSSLContext(ILibAsyncSocket_SocketModule socketModule, SSL_CTX *ssl_ctx, ILibAsyncSocket_TLS_Mode server)
+SSL* ILibAsyncSocket_SetSSLContextEx(ILibAsyncSocket_SocketModule socketModule, SSL_CTX *ssl_ctx, ILibAsyncSocket_TLS_Mode server, char *hostName)
 {
 	if (socketModule != NULL)
 	{
@@ -1992,6 +1992,7 @@ SSL* ILibAsyncSocket_SetSSLContext(ILibAsyncSocket_SocketModule socketModule, SS
 			SSL_set_bio(module->ssl, module->readBio, module->writeBio);
 			if (server == ILibAsyncSocket_TLS_Mode_Client)
 			{
+				if (hostName != NULL) { SSL_set_tlsext_host_name(module->ssl, hostName); }
 				SSL_set_connect_state(module->ssl);
 				status = SSL_do_handshake(module->ssl);
 				if (status <= 0) { status = SSL_get_error(module->ssl, status); }

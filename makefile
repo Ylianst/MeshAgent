@@ -36,10 +36,10 @@ SOURCES += microscript/duktape.c microscript/ILibAsyncSocket_Duktape.c microscri
 SOURCES += microscript/ILibDuktape_http.c microscript/ILibDuktape_net.c microscript/ILibDuktape_ReadableStream.c microscript/ILibDuktape_WritableStream.c
 SOURCES += microscript/ILibDuktapeModSearch.c microscript/ILibParsers_Duktape.c microscript/ILibWebClient_Duktape.c microscript/ILibDuktape_WebRTC.c
 SOURCES += microscript/ILibWebServer_Duktape.c microscript/ILibDuktape_SimpleDataStore.c microscript/ILibDuktape_GenericMarshal.c
-SOURCES += microscript/ILibDuktape_ProcessPipe.c microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
+SOURCES += microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c
 SOURCES += microscript/ILibDuktape_ScriptContainer.c microscript/ILibDuktape_MemoryStream.c microscript/ILibDuktape_NetworkMonitor.c
-SOURCES += microscript/ILibDuktape_ChildProcess.c
+SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HECI.c microscript/ILibDuktape_HttpStream.c
 
 # Mesh Agent core
 SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
@@ -192,8 +192,8 @@ ifneq ($(WatchDog),)
 CWATCHDOG := -DILibChain_WATCHDOG_TIMEOUT=$(WatchDog)
 endif
 
-ifeq ($(NOSSL),1)
-SOURCES += microstack/SHA256.c
+ifeq ($(NOTLS),1)
+SOURCES += microstack/sha384-512.c microstack/sha224-256.c
 CFLAGS += -DMICROSTACK_NOTLS
 LINUXSSL = 
 else
@@ -264,18 +264,18 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi2" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" LDFLAGS="-Lopenssl/libstatic/linux/pi2 $(LDFLAGS) $(LDEXTRA)"
-	strip meshagent_pi2
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" LDFLAGS="-Lopenssl/libstatic/linux/pi $(LDFLAGS) $(LDEXTRA)"
+	strip meshagent_pi
 
 linux:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" CFLAGS="-DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LDFLAGS) $(LDEXTRA)"
 	$(STRIP)
 
-linux-nossl-64-library:
-	$(MAKE) LIBNAME="$(EXENAME)_x64.so" ADDITIONALSOURCES="$(KVMSOURCES)" CFLAGS="-Os -fPIC -DMICROSTACK_NOTLS $(CFLAGS) $(CEXTRA)" LDFLAGS="-shared $(LDFLAGS) $(LDEXTRA)"
+#linux-nossl-64-library:
+#	$(MAKE) LIBNAME="$(EXENAME)_x64.so" ADDITIONALSOURCES="$(KVMSOURCES)" CFLAGS="-Os -fPIC -DMICROSTACK_NOTLS $(CFLAGS) $(CEXTRA)" LDFLAGS="-shared $(LDFLAGS) $(LDEXTRA)"
 
-linux-64-library-debug:
-	$(MAKE) LIBNAME="$(EXENAME)_x64.so" ADDITIONALSOURCES="$(KVMSOURCES)" CFLAGS="-fPIC -D_DEBUG -DMICROSTACK_TLS_DETECT $(CFLAGS) $(CEXTRA)" LDFLAGS="-shared -L../../opentools/MeshManageability/openssl-static/x86-64 -lssl $(LDFLAGS) $(LDEXTRA)"
+#linux-64-library-debug:
+#	$(MAKE) LIBNAME="$(EXENAME)_x64.so" ADDITIONALSOURCES="$(KVMSOURCES)" CFLAGS="-fPIC -D_DEBUG -DMICROSTACK_TLS_DETECT $(CFLAGS) $(CEXTRA)" LDFLAGS="-shared -L../../opentools/MeshManageability/openssl-static/x86-64 -lssl $(LDFLAGS) $(LDEXTRA)"
 
 #mac-nossl-64:
 #	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_osx64" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings -std=gnu99 -Os -Wall -D_AGENTID=16 -D_POSIX -D_NOHECI -D_DAEMON -DMICROSTACK_PROXY -DMICROSTACK_NOTLS -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS)" LDFLAGS="-L. -lpthread -ldl -lz -lutil"

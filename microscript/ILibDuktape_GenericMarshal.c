@@ -41,6 +41,8 @@ limitations under the License.
 #include <dlfcn.h>
 #endif
 
+#define ILibDuktape_GenericMarshal_VariableType	"\xFF_GenericMarshal_VarType"
+
 typedef PTRSIZE(APICALLTYPE *R0)();
 typedef PTRSIZE(APICALLTYPE *R1)(PTRSIZE V1);
 typedef PTRSIZE(APICALLTYPE *R2)(PTRSIZE V1, PTRSIZE V2);
@@ -52,6 +54,17 @@ typedef PTRSIZE(APICALLTYPE *R7)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4,
 typedef PTRSIZE(APICALLTYPE *R8)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8);
 typedef PTRSIZE(APICALLTYPE *R9)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9);
 typedef PTRSIZE(APICALLTYPE *R10)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10);
+typedef PTRSIZE(APICALLTYPE *R11)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11);
+typedef PTRSIZE(APICALLTYPE *R12)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12);
+typedef PTRSIZE(APICALLTYPE *R13)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13);
+typedef PTRSIZE(APICALLTYPE *R14)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14);
+typedef PTRSIZE(APICALLTYPE *R15)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15);
+typedef PTRSIZE(APICALLTYPE *R16)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16);
+typedef PTRSIZE(APICALLTYPE *R17)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17);
+typedef PTRSIZE(APICALLTYPE *R18)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17, PTRSIZE V18);
+typedef PTRSIZE(APICALLTYPE *R19)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17, PTRSIZE V18, PTRSIZE V19);
+typedef PTRSIZE(APICALLTYPE *R20)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17, PTRSIZE V18, PTRSIZE V19, PTRSIZE V20);
+
 
 typedef struct Duktape_GenericMarshal_Proxy
 {
@@ -175,7 +188,6 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_SET(duk_context *ctx)
 {
 	void *ptr;
 	int size;
-	int value = duk_require_int(ctx, 0);
 
 	duk_push_this(ctx);							// [var]
 	duk_get_prop_string(ctx, -1, "_ptr");		// [var][ptr]
@@ -183,18 +195,32 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_SET(duk_context *ctx)
 	duk_get_prop_string(ctx, -2, "_size");		// [var][ptr][size]
 	size = duk_to_int(ctx, -1);
 
-	switch (size)
+	if (duk_is_number(ctx, 0))
 	{
+		switch (size)
+		{
 		case 2:
-			((unsigned short*)ptr)[0] = (unsigned short)value;
+			((unsigned short*)ptr)[0] = (unsigned short)duk_require_int(ctx, 0);
 			break;
 		case 4:
-			((unsigned int*)ptr)[0] = (unsigned int)value;
+			((unsigned int*)ptr)[0] = (unsigned int)duk_require_int(ctx, 0);
 			break;
 		default:
-			duk_push_string(ctx, "UNSUPPORTED VAL SIZE");
+			duk_push_string(ctx, "UNSUPPORTED VAL SIZE, with integral type");
 			duk_throw(ctx);
 			return(DUK_RET_ERROR);
+		}
+	}
+	else if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, ILibDuktape_GenericMarshal_VariableType))
+	{
+		((void**)ptr)[0] = Duktape_GetPointerProperty(ctx, 0, "_ptr");
+		duk_push_this(ctx);		// [var]
+		duk_dup(ctx, 0);		// [var][var]
+		duk_put_prop_string(ctx, -2, "\xFF_ref");
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "Invalid Parameter"));
 	}
 	return 0;
 }
@@ -292,6 +318,18 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_SetEx(duk_context *ctx)
 	}
 	return 0;
 }
+duk_ret_t ILibDuktape_GenericMarshal_Variable_toBuffer(duk_context *ctx)
+{
+	duk_push_this(ctx);						// [variable]
+
+	void *buffer = Duktape_GetPointerProperty(ctx, -1, "_ptr");
+	int bufferLen = Duktape_GetIntPropertyValue(ctx, -1, "_size", 0);
+
+	duk_push_external_buffer(ctx);								// [variable][ext]
+	duk_config_buffer(ctx, -1, buffer, (duk_size_t)bufferLen);
+	duk_push_buffer_object(ctx, -1, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
+	return(1);
+}
 void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size)
 {
 	duk_push_object(ctx);						// [var]
@@ -299,7 +337,8 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 	duk_put_prop_string(ctx, -2, "_ptr");		// [var]
 	duk_push_int(ctx, size);					// [var][size]
 	duk_put_prop_string(ctx, -2, "_size");		// [var]
-
+	duk_push_true(ctx);
+	duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_VariableType);
 
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "Val", ILibDuktape_GenericMarshal_Variable_Val_GET, ILibDuktape_GenericMarshal_Variable_Val_SET);
 	ILibDuktape_CreateEventWithGetterAndSetterWithIntMetaData(ctx, "_VarSize", 4, "IntVal", ILibDuktape_GenericMarshal_Variable_GetEx, ILibDuktape_GenericMarshal_Variable_SetEx);
@@ -310,6 +349,8 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 	ILibDuktape_CreateEventWithGetter(ctx, "AnsiString", ILibDuktape_GenericMarshal_Variable_Val_ASTRING);
 	ILibDuktape_CreateEventWithGetter(ctx, "HexString", ILibDuktape_GenericMarshal_Variable_Val_HSTRING);
 	ILibDuktape_CreateEventWithGetter(ctx, "HexString2", ILibDuktape_GenericMarshal_Variable_Val_HSTRING2);
+
+	ILibDuktape_CreateInstanceMethod(ctx, "toBuffer", ILibDuktape_GenericMarshal_Variable_toBuffer, 0);
 }
 duk_ret_t ILibDuktape_GenericMarshal_Variable_Finalizer(duk_context *ctx)
 {
@@ -330,9 +371,30 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Finalizer(duk_context *ctx)
 duk_ret_t ILibDuktape_GenericMarshal_CreateVariable(duk_context *ctx)
 {
 	char* ptr;
-	int size = duk_require_int(ctx, 0);
+	int size;
+	char *str = NULL;
+	duk_size_t strLen;
+
+	if (duk_is_number(ctx, 0))
+	{
+		size = duk_require_int(ctx, 0);
+	}
+	else if(duk_is_string(ctx, 0))
+	{
+		str = Duktape_GetBuffer(ctx, 0, &strLen);
+		size = (int)strLen + 1;
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "_GenericMarshal.CreateVariable(): Invalid Parameter"));
+	}
 
 	ptr = (char*)ILibMemory_Allocate(size, 0, NULL, NULL);
+	if (str != NULL)
+	{
+		memcpy_s(ptr, size, str, strLen);
+		ptr[strLen] = 0;
+	}
 	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, ptr, size);							// [var]
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_GenericMarshal_Variable_Finalizer);
 
@@ -567,8 +629,9 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	void *fptr = NULL;
 	int parms = duk_get_top(ctx);
 	int i;
-	PTRSIZE vars[10];
 	int retVal = -1;
+	if (parms > 20) { return(ILibDuktape_Error(ctx, "Too many parameters")); }
+	PTRSIZE *vars = ILibMemory_AllocateA(sizeof(PTRSIZE)*parms);
 
 	duk_push_current_function(ctx);					// [func]
 	duk_get_prop_string(ctx, -1, "_address");		// [func][addr]
@@ -638,6 +701,36 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 		break;
 	case 10:
 		retVal = (int)((R10)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9]);
+		break;
+	case 11:
+		retVal = (int)((R11)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10]);
+		break;
+	case 12:
+		retVal = (int)((R12)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11]);
+		break;
+	case 13:
+		retVal = (int)((R13)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12]);
+		break;
+	case 14:
+		retVal = (int)((R14)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13]);
+		break;
+	case 15:
+		retVal = (int)((R15)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14]);
+		break;
+	case 16:
+		retVal = (int)((R16)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15]);
+		break;
+	case 17:
+		retVal = (int)((R17)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16]);
+		break;
+	case 18:
+		retVal = (int)((R18)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17]);
+		break;
+	case 19:
+		retVal = (int)((R19)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17], vars[18]);
+		break;
+	case 20:
+		retVal = (int)((R20)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17], vars[18], vars[19]);
 		break;
 	default:
 		duk_push_string(ctx, "INVALID NUMBER OF PARAMETERS, MAX of 10");
@@ -726,6 +819,7 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateVariableEx(duk_context *ctx)
 
 	return 1;
 }
+
 void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);				// [obj]

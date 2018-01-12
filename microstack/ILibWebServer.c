@@ -1141,7 +1141,7 @@ int ILibWebServer_Digest_ParseAuthenticationHeader2(char* value, int valueLen, c
 	*token = value;
 
 	len = ILibTrimString(token, i);
-	(*token)[len] = 0;
+	//(*token)[len] = 0;
 	*tokenLen = len;
 
 	*tokenValue = value + i + 1;
@@ -1157,7 +1157,7 @@ int ILibWebServer_Digest_ParseAuthenticationHeader2(char* value, int valueLen, c
 	{
 		len -= 1;
 	}
-	(*tokenValue)[len] = 0;
+	//(*tokenValue)[len] = 0;
 	*tokenValueLen = len;
 	return 0;
 }
@@ -1190,7 +1190,7 @@ int ILibWebServer_Digest_IsCorrectRealmAndNonce(struct ILibWebServer_Session *se
 	int userRealmLen;
 	char* nonce = NULL;
 	char* opaque = NULL;
-	int opaqueLen;
+	int opaqueLen, nonceLen;
 	long long current;
 	char expiration[8];
 	char calculatedNonce[33];
@@ -1205,7 +1205,7 @@ int ILibWebServer_Digest_IsCorrectRealmAndNonce(struct ILibWebServer_Session *se
 
 	ILibWebServer_Digest_ParseAuthenticationHeader(ILibWebServer_Session_GetSystemData(session)->DigestTable, auth, authLen);
 	ILibGetEntryEx(ILibWebServer_Session_GetSystemData(session)->DigestTable, "realm", 5, (void**)&userRealm, &userRealmLen);
-	nonce = (char*)ILibGetEntry(ILibWebServer_Session_GetSystemData(session)->DigestTable, "nonce", 5);
+	ILibGetEntryEx(ILibWebServer_Session_GetSystemData(session)->DigestTable, "nonce", 5, (void**)&nonce, &nonceLen);
 	ILibGetEntryEx(ILibWebServer_Session_GetSystemData(session)->DigestTable, "opaque", 6, (void**)&opaque, &opaqueLen);
 
 	if (opaque != NULL && userRealm != NULL && userRealmLen == realmLen && strncmp(userRealm, realm, realmLen) == 0)
@@ -1217,7 +1217,7 @@ int ILibWebServer_Digest_IsCorrectRealmAndNonce(struct ILibWebServer_Session *se
 		if (((long long*)expiration)[0] < current) { return 0; } // Opaque Block Expired
 
 		ILibWebServer_Digest_CalculateNonce(session, ((long long*)expiration)[0], calculatedNonce);
-		return(strcmp(nonce, calculatedNonce) == 0 ? 1 : 0);
+		return((nonceLen == 32 && strncmp(nonce, calculatedNonce, 32)) == 0 ? 1 : 0);
 	}
 	else
 	{
@@ -1304,7 +1304,7 @@ ILibExportMethod int ILibWebServer_Digest_ValidatePassword(struct ILibWebServer_
 	MD5_Final((unsigned char*)val, &mctx);
 	util_tohex_lower(val, 16, result3);
 
-	retVal = strcmp(result3, response) == 0 ? 1 : 0;
+	retVal = (responseLen == 32 && strncmp(result3, response, 32)) == 0 ? 1 : 0;
 	// if (retVal == 0) { ILibWebServer_Digest_SendUnauthorized(session, realm, strlen(realm)); }
 
 	return retVal;

@@ -212,7 +212,8 @@ typedef enum ILibAsyncSocket_TLS_Mode
 #endif
 }ILibAsyncSocket_TLS_Mode;
 
-SSL* ILibAsyncSocket_SetSSLContext(ILibAsyncSocket_SocketModule socketModule, SSL_CTX *ssl_ctx, ILibAsyncSocket_TLS_Mode server);
+SSL* ILibAsyncSocket_SetSSLContextEx(ILibAsyncSocket_SocketModule socketModule, SSL_CTX *ssl_ctx, ILibAsyncSocket_TLS_Mode server, char *hostname);
+#define ILibAsyncSocket_SetSSLContext(socketModule, ssl_ctx, tlsMode) ILibAsyncSocket_SetSSLContextEx(socketModule, ssl_ctx, tlsMode, NULL)
 SSL_CTX *ILibAsyncSocket_GetSSLContext(ILibAsyncSocket_SocketModule socketModule);
 #endif
 
