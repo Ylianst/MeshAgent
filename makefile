@@ -32,7 +32,7 @@
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c
 SOURCES += microstack/ILibRemoteLogging.c microstack/ILibWebClient.c microstack/ILibWebRTC.c microstack/ILibWebServer.c microstack/ILibCrypto.c
 SOURCES += microstack/ILibWrapperWebRTC.c microstack/md5.c microstack/sha1.c microstack/ILibSimpleDataStore.c microstack/ILibProcessPipe.c microstack/ILibIPAddressMonitor.c
-SOURCES += microscript/duktape.c microscript/ILibAsyncSocket_Duktape.c microscript/ILibDuktape_DuplexStream.c microscript/ILibDuktape_Helpers.c
+SOURCES += microscript/duktape.c microscript/duk_module_duktape.c microscript/ILibAsyncSocket_Duktape.c microscript/ILibDuktape_DuplexStream.c microscript/ILibDuktape_Helpers.c
 SOURCES += microscript/ILibDuktape_http.c microscript/ILibDuktape_net.c microscript/ILibDuktape_ReadableStream.c microscript/ILibDuktape_WritableStream.c
 SOURCES += microscript/ILibDuktapeModSearch.c microscript/ILibParsers_Duktape.c microscript/ILibWebClient_Duktape.c microscript/ILibDuktape_WebRTC.c
 SOURCES += microscript/ILibWebServer_Duktape.c microscript/ILibDuktape_SimpleDataStore.c microscript/ILibDuktape_GenericMarshal.c
@@ -188,6 +188,11 @@ else
 CFLAGS += -D_NOHECI
 endif
 
+ifeq ($(WEBRTCDEBUG),1)
+# Adds WebRTC Debug Interfaces
+CFLAGS += -D_WEBRTCDEBUG
+endif
+
 ifneq ($(WatchDog),)
 CWATCHDOG := -DILibChain_WATCHDOG_TIMEOUT=$(WatchDog)
 endif
@@ -264,7 +269,7 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" LDFLAGS="-Lopenssl/libstatic/linux/pi $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" LDFLAGS="-Lopenssl/libstatic/linux/pi $(LDFLAGS) $(LDEXTRA)"
 	strip meshagent_pi
 
 linux:

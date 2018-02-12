@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,10 +34,6 @@ typedef struct ILibDuktape_net_socket
 	void *net;
 	void *duplexStream;
 	void *chain;
-	void *OnConnect;
-	void *OnClose;
-	void *OnError;
-	void *OnTimeout;
 	void *OnSetTimeout;
 	int unshiftBytes;
 	ILibDuktape_EventEmitter *emitter;
@@ -53,9 +49,7 @@ typedef struct ILibDuktape_net_server
 	void *self;
 	ILibAsyncServerSocket_ServerModule server;
 	ILibDuktape_EventEmitter *emitter;
-	void *OnClose;
-	void *OnListening;
-	void *OnError;
+	int isTLS;
 }ILibDuktape_net_server;
 typedef struct ILibDuktape_net_server_session
 {
@@ -66,8 +60,6 @@ typedef struct ILibDuktape_net_server_session
 	ILibDuktape_DuplexStream *stream;
 
 	int unshiftBytes;
-
-	void *OnTimeout;
 }ILibDuktape_net_server_session;
 
 int ILibDuktape_TLS_ctx2socket = -1;
@@ -83,6 +75,7 @@ int ILibDuktape_TLS_ctx2server = -1;
 #define ILibDuktape_SERVER2ContextTable			"\xFF_Server2ContextTable"
 #define ILibDuktape_SERVER2OPTIONS				"\xFF_ServerToOptions"
 #define ILibDuktape_SERVER2LISTENOPTIONS		"\xFF_ServerToListenOptions"
+#define ILibDuktape_TLSSocket2SecureContext		"\xFF_TLSSocket2SecureContext"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
@@ -143,28 +136,34 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 			return;
 		}
 #endif
-		if (ptrs->OnConnect != NULL)
-		{
-			duk_push_heapptr(ptrs->ctx, ptrs->OnConnect);			// [func]
-			duk_push_heapptr(ptrs->ctx, ptrs->object);				// [func][this]
-			if (duk_pcall_method(ptrs->ctx, 0) != 0)				// [retVal]
-			{
-				ILibDuktape_Process_UncaughtException(ptrs->ctx);
-			}
-			duk_pop(ptrs->ctx);										// ...
-		}
+		duk_push_heapptr(ptrs->ctx, ptrs->object);					// [this]
+		duk_get_prop_string(ptrs->ctx, -1, "emit");					// [this][emit]
+		duk_swap_top(ptrs->ctx, -2);								// [emit][this]
+		duk_push_string(ptrs->ctx, "connect");						// [emit][this][connect]
+		if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
+		duk_pop(ptrs->ctx);											// ...
 	}
-	else if(ptrs->OnError != NULL)
+	else 
 	{
-		duk_push_heapptr(ptrs->ctx, ptrs->OnError);					// [func]
-		ILibDuktape_net_socket_PUSH(ptrs->ctx, socketModule);		// [func][this]
-		duk_push_object(ptrs->ctx);									// [func][this][error]
-		duk_push_string(ptrs->ctx, "Connection Failed");			// [func][this][error][msg]
-		duk_put_prop_string(ptrs->ctx, -2, "message");				// [func][this][error]
-		if (duk_pcall_method(ptrs->ctx, 1) != 0)					// [retVal]
+		duk_push_heapptr(ptrs->ctx, ptrs->object);					// [this]
+		duk_get_prop_string(ptrs->ctx, -1, "emit");					// [this][emit]
+		duk_swap_top(ptrs->ctx, -2);								// [emit][this]
+		duk_push_string(ptrs->ctx, "error");						// [emit][this][error]
+		duk_push_object(ptrs->ctx);									// [emit][this][error][errorObj]
+#ifndef MICROSTACK_NOTLS
+		if (ptrs->ssl != NULL && ILibAsyncSocket_TLS_WasHandshakeError(socketModule))
 		{
-			ILibDuktape_Process_UncaughtException(ptrs->ctx);
+			duk_push_string(ptrs->ctx, "TLS Handshake Error");		// [emit][this][error][errorObj][msg]
 		}
+		else
+		{
+			duk_push_string(ptrs->ctx, "Connection Failed");		// [emit][this][error][errorObj][msg]
+		}
+#else
+		duk_push_string(ptrs->ctx, "Connection Failed");			// [emit][this][error][errorObj][msg]
+#endif
+		duk_put_prop_string(ptrs->ctx, -2, "message");				// [emit][this][error][errorObj]
+		if (duk_pcall_method(ptrs->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
 		duk_pop(ptrs->ctx);											// ...
 	}
 }
@@ -338,13 +337,13 @@ duk_ret_t ILibDuktape_net_socket_address(duk_context *ctx)
 void ILibDuktape_net_socket_timeoutSink(ILibAsyncSocket_SocketModule socketModule, void *user)
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
-	if (ptrs->OnTimeout != NULL)
-	{
-		duk_push_heapptr(ptrs->ctx, ptrs->OnTimeout);					// [func]
-		duk_push_heapptr(ptrs->ctx, ptrs->object);						// [func][this]
-		if (duk_pcall_method(ptrs->ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
-		duk_pop(ptrs->ctx);												// ...
-	}
+
+	duk_push_heapptr(ptrs->ctx, ptrs->object);						// [this]
+	duk_get_prop_string(ptrs->ctx, -1, "emit");						// [this][emit]
+	duk_swap_top(ptrs->ctx, -2);									// [emit][this]
+	duk_push_string(ptrs->ctx, "timeout");							// [emit][this][timeout]
+	if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
+	duk_pop(ptrs->ctx);												// ...
 }
 duk_ret_t ILibDuktape_net_socket_setTimeout(duk_context *ctx)
 {
@@ -378,9 +377,6 @@ duk_ret_t ILibDuktape_net_socket_finalizer(duk_context *ctx)
 	if (ptrs->socketModule != NULL)
 	{
 		if (ILibAsyncSocket_IsConnected(ptrs->socketModule) != 0) { ILibAsyncSocket_Disconnect(ptrs->socketModule); }
-#ifndef MICROSTACK_NOTLS
-		if (ptrs->ssl_ctx != NULL) { SSL_CTX_free(ptrs->ssl_ctx); ptrs->ssl_ctx = NULL; }
-#endif
 		ILibChain_SafeRemove(chain, ptrs->socketModule);
 	}
 
@@ -423,10 +419,10 @@ void ILibDuktape_net_socket_PUSH(duk_context *ctx, ILibAsyncSocket_SocketModule 
 	ptrs->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ptrs->duplexStream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_net_socket_WriteHandler, ILibDuktape_net_socket_EndHandler, ILibDuktape_net_socket_PauseHandler, ILibDuktape_net_socket_ResumeHandler, ILibDuktape_net_socket_unshift, ptrs);
 
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "close", &(ptrs->OnClose));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "connect", &(ptrs->OnConnect));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "error", &(ptrs->OnError));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "timeout", &(ptrs->OnTimeout));
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "close");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "connect");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "error");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "timeout");
 
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "connect", ILibDuktape_net_socket_connect, DUK_VARARGS);
 
@@ -576,7 +572,7 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 	session->emitter = ILibDuktape_EventEmitter_Create(ptr->ctx);
 		
 
-	ILibDuktape_EventEmitter_CreateEvent(session->emitter, "timeout", &(session->OnTimeout));
+	ILibDuktape_EventEmitter_CreateEventEx(session->emitter, "timeout");
 
 	session->stream = ILibDuktape_DuplexStream_InitEx(ptr->ctx, ILibDuktape_net_server_WriteSink, ILibDuktape_net_server_EndSink,
 		ILibDuktape_net_server_PauseSink, ILibDuktape_net_server_ResumeSink, ILibDuktape_net_server_unshiftSink, session);
@@ -587,7 +583,7 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 void ILibDuktape_net_server_OnDisconnect(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
-	ILibDuktape_DuplexStream_WriteEnd(session->stream);
+	ILibDuktape_DuplexStream_Closed(session->stream);
 }
 void ILibDuktape_net_server_OnReceive(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncServerSocket_OnInterrupt *OnInterrupt, void **user, int *PAUSE)
 {
@@ -689,34 +685,37 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	ILibAsyncServerSocket_SetTag(server->server, server);
 #ifndef MICROSTACK_NOTLS
 	{
-		duk_push_this(ctx);												// [server]
-		if (duk_has_prop_string(ctx, -1, "addContext"))
+		if (server->isTLS)
 		{
-			duk_get_prop_string(ctx, -1, "addContext");					// [server][addContext]
-			duk_swap_top(ctx, -2);										// [addContext][this]
-			duk_push_string(ctx, "*");									// [addContext][this][*]
-			duk_eval_string(ctx, "require('tls');");					// [addContext][this][*][tls]
-			duk_get_prop_string(ctx, -1, "createSecureContext");		// [addContext][this][*][tls][createSecureContext]
-			duk_swap_top(ctx, -2);										// [addContext][this][*][createSecureContext][this]
-			duk_get_prop_string(ctx, -4, ILibDuktape_SERVER2OPTIONS);	// [addContext][this][*][createSecureContext][this][options]
-			duk_call_method(ctx, 1);									// [addContext][this][*][secureContext]
-			duk_call_method(ctx, 2); duk_pop(ctx);						// ...
-		}
-		else
-		{
-			duk_pop(ctx);												// ...
+			duk_push_this(ctx);												// [server]
+			if (duk_has_prop_string(ctx, -1, "addContext"))
+			{
+				duk_get_prop_string(ctx, -1, "addContext");					// [server][addContext]
+				duk_swap_top(ctx, -2);										// [addContext][this]
+				duk_push_string(ctx, "*");									// [addContext][this][*]
+				duk_eval_string(ctx, "require('tls');");					// [addContext][this][*][tls]
+				duk_get_prop_string(ctx, -1, "createSecureContext");		// [addContext][this][*][tls][createSecureContext]
+				duk_swap_top(ctx, -2);										// [addContext][this][*][createSecureContext][this]
+				duk_get_prop_string(ctx, -4, ILibDuktape_SERVER2OPTIONS);	// [addContext][this][*][createSecureContext][this][options]
+				duk_call_method(ctx, 1);									// [addContext][this][*][secureContext]
+				duk_call_method(ctx, 2); duk_pop(ctx);						// ...
+			}
+			else
+			{
+				duk_pop(ctx);												// ...
+			}
 		}
 	}
 #endif
 
-	if (server->OnListening != NULL)
-	{
-		duk_push_heapptr(server->ctx, server->OnListening);		// [func]
-		duk_push_heapptr(server->ctx, server->self);			// [func][this]
-		if (duk_pcall_method(server->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(server->ctx, "net.server.listen(): Error "); }
-		duk_pop(server->ctx);									// ...
-	}
 
+		duk_push_heapptr(server->ctx, server->self);			// [this]
+		duk_get_prop_string(server->ctx, -1, "emit");			// [this][emit]
+		duk_swap_top(server->ctx, -2);							// [emit][this]
+		duk_push_string(server->ctx, "listening");				// [emit][this][listenting]
+		if (duk_pcall_method(server->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(server->ctx, "net.server.listen(): Error "); }
+		duk_pop(server->ctx);									// ...
+	
 #ifndef WIN32
 	ignore_result(backlog);
 #endif
@@ -783,11 +782,12 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 	server = (ILibDuktape_net_server*)Duktape_GetBuffer(ctx, -1, NULL);
 	memset(server, 0, sizeof(ILibDuktape_net_server));
 	duk_put_prop_string(ctx, -2, ILibDuktape_net_Server_buffer);				// [server]
-
+	
+	server->isTLS = isTLS;
 	server->self = duk_get_heapptr(ctx, -1);
 	server->ctx = ctx;
 	server->emitter = ILibDuktape_EventEmitter_Create(ctx);
-	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "close", &(server->OnClose));
+	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "close");
 	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "connection");
 #ifndef MICROSTACK_NOTLS
 	if (isTLS)
@@ -799,8 +799,8 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 		if (ILibDuktape_TLS_ctx2server < 0) { ILibDuktape_TLS_ctx2server = SSL_get_ex_new_index(0, "ILibDuktape_TLS_Server index", NULL, NULL, NULL); }
 	}
 #endif
-	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "error", &(server->OnError));
-	ILibDuktape_EventEmitter_CreateEvent(server->emitter, "listening", &(server->OnListening));
+	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "error");
+	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "listening");
 
 	ILibDuktape_CreateInstanceMethod(ctx, "listen", ILibDuktape_net_server_listen, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "address", ILibDuktape_net_server_address, 0);
@@ -816,6 +816,13 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 		if (duk_is_object(ctx, i))
 		{
 			// Options
+			if (isTLS && !duk_has_prop_string(ctx, i, "secureProtocol"))
+			{
+				duk_dup(ctx, i);									// [options]
+				duk_push_string(ctx, "SSLv23_server_method");		// [options][secureProtocol]
+				duk_put_prop_string(ctx, -2, "secureProtocol");		// [options]
+				duk_pop(ctx);										// ...
+			}
 		}
 	}
 
@@ -974,7 +981,7 @@ int ILibDuktape_TLS_verify(int preverify_ok, X509_STORE_CTX *storectx)
 	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1)) { duk_pop_2(data->ctx); return(preverify_ok); }
 	void *OnVerify = Duktape_GetHeapptrProperty(data->ctx, -1, "checkServerIdentity");
 
-	if (OnVerify == NULL) { return(1); }
+	if (OnVerify == NULL) { duk_pop_2(data->ctx); return(1); }
 
 	duk_push_heapptr(data->ctx, OnVerify);													// [func]
 	duk_push_heapptr(data->ctx, data->object);												// [func][this]
@@ -1141,10 +1148,6 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 	ILibAsyncSocket_SocketModule module = ILibCreateAsyncSocketModuleWithMemory(Duktape_GetChain(ctx), 4096, ILibDuktape_net_socket_OnData, ILibDuktape_net_socket_OnConnect, ILibDuktape_net_socket_OnDisconnect, ILibDuktape_net_socket_OnSendOK, sizeof(ILibDuktape_net_socket));
 	ILibDuktape_net_socket *data = (ILibDuktape_net_socket*)((ILibChain_Link*)module)->ExtraMemoryPtr;
 
-	data->ssl_ctx = SSL_CTX_new(SSLv23_client_method());
-	SSL_CTX_set_options(data->ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
-	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */ 
-
 	if (ILibDuktape_TLS_ctx2socket < 0)
 	{
 		ILibDuktape_TLS_ctx2socket = SSL_get_ex_new_index(0, "ILibDuktape_TLS index", NULL, NULL, NULL);
@@ -1152,6 +1155,28 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 
 	ILibDuktape_net_socket_PUSH(ctx, module);													// [socket]
 	ILibDuktape_WriteID(ctx, "tls.socket");
+	duk_dup(ctx, 0);																			// [socket][options]
+	if (duk_has_prop_string(ctx, -1, "secureContext"))
+	{
+		duk_get_prop_string(ctx, -1, "secureContext");											// [socket][options][secureContext]
+	}
+	else
+	{
+		duk_push_this(ctx);																		// [socket][options][tls]
+		duk_get_prop_string(ctx, -1, "createSecureContext");									// [socket][options][tls][createSecureContext]
+		duk_swap_top(ctx, -2);																	// [socket][options][createSecureContext][this]
+		duk_dup(ctx, -3);																		// [socket][options][createSecureContext][this][options]
+		duk_call_method(ctx, 1);																// [socket][options][secureContext]
+	}
+	if ((data->ssl_ctx = (SSL_CTX*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_SecureContext2SSLCTXPTR)) == NULL)
+	{
+		return(ILibDuktape_Error(ctx, "Invalid SecureContext Object"));
+	}
+	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */
+
+	duk_remove(ctx, -2);																		// [socket][secureContext]
+	duk_put_prop_string(ctx, -2, ILibDuktape_TLSSocket2SecureContext);
+
 	duk_dup(ctx, 0);																			// [socket][options]
 	duk_put_prop_string(ctx, -2, ILibDuktape_SOCKET2OPTIONS);									// [socket]
 	ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "secureConnect");
@@ -1197,6 +1222,7 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		SSL_set_ex_data(data->ssl, ILibDuktape_TLS_ctx2socket, data);
 		SSL_set_tlsext_host_name(data->ssl, host);
 	}
+
 	return(1);
 }
 duk_ret_t ILibDuktape_TLS_secureContext_Finalizer(duk_context *ctx)
@@ -1211,6 +1237,7 @@ duk_ret_t ILibDuktape_TLS_secureContext_Finalizer(duk_context *ctx)
 duk_ret_t ILibDuktape_TLS_createSecureContext(duk_context *ctx)
 {
 	duk_push_object(ctx);																	// [secureContext]
+	ILibDuktape_WriteID(ctx, "tls.secureContext");
 	duk_push_fixed_buffer(ctx, sizeof(struct util_cert));									// [secureContext][cert]
 	struct util_cert *cert = (struct util_cert*)Duktape_GetBuffer(ctx, -1, NULL);			
 	duk_put_prop_string(ctx, -2, ILibDuktape_SecureContext2CertBuffer);						// [secureContext]
@@ -1218,13 +1245,68 @@ duk_ret_t ILibDuktape_TLS_createSecureContext(duk_context *ctx)
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_TLS_secureContext_Finalizer);
 
 	duk_size_t secureProtocolLen;
-	char *secureProtocol = (char*)Duktape_GetStringPropertyValueEx(ctx, 0, "secureProtocol", "SSLv23_server_method", &secureProtocolLen);
+	char *secureProtocol = (char*)Duktape_GetStringPropertyValueEx(ctx, 0, "secureProtocol", "SSLv23_method", &secureProtocolLen);
 	SSL_CTX *ssl_ctx = NULL;
 
-	if (secureProtocolLen == 20 && strncmp(secureProtocol, "SSLv23_server_method", 20) == 0)
+	if (secureProtocolLen == 13 && strncmp(secureProtocol, "SSLv23_method", 13) == 0)
 	{
-		ssl_ctx = SSL_CTX_new(SSLv23_server_method());
+		ssl_ctx = SSL_CTX_new(TLS_method());
 		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	}
+	else if (secureProtocolLen == 20 && strncmp(secureProtocol, "SSLv23_client_method", 20) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	}
+	else if (secureProtocolLen == 20 && strncmp(secureProtocol, "SSLv23_server_method", 20) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
+	}
+	else if (secureProtocolLen == 12 && strncmp(secureProtocol, "TLSv1_method", 12) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2);
+	}
+	else if (secureProtocolLen == 19 && strncmp(secureProtocol, "TLSv1_client_method", 19) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2);
+	}
+	else if (secureProtocolLen == 19 && strncmp(secureProtocol, "TLSv1_server_method", 19) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2);
+	}
+	else if (secureProtocolLen == 14 && strncmp(secureProtocol, "TLSv1_1_method", 14) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_2);
+	}
+	else if (secureProtocolLen == 21 && strncmp(secureProtocol, "TLSv1_1_client_method", 21) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_2);
+	}
+	else if (secureProtocolLen == 21 && strncmp(secureProtocol, "TLSv1_1_server_method", 21) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_2);
+	}
+	else if (secureProtocolLen == 14 && strncmp(secureProtocol, "TLSv1_2_method", 14) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
+	}
+	else if (secureProtocolLen == 21 && strncmp(secureProtocol, "TLSv1_2_client_method", 21) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
+	}
+	else if (secureProtocolLen == 21 && strncmp(secureProtocol, "TLSv1_2_server_method", 21) == 0)
+	{
+		ssl_ctx = SSL_CTX_new(TLS_method());
+		SSL_CTX_set_options(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
 	}
 	else if (secureProtocolLen == 11 && strncmp(secureProtocol, "DTLS_method", 11) == 0)
 	{
@@ -1266,10 +1348,30 @@ duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)
 	duk_push_fixed_buffer(ctx, len);
 	memcpy_s((void*)Duktape_GetBuffer(ctx, -1, NULL), len, data, len);
 	duk_push_buffer_object(ctx, -1, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);
-
+	ILibDuktape_WriteID(ctx, "tls.pfxCertificate");
 	util_free(data);
 	util_freecert(&cert);
 	return 1;
+}
+duk_ret_t ILibDuktape_TLS_loadpkcs7b(duk_context *ctx)
+{
+	duk_size_t len;
+	char *buffer = (char*)Duktape_GetBuffer(ctx, 0, &len);
+	int val = util_from_pkcs7b_string(buffer, (int)len, NULL, 0);
+	char *out;
+
+	if (val > 0)
+	{
+		duk_push_fixed_buffer(ctx, val);
+		out = Duktape_GetBuffer(ctx, -1, NULL);
+		duk_push_buffer_object(ctx, -1, 0, val, DUK_BUFOBJ_NODEJS_BUFFER);
+		util_from_pkcs7b_string(buffer, (int)len, out, val);
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "Error reading pkcs7b data"));
+	}
 }
 void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 {
@@ -1278,6 +1380,7 @@ void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_TLS_connect, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createSecureContext", ILibDuktape_TLS_createSecureContext, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "loadpkcs7b", ILibDuktape_TLS_loadpkcs7b, 1);
 }
 #endif
 

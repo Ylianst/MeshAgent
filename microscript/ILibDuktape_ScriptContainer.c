@@ -1,11 +1,11 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
 
 #ifdef WIN32
 #include <WinSock2.h>
@@ -52,6 +51,7 @@ limitations under the License.
 #include "ILibDuktape_Polyfills.h"
 #include "ILibDuktape_SimpleDataStore.h"
 #include "ILibDuktape_NetworkMonitor.h"
+#include "ILibDuktape_ReadableStream.h"
 
 #include "ILibDuktape_SHA256.h"
 #include "ILibDuktape_EncryptionStream.h"
@@ -62,13 +62,16 @@ limitations under the License.
 extern char **environ;
 #endif
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
+
+char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 #define ILibDuktape_ScriptContainer_MasterPtr		"\xFF_ScriptContainer_MasterPtr"
 #define ILibDuktape_ScriptContainer_SlavePtr		"\xFF_ScriptContainer_SlavePtr"
 #define ILibDuktape_ScriptContainer_ExePath			"\xFF_ScriptContainer_ExePath"
 #define ILibDuktape_ScriptContainer_PipeManager		"\xFF_ScriptContainer_PipeManager"
 #define ILibDuktape_ScriptContainer_PtrTable		"\xFF_ScriptContainer_PtrTable"
 #define ILibDuktape_ScriptContainer_PtrTable_Idx	"\xFF_ScriptContainer_PtrTableIdx"
-
+#define ILibDuktape_ScriptContainer_ProcessIsolated	"\xFF_ScriptContainer_ProcessIsolated"
+#define ILibDuktape_ScriptContainer_PeerThread		"\xFF_ScriptContainer_PeerThread"
 
 #define ILibDuktape_ScriptContainer_Command_Execute_Status		"ScriptContainer_Command_Execute_Status"
 #define ILibDuktape_ScriptContainer_Command_Log					"ScriptContainer_Command_Log"
@@ -79,6 +82,7 @@ extern char **environ;
 #define ILibDuktape_ScriptContainer_Settings_ExitUser			"\xFF_ScriptContainerSettings_ExitUser"
 #define ILibDuktape_ScriptContainer_Process_ArgArray			"\xFF_argArray"
 #define ILibDuktape_ScriptContainer_Process_Restart				"\xFF_ScriptContainer_Process_Restart"
+#define ILibDuktape_ScriptContainer_Process_stdin				"\xFF_stdin"
 
 #define ILibDuktape_ScriptContainer_ExitCode					"\xFF_ExitCode"
 #define ILibDuktape_ScriptContainer_Exitting					"\xFF_Exiting"
@@ -111,6 +115,7 @@ extern char **environ;
 
 extern void ILibDuktape_MemoryStream_Init(duk_context *ctx);
 extern void ILibDuktape_NetworkMonitor_Init(duk_context *ctx);
+char g_AgentCrashID[280];
 
 typedef enum SCRIPT_ENGINE_COMMAND
 {
@@ -121,6 +126,8 @@ typedef enum SCRIPT_ENGINE_COMMAND
 	SCRIPT_ENGINE_COMMAND_SEND_JSON = 0x10,
 	SCRIPT_ENGINE_COMMAND_QUERY = 0x20,
 	SCRIPT_ENGINE_COMMAND_SET = 0x21,
+	SCRIPT_ENGINE_COMMAND_ERROR = 0x40,
+	SCRIPT_ENGINE_COMMAND_EXIT = 0x80,
 	SCRIPT_ENGINE_COMMAND_LOG = 0xFF
 }SCRIPT_ENGINE_COMMAND;
 
@@ -132,7 +139,8 @@ typedef struct ILibDuktape_ScriptContainer_Master
 
 	ILibProcessPipe_Process child;
 	void *chain;
-	void *OnExit, *OnError, *OnJSON;
+	void *PeerThread, *PeerChain;
+	unsigned int ChildSecurityFlags;
 }ILibDuktape_ScriptContainer_Master;
 
 typedef struct ILibDuktape_ScriptContainer_Slave
@@ -140,10 +148,20 @@ typedef struct ILibDuktape_ScriptContainer_Slave
 	duk_context *ctx;
 	ILibDuktape_EventEmitter *emitter;
 
-	void *OnData;
 	void *chain;
 	int exitCode;
+	int noRespond;
 }ILibDuktape_ScriptContainer_Slave;
+
+
+typedef struct ILibDuktape_ScriptContainer_NonIsolated_Command
+{
+	union { ILibDuktape_ScriptContainer_Master * master; ILibDuktape_ScriptContainer_Slave *slave; }container;
+	char json[];
+}ILibDuktape_ScriptContainer_NonIsolated_Command;
+
+void ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave(void *chain, void *user);
+void ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster(void *chain, void *user);
 
 #ifdef _REMOTELOGGING
 void ILibDuktape_ScriptContainer_Slave_LogForwarder(ILibRemoteLogging sender, ILibRemoteLogging_Modules module, ILibRemoteLogging_Flags flags, char *buffer, int bufferLen)
@@ -190,40 +208,134 @@ void ILibDuktape_ScriptContainer_Slave_OnBrokenPipe(ILibProcessPipe_Pipe sender)
 void ILibDuktape_ScriptContainer_CheckEmbedded(char **argv, char **script, int *scriptLen)
 {
 	// Check if .JS file is integrated with executable
+	int i;
 	FILE *tmpFile;
 	char *integratedJavaScript = NULL;
 	int integratedJavaScriptLen = 0;
 #ifdef WIN32
 	if (ILibString_EndsWith(argv[0], -1, ".exe", 4) == 0)
 	{
+		i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s_", argv[0]);
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", argv[0]);
 		fopen_s(&tmpFile, ILibScratchPad, "rb");
 	}
 	else
 	{
+		i = ILibString_LastIndexOf(argv[0], -1, "\\", 1);
+		if (i > 0)
+		{
+			i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s", argv[0] + i + 1);
+			g_AgentCrashID[i-4] = '_';
+			i -= 3;
+		}
+		else
+		{
+			i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s", argv[0]);
+			g_AgentCrashID[i-4] = '_';
+			i -= 3;
+		}
 		fopen_s(&tmpFile, argv[0], "rb");
 	}
 #else
+	i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s_", argv[0]);
 	tmpFile = fopen(argv[0], "rb");
 #endif
 
 	if (tmpFile != NULL)
 	{
-		fseek(tmpFile, 0, SEEK_END);
-		fseek(tmpFile, ftell(tmpFile) - 4, SEEK_SET);
-		ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
-		fseek(tmpFile, 0, SEEK_END);
-		if (ftell(tmpFile) == ntohl(((int*)ILibScratchPad)[0]))
+		SHA512_CTX shctx;
+		char hashBuffer[4096];
+		char hashValue[1 + UTIL_SHA384_HASHSIZE];
+		int hashBufferReadLen;
+
+		SHA384_Init(&shctx);
+		while ((hashBufferReadLen = (int)fread(hashBuffer, 1, sizeof(hashBuffer), tmpFile)) > 0)
 		{
-			fseek(tmpFile, ftell(tmpFile) - 8, SEEK_SET);
+			SHA384_Update(&shctx, hashBuffer, hashBufferReadLen);
+		}
+		SHA384_Final((unsigned char*)hashValue, &shctx);
+		util_tohex(hashValue, UTIL_SHA384_HASHSIZE, g_AgentCrashID + i);
+#ifdef WIN32
+		memcpy_s(g_AgentCrashID + i + 16, 5, ".exe", 5);
+#else
+		g_AgentCrashID[i + 16] = 0;
+#endif
+
+		g_ILibCrashID = g_AgentCrashID;
+
+#ifdef WIN32
+		// Read the PE Headers, to determine where to look for the Embedded JS
+		char *optHeader = NULL;
+		fseek(tmpFile, 0, SEEK_SET);
+		ignore_result(fread(ILibScratchPad, 1, 2, tmpFile));
+		if (ntohs(((unsigned int*)ILibScratchPad)[0]) == 19802) // 5A4D
+		{
+			fseek(tmpFile, 60, SEEK_SET);
 			ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
-			integratedJavaScriptLen = ntohl(((int*)ILibScratchPad)[0]);
-			integratedJavaScript = ILibMemory_Allocate(1 + integratedJavaScriptLen, 0, NULL, NULL);
-			fseek(tmpFile, 0, SEEK_END);
-			fseek(tmpFile, ftell(tmpFile) - 8 - integratedJavaScriptLen, SEEK_SET);
+			fseek(tmpFile, ((unsigned *)ILibScratchPad)[0], SEEK_SET);
+			ignore_result(fread(ILibScratchPad, 1, 24, tmpFile));
+			if (((unsigned int*)ILibScratchPad)[0] == 17744)
+			{
+				// PE Image
+				optHeader = ILibMemory_AllocateA(((unsigned short*)ILibScratchPad)[10]);
+				ignore_result(fread(optHeader, 1, ILibMemory_AllocateA_Size(optHeader), tmpFile));
+				switch (((unsigned short*)optHeader)[0])
+				{
+					case 0x10B:
+						if (((unsigned int*)(optHeader + 128))[0] != 0)
+						{
+							fseek(tmpFile, ((unsigned int*)(optHeader + 128))[0] - 16, SEEK_SET);
+						}
+						else
+						{
+							fseek(tmpFile, -16, SEEK_END);
+						}
+						break;
+					case 0x20B:
+						if (((unsigned int*)(optHeader + 144))[0] != 0)
+						{
+							fseek(tmpFile, ((unsigned int*)(optHeader + 144))[0] - 16, SEEK_SET);
+						}
+						else
+						{
+							fseek(tmpFile, -16, SEEK_END);
+						}
+						break;
+					default:
+						fclose(tmpFile);
+						return;
+				}
+				ignore_result(fread(ILibScratchPad, 1, 16, tmpFile));
+				util_hexToBuf(exeJavaScriptGuid, 32, ILibScratchPad2);
+				if (memcmp(ILibScratchPad, ILibScratchPad2, 16) == 0)
+				{
+					// Found an Embedded JS
+					fseek(tmpFile, -20, SEEK_CUR);
+					ignore_result(fread((void*)&integratedJavaScriptLen, 1, 4, tmpFile));
+					integratedJavaScriptLen = (int)ntohl(integratedJavaScriptLen);
+					fseek(tmpFile, -4 - integratedJavaScriptLen, SEEK_CUR);
+					integratedJavaScript = ILibMemory_Allocate(integratedJavaScriptLen + 1, 0, NULL, NULL);
+					ignore_result(fread(integratedJavaScript, 1, integratedJavaScriptLen, tmpFile));
+					integratedJavaScript[integratedJavaScriptLen] = 0;
+				}
+			}
+		}
+#else
+		fseek(tmpFile, -16, SEEK_END);
+		ignore_result(fread(ILibScratchPad, 1, 16, tmpFile));
+		util_hexToBuf(exeJavaScriptGuid, 32, ILibScratchPad2);
+		if (memcmp(ILibScratchPad, ILibScratchPad2, 16) == 0)
+		{
+			// Found an Embedded JS
+			fseek(tmpFile, -20, SEEK_CUR);
+			ignore_result(fread((void*)&integratedJavaScriptLen, 1, 4, tmpFile));
+			integratedJavaScriptLen = (int)ntohl(integratedJavaScriptLen);
+			fseek(tmpFile, -4 - integratedJavaScriptLen, SEEK_CUR);
+			integratedJavaScript = ILibMemory_Allocate(integratedJavaScriptLen + 1, 0, NULL, NULL);
 			ignore_result(fread(integratedJavaScript, 1, integratedJavaScriptLen, tmpFile));
 			integratedJavaScript[integratedJavaScriptLen] = 0;
 		}
+#endif
 		fclose(tmpFile);
 	}
 	*script = integratedJavaScript;
@@ -353,6 +465,146 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_env(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_ScriptContainer_Process_Finalizer(duk_context *ctx)
+{
+	// We need to dispatch the 'exit' event
+	int exitCode = 0;
+	duk_push_this(ctx);											// [process]
+	if (duk_has_prop_string(ctx, -1, "\xFF_ExitCode"))
+	{
+		duk_get_prop_string(ctx, -1, "\xFF_ExitCode");			// [process][exitCode]
+		exitCode = duk_get_int(ctx, -1);
+		duk_pop(ctx);											// [process]
+	}
+	ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "exit");	// [emit][this]['exit']
+	duk_push_int(ctx, exitCode);												// [emit][this]['exit'][exitCode]
+	duk_call_method(ctx, 2);
+	return(0);
+}
+
+
+typedef struct ILibDuktape_Process_StdIn_Data
+{
+	ILibDuktape_readableStream *rs;
+#ifdef WIN32
+	HANDLE workerThread;
+	HANDLE resumeEvent;
+	int exit;
+#endif
+	int wasUnshifted;
+	int endPointer;
+	int bufferSize;
+	char buffer[];
+}ILibDuktape_Process_StdIn_Data;
+
+#ifdef WIN32
+void __stdcall ILibDuktape_Process_stdin_readSink(ULONG_PTR obj)
+{
+	ILibDuktape_Process_StdIn_Data *data = (ILibDuktape_Process_StdIn_Data*)obj;
+	int endPointer;
+	do
+	{
+		endPointer = data->endPointer;
+		data->wasUnshifted = 0;
+		ILibDuktape_readableStream_WriteData(data->rs, data->buffer, data->endPointer);
+	} while (!data->rs->paused && data->wasUnshifted > 0 && data->wasUnshifted != endPointer);
+
+	data->endPointer = data->wasUnshifted;
+	if (!data->rs->paused) { SetEvent(data->resumeEvent); }
+}
+#endif
+void ILibDuktape_Process_stdin_pauseSink(struct ILibDuktape_readableStream *sender, void *user)
+{
+	UNREFERENCED_PARAMETER(sender);
+	UNREFERENCED_PARAMETER(user);
+
+	// NO-OP, because stream state flag will be paused, which will cause the processing loop to exit
+}
+void ILibDuktape_Process_stdin_resumeSink(struct ILibDuktape_readableStream *sender, void *user)
+{
+	ILibDuktape_Process_StdIn_Data *data = (ILibDuktape_Process_StdIn_Data*)user;
+#ifdef WIN32
+	SetEvent(data->resumeEvent);
+#endif
+}
+int ILibDuktape_Process_stdin_unshiftSink(struct ILibDuktape_readableStream *sender, int unshiftBytes, void *user)
+{
+	ILibDuktape_Process_StdIn_Data *data = (ILibDuktape_Process_StdIn_Data*)user;
+	data->wasUnshifted = unshiftBytes <= data->endPointer ? unshiftBytes : data->endPointer;
+
+	if (unshiftBytes > 0 && unshiftBytes < data->endPointer)
+	{
+		memmove_s(data->buffer, data->bufferSize, data->buffer + (data->endPointer - unshiftBytes), unshiftBytes);
+		data->endPointer = unshiftBytes;
+	}
+	return(data->wasUnshifted);
+}
+#ifdef WIN32
+void ILibDuktape_Process_stdin_WindowsRunLoop(void *arg)
+{
+	ILibDuktape_Process_StdIn_Data *data = (ILibDuktape_Process_StdIn_Data*)arg;
+	HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+	DWORD bytesRead, waitResult;
+
+	while (((waitResult = WaitForSingleObjectEx(data->resumeEvent, INFINITE, TRUE)) == WAIT_OBJECT_0 || waitResult == WAIT_IO_COMPLETION) && !data->exit)
+	{
+		if (!ReadFile(h, data->buffer + data->endPointer, data->bufferSize - data->endPointer, &bytesRead, NULL))
+		{
+			break;
+		}
+		else
+		{
+			ResetEvent(data->resumeEvent);		// Reset, becuase we'll need to pause and context switch to Duktape thread
+			data->endPointer += (int)bytesRead;
+			QueueUserAPC((PAPCFUNC)ILibDuktape_Process_stdin_readSink, ILibChain_GetMicrostackThreadHandle(data->rs->chain), (ULONG_PTR)data);
+		}
+	}
+}
+#endif
+duk_ret_t ILibDuktape_Process_stdin_finalizer(duk_context *ctx)
+{
+	duk_get_prop_string(ctx, 0, ILibDuktape_readableStream_RSPTRS);
+	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
+	ILibDuktape_Process_StdIn_Data *data = (ILibDuktape_Process_StdIn_Data*)rs->user;
+
+#ifdef WIN32
+	data->exit = 1;
+	SetEvent(data->resumeEvent);
+	CancelSynchronousIo(data->workerThread);
+	WaitForSingleObject(data->workerThread, 10000);
+
+	CloseHandle(data->resumeEvent);
+#endif
+
+	free(data);
+	return(0);
+}
+duk_ret_t ILibDuktape_Process_stdin_get(duk_context *ctx)
+{
+	duk_push_this(ctx);																// [process]
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_stdin))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_stdin);
+		return(1);
+	}
+
+	duk_push_object(ctx);															// [process][stdin]
+	duk_dup(ctx, -1);																// [process][stdin][dup]
+	duk_put_prop_string(ctx, -3, ILibDuktape_ScriptContainer_Process_stdin);		// [process][stdin]
+	ILibDuktape_WriteID(ctx, "process.stdin");
+	ILibDuktape_readableStream *rs = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_Process_stdin_pauseSink, ILibDuktape_Process_stdin_resumeSink, ILibDuktape_Process_stdin_unshiftSink, NULL);
+	rs->user = ILibMemory_Allocate(sizeof(ILibDuktape_Process_StdIn_Data) + 4096, 0, NULL, NULL);
+	((ILibDuktape_Process_StdIn_Data*)rs->user)->rs = rs;
+	((ILibDuktape_Process_StdIn_Data*)rs->user)->bufferSize = 4096;
+
+#ifdef WIN32
+	((ILibDuktape_Process_StdIn_Data*)rs->user)->resumeEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
+	((ILibDuktape_Process_StdIn_Data*)rs->user)->workerThread = ILibSpawnNormalThread(ILibDuktape_Process_stdin_WindowsRunLoop, rs->user);
+#endif
+	
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "~", ILibDuktape_Process_stdin_finalizer);
+	return(1);
+}
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -360,6 +612,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 
 	duk_push_global_object(ctx);														// [g]
 	duk_push_object(ctx);																// [g][process]
+	ILibDuktape_WriteID(ctx, "process");
 	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
 
 #if defined(WIN32)																		// [g][process][platform]
@@ -416,8 +669,21 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_push_int(ctx, 0);
 	ILibDuktape_CreateEventWithGetterAndCustomProperty(ctx, "readOnly", "_argv", ILibDuktape_ScriptContainer_Process_Argv);
 
+	duk_push_heap_stash(ctx);															// [g][process][stash]
+	if (!duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_SlavePtr))
+	{
+		duk_pop(ctx);																	// [g][process]
+		ILibDuktape_CreateEventWithGetter(ctx, "stdin", ILibDuktape_Process_stdin_get);
+	}
+	else
+	{
+		duk_pop(ctx);																	// [g][process]
+	}
+
 	duk_put_prop_string(ctx, -2, "process");											// [g]
 	duk_pop(ctx);																		// ...
+
+	ILibDuktape_EventEmitter_AddOnceEx(emitter, "~", ILibDuktape_ScriptContainer_Process_Finalizer, 1);
 }
 void ILibDuktape_ScriptContainer_ExecTimeout_Finalizer(duk_context *ctx, void *timeoutKey)
 {
@@ -510,9 +776,9 @@ void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
 {
 	free(ptr);
 }
-void ILibDuktape_ScriptContainer_Engine_fatal(duk_context *ctx, duk_errcode_t code, const char *msg)
+void ILibDuktape_ScriptContainer_Engine_fatal(void *udata, const char *msg)
 {
-	ILIBCRITICALEXITMSG(code, msg);
+	ILIBCRITICALEXITMSG(254, msg);
 }
 duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 {
@@ -756,6 +1022,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);							// [os]
+	ILibDuktape_WriteID(ctx, "os");
 
 #ifdef WIN32
 	duk_push_string(ctx, "\r\n");
@@ -773,10 +1040,13 @@ void ILibDuktape_ScriptContainer_OS_Init(duk_context *ctx)
 	ILibDuktape_ModSearch_AddHandler(ctx, "os", ILibDuktape_ScriptContainer_OS_Push);
 }
 extern void ILibDuktape_HttpStream_Init(duk_context *ctx);
-duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
+duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal()
 {
 	duk_context *ctx = duk_create_heap(ILibDuktape_ScriptContainer_Engine_malloc, ILibDuktape_ScriptContainer_Engine_realloc, ILibDuktape_ScriptContainer_Engine_free, NULL, ILibDuktape_ScriptContainer_Engine_fatal);
-	//duk_context *ctx = duk_create_heap_default();
+	return(ctx);
+}
+duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_context *ctx, SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
+{
 	void **timeoutKey = executionTimeout > 0 ? (void**)ILibMemory_Allocate(sizeof(void*), 0, NULL, NULL) : NULL;
 
 	duk_push_heap_stash(ctx);															// [s]
@@ -897,7 +1167,7 @@ int ILibDuktape_ScriptContainer_CompileJavaScript_FromFile(duk_context *ctx, cha
 
 	if (path == NULL || pathLen == 0)
 	{
-		duk_push_error_object(ctx, DUK_ERR_API_ERROR, "Invalid Path specified");
+		duk_push_error_object(ctx, DUK_ERR_ERROR, "Invalid Path specified");
 		return(1);
 	}
 	else
@@ -1153,16 +1423,15 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 		break;
 		case SCRIPT_ENGINE_COMMAND_SEND_JSON:
 		{
-			if (slave->OnData != NULL)
+			if (ILibDuktape_EventEmitter_HasListeners(slave->emitter, "data")!=0)
 			{
 				char *json = Duktape_GetStringPropertyValue(slave->ctx, -1, "json", NULL);
 				if (json != NULL)
 				{
-					duk_push_heapptr(slave->ctx, slave->OnData);									// [func]
-					duk_push_heapptr(slave->ctx, slave->emitter->object);							// [func][this]
-					duk_push_string(slave->ctx, json);												// [func][this][json]
-					duk_json_decode(slave->ctx, -1);												// [func][this][object]
-					if (duk_pcall_method(slave->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(slave->ctx, "ScriptContainer.OnData(): "); }
+					ILibDuktape_EventEmitter_SetupEmit(slave->ctx, slave->emitter->object, "data");	// [emit][this][data]
+					duk_push_string(slave->ctx, json);												// [emit][this][data][json]
+					duk_json_decode(slave->ctx, -1);												// [emit][this][data][object]
+					if (duk_pcall_method(slave->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(slave->ctx, "ScriptContainer.OnData(): "); }
 					duk_pop(slave->ctx);															// ...
 				}
 			}
@@ -1313,6 +1582,15 @@ duk_ret_t ILibDuktape_ScriptContainer_Exit(duk_context *ctx)
 	duk_push_this(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_MasterPtr);
 	master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBuffer(ctx, -1, NULL);
+	if (master->PeerChain != NULL)
+	{
+		char json[] = "{\"command\": \"128\"}";
+		ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = ILibMemory_Allocate(sizeof(json) + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+		cmd->container.slave = ((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
+		memcpy_s(cmd->json, sizeof(json), json, sizeof(json));
+		ILibChain_RunOnMicrostackThread(master->PeerChain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave, cmd);
+		return(0);
+	}
 
 	if (ILibIsChainBeingDestroyed(Duktape_GetChain(ctx)) == 0)
 	{
@@ -1337,6 +1615,27 @@ duk_ret_t ILibDuktape_ScriptContainer_ExecuteString(duk_context *ctx)
 	duk_push_this(ctx);																	// [container]
 	duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_MasterPtr);				// [container][buffer]
 	master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBuffer(ctx, -1, NULL);		// [container][buffer]
+
+
+	if (master->PeerChain != NULL)
+	{
+		char json[] = "{\"command\": \"2\", \"base64\": \"\"}";
+		char *payload;
+		duk_size_t payloadLen;
+		payload = (char*)duk_get_lstring(ctx, 0, &payloadLen);
+		int encodedPayloadLen = ILibBase64EncodeLength((int)payloadLen);
+		ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command) + encodedPayloadLen + sizeof(json), 0, NULL, NULL);
+
+		cmd->container.slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
+		int i = sprintf_s(cmd->json, sizeof(json) + encodedPayloadLen, json);
+		char *output = cmd->json + i -2;
+		i += ILibBase64Encode((unsigned char*)payload, (int)payloadLen, (unsigned char**)&output);
+		sprintf_s(cmd->json + i - 2, 3, "\"}");
+		
+		ILibChain_RunOnMicrostackThread(master->PeerChain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave, cmd);
+		return(0);
+	}
+
 
 	if (ptr != NULL) { seq = ILibDuktape_ScriptContainer_AddVoidPtr(ctx, duk_get_heapptr(ctx, -2), ptr); }
 
@@ -1364,18 +1663,13 @@ duk_ret_t ILibDuktape_ScriptContainer_ExecuteString(duk_context *ctx)
 void ILibDuktape_ScriptContainer_ExitSink(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)user;
-	
-	if (master->OnExit != NULL)
+	ILibDuktape_EventEmitter_SetupEmit(master->ctx, master->emitter->object, "exit");			// [emit][this][exit]
+	duk_push_int(master->ctx, exitCode);														// [emit][this][exit][code]
+	if (duk_pcall_method(master->ctx, 2) != 0)				
 	{
-		duk_push_heapptr(master->ctx, master->OnExit);			// [func]
-		duk_push_heapptr(master->ctx, master->emitter->object);	// [func][this]
-		duk_push_int(master->ctx, exitCode);					// [func][this][code]
-		if (duk_pcall_method(master->ctx, 1) != 0)				// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(master->ctx);
-		}
-		duk_pop(master->ctx);									// ...
+		ILibDuktape_Process_UncaughtException(master->ctx);
 	}
+	duk_pop(master->ctx);
 
 	master->child = NULL;
 }
@@ -1402,16 +1696,15 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 		{
 			case SCRIPT_ENGINE_COMMAND_SEND_JSON:
 			{
-				if (master->OnJSON != NULL)
-				{
+				if(ILibDuktape_EventEmitter_HasListeners(master->emitter, "data")!=0)
+				{ 
 					char *json = Duktape_GetStringPropertyValue(master->ctx, -1, "json", NULL);
 					if (json != NULL)
 					{
-						duk_push_heapptr(master->ctx, master->OnJSON);
-						duk_push_heapptr(master->ctx, master->emitter->object);
-						duk_push_string(master->ctx, json);
-						duk_json_decode(master->ctx, -1);
-						if (duk_pcall_method(master->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer.OnData(): "); }
+						ILibDuktape_EventEmitter_SetupEmit(master->ctx, master->emitter->object, "data");	// [emit][this][data]
+						duk_push_string(master->ctx, json);													// [emit][this][data][str]
+						duk_json_decode(master->ctx, -1);													// [emit][this][data][json]
+						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer.OnData(): "); }
 						duk_pop(master->ctx);
 					}
 				}
@@ -1430,14 +1723,10 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 					if ((i = Duktape_GetIntPropertyValue(master->ctx, -1, "sequence", -1)) < 0)
 					{
 						// No callback was specified
-						if (master->OnError != NULL)
-						{
-							duk_push_heapptr(master->ctx, master->OnError);									// [func]
-							duk_push_heapptr(master->ctx, master->emitter->object);							// [func][this]
-							duk_get_prop_string(master->ctx, -3, "error");									// [func][this][error]
-							if (duk_pcall_method(master->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnError_Dispatch(): "); }
-							duk_pop(master->ctx);															// ...
-						}
+						ILibDuktape_EventEmitter_SetupEmit(master->ctx, master->emitter->object, "error");	// [emit][this][error]
+						duk_get_prop_string(master->ctx, -4, "error");										// [emit][this][error][errorObj]
+						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnError_Dispatch(): "); }
+						duk_pop(master->ctx);																// ...
 					}
 					else
 					{
@@ -1515,6 +1804,17 @@ duk_ret_t ILibDuktape_ScriptContainer_Finalizer(duk_context *ctx)
 	{
 		ILibProcessPipe_Process_KillEx(master->child);
 	}
+	else if (master->PeerChain != NULL)
+	{
+		char json[] = "{\"command\": \"128\", \"noResponse\": \"1\"}";
+		ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = ILibMemory_Allocate(sizeof(json) + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+		cmd->container.slave = ((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
+		memcpy_s(cmd->json, sizeof(json), json, sizeof(json));
+		ILibChain_RunOnMicrostackThread(master->PeerChain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave, cmd);
+#ifdef WIN32
+		WaitForSingleObject(master->PeerThread, INFINITE);
+#endif
+	}
 
 	return(0);
 }
@@ -1535,10 +1835,23 @@ duk_ret_t ILibDuktape_ScriptContainer_SendToSlave(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "json");												// [container][master][obj]
 
 	duk_json_encode(ctx, -1);															// [container][master][json]
-	len = sprintf_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, "%s", duk_get_string(ctx, -1));
-	((int*)ILibScratchPad2)[0] = len + 4;
 
-	ILibProcessPipe_Process_WriteStdIn(master->child, ILibScratchPad2, len + 4, ILibTransport_MemoryOwnership_USER);
+	if (master->child != NULL)
+	{
+		len = sprintf_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, "%s", duk_get_string(ctx, -1));
+		((int*)ILibScratchPad2)[0] = len + 4;
+
+		ILibProcessPipe_Process_WriteStdIn(master->child, ILibScratchPad2, len + 4, ILibTransport_MemoryOwnership_USER);
+	}
+	else if(master->PeerChain != NULL)
+	{
+		duk_size_t payloadLen;
+		char *payload = (char*)duk_get_lstring(ctx, -1, &payloadLen);
+		ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = ILibMemory_Allocate(sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command) + (int)payloadLen + 1, 0, NULL, NULL);
+		cmd->container.slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
+		memcpy_s(cmd->json, payloadLen + 1, payload, payloadLen + 1);
+		ILibChain_RunOnMicrostackThread(master->PeerChain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave, cmd);
+	}
 	return(0);
 }
 duk_ret_t ILibDuktape_ScriptContainer_Master_AddModule(duk_context *ctx)
@@ -1565,6 +1878,181 @@ duk_ret_t ILibDuktape_ScriptContainer_Master_AddModule(duk_context *ctx)
 	ILibProcessPipe_Process_WriteStdIn(master->child, ILibScratchPad2, len+4, ILibTransport_MemoryOwnership_USER);
 	return(0);
 }
+
+
+void ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster(void *chain, void *user)
+{
+	ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)user;
+	ILibDuktape_ScriptContainer_Master *master = cmd->container.master;
+	ILibDuktape_ScriptContainer_Slave *slave = master->PeerChain == NULL ? NULL : (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
+
+	int id;
+	duk_push_string(master->ctx, cmd->json);		// [string]
+	duk_json_decode(master->ctx, -1);				// [json]
+	free(cmd);
+
+	switch ((id = Duktape_GetIntPropertyValue(master->ctx, -1, "command", -1)))
+	{
+		case 0:																// Ready
+			{
+				// Call INIT first
+				char json[] = "{\"command\": \"1\"}";
+				ILibDuktape_ScriptContainer_NonIsolated_Command* initCmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(sizeof(json) + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+				initCmd->container.slave = slave;
+				memcpy_s(initCmd->json, sizeof(json), json, sizeof(json));
+				ILibChain_RunOnMicrostackThread(master->PeerChain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave, initCmd);
+
+				// Emit Ready Event
+				duk_push_heapptr(master->ctx, master->emitter->object);		// [json][container]
+				duk_get_prop_string(master->ctx, -1, "emit");				// [json][container][emit]
+				duk_swap_top(master->ctx, -2);								// [json][emit][this]
+				duk_push_string(master->ctx, "ready");						// [json][emit][this][ready]
+				if (duk_pcall_method(master->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "Error Dispatching 'ready' event to Master Script Container"); }
+				duk_pop(master->ctx);										// [json]
+			}
+			break;
+		case SCRIPT_ENGINE_COMMAND_ERROR:
+			duk_push_heapptr(master->ctx, master->emitter->object);			// [json][container]
+			duk_get_prop_string(master->ctx, -1, "emit");					// [json][container][emit]
+			duk_swap_top(master->ctx, -2);									// [json][emit][this]
+			duk_push_string(master->ctx, "error");							// [json][emit][this][error]
+			duk_get_prop_string(master->ctx, -4, "message");				// [json][emit][this][error][msg]
+			if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "Error Emitting ScriptContainer Error Message: "); }
+			duk_pop(master->ctx);											// [json]
+			break;
+		case SCRIPT_ENGINE_COMMAND_EXIT:
+			duk_push_heapptr(master->ctx, master->emitter->object);			// [json][container]
+			duk_get_prop_string(master->ctx, -1, "emit");					// [json][container][emit]
+			duk_swap_top(master->ctx, -2);									// [json][emit][this]
+			duk_push_string(master->ctx, "exit");							// [json][emit][this][exit]
+			duk_get_prop_string(master->ctx, -4, "exitCode");				// [json][emit][this][exit][msg]
+			if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "Error Emitting ScriptContainer Exit: "); }
+			duk_pop(master->ctx);											// [json]
+			master->PeerChain = NULL;
+			break;
+		default:
+			ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "Unknown Command [%d] Received from Slave Container ", id);
+			break;
+	}
+
+	duk_pop(master->ctx);							// ...
+
+}
+
+void ILibDuktape_ScriptContainer_NonIsolatedWorker_ExceptionSink(duk_context *ctx, char *msg, void *user)
+{
+	duk_push_object(ctx);									// [obj]
+	duk_push_int(ctx, (int)SCRIPT_ENGINE_COMMAND_ERROR);
+	duk_put_prop_string(ctx, -2, "command");
+	duk_push_string(ctx, msg);
+	duk_put_prop_string(ctx, -2, "message");
+	duk_json_encode(ctx, -1);								// [json]
+
+	duk_size_t payloadLen;
+	char *payload = (char*)duk_get_lstring(ctx, -1, &payloadLen);
+
+	ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate((int)(sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command) + payloadLen + 1), 0, NULL, NULL);
+	cmd->container.master = ((void**)ILibMemory_GetExtraMemory(Duktape_GetChain(ctx), ILibMemory_CHAIN_CONTAINERSIZE))[0];
+	memcpy_s(cmd->json, payloadLen + 1, payload, payloadLen + 1);
+
+	duk_pop(ctx);											// ...
+
+	ILibChain_RunOnMicrostackThread(cmd->container.master->chain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster, cmd);
+}
+void ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave(void *chain, void *user)
+{
+	ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)user;
+	ILibDuktape_ScriptContainer_Slave *slave = cmd->container.slave;
+	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)((void**)ILibMemory_GetExtraMemory(slave->chain, ILibMemory_CHAIN_CONTAINERSIZE))[0];
+
+	int id;
+	duk_push_string(slave->ctx, cmd->json);		// [string]
+	duk_json_decode(slave->ctx, -1);			// [json]
+	free(cmd);
+
+	switch ((id = Duktape_GetIntPropertyValue(slave->ctx, -1, "command", -1)))
+	{
+		case SCRIPT_ENGINE_COMMAND_INIT:
+			ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(slave->ctx, (SCRIPT_ENGINE_SECURITY_FLAGS)master->ChildSecurityFlags, 0, slave->chain, NULL, NULL, NULL, NULL, ILibDuktape_ScriptContainer_Slave_HeapDestroyed, slave);
+			ILibDuktape_SetNativeUncaughtExceptionHandler(slave->ctx, ILibDuktape_ScriptContainer_NonIsolatedWorker_ExceptionSink, master);
+			break;
+		case SCRIPT_ENGINE_COMMAND_EXEC:
+			{
+				char *payload;
+				duk_size_t payloadLen;
+
+				payload = (char*)Duktape_GetStringPropertyValueEx(slave->ctx, -1, "base64", NULL, &payloadLen);
+				payloadLen = ILibBase64Decode((unsigned char*)payload, (int)payloadLen, (unsigned char**)&payload);
+
+				if (ILibDuktape_ScriptContainer_CompileJavaScript(slave->ctx, payload, (int)payloadLen) == 0 && ILibDuktape_ScriptContainer_ExecuteByteCode(slave->ctx) == 0)
+				{
+					// SUCCESS
+					duk_pop(slave->ctx);
+				}
+				else
+				{
+					// ERROR
+					ILibDuktape_Process_UncaughtExceptionEx(slave->ctx, "ScriptContainer Error: ");
+					duk_pop(slave->ctx);
+				}
+			}
+			break;
+		case SCRIPT_ENGINE_COMMAND_SEND_JSON:
+			{
+				if (slave->emitter != NULL)
+				{
+					duk_get_prop_string(slave->ctx, -1, "json");			// [cmd][string]
+					duk_json_decode(slave->ctx, -1);						// [cmd][obj]
+					duk_push_heapptr(slave->ctx, slave->emitter->object);	// [cmd][obj][container]
+					duk_get_prop_string(slave->ctx, -1, "emit");			// [cmd][obj][container][emit]
+					duk_swap_top(slave->ctx, -2);							// [cmd][obj][emit][this]
+					duk_push_string(slave->ctx, "data");					// [cmd][obj][emit][this][data]
+					duk_dup(slave->ctx, -4);								// [cmd][obj][emit][this][data][obj]
+					if (duk_pcall_method(slave->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(slave->ctx); }
+					duk_pop_2(slave->ctx);									// [cmd]
+				}
+			}
+			break;
+		case SCRIPT_ENGINE_COMMAND_EXIT:
+			slave->noRespond = Duktape_GetIntPropertyValue(slave->ctx, -1, "noResponse", 0);
+			duk_pop(slave->ctx);
+			duk_destroy_heap(slave->ctx);
+			return;
+	}
+	duk_pop(slave->ctx);						// ...
+}
+
+void ILibDuktape_ScriptContainer_NonIsolatedWorker(void *arg)
+{
+	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)arg;
+	ILibDuktape_ScriptContainer_Slave *slave = ILibMemory_AllocateA(sizeof(ILibDuktape_ScriptContainer_Slave));
+	char json[] = "{\"command\": \"0\"}";
+
+	slave->chain = ILibCreateChainEx(2 * sizeof(void*));
+	((void**)ILibMemory_GetExtraMemory(slave->chain, ILibMemory_CHAIN_CONTAINERSIZE))[0] = master;
+	((void**)ILibMemory_GetExtraMemory(slave->chain, ILibMemory_CHAIN_CONTAINERSIZE))[1] = slave;
+	master->PeerChain = slave->chain;
+	slave->ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal();
+
+	duk_push_heap_stash(slave->ctx);
+	duk_push_pointer(slave->ctx, slave);
+	duk_put_prop_string(slave->ctx, -2, ILibDuktape_ScriptContainer_SlavePtr);
+	duk_pop(slave->ctx);
+
+	ILibDuktape_ScriptContainer_NonIsolated_Command* cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(sizeof(json) + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+	cmd->container.master = master;
+	memcpy_s(cmd->json, sizeof(json), json, sizeof(json));
+	ILibChain_RunOnMicrostackThread(master->chain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster, cmd);
+	ILibStartChain(slave->chain);
+
+	if (slave->noRespond == 0)
+	{
+		cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(64 + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+		cmd->container.master = master;
+		sprintf_s(cmd->json, 64, "{\"command\": \"128\", \"exitCode\": \"%d\"}", slave->exitCode);
+		ILibChain_RunOnMicrostackThread(master->chain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster, cmd);
+	}
+}
 duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 {
 	char *exePath;
@@ -1575,6 +2063,12 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 	char *buffer;
 	char header[4];
 	ILibProcessPipe_SpawnTypes spawnType = (duk_get_top(ctx) > 2 && duk_is_number(ctx, 2)) ? (ILibProcessPipe_SpawnTypes)duk_require_int(ctx, 2) : ILibProcessPipe_SpawnTypes_DEFAULT;
+	int processIsolation = 1;
+
+	if (duk_get_top(ctx) > 0 && duk_is_object(ctx, 0))
+	{
+		processIsolation = Duktape_GetIntPropertyValue(ctx, 0, "processIsolation", 1);
+	}
 
 	duk_push_heap_stash(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_ExePath);
@@ -1584,6 +2078,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 	manager = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);
 
 	duk_push_object(ctx);														// [container]
+	ILibDuktape_WriteID(ctx, "ScriptContainer.master");
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_ScriptContainer_Master));		// [container][buffer]
 	master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_MasterPtr);		// [container]
@@ -1592,9 +2087,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 	master->ctx = ctx;
 	master->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	master->chain = Duktape_GetChain(ctx);
-	ILibDuktape_EventEmitter_CreateEvent(master->emitter, "exit", &(master->OnExit));
-	ILibDuktape_EventEmitter_CreateEvent(master->emitter, "error", &(master->OnError));
-	ILibDuktape_EventEmitter_CreateEvent(master->emitter, "data", &(master->OnJSON));
+	ILibDuktape_EventEmitter_CreateEventEx(master->emitter, "exit");
+	ILibDuktape_EventEmitter_CreateEventEx(master->emitter, "error");
+	ILibDuktape_EventEmitter_CreateEventEx(master->emitter, "data");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Exit, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(master->ctx, "ExecuteScript", ILibDuktape_ScriptContainer_ExecuteScript, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(master->ctx, "ExecuteString", ILibDuktape_ScriptContainer_ExecuteString, DUK_VARARGS);
@@ -1602,28 +2097,43 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(master->ctx, "addModule", ILibDuktape_ScriptContainer_Master_AddModule, 2);
 	ILibDuktape_CreateFinalizer(master->ctx, ILibDuktape_ScriptContainer_Finalizer);
 
-	unsigned int executionTimeout = (unsigned int)duk_require_int(ctx, 0);
-	unsigned int securityFlags = (unsigned int)duk_require_int(ctx, 1) | SCRIPT_ENGINE_NO_MESH_AGENT_ACCESS;
+	if (processIsolation)
+	{
+		// We're going to spawn a child process to run this ScriptContainer
+		unsigned int executionTimeout = (unsigned int)duk_require_int(ctx, 0);
+		master->ChildSecurityFlags = (unsigned int)duk_require_int(ctx, 1) | SCRIPT_ENGINE_NO_MESH_AGENT_ACCESS;
 
-	master->child = ILibProcessPipe_Manager_SpawnProcessEx2(manager, exePath, (char * const*)param, spawnType, 2 * sizeof(void*));
-	if (master->child == NULL) { return(ILibDuktape_Error(ctx, "ScriptContainer.Create(): Error spawning child process, using [%s]", exePath)); }
+		master->child = ILibProcessPipe_Manager_SpawnProcessEx2(manager, exePath, (char * const*)param, spawnType, 2 * sizeof(void*));
+		if (master->child == NULL) { return(ILibDuktape_Error(ctx, "ScriptContainer.Create(): Error spawning child process, using [%s]", exePath)); }
+		
+		duk_push_true(ctx);
+		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_ProcessIsolated);
+		duk_push_object(ctx);										// [container][obj]
+		duk_push_int(ctx, (int)SCRIPT_ENGINE_COMMAND_INIT);
+		duk_put_prop_string(ctx, -2, "command");
+		duk_push_int(ctx, (int)executionTimeout);
+		duk_put_prop_string(ctx, -2, "executionTimeout");
+		duk_push_int(ctx, (int)master->ChildSecurityFlags);
+		duk_put_prop_string(ctx, -2, "securityFlags");
+		duk_json_encode(ctx, -1);
+		buffer = (char*)Duktape_GetBuffer(ctx, -1, &bufferLen);
 
-	duk_push_object(ctx);										// [container][obj]
-	duk_push_int(ctx, (int)SCRIPT_ENGINE_COMMAND_INIT);
-	duk_put_prop_string(ctx, -2, "command");
-	duk_push_int(ctx, (int)executionTimeout);
-	duk_put_prop_string(ctx, -2, "executionTimeout");
-	duk_push_int(ctx, (int)securityFlags);
-	duk_put_prop_string(ctx, -2, "securityFlags");
-	duk_json_encode(ctx, -1);
-	buffer = (char*)Duktape_GetBuffer(ctx, -1, &bufferLen);
+		duk_swap_top(ctx, -2);										// [json][container]
 
-	duk_swap_top(ctx, -2);										// [json][container]
-
-	((int*)header)[0] = (int)bufferLen + 4;
-	ILibProcessPipe_Process_AddHandlers(master->child, SCRIPT_ENGINE_PIPE_BUFFER_SIZE, ILibDuktape_ScriptContainer_ExitSink, ILibDuktape_ScriptContainer_StdOutSink, ILibDuktape_ScriptContainer_StdErrSink, ILibDuktape_ScriptContainer_SendOkSink, master);
-	ILibProcessPipe_Process_WriteStdIn(master->child, header, sizeof(header), ILibTransport_MemoryOwnership_USER);
-	ILibProcessPipe_Process_WriteStdIn(master->child, buffer, (int)bufferLen, ILibTransport_MemoryOwnership_USER);
+		((int*)header)[0] = (int)bufferLen + 4;
+		ILibProcessPipe_Process_AddHandlers(master->child, SCRIPT_ENGINE_PIPE_BUFFER_SIZE, ILibDuktape_ScriptContainer_ExitSink, ILibDuktape_ScriptContainer_StdOutSink, ILibDuktape_ScriptContainer_StdErrSink, ILibDuktape_ScriptContainer_SendOkSink, master);
+		ILibProcessPipe_Process_WriteStdIn(master->child, header, sizeof(header), ILibTransport_MemoryOwnership_USER);
+		ILibProcessPipe_Process_WriteStdIn(master->child, buffer, (int)bufferLen, ILibTransport_MemoryOwnership_USER);
+	}
+	else
+	{
+		// We're going to spawn a thread to host this Script Container
+		duk_push_false(ctx);
+		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_ProcessIsolated);
+		ILibDuktape_EventEmitter_CreateEventEx(master->emitter, "ready");
+		master->PeerThread = ILibSpawnNormalThread(ILibDuktape_ScriptContainer_NonIsolatedWorker, master);
+		master->ChildSecurityFlags = Duktape_GetIntPropertyValue(ctx, 0, "permissions", 0);
+	}
 	return 1;
 }
 void ILibDuktape_ScriptContainer_PUSH_MASTER(duk_context *ctx, void *chain)
@@ -1653,8 +2163,9 @@ void ILibDuktape_ScriptContainer_PUSH_SLAVE(duk_context *ctx, void *chain)
 	duk_pop(ctx);															// ...
 
 	duk_push_object(ctx);
+	ILibDuktape_WriteID(ctx, "ScriptContainer.slave");
 	slave->emitter = ILibDuktape_EventEmitter_Create(ctx);
-	ILibDuktape_EventEmitter_CreateEvent(slave->emitter, "data", &(slave->OnData));
+	ILibDuktape_EventEmitter_CreateEventEx(slave->emitter, "data");
 	ILibDuktape_CreateInstanceMethod(ctx, "send", ILibDuktape_ScriptContainer_Slave_SendToMaster, 1);
 }
 

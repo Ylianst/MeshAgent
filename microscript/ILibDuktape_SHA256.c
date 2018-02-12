@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #include "ILibDuktape_SHA256.h"
 #include "duktape.h"
 #include "ILibDuktape_Helpers.h"
@@ -21,8 +37,6 @@ typedef struct ILibDuktape_SHA256_Data
 	duk_context *ctx;
 
 	void *object;
-	void *OnHash;
-	void *OnHashString;
 	char buffer[33];
 	SHA256_CTX shctx;
 }ILibDuktape_SHA256_Data;
@@ -31,8 +45,6 @@ typedef struct ILibDuktape_SHA512_Data
 	duk_context *ctx;
 
 	void *object;
-	void *OnHash;
-	void *OnHashString;
 	char buffer[65];
 	SHA512_CTX shctx;
 }ILibDuktape_SHA512_Data;
@@ -41,8 +53,6 @@ typedef struct ILibDuktape_MD5_Data
 	duk_context *ctx;
 
 	void *object;
-	void *OnHash;
-	void *OnHashString;
 	char buffer[33];
 	MD5_CTX mctx;
 }ILibDuktape_MD5_Data;
@@ -82,34 +92,21 @@ ILibTransport_DoneState ILibDuktape_SHA384_Write(struct ILibDuktape_WritableStre
 }
 void ILibDuktape_SHA256_End(struct ILibDuktape_WritableStream *stream, void *user)
 {
-
 	ILibDuktape_SHA256_Data *data = (ILibDuktape_SHA256_Data*)user;
 	data->buffer[32] = 0;
 	SHA256_Final((unsigned char*)data->buffer, &(data->shctx));
 
-	if (data->ctx != NULL && data->OnHash != NULL)
-	{
-		duk_push_heapptr(data->ctx, data->OnHash);				// [func]
-		duk_push_heapptr(data->ctx, data->object);				// [func][this]
-		duk_push_external_buffer(data->ctx);					// [func][this][hash]
-		duk_config_buffer(data->ctx, -1, data->buffer, 32);	
-		if (duk_pcall_method(data->ctx, 1) != 0)				// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);										// ...
-	}
-	if (data->ctx != NULL && data->OnHashString != NULL)
-	{
-		duk_push_heapptr(data->ctx, data->OnHashString);					// [func]
-		duk_push_heapptr(data->ctx, data->object);							// [func][this]
-		duk_push_string(data->ctx, util_tohex(data->buffer, 32, ILibScratchPad));	// [func][this][hashString]
-		if (duk_pcall_method(data->ctx, 1) != 0)							// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);													// ...
-	}
+	duk_push_external_buffer(data->ctx);									// [extBuffer]
+	duk_config_buffer(data->ctx, -1, data->buffer, 32);
+	ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "hash");	// [extBuffer][emit][this]['hash']
+	duk_push_buffer_object(data->ctx, -4, 0, 32, DUK_BUFOBJ_NODEJS_BUFFER);	// [extBuffer][emit][this]['hash'][hash]
+	if (duk_pcall_method(data->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+	duk_pop_2(data->ctx);													// ...
+
+	ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "hashString");	// [emit][this]['hash']
+	duk_push_string(data->ctx, util_tohex(data->buffer, 32, ILibScratchPad));	// [emit][this]['hash'][hashString]
+	if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+	duk_pop(data->ctx);															// ...
 }
 void ILibDuktape_SHA384_End(struct ILibDuktape_WritableStream *stream, void *user)
 {
@@ -117,29 +114,17 @@ void ILibDuktape_SHA384_End(struct ILibDuktape_WritableStream *stream, void *use
 	data->buffer[48] = 0;
 	SHA384_Final((unsigned char*)data->buffer, &(data->shctx));
 
-	if (data->ctx != NULL && data->OnHash != NULL)
-	{
-		duk_push_heapptr(data->ctx, data->OnHash);				// [func]
-		duk_push_heapptr(data->ctx, data->object);				// [func][this]
-		duk_push_external_buffer(data->ctx);					// [func][this][hash]
-		duk_config_buffer(data->ctx, -1, data->buffer, 48);
-		if (duk_pcall_method(data->ctx, 1) != 0)				// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);										// ...
-	}
-	if (data->ctx != NULL && data->OnHashString != NULL)
-	{
-		duk_push_heapptr(data->ctx, data->OnHashString);					// [func]
-		duk_push_heapptr(data->ctx, data->object);							// [func][this]
-		duk_push_string(data->ctx, util_tohex(data->buffer, 48, ILibScratchPad));	// [func][this][hashString]
-		if (duk_pcall_method(data->ctx, 1) != 0)							// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);													// ...
-	}
+	duk_push_external_buffer(data->ctx);									// [extBuffer]
+	duk_config_buffer(data->ctx, -1, data->buffer, 48);
+	ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "hash");	// [extBuffer][emit][this]['hash']
+	duk_push_buffer_object(data->ctx, -4, 0, 48, DUK_BUFOBJ_NODEJS_BUFFER);	// [extBuffer][emit][this]['hash'][hash]
+	if (duk_pcall_method(data->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+	duk_pop_2(data->ctx);													// ...
+
+	ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "hashString");	// [emit][this]['hashString']
+	duk_push_string(data->ctx, util_tohex(data->buffer, 48, ILibScratchPad));	// [emit][this]['hashString'][hashString]
+	if (duk_pcall_method(data->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+	duk_pop(data->ctx);															// ...
 }
 duk_ret_t ILibDuktape_SHA256_SIGNER_Finalizer(duk_context *ctx)
 {
@@ -175,7 +160,7 @@ void ILibDuktape_SHA256_SIGNER_End(struct ILibDuktape_WritableStream *stream, vo
 		duk_swap_top(data->ctx, -2);																	// [sigBuffer][signer]
 		duk_push_heapptr(data->ctx, data->OnSignature);													// [sigBuffer][signer][func]
 		duk_swap_top(data->ctx, -2);																	// [sigBuffer][func][signer/this]
-		duk_push_buffer_object(data->ctx, -3, 0, len, DUK_BUFOBJ_DUKTAPE_BUFFER);						// [sigBuffer][func][signer/this][bufView]
+		duk_push_buffer_object(data->ctx, -3, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);						// [sigBuffer][func][signer/this][bufView]
 		if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }	// ...
 	}
 	duk_pop(data->ctx);																// ...
@@ -363,29 +348,23 @@ void ILibDuktape_MD5_End(struct ILibDuktape_WritableStream *stream, void *user)
 	data->buffer[32] = 0;
 	MD5_Final((unsigned char*)data->buffer, &(data->mctx));
 
-	if (data->ctx != NULL && data->OnHash != NULL)
+	duk_push_external_buffer(data->ctx);									// [extBuffer]
+	duk_config_buffer(data->ctx, -1, data->buffer, 32);
+	ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "hash");	// [extBuffer][emit][this]["hash"]
+	duk_push_buffer_object(data->ctx, -4, 0, 32, DUK_BUFOBJ_NODEJS_BUFFER);	// [extBuffer][emit][this]["hash"][buffer]
+	if (duk_pcall_method(data->ctx, 2) != 0)								// [retVal]
 	{
-		duk_push_heapptr(data->ctx, data->OnHash);				// [func]
-		duk_push_heapptr(data->ctx, data->object);				// [func][this]
-		duk_push_external_buffer(data->ctx);					// [func][this][hash]
-		duk_config_buffer(data->ctx, -1, data->buffer, 32);
-		if (duk_pcall_method(data->ctx, 1) != 0)				// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);										// ...
+		ILibDuktape_Process_UncaughtException(data->ctx);
 	}
-	if (data->ctx != NULL && data->OnHashString != NULL)
+	duk_pop_2(data->ctx);														// ...
+	
+	ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "hashString");	// [emit][this]["hashString"]
+	duk_push_string(data->ctx, util_tohex(data->buffer, 32, ILibScratchPad));	// [emit][this]["hashString"][hashString]
+	if (duk_pcall_method(data->ctx, 2) != 0)									// [retVal]
 	{
-		duk_push_heapptr(data->ctx, data->OnHashString);					// [func]
-		duk_push_heapptr(data->ctx, data->object);							// [func][this]
-		duk_push_string(data->ctx, util_tohex(data->buffer, 32, ILibScratchPad));	// [func][this][hashString]
-		if (duk_pcall_method(data->ctx, 1) != 0)							// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);													// ...
+		ILibDuktape_Process_UncaughtException(data->ctx);
 	}
+	duk_pop(data->ctx);															// ...
 }
 duk_ret_t ILibDuktape_MD5_syncHash(duk_context *ctx)
 {
@@ -431,8 +410,8 @@ duk_ret_t ILibDuktape_MD5_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 0, "syncHash", ILibDuktape_MD5_syncHash, 1);
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 1, "syncHashString", ILibDuktape_MD5_syncHash, 1);
 
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "hash", &(data->OnHash));
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "hashString", &(data->OnHashString));
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "hash");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "hashString");
 
 	data->ctx = ctx;
 	data->object = duk_get_heapptr(ctx, -1);
@@ -457,8 +436,8 @@ duk_ret_t ILibDuktape_SHA256_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 0, "syncHash", ILibDuktape_SHA256_syncHash, 1);
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 1, "syncHashString", ILibDuktape_SHA256_syncHash, 1);
 
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "hash", &(data->OnHash));
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "hashString", &(data->OnHashString));
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "hash");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "hashString");
 
 	data->ctx = ctx;
 	data->object = duk_get_heapptr(ctx, -1);
@@ -474,6 +453,7 @@ duk_ret_t ILibDuktape_SHA384_Create(duk_context *ctx)
 	ILibDuktape_EventEmitter *emitter;
 
 	duk_push_object(ctx);											// [sha]
+	ILibDuktape_WriteID(ctx, "SHA384Stream");
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_SHA512_Data));	// [sha][buffer]
 	data = (ILibDuktape_SHA512_Data*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_put_prop_string(ctx, -2, ILibDuktape_SHA512_PTR);			// [sha]
@@ -484,8 +464,8 @@ duk_ret_t ILibDuktape_SHA384_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 0, "syncHash", ILibDuktape_SHA384_syncHash, 1);
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "strRet", 1, "syncHashString", ILibDuktape_SHA384_syncHash, 1);
 
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "hash", &(data->OnHash));
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "hashString", &(data->OnHashString));
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "hash");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "hashString");
 
 	data->ctx = ctx;
 	data->object = duk_get_heapptr(ctx, -1);

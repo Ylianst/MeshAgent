@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "duktape.h"
 #include "microstack/ILibParsers.h"
+#include "ILibDuktape_EventEmitter.h"
 
 #define ILibDuktape_readableStream_RSPTRS				"\xFF_ReadableStream_PTRS"
 
@@ -39,9 +40,6 @@ typedef struct ILibDuktape_readableStream
 	duk_context *ctx;
 	void *chain;
 	void *object;
-	void *OnClose;
-	void *OnData;
-	void *OnEnd;
 
 	void *user;
 	void *pipeArray;
@@ -64,6 +62,10 @@ typedef struct ILibDuktape_readableStream
 	ILibDuktape_readableStream_PauseResumeHandler ResumeHandler;
 	ILibDuktape_readableStream_MethodHookHandler PipeHookHandler;
 	ILibDuktape_readableStream_UnShiftHandler UnshiftHandler;
+	ILibDuktape_EventEmitter *emitter;
+	char *unshiftReserved;
+	void *resumeImmediate;
+	void *pipeImmediate;
 }ILibDuktape_readableStream;
 
 ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, ILibDuktape_readableStream_PauseResumeHandler OnPause, ILibDuktape_readableStream_PauseResumeHandler OnResume, ILibDuktape_readableStream_UnShiftHandler OnUnshift, void *user);
@@ -71,6 +73,7 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 #define ILibDuktape_ReadableStream_Init(ctx, OnPause, OnResume, user) ILibDuktape_ReadableStream_InitEx(ctx, OnPause, OnResume, NULL, user)
 #define ILibDuktape_readableStream_SetPauseResumeHandlers(stream, PauseFunc, ResumeFunc, userObj) ((ILibDuktape_readableStream*)stream)->PauseHandler = PauseFunc; ((ILibDuktape_readableStream*)stream)->ResumeHandler = ResumeFunc; ((ILibDuktape_readableStream*)stream)->user = userObj;
 
+void ILibDuktape_ReadableStream_DestroyPausedData(ILibDuktape_readableStream *stream);
 int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, int streamReserved, char* buffer, int bufferLen);
 int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream);
 #define ILibDuktape_readableStream_WriteData(stream, buffer, bufferLen) ILibDuktape_readableStream_WriteDataEx(stream, 0, buffer, bufferLen)

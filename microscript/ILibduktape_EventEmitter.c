@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
@@ -7,6 +23,7 @@
 #include "ILibDuktape_EventEmitter.h"
 #include "ILibDuktapeModSearch.h"
 #include "ILibDuktape_Helpers.h"
+#include "ILibDuktape_Polyfills.h"
 
 #define ILibDuktape_EventEmitter_MaxEventNameLen		255
 #define ILibDuktape_EventEmitter_Data					"\xFF_EventEmitter_Data"
@@ -127,39 +144,19 @@ void ILibDuktape_EventEmitter_FinalizerEx(ILibHashtable sender, void *Key1, char
 		duk_pop_2(data->ctx);														// ...
 	}
 }
-duk_ret_t ILibDuktape_EventEmitter_Finalizer(duk_context *ctx)
+
+int ILibDuktape_EventEmitter_HasListeners(ILibDuktape_EventEmitter *emitter, char *eventName)
 {
-	ILibDuktape_EventEmitter *data;
-	duk_get_prop_string(ctx, 0, ILibDuktape_EventEmitter_Data);		
-	data = (ILibDuktape_EventEmitter*)Duktape_GetBuffer(ctx, -1, NULL);
-
-	// Check to see if this is the process object going away
-	if (ILibDuktape_GetProcessObject(ctx) == data->object)
+	int retVal = 0;
+	if (emitter->eventTable != NULL)
 	{
-		// We need to dispatch the 'exit' event
-		int exitCode = 0;
-		duk_push_heapptr(data->ctx, data->object);					// [process]
-		if (duk_has_prop_string(data->ctx, -1, "\xFF_ExitCode"))
+		ILibLinkedList eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, (int)strnlen_s(eventName, 255));
+		if (eventList != NULL)
 		{
-			duk_get_prop_string(data->ctx, -1, "\xFF_ExitCode");	// [process][exitCode]
-			exitCode = duk_get_int(data->ctx, -1);
-			duk_pop(data->ctx);										// [process]
+			retVal = ILibLinkedList_GetCount(eventList);
 		}
-		duk_get_prop_string(data->ctx, -1, "emit");					// [process][emit]
-		duk_swap_top(data->ctx, -2);								// [emit][this]
-		duk_push_string(data->ctx, "exit");							// [emit][this][eventName/exit]
-		duk_push_int(data->ctx, exitCode);							// [emit][this][eventName/exit][exitCode]
-		duk_pcall_method(data->ctx, 2);
-		duk_pop(data->ctx);
 	}
-
-
-	// We need to clear the Native Dispatcher, while destroying the Hashtable
-	ILibHashtable_DestroyEx(data->eventTable, ILibDuktape_EventEmitter_FinalizerEx, data);
-
-	memset(data, 0, sizeof(ILibDuktape_EventEmitter));
-
-	return 0;
+	return(retVal);
 }
 duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 {
@@ -170,25 +167,24 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	void *self;
 	int nargs = duk_get_top(ctx);
 	ILibDuktape_EventEmitter *data;
-	void *node, *nextNode, *func, *dispatcher;
-	int i, j, count;
-	void **hptr;
+	void *node, *nextNode, *func;
+	int i, j;
 	void **emitList;
+	char *objid;
 
-	duk_push_this(ctx);
+	duk_push_this(ctx);													// [this]
+	objid = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown");
 	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_TempObject);	// [this][tmp]
 	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_Data);		// [this][tmp][data]
 	data = (ILibDuktape_EventEmitter*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_pop_2(ctx);														// [this]
 	self = duk_get_heapptr(ctx, -1);
+	duk_pop(ctx);														// ...
 
 	if (data->eventTable == NULL) { duk_push_false(ctx);  return(1); } // This probably means the finalizer was already run on the eventEmitter
 
 	eventList = ILibHashtable_Get(data->eventTable, NULL, name, (int)nameLen);
-	if (eventList == NULL) { return ILibDuktape_Error(ctx, "EventEmitter.emit(): Event '%s' not found", name); }
-	dispatcher = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_SetterFunc, name, (int)nameLen);
-	if (dispatcher == NULL) { return ILibDuktape_Error(ctx, "EventEmitter.emit(): Internal Error with event '%s'", name); }
-
+	if (eventList == NULL) { return ILibDuktape_Error(ctx, "EventEmitter.emit(): Event '%s' not found on object '%s'", name, objid); }
 
 	// Copy the list, so we can enumerate with local memory, so the list can be manipulated while we are dispatching
 #ifdef WIN32
@@ -213,22 +209,6 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	}
 	emitList[i] = NULL;
 
-	// If no more listeners, we can set the hptr to NULL
-	if (ILibLinkedList_GetCount(eventList) == 0)
-	{
-		duk_push_heapptr(ctx, dispatcher);									// [dispatcher]
-		duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);	// [dispatcher][hptrList]
-		count = (int)duk_get_length(ctx, -1);
-		for (i = 0; i < count; ++i)
-		{
-			duk_get_prop_index(ctx, -1, i);									// [dispatcher][hptrList][hptr]
-			hptr = (void**)duk_get_pointer(ctx, -1);
-			*hptr = NULL;
-			duk_pop(ctx);													// [dispatcher][hptrList]
-		}
-		duk_pop_2(ctx);														// ...
-	}
-
 	// Now that we have all the housekeeping stuff out of the way, we can actually dispatch our events
 	i = 0;
 	while ((func = emitList[i++]) != NULL)
@@ -241,13 +221,27 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 		}
 		if (duk_pcall_method(ctx, nargs - 1) != 0)
 		{
-			return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' threw an exception: %s", name, duk_safe_to_string(ctx, -1)));
+			return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' on '%s' threw an exception: %s", name, objid, duk_safe_to_string(ctx, -1)));
 		}
 		duk_pop(ctx);										// ...
 	}
 	duk_push_boolean(ctx, i > 1 ? 1 : 0);
 	return(1);
 }
+int ILibDuktape_EventEmitter_PrependOnce(duk_context *ctx, duk_idx_t i, char *eventName, duk_c_function func)
+{
+	int retVal = 1;
+
+	duk_dup(ctx, i);										// [this]
+	duk_get_prop_string(ctx, -1, "prependOnceListener");	// [this][prependOnce]
+	duk_swap_top(ctx, -2);									// [prependOnce][this]
+	duk_push_string(ctx, eventName);						// [prependOnce][this][eventName]
+	duk_push_c_function(ctx, func, DUK_VARARGS);			// [prependOnce][this][eventName][func]
+	if (duk_pcall_method(ctx, 2) != 0) { retVal = 0; }
+	duk_pop(ctx);											// ...
+	return(retVal);
+}
+
 int ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr)
 {
 	int retVal = 1;
@@ -315,8 +309,9 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	void *callback = duk_require_heapptr(ctx, 1);
 	ILibDuktape_EventEmitter *data;
 	int once;
-	void *eventList, *node, *dispatcher, **hptr;
-	int i, count, prepend;
+	void *eventList, *node;
+	int prepend;
+	ILibDuktape_EventEmitter_HookHandler hookHandler = NULL;
 
 	duk_push_current_function(ctx);
 	once = Duktape_GetIntPropertyValue(ctx, -1, "once", 0);
@@ -333,8 +328,7 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	{ 
 		return(ILibDuktape_Error(ctx, "EventEmitter.on(): Event '%s' not found", propName)); 
 	}
-	dispatcher = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_SetterFunc, propName, (int)propNameLen);
-	if (dispatcher == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.on(): Internal error with Event '%s'", propName)); }
+	hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
 
 	node = prepend ? ILibLinkedList_AddHead(eventList, callback) : ILibLinkedList_AddTail(eventList, callback);
 	((int*)ILibLinkedList_GetExtendedMemory(node))[0] = once;
@@ -344,17 +338,7 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	duk_push_heapptr(ctx, callback);
 	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(callback)); // Save the callback to the tmp object, so it won't get GC'ed
 
-	duk_push_heapptr(ctx, dispatcher);									// [dispatcher]
-	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);	// [dispatcher][hptrList]
-	count = (int)duk_get_length(ctx, -1);
-	for (i = 0; i < count; ++i)
-	{
-		duk_get_prop_index(ctx, -1, i);									// [dispatcher][hptrList][hptr]
-		hptr = (void**)duk_get_pointer(ctx, -1);
-		*hptr = dispatcher;
-		duk_pop(ctx);													// [dispatcher][hptrList]
-	}
-
+	if (hookHandler != NULL) { hookHandler(data, propName, callback); }
 	return 0;
 }
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromThis(duk_context *ctx)
@@ -406,34 +390,67 @@ duk_ret_t ILibDuktape_EventEmitter_removeAllListeners(duk_context *ctx)
 	duk_size_t eventNameLen;
 	char *eventName = Duktape_GetBuffer(ctx, 0, &eventNameLen);
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx);
-	void *eventList, *dispatcher;
-	int count, i;
-	void **hptr;
+	void *eventList;
 
 	if (emitter != NULL)
 	{
 		eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, (int)eventNameLen);
 		if (eventList == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.removeAllListeners(): Event '%s' not found", eventName)); }
-		dispatcher = ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, (int)eventNameLen);
-		if (dispatcher == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.removeAllListeners(): Internal error with Event '%s'", eventName)); }
-
-
-		// NULL was passed, we'll need to clear all listeners. 
-		// Start by setting the Native Dispatcher to NULL, so it appears there are no subscribers
-		duk_push_heapptr(ctx, dispatcher);									// [dispatcher]
-		duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);	// [dispatcher][hptrList]
-		count = (int)duk_get_length(ctx, -1);
-		for (i = 0; i < count; ++i)
-		{
-			duk_get_prop_index(ctx, -1, i);									// [dispatcher][hptrList][hptr]
-			hptr = (void**)duk_get_pointer(ctx, -1);
-			*hptr = NULL;
-			duk_pop(ctx);													// [dispatcher][hptrList]
-		}
 
 		ILibLinkedList_Clear(eventList);
 		emitter->totalListeners[0] = 0;
 	}
+	return(0);
+}
+
+void ILibDuktape_EventEmitter_EmbeddedFinalizer2(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+{
+	if (Key1 == NULL)
+	{
+		char *name = (char*)ILibMemory_AllocateA(Key2Len + 1);
+		name[Key2Len] = 0;
+		memcpy_s(name, Key2Len + 1, Key2, Key2Len);
+		printf("%s ", name);
+	}
+}
+duk_ret_t ILibDuktape_EventEmitter_EmbeddedFinalizer(duk_context *ctx)
+{
+	ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, 0), "~");	// [emit][this][~]
+	duk_dup(ctx, 0);														// [emit][this][~][self]
+	if (g_displayFinalizerMessages)
+	{
+		printf("+-+- Finalizer Event for: %s [%p] -+-+\n", Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN"), duk_get_heapptr(ctx, -1));
+		if (strcmp(Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN"), "UNKNOWN") == 0)
+		{
+			ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter(ctx, -1);
+			if (emitter != NULL)
+			{
+				printf("UNKNOWN: Listeners=%d\n", ILibDuktape_EventEmitter_HasListeners(emitter, "~"));
+
+				duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);			// [enumerator]
+				while (duk_next(ctx, -1, 1))
+				{
+					printf("Key: %s, Val: %s\n", duk_get_string(ctx, -2), duk_get_string(ctx, -1));// [enumerator][key][val]
+					duk_pop_2(ctx);											// [enumerator]
+				}
+				duk_pop(ctx);												// ...
+				printf("Event Names: ");
+				if (emitter->eventTable != NULL) { ILibHashtable_Enumerate(emitter->eventTable, ILibDuktape_EventEmitter_EmbeddedFinalizer2, NULL); }
+				printf("\n");
+			}
+		}
+	}
+	if (duk_pcall_method(ctx, 2) != 0)
+	{
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error in Finalizer: [Invalid C function means you forgot to return 0] ");
+	}
+
+	ILibDuktape_EventEmitter *data = ILibDuktape_EventEmitter_GetEmitter(ctx, 0);
+	if (data == NULL) { return(ILibDuktape_Error(ctx, "Internal Error")); }			// This is deadcode, will never occur, but is here because Klockwork thinks this could happen
+
+	// We need to clear the Native Dispatcher, while destroying the Hashtable
+	ILibHashtable_DestroyEx(data->eventTable, ILibDuktape_EventEmitter_FinalizerEx, data);
+	memset(data, 0, sizeof(ILibDuktape_EventEmitter));
 	return(0);
 }
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
@@ -456,10 +473,8 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	retVal->tmpObject = duk_get_heapptr(ctx, -2);
 
 	duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_Data);			// [emitterTmp]
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_EventEmitter_Finalizer);
 	duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_TempObject);		// [...parent...]
 
-	
 	retVal->ctx = ctx;
 	retVal->object = duk_get_heapptr(ctx, -1);
 	retVal->eventTable = ILibHashtable_Create();
@@ -489,6 +504,10 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	}
 	duk_pop(ctx);
 
+	ILibDuktape_EventEmitter_CreateEventEx(retVal, "~");
+	duk_push_c_function(ctx, ILibDuktape_EventEmitter_EmbeddedFinalizer, 1);
+	duk_set_finalizer(ctx, -2);
+
 	return retVal;
 }
 
@@ -505,15 +524,10 @@ duk_ret_t ILibDuktape_EventEmitter_SetEvent(duk_context *ctx)
 	duk_size_t propNameLen;
 	ILibDuktape_EventEmitter *data;
 	ILibLinkedList eventList = NULL;
-	void **hptr;
-	void *dispatcher;
-	int i, count;
 
 	duk_push_current_function(ctx);												// [func]
-	duk_get_prop_string(ctx, -1, "name");										// [func][name]
+	duk_get_prop_string(ctx, -1, "eventName");									// [func][name]
 	propName = (char*)duk_get_lstring(ctx, -1, &propNameLen);
-	duk_get_prop_string(ctx, -2, ILibDuktape_EventEmitter_DispatcherFunc);		// [func][name][dispatcher]
-	dispatcher = duk_get_heapptr(ctx, -1);
 
 	duk_push_this(ctx);															// [obj]
 	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_TempObject);			// [this][tmp]
@@ -526,142 +540,20 @@ duk_ret_t ILibDuktape_EventEmitter_SetEvent(duk_context *ctx)
 	if (duk_is_null_or_undefined(ctx, 0))
 	{
 		// NULL was passed, we'll need to clear all listeners. 
-		// Start by setting the Native Dispatcher to NULL, so it appears there are no subscribers
-		duk_push_heapptr(ctx, dispatcher);									// [dispatcher]
-		duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);	// [dispatcher][hptrList]
-		count = (int)duk_get_length(ctx, -1);
-		for (i = 0; i < count; ++i)
-		{
-			duk_get_prop_index(ctx, -1, i);									// [dispatcher][hptrList][hptr]
-			hptr = (void**)duk_get_pointer(ctx, -1);
-			*hptr = NULL;		
-			duk_pop(ctx);													// [dispatcher][hptrList]
-		}
-
-		ILibLinkedList_Clear(eventList);
+		duk_push_this(ctx);														// [obj]
+		duk_get_prop_string(ctx, -1, "removeAllListeners");						// [obj][removeAll]
+		duk_swap_top(ctx, -2);													// [removeAll][this]
+		duk_push_string(ctx, propName);											// [removeAll][this][name]
+		duk_call_method(ctx, 1); duk_pop(ctx);
 	}
 	else
 	{
-		void *callback = duk_require_heapptr(ctx, 0);
-		ILibDuktape_EventEmitter_HookHandler hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
-
-		ILibLinkedList_AddTail(eventList, callback);
-		duk_push_heapptr(ctx, data->tmpObject);
-		duk_push_heapptr(ctx, callback);
-		duk_put_prop_string(ctx, -2, Duktape_GetStashKey(callback)); // Save callback to tmpObject so it won't get GC'ed
-
-		duk_push_heapptr(ctx, dispatcher);									// [dispatcher]
-		duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);	// [dispatcher][hptrList]
-		count = (int)duk_get_length(ctx, -1);
-		for (i = 0; i < count; ++i)
-		{
-			duk_get_prop_index(ctx, -1, i);									// [dispatcher][hptrList][hptr]
-			hptr = (void**)duk_get_pointer(ctx, -1);
-			*hptr = dispatcher;												// Set this, so from Native, it looks like there is a subscriber.
-			duk_pop(ctx);													// [dispatcher][hptrList]
-		}
-
-		if (hookHandler != NULL)
-		{
-			hookHandler(data, propName, callback);
-		}
+		ILibDuktape_EventEmitter_AddOn(data, propName, duk_get_heapptr(ctx, 0));
 	}
 
 	return 0;
 }
-duk_ret_t ILibDuktape_EventEmitter_Dispatcher(duk_context *ctx)
-{
-	int nargs = duk_get_top(ctx);
-	void *self;
-	int i;
-	char *name;
 
-	duk_push_current_function(ctx);										// [func]
-	duk_get_prop_string(ctx, -1, "name");								// [func][name]
-	name = (char*)duk_get_string(ctx, -1);
-	duk_get_prop_string(ctx, -2, "this");								// [func][name][this]
-	self = duk_get_heapptr(ctx, -1);
-	duk_get_prop_string(ctx, -1, "emit");								// [func][name][this][emitter]
-
-	//-------------------------------------------------------------------------------------------------
-
-	duk_push_heapptr(ctx, self);										// [emitter][this]
-	duk_push_string(ctx, name);											// [emitter][this][name]
-	for (i = 0; i < nargs; ++i)
-	{
-		duk_dup(ctx, i);												// [emitter][this][name][...args...]
-	}
-	duk_call_method(ctx, nargs + 1);									// Exception will bubble up.
-
-	return 0;
-}
-duk_ret_t ILibDuktape_EventEmitter_NativeDispatch(duk_context *ctx)
-{
-	int nargs = duk_get_top(ctx);
-	char *name;
-	ILibDuktape_EventEmitter_Handler handler;
-	void *args;
-	int i = 0;
-
-	duk_push_current_function(ctx);											// [func]
-	duk_get_prop_string(ctx, -1, "name");									// [func][name]
-	name = (char*)duk_get_string(ctx, -1);
-	duk_get_prop_string(ctx, -2, "handler");								// [func][name][handler]
-	handler = (ILibDuktape_EventEmitter_Handler)duk_get_pointer(ctx, -1);
-	
-	duk_push_array(ctx);													// [func][name][handler][args]
-	args = duk_get_heapptr(ctx, -1);
-
-	for (i = 0; i < nargs; ++i)
-	{
-		duk_dup(ctx, i);													// [func][name][handler][args][...arg...]
-		duk_put_prop_index(ctx, -2, i);										// [func][name][handler][args]
-	}
-
-	duk_push_this(ctx);
-	handler(ctx, duk_get_heapptr(ctx, -1), name, args);
-	
-	return 0;
-}
-int ILibDuktape_EventEmitter_AddSink(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_Handler handler)
-{
-	ILibLinkedList eventList;
-	void *func;
-
-	duk_push_heapptr(emitter->ctx, emitter->tmpObject);											// [tmp]
-	duk_push_c_function(emitter->ctx, ILibDuktape_EventEmitter_NativeDispatch, DUK_VARARGS);	// [tmp][dispatch]
-	duk_push_string(emitter->ctx, eventName);													// [tmp][dispatch][name]
-	duk_put_prop_string(emitter->ctx, -2, "name");												// [tmp][dispatch]
-	duk_push_pointer(emitter->ctx, handler);													// [tmp][dispatch][nativePtr]
-	duk_put_prop_string(emitter->ctx, -2, "handler");											// [tmp][dispatch]
-	func = duk_get_heapptr(emitter->ctx, -1);
-	eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, (int)strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen));
-	if (eventList == NULL) { return 1; }
-
-	((int*)ILibLinkedList_GetExtendedMemory(ILibLinkedList_AddTail(eventList, func)))[0] = 2;
-	emitter->totalListeners[0]++;
-
-	duk_put_prop_string(emitter->ctx, -2, Duktape_GetStashKey(func));							// [tmp]
-	duk_pop(emitter->ctx);																		// ...
-
-	return 0;
-}
-void ILibDuktape_EventEmitter_RemoveAllEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
-{
-	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)user;
-	if (Key1 == ILibDuktape_EventEmitter_SetterFunc)
-	{
-		// If this is not NULL, this is the JavaScript Setter Func
-		memcpy_s(ILibScratchPad, sizeof(ILibScratchPad), Key2, Key2Len);
-		ILibScratchPad[Key2Len] = 0;
-		duk_push_heapptr(data->ctx, Data);											// [Setter]
-		duk_del_prop_string(data->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);
-		duk_push_array(data->ctx);													// [Setter][list]
-		duk_put_prop_string(data->ctx, -2, ILibDuktape_EventEmitter_HPTR_LIST);		// [Setter]
-
-		duk_pop(data->ctx);															// ...
-	}
-}
 void ILibDuktape_EventEmitter_RemoveAllListeners(ILibDuktape_EventEmitter *emitter, char *eventName)
 {
 	duk_push_heapptr(emitter->ctx, emitter->object);				// [this]
@@ -671,97 +563,30 @@ void ILibDuktape_EventEmitter_RemoveAllListeners(ILibDuktape_EventEmitter *emitt
 	if (duk_pcall_method(emitter->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(emitter->ctx, "EventEmitter.removeAllListeners(): "); }
 	duk_pop(emitter->ctx);											// ...
 }
-void ILibDuktape_EventEmitter_RemoveAll(ILibDuktape_EventEmitter *emitter)
+void ILibDuktape_EventEmitter_GetEventCountSink(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
-	if (emitter->eventTable != NULL) { ILibHashtable_Enumerate(emitter->eventTable, ILibDuktape_EventEmitter_RemoveAllEx, emitter); }
-}
-void ILibDuktape_EventEmitter_RemoveEventHeapptr(ILibDuktape_EventEmitter *emitter, char *eventName, void **heapptr)
-{
-	int i, count;
-	void *dispatcher = NULL;
-	int eventNameLen = (int)strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen);
-	if ((dispatcher = ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, eventNameLen)) != NULL)
+	int *count = (int*)user;
+	if (Key1 == NULL)
 	{
-		// This event already exists... Let's hook up the hptr to the existing dispatcher
-		duk_push_heapptr(emitter->ctx, dispatcher);															// [dispatcher]
-		if (heapptr != NULL)
-		{
-			duk_get_prop_string(emitter->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);						// [dispatcher][hptrList]
-			count = (int)duk_get_length(emitter->ctx, -1);
-			for (i = 0; i < count; ++i)
-			{
-				duk_get_prop_index(emitter->ctx, -1, i);													// [dispatcher][hptrList][hptr]
-				if (duk_get_pointer(emitter->ctx, -1) == heapptr)
-				{
-					duk_pop(emitter->ctx);																	// [dispatcher][hptrList]
-					duk_del_prop_index(emitter->ctx, -1, i);
-					break;
-				}
-				duk_pop(emitter->ctx);																		// [dispatcher][hptrList]
-			}
-			duk_pop(emitter->ctx);																			// [dispatcher]
-		}
-		else
-		{
-			duk_del_prop_string(emitter->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);						// [dispatcher]
-			duk_push_array(emitter->ctx);																	// [dispatcher][hptrList]
-			duk_put_prop_string(emitter->ctx, -2, ILibDuktape_EventEmitter_HPTR_LIST);						// [dispatcher]
-		}
-		duk_pop(emitter->ctx);																				// ...
+		++(*count);
 	}
 }
-int ILibDuktape_EventEmitter_AddEventHeapptr(ILibDuktape_EventEmitter *emitter, char *eventName, void **heapptr)
+int ILibDuktape_EventEmitter_GetEventCount(ILibDuktape_EventEmitter *emitter)
 {
-	ILibLinkedList eventList = NULL;
-	void *dispatcher = NULL;
-	int eventNameLen = (int)strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen);
-	if ((dispatcher = ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, eventNameLen)) != NULL)
-	{
-		// This event already exists... Let's hook up the hptr to the existing dispatcher
-		duk_push_heapptr(emitter->ctx, dispatcher);														// [dispatcher]
-		duk_get_prop_string(emitter->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);						// [dispatcher][hptrList]
-		duk_push_pointer(emitter->ctx, heapptr);														// [dispatcher][hptrList][hptr]
-		duk_put_prop_index(emitter->ctx, -2, (duk_uarridx_t)duk_get_length(emitter->ctx, -2));			// [dispatcher][hptrList]
-		duk_pop_2(emitter->ctx);																		// ...
+	int retVal = 0;
+	if (emitter->eventTable != NULL) { ILibHashtable_Enumerate(emitter->eventTable, ILibDuktape_EventEmitter_GetEventCountSink, &retVal); }
+	return(retVal);
+}
 
-		// Now lets check if there was already a subscriber
-		if ((eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, eventNameLen)) != NULL && ILibLinkedList_GetCount(eventList) > 0)
-		{
-			*heapptr = dispatcher;
-		}
-		return 0;
-	}
-	return 1;
-}
 void ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter *emitter, char *eventName)
 {
-	void **heapptr;
-	duk_push_heapptr(emitter->ctx, emitter->tmpObject);												// [emitter]
-	duk_push_object(emitter->ctx);																	// [emitter][tmp]
-	duk_push_fixed_buffer(emitter->ctx, sizeof(void*));												// [emitter][tmp][buffer]
-	heapptr = (void**)Duktape_GetBuffer(emitter->ctx, -1, NULL);
-	memset((void*)heapptr, 0, sizeof(void*));
-	duk_put_prop_string(emitter->ctx, -2, "\xFF_buffer");											// [emitter][tmp]
-	duk_put_prop_string(emitter->ctx, -2, Duktape_GetStashKey(duk_get_heapptr(emitter->ctx, -1)));	// [emitter]
-	duk_pop(emitter->ctx);																			// ...
-
-	ILibDuktape_EventEmitter_CreateEvent(emitter, eventName, heapptr);
-}
-void ILibDuktape_EventEmitter_CreateEvent(ILibDuktape_EventEmitter *emitter, char *eventName, void **hptr)
-{
-	void *dispatcher = NULL;
 	int eventNameLen = (int)strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen);
-	if ((dispatcher = ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, eventNameLen)) != NULL)
+	
+	if (ILibHashtable_Get(emitter->eventTable, NULL, eventName, eventNameLen) != NULL)
 	{
-		// This event already exists... Let's hook up the hptr to the existing dispatcher
-		duk_push_heapptr(emitter->ctx, dispatcher);														// [dispatcher]
-		duk_get_prop_string(emitter->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);						// [dispatcher][hptrList]
-		duk_push_pointer(emitter->ctx, hptr);															// [dispatcher][hptrList][hptr]
-		duk_put_prop_index(emitter->ctx, -2, (duk_uarridx_t)duk_get_length(emitter->ctx, -2));			// [dispatcher][hptrList]
-		duk_pop_2(emitter->ctx);																		// ...
+		// This event already exists... 
 		return;
 	}
-
 
 	duk_push_heapptr(emitter->ctx, emitter->object);													// [obj]
 
@@ -769,27 +594,14 @@ void ILibDuktape_EventEmitter_CreateEvent(ILibDuktape_EventEmitter *emitter, cha
 	duk_push_string(emitter->ctx, eventName);															// [obj][prop]
 	duk_push_c_function(emitter->ctx, ILibDuktape_EventEmitter_SetEvent, 1);							// [obj][prop][setFunc]
 	duk_push_string(emitter->ctx, eventName);															// [obj][prop][setFunc][name]
-	duk_put_prop_string(emitter->ctx, -2, "name");														// [obj][prop][setFunc]
-	
-	// Set some custom properties into the setter func, so we can access it later
-	duk_push_c_function(emitter->ctx, ILibDuktape_EventEmitter_Dispatcher, DUK_VARARGS);				// [obj][prop][setFunc][dispatcher]
-	dispatcher = duk_get_heapptr(emitter->ctx, -1);
-	duk_push_heapptr(emitter->ctx, emitter->object);													// [obj][prop][setFunc][dispatcher][this]
-	duk_put_prop_string(emitter->ctx, -2, "this");														// [obj][prop][setFunc][dispatcher]			
-	duk_push_string(emitter->ctx, eventName);															// [obj][prop][setFunc][dispatcher][name]
-	duk_put_prop_string(emitter->ctx, -2, "name");														// [obj][prop][setFunc][dispatcher]
-	duk_push_array(emitter->ctx);																		// [obj][prop][setFunc][dispatcher][hptrList]
-	duk_push_pointer(emitter->ctx, hptr);																// [obj][prop][setFunc][dispatcher][hptrList][hptr]
-	duk_put_prop_index(emitter->ctx, -2, 0);															// [obj][prop][setFunc][dispatcher][hptrList]
-	duk_put_prop_string(emitter->ctx, -2, ILibDuktape_EventEmitter_HPTR_LIST);							// [obj][prop][setFunc][dispatcher]
-	duk_put_prop_string(emitter->ctx, -2, ILibDuktape_EventEmitter_DispatcherFunc);						// [obj][prop][setFunc]
+	duk_put_prop_string(emitter->ctx, -2, "eventName");													// [obj][prop][setFunc]
 
 	duk_def_prop(emitter->ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_SETTER);						// [obj]
 	duk_pop(emitter->ctx);																				// ...
 
 	ILibHashtable_Put(emitter->eventTable, NULL, eventName, eventNameLen, ILibLinkedList_CreateEx(sizeof(int)));
-	ILibHashtable_Put(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, eventNameLen, dispatcher);
 }
+
 void *ILibDuktape_EventEmitter_GetDispatcher(ILibDuktape_EventEmitter *emitter, char *eventName)
 {
 	return ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, (int)strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen));
@@ -798,16 +610,13 @@ duk_ret_t ILibDuktape_EventEmitter_Inherits_createEvent(duk_context *ctx)
 {
 	char *name = (char*)duk_require_string(ctx, 0);
 	ILibDuktape_EventEmitter *emitter;
-	void **hptr;
+
 	duk_push_this(ctx);									// [emitterUtils]
 	duk_get_prop_string(ctx, -1, "emitter");			// [emitterUtils][ptr]
 	emitter = (ILibDuktape_EventEmitter*)duk_get_pointer(ctx, -1);
 	duk_pop(ctx);										// [emitterUtils]
-	duk_push_fixed_buffer(ctx, sizeof(void*));			// [emitterUtils][buffer]
-	hptr = (void**)Duktape_GetBuffer(ctx, -1, NULL);
-	duk_put_prop_string(ctx, -2, name);					// [emitterUtils]
 
-	ILibDuktape_EventEmitter_CreateEvent(emitter, name, hptr);
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, name);
 	return 0;
 }
 duk_ret_t ILibDuktape_EventEmitter_Inherits_addMethod(duk_context *ctx)
@@ -878,8 +687,22 @@ duk_ret_t ILibDuktape_EventEmitter_ForwardEvent_Sink(duk_context *ctx)
 	if (duk_pcall_method(ctx, 1 + nargs) != 0) { return(ILibDuktape_Error(ctx, "EventEmitter.ForwardEvent() [%s]: %s", name, duk_safe_to_string(ctx, -1))); }
 	return(0);	
 }
+
+duk_ret_t ILibDuktape_EventEmitter_ForwardEvent_Finalizer(duk_context *ctx)
+{
+	duk_push_current_function(ctx);					// [func]
+	duk_get_prop_string(ctx, -1, "fptr");			// [func][fptr]
+	duk_get_prop_string(ctx, -1, "targetObject");	// [func][fptr][target]
+	duk_del_prop_string(ctx, -2, "targetObject");
+	if (g_displayFinalizerMessages) { printf("EventEmitter.Forwarder[%s]: Deleted reference to [%s] RC=%d\n", Duktape_GetStringPropertyValue(ctx, -3, "targetName", "UNKNOWN"), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN"), ILibDuktape_GetReferenceCount(ctx, -1) - 1); }
+	duk_pop_n(ctx, 3);
+
+	if (g_displayFinalizerMessages) { duk_eval_string(ctx, "_debugGC();"); duk_pop(ctx); }
+	return(0);
+}
 void ILibDuktape_EventEmitter_ForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName, duk_idx_t eventTargetIndex, char *targetEventName)
 {
+	void *fptr;
 	void *target;
 	duk_dup(ctx, eventTargetIndex);														// [targetObject]
 	target = duk_get_heapptr(ctx, -1);
@@ -889,12 +712,26 @@ void ILibDuktape_EventEmitter_ForwardEvent(duk_context *ctx, duk_idx_t eventSour
 	duk_swap_top(ctx, -2);																// [on][this]
 	duk_push_string(ctx, sourceEventName);												// [on][this][name]
 	duk_push_c_function(ctx, ILibDuktape_EventEmitter_ForwardEvent_Sink, DUK_VARARGS);	// [on][this][name][sink]
+	fptr = duk_get_heapptr(ctx, -1);
 	duk_push_heapptr(ctx, target);														// [on][this][name][sink][targetObject]
 	duk_put_prop_string(ctx, -2, "targetObject");										// [on][this][name][sink]
 	duk_push_string(ctx, targetEventName);												// [on][this][name][sink][targetName]
 	duk_put_prop_string(ctx, -2, "targetName");											// [on][this][name][sink]
 	if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "EventEmitter_ForwardEvent(): "); }
 	duk_pop(ctx);																		// ...
+
+	duk_dup(ctx, eventSourceIndex);															// [sourceObject]
+	duk_get_prop_string(ctx, -1, "prependOnceListener");									// [sourceObject][prependOnce]
+	duk_swap_top(ctx, -2);																	// [prependOnce][this]
+	duk_push_string(ctx, "~");																// [prependOnce][this]['~']
+	duk_push_c_function(ctx, ILibDuktape_EventEmitter_ForwardEvent_Finalizer, DUK_VARARGS);	// [prependOnce][this]['~'][func]
+	duk_push_heapptr(ctx, fptr);															// [prependOnce][this]['~'][func][fptr]
+	duk_put_prop_string(ctx, -2, "fptr");													// [prependOnce][this]['~'][func]
+	duk_push_string(ctx, targetEventName);													// [prependOnce][this]['~'][func][name]
+	duk_put_prop_string(ctx, -2, "targetName");												// [prependOnce][this]['~'][func]
+
+	if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "EventEmitter_ForwardEvent_SetFinalizer(): "); }
+	duk_pop(ctx);																			// ...
 }
 int ILibDuktape_EventEmitter_AddOnEx(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func)
 {

@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #include "ILibDuktape_ChildProcess.h"
 
 #include "ILibDuktapeModSearch.h"
@@ -100,6 +116,7 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUSH(duk_context *ctx, ILibProcessPipe_Process mProcess, void *callback)
 {
 	duk_push_object(ctx);														// [ChildProcess]
+	ILibDuktape_WriteID(ctx, "childProcess.subProcess");
 	duk_push_pointer(ctx, mProcess);											// [ChildProcess][ptr]
 	duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Process);				// [ChildProcess]
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_ChildProcess_SubProcess));	// [ChildProcess][buffer]
@@ -121,21 +138,21 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 	ILibDuktape_CreateInstanceMethod(ctx, "kill", ILibDuktape_ChildProcess_Kill, 0);
 
 	duk_push_object(ctx);
-	ILibDuktape_WriteID(ctx, "childProcess.stdout");
+	ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdout");
 	duk_dup(ctx, -2);
 	ILibDuktape_CreateReadonlyProperty(ctx, "parent");
 	retVal->stdOut = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdOut_OnPause, ILibDuktape_ChildProcess_SubProcess_StdOut_OnResume, retVal);
 	ILibDuktape_CreateReadonlyProperty(ctx, "stdout");
 
 	duk_push_object(ctx);
-	ILibDuktape_WriteID(ctx, "childProcess.stderr");
+	ILibDuktape_WriteID(ctx, "childProcess.subProcess.stderr");
 	duk_dup(ctx, -2);
 	ILibDuktape_CreateReadonlyProperty(ctx, "parent");
 	retVal->stdErr = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdErr_OnPause, ILibDuktape_ChildProcess_SubProcess_StdErr_OnResume, retVal);
 	ILibDuktape_CreateReadonlyProperty(ctx, "stderr");
 
 	duk_push_object(ctx);
-	ILibDuktape_WriteID(ctx, "childProcess.stdin");
+	ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdin");
 	duk_dup(ctx, -2);
 	ILibDuktape_CreateReadonlyProperty(ctx, "parent");
 	retVal->stdIn = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler, ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler, retVal);
@@ -231,6 +248,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);
+	ILibDuktape_WriteID(ctx, "childProcess");
 	duk_push_pointer(ctx, (void*)ILibProcessPipe_Manager_Create(chain));
 	duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Manager);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_ChildProcess_Manager_Finalizer);

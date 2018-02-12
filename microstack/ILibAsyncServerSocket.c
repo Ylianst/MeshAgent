@@ -1,5 +1,5 @@
 /*   
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -145,46 +145,13 @@ void ILibAsyncServerSocket_OnInterruptSink(ILibAsyncSocket_SocketModule socketMo
 void ILibAsyncServerSocket_PreSelect(void* socketModule, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	struct ILibAsyncServerSocketModule *module = (struct ILibAsyncServerSocketModule*)socketModule;
-	int flags,i;
+	int i;
 
 	UNREFERENCED_PARAMETER( writeset );
 	UNREFERENCED_PARAMETER( errorset );
 	UNREFERENCED_PARAMETER( blocktime );
 
-	//
-	// The socket isn't put in listening mode, until the chain is started.
-	// If this variable == 0, that means we need to do that.
-	//
-	if (module->listening == 0)
-	{
-		//
-		// Set the socket to non-block mode, so we can play nice and share the thread
-		//
-#ifdef _WIN32_WCE
-		flags = 1;
-		ioctlsocket(module->ListenSocket, FIONBIO, &flags);
-#elif WIN32
-		flags = 1;
-		ioctlsocket(module->ListenSocket, FIONBIO, (u_long *)(&flags));
-#elif _POSIX
-		flags = fcntl(module->ListenSocket, F_GETFL,0);
-		fcntl(module->ListenSocket, F_SETFL, O_NONBLOCK | flags);
-#endif
-
-		//
-		// Put the socket in Listen, and add it to the fdset for the Select loop
-		//
-		module->listening = 1;
-		listen(module->ListenSocket, 4);
-		#if defined(WIN32)
-		#pragma warning( push, 3 ) // warning C4127: conditional expression is constant
-		#endif
-		FD_SET(module->ListenSocket, readset);
-		#if defined(WIN32)
-		#pragma warning( pop )
-		#endif
-	}
-	else if (module->ListenSocket != ~0)
+	if (module->ListenSocket != ~0)
 	{
 		// Only put the ListenSocket in the readset, if we are able to handle a new socket
 		for(i = 0; i < module->MaxConnection; ++i)
@@ -714,8 +681,28 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 		//
 		ILibAsyncSocket_SetReAllocateNotificationCallback(RetVal->AsyncSockets[i], &ILibAsyncServerSocket_OnBufferReAllocated);
 	}
-	ILibAddToChain(Chain, RetVal);
 
+
+	//
+	// Set the socket to non-block mode, so we can play nice and share the thread
+	//
+	int flags = 1;
+#ifdef _WIN32_WCE
+	ioctlsocket(RetVal->ListenSocket, FIONBIO, &flags);
+#elif WIN32
+	ioctlsocket(RetVal->ListenSocket, FIONBIO, (u_long *)(&flags));
+#elif _POSIX
+	flags = fcntl(RetVal->ListenSocket, F_GETFL, 0);
+	fcntl(RetVal->ListenSocket, F_SETFL, O_NONBLOCK | flags);
+#endif
+
+	RetVal->listening = 1;
+	listen(RetVal->ListenSocket, 4);
+	#if defined(WIN32)
+	#pragma warning( push, 3 ) // warning C4127: conditional expression is constant
+	#endif
+
+	ILibAddToChain(Chain, RetVal);
 	return RetVal;
 }
 

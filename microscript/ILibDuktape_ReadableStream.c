@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ limitations under the License.
 #include "ILibParsers_Duktape.h"
 #include "microstack/ILibParsers.h"
 #include "ILibDuktape_EventEmitter.h"
+#include "ILibDuktape_Polyfills.h"
 
 
 #define ILibDuktape_readableStream_WritePipes			"\xFF_WritePipes"
@@ -105,6 +106,19 @@ typedef struct ILibDuktape_readableStream_bufferedData
 	char buffer[];
 }ILibDuktape_readableStream_bufferedData;
 
+void ILibDuktape_ReadableStream_DestroyPausedData(ILibDuktape_readableStream *stream)
+{
+	ILibDuktape_readableStream_bufferedData *buffered = (ILibDuktape_readableStream_bufferedData*)stream->paused_data;
+	ILibDuktape_readableStream_bufferedData *tmp;
+
+	while (buffered != NULL)
+	{
+		tmp = buffered->Next;
+		free(buffered);
+		buffered = tmp;
+	}
+	stream->paused_data = NULL;
+}
 void ILibDuktape_readableStream_WriteData_buffer(ILibDuktape_readableStream *stream, int streamReserved, char *buffer, int bufferLen)
 {
 	ILibDuktape_readableStream_bufferedData *buffered = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(bufferLen + sizeof(ILibDuktape_readableStream_bufferedData), 0, NULL, NULL);
@@ -137,17 +151,17 @@ void ILibDuktape_readableStream_WriteData_OnData_ChainThread(void *chain, void *
 		duk_push_external_buffer(stream->ctx);																// [ext]
 		duk_config_buffer(stream->ctx, -1, data->buffer, data->bufferLen);
 	}
-	duk_push_heapptr(stream->ctx, stream->OnData);															// [ext][func]
-	duk_push_heapptr(stream->ctx, stream->object);															// [ext][func][this]
+
+	ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "data");								// [ext][emit][this][data]
 	if (data->Reserved == 0)
 	{
-		duk_push_buffer_object(stream->ctx, -3, 0, data->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);				// [ext][func][this][buffer]
+		duk_push_buffer_object(stream->ctx, -4, 0, data->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);				// [ext][emit][this][data][buffer]
 	}
 	else
 	{
-		duk_push_lstring(stream->ctx, data->buffer, data->bufferLen);										// [ext][func][this][buffer/string]
+		duk_push_lstring(stream->ctx, data->buffer, data->bufferLen);										// [ext][emit][this][data][buffer/string]
 	}
-	if (duk_pcall_method(stream->ctx, 1) != 0)																// [...][retVal]
+	if (duk_pcall_method(stream->ctx, 2) != 0)																// [...][retVal]
 	{
 		ILibDuktape_Process_UncaughtException(stream->ctx);
 	}
@@ -275,6 +289,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 			{
 				ILibDuktape_WritableStream *ws = (ILibDuktape_WritableStream*)w->nativeWritable;
 				ws->Reserved = streamReserved;
+				ws->endBytes = -1;
 				switch (ws->WriteSink(ws, buffer, bufferLen, ws->WriteSink_User))
 				{
 					case ILibTransport_DoneState_INCOMPLETE:
@@ -333,7 +348,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 		stream->pipeInProgress = 0;
 		sem_post(&(stream->pipeLock));
 
-		if (stream->OnData != NULL)
+		if(ILibDuktape_EventEmitter_HasListeners(stream->emitter, "data"))
 		{
 			if (ILibIsRunningOnChainThread(stream->chain))
 			{
@@ -342,17 +357,16 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 					duk_push_external_buffer(stream->ctx);												// [extBuffer]
 					duk_config_buffer(stream->ctx, -1, buffer, bufferLen);
 				}
-				duk_push_heapptr(stream->ctx, stream->OnData);											// [func]
-				duk_push_heapptr(stream->ctx, stream->object);											// [func][this]
+				ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "data");				// [extBuffer][emit][this][data]
 				if (streamReserved == 0)
 				{
-					duk_push_buffer_object(stream->ctx, -3, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [extBuffer][func][this][nodeBuffer]
+					duk_push_buffer_object(stream->ctx, -4, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [extBuffer][emit][this][data][nodeBuffer]
 				}
 				else
 				{
-					duk_push_lstring(stream->ctx, buffer, bufferLen);									// [func][this][string]
+					duk_push_lstring(stream->ctx, buffer, bufferLen);									// [extBuffer][emit][this][data][string]
 				}
-				if (duk_pcall_method(stream->ctx, 1) != 0)												// [retVal]
+				if (duk_pcall_method(stream->ctx, 2) != 0)												// [retVal]
 				{
 					ILibDuktape_Process_UncaughtException(stream->ctx);
 				}
@@ -377,14 +391,14 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 				ILibChain_RunOnMicrostackThread(stream->chain, ILibDuktape_readableStream_WriteData_OnData_ChainThread, tmp);
 			}
 		}
-		else if (stream->PauseHandler != NULL && stream->OnEnd == NULL)
+		else if (stream->PauseHandler != NULL && ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") == 0)
 		{
 			// If we get here, it means we are writing data, but nobody is going to be receiving it...
 			// So we need to buffer the data, so when we are resumed later, we can retry
 			needPause = 1;
 			ILibDuktape_readableStream_WriteData_buffer(stream, streamReserved, buffer, bufferLen);
 		}
-		else if (stream->OnEnd != NULL)
+		else if (ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") != 0)
 		{
 			return 0;
 		}
@@ -429,16 +443,11 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 				retVal = 0;
 			}
 		}
-		else if (stream->OnEnd != NULL)
+		else if (ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") != 0)
 		{
-			duk_context *x = stream->ctx;
-			duk_push_heapptr(stream->ctx, stream->OnEnd);		// [func]
-			duk_push_heapptr(stream->ctx, stream->object);		// [func][this]
-			if (duk_pcall_method(stream->ctx, 0) != 0)			// [retVal]
-			{
-				ILibDuktape_Process_UncaughtException(stream->ctx);
-			}
-			duk_pop(x);								// ...
+			ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "end");	// [emit][this][end]
+			if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
+			duk_pop(stream->ctx);													// ...
 			retVal = 0;
 		}
 	}
@@ -447,16 +456,18 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 void ILibDuktape_readableStream_Closed(ILibDuktape_readableStream *stream)
 {
 	ILibDuktape_readableStream_WriteEnd(stream);
-	if (stream->OnClose != NULL)
+	if(ILibDuktape_EventEmitter_HasListeners(stream->emitter, "close")!=0)
 	{
-		duk_push_heapptr(stream->ctx, stream->OnClose);		// [func]
-		duk_push_heapptr(stream->ctx, stream->object);		// [func][this]
-		if (duk_pcall_method(stream->ctx, 0) != 0)			// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(stream->ctx);
-		}
-		duk_pop(stream->ctx);								// ...
+		ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "close");	// [emit][this][close]
+		if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
+		duk_pop(stream->ctx);														// ...
 	}
+	
+	duk_push_heapptr(stream->ctx, stream->object);		// [stream]
+	duk_get_prop_string(stream->ctx, -1, "unpipe");		// [stream][unpipe]
+	duk_swap_top(stream->ctx, -2);						// [unpipe][this]
+	if (duk_pcall_method(stream->ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
+	duk_pop(stream->ctx);								// ...
 }
 
 duk_ret_t ILibDuktape_readableStream_pause(duk_context *ctx)
@@ -482,7 +493,7 @@ duk_ret_t ILibDuktape_readableStream_pause(duk_context *ctx)
 int ILibDuktape_readableStream_resume_flush(ILibDuktape_readableStream *rs)
 {
 	// Sanity check, and make sure there is a listener first, otherwise we're wasting our time
-	if (rs->OnData == NULL && rs->nextWriteable == NULL && rs->OnEnd == NULL)
+	if(ILibDuktape_EventEmitter_HasListeners(rs->emitter, "data")==0 && rs->nextWriteable == NULL && ILibDuktape_EventEmitter_HasListeners(rs->emitter, "end")==0)
 	{
 		return 1; // No listeners....
 	}
@@ -528,12 +539,23 @@ duk_ret_t ILibDuktape_readableStream_resume(duk_context *ctx)
 void ILibDuktape_ReadableStream_pipe_ResumeLater(duk_context *ctx, void **args, int argsLen)
 {
 	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)args[0];
+	rs->resumeImmediate = NULL;
 	if (ILibDuktape_readableStream_resume_flush(rs) == 0 && rs->ResumeHandler != NULL) { rs->paused = 0; rs->ResumeHandler(rs, rs->user); }
 	if (rs->PipeHookHandler != NULL) { rs->PipeHookHandler(rs, args[1], rs->user); }
 }
 void ILibDuktape_readableStream_pipe_later(duk_context *ctx, void **args, int argsLen)
 {
 	duk_push_heapptr(ctx, args[0]);							// [readable]
+	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_RSPTRS);
+	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
+	duk_pop(ctx);
+
+	duk_push_heapptr(ctx, rs->pipeImmediate);
+	duk_del_prop_string(ctx, -1, "dest");
+	duk_pop(ctx);
+	rs->pipeImmediate = NULL;
+
+
 	duk_get_prop_string(ctx, -1, "pipe");					// [readable][pipe]
 	duk_swap_top(ctx, -2);									// [pipe][this]
 	duk_push_heapptr(ctx, args[1]);							// [pipe][this][writable]
@@ -557,8 +579,10 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	{
 		// We must YIELD and try again later, becuase there is an active dispatch going on
 		duk_push_this(ctx);
-		ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, -1), duk_get_heapptr(ctx, 0), nargs > 1 ? duk_get_heapptr(ctx, 1) : NULL }, 1 + nargs, ILibDuktape_readableStream_pipe_later);
-
+		rstream->pipeImmediate = ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, -1), duk_get_heapptr(ctx, 0), nargs > 1 ? duk_get_heapptr(ctx, 1) : NULL }, 1 + nargs, ILibDuktape_readableStream_pipe_later);
+		duk_push_heapptr(ctx, rstream->pipeImmediate);	// [immediate]
+		duk_dup(ctx, 0);								// [immediate][ws]
+		duk_put_prop_string(ctx, -2, "dest");			// [immediate]
 		duk_dup(ctx, 0);
 		sem_post(&(rstream->pipeLock));
 		return(1);
@@ -615,12 +639,14 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	duk_push_string(ctx, "pipe");						// [emit][this][pipe]
 	duk_push_this(ctx);									// [emit][this][pipe][readable]
 	duk_call_method(ctx, 2); duk_pop(ctx);				// ...
-
-
 	if (rstream->paused != 0)
 	{
 		// We are paused, so we should yield and resume... We yield, so in case the user tries to chain multiple pipes, it will chain first
-		ILibDuktape_Immediate(ctx, (void*[]) { rstream, duk_get_heapptr(ctx, 0) }, 1, ILibDuktape_ReadableStream_pipe_ResumeLater);
+		rstream->resumeImmediate = ILibDuktape_Immediate(ctx, (void*[]) { rstream, duk_get_heapptr(ctx, 0) }, 1, ILibDuktape_ReadableStream_pipe_ResumeLater);
+		duk_push_heapptr(ctx, rstream->resumeImmediate);		// [immediate]
+		duk_push_this(ctx);										// [immediate][this]
+		duk_put_prop_string(ctx, -2, "self");					// [immediate]
+		duk_pop(ctx);											// ...
 	}
 	else
 	{
@@ -646,7 +672,12 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 	if (data->pipeInProgress != 0)
 	{
 		// We must yield, and try again, because there's an active dispatch going on
-		ILibDuktape_Immediate(ctx, (void*[]) { args[0], args[1] }, argsLen, ILibDuktape_readableStream_unpipe_later);
+		void *imm = ILibDuktape_Immediate(ctx, (void*[]) { args[0], args[1] }, argsLen, ILibDuktape_readableStream_unpipe_later);
+		duk_push_heapptr(ctx, imm);					// [immediate]
+		duk_push_heapptr(ctx, args[0]);				// [immediate][this]
+		duk_put_prop_string(ctx, -2, "\xFF_Self");	// [immediate]
+		if (args[1] != NULL) { duk_push_heapptr(ctx, args[1]); duk_put_prop_string(ctx, -2, "\xFF_w"); }
+		duk_pop(ctx);								// ...
 		sem_post(&(data->pipeLock));
 		return;
 	}
@@ -683,11 +714,11 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 					for (i = 0; i < (int)arrayLen; ++i)									   
 					{																	   
 						duk_get_prop_index(ctx, -1, i);									// [array][ws]
-						ILibDuktape_Push_ObjectStash(ctx);								// [array][ws][stash]
-						if (duk_has_prop_string(ctx, -1, Duktape_GetStashKey(args[1])))	   
+						if(duk_get_heapptr(ctx, -1) == args[1])
 						{		
+							if (g_displayFinalizerMessages) { printf("*** UNPIPE/Removing Reference to Writeable: %s (RefCount: %d)\n", Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN"), ILibDuktape_GetReferenceCount(ctx, -1)); }
 							// Removing the entry from the Array
-							duk_pop_2(ctx);												// [array]
+							duk_pop(ctx);												// [array]
 							duk_get_prop_string(ctx, -1, "splice");						// [array][splice]
 							duk_swap_top(ctx, -2);										// [splice][this]
 							duk_push_int(ctx, i);										// [splice][this][i]
@@ -707,10 +738,10 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 		else
 		{
 			// 'unpipe' all pipes
-			w = data->nextWriteable;
 			while (w != NULL)
 			{
 				duk_push_heapptr(ctx, w->writableStream);			// [ws]
+				if (g_displayFinalizerMessages) { printf("*** UNPIPE/Removing Reference to Writeable: %s (RefCount: %d)\n", Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN"), ILibDuktape_GetReferenceCount(ctx, -1)); }
 				duk_get_prop_string(ctx, -1, "emit");				// [ws][emit]
 				duk_swap_top(ctx, -2);								// [emit][this]
 				duk_push_string(ctx, "unpipe");						// [emit][this][unpipe]
@@ -752,7 +783,13 @@ duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 	duk_call_method(ctx, 0); duk_pop(ctx);	// [readable]
 	
 	// We must yield, and do this on the next event loop, because we can't unpipe if we're called from a pipe'ed call
-	ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, -1), nargs == 1 ? duk_get_heapptr(ctx, 0) : NULL }, nargs + 1, ILibDuktape_readableStream_unpipe_later);
+	void *imm = ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, -1), nargs == 1 ? duk_get_heapptr(ctx, 0) : NULL }, nargs + 1, ILibDuktape_readableStream_unpipe_later);
+	duk_push_heapptr(ctx, imm);					// [immediate]
+	duk_push_this(ctx);							// [immediate][this]
+	duk_put_prop_string(ctx, -2, "\xFF_Self");	// [immediate]
+	if (nargs == 1) { duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "\xFF_w"); }
+	duk_pop(ctx);								// ...
+
 	return 0;
 }
 duk_ret_t ILibDuktape_readableStream_isPaused(duk_context *ctx)
@@ -777,13 +814,23 @@ duk_ret_t ILibDuktape_readableStream_pipe_getter(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_readableStream_pipe, DUK_VARARGS);
 	return 1;
 }
-void ILibDuktape_ReadableStream_PipeLockFinalizer(duk_context *ctx, void *stream)
+duk_ret_t ILibDuktape_ReadableStream_PipeLockFinalizer(duk_context *ctx)
 {
 	ILibDuktape_readableStream_bufferedData *tmp;
 	ILibDuktape_readableStream *ptrs;
-	duk_push_heapptr(ctx, stream);											// [stream]
+
+	duk_push_this(ctx);														// [stream]
 	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_RSPTRS);		// [stream][buffer]
 	ptrs = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
+	if (ptrs->pipeImmediate != NULL)
+	{
+		duk_push_global_object(ctx);						// [g]
+		duk_get_prop_string(ctx, -1, "clearImmediate");		// [g][clearImmediate]
+		duk_swap_top(ctx, -2);								// [clearImmediate][this]
+		duk_push_heapptr(ctx, ptrs->pipeImmediate);			// [clearImmediate][this][immedate]
+		duk_call_method(ctx, 1); duk_pop(ctx);				// ...
+		ptrs->pipeImmediate = NULL;
+	}
 
 	while ((tmp = (ILibDuktape_readableStream_bufferedData*)ptrs->paused_data) != NULL)
 	{
@@ -794,6 +841,7 @@ void ILibDuktape_ReadableStream_PipeLockFinalizer(duk_context *ctx, void *stream
 
 	sem_destroy(&(ptrs->pipeLock));
 	duk_pop_2(ctx);
+	return(0);
 }
 duk_ret_t ILibDuktape_ReadableStream_unshift(duk_context *ctx)
 {
@@ -809,7 +857,7 @@ duk_ret_t ILibDuktape_ReadableStream_unshift(duk_context *ctx)
 	else
 	{
 		duk_size_t bufferLen;
-		Duktape_GetBuffer(ctx, 0, &bufferLen);
+		rs->unshiftReserved = (char*)Duktape_GetBuffer(ctx, 0, &bufferLen);
 		duk_push_int(ctx, rs->UnshiftHandler(rs, (int)bufferLen, rs->user));
 		return(1);
 	}
@@ -831,7 +879,6 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	retVal->pipeArray = duk_get_heapptr(ctx, -1);
 	duk_put_prop_string(ctx, -2, ILibDuktape_readableStream_PipeArray);		// [obj]
 
-
 	retVal->ctx = ctx;
 	retVal->chain = Duktape_GetChain(ctx);
 	retVal->object = duk_get_heapptr(ctx, -1);
@@ -840,12 +887,12 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	retVal->ResumeHandler = OnResume;
 	retVal->UnshiftHandler = OnUnshift;
 	sem_init(&(retVal->pipeLock), 0, 1);
-	ILibDuktape_CreateIndependentFinalizer(ctx, ILibDuktape_ReadableStream_PipeLockFinalizer);
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_ReadableStream_PipeLockFinalizer);
 
-	emitter = ILibDuktape_EventEmitter_Create(ctx);
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "end", &(retVal->OnEnd));
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "data", &(retVal->OnData));
-	ILibDuktape_EventEmitter_CreateEvent(emitter, "close", &(retVal->OnClose));
+	retVal->emitter = emitter = ILibDuktape_EventEmitter_Create(ctx);
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "end");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "data");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "close");
 
 	ILibDuktape_CreateInstanceMethod(ctx, "pause", ILibDuktape_readableStream_pause, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "resume", ILibDuktape_readableStream_resume, 0);

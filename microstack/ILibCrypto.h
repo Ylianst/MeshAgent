@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #ifndef __ILIB_CRYPTO__
 #define __ILIB_CRYPTO__
 
@@ -95,6 +111,7 @@ int   __fastcall util_to_cer(struct util_cert cert, char** data);
 int   __fastcall util_from_cer(char* data, int datalen, struct util_cert* cert);
 int   __fastcall util_from_pem(char* filename, struct util_cert* cert);
 int	  __fastcall util_from_pem_string(char *data, int datalen, struct util_cert* cert);
+int	  __fastcall util_from_pkcs7b_string(char *data, int datalen, char *out, int outLen);
 int   __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, int bits, int days, char* name, enum CERTIFICATE_TYPES certtype, struct util_cert* initialcert);
 void  __fastcall util_printcert(struct util_cert cert);
 void  __fastcall util_printcert_pk(struct util_cert cert);

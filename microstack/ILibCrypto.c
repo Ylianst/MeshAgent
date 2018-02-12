@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #if defined(WIN32) && !defined(_WIN32_WCE)
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
@@ -479,6 +495,56 @@ int __fastcall util_from_cer(char* data, int datalen, struct util_cert* cert)
 	cert->pkey = NULL;
 	cert->x509 = d2i_X509(NULL, (const unsigned char**)&data, datalen);
 	return ((cert->x509) == NULL);
+}
+
+int __fastcall util_from_pkcs7b_string(char *data, int datalen, char *out, int outLen)
+{
+	BIO* bio = BIO_new_mem_buf((void*)data, datalen);
+	BIO* bio_out = BIO_new(BIO_s_mem());
+	BUF_MEM *outBuffer;
+	int retVal = 0, i = 0;
+	PKCS7 *p7 = NULL;
+	STACK_OF(X509) *certs = NULL;
+	STACK_OF(X509_ALGOR) *md_algs = NULL;
+	STACK_OF(PKCS7_SIGNER_INFO) *sinfo = NULL;
+
+	BIO_get_mem_ptr(bio_out, &outBuffer);
+	p7 = d2i_PKCS7_bio(bio, NULL);
+
+	md_algs = p7->d.sign->md_algs;
+	sinfo = p7->d.sign->signer_info;
+
+	for (i = 0; i < sk_PKCS7_SIGNER_INFO_num(sinfo); i++)
+	{
+		printf("Hash Algorithm: %s\n", OBJ_nid2ln(OBJ_obj2nid(sk_PKCS7_SIGNER_INFO_value(sinfo, i)->digest_alg->algorithm)));
+		printf("Enc Algorithm: %s\n", OBJ_nid2ln(OBJ_obj2nid(sk_PKCS7_SIGNER_INFO_value(sinfo, i)->digest_enc_alg->algorithm)));
+	}
+
+	for (i = 0; i < sk_X509_ALGOR_num(md_algs); i++)
+	{
+		printf("Algorithm: %s\n", OBJ_nid2ln(OBJ_obj2nid(sk_X509_ALGOR_value(md_algs, i)->algorithm)));
+	}
+
+	certs = p7->d.sign->cert;
+	for (i = 0; certs && i < sk_X509_num(certs); i++) 
+	{
+		PEM_write_bio_X509(bio_out, sk_X509_value(certs, i));
+	}
+	
+	if (outLen >= (int)outBuffer->length)
+	{
+		memcpy_s(out, outLen, outBuffer->data, outBuffer->length);
+		out[outBuffer->length] = 0;
+	}
+	else
+	{
+		retVal = (int)(outBuffer->length) + 1;
+	}
+
+	BIO_free(bio);
+	BIO_free(bio_out);
+
+	return(retVal);
 }
 
 int __fastcall util_from_pem_string(char *data, int datalen, struct util_cert* cert)

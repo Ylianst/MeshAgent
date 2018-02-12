@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -226,11 +226,11 @@ BOOL InstallService()
 
 				// Update the faliure action
 				failactions[0].Type = SC_ACTION_RESTART;
-				failactions[0].Delay = 120000;				// Wait 2 minutes before faliure restart (milliseconds)
+				failactions[0].Delay = 60000;                          // Wait 1 minutes before faliure restart (milliseconds)
 				failactions[1].Type = SC_ACTION_RESTART;
-				failactions[1].Delay = 120000;				// Wait 2 minutes before faliure restart (milliseconds)
-				failactions[2].Type = SC_ACTION_NONE;
-				failactions[2].Delay = 120000;
+				failactions[1].Delay = 60000;                          // Wait 1 minutes before faliure restart (milliseconds)
+				failactions[2].Type = SC_ACTION_RESTART;
+				failactions[2].Delay = 60000;
 				memset(&fa, 0, sizeof(SERVICE_FAILURE_ACTIONS));
 				fa.dwResetPeriod = 86400;					// After 1 days, reset the faliure counters (seconds)
 				fa.cActions = 3;
@@ -500,6 +500,14 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "msh", 4);
 		setup2[setup2len] = 0;
 		remove(setup2);
+
+		// Remove "[Executable].mshx" file
+		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
+		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
+		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "mshx", 5);
+		setup2[setup2len + 1] = 0;
+		remove(setup2);
+
 
 		// Remove "[Executable].proxy" file
 		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 257) return;
@@ -778,6 +786,7 @@ int main(int argc, char* argv[])
 			agent = MeshAgent_Create();
 			agent->meshCoreCtx_embeddedScript = integratedJavaScript;
 			agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
+			if (integratedJavaScript != NULL || (argc > 1 && strcasecmp(argv[1], "run") == 0)) { agent->runningAsConsole = 1; }
 			MeshAgent_Start(agent, argc, argv);
 			retCode = agent->exitCode;
 			MeshAgent_Destroy(agent);
@@ -1100,7 +1109,7 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-char* getMshSettings(char* fileName, char** meshname, char** meshid, char** serverid, char** serverurl)
+char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** meshid, char** serverid, char** serverurl)
 {
 	char* importFile;
 	int eq, importFileLen;
@@ -1109,18 +1118,43 @@ char* getMshSettings(char* fileName, char** meshname, char** meshid, char** serv
 
 	*meshname = *meshid = *serverid = *serverurl = NULL;
 	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
-	if (importFile == NULL) return NULL;
+	if (importFile == NULL) {
+		// Could not find the .msh file, see if there is one inside our own executable.
+		FILE *tmpFile = NULL;
+		char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB7, 0xF7, 0xE9, 0xBE, 0x44, 0x91, 0x4C, 0x19 };
+		char tmpHash[16];
+
+		fopen_s(&tmpFile, selfexe, "rb");
+		if (tmpFile == NULL) { return NULL; } // Could not open our own executable
+
+		fseek(tmpFile, -16, SEEK_END);
+		ignore_result(fread(tmpHash, 1, 16, tmpFile)); // Read the GUID
+		if (memcmp(tmpHash, exeMeshPolicyGuid, 16) == 0) { // If this is the Mesh policy file guid, we found a MSH file
+														   // Found embedded MSH File
+			fseek(tmpFile, -20, SEEK_CUR);
+			if (fread((void*)&importFileLen, 1, 4, tmpFile) == 4) { // Read the length of the MSH file
+				importFileLen = ntohl(importFileLen);
+				if ((importFileLen >= 20000) || (importFileLen < 1)) { fclose(tmpFile); return NULL; }
+				fseek(tmpFile, -4 - importFileLen, SEEK_CUR);
+				if ((importFile = malloc(importFileLen + 1)) == NULL) { fclose(tmpFile); return NULL; }
+				if (fread(importFile, 1, importFileLen, tmpFile) != importFileLen) { fclose(tmpFile); free(importFile); return NULL; }
+				importFile[importFileLen] = 0;
+			}
+		}
+		else {
+			fclose(tmpFile);
+			return NULL;
+		}
+		fclose(tmpFile);
+	}
 
 	pr = ILibParseString(importFile, 0, importFileLen, "\n", 1);
 	f = pr->FirstResult;
-	while (f != NULL)
-	{
+	while (f != NULL) {
 		f->datalength = ILibTrimString(&(f->data), f->datalength);
-		if (f->data[0] != 35)	// Checking to see if this line is commented out
-		{
+		if (f->data[0] != 35) { // Checking to see if this line is commented out
 			eq = ILibString_IndexOf(f->data, f->datalength, "=", 1);
-			if (eq > 0)
-			{
+			if (eq > 0) {
 				char *key, *val;
 				int keyLen, valLen;
 
@@ -1144,6 +1178,7 @@ char* getMshSettings(char* fileName, char** meshname, char** meshid, char** serv
 	ILibDestructParserResults(pr);
 	return importFile;
 }
+
 
 #ifndef _MINCORE
 
@@ -1229,11 +1264,11 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				}
 			}
 
-			if ((mshfile = getMshSettings(fileName, &meshname, &meshid, &serverid, &serverurl)) != NULL)
+			if ((mshfile = getMshSettings(fileName, selfexe, &meshname, &meshid, &serverid, &serverurl)) != NULL)
 			{
 				// Set text in the dialog box
-				if (strlen(meshid) > 50) { meshid += 2; meshid[42] = 0; }
-				if (strlen(serverid) > 50) { serverid[42] = 0; }
+				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
+				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
 				SetWindowTextA(GetDlgItem(hDlg, IDC_POLICYTEXT), (meshid != NULL) ? meshname : "(None)");
 				SetWindowTextA(GetDlgItem( hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERLOCATION), (serverurl != NULL) ? serverurl : "(None)");

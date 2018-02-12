@@ -390,7 +390,7 @@ int getScreenBuffer(char **desktop, long long *desktopsize, XImage *image)
 	if (*desktopsize != size) {
 		if (*desktop != NULL) { free(*desktop); }
 		*desktopsize = size;
-		if ((*desktop = (char *) malloc (*desktopsize)) == NULL) ILIBCRITICALEXIT(254);
+		if ((*desktop = (char *) malloc (*desktopsize + 4)) == NULL) ILIBCRITICALEXIT(254);
 	}
 
 	if (bpp == 16) {

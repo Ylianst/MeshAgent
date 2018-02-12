@@ -1,5 +1,5 @@
 /*   
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -176,6 +176,7 @@ typedef struct ILibAsyncSocketModule
 
 	// Added for TLS support
 #ifndef MICROSTACK_NOTLS
+	int TLS_HandshakeError_Occurred;
 	int SSLConnect;
 	SSL* ssl;
 	SSL_CTX *ssl_ctx;
@@ -577,6 +578,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 						module->TotalBytesSent += bytesSent;
 						module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
 					}
+					retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 				}
 				else if (bytesSent == module->writeBioBuffer->length)
 				{
@@ -607,6 +609,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 		}
 
 		if (lockOverride == 0) { sem_post(&(module->SendLock)); }
+		if (retVal != ILibAsyncSocket_ALL_DATA_SENT && !ILibIsRunningOnChainThread(module->Transport.ChainLink.ParentChain)) ILibForceUnBlockChain(module->Transport.ChainLink.ParentChain);
 		return retVal;
 	}
 #endif
@@ -719,7 +722,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 
 	if (lockOverride == 0) { sem_post(&(module->SendLock)); }
 
-	if (retVal != ILibAsyncSocket_ALL_DATA_SENT) ILibForceUnBlockChain(module->Transport.ChainLink.ParentChain);
+	if (retVal != ILibAsyncSocket_ALL_DATA_SENT && !ILibIsRunningOnChainThread(module->Transport.ChainLink.ParentChain)) ILibForceUnBlockChain(module->Transport.ChainLink.ParentChain);
 	return (retVal);
 }
 
@@ -1034,7 +1037,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 	int bytesReceived = 0;
 	int len;
 	char *temp;
-	
+
 	if (Reader->PAUSE > 0)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(Reader->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_2, "AsyncSocket[%p] is PAUSED", (void*)Reader);
@@ -1105,7 +1108,15 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 					default:
 						// SSL_WANT_READ most likely
 						sslerror = SSL_get_error(Reader->ssl, sslerror);
-						ILibAsyncSocket_ProcessEncryptedBuffer(Reader);
+						if (sslerror == SSL_ERROR_SSL)
+						{
+							Reader->TLS_HandshakeError_Occurred = 1;
+							bytesReceived = -1;
+						}
+						else
+						{
+							ILibAsyncSocket_ProcessEncryptedBuffer(Reader);
+						}
 						break;
 					}
 				}
@@ -2288,6 +2299,10 @@ void ILibAsyncSocket_UpdateCallbacks(ILibAsyncSocket_SocketModule module, ILibAs
 	((ILibAsyncSocketModule*)module)->OnSendOK = OnSendOK;
 }
 #ifndef MICROSTACK_NOTLS
+int ILibAsyncSocket_TLS_WasHandshakeError(ILibAsyncSocket_SocketModule socketModule)
+{
+	return(((struct ILibAsyncSocketModule*)socketModule)->TLS_HandshakeError_Occurred || ((struct ILibAsyncSocketModule*)socketModule)->TLSHandshakeCompleted == 0 ? 1 : 0);
+}
 //! Gets the Peer's TLS Certificate
 /*!
 	\ingroup TLSGroup

@@ -1,11 +1,11 @@
 /*   
-Copyright 2006 - 2015 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-   http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -111,6 +111,7 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 HANDLE hStdOut = INVALID_HANDLE_VALUE;
 HANDLE hStdIn = INVALID_HANDLE_VALUE;
 int ThreadRunning = 0;
+int kvmConsoleMode = 0;
 
 ILibRemoteLogging gKVMRemoteLogging = NULL;
 #ifdef _WINSERVICE
@@ -379,7 +380,7 @@ void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *r
 
 			if (SCREEN_X != x || SCREEN_Y != y || SCREEN_WIDTH != w || SCREEN_HEIGHT != h || SCALING_FACTOR != SCALING_FACTOR_NEW)
 			{
-				printf("RESOLUTION CHANGED! (supposedly)\n");
+				//printf("RESOLUTION CHANGED! (supposedly)\n");
 				SCREEN_X = x;
 				SCREEN_Y = y;
 				SCREEN_WIDTH = w;
@@ -460,12 +461,13 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 {
 	unsigned short type, size;
 
+	// Decode the block header
+	if (blocklen < 4) return 0;
+
 	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [SLAVE]: Handle Input [Len = %d]", blocklen);
 	// KVMDEBUG("kvm_server_inputdata", blocklen);
 	CheckDesktopSwitch(0, writeHandler, reserved);
 
-	// Decode the block header
-	if (blocklen < 4) return 0;
 	type = ntohs(((unsigned short*)(block))[0]);
 	size = ntohs(((unsigned short*)(block))[1]);
 
@@ -649,22 +651,25 @@ typedef struct kvm_data_handler
 // This method consumes as many input commands as it can.
 int kvm_relay_feeddata(char* buf, int len, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
-#ifdef _WINSERVICE
-	if (len >= 2 && ntohs(((unsigned short*)buf)[0]) == MNG_CTRLALTDEL)
+	if (gChildProcess != NULL)
 	{
-		HANDLE ht = CreateThread(NULL, 0, kvm_ctrlaltdel, 0, 0, 0);
-		if (ht != NULL) CloseHandle(ht);
+		if (len >= 2 && ntohs(((unsigned short*)buf)[0]) == MNG_CTRLALTDEL)
+		{
+			HANDLE ht = CreateThread(NULL, 0, kvm_ctrlaltdel, 0, 0, 0);
+			if (ht != NULL) CloseHandle(ht);
+		}
+		ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
+		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [Master]: Write Input [Type = %u]", ntohs(((unsigned short*)buf)[0]));
+		return len;
 	}
-	ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
-	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM [Master]: Write Input [Type = %u]", ntohs(((unsigned short*)buf)[0]));
-	return len;
-#else
-	int len2 = 0;
-	int ptr = 0;
-	//while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, kvm_relay_feeddata_ex, (void*[]) {writeHandler, reserved})) != 0) { ptr += len2; }
-	while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, writeHandler, reserved)) != 0) { ptr += len2; }
-	return ptr;
-#endif
+	else
+	{
+		int len2 = 0;
+		int ptr = 0;
+		//while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, kvm_relay_feeddata_ex, (void*[]) {writeHandler, reserved})) != 0) { ptr += len2; }
+		while ((len2 = kvm_server_inputdata(buf + ptr, len - ptr, writeHandler, reserved)) != 0) { ptr += len2; }
+		return ptr;
+	}
 }
 
 // Set the KVM pause state
@@ -781,9 +786,12 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 	void *reserved = ((void**)parm)[1];
 
 #ifdef _WINSERVICE
-	gKVMRemoteLogging = ILibRemoteLogging_Create(NULL);
-	ILibRemoteLogging_SetRawForward(gKVMRemoteLogging, sizeof(KVMDebugLog), kvm_slave_OnRawForwardLog);
-	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: Child Processing Running...");
+	if (!kvmConsoleMode)
+	{
+		gKVMRemoteLogging = ILibRemoteLogging_Create(NULL);
+		ILibRemoteLogging_SetRawForward(gKVMRemoteLogging, sizeof(KVMDebugLog), kvm_slave_OnRawForwardLog);
+		ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: Child Processing Running...");
+	}
 #endif
 
 	// This basic lock will prevent 2 thread from running at the same time. Gives time for the first one to fully exit.
@@ -798,27 +806,39 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 	KVMDEBUG("kvm_server_mainloop / start1", (int)GetCurrentThreadId());
 
 #ifdef _WINSERVICE
-	hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-	hStdIn = GetStdHandle(STD_INPUT_HANDLE);
+	if (!kvmConsoleMode)
+	{
+		hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+		hStdIn = GetStdHandle(STD_INPUT_HANDLE);
+	}
 #endif
 
 	KVMDEBUG("kvm_server_mainloop / start2", (int)GetCurrentThreadId());
 
-	if (!initialize_gdiplus()) 
-	{ 
+	if (!initialize_gdiplus())
+	{
 #ifdef _WINSERVICE
-		ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: initialize_gdiplus() failed");
+		if (!kvmConsoleMode)
+		{
+			ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: initialize_gdiplus() failed");
+		}
 #endif
-		KVMDEBUG("kvm_server_mainloop / initialize_gdiplus failed", (int)GetCurrentThreadId()); return 0; 
+		KVMDEBUG("kvm_server_mainloop / initialize_gdiplus failed", (int)GetCurrentThreadId()); return 0;
 	}
 #ifdef _WINSERVICE
-	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: initialize_gdiplus() SUCCESS");
+	if (!kvmConsoleMode)
+	{
+		ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: initialize_gdiplus() SUCCESS");
+	}
 #endif
 	kvm_server_SetResolution(writeHandler, reserved);
 
 #ifdef _WINSERVICE
-	g_shutdown = 0;
-	kvmthread = CreateThread(NULL, 0, kvm_mainloopinput, parm, 0, 0);
+	if (!kvmConsoleMode)
+	{
+		g_shutdown = 0;
+		kvmthread = CreateThread(NULL, 0, kvm_mainloopinput, parm, 0, 0);
+	}
 #endif
 
 	// Set all CRCs to 0xFF
@@ -864,7 +884,10 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 		if (get_desktop_buffer(&desktop, &desktopsize) == 1)
 		{
 #ifdef _WINSERVICE
-			ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: get_desktop_buffer() failed");
+			if (!kvmConsoleMode)
+			{
+				ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: get_desktop_buffer() failed");
+			}
 #endif
 			KVMDEBUG("get_desktop_buffer() failed, shutting down", (int)GetCurrentThreadId());
 			g_shutdown = 1;
@@ -979,32 +1002,22 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 
 void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
 {
-	int ptr = 0;
 	unsigned short size = 0;
-	unsigned short cmd = 0;
 	UNREFERENCED_PARAMETER(sender);
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)user)[0];
 	void *reserved = ((void**)user)[1];
 
-	while (bufferLen - ptr > 4)
+	if (bufferLen > 4)
 	{
-		//type = ntohs(((unsigned short*)(pchRequest + ptr))[0]);
-		size = ntohs(((unsigned short*)(buffer + ptr))[1]);
-		cmd = ntohs(((unsigned short*)(buffer + ptr))[0]);
-		if ((ptr + size > bufferLen) || size == 0) break;
-		ptr += size;
+		size = ntohs(((unsigned short*)(buffer))[1]);
+		if (size <= bufferLen)
+		{
+			*bytesConsumed = size;
+			writeHandler(buffer, size, reserved);
+			return;
+		}
 	}
-
-	if (ptr > 0)
-	{
-		//ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_2, "KVM Data: CMD: %d, Size = %d", cmd, size);
-		writeHandler(buffer, ptr, reserved); // stream object will take care of flow control
-		*bytesConsumed = ptr;
-	}
-	else
-	{
-		*bytesConsumed = 0;
-	}
+	*bytesConsumed = 0;
 }
 void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
 {
@@ -1055,24 +1068,31 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
 int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
+	if (processPipeMgr != NULL)
+	{
 #ifdef _WINSERVICE
-	// if (kvmthread != NULL || g_slavekvm != 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); return 0; }
-	if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); return 0; }
-	g_restartcount = 0;
-	gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
-	KVMDEBUG("kvm_relay_setup() session starting", 0);
-	return kvm_relay_restart(1, processPipeMgr, exePath, writeHandler, reserved);
+		if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); return 0; }
+		g_restartcount = 0;
+		gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
+		KVMDEBUG("kvm_relay_setup() session starting", 0);
+		return kvm_relay_restart(1, processPipeMgr, exePath, writeHandler, reserved);
 #else
-	// if (kvmthread != NULL && g_shutdown == 0) return 0;
-	void **parms = (void**)ILibMemory_Allocate((2 * sizeof(void*)) + sizeof(int), 0, NULL, NULL);
-	parms[0] = writeHandler;
-	parms[1] = reserved;
-	((int*)(&parms[2]))[0] = 1;
-
-	if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); free(parms); return 0; }
-	kvmthread = CreateThread(NULL, 0, kvm_server_mainloop, (void*)parms, 0, 0);
-	return 1;
+		return(0);
 #endif
+	}
+	else
+	{
+		// if (kvmthread != NULL && g_shutdown == 0) return 0;
+		void **parms = (void**)ILibMemory_Allocate((2 * sizeof(void*)) + sizeof(int), 0, NULL, NULL);
+		parms[0] = writeHandler;
+		parms[1] = reserved;
+		((int*)(&parms[2]))[0] = 1;
+		kvmConsoleMode = 1;
+
+		if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); free(parms); return 0; }
+		kvmthread = CreateThread(NULL, 0, kvm_server_mainloop, (void*)parms, 0, 0);
+		return 1;
+	}
 }
 
 // Force a KVM reset & refresh

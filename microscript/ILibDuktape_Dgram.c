@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
@@ -38,7 +54,6 @@ typedef struct ILibDuktape_DGRAM_DATA
 	void *socketObject;
 	void *dgramObject;
 	void *chain;
-	void *OnClose, *OnError, *OnListening, *OnMessage, *OnSendOK;
 	ILibAsyncUDPSocket_SocketModule *mSocket;
 }ILibDuktape_DGRAM_DATA;
 typedef enum ILibDuktape_DGRAM_Config
@@ -68,34 +83,39 @@ void ILibDuktape_Dgram_Socket_OnData(ILibAsyncUDPSocket_SocketModule socketModul
 	ILibDuktape_DGRAM_DATA* ptrs = (ILibDuktape_DGRAM_DATA*)user;
 
 
-	if (ptrs != NULL && ptrs->ctx != NULL && ptrs->OnMessage != NULL)
+	if (ptrs != NULL && ptrs->ctx != NULL)
 	{
-		duk_push_heapptr(ptrs->ctx, ptrs->OnMessage);														// [func]
-		duk_push_heapptr(ptrs->ctx, ptrs->socketObject);													// [func][this]
+		duk_push_heapptr(ptrs->ctx, ptrs->socketObject);													// [this]
+		duk_get_prop_string(ptrs->ctx, -1, "emit");															// [this][emit]
+		duk_swap_top(ptrs->ctx, -2);																		// [emit][this]
+		duk_push_string(ptrs->ctx, "message");																// [emit][this][message]
 		duk_push_external_buffer(ptrs->ctx);
-		duk_config_buffer(ptrs->ctx, -1, buffer, (duk_size_t)bufferLength);									// [func][this][buffer]
-		duk_push_object(ptrs->ctx);																			// [func][this][buffer][rinfo]
-		duk_push_string(ptrs->ctx, remoteInterface->sin6_family == AF_INET ? "IPv4" : "IPv6");				// [func][this][buffer][rinfo][family]
-		duk_put_prop_string(ptrs->ctx, -2, "family");														// [func][this][buffer][rinfo]
-		duk_push_string(ptrs->ctx, ILibRemoteLogging_ConvertAddress((struct sockaddr*)remoteInterface));	// [func][this][buffer][rinfo][address]
-		duk_put_prop_string(ptrs->ctx, -2, "address");														// [func][this][buffer][rinfo]
-		duk_push_int(ptrs->ctx, (int)ntohs(remoteInterface->sin6_port));									// [func][this][buffer][rinfo][port]
-		duk_put_prop_string(ptrs->ctx, -2, "port");															// [func][this][buffer][rinfo]
+		duk_config_buffer(ptrs->ctx, -1, buffer, (duk_size_t)bufferLength);									// [emit][this][message][buffer]
+		duk_push_object(ptrs->ctx);																			// [emit][this][message][buffer][rinfo]
+		duk_push_string(ptrs->ctx, remoteInterface->sin6_family == AF_INET ? "IPv4" : "IPv6");				// [emit][this][message][buffer][rinfo][family]
+		duk_put_prop_string(ptrs->ctx, -2, "family");														// [emit][this][message][buffer][rinfo]
+		duk_push_string(ptrs->ctx, ILibRemoteLogging_ConvertAddress((struct sockaddr*)remoteInterface));	// [emit][this][message][buffer][rinfo][address]
+		duk_put_prop_string(ptrs->ctx, -2, "address");														// [emit][this][message][buffer][rinfo]
+		duk_push_int(ptrs->ctx, (int)ntohs(remoteInterface->sin6_port));									// [emit][this][message][buffer][rinfo][port]
+		duk_put_prop_string(ptrs->ctx, -2, "port");															// [emit][this][message][buffer][rinfo]
 		duk_push_int(ptrs->ctx, bufferLength);
 		duk_put_prop_string(ptrs->ctx, -2, "size");
 
-		if (duk_pcall_method(ptrs->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "dgram.message() dispatch error"); }
+		if (duk_pcall_method(ptrs->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "dgram.message() dispatch error"); }
 		duk_pop(ptrs->ctx);																					// ...
 	}
 }
 void ILibDuktape_Dgram_Socket_OnSendOK(ILibAsyncUDPSocket_SocketModule socketModule, void *user1, void *user2)
 {
 	ILibDuktape_DGRAM_DATA* ptrs = (ILibDuktape_DGRAM_DATA*)user1;
-	if (ptrs != NULL && ptrs->ctx != NULL && ptrs->OnSendOK != NULL)
+	if (ptrs != NULL && ptrs->ctx != NULL)
 	{
-		duk_push_heapptr(ptrs->ctx, ptrs->OnSendOK);		// [func]
-		duk_push_heapptr(ptrs->ctx, ptrs->socketObject);	// [func][this]
-		if (duk_pcall_method(ptrs->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "net.dgram.socket.onSendOk"); }
+		duk_push_heapptr(ptrs->ctx, ptrs->socketObject);	// [this]
+		duk_get_prop_string(ptrs->ctx, -1, "emit");			// [this][emit]
+		duk_swap_top(ptrs->ctx, -2);						// [emit][this]
+		duk_push_string(ptrs->ctx, "flushed");				// [emit][this][flushed]
+		if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "net.dgram.socket.onSendOk"); }
+		duk_pop(ptrs->ctx);									// ...
 	}
 }
 
@@ -201,13 +221,14 @@ duk_ret_t ILibDuktape_DGram_Socket_bind(duk_context *ctx)
 #endif
 	}
 
-	if (ptrs->OnListening != NULL)
-	{
-		duk_push_heapptr(ctx, ptrs->OnListening);			// [func]
-		duk_push_heapptr(ctx, ptrs->socketObject);			// [func][this]
-		if (duk_pcall_method(ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(ctx); }
-		duk_pop(ctx);										// ...
-	}
+
+	duk_push_heapptr(ctx, ptrs->socketObject);			// [this]
+	duk_get_prop_string(ctx, -1, "emit");				// [this][emit]
+	duk_swap_top(ctx, -2);								// [emit][this]
+	duk_push_string(ctx, "listening");					// [emit][this][listening]
+	if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(ctx); }
+	duk_pop(ctx);										// ...
+	
 
 	return 0;
 }
@@ -352,12 +373,14 @@ duk_ret_t ILibDuktape_DGram_send(duk_context *ctx)
 				if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "net.dgram.send.callback(): Error "); }
 				duk_pop(ctx);								// ...
 			}
-			else if(ptrs->OnError != NULL)
+			else
 			{
-				duk_push_heapptr(ctx, ptrs->OnError);		// [func]
-				duk_push_heapptr(ctx, ptrs->socketObject);	// [func][this]
+				duk_push_heapptr(ctx, ptrs->socketObject);	// [this]
+				duk_get_prop_string(ctx, -1, "emit");		// [this][emit]
+				duk_swap_top(ctx, -2);						// [emit][this]
+				duk_push_string(ctx, "error");				// [emit][this][error]
 				duk_push_error_object(ctx, DUK_ERR_TYPE_ERROR, "net.dgram.send(): Attempted to send on a closed socket");
-				if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "net.dgram.onError(): Error "); }
+				if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "net.dgram.onError(): Error "); }
 				duk_pop(ctx);								// ...
 			}
 			break;
@@ -433,11 +456,11 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ptrs->dgramObject = dgram;
 	ptrs->emitter = ILibDuktape_EventEmitter_Create(ctx);
 
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "close", &(ptrs->OnClose));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "error", &(ptrs->OnError));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "listening", &(ptrs->OnListening));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "message", &(ptrs->OnMessage));
-	ILibDuktape_EventEmitter_CreateEvent(ptrs->emitter, "flushed", &(ptrs->OnSendOK));
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "close");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "error");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "listening");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "message");
+	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "flushed");
 
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "config", config, "bind", ILibDuktape_DGram_Socket_bind, DUK_VARARGS);
 
@@ -459,6 +482,7 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 void ILibDuktape_DGram_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);										// [dgram]
+	ILibDuktape_WriteID(ctx, "dgram");
 	duk_push_pointer(ctx, chain);								// [dgram][chain]
 	duk_put_prop_string(ctx, -2, ILibDuktape_DGRAM_CHAIN);		// [dgram]
 	ILibDuktape_CreateInstanceMethod(ctx, "createSocket", ILibDuktape_DGram_createSocket, DUK_VARARGS);

@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,6 +39,14 @@ struct sockaddr_in6 duktape_internalAddress;
 #define ILibDuktape_Memory_AllocTable						"\xFF_MemoryAllocTable"
 #define ILibDuktape_ObjectStashKey							"\xFF_ObjectStashKey"
 
+int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i)
+{
+	int retVal = -1;
+	duk_inspect_value(ctx, i);
+	retVal = Duktape_GetIntPropertyValue(ctx, -1, "refc", -1);
+	duk_pop(ctx);
+	return(retVal-1);
+}
 void ILibDuktape_Push_ObjectStash(duk_context *ctx)
 {
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_ObjectStashKey))
@@ -299,7 +307,7 @@ void ILibDuktape_CreateEventWithSetterEx(duk_context *ctx, char *propName, duk_c
 	duk_push_string(ctx, propName);																	// [obj][prop]
 	duk_push_c_function(ctx, setterMethod, 1);														// [obj][prop][setFunc]
 	duk_push_string(ctx, propName);																	// [obj][prop][setFunc][name]
-	duk_put_prop_string(ctx, -2, "name");															// [obj][prop][setFunc]
+	duk_put_prop_string(ctx, -2, "propName");														// [obj][prop][setFunc]
 	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_SETTER);								// [obj]
 }
 void ILibDuktape_CreateEventWithSetter(duk_context *ctx, char *propName, char *propNamePtr, void **hptr)
@@ -333,6 +341,7 @@ void ILibDuktape_Helper_AddHeapFinalizer(duk_context *ctx, ILibDuktape_HelperEve
 
 	duk_push_heap_stash(ctx);				// [g]
 	duk_push_object(ctx);					// [g][obj]
+	ILibDuktape_WriteID(ctx, "Mesh.ScriptContainer.heapFinalizer");
 	duk_push_pointer(ctx, user);			// [g][obj][user]
 	duk_put_prop_string(ctx, -2, "user");	// [g][obj]
 	duk_push_pointer(ctx, handler);			// [g][obj][handler]
@@ -362,19 +371,6 @@ int ILibDuktape_Process_GetExitCode(duk_context *ctx)
 	return(retVal);
 }
 
-ILibDuktape_EventEmitter *ILibDuktape_Process_GetEventEmitter(duk_context *ctx)
-{
-	ILibDuktape_EventEmitter *retVal = NULL;
-	duk_push_global_object(ctx);					// [g]
-	if (duk_has_prop_string(ctx, -1, "process"))
-	{
-		duk_get_prop_string(ctx, -1, "process");	// [g][process]
-		retVal = ILibDuktape_EventEmitter_GetEmitter_fromCurrent(ctx);
-		duk_pop(ctx);								// [g]
-	}
-	duk_pop(ctx);									// ...
-	return retVal;
-}
 
 void *ILibDuktape_GetProcessObject(duk_context *ctx)
 {
@@ -420,7 +416,7 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 	void *j = ILibDuktape_GetProcessObject(ctx);
 	ILibDuktape_EventEmitter *emitter;
 
-	if (strcmp(errmsg, "Process.exit() forced script termination") == 0) { return; }
+	if (ILibString_IndexOf(errmsg, (int)errmsgLen, "Process.exit() forced script termination", 40) >= 0) { return; }
 
 	duk_push_heapptr(ctx, j);															// [process]
 	emitter = ILibDuktape_EventEmitter_GetEmitter_fromCurrent(ctx);
@@ -454,7 +450,7 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 		duk_get_prop_string(emitter->ctx, -1, "emit");									// [process][emit]
 		duk_swap_top(emitter->ctx, -2);													// [emit][this]
 		duk_push_string(emitter->ctx, "uncaughtException");								// [emit][this][eventName]
-		duk_push_error_object(emitter->ctx, DUK_ERR_UNCAUGHT_ERROR, "%s", dest);
+		duk_push_error_object(emitter->ctx, DUK_ERR_ERROR, "%s", dest);
 		duk_pcall_method(emitter->ctx, 2);
 		duk_pop(emitter->ctx);															// ...
 	}
@@ -533,18 +529,11 @@ duk_ret_t ILibDuktape_IndependentFinalizer_Dispatch(duk_context *ctx)
 	handler(ctx, duk_get_heapptr(ctx, -1));
 	return 0;
 }
-void ILibDuktape_CreateIndependentFinalizer(duk_context *ctx, ILibDuktape_IndependentFinalizerHandler handler)
-{
-	char tmp[255];
 
-	duk_push_object(ctx);															// [obj]
-	duk_push_pointer(ctx, handler);													// [obj][ptr]
-	duk_put_prop_string(ctx, -2, "ptr");											// [obj]
-	duk_dup(ctx, -2);																// [obj][parent]
-	duk_put_prop_string(ctx, -2, "parent");											// [obj]
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_IndependentFinalizer_Dispatch);
-	sprintf_s(tmp, sizeof(tmp), "\xFF_%s", Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));
-	duk_put_prop_string(ctx, -2, tmp);
+void ILibDuktape_CreateFinalizer(duk_context *ctx, duk_c_function func)
+{
+	ILibDuktape_EventEmitter_Create(ctx);
+	ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", func);
 }
 duk_ret_t ILibDuktape_CreateProperty_InstanceMethod_Sink(duk_context *ctx)
 {
@@ -630,10 +619,14 @@ int ILibDuktape_IsPointerValid(void *chain, void *ptr)
 {
 	return(ILibHashtable_Get(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0) == NULL ? 0 : 1);
 }
-void ILibDuktape_PointerValidation_Finalizer(duk_context *ctx, void *obj)
+duk_ret_t ILibDuktape_PointerValidation_Finalizer(duk_context *ctx)
 {
+	duk_push_this(ctx);
 	void *chain = Duktape_GetChain(ctx);
+	void *obj = duk_get_heapptr(ctx, -1);
 	ILibDuktape_InValidatePointer(chain, obj);
+	duk_pop(ctx);
+	return(0);
 }
 void ILibDuktape_PointerValidation_Init(duk_context *ctx)
 {
@@ -642,7 +635,7 @@ void ILibDuktape_PointerValidation_Init(duk_context *ctx)
 	{
 		// Not set up yet, so set it up
 		ILibDuktape_ValidatePointer(chain, duk_get_heapptr(ctx, -1));
-		ILibDuktape_CreateIndependentFinalizer(ctx, ILibDuktape_PointerValidation_Finalizer);
+		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_PointerValidation_Finalizer);
 	}
 }
 duk_ret_t ILibDuktape_Immediate_Sink(duk_context *ctx)
@@ -664,14 +657,17 @@ duk_ret_t ILibDuktape_Immediate_Sink(duk_context *ctx)
 		}
 	}
 
-	duk_push_heap_stash(ctx);											// [immediate][array][stash]
-	duk_del_prop_string(ctx, -1, Duktape_GetStashKey(duk_get_heapptr(ctx, -3)));
 
 	if (userCallback != NULL) { userCallback(ctx, args, argsLen); }
+
+	duk_push_heap_stash(ctx);											// [stash]
+	duk_push_this(ctx);													// [stash][immediate]
+	duk_del_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));
 	return(0);
 }
-void ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback)
+void* ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback)
 {
+	void *retval = NULL;
 	int i = 0;
 	duk_push_global_object(ctx);										// [g]
 	duk_get_prop_string(ctx, -1, "setImmediate");						// [g][setImmediate]
@@ -690,13 +686,15 @@ void ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDukt
 		++i;
 	}
 
-	if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Immediate => immediate(): "); duk_pop(ctx); return; }
+	if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Immediate => immediate(): "); duk_pop(ctx); return(NULL); }
 
-																				// [immediate]
+																				
+	retval = duk_get_heapptr(ctx, -1);											// [immediate]
 	duk_push_heap_stash(ctx);													// [immediate][stash]
 	duk_swap_top(ctx, -2);														// [stash][immediate]
-	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));// [stash]
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(retval));					// [stash]
 	duk_pop(ctx);																// ...
+	return(retval);
 }
 void ILibDuktape_CreateInstanceMethodWithProperties(duk_context *ctx, char *funcName, duk_c_function funcImpl, duk_idx_t numArgs, unsigned int propertyCount, ...)
 {

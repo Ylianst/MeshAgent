@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -727,6 +727,8 @@ typedef struct ILibStun_dTlsSession
 	char* holdingQueueTail;
 
 	ILibLinkedList receiveHoldBuffer;
+	BIO *writeBIO;
+	BUF_MEM *writeBIOBuffer;
 
 	char* rpacket;
 	int rpacketptr;
@@ -753,6 +755,7 @@ typedef struct ILibStun_dTlsSession
 	ILibSCTP_OnSCTPDebug onRTTCalculated;
 
 	ILibSCTP_OnSCTPDebug onTSNFloorNotRaised;
+	ILibSCTP_OnSCTPDebug onRetryPacket;
 #endif
 
 	unsigned int PARTIAL_BYTES_ACKED;
@@ -845,6 +848,8 @@ unsigned int ILibStun_CRC32(char *buf, int len)
 #define ILibWebRTC_DTLS_TO_SCTP_HEARTBEAT_TIMER_OBJECT(d) d
 #define ILibWebRTC_DTLS_FROM_SCTP_HEARTBEAT_TIMER_OBJECT(d) ((ILibStun_dTlsSession*)d)
 #define ILibWebRTC_STUN_TO_CONNECTIVITY_CHECK_TIMER(s) ((char*)s+1)
+#define ILibWebRTC_STUN_TO_PERIODIC_CHECK_TIMER(s)	((char*)s+3)
+#define ILibWebRTC_STUN_FROM_PERIODIC_CHECK_TIMER(s) ((ILibStun_Module*)((char*)s-3))
 #define ILibWebRTC_STUN_FROM_CONNECTIVITY_CHECK_TIMER(s) ((ILibStun_Module*)((char*)s-1))
 int ILibStunClientIndex = -1;
 
@@ -1134,6 +1139,7 @@ void ILibStun_OnDestroy(void *object)
 	if (obj->turnUsername != NULL) { free(obj->turnUsername); obj->turnUsername = NULL; }
 	if (obj->turnPassword != NULL) { free(obj->turnPassword); obj->turnPassword = NULL; }
 
+	ILibLifeTime_Remove(obj->Timer, ILibWebRTC_STUN_TO_PERIODIC_CHECK_TIMER(obj));
 	if (extraClean == 0) return;
 
 #ifdef WIN32
@@ -1147,6 +1153,7 @@ void ILibStun_OnDestroy(void *object)
 		// Clean up OpenSSL dTLS session
 		if (obj->dTlsSessions[i] != NULL)
 		{
+			ILibLifeTime_Remove(obj->Timer, ILibWebRTC_DTLS_TO_SCTP_HEARTBEAT_TIMER_OBJECT(obj->dTlsSessions[i]));
 			free(obj->dTlsSessions[i]);
 			obj->dTlsSessions[i] = NULL;
 		}
@@ -1655,6 +1662,110 @@ void ILibStun_FireResults(ILibStun_Module *StunModule, ILibStun_Results Result, 
 		if (StunModule->OnResult != NULL) { StunModule->OnResult(StunModule, Result, PublicIP, node); }
 	}
 }
+#ifdef _WEBRTCDEBUG
+void _DebugSTUN(char *buffer, int bufferLen)
+{
+	char tid[25];
+	printf(" --> DEBUG Outbound STUN Packet\n");
+	unsigned short messageType = ntohs(((unsigned short*)buffer)[0]);											// Get the message type
+	//unsigned short messageLength = ntohs(((unsigned short*)buffer)[1]) + 20;									// Get the message length
+
+	switch (messageType)
+	{
+	case STUN_BINDING_REQUEST:
+		printf("STUN_BINDING_REQUEST");
+		break;
+	case STUN_BINDING_RESPONSE:
+		printf("STUN_BINDING_RESPONSE");
+		break;
+	case STUN_BINDING_ERROR_RESPONSE:
+		printf("STUN_BINDING_ERROR_RESPONSE");
+		break;
+	case STUN_SHAREDSECRET_REQUEST:
+		printf("STUN_SHARED_SECRET_REQUEST");
+		break;
+	case STUN_SHAREDSECRET_RESPONSE:
+		printf("STUN_SHARED_SECRET_RESPONSE");
+		break;
+	case STUN_SHAREDSECRET_ERROR_RESPONSE:
+		printf("STUN_SHARED_SECRET_ERROR_RESPONSE");
+		break;
+	case TURN_ALLOCATE:
+		printf("TURN_ALLOCATE");
+		break;
+	case TURN_ALLOCATE_RESPONSE:
+		printf("TURN_ALLOCATE_RESPONSE");
+		break;
+	case TURN_ALLOCATE_ERROR:
+		printf("TURN_ALLOCATE_ERROR");
+		break;
+	case TURN_REFRESH:
+		printf("TURN_REFRESH");
+		break;
+	case TURN_REFRESH_RESPONSE:
+		printf("TURN_REFRESH_RESPONSE");
+		break;
+	case TURN_REFRESH_ERROR:
+		printf("TURN_REFRESH_ERROR");
+		break;
+	case TURN_SEND:
+		printf("TURN_SEND");
+		break;
+	case TURN_DATA:
+		printf("TURN_DATA");
+		break;
+	case TURN_CREATE_PERMISSION:
+		printf("TURN_CREATE_PERMISSION");
+		break;
+	case TURN_CREATE_PERMISSION_RESPONSE:
+		printf("TURN_CREATE_PERMISSION_RESPONSE");
+		break;
+	case TURN_CREATE_PERMISSION_ERROR:
+		printf("TURN_CREATE_PERMISSION_ERROR");
+		break;
+	case TURN_CHANNEL_BIND:
+		printf("TURN_CHANNEL_BIND");
+		break;
+	case TURN_CHANNEL_BIND_RESPONSE:
+		printf("TURN_CHANNEL_BIND_RESPONSE");
+		break;
+	case TURN_CHANNEL_BIND_ERROR:
+		printf("TURN_CHANNEL_BIND_ERROR");
+		break;
+	case TURN_TCP_CONNECT:
+		printf("TURN_TCP_CONNECT");
+		break;
+	case TURN_TCP_CONNECT_RESPONSE:
+		printf("TURN_TCP_CONNECT_RESPONSE");
+		break;
+	case TURN_TCP_CONNECT_ERROR:
+		printf("TURN_TCP_CONNECT_ERROR");
+		break;
+	case TURN_TCP_CONNECTION_BIND:
+		printf("TURN_TCP_CONNECTION_BIND");
+		break;
+	case TURN_TCP_CONNECTION_BIND_RESPONSE:
+		printf("TURN_TCP_CONNECTION_BIND_RESPONSE");
+		break;
+	case TURN_TCP_CONNECTION_BIND_ERROR:
+		printf("TURN_TCP_CONNECTION_BIND_ERROR");
+		break;
+	case TURN_TCP_CONNECTION_ATTEMPT:
+		printf("TURN_TCP_CONNECTION_ATTEMPT");
+		break;
+	default: 
+		printf("UNKNOWN");
+		break;
+	}
+	printf("\n");
+
+
+	util_tohex(buffer + 8, 12, tid);
+	printf("...TransactionID: %s\n", tid);
+
+	printf("\n");
+}
+#endif
 
 int ILibStun_ProcessStunPacket(void *j, char* buffer, int bufferLength, struct sockaddr_in6 *remoteInterface)
 {
@@ -1682,7 +1793,7 @@ int ILibStun_ProcessStunPacket(void *j, char* buffer, int bufferLength, struct s
 	messageLength = ntohs(((unsigned short*)buffer)[1]) + 20;									// Get the message length
 
 	// Check the length and magic string
-	if (messageLength != bufferLength || ntohl(((int*)buffer)[1]) != 0x2112A442) { ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_STUN_ICE, ILibRemoteLogging_Flags_VerbosityLevel_3, "Skipping: Not a STUN Packet (Magic String)"); return 0; }
+	if (messageLength != bufferLength || ntohl(((int*)buffer)[1]) != 0x2112A442) { ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_STUN_ICE, ILibRemoteLogging_Flags_VerbosityLevel_4, "Skipping: Not a STUN Packet (Magic String)"); return 0; }
 
 	memset(&mappedAddress, 0, sizeof(mappedAddress));
 	memset(&changedAddress, 0, sizeof(changedAddress));
@@ -2048,9 +2159,12 @@ int ILibStun_ProcessStunPacket(void *j, char* buffer, int bufferLength, struct s
 					((unsigned int*)(rbuffer + 20))[2] = ((struct sockaddr_in*)remoteInterface)->sin_addr.s_addr ^ 0x42A41221;			// IPv4 address														
 
 					rptr += ILibStun_AddMessageIntegrityAttr(rbuffer, rptr, integritykey, 32);
-					rptr += ILibStun_AddFingerprint(rbuffer, rptr);												// Set the length in this function
+					rptr += ILibStun_AddFingerprint(rbuffer, rptr);												// Set the length in this function				
 
 					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_STUN_ICE, ILibRemoteLogging_Flags_VerbosityLevel_3, "...Sending Response to %s:%u", ILibRemoteLogging_ConvertAddress((struct sockaddr*)remoteInterface), ntohs(remoteInterface->sin6_port));
+#ifdef _WEBRTCDEBUG
+					_DebugSTUN(rbuffer, rptr);
+#endif
 				}
 				else if ((obj->IceStates[EncodedSlot]->peerHasActiveOffer == 1 && isControlled != 0 &&
 					ILibNTOHLL(((unsigned long long*)obj->IceStates[EncodedSlot]->tieBreaker)[0]) < tiebreakValue) ||
@@ -2084,12 +2198,13 @@ int ILibStun_ProcessStunPacket(void *j, char* buffer, int bufferLength, struct s
 
 				// Send the data in plain text
 				ILibStun_SendPacket(obj, rbuffer, 0, rptr, remoteInterface, ILibAsyncSocket_MemoryOwnership_USER);
+
 				//ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)remoteInterface, rbuffer, rptr, ILibAsyncSocket_MemoryOwnership_USER);
 
 				// Send an ICE request back. This is needed to unlock Chrome/Opera inbound port for TLS. Don't do more than ILibSTUN_MaxSlots of these.
 				if (obj->IceStates[EncodedSlot]->hostcandidates != NULL && obj->IceStates[EncodedSlot]->hostcandidatecount > 0)
 				{
-					if (obj->IceStates[EncodedSlot] != NULL && obj->IceStates[EncodedSlot]->requerycount < ILibSTUN_MaxSlots)
+					if (obj->IceStates[EncodedSlot] != NULL && obj->IceStates[EncodedSlot]->requerycount < ILibSTUN_MaxSlots && obj->IceStates[EncodedSlot]->dtlsSession < 0)
 					{
 						char TransactionID[12];
 						util_random(12, TransactionID);
@@ -2557,7 +2672,7 @@ void ILibStun_ICE_FinalizeConnectivityChecks(void *object)
 
 void ILibStun_PeriodicStunCheckEx(void *obj)
 {
-	ILibStun_PeriodicStunCheck((struct ILibStun_Module*)obj - 3);
+	ILibStun_PeriodicStunCheck(ILibWebRTC_STUN_FROM_PERIODIC_CHECK_TIMER(obj));
 }
 
 void ILibStun_PeriodicStunCheck(struct ILibStun_Module* obj)
@@ -2565,7 +2680,7 @@ void ILibStun_PeriodicStunCheck(struct ILibStun_Module* obj)
 	int i;
 	int needRecheck = 0;
 
-	ILibLifeTime_Remove(obj->Timer, obj + 3);
+	ILibLifeTime_Remove(obj->Timer, ILibWebRTC_STUN_TO_PERIODIC_CHECK_TIMER(obj));
 
 	for (i = 0; i < ILibSTUN_MaxSlots; ++i)
 	{
@@ -2580,8 +2695,9 @@ void ILibStun_PeriodicStunCheck(struct ILibStun_Module* obj)
 
 	if (needRecheck != 0)
 	{
+
 		ILibLifeTime_Add(obj->Timer,
-			obj + 3,
+			ILibWebRTC_STUN_TO_PERIODIC_CHECK_TIMER(obj),
 			ILibStun_GetNextPeriodicInterval(ILibSTUN_MinNATKeepAliveIntervalSeconds, ILibSTUN_MaxNATKeepAliveIntervalSeconds),
 			ILibStun_PeriodicStunCheckEx,
 			NULL);
@@ -2930,27 +3046,27 @@ void ILibORTC_AddRemoteCandidate(void *stunModule, char* localUsername, struct s
 ILibTransport_DoneState ILibStun_SendDtls(struct ILibStun_Module *obj, int session, char* buffer, int bufferLength)
 {
 	ILibTransport_DoneState r = ILibTransport_DoneState_ERROR;
-	char exBuffer[4096];
-	int j;
 	if (obj == NULL || session < 0 || session > (ILibSTUN_MaxSlots-1) || obj->dTlsSessions[session] == NULL || SSL_get_state(obj->dTlsSessions[session]->ssl) != TLS_ST_OK) return ILibTransport_DoneState_ERROR;
 
 #ifdef _WEBRTCDEBUG
 	// Simulated Inbound Packet Loss
-	if ((obj->lossPercentage) > 0 && ((rand() % 100) >= (100 - obj->lossPercentage))) { return; }
+	if ((obj->lossPercentage) > 0 && ((rand() % 100) >= (100 - obj->lossPercentage))) { return(ILibTransport_DoneState_COMPLETE); }
 #endif
 
 	SSL_write(obj->dTlsSessions[session]->ssl, buffer, bufferLength);
-	while (BIO_ctrl_pending(SSL_get_wbio(obj->dTlsSessions[session]->ssl)) > 0)
+
+	if(obj->dTlsSessions[session]->writeBIOBuffer->length > 0)
 	{
+		BIO_clear_retry_flags(obj->dTlsSessions[session]->writeBIO); // Klocwork reports this could block, but this is a memory bio, so it will never block.
+
 		// Data is pending in the write buffer, send it out
-		j = BIO_read(SSL_get_wbio(obj->dTlsSessions[session]->ssl), exBuffer, 4096);
 		if (obj->IceStates[obj->dTlsSessions[session]->iceStateSlot]->useTurn != 0)
 		{
 			if ((((int*)ILibMemory_GetExtraMemory(obj->dTlsSessions[session]->remoteInterface, sizeof(struct sockaddr_in6)))[0] & ILibTURN_FLAGS_CHANNEL_DATA) == ILibTURN_FLAGS_CHANNEL_DATA)
 			{
 				if (ILibTURN_GetPendingBytesToSend(obj->mTurnClientModule) == 0)
 				{
-					r = (ILibTransport_DoneState)ILibTURN_SendChannelData(obj->mTurnClientModule, (unsigned short)session, exBuffer, 0, j);
+					r = (ILibTransport_DoneState)ILibTURN_SendChannelData(obj->mTurnClientModule, (unsigned short)session, obj->dTlsSessions[session]->writeBIOBuffer->data, 0, (int)obj->dTlsSessions[session]->writeBIOBuffer->length);
 				}
 				else
 				{
@@ -2962,7 +3078,7 @@ ILibTransport_DoneState ILibStun_SendDtls(struct ILibStun_Module *obj, int sessi
 			{
 				if (ILibTURN_GetPendingBytesToSend(obj->mTurnClientModule) == 0)
 				{
-					r = (ILibTransport_DoneState)ILibTURN_SendIndication(obj->mTurnClientModule, obj->dTlsSessions[session]->remoteInterface, exBuffer, 0, j);
+					r = (ILibTransport_DoneState)ILibTURN_SendIndication(obj->mTurnClientModule, obj->dTlsSessions[session]->remoteInterface, obj->dTlsSessions[session]->writeBIOBuffer->data, 0, (int)obj->dTlsSessions[session]->writeBIOBuffer->length);
 				}
 				else
 				{
@@ -2972,13 +3088,15 @@ ILibTransport_DoneState ILibStun_SendDtls(struct ILibStun_Module *obj, int sessi
 			}
 			else
 			{
-				r = (ILibTransport_DoneState)ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)obj->dTlsSessions[session]->remoteInterface, exBuffer, j, ILibAsyncSocket_MemoryOwnership_USER);
+				r = (ILibTransport_DoneState)ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)obj->dTlsSessions[session]->remoteInterface, obj->dTlsSessions[session]->writeBIOBuffer->data, obj->dTlsSessions[session]->writeBIOBuffer->length, ILibAsyncSocket_MemoryOwnership_USER);
 			}
 		}
 		else
 		{
-			r = (ILibTransport_DoneState)ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)obj->dTlsSessions[session]->remoteInterface, exBuffer, j, ILibAsyncSocket_MemoryOwnership_USER);
+			r = (ILibTransport_DoneState)ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)obj->dTlsSessions[session]->remoteInterface, obj->dTlsSessions[session]->writeBIOBuffer->data, obj->dTlsSessions[session]->writeBIOBuffer->length, ILibAsyncSocket_MemoryOwnership_USER);
 		}
+		obj->dTlsSessions[session]->writeBIOBuffer->data += (obj->dTlsSessions[session]->writeBIOBuffer->length);
+		obj->dTlsSessions[session]->writeBIOBuffer->length = 0;
 	}
 	return r;
 }
@@ -3153,7 +3271,6 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 	if (obj->dTlsSessions[session]->T3RTXTIME == 0)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...Start T3RTX Timer");
-
 		// Only set the T3RTX timer if it is not already running
 		obj->dTlsSessions[session]->T3RTXTIME = rpacket->LastSentTimeStamp;
 #ifdef _WEBRTCDEBUG
@@ -3180,7 +3297,7 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 #endif
 
 	// Send the packet now
-	if ((flags & 0x03) == 0x03 && obj->dTlsSessions[session]->rpacketptr > 0 && obj->dTlsSessions[session]->rpacketsize > (obj->dTlsSessions[session]->rpacketptr + 16 + datalen + 4))
+	if ((flags & 0x03) == 0x03 && obj->dTlsSessions[session]->rpacketptr > 0 && obj->dTlsSessions[session]->rpacketsize > (obj->dTlsSessions[session]->rpacketptr + 16 + datalen + 4) && (obj->dTlsSessions[session]->rpacketptr + 16 + datalen + 4) < 1400)
 	{
 		int st;
 		// Merge this data chunk in packet that is going to be sent
@@ -3757,7 +3874,13 @@ void ILibStun_SctpResent(struct ILibStun_dTlsSession *obj)
 			// 0xFD means this packet is marked as ABANDONED
 			if(rpacket->PacketGAPCounter != 0xFE && rpacket->PacketGAPCounter != 0xFD)	
 			{
-				if ((rpacket->LastSentTimeStamp + obj->RTO) > time) { break; }	// T3RTX did not expire for this packet
+				if ((rpacket->LastSentTimeStamp + obj->RTO) > time) 
+				{ 
+#ifdef _WEBRTCDEBUG
+					if (obj->onT3RTX != NULL) { obj->onT3RTX(obj, "OnT3RTX", -2); }	// Debug event informing of the T3RTX timer non-expiration
+#endif
+					break; // T3RTX did not expire for this packet
+				}	
 				if ((rpacket->Reliability & 0x2000) == 0x2000 && rpacket->PacketResendCounter >= (rpacket->Reliability & 0x1FFF))
 				{
 					// Partial-Reliability REXMIT : Exceeded Max Retransmit
@@ -3786,12 +3909,25 @@ void ILibStun_SctpResent(struct ILibStun_dTlsSession *obj)
 
 					obj->senderCredits -= rpacket->PacketSize;					// Deduct CWND
 					if (obj->T3RTXTIME == 0)
-					{
+					{			
 						// Only set the T3-RTX timer if it's not already running
 						obj->T3RTXTIME = time;
+#ifdef _WEBRTCDEBUG
+						if (obj->onT3RTX != NULL) { obj->onT3RTX(obj, "OnT3RTX", obj->RTO); }	// Debug event informing of the T3RTX timer expiration
+#endif
 					}
-
 					ILibStun_SendSctpPacket(obj->parent, obj->sessionId, rpacket->Data - 12, rpacket->PacketSize);
+#ifdef _WEBRTCDEBUG
+					//if (obj->onSendRetry != NULL) { obj->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(rpacket->Data + sizeof(char*)))[0]); }
+					if (obj->onSendRetry != NULL) { obj->onSendRetry(obj, "OnSendRetry", ntohl(((unsigned int*)rpacket->Data)[1])); }
+					if (obj->onRetryPacket != NULL)
+					{
+						char *tmp = ILibMemory_AllocateA(rpacket->PacketSize + 14);
+						sprintf_s(tmp, 14, "OnRetryPacket");
+						memcpy_s(tmp + 14, rpacket->PacketSize, rpacket->Data - 12, rpacket->PacketSize);
+						obj->onRetryPacket(obj, tmp, rpacket->PacketSize);
+					}
+#endif
 				}
 				else
 				{
@@ -3822,6 +3958,7 @@ void ILibStun_SctpOnTimeout(void *object)
 	else
 	{
 		// Close the connection
+		printf("************************************\n");
 		sem_post(&(obj->Lock));
 		ILibRemoteLogging_printf(ILibChainGetLogger(obj->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "SCTP Timeout on Session: %d", obj->sessionId);
 		ILibStun_SctpDisconnect(obj->parent, obj->sessionId);
@@ -4321,7 +4458,8 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 								ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "......Responding with Outbound Reset Request");
 								outRequest = (ILibSCTP_Reconfig_OutgoingSSNResetRequest*)((char*)(&outChunk->reconfigurationParameter) + outOffset); // Ignore Klocwork Error, it's not a problem in this case												
 								outRequest->parameterType = htons(SCTP_RECONFIG_TYPE_OUTGOING_SSN_RESET_REQUEST);
-								outRequest->parameterLength = htons(16 + 2 * streamCount);
+								//outRequest->parameterLength = htons(16 + 2 * streamCount);
+								outRequest->parameterLength = 16 + 2 * streamCount;
 								outRequest->LastTSN = htonl(o->outtsn - 1);
 								outRequest->RReqSeqNum = htonl(o->RREQSEQ++);
 								outRequest->RResSeqNum = htonl(o->RRESSEQ++);
@@ -4551,6 +4689,12 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 			o->zeroWindowProbeTime = 0;
 			o->lastSackTime = (unsigned int)ILibGetUptime();
 
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "SCTP [SACK] Received");
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... TSN = %u", tsn);
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... GAP Count = %u", GapAckCount);
+
+
+
 			if (o->FastRetransmitExitPoint != 0 && tsn >= o->FastRetransmitExitPoint)
 			{
 				// We have exited Fast Recovery Mode
@@ -4579,16 +4723,20 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 						// This packet that was ACK'ed and was NOT retransmitted, and NO OTHER packets
 						// were retransmitted since this packet was originally sent
 						int r = (int)(o->lastSackTime - ((ILibSCTP_RPACKET*)o->pendingQueueHead)->LastSentTimeStamp);
-						o->RTTVAR = (int)((double)(1 - RTO_BETA) * (double)o->RTTVAR + RTO_BETA * (double)abs(o->SRTT - r));
-						o->SRTT = (int)((double)(1 - RTO_ALPHA) * (double)o->SRTT + RTO_ALPHA * (double)r);
-						o->RTO = o->SRTT + 4 * o->RTTVAR;
-						if (o->RTO < RTO_MIN) { o->RTO = RTO_MIN; }
-						if (o->RTO > RTO_MAX) { o->RTO = RTO_MAX; }
-						rttCalculated = 1; // We only need to calculate this once for each packet received
-
+						if (r >= 0)
+						{
+							o->RTTVAR = (int)((double)(1 - RTO_BETA) * (double)o->RTTVAR + RTO_BETA * (double)abs(o->SRTT - r));
+							o->SRTT = (int)((double)(1 - RTO_ALPHA) * (double)o->SRTT + RTO_ALPHA * (double)r);
+							o->RTO = o->SRTT + 4 * o->RTTVAR;
+							if (o->RTO < RTO_MIN) { o->RTO = RTO_MIN; }
+							if (o->RTO > RTO_MAX) { o->RTO = RTO_MAX; }
+							rttCalculated = 1; // We only need to calculate this once for each packet received
 #ifdef _WEBRTCDEBUG
-						if (o->onRTTCalculated != NULL) { o->onRTTCalculated(o, "OnRTTCalculated", o->SRTT); }
+							if (o->onRTTCalculated != NULL) { o->onRTTCalculated(o, "OnRTTCalculated", o->SRTT); }
+							if (o->onRTTCalculated != NULL) { o->onRTTCalculated(o, "OnLastSackTime", o->lastSackTime); }
+							if (o->onRTTCalculated != NULL) { o->onRTTCalculated(o, "OnLastSentTime", ((ILibSCTP_RPACKET*)o->pendingQueueHead)->LastSentTimeStamp); }
 #endif
+						}
 					}
 				}
 				cumulativeTSNAdvanced += (((ILibSCTP_RPACKET*)o->pendingQueueHead)->PacketSize - (12 + 16));
@@ -4753,7 +4901,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 
 							FastRetryDisabled = 1;
 #ifdef _WEBRTCDEBUG
-							if (o->onSendFastRetry != NULL) { o->onSendFastRetry(o, "OnSendFastRetry", ((unsigned short*)(packet + sizeof(char*)))[0]); }
+							if (o->onSendFastRetry != NULL) { o->onSendFastRetry(o, "OnSendFastRetry", ((unsigned short*)(rpacket->Data + sizeof(char*)))[0]); }
 #endif
 						}
 						else
@@ -4775,10 +4923,11 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 								o->senderCredits -= (rpacket->PacketSize - (12 + 16));		// Update sender credits
 								o->lastRetransmitTime = o->lastSackTime; // Every time we retransmit, we need to take note of it, for RTT purposes
 								
-								ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP[%d]: Retransmitting/T3RTX Expired", o->sessionId);
+								ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP[%d]: Retransmitting/T3RTX Expired", o->sessionId);
 								ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rpacket->PacketSize);
 #ifdef _WEBRTCDEBUG
-								if (o->onSendRetry != NULL) { o->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(packet + sizeof(char*)))[0]); }
+								//if (o->onSendRetry != NULL) { o->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(rpacket->Data + sizeof(char*)))[0]); }
+								if (o->onSendRetry != NULL) { o->onSendRetry(o, "OnSendRetry", ntohl(((unsigned int*)rpacket->Data)[1])); }
 #endif
 							}
 							else
@@ -4799,7 +4948,8 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 
 						ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rpacket->PacketSize);
 #ifdef _WEBRTCDEBUG
-						if (o->onSendRetry != NULL) { o->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(packet + sizeof(char*)))[0]); }
+						//if (o->onSendRetry != NULL) { o->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(rpacket->Data + sizeof(char*)))[0]); }
+						if (o->onSendRetry != NULL) { o->onSendRetry(o, "OnSendRetry", ntohl(((unsigned int*)rpacket->Data)[1])); }
 #endif
 					}
 					rpacket->PacketGAPCounter = frt; // Possibly add to the packet gap counter
@@ -5026,7 +5176,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "... UserTSN = %u", o->userTSN);
 						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "... InTSN   = %u", o->intsn);
 					}
-					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP: %d, exiting processing loop due to PAUSE state", o->sessionId);
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP: %d, exiting processing loop due to PAUSE state", o->sessionId);
 					break;
 				}
 				else
@@ -5040,7 +5190,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 				{
 					unsigned int tsnx = ntohl(((ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(rqptr))->TSN);
 					if (tsnx != o->intsn + 1) break;
-					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "TSN Moved Forward to: %u", tsnx);
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "TSN Moved Forward to: %u", tsnx);
 					o->intsn = tsnx;
 					RCTPRCVDEBUG(printf("MOVED TSN to %u\r\n", o->intsn);)
 						rqptr = ILibLinkedList_GetNextNode(rqptr);
@@ -5081,7 +5231,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 					pid = ntohl(payload->ProtocolID);
 					o->userTSN = o->intsn = tsnx;
 
-					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint|ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP: %d Packet: %u Pulled from Holding Queue", o->sessionId, o->userTSN);
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP: %d Packet: %u Pulled from Holding Queue", o->sessionId, o->userTSN);
 
 					if (ILibSCTP_GetHoldingQueueFlags(ILibLinkedList_GetNode_Head(o->receiveHoldBuffer))->DataPropagated == 0)
 					{
@@ -5096,7 +5246,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 					ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(o->receiveHoldBuffer));
 					if((o->flags & DTLS_PAUSE_FLAG)==DTLS_PAUSE_FLAG) 
 					{
-						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP_2: %d, exiting processing loop due to PAUSE state", o->sessionId);
+						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP_2: %d, exiting processing loop due to PAUSE state", o->sessionId);
 						break;
 					}
 				}
@@ -5114,9 +5264,9 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 				}
 				else
 				{
-					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "SCTP: %d Packet: %u DROPPED, because holding Queue is FULL", o->sessionId, ntohl(data->TSN));
-					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... UserTSN = %u", o->userTSN);
-					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_ConsolePrint | ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... InTSN   = %u", o->intsn);
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "SCTP: %d Packet: %u DROPPED, because holding Queue is FULL", o->sessionId, ntohl(data->TSN));
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... UserTSN = %u", o->userTSN);
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... InTSN   = %u", o->intsn);
 
 				}
 			}
@@ -5518,10 +5668,11 @@ void ILibStun_InitiateDTLS(struct ILibStun_IceState *IceState, int IceSlot, stru
 
 	// Start a new dTLS session
 	ILibStun_CreateDtlsSession(obj, j, IceSlot, remoteInterface);
-
+	
 	// Set up the memory-buffer BIOs
 	read = BIO_new(BIO_s_mem());
-	write = BIO_new(BIO_s_mem());
+	obj->dTlsSessions[j]->writeBIO = write = BIO_new(BIO_s_mem());
+	BIO_get_mem_ptr(obj->dTlsSessions[j]->writeBIO, &(obj->dTlsSessions[j]->writeBIOBuffer));
 	BIO_set_mem_eof_return(read, -1);
 	BIO_set_mem_eof_return(write, -1);
 
@@ -5823,7 +5974,8 @@ void ILibStun_OnUDP(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, 
 
 		// Set up the memory-buffer BIOs
 		read = BIO_new(BIO_s_mem());
-		write = BIO_new(BIO_s_mem());
+		obj->dTlsSessions[j]->writeBIO = write = BIO_new(BIO_s_mem());
+		BIO_get_mem_ptr(obj->dTlsSessions[j]->writeBIO, &(obj->dTlsSessions[j]->writeBIOBuffer));
 		BIO_set_mem_eof_return(read, -1);
 		BIO_set_mem_eof_return(write, -1);
 
@@ -5941,28 +6093,32 @@ void ILibStun_OnUDP(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, 
 		if (obj->dTlsSessions[existingSession] != NULL && obj->dTlsSessions[existingSession]->state != 0)
 		{
 			sem_wait(&(obj->dTlsSessions[existingSession]->Lock));
-			while (BIO_ctrl_pending(SSL_get_wbio(obj->dTlsSessions[existingSession]->ssl)) > 0)
+			if(obj->dTlsSessions[existingSession]->writeBIOBuffer->length > 0)
 			{
+				BIO_clear_retry_flags(obj->dTlsSessions[existingSession]->writeBIO); // Klocwork reports this could block, but this is a memory bio, so it will never block.
+
 				// Data is pending in the write buffer, send it out
-				j = BIO_read(SSL_get_wbio(obj->dTlsSessions[existingSession]->ssl), tbuffer, 4096);
 				if (socketModule == NULL)
 				{
 					// Response was from TURN
 					if (remoteInterface->sin6_family == 0)
 					{
-						ILibTURN_SendChannelData(obj->mTurnClientModule, remoteInterface->sin6_port, tbuffer, 0, j);
+						ILibTURN_SendChannelData(obj->mTurnClientModule, remoteInterface->sin6_port, obj->dTlsSessions[existingSession]->writeBIOBuffer->data, 0, (int)obj->dTlsSessions[existingSession]->writeBIOBuffer->length);
 					}
 					else
 					{
-						ILibTURN_SendIndication(obj->mTurnClientModule, remoteInterface, tbuffer, 0, j);
+						ILibTURN_SendIndication(obj->mTurnClientModule, remoteInterface, obj->dTlsSessions[existingSession]->writeBIOBuffer->data, 0, (int)obj->dTlsSessions[existingSession]->writeBIOBuffer->length);
 					}
 				}
 				else
 				{
 					// Response was from a local Socket
-					ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)remoteInterface, tbuffer, j, ILibAsyncSocket_MemoryOwnership_USER);
+					ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)remoteInterface, obj->dTlsSessions[existingSession]->writeBIOBuffer->data, obj->dTlsSessions[existingSession]->writeBIOBuffer->length, ILibAsyncSocket_MemoryOwnership_USER);
 				}
-				if(obj->dTlsSessions[existingSession]->state == 4) {ILibWebRTC_DTLS_HandshakeDetect(obj, "S ", tbuffer, 0, j);}
+				if(obj->dTlsSessions[existingSession]->state == 4) {ILibWebRTC_DTLS_HandshakeDetect(obj, "S ", obj->dTlsSessions[existingSession]->writeBIOBuffer->data, 0, (int)obj->dTlsSessions[existingSession]->writeBIOBuffer->length);}
+			
+				obj->dTlsSessions[existingSession]->writeBIOBuffer->data += (obj->dTlsSessions[existingSession]->writeBIOBuffer->length);
+				obj->dTlsSessions[existingSession]->writeBIOBuffer->length = 0;
 			}
 			sem_post(&(obj->dTlsSessions[existingSession]->Lock));
 		}
@@ -7263,12 +7419,12 @@ int ILibSCTP_Debug_SetDebugCallback(void* dtlsSession, char* debugFieldName, ILi
 	if (strcmp(debugFieldName, "OnHold") == 0)
 	{
 		session->onHold = handler;
-		handler(session, "OnHold", session->holdingCount);
+		if (handler != NULL) { handler(session, "OnHold", session->holdingCount); }
 	}
 	else if (strcmp(debugFieldName, "OnReceiverCredits") == 0)
 	{
 		session->onReceiverCredits = handler;
-		handler(session, "OnReceiverCredits", session->receiverCredits);
+		if (handler != NULL) { handler(session, "OnReceiverCredits", session->receiverCredits); }
 	}
 	else if (strcmp(debugFieldName, "OnSendFastRetry") == 0)
 	{
@@ -7281,7 +7437,7 @@ int ILibSCTP_Debug_SetDebugCallback(void* dtlsSession, char* debugFieldName, ILi
 	else if (strcmp(debugFieldName, "OnCongestionWindowSizeChanged") == 0)
 	{
 		session->onCongestionWindowSizeChanged = handler;
-		handler(session, "OnCongestionWindowSizeChanged", session->congestionWindowSize);
+		if (handler != NULL) { handler(session, "OnCongestionWindowSizeChanged", session->congestionWindowSize); }
 	}
 	else if (strcmp(debugFieldName, "OnSACKReceived") == 0)
 	{
@@ -7302,6 +7458,10 @@ int ILibSCTP_Debug_SetDebugCallback(void* dtlsSession, char* debugFieldName, ILi
 	else if (strcmp(debugFieldName, "OnTSNFloorNotRaised") == 0)
 	{
 		session->onTSNFloorNotRaised = handler;
+	}
+	else if (strcmp(debugFieldName, "OnRetryPacket") == 0)
+	{
+		session->onRetryPacket = handler;
 	}
 	else { return 1; }
 	return 0;

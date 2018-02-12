@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -1555,6 +1555,12 @@ void ILibChain_RunOnMicrostackThreadEx(void *chain, ILibChain_StartEvent handler
 	value[2] = user;
 	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), value, 0, &ILibChain_RunOnMicrostackThreadSink, &ILibChain_RunOnMicrostackThreadSink);
 }
+#ifdef WIN32
+HANDLE ILibChain_GetMicrostackThreadHandle(void *chain)
+{
+	return(((struct ILibBaseChain*)chain)->MicrostackThreadHandle);
+}
+#endif
 
 void ILibChain_Safe_Destroy(void *object)
 {
@@ -1911,6 +1917,8 @@ ILibExportMethod void ILibChain_EndContinue(void *chain)
 	ILibForceUnBlockChain(chain);
 }
 
+char* g_ILibCrashID = NULL;
+
 #if defined(WIN32)
 int ILib_WindowsExceptionFilter(DWORD exceptionCode, void *exceptionInfo, CONTEXT *exceptionContext)
 {
@@ -1981,7 +1989,7 @@ void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext)
 			psym->MaxNameLen = MAX_SYM_NAME;
 			pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
+			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION [%s] @ ", (g_ILibCrashID!=NULL? g_ILibCrashID:""));
 
 			if (SymFromAddr(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp, psym))
 			{
@@ -2027,6 +2035,18 @@ void ILib_POSIX_CrashHandler(int code)
 	{
 		memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "** CRASH **\n", 12);
 		msgLen += 12;
+		if (g_ILibCrashID != NULL)
+		{
+			int idlen = strnlen_s(g_ILibCrashID, 255);
+			memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "[", 1);
+			msgLen += 1;
+
+			memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, g_ILibCrashID, idlen);
+			msgLen += idlen;
+
+			memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "]\n", 2);
+			msgLen += 2;
+		}
 	}
 	else if (code == 254)
 	{
@@ -5894,7 +5914,7 @@ void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, ILibLife
 	}
 
 	// If this notification is sooner than the existing one, replace it.
-	if (LifeTimeMonitor->NextTriggerTick > ltms->ExpirationTick) LifeTimeMonitor->NextTriggerTick = ltms->ExpirationTick;
+	if (LifeTimeMonitor->NextTriggerTick > ltms->ExpirationTick || LifeTimeMonitor->NextTriggerTick == -1) LifeTimeMonitor->NextTriggerTick = ltms->ExpirationTick;
 
 	ILibLinkedList_UnLock(LifeTimeMonitor->ObjectList);
 }
@@ -5972,7 +5992,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 		// If it is, that means we shouldn't fire this item anymore.
 		//
 		ILibLinkedList_Lock(LifeTimeMonitor->Reserved);
-		removed = ILibLinkedList_Remove_ByData(LifeTimeMonitor->Reserved,node);
+		removed = ILibLinkedList_Remove_ByData(LifeTimeMonitor->Reserved,((struct LifeTimeMonitorData*)node)->data);
 		ILibLinkedList_UnLock(LifeTimeMonitor->Reserved);
 
 		EVT = (struct LifeTimeMonitorData*)node;

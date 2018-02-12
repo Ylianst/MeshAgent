@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -179,6 +179,17 @@ duk_ret_t ILibDuktape_SimpleDataStore_Keys(duk_context *ctx)
 	ILibSimpleDataStore_EnumerateKeys(ds, ILibDuktape_SimpleDataStore_Keys_EnumerationSink, &enumerator);
 	return 1;
 }
+duk_ret_t ILibDuktape_SimpleDataStore_Delete(duk_context *ctx)
+{
+	duk_push_this(ctx);																				// [DataStore]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DataStore_PTR);										// [DataStore][ptr]
+	ILibSimpleDataStore ds = (ILibSimpleDataStore)duk_get_pointer(ctx, -1);
+	duk_size_t keyLen;
+	char *key = (char*)duk_get_lstring(ctx, 0, &keyLen);
+	
+	ILibSimpleDataStore_DeleteEx(ds, key, (int)keyLen);
+	return(0);
+}
 duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 {
 	ILibSimpleDataStore dataStore;
@@ -214,6 +225,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 	duk_push_pointer(ctx, dataStore);						// [DataStore][RetVal][ds]
 	duk_put_prop_string(ctx, -2, ILibDuktape_DataStore_PTR);// [DataStore][RetVal]
 
+	ILibDuktape_CreateInstanceMethod(ctx, "Delete", ILibDuktape_SimpleDataStore_Delete, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "Put", ILibDuktape_SimpleDataStore_Put, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "Get", ILibDuktape_SimpleDataStore_Get, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "Compact", ILibDuktape_SimpleDataStore_Compact, 0);

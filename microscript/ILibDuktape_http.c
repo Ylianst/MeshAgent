@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,14 +41,12 @@ limitations under the License.
 
 duk_ret_t ILibDuktape_httpDigest_clientRequest_response2(duk_context *ctx)
 {
-	ILibHTTPPacket *packet;
-	duk_get_prop_string(ctx, 0, "PacketPtr");
-	packet = (ILibHTTPPacket*)duk_get_pointer(ctx, -1);
-
 	duk_push_current_function(ctx);
 	duk_get_prop_string(ctx, -1, "digestClientRequest");// [digestClientRequest]
 
-	if (packet->StatusCode == 200)
+	int statusCode = Duktape_GetIntPropertyValue(ctx, 0, "statusCode", 0);
+
+	if (statusCode == 200)
 	{
 		duk_get_prop_string(ctx, -1, "emit");	// [digestClientRequest][emit]
 		duk_swap_top(ctx, -2);					// [emit][this]
@@ -60,8 +58,8 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response2(duk_context *ctx)
 	{
 		duk_get_prop_string(ctx, -1, "emit");	// [digestClientRequest][emit]
 		duk_swap_top(ctx, -2);					// [emit][this]
-		duk_push_string(ctx, "error");			// [emit][this][response]
-		duk_dup(ctx, 0);						// [emit][this][response][imsg]
+		duk_push_string(ctx, "error");			// [emit][this][error]
+		duk_dup(ctx, 0);						// [emit][this][error][imsg]
 		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http-digest: Error dispatching response event"); }
 	}
 
@@ -143,8 +141,8 @@ extern void ILibWebServer_Digest_ParseAuthenticationHeader(void* table, char* va
 char *ILibDuktape_httpDigest_generateAuthenticationHeader(duk_context *ctx, void *digestObj, void *optionsObj)
 {
 	int top = duk_get_top(ctx);
-	int NC;
-	char *CNONCE;
+	int NC = 0;
+	char *CNONCE = NULL;
 
 	char *wwwauth, *username, *password;
 	char *method, *path;
@@ -188,7 +186,9 @@ char *ILibDuktape_httpDigest_generateAuthenticationHeader(duk_context *ctx, void
 	}
 	else
 	{
+		duk_get_prop_string(ctx, -1, DIGEST2CNONCE);													// [digest][buffer]
 		CNONCE = (char*)Duktape_GetBuffer(ctx, -1, NULL);
+		duk_pop(ctx);																					// [digest]
 		NC = Duktape_GetIntPropertyValue(ctx, -1, DIGEST2NC, 0) + 1;
 		duk_push_int(ctx, NC);																			// [digest][NC]
 		duk_put_prop_string(ctx, -2, DIGEST2NC);														// [digest]		
@@ -198,14 +198,10 @@ char *ILibDuktape_httpDigest_generateAuthenticationHeader(duk_context *ctx, void
 	util_md5hex(ILibScratchPad2, tmpLen, result3);
 	duk_pop(ctx);																						// ...
 
-	tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "Digest username=\"%s\", realm=\"%s\", nonce=\"%s\", uri=\"%s\"", username, realm, nonce, path);
-	if (opaque != NULL) { tmpLen += sprintf_s(ILibScratchPad2 + tmpLen, sizeof(ILibScratchPad2) - tmpLen, ", opaque=\"%s\"", opaque); }
-	if (qop != NULL)
-	{
-		tmpLen += sprintf_s(ILibScratchPad2 + tmpLen, sizeof(ILibScratchPad2) - tmpLen, ", qop=\"%s\", nc=%08x, cnonce=\"%s\"", qop, NC, CNONCE);
-	}
-
-	tmpLen += sprintf_s(ILibScratchPad2 + tmpLen, sizeof(ILibScratchPad2) - tmpLen, ", response=\"%s\"", result3);
+	tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "Digest username=\"%s\",realm=\"%s\",nonce=\"%s\",uri=\"%s\"", username, realm, nonce, path);
+	if (opaque != NULL) { tmpLen += sprintf_s(ILibScratchPad2 + tmpLen, sizeof(ILibScratchPad2) - tmpLen, ",opaque=\"%s\"", opaque); }
+	tmpLen += sprintf_s(ILibScratchPad2 + tmpLen, sizeof(ILibScratchPad2) - tmpLen, ",response=\"%s\"", result3);
+	if (qop != NULL) { tmpLen += sprintf_s(ILibScratchPad2 + tmpLen, sizeof(ILibScratchPad2) - tmpLen, ",qop=\"%s\",nc=\"%08x\",cnonce=\"%s\"", qop, NC, CNONCE); }
 	
 	if (realmLen > 0) { realm[realmLen] = '"'; }
 	if (nonceLen > 0) { nonce[nonceLen] = '"'; }
@@ -305,8 +301,8 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 				duk_dup(ctx, -2);																	// [clientRequest][buffer][clientRequest]
 				duk_get_prop_string(ctx, -1, "write");												// [clientRequest][buffer][clientRequest][write]
 				duk_swap_top(ctx, -2);																// [clientRequest][buffer][write][this]
-				duk_swap(ctx, -3, -2);																// [clientRequest][write][buffer][this]
-				duk_swap_top(ctx, -2);																// [clientReqeust][write][this][buffer]
+				duk_dup(ctx, -3);																	// [clientRequest][buffer][write][this][buffer]
+				duk_remove(ctx, -4);																// [clientRequest][write][this][buffer]
 				if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpDigest.clientRequest.onResponse(): Error calling clientRequest.write(): "); }
 				duk_pop(ctx);																		// [clientRequest]
 			}
@@ -410,6 +406,12 @@ ILibTransport_DoneState ILibDuktape_httpDigest_http_request_WriteHandler(struct 
 			duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_TmpBuffer);	// [digestClientRequest]
 			memcpy_s(tmpBuffer, bufLen, buffer, (size_t)bufferLen);
 		}
+
+		if (stream->endBytes > 0)
+		{
+			duk_push_true(ctx);
+			duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_END_CALLED);
+		}
 	}
 
 	if (duk_has_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST))
@@ -477,6 +479,7 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	void *clientRequest = NULL;
 	ILibDuktape_EventEmitter *emitter;
 	char *auth = NULL;
+	int needCallEnd = 0;
 
 	duk_push_this(ctx);								// [digest]
 	duk_get_prop_string(ctx, -1, HTTP_DIGEST);		// [digest][http]
@@ -489,6 +492,7 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 		duk_dup(ctx, -2);							// [digest][request][this][parseUri][this]
 		duk_dup(ctx, 0);							// [digest][request][this][parseUri][this][uri]
 		duk_call_method(ctx, 1);					// [digest][request][this][options]
+		needCallEnd = 1;
 	}
 	else
 	{
@@ -522,6 +526,13 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_httpDigest_clientRequest_response, DUK_VARARGS);	// [once][this][response][method] 
 	
 	duk_push_object(ctx);																	// [once][this][response][method][digest-clientRequest]
+	ILibDuktape_WriteID(ctx, "httpDigest.clientRequest");
+	if (needCallEnd)
+	{
+		duk_push_true(ctx);
+		duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_END_CALLED);
+	}
+	
 	duk_push_this(ctx);																		// [once][this][response][method][digest-clientRequest][digest]
 	duk_put_prop_string(ctx, -2, DIGESTCLIENTREQUEST_DIGEST);								// [once][this][response][method][digest-clientRequest]
 	duk_push_heapptr(ctx, clientRequest);													// [once][this][response][method][digest-clientRequest][clientRequest]
@@ -557,6 +568,13 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	ILibDuktape_EventEmitter_ForwardEvent(ctx, -2, "timeout", -1, "timeout");
 	ILibDuktape_EventEmitter_ForwardEvent(ctx, -2, "drain", -1, "drain");
 
+	if (needCallEnd)
+	{
+		duk_get_prop_string(ctx, -2, "end");												// [clientRequest][digestClientRequest][end]
+		duk_dup(ctx, -3);																	// [clientRequest][digestClientRequest][end][this]
+		duk_call_method(ctx, 0); duk_pop(ctx);												// [clientRequest][digestClientRequest]
+	}
+
 	return(1);
 }
 duk_ret_t ILibduktape_httpDigest_create(duk_context *ctx)
@@ -566,6 +584,7 @@ duk_ret_t ILibduktape_httpDigest_create(duk_context *ctx)
 	ILibDuktape_EventEmitter *emitter;
 
 	duk_push_object(ctx);					// [obj]
+	ILibDuktape_WriteID(ctx, "httpDigest");
 	ILibDuktape_CreateEventWithSetterEx(ctx, "clientRequest", ILibDuktape_httpDigest_clientRequest_setter);
 	ILibDuktape_CreateEventWithSetterEx(ctx, "http", ILibDuktape_httpDigest_http_setter);
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
@@ -580,6 +599,7 @@ duk_ret_t ILibduktape_httpDigest_create(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, DIGEST_PASSWORD);
 	duk_push_fixed_buffer(ctx, 16);
 	util_randomtext(16, (char*)Duktape_GetBuffer(ctx, -1, NULL));
+	((char*)Duktape_GetBuffer(ctx, -1, NULL))[15] = 0;
 	duk_put_prop_string(ctx, -2, DIGEST2CNONCE);
 	duk_push_int(ctx, 0);
 	duk_put_prop_string(ctx, -2, DIGEST2NC);

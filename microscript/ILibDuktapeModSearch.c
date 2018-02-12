@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ limitations under the License.
 #include "ILibDuktapeModSearch.h"
 #include "microstack/ILibParsers.h"
 #include "microscript/ILibDuktape_Helpers.h"
-
+#include "microscript/duk_module_duktape.h"
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
@@ -204,6 +204,8 @@ void ILibDuktape_ModSearch_Destroy(duk_context *ctx, void *user)
 }
 void ILibDuktape_ModSearch_Init(duk_context * ctx, void * chain, ILibSimpleDataStore mDB)
 {
+	duk_module_duktape_init(ctx);
+
 	duk_push_heap_stash(ctx);									// [stash]
 	duk_push_pointer(ctx, chain);								// [stash][chain]
 	duk_put_prop_string(ctx, -2, ILibDuktape_Context_Chain);	// [stash]

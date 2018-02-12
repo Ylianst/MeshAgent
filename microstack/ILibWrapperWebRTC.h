@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -213,6 +213,7 @@ ILibWrapper_WebRTC_Connection ILibWrapper_WebRTC_ConnectionFactory_CreateConnect
 */
 int ILibWrapper_WebRTC_Connection_GetID(ILibWrapper_WebRTC_Connection connection);
 char* ILibWrapper_WebRTC_Connection_GetLocalUsername(ILibWrapper_WebRTC_Connection connection);
+#define ILibWrapper_WebRTC_Connection2DtlsSession(connection) ((void**)(connection))[0]
 
 ILibTransport* ILibWrapper_WebRTC_Connection_GetRawTransport(ILibWrapper_WebRTC_Connection connection);
 //! Set the STUN Servers to use with the WebRTC Connection when gathering candidates

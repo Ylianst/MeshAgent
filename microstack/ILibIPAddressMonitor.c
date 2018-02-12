@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #ifdef WIN32
 	#include <winsock2.h>
 	#include <ws2tcpip.h>
@@ -23,7 +39,7 @@ typedef struct _ILibIPAddressMonitor
 #ifdef WIN32
 	SOCKET mSocket;
 	DWORD bytesReturned;
-	WSAOVERLAPPED reserved;
+	OVERLAPPED *reserved;
 #elif defined (_POSIX)
 	int mSocket;
 	struct sockaddr_nl addr;
@@ -46,12 +62,16 @@ void CALLBACK ILibIPAddressMonitor_dispatch(
 		_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)lpOverlapped->hEvent;
 		ILibChain_RunOnMicrostackThread(obj->chainLink.ParentChain, ILibIPAddressMonitor_MicrostackThreadDispatch, obj);
 	}
+	else if (lpOverlapped->hEvent == NULL)
+	{
+		free(lpOverlapped);
+	}
 }
 void ILibIPAddressMonitor_MicrostackThreadDispatch(void *chain, void *user)
 {
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)user;
 	if (obj->onUpdate != NULL) { obj->onUpdate(obj, obj->user); }
-	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), &(obj->reserved), ILibIPAddressMonitor_dispatch);
+	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), (LPWSAOVERLAPPED)&(obj->reserved), ILibIPAddressMonitor_dispatch);
 }
 #endif
 
@@ -60,7 +80,7 @@ void ILibIPAddressMonitor_Destroy(void *object)
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
 
 #ifdef WIN32
-	obj->reserved.hEvent = NULL;
+	obj->reserved->hEvent = NULL;
 	closesocket(obj->mSocket);
 	obj->mSocket = INVALID_SOCKET;
 #elif defined(_POSIX)
@@ -108,9 +128,10 @@ ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonit
 	obj->onUpdate = handler;
 	obj->user = user;
 #ifdef WIN32
-	obj->reserved.hEvent = (HANDLE)obj;
+	obj->reserved = ILibMemory_Allocate(sizeof(OVERLAPPED), 0, NULL, NULL);
+	obj->reserved->hEvent = (HANDLE)obj;
 	obj->mSocket = socket(AF_INET, SOCK_DGRAM, 0);
-	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), &(obj->reserved), ILibIPAddressMonitor_dispatch);
+	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), obj->reserved, ILibIPAddressMonitor_dispatch);
 #elif defined (_POSIX)
 	obj->mSocket = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE);
 	int flags = fcntl(obj->mSocket, F_GETFL, 0);

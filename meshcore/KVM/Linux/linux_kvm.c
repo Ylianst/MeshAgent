@@ -224,7 +224,7 @@ void getAvailableDisplays(unsigned short **array, int *len) {
 	if (dir != NULL) {
 		*len = scandir("/tmp/", &ent, lockfileCheckFn, alphasort);
 
-		if ((*array = (unsigned short *)malloc(*len)) == NULL) ILIBCRITICALEXIT(254);
+		if ((*array = (unsigned short *)malloc((*len)*sizeof(unsigned short))) == NULL) ILIBCRITICALEXIT(254);
 
 		for (i = 0; i < *len; i++) {
 			int dispNo = 0;

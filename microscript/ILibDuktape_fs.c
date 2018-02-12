@@ -1,11 +1,11 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -69,7 +69,6 @@ typedef struct ILibDuktape_fs_writeStreamData
 	ILibDuktape_EventEmitter *emitter;
 	void *fsObject;
 	void *WriteStreamObject;
-	void *onClose;
 	FILE *fPtr;
 	int fd;
 	int autoClose;
@@ -82,7 +81,6 @@ typedef struct ILibDuktape_fs_readStreamData
 	void *ReadStreamObject;
 	void *fsObject;
 	ILibDuktape_EventEmitter *emitter;
-	void *onClose;
 	FILE *fPtr;
 	int fd;
 	int autoClose;
@@ -99,7 +97,6 @@ typedef struct ILibDuktape_fs_watcherData
 	duk_context *ctx;
 	void *object;
 	void *parent;
-	void *OnChange;
 	ILibDuktape_EventEmitter *emitter;
 #if defined(WIN32)
 	int recursive;
@@ -240,9 +237,7 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	}
 	else
 	{
-		duk_push_string(ctx, "fs.openSync ERROR");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "fs.openSync(): Error opening '%s'", path));
 	}
 }
 duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
@@ -260,7 +255,7 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 	{
 		if (duk_is_number(ctx, 4))
 		{
-			fseek(f, duk_require_int(ctx, 4), SEEK_CUR);
+			fseek(f, duk_require_int(ctx, 4), SEEK_SET);
 		}
 		bytesRead = (int)fread(buffer + offset, 1, length, f);
 		duk_push_int(ctx, bytesRead);
@@ -285,7 +280,7 @@ duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 	f = ILibDuktape_fs_getFilePtr(ctx, duk_require_int(ctx, 0));
 	if (f != NULL)
 	{
-		if (nargs > 4) { fseek(f, duk_require_int(ctx, 4), SEEK_CUR); }
+		if (nargs > 4) { fseek(f, duk_require_int(ctx, 4), SEEK_SET); printf("Write: Seeking to %d\n", duk_require_int(ctx, 4)); }
 		bytesWritten = (int)fwrite(buffer, 1, length, f);
 		duk_push_int(ctx, bytesWritten);
 		return 1;
@@ -339,17 +334,14 @@ void ILibDuktape_fs_writeStream_endHandler(struct ILibDuktape_WritableStream *st
 		data->fPtr = NULL;
 	}
 
-	if (data->ctx != NULL && data->onClose != NULL)
-	{
-		// Call the 'close' event on the WriteStream
-		duk_push_heapptr(data->ctx, data->onClose);				// [func]
-		duk_push_heapptr(data->ctx, data->WriteStreamObject);	// [func][this]
-		if (duk_pcall_method(data->ctx, 0) != 0)				// [retVal]
-		{
-			ILibDuktape_Process_UncaughtException(data->ctx);
-		}
-		duk_pop(data->ctx);
-	}
+
+	// Call the 'close' event on the WriteStream
+	duk_push_heapptr(data->ctx, data->WriteStreamObject);	// [this]
+	duk_get_prop_string(data->ctx, -1, "emit");				// [this][emit]
+	duk_swap_top(data->ctx, -2);							// [emit][this]
+	duk_push_string(data->ctx, "close");					// [emit][this][close]
+	if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+	duk_pop(data->ctx);										// ...
 }
 duk_ret_t ILibDuktape_fs_writeStream_finalizer(duk_context *ctx)
 {
@@ -413,6 +405,7 @@ duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 	if (f != NULL)
 	{
 		duk_push_object(ctx);													// [writeStream]
+		ILibDuktape_WriteID(ctx, "fs.writeStream");
 		duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_fs_writeStreamData));		// [writeStream][buffer]
 		data = (ILibDuktape_fs_writeStreamData*)Duktape_GetBuffer(ctx, -1, NULL);
 		memset(data, 0, sizeof(ILibDuktape_fs_writeStreamData));
@@ -428,7 +421,7 @@ duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 		data->emitter = ILibDuktape_EventEmitter_Create(ctx);
 		data->stream = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_fs_writeStream_writeHandler, ILibDuktape_fs_writeStream_endHandler, data);
 
-		ILibDuktape_EventEmitter_CreateEvent(data->emitter, "close", &(data->onClose));
+		ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "close");
 		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_writeStream_finalizer);
 		return 1;
 	}
@@ -454,14 +447,15 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	sender->paused = 0;
 
 	if (data->bytesRead == -1) { data->bytesRead = 1; }
-	while (sender->paused == 0 && data->bytesRead > 0 && data->bytesLeft < 0)
+	while (sender->paused == 0 && data->bytesRead > 0 && (data->bytesLeft < 0 || data->bytesLeft > 0))
 	{
-		bytesToRead = data->bytesLeft < 0 ? sizeof(data->buffer) : data->bytesLeft;
+		bytesToRead = data->bytesLeft < 0 ? sizeof(data->buffer) : (data->bytesLeft > sizeof(data->buffer) ? sizeof(data->buffer) : data->bytesLeft);
 		data->bytesRead = (int)fread(data->buffer, 1, bytesToRead, data->fPtr);
 		if (data->bytesRead > 0)
 		{
 			if (data->bytesLeft > 0) { data->bytesLeft -= data->bytesRead; }
 			ILibDuktape_readableStream_WriteData(sender, data->buffer, data->bytesRead);
+			if (data->bytesLeft == 0) { data->bytesRead = 0; }
 		}
 	}
 	if (sender->paused == 0 && data->bytesRead == 0)
@@ -477,14 +471,13 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 			data->fd = 0;
 			data->fPtr = NULL;
 
-			if (data->onClose != NULL && data->ctx != NULL)
+			if (data->ctx != NULL && data->ReadStreamObject != NULL)
 			{
-				duk_push_heapptr(data->ctx, data->onClose);								// [func]
-				duk_push_heapptr(data->ctx, data->ReadStreamObject);					// [func][this]
-				if (duk_pcall_method(data->ctx, 0) != 0)								// [retVal]
-				{
-					ILibDuktape_Process_UncaughtException(data->ctx);
-				}
+				duk_push_heapptr(data->ctx, data->ReadStreamObject);					// [this]
+				duk_get_prop_string(data->ctx, -1, "emit");								// [this][emit]
+				duk_swap_top(data->ctx, -2);											// [emit][this]
+				duk_push_string(data->ctx, "close");									// [emit][this][close]
+				if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
 				duk_pop(data->ctx);														// ...
 			}
 		}
@@ -551,6 +544,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	}
 
 	duk_push_object(ctx);													// [readStream]
+	ILibDuktape_WriteID(ctx, "fs.readStream");
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_fs_readStreamData));		// [readStream][buffer]
 	data = (ILibDuktape_fs_readStreamData*)Duktape_GetBuffer(ctx, -1, NULL);
 	memset(data, 0, sizeof(ILibDuktape_fs_readStreamData));
@@ -564,17 +558,19 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	data->fPtr = f;
 	data->autoClose = autoClose;
 	data->ReadStreamObject = duk_get_heapptr(ctx, -1);
-	data->bytesLeft = end;
+	data->bytesLeft = end < 0 ? end : (end - start + 1);
 	data->bytesRead = -1;
 	data->stream = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_fs_readStream_Pause, ILibDuktape_fs_readStream_Resume, data);
 	data->stream->paused = 1;
 
-	ILibDuktape_EventEmitter_CreateEvent(data->emitter, "close", &(data->onClose));
+	//printf("readStream [start: %d, end: %d\n", start, end);
+
+	ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "close");
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_readStream_finalizer);
 
 	if (start != 0)
 	{
-		fseek(f, start, SEEK_CUR);
+		fseek(f, start, SEEK_SET);
 	}
 
 	return 1;
@@ -904,24 +900,23 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 		n = (n->NextEntryOffset != 0) ? ((FILE_NOTIFY_INFORMATION*)((char*)n + n->NextEntryOffset)) : NULL;
 	}
 
-	if (data->OnChange != NULL)
+
+	duk_push_heapptr(data->ctx, data->object);						// [detail][fsWatcher]
+	duk_get_prop_string(data->ctx, -1, "emit");						// [detail][fsWatcher][emit]
+	duk_swap_top(data->ctx, -2);									// [detail][emit][this]
+	duk_push_string(data->ctx, "change");							// [detail][emit][this][change]
+	duk_push_string(data->ctx, changed == 0 ? "rename" : "change");	// [detail][emit][this][change][type]
+	if (changed == 0)
 	{
-		duk_push_heapptr(data->ctx, data->OnChange);					// [detail][change]
-		duk_push_heapptr(data->ctx, data->object);						// [detail][change][fsWatcher]
-		duk_push_string(data->ctx, changed == 0 ? "rename" : "change");	// [detail][change][fsWatcher][type]
-		if (changed == 0)
-		{
-			duk_get_prop_string(data->ctx, -4, "oldname");				// [detail][listener][fsWatcher][type][fileName]
-		}
-		else
-		{
-			duk_get_prop_string(data->ctx, -4, "\xFF_FileName");		// [detail][listener][fsWatcher][type][fileName]
-		}
-		duk_dup(data->ctx, -5);											// [detail][change][fsWatcher][type][fileName][detail]
-		if (duk_pcall_method(data->ctx, 3) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
-		duk_pop(data->ctx);												// [detail]
+		duk_get_prop_string(data->ctx, -4, "oldname");				// [detail][emit][this][change][type][fileName]
 	}
-	duk_pop(data->ctx);													// ...
+	else
+	{
+		duk_get_prop_string(data->ctx, -4, "\xFF_FileName");		// [detail][emit][this][change][type][fileName]
+	}
+	duk_dup(data->ctx, -5);											// [detail][emit][this][change][type][fileName][detail]
+	if (duk_pcall_method(data->ctx, 4) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
+	duk_pop_2(data->ctx);											// ...
 
 	memset(data->results, 0, sizeof(data->results));
 	if (data->h != NULL)
@@ -1001,7 +996,7 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 			wd.p = NULL;
 			wd.i = evt->wd;
 			watcher = (ILibDuktape_fs_watcherData*)ILibHashtable_Get(data->watchTable, wd.p, NULL, 0);
-			if (watcher == NULL || watcher->OnChange == NULL) { continue; }
+			if (watcher == NULL || ILibDuktape_EventEmitter_HasListeners(watcher->emitter, "change") == 0) { continue; }
 
 			duk_push_object(watcher->ctx);					// [detail]
 
@@ -1021,21 +1016,19 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 				duk_push_string(watcher->ctx, evt->name);
 				duk_put_prop_string(watcher->ctx, -2, "\xFF_FileName");
 			}
-
-			duk_push_heapptr(watcher->ctx, watcher->OnChange);					// [detail][change]
-			duk_push_heapptr(watcher->ctx, watcher->object);					// [detail][change][fsWatcher]
-			duk_push_string(watcher->ctx, changed == 0 ? "rename" : "change");	// [detail][change][fsWatcher][type]
+			ILibDuktape_EventEmitter_SetupEmit(watcher->ctx, watcher->object, "change");// [detail][emit][this][change]
+			duk_push_string(watcher->ctx, changed == 0 ? "rename" : "change");			// [detail][emit][this][change][type]
 			if (changed == 0)
 			{
-				duk_get_prop_string(watcher->ctx, -4, "oldname");				// [detail][listener][fsWatcher][type][fileName]
+				duk_get_prop_string(watcher->ctx, -5, "oldname");						// [detail][emit][this][change][type][fileName]
 			}
 			else
 			{
-				duk_get_prop_string(watcher->ctx, -4, "\xFF_FileName");			// [detail][listener][fsWatcher][type][fileName]
+				duk_get_prop_string(watcher->ctx, -5, "\xFF_FileName");					// [detail][emit][this][change][type][fileName]
 			}
-			duk_dup(watcher->ctx, -5);											// [detail][change][fsWatcher][type][fileName][detail]
-			if (duk_pcall_method(watcher->ctx, 3) != 0) { ILibDuktape_Process_UncaughtException(watcher->ctx); }
-			duk_pop_2(watcher->ctx);											// ...
+			duk_dup(watcher->ctx, -6);													// [detail][emit][this][change][type][fileName][detail]
+			if (duk_pcall_method(watcher->ctx, 4) != 0) { ILibDuktape_Process_UncaughtException(watcher->ctx); }
+			duk_pop_2(watcher->ctx);													// ...
 		}
 	}
 }
@@ -1099,6 +1092,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 #endif
 	
 	duk_push_object(ctx);													// [FSWatcher]
+	ILibDuktape_WriteID(ctx, "fs.fsWatcher");
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_fs_watcherData));			// [FSWatcher][data]
 	data = (ILibDuktape_fs_watcherData*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_put_prop_string(ctx, -2, FS_WATCHER_DATA_PTR);						// [FSWatcher]
@@ -1117,7 +1111,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	
 
 	ILibDuktape_CreateInstanceMethod(ctx, "close", ILibDuktape_fs_watcher_close, 0);
-	ILibDuktape_EventEmitter_CreateEvent(data->emitter, "change", &(data->OnChange));
+	ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "change");
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_watcher_finalizer);
 
 	for (i = 1; i < nargs; ++i)
@@ -1233,10 +1227,26 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 
 	return(1);
 }
+duk_ret_t ILibDuktape_fs_existsSync(duk_context *ctx)
+{
+	duk_push_this(ctx);							// [fs]
+	duk_get_prop_string(ctx, -1, "statSync");	// [fs][statSync]
+	duk_swap_top(ctx, -2);						// [statSync][this]
+	duk_dup(ctx, 0);							// [statSync][this][path]
+	if (duk_pcall_method(ctx, 1) != 0) 
+	{ 
+		duk_push_false(ctx); 
+	}
+	else
+	{
+		duk_push_true(ctx);
+	}
+	return(1);
+}
 void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);						// [fs]
-
+	ILibDuktape_WriteID(ctx, "fs");
 	duk_push_pointer(ctx, chain);				// [fs][chain]
 	duk_put_prop_string(ctx, -2, FS_CHAIN_PTR);	// [fs]
 
@@ -1256,6 +1266,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "statSync", ILibDuktape_fs_statSync, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "readDrivesSync", ILibDuktape_fs_readDrivesSync, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "readFileSync", ILibDuktape_fs_readFileSync, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "existsSync", ILibDuktape_fs_existsSync, 1);
 #ifndef _NOFSWATCHER
 	ILibDuktape_CreateInstanceMethod(ctx, "watch", ILibDuktape_fs_watch, DUK_VARARGS);
 #endif

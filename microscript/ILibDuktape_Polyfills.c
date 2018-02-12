@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #include "duktape.h"
 #include "ILibDuktape_Helpers.h"
 #include "ILibDuktapeModSearch.h"
@@ -9,7 +25,10 @@
 
 #define ILibDuktape_Timer_Ptrs			"\xFF_DuktapeTimer_PTRS"
 #define ILibDuktape_Queue_Ptr			"\xFF_Queue"
-
+#define ILibDuktape_Stream_Buffer		"\xFF_BUFFER"
+#define ILibDuktape_Stream_ReadablePtr	"\xFF_ReadablePtr"
+int g_displayStreamPipeMessages = 0;
+int g_displayFinalizerMessages = 0;
 
 duk_ret_t ILibDuktape_Pollyfills_Buffer_slice(duk_context *ctx)
 {
@@ -157,23 +176,23 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_alloc(duk_context *ctx)
 }
 void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 {
-	// Polyfill 'Buffer.slice'
-	duk_get_prop_string(ctx, -1, "Duktape");										// [g][Duktape]
-	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Duktape][Buffer]
-	duk_get_prop_string(ctx, -1, "prototype");										// [g][Duktape][Buffer][prototype]
-	duk_push_c_function(ctx, ILibDuktape_Pollyfills_Buffer_slice, DUK_VARARGS);		// [g][Duktape][Buffer][prototype][func]
-	duk_put_prop_string(ctx, -2, "slice");											// [g][Duktape][Buffer][prototype]
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_readInt32BE, DUK_VARARGS);// [g][Duktape][Buffer][prototype][func]
-	duk_put_prop_string(ctx, -2, "readInt32BE");									// [g][Duktape][Buffer][prototype]
-	duk_pop_3(ctx);																	// [g]
+	//// Polyfill 'Buffer.slice'
+	//duk_get_prop_string(ctx, -1, "Duktape");										// [g][Duktape]
+	//duk_get_prop_string(ctx, -1, "Buffer");											// [g][Duktape][Buffer]
+	//duk_get_prop_string(ctx, -1, "prototype");										// [g][Duktape][Buffer][prototype]
+	//duk_push_c_function(ctx, ILibDuktape_Pollyfills_Buffer_slice, DUK_VARARGS);		// [g][Duktape][Buffer][prototype][func]
+	//duk_put_prop_string(ctx, -2, "slice");											// [g][Duktape][Buffer][prototype]
+	//duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_readInt32BE, DUK_VARARGS);// [g][Duktape][Buffer][prototype][func]
+	//duk_put_prop_string(ctx, -2, "readInt32BE");									// [g][Duktape][Buffer][prototype]
+	//duk_pop_3(ctx);																	// [g]
 
-	// Polyfill 'Buffer.toString()
-	duk_get_prop_string(ctx, -1, "Duktape");										// [g][Duktape]
-	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Duktape][Buffer]
-	duk_get_prop_string(ctx, -1, "prototype");										// [g][Duktape][Buffer][prototype]
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);	// [g][Duktape][Buffer][prototype][func]
-	duk_put_prop_string(ctx, -2, "toString");										// [g][Duktape][Buffer][prototype]
-	duk_pop_3(ctx);																	// [g]
+	//// Polyfill 'Buffer.toString()
+	//duk_get_prop_string(ctx, -1, "Duktape");										// [g][Duktape]
+	//duk_get_prop_string(ctx, -1, "Buffer");											// [g][Duktape][Buffer]
+	//duk_get_prop_string(ctx, -1, "prototype");										// [g][Duktape][Buffer][prototype]
+	//duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);	// [g][Duktape][Buffer][prototype][func]
+	//duk_put_prop_string(ctx, -2, "toString");										// [g][Duktape][Buffer][prototype]
+	//duk_pop_3(ctx);																	// [g]
 																						
 	// Polyfill Buffer.from()
 	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Buffer]
@@ -313,6 +332,31 @@ duk_ret_t ILibDuktape_Polyfills_Console_enableWebLog(duk_context *ctx)
 #endif
 	return (0);
 }
+duk_ret_t ILibDuktape_Polyfills_Console_displayStreamPipe_getter(duk_context *ctx)
+{
+	duk_push_int(ctx, g_displayStreamPipeMessages);
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_displayStreamPipe_setter(duk_context *ctx)
+{
+	g_displayStreamPipeMessages = duk_require_int(ctx, 0);
+	return(0);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_displayFinalizer_getter(duk_context *ctx)
+{
+	duk_push_int(ctx, g_displayFinalizerMessages);
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_displayFinalizer_setter(duk_context *ctx)
+{
+	g_displayFinalizerMessages = duk_require_int(ctx, 0);
+	return(0);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_logRefCount(duk_context *ctx)
+{
+	printf("Reference Count => %s[%p]:%d\n", Duktape_GetStringPropertyValue(ctx, 0, ILibDuktape_OBJID, "UNKNOWN"), duk_require_heapptr(ctx, 0), ILibDuktape_GetReferenceCount(ctx, 0) - 1);
+	return(0);
+}
 void ILibDuktape_Polyfills_Console(duk_context *ctx)
 {
 	// Polyfill console.log()
@@ -326,11 +370,12 @@ void ILibDuktape_Polyfills_Console(duk_context *ctx)
 		duk_dup(ctx, -1);															// [g][console][console]
 		duk_put_prop_string(ctx, -3, "console");									// [g][console]
 	}
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_Console_log, DUK_VARARGS);		// [g][console][log]
-	duk_put_prop_string(ctx, -2, "log");											// [g][console]
 
+	ILibDuktape_CreateInstanceMethod(ctx, "log", ILibDuktape_Polyfills_Console_log, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "enableWebLog", ILibDuktape_Polyfills_Console_enableWebLog, 1);
-
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "displayStreamPipeMessages", ILibDuktape_Polyfills_Console_displayStreamPipe_getter, ILibDuktape_Polyfills_Console_displayStreamPipe_setter);
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "displayFinalizerMessages", ILibDuktape_Polyfills_Console_displayFinalizer_getter, ILibDuktape_Polyfills_Console_displayFinalizer_setter);
+	ILibDuktape_CreateInstanceMethod(ctx, "logReferenceCount", ILibDuktape_Polyfills_Console_logRefCount, 1);
 	duk_pop(ctx);																	// [g]
 }
 duk_ret_t ILibDuktape_ntohl(duk_context *ctx)
@@ -404,6 +449,14 @@ duk_ret_t ILibDuktape_Polyfills_timer_finalizer(duk_context *ctx)
 	// Make sure we remove any timers just in case, so we don't leak resources
 	ILibDuktape_Timer *ptrs;
 	duk_get_prop_string(ctx, 0, ILibDuktape_Timer_Ptrs);
+	if (duk_has_prop_string(ctx, 0, "\xFF_callback"))
+	{
+		duk_del_prop_string(ctx, 0, "\xFF_callback");
+	}
+	if (duk_has_prop_string(ctx, 0, "\xFF_argArray"))
+	{
+		duk_del_prop_string(ctx, 0, "\xFF_argArray");
+	}
 	ptrs = (ILibDuktape_Timer*)Duktape_GetBuffer(ctx, -1, NULL);
 
 	ILibLifeTime_Remove(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs);
@@ -415,24 +468,29 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 	int argCount, i;
 	duk_context *ctx = ptrs->ctx;
 
+	duk_push_heapptr(ctx, ptrs->callback);				// [func]
+	duk_push_heapptr(ctx, ptrs->object);				// [func][this]
+	duk_push_heapptr(ctx, ptrs->args);					// [func][this][argArray]
+
 	if (ptrs->timerType == ILibDuktape_Timer_Type_INTERVAL)
 	{
-		ILibLifeTime_AddEx(ILibGetBaseTimer(Duktape_GetChain(ptrs->ctx)), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL);
+		ILibLifeTime_AddEx(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL);
+	}
+	else
+	{
+		duk_del_prop_string(ctx, -2, "\xFF_callback");
+		duk_del_prop_string(ctx, -2, "\xFF_argArray");
 	}
 
-	duk_push_heapptr(ptrs->ctx, ptrs->callback);				// [func]
-	duk_push_heapptr(ptrs->ctx, ptrs->object);					// [func][this]
-
-	duk_push_heapptr(ptrs->ctx, ptrs->args);					// [func][this][argArray]
-	argCount = (int)duk_get_length(ptrs->ctx, -1);
+	argCount = (int)duk_get_length(ctx, -1);
 	for (i = 0; i < argCount; ++i)
 	{
-		duk_get_prop_index(ptrs->ctx, -1, i);					// [func][this][argArray][arg]
-		duk_swap_top(ptrs->ctx, -2);							// [func][this][arg][argArray]
+		duk_get_prop_index(ctx, -1, i);					// [func][this][argArray][arg]
+		duk_swap_top(ctx, -2);							// [func][this][arg][argArray]
 	}
-	duk_pop(ptrs->ctx);											// [func][this][...arg...]
-	if (duk_pcall_method(ptrs->ctx, argCount) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "timers.onElapsed() callback handler"); }
-	duk_pop(ctx);												// ...
+	duk_pop(ctx);										// [func][this][...arg...]
+	if (duk_pcall_method(ctx, argCount) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "timers.onElapsed() callback handler"); }
+	duk_pop(ctx);										// ...
 }
 duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 {
@@ -447,6 +505,18 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 	timerType = (ILibDuktape_Timer_Type)duk_get_int(ctx, -1);
 
 	duk_push_object(ctx);														//[retVal]
+	switch (timerType)
+	{
+	case ILibDuktape_Timer_Type_IMMEDIATE:
+		ILibDuktape_WriteID(ctx, "Timers.immediate");
+		break;
+	case ILibDuktape_Timer_Type_INTERVAL:
+		ILibDuktape_WriteID(ctx, "Timers.interval");
+		break;
+	case ILibDuktape_Timer_Type_TIMEOUT:
+		ILibDuktape_WriteID(ctx, "Timers.timeout");
+		break;
+	}
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Polyfills_timer_finalizer);
 	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_Timer));						//[retVal][ptrs]
 	ptrs = (ILibDuktape_Timer*)Duktape_GetBuffer(ctx, -1, NULL);
@@ -463,13 +533,13 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 	for (argx = ILibDuktape_Timer_Type_IMMEDIATE == timerType ? 1 : 2; argx < nargs; ++argx)
 	{
 		duk_dup(ctx, argx);																			//[retVal][argArray][arg]
-		duk_put_prop_index(ctx, -2, argx - (ILibDuktape_Timer_Type_IMMEDIATE == timerType ? 1 : 2));	//[retVal][argArray]
+		duk_put_prop_index(ctx, -2, argx - (ILibDuktape_Timer_Type_IMMEDIATE == timerType ? 1 : 2));//[retVal][argArray]
 	}
-	ptrs->args = duk_get_heapptr(ctx, -1);
+	ptrs->args = duk_get_heapptr(ctx, -1);															//[retVal]
 	duk_put_prop_string(ctx, -2, "\xFF_argArray");
 
-	duk_dup(ctx, 0);															//[retVal][callback]
-	duk_put_prop_string(ctx, -2, "\xFF_callback");								//[retVal]
+	duk_dup(ctx, 0);																				//[retVal][callback]
+	duk_put_prop_string(ctx, -2, "\xFF_callback");													//[retVal]
 
 	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL);
 	return 1;
@@ -758,11 +828,179 @@ void ILibDuktape_DynamicBuffer_Push(duk_context *ctx, void *chain)
 	duk_push_c_function(ctx, ILibDuktape_DynamicBuffer_new, DUK_VARARGS);
 }
 
+duk_ret_t ILibDuktape_Polyfills_debugCrash(duk_context *ctx)
+{
+	void *p = NULL;
+	((int*)p)[0] = 55;
+	return(0);
+}
 
+
+void ILibDuktape_Stream_PauseSink(struct ILibDuktape_readableStream *sender, void *user)
+{
+}
+void ILibDuktape_Stream_ResumeSink(struct ILibDuktape_readableStream *sender, void *user)
+{
+	int skip = 0;
+	duk_size_t bufferLen;
+
+	duk_push_heapptr(sender->ctx, sender->object);			// [stream]
+	void *func = Duktape_GetHeapptrProperty(sender->ctx, -1, "_read");
+	duk_pop(sender->ctx);									// ...
+
+	while (func != NULL && sender->paused == 0)
+	{
+		duk_push_heapptr(sender->ctx, sender->object);									// [this]
+		if (!skip && duk_has_prop_string(sender->ctx, -1, ILibDuktape_Stream_Buffer))
+		{
+			duk_get_prop_string(sender->ctx, -1, ILibDuktape_Stream_Buffer);			// [this][buffer]
+			if ((bufferLen = duk_get_length(sender->ctx, -1)) > 0)
+			{
+				// Buffer is not empty, so we need to 'PUSH' it
+				duk_get_prop_string(sender->ctx, -2, "push");							// [this][buffer][push]
+				duk_dup(sender->ctx, -3);												// [this][buffer][push][this]
+				duk_dup(sender->ctx, -3);												// [this][buffer][push][this][buffer]
+				duk_remove(sender->ctx, -4);											// [this][push][this][buffer]
+				duk_call_method(sender->ctx, 1);										// [this][boolean]
+				sender->paused = !duk_get_boolean(sender->ctx, -1);
+				duk_pop(sender->ctx);													// [this]
+
+				if (duk_has_prop_string(sender->ctx, -1, ILibDuktape_Stream_Buffer))
+				{
+					duk_get_prop_string(sender->ctx, -1, ILibDuktape_Stream_Buffer);	// [this][buffer]
+					if (duk_get_length(sender->ctx, -1) == bufferLen)
+					{
+						// All the data was unshifted
+						skip = !sender->paused;					
+					}
+					duk_pop(sender->ctx);												// [this]
+				}
+				duk_pop(sender->ctx);													// ...
+			}
+			else
+			{
+				// Buffer is empty
+				duk_pop(sender->ctx);													// [this]
+				duk_del_prop_string(sender->ctx, -1, ILibDuktape_Stream_Buffer);
+				duk_pop(sender->ctx);													// ...
+			}
+		}
+		else
+		{
+			// We need to 'read' more data
+			duk_push_heapptr(sender->ctx, func);										// [this][read]
+			duk_swap_top(sender->ctx, -2);												// [read][this]
+			if (duk_pcall_method(sender->ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(sender->ctx); duk_pop(sender->ctx); break; }
+			//																			// [buffer]
+			duk_push_heapptr(sender->ctx, sender->object);								// [buffer][this]
+			duk_swap_top(sender->ctx, -2);												// [this][buffer]
+			if (duk_has_prop_string(sender->ctx, -2, ILibDuktape_Stream_Buffer))
+			{
+				duk_push_global_object(sender->ctx);									// [this][buffer][g]
+				duk_get_prop_string(sender->ctx, -1, "Buffer");							// [this][buffer][g][Buffer]
+				duk_remove(sender->ctx, -2);											// [this][buffer][Buffer]
+				duk_get_prop_string(sender->ctx, -1, "concat");							// [this][buffer][Buffer][concat]
+				duk_swap_top(sender->ctx, -2);											// [this][buffer][concat][this]
+				duk_push_array(sender->ctx);											// [this][buffer][concat][this][Array]
+				duk_get_prop_string(sender->ctx, -1, "push");							// [this][buffer][concat][this][Array][push]
+				duk_dup(sender->ctx, -2);												// [this][buffer][concat][this][Array][push][this]
+				duk_get_prop_string(sender->ctx, -7, ILibDuktape_Stream_Buffer);		// [this][buffer][concat][this][Array][push][this][buffer]
+				duk_call_method(sender->ctx, 1); duk_pop(sender->ctx);					// [this][buffer][concat][this][Array]
+				duk_get_prop_string(sender->ctx, -1, "push");							// [this][buffer][concat][this][Array][push]
+				duk_dup(sender->ctx, -2);												// [this][buffer][concat][this][Array][push][this]
+				duk_dup(sender->ctx, -6);												// [this][buffer][concat][this][Array][push][this][buffer]
+				duk_remove(sender->ctx, -7);											// [this][concat][this][Array][push][this][buffer]
+				duk_call_method(sender->ctx, 1); duk_pop(sender->ctx);					// [this][concat][this][Array]
+				duk_call_method(sender->ctx, 1);										// [this][buffer]
+			}
+			duk_put_prop_string(sender->ctx, -2, ILibDuktape_Stream_Buffer);			// [this]
+			duk_pop(sender->ctx);														// ...
+			skip = 0;
+		}
+	}
+}
+int ILibDuktape_Stream_UnshiftSink(struct ILibDuktape_readableStream *sender, int unshiftBytes, void *user)
+{
+	duk_push_fixed_buffer(sender->ctx, unshiftBytes);									// [buffer]
+	memcpy_s(Duktape_GetBuffer(sender->ctx, -1, NULL), unshiftBytes, sender->unshiftReserved, unshiftBytes);
+	duk_push_heapptr(sender->ctx, sender->object);										// [buffer][stream]
+	duk_push_buffer_object(sender->ctx, -2, 0, unshiftBytes, DUK_BUFOBJ_NODEJS_BUFFER);	// [buffer][stream][buffer]
+	duk_put_prop_string(sender->ctx, -2, ILibDuktape_Stream_Buffer);					// [buffer][stream]
+	duk_pop_2(sender->ctx);																// ...
+
+	return(unshiftBytes);
+}
+duk_ret_t ILibDuktape_Stream_Push(duk_context *ctx)
+{
+	duk_push_this(ctx);																					// [stream]
+	ILibDuktape_readableStream *RS = (ILibDuktape_readableStream*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_Stream_ReadablePtr);
+	duk_get_prop_string(ctx, -1, ILibDuktape_Stream_Buffer);											// [stream][buffer]
+	duk_del_prop_string(ctx, -2, ILibDuktape_Stream_Buffer); // (Deleting here, because unshift will save it again, if necessary)
+
+	duk_size_t bufferLen;
+	char *buffer = (char*)Duktape_GetBuffer(ctx, -1, &bufferLen);
+
+	duk_push_boolean(ctx, !ILibDuktape_readableStream_WriteDataEx(RS, 0, buffer, (int)bufferLen));		// [stream][buffer][retVal]
+	return(1);
+}
+duk_ret_t ILibDuktape_Stream_EndSink(duk_context *ctx)
+{
+	duk_push_this(ctx);												// [stream]
+	ILibDuktape_readableStream *RS = (ILibDuktape_readableStream*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_Stream_ReadablePtr);
+	ILibDuktape_readableStream_WriteEnd(RS);
+	return(0);
+}
+duk_idx_t ILibDuktape_Stream_newReadable(duk_context *ctx)
+{
+	ILibDuktape_readableStream *RS;
+	duk_push_object(ctx);							// [Readable]
+	ILibDuktape_WriteID(ctx, "stream.readable");
+	RS = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_Stream_PauseSink, ILibDuktape_Stream_ResumeSink, ILibDuktape_Stream_UnshiftSink, NULL);
+	RS->paused = 1;
+
+	duk_push_pointer(ctx, RS);
+	duk_put_prop_string(ctx, -2, ILibDuktape_Stream_ReadablePtr);
+	ILibDuktape_CreateInstanceMethod(ctx, "push", ILibDuktape_Stream_Push, DUK_VARARGS);
+	ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "end", ILibDuktape_Stream_EndSink);
+
+	if (duk_is_object(ctx, 0))
+	{
+		void *h = Duktape_GetHeapptrProperty(ctx, 0, "read");
+		if (h != NULL) { duk_push_heapptr(ctx, h); duk_put_prop_string(ctx, -2, "_read"); }
+	}
+	return(1);
+}
+void ILibDuktape_Stream_Init(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);					// [stream
+	ILibDuktape_WriteID(ctx, "stream");
+	ILibDuktape_CreateInstanceMethod(ctx, "Readable", ILibDuktape_Stream_newReadable, DUK_VARARGS);
+}
+void ILibDuktape_Polyfills_debugGC2(duk_context *ctx, void ** args, int argsLen)
+{
+	if (g_displayFinalizerMessages) { printf("=> GC();\n"); }
+	duk_gc(ctx, 0);
+	duk_gc(ctx, 0);
+}
+duk_ret_t ILibDuktape_Polyfills_debugGC(duk_context *ctx)
+{
+	ILibDuktape_Immediate(ctx, (void*[]) { NULL }, 0, ILibDuktape_Polyfills_debugGC2);
+	return(0);
+}
+duk_ret_t ILibDuktape_Polyfills_debug(duk_context *ctx)
+{
+#ifdef WIN32
+	if (IsDebuggerPresent()) { __debugbreak(); }
+#elif defined(_POSIX)
+	raise(SIGTRAP);
+#endif
+	return(0);
+}
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
 	ILibDuktape_ModSearch_AddHandler(ctx, "DynamicBuffer", ILibDuktape_DynamicBuffer_Push);
+	ILibDuktape_ModSearch_AddHandler(ctx, "stream", ILibDuktape_Stream_Init);
 
 	// Global Polyfills
 	duk_push_global_object(ctx);													// [g]
@@ -774,6 +1012,9 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_Polyfills_timer(ctx);
 	
 	ILibDuktape_CreateInstanceMethod(ctx, "addModule", ILibDuktape_Polyfills_addModule, 2);
+	ILibDuktape_CreateInstanceMethod(ctx, "_debugCrash", ILibDuktape_Polyfills_debugCrash, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "_debugGC", ILibDuktape_Polyfills_debugGC, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "_debug", ILibDuktape_Polyfills_debug, 0);
 
 	duk_pop(ctx);																	// ...
 }

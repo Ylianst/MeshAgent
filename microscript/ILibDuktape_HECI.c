@@ -1,3 +1,19 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 #include "ILibDuktape_HECI.h"
 #include "ILibDuktapeModSearch.h"
 #include "ILibDuktape_Helpers.h"
@@ -220,7 +236,7 @@ duk_ret_t ILibDuktape_HECI_SessionFinalizer(duk_context *ctx)
 
 void ILibDuktape_HECI_Session_EmitErrorEvent(void *chain, void *session)
 {
-	if (ILibIsRunningOnChainThread(chain) == 0) { ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_HECI_Session_EmitErrorEvent, session); }
+	if (ILibIsRunningOnChainThread(chain) == 0) { ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_HECI_Session_EmitErrorEvent, session); return; }
 	ILibDuktape_HECI_Session *s = (ILibDuktape_HECI_Session*)session;
 	duk_context *ctx = s->stream->readableStream->ctx;
 
@@ -234,7 +250,7 @@ void ILibDuktape_HECI_Session_EmitErrorEvent(void *chain, void *session)
 }
 void ILibDuktape_HECI_Session_EmitStreamReady(void *chain, void *session)
 {
-	if (ILibIsRunningOnChainThread(chain) == 0) { ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_HECI_Session_EmitStreamReady, session); }
+	if (ILibIsRunningOnChainThread(chain) == 0) { ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_HECI_Session_EmitStreamReady, session); return; }
 	ILibDuktape_DuplexStream_Ready(((ILibDuktape_HECI_Session*)session)->stream);
 }
 
@@ -278,7 +294,7 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteHandler_Process(ILibDuktap
 	DWORD bytesWritten;
 	BOOL result = TRUE;
 #else
-	size_t bytesWritten;
+	ssize_t bytesWritten;
 #endif
 
 	while (ILibQueue_GetCount(session->PendingWrites) > 0)
@@ -662,6 +678,7 @@ duk_ret_t ILibDuktape_HECI_Session_connect(duk_context *ctx)
 duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
 {
 	duk_push_object(ctx);															// [Session]
+	ILibDuktape_WriteID(ctx, "heci.session");
 	ILibDuktape_HECI_Push(ctx, NULL);												// [Session][HECI]
 	duk_dup(ctx, -2);																// [Session][HECI][Session]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Parent);							// [Session][HECI]
@@ -939,7 +956,7 @@ void ILibDuktape_HECI_PostSelect(void* object, int slct, fd_set *readset, fd_set
 	}
 	if (FD_ISSET(h->descriptor, writeset))
 	{
-		printf("Writeset\n");
+		ILibDuktape_HECI_Session_WriteHandler_Process(h->session);
 	}
 }
 void ILibDuktape_HECI_Destroy(void *object)
@@ -957,6 +974,7 @@ void ILibDuktape_HECI_Destroy(void *object)
 void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);																	// [HECI]
+	ILibDuktape_WriteID(ctx, "heci");
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_HECI_Finalizer);
 
 #ifdef WIN32

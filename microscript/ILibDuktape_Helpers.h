@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,7 +61,6 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 
 duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...);
 typedef void(*ILibDuktape_IndependentFinalizerHandler)(duk_context *ctx, void *object);
-void ILibDuktape_CreateIndependentFinalizer(duk_context *ctx, ILibDuktape_IndependentFinalizerHandler handler);
 int ILibDuktape_Process_GetExitCode(duk_context *ctx);
 
 void ILibDuktape_CreateEventWithGetter(duk_context *ctx, char *propName, duk_c_function getterMethod);
@@ -86,7 +85,7 @@ void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodNam
 void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr);
 void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName);
 #define ILibDuktape_CreateReadonlyProperty_int(ctx, propName, propValue) duk_push_int(ctx, propValue);ILibDuktape_CreateReadonlyProperty(ctx, propName)
-#define ILibDuktape_CreateFinalizer(context, funcImpl) 	duk_push_c_function(context, funcImpl, 1); duk_set_finalizer(context, -2);														
+void ILibDuktape_CreateFinalizer(duk_context *ctx, duk_c_function func);
 
 void *ILibDuktape_Memory_Alloc(duk_context *ctx, duk_size_t size);
 void *ILibDuktape_Memory_AllocEx(duk_context *ctx, duk_idx_t index, duk_size_t size);
@@ -102,7 +101,8 @@ int ILibDuktape_IsPointerValid(void *chain, void *ptr);
 #define ILibDuktape_InValidateHeapPointer(ctx, objIdx) ILibDuktape_InValidatePointer(Duktape_GetChain(ctx), duk_get_heapptr(ctx, objIdx))
 
 typedef void(*ILibDuktape_ImmediateHandler)(duk_context *ctx, void ** args, int argsLen);
-void ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback);
+void* ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback);
+int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i);
 
 #define ILibDuktape_WriteID(ctx, id) duk_push_string(ctx, id);duk_put_prop_string(ctx, -2, ILibDuktape_OBJID)
 

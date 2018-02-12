@@ -34,9 +34,6 @@
     <ClCompile Include="..\microscript\duktape.c">
       <Filter>Microscript</Filter>
     </ClCompile>
-    <ClCompile Include="..\microscript\ILibDuktape_Debugger.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_DuplexStream.c">
       <Filter>Microscript</Filter>
     </ClCompile>
@@ -62,15 +59,6 @@
       <Filter>Microscript</Filter>
     </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktapeModSearch.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microscript\ILibParsers_Duktape.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microscript\ILibWebClient_Duktape.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
-    <ClCompile Include="..\microscript\ILibWebServer_Duktape.c">
       <Filter>Microscript</Filter>
     </ClCompile>
     <ClCompile Include="..\microstack\ILibAsyncServerSocket.c">
@@ -172,15 +160,15 @@
     <ClCompile Include="..\microscript\ILibDuktape_HttpStream.c">
       <Filter>Microscript</Filter>
     </ClCompile>
+    <ClCompile Include="..\microscript\duk_module_duktape.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\duktape.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microscript\ILibDuktape_Debugger.h">
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_DuplexStream.h">
@@ -208,15 +196,6 @@
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktapeModSearch.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microscript\ILibParsers_Duktape.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microscript\ILibWebClient_Duktape.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microscript\ILibWebServer_Duktape.h">
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microstack\ILibAsyncServerSocket.h">
@@ -314,6 +293,9 @@
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_HECI.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\duk_module_duktape.h">
       <Filter>Microscript</Filter>
     </ClInclude>
   </ItemGroup>

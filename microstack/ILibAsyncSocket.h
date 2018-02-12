@@ -1,5 +1,5 @@
 /*   
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -239,6 +239,7 @@ void ILibAsyncSocket_SetTimeoutEx(ILibAsyncSocket_SocketModule module, int timeo
 #define ILibAsyncSocket_SetTimeout(module, timeoutSeconds, timeoutHandler) ILibAsyncSocket_SetTimeoutEx(module, timeoutSeconds*1000, timeoutHandler)
 
 #ifndef MICROSTACK_NOTLS
+int ILibAsyncSocket_TLS_WasHandshakeError(ILibAsyncSocket_SocketModule socketModule);
 X509 *ILibAsyncSocket_SslGetCert(ILibAsyncSocket_SocketModule socketModule);
 STACK_OF(X509) *ILibAsyncSocket_SslGetCerts(ILibAsyncSocket_SocketModule socketModule);
 #endif 

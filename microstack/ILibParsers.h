@@ -1,5 +1,5 @@
 /*   
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -859,6 +859,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibForceUnBlockChain(void *Chain);
 	void ILibChain_RunOnMicrostackThreadEx(void *chain, ILibChain_StartEvent handler, void *user);
 	#define ILibChain_RunOnMicrostackThread(chain, handler, user) if(ILibIsRunningOnChainThread(chain)==0){ILibChain_RunOnMicrostackThreadEx(chain, handler, user);}else{handler(chain,user);}
+#ifdef WIN32
+	HANDLE ILibChain_GetMicrostackThreadHandle(void *chain);
+#endif
 	/* \} */
 
 	/*! \defgroup SparseArrayGroup Sparse Array
@@ -1279,6 +1282,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	//
 	void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset);
 	char* ILibChain_Debug(void *chain, char* buffer, int bufferLen);
+	extern char* g_ILibCrashID;
 #if defined(WIN32)
 	int ILib_WindowsExceptionFilter(DWORD exceptionCode, void *exceptionInfo, CONTEXT *exceptionContext);
 	void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext);

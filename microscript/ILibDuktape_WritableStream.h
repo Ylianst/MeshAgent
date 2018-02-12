@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,14 +33,10 @@ typedef struct ILibDuktape_WritableStream
 	int JSCreated;
 	duk_context *ctx;
 	void *obj;
-	void *OnDrain;
 	void *OnWriteFlush;
 
 	ILibDuktape_WriteableStream_WriteFlushNative OnWriteFlushEx;
 	void *OnWriteFlushEx_User;
-
-	void *OnError;
-	void *OnFinish;
 	char WaitForEnd;
 
 	ILibDuktape_WritableStream_WriteHandler WriteSink;

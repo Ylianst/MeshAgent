@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -1082,6 +1082,8 @@ char* ILibWrapper_WebRTC_Connection_SetOffer(ILibWrapper_WebRTC_Connection conne
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->mFactory->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_STUN_ICE, ILibRemoteLogging_Flags_VerbosityLevel_1, "[ILibWrapperWebRTC] Set ICE/Offer: <br/>%s", offer);
 
 	obj->offerBlockLen = ILibStun_SetIceOffer2(obj->mFactory->mStunModule, obj->remoteOfferBlock, obj->remoteOfferBlockLen, obj->offerBlock != NULL ? obj->localUsername : NULL, obj->offerBlock != NULL ? 8 : 0, obj->offerBlock != NULL ? obj->localPassword : NULL, obj->offerBlock != NULL ? 32 : 0, &obj->offerBlock);
+	if (obj->offerBlockLen == 0) { return(NULL); }
+
 	ILibWrapper_BlockToSDP(obj->offerBlock, obj->offerBlockLen, obj->isOfferInitiator, &un, &up, &sdp);
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->mFactory->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_STUN_ICE, ILibRemoteLogging_Flags_VerbosityLevel_1, "[ILibWrapperWebRTC] Return ICE/Response: <br/>%s", sdp);
@@ -1312,7 +1314,7 @@ int ILibWrapper_WebRTC_Connection_Debug_Set(ILibWrapper_WebRTC_Connection connec
 }
 void ILibWrapper_WebRTC_ConnectionFactory_SetSimulatedLossPercentage(ILibWrapper_WebRTC_ConnectionFactory factory, int lossPercentage)
 {
-	ILibSCTP_SetSimulatedInboundLossPercentage(((ILibWrapper_WebRTC_ConnectionFactoryStruct*)factory)->mFactory, lossPercentage);
+	ILibSCTP_SetSimulatedInboundLossPercentage(((ILibWrapper_WebRTC_ConnectionFactoryStruct*)factory)->mStunModule, lossPercentage);
 }
 #endif
 #endif

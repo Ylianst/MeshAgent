@@ -1,3 +1,18 @@
+/*
+Copyright 2006 - 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 #include "duktape.h"
 #include "ILibDuktapeModSearch.h"
@@ -15,9 +30,6 @@ typedef struct ILibDuktape_NetworkMonitor
 	ILibDuktape_EventEmitter *emitter;
 	ILibIPAddressMonitor addressMonitor;
 	ILibHashtable *addressTable;
-	void *OnChange;
-	void *OnAdded;
-	void *OnRemoved;
 }ILibDuktape_NetworkMonitor;
 
 
@@ -63,45 +75,31 @@ ILibHashtable ILibDuktape_NetworkMonitor_CreateTable(duk_context *ctx)
 void ILibDuktape_NetworkMonitor_EventSink_OnEnumerateCurrent(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	duk_context *ctx = (duk_context*)((void**)user)[0];
-	void *OnEvent = ((void**)user)[1];
+	char *eventName = (char*)((void**)user)[1];
 	void *Self = ((void**)user)[2];
 	ILibHashtable other = (ILibHashtable)((void**)user)[3];
 
 	if (ILibHashtable_Get(other, NULL, Key2, Key2Len) == NULL)
 	{
-		if (OnEvent != NULL)
-		{
-			duk_push_heapptr(ctx, OnEvent);						// [func]
-			duk_push_heapptr(ctx, Self);						// [func][this]
-			duk_push_lstring(ctx, Key2, (duk_size_t)Key2Len);	// [func][this][address]
-			if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "NetworkMonitor.OnAdd/Remove(): "); }
-			duk_pop(ctx);
-		}
+		ILibDuktape_EventEmitter_SetupEmit(ctx, Self, eventName);	// [emit][this][eventName]
+		duk_push_lstring(ctx, Key2, (duk_size_t)Key2Len);			// [emit][this][eventName][address]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "NetworkMonitor.OnAdd/Remove(): "); }
+		duk_pop(ctx);
 	}
 }
 void ILibDuktape_NetworkMonitor_EventSink(ILibIPAddressMonitor sender, void *user)
 {
 	ILibDuktape_NetworkMonitor *nm = (ILibDuktape_NetworkMonitor*)user;
-	if (nm->OnChange != NULL)
-	{
-		duk_push_heapptr(nm->ctx, nm->OnChange);		// [func]
-		duk_push_heapptr(nm->ctx, nm->emitter->object);	// [func][this]
-		if (duk_pcall_method(nm->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(nm->ctx, "NetworkMonitor.change(): "); }
-		duk_pop(nm->ctx);								// ...
-	}
+		
+	ILibDuktape_EventEmitter_SetupEmit(nm->ctx, nm->emitter->object, "change");	// [emit][this][change]
+	if (duk_pcall_method(nm->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(nm->ctx, "NetworkMonitor.change(): "); }
+	duk_pop(nm->ctx);															// ...
+	
 
 	ILibHashtable current = ILibDuktape_NetworkMonitor_CreateTable(nm->ctx);
+	ILibHashtable_Enumerate(current, ILibDuktape_NetworkMonitor_EventSink_OnEnumerateCurrent, (void*[]){ nm->ctx, "add", nm->emitter->object, nm->addressTable });
+	ILibHashtable_Enumerate(nm->addressTable, ILibDuktape_NetworkMonitor_EventSink_OnEnumerateCurrent, (void*[]) { nm->ctx, "remove", nm->emitter->object, current });
 
-	if (nm->OnAdded != NULL) 
-	{ 
-		void *data[] = { nm->ctx, nm->OnAdded, nm->emitter->object, nm->addressTable };
-		ILibHashtable_Enumerate(current, ILibDuktape_NetworkMonitor_EventSink_OnEnumerateCurrent, data); 
-	}
-	if(nm->OnRemoved != NULL) 
-	{ 
-		void *data[] = { nm->ctx, nm->OnRemoved, nm->emitter->object, current };
-		ILibHashtable_Enumerate(nm->addressTable, ILibDuktape_NetworkMonitor_EventSink_OnEnumerateCurrent, data);
-	}
 
 	ILibHashtable_Destroy(nm->addressTable);
 	nm->addressTable = current;
@@ -130,9 +128,9 @@ void ILibDuktape_NetworkMonitor_PUSH(duk_context *ctx, void *chain)
 	nm->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	nm->addressMonitor = ILibIPAddressMonitor_Create(chain, ILibDuktape_NetworkMonitor_EventSink, nm);
 
-	ILibDuktape_EventEmitter_CreateEvent(nm->emitter, "change", &(nm->OnChange));
-	ILibDuktape_EventEmitter_CreateEvent(nm->emitter, "add", &(nm->OnAdded));
-	ILibDuktape_EventEmitter_CreateEvent(nm->emitter, "remove", &(nm->OnRemoved));
+	ILibDuktape_EventEmitter_CreateEventEx(nm->emitter, "change");
+	ILibDuktape_EventEmitter_CreateEventEx(nm->emitter, "add");
+	ILibDuktape_EventEmitter_CreateEventEx(nm->emitter, "remove");
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_NetworkMonitor_Finalizer);
 
 	//

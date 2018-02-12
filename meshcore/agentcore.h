@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -118,16 +118,6 @@ typedef struct MeshAgent_Commands_SCRIPT_ExecuteString
 }MeshAgent_Commands_SCRIPT_ExecuteString;
 #pragma pack(pop)
 
-typedef struct MeshAgentDuktapePtrs
-{
-	struct MeshAgentDuktapePtrs *Next;
-	duk_context *ctx;
-	void *MeshAgentObject;
-	void *OnCommand;
-	void *OnConnect;
-	void *OnReady;
-}MeshAgentDuktapePtrs;
-
 typedef enum MeshAgentHost_BatteryInfo
 {
 	MeshAgentHost_BatteryInfo_HIGH			= 1,
@@ -148,7 +138,6 @@ typedef struct MeshAgentHostContainer
 	duk_context *meshCoreCtx;
 	char *meshCoreCtx_embeddedScript;
 	int meshCoreCtx_embeddedScriptLen;
-	MeshAgentDuktapePtrs *DuktapeMeshBindings;
 	ILibProcessPipe_Manager *pipeManager;
 
 	char* exePath;
@@ -191,6 +180,9 @@ typedef struct MeshAgentHostContainer
 	int exitCode;
 #ifndef WIN32
 	int dbRetryCount;
+#endif
+#if defined(_WINSERVICE)
+	int runningAsConsole;
 #endif
 }MeshAgentHostContainer;
 

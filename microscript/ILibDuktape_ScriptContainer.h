@@ -1,11 +1,11 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -144,9 +144,10 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **argv, char **script, int *
 void ILibDuktape_ScriptContainer_InitMaster(void *chain, char *exePath, ILibProcessPipe_Manager manager);
 int ILibDuktape_ScriptContainer_StartSlave(void *chain, ILibProcessPipe_Manager manager);
 
-
+duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal();
+duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_context *ctx, SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser);
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_ENGINE_SETTINGS *settings);
-duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser);
+#define ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(securityFlags, executionTimeout, chain, argList, db, exePath, pipeManager, exitHandler, exitUser) ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal(), (securityFlags), (executionTimeout), (chain), (argList), (db), (exePath), (pipeManager), (exitHandler), (exitUser))
 #define ILibDuktape_ScriptContainer_InitializeJavaScriptEngine(securityFlags, executionTimeout, chain, pp_argList, db, exitHandler, exitUser) ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx((securityFlags), (executionTimeout), (chain), (pp_argList), (db), NULL, NULL, (exitHandler), (exitUser))
 
 SCRIPT_ENGINE_SETTINGS *ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx);

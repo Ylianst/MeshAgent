@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2017 Intel Corporation
+Copyright 2006 - 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -68,12 +68,12 @@ limitations under the License.
 #define MESH_MCASTv4_GROUP "239.255.255.235"
 #define MESH_MCASTv6_GROUP "FF02:0:0:0:0:0:0:FE"
 
+char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB7, 0xF7, 0xE9, 0xBE, 0x44, 0x91, 0x4C, 0x19 };
 #define MESH_SCRIPTCONTAINER_ID	"\xFF_ScriptContainer_ID"
 #define MESH_AGENT_SINGLETON	"\xFF_MeshAgentObject_Singleton"
 #define SEQ_TABLE_KEY			"\xFF_seqTable"
 #define CONTAINER_PTR			"\xFF_ptr"
 #define MESH_AGENT_PTR			"\xFFMeshAgentPtr"
-#define MESH_AGENT_DUKPTRS		"\xFFptrs"
 #define CTX_PTR					"\xFF_Heap"
 #define CONTEXT_GUID_PTR		"_CONTEXT_GUID_PTR"
 #define REMOTE_DESKTOP_STREAM	"\xFF_RemoteDesktopStream"
@@ -521,85 +521,28 @@ void IPAddressMonitor(void *data)
 Begin Mesh Agent Duktape Abstraction
 --------------------------------*/
 
-MeshAgentDuktapePtrs* ILibDuktape_MeshAgent_GetMeshAgentPtrs(duk_context *ctx) 
-{
-	MeshAgentDuktapePtrs *ptrs = NULL;
-	MeshAgentHostContainer *agent = NULL;
-
-	duk_push_this(ctx);												// [MeshAgent]
-	if (duk_has_prop_string(ctx, -1, MESH_AGENT_DUKPTRS))
-	{
-		// We already created a binding earlier
-		duk_get_prop_string(ctx, -1, MESH_AGENT_DUKPTRS);			// [MeshAgent][ptrs]
-		ptrs = (MeshAgentDuktapePtrs*)Duktape_GetBuffer(ctx, -1, NULL);
-		duk_pop(ctx);												// [MeshAgent]
-	}
-	else
-	{
-		// Create a new binding
-		duk_push_fixed_buffer(ctx, sizeof(MeshAgentDuktapePtrs));	// [MeshAgent][buffer]
-		ptrs = (MeshAgentDuktapePtrs*)Duktape_GetBuffer(ctx, -1, NULL);
-		duk_put_prop_string(ctx, -2, MESH_AGENT_DUKPTRS);			// [MeshAgent]
-
-		memset(ptrs, 0, sizeof(MeshAgentDuktapePtrs));
-		ptrs->ctx = ctx;
-		ptrs->MeshAgentObject = duk_get_heapptr(ctx, -1);
-
-		duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);				// [MeshAgent][Host]
-		agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
-		duk_pop(ctx);												// [MeshAgent]
-		ptrs->Next = agent->DuktapeMeshBindings;
-		agent->DuktapeMeshBindings = ptrs;
-	}
-	duk_pop(ctx);													// ...
-	return ptrs;
-}
 duk_ret_t ILibDuktape_MeshAgent_AddCommandHandler(duk_context *ctx)
 {
-	MeshAgentDuktapePtrs *ptrs;
-	void *OnCommand = duk_require_heapptr(ctx, 0);
-
-	ptrs = ILibDuktape_MeshAgent_GetMeshAgentPtrs(ctx);
-	ptrs->OnCommand = OnCommand;
+	duk_push_this(ctx);							// [agent]
+	duk_get_prop_string(ctx, -1, "on");			// [agent][on]
+	duk_swap_top(ctx, -2);						// [on][this]
+	duk_push_string(ctx, "Command");			// [on][this][Command]
+	duk_dup(ctx, 0);							// [on][this][Command][listener]
+	duk_call_method(ctx, 2);
 	return 0;
 }
 duk_ret_t ILibDuktape_MeshAgent_AddConnectHandler(duk_context *ctx)
 {
-	MeshAgentDuktapePtrs *ptrs;
-	void *OnConnect = duk_require_heapptr(ctx, 0);
-
-	ptrs = ILibDuktape_MeshAgent_GetMeshAgentPtrs(ctx);
-	ptrs->OnConnect = OnConnect;
+	duk_push_this(ctx);							// [agent]
+	duk_get_prop_string(ctx, -1, "on");			// [agent][on]
+	duk_swap_top(ctx, -2);						// [on][this]
+	duk_push_string(ctx, "Connected");			// [on][this][connected]
+	duk_dup(ctx, 0);							// [on][this][connected][listener]
+	duk_call_method(ctx, 2);
 	return 0;
 }
 duk_ret_t ILibDuktape_MeshAgent_Finalizer(duk_context *ctx)
 {
-	MeshAgentDuktapePtrs *ptrs = NULL, *binding = NULL;
-	MeshAgentHostContainer *agent = NULL;
-
-	duk_dup(ctx, 0);									// [MeshAgent]
-	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);		// [MeshAgent][MeshAgentPtr]
-	agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
-
-	if (duk_has_prop_string(ctx, -2, MESH_AGENT_DUKPTRS))
-	{
-		duk_get_prop_string(ctx, -2, MESH_AGENT_DUKPTRS);		// [MeshAgent][MeshAgentPtr][ptrs]
-		ptrs = (MeshAgentDuktapePtrs*)Duktape_GetBuffer(ctx, -1, NULL);
-
-		if (agent->DuktapeMeshBindings == ptrs)
-		{
-			agent->DuktapeMeshBindings = ptrs->Next;
-		}
-		else
-		{
-			binding = agent->DuktapeMeshBindings;
-			while (binding->Next != NULL)
-			{
-				if (binding->Next == ptrs) { binding->Next = ptrs->Next; break; }
-				binding = binding->Next;
-			}
-		}
-	}
 	return 0;
 }
 
@@ -735,7 +678,6 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
-
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
 	kvm_cleanup();
@@ -745,7 +687,7 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 {
 	//printf("KVM/PAUSE\n");
 #ifdef _POSIX
-	ILibProcessPipe_Pipe_Pause(((RemoteDesktop_Ptrs*)user)->kvmPipe);
+	if (((RemoteDesktop_Ptrs*)user)->kvmPipe != NULL) { ILibProcessPipe_Pipe_Pause(((RemoteDesktop_Ptrs*)user)->kvmPipe); }
 #else
 	kvm_pause(1);
 #endif
@@ -755,7 +697,7 @@ void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *se
 	//printf("KVM/RESUME\n");
 
 #ifdef _POSIX
-	ILibProcessPipe_Pipe_Resume(((RemoteDesktop_Ptrs*)user)->kvmPipe);
+	if (((RemoteDesktop_Ptrs*)user)->kvmPipe != NULL) { ILibProcessPipe_Pipe_Resume(((RemoteDesktop_Ptrs*)user)->kvmPipe); }
 #else
 	kvm_pause(0);
 #endif
@@ -838,7 +780,11 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 
 	// Setup Remote Desktop
 #ifdef WIN32
-	kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
+	#ifdef _WINSERVICE
+		kvm_relay_setup(agent->exePath, agent->runningAsConsole ? NULL : agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
+	#else
+		kvm_relay_setup(agent->exePath, NULL, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
+	#endif
 #else
 	ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
 #endif
@@ -933,17 +879,54 @@ duk_ret_t ILibDuktape_MeshAgent_isControlChannelConnected(duk_context *ctx)
 duk_ret_t ILibDuktape_MeshAgent_eval(duk_context *ctx)
 {
 	duk_size_t evalStrLen;
-	char *evalStr = duk_get_lstring(ctx, 0, &evalStrLen);
+	char *evalStr = (char*)duk_get_lstring(ctx, 0, &evalStrLen);
 
 	printf("eval(): %s\n", evalStr);
 	duk_eval_string(ctx, evalStr);
 	return(1);
 }
+duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID);
+
+void ILibDuktape_MeshAgent_dumpCoreModuleEx(void *chain, void *user)
+{
+	MeshAgentHostContainer* agentHost = (MeshAgentHostContainer*)user;
+	char *CoreModule;
+
+	ScriptEngine_Stop((MeshAgentHostContainer*)user, MeshAgent_JavaCore_ContextGuid);
+	printf("CoreModule was manually dumped, restarting!\n");
+
+	int CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
+	if (CoreModuleLen > 0)
+	{
+		// There is a core module, launch it now.
+		CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+		ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+
+		if (ILibDuktape_ScriptContainer_CompileJavaScript(agentHost->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4) != 0 ||
+			ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+				ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+			duk_pop(agentHost->meshCoreCtx);
+		}
+		free(CoreModule);
+	}
+	agentHost->localScript = 1;
+}
+duk_ret_t ILibDuktape_MeshAgent_dumpCoreModule(duk_context *ctx)
+{
+	duk_push_this(ctx);								// [agent]
+	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);	// [agent][ptr]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
+
+	agent->localScript = 0;
+	ILibChain_RunOnMicrostackThreadEx(agent->chain, ILibDuktape_MeshAgent_dumpCoreModuleEx, agent);
+	return(0);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
 	ILibDuktape_EventEmitter *emitter;
-
 
 	duk_push_heap_stash(ctx);									// [stash]
 	if (duk_has_prop_string(ctx, -1, MESH_AGENT_SINGLETON))
@@ -959,6 +942,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 
 	duk_pop_2(ctx);												// ...
 	duk_push_object(ctx);										// [MeshAgent]
+	ILibDuktape_WriteID(ctx, "MeshAgent");
 	duk_push_pointer(ctx, agent);								// [MeshAgent][ptr]
 	duk_put_prop_string(ctx, -2, MESH_AGENT_PTR);				// [MeshAgent]
 
@@ -979,18 +963,10 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		duk_push_pointer(ctx, &agent->selfcert);
 		duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_NonLeaf);
 #endif
-		duk_push_fixed_buffer(ctx, sizeof(MeshAgentDuktapePtrs));	// [MeshAgent][buffer]
-		MeshAgentDuktapePtrs *ptrs  = (MeshAgentDuktapePtrs*)Duktape_GetBuffer(ctx, -1, NULL);
-		duk_put_prop_string(ctx, -2, MESH_AGENT_DUKPTRS);			// [MeshAgent]
 
-		memset(ptrs, 0, sizeof(MeshAgentDuktapePtrs));
-		ptrs->ctx = ctx;
-		ptrs->MeshAgentObject = duk_get_heapptr(ctx, -1);
-		ptrs->Next = agent->DuktapeMeshBindings;
-		agent->DuktapeMeshBindings = ptrs;
-
-		ILibDuktape_EventEmitter_CreateEvent(emitter, "Ready", &(ptrs->OnReady));
-		ILibDuktape_EventEmitter_CreateEvent(emitter, "Connected", &(ptrs->OnConnect));
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Ready");
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Connected");
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Command");
 
 		ILibDuktape_CreateEventWithGetter(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected);
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
@@ -1002,6 +978,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "SendCommand", ILibDuktape_MeshAgent_SendCommand, 1);
 		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MeshAgent_Finalizer);
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "activeMicroLMS", (agent->microLMS != NULL ? 1 : 0));
+		ILibDuktape_CreateInstanceMethod(ctx, "restartCore", ILibDuktape_MeshAgent_dumpCoreModule, 0);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
@@ -1264,7 +1241,7 @@ duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID)
 	ILibDuktape_MeshAgent_Init(newCtx, agent->chain, agent);
 
 	ILibDuktape_SetNativeUncaughtExceptionHandler(newCtx, settings->nExeptionHandler, settings->nExceptionUserObject);
-
+	if (g_displayFinalizerMessages) { printf("\n\n==> Stopping JavaScript Engine\n"); }
 	duk_destroy_heap(oldCtx);
 	agent->meshCoreCtx = newCtx;
 	if (agent->proxyServer != NULL)
@@ -1314,10 +1291,131 @@ void MeshServer_OnSendOK(ILibWebClient_StateObject sender, void *user1, void *us
 	// TODO: Inform JavaScript core module that we are in underflow situation
 }
 
+
+int GenerateSHA384FileHash(char *filePath, char *fileHash)
+{
+	FILE *tmpFile = NULL;
+	unsigned int endIndex = 0;
+	unsigned int bytesLeft = 0;
+	size_t bytesRead;
+	unsigned int checkSumIndex = 0;
+	unsigned int tableIndex = 0;
+
+#ifdef WIN32
+	int retVal = 1;
+	fopen_s(&tmpFile, filePath, "rb");
+#else
+	tmpFile = fopen(filePath, "rb");
+#endif
+	if (tmpFile == NULL) { return(1); }
+
+#ifdef WIN32
+	// We need to check if this is a signed binary
+	// Read the PE Headers, to determine where to look for the Embedded JS
+	char *optHeader = NULL;
+	unsigned int NTHeaderIndex = 0;
+	fseek(tmpFile, 0, SEEK_SET);
+	ignore_result(fread(ILibScratchPad, 1, 2, tmpFile));
+	if (ntohs(((unsigned int*)ILibScratchPad)[0]) == 19802) // 5A4D
+	{
+		fseek(tmpFile, 60, SEEK_SET);
+		ignore_result(fread((void*)&NTHeaderIndex, 1, 4, tmpFile));
+		fseek(tmpFile, NTHeaderIndex, SEEK_SET);					// NT HEADER
+		checkSumIndex = NTHeaderIndex + 24 + 64;
+
+		ignore_result(fread(ILibScratchPad, 1, 24, tmpFile));		
+		if (((unsigned int*)ILibScratchPad)[0] == 17744)
+		{
+			// PE Image
+			optHeader = ILibMemory_AllocateA(((unsigned short*)ILibScratchPad)[10]);
+			ignore_result(fread(optHeader, 1, ILibMemory_AllocateA_Size(optHeader), tmpFile));
+			switch (((unsigned short*)optHeader)[0])
+			{
+			case 0x10B:
+				if (((unsigned int*)(optHeader + 128))[0] != 0)
+				{
+					endIndex = ((unsigned int*)(optHeader + 128))[0];
+				}
+				tableIndex = NTHeaderIndex + 24 + 128;
+				retVal = 0;
+				break;
+			case 0x20B:
+				if (((unsigned int*)(optHeader + 144))[0] != 0)
+				{
+					endIndex = ((unsigned int*)(optHeader + 144))[0];
+				}
+				tableIndex = NTHeaderIndex + 24 + 144;
+				retVal = 0;
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	if (retVal != 0)
+	{
+		fclose(tmpFile);
+		return(1);
+	}
+#endif
+
+	if (endIndex == 0)
+	{
+		// We just need to check for Embedded MSH file
+		int mshLen = 0;
+		fseek(tmpFile, -16, SEEK_END);
+		ignore_result(fread(ILibScratchPad, 1, 16, tmpFile));
+		if (memcmp(ILibScratchPad, exeMeshPolicyGuid, 16) == 0)
+		{
+			fseek(tmpFile, -20, SEEK_CUR);
+			ignore_result(fread((void*)&mshLen, 1, 4, tmpFile));
+			mshLen = ntohl(mshLen);
+			endIndex = (unsigned int)ftell(tmpFile) - 4 - mshLen;
+		}
+		else
+		{
+			endIndex = (unsigned int)ftell(tmpFile);
+		}
+	}
+
+	SHA512_CTX ctx;
+	SHA384_Init(&ctx);
+	bytesLeft = endIndex;
+	fseek(tmpFile, 0, SEEK_SET);
+	if (checkSumIndex != 0)
+	{
+		bytesRead = fread(ILibScratchPad, 1, checkSumIndex + 4, tmpFile);
+		((unsigned int*)(ILibScratchPad + checkSumIndex))[0] = 0;
+		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
+		if (endIndex > 0) { bytesLeft -= (unsigned int)bytesRead; }
+
+		bytesRead = fread(ILibScratchPad, 1, tableIndex + 8 - (checkSumIndex + 4), tmpFile);
+		((unsigned int*)(ILibScratchPad + bytesRead - 8))[0] = 0;
+		((unsigned int*)(ILibScratchPad + bytesRead - 8))[1] = 0;
+		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
+		if (endIndex > 0) { bytesLeft -= (unsigned int)bytesRead; }
+	}
+
+	while ((bytesRead = fread(ILibScratchPad, 1, endIndex == 0 ? sizeof(ILibScratchPad) : (bytesLeft > sizeof(ILibScratchPad) ? sizeof(ILibScratchPad) : bytesLeft), tmpFile)) > 0)
+	{
+		SHA384_Update(&ctx, ILibScratchPad, bytesRead);
+		if (endIndex > 0) 
+		{ 
+			bytesLeft -= (unsigned int)bytesRead; 
+			if (bytesLeft == 0) { break; }
+		}
+	}
+	SHA384_Final((unsigned char*)fileHash, &ctx);
+	fclose(tmpFile);
+
+	return(0);
+}
+
+
+
 // Called when the connection of the mesh server is fully authenticated
 void MeshServer_ServerAuthenticated(ILibWebClient_StateObject WebStateObject, MeshAgentHostContainer *agent) {
 	int len = 0;
-	MeshAgentDuktapePtrs *meshBindings;
 
 	// Send the mesh agent tag to the server
 	// We send the tag information independently of the meshcore because we could use this to select what meshcore to use on the server.
@@ -1327,20 +1425,15 @@ void MeshServer_ServerAuthenticated(ILibWebClient_StateObject WebStateObject, Me
 
 	// Inform JavaScript core module of the connection
 	// TODO: Verify with Bryan that only the core module will get this. No other modules should.
-	if (agent->serverAuthState == 3) {
-		meshBindings = agent->DuktapeMeshBindings;
-		while (meshBindings != NULL)
-		{
-			if (meshBindings->OnConnect != NULL)
-			{
-				duk_push_heapptr(meshBindings->ctx, meshBindings->OnConnect);
-				duk_push_heapptr(meshBindings->ctx, meshBindings->MeshAgentObject);
-				duk_push_int(meshBindings->ctx, 1); // Argument 1 here indicates connection
-				if (duk_pcall_method(meshBindings->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(meshBindings->ctx); }
-				duk_pop(meshBindings->ctx);
-			}
-			meshBindings = meshBindings->Next;
-		}
+	if (agent->serverAuthState == 3) 
+	{
+		ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);				// [agent]
+		duk_get_prop_string(agent->meshCoreCtx, -1, "emit");						// [agent][emit]
+		duk_swap_top(agent->meshCoreCtx, -2);										// [emit][this]
+		duk_push_string(agent->meshCoreCtx, "Connected");							// [emit][this][Connected]
+		duk_push_int(agent->meshCoreCtx, 1);										// [emit][this][Connected][1]
+		if (duk_pcall_method(agent->meshCoreCtx, 2) != 0) { ILibDuktape_Process_UncaughtException(agent->meshCoreCtx); }
+		duk_pop(agent->meshCoreCtx);												// ...
 	}
 }
 
@@ -1349,7 +1442,6 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 {
 	unsigned short command = ntohs(((unsigned short*)cmd)[0]);
 	unsigned short requestid;
-	MeshAgentDuktapePtrs *meshBindings;
 
 #ifndef MICROSTACK_NOTLS
 	// If we are not authenticated with the mesh server, we only support auth commands.
@@ -1501,49 +1593,41 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 	// TODO: Verify with Bryan that only the core module will get this. No other modules should.
 	if (cmd[0] == '{' || command >= 1000)
 	{
-		int processed = 0;
+		int popCount = 0;
 		// if (cmd[0] == '{') { cmd[cmdLen] = 0; printf("%s\r\n", cmd); } // DEBUG: Print JSON command
-		meshBindings = agent->DuktapeMeshBindings;
-		while (processed == 0 && meshBindings != NULL)
-		{
-			if (meshBindings->OnCommand != NULL)
-			{
-				duk_push_heapptr(meshBindings->ctx, meshBindings->OnCommand);														// [func] 
-				duk_push_heapptr(meshBindings->ctx, meshBindings->MeshAgentObject);													// [func][this]
-				if (cmd[0] == '{')
-				{
-					// JSON
-					duk_push_global_object(meshBindings->ctx);				// [g]
-					duk_get_prop_string(meshBindings->ctx, -1, "JSON");		// [g][JSON]
-					duk_get_prop_string(meshBindings->ctx, -1, "parse");	// [g][JSON][func]
-					duk_swap_top(meshBindings->ctx, -3);					// [func][JSON][g]
-					duk_pop_2(meshBindings->ctx);							// [func]
-					duk_push_lstring(meshBindings->ctx, cmd, cmdLen);		// [func][str]
-					if (duk_pcall(meshBindings->ctx, 1) != 0)
-					{
-						duk_pop(meshBindings->ctx);							
-						duk_push_lstring(meshBindings->ctx, cmd, cmdLen);
-					}
-				}
-				else
-				{
-					// BINARY
-					duk_push_external_buffer(meshBindings->ctx);														// [func][this][buffer]
-					duk_config_buffer(meshBindings->ctx, -1, cmd, cmdLen);
-				}
 
-				if (duk_pcall_method(meshBindings->ctx, 1) == 0)														// [retVal]
-				{
-					if (duk_is_number(meshBindings->ctx, -1)) { processed = duk_get_int(meshBindings->ctx, -1); }		// Get the return value
-				}
-				else
-				{
-					ILibDuktape_Process_UncaughtException(meshBindings->ctx);
-				}
-				duk_pop(meshBindings->ctx);																				// ...
+		ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);			// [agent]
+		duk_get_prop_string(agent->meshCoreCtx, -1, "emit");					// [agent][emit]
+		duk_swap_top(agent->meshCoreCtx, -2);									// [emit][this]
+		duk_push_string(agent->meshCoreCtx, "Command");							// [emit][this][Command]
+		if (cmd[0] == '{')
+		{
+			// JSON
+			duk_push_global_object(agent->meshCoreCtx);											// [emit][this][Command][g]
+			duk_get_prop_string(agent->meshCoreCtx, -1, "JSON");								// [emit][this][Command][g][JSON]
+			duk_get_prop_string(agent->meshCoreCtx, -1, "parse");								// [emit][this][Command][g][JSON][func]
+			duk_swap_top(agent->meshCoreCtx, -3);												// [emit][this][Command][func][JSON][g]
+			duk_pop_2(agent->meshCoreCtx);														// [emit][this][Command][func]
+			duk_push_lstring(agent->meshCoreCtx, cmd, cmdLen);									// [emit][this][Command][func][str]
+			if (duk_pcall(agent->meshCoreCtx, 1) != 0)											// [emit][this][Command][JSON]
+			{
+				duk_pop(agent->meshCoreCtx);													// [emit][this][Command]
+				duk_push_lstring(agent->meshCoreCtx, cmd, cmdLen);								// [emit][this][Command][str]
 			}
-			meshBindings = meshBindings->Next;
+			popCount = 1;
 		}
+		else
+		{
+			// BINARY
+			duk_push_external_buffer(agent->meshCoreCtx);										// [emit][this][Command][extBuffer]
+			duk_insert(agent->meshCoreCtx, -4);													// [extBuffer][emit][this][Command]
+			duk_config_buffer(agent->meshCoreCtx, -4, cmd, cmdLen);
+			duk_push_buffer_object(agent->meshCoreCtx, -4, 0, cmdLen, DUK_BUFOBJ_NODEJS_BUFFER);// [extBuffer][emit][this][Command][buffer]
+			popCount = 2;
+		}
+
+		if (duk_pcall_method(agent->meshCoreCtx, 2) != 0) { ILibDuktape_Process_UncaughtException(agent->meshCoreCtx); }
+		duk_pop_n(agent->meshCoreCtx, popCount);												// ...
 		return;
 	}
 
@@ -1685,16 +1769,19 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			{
 				// Indicates the end of the agent update transfer
 				// Check the SHA384 hash of the received file against the file we got.
-				if ((util_sha384file(updateFilePath, updateFileHash) == 0) && (memcmp(updateFileHash, cm->coreModuleHash, sizeof(cm->coreModuleHash)) == 0)) 
+				if ((GenerateSHA384FileHash(updateFilePath, updateFileHash) == 0) && (memcmp(updateFileHash, cm->coreModuleHash, sizeof(cm->coreModuleHash)) == 0))
 				{
-					printf("UPDATE: End OK\r\n");
-					// Check the file signature & version number
-					//if (signcheck_verifysign(updateFilePath, 1))
-					{
-						// Everything looks good, lets perform the update
-						agent->performSelfUpdate = 1;
-						ILibStopChain(agent->chain);
-					}
+					//printf("UPDATE: End OK\r\n");
+#ifdef WIN32
+					agent->performSelfUpdate = 1;
+#else
+					// Set performSelfUpdate to the startupType, on Linux is this important: 1 = systemd, 2 = upstart, 3 = sysv-init
+					int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
+					if (len > 0) { agent->performSelfUpdate = atoi(ILibScratchPad); }
+					if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
+#endif
+					// Everything looks good, lets perform the update
+					ILibStopChain(agent->chain);
 				} else {
 					// Hash check failed, delete the file and do nothing. On next server reconnect, we will try again.
 					util_deletefile(updateFilePath);
@@ -1816,18 +1903,15 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			if (agent->serverAuthState == 3)
 #endif
 			{
-				MeshAgentDuktapePtrs *meshBindings = agent->DuktapeMeshBindings;
-				while (meshBindings != NULL)
+				if (agent->meshCoreCtx != NULL)
 				{
-					if (meshBindings->OnConnect != NULL)
-					{
-						duk_push_heapptr(meshBindings->ctx, meshBindings->OnConnect);
-						duk_push_heapptr(meshBindings->ctx, meshBindings->MeshAgentObject);
-						duk_push_int(meshBindings->ctx, 0); // 0 here as second parameter indicates disconnection
-						if (duk_pcall_method(meshBindings->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(meshBindings->ctx); }
-						duk_pop(meshBindings->ctx);
-					}
-					meshBindings = meshBindings->Next;
+					ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);			// [agent]
+					duk_get_prop_string(agent->meshCoreCtx, -1, "emit");					// [agent][emit]
+					duk_swap_top(agent->meshCoreCtx, -2);									// [emit][this]
+					duk_push_string(agent->meshCoreCtx, "Connected");						// [emit][this][Connected]
+					duk_push_int(agent->meshCoreCtx, 0);									// [emit][this][Connected][0] (0 means disconnected)
+					if (duk_pcall_method(agent->meshCoreCtx, 2) != 0) { ILibDuktape_Process_UncaughtException(agent->meshCoreCtx); }
+					duk_pop(agent->meshCoreCtx);
 				}
 			}
 			agent->controlChannel = NULL; // Set the agent MeshCentral server control channel
@@ -2094,7 +2178,50 @@ int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STAC
 }
 #endif
 
-void importSettings(MeshAgentHostContainer *agent, char* fileName)
+
+void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
+{
+	FILE *tmpFile = NULL;
+	int mshLen;
+
+#ifdef WIN32
+	fopen_s(&tmpFile, agent->exePath, "rb");
+#else
+	tmpFile = fopen(agent->exePath, "rb");
+#endif
+	if (tmpFile == NULL) { return; }
+
+	fseek(tmpFile, -16, SEEK_END);
+	ignore_result(fread(ILibScratchPad, 1, 16, tmpFile));
+	if (memcmp(ILibScratchPad, exeMeshPolicyGuid, 16) == 0)
+	{
+		// Found Embedded MSH File
+		fseek(tmpFile, -20, SEEK_CUR);
+		if (fread((void*)&mshLen, 1, 4, tmpFile) == 4)
+		{
+			mshLen = ntohl(mshLen);
+			fseek(tmpFile, -4 - mshLen, SEEK_CUR);
+			char *eMSH = ILibMemory_AllocateA(mshLen);
+			if (fread(eMSH, 1, mshLen, tmpFile) == mshLen)
+			{
+				FILE *msh = NULL;
+#ifdef WIN32
+				fopen_s(&msh, MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
+#else
+				msh = fopen(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
+#endif
+				if (msh != NULL)
+				{
+					fwrite(eMSH, 1, mshLen, msh);
+					fclose(msh);
+				}
+			}
+			
+		}
+	}
+	fclose(tmpFile);
+}
+int importSettings(MeshAgentHostContainer *agent, char* fileName)
 {
 	int eq;
 	char* importFile;
@@ -2103,7 +2230,7 @@ void importSettings(MeshAgentHostContainer *agent, char* fileName)
 	parser_result_field *f;
 
 	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
-	if (importFileLen == 0) { return; }
+	if (importFileLen == 0) { return(0); }
 	//printf("Importing settings file: %s\n", fileName);
 
 	pr = ILibParseString(importFile, 0, importFileLen, "\n", 1);
@@ -2152,6 +2279,8 @@ void importSettings(MeshAgentHostContainer *agent, char* fileName)
 	}
 	ILibDestructParserResults(pr);
 	free(importFile);
+
+	return(importFileLen);
 }
 
 void agentDumpKeysSink(ILibSimpleDataStore sender, char* Key, int KeyLen, void *user)
@@ -2207,7 +2336,12 @@ void MeshAgent_Slave(MeshAgentHostContainer *agentHost)
 void MeshAgent_ChainEnd(void *chain, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
-	if (agent->meshCoreCtx != NULL) { duk_destroy_heap(agent->meshCoreCtx); }
+	if (agent->meshCoreCtx != NULL) 
+	{
+		if (g_displayFinalizerMessages) { printf("\n\n==> Stopping JavaScript Engine\n"); }
+		duk_destroy_heap(agent->meshCoreCtx); 
+	}
+	agent->meshCoreCtx = NULL;
 }
 
 void MeshAgent_RunScriptOnly_Finalizer(duk_context *ctx, void *user)
@@ -2338,14 +2472,26 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	// Read the .proxy file if present and push it into the database
 	{
-		char* str = NULL;
-		int len = (int)util_readfile(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".proxy"), &str, 1024);
-		if (str != NULL) { ILibSimpleDataStore_PutEx(agentHost->masterDb, "WebProxy", 8, str, len); free(str); } else { ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "WebProxy", 8); }
+		char tmp[255];
+		if (ILibSimpleDataStore_GetEx(agentHost->masterDb, "ignoreProxyFile", 15, tmp, sizeof(tmp)) == 0)
+		{
+			char* str = NULL;
+			int len = (int)util_readfile(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".proxy"), &str, 1024);
+			if (str != NULL) { ILibSimpleDataStore_PutEx(agentHost->masterDb, "WebProxy", 8, str, len); free(str); }
+			else { ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "WebProxy", 8); }
+		}
 	}
 
 	// Check to see if we need to import a settings file
-	importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx"));
-	importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+	if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx")) == 0) 
+	{
+		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh")) == 0)
+		{
+			// Let's check to see if an .msh was embedded into our binary
+			checkForEmbeddedMSH(agentHost);
+			importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+		}
+	}
 
 #ifdef WIN32
 	// If running as a Windows service, set basic values to the registry, this allows other applications to know what the mesh agent is doing.
@@ -2495,18 +2641,15 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		// Check if there is a CoreModule in the db
 		char *CoreModule;
 		int CoreModuleLen = agentHost->localScript == 0 ? ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0) : 0;
-		MeshAgentDuktapePtrs* ptrs = agentHost->DuktapeMeshBindings;
-
-		while (ptrs != NULL)
+		
+		if (agentHost->meshCoreCtx != NULL)
 		{
-			if (ptrs->OnReady != NULL)
-			{
-				duk_push_heapptr(ptrs->ctx, ptrs->OnReady);														// [func]
-				duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);												// [func][this]
-				if (duk_pcall_method(ptrs->ctx, 0) != 0) {ILibDuktape_Process_UncaughtException(ptrs->ctx); }	// [retVal]
-				duk_pop(ptrs->ctx);																				// ...
-			}
-			ptrs = ptrs->Next;
+			ILibDuktape_MeshAgent_PUSH(agentHost->meshCoreCtx, agentHost->chain);								// [agent]
+			duk_get_prop_string(agentHost->meshCoreCtx, -1, "emit");											// [agent][emit]
+			duk_swap_top(agentHost->meshCoreCtx, -2);															// [emit][this]
+			duk_push_string(agentHost->meshCoreCtx, "Ready");													// [emit][this][Ready]
+			if (duk_pcall_method(agentHost->meshCoreCtx, 1) != 0) { ILibDuktape_Process_UncaughtException(agentHost->meshCoreCtx); }	
+			duk_pop(agentHost->meshCoreCtx);																	// ...
 		}
 
 		if (agentHost->localScript == 0)
@@ -2532,6 +2675,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				}
 
 				free(CoreModule);
+				if (ILibSimpleDataStore_Get(agentHost->masterDb, "noUpdateCoreModule", NULL, 0) != 0) { agentHost->localScript = 1; printf("** CoreModule: Update Disabled**\n"); }
 			}
 		}
 
@@ -2757,7 +2901,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 
 	// Perform a self SHA384 Hash
-	util_sha384file(agentHost->exePath, agentHost->agentHash);
+	GenerateSHA384FileHash(agentHost->exePath, agentHost->agentHash);
 
 #ifdef _REMOTELOGGINGSERVER
 	{
@@ -2812,8 +2956,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		ILibStartChain(agentHost->chain);
 		agentHost->chain = NULL; // Mesh agent has exited, set the chain to NULL
 
-		// Check if we need to perform self-update
-		if (agentHost->performSelfUpdate == 1)
+		// Check if we need to perform self-update (performSelfUpdate should indicate startup type on Liunx: 1 = systemd, 2 = upstart, 3 = sysv-init)
+		if (agentHost->performSelfUpdate != 0)
 		{
 			int i, ptr = 0;
 #ifdef WIN32
@@ -2860,7 +3004,19 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			}
 #else
 			// Linux version
-			{
+			if (agentHost->performSelfUpdate == 1) {
+				// Systemd is in use, move the update using "mv" and restart the systemd service
+				struct stat results;
+				stat(agentHost->exePath, &results); // This the mode of the current executable
+				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
+
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
+				if (system(ILibScratchPad)) {}
+
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "systemctl restart meshagent"); // Restart the service
+				if (system(ILibScratchPad)) {}
+			} else {
+				// Generic update process, call our own update with arguments.
 				struct stat results;
 				stat(agentHost->exePath, &results); // This the mode of the current executable
 				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
