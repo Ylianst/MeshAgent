@@ -90,6 +90,21 @@ BOOL IsAdmin()
 	return admin;
 }
 
+BOOL RunAsAdmin(char* args) {
+	char szPath[_MAX_PATH + 100];
+	if (GetModuleFileNameA(NULL, szPath, _MAX_PATH))
+	{
+		SHELLEXECUTEINFO sei = { sizeof(sei) };
+		sei.hwnd = NULL;
+		sei.nShow = SW_NORMAL;
+		sei.lpVerb = "runas";
+		sei.lpFile = szPath;
+		sei.lpParameters = args;
+		return ShellExecuteExA(&sei);
+	}
+	return FALSE;
+}
+
 DWORD WINAPI ServiceControlHandler( DWORD controlCode, DWORD eventType, void *eventData, void* eventContext )
 {
 	switch (controlCode)
@@ -622,7 +637,7 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 		serviceStateLoopCount++;
 		Sleep(100);
 		serviceState = GetServiceState(serviceFile);
-	} while ((serviceState == 3) && (serviceStateLoopCount < 100));
+	} while ((serviceState == 3) && (serviceStateLoopCount < 400));
 	UninstallService(serviceFile);
 	UninstallService(serviceFileOld);
 
@@ -678,7 +693,7 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 			Sleep(100);
 			selfExeDelLoopCount++;
 			selfExeDel = remove(targetexe);
-		} while ((selfExeDel != 0) && (selfExeDel != -1) && (selfExeDelLoopCount < 100));
+		} while ((selfExeDel != 0) && (selfExeDel != -1) && (selfExeDelLoopCount < 400));
 
 		// Remove "[Executable].msh" file
 		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
@@ -1297,6 +1312,7 @@ int main(int argc, char* argv[])
 			{
 				FreeConsole();
 
+				/*
 				if (IsAdmin() == FALSE)
 				{
 					MessageBox(NULL, TEXT("Must run as administrator"), TEXT("Mesh Agent"), MB_OK | MB_ICONERROR);
@@ -1305,6 +1321,8 @@ int main(int argc, char* argv[])
 				{
 					DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
 				}
+				*/
+				DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
 			}
 		}
 #else
@@ -1400,6 +1418,9 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 	size_t len;
 	char *integratedJavaScript;
 	int integragedJavaScriptLen;
+	char setup1[_MAX_PATH];
+	int setup1len;
+
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -1407,6 +1428,49 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 	// Get our own executable name
 	if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5) { wcstombs_s(&len, selfexe, _MAX_PATH, str, _MAX_PATH); }
 
+	// Setup proxy filenames
+	if ((setup1len = (int)strnlen_s(selfexe, sizeof(selfexe))) >= 4) {
+		memcpy_s(setup1, sizeof(setup1), selfexe, setup1len);
+		memcpy_s(setup1 + (setup1len - 3), sizeof(setup1) - setup1len - 3, "proxy", 6);
+
+		// Try to setup the proxy file
+		WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyEx;
+		if (WinHttpGetIEProxyConfigForCurrentUser(&proxyEx))
+		{
+			if (proxyEx.lpszProxy != NULL)
+			{
+				FILE *SourceFile = NULL;
+				size_t len;
+				if (wcstombs_s(&len, ILibScratchPad, 4095, proxyEx.lpszProxy, 2000) == 0)
+				{
+					char* ptr = strstr(ILibScratchPad, "https=");
+					if (ptr != NULL)
+					{
+						char* ptr2 = strstr(ptr, ";");
+						ptr += 6;
+						if (ptr2 != NULL) ptr2[0] = 0;
+					}
+					else
+					{
+						ptr = ILibScratchPad;
+					}
+					fopen_s(&SourceFile, setup1, "wb");
+					if (SourceFile != NULL)
+					{
+						if (fwrite(ptr, sizeof(char), strnlen_s(ptr, sizeof(ILibScratchPad)), SourceFile)) {}
+						fclose(SourceFile);
+					}
+				}
+				GlobalFree(proxyEx.lpszProxy);
+			}
+
+			// Release the rest of the proxy settings
+			if (proxyEx.lpszAutoConfigUrl != NULL) GlobalFree(proxyEx.lpszAutoConfigUrl);
+			if (proxyEx.lpszProxyBypass != NULL) GlobalFree(proxyEx.lpszProxyBypass);
+		}
+	}
+
+	// Launch the temporary agent
 	__try
 	{
 		agent = MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY);
@@ -1541,12 +1605,34 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		}
 		else if (LOWORD(wParam) == IDC_INSTALLBUTTON || LOWORD(wParam) == IDC_UNINSTALLBUTTON)
 		{
+			BOOL result = FALSE;
+
 			EnableWindow( GetDlgItem( hDlg, IDC_INSTALLBUTTON ), FALSE );
 			EnableWindow( GetDlgItem( hDlg, IDC_UNINSTALLBUTTON ), FALSE );
 			EnableWindow( GetDlgItem( hDlg, IDCANCEL ), FALSE );
 
-			if (LOWORD(wParam) == IDC_INSTALLBUTTON) fullinstall( 0, NULL, 0, NULL, 0 ); else fullinstall( 1, NULL, 0, NULL, 0 );
-			EndDialog(hDlg, LOWORD(wParam));
+			if (IsAdmin() == TRUE)
+			{
+				// We are already administrator, just install/uninstall now.
+				if (LOWORD(wParam) == IDC_INSTALLBUTTON) { fullinstall(0, NULL, 0, NULL, 0); } else { fullinstall(1, NULL, 0, NULL, 0); }
+				result = TRUE;
+			}
+			else
+			{
+				// We need to request admin escalation
+				if (LOWORD(wParam) == IDC_INSTALLBUTTON) { result = RunAsAdmin("-fullinstall"); } else { result = RunAsAdmin("-fulluninstall"); }
+			}
+
+			if (result)
+			{
+				EndDialog(hDlg, LOWORD(wParam));
+			}
+			else
+			{
+				EnableWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), TRUE);
+				EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), TRUE);
+				EnableWindow(GetDlgItem(hDlg, IDCANCEL), TRUE);
+			}
 
 #ifdef _DEBUG
 			_CrtCheckMemory();

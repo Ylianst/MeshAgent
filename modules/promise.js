@@ -26,7 +26,7 @@ function event_switcher_helper(desired_callee, target)
         {
             args.push(arguments[i]);
         }
-        func.target.apply(func.desired, args);
+        return (func.target.apply(func.desired, args));
     };
     this.func.desired = desired_callee;
     this.func.target = target;
