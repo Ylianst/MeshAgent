@@ -591,7 +591,7 @@ if (process.argv.length > 1)
 if (!testCP) { process.exit(); }
 testCP.on('device', function (dv)
 {
-    var selectedDevice = null;
+    var selectedDevice = dv;
     var selectedService = null;
     var selectedAction = null;
 

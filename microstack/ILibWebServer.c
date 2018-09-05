@@ -1073,7 +1073,7 @@ ILibWebServer_ServerToken ILibWebServer_CreateEx(void *Chain, int MaxConnections
 unsigned short ILibWebServer_GetPortNumber(ILibWebServer_ServerToken WebServerToken)
 {
 	struct ILibWebServer_StateModule *WSM = (struct ILibWebServer_StateModule*) WebServerToken;
-	return ILibAsyncServerSocket_GetPortNumber(WSM->ServerSocket);
+	return (WSM != NULL ? ILibAsyncServerSocket_GetPortNumber(WSM->ServerSocket) : 0);
 }
 
 void ILibWebServer_Digest_CalculateNonce(struct ILibWebServer_Session *session, long long expiration, char* buffer)
@@ -1447,7 +1447,7 @@ int ILibWebServer_WebSocket_CreateHeader(char* header, unsigned short FLAGS, uns
 		retVal = 10;
 		header1 |= 127;
 		((unsigned short*)header)[0] = htons(header1);
-		((unsigned long long*)(header + 2))[0] = htonl((int)payloadLength);
+		((unsigned long long*)(header + 2))[0] = ILibHTONLL((uint64_t)payloadLength);
 	}
 
 	return retVal;

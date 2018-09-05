@@ -114,6 +114,7 @@ public:
 
 typedef enum SCRIPT_ENGINE_SECURITY_FLAGS
 {
+	SCRIPT_ENGINE_NO_DEBUGGER = 0x20000000,
 	SCRIPT_ENGINE_NO_MESH_AGENT_ACCESS = 0x10000000,
 	SCRIPT_ENGINE_NO_GENERIC_MARSHAL_ACCESS = 0x08000000,
 	SCRIPT_ENGINE_NO_PROCESS_SPAWNING = 0x04000000,
@@ -140,7 +141,9 @@ typedef struct SCRIPT_ENGINE_SETTINGS
 }SCRIPT_ENGINE_SETTINGS;
 
 
-void ILibDuktape_ScriptContainer_CheckEmbedded(char **argv, char **script, int *scriptLen);
+void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen);
+void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, int *scriptLen);
+
 void ILibDuktape_ScriptContainer_InitMaster(void *chain, char *exePath, ILibProcessPipe_Manager manager);
 int ILibDuktape_ScriptContainer_StartSlave(void *chain, ILibProcessPipe_Manager manager);
 
@@ -149,12 +152,12 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_ENGINE_SETTINGS *settings);
 #define ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(securityFlags, executionTimeout, chain, argList, db, exePath, pipeManager, exitHandler, exitUser) ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal(), (securityFlags), (executionTimeout), (chain), (argList), (db), (exePath), (pipeManager), (exitHandler), (exitUser))
 #define ILibDuktape_ScriptContainer_InitializeJavaScriptEngine(securityFlags, executionTimeout, chain, pp_argList, db, exitHandler, exitUser) ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx((securityFlags), (executionTimeout), (chain), (pp_argList), (db), NULL, NULL, (exitHandler), (exitUser))
+int ILibDuktape_ScriptContainer_DebuggingOK(duk_context *ctx);
 
 SCRIPT_ENGINE_SETTINGS *ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx);
-
-int ILibDuktape_ScriptContainer_CompileJavaScript(duk_context *ctx, char *payload, int payloadLen);
 int ILibDuktape_ScriptContainer_CompileJavaScript_FromFile(duk_context *ctx, char *path, int pathLen);
+int ILibDuktape_ScriptContainer_CompileJavaScriptEx(duk_context *ctx, char *payload, int payloadLen, char *filename, int filenameLen);
+#define ILibDuktape_ScriptContainer_CompileJavaScript(ctx, payload, payloadLen) ILibDuktape_ScriptContainer_CompileJavaScriptEx(ctx, payload, payloadLen, NULL, 0)
 int ILibDuktape_ScriptContainer_ExecuteByteCode(duk_context *ctx);
 
 #endif
-

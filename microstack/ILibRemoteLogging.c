@@ -27,7 +27,7 @@ limitations under the License.
 #include "ILibCrypto.h"
 #include <stdarg.h>
 
-char ILibScratchPad_RemoteLogging[255];
+char ILibScratchPad_RemoteLogging[520];
 //! Converts a sockaddr to a friendly string, using static memory, for logging purposes
 /*!
 \param addr sockaddr to convert
@@ -157,6 +157,8 @@ ILibRemoteLogging ILibRemoteLogging_Create(ILibRemoteLogging_OnWrite onOutput)
 void ILibRemoteLogging_RegisterCommandSink(ILibRemoteLogging logger, ILibRemoteLogging_Modules module, ILibRemoteLogging_OnCommand sink)
 {
 	ILibRemoteLogging_Module *obj = (ILibRemoteLogging_Module*)logger;
+	if (module < 0) { return; }
+
 	sem_wait(&(obj->LogSyncLock));
 	obj->CommandSink[ILibWhichPowerOfTwo((int)module)] = sink;
 	sem_post(&(obj->LogSyncLock));
@@ -669,7 +671,7 @@ ILibTransport* ILibRemoteLogging_CreateFileTransport(ILibRemoteLogging loggingMo
 	retVal->localFilePath = ILibString_Copy(path, pathLen);
 
 	retVal->logFile = ILibLinkedList_FileBacked_Create(retVal->localFilePath, 2048000, 4096);
-	if (retVal->logFile->flags != 0)
+	if (retVal->logFile != NULL && retVal->logFile->flags != 0)
 	{
 		modules = (unsigned short)(retVal->logFile->flags & 0xFFFF);
 		flags = (unsigned short)(retVal->logFile->flags >> 16);

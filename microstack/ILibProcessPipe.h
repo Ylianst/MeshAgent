@@ -39,6 +39,8 @@ typedef enum ILibProcessPipe_SpawnTypes
 	ILibProcessPipe_SpawnTypes_USER			= 1,
 	ILibProcessPipe_SpawnTypes_WINLOGON		= 2,
 	ILibProcessPipe_SpawnTypes_TERM			= 3,
+	ILibProcessPipe_SpawnTypes_DETACHED		= 4,
+	ILibProcessPipe_SpawnTypes_SPECIFIED_USER = 5
 }ILibProcessPipe_SpawnTypes;
 
 
@@ -66,12 +68,12 @@ void ILibProcessPipe_Pipe_AddPipeReadHandler(ILibProcessPipe_Pipe targetPipe, in
 void ILibProcessPipe_Pipe_SetBrokenPipeHandler(ILibProcessPipe_Pipe targetPipe, ILibProcessPipe_Pipe_BrokenPipeHandler handler);
 
 ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain);
-ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx2(ILibProcessPipe_Manager pipeManager, char* target, char* const * parameters, ILibProcessPipe_SpawnTypes spawnType, int extraMemorySize);
+int ILibProcessPipe_Process_IsDetached(ILibProcessPipe_Process p);
+ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_Manager pipeManager, char* target, char* const* parameters, ILibProcessPipe_SpawnTypes spawnType, void *sessionId, int extraMemorySize);
 #define ILibProcessPipe_Manager_SpawnProcess(pipeManager, target, parameters) ILibProcessPipe_Manager_SpawnProcessEx2(pipeManager, target, parameters, ILibProcessPipe_SpawnTypes_DEFAULT, 0)
 #define ILibProcessPipe_Manager_SpawnProcessEx(pipeManager, target, parameters, spawnType) ILibProcessPipe_Manager_SpawnProcessEx2(pipeManager, target, parameters, spawnType, 0)
+#define ILibProcessPipe_Manager_SpawnProcessEx2(pipeManager, target, parameters, spawnType, extraMemorySize) ILibProcessPipe_Manager_SpawnProcessEx3(pipeManager, target, parameters, spawnType, NULL, extraMemorySize)
 #define ILibProcessPipe_Manager_SpawnProcessWithExtraPipeMemory(pipeManager, target, parameters, memorySize) ILibProcessPipe_Manager_SpawnProcessEx2(pipeManager, target, parameters, ILibProcessPipe_SpawnTypes_DEFAULT, memorySize)
-void* ILibProcessPipe_Process_Kill(ILibProcessPipe_Process p);
-void* ILibProcessPipe_Process_KillEx(ILibProcessPipe_Process p);
 void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p);
 void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int bufferSize, ILibProcessPipe_Process_ExitHandler exitHandler, ILibProcessPipe_Process_OutputHandler stdOut, ILibProcessPipe_Process_OutputHandler stdErr, ILibProcessPipe_Process_SendOKHandler sendOk, void *user);
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj);

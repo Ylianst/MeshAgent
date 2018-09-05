@@ -163,6 +163,9 @@
     <ClCompile Include="..\microscript\duk_module_duktape.c">
       <Filter>Microscript</Filter>
     </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_Debugger.c">
+      <Filter>Microscript</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
@@ -296,6 +299,9 @@
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\duk_module_duktape.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_Debugger.h">
       <Filter>Microscript</Filter>
     </ClInclude>
   </ItemGroup>

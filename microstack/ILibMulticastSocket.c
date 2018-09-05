@@ -393,4 +393,3 @@ void ILibMulticastSocket_WakeOnLan(void *module, char* mac)
 		ILibMulticastSocket_Broadcast((struct ILibMulticastSocket_StateModule*)module, ILibScratchPad, 102, 1);
 	}
 }
-

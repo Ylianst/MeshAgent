@@ -1047,6 +1047,7 @@ typedef struct ILibBaseChain
 
 	void *Timer;
 	void *Reserved;
+	ILibLinkedList OnDestroyEventSinks;
 	ILibLinkedList Links;
 	ILibLinkedList LinksPendingDelete;
 	ILibHashtable ChainStash;
@@ -1063,7 +1064,73 @@ typedef struct ILibBaseChain
 	void *node;
 }ILibBaseChain;
 
+void* ILibMemory_AllocateA_Init(void *buffer)
+{
+	((void**)buffer)[0] = (char*)buffer + sizeof(void*);
+	return(buffer);
+}
+void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType)
+{
+	if (ptr == NULL) { ILIBCRITICALEXIT(254); }
+	memset(ptr, 0, primarySize + extraSize + sizeof(ILibMemory_Header) + (extraSize > 0 ? sizeof(ILibMemory_Header) : 0));
+
+	void *primary = ILibMemory_FromRaw(ptr);
+
+	((ILibMemory_Header*)ptr)->size = primarySize;
+	((ILibMemory_Header*)ptr)->extraSize = extraSize;
+	((ILibMemory_Header*)ptr)->CANARY = ILibMemory_Canary;
+	((ILibMemory_Header*)ptr)->memoryType = memType;
+
+	if (extraSize > 0)
+	{
+		ILibMemory_Header *extra = (ILibMemory_Header*)ILibMemory_RawPtr(ILibMemory_Extra(primary));
+		extra->size = extraSize;
+		extra->extraSize = 0;
+		extra->CANARY = ILibMemory_Canary;
+		extra->memoryType = ILibMemory_Types_OTHER;
+	}
+
+	return(primary);
+}
+void ILibMemory_Free(void *ptr)
+{
+	if (ILibMemory_CanaryOK(ptr) && ILibMemory_MemType(ptr) == ILibMemory_Types_HEAP) 
+	{ 
+		if (ILibMemory_ExtraSize(ptr) > 0)
+		{
+			memset(ILibMemory_RawPtr(ILibMemory_Extra(ptr)), 0, sizeof(ILibMemory_Header));
+		}
+		memset(ILibMemory_RawPtr(ptr), 0, sizeof(ILibMemory_Header)); 
+		free(ILibMemory_RawPtr(ptr)); 
+	}
+}
+
+#ifdef WIN32
+int ILibMemory_CanaryOK(void *ptr)
+{
+	__try
+	{
+		return(ILibMemory_Ex_CanaryOK(ptr));
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return(0);
+	}
+}
+#endif
+
 const int ILibMemory_CHAIN_CONTAINERSIZE = sizeof(ILibBaseChain);
+void ILibMemory_AllocateTemp_Sink(void *obj)
+{
+	ILibMemory_Free(obj);
+}
+void* ILibMemory_AllocateTemp(void* chain, size_t sz)
+{
+	char *ret = ILibMemory_SmartAllocate(sz);
+	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), ret, 0, ILibMemory_AllocateTemp_Sink, ILibMemory_AllocateTemp_Sink);
+	return(ret);
+}
+
 void* ILibMemory_AllocateA_InitMem(void *buffer, size_t bufferLen)
 {
 	char *retVal = ((char*)buffer + 8 + sizeof(void*));
@@ -1079,11 +1146,11 @@ void* ILibMemory_AllocateA_Get(void *buffer, size_t sz)
 {
 	char *retVal = NULL;
 
-	if (ILibMemory_AllocateA_Size(buffer) > (int)sz)
+	if (ILibMemory_AllocateA_Size(buffer) > sz)
 	{
 		retVal = ILibMemory_AllocateA_Next(buffer);
-		ILibMemory_AllocateA_Size(buffer) -= (int)sz;
-		ILibMemory_AllocateA_Next(buffer) = (char*)ILibMemory_AllocateA_Next(buffer) + (int)sz;
+		ILibMemory_AllocateA_Size(buffer) -= sz;
+		ILibMemory_AllocateA_Next(buffer) = (char*)ILibMemory_AllocateA_Next(buffer) + sz;
 	}
 
 	return(retVal);
@@ -1141,16 +1208,6 @@ ILibHashtable ILibChain_GetBaseHashtable(void* chain)
 	return(b->ChainStash);
 }
 
-void ILibChain_OnDestroyEvent_Sink(void *object)
-{
-	ILibChain_Link *link = (ILibChain_Link*)object;
-	ILibChain_DestroyEvent e = (ILibChain_DestroyEvent)((void**)link->ExtraMemoryPtr)[0];
-
-	if (e != NULL)
-	{
-		e(link->ParentChain, ((void**)link->ExtraMemoryPtr)[1]);
-	}
-}
 //! Add an event handler to be dispatched when the Microstack Chain is shutdown
 /*! 
 	\param chain Microstack Chain to add an event handler to
@@ -1159,20 +1216,16 @@ void ILibChain_OnDestroyEvent_Sink(void *object)
 */
 void ILibChain_OnDestroyEvent_AddHandler(void *chain, ILibChain_DestroyEvent sink, void *user)
 {
-	ILibChain_Link *link = ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
-	link->ParentChain = chain;
-	link->DestroyHandler = (ILibChain_Destroy)&ILibChain_OnDestroyEvent_Sink;
-	((void**)link->ExtraMemoryPtr)[0] = sink;
-	((void**)link->ExtraMemoryPtr)[1] = user;
+	ILibBaseChain *bchain = (ILibBaseChain*)chain;
+	void **data = (void**)ILibMemory_Allocate(sizeof(void*) * 2, 0, NULL, NULL);
+	data[0] = sink;
+	data[1] = user;
 
-	if (ILibIsChainRunning(chain) == 0)
+	if (bchain->OnDestroyEventSinks == NULL)
 	{
-		ILibAddToChain(chain, link);
+		bchain->OnDestroyEventSinks = ILibLinkedList_Create();
 	}
-	else
-	{
-		ILibChain_SafeAdd(chain, link);
-	}
+	ILibLinkedList_AddTail(bchain->OnDestroyEventSinks, data);
 }
 void ILibChain_OnStartEvent_Sink(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
@@ -1530,11 +1583,16 @@ void ILibChain_RunOnMicrostackThreadSink(void *obj)
 	void* chain = ((void**)obj)[0];
 	ILibChain_StartEvent handler = (ILibChain_StartEvent)((void**)obj)[1];
 	void* user = ((void**)obj)[2];
+	void* freeOnShutdown = ((void**)obj)[3];
 
 	if (ILibIsChainBeingDestroyed(chain) == 0)
 	{
 		// Only Dispatch if the chain is still running
 		if (handler != NULL) { handler(chain, user); }
+	}
+	else if (freeOnShutdown != NULL)
+	{
+		free(user);
 	}
 	free(obj);
 }
@@ -1544,15 +1602,16 @@ void ILibChain_RunOnMicrostackThreadSink(void *obj)
 	\param handler Event to dispatch on the microstack thread
 	\param user Custom user data to dispatch to the microstack thread
 */
-void ILibChain_RunOnMicrostackThreadEx(void *chain, ILibChain_StartEvent handler, void *user)
+void ILibChain_RunOnMicrostackThreadEx2(void *chain, ILibChain_StartEvent handler, void *user, int freeOnShutdown)
 {
 	void** value = NULL;
 	
-	value = (void**)ILibMemory_Allocate(3 * sizeof(void*), 0, NULL, NULL);
+	value = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
 
 	value[0] = chain;
 	value[1] = handler;
 	value[2] = user;
+	value[3] = (void*)(uint64_t)freeOnShutdown;
 	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), value, 0, &ILibChain_RunOnMicrostackThreadSink, &ILibChain_RunOnMicrostackThreadSink);
 }
 #ifdef WIN32
@@ -1989,11 +2048,16 @@ void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext)
 			psym->MaxNameLen = MAX_SYM_NAME;
 			pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION [%s] @ ", (g_ILibCrashID!=NULL? g_ILibCrashID:""));
+			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION [%s] @ ", (g_ILibCrashID != NULL ? g_ILibCrashID : ""));
+#ifdef WIN64
+			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)&ILibCreateChain, (unsigned __int64)&ILibCreateChain - (unsigned __int64)StackFrame.AddrPC.Offset);
+#else
+			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%08x / BaseAddr: 0x%08x / Delta: %d]\n", (unsigned __int32)StackFrame.AddrPC.Offset, (unsigned __int32)&ILibCreateChain, (unsigned __int32)&ILibCreateChain - (unsigned __int32)StackFrame.AddrPC.Offset);
+#endif
 
 			if (SymFromAddr(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp, psym))
 			{
-				len += sprintf_s(buffer + len, sizeof(buffer) - len, "[%s", (char*)(psym->Name));
+				len += sprintf_s(buffer + len, sizeof(buffer) - len, "    [%s", (char*)(psym->Name));
 				if (SymGetLineFromAddr64(GetCurrentProcess(), StackFrame.AddrPC.Offset, &tmp2, pimg))
 				{
 					len += sprintf_s(buffer + len, sizeof(buffer) - len, " => %s:%d]\n", (char*)(pimg->FileName), pimg->LineNumber);
@@ -2002,11 +2066,6 @@ void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext)
 				{
 					len += sprintf_s(buffer + len, sizeof(buffer) - len, "]\n");
 				}
-			}
-			else
-			{
-				util_tohex((char*)&(StackFrame.AddrPC.Offset), sizeof(DWORD64), imgBuffer);
-				len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%s]\n", imgBuffer);
 			}
 		}
 	}
@@ -2078,6 +2137,7 @@ void ILib_POSIX_CrashHandler(int code)
 			if ((strings[i])[c] == ']') { (strings[i])[c] = 0; }
 			if ((strings[i])[c] == 0) { break; }
 		}
+
 		if (pipe(fd) == 0)
 		{
 			pid = vfork();
@@ -2126,8 +2186,15 @@ char* ILib_POSIX_InstallCrashHandler(char *exename)
 }
 #endif
 #endif
+
+void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t delta)
+{
+	ILibChain_DebugOffset(buffer, bufferLen, (uint64_t)&ILibCreateChain - delta);
+}
+
 void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 {
+#ifndef _NOILIBSTACKDEBUG
 #ifdef WIN32
 	int len = 0;
 	char symBuffer[4096];
@@ -2141,11 +2208,19 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 	pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 	SymInitialize(GetCurrentProcess(), NULL, TRUE);
 
-	sprintf_s(buffer, bufferLen, "[Unable to decode function address]");
+#ifdef WIN64
+	sprintf_s(buffer, bufferLen, "[Unable to decode function address, BaseAddr: 0x%016llx]", (unsigned __int64)&ILibCreateChain);
+#else
+	sprintf_s(buffer, bufferLen, "[Unable to decode function address, BaseAddr: 0x%08x]", (unsigned __int32)&ILibCreateChain);
+#endif
 
 	if (SymFromAddr(GetCurrentProcess(), (DWORD64)addrOffset, &tmp, psym))
 	{
-		len += sprintf_s(buffer + len, bufferLen - len, "[%s", (char*)(psym->Name));
+#ifdef WIN64
+		len += sprintf_s(buffer + len, bufferLen - len, "[BaseAddr: 0x%016llx, %s", (unsigned __int64)&ILibCreateChain, (char*)(psym->Name));
+#else
+		len += sprintf_s(buffer + len, bufferLen - len, "[BaseAddr: 0x%08x, %s", (unsigned __int32)&ILibCreateChain, (char*)(psym->Name));
+#endif
 		if (SymGetLineFromAddr64(GetCurrentProcess(), (DWORD64)addrOffset, &tmp2, pimg))
 		{
 			len += sprintf_s(buffer + len, bufferLen - len, " => %s:%d]\n", (char*)(pimg->FileName), pimg->LineNumber);
@@ -2155,8 +2230,54 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 			len += sprintf_s(buffer + len, bufferLen - len, "]\n");
 		}
 	}
+#else
+	char addrtmp[255];
+	int len = 0;
+	pid_t pid;
+	int fd[2];
+
+	sprintf_s(addrtmp, sizeof(addrtmp), "0x%016"PRIx64, addrOffset);
+	((char**)ILib_POSIX_CrashParamBuffer)[1] = addrtmp;
+
+	if (pipe(fd) == 0)
+	{
+		pid = vfork();
+		if (pid == 0)
+		{
+			dup2(fd[1], STDOUT_FILENO);
+			close(fd[1]);
+			
+			execv("/usr/bin/addr2line", (char**)ILib_POSIX_CrashParamBuffer);
+			if (write(STDOUT_FILENO, "??:0", 4)) {}
+			exit(0);
+		}
+		if (pid > 0)
+		{
+			char tmp[8192];
+			int rlen;
+			
+			rlen = read(fd[0], tmp, 8192);
+			if (rlen > 0 && tmp[0] != '?')
+			{
+				memcpy_s(buffer + len, bufferLen - len, "=> ", 3);
+				len += 3;
+				memcpy_s(buffer + len, bufferLen - len, tmp, rlen);
+				len += rlen;
+			}
+			else
+			{
+				memcpy_s(buffer + len, bufferLen - len, "=> NOT FOUND", 12);
+				len += 12;
+			}
+			close(fd[0]);
+		}
+
+		buffer[len] = 0;
+	}
+#endif
 #endif
 }
+
 char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 {
 	char *retVal = NULL;
@@ -2583,6 +2704,25 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		if (write(chain->WatchDogTerminator[1], " ", 1)) {}
 #endif
 	}
+
+	// Before we start, lets signal that the chain is stopping
+	if (chain->OnDestroyEventSinks != NULL)
+	{
+		void *n = ILibLinkedList_GetNode_Head(chain->OnDestroyEventSinks);
+		while (n != NULL)
+		{
+			void **edata = (void**)ILibLinkedList_GetDataFromNode(n);
+			if (edata != NULL)
+			{
+				((ILibChain_DestroyEvent)edata[0])(chain, edata[1]);
+				free(edata);
+			}
+			n = ILibLinkedList_GetNextNode(n);
+		}
+		ILibLinkedList_Destroy(chain->OnDestroyEventSinks);
+		chain->OnDestroyEventSinks = NULL;
+	}
+
 
 	// Because many modules in the chain are using the base chain timer which is the first node
 	// in the chain in the base timer), these modules may start cleaning up their timers. So, we
@@ -4681,7 +4821,7 @@ struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
 		RetVal->StatusCode = (int)atoi(tempbuffer);
 		free(tempbuffer);
 		RetVal->StatusData = StartLine->FirstResult->NextResult->NextResult->data;
-		RetVal->StatusDataLength = StartLine->FirstResult->NextResult->NextResult->datalength;
+		RetVal->StatusDataLength = (int)((f->data + f->datalength) - RetVal->StatusData);
 	}
 	else
 	{
@@ -5218,7 +5358,7 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 			}
 			AddrStruct->sin6_port = (unsigned short)htons(lport);
 		}
-		else
+		else if(laddr!=NULL)
 		{
 			// IPv4
 			AddrStruct->sin6_family = AF_INET;
@@ -5557,7 +5697,7 @@ void ILibencodeblock( unsigned char in[3], unsigned char out[4], int len )
 {
 	out[0] = cb64[ in[0] >> 2 ];
 	out[1] = cb64[ ((in[0] & 0x03) << 4) | ((in[1] & 0xf0) >> 4) ];
-	out[2] = (unsigned char) (len > 1 ? cb64[ ((in[1] & 0x0f) << 2) | ((in[2] & 0xc0) >> 6) ] : '=');
+	out[2] = (unsigned char) (len > 1 ? cb64[ ((in[1] & 0x0f) << 2) | (len>2?((in[2] & 0xc0) >> 6):0) ] : '=');
 	out[3] = (unsigned char) (len > 2 ? cb64[ in[2] & 0x3f ] : '=');
 }
 
@@ -5590,10 +5730,26 @@ int ILibBase64Encode(unsigned char* input, const int inputlen, unsigned char** o
 	out = *output;
 	in = input;
 
-	if (input == NULL || inputlen == 0) { *output = NULL; return 0; }
-	while ((in+3) <= (input+inputlen)) { ILibencodeblock(in, out, 3); in += 3; out += 4; }
-	if ((input+inputlen)-in == 1) { ILibencodeblock(in, out, 1); out += 4; }
-	else if ((input+inputlen)-in == 2) { ILibencodeblock(in, out, 2); out += 4; }
+	if (input == NULL || inputlen == 0) 
+	{ 
+		*output = NULL; return 0; 
+	}
+	while ((in+3) <= (input+inputlen)) 
+	{ 
+		ILibencodeblock(in, out, 3); 
+		in += 3; 
+		out += 4;
+	}
+	if ((input+inputlen)-in == 1) 
+	{
+		ILibencodeblock(in, out, 1); 
+		out += 4; 
+	}
+	else if ((input+inputlen)-in == 2) 
+	{
+		ILibencodeblock(in, out, 2); 
+		out += 4; 
+	}
 	*out = 0;
 
 	return (int)(out-*output);
@@ -6056,15 +6212,15 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 				node = ILibLinkedList_GetNextNode(node);
 			}
 		}
-		if (removed == 0)
-		{
-			//
-			// The item wasn't in the list, so maybe it is pending to be triggered
-			//
-			ILibLinkedList_Lock(UPnPLifeTime->Reserved);
-			ILibLinkedList_AddTail(UPnPLifeTime->Reserved, data);
-			ILibLinkedList_UnLock(UPnPLifeTime->Reserved);
-		}
+	}
+	if (removed == 0)
+	{
+		//
+		// The item wasn't in the list, so maybe it is pending to be triggered
+		//
+		ILibLinkedList_Lock(UPnPLifeTime->Reserved);
+		ILibLinkedList_AddTail(UPnPLifeTime->Reserved, data);
+		ILibLinkedList_UnLock(UPnPLifeTime->Reserved);
 	}
 	ILibLinkedList_UnLock(UPnPLifeTime->ObjectList);
 
@@ -7040,7 +7196,7 @@ void* ILibSparseArray_Add(ILibSparseArray sarray, int index, void *data)
 	else if(root->bucket[i].index < 0)
 	{
 		// Need to use Linked List
-		ILibSparseArray_Node* n = (ILibSparseArray_Node*)malloc(sizeof(ILibSparseArray_Node));
+		ILibSparseArray_Node* n = (ILibSparseArray_Node*)ILibMemory_Allocate(sizeof(ILibSparseArray_Node), 0, NULL, NULL);
 		n->index = index;
 		n->ptr = data;
 		n = (ILibSparseArray_Node*)ILibLinkedList_SortedInsert(root->bucket[i].ptr, &ILibSparseArray_Comparer, n);
@@ -7063,7 +7219,7 @@ void* ILibSparseArray_Add(ILibSparseArray sarray, int index, void *data)
 		else
 		{
 			// We need to create a linked list, add the old value, then insert our new value (No return value)
-			ILibSparseArray_Node* n = (ILibSparseArray_Node*)malloc(sizeof(ILibSparseArray_Node));
+			ILibSparseArray_Node* n = (ILibSparseArray_Node*)ILibMemory_Allocate(sizeof(ILibSparseArray_Node), 0, NULL, NULL);
 			n->index = root->bucket[i].index;
 			n->ptr = root->bucket[i].ptr;
 
@@ -7071,7 +7227,7 @@ void* ILibSparseArray_Add(ILibSparseArray sarray, int index, void *data)
 			root->bucket[i].ptr = ILibLinkedList_Create();
 			ILibLinkedList_AddHead(root->bucket[i].ptr, n);
 
-			n = (ILibSparseArray_Node*)malloc(sizeof(ILibSparseArray_Node));
+			n = (ILibSparseArray_Node*)(ILibSparseArray_Node*)ILibMemory_Allocate(sizeof(ILibSparseArray_Node), 0, NULL, NULL);
 			n->index = index;
 			n->ptr = data;
 			ILibLinkedList_SortedInsert(root->bucket[i].ptr, &ILibSparseArray_Comparer, n);
@@ -7852,6 +8008,7 @@ long long ILibGetUptime()
 		if (hlib == NULL) return 0;
         pILibGetUptimeGetTickCount64 = (ULONGLONG(*)())GetProcAddress(hlib, "GetTickCount64");
         ILibGetUptimeFirst = 0;
+		FreeLibrary(hlib);
     }
     if (pILibGetUptimeGetTickCount64 != NULL) return pILibGetUptimeGetTickCount64(); 
 
@@ -8810,8 +8967,14 @@ int ILibInetCompare(struct sockaddr* addr1, struct sockaddr* addr2, int compare)
 int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, int addr6Count)
 {
 	int r, i = 0;
+#ifdef WIN32
+	ADDRINFOW *result = NULL, *current = NULL;
+	ADDRINFOW hints;
+#else
 	struct addrinfo *result = NULL, *current = NULL;
 	struct addrinfo hints;
+#endif
+
 	int len = 0;
 
 	if (addr6 != NULL && addr6Count > 0)
@@ -8823,19 +8986,29 @@ int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, in
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-#ifndef WIN32
+#ifdef WIN32
 	if (hostname[0] == '[')
 	{
-		int hostnameLen = strnlen_s(hostname, 4096);
-		char *newHost = alloca(hostnameLen);
+		int hostnameLen = (int)strnlen_s(hostname, 4096);
+		char *newHost = _alloca((size_t)hostnameLen);
 		memcpy_s(newHost, hostnameLen, hostname + 1, hostnameLen - 2);
 		newHost[hostnameLen - 2] = 0;
 		hostname = newHost;
 	}
-#endif
 
+	size_t hnameLen = hostname == NULL ? 0 : (2 + (2 * MultiByteToWideChar(CP_UTF8, 0, (LPCCH)hostname, -1, NULL, 0)));
+	size_t svcLen = service == NULL ? 0 : (2 + (2 * MultiByteToWideChar(CP_UTF8, 0, (LPCCH)service, -1, NULL, 0)));
+	PCWSTR hname = hnameLen == 0 ? NULL : _alloca(hnameLen);
+	PCWSTR svc = svcLen == 0 ? NULL : _alloca(svcLen);
+	if (hname != NULL) { MultiByteToWideChar(CP_UTF8, 0, (LPCCH)hostname, -1, (LPWSTR)hname, (int)hnameLen); }
+	if (svc != NULL) { MultiByteToWideChar(CP_UTF8, 0, (LPCCH)service, -1, (LPWSTR)svc, (int)svcLen); }
+	r = GetAddrInfoW(hname, svc, &hints, &result);
+	if (r != 0) { if (result != NULL) { FreeAddrInfoW(result); } return r; }
+#else
 	r = getaddrinfo(hostname, service, &hints, &result);
 	if (r != 0) { if (result != NULL) { freeaddrinfo(result); } return r; }
+#endif
+
 	if (result == NULL) return -1;
 
 	// Determine Number of results
@@ -8865,7 +9038,11 @@ int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, in
 		current = current->ai_next;
 	}
 
+#ifdef WIN32
+	FreeAddrInfoW(result);
+#else
 	freeaddrinfo(result);
+#endif
 	return i;
 }
 int ILibResolveEx2(char* hostname, unsigned short port, struct sockaddr_in6* addr6, int count)

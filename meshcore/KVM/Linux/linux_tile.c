@@ -320,12 +320,9 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
 		if (retval != 0) {
 			if (firstTime) {
-				//Re-adjust the compression ratio.
+				// Re-adjust the compression ratio.
 				COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
-				if (COMPRESSION_RATIO <= 1) {
-					COMPRESSION_RATIO = 2;
-				}
-
+				if (COMPRESSION_RATIO <= 1) { COMPRESSION_RATIO = 2; }
 				firstTime = 0;
 			}
 

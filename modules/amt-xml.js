@@ -1,3 +1,21 @@
+/*
+Copyright 2018 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+try { Object.defineProperty(Array.prototype, "peek", { value: function () { return (this.length > 0 ? this[this.length - 1] : undefined); } }); } catch (e) { }
+
 
 // Parse XML and return JSON
 module.exports.ParseWsman = function (xml) {
@@ -21,7 +39,7 @@ module.exports.ParseWsman = function (xml) {
         }
         return r;
     } catch (e) {
-        console.log("Unable to parse XML: " + xml);
+        console.error("Unable to parse XML: " + xml, e);
         return null;
     }
 }
@@ -88,7 +106,6 @@ function _PutObjToBodyXml(resuri, putObj) {
 }
 
 // This is a drop-in replacement to _turnToXml() that works without xml parser dependency.
-Object.defineProperty(Array.prototype, "peek", { value: function () { return (this.length > 0 ? this[this.length - 1] : null); } });
 function _treeBuilder() {
     this.tree = [];
     this.push = function (element) { this.tree.push(element); };

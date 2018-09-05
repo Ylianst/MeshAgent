@@ -70,11 +70,9 @@ ILibDuktape_DuplexStream * ILibDuktape_DuplexStream_InitEx(duk_context * ctx, IL
 {
 	ILibDuktape_DuplexStream *retVal;
 
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_DuplexStream));			// [obj][buffer]
-	retVal = (ILibDuktape_DuplexStream*)Duktape_GetBuffer(ctx, -1, NULL);	// [obj][buffer]
-	duk_put_prop_string(ctx, -2, ILibDuktape_DuplexStream_bufferPtr);		// [obj]
+	retVal = (ILibDuktape_DuplexStream*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_DuplexStream));	// [obj][buffer]
+	duk_put_prop_string(ctx, -2, ILibDuktape_DuplexStream_bufferPtr);								// [obj]
 
-	memset(retVal, 0, sizeof(ILibDuktape_DuplexStream));
 	retVal->user = user;
 	retVal->readableStream = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_DuplexStream_OnPause, ILibDuktape_DuplexStream_OnResume, UnshiftHandler != NULL ? ILibDuktape_DuplexStream_OnUnshift : NULL, retVal);
 	retVal->writableStream = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_DuplexStream_OnWrite, ILibDuktape_DuplexStream_OnEnd, retVal);

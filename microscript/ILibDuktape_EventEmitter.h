@@ -20,13 +20,22 @@ limitations under the License.
 #include "duktape.h"
 #include "microstack/ILibParsers.h"
 
+typedef enum ILibDuktape_EventEmitter_Types
+{
+	ILibDuktape_EventEmitter_Type_EXPLICIT = 0,
+	ILibDuktape_EventEmitter_Type_IMPLICIT = 1
+}ILibDuktape_EventEmitter_Types;
+
 typedef void(*ILibDuktape_EventEmitter_Handler)(duk_context *ctx, void *object, char *eventName, void *duk_eventArgs);
 typedef struct ILibDuktape_EventEmitter
 {
 	duk_context *ctx;
 	void *object;
 	void *tmpObject;
+	void *lastReturnValue;
+	void *retValTable;
 	unsigned int *totalListeners;
+	ILibDuktape_EventEmitter_Types eventType;
 	ILibHashtable eventTable;
 }ILibDuktape_EventEmitter;
 typedef void(*ILibDuktape_EventEmitter_HookHandler)(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback);
@@ -50,11 +59,16 @@ int ILibDuktape_EventEmitter_HasListeners(ILibDuktape_EventEmitter *emitter, cha
 
 #define ILibDuktape_EventEmitter_AddOnceEx2(ctx, idx, eventName, func, argCount) ILibDuktape_EventEmitter_AddOnceEx3(ctx, idx, eventName, func)
 #define ILibDuktape_EventEmitter_SetupEmit(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "emit");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
+#define ILibDuktape_EventEmitter_SetupOn(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "on");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
+#define ILibDuktape_EventEmitter_SetupPrependOnce(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "prependOnceListener");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
 
 int ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);								// Add native event handler
 int ILibDuktape_EventEmitter_AddOnEx(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func);
 
 void ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_HookHandler handler);
+void ILibDuktape_EventEmitter_ClearHook(ILibDuktape_EventEmitter *emitter, char *eventName);
+
 void ILibDuktape_EventEmitter_ForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName, duk_idx_t eventTargetIndex, char *targetEventName);
+void ILibDuktape_EventEmitter_DeleteForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName);
 
 #endif

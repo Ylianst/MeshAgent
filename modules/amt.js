@@ -26,6 +26,7 @@ limitations under the License.
  */
 function AmtStackCreateService(wsmanStack) {
     var obj = new Object();
+    obj._ObjectID = 'AMT'
     obj.wsman = wsmanStack;
     obj.pfx = ["http://intel.com/wbem/wscim/1/amt-schema/1/", "http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/", "http://intel.com/wbem/wscim/1/ips-schema/1/"];
     obj.PendingEnums = [];
@@ -52,31 +53,31 @@ function AmtStackCreateService(wsmanStack) {
     }
 
     // Perform a WSMAN "SUBSCRIBE" operation.
-    obj.Subscribe = function (name, delivery, url, callback, tag, pri, selectors, opaque, user, pass) { obj.wsman.ExecSubscribe(obj.CompleteName(name), delivery, url, function (ws, resuri, response, xstatus) { _up(); callback(obj, name, response, xstatus, tag); }, 0, pri, selectors, opaque, user, pass); _up(); }
+    obj.Subscribe = function Subscribe(name, delivery, url, callback, tag, pri, selectors, opaque, user, pass) { obj.wsman.ExecSubscribe(obj.CompleteName(name), delivery, url, function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, response, xstatus, tag); }, 0, pri, selectors, opaque, user, pass); _up(); }
 
     // Perform a WSMAN "UNSUBSCRIBE" operation.
-    obj.UnSubscribe = function (name, callback, tag, pri, selectors) { obj.wsman.ExecUnSubscribe(obj.CompleteName(name), function (ws, resuri, response, xstatus) { _up(); callback(obj, name, response, xstatus, tag); }, 0, pri, selectors); _up(); }
+    obj.UnSubscribe = function UnSubscribe(name, callback, tag, pri, selectors) { obj.wsman.ExecUnSubscribe(obj.CompleteName(name), function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, response, xstatus, tag); }, 0, pri, selectors); _up(); }
 
     // Perform a WSMAN "GET" operation.
-    obj.Get = function (name, callback, tag, pri) { obj.wsman.ExecGet(obj.CompleteName(name), function (ws, resuri, response, xstatus) { _up(); callback(obj, name, response, xstatus, tag); }, 0, pri); _up(); }
+    obj.Get = function Get(name, callback, tag, pri) { obj.wsman.ExecGet(obj.CompleteName(name), function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, response, xstatus, tag); }, 0, pri); _up(); }
 
     // Perform a WSMAN "PUT" operation.
-    obj.Put = function (name, putobj, callback, tag, pri, selectors) { obj.wsman.ExecPut(obj.CompleteName(name), putobj, function (ws, resuri, response, xstatus) { _up(); callback(obj, name, response, xstatus, tag); }, 0, pri, selectors); _up(); }
+    obj.Put = function Put(name, putobj, callback, tag, pri, selectors) { obj.wsman.ExecPut(obj.CompleteName(name), putobj, function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, response, xstatus, tag); }, 0, pri, selectors); _up(); }
 	
     // Perform a WSMAN "CREATE" operation.
-    obj.Create = function (name, putobj, callback, tag, pri) { obj.wsman.ExecCreate(obj.CompleteName(name), putobj, function (ws, resuri, response, xstatus) { _up(); callback(obj, name, response, xstatus, tag); }, 0, pri); _up(); }
+    obj.Create = function Create(name, putobj, callback, tag, pri) { obj.wsman.ExecCreate(obj.CompleteName(name), putobj, function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, response, xstatus, tag); }, 0, pri); _up(); }
 
     // Perform a WSMAN "DELETE" operation.
-    obj.Delete = function (name, putobj, callback, tag, pri) { obj.wsman.ExecDelete(obj.CompleteName(name), putobj, function (ws, resuri, response, xstatus) { _up(); callback(obj, name, response, xstatus, tag); }, 0, pri); _up(); }
+    obj.Delete = function Delete(name, putobj, callback, tag, pri) { obj.wsman.ExecDelete(obj.CompleteName(name), putobj, function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, response, xstatus, tag); }, 0, pri); _up(); }
 
     // Perform a WSMAN method call operation.
-    obj.Exec = function (name, method, args, callback, tag, pri, selectors) { obj.wsman.ExecMethod(obj.CompleteName(name), method, args, function (ws, resuri, response, xstatus) { _up(); callback(obj, name, obj.CompleteExecResponse(response), xstatus, tag); }, 0, pri, selectors); _up(); }
+    obj.Exec = function Exec(name, method, args, callback, tag, pri, selectors) { obj.wsman.ExecMethod(obj.CompleteName(name), method, args, function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, obj.CompleteExecResponse(response), xstatus, tag); }, 0, pri, selectors); _up(); }
 	
     // Perform a WSMAN method call operation.
-    obj.ExecWithXml = function (name, method, args, callback, tag, pri, selectors) { obj.wsman.ExecMethodXml(obj.CompleteName(name), method, execArgumentsToXml(args), function (ws, resuri, response, xstatus) { _up(); callback(obj, name, obj.CompleteExecResponse(response), xstatus, tag); }, 0, pri, selectors); _up(); }
+    obj.ExecWithXml = function ExecWithXml(name, method, args, callback, tag, pri, selectors) { obj.wsman.ExecMethodXml(obj.CompleteName(name), method, execArgumentsToXml(args), function (ws, resuri, response, xstatus) { _up(); callback.call(obj, obj, name, obj.CompleteExecResponse(response), xstatus, tag); }, 0, pri, selectors); _up(); }
 	
     // Perform a WSMAN "ENUMERATE" operation.
-    obj.Enum = function (name, callback, tag, pri) {
+    obj.Enum = function Enum(name, callback, tag, pri) {
         if (obj.ActiveEnumsCount < obj.MaxActiveEnumsCount) {
             obj.ActiveEnumsCount++; obj.wsman.ExecEnum(obj.CompleteName(name), function (ws, resuri, response, xstatus, tag0) { _up(); _EnumStartSink(name, response, callback, resuri, xstatus, tag0); }, tag, pri);
         } else {
@@ -87,16 +88,16 @@ function AmtStackCreateService(wsmanStack) {
 
     // Private method
     function _EnumStartSink(name, response, callback, resuri, status, tag, pri) {
-        if (status != 200) { callback(obj, name, null, status, tag); _EnumDoNext(1); return; }
-        if (response == null || response.Header["Method"] != "EnumerateResponse" || !response.Body["EnumerationContext"]) { callback(obj, name, null, 603, tag); _EnumDoNext(1); return; }
+        if (status != 200) { callback.call(obj, obj, name, null, status, tag); _EnumDoNext(1); return; }
+        if (response == null || response.Header["Method"] != "EnumerateResponse" || !response.Body["EnumerationContext"]) { callback.call(obj, obj, name, null, 603, tag); _EnumDoNext(1); return; }
         var enumctx = response.Body["EnumerationContext"];
         obj.wsman.ExecPull(resuri, enumctx, function (ws, resuri, response, xstatus) { _EnumContinueSink(name, response, callback, resuri, [], xstatus, tag, pri); });
     }
 
     // Private method
     function _EnumContinueSink(name, response, callback, resuri, items, status, tag, pri) {
-        if (status != 200) { callback(obj, name, null, status, tag); _EnumDoNext(1); return; }
-        if (response == null || response.Header["Method"] != "PullResponse") { callback(obj, name, null, 604, tag); _EnumDoNext(1); return; }
+        if (status != 200) { callback.call(obj, obj, name, null, status, tag); _EnumDoNext(1); return; }
+        if (response == null || response.Header["Method"] != "PullResponse") { callback.call(obj, obj, name, null, 604, tag); _EnumDoNext(1); return; }
         for (var i in response.Body["Items"]) {
             if (response.Body["Items"][i] instanceof Array) {
                 for (var j in response.Body["Items"][i]) { items.push(response.Body["Items"][i][j]); }
@@ -109,7 +110,7 @@ function AmtStackCreateService(wsmanStack) {
             obj.wsman.ExecPull(resuri, enumctx, function (ws, resuri, response, xstatus) { _EnumContinueSink(name, response, callback, resuri, items, xstatus, tag, 1); });
         } else {
             _EnumDoNext(1);
-            callback(obj, name, items, status, tag);
+            callback.call(obj, obj, name, items, status, tag);
             _up();
         }
     }
@@ -140,7 +141,7 @@ function AmtStackCreateService(wsmanStack) {
         // Perform a GET/ENUM action
         f(n, function (stack, name, responses, status, tag0) {
             tag0[2][name] = { response: (responses==null?null:responses.Body), responses: responses, status: status };
-            if (tag0[1].length == 0 || status == 401 || (continueOnError != true && status != 200 && status != 400)) { obj.PendingBatchOperations -= (names.length * 2); _up(); callback(obj, batchname, tag0[2], status, tag); }
+            if (tag0[1].length == 0 || status == 401 || (continueOnError != true && status != 200 && status != 400)) { obj.PendingBatchOperations -= (names.length * 2); _up(); callback.call(obj, obj, batchname, tag0[2], status, tag); }
             else { _up(); _BatchNextEnum(batchname, names, callback, tag, tag0[2], pri); }
         }, [batchname, names, results], pri);
         _up();
@@ -154,7 +155,7 @@ function AmtStackCreateService(wsmanStack) {
     // Private method
     function _FetchNext(batch) {
         if (batch.names.length <= batch.current) {
-            batch.callback(obj, batch.name, batch.responses, 200, batch.tag);
+            batch.callback.call(obj, obj, batch.name, batch.responses, 200, batch.tag);
         } else {
             obj.wsman.ExecGet(obj.CompleteName(batch.names[batch.current]), function (ws, resuri, response, xstatus) { _Fetched(batch, response, xstatus); }, batch.pri);
             batch.current++;
@@ -165,7 +166,7 @@ function AmtStackCreateService(wsmanStack) {
     // Private method
     function _Fetched(batch, response, status) {
         if (response == null || status != 200) {
-            batch.callback(obj, batch.name, null, status, batch.tag);
+            batch.callback.call(obj, obj, batch.name, null, status, batch.tag);
         } else {
             batch.responses[response.Header["Method"]] = response;
             _FetchNext(batch);
@@ -209,6 +210,16 @@ function AmtStackCreateService(wsmanStack) {
     obj.AMT_AgentPresenceWatchdogVA_AssertShutdown = function (SequenceNumber, callback_func) { obj.Exec("AMT_AgentPresenceWatchdogVA", "AssertShutdown", { "SequenceNumber": SequenceNumber }, callback_func); }
     obj.AMT_AgentPresenceWatchdogVA_AddAction = function (OldState, NewState, EventOnTransition, ActionSd, ActionEac, callback_func) { obj.Exec("AMT_AgentPresenceWatchdogVA", "AddAction", { "OldState": OldState, "NewState": NewState, "EventOnTransition": EventOnTransition, "ActionSd": ActionSd, "ActionEac": ActionEac }, callback_func); }
     obj.AMT_AgentPresenceWatchdogVA_DeleteAllActions = function (_method_dummy, callback_func) { obj.Exec("AMT_AgentPresenceWatchdogVA", "DeleteAllActions", { "_method_dummy": _method_dummy }, callback_func); }
+    obj.AMT_AlarmClockService_AddAlarm = function AlarmClockService_AddAlarm(alarmInstance, callback_func)
+    {
+        var id = alarmInstance.InstanceID;
+        var nm = alarmInstance.ElementName;
+        var start = alarmInstance.StartTime.Datetime;
+        var interval = alarmInstance.Interval ? alarmInstance.Interval.Datetime : undefined;
+        var doc = alarmInstance.DeleteOnCompletion;
+        var tpl = "<d:AlarmTemplate xmlns:d=\"http://intel.com/wbem/wscim/1/amt-schema/1/AMT_AlarmClockService\" xmlns:s=\"http://intel.com/wbem/wscim/1/ips-schema/1/IPS_AlarmClockOccurrence\"><s:InstanceID>" + id + "</s:InstanceID><s:ElementName>" + nm + "</s:ElementName><s:StartTime><p:Datetime xmlns:p=\"http://schemas.dmtf.org/wbem/wscim/1/common\">" + start + "</p:Datetime></s:StartTime>" + ((interval!=undefined)?("<s:Interval><p:Interval xmlns:p=\"http://schemas.dmtf.org/wbem/wscim/1/common\">" + interval + "</p:Interval></s:Interval>"):"") + "<s:DeleteOnCompletion>" + doc + "</s:DeleteOnCompletion></d:AlarmTemplate>"
+        obj.wsman.ExecMethodXml(obj.CompleteName("AMT_AlarmClockService"), "AddAlarm", tpl, callback_func);
+    };
     obj.AMT_AuditLog_ClearLog = function (callback_func) { obj.Exec("AMT_AuditLog", "ClearLog", {}, callback_func); }
     obj.AMT_AuditLog_RequestStateChange = function (RequestedState, TimeoutPeriod, callback_func) { obj.Exec("AMT_AuditLog", "RequestStateChange", { "RequestedState": RequestedState, "TimeoutPeriod": TimeoutPeriod }, callback_func); }
     obj.AMT_AuditLog_ReadRecords = function (StartIndex, callback_func, tag) { obj.Exec("AMT_AuditLog", "ReadRecords", { "StartIndex": StartIndex }, callback_func, tag); }
@@ -250,7 +261,7 @@ function AmtStackCreateService(wsmanStack) {
     obj.AMT_MessageLog_FreezeLog = function (Freeze, callback_func) { obj.Exec("AMT_MessageLog", "FreezeLog", { "Freeze": Freeze }, callback_func); }
     obj.AMT_PublicKeyManagementService_AddCRL = function (Url, SerialNumbers, callback_func) { obj.Exec("AMT_PublicKeyManagementService", "AddCRL", { "Url": Url, "SerialNumbers": SerialNumbers }, callback_func); }
     obj.AMT_PublicKeyManagementService_ResetCRLList = function (_method_dummy, callback_func) { obj.Exec("AMT_PublicKeyManagementService", "ResetCRLList", { "_method_dummy": _method_dummy }, callback_func); }
-    obj.AMT_PublicKeyManagementService_AddCertificate = function (CertificateBlob, callback_func) { obj.Exec("AMT_PublicKeyManagementService", "AddCertificate", { "CertificateBlob": CertificateBlob }, callback_func); }
+    obj.AMT_PublicKeyManagementService_AddCertificate = function (CertificateBlob, callback_func, tag) { obj.Exec("AMT_PublicKeyManagementService", "AddCertificate", { "CertificateBlob": CertificateBlob }, callback_func, tag); }
     obj.AMT_PublicKeyManagementService_AddTrustedRootCertificate = function (CertificateBlob, callback_func) { obj.Exec("AMT_PublicKeyManagementService", "AddTrustedRootCertificate", { "CertificateBlob": CertificateBlob }, callback_func); }
     obj.AMT_PublicKeyManagementService_AddKey = function (KeyBlob, callback_func) { obj.Exec("AMT_PublicKeyManagementService", "AddKey", { "KeyBlob": KeyBlob }, callback_func); }
     obj.AMT_PublicKeyManagementService_GeneratePKCS10Request = function (KeyPair, DNName, Usage, callback_func) { obj.Exec("AMT_PublicKeyManagementService", "GeneratePKCS10Request", { "KeyPair": KeyPair, "DNName": DNName, "Usage": Usage }, callback_func); }
@@ -261,7 +272,7 @@ function AmtStackCreateService(wsmanStack) {
     obj.AMT_RemoteAccessService_AddMpServer = function (AccessInfo, InfoFormat, Port, AuthMethod, Certificate, Username, Password, CN, callback_func) { obj.Exec("AMT_RemoteAccessService", "AddMpServer", { "AccessInfo": AccessInfo, "InfoFormat": InfoFormat, "Port": Port, "AuthMethod": AuthMethod, "Certificate": Certificate, "Username": Username, "Password": Password, "CN": CN }, callback_func); }
     obj.AMT_RemoteAccessService_AddRemoteAccessPolicyRule = function (Trigger, TunnelLifeTime, ExtendedData, MpServer, callback_func) { obj.Exec("AMT_RemoteAccessService", "AddRemoteAccessPolicyRule", { "Trigger": Trigger, "TunnelLifeTime": TunnelLifeTime, "ExtendedData": ExtendedData, "MpServer": MpServer }, callback_func); }
     obj.AMT_RemoteAccessService_CloseRemoteAccessConnection = function (_method_dummy, callback_func) { obj.Exec("AMT_RemoteAccessService", "CloseRemoteAccessConnection", { "_method_dummy": _method_dummy }, callback_func); }
-    obj.AMT_SetupAndConfigurationService_CommitChanges = function (_method_dummy, callback_func) { obj.Exec("AMT_SetupAndConfigurationService", "CommitChanges", { "_method_dummy": _method_dummy }, callback_func); }
+    obj.AMT_SetupAndConfigurationService_CommitChanges = function (_method_dummy, callback_func, tag) { obj.Exec("AMT_SetupAndConfigurationService", "CommitChanges", { "_method_dummy": _method_dummy }, callback_func, tag); }
     obj.AMT_SetupAndConfigurationService_Unprovision = function (ProvisioningMode, callback_func) { obj.Exec("AMT_SetupAndConfigurationService", "Unprovision", { "ProvisioningMode": ProvisioningMode }, callback_func); }
     obj.AMT_SetupAndConfigurationService_PartialUnprovision = function (_method_dummy, callback_func) { obj.Exec("AMT_SetupAndConfigurationService", "PartialUnprovision", { "_method_dummy": _method_dummy }, callback_func); }
     obj.AMT_SetupAndConfigurationService_ResetFlashWearOutProtection = function (_method_dummy, callback_func) { obj.Exec("AMT_SetupAndConfigurationService", "ResetFlashWearOutProtection", { "_method_dummy": _method_dummy }, callback_func); }
@@ -278,8 +289,9 @@ function AmtStackCreateService(wsmanStack) {
     obj.AMT_SystemPowerScheme_SetPowerScheme = function (callback_func, schemeInstanceId, tag) { obj.Exec("AMT_SystemPowerScheme", "SetPowerScheme", {}, callback_func, tag, 0, { "InstanceID": schemeInstanceId }); }
     obj.AMT_TimeSynchronizationService_GetLowAccuracyTimeSynch = function (callback_func, tag) { obj.Exec("AMT_TimeSynchronizationService", "GetLowAccuracyTimeSynch", {}, callback_func, tag); }
     obj.AMT_TimeSynchronizationService_SetHighAccuracyTimeSynch = function (Ta0, Tm1, Tm2, callback_func, tag) { obj.Exec("AMT_TimeSynchronizationService", "SetHighAccuracyTimeSynch", { "Ta0": Ta0, "Tm1": Tm1, "Tm2": Tm2 }, callback_func, tag); }
+    obj.AMT_TLSCredentialContext_Create = function AMT_TLSCredentialContext_Create(ElementInContext, ElementProvidingContext, callback_func, tag) { obj.Create("AMT_TLSCredentialContext", { "ElementInContext": ElementInContext, "ElementProvidingContext": ElementProvidingContext }, callback_func, tag); }
     obj.AMT_UserInitiatedConnectionService_RequestStateChange = function (RequestedState, TimeoutPeriod, callback_func) { obj.Exec("AMT_UserInitiatedConnectionService", "RequestStateChange", { "RequestedState": RequestedState, "TimeoutPeriod": TimeoutPeriod }, callback_func); }
-    obj.AMT_WebUIService_RequestStateChange = function (RequestedState, TimeoutPeriod, callback_func) { obj.Exec("AMT_WebUIService", "RequestStateChange", { "RequestedState": RequestedState, "TimeoutPeriod": TimeoutPeriod }, callback_func); }
+    obj.AMT_WebUIService_RequestStateChange = function (RequestedState, TimeoutPeriod, callback_func, tag) { obj.Exec("AMT_WebUIService", "RequestStateChange", { "RequestedState": RequestedState, "TimeoutPeriod": TimeoutPeriod }, callback_func, tag); }
     obj.AMT_WiFiPortConfigurationService_AddWiFiSettings = function (WiFiEndpoint, WiFiEndpointSettingsInput, IEEE8021xSettingsInput, ClientCredential, CACredential, callback_func) { obj.ExecWithXml("AMT_WiFiPortConfigurationService", "AddWiFiSettings", { "WiFiEndpoint": WiFiEndpoint, "WiFiEndpointSettingsInput": WiFiEndpointSettingsInput, "IEEE8021xSettingsInput": IEEE8021xSettingsInput, "ClientCredential": ClientCredential, "CACredential": CACredential }, callback_func); }
     obj.AMT_WiFiPortConfigurationService_UpdateWiFiSettings = function (WiFiEndpointSettings, WiFiEndpointSettingsInput, IEEE8021xSettingsInput, ClientCredential, CACredential, callback_func) { obj.ExecWithXml("AMT_WiFiPortConfigurationService", "UpdateWiFiSettings", { "WiFiEndpointSettings": WiFiEndpointSettings, "WiFiEndpointSettingsInput": WiFiEndpointSettingsInput, "IEEE8021xSettingsInput": IEEE8021xSettingsInput, "ClientCredential": ClientCredential, "CACredential": CACredential }, callback_func); }
     obj.AMT_WiFiPortConfigurationService_DeleteAllITProfiles = function (_method_dummy, callback_func) { obj.Exec("AMT_WiFiPortConfigurationService", "DeleteAllITProfiles", { "_method_dummy": _method_dummy }, callback_func); }
@@ -633,7 +645,7 @@ function AmtStackCreateService(wsmanStack) {
         2003: 'Security Audit Log Enabled',
         2004: 'Security Audit Log Exported',
         2005: 'Security Audit Log Recovered',
-        2100: 'Intel&reg; ME Time Set',
+        2100: 'Intel(R) ME Time Set',
         2200: 'TCPIP Parameters Set',
         2201: 'Host Name Set',
         2202: 'Domain Name Set',
@@ -680,8 +692,8 @@ function AmtStackCreateService(wsmanStack) {
     // TODO: Just put some of them here, but many more still need to be added, helpful link here:
     // https://software.intel.com/sites/manageability/AMT_Implementation_and_Reference_Guide/default.htm?turl=WordDocuments%2Fsecurityadminevents.htm
     obj.GetAuditLogExtendedDataStr = function (id, data) {
-        if ((id == 1602 || id == 1604) && data[0] == 0) { return data.splice(2, 2 + data[1]).toString(); } // ACL Entry Added/Removed (Digest)
-        if (id == 1603) { if (data[1] == 0) { return data.splice(3).toString(); } return null; } // ACL Entry Modified
+        if ((id == 1602 || id == 1604) && data[0] == 0) { return data.slice(2, 2 + data[1]).toString(); } // ACL Entry Added/Removed (Digest)
+        if (id == 1603) { if (data[1] == 0) { return data.slice(3).toString(); } return null; } // ACL Entry Modified
         if (id == 1605) { return ["Invalid ME access", "Invalid MEBx access"][data[0]]; } // ACL Access with Invalid Credentials
         if (id == 1606) { var r = ["Disabled", "Enabled"][data[0]]; if (data[1] == 0) { r += ", " + data[3]; } return r; } // ACL Entry State
         if (id == 1607) { return "Remote " + ["NoAuth", "ServerAuth", "MutualAuth"][data[0]] + ", Local " + ["NoAuth", "ServerAuth", "MutualAuth"][data[1]]; } // TLS State Changed
@@ -694,8 +706,12 @@ function AmtStackCreateService(wsmanStack) {
         return null;
     }
 
-    obj.GetAuditLog = function (func) {
-        obj.AMT_AuditLog_ReadRecords(1, _GetAuditLog0, [func, []]);
+    obj.GetAuditLog = function (func)
+    {
+        var opt = [];
+        for (var i = 1; i < arguments.length; ++i) { opt.push(arguments[i]); }
+
+        obj.AMT_AuditLog_ReadRecords(1, _GetAuditLog0, [func, [], opt]);
     }
 
     function MakeToArray(v) { if (!v || v == null || typeof v == 'object') return v; return [v]; }
@@ -706,7 +722,15 @@ function AmtStackCreateService(wsmanStack) {
     function atob(x) { var z = null; try { z = Buffer.from(x, 'base64').toString(); } catch (e) { console.log(e); } return z; }
 
     function _GetAuditLog0(stack, name, responses, status, tag) {
-        if (status != 200) { tag[0](obj, [], status); return; }
+        var opt = tag[2];
+        if (status != 200)
+        {       
+            opt.unshift([]);
+            opt.unshift(status);
+            opt.unshift(obj);
+            tag[0].apply(obj, opt);
+            return;
+        }
         var ptr, i, e, es, x, r = tag[1], t = new Date(), TimeStamp;
 
         if (responses.Body['RecordsReturned'] > 0) {
@@ -742,12 +766,12 @@ function AmtStackCreateService(wsmanStack) {
                 }
                 if (x['InitiatorType'] == 2) {
                     // Local
-                    x['Initiator'] = '<i>Local</i>';
+                    x['Initiator'] = 'Local';
                     ptr = 5;
                 }
                 if (x['InitiatorType'] == 3) {
                     // KVM Default Port
-                    x['Initiator'] = '<i>KVM Default Port</i>';
+                    x['Initiator'] = 'KVM Default Port';
                     ptr = 5;
                 }
                 
@@ -770,10 +794,15 @@ function AmtStackCreateService(wsmanStack) {
                 r.push(x);
             }
         }
-        if (responses.Body['TotalRecordCount'] > r.length) {
-            obj.AMT_AuditLog_ReadRecords(r.length + 1, _GetAuditLog0, [tag[0], r]);
-        } else {
-            tag[0](obj, r, status);
+        if (responses.Body['TotalRecordCount'] > r.length)
+        {
+            obj.AMT_AuditLog_ReadRecords(r.length + 1, _GetAuditLog0, [tag[0], r, opt]);
+        } else
+        {
+            opt.unshift(r);
+            opt.unshift(status);     
+            opt.unshift(obj);
+            tag[0].apply(obj, opt);
         }
     }
 

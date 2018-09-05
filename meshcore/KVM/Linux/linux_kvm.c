@@ -42,6 +42,8 @@ int TILE_HEIGHT = 0;
 int TILE_WIDTH_COUNT = 0;
 int TILE_HEIGHT_COUNT = 0;
 int COMPRESSION_RATIO = 0;
+int SCALING_FACTOR = 1024;		// Scaling factor, 1024 = 100%
+int SCALING_FACTOR_NEW = 1024;	// Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
 struct tileInfo_t **g_tileInfo = NULL;
 pthread_t kvmthread = (pthread_t)NULL;
@@ -429,8 +431,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_COMPRESSION: // Compression
 		{
-			if (size != 6) break;
-			set_tile_compression((int)block[4], (int)block[5]);
+			if (size >= 10) { int fr = ((int)ntohs(((unsigned short*)(block + 8))[0])); if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr; }
+			if (size >= 8) { int ns = ((int)ntohs(((unsigned short*)(block + 6))[0])); if (ns >= 64 && ns <= 4096) SCALING_FACTOR_NEW = ns; }
+			if (size >= 6) { set_tile_compression((int)block[4], (int)block[5]); }
 			COMPRESSION_RATIO = 100;
 			break;
 		}
@@ -458,6 +461,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 			g_remotepause = block[4];
 			break;
 		}
+	case MNG_KVM_FRAME_RATE_TIMER:
+		{
+			int fr = ((int)ntohs(((unsigned short*)(block))[2]));
+			if (fr >= 20 && fr <= 5000) FRAME_RATE_TIMER = fr;
+			break;
+		}
 	case MNG_KVM_GET_DISPLAYS:
 		{
 			kvm_send_display_list();
@@ -468,12 +477,6 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (ntohs(((unsigned short*)(block))[2]) == current_display) { break; } // Don't do anything
 			current_display = ntohs(((unsigned short*)(block))[2]);
 			change_display = 1;
-			break;
-		}
-	case MNG_KVM_FRAME_RATE_TIMER:
-		{
-			int fr = ((int)ntohs(((unsigned short*)(block))[2]));
-			if (fr > 20 && fr < 2000) FRAME_RATE_TIMER = fr;
 			break;
 		}
 	}
@@ -510,10 +513,10 @@ void* kvm_server_mainloop(void* parm)
 	int x, y, height, width, r, c, count = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
-	long long prev_timestamp = 0;
-	long long cur_timestamp = 0;
-	long long time_diff = 50;
-	struct timeb tp;
+	//long long prev_timestamp = 0;
+	//long long cur_timestamp = 0;
+	//long long time_diff = 50;
+	//struct timeb tp;
 	void *desktop = NULL;
 	XImage *image = NULL;
 	eventdisplay = NULL;
@@ -536,6 +539,7 @@ void* kvm_server_mainloop(void* parm)
 
 	while (!g_shutdown) {
 
+		/*
 		//printf("KVM/Loop");
 		ftime(&tp);
 		cur_timestamp = tp.time * 1000 + tp.millitm;
@@ -547,6 +551,7 @@ void* kvm_server_mainloop(void* parm)
 		usleep(time_diff * 1000);
 		prev_timestamp = cur_timestamp;
 		//printf("...\n");
+		*/
 
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) {
 			for (c = 0; c < TILE_WIDTH_COUNT; c++) {
@@ -660,6 +665,10 @@ void* kvm_server_mainloop(void* parm)
 			XCloseDisplay(imagedisplay);
 			imagedisplay = NULL;
 		}
+
+		// We can't go full speed here, we need to slow this down.
+		height = FRAME_RATE_TIMER;
+		while (!g_shutdown && height > 0) { if (height > 50) { height -= 50; usleep(50000); } else { usleep(height * 1000); height = 0; } }
 	}
 
 	close(slave2master[1]);

@@ -48,6 +48,8 @@ int ClearWindowsFirewall(wchar_t* processname);
 #define _CRTDBG_MAP_ALLOC
 #endif
 
+#include <WtsApi32.h>
+
 TCHAR* serviceFile = TEXT("Mesh Agent");
 TCHAR* serviceFileOld = TEXT("Mesh Agent v2");
 TCHAR* serviceName = TEXT("Mesh Agent background service");
@@ -88,7 +90,7 @@ BOOL IsAdmin()
 	return admin;
 }
 
-void WINAPI ServiceControlHandler( DWORD controlCode )
+DWORD WINAPI ServiceControlHandler( DWORD controlCode, DWORD eventType, void *eventData, void* eventContext )
 {
 	switch (controlCode)
 	{
@@ -99,12 +101,161 @@ void WINAPI ServiceControlHandler( DWORD controlCode )
 			serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
 			SetServiceStatus( serviceStatusHandle, &serviceStatus );
 			if (agent != NULL) { MeshAgent_Stop(agent); }
-			return;
+			return(0);
+		case SERVICE_CONTROL_POWEREVENT:
+			switch (eventType)
+			{
+				case PBT_APMPOWERSTATUSCHANGE:	// Power status has changed.
+					break;
+				case PBT_APMRESUMEAUTOMATIC:	// Operation is resuming automatically from a low - power state.This message is sent every time the system resumes.
+					break;
+				case PBT_APMRESUMESUSPEND:		// Operation is resuming from a low - power state.This message is sent after PBT_APMRESUMEAUTOMATIC if the resume is triggered by user input, such as pressing a key.
+					break;
+				case PBT_APMSUSPEND:			// System is suspending operation.
+					break;
+				case PBT_POWERSETTINGCHANGE:	// Power setting change event has been received.
+					break;
+			}
+			break;
+		case SERVICE_CONTROL_SESSIONCHANGE:
+			if (agent == NULL)
+			{
+				break; // If there isn't an agent, no point in doing anything, cuz nobody will hear us
+			}
+
+			switch (eventType)
+			{
+				case WTS_CONSOLE_CONNECT:		// The session identified by lParam was connected to the console terminal or RemoteFX session.
+					break;
+				case WTS_CONSOLE_DISCONNECT:	// The session identified by lParam was disconnected from the console terminal or RemoteFX session.
+					break;
+				case WTS_REMOTE_CONNECT:		// The session identified by lParam was connected to the remote terminal.
+					break;
+				case WTS_REMOTE_DISCONNECT:		// The session identified by lParam was disconnected from the remote terminal.
+					break;
+				case WTS_SESSION_LOGON:			// A user has logged on to the session identified by lParam.
+				case WTS_SESSION_LOGOFF:		// A user has logged off the session identified by lParam.					
+					break;
+				case WTS_SESSION_LOCK:			// The session identified by lParam has been locked.
+					break;
+				case WTS_SESSION_UNLOCK:		// The session identified by lParam has been unlocked.
+					break;
+				case WTS_SESSION_REMOTE_CONTROL:// The session identified by lParam has changed its remote controlled status.To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
+					break;
+				case WTS_SESSION_CREATE:		// Reserved for future use.
+				case WTS_SESSION_TERMINATE:		// Reserved for future use.
+					break;
+			}
+			break;
 		default:
 			break;
 	}
 
 	SetServiceStatus( serviceStatusHandle, &serviceStatus );
+	return(0);
+}
+
+
+// Add the uninstallation icon in the Windows Control Panel.
+void WINAPI AddUninstallIcon()
+{
+	/*
+	[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MeshAgent]
+	"DisplayName"="Mesh Agent Service - Remote Control Software"
+	"Publisher"="MeshCentral"
+	"MajorVersion"="2"
+	"MinorVersion"="13"
+	"InstallLocation"="C:\\Program Files\\Mesh Agent"
+	"UninstallString"="C:\\Program Files\\Mesh Agent\\meshuninstaller.bat"
+	"DisplayIcon"="C:\\Program Files\\Mesh Agent\\MeshAgent.exe"
+	"DisplayVersion"="2.1.3"
+	"URLInfoAbout"="http://www.meshcentral.com/"
+	"VersionMajor"=dword:00000002
+	"VersionMinor"=dword:00000013
+	"EstimatedSize"=dword:00208000
+	"NoModify"=dword:00000001
+	"NoRepair"=dword:00000001
+	*/
+
+	int i;
+	HKEY hKey;
+	if (RegCreateKey(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MeshCentralAgent", &hKey) == ERROR_SUCCESS)
+	{
+		LPCTSTR str;
+		char targetexe[_MAX_PATH + 40];
+		size_t targetexelen = 0;
+
+		str = "MeshCentral Agent - Remote Control Software\0";
+		RegSetValueEx(hKey, "DisplayName", 0, REG_SZ, (LPBYTE)str, (DWORD)strlen(str)+1);
+
+		str = "Open Source\0";
+		RegSetValueEx(hKey, "Publisher", 0, REG_SZ, (LPBYTE)str, (DWORD)strlen(str) + 1);
+
+		str = "1\0";
+		RegSetValueEx(hKey, "MajorVersion", 0, REG_SZ, (LPBYTE)str, (DWORD)strlen(str) + 1);
+
+		str = "0\0";
+		RegSetValueEx(hKey, "MinorVersion", 0, REG_SZ, (LPBYTE)str, (DWORD)strlen(str) + 1);
+
+		// Install location
+		if (SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, targetexe) != S_FALSE) {
+			targetexelen = strnlen_s(targetexe, _MAX_PATH + 40);
+			if (targetexelen <= MAX_PATH) {
+				memcpy_s(targetexe + targetexelen, _MAX_PATH + 40 - targetexelen, "\\Mesh Agent\\\0", 13);
+				RegSetValueEx(hKey, "InstallLocation", 0, REG_SZ, (LPBYTE)targetexe, (DWORD)strlen(targetexe) + 1);
+			}
+		}
+
+		// Uninstall command
+		if (SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, targetexe) != S_FALSE) {
+			targetexelen = strnlen_s(targetexe, _MAX_PATH + 40);
+			if (targetexelen <= MAX_PATH) {
+				memcpy_s(targetexe + targetexelen, _MAX_PATH + 40 - targetexelen, "\\Mesh Agent\\MeshAgent.exe -fulluninstall\0", 41);
+				RegSetValueEx(hKey, "UninstallString", 0, REG_SZ, (LPBYTE)targetexe, (DWORD)strlen(targetexe) + 1);
+			}
+		}
+
+		// Display icon
+		if (SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, targetexe) != S_FALSE) {
+			targetexelen = strnlen_s(targetexe, _MAX_PATH + 40);
+			if (targetexelen <= MAX_PATH) {
+				memcpy_s(targetexe + targetexelen, _MAX_PATH + 40 - targetexelen, "\\Mesh Agent\\MeshAgent.exe\0", 26);
+				RegSetValueEx(hKey, "DisplayIcon", 0, REG_SZ, (LPBYTE)targetexe, (DWORD)strlen(targetexe) + 1);
+			}
+		}
+
+		str = "1.0.0\0";
+		RegSetValueEx(hKey, "DisplayVersion", 0, REG_SZ, (LPBYTE)str, (DWORD)strlen(str) + 1);
+
+		str = "http://www.meshcentral.com/\0"; // TODO - Change this to .msg content
+		RegSetValueEx(hKey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)str, (DWORD)strlen(str) + 1);
+
+		i = 2;
+		RegSetValueEx(hKey, "VersionMajor", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
+
+		i = 13;
+		RegSetValueEx(hKey, "VersionMinor", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
+
+		i = 0x00208000;
+		RegSetValueEx(hKey, "EstimatedSize", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
+
+		i = 1;
+		RegSetValueEx(hKey, "NoModify", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
+		RegSetValueEx(hKey, "NoRepair", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
+
+		RegCloseKey(hKey);
+	}
+	else
+	{
+		printf("Error writing to registry, try running as administrator.");
+	}
+
+}
+
+
+void WINAPI RemoveUninstallIcon()
+{
+	RegDeleteKey(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MeshCentralAgent");
 }
 
 
@@ -127,7 +278,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	serviceStatus.dwServiceSpecificExitCode = NO_ERROR;
 	serviceStatus.dwCheckPoint = 0;
 	serviceStatus.dwWaitHint = 0;
-	serviceStatusHandle = RegisterServiceCtrlHandler(serviceName, ServiceControlHandler);
+	serviceStatusHandle = RegisterServiceCtrlHandlerExA(serviceName, (LPHANDLER_FUNCTION_EX)ServiceControlHandler, NULL);
 
 	if (serviceStatusHandle)
 	{
@@ -136,7 +287,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		SetServiceStatus(serviceStatusHandle, &serviceStatus);
 
 		// Service running
-		serviceStatus.dwControlsAccepted |= (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
+		serviceStatus.dwControlsAccepted |= (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_POWEREVENT | SERVICE_ACCEPT_SESSIONCHANGE);
 		serviceStatus.dwCurrentState = SERVICE_RUNNING;
 		SetServiceStatus( serviceStatusHandle, &serviceStatus);
 
@@ -153,10 +304,10 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 
 		// Run the mesh agent
 		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-		
+
 		__try
 		{
-			agent = MeshAgent_Create();
+			agent = MeshAgent_Create(0);
 			MeshAgent_Start(agent, 1, selfexe_ptr);
 			agent = NULL;
 		}
@@ -252,7 +403,7 @@ BOOL InstallService()
 				}
 				else
 				{
-					ILIBMESSAGE2("Mesh service was not Installed Successfully. Error Code %d", (int)GetLastError());
+					ILIBMESSAGE("Mesh service was not Installed Successfully.");
 				}
 				#endif
 			}
@@ -409,21 +560,22 @@ int StopService(LPCSTR servicename)
 	return r;
 }
 
-int RunProcess(char* exe)
+int RunProcess(char* exe, int waitForExit)
 {
-	BOOL r;
+	BOOL r = TRUE;
 	int count = 50;
 	DWORD exitcode;
 	STARTUPINFOA info = {sizeof(info)};
 	PROCESS_INFORMATION processInfo;
 	if (CreateProcessA(NULL, exe, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo) == 0) return 0;
-	do
-	{
-		Sleep(100);
-		r = GetExitCodeProcess(processInfo.hProcess, &exitcode);
-		if (exitcode == STILL_ACTIVE) r = 0;
+	if (waitForExit != 0) {
+		do
+		{
+			Sleep(100);
+			r = GetExitCodeProcess(processInfo.hProcess, &exitcode);
+			if (exitcode == STILL_ACTIVE) r = 0;
+		} while (r == 0 && count-- > 0);
 	}
-	while (r == 0 && count-- > 0);
 	CloseHandle(processInfo.hProcess);
 	CloseHandle(processInfo.hThread);
 	return r;
@@ -457,8 +609,20 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 	int setup1len;
 	int setup2len;
 
+	if (IsAdmin() == FALSE) { printf("Requires administrator permissions.\r\n"); return; }
+	if (uninstallonly != 0) { printf("Performing uninstall...\r\n"); } else { printf("Performing install...\r\n"); }
+
 	// Stop and remove the service
 	StopService(serviceFile);
+
+	// Wait for the service to stop
+	int serviceStateLoopCount = 0;;
+	int serviceState;
+	do {
+		serviceStateLoopCount++;
+		Sleep(100);
+		serviceState = GetServiceState(serviceFile);
+	} while ((serviceState == 3) && (serviceStateLoopCount < 100));
 	UninstallService(serviceFile);
 	UninstallService(serviceFileOld);
 
@@ -474,8 +638,21 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 		targetexelen += 25;
 	}
 
+	// Check if we are uninstalling ourself
+	if ((uninstallonly != 0) && (targetexelen == selfexelen) && (memcmp(selfexe, targetexe, targetexelen) == 0)) {
+		// Copy ourself to a temp folder and run full uninstall.
+		char tempPath[_MAX_PATH + 40];
+		int tempPathLen = GetTempPathA(_MAX_PATH, tempPath);
+		memcpy_s(tempPath + tempPathLen, _MAX_PATH + 40 - tempPathLen, "MeshAgent.exe\0", 15);
+		remove(tempPath);
+		util_CopyFile(selfexe, tempPath, FALSE);
+		memcpy_s(tempPath + tempPathLen, _MAX_PATH + 40 - tempPathLen, "MeshAgent.exe -fulluninstall\0", 30);
+		RunProcess(tempPath, 0); // Don't wait for the process to terminate since we want to self-delete.
+		return;
+	}
+
 	// Call uninstall, this will remove the firewall rules.
-	RunProcess(targetexe2);
+	RunProcess(targetexe2, 1);
 
 #ifdef _MINCORE
 	// Remove the MeshAgent registry keys
@@ -487,12 +664,21 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 	RegDeleteKey(HKEY_CURRENT_USER, "Software\\Open Source\\MeshAgent2");
 #endif
 
+	// Remove the uninstall icon from the control panel if present
+	RemoveUninstallIcon();
+
 	// Check if selfexe is already located at the target, if so, skip to copy steps.
-	if (targetexelen != selfexelen || memcmp(selfexe, targetexe, targetexelen) != 0)
+	if ((uninstallonly != 0) || (targetexelen != selfexelen) || (memcmp(selfexe, targetexe, targetexelen) != 0))
 	{
-		// Remove the target executable.
+		// Remove the target executable, wait if needed
+		int selfExeDelLoopCount = 0;;
+		int selfExeDel;
 		targetexe[targetexelen] = 0;
-		remove(targetexe);
+		do {
+			Sleep(100);
+			selfExeDelLoopCount++;
+			selfExeDel = remove(targetexe);
+		} while ((selfExeDel != 0) && (selfExeDel != -1) && (selfExeDelLoopCount < 100));
 
 		// Remove "[Executable].msh" file
 		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
@@ -648,6 +834,9 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 		}
 	}
 
+	// Add the uninstall icon in the control panel
+	AddUninstallIcon();
+
 	/*
 #if defined(_LINKVM)
 	// Setup the SendSAS permission
@@ -657,9 +846,9 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 
 	// Attempt to start the updated service up again
 	memcpy(targetexe + targetexelen, "\" -install", 11);
-	r = RunProcess(targetexe2);
+	r = RunProcess(targetexe2, 1);
 	memcpy(targetexe + targetexelen, "\" -start", 9);
-	r = RunProcess(targetexe2);
+	r = RunProcess(targetexe2, 1);
 }
 #endif
 
@@ -706,18 +895,32 @@ int main(int argc, char* argv[])
 
 	//CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
-	if (argc > 2 && memcmp(argv[1], "-faddr", 6) == 0)
+	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
 	{
-		uint64_t addrOffset;
-		util_hexToBuf(argv[2] + 2, (int)strnlen_s(argv[2], 130) - 2, (char*)&addrOffset);
-		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), addrOffset);
+#ifdef WIN64
+		uint64_t addrOffset = 0;
+		sscanf_s(argv[2] + 2, "%016llx", &addrOffset);
+#else
+		uint32_t addrOffset = 0;
+		sscanf_s(argv[2] + 2, "%x", &addrOffset);
+#endif
+		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), (uint64_t)addrOffset);
+		printf("%s", ILibScratchPad);
+		return(0);
+	}
+
+	if (argc > 2 && strcasecmp(argv[1], "-fdelta") == 0)
+	{
+		uint64_t delta = 0;
+		sscanf_s(argv[2], "%lld", &delta);
+		ILibChain_DebugDelta(ILibScratchPad, sizeof(ILibScratchPad), delta);
 		printf("%s", ILibScratchPad);
 		return(0);
 	}
 
 	char *integratedJavaScript;
 	int integragedJavaScriptLen;
-	ILibDuktape_ScriptContainer_CheckEmbedded(argv, &integratedJavaScript, &integragedJavaScriptLen);
+	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -764,7 +967,6 @@ int main(int argc, char* argv[])
 		return 0;
 	}
 	#endif
-	
 
 #ifdef _MINCORE
 	if (argc > 1 && strcasecmp(argv[1], "-signcheck") == 0)
@@ -776,17 +978,20 @@ int main(int argc, char* argv[])
 		return 0;
 	}
 #else
-	else if (integratedJavaScript != NULL || (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "--slave") == 0))))
+	
+	if (integratedJavaScript != NULL || (argc > 0 && strcasecmp(argv[0], "--slave") == 0) || (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "connect") == 0) || (strcasecmp(argv[1], "--slave") == 0))))
 	{
 		// Run the mesh agent in console mode, since the agent is compiled for windows service, the KVM will not work right. This is only good for testing.
 		SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
 
 		__try
 		{
-			agent = MeshAgent_Create();
+			int capabilities = 0;
+			if (argc > 1 && ((strcasecmp(argv[1], "connect") == 0))) { capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY; }
+			agent = MeshAgent_Create(capabilities);
 			agent->meshCoreCtx_embeddedScript = integratedJavaScript;
 			agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
-			if (integratedJavaScript != NULL || (argc > 1 && strcasecmp(argv[1], "run") == 0)) { agent->runningAsConsole = 1; }
+			if (integratedJavaScript != NULL || (argc > 1 && (strcasecmp(argv[1], "run") == 0 || strcasecmp(argv[1], "connect") == 0))) { agent->runningAsConsole = 1; }
 			MeshAgent_Start(agent, argc, argv);
 			retCode = agent->exitCode;
 			MeshAgent_Destroy(agent);
@@ -1050,7 +1255,7 @@ int main(int argc, char* argv[])
 		}
 		else
 		{
-			printf("Error writing to registry, try running this as administrator.");
+			printf("Error writing to registry, try running as administrator.");
 		}
 		return 0;
 	}
@@ -1062,9 +1267,12 @@ int main(int argc, char* argv[])
 			// See if we need to run as a script engine
 			if (argc >= 2 && ILibString_EndsWith(argv[1], -1, ".js", 3) != 0)
 			{
+				SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
+
 				__try
 				{
-					agent = MeshAgent_Create();
+					agent = MeshAgent_Create(0);
+					agent->runningAsConsole = 1;
 					MeshAgent_Start(agent, argc, argv);
 					MeshAgent_Destroy(agent);
 				}
@@ -1076,9 +1284,9 @@ int main(int argc, char* argv[])
 			else
 			{
 #ifdef _MINCORE
-				printf("Mesh Agent available switches:\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
+				printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
 #else
-				printf("Mesh Agent available switches:\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
+				printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
 #endif
 			}
 		}
@@ -1182,6 +1390,42 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 
 #ifndef _MINCORE
 
+// Start as a temporary mesh agent.
+DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
+{
+	CONTEXT winException;
+	char selfexe[_MAX_PATH];
+	char *selfexe_ptr[] = { selfexe };
+	WCHAR str[_MAX_PATH];
+	size_t len;
+	char *integratedJavaScript;
+	int integragedJavaScriptLen;
+	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
+
+	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+	// Get our own executable name
+	if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5) { wcstombs_s(&len, selfexe, _MAX_PATH, str, _MAX_PATH); }
+
+	__try
+	{
+		agent = MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY);
+		agent->meshCoreCtx_embeddedScript = integratedJavaScript;
+		agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
+		agent->runningAsConsole = 1;
+		MeshAgent_Start(agent, 1, selfexe_ptr);
+		//retCode = agent->exitCode;
+		MeshAgent_Destroy(agent);
+	}
+	__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
+	{
+		ILib_WindowsExceptionDebug(&winException);
+	}
+
+	CoUninitialize();
+	return(0);
+}
+
 // Message handler for dialog box.
 INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -1241,8 +1485,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				int major, minor, hotfix, other;
 
 				if ((dwSize = GetFileVersionInfoSize(selfexe, NULL)))
-				{
-					pVersionInfo = malloc(dwSize);
+				{					
+					if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
 					if (GetFileVersionInfo(selfexe, 0, dwSize, pVersionInfo))
 					{
 						if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
@@ -1270,10 +1514,15 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
 				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
 				SetWindowTextA(GetDlgItem(hDlg, IDC_POLICYTEXT), (meshid != NULL) ? meshname : "(None)");
-				SetWindowTextA(GetDlgItem( hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
+				SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERLOCATION), (serverurl != NULL) ? serverurl : "(None)");
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
 				free(mshfile);
+				if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
+			}
+			else
+			{
+				EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
 			}
 
 			return (INT_PTR)TRUE;
@@ -1306,6 +1555,14 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			return (INT_PTR)TRUE;
 		}
+		else if (LOWORD(wParam) == IDC_CONNECTBUTTON) {
+			EnableWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
+			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), "Running as temporary agent");
+			CreateThread(NULL, 0, &StartTempAgent, NULL, 0, NULL);
+			return (INT_PTR)TRUE;
+		}
 		break;
 	}
 	return (INT_PTR)FALSE;
@@ -1321,4 +1578,3 @@ HANDLE WINAPI CreateSemaphoreW(_In_opt_  LPSECURITY_ATTRIBUTES lpSemaphoreAttrib
 	return 0;
 }
 #endif
-

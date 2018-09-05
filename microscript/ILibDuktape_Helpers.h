@@ -37,6 +37,17 @@ typedef void(*ILibDuktape_HelperEvent)(duk_context *ctx, void *user);
 #define ILibDuktape_CR2HTTP									"\xFF_CR2HTTP"
 #define ILibDuktape_CR2Options								"\xFF_CR2Options"
 
+typedef enum ILibDuktape_LogTypes
+{
+	ILibDuktape_LogType_Normal = 0,
+	ILibDuktape_LogType_Warn,
+	ILibDuktape_LogType_Error,
+	ILibDuktape_LogType_Info1,
+	ILibDuktape_LogType_Info2,
+	ILibDuktape_LogType_Info3
+}ILibDuktape_LogTypes;
+
+void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta);
 char* Duktape_GetContextGuidHex(duk_context *ctx);
 void *Duktape_GetChain(duk_context *ctx);
 char *Duktape_GetStashKey(void* value);
@@ -52,6 +63,14 @@ struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short
 struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short port);
 void ILibDuktape_SockAddrToOptions(duk_context *ctx, struct sockaddr_in6 *addr);
 void *ILibDuktape_GetProcessObject(duk_context *ctx);
+
+char* ILibDuktape_String_AsWide(duk_context *ctx, duk_idx_t idx, duk_size_t *len);
+void ILibDuktape_String_PushWideString(duk_context *ctx, char *wstr, size_t wstrlen);
+char *ILibDuktape_String_WideToUTF8(duk_context *ctx, char *wstr);
+char *ILibDuktape_String_UTF8ToWide(duk_context *ctx, char *str);
+
+#define Duktape_PushBuffer(ctx, bufSize) ILibMemory_Init(duk_push_fixed_buffer(ctx, (duk_size_t)(bufSize) + sizeof(ILibMemory_Header)), (bufSize), 0, ILibMemory_Types_OTHER)
+void Duktape_Console_Log(duk_context *ctx, void *chain, ILibDuktape_LogTypes logType, char *msg, duk_size_t msgLen);
 
 typedef void(*ILibDuktape_NativeUncaughtExceptionHandler)(duk_context *ctx, char *msg, void *user);
 void ILibDuktape_SetNativeUncaughtExceptionHandler(duk_context *ctx, ILibDuktape_NativeUncaughtExceptionHandler handler, void *user);
@@ -93,15 +112,11 @@ void ILibDuktape_Helper_AddHeapFinalizer(duk_context *ctx, ILibDuktape_HelperEve
 
 void ILibDuktape_Push_ObjectStash(duk_context *ctx);
 
-void ILibDuktape_PointerValidation_Init(duk_context *ctx);
-void ILibDuktape_ValidatePointer(void *chain, void *ptr);
-void ILibDuktape_InValidatePointer(void *chain, void *ptr);
-int ILibDuktape_IsPointerValid(void *chain, void *ptr);
-#define ILibDuktape_ValidateHeapPointer(ctx, objIdx) ILibDuktape_ValidatePointer(Duktape_GetChain(ctx), duk_get_heapptr(ctx, objIdx))
-#define ILibDuktape_InValidateHeapPointer(ctx, objIdx) ILibDuktape_InValidatePointer(Duktape_GetChain(ctx), duk_get_heapptr(ctx, objIdx))
-
 typedef void(*ILibDuktape_ImmediateHandler)(duk_context *ctx, void ** args, int argsLen);
+typedef ILibDuktape_ImmediateHandler ILibDuktape_IntervalHandler;
+
 void* ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback);
+void* ILibDuktape_Interval(duk_context *ctx, void **args, int argsLen, int delay, ILibDuktape_IntervalHandler callback);
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i);
 
 #define ILibDuktape_WriteID(ctx, id) duk_push_string(ctx, id);duk_put_prop_string(ctx, -2, ILibDuktape_OBJID)

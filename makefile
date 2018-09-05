@@ -1,3 +1,12 @@
+# To built libturbojpeg.a
+#
+# Get the file "libjpeg-turbo-1.4.2.tar.gz", extract it. For Linux 64bit compile:
+#   ./configure
+# For Linux 32bit compile
+#   ./configure --build=i686-pc-linux-gnu "CFLAGS=-m32" "CXXFLAGS=-m32" "LDFLAGS=-m32"
+# Then do "make -j8" and get the resulting file /.libs/libturbojpeg.a
+#
+#
 # To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext and jpeg. To install, do this:
 # 
 #  sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg-dev
@@ -7,15 +16,15 @@
 #
 # Special builds:
 #
-#   make linux ARCHID=6 WEBLOG=1 KVM=0		# Linux x86 64 bit, with Web Logging, and KVM disabled
-#	make linux ARCHID=6 DEBUG=1				# Linux x86 64 bit, with debug symbols and automated crash handling
+#   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
+#   make linux ARCHID=6 DEBUG=1             # Linux x86 64 bit, with debug symbols and automated crash handling
 #
 # Standard builds
 #
-#			   ARCHID=1						# Windows Console x86 32 bit
-#			   ARCHID=2						# Windows Console x86 64 bit
-#			   ARCHID=3						# Windows Service x86 32 bit
-#			   ARCHID=4						# Windows Service x86 64 bit
+#   ARCHID=1                                # Windows Console x86 32 bit
+#   ARCHID=2                                # Windows Console x86 64 bit
+#   ARCHID=3                                # Windows Service x86 32 bit
+#   ARCHID=4                                # Windows Service x86 64 bit
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPS
@@ -25,13 +34,14 @@
 #   make linux ARCHID=18					# Linux x86 64 bit POKY
 #   make linux ARCHID=19					# Linux x86 32 bit NOKVM
 #   make linux ARCHID=20					# Linux x86 64 bit NOKVM
-#   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry PI2, etc)
+#   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
+#   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #
 
 # Microstack & Microscript
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c
 SOURCES += microstack/ILibRemoteLogging.c microstack/ILibWebClient.c microstack/ILibWebRTC.c microstack/ILibWebServer.c microstack/ILibCrypto.c
-SOURCES += microstack/ILibWrapperWebRTC.c microstack/md5.c microstack/sha1.c microstack/ILibSimpleDataStore.c microstack/ILibProcessPipe.c microstack/ILibIPAddressMonitor.c
+SOURCES += microstack/ILibWrapperWebRTC.c microstack/ILibSimpleDataStore.c microstack/ILibProcessPipe.c microstack/ILibIPAddressMonitor.c
 SOURCES += microscript/duktape.c microscript/duk_module_duktape.c microscript/ILibAsyncSocket_Duktape.c microscript/ILibDuktape_DuplexStream.c microscript/ILibDuktape_Helpers.c
 SOURCES += microscript/ILibDuktape_http.c microscript/ILibDuktape_net.c microscript/ILibDuktape_ReadableStream.c microscript/ILibDuktape_WritableStream.c
 SOURCES += microscript/ILibDuktapeModSearch.c microscript/ILibParsers_Duktape.c microscript/ILibWebClient_Duktape.c microscript/ILibDuktape_WebRTC.c
@@ -39,7 +49,7 @@ SOURCES += microscript/ILibWebServer_Duktape.c microscript/ILibDuktape_SimpleDat
 SOURCES += microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c
 SOURCES += microscript/ILibDuktape_ScriptContainer.c microscript/ILibDuktape_MemoryStream.c microscript/ILibDuktape_NetworkMonitor.c
-SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HECI.c microscript/ILibDuktape_HttpStream.c
+SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HECI.c microscript/ILibDuktape_HttpStream.c microscript/ILibDuktape_Debugger.c
 
 # Mesh Agent core
 SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
@@ -178,7 +188,11 @@ ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
 SOURCES += meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
-LDFLAGS += -lX11 -lXtst -lXext -ljpeg
+	ifneq ($(JPEGVER),)
+		LDFLAGS += -lX11 -lXtst -lXext -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+	else
+		LDFLAGS += -lX11 -lXtst -lXext -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+	endif
 endif
 
 ifeq ($(LMS),1)
@@ -198,7 +212,7 @@ CWATCHDOG := -DILibChain_WATCHDOG_TIMEOUT=$(WatchDog)
 endif
 
 ifeq ($(NOTLS),1)
-SOURCES += microstack/sha384-512.c microstack/sha224-256.c
+SOURCES += microstack/nossl/sha384-512.c microstack/nossl/sha224-256.c microstack/nossl/md5.c microstack/nossl/sha1.c
 CFLAGS += -DMICROSTACK_NOTLS
 LINUXSSL = 
 else
@@ -209,7 +223,7 @@ endif
 
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
-CFLAGS += -g -rdynamic -D_DEBUG
+CFLAGS += -g -rdynamic -D_DEBUG -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
 STRIP = $(NOECHO) $(NOOP)
 else
 CFLAGS += -Os
@@ -240,9 +254,15 @@ clean:
 
 cleanbin:
 	rm -f $(EXENAME)_x86
+	rm -f $(EXENAME)_x86_nokvm
 	rm -f $(EXENAME)_x86-64
+	rm -f $(EXENAME)_x86-64_nokvm
 	rm -f $(EXENAME)_arm
 	rm -f $(EXENAME)_mips
+	rm -f $(EXENAME)_pogo
+	rm -f $(EXENAME)_poky
+	rm -f $(EXENAME)_poky64
+
 
 depend: $(SOURCES)
 	$(CC) -M $(CFLAGS) $(SOURCES) $(HEADERS) > depend

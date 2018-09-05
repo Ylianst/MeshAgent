@@ -585,6 +585,8 @@ void teardown_gdiplus()
 void set_tile_compression(int type, int level)
 {
 	encCompression = level;
+	if (encCompression < 1) { encCompression = 1; } // Guard against bad values.
+	if (encCompression > 90) { encCompression = 90; }
 	if (tilebuffer == NULL) { KVMDEBUG("set_tile_compression(), tilebuffer == NULL.", 0); return; }
 	KVMDEBUG("set_tile_compression() type", type);
 	KVMDEBUG("set_tile_compression() level", level);

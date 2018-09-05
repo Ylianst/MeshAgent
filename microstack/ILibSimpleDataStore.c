@@ -225,6 +225,7 @@ FILE* ILibSimpleDataStore_OpenFileEx(char* filePath, int forceTruncateIfNonZero)
 	{
 		f = fopen(filePath, "wb+");
 	}
+	if (f == NULL) { return NULL; } // If we failed to open the file, stop now.
 	if (flock(fileno(f), LOCK_EX | LOCK_NB) != 0) { fclose(f); return NULL; } // Request exclusive lock on this file, no blocking.
 #endif
 

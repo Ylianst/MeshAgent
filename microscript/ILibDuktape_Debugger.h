@@ -19,8 +19,7 @@ limitations under the License.
 
 #include "duktape.h"
 
-
-void ILibDuktape_Debugger_Start(duk_context *ctx, unsigned short debugPort);
-
+void ILibDuktape_Debugger_Init(duk_context *ctx, unsigned short debugPort);
+void ILibDuktape_Debugger_SetScript(char *js, int jsLen, char *fileName, int fileNameLen);
 
 #endif

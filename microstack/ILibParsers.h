@@ -160,7 +160,7 @@ long ILibGetTimeStamp();
 #endif
 	void ILibGetTimeOfDay(struct timeval *tp);
 
-/*
+
 // Implemented in Windows using events.
 #define sem_t HANDLE
 #define sem_init(x,pShared,InitValue) *x=CreateSemaphore(NULL,InitValue,SEM_MAX_COUNT,NULL)
@@ -168,15 +168,15 @@ long ILibGetTimeStamp();
 #define sem_wait(x) WaitForSingleObject(*x,INFINITE)
 #define sem_trywait(x) ((WaitForSingleObject(*x,0)==WAIT_OBJECT_0)?0:1)
 #define sem_post(x) ReleaseSemaphore(*x,1,NULL)
-*/
 
-// Implemented in Windows using critical section.
-#define sem_t CRITICAL_SECTION
-#define sem_init(x,pShared,InitValue) InitializeCriticalSection(x);
-#define sem_destroy(x) (DeleteCriticalSection(x))
-#define sem_wait(x) EnterCriticalSection(x)
-#define sem_trywait(x) TryEnterCriticalSection(x)
-#define sem_post(x) LeaveCriticalSection(x)
+
+//// Implemented in Windows using critical section.
+//#define sem_t CRITICAL_SECTION
+//#define sem_init(x,pShared,InitValue) InitializeCriticalSection(x);
+//#define sem_destroy(x) (DeleteCriticalSection(x))
+//#define sem_wait(x) EnterCriticalSection(x)
+//#define sem_trywait(x) TryEnterCriticalSection(x)
+//#define sem_post(x) LeaveCriticalSection(x)
 
 #define strncasecmp(x,y,z) _strnicmp(x,y,z)
 #define strcasecmp(x,y) _stricmp(x,y)
@@ -301,18 +301,56 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibChain_Link* ILibChain_Link_Allocate(int structSize, int extraMemorySize);
 	int ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link);
 
+	typedef enum ILibMemory_Types
+	{
+		ILibMemory_Types_HEAP = 0,
+		ILibMemory_Types_STACK = 1,
+		ILibMemory_Types_OTHER = 2
+	}ILibMemory_Types;
+
+	typedef struct ILibMemory_Header
+	{
+		size_t size;
+		size_t extraSize;
+		int CANARY;
+		ILibMemory_Types memoryType;
+	}ILibMemory_Header;
+
+	#define ILibMemory_Canary (((int*)((char*)(const char*)"broe"))[0])
+	#define ILibMemory_RawPtr(ptr) ((char*)(ptr) - sizeof(ILibMemory_Header))
+	#define ILibMemory_RawSize(ptr) (ILibMemory_Size((ptr)) + ILibMemory_ExtraSize((ptr)) + sizeof(ILibMemory_Header))
+	#define ILibMemory_MemType(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->memoryType)
+	#define ILibMemory_Size(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->size)
+	#define ILibMemory_ExtraSize(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->extraSize)
+	#define ILibMemory_Ex_CanaryOK(ptr) ((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary)
 #ifdef WIN32
-	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_InitMem(_alloca(8+bufferLen+sizeof(void*)), (size_t)(8+bufferLen+sizeof(void*)))
+	int ILibMemory_CanaryOK(void *ptr);
 #else
-	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_InitMem(alloca(8+bufferLen+sizeof(void*)), (size_t)(8+bufferLen+sizeof(void*)))
+	#define ILibMemory_CanaryOK(ptr) ILibMemory_Ex_CanaryOK(ptr)
 #endif
-	#define ILibMemory_AllocateA_Size(buffer)		(((unsigned int*)((char*)(buffer)-4))[0])
-	#define ILibMemory_AllocateA_Next(buffer)		(((void**)((char*)(buffer)-4-sizeof(void*)))[0])
-	#define ILibMemory_AllocateA_Raw(buffer)		((void*)((char*)(buffer)-4-sizeof(void*)-4))
-	#define ILibMemory_AllocateA_RawSize(buffer)	(((unsigned int*)((char*)(buffer)-4-sizeof(void*)-4))[0])
+
+	#define ILibMemory_Extra(ptr) (ILibMemory_ExtraSize(ptr)>0?((char*)(ptr) + ILibMemory_Size((ptr)) + sizeof(ILibMemory_Header)):NULL)
+	#define ILibMemory_FromRaw(ptr) ((char*)(ptr) + sizeof(ILibMemory_Header))
+
+	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
+	#define ILibMemory_SmartAllocate(len) ILibMemory_Init(malloc(len+sizeof(ILibMemory_Header)), (int)len, 0, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_Init(malloc(primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0)), (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
+	void ILibMemory_Free(void *ptr);
+	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
+
+#ifdef WIN32
+	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_Init(ILibMemory_Init(_alloca(bufferLen + sizeof(void*) + (2*sizeof(ILibMemory_Header))), bufferLen, sizeof(void*), ILibMemory_Types_STACK))
+#else
+	#define ILibMemory_AllocateA(bufferLen) ILibMemory_AllocateA_Init(ILibMemory_Init(alloca(bufferLen + sizeof(void*) + (2*sizeof(ILibMemory_Header))), bufferLen, sizeof(void*), ILibMemory_Types_STACK))
+#endif
+	#define ILibMemory_AllocateA_Size(buffer)		ILibMemory_Size(buffer)
+	#define ILibMemory_AllocateA_Next(buffer)		(((void**)buffer)[0])
+	#define ILibMemory_AllocateA_Raw(buffer)		ILibMemory_RawPtr(buffer)
+	#define ILibMemory_AllocateA_RawSize(buffer)	ILibMemory_RawSize(buffer);
 
 	void* ILibMemory_AllocateA_Get(void *buffer, size_t sz);
-	void* ILibMemory_AllocateA_InitMem(void *buffer, size_t bufferLen);
+	void* ILibMemory_AllocateA_Init(void *buffer);
+
 	void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory);
 	int ILibMemory_GetExtraMemorySize(void* extraMemory);
 	ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, int containerSize);
@@ -857,8 +895,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibExportMethod void ILibChain_EndContinue(void *chain);
 
 	void ILibForceUnBlockChain(void *Chain);
-	void ILibChain_RunOnMicrostackThreadEx(void *chain, ILibChain_StartEvent handler, void *user);
+	void ILibChain_RunOnMicrostackThreadEx2(void *chain, ILibChain_StartEvent handler, void *user, int freeOnShutdown);
+	#define ILibChain_RunOnMicrostackThreadEx(chain, handler, user) ILibChain_RunOnMicrostackThreadEx2(chain, handler, user, 0)
 	#define ILibChain_RunOnMicrostackThread(chain, handler, user) if(ILibIsRunningOnChainThread(chain)==0){ILibChain_RunOnMicrostackThreadEx(chain, handler, user);}else{handler(chain,user);}
+	#define ILibChain_RunOnMicrostackThread2(chain, handler, user, freeOnShutdown) if(ILibIsRunningOnChainThread(chain)==0){ILibChain_RunOnMicrostackThreadEx2(chain, handler, user, freeOnShutdown);}else{handler(chain,user);}
 #ifdef WIN32
 	HANDLE ILibChain_GetMicrostackThreadHandle(void *chain);
 #endif
@@ -1280,6 +1320,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	//
 	// Used to log critical problems
 	//
+	void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t addrOffset);
 	void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset);
 	char* ILibChain_Debug(void *chain, char* buffer, int bufferLen);
 	extern char* g_ILibCrashID;

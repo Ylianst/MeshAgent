@@ -686,12 +686,11 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 	//
 	// Set the socket to non-block mode, so we can play nice and share the thread
 	//
-	int flags = 1;
-#ifdef _WIN32_WCE
-	ioctlsocket(RetVal->ListenSocket, FIONBIO, &flags);
-#elif WIN32
+#ifdef WIN32
+	u_long flags = 1;
 	ioctlsocket(RetVal->ListenSocket, FIONBIO, (u_long *)(&flags));
 #elif _POSIX
+	int flags = 1;
 	flags = fcntl(RetVal->ListenSocket, F_GETFL, 0);
 	fcntl(RetVal->ListenSocket, F_SETFL, O_NONBLOCK | flags);
 #endif

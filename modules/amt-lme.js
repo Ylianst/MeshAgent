@@ -115,6 +115,7 @@ function lme_heci(options) {
     emitterUtils.createEvent('error');
     emitterUtils.createEvent('connect');
     emitterUtils.createEvent('notify');
+    emitterUtils.createEvent('bind');
     
     if ((options != null) && (options.debug == true)) { lme_port_offset = -100; } // LMS debug mode
 
@@ -123,10 +124,10 @@ function lme_heci(options) {
     
     this._ObjectID = "lme";
     this._LME = heci.create();
+    this._LME._binded = {};
     this._LME.LMS = this;
     this._LME.on('error', function (e) { this.LMS.emit('error', e); });
     this._LME.on('connect', function () {
-        this.LMS.emit('connect');
         this.on('data', function (chunk) {
             // this = HECI
             var cmd = chunk.readUInt8(0);
@@ -167,7 +168,8 @@ function lme_heci(options) {
                                     if (channel.localPort == port) { this.sockets[i].end(); delete this.sockets[i]; } // Close this socket
                                 }
                             }
-                            if (this[name][port] == null) { // Bind a new server socket if not already present
+                            if (this[name][port] == null)
+                            { // Bind a new server socket if not already present
                                 this[name][port] = require('net').createServer();
                                 this[name][port].HECI = this;
                                 if (lme_port_offset == 0) {
@@ -179,6 +181,8 @@ function lme_heci(options) {
                                     //console.log('New [' + socket.remoteFamily + '] TCP Connection on: ' + socket.remoteAddress + ' :' + socket.localPort);
                                     this.HECI.LMS.bindDuplexStream(socket, socket.remoteFamily, socket.localPort - lme_port_offset);
                                 });
+                                this._binded[port] = true;
+                                this.LMS.emit('bind', this._binded);
                             }
                             var outBuffer = Buffer.alloc(5);
                             outBuffer.writeUInt8(81, 0);
@@ -291,11 +295,8 @@ function lme_heci(options) {
                             var notify = null;
                             try { notify = xmlParser.ParseWsman(httpData); } catch (e) { }
 
-                            // Translate the event
-                            var notifyString = _lmsNotifyToString(notify);
-
                             // Event the http data
-                            if (notify != null) { this.LMS.emit('notify', notify, channel.options, notifyString); }
+                            if (notify != null) { this.LMS.emit('notify', notify, channel.options, _lmsNotifyToString(notify), _lmsNotifyToCode(notify)); }
 
                             // Send channel close
                             var buffer = Buffer.alloc(5);
@@ -392,6 +393,9 @@ function lme_heci(options) {
                     break;
             }
         });
+        this.LMS.emit('connect');
+        this.resume();
+
     });
     
     this.bindDuplexStream = function (duplexStream, remoteFamily, localPort) {
@@ -436,6 +440,13 @@ function parseHttp(httpData) {
     var contentLength = parseInt(headers['content-length']);
     if (httpData.length >= contentLength + i + 4) { return httpData.substring(i + 4, i + 4 + contentLength); }
     return null;
+}
+
+function _lmsNotifyToCode(notify) {
+    if ((notify == null) || (notify.Body == null) || (notify.Body.MessageID == null)) return null;
+    var msgid = notify.Body.MessageID;
+    try { msgid += '-' + notify.Body.MessageArguments[0]; } catch (e) { }
+    return msgid;
 }
 
 function _lmsNotifyToString(notify) {
@@ -521,7 +532,7 @@ var lmsEvents = {
     "iAMT0055-0": "User Notification Alert - Provisioning state change notification - Pre-configuration.",
     "iAMT0055-1": "User Notification Alert - Provisioning state change notification - In configuration.",
     "iAMT0055-2": "User Notification Alert - Provisioning state change notification - Post-configuration.",
-    "iAMT0055-3": "User Notification Alert - Provisioning state change notification - unprovision process has started.",
+    "iAMT0055-3": "User Notification Alert - Provisioning state change notification - Unprovision process has started.",
     "iAMT0056": "User Notification Alert - System Defense change notification.",
     "iAMT0057": "User Notification Alert - Network State change notification.",
     "iAMT0058": "User Notification Alert - Remote Access change notification.",

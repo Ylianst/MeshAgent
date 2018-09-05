@@ -100,6 +100,7 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
 	struct sockaddr_in6 local;
+	if (ptrs->ctx == NULL) { return; }
 
 	duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
 	duk_push_false(ptrs->ctx);									// [socket][connecting]
@@ -164,14 +165,13 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 #endif
 		duk_put_prop_string(ptrs->ctx, -2, "message");				// [emit][this][error][errorObj]
 		if (duk_pcall_method(ptrs->ctx, 2) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
-		duk_pop(ptrs->ctx);											// ...
+		if (ptrs->ctx != NULL) { duk_pop(ptrs->ctx); }				// ...
 	}
 }
 void ILibDuktape_net_socket_OnDisconnect(ILibAsyncSocket_SocketModule socketModule, void *user)
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
-	
-	if (ILibDuktape_IsPointerValid(ptrs->chain, ptrs->object))
+	if (ILibMemory_CanaryOK(ptrs->emitter))
 	{
 		duk_push_heapptr(ptrs->ctx, ptrs->object);			// [sock]
 		duk_push_string(ptrs->ctx, "0.0.0.0");				// [sock][localAddr]
@@ -379,7 +379,7 @@ duk_ret_t ILibDuktape_net_socket_finalizer(duk_context *ctx)
 		if (ILibAsyncSocket_IsConnected(ptrs->socketModule) != 0) { ILibAsyncSocket_Disconnect(ptrs->socketModule); }
 		ILibChain_SafeRemove(chain, ptrs->socketModule);
 	}
-
+	ptrs->ctx = NULL;
 	return 0;
 }
 int ILibDuktape_net_socket_unshift(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user)
@@ -399,7 +399,6 @@ void ILibDuktape_net_socket_PUSH(duk_context *ctx, ILibAsyncSocket_SocketModule 
 
 	duk_push_object(ctx);										// [obj]
 	ILibDuktape_WriteID(ctx, "net.socket");
-	ILibDuktape_PointerValidation_Init(ctx);
 	ptrs->ctx = ctx;
 	ptrs->chain = ((ILibChain_Link*)module)->ParentChain;
 	ptrs->object = duk_get_heapptr(ctx, -1);
@@ -493,21 +492,29 @@ duk_ret_t ILibDuktape_net_createConnection(duk_context *ctx)
 ILibTransport_DoneState ILibDuktape_net_server_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
+	if (!ILibMemory_CanaryOK(session)) { return(ILibTransport_DoneState_ERROR); }
+
 	return((ILibTransport_DoneState)ILibAsyncServerSocket_Send(NULL, session->connection, buffer, bufferLen, ILibAsyncSocket_MemoryOwnership_USER));
 }
 void ILibDuktape_net_server_EndSink(ILibDuktape_DuplexStream *stream, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
-	ILibAsyncServerSocket_Disconnect(NULL, session->connection);
+	if (!ILibMemory_CanaryOK(session)) { return; }
+
+	if (session->connection != NULL) { ILibAsyncServerSocket_Disconnect(NULL, session->connection); }
 }
 void ILibDuktape_net_server_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
+	if (!ILibMemory_CanaryOK(session)) { return; }
+
 	ILibAsyncSocket_Pause(session->connection);
 }
 void ILibDuktape_net_server_ResumeSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
+	if (!ILibMemory_CanaryOK(session)) { return; }
+
 	ILibAsyncSocket_Resume(session->connection);
 }
 duk_ret_t ILibDuktape_net_server_socket_Finalizer(duk_context *ctx)
@@ -527,6 +534,8 @@ duk_ret_t ILibDuktape_net_server_socket_Finalizer(duk_context *ctx)
 int ILibDuktape_net_server_unshiftSink(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
+	if (!ILibMemory_CanaryOK(session)) { return(unshiftBytes); }
+
 	session->unshiftBytes = unshiftBytes;
 	return(unshiftBytes);
 }
@@ -534,7 +543,12 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 {
 	ILibDuktape_net_server *ptr = (ILibDuktape_net_server*)((void**)ILibMemory_GetExtraMemory(AsyncServerSocketModule, ILibMemory_ASYNCSERVERSOCKET_CONTAINERSIZE))[0];
 	ILibDuktape_net_server_session *session;
+#ifndef MICROSTACK_NOTLS
 	int isTLS = ILibAsyncSocket_IsUsingTls(ConnectionToken);
+#else
+	int isTLS = 0;
+#endif
+	if (!ILibMemory_CanaryOK(ptr)) { return; }
 
 	duk_push_heapptr(ptr->ctx, ptr->self);																					// [server]
 
@@ -545,9 +559,7 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 	duk_push_object(ptr->ctx);																								// [emit][this][connection][socket]
 	ILibDuktape_WriteID(ptr->ctx, isTLS ? "tls.serverSocketConnection" : "net.serverSocketConnection");
 	ILibDuktape_CreateFinalizer(ptr->ctx, ILibDuktape_net_server_socket_Finalizer);
-	duk_push_fixed_buffer(ptr->ctx, sizeof(ILibDuktape_net_server_session));												// [emit][this][connection][socket][buffer]
-	session = (ILibDuktape_net_server_session*)Duktape_GetBuffer(ptr->ctx, -1, NULL);
-	memset(session, 0, sizeof(ILibDuktape_net_server_session));
+	session = Duktape_PushBuffer(ptr->ctx, sizeof(ILibDuktape_net_server_session));											// [emit][this][connection][socket][buffer]
 	duk_put_prop_string(ptr->ctx, -2, ILibDuktape_net_Server_Session_buffer);												// [emit][this][connection][socket]
 
 	struct sockaddr_in6 local;
@@ -583,12 +595,19 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 void ILibDuktape_net_server_OnDisconnect(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
-	ILibDuktape_DuplexStream_Closed(session->stream);
+	if (!ILibMemory_CanaryOK(session)) { return; }
+
+	if (session->connection != NULL)
+	{
+		ILibDuktape_DuplexStream_Closed(session->stream);
+		session->connection = NULL;
+	}
 }
 void ILibDuktape_net_server_OnReceive(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncServerSocket_OnInterrupt *OnInterrupt, void **user, int *PAUSE)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)*user;
-	
+	if (!ILibMemory_CanaryOK(session)) { *p_beginPointer = endPointer;  return; }
+
 	session->unshiftBytes = 0;
 	ILibDuktape_DuplexStream_WriteData(session->stream, buffer + *p_beginPointer, endPointer);
 	*p_beginPointer = endPointer - session->unshiftBytes;
@@ -599,6 +618,8 @@ void ILibDuktape_net_server_OnInterrupt(ILibAsyncServerSocket_ServerModule Async
 void ILibDuktape_net_server_OnSendOK(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void *user)
 {
 	ILibDuktape_net_server_session *session = (ILibDuktape_net_server_session*)user;
+	if (!ILibMemory_CanaryOK(session)) { return; }
+
 	ILibDuktape_DuplexStream_Ready(session->stream);
 }
 duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
@@ -777,10 +798,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 		duk_dup(ctx, 0);														// [server][Options]
 		duk_put_prop_string(ctx, -2, ILibDuktape_SERVER2OPTIONS);				// [server]
 	}
-
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_net_server));					// [server][fbuffer]
-	server = (ILibDuktape_net_server*)Duktape_GetBuffer(ctx, -1, NULL);
-	memset(server, 0, sizeof(ILibDuktape_net_server));
+	server = Duktape_PushBuffer(ctx, sizeof(ILibDuktape_net_server));			// [server][fbuffer]
 	duk_put_prop_string(ctx, -2, ILibDuktape_net_Server_buffer);				// [server]
 	
 	server->isTLS = isTLS;
@@ -828,6 +846,20 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 
 	return 1;
 }
+duk_ret_t ILibDuktape_net_addr2int(duk_context *ctx)
+{
+	struct sockaddr_in6 addr6;
+	ILibResolveEx((char*)duk_require_string(ctx, 0), 0, &addr6);
+	if (addr6.sin6_family == AF_INET)
+	{
+		duk_push_int(ctx, ((struct sockaddr_in*)&addr6)->sin_addr.s_addr);
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "Error converting address"));
+	}
+}
 void ILibDuktape_net_PUSH_net(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);														// [net]
@@ -843,6 +875,7 @@ void ILibDuktape_net_PUSH_net(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "tls", 0, "createServer", ILibDuktape_net_createServer, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createConnection", ILibDuktape_net_createConnection, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_net_createConnection, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "addr2int", ILibDuktape_net_addr2int, 1);
 }
 duk_ret_t ILibDuktape_globalTunnel_end(duk_context *ctx)
 {
@@ -1003,6 +1036,8 @@ int ILibDuktape_TLS_server_verify(int preverify_ok, X509_STORE_CTX *storectx)
 
 	int i;
 	int retVal = 0;
+	if (!ILibMemory_CanaryOK(data)) { return(0); }
+
 
 	duk_push_heapptr(data->ctx, data->self);													// [Server]
 	duk_get_prop_string(data->ctx, -1, ILibDuktape_SERVER2OPTIONS);								// [Server][Options]
@@ -1026,6 +1061,7 @@ int ILibDuktape_TLS_server_verify(int preverify_ok, X509_STORE_CTX *storectx)
 void ILibDuktape_tls_server_OnSSL(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, void *ConnectionToken, SSL* ctx, void **user)
 {
 	ILibDuktape_net_server *server = (ILibDuktape_net_server*)ILibAsyncServerSocket_GetTag(AsyncServerSocketModule);
+	if (!ILibMemory_CanaryOK(server)) { return; }
 
 	if (ctx != NULL && ILibDuktape_TLS_ctx2server)
 	{
@@ -1036,6 +1072,7 @@ static int ILibDuktape_tls_server_sniCallback(SSL *s, int *ad, void *arg)
 {
 	const char *servername = SSL_get_servername(s, TLSEXT_NAMETYPE_host_name);
 	ILibDuktape_net_server *data = (ILibDuktape_net_server*)SSL_get_ex_data(s, ILibDuktape_TLS_ctx2server);
+	if (!ILibMemory_CanaryOK(data)) { return(SSL_TLSEXT_ERR_OK); }
 
 	duk_push_heapptr(data->ctx, data->self);								// [server]
 	duk_get_prop_string(data->ctx, -1, ILibDuktape_SERVER2ContextTable);	// [server][table]

@@ -46,7 +46,6 @@ limitations under the License.
 #include "ILibParsers.h"
 #include "ILibAsyncSocket.h"
 #include "ILibRemoteLogging.h"
-#include "ILibAsyncSocket.h"
 
 #ifndef MICROSTACK_NOTLS
 #include <openssl/err.h>
@@ -742,6 +741,7 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 	#endif
 
 	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
+	if (module == NULL) { return; }
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(module->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_1, "AsyncSocket[%p] << DISCONNECT", (void*)module);
 
@@ -942,6 +942,12 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 }
 
 #ifdef MICROSTACK_PROXY
+void ILibAsyncSocket_ClearProxySettings(void *socketModule)
+{
+	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
+	memset(&(module->ProxyAddress), 0, sizeof(struct sockaddr_in6));
+}
+
 //! Connect using an HTTPS proxy. If "proxyAddress" is set to NULL, this call acts just to a normal connect call without a proxy.
 /*!
 	\param socketModule ILibAsyncSocket Client to initiate the connection
@@ -1401,7 +1407,11 @@ void ILibAsyncSocket_PreSelect(void* socketModule,fd_set *readset, fd_set *write
 						sem_post(&(module->SendLock));
 						h(module, module->user);
 						sem_wait(&(module->SendLock));
-						if (module->timeout_milliSeconds != 0) { *blocktime = module->timeout_milliSeconds; }
+						if (module->timeout_milliSeconds != 0) 
+						{ 
+							*blocktime = module->timeout_milliSeconds; 
+							module->timeout_lastActivity = ILibGetUptime();
+						}
 					}
 				}
 				else
@@ -2329,4 +2339,3 @@ STACK_OF(X509) *ILibAsyncSocket_SslGetCerts(ILibAsyncSocket_SocketModule socketM
 	return SSL_get_peer_cert_chain(sm->ssl);
 }
 #endif
-

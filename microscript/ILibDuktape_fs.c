@@ -20,6 +20,7 @@ limitations under the License.
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <direct.h>
+#include <wchar.h>
 #endif
 
 #include "microstack/ILibParsers.h"
@@ -88,6 +89,7 @@ typedef struct ILibDuktape_fs_readStreamData
 	int bytesRead;
 	int bytesLeft;
 	int readLoopActive;
+	int unshiftedBytes;
 	char buffer[FS_READSTREAM_BUFFERSIZE];
 }ILibDuktape_fs_readStreamData;
 
@@ -194,7 +196,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", retVal);
 #ifdef WIN32
-	fopen_s(&f, path, flags);
+	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
 #else
 	f = fopen(path, flags);
 #endif
@@ -439,6 +441,8 @@ void ILibDuktape_fs_readStream_Pause(struct ILibDuktape_readableStream *sender, 
 }
 void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender, void *user)
 {
+	if (!ILibMemory_CanaryOK(user)) { return; }
+
 	ILibDuktape_fs_readStreamData *data = (ILibDuktape_fs_readStreamData*)user;
 	int bytesToRead;
 
@@ -447,14 +451,22 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	sender->paused = 0;
 
 	if (data->bytesRead == -1) { data->bytesRead = 1; }
+	data->unshiftedBytes = 0;
 	while (sender->paused == 0 && data->bytesRead > 0 && (data->bytesLeft < 0 || data->bytesLeft > 0))
 	{
-		bytesToRead = data->bytesLeft < 0 ? sizeof(data->buffer) : (data->bytesLeft > sizeof(data->buffer) ? sizeof(data->buffer) : data->bytesLeft);
-		data->bytesRead = (int)fread(data->buffer, 1, bytesToRead, data->fPtr);
+		bytesToRead = data->bytesLeft < 0 ? (int)sizeof(data->buffer) : (data->bytesLeft > ((int)sizeof(data->buffer) - data->unshiftedBytes) ? (int)sizeof(data->buffer) - data->unshiftedBytes : data->bytesLeft);
+		data->bytesRead = (int)fread(data->buffer + data->unshiftedBytes, 1, bytesToRead, data->fPtr);
 		if (data->bytesRead > 0)
 		{
 			if (data->bytesLeft > 0) { data->bytesLeft -= data->bytesRead; }
-			ILibDuktape_readableStream_WriteData(sender, data->buffer, data->bytesRead);
+			data->bytesRead += data->unshiftedBytes; data->unshiftedBytes = 0;
+			do
+			{
+				int preshift = data->unshiftedBytes == 0 ? data->bytesRead : data->unshiftedBytes;
+				ILibDuktape_readableStream_WriteData(sender, data->buffer, data->unshiftedBytes>0 ? data->unshiftedBytes : data->bytesRead);
+				if (data->unshiftedBytes > 0 && data->unshiftedBytes != preshift) { memmove(data->buffer, data->buffer + (preshift - data->unshiftedBytes), data->unshiftedBytes); }
+			} while (data->unshiftedBytes != 0 && data->unshiftedBytes != data->bytesRead);
+			data->unshiftedBytes = 0;
 			if (data->bytesLeft == 0) { data->bytesRead = 0; }
 		}
 	}
@@ -502,6 +514,13 @@ duk_ret_t ILibDuktape_fs_readStream_finalizer(duk_context *ctx)
 
 	return 0;
 }
+int ILibDuktape_fs_readStream_unshift(struct ILibDuktape_readableStream *sender, int unshiftBytes, void *user)
+{
+	if (!ILibMemory_CanaryOK(user)) { return(unshiftBytes); }
+	ILibDuktape_fs_readStreamData *data = (ILibDuktape_fs_readStreamData*)user;
+	data->unshiftedBytes = unshiftBytes;
+	return(unshiftBytes);
+}
 duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -545,9 +564,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 
 	duk_push_object(ctx);													// [readStream]
 	ILibDuktape_WriteID(ctx, "fs.readStream");
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_fs_readStreamData));		// [readStream][buffer]
-	data = (ILibDuktape_fs_readStreamData*)Duktape_GetBuffer(ctx, -1, NULL);
-	memset(data, 0, sizeof(ILibDuktape_fs_readStreamData));
+	data = (ILibDuktape_fs_readStreamData*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_fs_readStreamData));
 	duk_put_prop_string(ctx, -2, FS_READSTREAM);							// [readStream]
 	duk_push_this(ctx);														// [readStream][fs]
 	data->fsObject = duk_get_heapptr(ctx, -1);
@@ -560,7 +577,8 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	data->ReadStreamObject = duk_get_heapptr(ctx, -1);
 	data->bytesLeft = end < 0 ? end : (end - start + 1);
 	data->bytesRead = -1;
-	data->stream = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_fs_readStream_Pause, ILibDuktape_fs_readStream_Resume, data);
+	//data->stream = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_fs_readStream_Pause, ILibDuktape_fs_readStream_Resume, data);
+	data->stream = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_fs_readStream_Pause, ILibDuktape_fs_readStream_Resume, ILibDuktape_fs_readStream_unshift, data);
 	data->stream->paused = 1;
 
 	//printf("readStream [start: %d, end: %d\n", start, end);
@@ -591,8 +609,11 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 	int i = 0;
 #ifdef WIN32
 	HANDLE h;
-	WIN32_FIND_DATA data;
-	char *path = (char*)duk_require_string(ctx, 0);
+	WIN32_FIND_DATAW data;
+	duk_size_t pathLen;
+	char *path = (char*)ILibDuktape_String_AsWide(ctx, 0, &pathLen);
+	//char *path = (char*)duk_require_string(ctx, 0);
+
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 	struct dirent *dir;
@@ -602,20 +623,22 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 	duk_push_array(ctx);								// [retVal]
 
 #ifdef WIN32
-	h = FindFirstFile(path, &data);
+	h = FindFirstFileW((LPCWSTR)path, &data);
 	if (h != INVALID_HANDLE_VALUE)
 	{
-		if (strcmp(data.cFileName, ".") != 0)
+		if (wcscmp(data.cFileName, L".") != 0)
 		{
-			duk_push_string(ctx, data.cFileName);			// [retVal][val]
+			ILibDuktape_String_PushWideString(ctx, (char*)data.cFileName, 0);	// [retVal][val]
+			//duk_push_string(ctx, data.cFileName);			// [retVal][val]
 			duk_put_prop_index(ctx, -2, i++);				// [retVal]
 		}
-		while (FindNextFile(h, &data))
+		while (FindNextFileW(h, &data))
 		{
-			if (strcmp(data.cFileName, "..") != 0)
+			if (wcscmp(data.cFileName, L"..") != 0)
 			{
-				duk_push_string(ctx, data.cFileName);		// [retVal][val]
-				duk_put_prop_index(ctx, -2, i++);			// [retVal]
+				ILibDuktape_String_PushWideString(ctx, (char*)data.cFileName, 0);	// [retVal][val]
+				//duk_push_string(ctx, data.cFileName);		// [retVal][val]
+				duk_put_prop_index(ctx, -2, i++);							// [retVal]
 			}
 		}
 		FindClose(h);
@@ -627,8 +650,11 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 	{
 		while ((dir = readdir(d)) != NULL)
 		{
-			duk_push_string(ctx, dir->d_name);
-			duk_put_prop_index(ctx, -2, i++);
+			if (strcmp(dir->d_name, ".") != 0 && strcmp(dir->d_name, "..") != 0)
+			{
+				duk_push_string(ctx, dir->d_name);
+				duk_put_prop_index(ctx, -2, i++);
+			}
 		}
 		closedir(d);
 	}
@@ -671,13 +697,13 @@ char *ILibDuktape_fs_convertTime(uint64_t st, char *dest, int destLen)
 
 duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 {
-#ifdef WIN32
-	char *path = (char*)duk_require_string(ctx, 0);
+#ifdef WIN32	
+	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
 	char data[4096];
 	WIN32_FILE_ATTRIBUTE_DATA *attr = (WIN32_FILE_ATTRIBUTE_DATA*)data;
 	SYSTEMTIME stime;
 	
-	if(GetFileAttributesEx(path, GetFileExInfoStandard, (void*)data) == 0)
+	if(GetFileAttributesExW((LPCWSTR)path, GetFileExInfoStandard, (void*)data) == 0)
 	{
 		duk_push_string(ctx, "fs.statSync(): Invalid path");
 		duk_throw(ctx);
@@ -725,6 +751,9 @@ duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 
 	duk_push_string(ctx, ILibDuktape_fs_convertTime(result.st_atime, ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_put_prop_string(ctx, -2, "atime");
+
+	duk_push_int(ctx, result.st_mode);
+	ILibDuktape_CreateReadonlyProperty(ctx, "mode");
 
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, FS_STAT_METHOD_RETVAL, S_ISDIR(result.st_mode) || S_ISBLK(result.st_mode) ? 1 : 0, "isDirectory", ILibDuktape_fs_statSyncEx, 0);
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, FS_STAT_METHOD_RETVAL, S_ISREG(result.st_mode) ? 1 : 0, "isFile", ILibDuktape_fs_statSyncEx, 0);
@@ -1093,10 +1122,8 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	
 	duk_push_object(ctx);													// [FSWatcher]
 	ILibDuktape_WriteID(ctx, "fs.fsWatcher");
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_fs_watcherData));			// [FSWatcher][data]
-	data = (ILibDuktape_fs_watcherData*)Duktape_GetBuffer(ctx, -1, NULL);
+	data = (ILibDuktape_fs_watcherData*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_fs_watcherData));
 	duk_put_prop_string(ctx, -2, FS_WATCHER_DATA_PTR);						// [FSWatcher]
-	memset(data, 0, sizeof(ILibDuktape_fs_watcherData));
 
 	data->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	data->ctx = ctx;
@@ -1156,7 +1183,11 @@ duk_ret_t ILibDuktape_fs_rename(duk_context *ctx)
 	char *oldPath = (char*)duk_require_string(ctx, 0);
 	char *newPath = (char*)duk_require_string(ctx, 1);
 
+#ifdef WIN32
+	if (_wrename((LPCWSTR)ILibDuktape_String_UTF8ToWide(ctx, oldPath), (LPCWSTR)ILibDuktape_String_UTF8ToWide(ctx, newPath)) != 0)
+#else
 	if (rename(oldPath, newPath) != 0)
+#endif
 	{
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "fs.renameSync(): Error renaming %s to %s", oldPath, newPath);
 		duk_push_string(ctx, ILibScratchPad);
@@ -1168,16 +1199,21 @@ duk_ret_t ILibDuktape_fs_rename(duk_context *ctx)
 duk_ret_t ILibDuktape_fs_unlink(duk_context *ctx)
 {
 #ifdef WIN32
-	char *path = (char*)duk_require_string(ctx, 0);
+	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 #endif
+
+#ifdef WIN32
+	if(_wremove((const wchar_t*)path) != 0)
+#else
 	if (remove(path) != 0)
+#endif
 	{
 #ifdef WIN32
-		if (RemoveDirectory(path) != 0) { return 0; }
+		if (RemoveDirectoryW((LPCWSTR)path) != 0) { return 0; }
 #endif
-		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "fs.unlinkSync(): Error trying to unlink: %s", path);
+		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "fs.unlinkSync(): Error trying to unlink: %s", ILibDuktape_String_WideToUTF8(ctx, path));
 		duk_push_string(ctx, ILibScratchPad);
 		duk_throw(ctx);
 		return(DUK_RET_ERROR);
@@ -1189,16 +1225,15 @@ duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 	//int nargs = duk_get_top(ctx);
 
 #ifdef WIN32
-	char *path = (char*)duk_require_string(ctx, 0);
-	if (_mkdir(path) != 0)
+	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
+	ILibDuktape_String_WideToUTF8(ctx, path);
+	if (_wmkdir((const wchar_t*)path) != 0)
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 	if (mkdir(path, 0777) != 0)
 #endif
 	{
-		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "fs.mkdirSync(): Unable to create dir: %s", path);
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, path)));
 	}
 	return 0;
 }
@@ -1209,9 +1244,20 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	long fileLen;
 
 #ifdef WIN32
-	fopen_s(&f, filePath, "rbN");
+	char *flags = "rbN";
 #else
-	f = fopen(filePath, "rb");
+	char *flags = "rb";
+#endif
+
+	if (duk_is_object(ctx, 1))
+	{
+		flags = Duktape_GetStringPropertyValue(ctx, 1, "flags", flags);
+	}
+
+#ifdef WIN32
+	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, filePath), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
+#else
+	f = fopen(filePath, flags);
 #endif
 
 	if (f == NULL) { return(ILibDuktape_Error(ctx, "fs.readFileSync(): File [%s] not found", filePath)); }
@@ -1219,11 +1265,31 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	fseek(f, 0, SEEK_END);
 	fileLen = ftell(f);
 	fseek(f, 0, SEEK_SET);
-
-	duk_push_fixed_buffer(ctx, (duk_size_t)fileLen);
-	ignore_result(fread(Duktape_GetBuffer(ctx, -1, NULL), 1, (size_t)fileLen, f));
-	fclose(f);
-	duk_push_buffer_object(ctx, -1, 0, (duk_size_t)fileLen, DUK_BUFOBJ_NODEJS_BUFFER);
+	if(fileLen > 0)
+	{
+		duk_push_fixed_buffer(ctx, (duk_size_t)fileLen);
+		ignore_result(fread(Duktape_GetBuffer(ctx, -1, NULL), 1, (size_t)fileLen, f));
+		fclose(f);
+		duk_push_buffer_object(ctx, -1, 0, (duk_size_t)fileLen, DUK_BUFOBJ_NODEJS_BUFFER);
+	}
+	else
+	{
+		duk_size_t bufferSize = 1024;
+		char *buffer = (char*)duk_push_dynamic_buffer(ctx, bufferSize);				// [dynamicBuffer]
+		size_t bytesRead = 0;
+		size_t len = 0;
+		while ((bytesRead = fread(buffer + len, 1, 1024, f)) > 0)
+		{
+			len += bytesRead;
+			if (bytesRead == 1024)
+			{
+				buffer = duk_resize_buffer(ctx, -1, bufferSize + 1024);
+				bufferSize += 1024;
+			}
+		}
+		fclose(f);
+		duk_push_buffer_object(ctx, -1, 0, (duk_size_t)len, DUK_BUFOBJ_NODEJS_BUFFER);
+	}
 
 	return(1);
 }
@@ -1243,6 +1309,19 @@ duk_ret_t ILibDuktape_fs_existsSync(duk_context *ctx)
 	}
 	return(1);
 }
+#ifdef _POSIX
+duk_ret_t ILibduktape_fs_chmodSync(duk_context *ctx)
+{
+	if(chmod((char*)duk_require_string(ctx, 0), (mode_t)duk_require_int(ctx, 1)) != 0)
+	{
+		return(ILibDuktape_Error(ctx, "Error calling chmod()"));
+	}
+	else
+	{
+		return(0);
+	}
+}
+#endif
 void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);						// [fs]
@@ -1267,6 +1346,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "readDrivesSync", ILibDuktape_fs_readDrivesSync, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "readFileSync", ILibDuktape_fs_readFileSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "existsSync", ILibDuktape_fs_existsSync, 1);
+#ifdef _POSIX
+	ILibDuktape_CreateInstanceMethod(ctx, "chmodSync", ILibduktape_fs_chmodSync, 2);
+#endif
 #ifndef _NOFSWATCHER
 	ILibDuktape_CreateInstanceMethod(ctx, "watch", ILibDuktape_fs_watch, DUK_VARARGS);
 #endif
@@ -1275,6 +1357,41 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "mkdirSync", ILibDuktape_fs_mkdirSync, DUK_VARARGS);
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_Finalizer);
+
+	char copyFile[] = "exports.copyFile = function copyFile(src, dest)\
+						{\
+							var ss = this.createReadStream(src, {flags: 'rb'});\
+							var ds = this.createWriteStream(dest, {flags: 'wb'});\
+							ss.fs = this;\
+							ss.pipe(ds);\
+							ds.ss = ss;\
+							if(!this._copyStreams){this._copyStreams = {};this._copyStreamID = 0;}\
+							ss.id = this._copyStreamID++;\
+							this._copyStreams[ss.id] = ss;\
+							if(arguments.length == 3 && typeof arguments[2] === 'function')\
+							{\
+								ds.on('close', arguments[2]);\
+							}\
+							else if(arguments.length == 4 && typeof arguments[3] === 'function')\
+							{\
+								ds.on('close', arguments[3]);\
+							}\
+							ds.on('close', function onCopyFileDone(){delete this.ss.fs._copyStreams[this.ss.id];});\
+						};\
+						exports.copyFileSync = function copyFileSync(src, dest)\
+						{\
+							var buffer = this.readFileSync(src, {flags: 'rb'});\
+							this.writeFileSync(dest, buffer, {flags: 'wb'});\
+						};\
+						exports.writeFileSync = function writeFileSync(dest, data, options)\
+						{\
+							var fd = this.openSync(dest, options?options.flags:'wb');\
+							this.writeSync(fd, data);\
+							this.closeSync(fd);\
+						};\
+						exports.CHMOD_MODES = {S_IRUSR: 0o400, S_IWUSR: 0o200, S_IXUSR: 0o100, S_IRGRP: 0o40, S_IWGRP: 0o20, S_IXGRP: 0o10, S_IROTH: 0o4, S_IWOTH: 0o2, S_IXOTH: 0o1};\
+						";
+	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, copyFile, sizeof(copyFile) - 1);
 }
 
 void ILibDuktape_fs_init(duk_context * ctx)

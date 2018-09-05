@@ -120,6 +120,7 @@ typedef struct ILibDuktape_HECI_Session
 	OVERLAPPED wv;
 	ILibProcessPipe_Manager mgr;
 	HANDLE descriptor;
+	DWORD bytesRead;
 #else
 	int descriptor;
 #endif
@@ -230,6 +231,13 @@ int ILibDuktape_HECI_linuxInit()
 
 duk_ret_t ILibDuktape_HECI_SessionFinalizer(duk_context *ctx)
 {
+	if (duk_has_prop_string(ctx, 0, ILibDuktape_HECI_SessionMemPtr))
+	{
+		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_SessionMemPtr);
+		ILibDuktape_HECI_Session *s = (ILibDuktape_HECI_Session*)Duktape_GetBuffer(ctx, -1, NULL);
+		if (s != NULL && s->PendingWrites != NULL) { ILibQueue_Destroy(s->PendingWrites); } // ToDo: If there is anything pending, we need to clear that too
+		if (s != NULL) { s->stream = NULL; }
+	}
 	return(0);
 }
 
@@ -297,7 +305,7 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteHandler_Process(ILibDuktap
 	ssize_t bytesWritten;
 #endif
 
-	while (ILibQueue_GetCount(session->PendingWrites) > 0)
+	while (session->noPipelining || ILibQueue_GetCount(session->PendingWrites) > 0)
 	{
 		ILibDuktape_HECI_WriteState *state = (ILibDuktape_HECI_WriteState*)ILibQueue_PeekQueue(session->PendingWrites);
 		returnIgnored = state->returnIgnored;
@@ -469,15 +477,19 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteSink(ILibDuktape_DuplexStr
 }
 void ILibDuktape_HECI_Session_EndSink(ILibDuktape_DuplexStream *stream, void *user)
 {
-
+	duk_context *ctx = stream->readableStream->ctx;
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, "disconnect");
+	duk_swap_top(ctx, -2);
+	if (duk_pcall_method(ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(ctx); }
+	duk_pop(ctx);
 }
 void ILibDuktape_HECI_Session_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 #ifdef WIN32
-	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
-
-	// To Pause, all we need to do is remove our handle
-	ILibProcessPipe_WaitHandle_Remove(session->mgr, session->v.hEvent);
+	// NO-OP Because we are already PAUSED, since we context switched
+	UNREFERENCED_PARAMETER(sender);
+	UNREFERENCED_PARAMETER(user);
 #else
 	UNREFERENCED_PARAMETER(sender);
 	UNREFERENCED_PARAMETER(user);
@@ -485,6 +497,15 @@ void ILibDuktape_HECI_Session_PauseSink(ILibDuktape_DuplexStream *sender, void *
 }
 #ifdef WIN32
 BOOL ILibDuktape_HECI_Session_ReceiveSink(HANDLE event, void* user);
+void __stdcall ILibDuktape_HECI_Session_ResumeSink2(ULONG_PTR obj)
+{
+	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)obj;
+	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &(session->bytesRead), &(session->v));
+	if (result == TRUE || GetLastError() == ERROR_IO_PENDING)
+	{
+		ILibProcessPipe_WaitHandle_Add(session->mgr, session->v.hEvent, session, ILibDuktape_HECI_Session_ReceiveSink);
+	}
+}
 #endif
 void ILibDuktape_HECI_Session_ResumeSink_NoPipeline(void *chain, void *user)
 {
@@ -508,37 +529,34 @@ void ILibDuktape_HECI_Session_ResumeSink(ILibDuktape_DuplexStream *sender, void 
 	if (session->noPipelining != 0)
 	{
 		ILibChain_RunOnMicrostackThread(sender->readableStream->chain, ILibDuktape_HECI_Session_ResumeSink_NoPipeline, session);
+		// Note: DO NOT 'return' here, because we still need to QueueUserAPC, to resume the stream on Windows
 	}
 
 #ifdef WIN32
-	DWORD bytesRead;
-
-	// To Resume, we need to ReadFile, then re-add our waithandle
-	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &bytesRead, &(session->v));
-	if (result == TRUE || GetLastError() == ERROR_IO_PENDING)
-	{
-		ILibProcessPipe_WaitHandle_Add(session->mgr, session->v.hEvent, session, ILibDuktape_HECI_Session_ReceiveSink);
-	}
+	// To Resume, we need to first context switch to the Windows Thread
+	QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_ResumeSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session);
 #endif
 }
 #ifdef WIN32
+void ILibDuktape_HECI_Session_ReceiveSink2(void *chain, void *user)
+{
+	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
+	if (!ILibMemory_CanaryOK(session)) { return; }
+
+	ILibDuktape_DuplexStream_WriteData(session->stream, session->buffer, session->bytesRead);
+	if (session->stream != NULL && !session->stream->readableStream->paused)
+	{
+		ILibDuktape_HECI_Session_ResumeSink(session->stream, session->stream->user);
+	}
+}
 BOOL ILibDuktape_HECI_Session_ReceiveSink(HANDLE event, void* user)
 {
 	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
-	DWORD bytesRead;
-
-	do
+	if (ILibMemory_CanaryOK(session))
 	{
-		if (GetOverlappedResult(session->descriptor, &(session->v), &bytesRead, FALSE) == FALSE) { break; }
-		ILibDuktape_DuplexStream_WriteData(session->stream, session->buffer, bytesRead);
-	} while (session->stream->readableStream->paused == 0 && ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &bytesRead, &(session->v)) == TRUE);
-	if (session->stream->readableStream->paused == 0 && GetLastError() != ERROR_IO_PENDING)
-	{
-		// Broken Connection
-		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->v.hEvent); // Remove ourselves from processing loop
-		ILibDuktape_DuplexStream_WriteEnd(session->stream);
+		if (GetOverlappedResult(session->descriptor, &(session->v), &(session->bytesRead), FALSE) == TRUE) { ILibChain_RunOnMicrostackThreadEx(session->chain, ILibDuktape_HECI_Session_ReceiveSink2, session); }
 	}
-	return(TRUE);
+	return(FALSE);
 }
 void __stdcall ILibDuktape_HECI_Session_Start(ULONG_PTR obj)
 {
@@ -560,6 +578,7 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 		duk_swap_top(ctx, -2);													// [emit][this]
 		duk_push_string(ctx, "error");											// [emit][this][error]
 		duk_push_error_object(ctx, DUK_ERR_ERROR, "HECI Connection Error [%d]", statusCode);		// [emit][this][error][err]
+		duk_push_int(ctx, statusCode); duk_put_prop_string(ctx, -2, "errno");
 		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "HECI.session.onError(): "); }
 		duk_pop(ctx);															// ...
 	}	
@@ -570,12 +589,10 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 		if (bufferLen > 4)
 		{
 			duk_push_int(ctx, ((int*)buffer)[0]);
-			duk_put_prop_string(ctx, -2, ILibDuktape_HECI_MaxBufferSize);								// [session]
+			duk_put_prop_string(ctx, -2, ILibDuktape_HECI_MaxBufferSize);														// [session]
 
-			duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_HECI_Session) + ((int*)buffer)[0]);			// [session][buffer]
-			session = (ILibDuktape_HECI_Session*)Duktape_GetBuffer(ctx, -1, NULL);						
-			memset(session, 0, sizeof(ILibDuktape_HECI_Session) + ((int*)buffer)[0]);					
-			duk_put_prop_string(ctx, -2, ILibDuktape_HECI_SessionMemPtr);								// [session]
+			session = (ILibDuktape_HECI_Session*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_HECI_Session) + ((int*)buffer)[0]);	// [session][buffer]
+			duk_put_prop_string(ctx, -2, ILibDuktape_HECI_SessionMemPtr);														// [session]
 #ifdef WIN32	
 			session->v.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 			session->wv.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -590,7 +607,6 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 			duk_push_current_function(ctx);
 			session->noPipelining = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Session_NoPipeline, 0);
 			duk_pop(ctx);
-
 #ifdef _POSIX
 			//printf("Session: %p\n", session);
 			duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Child);										// [session][heci]
@@ -675,6 +691,51 @@ duk_ret_t ILibDuktape_HECI_Session_connect(duk_context *ctx)
 	duk_pop(ctx);																	// ...
 	return(0);
 }
+#ifdef WIN32
+void __stdcall ILibDuktape_HECI_Session_CloseSink2(ULONG_PTR obj)
+{
+	HANDLE h = (HANDLE)obj;
+	CloseHandle(h);
+}
+#endif
+duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
+{
+	duk_push_this(ctx);										// [session]
+
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_HECI_Child))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Child);	// [session][heci]
+		duk_get_prop_string(ctx, -1, "disconnect");				// [session][heci][close]
+		duk_swap_top(ctx, -2);									// [session][close][this]
+		duk_call_method(ctx, 0);
+	}
+
+	duk_push_this(ctx);
+#ifdef WIN32
+	ILibDuktape_HECI_Session *session = NULL;
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_HECI_SessionMemPtr))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_HECI_SessionMemPtr);								// [HECI][SESSION]
+		session = (ILibDuktape_HECI_Session*)Duktape_GetBuffer(ctx, -1, NULL);
+
+		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->v.hEvent);
+		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->wv.hEvent);
+		session->stream = NULL;
+		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_CloseSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session->descriptor);
+	}
+#else
+	int d = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Descriptor, -1);
+	HECI_chainLink *hcl = (HECI_chainLink*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_ChainLink);
+	if (hcl != NULL)
+	{
+		hcl->descriptor = -1;
+		if (d != -1) { close(d); };
+		duk_del_prop_string(ctx, -1, ILibDuktape_HECI_Descriptor);
+	}
+#endif
+
+	return(0);
+}
 duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
 {
 	duk_push_object(ctx);															// [Session]
@@ -689,6 +750,7 @@ duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "connect", ILibDuktape_HECI_Session_connect, DUK_VARARGS);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_HECI_SessionFinalizer);
+	ILibDuktape_CreateInstanceMethod(ctx, "disconnect", ILibDuktape_HECI_Session_close, 0);
 	return(1);
 }
 
@@ -743,6 +805,8 @@ void ILibDuktape_HECI_NextIoctl(ILibQueue q)
 {
 	ILibDuktape_HECI_ioctl_data *data = (ILibDuktape_HECI_ioctl_data*)ILibQueue_PeekQueue(q);
 	int res;
+	if (data == NULL) { return; } // This line is unnecessary, because this method is only called on a non-empty Queue, but to satisfy Klockwork...
+
 	data->bytesReceived = 0;
 
 	ResetEvent(data->v.hEvent);
@@ -817,9 +881,7 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	ILibDuktape_Push_ObjectStash(ctx);												// [heci][stash]
 	duk_push_array(ctx);															// [heci][stash][array]
 	ILibDuktape_HECI_ioctl_data *data;
-	duk_push_fixed_buffer(ctx, bufferLen + sizeof(ILibDuktape_HECI_ioctl_data));	// [heci][stash][array][state]
-	data = (ILibDuktape_HECI_ioctl_data*)Duktape_GetBuffer(ctx, -1, NULL);
-	memset(data, 0, sizeof(ILibDuktape_HECI_ioctl_data));
+	data = (ILibDuktape_HECI_ioctl_data*)Duktape_PushBuffer(ctx, bufferLen + sizeof(ILibDuktape_HECI_ioctl_data));
 	duk_put_prop_index(ctx, -2, 0);													// [heci][stash][array]
 	if (outBufferLen > 0)
 	{																				// [heci][stash][array][buffer]
@@ -954,6 +1016,7 @@ void ILibDuktape_HECI_PostSelect(void* object, int slct, fd_set *readset, fd_set
 			ILibDuktape_DuplexStream_WriteEnd(h->session->stream);
 		}
 	}
+	if (h->descriptor <= 0) { return; }
 	if (FD_ISSET(h->descriptor, writeset))
 	{
 		ILibDuktape_HECI_Session_WriteHandler_Process(h->session);
@@ -971,6 +1034,7 @@ void ILibDuktape_HECI_Destroy(void *object)
 	close(h->descriptor);
 }
 #endif
+
 void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);																	// [HECI]
@@ -1011,6 +1075,7 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 #endif
 	if (chain != NULL) { ILibDuktape_CreateInstanceMethod(ctx, "create", ILibDuktape_HECI_create, 0); }
 	ILibDuktape_CreateInstanceMethod(ctx, "doIoctl", ILibDuktape_HECI_doIoctl, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "disconnect", ILibDuktape_HECI_Session_close, 0);
 #ifdef _POSIX
 	duk_push_pointer(ctx, hlink->Q);														// [HECI][Q]
 #else

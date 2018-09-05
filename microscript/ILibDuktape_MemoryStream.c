@@ -153,9 +153,8 @@ duk_ret_t ILibDuktape_MemoryStream_new(duk_context *ctx)
 
 	ILibDuktape_MemoryStream *ms;
 	duk_push_object(ctx);												// [ms]
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_MemoryStream));		// [ms][internal]
-	ms = (ILibDuktape_MemoryStream*)Duktape_GetBuffer(ctx, -1, NULL);
-	memset(ms, 0, sizeof(ILibDuktape_MemoryStream));
+	ILibDuktape_WriteID(ctx, "memoryStream");
+	ms = (ILibDuktape_MemoryStream*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_MemoryStream));
 	duk_put_prop_string(ctx, -2, ILibDuktape_MemoryStream_Internal);	// [ms]
 	ms->buffer = (char*)ILibMemory_Allocate(initial, 0, NULL, NULL);
 	ms->bufferSize = (size_t)initial;

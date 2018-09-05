@@ -137,34 +137,40 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 
 	ILibDuktape_CreateInstanceMethod(ctx, "kill", ILibDuktape_ChildProcess_Kill, 0);
 
-	duk_push_object(ctx);
-	ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdout");
-	duk_dup(ctx, -2);
-	ILibDuktape_CreateReadonlyProperty(ctx, "parent");
-	retVal->stdOut = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdOut_OnPause, ILibDuktape_ChildProcess_SubProcess_StdOut_OnResume, retVal);
-	ILibDuktape_CreateReadonlyProperty(ctx, "stdout");
+	if (ILibProcessPipe_Process_IsDetached(mProcess) == 0)
+	{
+		duk_push_object(ctx);
+		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdout");
+		duk_dup(ctx, -2);
+		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
+		retVal->stdOut = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdOut_OnPause, ILibDuktape_ChildProcess_SubProcess_StdOut_OnResume, retVal);
+		ILibDuktape_CreateReadonlyProperty(ctx, "stdout");
 
-	duk_push_object(ctx);
-	ILibDuktape_WriteID(ctx, "childProcess.subProcess.stderr");
-	duk_dup(ctx, -2);
-	ILibDuktape_CreateReadonlyProperty(ctx, "parent");
-	retVal->stdErr = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdErr_OnPause, ILibDuktape_ChildProcess_SubProcess_StdErr_OnResume, retVal);
-	ILibDuktape_CreateReadonlyProperty(ctx, "stderr");
+		duk_push_object(ctx);
+		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stderr");
+		duk_dup(ctx, -2);
+		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
+		retVal->stdErr = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdErr_OnPause, ILibDuktape_ChildProcess_SubProcess_StdErr_OnResume, retVal);
+		ILibDuktape_CreateReadonlyProperty(ctx, "stderr");
 
-	duk_push_object(ctx);
-	ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdin");
-	duk_dup(ctx, -2);
-	ILibDuktape_CreateReadonlyProperty(ctx, "parent");
-	retVal->stdIn = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler, ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler, retVal);
-	ILibDuktape_CreateReadonlyProperty(ctx, "stdin");
+		duk_push_object(ctx);
+		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdin");
+		duk_dup(ctx, -2);
+		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
+		retVal->stdIn = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler, ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler, retVal);
+		ILibDuktape_CreateReadonlyProperty(ctx, "stdin");
 
-	if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
+		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
 
-	ILibProcessPipe_Process_AddHandlers(mProcess, 4096, ILibDuktape_ChildProcess_SubProcess_ExitHandler, 
-		ILibDuktape_ChildProcess_SubProcess_StdOutHandler,
-		ILibDuktape_ChildProcess_SubProcess_StdErrHandler,
-		ILibDuktape_ChildProcess_SubProcess_SendOK, retVal);
-
+		ILibProcessPipe_Process_AddHandlers(mProcess, 4096, ILibDuktape_ChildProcess_SubProcess_ExitHandler,
+			ILibDuktape_ChildProcess_SubProcess_StdOutHandler,
+			ILibDuktape_ChildProcess_SubProcess_StdErrHandler,
+			ILibDuktape_ChildProcess_SubProcess_SendOK, retVal);
+	}
+	else
+	{
+		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
+	}
 	return(retVal);
 }
 
@@ -189,6 +195,10 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	void *callback = NULL;
 	ILibProcessPipe_Process p = NULL;
 	ILibProcessPipe_SpawnTypes spawnType = ILibProcessPipe_SpawnTypes_DEFAULT;
+#ifndef WIN32
+	int uid = -1;
+#endif
+
 
 	for (i = 0; i < nargs; ++i)
 	{
@@ -215,6 +225,9 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 		{
 			// Options
 			spawnType = (ILibProcessPipe_SpawnTypes)Duktape_GetIntPropertyValue(ctx, i, "type", (int)ILibProcessPipe_SpawnTypes_DEFAULT);
+#ifndef WIN32
+			uid = Duktape_GetIntPropertyValue(ctx, i, "uid", -1);
+#endif
 		}
 	}
 
@@ -237,7 +250,11 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	}
 #endif
 
+#ifdef WIN32
 	p = ILibProcessPipe_Manager_SpawnProcessEx2(manager, target, args, spawnType, 0);
+#else
+	p = ILibProcessPipe_Manager_SpawnProcessEx3(manager, target, args, spawnType, (void*)(uint64_t)uid, 0);
+#endif
 	if (p == NULL)
 	{
 		return(ILibDuktape_Error(ctx, "child_process.execFile(): Could not exec [%s]", target));
@@ -263,6 +280,8 @@ void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 	duk_put_prop_string(ctx, -2, "WINLOGON");
 	duk_push_int(ctx, 3);
 	duk_put_prop_string(ctx, -2, "TERM");
+	duk_push_int(ctx, 4);
+	duk_put_prop_string(ctx, -2, "DETACHED");
 	duk_put_prop_string(ctx, -2, "SpawnTypes");
 }
 void ILibDuktape_ChildProcess_Init(duk_context *ctx)

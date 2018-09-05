@@ -30,7 +30,6 @@ limitations under the License.
 /*! @{ */
 
 #define ILibTransports_WebRTC_DataChannel 0x51
-extern const int ILibMemory_WebRTC_Connection_CONTAINERSIZE;
 
 /** Factory object that is used to create WebRTC Connections. */
 typedef void* ILibWrapper_WebRTC_ConnectionFactory;

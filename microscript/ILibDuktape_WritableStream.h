@@ -55,5 +55,4 @@ typedef struct ILibDuktape_WritableStream
 ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, ILibDuktape_WritableStream_WriteHandler WriteHandler, ILibDuktape_WritableStream_EndHandler EndHandler, void *user);
 void ILibDuktape_WritableStream_Ready(ILibDuktape_WritableStream *stream);
 
-
 #endif

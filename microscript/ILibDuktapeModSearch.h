@@ -23,7 +23,10 @@ limitations under the License.
 typedef void (*ILibDuktape_ModSearch_PUSH_Object)(duk_context *ctx, void *chain);
 
 int ILibDuktape_ModSearch_AddHandler(duk_context *ctx, char *id, ILibDuktape_ModSearch_PUSH_Object handler);
+void ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(duk_context *ctx, char *js, size_t jsLen);
 int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, int moduleLen);
+void ILibDuktape_ModSearch_AddModuleObject(duk_context *ctx, char *id, void *heapptr);
+duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id);
 void ILibDuktape_ModSearch_Init(duk_context *ctx, void *chain, ILibSimpleDataStore mDB);
 
 #endif

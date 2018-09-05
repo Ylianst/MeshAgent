@@ -2217,20 +2217,7 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 	{
 		// Still Requests to be made
 		if (wcdo->InitialRequestAnswered == 0 && wcdo->CancelRequest == 0)
-		{
-			// Error
-			wr->OnResponse(
-				wcdo,
-				0,
-				NULL,
-				NULL,
-				NULL,
-				0,
-				ILibWebClient_ReceiveStatus_Complete,
-				wr->user1,
-				wr->user2,
-				&(wcdo->PAUSE));
-			
+		{	
 			if (wcdo->IsOrphan != 0 || wcdo->IsWebSocket != 0)
 			{
 				ILibWebClient_FinishedResponse(socketModule, wcdo);
@@ -2238,6 +2225,18 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 			}
 			else
 			{
+				// Error
+				wr->OnResponse(
+					wcdo,
+					0,
+					NULL,
+					NULL,
+					NULL,
+					0,
+					ILibWebClient_ReceiveStatus_Complete,
+					wr->user1,
+					wr->user2,
+					&(wcdo->PAUSE));
 				ILibWebClient_FinishedResponse(socketModule, wcdo);
 			}
 		}
@@ -2315,6 +2314,7 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 					else
 					{
 						// Don't use proxy
+						ILibAsyncSocket_ClearProxySettings(wcm->socks[i]);
 						ILibAsyncSocket_ConnectTo(
 							wcm->socks[i],
 							NULL,
@@ -3670,11 +3670,11 @@ void* ILibWebClient_Digest_GenerateTableEx(ILibWebClient_StateObject state, void
 	ILibWebClientDataObject *wcdo = (ILibWebClientDataObject*)state;
 	char* authenticate = ILibGetHeaderLineSP(((ILibWebClientDataObject*)state)->header, "WWW-Authenticate", 16);
 
-	if (wcdo->DigestData == NULL) { wcdo->DigestData = ILibMemory_AllocateA_InitMem(ILibMemory_Allocate(1024, 0, NULL, NULL), 1024); }
+	if (wcdo->DigestData == NULL) { wcdo->DigestData = ILibMemory_SmartAllocate(1024); }
 	if (authenticate != NULL)
 	{
-		ILibMemory_AllocateA_InitMem(ILibMemory_AllocateA_Raw(wcdo->DigestData), ILibMemory_AllocateA_RawSize(wcdo->DigestData));
-		strncpy_s(wcdo->DigestData, ILibMemory_AllocateA_Size(wcdo->DigestData), authenticate, strnlen_s(authenticate, sizeof(ILibScratchPad)));
+		ILibMemory_Init(ILibMemory_RawPtr(wcdo->DigestData), ILibMemory_RawSize(wcdo->DigestData), 0, ILibMemory_Types_HEAP);
+		strncpy_s(wcdo->DigestData, ILibMemory_Size(wcdo->DigestData), authenticate, strnlen_s(authenticate, sizeof(ILibScratchPad)));
 	}
 	else
 	{

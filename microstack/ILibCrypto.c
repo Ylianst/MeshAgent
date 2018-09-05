@@ -35,14 +35,38 @@ limitations under the License.
 #include <openssl/err.h>
 #include <openssl/hmac.h>
 #else
-#include "md5.h"
-#include "sha1.h"
-#include "microstack/sha.h"
+#ifdef WIN32
+void BCRYPT_INIT(BCRYPT_CTX* ctx, void* alg)
+{
+	memset(ctx, 0, sizeof(BCRYPT_CTX));
+	BCryptOpenAlgorithmProvider(&(ctx->hAlg), (LPCWSTR)alg, NULL, 0);
+	BCryptGetProperty(ctx->hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&(ctx->cbHashObject), sizeof(DWORD), &(ctx->cbData), 0);
+	ctx->pbHashObject = (PBYTE)HeapAlloc(GetProcessHeap(), 0, ctx->cbHashObject);
+	BCryptGetProperty(ctx->hAlg, BCRYPT_HASH_LENGTH, (PBYTE)&(ctx->cbHash), sizeof(DWORD), &(ctx->cbData), 0);
+	BCryptCreateHash(ctx->hAlg, &(ctx->hHash), ctx->pbHashObject, ctx->cbHashObject, NULL, 0, 0);
+}
+void BCRYPT_UPDATE(BCRYPT_CTX* ctx, void* data, size_t dataLen)
+{
+	BCryptHashData(ctx->hHash, (PBYTE)data, (ULONG)dataLen, 0);
+}
+void BCRYPT_FINAL(char *h, BCRYPT_CTX* ctx)
+{
+	BCryptFinishHash(ctx->hHash, (PUCHAR)h, ctx->cbHash, 0);
+	BCryptCloseAlgorithmProvider(ctx->hAlg, 0);
+	BCryptDestroyHash(ctx->hHash);
+	HeapFree(GetProcessHeap(), 0, ctx->pbHashObject);
+}
+#else
+#include "microstack/nossl/md5.h"
+#include "microstack/nossl/sha1.h"
+#include "microstack/nossl/sha.h"
 #include <time.h>
+#endif
 #endif
 
 char utils_HexTable[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F' };
 char utils_HexTable2[16] = { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
+
 
 void  __fastcall util_md5(char* data, int datalen, char* result)
 {

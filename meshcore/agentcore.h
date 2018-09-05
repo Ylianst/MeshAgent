@@ -50,6 +50,18 @@ typedef char JS_ENGINE_CONTEXT[16];
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibCrypto.h"
 
+#define ILibDuktape_MeshAgent_LoggedOnUsers	"\xFF_MeshAgent_LoggedOnUsers"
+
+typedef enum MeshCommand_AuthInfo_CapabilitiesMask
+{
+	MeshCommand_AuthInfo_CapabilitiesMask_DESKTOP = 0x01,
+	MeshCommand_AuthInfo_CapabilitiesMask_TERMINAL = 0x02,
+	MeshCommand_AuthInfo_CapabilitiesMask_FILES = 0x04,
+	MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE = 0x08,
+	MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT = 0x10,
+	MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY = 0x20
+}MeshCommand_AuthInfo_CapabilitiesMask;
+
 typedef enum AgentIdentifiers
 {
 	AGENTID_UNKNOWN = 0,  //!< Self-update not supported
@@ -148,10 +160,12 @@ typedef struct MeshAgentHostContainer
 	
 	int localScript;
 	int version;
+	int capabilities; // Extra agent capabilities indicated to the server from MeshCommand_AuthInfo_CapabilitiesMask
 	char hostname[255];
 	char serveruri[1024];
 	AgentIdentifiers agentID;
 	int serverIndex;
+	int triedNoProxy_Index;
 	int retryTime;
 	MeshAgentHost_BatteryInfo batteryState;
 	char meshId[UTIL_SHA384_HASHSIZE];
@@ -175,6 +189,7 @@ typedef struct MeshAgentHostContainer
 	char g_selfid[UTIL_SHA384_HASHSIZE];
 	void* microLMS;
 	void* multicastDiscovery;
+	void* multicastDiscovery2;
 	char* multicastServerUrl;
 	int serverConnectionState;
 	int exitCode;
@@ -186,7 +201,7 @@ typedef struct MeshAgentHostContainer
 #endif
 }MeshAgentHostContainer;
 
-MeshAgentHostContainer* MeshAgent_Create();
+MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities);
 void MeshAgent_Destroy(MeshAgentHostContainer* agent);
 
 int MeshAgent_Start(MeshAgentHostContainer *agent, int argc, char **argv);

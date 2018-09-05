@@ -58,9 +58,47 @@ void  __fastcall util_randomtext(int length, char* result);
 #define UTIL_SHA512_HASHSIZE	64
 
 #ifdef MICROSTACK_NOTLS
-#include "md5.h"
-#include "sha1.h"
-#include "microstack/SHA.h"
+#ifdef WIN32
+#include <bcrypt.h>
+
+typedef struct BCRYPT_CTX
+{
+	BCRYPT_ALG_HANDLE	hAlg;
+	BCRYPT_HASH_HANDLE	hHash;
+	DWORD				cbData;
+	DWORD				cbHash;
+	DWORD				cbHashObject;
+	PBYTE				pbHashObject;
+}BCRYPT_CTX;
+#define SHA512_CTX BCRYPT_CTX
+#define SHA384_CTX BCRYPT_CTX
+#define SHA256_CTX BCRYPT_CTX
+#define SHA_CTX BCRYPT_CTX
+#define MD5_CTX BCRYPT_CTX
+
+void BCRYPT_INIT(BCRYPT_CTX* ctx, void* alg);
+void BCRYPT_UPDATE(BCRYPT_CTX* ctx, void* data, size_t dataLen);
+void BCRYPT_FINAL(char *h, BCRYPT_CTX* ctx);
+#define SHA512_Init(ctx) BCRYPT_INIT(ctx, BCRYPT_SHA512_ALGORITHM)
+#define SHA384_Init(ctx) BCRYPT_INIT(ctx, BCRYPT_SHA384_ALGORITHM)
+#define SHA256_Init(ctx) BCRYPT_INIT(ctx, BCRYPT_SHA256_ALGORITHM)
+#define SHA1_Init(ctx) BCRYPT_INIT(ctx, BCRYPT_SHA1_ALGORITHM)
+#define MD5_Init(ctx) BCRYPT_INIT(ctx, BCRYPT_MD5_ALGORITHM)
+#define SHA512_Update(ctx, data, len) BCRYPT_UPDATE(ctx, data, len)
+#define SHA384_Update(ctx, data, len) BCRYPT_UPDATE(ctx, data, len)
+#define SHA256_Update(ctx, data, len) BCRYPT_UPDATE(ctx, data, len)
+#define SHA1_Update(ctx, data, len) BCRYPT_UPDATE(ctx, data, len)
+#define MD5_Update(ctx, data, len) BCRYPT_UPDATE(ctx, data, len)
+#define SHA512_Final(md, ctx) BCRYPT_FINAL(md, ctx)
+#define SHA384_Final(md, ctx) BCRYPT_FINAL(md, ctx)
+#define SHA256_Final(md, ctx) BCRYPT_FINAL(md, ctx)
+#define SHA1_Final(md, ctx) BCRYPT_FINAL(md, ctx)
+#define MD5_Final(md, ctx) BCRYPT_FINAL(md, ctx)
+
+#else
+#include "microstack/nossl/md5.h"
+#include "microstack/nossl/SHA.h"
+#include "microstack/nossl/sha1.h"
 
 #define SHA256_CTX SHA256Context
 #define SHA512_CTX SHA512Context
@@ -76,6 +114,7 @@ void  __fastcall util_randomtext(int length, char* result);
 #define SHA512_Init(ctx) SHA512Reset (ctx)
 #define SHA512_Update(ctx, data, len) SHA512Input(ctx, (uint8_t*)data, len)
 #define SHA512_Final(md, ctx) SHA512Result (ctx, md)
+#endif
 #endif
 
 

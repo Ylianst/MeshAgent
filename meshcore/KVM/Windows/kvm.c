@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #if defined(_LINKVM)
+#pragma warning(disable: 4996)
 
 #include <stdio.h>
 #include "kvm.h"
@@ -1114,7 +1115,7 @@ void kvm_cleanup()
 	if (gChildProcess != NULL) 
 	{ 
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM.c/kvm_cleanup: Attempting to kill child process");
-		free(ILibProcessPipe_Process_KillEx(gChildProcess));
+		ILibProcessPipe_Process_SoftKill(gChildProcess);
 		gChildProcess = NULL;
 	}
 	else

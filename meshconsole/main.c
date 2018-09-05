@@ -63,6 +63,31 @@ void BreakSink(int s)
 }
 #endif
 
+#if defined(WIN32) && defined(MeshLibInterface)
+extern void ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(char *exePath, char **script, int *scriptLen);
+typedef void(__stdcall *ExternalDispatch)(void *data);
+__declspec(dllexport)  ExternalDispatch ExternalDispatchSink = NULL;
+__declspec(dllexport) int mainEx(int argc, char **argv, ExternalDispatch ptr)
+{
+	int retCode = 0;
+	char *js = NULL;
+	int jsLen = 0;
+
+	ExternalDispatchSink = ptr;
+	ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(argv[0], &js, &jsLen);
+
+	agentHost = MeshAgent_Create(0);
+	agentHost->exePath = (char*)ILibMemory_AllocateA(strnlen_s(argv[0], _MAX_PATH) + 1);
+	memcpy_s(agentHost->exePath, ILibMemory_AllocateA_Size(agentHost->exePath), argv[0], ILibMemory_AllocateA_Size(agentHost->exePath) - 1);
+	
+	agentHost->meshCoreCtx_embeddedScript = js;
+	agentHost->meshCoreCtx_embeddedScriptLen = jsLen;
+	while (MeshAgent_Start(agentHost, argc, argv) != 0);
+	retCode = agentHost->exitCode;
+	MeshAgent_Destroy(agentHost);
+	return(retCode);
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -70,17 +95,49 @@ int main(int argc, char **argv)
 	char *integratedJavaScript = NULL;
 	int integratedJavaScriptLen = 0;
 	int retCode = 0;
+	int capabilities = 0;
 
-	ILibDuktape_ScriptContainer_CheckEmbedded(argv, &integratedJavaScript, &integratedJavaScriptLen);
+#if defined (_POSIX)
+#ifndef _NOILIBSTACKDEBUG
+char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
+#endif
+#endif
 
-	if (argc > 2 && memcmp(argv[1], "-faddr", 6) == 0)
+
+	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
+
+	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
 	{
-		uint64_t addrOffset;
-		util_hexToBuf(argv[2] + 2, (int)(strnlen_s(argv[2], 130) - 2), (char*)&addrOffset);
-		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), addrOffset);
+#if !defined(WIN32)
+		uint64_t addrOffset = 0;
+		sscanf(argv[2] + 2, "%016"PRIx64, &addrOffset);
+#elif defined(WIN64)
+		uint64_t addrOffset = 0;
+		sscanf_s(argv[2] + 2, "%016llx", &addrOffset);
+#else
+		uint32_t addrOffset = 0;
+		sscanf_s(argv[2] + 2, "%x", &addrOffset);
+#endif
+
+		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), (uint64_t)addrOffset);
 		printf("%s", ILibScratchPad);
 		return(0);
 	}
+
+	if (argc > 2 && strcasecmp(argv[1], "-fdelta") == 0)
+	{
+		uint64_t delta = 0;
+#ifdef WIN32
+		sscanf_s(argv[2], "%lld", &delta);
+#else
+		sscanf(argv[2], "%"PRIu64, &delta);
+#endif
+		ILibChain_DebugDelta(ILibScratchPad, sizeof(ILibScratchPad), delta);
+		printf("%s", ILibScratchPad);
+		return(0);
+	}
+
+	if (argc > 1 && strcasecmp(argv[1], "connect") == 0) { capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY; }
 
 	if (integratedJavaScriptLen == 0)
 	{
@@ -112,15 +169,12 @@ int main(int argc, char **argv)
 		act.sa_flags = 0;
 		sigaction(SIGPIPE, &act, NULL);
 	}
-#ifndef _NOILIBSTACKDEBUG
-	char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
-#endif
 #endif
 
 #ifdef WIN32
 	__try
 	{
-		agentHost = MeshAgent_Create();
+		agentHost = MeshAgent_Create(capabilities);
 		agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 		agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
 		while (MeshAgent_Start(agentHost, argc, argv) != 0);
@@ -133,7 +187,7 @@ int main(int argc, char **argv)
 	}
 	_CrtDumpMemoryLeaks();
 #else
-	agentHost = MeshAgent_Create();
+	agentHost = MeshAgent_Create(capabilities);
 	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);

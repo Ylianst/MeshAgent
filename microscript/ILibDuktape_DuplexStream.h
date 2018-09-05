@@ -66,11 +66,11 @@ typedef void(*ILibDuktape_DuplexStream_EndHandler)(ILibDuktape_DuplexStream *str
 typedef void(*ILibDuktape_DuplexStream_PauseResumeHandler)(ILibDuktape_DuplexStream *sender, void *user);
 typedef int(*ILibDuktape_DuplexStream_UnshiftHandler)(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user);
 
-#define ILibDuktape_DuplexStream_Ready(duplexStream) ILibDuktape_WritableStream_Ready((duplexStream)->writableStream)
-#define ILibDuktape_DuplexStream_WriteData(duplexStream, buffer, bufferLen) ILibDuktape_readableStream_WriteData((duplexStream)->readableStream, buffer, bufferLen)
-#define ILibDuktape_DuplexStream_WriteDataEx(duplexStream, streamReserved, buffer, bufferLen) ILibDuktape_readableStream_WriteDataEx((duplexStream)->readableStream, streamReserved, buffer, bufferLen)
-#define ILibDuktape_DuplexStream_WriteEnd(duplexStream) ILibDuktape_readableStream_WriteEnd((duplexStream)->readableStream)
-#define ILibDuktape_DuplexStream_Closed(duplexStream) ILibDuktape_readableStream_Closed((duplexStream)->readableStream)
+#define ILibDuktape_DuplexStream_Ready(duplexStream) if(ILibMemory_CanaryOK(duplexStream)){ILibDuktape_WritableStream_Ready((duplexStream)->writableStream);}
+#define ILibDuktape_DuplexStream_WriteData(duplexStream, buffer, bufferLen) (ILibMemory_CanaryOK(duplexStream)?(ILibDuktape_readableStream_WriteData((duplexStream)!=NULL?((duplexStream)->readableStream):NULL, buffer, bufferLen)):1)
+#define ILibDuktape_DuplexStream_WriteDataEx(duplexStream, streamReserved, buffer, bufferLen) (ILibMemory_CanaryOK(duplexStream)?(ILibDuktape_readableStream_WriteDataEx((duplexStream)!=NULL?((duplexStream)->readableStream):NULL, streamReserved, buffer, bufferLen)):1)
+#define ILibDuktape_DuplexStream_WriteEnd(duplexStream) (ILibMemory_CanaryOK(duplexStream)?ILibDuktape_readableStream_WriteEnd((duplexStream)->readableStream):1)
+#define ILibDuktape_DuplexStream_Closed(duplexStream) if(ILibMemory_CanaryOK(duplexStream)){ILibDuktape_readableStream_Closed((duplexStream)->readableStream);}
 
 ILibDuktape_DuplexStream* ILibDuktape_DuplexStream_InitEx(duk_context *ctx, ILibDuktape_DuplexStream_WriteHandler WriteHandler, ILibDuktape_DuplexStream_EndHandler EndHandler, ILibDuktape_DuplexStream_PauseResumeHandler PauseHandler, ILibDuktape_DuplexStream_PauseResumeHandler ResumeHandler, ILibDuktape_DuplexStream_UnshiftHandler UnshiftHandler, void *user);
 #define ILibDuktape_DuplexStream_Init(ctx, WriteHandler, EndHandler, PauseHandler, ResumeHandler, user) ILibDuktape_DuplexStream_InitEx(ctx, WriteHandler, EndHandler, PauseHandler, ResumeHandler, NULL, user)

@@ -191,7 +191,10 @@ int __fastcall utilx_readfile2(char* filename, char** data)
 		{
 			len = fread((*data) + count, 1, 1023, pFile);
 			count += len;
-			if (len == 1023) *data = realloc(*data, count + 1024);
+			if (len == 1023)
+			{
+				if ((*data = realloc(*data, count + 1024)) == NULL) { ILIBCRITICALEXIT(254); }
+			}
 		} while (len == 100);
 		(*data)[count] = 0;
 		fclose(pFile);
@@ -419,12 +422,12 @@ int MeshInfo_GetSystemInformation(char** data)
 	int ptr = 0;
 
 	// Setup the response
-	*data = (char*)malloc(65536);
+	if ((*data = (char*)malloc(65536)) == NULL) { ILIBCRITICALEXIT(254); }
 	ptr += snprintf(*data + ptr, 65536 - ptr, "{\"netif\":[");
 	ptr += info_GetLocalInterfaces(*data + ptr, 65536 - ptr);
 	ptr += snprintf(*data + ptr, 65536 - ptr, "]}");
 	(*data)[ptr] = 0;
-	*data = realloc(*data, ptr + 1);
+	if ((*data = realloc(*data, ptr + 1)) == NULL) { ILIBCRITICALEXIT(254); }
 
 	return ptr;
 }
@@ -587,4 +590,3 @@ int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 }
 
 #endif
-

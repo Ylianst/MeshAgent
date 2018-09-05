@@ -22,4 +22,3 @@ limitations under the License.
 void ILibDuktape_http_init(duk_context *ctx, void *chain);
 
 #endif
-

@@ -13,6 +13,8 @@
 #define IDC_HASHTEXT                    1007
 #define IDC_HASHTEXT2                   1008
 #define IDC_POLICYTEXT                  1008
+#define IDC_UNINSTALLBUTTON2            1009
+#define IDC_CONNECTBUTTON               1009
 #define IDC_HASHTEXT3                   1011
 #define IDC_SERVERID                    1011
 #define IDC_SERVERLOCATION              1012

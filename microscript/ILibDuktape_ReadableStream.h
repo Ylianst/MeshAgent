@@ -80,4 +80,3 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream);
 void ILibDuktape_readableStream_Closed(ILibDuktape_readableStream *stream);
 
 #endif
-

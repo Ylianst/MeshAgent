@@ -20,6 +20,12 @@ limitations under the License.
 	#include <iphlpapi.h>
 	#include <Dbghelp.h>
 #endif
+
+#if defined(WIN32) && !defined(_WIN32_WCE)
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#endif
+
 #include "ILibParsers.h"
 
 #ifdef _POSIX
@@ -57,21 +63,24 @@ void CALLBACK ILibIPAddressMonitor_dispatch(
 	IN DWORD dwFlags
 )
 {
-	if (dwError == 0 && lpOverlapped->hEvent != NULL)
+	if (ILibMemory_CanaryOK(lpOverlapped))
 	{
-		_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)lpOverlapped->hEvent;
-		ILibChain_RunOnMicrostackThread(obj->chainLink.ParentChain, ILibIPAddressMonitor_MicrostackThreadDispatch, obj);
-	}
-	else if (lpOverlapped->hEvent == NULL)
-	{
-		free(lpOverlapped);
+		if (dwError == 0 && lpOverlapped->hEvent != NULL)
+		{
+			_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)lpOverlapped->hEvent;
+			ILibChain_RunOnMicrostackThread(obj->chainLink.ParentChain, ILibIPAddressMonitor_MicrostackThreadDispatch, obj);
+		}
+		else if (lpOverlapped->hEvent == NULL)
+		{
+			ILibMemory_Free(lpOverlapped);
+		}
 	}
 }
 void ILibIPAddressMonitor_MicrostackThreadDispatch(void *chain, void *user)
 {
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)user;
 	if (obj->onUpdate != NULL) { obj->onUpdate(obj, obj->user); }
-	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), (LPWSAOVERLAPPED)&(obj->reserved), ILibIPAddressMonitor_dispatch);
+	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), obj->reserved, ILibIPAddressMonitor_dispatch);
 }
 #endif
 
@@ -128,7 +137,7 @@ ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonit
 	obj->onUpdate = handler;
 	obj->user = user;
 #ifdef WIN32
-	obj->reserved = ILibMemory_Allocate(sizeof(OVERLAPPED), 0, NULL, NULL);
+	obj->reserved = (OVERLAPPED*)ILibMemory_SmartAllocate(sizeof(OVERLAPPED));  // This leaks due to a bug in Windows, where the WSAIoctl frequently doesn't event on shutdown. If we free try to free it manually, it will cause a crash, because windows will have an invalid overlapped object.
 	obj->reserved->hEvent = (HANDLE)obj;
 	obj->mSocket = socket(AF_INET, SOCK_DGRAM, 0);
 	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), obj->reserved, ILibIPAddressMonitor_dispatch);

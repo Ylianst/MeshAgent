@@ -112,7 +112,7 @@ void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyNa
 char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len)
 {
 	char *retVal = defaultValue;
-	if (duk_has_prop_string(ctx, i, propertyName))
+	if (ctx != NULL && duk_has_prop_string(ctx, i, propertyName))
 	{
 		duk_get_prop_string(ctx, i, propertyName);
 		retVal = (char*)duk_get_lstring(ctx, -1, len);
@@ -127,7 +127,7 @@ char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* prop
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue)
 {
 	int retVal = defaultValue;
-	if (duk_has_prop_string(ctx, i, propertyName))
+	if (ctx!=NULL && duk_has_prop_string(ctx, i, propertyName))
 	{
 		duk_get_prop_string(ctx, i, propertyName);
 		retVal = duk_to_int(ctx, -1);
@@ -159,6 +159,7 @@ char *Duktape_GetStashKey(void* value)
 char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 {
 	char *retVal = NULL;
+	duk_size_t len = 0;
 	if (bufLen != NULL) { *bufLen = 0; }
 
 	if (duk_is_string(ctx, i))
@@ -167,11 +168,29 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 	}
 	else if (duk_is_buffer(ctx, i))
 	{
-		retVal = (char*)duk_require_buffer(ctx, i,bufLen);
+		retVal = (char*)duk_require_buffer(ctx, i, &len);
+		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		{
+			retVal = ILibMemory_FromRaw(retVal);
+			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }
+		}
+		else if (bufLen != NULL)
+		{
+			*bufLen = len;
+		}
 	}
 	else if(duk_is_buffer_data(ctx, i))
 	{
-		retVal = (char*)duk_require_buffer_data(ctx, i, bufLen);
+		retVal = (char*)duk_require_buffer_data(ctx, i, &len);
+		if (ILibMemory_CanaryOK(ILibMemory_FromRaw(retVal)) && ILibMemory_RawSize(ILibMemory_FromRaw(retVal)) == len)
+		{
+			retVal = ILibMemory_FromRaw(retVal);
+			if (bufLen != NULL) { *bufLen = ILibMemory_Size(retVal); }
+		}
+		else if (bufLen != NULL)
+		{
+			*bufLen = len;
+		}
 	}
 	else if (duk_is_object(ctx, i))
 	{
@@ -607,37 +626,7 @@ void *ILibDuktape_Memory_AllocEx(duk_context *ctx, duk_idx_t index, duk_size_t s
 	duk_pop_2(ctx);													// ...
 	return(retVal);
 }
-void ILibDuktape_ValidatePointer(void *chain, void *ptr)
-{
-	ILibHashtable_Put(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0, (void*)0xFFFF);
-}
-void ILibDuktape_InValidatePointer(void *chain, void *ptr)
-{
-	ILibHashtable_Remove(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0);
-}
-int ILibDuktape_IsPointerValid(void *chain, void *ptr)
-{
-	return(ILibHashtable_Get(ILibChain_GetBaseHashtable(chain), ptr, NULL, 0) == NULL ? 0 : 1);
-}
-duk_ret_t ILibDuktape_PointerValidation_Finalizer(duk_context *ctx)
-{
-	duk_push_this(ctx);
-	void *chain = Duktape_GetChain(ctx);
-	void *obj = duk_get_heapptr(ctx, -1);
-	ILibDuktape_InValidatePointer(chain, obj);
-	duk_pop(ctx);
-	return(0);
-}
-void ILibDuktape_PointerValidation_Init(duk_context *ctx)
-{
-	void *chain = Duktape_GetChain(ctx);
-	if (!ILibDuktape_IsPointerValid(chain, duk_get_heapptr(ctx, -1)))
-	{
-		// Not set up yet, so set it up
-		ILibDuktape_ValidatePointer(chain, duk_get_heapptr(ctx, -1));
-		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_PointerValidation_Finalizer);
-	}
-}
+
 duk_ret_t ILibDuktape_Immediate_Sink(duk_context *ctx)
 {
 	ILibDuktape_ImmediateHandler userCallback = (ILibDuktape_ImmediateHandler)duk_get_pointer(ctx, 0);
@@ -696,6 +685,61 @@ void* ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuk
 	duk_pop(ctx);																// ...
 	return(retval);
 }
+duk_ret_t ILibDuktape_Interval_Sink(duk_context *ctx)
+{
+	ILibDuktape_ImmediateHandler userCallback = (ILibDuktape_ImmediateHandler)duk_get_pointer(ctx, 0);
+	void **args = NULL;
+	int argsLen, i;
+
+	duk_push_this(ctx);													// [immediate]
+	duk_dup(ctx, 1);													// [immediate][array]
+	if ((argsLen = (int)duk_get_length(ctx, -1)) > 0)
+	{
+		args = ILibMemory_AllocateA(sizeof(void*)*argsLen);
+		for (i = 0; i < argsLen; ++i)
+		{
+			duk_get_prop_index(ctx, -1, i);								// [immediate][array][arg]
+			args[i] = duk_get_pointer(ctx, -1);
+			duk_pop(ctx);												// [immediate][array]
+		}
+	}
+
+
+	if (userCallback != NULL) { userCallback(ctx, args, argsLen); }
+	return(0);
+}
+void* ILibDuktape_Interval(duk_context *ctx, void **args, int argsLen, int delay, ILibDuktape_IntervalHandler callback)
+{
+	void *retval = NULL;
+	int i = 0;
+	duk_push_global_object(ctx);										// [g]
+	duk_get_prop_string(ctx, -1, "setInterval");						// [g][setInterval]
+	duk_swap_top(ctx, -2);												// [setInterval][this]
+	duk_push_c_function(ctx, ILibDuktape_Interval_Sink, DUK_VARARGS);	// [setInterval][this][func]
+	duk_push_int(ctx, delay);											// [setInterval][this][func][delay]
+	duk_push_pointer(ctx, callback);									// [setInterval][this][func][delay][userFunc]
+	duk_push_array(ctx);												// [setInterval][this][func][delay][userFunc][array]
+
+	while (args[i] != NULL && i < argsLen)
+	{
+		duk_get_prop_string(ctx, -1, "push");							// [setInterval][this][func][delay][userFunc][array][push]
+		duk_dup(ctx, -2);												// [setInterval][this][func][delay][userFunc][array][push][this]
+		duk_push_pointer(ctx, args[i]);									// [setInterval][this][func][delay][userFunc][array][push][this][val]
+		if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Immediate => Array.push(): "); }
+		duk_pop(ctx);													// [setInterval][this][func][delay][userFunc][array]
+		++i;
+	}
+
+	if (duk_pcall_method(ctx, 4) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Interval => interval(): "); duk_pop(ctx); return(NULL); }
+
+
+	retval = duk_get_heapptr(ctx, -1);											// [immediate]
+	duk_push_heap_stash(ctx);													// [immediate][stash]
+	duk_swap_top(ctx, -2);														// [stash][immediate]
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(retval));					// [stash]
+	duk_pop(ctx);																// ...
+	return(retval);
+}
 void ILibDuktape_CreateInstanceMethodWithProperties(duk_context *ctx, char *funcName, duk_c_function funcImpl, duk_idx_t numArgs, unsigned int propertyCount, ...)
 {
 	unsigned int i;
@@ -725,6 +769,142 @@ duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val)
 	return(duk_push_int(ctx, val), duk_get_top_index(ctx));
 }
 
+void Duktape_Console_Log_ChainEx(duk_context *ctx, ILibDuktape_LogTypes logType, char *msg, duk_size_t msgLen)
+{
+	duk_push_global_object(ctx);						// [g]
+	duk_get_prop_string(ctx, -1, "console");			// [g][console]
+	switch (logType)
+	{
+		case ILibDuktape_LogType_Error:
+			duk_get_prop_string(ctx, -1, "error");		// [g][console][error]
+			break;
+		case ILibDuktape_LogType_Warn:
+			duk_get_prop_string(ctx, -1, "warn");		// [g][console][warn]
+			break;
+		default:
+			duk_get_prop_string(ctx, -1, "log");		// [g][console][log]
+			break;
+	}
+	duk_swap_top(ctx, -2);								// [g][log][this]
+	duk_push_lstring(ctx, msg, msgLen);					// [g][log][this][str]
+	duk_pcall_method(ctx, 1); duk_pop(ctx);				// [g]
+	duk_pop(ctx);										// ...
+}
 
+typedef struct Duktape_Console_Log_data
+{
+	duk_context *ctx;
+	ILibDuktape_LogTypes logType;
+}Duktape_Console_Log_data;
 
+void Duktape_Console_Log_Chain(void *chain, void *user)
+{
+	Duktape_Console_Log_data *data = (Duktape_Console_Log_data*)user;
+	char *msg = (char*)ILibMemory_Extra(data);
 
+	Duktape_Console_Log_ChainEx(data->ctx, data->logType, msg, ILibMemory_Size(msg));
+	
+	ILibMemory_Free(user);
+}
+void Duktape_Console_Log(duk_context *ctx, void *chain, ILibDuktape_LogTypes logType, char *msg, duk_size_t msgLen)
+{
+	if (ILibIsRunningOnChainThread(chain))
+	{
+		Duktape_Console_Log_ChainEx(ctx, logType, msg, msgLen);
+	}
+	else
+	{
+		Duktape_Console_Log_data *data = (Duktape_Console_Log_data*)ILibMemory_SmartAllocateEx(sizeof(Duktape_Console_Log_data), msgLen);
+		data->ctx = ctx;
+		data->logType = logType;
+		memcpy_s(ILibMemory_Extra(data), ILibMemory_ExtraSize(data), msg, msgLen);
+
+		ILibChain_RunOnMicrostackThreadEx(chain, Duktape_Console_Log_Chain, data);
+	}
+}
+
+char* ILibDuktape_String_AsWide(duk_context *ctx, duk_idx_t idx, duk_size_t *len)
+{
+	char *src;
+	src = (char*)duk_require_string(ctx, idx);
+
+#ifdef WIN32
+	size_t inBufferLen = 2 + (2 * MultiByteToWideChar(CP_UTF8, 0, (LPCCH)src, -1, NULL, 0));
+	LPWSTR inBuffer = (LPWSTR)ILibMemory_AllocateTemp(Duktape_GetChain(ctx), inBufferLen);
+
+	int r = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)src, -1, inBuffer, (int)inBufferLen);
+	if (len != NULL)
+	{
+		*len = (duk_size_t)r;
+	}
+	return(r == 0 ? NULL : (char*)inBuffer);
+#else
+	return(src);
+#endif
+}
+void ILibDuktape_String_PushWideString(duk_context *ctx, char *wstr, size_t wstrlen)
+{
+#ifdef WIN32
+	char *tmp;
+	size_t tmpLen;
+
+	tmpLen = 2 + (size_t)WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, (int)(wstrlen > 0 ? wstrlen : -1), NULL, 0, NULL, NULL);
+	tmp = (char*)ILibMemory_AllocateTemp(Duktape_GetChain(ctx), tmpLen);
+
+	if (WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, (int)(wstrlen > 0 ? wstrlen : -1), (LPSTR)tmp, (int)tmpLen, NULL, NULL) != 0)
+	{
+		duk_push_string(ctx, tmp);
+	}
+	else
+	{
+		ILibDuktape_Error(ctx, "String_PushWideString() Error: %u", GetLastError());
+	}
+#else
+	if (wstrlen == 0)
+	{
+		duk_push_string(ctx, wstr);
+	}
+	else
+	{
+		duk_push_lstring(ctx, wstr, wstrlen);
+	}
+#endif
+}
+char *ILibDuktape_String_WideToUTF8(duk_context *ctx, char *wstr)
+{
+#ifdef WIN32
+	char *tmp;
+	size_t tmpLen;
+
+	tmpLen = 2 + (size_t)WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, -1, NULL, 0, NULL, NULL);
+	tmp = (char*)ILibMemory_AllocateTemp(Duktape_GetChain(ctx), tmpLen);
+	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, -1, tmp, (int)tmpLen, NULL, NULL);
+	return(tmp);
+#else
+	// NOP for non-Windows, because should already be UTF8
+	return(wstr);
+#endif
+}
+char *ILibDuktape_String_UTF8ToWide(duk_context *ctx, char *str)
+{
+#ifdef WIN32
+	size_t tmpLen = 2 + (2 * MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, -1, NULL, 0));
+	LPWSTR retVal = (LPWSTR)ILibMemory_AllocateTemp(Duktape_GetChain(ctx), tmpLen);
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, -1, retVal, (int)tmpLen);
+	return((char*)retVal);
+#else
+	// NOP on non-Windows, as strings should always be UTF-8 by default
+	return(str);
+#endif
+}
+void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta)
+{
+	void *h = duk_get_heapptr(ctx, i);
+	duk_enum(ctx, i, DUK_ENUM_INCLUDE_HIDDEN | DUK_ENUM_INCLUDE_SYMBOLS);
+	while (duk_next(ctx, -1, 1))
+	{
+		printf(" [%s: %p] => %s (%p)\n", (meta==NULL?"OBJ":meta), h, (char*)duk_get_string(ctx, -2), duk_get_heapptr(ctx, -1));
+		duk_pop_2(ctx);
+	}
+	duk_pop(ctx);
+}

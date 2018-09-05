@@ -117,9 +117,7 @@ ILibAsyncUDPSocket_SocketModule ILibAsyncUDPSocket_CreateEx(void *Chain, int Buf
 	#endif
 
 	// Initialize the UDP socket data structure
-	data = (struct ILibAsyncUDPSocket_Data*)malloc(sizeof(struct ILibAsyncUDPSocket_Data));
-	if (data == NULL) return NULL;
-	memset(data, 0, sizeof(struct ILibAsyncUDPSocket_Data));
+	data = (struct ILibAsyncUDPSocket_Data*)ILibMemory_Allocate(sizeof(struct ILibAsyncUDPSocket_Data), 0, NULL, NULL);
 	data->OnData = OnData;
 	data->OnSendOK = OnSendOK;
 	data->user1 = user;

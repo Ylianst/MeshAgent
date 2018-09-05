@@ -125,6 +125,10 @@ duk_ret_t ILibDuktape_SimpleDataStore_Get(duk_context *ctx)
 				duk_push_string(ctx, buffer);
 			}
 		}
+		else
+		{
+			duk_push_buffer_object(ctx, -1, 0, bufferSize, DUK_BUFOBJ_NODEJS_BUFFER);
+		}
 	}
 
 	return 1;

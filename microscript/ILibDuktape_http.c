@@ -24,6 +24,7 @@ limitations under the License.
 
 #define DIGEST_USERNAME					"\xFF_DigestUsername"
 #define DIGEST_PASSWORD					"\xFF_DigestPassword"
+#define DIGEST_AUTHTOKEN				"\xFF_DigestAuthToken"
 #define HTTP_DIGEST						"\xFF_HTTP_DIGEST"
 #define DIGEST_CLIENT_REQUEST			"\xFF_DIGEST_CLIENT_REQUEST"
 #define HTTP_CLIENTREQUEST_DATAPTR		"\xFF_CLIENTREQUEST_DATAPTR"
@@ -158,8 +159,10 @@ char *ILibDuktape_httpDigest_generateAuthenticationHeader(duk_context *ctx, void
 	wwwauth = (char*)Duktape_GetStringPropertyValueEx(ctx, -1, DIGEST2WWWAUTH, NULL, &wwwauthLen);
 	username = (char*)Duktape_GetStringPropertyValue(ctx, -1, DIGEST_USERNAME, NULL);
 	password = (char*)Duktape_GetStringPropertyValue(ctx, -1, DIGEST_PASSWORD, NULL);
-	if (wwwauth == NULL || username == NULL || password == NULL) { duk_pop(ctx); return(NULL); }
-	
+	if (!duk_has_prop_string(ctx, -1, DIGEST_AUTHTOKEN))
+	{
+		if (wwwauth == NULL || username == NULL || password == NULL) { duk_pop(ctx); return(NULL); }
+	}
 	duk_push_heapptr(ctx, optionsObj);																	// [digest][options]
 	method = (char*)Duktape_GetStringPropertyValue(ctx, -1, "method", NULL);
 	path = (char*)Duktape_GetStringPropertyValue(ctx, -1, "path", NULL);
@@ -174,9 +177,24 @@ char *ILibDuktape_httpDigest_generateAuthenticationHeader(duk_context *ctx, void
 	ILibGetEntryEx(table, "opaque", 6, (void**)&opaque, &opaqueLen); if (opaqueLen > 0) { opaque[opaqueLen] = 0; }
 	ILibGetEntryEx(table, "qop", 3, (void**)&qop, &qopLen); if (qopLen > 0) { qop[qopLen] = 0; }
 
-	tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s:%s", username, realm, password);
-	util_md5hex(ILibScratchPad2, tmpLen, result1);
-
+	if (duk_has_prop_string(ctx, -1, DIGEST_AUTHTOKEN))
+	{
+		duk_size_t authTokenLen;
+		char *authToken = Duktape_GetStringPropertyValueEx(ctx, -1, DIGEST_AUTHTOKEN, NULL, &authTokenLen);
+		
+		if (authTokenLen < sizeof(result1))
+		{
+			memcpy_s(result1, sizeof(result1), authToken, authTokenLen);
+			result1[32] = 0;
+			username = "admin";
+			tmpLen = (int)authTokenLen;
+		}
+	}
+	else
+	{
+		tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s:%s", username, realm, password);
+		util_md5hex(ILibScratchPad2, tmpLen, result1);
+	}
 	tmpLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s:%s", method, path);
 	util_md5hex(ILibScratchPad2, tmpLen, result2);
 
@@ -325,6 +343,11 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_response(duk_context *ctx)
 	else
 	{
 		duk_push_heapptr(ctx, digestClientPtr);								// [digestClientRequest]
+		duk_del_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST);
+		duk_push_this(ctx);
+		duk_del_prop_string(ctx, -1, DIGEST_CLIENT_REQUEST);
+		duk_pop(ctx);
+
 		duk_get_prop_string(ctx, -1, "emit");								// [digestClientRequest][emit]
 		duk_swap_top(ctx, -2);												// [emit][this]
 		duk_push_string(ctx, "response");									// [emit][this][response]
@@ -579,9 +602,18 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 }
 duk_ret_t ILibduktape_httpDigest_create(duk_context *ctx)
 {
-	duk_size_t usernameLen, passwordLen;
-	char *username = (char*)duk_require_lstring(ctx, 0, &usernameLen), *password = (char*)duk_require_lstring(ctx, 1, &passwordLen);
+	duk_size_t usernameLen, passwordLen, authTokenLen;
 	ILibDuktape_EventEmitter *emitter;
+	char *username = NULL, *password = NULL, *authToken = NULL;
+
+	if (duk_get_top(ctx) == 1 && duk_is_object(ctx, 0))
+	{
+		if ((authToken = Duktape_GetStringPropertyValueEx(ctx, 0, "authToken", NULL, &authTokenLen)) == NULL) { return(ILibDuktape_Error(ctx, "authToken Required")); }
+	}
+	else
+	{
+		username = (char*)duk_require_lstring(ctx, 0, &usernameLen), password = (char*)duk_require_lstring(ctx, 1, &passwordLen);
+	}
 
 	duk_push_object(ctx);					// [obj]
 	ILibDuktape_WriteID(ctx, "httpDigest");
@@ -593,10 +625,19 @@ duk_ret_t ILibduktape_httpDigest_create(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "upgrade");
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "isGet", 1, "get", ILibDuktape_httpDigest_http_request, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "isGet", 0, "request", ILibDuktape_httpDigest_http_request, DUK_VARARGS);
-	duk_push_string(ctx, username);
-	duk_put_prop_string(ctx, -2, DIGEST_USERNAME);
-	duk_push_string(ctx, password);
-	duk_put_prop_string(ctx, -2, DIGEST_PASSWORD);
+	
+	if (authToken == NULL)
+	{
+		duk_push_string(ctx, username);
+		duk_put_prop_string(ctx, -2, DIGEST_USERNAME);
+		duk_push_string(ctx, password);
+		duk_put_prop_string(ctx, -2, DIGEST_PASSWORD);
+	}
+	else
+	{
+		duk_push_lstring(ctx, authToken, authTokenLen);
+		duk_put_prop_string(ctx, -2, DIGEST_AUTHTOKEN);
+	}
 	duk_push_fixed_buffer(ctx, 16);
 	util_randomtext(16, (char*)Duktape_GetBuffer(ctx, -1, NULL));
 	((char*)Duktape_GetBuffer(ctx, -1, NULL))[15] = 0;
@@ -610,7 +651,7 @@ duk_ret_t ILibduktape_httpDigest_create(duk_context *ctx)
 void ILibDuktape_httpDigest_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);
-	ILibDuktape_CreateInstanceMethod(ctx, "create", ILibduktape_httpDigest_create, 2);
+	ILibDuktape_CreateInstanceMethod(ctx, "create", ILibduktape_httpDigest_create, DUK_VARARGS);
 }
 duk_ret_t ILibDuktape_httpHeaders(duk_context *ctx)
 {

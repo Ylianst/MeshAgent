@@ -9,8 +9,9 @@ var stream1;
 var stream2;
 var pending;
 
-hash.on('hashString', function (h)
+hash.on('hash', function (buffer)
 {
+    var h = buffer.toString('hex');
     if (process.platform == 'win32')
     {
         pending = 2;

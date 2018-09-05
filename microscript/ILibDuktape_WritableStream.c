@@ -304,12 +304,8 @@ ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, IL
 	ILibDuktape_WritableStream *retVal;
 	ILibDuktape_EventEmitter *emitter;
 
-	ILibDuktape_PointerValidation_Init(ctx);
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_WritableStream));			// [obj][buffer]
-	retVal = (ILibDuktape_WritableStream*)Duktape_GetBuffer(ctx, -1, NULL);	// [obj][buffer]
-	memset(retVal, 0, sizeof(ILibDuktape_WritableStream));
-
-	duk_put_prop_string(ctx, -2, ILibDuktape_WritableStream_WSPTRS);		// [obj]
+	retVal = (ILibDuktape_WritableStream*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_WritableStream));	// [obj][buffer]
+	duk_put_prop_string(ctx, -2, ILibDuktape_WritableStream_WSPTRS);									// [obj]
 	
 	retVal->ctx = ctx;
 	retVal->obj = duk_get_heapptr(ctx, -1);
