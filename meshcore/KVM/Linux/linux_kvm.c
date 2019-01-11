@@ -25,13 +25,14 @@ limitations under the License.
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <X11/extensions/XShm.h>
+#include <X11/keysym.h>
+#include <dlfcn.h>
+
+#include "linux_events.h"
+#include "linux_compression.h"
 
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
-
-#ifdef _DAEMON
-#define _GNU_SOURCE
-#endif
 
 int SCREEN_NUM = 0;
 int SCREEN_WIDTH = 0;
@@ -62,6 +63,28 @@ FILE *logFile = NULL;
 int g_enableEvents = 0;
 
 extern void* tilebuffer;
+
+typedef struct x11ext_struct
+{
+	void *xext_lib;
+	Bool(*XShmDetach)(Display *d, XShmSegmentInfo *si);
+	Bool(*XShmGetImage)(Display *dis, Drawable d, XImage *image, int x, int y, unsigned long plane_mask);
+	Bool(*XShmAttach)(Display *d, XShmSegmentInfo *si);
+	XImage*(*XShmCreateImage)(Display *display, Visual *visual, unsigned int depth, int format, char *data, XShmSegmentInfo *shminfo, unsigned int width, unsigned int height);
+}x11ext_struct;
+x11ext_struct *x11ext_exports = NULL;
+extern x11tst_struct *x11tst_exports;
+
+typedef struct x11_struct
+{
+	void *x11_lib;
+	Display*(*XOpenDisplay)(char *display_name);
+	int(*XCloseDisplay)(Display *d);
+	int(*XFlush)(Display *d);
+	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
+	Bool(*XQueryExtension)(Display *d, char *name, int* maj, int *firstev, int *firsterr);
+}x11_struct;
+x11_struct *x11_exports = NULL;
 
 void kvm_send_resolution()
 {
@@ -95,87 +118,6 @@ void kvm_send_display()
 }
 
 #define BUFSIZE 65535
-#ifdef _DAEMON
-int kvm_relay_restart(int paused);
-
-void* kvm_mainrelay(void* param)
-{
-	int ptr = 0;
-	int endPointer = 0;
-	unsigned short size;
-	char* pchRequest;
-	ssize_t cbBytesRead = 0;
-	enum ILibAsyncSocket_SendStatus r;
-
-	if ((pchRequest = (char*)malloc(BUFSIZE)) == NULL) ILIBCRITICALEXIT(254);
-
-	g_restartcount = 0;
-	while (!g_shutdown)
-	{
-		//fprintf(logFile, "Reading from slave in kvm_mainrelay\n");
-		cbBytesRead = read(slave2master[0], pchRequest + endPointer, BUFSIZE - endPointer);
-		//fprintf(logFile, "Read %d bytes from slave in kvm_mainrelay\n", cbBytesRead);
-		if (g_shutdown == 0 && (cbBytesRead == -1 || cbBytesRead == 0)) { g_shutdown = 3; }
-		if (g_shutdown) { /*ILIBMESSAGE("KVMBREAK-R1\r\n");*/ break; }
-		endPointer += cbBytesRead;
-
-		// See how much we can safely send
-		while (endPointer - ptr > 4)
-		{
-			//type = ntohs(((unsigned short*)(pchRequest + ptr))[0]);
-			size = ntohs(((unsigned short*)(pchRequest + ptr))[1]);
-			if (ptr + size > endPointer) break;
-			ptr += size;
-		}
-
-		if (ptr > 0)
-		{
-			// Send any complete data
-			r = GuardPost_ILibKVMSendTo(pchRequest, ptr, ILibAsyncSocket_MemoryOwnership_USER);
-			if (r == ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR) { /*ILIBMESSAGE("KVMBREAK-R2\r\n");*/ break; }
-			else if (r == ILibAsyncSocket_NOT_ALL_DATA_SENT_YET)
-			{
-				g_pause = 1;
-				while (g_pause && !g_shutdown) { if (GuardPost_ILibKVMGetPendingBytesToSend() == 0) { g_pause = 0; } usleep(5000); }
-			}
-
-			// Move remaining data to the front of the buffer
-			if (endPointer - ptr > 0) memcpy(pchRequest, pchRequest + ptr, endPointer - ptr);
-			endPointer -= ptr;
-			ptr = 0;
-
-		}
-
-		if (g_shutdown || ((BUFSIZE - endPointer) == 0)) break;
-	}
-
-	if (g_slavekvm != 0)
-	{
-		int r;
-		kill(g_slavekvm, SIGKILL);
-		waitpid(g_slavekvm, &r, 0);
-		g_slavekvm = 0;
-	}
-
-	close(slave2master[0]);
-	close(master2slave[1]);
-	kvmthread = (pthread_t)NULL;
-	free(pchRequest);
-	if (g_shutdown == 3 && g_restartcount < 4 && g_totalRestartCount < 256)
-	{
-		g_restartcount++;
-		g_totalRestartCount++;
-		usleep(500000);
-		// fprintf(logFile, "Restarting again!\n");
-		if (kvm_relay_restart(0) == 0) GuardPost_ILibKVMDisconnect();
-	}
-	else
-	{
-		if (g_shutdown == 2) GuardPost_ILibKVMDisconnect();
-	}
-	return 0;
-}
-#endif
 
 int kvm_server_inputdata(char* block, int blocklen);
 void* kvm_mainloopinput(void* parm)
@@ -326,6 +268,16 @@ void kvm_send_display_list()
 	if (displays != NULL) free(displays);
 }
 
+char Location_X11LIB[NAME_MAX];
+char Location_X11TST[NAME_MAX];
+char Location_X11EXT[NAME_MAX];
+void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext)
+{
+	if (libx11 != NULL) { strcpy_s(Location_X11LIB, sizeof(Location_X11LIB), libx11); } else { strcpy_s(Location_X11LIB, sizeof(Location_X11LIB), "libX11.so"); }
+	if (libx11tst != NULL) { strcpy_s(Location_X11TST, sizeof(Location_X11TST), libx11tst); } else { strcpy_s(Location_X11TST, sizeof(Location_X11TST), "libXtst.so"); }
+	if (libx11ext != NULL) { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), libx11ext); } else { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), "libXext.so"); }
+}
+
 int kvm_init(int displayNo)
 {
 	//fprintf(logFile, "kvm_init called\n"); fflush(logFile);
@@ -334,15 +286,59 @@ int kvm_init(int displayNo)
 	int dummy1, dummy2, dummy3;
 	char displayString[256] = "";
 
+	if (x11ext_exports == NULL)
+	{
+		x11ext_exports = ILibMemory_SmartAllocate(sizeof(x11ext_struct));
+		x11ext_exports->xext_lib = dlopen(Location_X11EXT, RTLD_NOW);
+		if (x11ext_exports->xext_lib)
+		{
+			((void**)x11ext_exports)[1] = (void*)dlsym(x11ext_exports->xext_lib, "XShmDetach");
+			((void**)x11ext_exports)[2] = (void*)dlsym(x11ext_exports->xext_lib, "XShmGetImage");
+			((void**)x11ext_exports)[3] = (void*)dlsym(x11ext_exports->xext_lib, "XShmAttach");
+			((void**)x11ext_exports)[4] = (void*)dlsym(x11ext_exports->xext_lib, "XShmCreateImage");
+		}
+	}
+	if (x11tst_exports == NULL)
+	{
+		x11tst_exports = ILibMemory_SmartAllocate(sizeof(x11tst_struct));
+		x11tst_exports->x11tst_lib = dlopen(Location_X11TST, RTLD_NOW);
+		if (x11tst_exports->x11tst_lib)
+		{
+			((void**)x11tst_exports)[1] = (void*)dlsym(x11tst_exports->x11tst_lib, "XTestFakeMotionEvent");
+			((void**)x11tst_exports)[2] = (void*)dlsym(x11tst_exports->x11tst_lib, "XTestFakeButtonEvent");
+			((void**)x11tst_exports)[3] = (void*)dlsym(x11tst_exports->x11tst_lib, "XTestFakeKeyEvent");
+		}
+	}
+	if (x11_exports == NULL)
+	{
+		x11_exports = ILibMemory_SmartAllocate(sizeof(x11_struct));
+		x11_exports->x11_lib = dlopen(Location_X11LIB, RTLD_NOW);
+		if (x11_exports->x11_lib)
+		{
+			((void**)x11_exports)[1] = (void*)dlsym(x11_exports->x11_lib, "XOpenDisplay");
+			((void**)x11_exports)[2] = (void*)dlsym(x11_exports->x11_lib, "XCloseDisplay");
+			((void**)x11_exports)[3] = (void*)dlsym(x11_exports->x11_lib, "XFlush");
+			((void**)x11_exports)[4] = (void*)dlsym(x11_exports->x11_lib, "XKeysymToKeycode");
+			((void**)x11_exports)[5] = (void*)dlsym(x11_exports->x11_lib, "XQueryExtension");
+
+			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
+			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
+		}
+	}
+
 	sprintf(displayString, ":%d", (int)displayNo);
 
 	while (setDisplay(displayNo) != 0 && count++ < 10);
 
 	if (count == 10) { return -1; }
 	count = 0;
-
-	eventdisplay = XOpenDisplay(displayString);
+	eventdisplay = x11_exports->XOpenDisplay(displayString);
 	//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
+	if (eventdisplay == NULL)
+	{
+		fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
+		fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
+	}
 
 	if (eventdisplay != NULL) { current_display = (unsigned short)displayNo; }
 
@@ -350,12 +346,12 @@ int kvm_init(int displayNo)
 		if (getNextDisplay() == -1) { return -1; }
 		sprintf(displayString, ":%d", (int)current_display);
 		if (setDisplay(current_display) != 0) { continue; }
-		eventdisplay = XOpenDisplay(displayString);
+		eventdisplay = x11_exports->XOpenDisplay(displayString);
 	}
 
 	if (count == 100 && eventdisplay == NULL) { return -1; }
 
-	g_enableEvents = XQueryExtension(eventdisplay, "XTEST", &dummy1, &dummy2, &dummy3)? 1 : 0;
+	g_enableEvents = x11_exports->XQueryExtension(eventdisplay, "XTEST", &dummy1, &dummy2, &dummy3)? 1 : 0;
 	if (!g_enableEvents) { printf("FATAL::::Fake motion is not supported.\n\n\n"); }
 
 	SCREEN_NUM = DefaultScreen(eventdisplay);
@@ -508,6 +504,19 @@ void kvm_pause(int pause)
 	g_pause = pause;
 }
 
+void kvm_server_jpegerror(char *msg)
+{
+	int msgLen = strnlen_s(msg, 255);
+	char buffer[512];
+
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
+	memcpy_s(buffer + 4, 512 - 4, msg, msgLen);
+
+	if (write(slave2master[1], buffer, msgLen + 4)) {}
+	fsync(slave2master[1]);
+}
+
 void* kvm_server_mainloop(void* parm)
 {
 	int x, y, height, width, r, c, count = 0;
@@ -526,6 +535,8 @@ void* kvm_server_mainloop(void* parm)
 	int screen_height, screen_width, screen_depth, screen_num;
 	ssize_t written;
 	XShmSegmentInfo shminfo;
+	default_JPEG_error_handler = kvm_server_jpegerror;
+
 
 	// Init the kvm
 	//fprintf(logFile, "Before kvm_init.\n"); fflush(logFile);
@@ -565,7 +576,7 @@ void* kvm_server_mainloop(void* parm)
 		setDisplay(current_display);
 
 		sprintf(displayString, ":%d", (int)current_display);
-		imagedisplay = XOpenDisplay(displayString);
+		imagedisplay = x11_exports->XOpenDisplay(displayString);
 
 		count = 0;
 
@@ -601,7 +612,7 @@ void* kvm_server_mainloop(void* parm)
 		}
 
 
-		image = XShmCreateImage(imagedisplay,
+		image = x11ext_exports->XShmCreateImage(imagedisplay,
 			DefaultVisual(imagedisplay, screen_num), // Use a correct visual. Omitted for brevity     
 			screen_depth,
 			ZPixmap, NULL, &shminfo, screen_width, screen_height);
@@ -610,8 +621,9 @@ void* kvm_server_mainloop(void* parm)
 			IPC_CREAT | 0777);
 		shminfo.shmaddr = image->data = shmat(shminfo.shmid, 0, 0);
 		shminfo.readOnly = False;
-		XShmAttach(imagedisplay, &shminfo);
-		XShmGetImage(imagedisplay,
+		x11ext_exports->XShmAttach(imagedisplay, &shminfo);
+		
+		x11ext_exports->XShmGetImage(imagedisplay,
 			RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay)),
 			image,
 			0,
@@ -654,15 +666,15 @@ void* kvm_server_mainloop(void* parm)
 				}
 			}
 		}
-
-		XShmDetach(imagedisplay, &shminfo);
+		
+		x11ext_exports->XShmDetach(imagedisplay, &shminfo);
 		XDestroyImage(image); image = NULL;
 		shmdt(shminfo.shmaddr);
 		shmctl(shminfo.shmid, IPC_RMID, 0);
 		
 		if (imagedisplay != NULL) 
 		{
-			XCloseDisplay(imagedisplay);
+			x11_exports->XCloseDisplay(imagedisplay);
 			imagedisplay = NULL;
 		}
 
@@ -676,7 +688,7 @@ void* kvm_server_mainloop(void* parm)
 	slave2master[1] = 0;
 	master2slave[0] = 0;
 
-	XCloseDisplay(eventdisplay);
+	x11_exports->XCloseDisplay(eventdisplay);
 	eventdisplay  = NULL;
 	pthread_join(kvmthread, NULL);
 	kvmthread = (pthread_t)NULL;
@@ -692,8 +704,8 @@ void* kvm_server_mainloop(void* parm)
 
 void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen, int* bytesConsumed)
 {
-	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0];
-	void *reserved = ((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[1];
+	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
+	void *reserved = ((void**)ILibMemory_Extra(sender))[1];
 	unsigned short size;
 
 	if (bufferLen > 4)
@@ -709,7 +721,7 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen
 	}
 	*bytesConsumed = 0;
 }
-void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved)
+void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
 	int r;
 	int count = 0;
@@ -726,11 +738,10 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	r = pipe(master2slave);
 
 	slave_out = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(processPipeMgr, slave2master[0], 2 * sizeof(void*));	
-	((void**)ILibMemory_GetExtraMemory(slave_out, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0] = writeHandler;
-	((void**)ILibMemory_GetExtraMemory(slave_out, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[1] = reserved;
+	((void**)ILibMemory_Extra(slave_out))[0] = writeHandler;
+	((void**)ILibMemory_Extra(slave_out))[1] = reserved;
 
 	UNREFERENCED_PARAMETER(r);
-
 	do
 	{
 		g_slavekvm = fork();
@@ -745,6 +756,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		close(master2slave[1]);
 
 		logFile = fopen("/tmp/slave", "w");
+		if (uid != 0) { ignore_result(setuid(uid)); }
 
 		//fprintf(logFile, "Starting kvm_server_mainloop\n");
 		kvm_server_mainloop((void*)0);
@@ -763,11 +775,11 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
-void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved)
+void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
 	if (kvmthread != (pthread_t)NULL || g_slavekvm != 0) return 0;
 	g_restartcount = 0;
-	return kvm_relay_restart(1, processPipeMgr, writeHandler, reserved);
+	return kvm_relay_restart(1, processPipeMgr, writeHandler, reserved, uid);
 }
 
 // Force a KVM reset & refresh

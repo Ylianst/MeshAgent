@@ -18,6 +18,17 @@ limitations under the License.
 
 unsigned char *jpeg_buffer = NULL;
 int jpeg_buffer_length = 0;
+char jpegLastError[JMSG_LENGTH_MAX];
+JPEG_error_handler default_JPEG_error_handler = NULL;
+
+void jpeg_error_handler(j_common_ptr ptr)
+{
+	// Build the error string
+	(*(ptr->err->format_message)) (ptr, jpegLastError);
+
+	if (default_JPEG_error_handler != NULL) { default_JPEG_error_handler(jpegLastError); }
+	exit(1);
+}
 
 void init_destination(j_compress_ptr cinfo)
 {
@@ -67,6 +78,8 @@ int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height
 	int row_stride;
 
 	cinfo.err = jpeg_std_error(&jerr);
+	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
+
 	jpeg_create_compress(&cinfo);
 	cinfo.dest = (struct jpeg_destination_mgr *) malloc (sizeof(struct jpeg_destination_mgr));
 	cinfo.dest->init_destination = &init_destination;

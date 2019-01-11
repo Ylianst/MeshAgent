@@ -24,6 +24,18 @@ limitations under the License.
 #include <stdio.h>
 #include <unistd.h>
 
+typedef struct x11tst_struct
+{
+	void *x11tst_lib;
+	int(*XTestFakeMotionEvent)(Display *d, int screen_number, int x, int y, unsigned long delay);
+	int(*XTestFakeButtonEvent)(Display *d, unsigned int button, Bool is_press, unsigned long delay);
+	int(*XTestFakeKeyEvent)(Display *d, unsigned int key_code, Bool is_press, unsigned long delay);
+
+	int(*XFlush)(Display *d);
+	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
+}x11tst_struct;
+x11tst_struct *x11tst_exports;
+
 enum MOUSE_EVENTS {
 	MOUSEEVENTF_LEFTDOWN = 		0x0002,
 	MOUSEEVENTF_RIGHTDOWN = 	0x0008,

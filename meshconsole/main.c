@@ -85,7 +85,19 @@ __declspec(dllexport) int mainEx(int argc, char **argv, ExternalDispatch ptr)
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);
 	retCode = agentHost->exitCode;
 	MeshAgent_Destroy(agentHost);
+	agentHost = NULL;
 	return(retCode);
+}
+#endif
+
+#if defined(_LINKVM) && defined(__APPLE__)
+extern void* kvm_server_mainloop(void *parm);
+extern void senddebug(int val);
+ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
+{
+	int len;
+	ignore_result(write(STDOUT_FILENO, (void*)buffer, bufferLen));
+	return ILibTransport_DoneState_COMPLETE;
 }
 #endif
 
@@ -105,6 +117,27 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
+
+	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
+	{
+		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
+		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
+		
+		return(0);
+	}
+
+#if defined(_LINKVM) && defined(__APPLE__)
+	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
+	{
+		kvm_server_mainloop(NULL);
+		return 0;
+	}
+	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
+	{
+		kvm_server_mainloop((void*)(uint64_t)getpid());
+		return 0;
+	}
+#endif
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
 	{
@@ -180,6 +213,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		while (MeshAgent_Start(agentHost, argc, argv) != 0);
 		retCode = agentHost->exitCode;
 		MeshAgent_Destroy(agentHost);
+		agentHost = NULL;
 	}
 	__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winExceptionContext))
 	{
@@ -193,6 +227,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);
 	retCode = agentHost->exitCode;
 	MeshAgent_Destroy(agentHost);
+	agentHost = NULL;
 #ifndef _NOILIBSTACKDEBUG
 	if (crashMemory != NULL) { free(crashMemory); }
 #endif

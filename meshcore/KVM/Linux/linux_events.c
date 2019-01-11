@@ -18,6 +18,7 @@ limitations under the License.
 
 static const int g_keymapLen = 96; // Modify this when you change anything in g_keymap.
 extern int change_display;
+x11tst_struct *x11tst_exports = NULL;
 
 static struct keymap_t g_keymap[] = {
 	{ XK_BackSpace,        VK_BACK },
@@ -123,8 +124,8 @@ void MouseAction(double absX, double absY, int button, short wheel, Display *dis
 	if (change_display) {
 		return;
 	}
-
-	if (!XTestFakeMotionEvent(display, -1, absX, absY, CurrentTime )) { return; }
+	
+	if (!x11tst_exports->XTestFakeMotionEvent(display, -1, absX, absY, CurrentTime )) { return; }
 
 	if (button != 0) {
 		int mouseDown = 1;
@@ -155,7 +156,7 @@ void MouseAction(double absX, double absY, int button, short wheel, Display *dis
 				break;
 		}
 
-		if (!XTestFakeButtonEvent(display, button, mouseDown, CurrentTime)) { return; }
+		if (!x11tst_exports->XTestFakeButtonEvent(display, button, mouseDown, CurrentTime)) { return; }
 	}
 	else if (wheel != 0) {
 		if (wheel > 0) {
@@ -165,13 +166,13 @@ void MouseAction(double absX, double absY, int button, short wheel, Display *dis
 			button = Button5;
 		}
 
-		if (!XTestFakeButtonEvent(display, button, True, CurrentTime)) { return; }
-		XFlush(display);
+		if (!x11tst_exports->XTestFakeButtonEvent(display, button, True, CurrentTime)) { return; }
+		x11tst_exports->XFlush(display);
 
-		if (!XTestFakeButtonEvent(display, button, False, CurrentTime)) { return; }
+		if (!x11tst_exports->XTestFakeButtonEvent(display, button, False, CurrentTime)) { return; }
 	}
 
-	XFlush(display);
+	x11tst_exports->XFlush(display);
 }
 
 void KeyAction(unsigned char vk, int up, Display *display) {
@@ -190,15 +191,15 @@ void KeyAction(unsigned char vk, int up, Display *display) {
 		}
 	}
 	if (keysym == 0) {
-		keycode = XKeysymToKeycode(display, vk);
+		keycode = x11tst_exports->XKeysymToKeycode(display, vk);
 	}
 	else {
-		keycode = XKeysymToKeycode(display, keysym);
+		keycode = x11tst_exports->XKeysymToKeycode(display, keysym);
 	}
 
 	//printf("%x %x %d %d\n", keysym, vk, keycode, up);
 	if (keycode != 0) {
-		if (!XTestFakeKeyEvent(display, keycode, !up, 0)) { return; }
-		XFlush(display);
+		if (!x11tst_exports->XTestFakeKeyEvent(display, keycode, !up, 0)) { return; }
+		x11tst_exports->XFlush(display);
 	}
 }

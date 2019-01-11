@@ -20,8 +20,8 @@ limitations under the License.
 #include <stdio.h>
 #include <stdlib.h>
 #ifdef __APPLE__
-#include "../../libjpeg-turbo/jpeglib.h"
-#include "../../libjpeg-turbo/jerror.h"
+#include "lib-jpeg-turbo/includes/jpeglib.h"
+#include "lib-jpeg-turbo/includes/jerror.h"
 #else
 #include <jpeglib.h>
 #include <jerror.h>
@@ -29,6 +29,9 @@ limitations under the License.
 
 #define MAX_BUFFER  22528 // 22 KiB should be fine.
 
-extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality);
+typedef void(*JPEG_error_handler)(char *msg);
 
-#endif /* LINUX_COMPRESSION_H_ */
+extern int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality);
+extern JPEG_error_handler default_JPEG_error_handler;
+
+#endif // LINUX_COMPRESSION_H_ 
