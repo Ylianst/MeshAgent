@@ -583,7 +583,7 @@ duk_ret_t ILibDuktape_Debugger_JSAttach_promise(duk_context *ctx)
 #endif
 	struct sockaddr_in6 *local_int;
 	struct sockaddr_in6 localBounded;
-	int localBoundedSize = sizeof(struct sockaddr_in6);
+	int localBoundedSize = sizeof(struct sockaddr_in);
 
 	duk_push_heap_stash(ctx);												// [stash]
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_Debugger_AttachOptions))
@@ -624,11 +624,17 @@ duk_ret_t ILibDuktape_Debugger_JSAttach_promise(duk_context *ctx)
 		duk_call_method(ctx, 1);
 		return(0);
 	}
-	bind(listenerSocket, (struct sockaddr*)local_int, sizeof(struct sockaddr_in6));
+	if (bind(listenerSocket, (struct sockaddr*)local_int, sizeof(struct sockaddr_in)) != 0) { return(ILibDuktape_Error(ctx, "BIND error")); }
 #if defined(WINSOCK2)
 	getsockname(listenerSocket, (struct sockaddr*)&localBounded, (int*)&localBoundedSize);
 #else
-	getsockname(listenerSocket, (struct sockaddr*)&localBounded, (socklen_t*)&localBoundedSize);
+	if (getsockname(listenerSocket, (struct sockaddr*)&localBounded, (socklen_t*)&localBoundedSize) != 0)
+	{
+		localBoundedSize = (int)sizeof(struct sockaddr_in);
+		if (getsockname(listenerSocket, (struct sockaddr*)&localBounded, (socklen_t*)&localBoundedSize) != 0)
+		{
+		}
+	}
 #endif
 	transport = (int)ntohs(localBounded.sin6_port);
 
@@ -709,19 +715,22 @@ void ILibDuktape_Debugger_SetScriptEx(void *chain, void *user)
 	if (ILibMemory_CanaryOK(user))
 	{
 		duk_push_global_object(DebugWebEngine_Context);
-		duk_push_lstring(DebugWebEngine_Context, ILibMemory_Extra(user), ILibMemory_ExtraSize(user));
-		duk_put_prop_string(DebugWebEngine_Context, -2, "_scriptPath");
-		duk_pop(DebugWebEngine_Context);
+		if (!duk_has_prop_string(DebugWebEngine_Context, -1, "_scriptTokens"))
+		{
+			duk_push_lstring(DebugWebEngine_Context, ILibMemory_Extra(user), ILibMemory_ExtraSize(user));
+			duk_put_prop_string(DebugWebEngine_Context, -2, "_scriptPath");
+			duk_pop(DebugWebEngine_Context);
 
-		duk_push_lstring(DebugWebEngine_Context, (char*)user, (duk_size_t)ILibMemory_Size(user));	// [str]
-		duk_get_prop_string(DebugWebEngine_Context, -1, "split");									// [str][split]
-		duk_swap_top(DebugWebEngine_Context, -2);													// [split][this]
-		duk_push_string(DebugWebEngine_Context, "\n");												// [split][this][\n]
-		if (duk_pcall_method(DebugWebEngine_Context, 1) == 0)
-		{																							// [tokens]
-			duk_push_global_object(DebugWebEngine_Context);											// [tokens][g]
-			duk_swap_top(DebugWebEngine_Context, -2);												// [g][tokens]
-			duk_put_prop_string(DebugWebEngine_Context, -2, "_scriptTokens");						// [g]
+			duk_push_lstring(DebugWebEngine_Context, (char*)user, (duk_size_t)ILibMemory_Size(user));	// [str]
+			duk_get_prop_string(DebugWebEngine_Context, -1, "split");									// [str][split]
+			duk_swap_top(DebugWebEngine_Context, -2);													// [split][this]
+			duk_push_string(DebugWebEngine_Context, "\n");												// [split][this][\n]
+			if (duk_pcall_method(DebugWebEngine_Context, 1) == 0)
+			{																							// [tokens]
+				duk_push_global_object(DebugWebEngine_Context);											// [tokens][g]
+				duk_swap_top(DebugWebEngine_Context, -2);												// [g][tokens]
+				duk_put_prop_string(DebugWebEngine_Context, -2, "_scriptTokens");						// [g]
+			}
 		}
 		duk_pop(DebugWebEngine_Context);
 		ILibMemory_Free(user);
