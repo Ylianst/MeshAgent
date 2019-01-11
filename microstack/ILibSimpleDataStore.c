@@ -119,14 +119,17 @@ ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDat
 	char data[4096];
 	char result[SHA384HASHSIZE];
 	int i, bytesLeft;
-	ILibSimpleDataStore_RecordNode *node = (ILibSimpleDataStore_RecordNode*)(root->scratchPad );
+	ILibSimpleDataStore_RecordNode *node;
+	
+	if (root == NULL) return NULL;
+	node = (ILibSimpleDataStore_RecordNode*)(root->scratchPad);
 
 	// If the current position is the end of the file, exit now.
-	if (ILibSimpleDataStore_GetPosition(root->dataFile) == root->fileSize) { return NULL; }
+	if (ILibSimpleDataStore_GetPosition(root->dataFile) == root->fileSize) return NULL;
 
 	// Read sizeof(ILibSimpleDataStore_RecordNode) bytes to get record Size
 	i = (int)fread((void*)node, 1, sizeof(ILibSimpleDataStore_RecordNode), root->dataFile);
-	if (i < sizeof(ILibSimpleDataStore_RecordNode)) { return NULL; }
+	if (i < sizeof(ILibSimpleDataStore_RecordNode)) return NULL;
 
 	// Correct the struct, valueHash stays the same
 	node->nodeSize = (int)ntohl(node->nodeSize);
@@ -134,9 +137,15 @@ ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDat
 	node->valueLength = (int)ntohl(node->valueLength);
 	node->valueOffset = ILibSimpleDataStore_GetPosition(root->dataFile) + (DS_Long)node->keyLen;
 
+	if (node->keyLen > (sizeof(ILibScratchPad) - sizeof(ILibSimpleDataStore_RecordNode)))
+	{
+		// Invalid record
+		return(NULL);
+	}
+
 	// Read the key name
 	i = (int)fread((char*)node + sizeof(ILibSimpleDataStore_RecordNode), 1, node->keyLen, root->dataFile);
-	if (i != node->keyLen) { return NULL; } // Reading Key Failed
+	if (i != node->keyLen) return NULL; // Reading Key Failed
 
 	// Validate Data, in 4k chunks at a time
 	bytesLeft = node->valueLength;
@@ -154,9 +163,7 @@ ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDat
 	if (node->valueLength > 0)
 	{
 		// Check the hash
-		if (memcmp(node->valueHash, result, SHA384HASHSIZE) == 0) {
-			return node; // Data is correct
-		}
+		if (memcmp(node->valueHash, result, SHA384HASHSIZE) == 0) { return node; } // Data is correct
 		return NULL; // Data is corrupt
 	}
 	return node;
@@ -180,6 +187,7 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 	ILibSimpleDataStore_RecordNode *node = NULL;
 	ILibSimpleDataStore_TableEntry *entry;
 
+	if (root == NULL) return;
 	ILibHashtable_ClearEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root); // Wipe the key table, we will rebulit it
 	fseek(root->dataFile, 0, SEEK_SET); // See the start of the file
 	root->fileSize = -1; // Indicate we can't write to the data store
@@ -265,9 +273,16 @@ __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx(char* filePath, i
 __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+
+	if (root == NULL) return;
 	ILibHashtable_DestroyEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root);
 
 	free(root->filePath);
+
+#ifdef _POSIX
+	flock(fileno(root->dataFile), LOCK_UN);
+#endif
+
 	fclose(root->dataFile);
 	free(root);
 }
@@ -277,7 +292,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 {
 	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
+	ILibSimpleDataStore_TableEntry *entry;
+	
+	if (root == NULL) return 0;
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 	ILibSimpleDataStore_SHA384(value, valueLen, hash); // Hash the value
 
 	// Create a new record for the key and value
@@ -301,7 +319,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 {
 	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
+	ILibSimpleDataStore_TableEntry *entry;
+	
+	if (root == NULL) return 0;
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 
 	if (entry == NULL) return 0; // If there is no in-memory entry for this key, return zero now.
 	if ((buffer != NULL) && (bufferLen >= entry->valueLength)) // If the buffer is not null and can hold the value, place the value in the buffer.
@@ -319,7 +340,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
+	ILibSimpleDataStore_TableEntry *entry;
+	
+	if (root == NULL) return NULL;
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 
 	if (entry == NULL) return NULL; // If there is no in-memory entry for this key, return zero now.
 	return entry->valueHash;
@@ -329,7 +353,10 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, keyLen);
+	ILibSimpleDataStore_TableEntry *entry;
+	
+	if (root == NULL) return 0;
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, keyLen);
 	if (entry != NULL) { ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, NULL, 0, NULL); free(entry); return 1; }
 	return 0;
 }
@@ -338,6 +365,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 __EXPORT_TYPE void ILibSimpleDataStore_Lock(ILibSimpleDataStore dataStore)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	if (root == NULL) return;
 	ILibHashtable_Lock(root->keyTable);
 }
 
@@ -345,6 +373,7 @@ __EXPORT_TYPE void ILibSimpleDataStore_Lock(ILibSimpleDataStore dataStore)
 __EXPORT_TYPE void ILibSimpleDataStore_UnLock(ILibSimpleDataStore dataStore)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	if (root == NULL) return;
 	ILibHashtable_UnLock(root->keyTable);
 }
 
@@ -361,6 +390,7 @@ void ILibSimpleDataStore_Compact_EnumerateSink(ILibHashtable sender, void *Key1,
 	int totalBytesWritten = 0;
 	int bytesWritten = 0;
 
+	if (root == NULL) return;
 	if (root->error != 0) return; // There was an error, ABORT!
 
 	offset = ILibSimpleDataStore_WriteRecord(compacted, Key2, Key2Len, NULL, entry->valueLength, entry->valueHash);
@@ -410,7 +440,8 @@ __EXPORT_TYPE void ILibSimpleDataStore_EnumerateKeys(ILibSimpleDataStore dataSto
 {
 	void* users[3];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	
+	if (root == NULL) return;
+
 	users[0] = (void*)handler;
 	users[1] = (void*)dataStore;
 	users[2] = (void*)user;
@@ -422,13 +453,16 @@ __EXPORT_TYPE void ILibSimpleDataStore_EnumerateKeys(ILibSimpleDataStore dataSto
 __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	char* tmp = ILibString_Cat(root->filePath, -1, ".tmp", -1); // Create the name of the temporary data store
+	char* tmp;
 	FILE* compacted;
 	void* state[2];
 	int retVal = 0;
 
+	if (root == NULL) return 1; // Error
+	tmp = ILibString_Cat(root->filePath, -1, ".tmp", -1); // Create the name of the temporary data store
+
 	// Start by opening a temporary .tmp file. Will be used to write the compacted data store.
-	if ((compacted = ILibSimpleDataStore_OpenFileEx(tmp, 1)) == NULL) { free(tmp);  return 1; }
+	if ((compacted = ILibSimpleDataStore_OpenFileEx(tmp, 1)) == NULL) { free(tmp); return 1; }
 
 	// Enumerate all keys and write them all into the temporary data store
 	state[0] = root;
