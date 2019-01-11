@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 #if !defined(__MeshDefines__)
-#define __MeshDefined__
+#define __MeshDefines__
 
 #define MESH_AGENT_PORT 16990					 //!< Default Mesh Agent Port
 #define MESH_AGENT_STUN_PORT 16991				 //!< Default Mesh Agent STUN Port
@@ -57,6 +57,7 @@ typedef enum RemoteManagementCommands
 	MNG_FILEDELETEREC = 62,					// Same as MNG_FILEDELETE but recursive
 	MNG_USERCONSENT = 63,					// Used to notify management console of user consent state
 	MNG_DEBUG = 64,							// Debug/Logging Message for ILibRemoteLogging
+	MNG_ERROR = 65,
 	MNG_ENCAPSULATE_AGENT_COMMAND = 70
 }RemoteManagementCommands;
 
