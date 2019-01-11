@@ -166,6 +166,9 @@
     <ClCompile Include="..\microscript\ILibDuktape_Debugger.c">
       <Filter>Microscript</Filter>
     </ClCompile>
+    <ClCompile Include="..\meshcore\wincrypto.cpp">
+      <Filter>Meshcore</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
@@ -303,6 +306,9 @@
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_Debugger.h">
       <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\wincrypto.h">
+      <Filter>Meshcore</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
