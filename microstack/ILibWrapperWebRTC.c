@@ -55,12 +55,9 @@ typedef struct
 	ILibWrapper_WebRTC_ConnectionFactory mStunModule; 
 	ILibSparseArray Connections;
 	int NextConnectionID;
-	struct util_cert selfcert;
-	struct util_cert selftlscert;
-	struct util_cert selftlsclientcert;
+	struct util_cert cert;
 	SSL_CTX* ctx;
 	char tlsServerCertThumbprint[UTIL_SHA256_HASHSIZE];
-	char g_selfid[UTIL_SHA256_HASHSIZE];
 
 	ILibWebRTC_TURN_ConnectFlags mTurnSetting;
 	struct sockaddr_in6 mTurnServer;
@@ -457,23 +454,22 @@ void ILibWrapper_WebRTC_InitializeCrypto(ILibWrapper_WebRTC_ConnectionFactoryStr
 		SSL_CTX_set_ex_data(factory->ctx, ILibWrapper_WebRTC_ConnectionFactoryIndex, factory);
 	}
 
-	if (tls != ILibWebWrapperWebRTC_ConnectionFactory_INIT_CRYPTO_LATER && factory->selftlscert.x509 == NULL)
+	if (tls != ILibWebWrapperWebRTC_ConnectionFactory_INIT_CRYPTO_LATER && factory->cert.x509 == NULL)
 	{
 		// Init Certs
 		if (tls == NULL)
 		{
-			util_mkCert(NULL, &(factory->selfcert), 2048, 10000, "localhost", CERTIFICATE_ROOT, NULL);
-			util_keyhash(factory->selfcert, factory->g_selfid);
-			util_mkCert(&(factory->selfcert), &(factory->selftlscert), 2048, 10000, "localhost", CERTIFICATE_TLS_SERVER, NULL);
+			util_mkCert(NULL, &(factory->cert), 2048, 10000, "localhost", CERTIFICATE_ROOT, NULL);
 		}
 		else
 		{
-			memcpy_s(&(factory->selftlscert), sizeof(struct util_cert), tls, sizeof(struct util_cert));
+			memcpy_s(&(factory->cert), sizeof(struct util_cert), tls, sizeof(struct util_cert));
+			factory->cert.flags |= ILibCrypto_Cert_Ownership_Other;
 		}
 
-		SSL_CTX_use_certificate(factory->ctx, factory->selftlscert.x509);
-		SSL_CTX_use_PrivateKey(factory->ctx, factory->selftlscert.pkey);
-		X509_digest(factory->selftlscert.x509, EVP_get_digestbyname("sha256"), (unsigned char*)factory->tlsServerCertThumbprint, (unsigned int*)&l);
+		SSL_CTX_use_certificate(factory->ctx, factory->cert.x509);
+		SSL_CTX_use_PrivateKey(factory->ctx, factory->cert.pkey);
+		X509_digest(factory->cert.x509, EVP_get_digestbyname("sha256"), (unsigned char*)factory->tlsServerCertThumbprint, (unsigned int*)&l);
 
 		if (factory->mStunModule != NULL) { ILibStunClient_SetOptions(factory->mStunModule, factory->ctx, factory->tlsServerCertThumbprint); }
 	}
@@ -484,18 +480,9 @@ void ILibWrapper_WebRTC_UnInitializeCrypto(ILibWrapper_WebRTC_ConnectionFactoryS
 	SSL_CTX_free(factory->ctx);
 	factory->ctx = NULL;
 
-	// UnInit Certs
-	if (factory->selfcert.x509 != NULL)
-	{
-		util_freecert(&(factory->selftlsclientcert));
-		util_freecert(&(factory->selftlscert));
-		util_freecert(&(factory->selfcert));
-	}
-
-	memset(&(factory->selftlsclientcert),0,sizeof(struct util_cert));
-	memset(&(factory->selftlscert),0,sizeof(struct util_cert));
-	memset(&(factory->selfcert),0,sizeof(struct util_cert));
-
+	// UnInit Cert
+	if (factory->cert.x509 != NULL) { util_freecert(&(factory->cert)); }
+	memset(&(factory->cert), 0, sizeof(struct util_cert));
 	
 	// UnInit SSL
 	util_openssl_uninit();

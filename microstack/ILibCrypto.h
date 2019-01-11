@@ -129,14 +129,17 @@ typedef struct util_cert
 {
 	X509 *x509;
 	EVP_PKEY *pkey;
-}util_cert;
+	int flags;
+} util_cert;
+
 typedef enum CERTIFICATE_TYPES
 {
 	CERTIFICATE_ROOT = 1,
 	CERTIFICATE_TLS_SERVER = 2,
 	CERTIFICATE_TLS_CLIENT = 3
-}CERTIFICATE_TYPES;
+} CERTIFICATE_TYPES;
 
+#define ILibCrypto_Cert_Ownership_Other 0x01
 
 void  __fastcall util_openssl_init();
 void  __fastcall util_openssl_uninit();
@@ -155,6 +158,8 @@ int   __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert,
 void  __fastcall util_printcert(struct util_cert cert);
 void  __fastcall util_printcert_pk(struct util_cert cert);
 
+int   __fastcall util_certhash(struct util_cert cert, char* result);
+int   __fastcall util_certhash2(X509* cert, char* result);
 int   __fastcall util_keyhash(struct util_cert cert, char* result);
 int   __fastcall util_keyhash2(X509* cert, char* result);
 int   __fastcall util_sign(struct util_cert cert, char* data, int datalen, char** signature);
@@ -166,6 +171,11 @@ int   __fastcall util_decrypt(char* encdata, int encdatalen, struct util_cert ce
 int   __fastcall util_rsaencrypt(X509 *cert, char* data, int datalen, char** encdata);
 int   __fastcall util_rsadecrypt(struct util_cert cert, char* data, int datalen, char** decdata);
 int   __fastcall util_rsaverify(X509 *cert, char* data, int datalen, char* sign, int signlen);
+
+#ifdef _DEBUG
+void  __fastcall util_savekeys(SSL* ssl);
+#endif
+
 #endif
 
 

@@ -502,10 +502,14 @@ int __fastcall util_add_ext(X509 *cert, int nid, char *value)
 
 void __fastcall util_freecert(struct util_cert* cert)
 {
-	if (cert->x509 != NULL) X509_free(cert->x509);
-	if (cert->pkey != NULL) EVP_PKEY_free(cert->pkey);
+	if ((cert->flags & ILibCrypto_Cert_Ownership_Other) == 0)
+	{
+		if (cert->x509 != NULL) X509_free(cert->x509);
+		if (cert->pkey != NULL) EVP_PKEY_free(cert->pkey);
+	}
 	cert->x509 = NULL;
 	cert->pkey = NULL;
+	cert->flags = 0;
 }
 
 int __fastcall util_to_cer(struct util_cert cert, char** data)
@@ -764,18 +768,31 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 
 	cert->x509 = x;
 	cert->pkey = pk;
+	cert->flags = 0;
 
 	return 1;
 err:
 	return 0;
 }
 
+int __fastcall util_certhash(struct util_cert cert, char* result) {
+	int hashlen = UTIL_SHA384_HASHSIZE;
+	if (cert.x509 == NULL) return -1;
+	X509_digest(cert.x509, EVP_sha384(), (unsigned char*)result, (unsigned int *)&hashlen); // OpenSSL 1.1
+	return 0;
+}
+
+int __fastcall util_certhash2(X509* cert, char* result) {
+	int hashlen = UTIL_SHA384_HASHSIZE;
+	if (cert == NULL) return -1;
+	X509_digest(cert, EVP_sha384(), (unsigned char*)result, (unsigned int*)&hashlen); // OpenSSL 1.1
+	return 0;
+}
 
 int __fastcall util_keyhash(struct util_cert cert, char* result)
 {
 	int hashlen = UTIL_SHA384_HASHSIZE;
 	if (cert.x509 == NULL) return -1;
-	//util_sha256((char*)(cert.x509->cert_info->key->public_key->data), cert.x509->cert_info->key->public_key->length, result); // OpenSSL 1.0
 	X509_pubkey_digest(cert.x509, EVP_sha384(), (unsigned char*)result,(unsigned int *) &hashlen); // OpenSSL 1.1
 	return 0;
 }
@@ -784,7 +801,6 @@ int __fastcall util_keyhash2(X509* cert, char* result)
 {
 	int hashlen = UTIL_SHA384_HASHSIZE;
 	if (cert == NULL) return -1;
-	//util_sha256((char*)(cert->cert_info->key->public_key->data), cert->cert_info->key->public_key->length, result);  // OpenSSL 1.0
 	X509_pubkey_digest(cert, EVP_sha384(), (unsigned char*)result, (unsigned int*)&hashlen); // OpenSSL 1.1
 	return 0;
 }
@@ -1029,5 +1045,32 @@ int __fastcall util_rsaverify(X509 *cert, char* data, int datalen, char* sign, i
 	RSA_free(rsa);
 	return r;
 }
+
+#ifdef _DEBUG
+// Saves the SSL/TLS session private keys to file.
+// Because we do lots of DTLS, we will be saving both client and server randoms pointing to the same key.
+// WARNING: THIS IS FOR DEBUG ONLY, NEVER RELEASE THIS. For safety, comment this out.
+void  __fastcall util_savekeys(SSL* ssl) {
+	/*
+	int len;
+	char clientRandom[32], serverRandom[32], sessionSecret[48], clientRandomHex[65], serverRandomHex[65], sessionSecretHex[97], text[2000];
+
+	// Get the client random and session key.
+	if (ssl == NULL) return;
+	if (SSL_get_client_random(ssl, clientRandom, 32) != 32) return;
+	if (SSL_get_server_random(ssl, serverRandom, 32) != 32) return;
+	if (SSL_SESSION_get_master_key(SSL_get_session(ssl), sessionSecret, 48) != 48) return;
+
+	// Convert the randoms and key into hex
+	util_tohex(clientRandom, 32, clientRandomHex);
+	util_tohex(serverRandom, 32, serverRandomHex);
+	util_tohex(sessionSecret, 48, sessionSecretHex);
+
+	// Append the client random and key to the log file.
+	len = snprintf(text, 1000, "CLIENT_RANDOM %s %s\r\nCLIENT_RANDOM %s %s\r\n", clientRandomHex, sessionSecretHex, serverRandomHex, sessionSecretHex);
+	util_appendfile("meshagentkeys.log", text, len);
+	*/
+}
+#endif
 
 #endif
