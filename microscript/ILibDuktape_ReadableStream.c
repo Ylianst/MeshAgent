@@ -145,6 +145,12 @@ void ILibDuktape_readableStream_WriteData_OnData_ChainThread(void *chain, void *
 	ILibDuktape_readableStream_bufferedData *data = (ILibDuktape_readableStream_bufferedData*)user;
 	ILibDuktape_readableStream *stream = (ILibDuktape_readableStream*)data->Next;
 
+	if (!ILibMemory_CanaryOK(stream))
+	{
+		free(data);
+		return;
+	}
+
 	stream->paused = 0;
 	if (data->Reserved == 0)
 	{
@@ -328,10 +334,10 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 					// We're running on the Chain Thread, so we can directly dispatch into JS
 					switch (ILibDuktape_readableStream_WriteDataEx_Chain_Dispatch(stream, w->writableStream, buffer, bufferLen))
 					{
-						case 1: // Need to Pause
+						case 0: // Need to Pause
 							needPause = 1;
 							break;
-						case 2: // Complete
+						case 1: // Complete
 							noContinue = 1;
 							break;
 						default: // NOP
@@ -427,6 +433,9 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 	}
 	else
 	{
+		if (stream->endRelayed != 0) { return(retVal); }
+		
+		stream->endRelayed = 1;
 		ILibDuktape_readableStream_nextWriteablePipe *next;
 		
 		if (stream->noPropagateEnd == 0 && stream->nextWriteable != NULL)

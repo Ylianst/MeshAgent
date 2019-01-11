@@ -52,6 +52,7 @@ typedef struct ILibDuktape_readableStream
 #else
 	int pipe_pendingCount;				// No Atomic Built-ins... Use a Mutex
 #endif
+	int endRelayed;
 	int pipeInProgress;
 	int unpipeInProgress;
 	int bypassValue;
