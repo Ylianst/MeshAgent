@@ -522,7 +522,12 @@ void ILibDestroyWebClient(void *object)
 	free(manager->socks);
 	
 	#ifndef MICROSTACK_NOTLS
-	if (manager->EnableHTTPS_Called != 0 && manager->ssl_ctx != NULL) { SSL_CTX_free(manager->ssl_ctx); }
+	if (manager->EnableHTTPS_Called != 0 && manager->ssl_ctx != NULL) 
+	{
+		SSL_TRACE1("ILibDestroyWebClient()");
+		SSL_CTX_free(manager->ssl_ctx); 
+		SSL_TRACE2("ILibDestroyWebClient()");
+	}
 	manager->ssl_ctx = NULL;
 	manager->OnSslConnection = NULL;
 	#endif
@@ -2164,7 +2169,7 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 	}
 	//{{{ <--REMOVE_THIS_FOR_HTTP/1.0_ONLY_SUPPORT }}}
 
-	if (wcdo->WaitForClose != 0 && wcdo->CancelRequest == 0)
+	if (wcdo->WaitForClose != 0 && wcdo->CancelRequest == 0 && wcdo->IsOrphan == 0)
 	{
 		//
 		// Since we had to read until the socket closes, we finally have
@@ -3503,6 +3508,8 @@ void* ILibWebClient_GetChainFromWebStateObject(ILibWebClient_StateObject wcdo)
 static int ILibWebClient_Https_AuthenticateServer(int preverify_ok, X509_STORE_CTX *ctx)
 {
 	int retVal = 0;
+	SSL_TRACE1("ILibWebClient_Https_AuthenticateServer()");
+
 	SSL *ssl = (SSL*)X509_STORE_CTX_get_ex_data(ctx, SSL_get_ex_data_X509_STORE_CTX_idx());
 	ILibWebClientDataObject *wcdo = SSL_get_ex_data(ssl, ILibWebClientDataObjectIndex);
 	ILibWebClient_RequestToken token = ILibWebClient_GetRequestToken_FromStateObject(wcdo);
@@ -3513,6 +3520,7 @@ static int ILibWebClient_Https_AuthenticateServer(int preverify_ok, X509_STORE_C
 		retVal = wcdo->Parent->OnHttpsConnection(token, preverify_ok, certChain, &(wcdo->remote));
 		//sk_X509_free(certChain);
 	}
+	SSL_TRACE2("ILibWebClient_Https_AuthenticateServer()");
 
 	return retVal;
 }
@@ -3530,6 +3538,8 @@ int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_
 		ILibRemoteLogging_printf(ILibChainGetLogger(((struct ILibWebClientManager*)manager)->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Web, ILibRemoteLogging_Flags_VerbosityLevel_1, "ILibWebClient_EnableHTTPS(): Error, SSL_CTX was already set on RequestManager: %p", (void*)manager);
 		return 1; 
 	} 
+
+	SSL_TRACE1("ILibWebClient_EnableHTTPS()");
 
 	ctx = SSL_CTX_new(SSLv23_client_method());		// HTTPS client
 	if (ctx == NULL)
@@ -3559,6 +3569,7 @@ int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_
 	((struct ILibWebClientManager *)manager)->ssl_ctx = ctx;
 	((struct ILibWebClientManager *)manager)->OnHttpsConnection = OnHttpsConnection;
 	((struct ILibWebClientManager *)manager)->EnableHTTPS_Called = 1;
+	SSL_TRACE2("ILibWebClient_EnableHTTPS()");
 	return 0;
 }
 void ILibWebClient_Request_SetHTTPS(ILibWebClient_RequestToken reqToken, ILibWebClient_RequestToken_HTTPS requestMode)
