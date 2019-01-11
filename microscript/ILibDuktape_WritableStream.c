@@ -87,9 +87,20 @@ ILibDuktape_WritableStream* ILibDuktape_WritableStream_GetStream(duk_context *ct
 	duk_pop_2(ctx);															// ...
 	return retVal;
 }
+void ILibDuktape_WritableStream_Finish(ILibDuktape_WritableStream *stream)
+{
+	if (stream == NULL || !ILibMemory_CanaryOK(stream)) { return; }
 
+	duk_push_heapptr(stream->ctx, stream->obj);						// [stream]
+	duk_get_prop_string(stream->ctx, -1, "emit");					// [stream][emit]
+	duk_swap_top(stream->ctx, -2);									// [emit][this]
+	duk_push_string(stream->ctx, "finish");							// [emit][this][finish]
+	if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
+	duk_pop(stream->ctx);											// ...
+}
 void ILibDuktape_WritableStream_Ready(ILibDuktape_WritableStream *stream)
 {
+	if (stream == NULL || !ILibMemory_CanaryOK(stream)) { return; }
 	if (stream->WaitForEnd == 0)
 	{
 		if (stream->OnWriteFlushEx != NULL)
@@ -139,13 +150,6 @@ void ILibDuktape_WritableStream_Ready(ILibDuktape_WritableStream *stream)
 		{
 			stream->EndSink(stream, stream->WriteSink_User);
 		}
-
-		duk_push_heapptr(stream->ctx, stream->obj);						// [stream]
-		duk_get_prop_string(stream->ctx, -1, "emit");					// [stream][emit]
-		duk_swap_top(stream->ctx, -2);									// [emit][this]
-		duk_push_string(stream->ctx, "finish");							// [emit][this][finish]
-		if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
-		duk_pop(stream->ctx);											// ...
 	}
 }
 
@@ -222,16 +226,22 @@ duk_ret_t ILibDuktape_WritableStream_End(duk_context *ctx)
 	ILibDuktape_WritableStream *stream = ILibDuktape_WritableStream_GetStream(ctx);
 	duk_size_t bufferLen;
 	char *buffer;
+	int i;
 
 	if (nargs > 0)
 	{
-		buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
-		if (stream->WriteSink != NULL)
+		for (i = 0; i < nargs; ++i)
 		{
-			if (nargs > 2 && !duk_is_null_or_undefined(ctx, 2))
+			if (duk_is_function(ctx, i))
 			{
-				ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx), "finish", duk_require_heapptr(ctx, 2));
+				ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx), "finish", duk_require_heapptr(ctx, i));
+				break;
 			}
+		}
+
+		buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
+		if (buffer != NULL && stream->WriteSink != NULL)
+		{
 			stream->endBytes = (int)bufferLen;
 			if (stream->WriteSink(stream, buffer, (int)bufferLen, stream->WriteSink_User) == ILibTransport_DoneState_INCOMPLETE)
 			{
@@ -244,14 +254,7 @@ duk_ret_t ILibDuktape_WritableStream_End(duk_context *ctx)
 	if (stream->WaitForEnd == 0)
 	{
 		// Continue with closing stream
-		if (stream->EndSink != NULL) { stream->EndSink(stream, stream->WriteSink_User); }
-		
-		duk_push_heapptr(stream->ctx, stream->obj);						// [stream]
-		duk_get_prop_string(stream->ctx, -1, "emit");					// [stream][emit]
-		duk_swap_top(stream->ctx, -2);									// [emit][this]
-		duk_push_string(stream->ctx, "finish");							// [emit][this][finish]
-		if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
-		duk_pop(stream->ctx);											// ...
+		if (stream->EndSink != NULL) { stream->EndSink(stream, stream->WriteSink_User); }		
 	}
 
 	return 0;
