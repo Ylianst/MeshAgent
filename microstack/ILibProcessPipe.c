@@ -35,7 +35,9 @@ limitations under the License.
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#ifndef __APPLE__
 #include <pty.h>
+#endif
 #endif
 
 #define CONSOLE_SCREEN_WIDTH 80
@@ -120,8 +122,6 @@ typedef struct ILibProcessPipe_WriteData
 	ILibTransport_MemoryOwnership ownership;
 }ILibProcessPipe_WriteData;
 
-const int ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE = sizeof(ILibProcessPipe_PipeObject);
-
 ILibProcessPipe_WriteData* ILibProcessPipe_WriteData_Create(char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership)
 {
 	ILibProcessPipe_WriteData* retVal;
@@ -153,13 +153,15 @@ ILibProcessPipe_Pipe ILibProcessPipe_Process_GetStdOut(ILibProcessPipe_Process p
 }
 
 #ifdef WIN32
-BOOL ILibProcessPipe_Process_OnExit(HANDLE event, void* user);
+BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user);
 typedef struct ILibProcessPipe_WaitHandle
 {
 	ILibProcessPipe_Manager_Object *parent;
 	HANDLE event;
 	void *user;
 	ILibProcessPipe_WaitHandle_Handler callback;
+	int timeRemaining;
+	int timeout;
 }ILibProcessPipe_WaitHandle;
 HANDLE ILibProcessPipe_Manager_GetWorkerThread(ILibProcessPipe_Manager mgr)
 {
@@ -200,6 +202,7 @@ void ILibProcessPipe_WaitHandle_Remove(ILibProcessPipe_Manager mgr, HANDLE event
 void __stdcall ILibProcessPipe_WaitHandle_Add_APC(ULONG_PTR obj)
 {
 	ILibProcessPipe_WaitHandle *waitHandle = (ILibProcessPipe_WaitHandle*)obj;
+	if (waitHandle->timeout > 0) { waitHandle->timeRemaining = waitHandle->timeout; }
 	ILibLinkedList_AddTail(waitHandle->parent->ActivePipes, waitHandle);
 }
 void ILibProcessPipe_WaitHandle_AddEx(ILibProcessPipe_Manager mgr, ILibProcessPipe_WaitHandle *waitHandle)
@@ -208,8 +211,8 @@ void ILibProcessPipe_WaitHandle_AddEx(ILibProcessPipe_Manager mgr, ILibProcessPi
 	if (manager->workerThreadID == GetCurrentThreadId())
 	{
 		// We're on the same thread, so we can just add it in
+		if (waitHandle->timeout > 0) { waitHandle->timeRemaining = waitHandle->timeout; }
 		ILibLinkedList_AddTail(manager->ActivePipes, waitHandle);
-
 		SetEvent(manager->updateEvent);
 	}
 	else
@@ -218,7 +221,7 @@ void ILibProcessPipe_WaitHandle_AddEx(ILibProcessPipe_Manager mgr, ILibProcessPi
 		QueueUserAPC((PAPCFUNC)ILibProcessPipe_WaitHandle_Add_APC, manager->workerThread, (ULONG_PTR)waitHandle);
 	}
 }
-void ILibProcessPipe_WaitHandle_Add(ILibProcessPipe_Manager mgr, HANDLE event, void *user, ILibProcessPipe_WaitHandle_Handler callback)
+void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback)
 {
 	ILibProcessPipe_Manager_Object *manager = (ILibProcessPipe_Manager_Object*)mgr;
 	ILibProcessPipe_WaitHandle *waitHandle;
@@ -228,6 +231,7 @@ void ILibProcessPipe_WaitHandle_Add(ILibProcessPipe_Manager mgr, HANDLE event, v
 	waitHandle->event = event;
 	waitHandle->user = user;
 	waitHandle->callback = callback;
+	waitHandle->timeout = milliseconds;
 
 	ILibProcessPipe_WaitHandle_AddEx(mgr, waitHandle);
 }
@@ -237,13 +241,14 @@ void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 	ILibProcessPipe_Manager_Object *manager = (ILibProcessPipe_Manager_Object*)arg;
 	HANDLE hList[FD_SETSIZE * (2*sizeof(HANDLE))];
 	ILibLinkedList active = manager->ActivePipes;
-
+	uint64_t timestamp1;
+	DWORD elapsedTime = 0;
 	void* node;
 	ILibProcessPipe_WaitHandle* data;
 
-	int i;
+	int i, jx;
 	DWORD x;
-
+	DWORD maxTimeout = INFINITE;
 	memset(hList, 0, sizeof(HANDLE)*FD_SETSIZE);
 	manager->workerThreadID = GetCurrentThreadId();
 
@@ -251,9 +256,9 @@ void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 	{
 		hList[0] = manager->updateEvent;
 		i = 1;
-
 		
 		//Prepare the rest of the WaitHandle Array, for the WaitForMultipleObject call
+		maxTimeout = INFINITE;
 		node = ILibLinkedList_GetNode_Head(active);
 		while (node != NULL)
 		{
@@ -263,21 +268,39 @@ void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 
 				hList[i] = data->event;
 				hList[i + FD_SETSIZE] = (HANDLE)data;
+				if (data->timeout > 0)
+				{
+					if (elapsedTime > 0)
+					{
+						// We popped out of the wait, but didn't decrement timeRemaining yet
+						if (data->timeRemaining < (int)elapsedTime)
+						{
+							data->timeRemaining = 0;
+						}
+						else
+						{
+							data->timeRemaining -= (int)elapsedTime;
+						}
+					}
+					if ((DWORD)data->timeRemaining < maxTimeout) { maxTimeout = (DWORD)data->timeRemaining; }
+				}
 				++i;
 			}
 			node = ILibLinkedList_GetNextNode(node);
 		}
 
 		ILibRemoteLogging_printf(ILibChainGetLogger(manager->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "WindowsRunLoopEx(): Number of Handles: %d", i);
+		timestamp1 = (uint64_t)ILibGetUptime();
 
-		while ((x = WaitForMultipleObjectsEx(i, hList, FALSE, INFINITE, TRUE)) != WAIT_IO_COMPLETION)
+		while ((x = WaitForMultipleObjectsEx(i, hList, FALSE, maxTimeout, TRUE)) != WAIT_IO_COMPLETION)
 		{
-			if (x == WAIT_FAILED || (x-WAIT_OBJECT_0) == 0) { break; }
+			elapsedTime = (DWORD)((uint64_t)ILibGetUptime() - timestamp1);
+			if (x == WAIT_FAILED || x == WAIT_TIMEOUT || (x-WAIT_OBJECT_0) == 0) { break; }
 			data = (ILibProcessPipe_WaitHandle*)hList[x + FD_SETSIZE];
 			manager->activeWaitHandle = data;
 			if (data != NULL && data->callback != NULL) 
 			{ 
-				if (data->callback(data->event, data->user) == FALSE)
+				if (data->callback(data->event, ILibWaitHandle_ErrorStatus_NONE, data->user) == FALSE)
 				{
 					// FALSE means to remove the WaitHandle
 					void *node = ILibLinkedList_GetNode_Search(manager->ActivePipes, ILibProcessPipe_Manager_WindowsWaitHandles_Remove_Comparer, data->event);
@@ -289,6 +312,96 @@ void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 					}
 				}
 			}
+
+			if (maxTimeout != INFINITE)
+			{
+				// Need to recalculate maxTimeout
+				for (jx = 1; jx < i; ++jx)
+				{
+					data = (ILibProcessPipe_WaitHandle*)hList[jx + FD_SETSIZE];
+					if (data->timeout > 0) // Timeout was specified
+					{
+						if (data->timeRemaining > (int)elapsedTime) // We can just decrement time left
+						{
+							data->timeRemaining -= (int)elapsedTime;
+						}
+						else
+						{
+							data->timeRemaining = 0; // Already expired
+						}
+						if (data->timeRemaining < (int)maxTimeout)
+						{
+							maxTimeout = (DWORD)data->timeRemaining; // Set the new maxTimeout
+						}
+					}
+				}
+			}
+		}
+		if (x == WAIT_IO_COMPLETION) { elapsedTime = (DWORD)((uint64_t)ILibGetUptime() - timestamp1); }
+		if (x == WAIT_FAILED)
+		{
+			for (jx = 1; jx < i; ++jx)
+			{
+				if (WaitForSingleObject(hList[jx], 0) == WAIT_FAILED)
+				{
+					// This handle is invalid, so let's error it out and remove it
+					node = ILibLinkedList_GetNode_Search(manager->ActivePipes, ILibProcessPipe_Manager_WindowsWaitHandles_Remove_Comparer, hList[jx]);
+					if (node != NULL)
+					{
+						// Propagate an Error up
+						data = (ILibProcessPipe_WaitHandle*)hList[jx + FD_SETSIZE];
+						if (data != NULL && data->callback != NULL)
+						{
+							manager->activeWaitHandle = data;
+							data->callback(data->event, ILibWaitHandle_ErrorStatus_INVALID_HANDLE, data->user);
+						}
+						
+						// Remove the wait handle
+						free(ILibLinkedList_GetDataFromNode(node));
+						ILibLinkedList_Remove(node);
+						break;
+					}
+				}
+			}
+		}
+		if (x == WAIT_TIMEOUT)
+		{
+			for (jx = 1; jx < i; ++jx)
+			{
+				data = (ILibProcessPipe_WaitHandle*)hList[jx + FD_SETSIZE];
+				if (data->timeout > 0)
+				{
+					// A timeout was specified, so lets check it
+					if (data->timeRemaining <= (int)elapsedTime)
+					{
+						data->timeRemaining = 0;
+					}
+					else
+					{
+						data->timeRemaining -= (int)elapsedTime;
+					}
+					if (data->timeRemaining == 0)
+					{
+						manager->activeWaitHandle = data;
+						if (data->callback == NULL || data->callback(data->event, ILibWaitHandle_ErrorStatus_TIMEOUT, data->user) == FALSE)
+						{
+							// Remove Wait Handle
+							node = ILibLinkedList_GetNode_Search(manager->ActivePipes, ILibProcessPipe_Manager_WindowsWaitHandles_Remove_Comparer, data->event);
+							if (node != NULL)
+							{
+								free(ILibLinkedList_GetDataFromNode(node));
+								ILibLinkedList_Remove(node);
+							}
+						}
+						else
+						{
+							// Reset timeout
+							data->timeRemaining = data->timeout;
+						}
+					}
+				}
+			}
+			elapsedTime = 0; // Set this to zero, becuase we already decremented everyone's time remaining
 		}
 		ResetEvent(manager->updateEvent);
 	}
@@ -401,6 +514,8 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 
 void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 {
+	if (!ILibMemory_CanaryOK(pipeObject)) { return; }
+
 #ifdef WIN32
 	if (pipeObject->mPipe_ReadEnd != NULL) { CloseHandle(pipeObject->mPipe_ReadEnd); }
 	if (pipeObject->mPipe_WriteEnd != NULL) { CloseHandle(pipeObject->mPipe_WriteEnd); }
@@ -424,7 +539,7 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 		if (pipeObject->mProcess->stdOut == pipeObject) { pipeObject->mProcess->stdOut = NULL; }
 		if (pipeObject->mProcess->stdErr == pipeObject) { pipeObject->mProcess->stdErr = NULL; }
 	}
-	free(pipeObject);
+	ILibMemory_Free(pipeObject);
 }
 
 #ifdef WIN32
@@ -444,7 +559,7 @@ ILibProcessPipe_Pipe ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(ILib
 {
 	ILibProcessPipe_PipeObject* retVal = NULL;
 
-	retVal = (ILibProcessPipe_PipeObject*)ILibMemory_Allocate(ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE, extraMemorySize, NULL, NULL);
+	retVal = ILibMemory_SmartAllocateEx(sizeof(ILibProcessPipe_PipeObject), extraMemorySize);
 	retVal->manager = (ILibProcessPipe_Manager_Object*)manager;
 
 #ifdef WIN32
@@ -479,7 +594,7 @@ ILibProcessPipe_PipeObject* ILibProcessPipe_CreatePipe(ILibProcessPipe_Manager m
 	int fd[2];
 #endif
 
-	retVal = (ILibProcessPipe_PipeObject*)ILibMemory_Allocate(ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE, extraMemorySize, NULL, NULL);
+	retVal = (ILibProcessPipe_PipeObject*)ILibMemory_SmartAllocateEx(sizeof(ILibProcessPipe_PipeObject), extraMemorySize);
 	retVal->brokenPipeHandler = brokenPipeHandler;
 	retVal->manager = (ILibProcessPipe_Manager_Object*)manager;
 
@@ -707,7 +822,10 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_
 	if (token != NULL) { CloseHandle(token); token = NULL; }
 	if (userToken != NULL) { CloseHandle(userToken); userToken = NULL; }
 #else
-	int UID = (int)(uint64_t)sid;
+	int UID = (int)(uint64_t)(ILibPtrCAST)sid;
+#ifdef __APPLE__
+	if (spawnType == ILibProcessPipe_SpawnTypes_TERM) { spawnType = ILibProcessPipe_SpawnTypes_DEFAULT; }
+#endif
 	if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 	{
 		int pipe;
@@ -716,8 +834,9 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_
 		w.ws_col = CONSOLE_SCREEN_WIDTH;
 		w.ws_xpixel = 0;
 		w.ws_ypixel = 0;
+#ifndef __APPLE__
 		pid = forkpty(&pipe, NULL, NULL, &w);
-
+#endif
 		retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
 		retVal->stdIn->mProcess = retVal;
 		retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
@@ -772,12 +891,12 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_
 				close(retVal->stdOut->mPipe_WriteEnd);
 			}
 		}
-		if (UID != -1)
+		if (UID != -1 && UID != 0)
 		{
-			setuid((uid_t)UID);
+			ignore_result(setuid((uid_t)UID));
 		}
 		execv(target, parameters);
-		exit(1);
+		_exit(1);
 	}
 	if (spawnType != ILibProcessPipe_SpawnTypes_TERM && spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{
@@ -811,11 +930,14 @@ void ILibProcessPipe_Pipe_SwapBuffers(ILibProcessPipe_Pipe obj, char* newBuffer,
 	pipeObject->totalRead = newBufferTotalBytesRead;
 }
 #ifdef WIN32
-BOOL ILibProcessPipe_Process_ReadHandler(HANDLE event, void* user)
+BOOL ILibProcessPipe_Process_ReadHandler(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 #else
 void ILibProcessPipe_Process_ReadHandler(void* user)
 #endif
 {
+#ifdef WIN32
+	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
+#endif
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
 	int consumed;
 	int err;
@@ -942,8 +1064,9 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 #endif
 }
 #ifdef WIN32
-BOOL ILibProcessPipe_Process_WindowsWriteHandler(HANDLE event, void* user)
+BOOL ILibProcessPipe_Process_WindowsWriteHandler(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 {
+	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
 	BOOL result;
 	DWORD bytesWritten;
@@ -1147,6 +1270,7 @@ void __stdcall ILibProcessPipe_Pipe_ResumeEx_APC(ULONG_PTR obj)
 #endif
 void ILibProcessPipe_Pipe_ResumeEx(ILibProcessPipe_PipeObject* p)
 {
+	if (!ILibMemory_CanaryOK(p)) { return; }
 	ILibRemoteLogging_printf(ILibChainGetLogger(p->manager->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ProcessPipe.ResumeEx(): processingLoop = %d", p->processingLoop);
 
 #ifdef WIN32
@@ -1181,6 +1305,7 @@ void ILibProcessPipe_Pipe_ResumeEx(ILibProcessPipe_PipeObject* p)
 void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject)
 {
 	ILibProcessPipe_PipeObject *p = (ILibProcessPipe_PipeObject*)pipeObject;
+	if (!ILibMemory_CanaryOK(p)) { return; }
 #ifdef WIN32
 	if (p->mOverlapped == NULL)
 	{
@@ -1322,9 +1447,10 @@ void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 	// We can't destroy this now, because we're on the MicrostackThread. We must destroy this on the WindowsRunLoop Thread.
 	QueueUserAPC((PAPCFUNC)ILibProcessPipe_Process_OnExit_ChainSink_DestroySink, j->parent->workerThread, (ULONG_PTR)j);
 }
-BOOL ILibProcessPipe_Process_OnExit(HANDLE event, void* user)
+BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 {
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)user;
+	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
 
 	UNREFERENCED_PARAMETER(event);
 	ILibProcessPipe_WaitHandle_Remove(j->parent, j->hProcess);

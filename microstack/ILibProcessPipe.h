@@ -43,9 +43,6 @@ typedef enum ILibProcessPipe_SpawnTypes
 	ILibProcessPipe_SpawnTypes_SPECIFIED_USER = 5
 }ILibProcessPipe_SpawnTypes;
 
-
-extern const int ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE;
-
 #ifdef WIN32
 typedef enum ILibProcessPipe_Pipe_ReaderHandleType
 {
@@ -91,8 +88,16 @@ pid_t ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p);
 
 
 #ifdef WIN32
-typedef BOOL(*ILibProcessPipe_WaitHandle_Handler)(HANDLE event, void* user);
-void ILibProcessPipe_WaitHandle_Add(ILibProcessPipe_Manager mgr, HANDLE event, void *user, ILibProcessPipe_WaitHandle_Handler callback);
+typedef enum ILibWaitHandle_ErrorStatus
+{
+	ILibWaitHandle_ErrorStatus_NONE = 0,
+	ILibWaitHandle_ErrorStatus_INVALID_HANDLE = 1,
+	ILibWaitHandle_ErrorStatus_TIMEOUT = 2
+}ILibWaitHandle_ErrorStatus;
+
+typedef BOOL(*ILibProcessPipe_WaitHandle_Handler)(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user);
+void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback);
+#define ILibProcessPipe_WaitHandle_Add(processPipeManager, eventHandle, user, callback) ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(processPipeManager, eventHandle, 0, user, callback)
 void ILibProcessPipe_WaitHandle_Remove(ILibProcessPipe_Manager mgr, HANDLE event);
 #endif
 #define ILibTransports_ProcessPipe 0x60
