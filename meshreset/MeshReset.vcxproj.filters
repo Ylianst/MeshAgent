@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="main.c" />
+    <ClCompile Include="stdafx.cpp" />
+    <ClCompile Include="..\microstack\nossl\md5.c">
+      <Filter>Microstack\nossl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\nossl\sha1.c">
+      <Filter>Microstack\nossl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\nossl\sha224-256.c">
+      <Filter>Microstack\nossl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\nossl\sha384-512.c">
+      <Filter>Microstack\nossl</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibParsers.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibSimpleDataStore.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microstack\ILibCrypto.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="..\microstack\nossl\md5.h">
+      <Filter>Microstack\nossl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\nossl\sha.h">
+      <Filter>Microstack\nossl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\nossl\sha1.h">
+      <Filter>Microstack\nossl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\nossl\sha-private.h">
+      <Filter>Microstack\nossl</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibParsers.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibSimpleDataStore.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microstack\ILibCrypto.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Microstack">
+      <UniqueIdentifier>{24205618-7a0a-4260-916f-f08e93a87031}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Microstack\nossl">
+      <UniqueIdentifier>{2a875bde-bc37-451d-94aa-dd141af887fd}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
