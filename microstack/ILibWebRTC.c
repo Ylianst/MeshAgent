@@ -5631,7 +5631,7 @@ void ILibStun_CreateDtlsSession(struct ILibStun_Module *obj, int sessionId, int 
 	obj->dTlsSessions[sessionId]->Transport.PendingBytesPtr = (ILibTransport_PendingBytesToSendPtr)&ILibSCTP_GetPendingBytesToSend;
 
 	obj->dTlsSessions[sessionId]->iceStateSlot = iceSlot;
-	obj->dTlsSessions[sessionId]->state = 4; //Bryan: Changed this to 4 from 1, becuase we need to call SSL_do_handshake to determine when DTLS was successful
+	obj->dTlsSessions[sessionId]->state = 4; // Bryan: Changed this to 4 from 1, because we need to call SSL_do_handshake to determine when DTLS was successful
 	obj->dTlsSessions[sessionId]->sessionId = sessionId;
 	sem_init(&(obj->dTlsSessions[sessionId]->Lock), 0, 1);
 	obj->dTlsSessions[sessionId]->parent = obj;
@@ -6002,7 +6002,7 @@ void ILibStun_OnUDP(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, 
 			break;
 		case 1:
 			obj->dTlsSessions[j]->state = 1;
-			ILibStun_DTLS_Success(obj, j, remoteInterface);			 // Successful DTLS Handshake	
+			ILibStun_DTLS_Success(obj, j, remoteInterface);			 // Successful DTLS Handshake
 			break;
 		default:
 			//
@@ -6060,7 +6060,11 @@ void ILibStun_OnUDP(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, 
 				break;
 			case 1:
 				obj->dTlsSessions[existingSession]->state = 1;
-				ILibStun_DTLS_Success(obj, existingSession, remoteInterface);			 // Successful DTLS Handshake			
+				ILibStun_DTLS_Success(obj, existingSession, remoteInterface);			 // Successful DTLS Handshake
+
+#ifdef _DEBUG
+				//util_savekeys(obj->dTlsSessions[existingSession]->ssl); // SAVES DTLS PRIVATE KEYS !!! WARNING - THIS CODE SHOULD ALWAYS BE COMMENTED OUT !!!
+#endif
 				break;
 			default:
 				// SSL_WANT_READ most likely, so do nothing for now
