@@ -422,6 +422,15 @@ duk_ret_t ILibDuktape_Dgram_socket_close(duk_context *ctx)
 	
 	return(0);
 }
+duk_ret_t ILibDuktape_DGram_address(duk_context *ctx)
+{
+	ILibDuktape_DGRAM_DATA *ptrs = ILibDuktape_DGram_GetPTR(ctx);
+	struct sockaddr_in6 addr;
+
+	ILibAsyncUDPSocket_GetLocalInterface(ptrs->mSocket, (struct sockaddr*)&addr);
+	ILibDuktape_SockAddrToOptions(ctx, &addr);
+	return(1);
+}
 duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 {
 	ILibDuktape_DGRAM_Config config = ILibDuktape_DGRAM_Config_NONE;
@@ -475,6 +484,7 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "setMulticastTTL", ILibDuktape_DGram_setMulticastTTL, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setMulticastInterface", ILibDuktape_DGram_setMulticastInterface, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setTTL", ILibDuktape_DGram_setTTL, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "address", ILibDuktape_DGram_address, 0);
 
 	return 1;
 }
