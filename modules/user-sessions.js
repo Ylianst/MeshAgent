@@ -60,7 +60,14 @@ function UserSessions()
         {
             p.__resolver(users);
         };
-        this.Current(p.__handler);
+        try
+        {
+            this.Current(p.__handler);
+        }
+        catch(e)
+        {
+            p.__rejector(e);
+        }
         p.parent = this;
         return (p);
     }
@@ -71,14 +78,22 @@ function UserSessions()
         this._marshal = require('_GenericMarshal');
         this._kernel32 = this._marshal.CreateNativeProxy('Kernel32.dll');
         this._kernel32.CreateMethod('GetLastError');
-        this._wts = this._marshal.CreateNativeProxy('Wtsapi32.dll');
-        this._wts.CreateMethod('WTSEnumerateSessionsA');
-        this._wts.CreateMethod('WTSQuerySessionInformationA');
-        this._wts.CreateMethod('WTSRegisterSessionNotification');
-        this._wts.CreateMethod('WTSUnRegisterSessionNotification');
-        this._wts.CreateMethod('WTSFreeMemory');
+        
+        try
+        {
+            this._wts = this._marshal.CreateNativeProxy('Wtsapi32.dll');
+            this._wts.CreateMethod('WTSEnumerateSessionsA');
+            this._wts.CreateMethod('WTSQuerySessionInformationA');
+            this._wts.CreateMethod('WTSRegisterSessionNotification');
+            this._wts.CreateMethod('WTSUnRegisterSessionNotification');
+            this._wts.CreateMethod('WTSFreeMemory');
+        }
+        catch(exc)
+        {
+        }
+
         this._user32 = this._marshal.CreateNativeProxy('user32.dll');
-        this._user32.CreateMethod('RegisterPowerSettingNotification');
+        this._user32.CreateMethod({ method: 'RegisterPowerSettingNotification', threadDispatch: 1});
         this._user32.CreateMethod('UnregisterPowerSettingNotification');
         this._rpcrt = this._marshal.CreateNativeProxy('Rpcrt4.dll');
         this._rpcrt.CreateMethod('UuidFromStringA');
@@ -190,11 +205,18 @@ function UserSessions()
         {
             this.parent.hwnd = h;
 
-            // Now that we have a window handle, we can register it to receive Windows Messages
-            this.parent._wts.WTSRegisterSessionNotification(this.parent.hwnd, NOTIFY_FOR_ALL_SESSIONS);
-            this.parent._user32.ACDC_H = this.parent._user32.RegisterPowerSettingNotification(this.parent.hwnd, GUID_ACDC_POWER_SOURCE, 0);
-            this.parent._user32.BATT_H = this.parent._user32.RegisterPowerSettingNotification(this.parent.hwnd, GUID_BATTERY_PERCENTAGE_REMAINING, 0);
-            this.parent._user32.DISP_H = this.parent._user32.RegisterPowerSettingNotification(this.parent.hwnd, GUID_CONSOLE_DISPLAY_STATE, 0);
+            // We need to yield, and do this in the next event loop pass, becuase we don't want to call 'RegisterPowerSettingNotification'
+            // from the messagepump 'thread', because we are actually on the microstack thread, such that the message pump thread, is holding
+            // on a semaphore for us to return. If we call now, we may deadlock on Windows 7, becuase it will try to notify immediately
+            this.immediate = setImmediate(function (self)
+            {
+                // Now that we have a window handle, we can register it to receive Windows Messages
+                if (self.parent._wts) { self.parent._wts.WTSRegisterSessionNotification(self.parent.hwnd, NOTIFY_FOR_ALL_SESSIONS); }
+                self.parent._user32.ACDC_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_ACDC_POWER_SOURCE, 0);
+                self.parent._user32.BATT_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_BATTERY_PERCENTAGE_REMAINING, 0);
+                self.parent._user32.DISP_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_CONSOLE_DISPLAY_STATE, 0);
+                //console.log(self.parent._user32.ACDC_H.Val, self.parent._user32.BATT_H.Val, self.parent._user32.DISP_H.Val);
+            }, this);
         });
         this._messagepump.on('message', function (msg)
         {
@@ -284,7 +306,7 @@ function UserSessions()
             }
         });
     }
-    else
+    else if(process.platform == 'linux')
     {
         var dbus = require('linux-dbus');
         this._linuxWatcher = require('fs').watch('/var/run/utmp');
@@ -293,6 +315,38 @@ function UserSessions()
         {
             this.user_session.emit('changed');
         });
+        this._users = function _users()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('awk -F: \'($3 >= 0) {printf "%s:%s\\n", $1, $3}\' /etc/passwd\nexit\n');
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            var ret = {}, tokens;
+            for (var ln in lines)
+            {
+                tokens = lines[ln].split(':');
+                if (tokens[0]) { ret[tokens[0]] = tokens[1]; }           
+            }
+            return (ret);
+        }
+        this._uids = function _uids() {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('awk -F: \'($3 >= 0) {printf "%s:%s\\n", $1, $3}\' /etc/passwd\nexit\n');
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            var ret = {}, tokens;
+            for (var ln in lines) {
+                tokens = lines[ln].split(':');
+                if (tokens[0]) { ret[tokens[1]] = tokens[0]; }
+            }
+            return (ret);
+        }
         this.Self = function Self()
         {
             var promise = require('promise');
@@ -485,6 +539,145 @@ function UserSessions()
         // First step, is to see if there is a user logged in:
         this._recheckLoggedInUsers();
     }
+    else if(process.platform == 'darwin')
+    {
+        this._users = function ()
+        {
+            var child = require('child_process').execFile('/usr/bin/dscl', ['dscl', '.', 'list', '/Users', 'UniqueID']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('exit\n');
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            var tokens, i;
+            var users = {};
+
+            for (i = 0; i < lines.length; ++i) {
+                tokens = lines[i].split(' ');
+                if (tokens[0]) { users[tokens[0]] = tokens[tokens.length - 1]; }
+            }
+
+            return (users);
+        }
+        this._uids = function () {
+            var child = require('child_process').execFile('/usr/bin/dscl', ['dscl', '.', 'list', '/Users', 'UniqueID']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('exit\n');
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            var tokens, i;
+            var users = {};
+
+            for (i = 0; i < lines.length; ++i) {
+                tokens = lines[i].split(' ');
+                if (tokens[0]) { users[tokens[tokens.length - 1]] = tokens[0]; }
+            }
+
+            return (users);
+        }
+        this._idTable = function()
+        {
+            var table = {};
+            var child = require('child_process').execFile('/usr/bin/id', ['id']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n')[0].split(' ');
+            for (var i = 0; i < lines.length; ++i) {
+                var types = lines[i].split('=');
+                var tokens = types[1].split(',');
+                table[types[0]] = {};
+
+                for (var j in tokens) {
+                    var idarr = tokens[j].split('(');
+                    var id = idarr[0];
+                    var name = idarr[1].substring(0, idarr[1].length - 1).trim();
+                    table[types[0]][name] = id;
+                    table[types[0]][id] = name;
+                }
+            }
+            return (table);
+        }
+        this.Current = function (cb)
+        {
+            var users = {};
+            var table = this._idTable();
+            var child = require('child_process').execFile('/usr/bin/last', ['last']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            for (var i = 0; i < lines.length && lines[i].length > 0; ++i)
+            {
+                if (!users[lines[i].split(' ')[0]])
+                {
+                    try
+                    {
+                        users[lines[i].split(' ')[0]] = { Username: lines[i].split(' ')[0], State: lines[i].split('still logged in').length > 1 ? 'Active' : 'Inactive', uid: table.uid[lines[i].split(' ')[0]] };
+                    }
+                    catch(e)
+                    {}
+                }
+                else
+                {
+                    if(users[lines[i].split(' ')[0]].State != 'Active' && lines[i].split('still logged in').length > 1)
+                    {
+                        users[lines[i].split(' ')[0]].State = 'Active';
+                    }
+                }
+            }
+
+            Object.defineProperty(users, 'Active', { value: showActiveOnly(users) });
+            if (cb) { cb.call(this, users); }
+        }
+    }
+
+    if(process.platform == 'linux' || process.platform == 'darwin')
+    {
+        this._self = function _self()
+        {
+            var child = require('child_process').execFile('/usr/bin/id', ['id', '-u']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.waitExit();
+            return (parseInt(child.stdout.str));
+        }
+        this.isRoot = function isRoot()
+        {
+            return (this._self() == 0);
+        }
+        this.consoleUid = function consoleUid()
+        {
+            var checkstr = process.platform == 'darwin' ? 'console' : ':0';
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('who\nexit\n');
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            var tokens, i, j;
+            for (i in lines)
+            {
+                tokens = lines[i].split(' ');
+                for (j = 1; j < tokens.length; ++j)
+                {
+                    if (tokens[j].length > 0 && tokens[j] == checkstr)
+                    {
+                        return (parseInt(this._users()[tokens[0]]));
+                    }
+                }
+            }
+            throw ('nobody logged into console');
+        }
+    }
+
+
 }
 function showActiveOnly(source)
 {
