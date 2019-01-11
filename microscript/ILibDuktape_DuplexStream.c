@@ -88,8 +88,8 @@ ILibDuktape_DuplexStream * ILibDuktape_DuplexStream_InitEx(duk_context * ctx, IL
 ILibTransport_DoneState ILibDuktape_Transform_WriteSink(struct ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_Transform *TF = (ILibDuktape_Transform*)user;
-	TF->writerEnded = stream->endBytes;
-	TF->On_NativeTransform(TF, TF->source->Reserved, stream->endBytes, buffer, bufferLen, TF->user);
+	TF->writerEnded = stream->endBytes >= 0 ? -1 : 0;
+	TF->On_NativeTransform(TF, TF->source->Reserved, stream->endBytes >= 0, buffer, bufferLen, TF->user);
 	return(TF->target->paused == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE);
 }
 void ILibDuktape_Transform_EndSink(struct ILibDuktape_WritableStream *stream, void *user)
