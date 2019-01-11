@@ -28,7 +28,7 @@ limitations under the License.
 
 #include "ILibParsers.h"
 
-#ifdef _POSIX
+#if defined(_POSIX) && !defined(__APPLE__)
 #include <netinet/in.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -46,7 +46,7 @@ typedef struct _ILibIPAddressMonitor
 	SOCKET mSocket;
 	DWORD bytesReturned;
 	OVERLAPPED *reserved;
-#elif defined (_POSIX)
+#elif defined (_POSIX) && !defined(__APPLE__)
 	int mSocket;
 	struct sockaddr_nl addr;
 #endif
@@ -86,19 +86,21 @@ void ILibIPAddressMonitor_MicrostackThreadDispatch(void *chain, void *user)
 
 void ILibIPAddressMonitor_Destroy(void *object)
 {
+#ifndef __APPLE__
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
+#endif
 
 #ifdef WIN32
 	obj->reserved->hEvent = NULL;
 	closesocket(obj->mSocket);
 	obj->mSocket = INVALID_SOCKET;
-#elif defined(_POSIX)
+#elif defined(_POSIX) && !defined(__APPLE__)
 	close(obj->mSocket);
 	obj->mSocket = -1;
 #endif
 }
 
-#if defined(_POSIX)
+#if defined(_POSIX) && !defined(__APPLE__)
 void ILibIPAddressMonitor_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
@@ -141,7 +143,7 @@ ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonit
 	obj->reserved->hEvent = (HANDLE)obj;
 	obj->mSocket = socket(AF_INET, SOCK_DGRAM, 0);
 	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), obj->reserved, ILibIPAddressMonitor_dispatch);
-#elif defined (_POSIX)
+#elif defined (_POSIX) && !defined(__APPLE__)
 	obj->mSocket = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE);
 	int flags = fcntl(obj->mSocket, F_GETFL, 0);
 	fcntl(obj->mSocket, F_SETFL, O_NONBLOCK | flags);
