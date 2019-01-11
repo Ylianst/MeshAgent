@@ -15,12 +15,11 @@ limitations under the License.
 */
 
 #ifdef WIN32
-
 #include <winsock2.h>
 #include <ws2tcpip.h>
-
 #include <Windows.h>
 #include <WinBase.h>
+#include "wincrypto.h"
 #endif
 
 #include "agentcore.h"
@@ -43,20 +42,29 @@ limitations under the License.
 
 #ifdef _POSIX
 #include <sys/stat.h>
+#include <sys/wait.h>
 #endif
 
 #ifdef _LINKVM
 	#ifdef WIN32
-	#include "KVM/Windows/kvm.h"
+		#include "KVM/Windows/kvm.h"
 	#endif
 	#ifdef _POSIX
-	#include "KVM/Linux/linux_kvm.h"
+		#ifndef __APPLE__
+			#include "KVM/Linux/linux_kvm.h"
+		#else
+			#include "KVM/MacOS/mac_kvm.h"
+		#endif
 	#endif
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
+#endif
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
 #endif
 
 #define HEX_IDENTIFIER (unsigned short)12408
@@ -80,6 +88,8 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define REMOTE_DESKTOP_ptrs		"\xFF_RemoteDesktopPTRS"
 #define DEFAULT_IDLE_TIMEOUT	120
 
+#define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
+
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 
@@ -90,6 +100,9 @@ typedef struct RemoteDesktop_Ptrs
 	void *MeshAgentObject;
 #ifdef _POSIX
 	void *kvmPipe;
+#ifdef __APPLE__
+	int kvmDomainSocket;
+#endif
 #endif
 	ILibDuktape_DuplexStream *stream;
 }RemoteDesktop_Ptrs;
@@ -324,6 +337,241 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject wcdo, MeshAgentHostCont
 char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 
+
+void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
+{
+	if (ctx != NULL && txt != NULL)
+	{
+		if (duk_peval_string(ctx, "require('MeshAgent');") == 0)
+		{
+			duk_get_prop_string(ctx, -1, "SendCommand");			// [agent][SendCommand]
+			duk_swap_top(ctx, -2);									// [SendCommand][this]
+			duk_push_object(ctx);									// [SendCommand][this][var]
+			duk_push_string(ctx, "msg"); duk_put_prop_string(ctx, -2, "action");
+			duk_push_string(ctx, "console"); duk_put_prop_string(ctx, -2, "type");
+			duk_push_string(ctx, txt); duk_put_prop_string(ctx, -2, "value");
+			if (duk_pcall_method(ctx, 1) != 0) {}
+		}
+		duk_pop(ctx);												// ...
+	}
+}
+
+
+#ifdef _POSIX
+typedef enum MeshAgent_Posix_PlatformTypes
+{
+	MeshAgent_Posix_PlatformTypes_UNKNOWN	= 0,
+	MeshAgent_Posix_PlatformTypes_SYSTEMD	= 1,
+	MeshAgent_Posix_PlatformTypes_INITD		= 2,
+	MeshAgent_Posix_PlatformTypes_LAUNCHD	= 3,
+}MeshAgent_Posix_PlatformTypes;
+
+size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
+{
+	size_t i = 0, r, sz = 4096;
+	*buffer = NULL;
+	FILE *f = fopen(path, "rb");
+	if (f != NULL)
+	{
+		if ((*buffer = malloc(sz)) == NULL) { ILIBCRITICALEXIT(254); }
+		while ((r = fread(*buffer + i, 1, sz - i, f)) > 0)
+		{
+			i += r;
+			if (i == sz)
+			{
+				if ((*buffer = realloc(*buffer, sz + 4096)) == NULL) { ILIBCRITICALEXIT(254); }
+				sz += 4096;
+			}
+		}
+		(*buffer)[i] = 0;
+		fclose(f);
+	}
+	return(i);
+}
+MeshAgent_Posix_PlatformTypes MeshAgent_Posix_GetPlatformType()
+{
+#ifdef __APPLE__
+	return(MeshAgent_Posix_PlatformTypes_LAUNCHD);
+#else
+	MeshAgent_Posix_PlatformTypes retVal = MeshAgent_Posix_PlatformTypes_UNKNOWN, fini = 0;
+	char *status;
+	size_t statusLen = MeshAgent_Linux_ReadMemFile("/proc/1/status", &status);
+	if (statusLen > 0)
+	{
+		parser_result *result = ILibParseString(status, 0, (int)statusLen, "\n", 1), *tokens;
+		parser_result_field *rf = result->FirstResult;
+		while (rf != NULL && fini == 0)
+		{
+			tokens = ILibParseString(rf->data, 0, rf->datalength, ":", 1);
+			if (tokens->NumResults == 2)
+			{
+				if (tokens->FirstResult->datalength == 4 && strncasecmp(tokens->FirstResult->data, "name", 4) == 0)
+				{
+					int tlen = tokens->LastResult->datalength;
+					char *tstr = tokens->LastResult->data;
+					tlen = ILibTrimString(&tstr, tlen);
+					if (tlen == 7 && strncasecmp(tstr, "systemd", 5) == 0)
+					{
+						retVal = MeshAgent_Posix_PlatformTypes_SYSTEMD;
+					}
+					else if (tlen == 4 && strncasecmp(tstr, "init", 4) == 0)
+					{
+						retVal = MeshAgent_Posix_PlatformTypes_INITD;
+					}
+					fini = 1;
+				}
+			}
+			ILibDestructParserResults(tokens);
+			rf = rf->NextResult;
+		}
+		ILibDestructParserResults(result);
+		free(status);
+	}
+	return(retVal);
+#endif
+}
+int MeshAgent_Helper_CommandLine(char **commands, char **result, int *resultLen)
+{
+	int bytesRead, x;
+	size_t sz;
+	int inputPipe[2], outputPipe[2];
+	pid_t pid;
+
+	if (commands == NULL || result == NULL || resultLen == NULL) { return(-2); }
+
+	ignore_result(pipe(inputPipe));
+	ignore_result(pipe(outputPipe));
+
+	pid = vfork();
+	if (pid < 0)
+	{
+		// error;
+		close(inputPipe[0]); close(inputPipe[1]);
+		close(outputPipe[0]); close(outputPipe[1]);
+		return(-1);
+	}
+
+	if (pid == 0)
+	{
+		// child
+		close(inputPipe[1]);	// Close Write End of StdIn
+		close(outputPipe[0]);	// Close Read End of StdOut
+		dup2(inputPipe[0], STDIN_FILENO);
+		dup2(outputPipe[1], STDOUT_FILENO);
+		dup2(outputPipe[1], STDERR_FILENO);
+		close(inputPipe[0]);
+		close(outputPipe[1]);
+
+		execv("/bin/sh", (char*[]) {"sh", NULL});
+		exit(1);
+	}
+
+	// parent
+	close(inputPipe[0]);	// Close Read End of StdIn
+	close(outputPipe[1]);	// Close Write End of StdOut
+
+	for (int i = 0; commands[i] != NULL; ++i)
+	{
+		ignore_result(write(inputPipe[1], commands[i], strlen(commands[i])));
+	}
+	
+	x = 0;
+	sz = 4096;
+	if ((*result = (char*)malloc(sz)) == NULL) { ILIBCRITICALEXIT(254); }
+	while ((bytesRead = read(outputPipe[0], *result + x, sz - x)) > 0)
+	{
+		x += bytesRead;
+		if (x == sz)
+		{
+			if ((*result = realloc(*result, sz + 4096)) == NULL) { ILIBCRITICALEXIT(254); }
+			sz += 4096;
+		}
+	}
+	(*result)[x] = 0;
+	*resultLen = x;
+	waitpid(pid, &bytesRead, 0);
+	return(0);
+}
+int MeshAgent_Helper_IsService()
+{
+	char *result = NULL;
+	int resultLen = 0;
+	char pidStr[255];
+	int pidStrLen = sprintf_s(pidStr, sizeof(pidStr), "%d", (int)getpid());
+	int retVal = 0;
+
+	switch (MeshAgent_Posix_GetPlatformType())
+	{
+		case MeshAgent_Posix_PlatformTypes_SYSTEMD: // Linux Systemd			
+			if (MeshAgent_Helper_CommandLine((char*[]) { "systemctl status meshagent | grep 'Main PID:'\n", "exit\n", NULL }, &result, &resultLen) == 0)
+			{
+				ILibAppendStringToDiskEx("/tmp/meshagent.log", result, resultLen);
+				parser_result *pr = ILibParseString(result, 0, resultLen, "\r\n", 2);
+				parser_result_field *f = pr->FirstResult;
+				while (f != NULL)
+				{
+					if (ILibString_StartsWith(f->data, f->datalength, " Main PID:", 10) != 0)
+					{
+						int sx = ILibString_IndexOf(f->data, f->datalength, ":", 1) + 1;
+						int ex = ILibString_IndexOf(f->data, f->datalength, "(", 1) - 1;
+
+						char *syspid = f->data + sx;
+						int syspidLen = ILibTrimString(&syspid, ex - sx);
+						syspid[syspidLen] = 0;
+
+						if (syspidLen == pidStrLen && strncmp(syspid, pidStr, syspidLen) == 0)
+						{
+							retVal = 1;
+							break;
+						}
+					}
+					f = f->NextResult;
+				}
+				ILibDestructParserResults(pr);
+			}
+			break;
+		case MeshAgent_Posix_PlatformTypes_LAUNCHD: // MacOS Launchd
+			if (MeshAgent_Helper_CommandLine((char*[]) { "launchctl list\n", "exit\n", NULL }, &result, &resultLen) == 0)
+			{
+				parser_result *pr = ILibParseString(result, 0, resultLen, "\n", 1), *p2;
+				parser_result_field *f = pr->FirstResult;
+				while (f != NULL)
+				{
+					if (f->datalength > 0)
+					{
+						p2 = ILibParseString(f->data, 0, f->datalength, "\t", 1);
+						if (p2->NumResults > 1 && p2->FirstResult->datalength == pidStrLen && strncmp(p2->FirstResult->data, pidStr, pidStrLen) == 0)
+						{
+							retVal = 1;
+							ILibDestructParserResults(p2);
+							break;
+						}
+						ILibDestructParserResults(p2);
+					}
+					f = f->NextResult;
+				}
+				ILibDestructParserResults(pr);
+			}
+			break;
+		default: // Generic
+			// Just check to see if the pid file matches the current pid
+			{
+				char *diskpid;
+				int diskpidLen;
+		
+				if ((diskpidLen = ILibReadFileFromDiskEx(&diskpid, "/var/run/meshagent.pid")) == 0) { diskpidLen = ILibReadFileFromDiskEx(&diskpid, ".meshagent.pid"); }
+				if (diskpidLen != 0 && atoi(diskpid) == atoi(pidStr))
+				{
+					retVal = 1;
+				}
+			}
+			
+			break;
+	}
+	return(retVal);
+}
+#endif
+
 #ifdef _REMOTELOGGING
 void MeshAgent_Slave_LogForward(ILibRemoteLogging sender, ILibRemoteLogging_Modules module, ILibRemoteLogging_Flags flags, char *buffer, int bufferLen)
 {
@@ -556,7 +804,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertificate(duk_context *ctx)
 	// Generate a new TLS certificate
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating JS TLS Certificate");
 #endif
-
+	SSL_TRACE1("ILibDuktape_MeshAgent_GenerateCertificate()");
 	len = util_mkCert(NULL, &(cert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
 	len = util_to_p12(cert, passphrase, &data);
 
@@ -565,6 +813,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertificate(duk_context *ctx)
 
 	util_free(data);
 	util_freecert(&cert);
+	SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate()");
 	return 1;
 #endif
 }
@@ -656,7 +905,26 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 #ifdef WIN32
 	kvm_relay_feeddata(buffer, bufferLen, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
 #else
-	kvm_relay_feeddata(buffer, bufferLen);
+#ifdef __APPLE__
+	if (((RemoteDesktop_Ptrs*)user)->kvmPipe == NULL)
+	{
+		// Write to AF_UNIX Domain Socket
+		duk_push_external_buffer(stream->writableStream->ctx);														// [ext]
+		duk_config_buffer(stream->writableStream->ctx, -1, buffer, (duk_size_t)bufferLen);
+		duk_push_heapptr(stream->writableStream->ctx, stream->writableStream->obj);									// [ext][rd]
+		duk_get_prop_string(stream->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [ext][rd][IPC]
+		duk_get_prop_string(stream->writableStream->ctx, -1, "write");												// [ext][rd][IPC][write]
+		duk_swap_top(stream->writableStream->ctx, -2);																// [ext][rd][write][this]
+		duk_push_buffer_object(stream->writableStream->ctx, -4, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [ext][rd][write][this][buffer]
+		if (duk_pcall_method(stream->writableStream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(stream->writableStream->ctx, "Error Writing Data"); }
+																													// [ext][rd][ret]
+		duk_pop_n(stream->writableStream->ctx, 3);																	// ...
+	}
+	else
+#endif
+	{
+		kvm_relay_feeddata(buffer, bufferLen);
+	}
 #endif
 #endif
 	return ILibTransport_DoneState_COMPLETE;
@@ -668,6 +936,18 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 	if (ptrs->ctx != NULL)
 	{
 		duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
+		duk_get_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);	// [MeshAgent][RD]
+		if (duk_has_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET))
+		{
+			duk_get_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET);		// [MeshAgent][RD][IPC]
+			duk_get_prop_string(ptrs->ctx, -1, "end");				// [MeshAgent][RD][IPC][end]
+			duk_swap_top(ptrs->ctx, -2);							// [MeshAgent][RD][end][this]
+			duk_pcall_method(ptrs->ctx, 0); duk_pop(ptrs->ctx);		// [MeshAgent][RD]
+
+			duk_peval_string(ptrs->ctx, "require('MeshAgent').SendCommand({ 'action': 'msg', 'type' : 'console', 'value' : 'Closing IPC Socket' });"); duk_pop(ptrs->ctx);
+		}
+		duk_pop(ptrs->ctx);											// [MeshAgent]
+		
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
@@ -680,6 +960,17 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 	//printf("KVM/PAUSE\n");
 #ifdef _POSIX
 	if (((RemoteDesktop_Ptrs*)user)->kvmPipe != NULL) { ILibProcessPipe_Pipe_Pause(((RemoteDesktop_Ptrs*)user)->kvmPipe); }
+#ifdef __APPLE__
+	else
+	{
+		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
+		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
+		duk_get_prop_string(sender->writableStream->ctx, -1, "pause");												// [rd][IPC][pause]
+		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][pause][this]
+		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		duk_pop_2(sender->writableStream->ctx);																		// ...
+	}
+#endif
 #else
 	kvm_pause(1);
 #endif
@@ -690,6 +981,17 @@ void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *se
 
 #ifdef _POSIX
 	if (((RemoteDesktop_Ptrs*)user)->kvmPipe != NULL) { ILibProcessPipe_Pipe_Resume(((RemoteDesktop_Ptrs*)user)->kvmPipe); }
+#ifdef __APPLE__
+	else
+	{
+		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
+		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
+		duk_get_prop_string(sender->writableStream->ctx, -1, "resume");												// [rd][IPC][resume]
+		duk_swap_top(sender->writableStream->ctx, -2);																// [rd][resume][this]
+		duk_pcall_method(sender->writableStream->ctx, 0);															// [rd][ret]
+		duk_pop_2(sender->writableStream->ctx);																		// ...
+	}
+#endif
 #else
 	kvm_pause(0);
 #endif
@@ -733,6 +1035,97 @@ int ILibDuktape_MeshAgent_remoteDesktop_unshiftSink(ILibDuktape_DuplexStream *se
 	return(0);
 }
 
+#ifdef __APPLE__
+duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *ctx)
+{
+	MeshAgent_sendConsoleText(ctx, "IPC Connection Closed...");
+
+	duk_push_this(ctx);
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)Duktape_GetPointerProperty(ctx, -1, KVM_IPC_SOCKET);
+
+	// Check to see if there is a user logged in
+	if (duk_peval_string(ctx, "require('user-sessions').consoleUid()") == 0)
+	{
+		int console_uid = duk_get_int(ctx, -1);
+		char tmp[255];
+		sprintf_s(tmp, sizeof(tmp), "User id: %d has logged in", console_uid);
+		MeshAgent_sendConsoleText(ctx, tmp);
+
+		duk_push_heapptr(ctx, ptrs->MeshAgentObject);
+		duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
+		MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
+
+		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
+		{
+			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		}
+	}
+	else
+	{
+		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
+		{
+			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+		}
+	}
+
+
+	return(0);
+}
+duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)Duktape_GetPointerProperty(ctx, -1, KVM_IPC_SOCKET);
+	char *buffer;
+	duk_size_t bufferLen, consumed = 0;
+	unsigned short size;
+
+	buffer = (char*)Duktape_GetBuffer(ctx, 0, &bufferLen);
+	
+	// We need to properly frame the data before we propagate it up
+	if (bufferLen > 4)
+	{
+		size = ntohs(((unsigned short*)(buffer))[1]);
+		if (size <= bufferLen)
+		{
+			// We have all the data, to be able to frame it
+			consumed = size;
+			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, (int)size, ptrs);
+		}
+	}
+
+	if ((bufferLen - consumed) > 0)
+	{
+		// We need to unshift() the remainder to continue processing
+		duk_push_external_buffer(ctx);														// [ext]
+		duk_config_buffer(ctx, -1, buffer, bufferLen - consumed);
+		duk_push_this(ctx);																	// [ext][IPC]
+		duk_get_prop_string(ctx, -1, "unshift");											// [ext][IPC][unshift]
+		duk_swap_top(ctx, -2);																// [ext][unshift][this]
+		duk_push_buffer_object(ctx, -3, 0, bufferLen - consumed, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][unshift][this][buffer]
+		duk_call_method(ctx, 1);															// [ext][ret]
+	}
+
+	return(0);
+}
+duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_Sink(duk_context *ctx)
+{
+	// This is called when we successfully attach an IPC Domain Socket to the Windows Server, running in the LoginWindow context
+	RemoteDesktop_Ptrs *ptrs;
+
+	MeshAgent_sendConsoleText(ctx, "IPC Connection Established...");
+
+	duk_push_current_function(ctx);
+	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetPointerProperty(ctx, -1, "ptrs");
+
+	duk_push_this(ctx);
+	duk_push_pointer(ctx, ptrs); duk_put_prop_string(ctx, -2, KVM_IPC_SOCKET);
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "data", ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink);
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "end", ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink);
+
+	return(0);
+}
+#endif
+
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 {
 #ifndef _LINKVM
@@ -741,6 +1134,17 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 #else
 	RemoteDesktop_Ptrs *ptrs;
 	MeshAgentHostContainer *agent;
+
+#if !defined(WIN32) && !defined(__APPLE__)
+	if (duk_peval_string(ctx, "require('monitor-info')") == 0)
+	{
+		char *libx11 = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11LIB", NULL);
+		char *libx11tst = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11TST", NULL);
+		char *libx11ext = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11EXT", NULL);
+		kvm_set_x11_locations(libx11, libx11tst, libx11ext);
+	}
+#endif
+
 
 	duk_push_this(ctx);											// [MeshAgent]
 	if (duk_has_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM))
@@ -769,16 +1173,43 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	ptrs->stream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_MeshAgent_RemoteDesktop_WriteSink, ILibDuktape_MeshAgent_RemoteDesktop_EndSink, ILibDuktape_MeshAgent_RemoteDesktop_PauseSink, ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink, ILibDuktape_MeshAgent_remoteDesktop_unshiftSink, ptrs);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MeshAgent_RemoteDesktop_Finalizer);
 	ptrs->stream->readableStream->PipeHookHandler = ILibDuktape_MeshAgent_RemoteDesktop_PipeHook;
-
 	// Setup Remote Desktop
 #ifdef WIN32
 	#ifdef _WINSERVICE
 		kvm_relay_setup(agent->exePath, agent->runningAsConsole ? NULL : agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
 	#else
 		kvm_relay_setup(agent->exePath, NULL, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
-	#endif
+	#endif	
 #else
-	ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
+	int console_uid = 0;
+	if (duk_peval_string(ctx, "require('user-sessions').consoleUid();") == 0) { console_uid = duk_get_int(ctx, -1); }
+	duk_pop(ctx);
+
+	#ifdef __APPLE__
+		// MacOS
+		if (console_uid == 0)
+		{
+			MeshAgent_sendConsoleText(ctx, "Establishing IPC-x-Connection to LoginWindow for KVM");
+			char *ipc = (char*)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			duk_eval_string(ctx, "require('net');");														// [rd][net]
+			duk_get_prop_string(ctx, -1, "createConnection");												// [rd][net][createConnection]
+			duk_swap_top(ctx, -2);																			// [rd][createConnection][this]
+			duk_push_object(ctx);																			// [rd][createConnection][this][options]
+			duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, "path");								// [rd][createConnection][this][options]
+			duk_push_c_function(ctx, ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_Sink, DUK_VARARGS);	// [rd][createConnection][this][options][callback]
+			duk_push_pointer(ctx, ptrs); duk_put_prop_string(ctx, -2, "ptrs");
+			duk_call_method(ctx, 2);																		// [rd][icpSocket]
+			duk_put_prop_string(ctx, -2, KVM_IPC_SOCKET);													// [rd]
+			//ptrs->kvmDomainSocket = (int)(uint64_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		}
+		else
+		{
+			MeshAgent_sendConsoleText(ctx, "Spawning User Process for KVM");
+			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		}
+	#else
+		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+	#endif
 #endif
 	return 1;
 #endif
@@ -816,6 +1247,10 @@ duk_ret_t ILibDuktape_MeshAgent_ConnectedServer(duk_context *ctx)
 
 duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 {
+#ifdef __APPLE__
+	duk_push_null(ctx);
+	return(1);
+#else
 	char *data;
 	int len = MeshInfo_GetSystemInformation(&data);
 	if (len > 0)
@@ -829,11 +1264,15 @@ duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 		duk_push_null(ctx);
 	}
 	return 1;
+#endif
 }
 
 // Javascript ExecPowerState(int), executes power state command on the computer (Sleep, Hibernate...)
 duk_ret_t ILibDuktape_MeshAgent_ExecPowerState(duk_context *ctx)
 {
+#ifdef __APPLE__
+	duk_push_null(ctx);
+#else
 	int force = 0;
 	int numArgs = (int)duk_get_top(ctx);
 	duk_push_this(ctx);	// [MeshAgent]
@@ -847,6 +1286,7 @@ duk_ret_t ILibDuktape_MeshAgent_ExecPowerState(duk_context *ctx)
 	{
 		duk_push_null(ctx);
 	}
+#endif
 	return 1;
 }
 
@@ -921,7 +1361,19 @@ duk_ret_t ILibDuktape_MeshAgent_dumpCoreModule(duk_context *ctx)
 	ILibChain_RunOnMicrostackThreadEx(agent->chain, ILibDuktape_MeshAgent_dumpCoreModuleEx, agent);
 	return(0);
 }
-
+void ILibDuktape_MeshAgent_ConnectedHook(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
+{
+	int top = duk_get_top(sender->ctx);
+	duk_push_heapptr(sender->ctx, hookedCallback);			// [cb]
+	duk_push_heapptr(sender->ctx, sender->object);			// [cb][this]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(sender->ctx, -1, MESH_AGENT_PTR);
+	if (agent->serverAuthState == 3)
+	{
+		duk_push_int(sender->ctx, 1);						// [cb][this][1]
+		duk_pcall_method(sender->ctx, 1);
+	}
+	duk_set_top(sender->ctx, top);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -955,10 +1407,16 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 	if (agent->slaveMode == 0)
 	{
 #ifndef MICROSTACK_NOTLS
-		duk_push_pointer(ctx, &agent->selftlscert);
-		duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_Server);
-		duk_push_pointer(ctx, &agent->selftlsclientcert);
-		duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_Client);
+		if (agent->selftlscert.x509 != NULL) {
+			// We have a TLS certificate, use it for WebRTC
+			duk_push_pointer(ctx, &agent->selftlscert);
+			duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_Server);
+		} else {
+			// We don't have a TLS certificate, use the root cert for WebRTC
+			duk_push_pointer(ctx, &agent->selfcert);
+			duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_Server);
+		}
+		// Always use the root cert for agent authentication
 		duk_push_pointer(ctx, &agent->selfcert);
 		duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_NonLeaf);
 #endif
@@ -967,6 +1425,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Connected");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Command");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "DesktopSessionChanged");
+		ILibDuktape_EventEmitter_AddHook(emitter, "Connected", ILibDuktape_MeshAgent_ConnectedHook);
+
 
 		ILibDuktape_CreateEventWithGetter(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected);
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
@@ -1058,63 +1518,104 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 	int len = -1;
 	char* str;
 
-	printf("Generating Certificates...\r\n");
-
+	// Clear the certs in the database.
 	ILibSimpleDataStore_Delete(agent->masterDb, "SelfNodeCert");
 	ILibSimpleDataStore_Delete(agent->masterDb, "SelfNodeTlsCert");
-	ILibSimpleDataStore_Delete(agent->masterDb, "SelfNodeTlsClientCert");
-
-	// Make sure the certs and database are clean
 	util_freecert(&(agent->selfcert));
 	util_freecert(&(agent->selftlscert));
-	util_freecert(&(agent->selftlsclientcert));
 
 	if (certfile == NULL)
 	{
-		// Generate a new random node certificate
-		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating new Node Certificate");
-		do
+#if defined(WIN32)
+		if (wincrypto_open(TRUE) == 0) // Force certificate re-generation
 		{
-			if (util_mkCert(NULL, &(agent->selfcert), 3072, 10000, "MeshNodeCertificate", CERTIFICATE_ROOT, NULL) == 0) return -1;
-			util_keyhash(agent->selfcert, agent->g_selfid);
-		} while (((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
-		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...g_selfid = %s", ILibRemoteLogging_ConvertToHex(agent->g_selfid, (int)sizeof(agent->g_selfid)));
+			int l;
+			do {
+				// Finish off work with our own certificate
+				l = wincrypto_getcert(&str);
+				if (l > 0)
+				{
+					util_from_cer(str, l, &(agent->selfcert));
+					util_keyhash(agent->selfcert, agent->g_selfid);
+					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_close(); wincrypto_open(1); }
+				}
+			} while (l != 0 && ((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
+
+			if (l > 0)
+			{
+				// Generate a new TLS certificate & save it.
+				l = wincrypto_mkCert(L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
+				util_from_p12(str, l, "hidden", &(agent->selftlscert));
+				ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
+				util_free(str);
+				return 0;
+			}
+		} else {
+#endif
+			// Generate a new self-signed root certificate for this node using OpenSSL
+			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating new Node Certificate");
+			printf("Generating Certificate...\r\n");
+			do
+			{
+				SSL_TRACE1("agent_GenerateCertificates()");
+				if (util_mkCert(NULL, &(agent->selfcert), 3072, 10000, "MeshNodeCertificate", CERTIFICATE_ROOT, NULL) == 0)
+				{
+					SSL_TRACE2("agent_GenerateCertificates()");
+					return -1;
+				}
+				util_keyhash(agent->selfcert, agent->g_selfid);
+				SSL_TRACE2("agent_GenerateCertificates()");
+			} while (((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
+			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...g_selfid = %s", ILibRemoteLogging_ConvertToHex(agent->g_selfid, (int)sizeof(agent->g_selfid)));
+#if defined(WIN32)
+			wincrypto_setregistry(L"KeyStore", L"None");
+		}
+#endif
 	}
 	else
 	{
 		// Load a node certificate from a PEM file
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Loading Node Cert from PEM file");
+		SSL_TRACE1("ILibDuktape_MeshAgent_GenerateCertificate_FromFile()");
+
 		if (util_from_pem(certfile, &(agent->selfcert)) == -1)
 		{
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "......*ERROR*");
+			SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate_FromFile([ERROR])");
 			return -1;
 		}
 		util_keyhash(agent->selfcert, agent->g_selfid);
 		if (((int*)agent->g_selfid)[0] == 0)
 		{
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "......g_selfid = *ERROR*");
+			SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate_FromFile([ERROR])");
 			return -1; // This removes any chance that the self_id starts with 32 bits of zeros.
 		}
+		SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate_FromFile()");
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...g_selfid = %s", ILibRemoteLogging_ConvertToHex(agent->g_selfid, (int)sizeof(agent->g_selfid)));
 	}
 
+	SSL_TRACE1("ILibDuktape_MeshAgent_GenerateCertificate(SelfNodeCert)");
 	len = util_to_p12(agent->selfcert, "hidden", &str);
 	ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeCert", 12, str, len);
 	util_free(str);
+	SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate(SelfNodeCert)");
 
-	// Generate a new TLS certificate
+	/*
+	// If the root certificate is generated in the TPM, generate a new TLS certificate
+	SSL_TRACE1("ILibDuktape_MeshAgent_GenerateCertificate(SelfNodeTlsCert)");
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating TLS Certificate");
 	len = util_mkCert(&(agent->selfcert), &(agent->selftlscert), 3072, 10000, "localhost", CERTIFICATE_TLS_SERVER, NULL);
 	len = util_to_p12(agent->selftlscert, "hidden", &str);
 	ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, len);
 	util_free(str);
+	SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate(SelfNodeTlsCert)");
+	*/
 
-	// Generate a new TLS client certificate
-	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating TLS Client Certificate");
-	len = util_mkCert(&(agent->selfcert), &(agent->selftlsclientcert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
-	len = util_to_p12(agent->selftlsclientcert, "hidden", &str);
-	ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsClientCert", 21, str, len);
-	util_free(str);
+	// If we don't use TPM, we can skip generating the TLS cert.
+	agent->selftlscert.flags = 0;
+	agent->selftlscert.x509 = NULL;
+	agent->selftlscert.pkey = NULL;
 
 	MSG("Certificates ready.\r\n");
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...READY");
@@ -1122,35 +1623,79 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 }
 int agent_LoadCertificates(MeshAgentHostContainer *agent)
 {
-	char *buffer = ILibScratchPad2;
 	int len;
 
+	SSL_TRACE1("agent_LoadCertificates()");
+
 	//printf("Loading Certificates...\r\n");
-	len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeCert", buffer, sizeof(ILibScratchPad2));
-	if (len == 0 || util_from_p12(buffer, len, "hidden", &(agent->selfcert)) == 0)
+
+	// First, look to see if we have a certificate in the .db file, if we do, use that.
+	len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeCert", ILibScratchPad2, sizeof(ILibScratchPad2));
+	if (len == 0 || util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selfcert)) == 0)
 	{
+#if defined(WIN32)
+		// No cert in this .db file. Try to load or generate a root certificate from a Windows crypto provider. This can be TPM backed which is great.
+		if (wincrypto_open(FALSE) == 0)
+		{
+			char* str = NULL;
+			int l;
+			
+			do {
+				// Finish off work with our own certificate
+				l = wincrypto_getcert(&str);
+				if (l > 0)
+				{
+					util_from_cer(str, l, &(agent->selfcert));
+					util_keyhash(agent->selfcert, agent->g_selfid);
+					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_open(TRUE); } // Force generation of a new certificate.
+				}
+			} while (l != 0 && ((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
+
+			if (l > 0)
+			{
+				// Load the TLS certificate from the database. If not present, generate one.
+				len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", ILibScratchPad2, sizeof(ILibScratchPad2));
+				if ((len != 0) && (util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selftlscert)) == 0)) { len = 0; } // Unable to decode this certificate
+				if (agent_VerifyMeshCertificates(agent) != 0) { len = 0; } // Check that the load TLS cert is signed by our root.
+				if (len == 0) {
+					// Generate a new TLS certificate & save it.
+					util_freecert(&(agent->selftlscert));
+					l = wincrypto_mkCert(L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
+					if (l > 0) {
+						util_from_p12(str, l, "hidden", &(agent->selftlscert));
+						ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
+					}
+					util_free(str);
+					if (l <= 0) { return 1; } // Problem generating the TLS cert, reset everything.
+				}
+				return 0; // All good. We loaded or generated a root agent cert and TLS cert.
+			}
+		}
+#endif
+
+		// No certificate in the database. Return 1 here so we can generate one.
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load Node Certificate from Database");
+		SSL_TRACE2("agent_LoadCertificates([ERROR: SelfNodeCert])");
 		return 1;
 	}
 
-	len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", buffer, sizeof(ILibScratchPad2));
-	if (len == 0 || util_from_p12(buffer, len, "hidden", &(agent->selftlscert)) == 0)
+	// Try to load the TLS certificate
+	len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", ILibScratchPad2, sizeof(ILibScratchPad2));
+	if (len != 0)
 	{
-		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load TLS Certificate from Database");
-		util_freecert(&(agent->selfcert));
-		return 1;
+		// If the TLS certificate is in the database, load it. If not, it's ok to skip this.
+		if (util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selftlscert)) == 0) {
+			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load TLS Certificate from Database");
+			util_freecert(&(agent->selfcert));
+			SSL_TRACE2("agent_LoadCertificates([ERROR: SelfNodeTlsCert])");
+			return 1;
+		}
 	}
 
-	len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsClientCert", buffer, sizeof(ILibScratchPad2));
-	if (len == 0 || util_from_p12(buffer, len, "hidden", &(agent->selftlsclientcert)) == 0)
-	{
-		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load TLS Client Certificate from Database");
-		util_freecert(&(agent->selfcert));
-		util_freecert(&(agent->selftlscert));
-		return 1;
-	}
-
+	// Compute this agent's nodeid.
 	util_keyhash(agent->selfcert, agent->g_selfid);
+	SSL_TRACE2("agent_LoadCertificates()");
+
 	return 0;
 }
 
@@ -1158,24 +1703,21 @@ int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent)
 {
 	X509_STORE *store;
 	X509_STORE_CTX *ctx;
-	int i, j;
+	int i = 0;
+
+	SSL_TRACE1("agent_VerifyMeshCertificates()");
+	if (agent->selftlscert.x509 == NULL) { return 0; } // There is no TLS certificate, no verification needed.
 
 	// Check that the TLS certificate and TLS client certificate are correctly signed by our Mesh Agent certificate
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Verifying TLS Certificates are signed by Mesh Agent Certificate");
 	store = X509_STORE_new();
 	X509_STORE_add_cert(store, agent->selfcert.x509);
 
-	// Check the TLS certificate
 	ctx = X509_STORE_CTX_new();
 	X509_STORE_CTX_init(ctx, store, agent->selftlscert.x509, NULL);
 	i = X509_verify_cert(ctx);
 	X509_STORE_CTX_free(ctx);
 
-	// Check the TLS client certificate
-	ctx = X509_STORE_CTX_new();
-	X509_STORE_CTX_init(ctx, store, agent->selftlsclientcert.x509, NULL);
-	j = X509_verify_cert(ctx);
-	X509_STORE_CTX_free(ctx);
 	X509_STORE_free(store);
 
 	// If the certificate chain is not correct, re-create all the certificates.
@@ -1183,12 +1725,9 @@ int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "......INVALID TLS Server Certificate");
 	}
-	if (j != 1)
-	{
-		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "......INVALID TLS Client Certificate");
-	}
+	SSL_TRACE2("agent_VerifyMeshCertificates()");
 
-	if (i != 1 || j != 1) { return 1; } // Bad certificates
+	if (i != 1) { return 1; } // Bad certificates
 	return 0;
 }
 #endif
@@ -1281,11 +1820,6 @@ void MeshAgent_Slave_HeapWasDestroyed(duk_context *ctx, void *user)
 	ILibStopChain(agent->chain);
 }
 
-
-void OnBrokenPipe_StdIn(ILibProcessPipe_Pipe sender)
-{
-	ILibStopChain(((MeshAgentHostContainer*)((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0])->chain);
-}
 
 // Called when we can now send more data to MeshCentral
 void MeshServer_OnSendOK(ILibWebClient_StateObject sender, void *user1, void *user2)
@@ -1484,35 +2018,61 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				RSA *rsa_prikey;
 
 				// Hash the server's web certificate and check if it matches the one in the auth request
-				util_keyhash2(peer, ILibScratchPad2); // Hash the server certificate public key and place it
-				if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) { printf("Bad server certificate hash\r\n"); break; } // TODO: Disconnect
+				util_certhash2(peer, ILibScratchPad2); // Hash the server certificate
+				if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) { 
+					util_keyhash2(peer, ILibScratchPad2); // Hash the server certificate public key (this is the old way)
+					if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) {
+						printf("Bad server certificate hash\r\n"); // TODO: Disconnect
+						break;
+					}
+				}
 				memcpy_s(agent->serverNonce, sizeof(agent->serverNonce), AuthRequest->serverNonce, sizeof(AuthRequest->serverNonce));
 
 				// Place our certificate in the response
 				MeshCommand_BinaryPacket_AuthVerify_Header *rav = (MeshCommand_BinaryPacket_AuthVerify_Header*)ILibScratchPad2;
 				rav->command = htons(MeshCommand_AuthVerify);										// MeshCommand_AuthVerify (2), agent certificate in ASN1 format
 				char *certDer = (char*)rav->data;
+				short certLen = i2d_X509(agent->selfcert.x509, (unsigned char **)&certDer); // Place the agent root certificate in DER form
+				rav->certLen = htons(certLen);
 
-				rav->certLen = htons(i2d_X509(agent->selfcert.x509, (unsigned char **)&certDer));	// Place the agent root certificate in DER form
-																					
-				// Use our agent root private key to sign the ServerWebHash + ServerNonce + AgentNonce
-				SHA384_Init(&c);
-				util_keyhash2(peer, ILibScratchPad);
-				SHA384_Update(&c, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)); // Server web hash
-				SHA384_Update(&c, agent->serverNonce, UTIL_SHA384_HASHSIZE); // Server nonce
-				SHA384_Update(&c, agent->agentNonce, UTIL_SHA384_HASHSIZE); // Agent nonce
-				SHA384_Final((unsigned char*)ILibScratchPad, &c);
+#ifdef WIN32
+				if (agent->selfcert.pkey != NULL) {
+#endif
+					// Use our agent root private key to sign HASH(ServerWebHash + ServerNonce + AgentNonce)
+					SHA384_Init(&c);
+					SHA384_Update(&c, AuthRequest->serverHash, UTIL_SHA384_HASHSIZE); // Server web hash
+					SHA384_Update(&c, agent->serverNonce, UTIL_SHA384_HASHSIZE); // Server nonce
+					SHA384_Update(&c, agent->agentNonce, UTIL_SHA384_HASHSIZE); // Agent nonce
+					SHA384_Final((unsigned char*)ILibScratchPad, &c);
 
-				// Place the signature & send
-				evp_prikey = agent->selfcert.pkey;
-				rsa_prikey = EVP_PKEY_get1_RSA(evp_prikey);
-				signLen = sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) - rav->certLen;
-				if (RSA_sign(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_SHA384_HASHSIZE, (unsigned char*)(rav->data + rav->certLen), (unsigned int*)&signLen, rsa_prikey) == 1)
-				{
-					// Signature succesful, send the result to the server
-					ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rav, sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + rav->certLen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+					// Create a RSA signature using OpenSSL & send it
+					evp_prikey = agent->selfcert.pkey;
+					rsa_prikey = EVP_PKEY_get1_RSA(evp_prikey);
+					signLen = sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) - certLen;
+					if (RSA_sign(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_SHA384_HASHSIZE, (unsigned char*)(rav->data + certLen), (unsigned int*)&signLen, rsa_prikey) == 1)
+					{
+						// Signature succesful, send the result to the server
+						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rav, sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + certLen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+					}
+					RSA_free(rsa_prikey);
+#ifdef WIN32
+				} else {
+					// Use our agent root private key to sign: ServerWebHash + ServerNonce + AgentNonce
+					memcpy_s(ILibScratchPad, sizeof(ILibScratchPad), AuthRequest->serverHash, UTIL_SHA384_HASHSIZE);
+					memcpy_s(ILibScratchPad + UTIL_SHA384_HASHSIZE, sizeof(ILibScratchPad) - UTIL_SHA384_HASHSIZE, agent->serverNonce, UTIL_SHA384_HASHSIZE);
+					memcpy_s(ILibScratchPad + UTIL_SHA384_HASHSIZE + UTIL_SHA384_HASHSIZE, sizeof(ILibScratchPad) - UTIL_SHA384_HASHSIZE - UTIL_SHA384_HASHSIZE, agent->agentNonce, UTIL_SHA384_HASHSIZE);
+
+					// Create a PKCS7 signature using Windows crypto & send it
+					char* signature = NULL;
+					signLen = wincrypto_sign((unsigned char*)ILibScratchPad, sizeof(AuthRequest->serverHash) + UTIL_SHA384_HASHSIZE + UTIL_SHA384_HASHSIZE, &signature);
+					if (signLen > 0) {
+						// Signature succesful, send the result to the server
+						memcpy_s((unsigned char*)(rav->data + certLen), sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) - certLen, signature, signLen);
+						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rav, sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + certLen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+						free(signature);
+					}
 				}
-				RSA_free(rsa_prikey);
+#endif
 			}
 			break;
 		case MeshCommand_AuthVerify: // This is the signature from the server. We need to check everything is ok.
@@ -1551,8 +2111,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 					// Compute the authentication hash
 					SHA384_Init(&c);
-					util_keyhash2(peer, ILibScratchPad);
-					SHA384_Update(&c, ILibScratchPad, UTIL_SHA384_HASHSIZE);
+					util_certhash2(peer, ILibScratchPad2);
+					SHA384_Update(&c, ILibScratchPad2, UTIL_SHA384_HASHSIZE);
 					SHA384_Update(&c, agent->agentNonce, UTIL_SHA384_HASHSIZE);
 					SHA384_Update(&c, agent->serverNonce, UTIL_SHA384_HASHSIZE);
 					SHA384_Final((unsigned char*)ILibScratchPad, &c);
@@ -1566,8 +2126,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						agent->serverAuthState += 1;
 
 						// Store the server's TLS cert hash so in the future, we can skip server auth.
-						util_keyhash2(peer, ILibScratchPad);
-						ILibSimpleDataStore_PutEx(agent->masterDb, "ServerTlsCertHash", 17, ILibScratchPad, UTIL_SHA384_HASHSIZE);
+						ILibSimpleDataStore_PutEx(agent->masterDb, "ServerTlsCertHash", 17, ILibScratchPad2, UTIL_SHA384_HASHSIZE);
 
 						// Send our agent information to the server
 						MeshServer_SendAgentInfo(agent, WebStateObject);
@@ -1898,7 +2457,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			// Check to see if we already have a validated TLS cert hash
 			{
 				MeshCommand_BinaryPacket_AuthRequest *ar = (MeshCommand_BinaryPacket_AuthRequest*)ILibScratchPad2;
-				util_keyhash2(peer, ar->serverHash); // Hash the server certificate public key and place it
+				util_certhash2(peer, ar->serverHash); // Hash the server certificate public key and place it
 
 				len = ILibSimpleDataStore_GetEx(agent->masterDb, "ServerTlsCertHash", 17, ILibScratchPad, sizeof(ILibScratchPad));
 				if ((len == UTIL_SHA384_HASHSIZE) && (memcmp(ILibScratchPad, ar->serverHash, UTIL_SHA384_HASHSIZE) == 0)) {
@@ -1942,9 +2501,16 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			agent->controlChannel = NULL; // Set the agent MeshCentral server control channel
 			agent->serverConnectionState = 0;
 			break;
-		case ILibWebClient_ReceiveStatus_MoreDataToBeReceived: // Data received
-			// Process Mesh Agent commands
-			MeshServer_ProcessCommand(WebStateObject, agent, bodyBuffer, endPointer);
+		case ILibWebClient_ReceiveStatus_MoreDataToBeReceived:	// Data received			
+			if (header->StatusCode == 101)
+			{
+				// Process Mesh Agent commands
+				MeshServer_ProcessCommand(WebStateObject, agent, bodyBuffer, endPointer);
+			}
+			else
+			{
+				printf("Protocol Error encountered...\n");
+			}
 			break;
 	}
 
@@ -2306,25 +2872,29 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 				if (val[valLen - 1] == 13) { --valLen; }
 				valLen = ILibTrimString(&val, valLen);
 
-				if (valLen == 0) {
-					// Empty key, remove the value completely.
-					ILibSimpleDataStore_DeleteEx(agent->masterDb, key, keyLen);
-				}
-				else
+				if (!(keyLen == 10 && strncmp("CoreModule", key, 10) == 0))
 				{
-					if (ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER)
+					if (valLen == 0) 
 					{
-						// HEX value
-						ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, ILibScratchPad2, util_hexToBuf(val + 2, valLen - 2, ILibScratchPad2));
+						// Empty key, remove the value completely.
+						ILibSimpleDataStore_DeleteEx(agent->masterDb, key, keyLen);
 					}
 					else
 					{
-						// STRING value
-						val[valLen] = 0;
-						ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, val, valLen + 1);
+						if (ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER)
+						{
+							// HEX value
+							ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, ILibScratchPad2, util_hexToBuf(val + 2, valLen - 2, ILibScratchPad2));
+						}
+						else
+						{
+							// STRING value
+							val[valLen] = 0;
+							ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, val, valLen + 1);
+						}
 					}
+					//printf("...Imported: %s\n", key);
 				}
-				//printf("...Imported: %s\n", key);
 			}
 		}
 		f = f->NextResult;
@@ -2426,7 +2996,6 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 	}
 }
 
-#ifndef WIN32
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands);
 void MeshAgent_AgentMost_dbRetryCallback(void *object)
 {
@@ -2440,7 +3009,6 @@ void MeshAgent_AgentMost_dbRetryCallback(void *object)
 		ILibStopChain(agentHost->chain);
 	}
 }
-#endif
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
@@ -2461,12 +3029,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			char str[15];
 			pid_t pid = 0;
 			size_t len;
-
-			/*
-			#if defined(__APPLE__) && defined(_DAEMON) && defined(_LINKVM)
-			installOsx(0);
-			#endif
-			*/
 
 #ifdef _ANDROID
 			fd = fopen("/data/usr/tmp/meshagent.pid", "r");
@@ -2489,12 +3051,12 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 				}
 				fclose(fd);
-				exit(EXIT_SUCCESS);
+				exit(EXIT_SUCCESS); 
 			}
 			else
 			{
 				printf("Unable to find process id file.\r\n");
-				exit(EXIT_FAILURE);
+				exit(EXIT_FAILURE); 
 			}
 		}
 	}
@@ -2503,7 +3065,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	// We are a Mesh Agent
 	if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")); }
-#ifndef WIN32
 	if (agentHost->masterDb == NULL) 
 	{ 
 		void **data = (void**)ILibScratchPad;
@@ -2524,9 +3085,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			return 1;
 		}
 	}
-#else
-	if (agentHost->masterDb == NULL) { printf("Unable to open database.\r\n"); return(0); }
-#endif
+
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: argv[0] = %s", param[0]);
@@ -2679,15 +3238,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 
 #ifndef MICROSTACK_NOTLS
-	ILibWebClient_EnableHTTPS(agentHost->httpClientManager, &(agentHost->selftlscert), agentHost->selfcert.x509, ValidateMeshServer);
+	if (agentHost->selftlscert.x509 == NULL) {
+		// We don't have a TLS certificate, so setup the client without one.
+		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, NULL, NULL, ValidateMeshServer);
+	} else {
+		// We have a TLS certificate, use it for HTTPS client side auth (not super useful).
+		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, &(agentHost->selftlscert), agentHost->selfcert.x509, ValidateMeshServer);
+	}
 #endif
 
-#ifdef _POSIX
+#if defined(_POSIX) && !defined(__APPLE__) // Excluding MacOS, becuase I found fork() doesn't work as expected on MacOS Sierra. Should be using launchctl on MacOS anyways
 	if (paramLen >= 2)
 	{
 		if ((strcmp(param[1], "start") == 0 || strcmp(param[1], "-d") == 0)) options = 1;
 		else if ((strcmp(param[1], "stop") == 0 || strcmp(param[1], "-s") == 0)) options = 2;
-		else if ((strcmp(param[1], "restart") == 0 || strcmp(param[1], "-r") == 0)) options = 3;
 	}
 
 	// Start
@@ -2698,12 +3262,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		pid_t pid, sid;
 		size_t len;
 
-		/*
-		#if defined(__APPLE__) && defined(_DAEMON) && defined(_LINKVM)
-		installOsx(1);
-		#endif
-		*/
-
+		ILibSimpleDataStore_Close(agentHost->masterDb);
+		agentHost->masterDb = NULL;
 		pid = fork();
 		if (pid < 0) { exit(EXIT_FAILURE); }
 		else if (pid > 0)
@@ -2724,28 +3284,34 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			printf("Mesh agent started.\r\n");
 			exit(EXIT_SUCCESS);
 		}
-
 		sid = setsid();
 		if (sid < 0) { exit(EXIT_FAILURE); }
 		close(STDIN_FILENO);
 		close(STDOUT_FILENO);
 		close(STDERR_FILENO);
 		parseCommands = 0;
+		agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
 	}
-	else if (options) exit(EXIT_SUCCESS);
-
+	else if (options) { exit(EXIT_SUCCESS); }
 #endif
 
 	if (parseCommands == 0 || paramLen == 1 || ((paramLen == 2) && (strcmp(param[1], "run") == 0 || strcmp(param[1], "connect") == 0)))
 	{
 #ifdef WIN32
-		char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update.exe");
+		char* filePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update.exe");
 #else
-		char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update");
+		char* filePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update");
 #endif
 
 		// Delete the mesh agent update file if there is one
-		util_deletefile(updateFilePath);
+		util_deletefile(filePath);
+
+		// If there is a ".corereset" file, delete the core and remove the file.
+		filePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".corereset");
+		if (ILibSimpleDataStore_Exists(filePath)) {
+			ILibSimpleDataStore_Delete(agentHost->masterDb, "CoreModule"); // Clear the core from datastore
+			util_deletefile(filePath);
+		}
 
 		// Check if there is a CoreModule in the db
 		char *CoreModule;
@@ -3030,8 +3596,10 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 
 	if ((paramLen == 1 && strcmp(param[0], "--slave") == 0) || (paramLen == 2 && strcmp(param[1], "--slave") == 0)) { MeshAgent_Slave(agentHost); return 0; }
+#ifndef __APPLE__
 	if (paramLen == 2 && strcmp(param[1], "--netinfo") == 0) { char* data; int len = MeshInfo_GetSystemInformation(&data); if (len > 0) { printf("%s\r\n", data); free(data); } return 0; }
-	
+#endif
+
 	if (agentHost->exePath == NULL)
 	{
 		agentHost->exePath = exePath;
@@ -3129,11 +3697,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 			char str[4096];
 
-			// Kill the KVM slave process if needed
-#if defined(__APPLE__) && defined(_DAEMON) && defined(_LINKVM)
-			if (kvm_clientProcessId != 0) kill(kvm_clientProcessId, SIGTERM);
-#endif
-
 			// Build the argument list
 			str[0] = 0;
 			for (i = 1; i < paramLen && ptr >= 0; i++) ptr += sprintf_s(str + ptr, 4096 - ptr, " %s", param[i]);
@@ -3160,24 +3723,49 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				CloseHandle(processInfo.hThread);
 			}
 #else
-			// Linux version
-			if (agentHost->performSelfUpdate == 1) {
-				// Systemd is in use, move the update using "mv" and restart the systemd service
-				struct stat results;
-				stat(agentHost->exePath, &results); // This the mode of the current executable
-				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
+			if (MeshAgent_Helper_IsService() != 0)
+			{
+				// We were started as a service
+				MeshAgent_Posix_PlatformTypes pt = MeshAgent_Posix_GetPlatformType();
+				if (pt != MeshAgent_Posix_PlatformTypes_UNKNOWN)
+				{
+					struct stat results;
+					stat(agentHost->exePath, &results); // This the mode of the current executable
+					chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
 
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
-				if (system(ILibScratchPad)) {}
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
+					if (system(ILibScratchPad)) {}
 
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "systemctl restart meshagent"); // Restart the service
-				if (system(ILibScratchPad)) {}
-			} else {
+					switch (pt)
+					{
+#ifdef __APPLE__
+						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
+							write(STDOUT_FILENO, "Finishing update...\n", 20);
+							fsync(STDOUT_FILENO);
+							exit(1); // We're exiting here, to restart via KeepAlive (LaunchD doesn't support an explicit 'restart')
+							break;
+#endif
+						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "systemctl restart meshagent"); // Restart the service
+							ignore_result(system(ILibScratchPad));
+							break;
+						case MeshAgent_Posix_PlatformTypes_INITD:
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent start");	// Restart the service
+							ignore_result(system(ILibScratchPad));
+							break;
+						default:
+							break;
+					}
+
+				}
+			}
+			else
+			{
 				// Generic update process, call our own update with arguments.
 				struct stat results;
 				stat(agentHost->exePath, &results); // This the mode of the current executable
 				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:\"%s\"%s &", updateFilePath, agentHost->exePath, str); // Launch the new executable for update.
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "\"%s\" -update:\"%s\"%s &", updateFilePath, agentHost->exePath, str); // Launch the new executable for update.
 				if (system(ILibScratchPad)) {}
 			}
 #endif
@@ -3198,13 +3786,11 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 #ifndef MICROSTACK_NOTLS
 	util_freecert(&agent->selftlscert);
 	util_freecert(&agent->selfcert);
-	util_freecert(&agent->selftlsclientcert);
 #endif
 
-	if (agent->masterDb != NULL) { ILibSimpleDataStore_Close(agent->masterDb); }
-	if (agent->chain != NULL) { ILibChain_DestroyEx(agent->chain); }
+	if (agent->masterDb != NULL) { ILibSimpleDataStore_Close(agent->masterDb); agent->masterDb = NULL; }
+	if (agent->chain != NULL) { ILibChain_DestroyEx(agent->chain); agent->chain = NULL; }
 	free(agent);
-
 }
 void MeshAgent_Stop(MeshAgentHostContainer *agent)
 {
@@ -3282,7 +3868,7 @@ void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char *
 
 	// Attempt to copy our own exe over 
 	remove(exepath);
-	sprintf_s(ILibScratchPad2, 6000, "cp %s %s", selfpath, exepath);
+	sprintf_s(ILibScratchPad2, 6000, "cp \"%s\" \"%s\"", selfpath, exepath);
 	while (system(ILibScratchPad2) != 0)
 	{
 		sleep(5);

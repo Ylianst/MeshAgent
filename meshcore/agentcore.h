@@ -177,7 +177,6 @@ typedef struct MeshAgentHostContainer
 #ifndef MICROSTACK_NOTLS
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
-	struct util_cert selftlsclientcert;
 	char serverWebHash[UTIL_SHA384_HASHSIZE];
 #endif
 
@@ -193,9 +192,7 @@ typedef struct MeshAgentHostContainer
 	char* multicastServerUrl;
 	int serverConnectionState;
 	int exitCode;
-#ifndef WIN32
 	int dbRetryCount;
-#endif
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif
