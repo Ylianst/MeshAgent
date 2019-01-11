@@ -199,9 +199,9 @@ function AmtStackCreateService(wsmanStack) {
     }
 
     // Auto generated methods
-    obj.AMT_AgentPresenceWatchdog_RegisterAgent = function (callback_func) { obj.Exec("AMT_AgentPresenceWatchdog", "RegisterAgent", {}, callback_func); }
-    obj.AMT_AgentPresenceWatchdog_AssertPresence = function (SequenceNumber, callback_func) { obj.Exec("AMT_AgentPresenceWatchdog", "AssertPresence", { "SequenceNumber": SequenceNumber }, callback_func); }
-    obj.AMT_AgentPresenceWatchdog_AssertShutdown = function (SequenceNumber, callback_func) { obj.Exec("AMT_AgentPresenceWatchdog", "AssertShutdown", { "SequenceNumber": SequenceNumber }, callback_func); }
+    obj.AMT_AgentPresenceWatchdog_RegisterAgent = function (callback_func, tag, pri, selectors) { obj.Exec("AMT_AgentPresenceWatchdog", "RegisterAgent", {}, callback_func, tag, pri, selectors); }
+    obj.AMT_AgentPresenceWatchdog_AssertPresence = function (SequenceNumber, callback_func, tag, pri, selectors) { obj.Exec("AMT_AgentPresenceWatchdog", "AssertPresence", { "SequenceNumber": SequenceNumber }, callback_func, tag, pri, selectors); }
+    obj.AMT_AgentPresenceWatchdog_AssertShutdown = function (SequenceNumber, callback_func, tag, pri, selectors) { obj.Exec("AMT_AgentPresenceWatchdog", "AssertShutdown", { "SequenceNumber": SequenceNumber }, callback_func, tag, pri, selectors); }
     obj.AMT_AgentPresenceWatchdog_AddAction = function (OldState, NewState, EventOnTransition, ActionSd, ActionEac, callback_func, tag, pri, selectors) { obj.Exec("AMT_AgentPresenceWatchdog", "AddAction", { "OldState": OldState, "NewState": NewState, "EventOnTransition": EventOnTransition, "ActionSd": ActionSd, "ActionEac": ActionEac }, callback_func, tag, pri, selectors); }
     obj.AMT_AgentPresenceWatchdog_DeleteAllActions = function (callback_func, tag, pri, selectors) { obj.Exec("AMT_AgentPresenceWatchdog", "DeleteAllActions", {}, callback_func, tag, pri, selectors); }
     obj.AMT_AgentPresenceWatchdogAction_GetActionEac = function (callback_func) { obj.Exec("AMT_AgentPresenceWatchdogAction", "GetActionEac", {}, callback_func); }
@@ -692,8 +692,8 @@ function AmtStackCreateService(wsmanStack) {
     // TODO: Just put some of them here, but many more still need to be added, helpful link here:
     // https://software.intel.com/sites/manageability/AMT_Implementation_and_Reference_Guide/default.htm?turl=WordDocuments%2Fsecurityadminevents.htm
     obj.GetAuditLogExtendedDataStr = function (id, data) {
-        if ((id == 1602 || id == 1604) && data[0] == 0) { return data.slice(2, 2 + data[1]).toString(); } // ACL Entry Added/Removed (Digest)
-        if (id == 1603) { if (data[1] == 0) { return data.slice(3).toString(); } return null; } // ACL Entry Modified
+        if ((id == 1602 || id == 1604) && data[0] == 0) { return bufToArray(data).splice(2, 2 + data[1]).toString(); } // ACL Entry Added/Removed (Digest)
+        if (id == 1603) { if (data[1] == 0) { return bufToArray(data).splice(3).toString(); } return null; } // ACL Entry Modified
         if (id == 1605) { return ["Invalid ME access", "Invalid MEBx access"][data[0]]; } // ACL Access with Invalid Credentials
         if (id == 1606) { var r = ["Disabled", "Enabled"][data[0]]; if (data[1] == 0) { r += ", " + data[3]; } return r; } // ACL Entry State
         if (id == 1607) { return "Remote " + ["NoAuth", "ServerAuth", "MutualAuth"][data[0]] + ", Local " + ["NoAuth", "ServerAuth", "MutualAuth"][data[1]]; } // TLS State Changed
@@ -706,12 +706,8 @@ function AmtStackCreateService(wsmanStack) {
         return null;
     }
 
-    obj.GetAuditLog = function (func)
-    {
-        var opt = [];
-        for (var i = 1; i < arguments.length; ++i) { opt.push(arguments[i]); }
-
-        obj.AMT_AuditLog_ReadRecords(1, _GetAuditLog0, [func, [], opt]);
+    obj.GetAuditLog = function (func) {
+        obj.AMT_AuditLog_ReadRecords(1, _GetAuditLog0, [func, []]);
     }
 
     function MakeToArray(v) { if (!v || v == null || typeof v == 'object') return v; return [v]; }
@@ -720,17 +716,10 @@ function AmtStackCreateService(wsmanStack) {
     function ReadIntX(v, p) { return (v[p + 3] * 0x1000000) + (v[p + 2] << 16) + (v[p + 1] << 8) + v[p]; }
     function btoa(x) { return Buffer.from(x).toString('base64'); }
     function atob(x) { var z = null; try { z = Buffer.from(x, 'base64').toString(); } catch (e) { console.log(e); } return z; }
+    function bufToArray(buf) { var r = []; for (var i in buf) { r.push(buf[i]); } return r; }
 
     function _GetAuditLog0(stack, name, responses, status, tag) {
-        var opt = tag[2];
-        if (status != 200)
-        {       
-            opt.unshift([]);
-            opt.unshift(status);
-            opt.unshift(obj);
-            tag[0].apply(obj, opt);
-            return;
-        }
+        if (status != 200) { tag[0](obj, [], status); return; }
         var ptr, i, e, es, x, r = tag[1], t = new Date(), TimeStamp;
 
         if (responses.Body['RecordsReturned'] > 0) {
@@ -774,18 +763,18 @@ function AmtStackCreateService(wsmanStack) {
                     x['Initiator'] = 'KVM Default Port';
                     ptr = 5;
                 }
-                
+
                 // Read timestamp
                 TimeStamp = ReadInt(e, ptr);
                 x['Time'] = new Date((TimeStamp + (t.getTimezoneOffset() * 60)) * 1000);
                 ptr += 4;
-                
+
                 // Read network access
                 x['MCLocationType'] = e[ptr++];
                 var netlen = e[ptr++];
 
                 x['NetAddress'] = e.slice(ptr, ptr + netlen).toString();
-                
+
                 // Read extended data
                 ptr += netlen;
                 var exlen = e[ptr++];
@@ -794,15 +783,10 @@ function AmtStackCreateService(wsmanStack) {
                 r.push(x);
             }
         }
-        if (responses.Body['TotalRecordCount'] > r.length)
-        {
-            obj.AMT_AuditLog_ReadRecords(r.length + 1, _GetAuditLog0, [tag[0], r, opt]);
-        } else
-        {
-            opt.unshift(r);
-            opt.unshift(status);     
-            opt.unshift(obj);
-            tag[0].apply(obj, opt);
+        if (responses.Body['TotalRecordCount'] > r.length) {
+            obj.AMT_AuditLog_ReadRecords(r.length + 1, _GetAuditLog0, [tag[0], r]);
+        } else {
+            tag[0](obj, r, status);
         }
     }
 
@@ -1004,7 +988,7 @@ function AmtStackCreateService(wsmanStack) {
     // Convert a byte array of SID into string
     function GetSidString(sid) {
         var r = "S-" + sid.charCodeAt(0) + "-" + sid.charCodeAt(7);
-        for (var i = 2; i < (sid.length / 4) ; i++) r += "-" + ReadIntX(sid, i * 4);
+        for (var i = 2; i < (sid.length / 4); i++) r += "-" + ReadIntX(sid, i * 4);
         return r;
     }
 
