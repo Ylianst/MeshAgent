@@ -24,8 +24,6 @@ limitations under the License.
 //   MeshAgent.exe -omeshcmd.exe -imodule1.js -xMeshService64.exe meshcmd.js
 //
 
-//attachDebugger({ webport: 9095, wait: 1 }).then(function (p) { console.log('debug on port: ' + p); });
-
 var fs = require('fs');
 var i, exe, js, exeLen = 0;
 var dependency = [];
@@ -83,7 +81,7 @@ if (depPath != null)
 {
     try
     {
-        filenames = fs.readdirSync(depPath +  (process.platform == 'win32' ? '\\*' : '/*'));
+        filenames = fs.readdirSync(depPath + '\\*');
         if(filenames.length == 0 && process.platform != 'win32')
         {
             var currentPath = process.execPath.substring(0, process.execPath.lastIndexOf('/'));
@@ -93,7 +91,8 @@ if (depPath != null)
     filenames.forEach(function (filename)
     {
         var fname = process.platform == 'win32' ? (depPath + '\\' + filename) : (depPath + '/' + filename);
-        try { dependency.push({ name: filename.slice(0, filename.indexOf('.js')), base64: fs.readFileSync(fname).toString('base64') }); } catch (e) { console.log(e); process.exit(); }
+        //try { dependency.push({ name: filename.slice(0, filename.indexOf('.js')), base64: fs.readFileSync(fname).toString('base64') }); } catch (e) { console.log(e); process.exit(); }
+        try { dependency.push({ name: filename.slice(0, filename.indexOf('.js')), str: fs.readFileSync(fname).toString() }); } catch (e) { console.log(e); process.exit(); }
     });
 }
 
@@ -104,7 +103,9 @@ if (dependency.length > 0) {
     console.log("\nIntegrating Dependencies: ")
     for (i = 0; i < dependency.length; ++i) {
         if (addOn == null) { addOn = ''; }
-        addOn += ("addModule('" + dependency[i].name + "', Buffer.from('" + dependency[i].base64 + "', 'base64'));\n");
+        //addOn += ("addModule('" + dependency[i].name + "', Buffer.from('" + dependency[i].base64 + "', 'base64'));\n");
+        //console.log(dependency[i].str);
+        addOn += ("addModule('" + dependency[i].name + "', \"" + escapeCodeString(dependency[i].str) + "\");\n");
         console.log("   " + dependency[i].name);
     }
     console.log("");
@@ -142,6 +143,8 @@ if (exe.slice(exe.length - 16).toString('hex').toUpperCase() == exeJavaScriptGui
 // Merge the dependencies at start of JS file & write binary
 if (addOn != null) { js = Buffer.concat([Buffer.from(addOn), js]); }
 console.log("JavaScript Length: " + js.length);
+//fs.writeFileSync("c:\\temp\\xx.js", js); // DEBUG
+
 w.write(exe.slice(0, exeLen), OnWroteExe); // Write original .exe binary
 
 // Called once the .exe is written 
@@ -165,4 +168,17 @@ function OnWroteExe() {
             process.exit();
         });
     });
+}
+
+// Escape a code string
+function escapeCodeString(str) {
+    const escapeCodeStringTable = { 39: '\\\'', 34: '\\"', 92: '\\\\', 8: '\\b', 12: '\\f', 10: '\\n', 13: '\\r', 9: '\\t' };
+    var r = '', c, cr, table;
+    for (var i = 0; i < str.length; i++) {
+        c = str[i];
+        cr = c.charCodeAt(0);
+        table = escapeCodeStringTable[cr];
+        if (table != null) { r += table; } else { if ((cr >= 32) && (cr <= 127)) { r += c; } }
+    }
+    return r;
 }
