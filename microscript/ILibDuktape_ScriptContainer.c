@@ -24,7 +24,11 @@ limitations under the License.
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <ifaddrs.h>
+#ifndef __APPLE__
 #include <netpacket/packet.h>
+#else
+#include <mach-o/dyld.h>
+#endif
 #include <sys/utsname.h>
 #endif
 
@@ -193,9 +197,9 @@ void ILibDuktape_ScriptContainer_PUSH_SLAVE(duk_context *ctx, void *chain);
 
 void ILibDuktape_ScriptContainer_Slave_SendJSON(duk_context *ctx)
 {
+	duk_size_t jsonLen;
 	char *json = (char*)duk_json_encode(ctx, -1);
-	int len = 4 + sprintf_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, "%s", json);
-	((int*)ILibScratchPad2)[0] = len;
+	duk_get_lstring(ctx, -1, &jsonLen);
 
 	duk_push_heap_stash(ctx);
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ScriptContainer_MasterPtr);
@@ -203,26 +207,34 @@ void ILibDuktape_ScriptContainer_Slave_SendJSON(duk_context *ctx)
 
 	if (master != NULL)
 	{
-		ILibDuktape_ScriptContainer_NonIsolated_Command* cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(len + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+		ILibDuktape_ScriptContainer_NonIsolated_Command* cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(1+(int)jsonLen + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
 		cmd->container.master = master;
-		memcpy_s(cmd->json, len, json, len);
+		memcpy_s(cmd->json, jsonLen, json, jsonLen);
+		cmd->json[jsonLen] = 0;
 		ILibChain_RunOnMicrostackThread2(master->chain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster, cmd, 1);
 		return;
 	}
 
+	char *scratch = ILibMemory_Allocate((int)jsonLen + 4, 0, NULL, NULL);
+	((int*)scratch)[0] = (int)jsonLen+4;
+	memcpy_s(scratch + 4, jsonLen, json, jsonLen);
 
 #ifdef WIN32
 	DWORD tmpLen;
-	WriteFile(GetStdHandle(STD_ERROR_HANDLE), ILibScratchPad2, len, &tmpLen, NULL);
+	WriteFile(GetStdHandle(STD_ERROR_HANDLE), scratch, 4+(DWORD)jsonLen, &tmpLen, NULL);
 #else
-	ignore_result(write(STDERR_FILENO, ILibScratchPad2, len));
+	ignore_result(write(STDERR_FILENO, scratch, 4 + jsonLen));
 #endif	
 	duk_pop(ctx);
+	free(scratch);
 }
 
 void ILibDuktape_ScriptContainer_Slave_OnBrokenPipe(ILibProcessPipe_Pipe sender)
 {
-	ILibStopChain(((ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0])->chain);
+	if (ILibMemory_CanaryOK(sender))
+	{
+		ILibStopChain(((ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_Extra(sender))[0])->chain);
+	}
 }
 
 
@@ -437,15 +449,18 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 {
 	// Check if .JS file is integrated with executable
 
+#ifndef __APPLE__
 	char exePath[_MAX_PATH];
+#else
+	char exePath[PATH_MAX+1];
+#endif
 
 #ifdef WIN32
 	GetModuleFileName(NULL, exePath, sizeof(exePath));
 #elif defined(__APPLE__)
-	uint32_t len;
+	uint32_t len = sizeof(exePath);
 	if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
 	exePath[len] = 0;
-	agentHost->exePath = exePath;
 #elif defined(NACL)
 #else
 	int x = readlink("/proc/self/exe", exePath, sizeof(exePath));
@@ -1107,10 +1122,10 @@ int ILibDuktape_ScriptContainer_os_isWirelessInterface(char *interfaceName)
 	return(retVal);
 }
 #endif
-
+#ifndef __APPLE__
 duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 {
-#ifndef WIN32
+#if !defined(WIN32)
 	duk_eval_string(ctx, "require('os').getDefaultGateways();");
 	void *gwTable = duk_get_heapptr(ctx, -1);
 #endif
@@ -1344,6 +1359,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 
 	return(1);
 }
+#endif
 duk_ret_t ILibDuktape_ScriptContainer_OS_hostname(duk_context *ctx)
 {
 	char name[1024];
@@ -1366,7 +1382,9 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateInstanceMethod(ctx, "arch", ILibDuktape_ScriptContainer_OS_arch, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "platform", ILibDuktape_ScriptContainer_OS_platform, 0);
+#ifndef __APPLE__
 	ILibDuktape_CreateInstanceMethod(ctx, "networkInterfaces", ILibDuktape_ScriptContainer_OS_networkInterfaces, 0);
+#endif
 	ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_ScriptContainer_OS_hostname, 0);
 
 	char jsExtras[] = "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
@@ -1407,6 +1425,55 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	};\
 	exports.getArpCache = function getArpCache()\
 	{\
+		if(process.platform == 'darwin')\
+		{\
+			var promise = require('promise');\
+			var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });\
+			var child_process = require('child_process');\
+			ret._child = child_process.execFile('/bin/sh', ['sh']);\
+			ret._child.promise = ret;\
+			ret._child.stdout._lines = '';\
+			ret._child.stdout.on('data', function (chunk) { this._lines += chunk.toString(); });\
+			ret._child.stdin.write('arp -a\\nexit\\n');\
+			ret._child.on('exit', function (code)\
+			{\
+				var lines = this.stdout._lines.split('\\n');\
+				var tokens, hw;\
+				var cache = {};\
+				for (var i in lines)\
+				{\
+					if (lines[i].length > 0)\
+					{\
+						tokens = lines[i].split(' ');\
+						if (tokens[3] != '(incomplete)')\
+						{\
+							if (!cache[tokens[5]]) { cache[tokens[5]] = {}; }\
+							var hwtokens = tokens[3].split(':');\
+							for (var hwi in hwtokens)\
+							{\
+								if (hwtokens[hwi].length == 1) { hwtokens[hwi] = '0' + hwtokens[hwi]; }\
+								hwtokens[hwi] = hwtokens[hwi].toUpperCase();\
+							}\
+							cache[tokens[5]][tokens[1].slice(1, tokens[1].length - 1)] = hwtokens.join(':');\
+						}\
+					}\
+				}\
+				Object.defineProperty(cache, 'flat',\
+				{\
+					value: function flat() {\
+						var r = {};\
+						for (var adapter in this) {\
+							for (var addr in this[adapter]) {\
+								r[addr] = this[adapter][addr];\
+							}\
+						}\
+						return (r);\
+					}\
+				});\
+				this.promise._res(cache);\
+			});\
+			return (ret);\
+		}\
 		var retVal = {};\
 		Object.defineProperty(retVal, 'flat',\
 		{\
@@ -1511,6 +1578,194 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			}\
 			return(defaultGateways);\
 		}\
+	}\
+	if(process.platform == 'darwin')\
+	{\
+		exports.networkInterfaces = function()\
+		{\
+		var child_process = require('child_process');\
+		var child = child_process.execFile('/bin/sh', ['sh']);\
+		child.stdout._lines = '';\
+		child.stdout.on('data', function (chunk) { this._lines += chunk.toString(); });\
+		child.stdin.write('ifconfig\\nexit\\n');\
+		child.waitExit();\
+		var adapters = [];\
+		var adapter;\
+		var lines = child.stdout._lines.split('\\n');\
+		var tokens;\
+		for (var i in lines)\
+		{\
+			if (lines[i].length > 0 && lines[i][0] != '\\t')\
+			{\
+				if (adapters.length > 0 && adapters[adapters.length - 1].inet === undefined && adapters[adapters.length - 1].inet6 === undefined) { adapters.pop(); }\
+				adapters.push({ device: lines[i].split(':')[0] });\
+			}\
+			if (lines[i][0] == '\\t')\
+			{\
+				adapter = adapters[adapters.length - 1];\
+				tokens = lines[i].split(' ');\
+				tokens[0] = tokens[0].trim();\
+				switch (tokens[0])\
+				{\
+				case 'inet':\
+					adapter.inet = tokens[1];\
+					var tst = Buffer.from(tokens[3].substring(2), 'hex');\
+					adapter.netmask = tst[0].toString() + '.' + tst[1].toString() + '.' + tst[2].toString() + '.' + tst[3].toString();\
+					break;\
+				case 'inet6':\
+					if (adapter.inet6 === undefined) { adapter.inet6 = []; }\
+					var i6 = {};\
+					i6.address = tokens[1].toUpperCase().split('%')[0];\
+					if (tokens[tokens.length - 3] == 'scopeid')\
+					{\
+						i6.scope = tokens[tokens.length - 2].substring(2);\
+						if (i6.scope.length == 1) { i6.scope = '0' + i6.scope; }\
+						i6.scope = Buffer.from(i6.scope, 'hex')[0].toString();\
+					}\
+					adapter.inet6.push(i6);\
+					break;\
+				case 'ether':\
+					var ether = tokens[1].split(':');\
+					for (var x in ether)\
+					{\
+						if (ether[x].length == 1) { ether[x] = '0' + ether[x]; }\
+						ether[x] = ether[x].toUpperCase();\
+					}\
+					adapter.mac = ether.join(':');\
+					break;\
+				}\
+			}\
+		}\
+		if (adapters.length > 0 && adapters[adapters.length - 1].inet === undefined && adapters[adapters.length - 1].inet6 === undefined) { adapters.pop(); }\
+		var retval = {};\
+		while (adapters.length > 0)\
+		{\
+			adapter = adapters.pop();\
+			retval[adapter.device] = [];\
+			if (adapter.inet)\
+			{\
+				retval[adapter.device].push({ address: adapter.inet, netmask : adapter.netmask, mac : adapter.mac, family : 'IPv4' });\
+			}\
+			if (adapter.inet6)\
+			{\
+				while (adapter.inet6.length > 0)\
+				{\
+					var i6 = adapter.inet6.pop();\
+					retval[adapter.device].push({ address: i6.address, mac : adapter.mac, family : 'IPv6', scope : i6.scope });\
+				}\
+			}\
+		}\
+		child = child_process.execFile('/bin/sh', ['sh']);\
+		child.stdout._lines = '';\
+		child.stdout.on('data', function(chunk) { this._lines += chunk.toString(); });\
+		child.stdin.write('networksetup -listallhardwareports\\nexit\\n');\
+		child.waitExit();\
+		lines = child.stdout._lines.split('\\n');\
+		for (var i = 0; i<lines.length; ++i)\
+		{\
+			if (lines[i].split('Hardware Port:').length > 1)\
+			{\
+				if (lines[i].split(':')[1].split('802.11').length > 1)\
+				{\
+					var dv = lines[i + 1].split(':')[1].trim();\
+					if (retval[dv])\
+					{\
+						for (var x in retval[dv])\
+						{\
+							retval[dv][x].type = 'wireless';\
+						}\
+					}\
+					else\
+					{\
+						retval[dv] = [{type: 'wireless', mac: lines[i + 2].split('Ethernet Address:')[1].trim().toUpperCase()}];\
+					}\
+				}\
+				else if (lines[i].split(':')[1].trim() == 'Ethernet')\
+				{\
+					var dv = lines[i + 1].split(':')[1].trim();\
+					if (retval[dv])\
+					{\
+						for (var x in retval[dv])\
+						{\
+							retval[dv][x].type = 'ethernet';\
+						}\
+					}\
+					else\
+					{\
+						retval[dv] = [{type: 'ethernet', mac: lines[i + 2].split('Ethernet Address:')[1].trim().toUpperCase()}];\
+					}\
+				}\
+			}\
+		}\
+		return(retval);\
+		};\
+	}\
+	exports.name = function name()\
+	{\
+		var promise = require('promise');\
+		var p = new promise(function(acc, rej) { this._acc = acc; this._rej = rej; });\
+		switch (process.platform)\
+		{\
+			case 'linux':\
+			case 'darwin':\
+				p.child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });\
+				break;\
+			case 'win32':\
+				p.child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
+				break;\
+		}\
+		p.child.promise = p;\
+		p.child.stdout.str = '';\
+		p.child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
+		p.child.on('exit', function(code)\
+		{\
+			var lines;\
+			var tokens;\
+			var i, j;\
+			switch (process.platform)\
+			{\
+				case 'win32':\
+					this.promise._acc(this.stdout.str.split('\\r\\n')[0]);\
+					break;\
+				case 'linux':\
+					lines = this.stdout.str.split('\\n');\
+					for (i in lines)\
+					{\
+						tokens = lines[i].split('=');\
+						if (tokens[0] == 'PRETTY_NAME')\
+						{\
+							this.promise._acc(tokens[1].substring(1, tokens[1].length - 2));\
+							break;\
+						}\
+					}\
+					break;\
+				case 'darwin':\
+					var OSNAME = '';\
+					var OSVERSION = '';\
+					lines = this.stdout.str.split('\\n');\
+					for (i in lines)\
+					{\
+						tokens = lines[i].split(':');\
+						if (tokens[0] == 'ProductName') { OSNAME = tokens[1].trim(); }\
+						if (tokens[0] == 'ProductVersion') { OSVERSION = tokens[1].trim(); }\
+					}\
+					this.promise._acc(OSNAME + ' ' + OSVERSION);\
+					break;\
+			}\
+		});\
+		switch (process.platform)\
+		{\
+			case 'linux':\
+				p.child.stdin.write('cat /etc/*release\\nexit\\n');\
+				break;\
+			case 'darwin':\
+				p.child.stdin.write('sw_vers\\nexit\\n');\
+				break;\
+			case 'win32':\
+				p.child.stdin.write('exit\\r\\n');\
+				break;\
+		}\
+		return (p);\
 	}";
 
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, jsExtras, sizeof(jsExtras) - 1);
@@ -1970,8 +2225,10 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 #ifdef WIN32
 void ILibDuktape_ScriptContainer_Slave_OnReadStdInEx(void *chain, void *data)
 {
-	ILibDuktape_ScriptContainer_Slave *slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(data, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0];
-	char *buffer = (char*)((void**)ILibMemory_GetExtraMemory(data, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[1];
+	if (!ILibMemory_CanaryOK(data)) { return; }
+
+	ILibDuktape_ScriptContainer_Slave *slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_Extra(data))[0];
+	char *buffer = (char*)((void**)ILibMemory_Extra(data))[1];
 
 	ILibDuktape_ScriptContainer_Slave_ProcessCommands(slave, buffer, (ILibProcessPipe_Pipe)data);
 	ILibProcessPipe_Pipe_Resume((ILibProcessPipe_Pipe)data);
@@ -1979,13 +2236,15 @@ void ILibDuktape_ScriptContainer_Slave_OnReadStdInEx(void *chain, void *data)
 #endif
 void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen, int* bytesConsumed)
 {
-	ILibDuktape_ScriptContainer_Slave *slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0];
+	if (!ILibMemory_CanaryOK(sender)) { return; }
+
+	ILibDuktape_ScriptContainer_Slave *slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_Extra(sender))[0];
 	if (bufferLen < 4 || bufferLen < ((int*)buffer)[0]) { return; }
 	ILibRemoteLogging_printf(ILibChainGetLogger(slave->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "Slave read: %d bytes", bufferLen);
 
 #ifdef WIN32
 	// Windows dispatches on a non-microstack thread, so we need to context switch to microstack/duktape thread
-	((void**)ILibMemory_GetExtraMemory(sender, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[1] = buffer;
+	((void**)ILibMemory_Extra(sender))[1] = buffer;
 
 	ILibProcessPipe_Pipe_Pause(sender);
 	ILibChain_RunOnMicrostackThread(slave->chain, ILibDuktape_ScriptContainer_Slave_OnReadStdInEx, sender);
@@ -2023,7 +2282,7 @@ int ILibDuktape_ScriptContainer_StartSlave(void *chain, ILibProcessPipe_Manager 
 #else
 	mStdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(manager, STDIN_FILENO, sizeof(void*));
 #endif
-	((void**)ILibMemory_GetExtraMemory(mStdIn, ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE))[0] = &slaveObject;
+	((void**)ILibMemory_Extra(mStdIn))[0] = &slaveObject;
 
 	ILibProcessPipe_Pipe_SetBrokenPipeHandler(mStdIn, ILibDuktape_ScriptContainer_Slave_OnBrokenPipe);
 	ILibProcessPipe_Pipe_AddPipeReadHandler(mStdIn, SCRIPT_ENGINE_PIPE_BUFFER_SIZE, ILibDuktape_ScriptContainer_Slave_OnReadStdIn);
@@ -2349,11 +2608,14 @@ void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char
 	
 	*bytesConsumed = ((int*)buffer)[0];
 #ifdef WIN32
-	void **ptr = (void**)ILibMemory_GetExtraMemory(ILibProcessPipe_Process_GetStdErr(sender), ILibMemory_ILibProcessPipe_Pipe_CONTAINERSIZE);
-	ptr[0] = master;
-	ptr[1] = buffer;
-	ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Process_GetStdErr(sender));
-	ILibChain_RunOnMicrostackThread(master->chain, ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread, ptr);
+	if (ILibMemory_CanaryOK(sender))
+	{
+		void **ptr = (void**)ILibMemory_Extra(ILibProcessPipe_Process_GetStdErr(sender));
+		ptr[0] = master;
+		ptr[1] = buffer;
+		ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Process_GetStdErr(sender));
+		ILibChain_RunOnMicrostackThread(master->chain, ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread, ptr);
+	}
 #else
 	void *ptr[2] = { master, buffer };
 	ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(master->chain, ptr);
@@ -2451,6 +2713,7 @@ void ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster(void *chain, 
 	ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)user;
 	ILibDuktape_ScriptContainer_Master *master = cmd->container.master;
 	ILibDuktape_ScriptContainer_Slave *slave = master->PeerChain == NULL ? NULL : (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
+	if (master->ctx == NULL) { return; }
 
 	int id;
 	duk_push_string(master->ctx, cmd->json);		// [string]
@@ -2628,6 +2891,7 @@ void ILibDuktape_ScriptContainer_NonIsolatedWorker(void *arg)
 	cmd->container.master = master;
 	memcpy_s(cmd->json, sizeof(json), json, sizeof(json));
 	ILibChain_RunOnMicrostackThread2(master->chain, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster, cmd, 1);
+	ILibChain_DisableWatchDog(slave->chain);
 	ILibStartChain(slave->chain);
 
 	if (slave->noRespond == 0)
@@ -2658,7 +2922,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 		if (duk_has_prop_string(ctx, 0, "sessionId"))
 		{
 			sessionIdSpecified = 1;
-			sessionId = (void*)(uint64_t)Duktape_GetIntPropertyValue(ctx, 0, "sessionId", 0);
+			sessionId = (void*)(ILibPtrCAST)(uint64_t)Duktape_GetIntPropertyValue(ctx, 0, "sessionId", 0);
 		}
 	}
 
