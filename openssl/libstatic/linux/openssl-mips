@@ -11,6 +11,6 @@ make depend
 sed 's/ -O3 / -Os /g' Makefile > t
 rm Makefile
 mv t Makefile
-make
-cp *.a ../openssl-static/mips
+make -j 8
+cp *.a ../linux/mips
 cd ..

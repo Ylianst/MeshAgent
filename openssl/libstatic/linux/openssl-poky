@@ -13,6 +13,6 @@ make depend
 sed 's/ -O3 / -Os -m32 /g' Makefile > t
 rm Makefile
 mv t Makefile
-make
-cp *.a ../openssl-static/poky
+make -j 8
+cp *.a ../linux/poky
 cd ..

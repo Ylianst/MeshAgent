@@ -7,6 +7,6 @@ make depend
 sed 's/ -O3 / -O3 /g' Makefile > t
 rm Makefile
 mv t Makefile
-make
-cp *.a ../openssl-static/x86-64
+make -j 8
+cp *.a ../linux/x86-64
 cd ..

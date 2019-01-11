@@ -15,6 +15,6 @@ mv t Makefile
 sed 's/SHARED_LDFLAGS=/SHARED_LDFLAGS=-EL/g' Makefile > t
 rm Makefile
 mv t Makefile
-make
-cp *.a ../openssl-static/mipsel
+make -j 8
+cp *.a ../linux/mipsel
 cd ..
