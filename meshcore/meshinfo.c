@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
+#ifndef __APPLE__
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
@@ -589,4 +589,5 @@ int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 	return 0;
 }
 
+#endif
 #endif
