@@ -84,7 +84,9 @@ struct sockaddr_in6;
 #include <netinet/ip.h>
 #include <unistd.h>
 #include <errno.h>
+#ifndef __APPLE__
 #include <semaphore.h>
+#endif
 #if !defined(__APPLE__) && !defined(_VX_CPU)
 #include <malloc.h>
 #endif
@@ -93,7 +95,7 @@ struct sockaddr_in6;
 #define UNREFERENCED_PARAMETER(P)
 #endif
 
-#ifdef _POSIX
+#if defined(_POSIX) && !defined(__APPLE__)
 #include <linux/limits.h>
 #endif
 
@@ -110,14 +112,42 @@ struct sockaddr_in6;
 #include <winbase.h>
 #endif
 
-#ifdef __APPLE__
+#ifdef WIN32
+#define ILIB_CURRENT_THREAD (unsigned int)GetCurrentThreadId()
+#else
 #include <pthread.h>
-#define sem_t pthread_mutex_t
-#define sem_init(x,pShared,InitValue) pthread_mutex_init(x, NULL)
-#define sem_destroy(x) pthread_mutex_destroy(x)
-#define sem_wait(x) pthread_mutex_lock(x)
-#define sem_trywait(x) pthread_mutex_trylock(x)
-#define sem_post(x) pthread_mutex_unlock(x)
+#define ILIB_CURRENT_THREAD (unsigned int)pthread_self()
+#endif
+
+
+#if defined(__LP64__) || defined(_LP64) || defined(_WIN64) || defined(WIN64)
+#define ILibPtrCAST uint64_t
+#else
+#define ILibPtrCAST uint32_t
+#endif
+
+
+#ifdef SSL_TRACE
+#define SSL_TRACE1(method) printf("OpenSSL/%ul enters %s [%s:%d]\n", ILIB_CURRENT_THREAD, method, __FILE__, __LINE__)
+#define SSL_TRACE2(method) printf("OpenSSL/%ul leaves %s [%s:%d]\n", ILIB_CURRENT_THREAD, method, __FILE__, __LINE__)
+#else
+#define SSL_TRACE1(method);
+#define SSL_TRACE2(method);
+#endif
+
+#ifdef __APPLE__
+#include <dispatch/dispatch.h>
+#include <semaphore.h>
+#define sem_init(x,pShared,InitValue) ILibDispatchSemaphore_Init((x), pShared, InitValue)
+#define sem_destroy(x) ILibDispatchSemaphore_Destroy(x)
+#define sem_wait(x) ILibDispatchSemaphore_wait(x)
+#define sem_trywait(x) ILibDispatchSemaphore_trywait(s)
+#define sem_post(x) ILibDispatchSemaphore_post(x)
+void ILibDispatchSemaphore_Init(sem_t* s, int pShared, int value);
+void ILibDispatchSemaphore_Destroy(sem_t* s);
+void ILibDispatchSemaphore_wait(sem_t* s);
+void ILibDispatchSemaphore_trywait(sem_t* s);
+void ILibDispatchSemaphore_post(sem_t* s);
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE)
@@ -322,7 +352,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_MemType(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->memoryType)
 	#define ILibMemory_Size(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->size)
 	#define ILibMemory_ExtraSize(ptr) (((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->extraSize)
-	#define ILibMemory_Ex_CanaryOK(ptr) ((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary)
+	#define ILibMemory_Ex_CanaryOK(ptr) ((ptr)==NULL?0:((((ILibMemory_Header*)ILibMemory_RawPtr((ptr)))->CANARY) == ILibMemory_Canary))
 #ifdef WIN32
 	int ILibMemory_CanaryOK(void *ptr);
 #else
@@ -332,9 +362,11 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_Extra(ptr) (ILibMemory_ExtraSize(ptr)>0?((char*)(ptr) + ILibMemory_Size((ptr)) + sizeof(ILibMemory_Header)):NULL)
 	#define ILibMemory_FromRaw(ptr) ((char*)(ptr) + sizeof(ILibMemory_Header))
 
+	#define ILibMemory_Init_Size(primaryLen, extraLen) (primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0))
 	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
 	#define ILibMemory_SmartAllocate(len) ILibMemory_Init(malloc(len+sizeof(ILibMemory_Header)), (int)len, 0, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_Init(malloc(primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0)), (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
+	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
 
@@ -889,13 +921,15 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_SafeRemove(void *chain, void *object);
 	void ILibChain_SafeRemoveEx(void *chain, void *object);
 	void ILibChain_DestroyEx(void *chain);
+	void ILibChain_DisableWatchDog(void *chain);
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
 	ILibExportMethod void ILibChain_EndContinue(void *chain);
 
 	void ILibForceUnBlockChain(void *Chain);
-	void ILibChain_RunOnMicrostackThreadEx2(void *chain, ILibChain_StartEvent handler, void *user, int freeOnShutdown);
+	void* ILibChain_RunOnMicrostackThreadEx3(void *chain, ILibChain_StartEvent handler, ILibChain_StartEvent abortHandler, void *user);
+	#define ILibChain_RunOnMicrostackThreadEx2(chain, handler, user, freeOnShutdown) ILibChain_RunOnMicrostackThreadEx3(chain, handler, ((freeOnShutdown) == 0 ? (void*)0x00 : (void*)0x01), user)
 	#define ILibChain_RunOnMicrostackThreadEx(chain, handler, user) ILibChain_RunOnMicrostackThreadEx2(chain, handler, user, 0)
 	#define ILibChain_RunOnMicrostackThread(chain, handler, user) if(ILibIsRunningOnChainThread(chain)==0){ILibChain_RunOnMicrostackThreadEx(chain, handler, user);}else{handler(chain,user);}
 	#define ILibChain_RunOnMicrostackThread2(chain, handler, user, freeOnShutdown) if(ILibIsRunningOnChainThread(chain)==0){ILibChain_RunOnMicrostackThreadEx2(chain, handler, user, freeOnShutdown);}else{handler(chain,user);}
@@ -1362,6 +1396,7 @@ extern void ILib_POSIX_CrashHandler(int code);
 	*@{
 	*/
 	void* ILibSpawnNormalThread(voidfp1 method, void* arg);
+	void ILibThread_Join(void *thr);
 	void  ILibEndThisThread();
 #ifdef WIN32
 	void ILibHandle_DisableInherit(HANDLE *h);

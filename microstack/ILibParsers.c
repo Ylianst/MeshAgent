@@ -59,7 +59,6 @@ limitations under the License.
 #include <time.h>
 
 #ifdef __APPLE__
-#include <semaphore.h>
 #include <ifaddrs.h>
 #include <sys/sysctl.h>
 #endif
@@ -329,6 +328,48 @@ int ILibGetLocalIPAddressNetMask(unsigned int address)
 		}
 	}
 	return 0;
+}
+#endif
+
+#ifdef __APPLE__
+void* semaphore_table[2048] = { 0 };
+void ILibDispatchSemaphore_Init(sem_t* s, int pShared, int value)
+{
+	dispatch_semaphore_t ds;
+	int i;
+	for (i = 0; i < 2048; ++i)
+	{
+		if (semaphore_table[i] == NULL)
+		{
+			// This index is free
+			ds = dispatch_semaphore_create((long)value);
+			semaphore_table[i] = (void*)ds;
+			((int*)s)[0] = i;
+			break;
+		}
+	}
+}
+void ILibDispatchSemaphore_Destroy(sem_t* s)
+{
+	int i = ((int*)s)[0];
+	dispatch_semaphore_t ds = (dispatch_semaphore_t)semaphore_table[i];
+	semaphore_table[i] = NULL;
+	if (ds != NULL)
+	{
+		dispatch_release(ds);
+	}
+}
+void ILibDispatchSemaphore_wait(sem_t* s)
+{
+	dispatch_semaphore_wait((dispatch_semaphore_t)semaphore_table[((int*)s)[0]], DISPATCH_TIME_FOREVER);
+}
+void ILibDispatchSemaphore_trywait(sem_t* s)
+{
+	dispatch_semaphore_wait((dispatch_semaphore_t)semaphore_table[((int*)s)[0]], DISPATCH_TIME_NOW);
+}
+void ILibDispatchSemaphore_post(sem_t* s)
+{
+	dispatch_semaphore_signal((dispatch_semaphore_t)semaphore_table[((int*)s)[0]]);
 }
 #endif
 
@@ -1055,6 +1096,7 @@ typedef struct ILibBaseChain
 	unsigned int PreSelectCount;
 	unsigned int PostSelectCount;
 	void *WatchDogThread;
+	int nowatchdog;
 #ifdef WIN32
 	HANDLE WatchDogTerminator;
 #else
@@ -1068,6 +1110,23 @@ void* ILibMemory_AllocateA_Init(void *buffer)
 {
 	((void**)buffer)[0] = (char*)buffer + sizeof(void*);
 	return(buffer);
+}
+void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
+{
+	if (ILibMemory_CanaryOK(ptr))
+	{
+		void *ret = NULL;
+		void *raw = ILibMemory_RawPtr(ptr);
+		if ((raw = realloc(raw, len + sizeof(ILibMemory_Header))) == NULL) { ILIBCRITICALEXIT(254); }
+		ret = ILibMemory_FromRaw(raw);
+
+		ILibMemory_Size(ret) = len;
+		return(ret);
+	}
+	else
+	{
+		return(NULL);
+	}
 }
 void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType)
 {
@@ -1578,23 +1637,37 @@ char* ILibDecompressString(unsigned char* CurrentCompressed, const int bufferLen
 	return((char*)RetVal);
 }
 
+void ILibChain_RunOnMicrostackThreadSink_Abort(void *obj)
+{
+	if (!ILibMemory_CanaryOK(obj)) { return; }
+
+	void* chain = ((void**)obj)[0];
+	ILibChain_StartEvent abortHandler = (ILibChain_StartEvent)((void**)obj)[3];
+	void* user = ((void**)obj)[2];
+
+	if (abortHandler == (ILibChain_StartEvent)0x01)
+	{
+		// Free On Shutdown was specified
+		free(user);
+	}
+	else if (abortHandler != NULL)
+	{
+		// Abort Handler was specified, so user can do cleanup
+		abortHandler(chain, user);
+	}
+	
+	ILibMemory_Free(obj);
+}
 void ILibChain_RunOnMicrostackThreadSink(void *obj)
 {
+	if (!ILibMemory_CanaryOK(obj)) { return; }
+
 	void* chain = ((void**)obj)[0];
 	ILibChain_StartEvent handler = (ILibChain_StartEvent)((void**)obj)[1];
 	void* user = ((void**)obj)[2];
-	void* freeOnShutdown = ((void**)obj)[3];
 
-	if (ILibIsChainBeingDestroyed(chain) == 0)
-	{
-		// Only Dispatch if the chain is still running
-		if (handler != NULL) { handler(chain, user); }
-	}
-	else if (freeOnShutdown != NULL)
-	{
-		free(user);
-	}
-	free(obj);
+	if (handler != NULL) { handler(chain, user); }
+	ILibMemory_Free(obj);
 }
 //! Dispatch an operation to the Microstack Chain thread
 /*!
@@ -1602,17 +1675,18 @@ void ILibChain_RunOnMicrostackThreadSink(void *obj)
 	\param handler Event to dispatch on the microstack thread
 	\param user Custom user data to dispatch to the microstack thread
 */
-void ILibChain_RunOnMicrostackThreadEx2(void *chain, ILibChain_StartEvent handler, void *user, int freeOnShutdown)
+void* ILibChain_RunOnMicrostackThreadEx3(void *chain, ILibChain_StartEvent handler, ILibChain_StartEvent abortHandler, void *user)
 {
 	void** value = NULL;
 	
-	value = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
+	value = (void**)ILibMemory_SmartAllocate(4 * sizeof(void*));
 
 	value[0] = chain;
 	value[1] = handler;
 	value[2] = user;
-	value[3] = (void*)(uint64_t)freeOnShutdown;
-	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), value, 0, &ILibChain_RunOnMicrostackThreadSink, &ILibChain_RunOnMicrostackThreadSink);
+	value[3] = abortHandler;
+	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), value, 0, &ILibChain_RunOnMicrostackThreadSink, &ILibChain_RunOnMicrostackThreadSink_Abort);
+	return(value);
 }
 #ifdef WIN32
 HANDLE ILibChain_GetMicrostackThreadHandle(void *chain)
@@ -1865,25 +1939,26 @@ void ILibChain_UpdateEventHook(ILibChain_EventHookToken token, int maxTimeout)
 		memset(hook, 0, sizeof(ILibChain_Link_Hook));
 	}
 }
-ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
+ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
 {
-	int i;
+	ILibBaseChain *chain = (ILibBaseChain*)Chain;
+	ILibChain_Link_Hook *nodeHook;
 	ILibBaseChain *root = (ILibBaseChain*)chain;
-	int slct = 0, vX = 0;
+	ILibChain_Link *module;
+	int slct = 0, vX = 0, mX = 0;
 	struct timeval tv;
-	long endTime;
 	fd_set readset;
 	fd_set errorset;
 	fd_set writeset;
 	void *currentNode;
+	ILibLinkedListNode tmpNode;
+	memset(&tmpNode, 0, sizeof(tmpNode));
 
 	if (root->continuationState != ILibChain_ContinuationState_INACTIVE) { return; }
 	root->continuationState = ILibChain_ContinuationState_CONTINUE;
 	currentNode = root->node;
 
 	gettimeofday(&tv, NULL);
-	endTime = tv.tv_sec + maxTimeout;
-
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...");
 
 	while (root->TerminateFlag == 0 && root->continuationState == ILibChain_ContinuationState_CONTINUE)
@@ -1892,46 +1967,94 @@ ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, 
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
-
-		gettimeofday(&tv, NULL);
-
-		if (tv.tv_sec >= endTime)
-		{
-			break;
-		}
-		
-		tv.tv_sec = endTime - tv.tv_sec;
+		tv.tv_sec = UPNP_MAX_WAIT;
 		tv.tv_usec = 0;
-		root->selectTimeout = (int)((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
 
-		for (i = 0; i < moduleCount; ++i)
+		//
+		// Iterate through all the PreSelect function pointers in the chain
+		//
+		chain->node = ILibLinkedList_GetNode_Head(chain->Links);
+		chain->selectTimeout = (int)((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
+		mX = 0;
+
+		while (((modules != NULL && moduleCount > 0 && mX < moduleCount && (module = modules[mX]) != NULL) && (tmpNode.Data = module) != NULL && (chain->node = &tmpNode) != NULL) || (moduleCount == 0 && chain->node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node)) != NULL))
 		{
-			if (modules[i]->PreSelectHandler != NULL)
+			if (module->PreSelectHandler != NULL)
 			{
-				root->node = modules[i];
-				vX = root->selectTimeout;
-				modules[i]->PreSelectHandler((void*)modules[i], &readset, &writeset, &errorset, &vX);
-				if (vX < root->selectTimeout) { root->selectTimeout = vX; }
+#ifdef MEMORY_CHECK
+#ifdef WIN32
+				//_CrtCheckMemory();
+#endif
+#endif
+				vX = chain->selectTimeout;
+				module->PreSelectHandler((void*)module, &readset, &writeset, &errorset, &vX);
+				if (vX < chain->selectTimeout) { chain->selectTimeout = vX; }
+#ifdef MEMORY_CHECK
+#ifdef WIN32
+				//_CrtCheckMemory();
+#endif
+#endif
+			}
+			nodeHook = (ILibChain_Link_Hook*)ILibLinkedList_GetExtendedMemory(chain->node);
+			if (nodeHook->MaxTimeout > 0 && nodeHook->MaxTimeout < chain->selectTimeout) { chain->selectTimeout = nodeHook->MaxTimeout; }
+			if (moduleCount > 0)
+			{
+				++mX;
+			}
+			else
+			{
+				chain->node = ILibLinkedList_GetNextNode(chain->node);
 			}
 		}
-		tv.tv_sec = root->selectTimeout / 1000;
-		tv.tv_usec = 1000 * (root->selectTimeout % 1000);
+		tv.tv_sec = chain->selectTimeout / 1000;
+		tv.tv_usec = 1000 * (chain->selectTimeout % 1000);
+
 
 #if defined(WIN32) || defined(_WIN32_WCE)
 		//
-		// Put the Terminate socket in the FDSET, for ILibForceUnblockChain
+		// Add the fake socket, for ILibForceUnBlockChain
 		//
-
-		FD_SET(root->TerminateSock, &errorset);
+		FD_SET(chain->TerminateSock, &errorset);
 #else
 		//
 		// Put the Read end of the Pipe in the FDSET, for ILibForceUnBlockChain
 		//
 		FD_SET(fileno(root->TerminateReadPipe), &readset);
 #endif
+		sem_wait(&ILibChainLock);
+		while (ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
+		{
+			chain->node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)Chain)->LinksPendingDelete);
+			module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node);
+			ILibLinkedList_Remove_ByData(((ILibBaseChain*)Chain)->Links, module);
+			ILibLinkedList_Remove(chain->node);
+			if (module != NULL)
+			{
+				if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
+				free(module);
+			}
+		}
+		sem_post(&ILibChainLock);
 
-
+		//
+		// The actual Select Statement
+		//
+		chain->PreSelectCount++;
+#ifdef WIN32
+		if (readset.fd_count == 0 && writeset.fd_count == 0)
+		{
+			SleepEx((DWORD)chain->selectTimeout, TRUE); // If there is no pending IO, we must force the thread into an alertable wait state, so ILibForceUnblockChain can function.
+			slct = -1;
+		}
+		else
+		{
+			slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
+		}
+#else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
+#endif
+		chain->PostSelectCount++;
+
 		if (slct == -1)
 		{
 			//
@@ -1948,21 +2071,35 @@ ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, 
 			//
 			// Empty the pipe
 			//
-			while (fgetc(root->TerminateReadPipe) != EOF)
+			while (fgetc(((struct ILibBaseChain*)Chain)->TerminateReadPipe) != EOF)
 			{
 			}
 		}
 #endif
-
-		for (i = 0; i < moduleCount && root->continuationState == ILibChain_ContinuationState_CONTINUE; ++i)
+		//
+		// Iterate through all of the PostSelect in the chain
+		//
+		chain->node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)Chain)->Links);
+		while (chain->node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node)) != NULL)
 		{
-			if (modules[i]->PostSelectHandler != NULL)
+			if (module->PostSelectHandler != NULL)
 			{
-				root->node = modules[i];
-				modules[i]->PostSelectHandler((void*)modules[i], slct, &readset, &writeset, &errorset);
+#ifdef MEMORY_CHECK
+#ifdef WIN32
+				//_CrtCheckMemory();
+#endif
+#endif
+				module->PostSelectHandler((void*)module, slct, &readset, &writeset, &errorset);
+#ifdef MEMORY_CHECK
+#ifdef WIN32
+				//_CrtCheckMemory();
+#endif
+#endif
 			}
+			nodeHook = (ILibChain_Link_Hook*)ILibLinkedList_GetExtendedMemory(chain->node);
+			if (nodeHook->Handler != NULL) { nodeHook->Handler(module, chain->node); }
+			chain->node = ILibLinkedList_GetNextNode(chain->node);
 		}
-
 	}
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
 
@@ -2072,7 +2209,7 @@ void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext)
 	
 	ILIBCRITICALEXITMSG(254, buffer);
 }
-#elif defined(_POSIX)
+#elif defined(_POSIX) && !defined(__APPLE__)
 #ifndef _NOILIBSTACKDEBUG
 char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
 void ILib_POSIX_CrashHandler(int code)
@@ -2189,7 +2326,7 @@ char* ILib_POSIX_InstallCrashHandler(char *exename)
 
 void ILibChain_DebugDelta(char *buffer, int bufferLen, uint64_t delta)
 {
-	ILibChain_DebugOffset(buffer, bufferLen, (uint64_t)&ILibCreateChain - delta);
+	ILibChain_DebugOffset(buffer, bufferLen, (uint64_t)(ILibPtrCAST)&ILibCreateChain - delta);
 }
 
 void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
@@ -2483,6 +2620,11 @@ void ILibChain_WatchDogStart(void *obj)
 }
 #endif
 
+void ILibChain_DisableWatchDog(void *chain)
+{
+	((ILibBaseChain*)chain)->nowatchdog = 1;
+}
+
 /*! \fn ILibStartChain(void *Chain)
 \brief Starts a Chain
 \par
@@ -2534,7 +2676,10 @@ ILibExportMethod void ILibStartChain(void *Chain)
 #endif
 	}
 #endif
-	chain->WatchDogThread = ILibSpawnNormalThread(ILibChain_WatchDogStart, chain);
+	if (chain->nowatchdog == 0)
+	{
+		chain->WatchDogThread = ILibSpawnNormalThread(ILibChain_WatchDogStart, chain);
+	}
 #endif
 
 	//
@@ -4798,7 +4943,7 @@ struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
 	//
 	StartLine = (struct parser_result*)ILibParseString(f->data, 0, f->datalength, " ", 1);
 	HeaderLine = f->NextResult;
-	if (memcmp(StartLine->FirstResult->data, "HTTP/", 5) == 0 && StartLine->FirstResult->NextResult != NULL)
+	if (memcmp(StartLine->FirstResult->data, "HTTP", 4) == 0 && StartLine->FirstResult->NextResult != NULL)
 	{
 		//
 		// If the StartLine starts with HTTP/, then we know this is a response packet.
@@ -4808,20 +4953,28 @@ struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
 		p = (struct parser_result*)ILibParseString(StartLine->FirstResult->data, 0, StartLine->FirstResult->datalength, "/", 1);
 		RetVal->Version = p->LastResult->data;
 		RetVal->VersionLength = p->LastResult->datalength;
+
+		if (ILibString_StartsWith(RetVal->Version, RetVal->VersionLength, "HTTP", 4) != 0)
+		{
+			// Work around for bug in some routers that output an invalid HTTP response, because it's missing the '/' character
+			RetVal->Version = (RetVal->Version + 4);
+			RetVal->VersionLength -= 4;
+		}
+
 		RetVal->Version[RetVal->VersionLength] = 0;
 		ILibDestructParserResults(p);
 		if ((tempbuffer = (char*)malloc(1+sizeof(char)*(StartLine->FirstResult->NextResult->datalength))) == NULL) ILIBCRITICALEXIT(254);
 		memcpy_s(tempbuffer,1 + StartLine->FirstResult->NextResult->datalength, StartLine->FirstResult->NextResult->data, StartLine->FirstResult->NextResult->datalength);
 		MEMCHECK(assert(StartLine->FirstResult->NextResult->datalength <= 1+(int)sizeof(char)*(StartLine->FirstResult->NextResult->datalength));) 
 
-			//
-			// The other tokens contain the Status code and data
-			//
-			tempbuffer[StartLine->FirstResult->NextResult->datalength] = '\0';
+		//
+		// The other tokens contain the Status code and data
+		//
+		tempbuffer[StartLine->FirstResult->NextResult->datalength] = '\0';
 		RetVal->StatusCode = (int)atoi(tempbuffer);
 		free(tempbuffer);
-		RetVal->StatusData = StartLine->FirstResult->NextResult->NextResult->data;
-		RetVal->StatusDataLength = (int)((f->data + f->datalength) - RetVal->StatusData);
+		RetVal->StatusData = StartLine->FirstResult->NextResult->NextResult != NULL ? StartLine->FirstResult->NextResult->NextResult->data : NULL;
+		RetVal->StatusDataLength = RetVal->StatusData != NULL ? ((int)((f->data + f->datalength) - RetVal->StatusData)) : 0;
 	}
 	else
 	{
@@ -9119,6 +9272,16 @@ void* ILibSpawnNormalThread(voidfp1 method, void* arg)
 	return CreateThread(NULL, 0, method, arg, 0, NULL );
 #endif
 }
+
+void ILibThread_Join(void *thr)
+{
+#ifdef WIN32
+	WaitForSingleObject((HANDLE)thr, INFINITE);
+#else
+	pthread_join((pthread_t)thr, NULL);
+#endif
+}
+
 //! Platform Agnostic to end the currently executing thread
 void ILibEndThisThread()
 {
