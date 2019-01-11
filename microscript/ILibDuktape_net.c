@@ -26,6 +26,12 @@ limitations under the License.
 #include "microstack/ILibAsyncServerSocket.h"
 #include "microstack/ILibRemoteLogging.h"
 
+#ifdef _POSIX
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#endif
+
 typedef struct ILibDuktape_net_socket
 {
 	duk_context *ctx;
@@ -110,19 +116,27 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 	if (Connected != 0)
 	{
 		duk_push_heapptr(ptrs->ctx, ptrs->object);																		// [sock]
-		ILibAsyncSocket_GetLocalInterface(socketModule, (struct sockaddr*)&local);
-		duk_push_string(ptrs->ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));	// [sock][localAddr]
-		duk_put_prop_string(ptrs->ctx, -2, "localAddress");																// [sock]
-		duk_push_int(ptrs->ctx, (int)ntohs(local.sin6_port));															// [sock][port]
-		duk_put_prop_string(ptrs->ctx, -2, "localPort");																// [sock]
+		if (ILibAsyncSocket_IsDomainSocket(socketModule) == 0)
+		{
+			ILibAsyncSocket_GetLocalInterface(socketModule, (struct sockaddr*)&local);
+			duk_push_string(ptrs->ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));	// [sock][localAddr]
+			duk_put_prop_string(ptrs->ctx, -2, "localAddress");																// [sock]
+			duk_push_int(ptrs->ctx, (int)ntohs(local.sin6_port));															// [sock][port]
+			duk_put_prop_string(ptrs->ctx, -2, "localPort");																// [sock]
 
-		ILibAsyncSocket_GetRemoteInterface(socketModule, (struct sockaddr*)&local);
-		duk_push_string(ptrs->ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));	// [sock][remoteAddr]
-		duk_put_prop_string(ptrs->ctx, -2, "remoteAddress");															// [sock]
-		duk_push_string(ptrs->ctx, local.sin6_family == AF_INET6 ? "IPv6" : "IPv4");									// [sock][remoteFamily]
-		duk_put_prop_string(ptrs->ctx, -2, "remoteFamily");																// [sock]
-		duk_push_int(ptrs->ctx, (int)ntohs(local.sin6_port));															// [sock][remotePort]
-		duk_put_prop_string(ptrs->ctx, -2, "remotePort");																// [sock]
+			ILibAsyncSocket_GetRemoteInterface(socketModule, (struct sockaddr*)&local);
+			duk_push_string(ptrs->ctx, ILibInet_ntop2((struct sockaddr*)&local, ILibScratchPad, sizeof(ILibScratchPad)));	// [sock][remoteAddr]
+			duk_put_prop_string(ptrs->ctx, -2, "remoteAddress");															// [sock]
+			duk_push_string(ptrs->ctx, local.sin6_family == AF_INET6 ? "IPv6" : "IPv4");									// [sock][remoteFamily]
+			duk_put_prop_string(ptrs->ctx, -2, "remoteFamily");																// [sock]
+			duk_push_int(ptrs->ctx, (int)ntohs(local.sin6_port));															// [sock][remotePort]
+			duk_put_prop_string(ptrs->ctx, -2, "remotePort");																// [sock]
+		}
+		else
+		{
+			duk_get_prop_string(ptrs->ctx, -1, "remoteHost");																// [sock][remoteHost]
+			duk_put_prop_string(ptrs->ctx, -2, "path");																		// [sock]
+		}
 		duk_pop(ptrs->ctx);																								// ...
 
 #ifndef MICROSTACK_NOTLS
@@ -224,6 +238,8 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	int nargs = duk_get_top(ctx);
 	int port = 0;
 	char *host = "127.0.0.1";
+	char *path = NULL;
+	duk_size_t pathLen = 0;
 	ILibDuktape_net_socket *ptrs;
 	struct sockaddr_in6 dest;
 
@@ -245,15 +261,46 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		*/
 		host = Duktape_GetStringPropertyValue(ctx, 0, "host", "127.0.0.1");
 		port = Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
+		path = Duktape_GetStringPropertyValueEx(ctx, 0, "path", NULL, &pathLen);
 		if (nargs >= 2 && duk_is_function(ctx, 1))
 		{
 			ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "connect", duk_require_heapptr(ctx, 1));
 		}
 	}
-	if (duk_is_string(ctx, 0))
+	if (duk_is_string(ctx, 0) || pathLen > 0)
 	{
-		// This is a PATH string
+		// This is a PATH string (Domain Socket)
+#ifndef _POSIX
+		//return(ILibDuktape_Error(ctx, "AF_UNIX sockets not supported on this platform"));
+#else
+		if (pathLen > 0) 
+		{ 
+			host = path; 
+		}
+		else
+		{
+			host = (char*)duk_require_string(ctx, 0);
+		}
+		duk_push_heapptr(ptrs->ctx, ptrs->object);				// [socket]
+		duk_push_string(ctx, host);								// [socket][host]
+		ILibDuktape_CreateReadonlyProperty(ctx, "remoteHost");	// [socket]
+		duk_pop(ctx);											// ...
+
+		struct sockaddr_un serveraddr;
+		memset(&serveraddr, 0, sizeof(serveraddr));
+		serveraddr.sun_family = AF_UNIX;
+		strcpy(serveraddr.sun_path, host);
+		ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&serveraddr, NULL, ptrs);
+
+		duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
+		duk_push_true(ptrs->ctx);									// [socket][connecting]
+		duk_put_prop_string(ptrs->ctx, -2, "connecting");			// [socket]
+		duk_pop(ptrs->ctx);											// ...
+		return(0);
+#endif
 	}
+
+
 	if (duk_is_number(ctx, 0))
 	{
 		// This is a PORT number
@@ -631,9 +678,14 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	unsigned short port = 0;
 	int backlog = 0;
 	struct sockaddr_in6 local;
+#ifdef _POSIX
+	struct sockaddr_un ipcaddr;
+	memset(&ipcaddr, 0, sizeof(struct sockaddr_un));
+#endif
 	int maxConnections = 10;
 	int initalBufferSize = 4096;
-	char *host;
+	char *host, *ipc;
+	duk_size_t ipcLen;
 	memset(&local, 0, sizeof(struct sockaddr_in6));
 
 	duk_push_this(ctx);
@@ -648,9 +700,9 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		duk_push_object(ctx);														// [listen][this][Options]
 
 		// let's call listen again, using an Options object
-		if (nargs > 0 && duk_is_number(ctx, 0))
+		if (nargs > 0 && (duk_is_number(ctx, 0) || duk_is_string(ctx, 0)))
 		{
-			duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "port");					// [listen][this][Options]
+			duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, duk_is_number(ctx, 0) ? "port" : "path");					// [listen][this][Options]
 			for (i = 1; i < nargs; ++i)
 			{
 				if (duk_is_number(ctx, i)) { duk_dup(ctx, i); duk_put_prop_string(ctx, -2, "backlog"); }
@@ -675,6 +727,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	port = (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
 	backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", 64);
 	host = Duktape_GetStringPropertyValue(ctx, 0, "host", NULL);
+	ipc = Duktape_GetStringPropertyValueEx(ctx, 0, "path", NULL, &ipcLen);
 	if (nargs > 1 && duk_is_function(ctx, 1))
 	{
 		// Callback
@@ -688,15 +741,29 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			return(ILibDuktape_Error(ctx, "Socket.listen(): Could not resolve host: '%s'", host));
 		}
 	}
+	
+	if (ipc != NULL)
+	{
+#ifdef _POSIX
+		if (ipcLen > sizeof(ipcaddr.sun_path)) { return(ILibDuktape_Error(ctx, "Path too long")); }
+		ipcaddr.sun_family = AF_UNIX;
+		strcpy_s((char*)(ipcaddr.sun_path), sizeof(ipcaddr.sun_path), ipc);
+		server->server = ILibCreateAsyncServerSocketModuleWithMemoryEx(Duktape_GetChain(ctx), maxConnections, initalBufferSize, (struct sockaddr*)&ipcaddr,
+			ILibDuktape_net_server_OnConnect, ILibDuktape_net_server_OnDisconnect, ILibDuktape_net_server_OnReceive,
+			ILibDuktape_net_server_OnInterrupt, ILibDuktape_net_server_OnSendOK, sizeof(void*), sizeof(void*));
+#endif
+	}
 	else
 	{
 		local.sin6_family = AF_INET;
 		local.sin6_port = htons(port);
+
+		server->server = ILibCreateAsyncServerSocketModuleWithMemoryEx(Duktape_GetChain(ctx), maxConnections, initalBufferSize, (struct sockaddr*)&local,
+			ILibDuktape_net_server_OnConnect, ILibDuktape_net_server_OnDisconnect, ILibDuktape_net_server_OnReceive,
+			ILibDuktape_net_server_OnInterrupt, ILibDuktape_net_server_OnSendOK, sizeof(void*), sizeof(void*));
 	}
 
-	server->server = ILibCreateAsyncServerSocketModuleWithMemoryEx(Duktape_GetChain(ctx), maxConnections, initalBufferSize, (struct sockaddr*)&local,
-		ILibDuktape_net_server_OnConnect, ILibDuktape_net_server_OnDisconnect, ILibDuktape_net_server_OnReceive,
-		ILibDuktape_net_server_OnInterrupt, ILibDuktape_net_server_OnSendOK, sizeof(void*), sizeof(void*));
+
 	if (server->server == NULL)
 	{
 		return(ILibDuktape_Error(ctx, "server.listen(): Failed to bind"));
@@ -1223,6 +1290,7 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 	}
 
 	char *host = Duktape_GetStringPropertyValue(ctx, 0, "host", "127.0.0.1");
+	char *sniname = Duktape_GetStringPropertyValue(ctx, 0, "servername", host);
 	int port = Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
 	struct sockaddr_in6 dest;
 	struct sockaddr_in6 proxy;
@@ -1255,9 +1323,8 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		{
 			ILibAsyncSocket_ConnectTo(data->socketModule, NULL, (struct sockaddr*)&dest, NULL, data);
 		}
-		data->ssl = ILibAsyncSocket_SetSSLContext(data->socketModule, data->ssl_ctx, ILibAsyncSocket_TLS_Mode_Client);
+		data->ssl = ILibAsyncSocket_SetSSLContextEx(data->socketModule, data->ssl_ctx, ILibAsyncSocket_TLS_Mode_Client, sniname);
 		SSL_set_ex_data(data->ssl, ILibDuktape_TLS_ctx2socket, data);
-		SSL_set_tlsext_host_name(data->ssl, host);
 	}
 
 	return(1);
@@ -1273,11 +1340,10 @@ duk_ret_t ILibDuktape_TLS_secureContext_Finalizer(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_TLS_createSecureContext(duk_context *ctx)
 {
-	duk_push_object(ctx);																	// [secureContext]
-	ILibDuktape_WriteID(ctx, "tls.secureContext");
-	duk_push_fixed_buffer(ctx, sizeof(struct util_cert));									// [secureContext][cert]
-	struct util_cert *cert = (struct util_cert*)Duktape_GetBuffer(ctx, -1, NULL);			
-	duk_put_prop_string(ctx, -2, ILibDuktape_SecureContext2CertBuffer);						// [secureContext]
+	duk_push_object(ctx);																				// [secureContext]
+	ILibDuktape_WriteID(ctx, "tls.secureContext");	
+	struct util_cert *cert = (struct util_cert*)duk_push_fixed_buffer(ctx, sizeof(struct util_cert));	// [secureContext][cert]			
+	duk_put_prop_string(ctx, -2, ILibDuktape_SecureContext2CertBuffer);									// [secureContext]
 	memset(cert, 0, sizeof(struct util_cert));
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_TLS_secureContext_Finalizer);
 
@@ -1410,6 +1476,33 @@ duk_ret_t ILibDuktape_TLS_loadpkcs7b(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "Error reading pkcs7b data"));
 	}
 }
+duk_ret_t ILibDuktape_TLS_generateRandomInteger(duk_context *ctx)
+{
+	char *low = (char*)duk_require_string(ctx, 0);
+	char *hi = (char*)duk_require_string(ctx, 1);
+
+	BN_CTX *binctx = BN_CTX_new();
+	BIGNUM *bnlow = NULL;
+	BIGNUM *bnhi = NULL;
+
+	BN_dec2bn(&bnlow, low);
+	BN_dec2bn(&bnhi, hi);
+	if (BN_rand_range(bnlow, bnhi) == 0)
+	{
+		return(ILibDuktape_Error(ctx, "Error calling BN_rand_range()"));
+	}
+	else
+	{
+		char *v = BN_bn2dec(bnlow);
+		duk_push_string(ctx, v);
+		OPENSSL_free(v);
+	}
+
+	BN_free(bnlow);
+	BN_free(bnhi);
+	BN_CTX_free(binctx);
+	return(1);
+}
 void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);				// [TLS]
@@ -1417,6 +1510,7 @@ void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_TLS_connect, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createSecureContext", ILibDuktape_TLS_createSecureContext, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "generateRandomInteger", ILibDuktape_TLS_generateRandomInteger, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "loadpkcs7b", ILibDuktape_TLS_loadpkcs7b, 1);
 }
 #endif
