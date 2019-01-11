@@ -29,6 +29,10 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "microstack/ILibRemoteLogging.h"
 
+#ifdef _POSIX
+#include <pthread.h>
+#endif
+
 #if defined(_WIN64) || defined(__LP64__)
 	typedef uint_fast64_t PTRSIZE;
 #else
@@ -48,6 +52,7 @@ limitations under the License.
 #define ILibDuktape_GenericMarshal_Variable_AutoFree	"\xFF_GenericMarshal_Variable_AutoFree"
 #define ILibDuktape_GenericMarshal_Variable_Parms		"\xFF_GenericMarshal_Variable_Parms"
 #define ILibDuktape_GenericMarshal_StashTable			"\xFF_GenericMarshal_StashTable"
+#define ILibDuktape_GenericMarshal_GlobalCallback_ThreadID "\xFF_GenericMarshal_ThreadID"
 #define ILibDuktape_GenericMarshal_Variable_EnableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_false(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 
@@ -88,6 +93,11 @@ typedef struct Duktape_GlobalGeneric_Data
 	void *retVal;
 	void *chain;
 	sem_t contextWaiter;
+#ifdef WIN32
+	DWORD callingThread;
+#else
+	pthread_t callingThread;
+#endif
 	int numArgs;
 	PTRSIZE args[];
 }Duktape_GlobalGeneric_Data;
@@ -796,6 +806,306 @@ void ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink(void *args)
 	ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return, args);
 
 }
+
+#define ILibDuktape_FFI_AsyncDataPtr "\xFF_FFI_AsyncDataPtr"
+typedef struct ILibDuktape_FFI_AsyncData
+{
+	duk_context *ctx;
+	void *chain;
+	void *workerThread;
+#ifdef WIN32
+	DWORD workerThreadId;
+#else
+	pthread_t workerThreadId;
+#endif
+	void *fptr;
+	void *fptr_redirection;
+	int abort;
+	int waitingForResult;
+	PTRSIZE *vars;
+	void *promise;
+	uint32_t lastError;
+	sem_t workAvailable;
+	sem_t workStarted;
+	sem_t workFinished;
+}ILibDuktape_FFI_AsyncData;
+
+void ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch(void *chain, void *user)
+{
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)user;
+	if (!ILibMemory_CanaryOK(data)) { return; }
+
+	duk_push_heapptr(data->ctx, data->promise);																// [promise]
+	duk_get_prop_string(data->ctx, -1, "_RES");																// [promise][resolver]
+	duk_swap_top(data->ctx, -2);																			// [resolver][this]
+	ILibDuktape_GenericMarshal_Variable_PUSH(data->ctx, (void*)(PTRSIZE)data->vars, (int)sizeof(void*));	// [resolver][this][var]
+	duk_push_int(data->ctx, data->lastError); duk_put_prop_string(data->ctx, -2, "_LastError");
+	data->promise = NULL;
+	if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "Error Resolving Promise: "); }
+	duk_pop(data->ctx);																						// ...
+}
+void ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop(void *arg)
+{
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)arg;
+	PTRSIZE var[20];
+	int varCount, i;
+
+#ifdef WIN32
+	data->workerThreadId = GetCurrentThreadId();
+#else
+	data->workerThreadId = pthread_self();
+#endif
+
+	while (data->abort == 0)
+	{
+		sem_wait(&(data->workAvailable));
+		if (data->abort != 0) { break; }
+		varCount = (int)(ILibMemory_Size(data->vars) / sizeof(PTRSIZE));
+		for (i = (data->fptr_redirection == NULL ? 0 : 1); i < varCount; ++i)
+		{
+			var[(data->fptr_redirection == NULL ? i : (i - 1))] = data->vars[i];
+		}
+		sem_post(&(data->workStarted));
+
+		if (data->fptr_redirection == NULL)
+		{
+			data->vars = (PTRSIZE*)ILibDuktape_GenericMarshal_MethodInvoke_Native(varCount, data->fptr, var);
+		}
+		else
+		{
+			data->vars = (PTRSIZE*)ILibDuktape_GenericMarshal_MethodInvoke_Native(varCount-1, data->fptr_redirection, var);
+			data->fptr_redirection = NULL;
+		}
+#ifdef WIN32
+		data->lastError = (DWORD)GetLastError();
+#endif
+		if (ILibMemory_CanaryOK(data))
+		{
+			if (data->waitingForResult == 0)
+			{
+				ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch, data);
+			}
+			else
+			{
+				data->waitingForResult = 0;
+				sem_post(&(data->workFinished));
+			}
+		}
+	}
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_promise(duk_context *ctx)
+{
+	duk_push_this(ctx);		// [promise]
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "_RES");
+	duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, "_REJ");
+	return(0);
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_abort(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+
+	if (data != NULL)
+	{
+		data->abort = 1;
+		if (data->promise == NULL)
+		{
+			// We can gracefully exit this thread
+			sem_post(&(data->workAvailable));
+#ifdef WIN32
+			ILibThread_Join(data->workerThread);
+#endif
+		}
+		else
+		{
+			if (data->waitingForResult == 0)
+			{
+				// We cannot gracefully exit the thread, so let's reject the promise, and let the app layer figure it out
+				duk_push_heapptr(data->ctx, data->promise);		// [promise]
+				duk_get_prop_string(data->ctx, -1, "_REJ");		// [promise][rej]
+				duk_swap_top(data->ctx, -2);					// [rej][this]
+				duk_push_string(data->ctx, "ABORT");			// [rej][this][abort]
+				duk_call_method(data->ctx, 1);
+				duk_pop(data->ctx);								// ...
+
+				// We are purposefully not clearing the promise, becuase the hope is that the above layer
+				// will receive this rejection, and do a proper cleanup, which may need the promise to accomplish that
+			}
+			else
+			{
+				// Invalid scenario
+				return(ILibDuktape_Error(ctx, "Cannot abort operation that is marked as 'wait for result'"));
+			}
+		}
+		duk_push_this(ctx);
+		sem_destroy(&(data->workAvailable));
+		sem_destroy(&(data->workStarted));
+		sem_destroy(&(data->workFinished));
+		duk_del_prop_string(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	}
+	return(0);
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer(duk_context *ctx)
+{
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
+
+	if (data != NULL)
+	{
+		data->abort = 1;
+		if (data->promise == NULL)
+		{
+			data->abort = 1;
+			sem_post(&(data->workAvailable));
+#ifdef WIN32
+			ILibThread_Join(data->workerThread);
+#endif
+			sem_destroy(&(data->workAvailable));
+			sem_destroy(&(data->workStarted));
+			sem_destroy(&(data->workFinished));
+		}
+	}
+	return(0);
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
+{
+	void *redirectionPtr = NULL;
+	int i;
+	int parms = duk_get_top(ctx);
+	ILibDuktape_FFI_AsyncData *data = NULL;
+	if (parms > 20) { return(ILibDuktape_Error(ctx, "Too many parameters")); }
+
+	if (duk_is_function(ctx, 0))
+	{
+		data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
+		if (data != NULL)
+		{
+			redirectionPtr = Duktape_GetPointerProperty(ctx, 0, "_address");
+		}
+	}
+
+	if (redirectionPtr == NULL)
+	{
+		duk_push_current_function(ctx);						// [func]
+		data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+		if (data == NULL)
+		{
+			data = Duktape_PushBuffer(ctx, sizeof(ILibDuktape_FFI_AsyncData));
+			
+			duk_push_current_function(ctx);
+			duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer, 1);
+			duk_set_finalizer(ctx, -2);
+			duk_pop(ctx);
+
+			duk_put_prop_string(ctx, -2, ILibDuktape_FFI_AsyncDataPtr);
+			data->ctx = ctx;
+			data->chain = Duktape_GetChain(ctx);
+			data->fptr = Duktape_GetPointerProperty(ctx, -1, "_address");
+			sem_init(&(data->workAvailable), 0, 0);
+			sem_init(&(data->workStarted), 0, 0);
+			sem_init(&(data->workFinished), 0, 0);
+			data->workerThread = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data);
+		}
+	}
+	else
+	{
+		duk_push_current_function(ctx);
+		redirectionPtr = Duktape_GetPointerProperty(ctx, -1, "_address");
+	}
+	if (data->promise != NULL) { return(ILibDuktape_Error(ctx, "Async Operation already in progress")); }
+	if (data->waitingForResult == 0)
+	{
+		// Only need to create a promise, if it's fully async
+		duk_eval_string(ctx, "require('promise');");		// [func][promise]
+		duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_promise, 2);
+		duk_new(ctx, 1);
+		data->promise = duk_get_heapptr(ctx, -1);
+	}
+	data->vars = (PTRSIZE*)ILibMemory_AllocateA(sizeof(PTRSIZE)*parms);
+	data->fptr_redirection = redirectionPtr;
+
+	duk_push_array(ctx);
+	for (i = 0; i < parms; ++i)
+	{
+		duk_dup(ctx, i);
+		duk_put_prop_index(ctx, -2, i);			// Stash the input arguments in the promise, so they don't get GC'ed until we're done
+	}
+	duk_put_prop_string(ctx, -2, "_varArray");
+
+	for (i = 0; i < parms; ++i)
+	{
+		if (duk_is_object(ctx, i))
+		{
+			duk_get_prop_string(ctx, i, "_ptr");
+			data->vars[i] = (PTRSIZE)duk_to_pointer(ctx, -1);
+		}
+		else if (duk_is_number(ctx, i))
+		{
+			data->vars[i] = (PTRSIZE)duk_require_int(ctx, i);
+		}
+		else if (duk_is_pointer(ctx, i))
+		{
+			data->vars[i] = (PTRSIZE)duk_require_pointer(ctx, i);
+		}
+		else if(!(i==0 && duk_is_function(ctx, 0)))
+		{
+			return(ILibDuktape_Error(ctx, "INVALID Parameter"));
+		}
+	}
+
+	sem_post(&(data->workAvailable));			// Let worker know there is work available
+	sem_wait(&(data->workStarted));				// Wait for work to start before exiting, because VARS will be gone when we leave
+	duk_push_heapptr(ctx, data->promise);		// [promise]
+
+	duk_push_current_function(ctx);				// [promise][func]
+	duk_get_prop_string(ctx, -1, "_obj");		// [promise][func][obj]
+	duk_remove(ctx, -2);						// [promise][obj]
+	duk_put_prop_string(ctx, -2, "nativeProxy");// [promise]
+
+	return(1);
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_wait(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx), i;
+
+	ILibDuktape_FFI_AsyncData *data;
+	duk_push_this(ctx);																						// [func]
+	data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	if (data == NULL)
+	{
+		data = Duktape_PushBuffer(ctx, sizeof(ILibDuktape_FFI_AsyncData));									// [func][buffer]
+
+		duk_push_this(ctx);																					// [func][buffer][func]
+		duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer, 1);			// [func][buffer][func][finalizer]
+		duk_set_finalizer(ctx, -2);																			// [func][buffer][func]
+		duk_pop(ctx);																						// [func][buffer]
+
+		duk_put_prop_string(ctx, -2, ILibDuktape_FFI_AsyncDataPtr);											// [func]
+		data->ctx = ctx;
+		data->chain = Duktape_GetChain(ctx);
+		data->fptr = Duktape_GetPointerProperty(ctx, -1, "_address");
+		sem_init(&(data->workAvailable), 0, 0);
+		sem_init(&(data->workStarted), 0, 0);
+		sem_init(&(data->workFinished), 0, 0);
+		data->workerThread = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data);
+	}
+
+	// If we set this flag, a promise won't be created, instead we can just wait for the response
+	data->waitingForResult = 1;																				// [func]
+	duk_get_prop_string(ctx, -1, "apply");																	// [func][apply]
+	duk_swap_top(ctx, -2);																					// [apply][this]
+	duk_dup(ctx, -1);																						// [apply][this][this]
+	duk_push_array(ctx);																					// [apply][this][this][args]
+	for (i = 0; i < nargs; ++i)
+	{
+		duk_dup(ctx, i);																					// [apply][this][this][args][arg]
+		duk_put_prop_index(ctx, -2, i);																		// [apply][this][this][args]
+	}
+	duk_call_method(ctx, 2);
+	
+	sem_wait(&(data->workFinished));
+	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, (void*)(PTRSIZE)data->vars, (int)sizeof(void*));			
+	return(1);
+}
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 {
 	void *fptr = NULL;
@@ -851,7 +1161,13 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 		if (spawnThread == 0)
 		{
 			retVal = ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars);
+#ifdef WIN32
+			DWORD err = GetLastError();
+#endif
 			ILibDuktape_GenericMarshal_Variable_PUSH(ctx, (void*)(PTRSIZE)retVal, (int)sizeof(void*));
+#ifdef WIN32
+			duk_push_int(ctx, err); duk_put_prop_string(ctx, -2, "_LastError");
+#endif
 		}
 		else
 		{
@@ -879,6 +1195,25 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	}
 
 	return 1;
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread(duk_context *ctx)
+{
+	duk_push_this(ctx);		// [async]
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	if (data == NULL) { return(ILibDuktape_Error(ctx, "No thread")); }
+	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, data->workerThread, sizeof(void*));
+	return(1);
+}
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread_id(duk_context *ctx)
+{
+	duk_push_this(ctx);		// [async]
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	
+	char tmp[255];
+	sprintf_s(tmp, sizeof(tmp), "%ul", data->workerThreadId);
+	duk_push_string(ctx, tmp);
+	return(1);
+	
 }
 duk_ret_t ILibDuktape_GenericMarshal_CreateMethod(duk_context *ctx)
 {
@@ -930,6 +1265,20 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateMethod(duk_context *ctx)
 	duk_push_pointer(ctx, funcAddress);																// [obj][func][addr]
 	duk_put_prop_string(ctx, -2, "_address");														// [obj][func]
 	if (threadDispatch != 0) { duk_push_true(ctx); duk_put_prop_string(ctx, -2, "_spawnThread"); }	// [obj][func]
+
+	// Add an 'async' method, to use a dispatch thread to invoke the method
+	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync, DUK_VARARGS);			// [obj][func][func]
+	duk_push_pointer(ctx, funcAddress);																// [obj][func][func][addr]
+	duk_put_prop_string(ctx, -2, "_address");														// [obj][func][func]
+	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_abort, 0); 				// [obj][func][func][func]
+	duk_put_prop_string(ctx, -2, "abort");															// [obj][func][func]
+	duk_push_this(ctx);	duk_put_prop_string(ctx, -2, "_obj");
+	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_thread, 0); duk_put_prop_string(ctx, -2, "thread");
+	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_wait, DUK_VARARGS); duk_put_prop_string(ctx, -2, "wait");
+	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_thread_id, 0); duk_put_prop_string(ctx, -2, "threadId");
+
+	duk_put_prop_string(ctx, -2, "async");															// [obj][func]
+
 	duk_put_prop_string(ctx, -2, exposedMethod);													// [obj]
 
 	return 0;
@@ -1018,12 +1367,27 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateVariableEx(duk_context *ctx)
 	}
 	return 1;
 }
-
+void ILibDuktape_GlobalGenericCallback_ProcessEx_Abort(void *chain, void *user)
+{
+	Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)user;
+	if (ILibMemory_CanaryOK(data))
+	{
+		data->retVal = NULL;
+		sem_post(&(data->contextWaiter));
+	}
+}
 void ILibDuktape_GlobalGenericCallback_ProcessEx(void *chain, void *user)
 {
 	int i;
 	//void *retVal = NULL;
 	Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)user;
+	char tmp[255];
+	sprintf_s(tmp, sizeof(tmp), "%ul", data->callingThread);
+	duk_push_heapptr(data->emitter->ctx, data->emitter->object);										// [obj]
+	duk_push_string(data->emitter->ctx, tmp);														    // [obj][str]
+	duk_put_prop_string(data->emitter->ctx, -2, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID);	// [obj]
+	duk_pop(data->emitter->ctx);																		// ...
+
 	ILibDuktape_EventEmitter_SetupEmit(data->emitter->ctx, data->emitter->object, "GlobalCallback");	// [emit][this][GlobalCallback]
 	for (i = 0; i < data->numArgs; ++i)
 	{
@@ -1049,82 +1413,106 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 {
 	void *retVal = NULL;
 	PTRSIZE v;
+	Duktape_GlobalGeneric_Data *user;
+
+	if (GlobalCallbackList == NULL) { return(NULL); }
+
 	ILibLinkedList_Lock(GlobalCallbackList);
 	Duktape_GlobalGeneric_Data *data;
-	int i = 0, maxCount = ILibLinkedList_GetCount(GlobalCallbackList), count = 0;
+	int i = 0, maxCount = ILibLinkedList_GetCount(GlobalCallbackList), count = 0, j = 0;
 	void *node = ILibLinkedList_GetNode_Head(GlobalCallbackList);
 	Duktape_GlobalGeneric_Data **refList = (Duktape_GlobalGeneric_Data**)ILibMemory_AllocateA(maxCount * sizeof(Duktape_GlobalGeneric_Data*));
+	
 	while (node != NULL)
 	{
 		data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
-		if (!ILibIsRunningOnChainThread(data->chain))
-		{
-			// Need to Context Switch
-			Duktape_GlobalGeneric_Data *user = ILibMemory_Allocate(sizeof(Duktape_GlobalGeneric_Data) + (numParms * sizeof(PTRSIZE)), 0, NULL, NULL);
-			sem_init(&(user->contextWaiter), 0, 0);
-			user->chain = data->chain;
-			user->emitter = data->emitter;
-			user->numArgs = numParms;
-			if (numParms > 0)
-			{
-				va_list vlist;
-				va_start(vlist, numParms);
-				for (i = 0; i < numParms; ++i)
-				{
-					user->args[i] = va_arg(vlist, PTRSIZE);
-				}
-				va_end(vlist);
-			}
-			ILibChain_RunOnMicrostackThreadEx(user->chain, ILibDuktape_GlobalGenericCallback_ProcessEx, user);
-			sem_wait(&(user->contextWaiter));
-
-			if (user->retVal != NULL) { retVal = user->retVal; }
-			sem_destroy(&(user->contextWaiter));
-			free(user);
-		}
-		else
-		{
-			// No need to context switch, so just reference this
-			refList[count++] = data;
-		}
+		refList[count++] = data;
 		node = ILibLinkedList_GetNextNode(node);
 	}
 	ILibLinkedList_UnLock(GlobalCallbackList);
 
 	for (i = 0; i < count; ++i)
 	{
-		ILibDuktape_EventEmitter_SetupEmit(refList[i]->emitter->ctx, refList[i]->emitter->object, "GlobalCallback");	// [emit][this][GlobalCallback]
-		if (numParms > 0)
+		user = NULL;
+		ILibLinkedList_Lock(GlobalCallbackList);
+		if (ILibMemory_CanaryOK(refList[i]))
 		{
-			int z;
-			va_list vlist;
-			va_start(vlist, numParms);
-			for (z = 0; z < numParms; ++z)
+			if (!ILibIsRunningOnChainThread(refList[i]->chain))
 			{
-				v = va_arg(vlist, PTRSIZE);
-				ILibDuktape_GenericMarshal_Variable_PUSH(refList[i]->emitter->ctx, (void*)v, sizeof(void*));
-				ILibDuktape_GenericMarshal_Variable_DisableAutoFree(refList[i]->emitter->ctx, -1);
-			}
-			va_end(vlist);
-		}
-		if (duk_pcall_method(refList[i]->emitter->ctx, numParms + 1) != 0) 
-		{ 
-			ILibDuktape_Process_UncaughtException(refList[i]->emitter->ctx); 
-		}
-		else
-		{
-			if ((retVal = refList[i]->emitter->lastReturnValue) != NULL)
-			{
-				duk_push_heapptr(refList[i]->emitter->ctx, refList[i]->emitter->lastReturnValue);				// [retVal]
-				if (duk_has_prop_string(refList[i]->emitter->ctx, -1, ILibDuktape_GenericMarshal_VariableType))
+				// Need to context switch
+				user = ILibMemory_SmartAllocate(sizeof(Duktape_GlobalGeneric_Data) + (numParms * sizeof(PTRSIZE)));
+#ifdef WIN32
+				user->callingThread = GetCurrentThreadId();
+#else
+				user->callingThread = pthread_self();
+#endif
+				sem_init(&(user->contextWaiter), 0, 0);
+				user->chain = refList[i]->chain;
+				user->emitter = refList[i]->emitter;
+				user->numArgs = numParms;
+				if (numParms > 0)
 				{
-					retVal = Duktape_GetPointerProperty(refList[i]->emitter->ctx, -1, "_ptr");
+					va_list vlist;
+					va_start(vlist, numParms);
+					for (j = 0; j < numParms; ++j)
+					{
+						user->args[j] = va_arg(vlist, PTRSIZE);
+					}
+					va_end(vlist);
 				}
-				duk_pop(refList[i]->emitter->ctx);																// ...
+				ILibChain_RunOnMicrostackThreadEx3(refList[i]->chain, ILibDuktape_GlobalGenericCallback_ProcessEx, ILibDuktape_GlobalGenericCallback_ProcessEx_Abort, user);
+			}
+			else
+			{
+				// No need to context switch
+				duk_push_heapptr(refList[i]->emitter->ctx, refList[i]->emitter->object);										// [obj]
+				duk_del_prop_string(refList[i]->emitter->ctx, -1, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID);
+				duk_pop(refList[i]->emitter->ctx);																				// ...
+				ILibDuktape_EventEmitter_SetupEmit(refList[i]->emitter->ctx, refList[i]->emitter->object, "GlobalCallback");	// [emit][this][GlobalCallback]
+				if (numParms > 0)
+				{
+					int z;
+					va_list vlist;
+					va_start(vlist, numParms);
+					for (z = 0; z < numParms; ++z)
+					{
+						v = va_arg(vlist, PTRSIZE);
+						ILibDuktape_GenericMarshal_Variable_PUSH(refList[i]->emitter->ctx, (void*)v, sizeof(void*));
+						ILibDuktape_GenericMarshal_Variable_DisableAutoFree(refList[i]->emitter->ctx, -1);
+					}
+					va_end(vlist);
+				}
+				if (duk_pcall_method(refList[i]->emitter->ctx, numParms + 1) != 0)
+				{
+					ILibDuktape_Process_UncaughtException(refList[i]->emitter->ctx);
+				}
+				else
+				{
+					if ((retVal = refList[i]->emitter->lastReturnValue) != NULL)
+					{
+						duk_push_heapptr(refList[i]->emitter->ctx, refList[i]->emitter->lastReturnValue);				// [retVal]
+						if (duk_has_prop_string(refList[i]->emitter->ctx, -1, ILibDuktape_GenericMarshal_VariableType))
+						{
+							retVal = Duktape_GetPointerProperty(refList[i]->emitter->ctx, -1, "_ptr");
+						}
+						duk_pop(refList[i]->emitter->ctx);																// ...
+					}
+				}
+				duk_pop(refList[i]->emitter->ctx);
 			}
 		}
-		duk_pop(refList[i]->emitter->ctx);
+		ILibLinkedList_UnLock(GlobalCallbackList);	
+
+		if (user != NULL)
+		{
+			sem_wait(&(user->contextWaiter));
+
+			if (user->retVal != NULL) { retVal = user->retVal; }
+			sem_destroy(&(user->contextWaiter));
+			ILibMemory_Free(user);
+		}
 	}
+
 	return(retVal);
 }
 
@@ -1172,6 +1560,14 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalGenericCallback_EventSink(duk_context
 	void *self = duk_get_heapptr(ctx, -1);
 	if (Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_GenericMarshal_Variable_Parms, -1) == nargs)
 	{
+		duk_dup(ctx, -1);										// [var]
+		duk_eval_string(ctx, "require('_GenericMarshal');");	// [var][GM]
+		duk_get_prop_string(ctx, -1, "CallingThread");			// [var][GM][CallingThread]
+		duk_swap_top(ctx, -2);									// [var][CallingThread][this]
+		duk_call_method(ctx, 0);								// [var][ThreadId]
+		duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID);
+		duk_pop(ctx);
+
 		ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "GlobalCallback");	// [emit][this][GlobalCallback]
 		for (i = 0; i < nargs; ++i) { duk_dup(ctx, i); }
 		duk_pcall_method(ctx, nargs + 1);
@@ -1194,6 +1590,22 @@ duk_ret_t ILibDuktape_GenericMarshal_ObjectToPtr_Verify(duk_context *ctx)
 	duk_push_boolean(ctx, ptr == var);
 	return(1);
 }
+duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_CallingThread(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID);
+	}
+	else
+	{
+		duk_eval_string(ctx, "require('_GenericMarshal');");	// [GM]
+		duk_get_prop_string(ctx, -1, "GetCurrentThread");		// [GM][GCT]
+		duk_swap_top(ctx, -2);									// [GCT][this]
+		duk_call_method(ctx, 0);								// [ThreadId]
+	}
+	return(1);
+}
 duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 {
 	int numParms = duk_require_int(ctx, 0);
@@ -1205,11 +1617,12 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 		{
 			GlobalCallbackList = ILibLinkedList_Create();
 		}
-
-		Duktape_GlobalGeneric_Data *data = ILibMemory_Allocate(sizeof(Duktape_GlobalGeneric_Data), 0, NULL, NULL);
+		
+		Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibMemory_SmartAllocate(sizeof(Duktape_GlobalGeneric_Data));
 		data->emitter = ILibDuktape_EventEmitter_Create(ctx);
 		data->chain = Duktape_GetChain(ctx);
 		ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "GlobalCallback");
+		ILibDuktape_CreateInstanceMethod(ctx, "CallingThread", ILibDuktape_GenericMarshal_GlobalCallback_CallingThread, 0);
 
 		ILibLinkedList_Lock(GlobalCallbackList);
 		ILibLinkedList_AddTail(GlobalCallbackList, data);
@@ -1255,6 +1668,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 	ILibDuktape_EventEmitter *varEmitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(varEmitter, "GlobalCallback");
 	duk_push_int(ctx, numParms); duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_Parms);
+	ILibDuktape_CreateInstanceMethod(ctx, "CallingThread", ILibDuktape_GenericMarshal_GlobalCallback_CallingThread, 0);
 
 	duk_get_prop_string(ctx, -2, "on");																	// [GenericMarshal][Variable][on]
 	duk_dup(ctx, -3);																					// [GenericMarshal][Variable][on][this/GM]
@@ -1279,7 +1693,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 			Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
 			if (data->chain == Duktape_GetChain(ctx))
 			{
-				free(data);
+				ILibMemory_Free(data);
 				void *next = ILibLinkedList_GetNextNode(node);
 				ILibLinkedList_Remove(node);
 				node = next;
@@ -1374,6 +1788,18 @@ duk_ret_t ILibDuktape_GenericMarshal_ObjectToPtr(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_GenericMarshal_GetCurrentThread(duk_context *ctx)
+{
+	char tmp[255];
+#if defined(WIN32)
+	sprintf_s(tmp, sizeof(tmp), "%ul", GetCurrentThreadId());
+#else
+	sprintf_s(tmp, sizeof(tmp), "%ul", pthread_self());
+#endif
+	duk_push_string(ctx, tmp);
+	return(1);
+}
+
 void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);												// [obj]
@@ -1389,6 +1815,7 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "StashObject", ILibDuktape_GenericMarshal_StashObject, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "UnstashObject", ILibDuktape_GenericMarshal_UnstashObject, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "ObjectToPtr", ILibDuktape_GenericMarshal_ObjectToPtr, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "GetCurrentThread", ILibDuktape_GenericMarshal_GetCurrentThread, 0);
 
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_VarSize", 4, "CreateInteger", ILibDuktape_GenericMarshal_CreateVariableEx, 0);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_VarSize", ((int)sizeof(void*)), "CreatePointer", ILibDuktape_GenericMarshal_CreateVariableEx, DUK_VARARGS);
