@@ -39,10 +39,18 @@ limitations under the License.
 
 #ifdef _POSIX
 #include <sys/stat.h>
-#ifndef _NOFSWATCHER
+#if !defined(_NOFSWATCHER) && !defined(__APPLE__)
 #include <sys/inotify.h>
 #endif
 #endif
+#ifdef __APPLE__
+#include <sys/types.h>
+#include <sys/event.h>
+#include <sys/time.h>
+
+#define KEVENTBLOCKSIZE 16
+#endif
+
 
 #define FS_NextFD			"\xFF_NextFD"
 #define FS_FDS				"\xFF_FDS"
@@ -53,16 +61,44 @@ limitations under the License.
 #define FS_READSTREAM_BUFFERSIZE	4096
 #define FS_STAT_METHOD_RETVAL		"\xFF_RetVal"
 #define FS_WATCHER_DATA_PTR			"\xFF_FSWatcherPtr"
+#define FS_WATCHER_2_FS				"\xFF_FSWatcher2FS"
 #define FS_PIPEMANAGER_PTR			"\xFF_FSWatcher_PipeMgrPtr"
 #define FS_NOTIFY_DISPATCH_PTR		"\xFF_FSWatcher_NotifyDispatchPtr"
 #define FS_CHAIN_PTR				"\xFF_FSWatcher_ChainPtr"
 
+#if defined(_POSIX) && !defined(__APPLE__)
 typedef struct ILibDuktape_fs_linuxWatcher
 {
 	ILibChain_Link chainLink;
 	ILibHashtable watchTable;
 	int fd;
 }ILibDuktape_fs_linuxWatcher;
+#endif
+
+#ifdef __APPLE__
+typedef enum ILibDuktape_fs_descriptorFlags
+{
+	ILibDuktape_fs_descriptorFlags_ADD = 1,
+	ILibDuktape_fs_descriptorFlags_REMOVE = 2
+}ILibDuktape_fs_descriptorFlags;
+typedef struct ILibDuktape_fs_descriptorInfo
+{
+	void* descriptor;
+	void* user;
+	ILibDuktape_fs_descriptorFlags flags;
+}ILibDuktape_fs_descriptorInfo;
+typedef struct ILibDuktape_fs_appleWatcher
+{
+	int exit;
+	void *chain;
+	void *kthread;
+	int kq;
+	sem_t exitWaiter;
+	sem_t inputWaiter;
+	int unblocker[2];
+	ILibDuktape_fs_descriptorInfo **descriptors;
+}ILibDuktape_fs_appleWatcher;
+#endif
 
 typedef struct ILibDuktape_fs_writeStreamData
 {
@@ -108,10 +144,11 @@ typedef struct ILibDuktape_fs_watcherData
 	void *pipeManager;
 	char results[4096];
 #elif defined(_POSIX)
-	
-#endif
+#ifndef __APPLE__
 	ILibDuktape_fs_linuxWatcher* linuxWatcher;
+#endif
 	union { int i; void *p; } wd;
+#endif
 }ILibDuktape_fs_watcherData;
 #endif
 
@@ -601,6 +638,26 @@ duk_ret_t ILibDuktape_fs_Finalizer(duk_context *ctx)
 		duk_get_prop_string(ctx, 0, FS_CHAIN_PTR);				// [pipeMgr][chain]
 		ILibChain_SafeRemove(duk_get_pointer(ctx, -1), duk_get_pointer(ctx, -2));
 	}
+	if (duk_has_prop_string(ctx, 0, FS_NOTIFY_DISPATCH_PTR))
+	{
+#ifdef _POSIX
+#ifdef __APPLE__
+		duk_get_prop_string(ctx, 0, FS_NOTIFY_DISPATCH_PTR);
+		ILibDuktape_fs_appleWatcher *watcher = (ILibDuktape_fs_appleWatcher*)Duktape_GetBuffer(ctx, -1, NULL);
+		watcher->exit = 1;
+		watcher->descriptors = NULL;
+		write(watcher->unblocker[1], " ", 1);
+		sem_wait(&(watcher->exitWaiter));
+
+		sem_destroy(&(watcher->exitWaiter));
+		sem_destroy(&(watcher->inputWaiter));
+		close(watcher->kq);
+		close(watcher->unblocker[0]);
+		close(watcher->unblocker[1]);
+#else
+#endif
+#endif
+	}
 	return 0;
 }
 
@@ -852,7 +909,8 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 {
 	ILibDuktape_fs_watcherData *data;
 
-	duk_push_this(ctx);													// [fsWatcher]
+	duk_push_this(ctx);																	// [fsWatcher]
+	if (!duk_has_prop_string(ctx, -1, FS_WATCHER_DATA_PTR)) { return(0); }
 	duk_get_prop_string(ctx, -1, FS_WATCHER_DATA_PTR);
 	data = (ILibDuktape_fs_watcherData*)Duktape_GetBuffer(ctx, -1, NULL);
 
@@ -861,22 +919,41 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, data->overlapped.hEvent);
 	CloseHandle(data->h);
 	data->h = NULL;
-#elif defined(_POSIX)
+#elif defined(_POSIX) && !defined(__APPLE__)
 	ILibHashtable_Remove(data->linuxWatcher->watchTable, data->wd.p, NULL, 0);
 	if (inotify_rm_watch(data->linuxWatcher->fd, data->wd.i) != 0) { ILibRemoteLogging_printf(ILibChainGetLogger(Duktape_GetChain(ctx)), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "FSWatcher.close(): Error removing wd[%d] from fd[%d]", data->wd.i, data->linuxWatcher->fd); }
 	else
 	{
-		ILibRemoteLogging_printf(ILibChainGetLogger(Duktape_GetChain(ctx)), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "FSWatcher.close(): Success removing wd[%d] from fd[%d]", data->wd.i, data->linuxWatcher->fd);
+		ILibRemoteLogging_printf(ILibChainGetLogger(Duktape_GetChain(ctx)), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "FSWatcher.close(): Success removing wd[%d] from fd[%d]", data->wd.i, data->linuxWatcher->fd);
 	}
 	data->wd.p = NULL;
+#elif defined(__APPLE__)
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, FS_WATCHER_2_FS);
+	duk_get_prop_string(ctx, -1, FS_NOTIFY_DISPATCH_PTR);
+
+	ILibDuktape_fs_appleWatcher *watcher = (ILibDuktape_fs_appleWatcher*)Duktape_GetBuffer(ctx, -1, NULL);
+	void **d = ILibMemory_Init(alloca(ILibMemory_Init_Size(2 * sizeof(void*), sizeof(ILibDuktape_fs_descriptorInfo))), 2 * sizeof(void*), sizeof(ILibDuktape_fs_descriptorInfo), ILibMemory_Types_STACK);
+	d[0] = ILibMemory_Extra(d);
+	d[1] = NULL;
+	((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->descriptor = data->wd.p;
+	((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->user = data;
+	((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->flags = ILibDuktape_fs_descriptorFlags_REMOVE;
+	watcher->descriptors = d;
+	write(watcher->unblocker[1], " ", 1);
+	sem_wait(&(watcher->inputWaiter));
+
+	close(data->wd.i);
 #endif
 	
+	duk_push_this(ctx);									// [fsWatcher]
+	duk_del_prop_string(ctx, -1, FS_WATCHER_DATA_PTR);
 	return 0;
 }
 #endif
 
 #ifdef WIN32
-BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, void *user);
+BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user);
 void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 {
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
@@ -943,7 +1020,7 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 	{
 		duk_get_prop_string(data->ctx, -4, "\xFF_FileName");		// [detail][emit][this][change][type][fileName]
 	}
-	duk_dup(data->ctx, -5);											// [detail][emit][this][change][type][fileName][detail]
+	duk_dup(data->ctx, -6);											// [detail][emit][this][change][type][fileName][detail]
 	if (duk_pcall_method(data->ctx, 4) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
 	duk_pop_2(data->ctx);											// ...
 
@@ -962,8 +1039,9 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 		}
 	}
 }
-BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, void *user)
+BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
+	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
 
 	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, h);
@@ -975,28 +1053,14 @@ BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, void *user)
 #ifndef _NOFSWATCHER
 duk_ret_t ILibDuktape_fs_watcher_finalizer(duk_context *ctx)
 {
-	ILibDuktape_fs_watcherData *data;
-	duk_get_prop_string(ctx, 0, FS_WATCHER_DATA_PTR);
-	data = (ILibDuktape_fs_watcherData*)Duktape_GetBuffer(ctx, -1, NULL);
-
-#if defined(WIN32)
-	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, data->overlapped.hEvent);
-	CancelIo(data->h);
-#elif defined(_POSIX)
-	if (data->wd.p != NULL)
-	{
-		ILibHashtable_Remove(data->linuxWatcher->watchTable, data->wd.p, NULL, 0);
-		if (inotify_rm_watch(data->linuxWatcher->fd, data->wd.i) != 0) 
-		{ 
-			ILibRemoteLogging_printf(ILibChainGetLogger(Duktape_GetChain(ctx)), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "FSWatcher.close(): Error removing wd[%d] from fd[%d]", data->wd.i, data->linuxWatcher->fd); 
-		}
-	}
-#endif
+	duk_get_prop_string(ctx, 0, "close");		// [close]
+	duk_dup(ctx, 0);							// [close][this]
+	duk_call_method(ctx, 0);					// [ret]
 
 	return 0;
 }
 
-#ifdef _POSIX
+#if defined(_POSIX) && !defined(__APPLE__)
 void ILibDuktape_fs_notifyDispatcher_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
@@ -1066,6 +1130,157 @@ void ILibDuktape_fs_notifyDispatcher_Destroy(void *object)
 }
 #endif
 
+#ifdef __APPLE__
+void ILibduktape_fs_watch_appleWorker_MODIFIED(void *chain, void *user, char *changeType)
+{
+	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
+	if (ILibMemory_CanaryOK(data))
+	{
+		ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "change");	// [emit][this][change]
+		duk_push_string(data->ctx, "change");									// [emit][this][change][eventType]
+		duk_get_prop_string(data->ctx, -3, "\xFF_FileName");					// [emit][this][change][eventType][fileName]
+		duk_push_object(data->ctx);												// [emit][this][change][eventType][fileName][detail]
+		duk_push_string(data->ctx, changeType); duk_put_prop_string(data->ctx, -2, "changeType");
+		if (duk_pcall_method(data->ctx, 4) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "fs.fsWatch.onChange(): "); }
+		duk_pop(data->ctx);														// ...
+	}
+}
+void ILibduktape_fs_watch_appleWorker_DELETE(void *chain, void *user)
+{
+	ILibduktape_fs_watch_appleWorker_MODIFIED(chain, user, "DELETE");
+}
+void ILibduktape_fs_watch_appleWorker_EXTEND(void *chain, void *user)
+{
+	ILibduktape_fs_watch_appleWorker_MODIFIED(chain, user, "MODIFIED_EXTEND");
+}
+void ILibduktape_fs_watch_appleWorker_ATTRIB(void *chain, void *user)
+{
+	ILibduktape_fs_watch_appleWorker_MODIFIED(chain, user, "MODIFIED_ATTRIB");
+}
+void ILibduktape_fs_watch_appleWorker_RENAME(void *chain, void *user)
+{
+	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
+	if (ILibMemory_CanaryOK(data))
+	{
+		if (duk_peval_string(data->ctx, "require('fs');")==0)
+		{
+			duk_get_prop_string(data->ctx, -1, "_fdToName");							// [fs][_fdToName]
+			duk_swap_top(data->ctx, -2);												// [_fdToName][this]
+			duk_push_int(data->ctx, data->wd.i);										// [_fdToName][this][fd]
+			if (duk_pcall_method(data->ctx, 1) == 0)
+			{
+				ILibDuktape_EventEmitter_SetupEmit(data->ctx, data->object, "change");	// [NAME][emit][this][change]
+				duk_push_string(data->ctx, "rename");									// [NAME][emit][this][change][eventType]
+				duk_get_prop_string(data->ctx, -3, "\xFF_FileName");					// [NAME][emit][this][change][eventType][oldName]
+				duk_push_object(data->ctx);												// [NAME][emit][this][change][eventType][oldName][detail]
+				duk_push_string(data->ctx, "rename"); duk_put_prop_string(data->ctx, -2, "changeType");				
+				duk_dup(data->ctx, -7);	duk_put_prop_string(data->ctx, -2, "newname");	// [NAME][emit][this][change][eventType][oldName][detail]
+				duk_get_prop_string(data->ctx, -5, "\xFF_FileName"); duk_put_prop_string(data->ctx, -2, "oldname");		
+				duk_remove(data->ctx, -7);												// [emit][this][change][eventType][oldName][detail]
+				if (duk_pcall_method(data->ctx, 4) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "fs.fsWatch.onChange(): "); }
+				duk_pop(data->ctx);														// ...
+			}
+			duk_pop(data->ctx);										// ...
+		}
+		else
+		{
+			duk_pop(data->ctx);
+		}
+	}
+}
+void ILibduktape_fs_watch_appleWorker_WRITE(void *chain, void *user)
+{
+	ILibduktape_fs_watch_appleWorker_MODIFIED(chain, user, "MODIFIED_WRITE");
+}
+void ILibduktape_fs_watch_appleWorker_LINK(void *chain, void *user)
+{
+	ILibduktape_fs_watch_appleWorker_MODIFIED(chain, user, "MODIFIED_LINK");
+}
+void ILibduktape_fs_watch_appleWorker(void *obj)
+{
+	ILibDuktape_fs_appleWatcher *watcher = (ILibDuktape_fs_appleWatcher*)obj;
+	struct kevent change[KEVENTBLOCKSIZE];
+	struct kevent event;
+	int inCount = 1;
+	int n, i, x;
+	char tmp[255];
+
+	EV_SET(&(change[0]), watcher->unblocker[0], EVFILT_READ, EV_ADD | EV_CLEAR,	0, 0, 0);
+	while (watcher->exit == 0)
+	{
+		n = kevent(watcher->kq, change, inCount, &event, 1, NULL); inCount = 0;
+		if (n > 0)
+		{
+			if (event.ident == watcher->unblocker[0])
+			{
+				// Force Unblock
+				read(watcher->unblocker[0], tmp, event.data < sizeof(tmp) ? event.data : sizeof(tmp));
+				if (watcher->exit != 0) { continue; }
+
+				for(i=0; (watcher->descriptors != NULL && watcher->descriptors[i] != NULL); ++i)
+				{
+					if ((watcher->descriptors[i]->flags & ILibDuktape_fs_descriptorFlags_ADD) == ILibDuktape_fs_descriptorFlags_ADD)
+					{
+						// Add Descriptor
+						EV_SET(&(change[inCount++]), watcher->descriptors[i]->descriptor, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR, NOTE_DELETE | NOTE_EXTEND | NOTE_WRITE | NOTE_ATTRIB | NOTE_RENAME | NOTE_LINK, 0, watcher->descriptors[i]->user);
+						if (inCount == KEVENTBLOCKSIZE)
+						{
+							// Change List is full, let's set it to kevent now
+							kevent(watcher->kq, change, inCount, &event, 0, NULL); // This will return immediately, becuase we set eventsize to 0
+							inCount = 0;
+						}
+					}
+					if ((watcher->descriptors[i]->flags & ILibDuktape_fs_descriptorFlags_REMOVE) == ILibDuktape_fs_descriptorFlags_REMOVE)
+					{
+						// Remove Descriptor
+						EV_SET(&(change[inCount++]), watcher->descriptors[i]->descriptor, EVFILT_VNODE, EV_DELETE | EV_DISABLE, 0, 0, NULL);
+						if (inCount == KEVENTBLOCKSIZE)
+						{
+							// Change List is full, let's set it to kevent now
+							kevent(watcher->kq, change, inCount, &event, 0, NULL); // This will return immediately, becuase we set eventsize to 0
+							inCount = 0;
+						}
+					}
+				}
+				sem_post(&(watcher->inputWaiter));
+			}
+			else
+			{
+				// One of the descriptors triggered!
+				char test[4096];
+				int testLen = 4096;
+
+				if ((event.fflags & NOTE_ATTRIB) == NOTE_ATTRIB)
+				{
+					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_ATTRIB, event.udata);
+				}
+				if ((event.fflags & NOTE_DELETE) == NOTE_DELETE)
+				{
+					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_DELETE, event.udata);
+				}
+				if ((event.fflags & NOTE_EXTEND) == NOTE_EXTEND)
+				{
+					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_EXTEND, event.udata);
+				}
+				if ((event.fflags & NOTE_RENAME) == NOTE_RENAME)
+				{
+					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_RENAME, event.udata);
+				}
+				if ((event.fflags & NOTE_WRITE) == NOTE_WRITE)
+				{
+					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_WRITE, event.udata);
+				}	
+				if ((event.fflags & NOTE_LINK) == NOTE_LINK)
+				{
+					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_LINK, event.udata);
+				}
+			}
+		}
+	}
+	sem_post(&(watcher->exitWaiter));
+}
+#endif
+
 duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 {
 #ifdef WIN32
@@ -1096,8 +1311,9 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		duk_pop(ctx);														// ...
 	}
 #elif defined(_POSIX)
+#ifndef __APPLE__
+	// Linux
 	ILibDuktape_fs_linuxWatcher *notifyDispatcher = NULL;
-
 	duk_push_this(ctx);																// [fs]
 	if (duk_has_prop_string(ctx, -1, FS_NOTIFY_DISPATCH_PTR))
 	{
@@ -1118,12 +1334,41 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		duk_put_prop_string(ctx, -2, FS_NOTIFY_DISPATCH_PTR);				// [fs]
 		duk_pop(ctx);														// ...
 	}
+#else
+	// MacOS
+	ILibDuktape_fs_appleWatcher *watcher = NULL;
+	duk_push_this(ctx);																// [fs]
+	if (duk_has_prop_string(ctx, -1, FS_NOTIFY_DISPATCH_PTR))
+	{
+		duk_get_prop_string(ctx, -1, FS_NOTIFY_DISPATCH_PTR);						// [fs][buffer]
+		watcher = (ILibDuktape_fs_appleWatcher*)Duktape_GetBuffer(ctx, -1, NULL);
+		duk_pop_2(ctx);																// ...
+	}
+	else
+	{
+		watcher = (ILibDuktape_fs_appleWatcher*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_fs_appleWatcher));
+		duk_put_prop_string(ctx, -2, FS_NOTIFY_DISPATCH_PTR);
+		duk_pop(ctx);																// ...
+
+		// Since this is newly created, we must take care of a few housekeeping things
+		if ((watcher->kq = kqueue()) == -1)
+		{
+			return(ILibDuktape_Error(ctx, "Could not create kq"));
+		}		
+		sem_init(&(watcher->exitWaiter), 0, 0);
+		sem_init(&(watcher->inputWaiter), 0, 0);
+		pipe(watcher->unblocker);
+		watcher->chain = Duktape_GetChain(ctx);
+		watcher->kthread = ILibSpawnNormalThread(ILibduktape_fs_watch_appleWorker, watcher);
+	}
+#endif
 #endif
 	
 	duk_push_object(ctx);													// [FSWatcher]
 	ILibDuktape_WriteID(ctx, "fs.fsWatcher");
 	data = (ILibDuktape_fs_watcherData*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_fs_watcherData));
 	duk_put_prop_string(ctx, -2, FS_WATCHER_DATA_PTR);						// [FSWatcher]
+	duk_push_this(ctx); duk_put_prop_string(ctx, -2, FS_WATCHER_2_FS);
 
 	data->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	data->ctx = ctx;
@@ -1132,10 +1377,13 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	data->chain = chain;
 	data->pipeManager = pipeMgr;
 	data->recursive = recursive;
-#elif defined(_POSIX)
+#elif defined(_POSIX) && !defined(__APPLE__)
 	data->linuxWatcher = notifyDispatcher;
 #endif
-	
+#ifdef __APPLE__
+	duk_dup(ctx, 0);
+	duk_put_prop_string(ctx, -2, "\xFF_FileName");
+#endif
 
 	ILibDuktape_CreateInstanceMethod(ctx, "close", ILibDuktape_fs_watcher_close, 0);
 	ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "change");
@@ -1162,7 +1410,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		duk_push_string(ctx, "fs.watch(): Error creating watcher"); duk_throw(ctx); return(DUK_RET_ERROR);
 	}
 	ILibProcessPipe_WaitHandle_Add(pipeMgr, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
-#elif defined(_POSIX)
+#elif defined(_POSIX) && !defined(__APPLE__)
 	data->wd.i = inotify_add_watch(data->linuxWatcher->fd, path, IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO);
 	if (data->wd.i < 0)
 	{
@@ -1171,6 +1419,23 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	else
 	{
 		ILibHashtable_Put(data->linuxWatcher->watchTable, data->wd.p, NULL, 0, data);
+	}
+#elif defined(__APPLE__)
+	if ((data->wd.i = open(path, O_RDONLY)) < 0)
+	{
+		return(ILibDuktape_Error(ctx, "Could not create watcher for: %s", path));
+	}
+	else
+	{
+		void **d = ILibMemory_Init(alloca(ILibMemory_Init_Size(2 * sizeof(void*), sizeof(ILibDuktape_fs_descriptorInfo))), 2 * sizeof(void*), sizeof(ILibDuktape_fs_descriptorInfo), ILibMemory_Types_STACK);
+		d[0] = ILibMemory_Extra(d);
+		d[1] = NULL;
+		((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->descriptor = data->wd.p;
+		((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->user = data;
+		((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->flags = ILibDuktape_fs_descriptorFlags_ADD;
+		watcher->descriptors = d;
+		write(watcher->unblocker[1], " ", 1);
+		sem_wait(&(watcher->inputWaiter));
 	}
 #endif
 
@@ -1217,6 +1482,21 @@ duk_ret_t ILibDuktape_fs_unlink(duk_context *ctx)
 		duk_push_string(ctx, ILibScratchPad);
 		duk_throw(ctx);
 		return(DUK_RET_ERROR);
+	}
+	return 0;
+}
+duk_ret_t ILibDuktape_fs_rmdirSync(duk_context *ctx)
+{
+#ifdef WIN32
+	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
+	ILibDuktape_String_WideToUTF8(ctx, path);
+	if (_wrmdir((const wchar_t*)path) != 0)
+#else
+	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	if (rmdir(path) != 0)
+#endif
+	{
+		return(ILibDuktape_Error(ctx, "fs.rmdirSync(): Unable to remove dir: %s", ILibDuktape_String_WideToUTF8(ctx, path)));
 	}
 	return 0;
 }
@@ -1314,7 +1594,18 @@ duk_ret_t ILibduktape_fs_chmodSync(duk_context *ctx)
 {
 	if(chmod((char*)duk_require_string(ctx, 0), (mode_t)duk_require_int(ctx, 1)) != 0)
 	{
-		return(ILibDuktape_Error(ctx, "Error calling chmod()"));
+		return(ILibDuktape_Error(ctx, "Error calling chmod(), errno=%d", errno));
+	}
+	else
+	{
+		return(0);
+	}
+}
+duk_ret_t ILibDuktape_fs_chownSync(duk_context *ctx)
+{
+	if (chown((char*)duk_require_string(ctx, 0), (uid_t)duk_require_int(ctx, 1), (gid_t)duk_require_int(ctx, 2)) != 0)
+	{
+		return(ILibDuktape_Error(ctx, "Error calling chown(), errno=%d", errno));
 	}
 	else
 	{
@@ -1348,6 +1639,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "existsSync", ILibDuktape_fs_existsSync, 1);
 #ifdef _POSIX
 	ILibDuktape_CreateInstanceMethod(ctx, "chmodSync", ILibduktape_fs_chmodSync, 2);
+	ILibDuktape_CreateInstanceMethod(ctx, "chownSync", ILibDuktape_fs_chownSync, 3);
 #endif
 #ifndef _NOFSWATCHER
 	ILibDuktape_CreateInstanceMethod(ctx, "watch", ILibDuktape_fs_watch, DUK_VARARGS);
@@ -1355,6 +1647,8 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "renameSync", ILibDuktape_fs_rename, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "unlinkSync", ILibDuktape_fs_unlink, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "mkdirSync", ILibDuktape_fs_mkdirSync, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "rmdirSync", ILibDuktape_fs_rmdirSync, 1);
+
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_Finalizer);
 
@@ -1390,7 +1684,31 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 							this.closeSync(fd);\
 						};\
 						exports.CHMOD_MODES = {S_IRUSR: 0o400, S_IWUSR: 0o200, S_IXUSR: 0o100, S_IRGRP: 0o40, S_IWGRP: 0o20, S_IXGRP: 0o10, S_IROTH: 0o4, S_IWOTH: 0o2, S_IXOTH: 0o1};\
-						";
+						if(process.platform == 'darwin')\
+						{\
+							exports._fdToName = function _fdToName(req_fd, pid)\
+							{\
+								var child = require('child_process').execFile('/bin/sh', ['sh']);\
+								child.stdout._lines = '';\
+								child.stdout.on('data', function(chunk) { this._lines += chunk.toString(); });\
+								child.stdin.write('lsof -p ' + (pid ? pid : process.pid) + '\\nexit\\n');\
+								child.waitExit();\
+								var lines = child.stdout._lines.split('\\n');\
+								var nx = lines[0].indexOf('NAME');\
+								var fdx = lines[0].indexOf('FD') + 2;\
+								for (var i = 1; i < lines.length; ++i)\
+								{\
+									var name = lines[i].substring(nx).trim();\
+									var fd = lines[i].substring(0, fdx).split(' ');\
+									fd = fd[fd.length - 1];\
+									if (req_fd == fd)\
+									{\
+										return (name);\
+									}\
+								}\
+								throw ('not found');\
+							}\
+						}";
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, copyFile, sizeof(copyFile) - 1);
 }
 
