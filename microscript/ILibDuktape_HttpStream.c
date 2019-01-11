@@ -1044,6 +1044,9 @@ duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 	duk_size_t protoLen;
 	int isTLS = 0;
 	int nargs = duk_get_top(ctx);
+
+	duk_require_stack(ctx, DUK_API_ENTRY_STACK);											
+
 	if (duk_is_string(ctx, 0))
 	{
 		// Call 'get' instead, since we already handle that case there...
@@ -2854,10 +2857,19 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 				{
 					duk_push_string(ctx, "request");																							// [emit][this][request]
 					ILibDuktape_HttpStream_IncomingMessage_PUSH(ctx, header, data->DS->ParentObject);											// [emit][this][request][imsg]
+					data->bodyStream = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_HttpStream_IncomingMessage_PauseSink, ILibDuktape_HttpStream_IncomingMessage_ResumeSink, ILibDuktape_HttpStream_IncomingMessage_UnshiftBytes, data);
+					duk_dup(ctx, -3); duk_dup(ctx, -2);																							// [emit][this][request][imsg][httpstream][imsg]
+					duk_put_prop_string(ctx, -2, ILibDuktape_HTTPStream2IMSG); duk_pop(ctx);													// [emit][this][request][imsg]
+
 					ILibDuktape_HttpStream_ServerResponse_PUSH(ctx, data->DS->writableStream->pipedReadable, header, data->DS->ParentObject);	// [emit][this][request][imsg][rsp]
 
 					if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.httpStream.onReceive->request(): "); }
 					duk_pop(ctx);
+
+					if (bodyBuffer != NULL && endPointer > 0)
+					{
+						ILibDuktape_readableStream_WriteData(data->bodyStream, bodyBuffer + *beginPointer, endPointer);
+					}
 				}
 			}
 		}
@@ -2940,6 +2952,23 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 			duk_push_string(ctx, "end");									// [emit]][this][end]
 			if (duk_pcall_method(ctx, 1) != 0) ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpStream.onReceive(): Error dispatching 'end': %s", duk_safe_to_string(ctx, -1));
 			duk_pop(ctx);													// ...
+
+			if (header->Directive == NULL)
+			{
+				duk_push_heapptr(ctx, data->DS->ParentObject);					// [httpStream]
+				duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);	// [httpStream][socket]
+				if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2Agent))
+				{
+					duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);		// [httpStream][socket][agent]
+					duk_get_prop_string(ctx, -1, "keepSocketAlive");			// [httpStream][socket][agent][keepSocketAlive]
+					duk_swap_top(ctx, -2);										// [httpStream][socket][keepSocketAlive][this]
+					duk_dup(ctx, -3);											// [httpStream][socket][keepSocketAlive][this][socket]
+					if (duk_pcall_method(ctx, 1) != 0) {}
+					duk_pop(ctx);												// [httpStream][socket]
+					duk_pop_2(ctx);												// ...
+				}			
+			}
+
 		}
 		else
 		{
