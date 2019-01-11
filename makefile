@@ -25,6 +25,7 @@
 #   ARCHID=2                                # Windows Console x86 64 bit
 #   ARCHID=3                                # Windows Service x86 32 bit
 #   ARCHID=4                                # Windows Service x86 64 bit
+#	make macos ARCHID=16					# Mac OS x86 64 bit
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPS
@@ -34,6 +35,7 @@
 #   make linux ARCHID=18					# Linux x86 64 bit POKY
 #   make linux ARCHID=19					# Linux x86 32 bit NOKVM
 #   make linux ARCHID=20					# Linux x86 64 bit NOKVM
+#   make linux ARCHID=24 					# Linux ARM 32 bit HardFloat (Linaro)
 #   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #
@@ -50,6 +52,7 @@ SOURCES += microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microsc
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c
 SOURCES += microscript/ILibDuktape_ScriptContainer.c microscript/ILibDuktape_MemoryStream.c microscript/ILibDuktape_NetworkMonitor.c
 SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HECI.c microscript/ILibDuktape_HttpStream.c microscript/ILibDuktape_Debugger.c
+SOURCES += $(ADDITIONALSOURCES)
 
 # Mesh Agent core
 SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
@@ -62,6 +65,7 @@ EXENAME = meshagent
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
 PATH_ARM5 = ../ToolChains/LinuxArm/bin/
 PATH_POGO = ../ToolChains/pogoplug-gcc/bin/
+PATH_LINARO = ../ToolChains/linaro-arm/bin/
 PATH_POKY = ../Galileo/arduino-1.5.3/hardware/tools/sysroots/x86_64-pokysdk-linux/usr/bin/i586-poky-linux-uclibc/
 PATH_POKY64 = /opt/poky/1.6.1/sysroots/x86_64-pokysdk-linux/usr/bin/x86_64-poky-linux/
 
@@ -75,10 +79,27 @@ STRIP = strip
 INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshconsole
 
 # Compiler and linker flags
-CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS)
-LDFLAGS ?= -rdynamic -L. -lpthread -ldl -lutil -lrt -lm 
+CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+LDFLAGS ?= -rdynamic -L. -lpthread -ldl -lutil -lm 
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
+
+
+SKIPFLAGS = 0
+ifeq ($(AID), 7)
+SKIPFLAGS = 1
+endif
+ifeq ($(AID), 9)
+SKIPFLAGS = 1
+endif
+ifeq ($(AID), 13)
+SKIPFLAGS = 1
+endif
+ifeq ($(AID), 25)
+SKIPFLAGS = 1
+endif
+
+
 
 # Official Linux x86 32bit
 ifeq ($(ARCHID),5)
@@ -86,7 +107,6 @@ ARCHNAME = x86
 CC = gcc -m32
 KVM = 1
 LMS = 1
-LDEXTRA += -z noexecstack -z relro -z now
 endif
 
 # Official Linux x86 64bit
@@ -94,7 +114,13 @@ ifeq ($(ARCHID),6)
 ARCHNAME = x86-64
 KVM = 1
 LMS = 1
-LDEXTRA += -z noexecstack -z relro -z now
+endif
+
+# Official MacOS x86 64bit
+ifeq ($(ARCHID),16)
+ARCHNAME = osx-x86-64
+KVM = 1
+LMS = 0
 endif
 
 # Official Linux MIPS
@@ -157,7 +183,6 @@ CC = gcc -m32
 KVM = 0
 LMS = 1
 EXENAME2=_nokvm
-LDEXTRA += -z noexecstack -z relro -z now
 endif
 
 # Official Linux x86 64bit NOKVM
@@ -166,7 +191,17 @@ ARCHNAME = x86-64
 KVM = 0
 LMS = 1
 EXENAME2=_nokvm
-LDEXTRA += -z noexecstack -z relro -z now
+endif
+
+# Official Linux ARM 32bit HardFloat Linaro
+ifeq ($(ARCHID),24)
+ARCHNAME = arm-linaro
+CC = $(PATH_LINARO)arm-linux-gnueabihf-gcc
+STRIP = $(PATH_LINARO)arm-linux-gnueabihf-strip
+KVM = 0
+LMS = 0
+CFLAGS += -D_NOFSWATCHER 
+CEXTRA = -fno-strict-aliasing 
 endif
 
 # Official Linux ARM 32bit HardFloat
@@ -174,7 +209,7 @@ ifeq ($(ARCHID),25)
 ARCHNAME = armhf
 CC = arm-linux-gnueabihf-gcc
 STRIP = arm-linux-gnueabihf-strip
-KVM = 0
+KVM = 1
 LMS = 0
 CFLAGS += -D_NOFSWATCHER 
 CEXTRA = -fno-strict-aliasing 
@@ -186,19 +221,19 @@ endif
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
-SOURCES += meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
+LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
+MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 	ifneq ($(JPEGVER),)
-		LDFLAGS += -lX11 -lXtst -lXext -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+		LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
 	else
-		LDFLAGS += -lX11 -lXtst -lXext -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+		LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
 	endif
 endif
 
-ifeq ($(LMS),1)
-# MicroLMS, only included in x86 builds
-SOURCES += microlms/lms/ILibLMS.c microlms/heci/HECILinux.c microlms/heci/LMEConnection.c microlms/heci/PTHICommand.c
-else
+ifeq ($(LMS),0)
 CFLAGS += -D_NOHECI
 endif
 
@@ -215,29 +250,37 @@ ifeq ($(NOTLS),1)
 SOURCES += microstack/nossl/sha384-512.c microstack/nossl/sha224-256.c microstack/nossl/md5.c microstack/nossl/sha1.c
 CFLAGS += -DMICROSTACK_NOTLS
 LINUXSSL = 
+MACSSL =
 else
 LINUXSSL = -Lopenssl/libstatic/linux/$(ARCHNAME)
+MACSSL = -Lopenssl/libstatic/macos/$(ARCHNAME)
 CFLAGS += -DMICROSTACK_TLS_DETECT
 LDEXTRA += -lssl -lcrypto
 endif
 
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
-CFLAGS += -g -rdynamic -D_DEBUG -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+CFLAGS += -g -rdynamic -D_DEBUG 
 STRIP = $(NOECHO) $(NOOP)
 else
 CFLAGS += -Os
 STRIP += ./$(EXENAME)_$(ARCHNAME)$(EXENAME2)
 endif
 
+ifeq ($(SSL_TRACE),1)
+CFLAGS += -DSSL_TRACE
+endif
 
 .PHONY: all clean
 
 all: $(EXENAME) $(LIBNAME)
 
 $(EXENAME): $(OBJECTS)
-	$(V)$(CC) $^ $(LDFLAGS) -o $@
-
+ifeq ($(SKIPFLAGS), 1)
+	$(V)$(CC) $^ $(LDFLAGS) -lrt -o $@
+else
+	$(V)$(CC) $^ $(LDFLAGS) $(ADDITIONALFLAGS) -o $@
+endif
 sign:
 	strip ./$(EXENAME)
 	./agent/signer/signer_linux $(EXENAME) $(shell ./$(EXENAME) -v)
@@ -246,6 +289,7 @@ sign:
 clean:
 	rm -f meshconsole/*.o
 	rm -f microstack/*.o
+	rm -f microstack/nossl/*.o
 	rm -f microscript/*.o
 	rm -f meshcore/*.o
 	rm -f meshcore/KVM/Linux/*.o
@@ -258,7 +302,11 @@ cleanbin:
 	rm -f $(EXENAME)_x86-64
 	rm -f $(EXENAME)_x86-64_nokvm
 	rm -f $(EXENAME)_arm
+	rm -f $(EXENAME)_armhf
 	rm -f $(EXENAME)_mips
+	rm -f $(EXENAME)_osx-x86-64
+	rm -f $(EXENAME)_pi
+	rm -f $(EXENAME)_pi2
 	rm -f $(EXENAME)_pogo
 	rm -f $(EXENAME)_poky
 	rm -f $(EXENAME)_poky64
@@ -289,30 +337,15 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" LDFLAGS="-Lopenssl/libstatic/linux/pi $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA)"
 	strip meshagent_pi
 
 linux:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" CFLAGS="-DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA)"
 	$(STRIP)
 
-#linux-nossl-64-library:
-#	$(MAKE) LIBNAME="$(EXENAME)_x64.so" ADDITIONALSOURCES="$(KVMSOURCES)" CFLAGS="-Os -fPIC -DMICROSTACK_NOTLS $(CFLAGS) $(CEXTRA)" LDFLAGS="-shared $(LDFLAGS) $(LDEXTRA)"
+macos:
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -std=gnu99 -Os -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(STRIP)
 
-#linux-64-library-debug:
-#	$(MAKE) LIBNAME="$(EXENAME)_x64.so" ADDITIONALSOURCES="$(KVMSOURCES)" CFLAGS="-fPIC -D_DEBUG -DMICROSTACK_TLS_DETECT $(CFLAGS) $(CEXTRA)" LDFLAGS="-shared -L../../opentools/MeshManageability/openssl-static/x86-64 -lssl $(LDFLAGS) $(LDEXTRA)"
-
-#mac-nossl-64:
-#	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_osx64" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings -std=gnu99 -Os -Wall -D_AGENTID=16 -D_POSIX -D_NOHECI -D_DAEMON -DMICROSTACK_PROXY -DMICROSTACK_NOTLS -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS)" LDFLAGS="-L. -lpthread -ldl -lz -lutil"
-#	strip ./$(EXENAME)_osx64
-
-#mac-nossl-64-debug:
-#	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_osx64" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings -std=gnu99 -g -Wall -D_AGENTID=16 -D_POSIX -D_NOHECI -D_DAEMON -D_DEBUG -DMICROSTACK_PROXY -DMICROSTACK_NOTLS -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS)" LDFLAGS="-L. -lpthread -ldl -lz -lutil"
-
-#mac-64:
-#	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_osx64" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings -Os -std=gnu99 -Wall -D_AGENTID=16 -D_POSIX -D_DAEMON -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D__APPLE__ $(CWEBLOG) $(CEXTRA) $(INCDIRS)" LDFLAGS="-L../../opentools/MeshManageability/openssl-static/osx64 -L. -lpthread -ldl -lssl -lutil -lcrypto -lm"
-#	strip ./$(EXENAME)_osx64
-
-#mac-64-debug:
-#	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_osx64" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings -g -std=gnu99 -Wall -D_AGENTID=16 -D_DEBUG -D_POSIX -D_DAEMON -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D__APPLE__ $(CWEBLOG) $(CEXTRA) $(INCDIRS)" LDFLAGS="-L../../opentools/MeshManageability/openssl-static/osx64 -L. -lpthread -ldl -lssl -lutil -lcrypto -lm"
 
