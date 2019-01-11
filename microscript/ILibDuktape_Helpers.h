@@ -28,7 +28,6 @@ typedef void(*ILibDuktape_HelperEvent)(duk_context *ctx, void *user);
 #define ILibDuktape_NativeUncaughtExceptionUserPtr			"\xFF_NativeUncaughtExceptionUserPtr"
 
 #define ILibDuktape_MeshAgent_Cert_NonLeaf					"\xFF_selfcert"		
-#define ILibDuktape_MeshAgent_Cert_Client					"\xFF_selftlsclientcert"
 #define ILibDuktape_MeshAgent_Cert_Server					"\xFF_selftlscert"
 #define CONTEXT_GUID_BUFFER									"_CONTEXT_GUID"
 #define ILibDuktape_Context_Chain							"\xFF_chainptr"
@@ -58,6 +57,7 @@ char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* prop
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue);
 void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
 void *Duktape_GetHeapptrProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
+void *Duktape_GetBufferProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);
 struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short port);
