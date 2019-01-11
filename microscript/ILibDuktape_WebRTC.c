@@ -543,10 +543,18 @@ duk_ret_t ILibDuktape_WebRTC_CreateConnection(duk_context *ctx)
 void ILibDuktape_WebRTC_Push(duk_context *ctx, void *chain)
 {
 	ILibWrapper_WebRTC_ConnectionFactory factory;
+	struct util_cert *rtcert = NULL;
+
+	if (duk_peval_string(ctx, "require('MeshAgent');") == 0)	// [MeshAgent]
+	{
+		// We can use the Agent Cert
+		rtcert = (struct util_cert*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_MeshAgent_Cert_Server);
+	}
+	duk_pop(ctx);												// ...
 
 	duk_push_object(ctx);																// [factory]
 	ILibDuktape_WriteID(ctx, "webRTC");
-	factory = ILibWrapper_WebRTC_ConnectionFactory_CreateConnectionFactory(chain, 0);
+	factory = ILibWrapper_WebRTC_ConnectionFactory_CreateConnectionFactory2(chain, 0, rtcert);
 	duk_push_pointer(ctx, factory);														// [factory][ptr]
 	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_ConnectionFactoryPtr);				// [factory]
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_WebRTC_ConnectionFactory_Finalizer);
