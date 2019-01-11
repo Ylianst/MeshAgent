@@ -47,8 +47,23 @@ if (process.argv.length > 1)
             console.log(val);
             process.exit();
             break;
+        case 'list':
         case 'keys':
-            console.log('KEYS = ' + db.Keys);
+            console.log('Number of Keys: ' + db.Keys.length);
+            var skeys = db.Keys.sort(function (a, b)
+            {
+                var aL = a.toLowerCase();
+                var bL = b.toLowerCase();
+
+                if (aL < bL) { return (-1); }
+                if (aL > bL) { return (1); }
+                return (0);
+            });
+            for (var x = 0; x< skeys.length; ++x)
+            {
+                console.log((x+1) + ': ' + skeys[x]);
+            }
+            //console.log('KEYS = ' + db.Keys);
             process.exit();
             break;
         case 'delete':
@@ -86,7 +101,10 @@ if (process.argv.length > 1)
 }
 else
 {
-    console.log('[get/put/delete/export/import] [KEY] [args]');
-    console.log(' Commonly used keys are: disableUpdate and noUpdateCoreModule');
+    console.log('usage: ');
+    console.log('   [get/delete/export/import] [KEY]');
+    console.log('   [put] [KEY] [value]');
+    console.log('   [list]');
+    console.log('   Commonly used keys are: disableUpdate and noUpdateCoreModule');
     process.exit();
 }
