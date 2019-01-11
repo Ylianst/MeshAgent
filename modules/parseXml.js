@@ -1,10 +1,5 @@
-Object.defineProperty(Array.prototype, "peek",
-{
-    value: function ()
-    {
-        return (this.length > 0 ? this[this.length - 1] : undefined);
-    }
-});
+try { Object.defineProperty(Array.prototype, "peek", { value: function () { return (this.length > 0 ? this[this.length - 1] : undefined); } }); } catch (e) { }
+
 
 
 function _treeBuilder()
