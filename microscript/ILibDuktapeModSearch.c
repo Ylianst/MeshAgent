@@ -136,7 +136,7 @@ int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, in
 	}
 	duk_pop(ctx);											// ...
 
-	if (ILibHashtable_Get(table, NULL, id, idLen) != NULL || ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, idLen) != NULL) { return 1; }
+	//if (ILibHashtable_Get(table, NULL, id, idLen) != NULL || ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, idLen) != NULL) { return 1; }
 	char *newModule = (char*)ILibDuktape_Memory_Alloc(ctx, moduleLen+1);
 	memcpy_s(newModule, moduleLen + 1, module, moduleLen);
 	newModule[moduleLen] = 0;
