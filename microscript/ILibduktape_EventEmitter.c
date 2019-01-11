@@ -179,7 +179,8 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	char *objid;
 	int wasReturnSpecified = 0;
 
-	duk_require_stack(ctx, 3);											// This will make sure we have enough stack space to get the emitter object
+	duk_require_stack(ctx, 4 + nargs + DUK_API_ENTRY_STACK);											// This will make sure we have enough stack space to get the emitter object
+
 
 	duk_push_this(ctx);													// [this]
 	objid = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown");
@@ -238,8 +239,6 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	i = 0;
 	while ((func = emitList[i++]) != NULL)
 	{
-		duk_require_stack(ctx, nargs + 1);					// This will make sure that we have enough stack space to make the method call
-
 		duk_push_heapptr(ctx, func);						// [func]
 		duk_push_heapptr(ctx, self);						// [func][this]
 		for (j = 1; j < nargs; ++j)
@@ -368,6 +367,8 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	void *eventList, *node;
 	int prepend;
 	ILibDuktape_EventEmitter_HookHandler hookHandler = NULL;
+
+	duk_require_stack(ctx, 10);
 
 	duk_push_current_function(ctx);
 	once = Duktape_GetIntPropertyValue(ctx, -1, "once", 0);
@@ -603,7 +604,7 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	}
 	else
 	{
-		duk_push_fixed_buffer(ctx, sizeof(unsigned int));
+		Duktape_PushBuffer(ctx, sizeof(unsigned int));
 		retVal->totalListeners = (unsigned int *)Duktape_GetBuffer(ctx, -1, NULL);
 		duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_GlobalListenerCount);
 		*(retVal->totalListeners) = 0;
