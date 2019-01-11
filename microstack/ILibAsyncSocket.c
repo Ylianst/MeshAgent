@@ -47,6 +47,15 @@ limitations under the License.
 #include "ILibAsyncSocket.h"
 #include "ILibRemoteLogging.h"
 
+#ifdef _DEBUG
+#include "ILibCrypto.h"
+#endif
+
+#ifdef _POSIX
+#include <sys/socket.h>
+#include <sys/un.h>
+#endif
+
 #ifndef MICROSTACK_NOTLS
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -121,6 +130,9 @@ typedef struct ILibAsyncSocketModule
 	unsigned int PendingBytesToSend;
 	unsigned int TotalBytesSent;
 
+#ifdef _POSIX
+	struct sockaddr_un DomainAddress;
+#endif
 
 
 	// The IPv4/IPv6 compliant address of the remote endpoint. We are not going to be using IPv6 all the time,
@@ -353,8 +365,10 @@ void ILibAsyncSocket_Destroy(void *socketModule)
 	// If this is an SSL socket, free the SSL state
 	if (module->ssl != NULL)
 	{
+		SSL_TRACE1("SSL_free()");
 		SSL_free(module->ssl); // Frees SSL session and BIO buffer at the same time
 		module->ssl = NULL;
+		SSL_TRACE2("SSL_free()");
 	}
 	#endif
 
@@ -548,7 +562,9 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 			bufferLen = va_arg(vlist, int);
 			UserFree = va_arg(vlist, ILibAsyncSocket_MemoryOwnership);
 
+			SSL_TRACE1("SSL_write()");
 			SSL_write(module->ssl, buffer, bufferLen);
+			SSL_TRACE2("SSL_write()");
 			if (UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(buffer); }
 		}
 		va_end(vlist); 
@@ -669,7 +685,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 		else if (module->PendingSend_Tail == NULL && module->FinConnect != 0)
 		{
 			// No pending data, so we can try to send now
-			if (remoteAddress == NULL)
+			if (remoteAddress == NULL || remoteAddress->sa_family == AF_UNIX)
 			{
 				// Set MSG_NOSIGNAL since we don't want to get Broken Pipe signals in Linux, ignored if Windows.
 				bytesSent = send(module->internalSocket, buffer, bufferLen, MSG_NOSIGNAL);
@@ -754,11 +770,13 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 	wasssl = module->ssl;
 	if (module->ssl != NULL)
 	{
+		SSL_TRACE1("ILibAsyncSocket_Disconnect()");
 		SSL_shutdown(module->ssl);
 		sem_post(&(module->SendLock));
 		SSL_free(module->ssl); // Frees SSL session and both BIO buffers at the same time
 		sem_wait(&(module->SendLock));
 		module->ssl = NULL;
+		SSL_TRACE2("ILibAsyncSocket_Disconnect()");
 	}
 	#endif
 
@@ -826,7 +844,7 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 */
 void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterface, struct sockaddr *remoteInterface, ILibAsyncSocket_OnInterrupt InterruptPtr, void *user)
 {
-	int flags = 1;
+	int flags = 1, v;
 	char *tmp;
 	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
 	struct sockaddr_in6 any;
@@ -841,9 +859,22 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	memset(&(module->RemoteAddress), 0, sizeof(struct sockaddr_in6));
 	memset(&(module->LocalAddress) , 0, sizeof(struct sockaddr_in6));
 	memset(&(module->SourceAddress), 0, sizeof(struct sockaddr_in6));
+#ifdef _POSIX
+	memset(&(module->DomainAddress), 0, sizeof(struct sockaddr_un));
+#endif
 
 	// Setup
-	memcpy_s(&(module->RemoteAddress), sizeof(struct sockaddr_in6), remoteInterface, INET_SOCKADDR_LENGTH(remoteInterface->sa_family));
+	if (remoteInterface->sa_family == AF_UNIX)
+	{
+#ifdef _POSIX
+		memcpy_s(&(module->DomainAddress), sizeof(struct sockaddr_un), remoteInterface, sizeof(struct sockaddr_un));
+#endif
+		module->RemoteAddress.sin6_family = AF_UNIX;
+	}
+	else
+	{
+		memcpy_s(&(module->RemoteAddress), sizeof(struct sockaddr_in6), remoteInterface, INET_SOCKADDR_LENGTH(remoteInterface->sa_family));
+	}
 	module->PendingBytesToSend = 0;
 	module->TotalBytesSent = 0;
 	module->PAUSE = 0;
@@ -854,7 +885,7 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	module->MallocSize = module->InitialSize;
 
 	// If localInterface is NULL, we will assume INADDRANY - IPv4/IPv6 based on remote address
-	if (localInterface == NULL)
+	if (localInterface == NULL && module->RemoteAddress.sin6_family != AF_UNIX)
 	{
 		memset(&any, 0, sizeof(struct sockaddr_in6));
 		#ifdef MICROSTACK_PROXY
@@ -867,12 +898,22 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 
 	// The local port should always be zero
 #ifdef _DEBUG
-	if (localInterface->sa_family == AF_INET && ((struct sockaddr_in*)localInterface)->sin_port != 0) { PRINTERROR(); ILIBCRITICALEXIT(253); }
-	if (localInterface->sa_family == AF_INET6 && ((struct sockaddr_in6*)localInterface)->sin6_port != 0) { PRINTERROR(); ILIBCRITICALEXIT(253); }
+	if (localInterface != NULL)
+	{
+		if (localInterface->sa_family == AF_INET && ((struct sockaddr_in*)localInterface)->sin_port != 0) { PRINTERROR(); ILIBCRITICALEXIT(253); }
+		if (localInterface->sa_family == AF_INET6 && ((struct sockaddr_in6*)localInterface)->sin6_port != 0) { PRINTERROR(); ILIBCRITICALEXIT(253); }
+	}
 #endif
 
 	// Allocate a new socket
-	if ((module->internalSocket = ILibGetSocket(localInterface, SOCK_STREAM, IPPROTO_TCP)) == 0) { ILIBCRITICALEXIT(253); return; }
+	if (module->RemoteAddress.sin6_family != AF_UNIX)
+	{
+		if ((module->internalSocket = ILibGetSocket(localInterface, SOCK_STREAM, IPPROTO_TCP)) == 0) { ILIBCRITICALEXIT(253); return; }
+	}
+	else
+	{
+		if ((int)(module->internalSocket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) { ILIBCRITICALEXIT(253); return; }
+	}
 
 	// Initialise the buffer pointers, since no data is in them yet.
 	module->FinConnect = 0;
@@ -882,8 +923,11 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	module->BeginPointer = 0;
 	module->EndPointer = 0;
 
-	// Turn on keep-alives for the socket
-	if (setsockopt(module->internalSocket, SOL_SOCKET, SO_KEEPALIVE, (char*)&flags, sizeof(flags)) != 0) ILIBCRITICALERREXIT(253);
+	if (module->RemoteAddress.sin6_family != AF_UNIX)
+	{
+		// Turn on keep-alives for the socket
+		if (setsockopt(module->internalSocket, SOL_SOCKET, SO_KEEPALIVE, (char*)&flags, sizeof(flags)) != 0) ILIBCRITICALERREXIT(253);
+	}
 
 	// Set the socket to non-blocking mode, because we need to play nice and share the MicroStack thread
 #if defined(_WIN32_WCE) || defined(WIN32)
@@ -895,9 +939,9 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 
 	// Connect the socket, and force the chain to unblock, since the select statement doesn't have us in the fdset yet.
 #ifdef MICROSTACK_PROXY
-	if (module->ProxyAddress.sin6_family != 0)
+	if (module->ProxyAddress.sin6_family != 0 && module->RemoteAddress.sin6_family != AF_UNIX)
 	{
-		if (connect(module->internalSocket, (struct sockaddr*)&(module->ProxyAddress), INET_SOCKADDR_LENGTH(module->ProxyAddress.sin6_family)) != -1)
+		if ((v=connect(module->internalSocket, (struct sockaddr*)&(module->ProxyAddress), INET_SOCKADDR_LENGTH(module->ProxyAddress.sin6_family))) != -1)
 		{
 			// Connect failed. Set a short time and call disconnect.
 			module->FinConnect = -1;
@@ -907,17 +951,32 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	}
 	else
 #endif
-		if (connect(module->internalSocket, (struct sockaddr*)remoteInterface, INET_SOCKADDR_LENGTH(remoteInterface->sa_family)) != -1)
-	{
-		// Connect failed. Set a short time and call disconnect.
-		module->FinConnect = -1;
-		ILibLifeTime_Add(module->LifeTime, socketModule, 0, &ILibAsyncSocket_Disconnect, NULL);
-		return;
-	}
+		if (module->RemoteAddress.sin6_family != AF_UNIX)
+		{
+			if ((v=connect(module->internalSocket, (struct sockaddr*)remoteInterface, INET_SOCKADDR_LENGTH(remoteInterface->sa_family))) != -1)
+			{
+				// Connect failed. Set a short time and call disconnect.
+				module->FinConnect = -1;
+				ILibLifeTime_Add(module->LifeTime, socketModule, 0, &ILibAsyncSocket_Disconnect, NULL);
+				return;
+			}
+		}
+		else
+		{
+#ifdef _POSIX
+			if ((v=connect(module->internalSocket, (struct sockaddr *)&(module->DomainAddress), SUN_LEN(&(module->DomainAddress)))) < 0)
+#endif
+			{
+				// Connect failed. Set a short time and call disconnect.
+				module->FinConnect = -1;
+				ILibLifeTime_Add(module->LifeTime, socketModule, 0, &ILibAsyncSocket_Disconnect, NULL);
+				return;
+			}
+		}
 
 #ifdef _DEBUG
 	#ifdef _POSIX
-		if (errno != EINPROGRESS) // The result of the connect should always be "WOULD BLOCK" on Linux. But sometimes this fails.
+		if (v != 0 && errno != EINPROGRESS) // The result of the connect should always be "WOULD BLOCK" on Linux. But sometimes this fails.
 		{
 			// This happens when the interface is no longer available. Disconnect socket.
 			module->FinConnect = -1;
@@ -1060,6 +1119,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 #ifdef MICROSTACK_TLS_DETECT
 		if (Reader->ssl != NULL && Reader->TLSChecked == 0)
 		{
+#ifndef __APPLE__
 			bytesReceived = recv(Reader->internalSocket, Reader->buffer, Reader->MallocSize, MSG_PEEK | MSG_NOSIGNAL);
 			if (ILibAsyncSocket_TLSDetect(Reader, Reader->buffer, 0, bytesReceived) == 0)
 			{
@@ -1070,6 +1130,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 					if (Reader->OnConnect != NULL) Reader->OnConnect(Reader, -1, Reader->user);
 				}
 			}
+#endif
 			Reader->TLSChecked = 1;
 		}
 #endif
@@ -1082,18 +1143,32 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 		if (Reader->ssl != NULL)
 		{
 			BIO_clear_retry_flags(Reader->readBio);
-
 #if defined(WINSOCK2)
-			bytesReceived = recvfrom(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
+			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
+			{
+				bytesReceived = recv(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0);
+			}
+			else
+			{
+				bytesReceived = recvfrom(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
+			}
 #else
-			bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->readBioBuffer->data + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (socklen_t*)&len);
+			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
+			{
+				bytesReceived = (int)recv(Reader->internalSocket, Reader->readBioBuffer->data + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0);
+			}
+			else
+			{
+				bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->readBioBuffer->data + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (socklen_t*)&len);
+			}
 #endif
 			if (bytesReceived > 0)
 			{
 				Reader->readBioBuffer->length += bytesReceived;
 				if (Reader->TLSHandshakeCompleted == 0)
 				{
-					switch ((sslerror=SSL_do_handshake(Reader->ssl)))
+					SSL_TRACE1("SSL_handshake()");
+					switch ((sslerror = SSL_do_handshake(Reader->ssl)))
 					{
 					case 0:
 						// Handshake Failed!
@@ -1108,6 +1183,9 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 						if (Reader->OnConnect != NULL)
 						{
 							Reader->OnConnect(Reader, -1, Reader->user);
+#ifdef _DEBUG
+							//util_savekeys(Reader->ssl); // SAVES TLS PRIVATE KEYS - WARNING: !!! THIS CODE SHOULD ALWAYS BE COMMENTED OUT !!!!
+#endif
 						}
 						ILibAsyncSocket_ProcessEncryptedBuffer(Reader);
 						break;
@@ -1125,9 +1203,11 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 						}
 						break;
 					}
+					SSL_TRACE2("SSL_handshake()");
 				}
 				else
 				{
+					SSL_TRACE1("SSL_read()");
 					while ((j = SSL_read(Reader->ssl, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer))>0)
 					{
 						// We got new TLS Data
@@ -1154,6 +1234,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 							ILibAsyncSocket_ProcessEncryptedBuffer(Reader);
 						}
 					}
+					SSL_TRACE2("SSL_read()");
 				}
 			}
 			if (Reader->readBioBuffer->length == 0)
@@ -1166,12 +1247,29 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 #endif
 		{
 #if defined(WINSOCK2)
-			bytesReceived = recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
+			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
+			{
+				bytesReceived = recv(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0);
+			}
+			else
+			{
+				bytesReceived = recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
+			}
 #else
-			bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), (socklen_t*)&len);
+			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
+			{
+				bytesReceived = (int)recv(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0);
+			}
+			else
+			{
+				bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), (socklen_t*)&len);
+			}
 #endif
-			ILib6to4((struct sockaddr*)&(Reader->SourceAddress));
-			ILibRemoteLogging_printf(ILibChainGetLogger(Reader->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_2, "AsyncSocket[%p] recv returned %d", (void*)Reader, bytesReceived);
+			if (Reader->RemoteAddress.sin6_family != AF_UNIX)
+			{
+				ILib6to4((struct sockaddr*)&(Reader->SourceAddress));
+				ILibRemoteLogging_printf(ILibChainGetLogger(Reader->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_2, "AsyncSocket[%p] recv returned %d", (void*)Reader, bytesReceived);
+			}
 
 			if (bytesReceived > 0)
 			{
@@ -1481,8 +1579,10 @@ void ILibAsyncSocket_PrivateShutdown(void* socketModule)
 	#ifndef MICROSTACK_NOTLS
 	if ((wasssl = module->ssl) != NULL)
 	{
+		SSL_TRACE1("ILibAsyncSocket_PrivateShutdown()");
 		SSL_free(module->ssl); // Frees SSL session and BIO buffer at the same time
 		module->ssl = NULL;
+		SSL_TRACE2("ILibAsyncSocket_PrivateShutdown()");
 	}
 	#endif
 
@@ -1568,7 +1668,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 	{
 		serr = 1;
 	}
-	else
+	else if(fd_read!=0)
 	{
 		// Fetch the socket error code
 #if defined(WINSOCK2)
@@ -1580,12 +1680,13 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 
 	#ifdef MICROSTACK_PROXY
 	// Handle proxy, we need to read the proxy response, all of it and not a byte more.
-	if (module->FinConnect == 1 && module->ProxyState == 1 && serr == 0 && fd_read != 0)
+	if (module->FinConnect == 1 && module->ProxyState == 1 && serr == 0 && fd_read != 0 && module->RemoteAddress.sin6_family != AF_UNIX)
 	{
 		char *ptr1, *ptr2;
-		int len2, len3;
+		int len2;
+		int slen = sizeof(struct sockaddr_in6);
 		serr = 555; // Fake proxy error
-		len2 = recv(module->internalSocket, ILibScratchPad2, 1024, MSG_PEEK | MSG_NOSIGNAL); // Klockwork says this could block, but it can't, becuase socket was set to nonblock
+		len2 = recvfrom(module->internalSocket, ILibScratchPad2, 1024, 0, (struct sockaddr*)&(module->SourceAddress), (socklen_t*)&slen);
 		if (len2 > 0 && len2 < 1024)
 		{
 			ILibScratchPad2[len2] = 0;
@@ -1593,8 +1694,6 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 			ptr2 = strstr(ILibScratchPad2, " 200 ");
 			if (ptr1 != NULL && ptr2 != NULL && ptr2 < ptr1)
 			{
-				len3 = (int)((ptr1 + 4) - ILibScratchPad2);
-				recv(module->internalSocket, ILibScratchPad2, len3, MSG_NOSIGNAL);
 				module->FinConnect = 0; // Let pretend we never connected, this will trigger all the connection stuff.
 				module->ProxyState = 2; // Move the proxy connection state forward.
 				serr = 0;				// Proxy connected collectly.
@@ -1625,11 +1724,14 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 			{
 				// Connected
 				len = sizeof(struct sockaddr_in6);
+				if (module->RemoteAddress.sin6_family != AF_UNIX)
+				{
 #if defined(WINSOCK2)
-				getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), (int*)&len);
+					getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), (int*)&len);
 #else
-				getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), (socklen_t*)&len);
+					getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), (socklen_t*)&len);
 #endif
+				}
 				module->FinConnect = 1;
 				module->PAUSE = 0;
 
@@ -1644,7 +1746,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 
 				// If this is a proxy connection, send the proxy connect header now.
 #ifdef MICROSTACK_PROXY
-				if (module->ProxyAddress.sin6_family != 0 && module->ProxyState == 0)
+				if (module->ProxyAddress.sin6_family != 0 && module->ProxyState == 0 && module->RemoteAddress.sin6_family != AF_UNIX)
 				{
 					int len2;
 					ILibInet_ntop((int)(module->RemoteAddress.sin6_family), (void*)&(((struct sockaddr_in*)&(module->RemoteAddress))->sin_addr), ILibScratchPad, 4096);
@@ -1727,7 +1829,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 	SEM_TRACK(AsyncSocket_TrackLock("ILibAsyncSocket_PostSelect", 1, module);)
 	sem_wait(&(module->SendLock));
 	// Write Handling
-	if (module->FinConnect > 0 && module->internalSocket != ~0 && fd_write != 0 && module->PendingSend_Head != NULL)
+	if (module->FinConnect > 0 && module->internalSocket != ~0 && fd_write != 0 && module->PendingSend_Head != NULL && (module->ProxyState != 1))
 	{
 		//
 		// Keep trying to send data, until we are told we can't
@@ -1788,7 +1890,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 			else
 #endif
 			{
-				if (module->PendingSend_Head->remoteAddress.sin6_family == 0)
+				if (module->PendingSend_Head->remoteAddress.sin6_family == 0 || module->PendingSend_Head->remoteAddress.sin6_family == AF_UNIX)
 				{
 					bytesSent = (int)send(module->internalSocket, module->PendingSend_Head->buffer + module->PendingSend_Head->bytesSent, module->PendingSend_Head->bufferSize - module->PendingSend_Head->bytesSent, MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
 				}
@@ -2001,6 +2103,7 @@ SSL* ILibAsyncSocket_SetSSLContextEx(ILibAsyncSocket_SocketModule socketModule, 
 #ifdef MICROSTACK_TLS_DETECT
 			module->TLSChecked = server == ILibAsyncSocket_TLS_Mode_Server_with_TLSDetectLogic ? 0 : 1;
 #endif
+			SSL_TRACE1("SetSSLContextEx()");
 			module->ssl = SSL_new(ssl_ctx);
 			module->TLSHandshakeCompleted = 0;
 			module->readBio = BIO_new_mem_buf(module->readBioBuffer_mem, (int)sizeof(module->readBioBuffer_mem));
@@ -2027,6 +2130,7 @@ SSL* ILibAsyncSocket_SetSSLContextEx(ILibAsyncSocket_SocketModule socketModule, 
 			{
 				SSL_set_accept_state(module->ssl); // Setup server SSL state
 			}
+			SSL_TRACE2("SetSSLContextEx()");
 			return(module->ssl);
 		}
 	}
@@ -2118,6 +2222,11 @@ void ILibAsyncSocket_UseThisSocket(ILibAsyncSocket_SocketModule socketModule, in
 #endif
 }
 
+int ILibAsyncSocket_IsDomainSocket(ILibAsyncSocket_SocketModule socketModule)
+{
+	return(((struct ILibAsyncSocketModule*)socketModule)->RemoteAddress.sin6_family == AF_UNIX ? 1 : 0);
+}
+
 /*! \fn ILibAsyncSocket_GetRemoteInterface(ILibAsyncSocket_SocketModule socketModule)
 \brief Returns the Remote Interface of a connected session
 \param socketModule The ILibAsyncSocket to query
@@ -2154,10 +2263,14 @@ int ILibAsyncSocket_GetLocalInterface(ILibAsyncSocket_SocketModule socketModule,
 	}
 	else
 	{
-#if defined(WINSOCK2)
+#if defined(WIN32)
 		getsockname(module->internalSocket, localAddress, (int*)&receivingAddressLength);
 #else
-		getsockname(module->internalSocket, localAddress, (socklen_t*)&receivingAddressLength);
+		if (getsockname(module->internalSocket, localAddress, (socklen_t*)&receivingAddressLength) < 0)
+		{
+			receivingAddressLength = sizeof(struct sockaddr_in);
+			if (getsockname(module->internalSocket, localAddress, (socklen_t*)&receivingAddressLength) < 0) { receivingAddressLength = 0; }
+		}
 #endif
 		return receivingAddressLength;
 	}
@@ -2322,8 +2435,13 @@ int ILibAsyncSocket_TLS_WasHandshakeError(ILibAsyncSocket_SocketModule socketMod
 */
 X509 *ILibAsyncSocket_SslGetCert(ILibAsyncSocket_SocketModule socketModule)
 {
+	X509 *ret;
+	SSL_TRACE1("ILibAsyncSocket_SslGetCert()");
 	struct ILibAsyncSocketModule *sm = (struct ILibAsyncSocketModule*)socketModule;
-	return SSL_get_peer_certificate(sm->ssl);
+	ret = SSL_get_peer_certificate(sm->ssl);
+	SSL_TRACE2("ILibAsyncSocket_SslGetCert()");
+
+	return(ret);
 }
 
 //! Get's the Cert Chain presented by the Peer
@@ -2335,7 +2453,11 @@ X509 *ILibAsyncSocket_SslGetCert(ILibAsyncSocket_SocketModule socketModule)
 */
 STACK_OF(X509) *ILibAsyncSocket_SslGetCerts(ILibAsyncSocket_SocketModule socketModule)
 {
+	STACK_OF(X509) *ret;
+	SSL_TRACE1("ILibAsyncSocket_SslGetCerts()");
 	struct ILibAsyncSocketModule *sm = (struct ILibAsyncSocketModule*)socketModule;
-	return SSL_get_peer_cert_chain(sm->ssl);
+	ret = SSL_get_peer_cert_chain(sm->ssl);
+	SSL_TRACE2("ILibAsyncSocket_SslGetCerts()");
+	return (ret);
 }
 #endif

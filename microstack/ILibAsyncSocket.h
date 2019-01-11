@@ -225,6 +225,7 @@ int ILibAsyncSocket_IsFree(ILibAsyncSocket_SocketModule socketModule);
 int ILibAsyncSocket_IsConnected(ILibAsyncSocket_SocketModule socketModule);
 int ILibAsyncSocket_GetLocalInterface(ILibAsyncSocket_SocketModule socketModule, struct sockaddr *localAddress);
 int ILibAsyncSocket_GetRemoteInterface(ILibAsyncSocket_SocketModule socketModule, struct sockaddr *remoteAddress);
+int ILibAsyncSocket_IsDomainSocket(ILibAsyncSocket_SocketModule socketModule);
 unsigned short ILibAsyncSocket_GetLocalPort(ILibAsyncSocket_SocketModule socketModule);
 
 void ILibAsyncSocket_Resume(ILibAsyncSocket_SocketModule socketModule);

@@ -31,6 +31,11 @@ limitations under the License.
 #include "ILibAsyncServerSocket.h"
 #include "ILibAsyncSocket.h"
 
+#ifdef _POSIX
+#include <sys/socket.h>
+#include <sys/un.h>
+#endif
+
 #define DEBUGSTATEMENT(x)
 
 #define INET_SOCKADDR_LENGTH(x) ((x==AF_INET6?sizeof(struct sockaddr_in6):sizeof(struct sockaddr_in)))
@@ -621,6 +626,10 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 	struct ILibAsyncServerSocketModule *RetVal;
 	struct sockaddr_in6 localAddress;
 
+#ifdef WIN32
+	if (local->sa_family == AF_UNIX) { return(NULL); } // NOT YET SUPPORTED on Windows
+#endif
+
 	// Instantiate a new AsyncServer module
 	RetVal = (struct ILibAsyncServerSocketModule*)ILibChain_Link_Allocate(sizeof(struct ILibAsyncServerSocketModule), ServerUserMappedMemorySize);
 	
@@ -636,14 +645,24 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 	RetVal->MaxConnection = MaxConnections;
 	RetVal->AsyncSockets = (void**)malloc(MaxConnections * sizeof(void*));
 	if (RetVal->AsyncSockets == NULL) { free(RetVal); ILIBMARKPOSITION(253); return NULL; }
-	RetVal->portNumber = ntohs(((struct sockaddr_in6*)local)->sin6_port);
-	RetVal->initialPortNumber = RetVal->portNumber;
-	
-	// Get our listening socket
-	if ((RetVal->ListenSocket = socket(((struct sockaddr_in6*)local)->sin6_family, SOCK_STREAM, IPPROTO_TCP)) == -1) { free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	if (local->sa_family == AF_UNIX)
+	{
+		// Get our IPC socket
+		if ((RetVal->ListenSocket = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) { free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	}
+	else
+	{
+		RetVal->portNumber = ntohs(((struct sockaddr_in6*)local)->sin6_port);
+		RetVal->initialPortNumber = RetVal->portNumber;
 
-	// Setup the IPv6 & IPv4 support on same socket
-	if (((struct sockaddr_in6*)local)->sin6_family == AF_INET6) if (setsockopt(RetVal->ListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) ILIBCRITICALERREXIT(253);
+		// Get our listening socket
+		if ((RetVal->ListenSocket = socket(((struct sockaddr_in6*)local)->sin6_family, SOCK_STREAM, IPPROTO_TCP)) == -1) { free(RetVal->AsyncSockets); free(RetVal); return 0; }
+
+		// Setup the IPv6 & IPv4 support on same socket
+		if (((struct sockaddr_in6*)local)->sin6_family == AF_INET6) if (setsockopt(RetVal->ListenSocket, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) ILIBCRITICALERREXIT(253);
+	}
+
+	
 
 #ifdef SO_NOSIGPIPE
 	setsockopt(RetVal->ListenSocket, SOL_SOCKET, SO_NOSIGPIPE, (void*)&ra, sizeof(int));  // Turn off SIGPIPE if writing to disconnected socket
@@ -656,22 +675,31 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 	// On Linux. Setting the re-use on a TCP socket allows reuse of the socket even in timeout state. Allows for fast stop/start (Not a problem on Windows).
 	if (setsockopt(RetVal->ListenSocket, SOL_SOCKET, SO_REUSEADDR, (char*)&ra, sizeof(int)) != 0) ILIBCRITICALERREXIT(253);
 #endif
-
+	
 	// Bind the socket
 #if defined(WIN32)
 	if (bind(RetVal->ListenSocket, local, INET_SOCKADDR_LENGTH(((struct sockaddr_in6*)local)->sin6_family)) != 0) { closesocket(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
 #else
-	if (bind(RetVal->ListenSocket, local, INET_SOCKADDR_LENGTH(((struct sockaddr_in6*)local)->sin6_family)) != 0) { close(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	if (local->sa_family == AF_UNIX)
+	{
+		if (bind(RetVal->ListenSocket, local, SUN_LEN((struct sockaddr_un*)local)) != 0) { close(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	}
+	else
+	{
+		if (bind(RetVal->ListenSocket, local, INET_SOCKADDR_LENGTH(((struct sockaddr_in6*)local)->sin6_family)) != 0) { close(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
+	}
 #endif
 
 	// Fetch the local port number
 #if defined(WINSOCK2)
 	getsockname(RetVal->ListenSocket, (struct sockaddr*)&localAddress, (int*)&receivingAddressLength);
 #else
-	getsockname(RetVal->ListenSocket, (struct sockaddr*)&localAddress, (socklen_t*)&receivingAddressLength);
+	if (local->sa_family != AF_UNIX) { getsockname(RetVal->ListenSocket, (struct sockaddr*)&localAddress, (socklen_t*)&receivingAddressLength); }
 #endif
-	if (localAddress.sin6_family == AF_INET6) RetVal->portNumber = ntohs(localAddress.sin6_port); else RetVal->portNumber = ntohs(((struct sockaddr_in*)&localAddress)->sin_port);
-
+	if (local->sa_family != AF_UNIX)
+	{
+		if (localAddress.sin6_family == AF_INET6) RetVal->portNumber = ntohs(localAddress.sin6_port); else RetVal->portNumber = ntohs(((struct sockaddr_in*)&localAddress)->sin_port);
+	}
 	// Create our socket pool
 	for(i = 0; i < MaxConnections; ++i)
 	{
@@ -710,7 +738,11 @@ void ILibAsyncServerSocket_GetLocal(ILibAsyncServerSocket_ServerModule ServerSoc
 	socklen_t ssize = (socklen_t)addrLen;
 	if (getsockname(((struct ILibAsyncServerSocketModule*)ServerSocketModule)->ListenSocket, addr, &ssize) != 0)
 	{
-		((struct sockaddr_in6*)addr)->sin6_family = AF_UNSPEC;
+		ssize = (socklen_t)sizeof(struct sockaddr_in);
+		if (getsockname(((struct ILibAsyncServerSocketModule*)ServerSocketModule)->ListenSocket, addr, &ssize) != 0)
+		{
+			((struct sockaddr_in6*)addr)->sin6_family = AF_UNSPEC;
+		}
 	}
 }
 /*! \fn ILibAsyncServerSocket_GetPortNumber(ILibAsyncServerSocket_ServerModule ServerSocketModule)
