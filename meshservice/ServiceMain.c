@@ -910,6 +910,14 @@ int main(int argc, char* argv[])
 
 	//CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
+	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
+	{
+		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
+		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
+
+		return(0);
+	}
+
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
 	{
 #ifdef WIN64
@@ -1010,6 +1018,7 @@ int main(int argc, char* argv[])
 			MeshAgent_Start(agent, argc, argv);
 			retCode = agent->exitCode;
 			MeshAgent_Destroy(agent);
+			agent = NULL;
 		}
 		__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
 		{
@@ -1290,6 +1299,7 @@ int main(int argc, char* argv[])
 					agent->runningAsConsole = 1;
 					MeshAgent_Start(agent, argc, argv);
 					MeshAgent_Destroy(agent);
+					agent = NULL;
 				}
 				__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
 				{
@@ -1480,6 +1490,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 		MeshAgent_Start(agent, 1, selfexe_ptr);
 		//retCode = agent->exitCode;
 		MeshAgent_Destroy(agent);
+		agent = NULL;
 	}
 	__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
 	{
