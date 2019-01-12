@@ -3175,9 +3175,12 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	{
 		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh")) == 0)
 		{
-			// Let's check to see if an .msh was embedded into our binary
-			checkForEmbeddedMSH(agentHost);
-			importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+			if (importSettings(agentHost, "mesh_linumshx") == 0) // Do this because the old agent would generate this bad file name on linux.
+			{
+				// Let's check to see if an .msh was embedded into our binary
+				checkForEmbeddedMSH(agentHost);
+				importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+			}
 		}
 	}
 
