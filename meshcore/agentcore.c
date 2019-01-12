@@ -336,7 +336,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent);
 void MeshServer_ProcessCommand(ILibWebClient_StateObject wcdo, MeshAgentHostContainer *agent, char *buffer, int bufferLen);
 char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
-
+int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 
 void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
 {
@@ -2418,7 +2418,9 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			break;
 		case ILibWebClient_ReceiveStatus_Connection_Established: // New connection established.
 		{
+#ifndef MICROSTACK_NOTLS
 			int len;
+#endif
 			int idleLen;
 			if ((idleLen = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelIdleTimeout", NULL, 0)) != 0)
 			{

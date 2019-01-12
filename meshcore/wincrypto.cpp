@@ -17,7 +17,7 @@ limitations under the License.
 // When compiled in 32bit, this module uses Windows CAPI which is compatible with Windows XP.
 // When compiled in 64bit, this module uses Windows CNG (Crypto Next Gen) that is compatible and will use TPM modules.
 
-#if !defined(_NOCAPI) && defined(WIN32)
+#if !defined(_NOCAPI) && defined(WIN32) && !defined(MICROSTACK_NOTLS)
 
 #include <windows.h>
 #include <stdio.h>

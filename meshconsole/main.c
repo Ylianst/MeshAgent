@@ -121,8 +121,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
+#ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
-		
+#endif
 		return(0);
 	}
 
