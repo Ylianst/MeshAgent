@@ -63,6 +63,7 @@ FILE *logFile = NULL;
 int g_enableEvents = 0;
 
 extern void* tilebuffer;
+extern char **environ;
 
 typedef struct x11ext_struct
 {
@@ -213,6 +214,7 @@ int getNextDisplay() {
 		current_display = 0;
 	}
 
+	fprintf(logFile, "getNextDisplay() => %d\n", current_display);
 	return 0;
 }
 
@@ -336,6 +338,7 @@ int kvm_init(int displayNo)
 	//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 	if (eventdisplay == NULL)
 	{
+		fprintf(logFile, "DisplayString=%s\n", displayString);
 		fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 		fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
 	}
@@ -538,9 +541,25 @@ void* kvm_server_mainloop(void* parm)
 	default_JPEG_error_handler = kvm_server_jpegerror;
 
 
+	for (char **env = environ; *env; ++env)
+	{
+		int envLen = (int)strnlen_s(*env, INT_MAX);
+		int i = ILibString_IndexOf(*env, envLen, "=", 1);
+		if (i > 0)
+		{
+			if (i == 7 && strncmp("DISPLAY", *env, 7) == 0)
+			{
+				current_display = (unsigned short)atoi(*env + i + 2);
+				fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2);
+				break;
+			}
+		}
+	}
+
+
 	// Init the kvm
 	//fprintf(logFile, "Before kvm_init.\n"); fflush(logFile);
-	if (kvm_init(0) != 0) { return (void*)-1; }
+	if (kvm_init(current_display) != 0) { return (void*)-1; }
 	kvm_send_display_list();
 	//fprintf(logFile, "After kvm_init.\n"); fflush(logFile);
 
