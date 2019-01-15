@@ -11,6 +11,9 @@
 # 
 #  sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg-dev
 #
+# To build for 32 bit on 64 bit linux
+#  sudo apt-get install linux-libc-dev:i386
+#
 # To install ARM Cross Compiler for Raspberry PI
 #  sudo apt-get install libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf
 #
@@ -18,6 +21,10 @@
 #
 #   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
 #   make linux ARCHID=6 DEBUG=1             # Linux x86 64 bit, with debug symbols and automated crash handling
+#
+# Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2
+#  64 bit-> ./configure --with-jpeg8 CFLAGS='-fPIC'
+#  32 bit-> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32 -fPIC' LDFLAGS=-m32
 #
 # Standard builds
 #
