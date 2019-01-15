@@ -214,7 +214,7 @@ int getNextDisplay() {
 		current_display = 0;
 	}
 
-	fprintf(logFile, "getNextDisplay() => %d\n", current_display);
+	//fprintf(logFile, "getNextDisplay() => %d\n", current_display);
 	return 0;
 }
 
@@ -338,9 +338,9 @@ int kvm_init(int displayNo)
 	//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 	if (eventdisplay == NULL)
 	{
-		fprintf(logFile, "DisplayString=%s\n", displayString);
-		fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
-		fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
+		//fprintf(logFile, "DisplayString=%s\n", displayString);
+		//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
+		//fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
 	}
 
 	if (eventdisplay != NULL) { current_display = (unsigned short)displayNo; }
@@ -550,7 +550,7 @@ void* kvm_server_mainloop(void* parm)
 			if (i == 7 && strncmp("DISPLAY", *env, 7) == 0)
 			{
 				current_display = (unsigned short)atoi(*env + i + 2);
-				fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2);
+				//fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2);
 				break;
 			}
 		}
