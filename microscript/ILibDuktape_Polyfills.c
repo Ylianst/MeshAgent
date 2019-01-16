@@ -1935,6 +1935,56 @@ void ILibDuktape_bignum_Push(duk_context *ctx, void *chain)
 	duk_push_c_function(ctx, ILibDuktape_bignum_func, DUK_VARARGS);
 	duk_push_c_function(ctx, ILibDuktape_bignum_fromBuffer, DUK_VARARGS); duk_put_prop_string(ctx, -2, "fromBuffer");
 }
+void ILibDuktape_dataGenerator_onPause(struct ILibDuktape_readableStream *sender, void *user)
+{
+
+}
+void ILibDuktape_dataGenerator_onResume(struct ILibDuktape_readableStream *sender, void *user)
+{
+	SHA256_CTX shctx;
+
+	char *buffer = (char*)user;
+	size_t bufferLen = ILibMemory_Size(buffer);
+	int val;
+
+	while (sender->paused == 0)
+	{
+		duk_push_heapptr(sender->ctx, sender->object);
+		val = Duktape_GetIntPropertyValue(sender->ctx, -1, "\xFF_counter", 0);
+		duk_push_int(sender->ctx, (val + 1) < 255 ? (val+1) : 0); duk_put_prop_string(sender->ctx, -2, "\xFF_counter");
+		duk_pop(sender->ctx);
+
+		//util_random((int)(bufferLen - UTIL_SHA256_HASHSIZE), buffer + UTIL_SHA256_HASHSIZE);
+		memset(buffer + UTIL_SHA256_HASHSIZE, val, bufferLen - UTIL_SHA256_HASHSIZE);
+
+
+		SHA256_Init(&shctx);
+		SHA256_Update(&shctx, buffer + UTIL_SHA256_HASHSIZE, bufferLen - UTIL_SHA256_HASHSIZE);
+		SHA256_Final(buffer, &shctx);
+		ILibDuktape_readableStream_WriteData(sender, buffer, bufferLen);
+	}
+}
+duk_ret_t ILibDuktape_dataGenerator_const(duk_context *ctx)
+{
+	int bufSize = (int)duk_require_int(ctx, 0);
+	void *buffer;
+
+	if (bufSize <= UTIL_SHA256_HASHSIZE)
+	{
+		return(ILibDuktape_Error(ctx, "Value too small. Must be > %d", UTIL_SHA256_HASHSIZE));
+	}
+
+	duk_push_object(ctx);
+	duk_push_int(ctx, 0); duk_put_prop_string(ctx, -2, "\xFF_counter");
+	buffer = Duktape_PushBuffer(ctx, bufSize);
+	duk_put_prop_string(ctx, -2, "\xFF_buffer");
+	ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_dataGenerator_onPause, ILibDuktape_dataGenerator_onResume, buffer)->paused = 1;
+	return(1);
+}
+void ILibDuktape_dataGenerator_Push(duk_context *ctx, void *chain)
+{
+	duk_push_c_function(ctx, ILibDuktape_dataGenerator_const, DUK_VARARGS);
+}
 #endif
 
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
@@ -1948,8 +1998,8 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_ModSearch_AddModule(ctx, "promise", promise, sizeof(promise) - 1);
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_ModSearch_AddHandler(ctx, "bignum", ILibDuktape_bignum_Push);
+	ILibDuktape_ModSearch_AddHandler(ctx, "dataGenerator", ILibDuktape_dataGenerator_Push);
 #endif
-
 
 	// Global Polyfills
 	duk_push_global_object(ctx);													// [g]
