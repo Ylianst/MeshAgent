@@ -204,7 +204,19 @@ int ILibDuktape_readableStream_WriteData_Flush(struct ILibDuktape_WritableStream
 		stream->pipeInProgress = 0;
 		unpipeInProgress = stream->unpipeInProgress;
 		sem_post(&(stream->pipeLock));
-		if (unpipeInProgress == 0 && stream->ResumeHandler != NULL && stream->paused != 0) { stream->paused = 0; stream->ResumeHandler(stream, stream->user); }
+
+		if (stream->paused != 0 && stream->paused_data != NULL)
+		{
+			stream->paused = 0;
+			if (ILibDuktape_readableStream_resume_flush(stream) == 0 && stream->ResumeHandler != NULL)
+			{
+				stream->ResumeHandler(stream, stream->user);
+			}
+		}
+		else
+		{
+			if (unpipeInProgress == 0 && stream->ResumeHandler != NULL && stream->paused != 0) { stream->paused = 0; stream->ResumeHandler(stream, stream->user); }
+		}
 		return(1);
 	}
 	return(0);
