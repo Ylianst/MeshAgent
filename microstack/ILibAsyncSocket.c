@@ -701,6 +701,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 #endif
 			{
 				// Not all data was sent
+				if (bytesSent < 0) { bytesSent = 0; }
 				data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), 0, NULL, NULL);
 				if (UserFree == ILibAsyncSocket_MemoryOwnership_USER)
 				{
@@ -730,7 +731,11 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 				retVal = ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
 				ILibAsyncSocket_SendError(module);
 			}
-			if (bytesSent > 0) { module->TotalBytesSent += bytesSent; module->PendingBytesToSend -= bytesSent; }
+			if (bytesSent > 0) 
+			{
+				module->TotalBytesSent += bytesSent; module->PendingBytesToSend -= bytesSent;
+				if ((int)(module->PendingBytesToSend) < 0) { module->PendingBytesToSend = 0; }
+			}
 		}
 	}
 	va_end(vlist); 
@@ -1904,6 +1909,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 				if (bytesSent > 0)
 				{
 					module->PendingBytesToSend -= bytesSent;
+					if ((int)module->PendingBytesToSend < 0) { module->PendingBytesToSend = 0; }
 					module->TotalBytesSent += bytesSent;
 					module->PendingSend_Head->bytesSent += bytesSent;
 					if (module->PendingSend_Head->bytesSent == module->PendingSend_Head->bufferSize)
