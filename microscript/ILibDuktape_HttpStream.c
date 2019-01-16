@@ -3740,11 +3740,14 @@ void ILibDuktape_httpStream_webSocket_EncodedPauseSink_Chain(void *chain, void *
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
 	duk_context *ctx = state->decodedStream->writableStream->ctx;
 
-	duk_push_heapptr(ctx, state->decodedStream->writableStream->pipedReadable);			// [readable]
-	duk_get_prop_string(ctx, -1, "pause");												// [readable][pause]
-	duk_swap_top(ctx, -2);																// [pause][this]
-	if (duk_pcall_method(ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.webSocketStream.Encoded_Pause(): Error pausing upstream "); }
-	duk_pop(ctx);																		// ...
+	if (state->decodedStream->writableStream->pipedReadable != NULL)
+	{
+		duk_push_heapptr(ctx, state->decodedStream->writableStream->pipedReadable);			// [readable]
+		duk_get_prop_string(ctx, -1, "pause");												// [readable][pause]
+		duk_swap_top(ctx, -2);																// [pause][this]
+		if (duk_pcall_method(ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.webSocketStream.Encoded_Pause(): Error pausing upstream "); }
+		duk_pop(ctx);																		// ...
+	}
 }
 void ILibDuktape_httpStream_webSocket_EncodedPauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
