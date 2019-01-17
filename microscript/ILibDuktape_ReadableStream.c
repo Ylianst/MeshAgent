@@ -28,6 +28,8 @@ limitations under the License.
 #define ILibDuktape_readableStream_WritePipes_Stream	"\xFF_WritePipes_Stream"
 #define ILibDuktape_readableStream_PipeArray			"\xFF_RS_PipeArray"
 
+int ILibDuktape_readableStream_resume_flush(ILibDuktape_readableStream *rs);
+
 #ifdef __DOXY__
 /*! 
 \implements EventEmitter

@@ -1960,7 +1960,7 @@ void ILibDuktape_dataGenerator_onResume(struct ILibDuktape_readableStream *sende
 
 		SHA256_Init(&shctx);
 		SHA256_Update(&shctx, buffer + UTIL_SHA256_HASHSIZE, bufferLen - UTIL_SHA256_HASHSIZE);
-		SHA256_Final(buffer, &shctx);
+		SHA256_Final((unsigned char*)buffer, &shctx);
 		ILibDuktape_readableStream_WriteData(sender, buffer, bufferLen);
 	}
 }
