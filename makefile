@@ -87,7 +87,7 @@ INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshcons
 
 # Compiler and linker flags
 CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
-LDFLAGS ?= -L. -lpthread -ldl -lutil -lm -no-pie
+LDFLAGS ?= -L. -lpthread -ldl -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
@@ -276,6 +276,11 @@ endif
 
 ifeq ($(SSL_TRACE),1)
 CFLAGS += -DSSL_TRACE
+endif
+
+GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
+ifeq ($(GCCTEST),0)
+LDFLAGS += -no-pie
 endif
 
 .PHONY: all clean
