@@ -2345,6 +2345,12 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 			break;
 		}
+		case MeshCommand_CoreOk: // Message from the server indicating our meshcore is ok. No update needed.
+		{
+			// TODO: Start the core if we have not done it already.
+			//printf("CORE OK\r\n");
+			break;
+		}
 		case MeshCommand_AgentHash:
 		{
 			if (agent->disableUpdate != 0) { break; }

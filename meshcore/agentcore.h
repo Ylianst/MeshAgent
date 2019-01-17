@@ -106,7 +106,8 @@ typedef enum MeshCommands_Binary
 	MeshCommand_AgentHash				= 12,	// Request/return the SHA384 hash of the agent executable
 	MeshCommand_AgentUpdate				= 13,   // Indicate the start and end of the mesh agent binary transfer
 	MeshCommand_AgentUpdateBlock		= 14,   // Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server
-	MeshCommand_AgentTag				= 15	// Send the mesh agent tag to the server
+	MeshCommand_AgentTag				= 15,	// Send the mesh agent tag to the server
+	MeshCommand_CoreOk					= 16	// Sent by the server to indicate the meshcore is ok
 } MeshCommands_Binary;
 
 #pragma pack(push,1)
