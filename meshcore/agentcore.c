@@ -90,6 +90,10 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
 
+#ifdef _POSIX
+	extern char **environ;
+#endif
+
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 
@@ -357,6 +361,42 @@ void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
 }
 
 
+int MeshAgent_GetSystemProxy(char *buffer, size_t bufferSize)
+{
+#ifdef _POSIX
+	int retVal = 0;
+	for (char **env = environ; *env; ++env)
+	{
+		int envLen = (int)strnlen_s(*env, INT_MAX);
+		int i = ILibString_IndexOf(*env, envLen, "=", 1);
+		if (i > 0)
+		{
+			if (i == 11 && strncmp(*env, "https_proxy", 11) == 0)
+			{
+				if (ILibString_StartsWith(*env + i + 1, envLen - i - 1, "http://", 7) != 0)
+				{
+					strcpy_s(buffer, bufferSize, *env + i + 8);
+					retVal = envLen - i - 8;
+				}
+				else if(ILibString_StartsWith(*env + i + 1, envLen - i - 1, "https://", 8) != 0)
+				{
+					strcpy_s(buffer, bufferSize, *env + i + 9);
+					retVal = envLen - i - 9;
+				}
+				else
+				{
+					strcpy_s(buffer, bufferSize, *env + i + 1);
+					retVal = envLen - i - 1;
+				}
+				break;
+			}
+		}
+	}
+	return(retVal);
+#else
+	return(0);
+#endif
+}
 #ifdef _POSIX
 typedef enum MeshAgent_Posix_PlatformTypes
 {
@@ -2522,6 +2562,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		if (ILibIsChainBeingDestroyed(agent->chain)) { return; }
 		ILibRemoteLogging_printf(ILibChainGetLogger(ILibWebClient_GetChainFromWebStateObject(WebStateObject)), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent Host Container: Mesh Server Connection Error, trying again later.");
 		printf("Mesh Server Connection Error\n");
+
 		if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
 		MeshServer_Connect(agent);
 		return;
@@ -2705,7 +2746,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		ILibWebClient_Request_SetHTTPS(reqToken, result == ILibParseUriResult_TLS ? ILibWebClient_RequestToken_USE_HTTPS : ILibWebClient_RequestToken_USE_HTTP);
 		ILibWebClient_Request_SetSNI(reqToken, host, (int)strnlen_s(host, serverUrlLen));
 #endif
-		if ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
+
+		if ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0 || (len = MeshAgent_GetSystemProxy(ILibScratchPad, sizeof(ILibScratchPad))) != 0)
 		{
 #ifdef MICROSTACK_PROXY
 			unsigned short proxyPort = 80;
