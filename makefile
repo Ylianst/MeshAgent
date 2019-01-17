@@ -23,8 +23,8 @@
 #   make linux ARCHID=6 DEBUG=1             # Linux x86 64 bit, with debug symbols and automated crash handling
 #
 # Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2
-#  64 bit-> ./configure --with-jpeg8 CFLAGS='-fPIC'
-#  32 bit-> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32 -fPIC' LDFLAGS=-m32
+#  64 bit-> ./configure --with-jpeg8 
+#  32 bit-> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
 #
 # Standard builds
 #
@@ -87,7 +87,7 @@ INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshcons
 
 # Compiler and linker flags
 CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
-LDFLAGS ?= -rdynamic -L. -lpthread -ldl -lutil -lm 
+LDFLAGS ?= -L. -lpthread -ldl -lutil -lm -no-pie
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
@@ -267,7 +267,7 @@ endif
 
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
-CFLAGS += -g -rdynamic -D_DEBUG 
+CFLAGS += -g -D_DEBUG 
 STRIP = $(NOECHO) $(NOOP)
 else
 CFLAGS += -Os
