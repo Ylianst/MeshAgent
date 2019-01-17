@@ -3184,7 +3184,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			int i = 0;
 			while (i < len)
 			{
-				if (ILibString_IndexOf(mac, (int)macLen, curr + i, 19) >= 0) { break; }
+				if (strncmp(curr + i, "[00:00:00:00:00:00]", 19) != 0)
+				{
+					if (ILibString_IndexOf(mac, (int)macLen, curr + i, 19) >= 0) { break; }
+				}
 				i += 19;
 			}
 			if (i >= len) { resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); }
