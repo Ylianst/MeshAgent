@@ -2763,7 +2763,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			{
 				printf("Disabling Proxy: %s\n", ILibScratchPad);
 				agent->triedNoProxy_Index++;
-				agent->proxyServer = NULL;
+				agent->proxyServer = ILibWebClient_SetProxy(reqToken, NULL, 0, NULL, NULL);;
 
 				if (duk_peval_string(agent->meshCoreCtx, "require('global-tunnel');") == 0)
 				{

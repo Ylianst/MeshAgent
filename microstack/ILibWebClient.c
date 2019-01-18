@@ -3797,6 +3797,11 @@ struct sockaddr_in6* ILibWebClient_SetProxy(ILibWebClient_RequestToken token, ch
 {
 	ILibWebClientDataObject *wcdo = ILibWebClient_GetStateObjectFromRequestToken(token);
 	if (wcdo == NULL) { return(NULL); }
+	if (proxyHost == NULL)
+	{
+		memset(&(wcdo->proxy), 0, sizeof(struct sockaddr_in6));
+		return(NULL);
+	}
 
 	if (ILibResolveEx(proxyHost, proxyPort, &(wcdo->proxy)) != 0 || wcdo->proxy.sin6_family == AF_UNSPEC)
 	{

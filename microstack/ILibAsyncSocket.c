@@ -1010,6 +1010,7 @@ void ILibAsyncSocket_ClearProxySettings(void *socketModule)
 {
 	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
 	memset(&(module->ProxyAddress), 0, sizeof(struct sockaddr_in6));
+	module->ProxyState = 0;
 }
 
 //! Connect using an HTTPS proxy. If "proxyAddress" is set to NULL, this call acts just to a normal connect call without a proxy.
