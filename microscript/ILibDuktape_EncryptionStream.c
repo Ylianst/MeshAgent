@@ -133,9 +133,9 @@ duk_ret_t ILibDuktape_EncryptionStream_CreateEncryption(duk_context *ctx)
 	ILibDuktape_EncryptionStream_Ptrs *ptrs;
 	char *key = NULL;
 	char *iv = NULL;
-
-	if (!duk_has_prop_string(ctx, 0, "key")) { duk_push_string(ctx, "EncryptionStream.Create(): key must be specified!"); duk_throw(ctx); return DUK_RET_ERROR; }
-	if (!duk_has_prop_string(ctx, 0, "iv")) { duk_push_string(ctx, "EncryptionStream.Create(): iv must be specified!"); duk_throw(ctx); return DUK_RET_ERROR; }
+	
+	if (!duk_has_prop_string(ctx, 0, "key")) { return(ILibDuktape_Error(ctx, "EncryptionStream.Create(): key must be specified!")); }
+	if (!duk_has_prop_string(ctx, 0, "iv")) { return(ILibDuktape_Error(ctx, "EncryptionStream.Create(): iv must be specified!")); }
 
 	duk_get_prop_string(ctx, 0, "key");			// [key]
 	if (duk_is_string(ctx, -1))

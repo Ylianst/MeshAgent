@@ -59,9 +59,9 @@
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c
 SOURCES += microstack/ILibRemoteLogging.c microstack/ILibWebClient.c microstack/ILibWebRTC.c microstack/ILibWebServer.c microstack/ILibCrypto.c
 SOURCES += microstack/ILibWrapperWebRTC.c microstack/ILibSimpleDataStore.c microstack/ILibProcessPipe.c microstack/ILibIPAddressMonitor.c
-SOURCES += microscript/duktape.c microscript/duk_module_duktape.c microscript/ILibAsyncSocket_Duktape.c microscript/ILibDuktape_DuplexStream.c microscript/ILibDuktape_Helpers.c
+SOURCES += microscript/duktape.c microscript/duk_module_duktape.c microscript/ILibDuktape_DuplexStream.c microscript/ILibDuktape_Helpers.c
 SOURCES += microscript/ILibDuktape_http.c microscript/ILibDuktape_net.c microscript/ILibDuktape_ReadableStream.c microscript/ILibDuktape_WritableStream.c
-SOURCES += microscript/ILibDuktapeModSearch.c microscript/ILibParsers_Duktape.c microscript/ILibWebClient_Duktape.c microscript/ILibDuktape_WebRTC.c
+SOURCES += microscript/ILibDuktapeModSearch.c microscript/ILibParsers_Duktape.c microscript/ILibDuktape_WebRTC.c
 SOURCES += microscript/ILibWebServer_Duktape.c microscript/ILibDuktape_SimpleDataStore.c microscript/ILibDuktape_GenericMarshal.c
 SOURCES += microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c

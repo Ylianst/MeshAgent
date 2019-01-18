@@ -94,7 +94,7 @@ duk_ret_t ILibDuktape_httpDigest_clientRequest_propagateEvent(duk_context *ctx)
 	{
 		duk_dup(ctx, i);									// [func][emit][this][eventName][params]
 	}
-	if (duk_pcall_method(ctx, 1 + nargs) != 0) { duk_throw(ctx); return(DUK_RET_ERROR); }
+	if (duk_pcall_method(ctx, 1 + nargs) != 0) { return(ILibDuktape_Error(ctx, "propagateEvent() Error")); }
 	return(0);
 }
 
@@ -393,7 +393,7 @@ duk_ret_t ILibDuktape_httpDigest_digestRequest_end(duk_context *ctx)
 		{
 			duk_dup(ctx, i);									// [digestClientRequest][end][this][params...]
 		}
-		if (duk_pcall_method(ctx, nargs) != 0) { duk_throw(ctx); return(DUK_RET_ERROR); }
+		if (duk_pcall_method(ctx, nargs) != 0) { return(ILibDuktape_Error(ctx, "digestRequest().end() error")); }
 
 		duk_push_this(ctx);
 		duk_del_prop_string(ctx, -1, "DIGEST_CLIENT_REQUEST");
@@ -581,7 +581,7 @@ duk_ret_t ILibDuktape_httpDigest_http_request(duk_context *ctx)
 	duk_push_this(ctx);																		// [once][this][response][method][digest-clientRequest][digest]
 	duk_put_prop_string(ctx, -2, "digest");													// [once][this][response][method][digest-clientRequest]
 	duk_put_prop_string(ctx, -2, "digestClientRequest");									// [once][this][response][method]
-	if (duk_pcall_method(ctx, 2) != 0) { duk_throw(ctx); return(DUK_RET_ERROR); }			// [clientRequest]
+	if (duk_pcall_method(ctx, 2) != 0) { return(ILibDuktape_Error(ctx, "request error")); }			// [clientRequest]
 		
 	duk_push_heapptr(emitter->ctx, clientRequest);
 	duk_push_heapptr(emitter->ctx, emitter->object);										// [clientRequest][digestClientRequest]

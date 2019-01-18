@@ -1057,13 +1057,14 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 
 #ifdef WIN32
 	HANDLE h = ILibDuktape_HECI_windowsInit();
-	if (h == NULL) { duk_push_string(ctx, "error initializing HECI"); duk_throw(ctx); }
+	if (h == NULL) { ILibDuktape_Error(ctx, "Error initializing HECI"); return; }
 	duk_push_pointer(ctx, h);																// [HECI][HANDLE]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Descriptor);								// [HECI]
 
 	if (duk_peval_string(ctx, "require('child_process');") != 0)							// [HECI][child_process]
 	{
-		duk_push_string(ctx, "Error instantiating dependency 'child_process'"); duk_throw(ctx); return;
+		ILibDuktape_Error(ctx, "Error instantiating dependency 'child_process'");
+		return;
 	}
 
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_ChildProcess);							// [HECI]
@@ -1071,7 +1072,7 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_IoctlWaitHandle);							// [HECI]
 #elif defined(_POSIX) && !defined(__APPLE__)
 	int h = ILibDuktape_HECI_linuxInit();
-	if (h < 0) { duk_push_string(ctx, "error initializing HECI"); duk_throw(ctx); }
+	if (h < 0) { ILibDuktape_Error(ctx, "error initializing HECI"); return; }
 	duk_push_int(ctx, h);																	// [HECI][descriptor]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Descriptor);								// [HECI]
 	

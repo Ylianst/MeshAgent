@@ -243,7 +243,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	ILibDuktape_net_socket *ptrs;
 	struct sockaddr_in6 dest;
 
-	if (nargs == 0) { duk_push_string(ctx, "Too Few Arguments"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if (nargs == 0) { return(ILibDuktape_Error(ctx, "Too few arguments")); }
 	duk_push_this(ctx);														// [socket]
 	duk_get_prop_string(ctx, -1, ILibDuktape_net_socket_ptr);				// [socket][ptrs]
 	ptrs = (ILibDuktape_net_socket*)duk_to_pointer(ctx, -1);
@@ -487,7 +487,7 @@ duk_ret_t ILibDuktape_net_socket_constructor(duk_context *ctx)
 	void *chain;
 	void *net;
 
-	if (!duk_is_constructor_call(ctx)) { duk_push_string(ctx, "Invalid Call"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if (!duk_is_constructor_call(ctx)) { return(ILibDuktape_Error(ctx, "Invalid call")); }
 	
 	duk_push_current_function(ctx);				// [func]
 	duk_get_prop_string(ctx, -1, "chain");		// [func][chain]

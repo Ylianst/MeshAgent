@@ -216,9 +216,7 @@ duk_ret_t ILibDuktape_SHA256_SIGNER_Create(duk_context *ctx)
 		duk_put_prop_string(ctx, -2, ILibDuktape_SHA256_SIGNER_CERT);		// [signer]
 		if (util_from_p12(pfx, (int)pfxLen, passphrase, cert) == 0)
 		{
-			duk_push_string(ctx, "SHA256_Signer_Create: Invalid PFX/Passphrase");
-			duk_throw(ctx);
-			return(DUK_RET_ERROR);
+			return(ILibDuktape_Error(ctx, "Invalid PFX/Passphrase"));
 		}
 		else
 		{
@@ -235,9 +233,7 @@ duk_ret_t ILibDuktape_SHA256_SIGNER_Create(duk_context *ctx)
 	}
 	else
 	{
-		duk_push_string(ctx, "SHA256_Signer_Create: Unrecognized paramter");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "Unrecognized parameter"));
 	}
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_SHA256_SIGNER_Finalizer);

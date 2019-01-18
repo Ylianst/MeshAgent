@@ -213,9 +213,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 	}
 	else
 	{
-		duk_push_string(ctx, "invalid FD");
-		duk_throw(ctx);
-		return DUK_RET_ERROR;
+		return(ILibDuktape_Error(ctx, "Invalid FD"));
 	}
 	return 0;
 }
@@ -266,7 +264,7 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	char *flags = (char*)duk_require_string(ctx, 1);
 	int retVal = -1;
 
-	if (nargs < 2) { duk_push_string(ctx, "Too few arguments"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if (nargs < 2) { return(ILibDuktape_Error(ctx, "Too few arguments")); }
 
 	retVal = ILibDuktape_fs_openSyncEx(ctx, path, flags, NULL);
 	if (retVal > 0)
@@ -301,9 +299,7 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 		return 1;
 	}
 
-	duk_push_string(ctx, "FS I/O Error");
-	duk_throw(ctx);
-	return(DUK_RET_ERROR);
+	return(ILibDuktape_Error(ctx, "FS I/O Error"));
 }
 duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 {
@@ -325,9 +321,7 @@ duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 		return 1;
 	}
 
-	duk_push_string(ctx, "FS I/O ERROR");
-	duk_throw(ctx);
-	return(DUK_RET_ERROR);
+	return(ILibDuktape_Error(ctx, "FS I/O Error"));
 }
 
 int ILibduktape_fs_CloseFD(duk_context *ctx, void *fs, int fd)
@@ -466,9 +460,7 @@ duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 	}
 	else
 	{
-		duk_push_string(ctx, "FS CreateWriteStream Error");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "FS CreateWriteStream Error"));
 	}
 }
 void ILibDuktape_fs_readStream_Pause(struct ILibDuktape_readableStream *sender, void *user)
@@ -594,9 +586,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	f = ILibDuktape_fs_getFilePtr(ctx, fd);
 	if (f == NULL)
 	{
-		duk_push_string(ctx, "FS CreateReadStream Error");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "FS CreateReadStream Error"));
 	}
 
 	duk_push_object(ctx);													// [readStream]
@@ -762,9 +752,7 @@ duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 	
 	if(GetFileAttributesExW((LPCWSTR)path, GetFileExInfoStandard, (void*)data) == 0)
 	{
-		duk_push_string(ctx, "fs.statSync(): Invalid path");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "fs.statSync(): Invalid Path"));
 	}
 
 	duk_push_object(ctx);	
@@ -888,9 +876,7 @@ duk_ret_t ILibDuktape_fs_readDrivesSync(duk_context *ctx)
 
 	if (h == INVALID_HANDLE_VALUE)
 	{
-		duk_push_string(ctx, "fs.readDrivesSync(): Unknown Error");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "fs.readDrivesSync(): Unknown Error"));
 	}
 	if (ILibDuktape_fs_readDrivesSync_result_PUSH(ctx, volumeName) != 0) { duk_put_prop_index(ctx, -2, i++); }
 
@@ -1401,13 +1387,13 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 
 
 #if defined(WIN32)
-	if ((data->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL) { duk_push_string(ctx, "Could not create HANDLE"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if ((data->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL) { return(ILibDuktape_Error(ctx, "Could not create handle")); }
 	data->h = CreateFile(path, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
-	if (data->h == INVALID_HANDLE_VALUE) { duk_push_string(ctx, "fs.watch(): Invalid Path or Access Denied"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if (data->h == INVALID_HANDLE_VALUE) { return(ILibDuktape_Error(ctx, "fs.watch(): Invalid Path or Access Denied")); }
 
 	if (ReadDirectoryChangesW(data->h, data->results, sizeof(data->results), recursive, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_CREATION | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_LAST_ACCESS, NULL, &(data->overlapped), NULL) == 0)
 	{
-		duk_push_string(ctx, "fs.watch(): Error creating watcher"); duk_throw(ctx); return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "fs.watch(): Error creating watcher"));
 	}
 	ILibProcessPipe_WaitHandle_Add(pipeMgr, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
 #elif defined(_POSIX) && !defined(__APPLE__)
@@ -1455,9 +1441,7 @@ duk_ret_t ILibDuktape_fs_rename(duk_context *ctx)
 #endif
 	{
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "fs.renameSync(): Error renaming %s to %s", oldPath, newPath);
-		duk_push_string(ctx, ILibScratchPad);
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "%s", ILibScratchPad));
 	}
 	return 0;
 }
@@ -1479,9 +1463,7 @@ duk_ret_t ILibDuktape_fs_unlink(duk_context *ctx)
 		if (RemoveDirectoryW((LPCWSTR)path) != 0) { return 0; }
 #endif
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "fs.unlinkSync(): Error trying to unlink: %s", ILibDuktape_String_WideToUTF8(ctx, path));
-		duk_push_string(ctx, ILibScratchPad);
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "%s", ILibScratchPad));
 	}
 	return 0;
 }

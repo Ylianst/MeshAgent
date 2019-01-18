@@ -71,7 +71,14 @@ duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...)
 	va_end(argptr);
 
 	duk_push_string(ctx, dest);
+#ifdef _POSIX
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-value"
+#endif
 	duk_throw(ctx);
+#ifdef _POSIX
+#pragma GCC diagnostic pop
+#endif
 
 	return DUK_RET_ERROR;
 }

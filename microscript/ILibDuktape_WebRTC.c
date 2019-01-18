@@ -69,7 +69,7 @@ duk_ret_t ILibWebRTC_Duktape_ConnectionFactory_SetTurn(duk_context *ctx)
 	struct sockaddr_in6* server;
 	ILibWrapper_WebRTC_ConnectionFactory factory;
 
-	if (host == NULL || username == NULL) { duk_push_string(ctx, "Invalid TURN Parameters"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if (host == NULL || username == NULL) { return(ILibDuktape_Error(ctx, "Invalid TURN parameters")); }
 	server = Duktape_IPAddress4_FromString(host, (unsigned short)port);
 
 	duk_push_this(ctx);

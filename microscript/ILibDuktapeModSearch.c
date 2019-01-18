@@ -209,10 +209,7 @@ duk_ret_t mod_Search_Files(duk_context *ctx, char* id)
 	}
 	else
 	{
-		sprintf_s(fileName, sizeof(fileName), "Module: %s (NOT FOUND)", id);
-		duk_push_string(ctx, fileName);
-		duk_throw(ctx);
-		return DUK_RET_ERROR;
+		return(ILibDuktape_Error(ctx, "Module: %s (NOT FOUND)", id));
 	}
 }
 void ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(duk_context *ctx, char *js, size_t jsLen)

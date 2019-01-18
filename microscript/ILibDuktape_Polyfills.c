@@ -316,9 +316,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 		}
 		else
 		{
-			duk_push_string(ctx, "buffer.toString(): Unrecognized parameter");
-			duk_throw(ctx);
-			return(DUK_RET_ERROR);
+			return(ILibDuktape_Error(ctx, "Unrecognized parameter"));
 		}
 	}
 	return 1;
@@ -342,9 +340,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	}
 	else if(!(nargs == 2 && duk_is_string(ctx, 0) && duk_is_string(ctx, 1)))
 	{
-		duk_push_string(ctx, "Buffer.from(): Usage not supported yet.");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "usage not supported yet"));
 	}
 
 	str = (char*)duk_get_lstring(ctx, 0, &strlength);
@@ -365,9 +361,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	}
 	else
 	{
-		duk_push_string(ctx, "Buffer.from(): Encoding not supported yet.");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "unsupported encoding"));
 	}
 	return 1;
 }
@@ -828,7 +822,7 @@ duk_ret_t ILibDuktape_ntohl(duk_context *ctx)
 	char *buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
 	int offset = duk_require_int(ctx, 1);
 
-	if ((int)bufferLen < (4 + offset)) { duk_push_string(ctx, "buffer too small"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if ((int)bufferLen < (4 + offset)) { return(ILibDuktape_Error(ctx, "buffer too small")); }
 	duk_push_int(ctx, ntohl(((unsigned int*)(buffer + offset))[0]));
 	return 1;
 }
@@ -838,7 +832,7 @@ duk_ret_t ILibDuktape_ntohs(duk_context *ctx)
 	char *buffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
 	int offset = duk_require_int(ctx, 1);
 
-	if ((int)bufferLen < 2 + offset) { duk_push_string(ctx, "buffer too small"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if ((int)bufferLen < 2 + offset) { return(ILibDuktape_Error(ctx, "buffer too small")); }
 	duk_push_int(ctx, ntohs(((unsigned short*)(buffer + offset))[0]));
 	return 1;
 }
@@ -849,7 +843,7 @@ duk_ret_t ILibDuktape_htonl(duk_context *ctx)
 	int offset = duk_require_int(ctx, 1);
 	unsigned int val = (unsigned int)duk_require_int(ctx, 2);
 
-	if ((int)bufferLen < (4 + offset)) { duk_push_string(ctx, "buffer too small"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if ((int)bufferLen < (4 + offset)) { return(ILibDuktape_Error(ctx, "buffer too small")); }
 	((unsigned int*)(buffer + offset))[0] = htonl(val);
 	return 0;
 }
@@ -860,7 +854,7 @@ duk_ret_t ILibDuktape_htons(duk_context *ctx)
 	int offset = duk_require_int(ctx, 1);
 	unsigned int val = (unsigned int)duk_require_int(ctx, 2);
 
-	if ((int)bufferLen < (2 + offset)) { duk_push_string(ctx, "buffer too small"); duk_throw(ctx); return(DUK_RET_ERROR); }
+	if ((int)bufferLen < (2 + offset)) { return(ILibDuktape_Error(ctx, "buffer too small")); }
 	((unsigned short*)(buffer + offset))[0] = htons(val);
 	return 0;
 }

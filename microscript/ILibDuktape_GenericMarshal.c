@@ -220,9 +220,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_SET(duk_context *ctx)
 			((unsigned int*)ptr)[0] = (unsigned int)duk_require_int(ctx, 0);
 			break;
 		default:
-			duk_push_string(ctx, "UNSUPPORTED VAL SIZE, with integral type");
-			duk_throw(ctx);
-			return(DUK_RET_ERROR);
+			return(ILibDuktape_Error(ctx, "Unsupported VAL size, with integral type"));
 		}
 	}
 	else if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, ILibDuktape_GenericMarshal_VariableType))
@@ -301,7 +299,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_GetEx(duk_context *ctx)
 		duk_push_int(ctx, (int)((unsigned int*)ptr)[0]);
 		break;
 	default:
-		duk_push_string(ctx, "Invalid Variable"); duk_throw(ctx); return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "Invalid Variable"));
 	}
 	return 1;
 }
@@ -328,7 +326,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_SetEx(duk_context *ctx)
 		((unsigned int*)ptr)[0] = (unsigned int)newVal;
 		break;
 	default:
-		duk_push_string(ctx, "Invalid Variable"); duk_throw(ctx); return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "Invalid Variable"));
 	}
 	return 0;
 }
@@ -657,9 +655,7 @@ duk_ret_t ILibDuktape_GenericMashal_CallbackProxy_Callback(duk_context *ctx)
 			duk_push_pointer(ctx, (void*)ILibDuktape_GenericMarshal_CallbackProxy_NativeSink_9);
 			break;
 		default:
-			duk_push_string(ctx, "More than 9 parameters in the callback isn't supported yet");
-			duk_throw(ctx);
-			return(DUK_RET_ERROR);
+			return(ILibDuktape_Error(ctx, "More than 9 parameters in the callback isn't supported yet"));
 			break;
 	}
 	return 1;
@@ -1122,9 +1118,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 
 	if (fptr == NULL)
 	{
-		duk_push_string(ctx, "INVALID METHOD");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "Invalid Method"));
 	}
 
 	for (i = 0; i < parms; ++i)
@@ -1144,17 +1138,13 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 		}
 		else
 		{
-			duk_push_string(ctx, "INVALID PARAMETER");
-			duk_throw(ctx);
-			return(DUK_RET_ERROR);
+			return(ILibDuktape_Error(ctx, "Invalid Parameter"));
 		}
 	}
 
 	if (parms > 20)
 	{
-		duk_push_string(ctx, "INVALID NUMBER OF PARAMETERS, MAX of 20");
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "Invalid number of parameters (%d), max of 20", parms));
 	}
 	else
 	{
@@ -1250,11 +1240,7 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateMethod(duk_context *ctx)
 
 	if (funcAddress == NULL)
 	{
-		char errstr[4096];
-		sprintf_s(errstr, sizeof(errstr), "CreateMethod Error: Method Name [%s] Not Found", funcName);
-		duk_push_string(ctx, errstr);
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
+		return(ILibDuktape_Error(ctx, "CreateMethod Error: Method Name [%s] Not Found", funcName));
 	}
 	else if(deref!=0)
 	{
@@ -1324,11 +1310,11 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateNativeProxy(duk_context *ctx)
 	{
 #ifdef WIN32
 		duk_push_string(ctx, "Could not create Native Proxy");
+		return(ILibDuktape_Error(ctx, "Could not create Native Proxy"));
 #else
 		duk_push_string(ctx, dlerror());
+		return(ILibDuktape_Error(ctx, "%s", dlerror()));
 #endif
-		duk_throw(ctx);
-		return(DUK_RET_ERROR);
 	}
 
 	duk_push_object(ctx);																							// [obj]
