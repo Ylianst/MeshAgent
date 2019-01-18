@@ -74,8 +74,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Put(duk_context *ctx)
 	duk_push_int(ctx, ILibSimpleDataStore_PutEx(dataStore, key, (int)keyLen, value, (int)valueLen));		// [ds][ptr][retVal]
 	return 1;
 }
-
-duk_ret_t ILibDuktape_SimpleDataStore_Get(duk_context *ctx)
+duk_ret_t ILibDuktape_SimpleDataStore_GetRaw(duk_context *ctx)
 {
 	char *cguid = Duktape_GetContextGuidHex(ctx);
 	char *key = (char*)duk_require_string(ctx, 0);
@@ -100,7 +99,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Get(duk_context *ctx)
 		duk_push_null(ctx);
 		return 1;
 	}
-	
+
 	duk_push_fixed_buffer(ctx, bufferSize);									// [ds][ptr][buffer]
 	buffer = Duktape_GetBuffer(ctx, -1, NULL);
 	written = ILibSimpleDataStore_Get(dataStore, key, buffer, bufferSize);
@@ -110,27 +109,20 @@ duk_ret_t ILibDuktape_SimpleDataStore_Get(duk_context *ctx)
 	}
 	else
 	{
-		if (buffer[bufferSize - 1] == 0)
-		{
-			int i = 0;
-			for (i = 0; i < bufferSize - 1; ++i)
-			{
-				if (buffer[i] == 0)
-				{
-					break;
-				}
-			}
-			if (i == bufferSize - 1)
-			{
-				duk_push_string(ctx, buffer);
-			}
-		}
-		else
-		{
-			duk_push_buffer_object(ctx, -1, 0, bufferSize, DUK_BUFOBJ_NODEJS_BUFFER);
-		}
+		duk_push_buffer_object(ctx, -1, 0, bufferSize, DUK_BUFOBJ_NODEJS_BUFFER);
 	}
 
+	return 1;
+}
+duk_ret_t ILibDuktape_SimpleDataStore_Get(duk_context *ctx)
+{
+	ILibDuktape_SimpleDataStore_GetRaw(ctx);		// [buffer]
+	if (!duk_is_null_or_undefined(ctx, -1))
+	{
+		duk_get_prop_string(ctx, -1, "toString");	// [buffer][toString]
+		duk_swap_top(ctx, -2);						// [toString][this]
+		duk_call_method(ctx, 0);
+	}
 	return 1;
 }
 duk_ret_t ILibDuktape_SimpleDataStore_Compact(duk_context *ctx)
@@ -232,6 +224,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "Delete", ILibDuktape_SimpleDataStore_Delete, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "Put", ILibDuktape_SimpleDataStore_Put, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "Get", ILibDuktape_SimpleDataStore_Get, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "GetBuffer", ILibDuktape_SimpleDataStore_GetRaw, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "Compact", ILibDuktape_SimpleDataStore_Compact, 0);
 	ILibDuktape_CreateEventWithGetter(ctx, "Keys", ILibDuktape_SimpleDataStore_Keys);
 
