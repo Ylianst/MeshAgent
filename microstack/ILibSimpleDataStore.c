@@ -36,7 +36,7 @@ limitations under the License.
 	#define ILibSimpleDataStore_SeekPosition(filePtr, position, seekMode) _fseeki64(filePtr, position, seekMode)
 #else
 	#define ILibSimpleDataStore_GetPosition(filePtr) ftell(filePtr)
-	#define ILibSimpleDataStore_SeekPosition(filePtr, position, seekMode) fseek(filePtr, position, seekMode)
+	#define ILibSimpleDataStore_SeekPosition(filePtr, position, seekMode) fseek(filePtr, (long)position, seekMode)
 #endif
 
 typedef struct ILibSimpleDataStore_Root
@@ -158,7 +158,7 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 	}
 
 	i = (int)fread((void*)node, 1, nodeSize, root->dataFile);
-	if (i < nodeSize) return NULL;
+	if (i < (int)nodeSize) return NULL;
 
 
 	// Correct the struct, valueHash stays the same
