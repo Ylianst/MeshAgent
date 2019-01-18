@@ -3235,6 +3235,17 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 
+	// Check to see if any capabilities are specified in the db
+	{
+		int dbCapabilities = 0;
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "AgentCapabilities", NULL, 0) == 4)
+		{
+			ILibSimpleDataStore_Get(agentHost->masterDb, "AgentCapabilities", &dbCapabilities, 4);
+			agentHost->capabilities |= dbCapabilities;
+		}
+	}
+
+
 #ifdef WIN32
 	// If running as a Windows service, set basic values to the registry, this allows other applications to know what the mesh agent is doing.
 	{
