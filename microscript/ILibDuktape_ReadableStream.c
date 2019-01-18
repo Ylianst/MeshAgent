@@ -17,7 +17,6 @@ limitations under the License.
 #include "ILibDuktape_ReadableStream.h"
 #include "ILibDuktape_WritableStream.h"
 #include "ILibDuktape_Helpers.h"
-#include "ILibParsers_Duktape.h"
 #include "microstack/ILibParsers.h"
 #include "ILibDuktape_EventEmitter.h"
 #include "ILibDuktape_Polyfills.h"

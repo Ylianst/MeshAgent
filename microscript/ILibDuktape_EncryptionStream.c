@@ -16,7 +16,6 @@ limitations under the License.
 
 #include "duktape.h"
 #include "ILibDuktape_Helpers.h"
-#include "ILibParsers_Duktape.h"
 #include "ILibDuktapeModSearch.h"
 #include "ILibDuktape_DuplexStream.h"
 #include "ILibDuktape_ReadableStream.h"
