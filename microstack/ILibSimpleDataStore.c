@@ -251,6 +251,10 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 	
 	if (count == 0)
 	{
+		ILibHashtable_ClearEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root); // Wipe the key table, we will rebulit it
+		fseek(root->dataFile, 0, SEEK_SET); // See the start of the file
+		root->fileSize = -1; // Indicate we can't write to the data store
+
 		// Check if this is Legacy32 Format
 		count = 0;
 		while ((node = ILibSimpleDataStore_ReadNextRecord(root, 32)) != NULL)
