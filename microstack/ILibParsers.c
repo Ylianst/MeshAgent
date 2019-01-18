@@ -4643,6 +4643,7 @@ struct parser_result* ILibParseString(char* buffer, int offset, int length, cons
 	// Iterate through the string to find delimiters
 	//
 	Token = buffer + offset;
+	if (Token[length - 1] == 0) { length -= 1; }
 	for(i = offset; i < length; ++i)
 	{
 		if (ILibIsDelimiter(buffer, i, length, Delimiter, DelimiterLength))

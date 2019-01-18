@@ -295,6 +295,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 	ILibSimpleDataStore_TableEntry *entry;
 	
 	if (root == NULL) return 0;
+	if (keyLen > 1 && key[keyLen - 1] == 0) { keyLen -= 1; }
 	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 	ILibSimpleDataStore_SHA384(value, valueLen, hash); // Hash the value
 
@@ -322,6 +323,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 	ILibSimpleDataStore_TableEntry *entry;
 	
 	if (root == NULL) return 0;
+	if (keyLen > 1 && key[keyLen - 1] == 0) { keyLen -= 1; }
 	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 
 	if (entry == NULL) return 0; // If there is no in-memory entry for this key, return zero now.
@@ -393,6 +395,13 @@ void ILibSimpleDataStore_Compact_EnumerateSink(ILibHashtable sender, void *Key1,
 	if (root == NULL) return;
 	if (root->error != 0) return; // There was an error, ABORT!
 
+	if (Key2Len > 1)
+	{
+		if (Key2[Key2Len - 1] == 0)
+		{
+			Key2Len -= 1;
+		}
+	}
 	offset = ILibSimpleDataStore_WriteRecord(compacted, Key2, Key2Len, NULL, entry->valueLength, entry->valueHash);
 	while (bytesLeft > 0)
 	{
