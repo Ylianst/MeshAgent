@@ -59,6 +59,11 @@ void ILibDuktape_Push_ObjectStash(duk_context *ctx)
 		duk_put_prop_string(ctx, -3, ILibDuktape_ObjectStashKey);	// [obj][stash]
 	}
 }
+
+#ifdef _POSIX
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-value"
+#endif
 duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...)
 {
 	char dest[4096];
@@ -70,17 +75,14 @@ duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...)
 	va_end(argptr);
 
 	duk_push_string(ctx, dest);
-#ifdef _POSIX
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-value"
-#endif
 	duk_throw(ctx);
+
+	return DUK_RET_ERROR;
+}
 #ifdef _POSIX
 #pragma GCC diagnostic pop
 #endif
 
-	return DUK_RET_ERROR;
-}
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue)
 {
 	int retVal = defaultValue;
