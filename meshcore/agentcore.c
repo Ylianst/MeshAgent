@@ -3240,7 +3240,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		int dbCapabilities = 0;
 		if (ILibSimpleDataStore_Get(agentHost->masterDb, "AgentCapabilities", NULL, 0) == 4)
 		{
-			ILibSimpleDataStore_Get(agentHost->masterDb, "AgentCapabilities", &dbCapabilities, 4);
+			ILibSimpleDataStore_Get(agentHost->masterDb, "AgentCapabilities",(char*) &dbCapabilities, 4);
 			agentHost->capabilities |= dbCapabilities;
 		}
 	}
