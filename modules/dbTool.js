@@ -47,9 +47,20 @@ if (process.argv.length > 1)
             console.log(val);
             process.exit();
             break;
+        case 'getx':
+            console.log('GET ' + process.argv[2] + ' = ');
+            var val = db.GetBuffer(process.argv[2]);
+            console.log('len = ' + val.length);
+            console.log(val==null?'0x00':('0x' + val.toString('hex')));
+            process.exit();
+            break;
         case 'list':
         case 'keys':
-            console.log('Number of Keys: ' + db.Keys.length);
+        case 'keynum':
+            if (process.argv[1] != 'keynum')
+            {
+                console.log('Number of Keys: ' + db.Keys.length);
+            }
             var skeys = db.Keys.sort(function (a, b)
             {
                 var aL = a.toLowerCase();
@@ -59,11 +70,17 @@ if (process.argv.length > 1)
                 if (aL > bL) { return (1); }
                 return (0);
             });
-            for (var x = 0; x< skeys.length; ++x)
+            if (process.argv[1] == 'keynum')
             {
-                console.log((x+1) + ': ' + skeys[x]);
+                console.log('Key[' + parseInt(process.argv[2]) + '] = ' + db.Get(skeys[parseInt(process.argv[2])-1]));
             }
-            //console.log('KEYS = ' + db.Keys);
+            else
+            {
+                for (var x = 0; x < skeys.length; ++x)
+                {
+                    console.log((x + 1) + ': ' + skeys[x]);
+                }
+            }
             process.exit();
             break;
         case 'delete':
@@ -102,8 +119,8 @@ if (process.argv.length > 1)
 else
 {
     console.log('usage: ');
-    console.log('   [get/delete/export/import] [KEY]');
-    console.log('   [put] [KEY] [value]');
+    console.log('   [get/getx/delete/export/import] [KEY]');
+    console.log('   [put/putx] [KEY] [value]');
     console.log('   [list]');
     console.log('   Commonly used keys are: disableUpdate and noUpdateCoreModule');
     process.exit();
