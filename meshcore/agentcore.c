@@ -2674,7 +2674,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			meshServer.sin6_family = AF_UNSPEC;
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: Could not resolve: %s", ILibScratchPad);
-			printf("agentcore: Could not resolve: %s\n", ILibScratchPad);
+			printf("agentcore: Could not resolve: %s\n", host);
 		}
 	}
 	else
