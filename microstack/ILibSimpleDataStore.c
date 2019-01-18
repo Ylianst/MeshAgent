@@ -34,11 +34,9 @@ limitations under the License.
 #ifdef _WIN64
 	#define ILibSimpleDataStore_GetPosition(filePtr) _ftelli64(filePtr)
 	#define ILibSimpleDataStore_SeekPosition(filePtr, position, seekMode) _fseeki64(filePtr, position, seekMode)
-	typedef long long DS_Long;
 #else
 	#define ILibSimpleDataStore_GetPosition(filePtr) ftell(filePtr)
 	#define ILibSimpleDataStore_SeekPosition(filePtr, position, seekMode) fseek(filePtr, position, seekMode)
-	typedef long DS_Long;
 #endif
 
 typedef struct ILibSimpleDataStore_Root
@@ -47,7 +45,7 @@ typedef struct ILibSimpleDataStore_Root
 	char* filePath;
 	char scratchPad[4096];
 	ILibHashtable keyTable; // keys --> ILibSimpleDataStore_TableEntry
-	DS_Long fileSize;
+	uint64_t fileSize;
 	int error;
 } ILibSimpleDataStore_Root;
 
@@ -61,50 +59,66 @@ Variable	- Key
 Variable	- Value
 ------------------------------------------ */
 
-typedef struct ILibSimpleDataStore_RecordHeader
+#define ILibSimpleDataStore_RecordHeader_ValueOffset(h) (((uint64_t*)((char*)h) - sizeof(uint64_t))[0])
+
+#pragma pack(push, 1)
+typedef struct ILibSimpleDataStore_RecordHeader_NG
 {
 	int nodeSize;
 	int keyLen;
 	int valueLength;
 	char hash[SHA384HASHSIZE];
-} ILibSimpleDataStore_RecordHeader;
-
-typedef struct ILibSimpleDataStore_RecordNode
+	char key[];
+} ILibSimpleDataStore_RecordHeader_NG;
+typedef struct ILibSimpleDataStore_RecordHeader_32
 {
 	int nodeSize;
 	int keyLen;
 	int valueLength;
-	char valueHash[SHA384HASHSIZE];
-	DS_Long valueOffset;
+	char hash[SHA384HASHSIZE];
+	char reserved[4];
 	char key[];
-} ILibSimpleDataStore_RecordNode;
+} ILibSimpleDataStore_RecordHeader_32;
+typedef struct ILibSimpleDataStore_RecordHeader_64
+{
+	int nodeSize;
+	int keyLen;
+	int valueLength;
+	char hash[SHA384HASHSIZE];
+	char reserved[12];
+	char key[];
+} ILibSimpleDataStore_RecordHeader_64;
+#pragma pack(pop)
+
 
 typedef struct ILibSimpleDataStore_TableEntry
 {
 	int valueLength;
 	char valueHash[SHA384HASHSIZE];
-	DS_Long valueOffset;
+	uint64_t valueOffset;
 } ILibSimpleDataStore_TableEntry;
 
 const int ILibMemory_SimpleDataStore_CONTAINERSIZE = sizeof(ILibSimpleDataStore_Root);
+void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root);
+
 
 // Perform a SHA384 hash of some data
 void ILibSimpleDataStore_SHA384(char *data, int datalen, char* result) { util_sha384(data, datalen, result); }
 
 // Write a key/value pair to file, the hash is already calculated
-DS_Long ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* value, int valueLen, char* hash)
+uint64_t ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* value, int valueLen, char* hash)
 {
-	char headerBytes[sizeof(ILibSimpleDataStore_RecordNode)];
-	ILibSimpleDataStore_RecordHeader *header = (ILibSimpleDataStore_RecordHeader*)headerBytes;
-	DS_Long offset;
+	char headerBytes[sizeof(ILibSimpleDataStore_RecordHeader_NG)];
+	ILibSimpleDataStore_RecordHeader_NG *header = (ILibSimpleDataStore_RecordHeader_NG*)headerBytes;
+	uint64_t offset;
 
 	fseek(f, 0, SEEK_END);
-	header->nodeSize = htonl(sizeof(ILibSimpleDataStore_RecordNode) + keyLen + valueLen);
+	header->nodeSize = htonl(sizeof(ILibSimpleDataStore_RecordHeader_NG) + keyLen + valueLen);
 	header->keyLen = htonl(keyLen);
 	header->valueLength = htonl(valueLen);
 	if (hash != NULL) { memcpy_s(header->hash, sizeof(header->hash), hash, SHA384HASHSIZE); } else { memset(header->hash, 0, SHA384HASHSIZE); }
 
-	if (fwrite(headerBytes, 1, sizeof(ILibSimpleDataStore_RecordNode), f)) {}
+	if (fwrite(headerBytes, 1, sizeof(ILibSimpleDataStore_RecordHeader_NG), f)) {}
 	if (fwrite(key, 1, keyLen, f)) {}
 	offset = ILibSimpleDataStore_GetPosition(f);
 	if (value != NULL) { if (fwrite(value, 1, valueLen, f)) {} }
@@ -113,38 +127,54 @@ DS_Long ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* va
 }
 
 // Read the next record in the file
-ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDataStore_Root *root)
+ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDataStore_Root *root, int legacySize)
 {
 	SHA512_CTX c;
 	char data[4096];
 	char result[SHA384HASHSIZE];
 	int i, bytesLeft;
-	ILibSimpleDataStore_RecordNode *node;
-	
+
+	ILibSimpleDataStore_RecordHeader_NG *node;
+	size_t nodeSize;
+
 	if (root == NULL) return NULL;
-	node = (ILibSimpleDataStore_RecordNode*)(root->scratchPad);
+	node = (ILibSimpleDataStore_RecordHeader_NG*)(root->scratchPad + sizeof(uint64_t));
 
 	// If the current position is the end of the file, exit now.
 	if (ILibSimpleDataStore_GetPosition(root->dataFile) == root->fileSize) return NULL;
 
 	// Read sizeof(ILibSimpleDataStore_RecordNode) bytes to get record Size
-	i = (int)fread((void*)node, 1, sizeof(ILibSimpleDataStore_RecordNode), root->dataFile);
-	if (i < sizeof(ILibSimpleDataStore_RecordNode)) return NULL;
+	switch (legacySize)
+	{
+		default:
+			nodeSize = sizeof(ILibSimpleDataStore_RecordHeader_NG);
+			break;
+		case 32:
+			nodeSize = sizeof(ILibSimpleDataStore_RecordHeader_32);
+			break;
+		case 64:
+			nodeSize = sizeof(ILibSimpleDataStore_RecordHeader_64);
+			break;
+	}
+
+	i = (int)fread((void*)node, 1, nodeSize, root->dataFile);
+	if (i < nodeSize) return NULL;
+
 
 	// Correct the struct, valueHash stays the same
 	node->nodeSize = (int)ntohl(node->nodeSize);
 	node->keyLen = (int)ntohl(node->keyLen);
 	node->valueLength = (int)ntohl(node->valueLength);
-	node->valueOffset = ILibSimpleDataStore_GetPosition(root->dataFile) + (DS_Long)node->keyLen;
+	ILibSimpleDataStore_RecordHeader_ValueOffset(node) = (uint64_t)((uint64_t)ILibSimpleDataStore_GetPosition(root->dataFile) + (uint64_t)node->keyLen);
 
-	if (node->keyLen > (sizeof(ILibScratchPad) - sizeof(ILibSimpleDataStore_RecordNode)))
+	if (node->keyLen > (int)((sizeof(ILibScratchPad) - nodeSize - sizeof(uint64_t))))
 	{
 		// Invalid record
 		return(NULL);
 	}
 
 	// Read the key name
-	i = (int)fread((char*)node + sizeof(ILibSimpleDataStore_RecordNode), 1, node->keyLen, root->dataFile);
+	i = (int)fread((char*)node + nodeSize, 1, node->keyLen, root->dataFile);
 	if (i != node->keyLen) return NULL; // Reading Key Failed
 
 	// Validate Data, in 4k chunks at a time
@@ -163,13 +193,13 @@ ILibSimpleDataStore_RecordNode* ILibSimpleDataStore_ReadNextRecord(ILibSimpleDat
 	if (node->valueLength > 0)
 	{
 		// Check the hash
-		if (memcmp(node->valueHash, result, SHA384HASHSIZE) == 0) { return node; } // Data is correct
+		if (memcmp(node->hash, result, SHA384HASHSIZE) == 0) { return node; } // Data is correct
 		return NULL; // Data is corrupt
 	}
 	return node;
 }
 
-// ???
+// Free resources associated with each table entry
 void ILibSimpleDataStore_TableClear_Sink(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	UNREFERENCED_PARAMETER(sender);
@@ -184,38 +214,106 @@ void ILibSimpleDataStore_TableClear_Sink(ILibHashtable sender, void *Key1, char*
 // Rebuild the in-memory key to record table, done when starting up the data store
 void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 {
-	ILibSimpleDataStore_RecordNode *node = NULL;
+	ILibSimpleDataStore_RecordHeader_NG *node = NULL;
 	ILibSimpleDataStore_TableEntry *entry;
+	int count;
 
 	if (root == NULL) return;
+
 	ILibHashtable_ClearEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root); // Wipe the key table, we will rebulit it
 	fseek(root->dataFile, 0, SEEK_SET); // See the start of the file
 	root->fileSize = -1; // Indicate we can't write to the data store
 
-	// Start reading records
-	while ((node = ILibSimpleDataStore_ReadNextRecord(root)) != NULL)
+
+	// First, try NG Format
+	count = 0;
+	while ((node = ILibSimpleDataStore_ReadNextRecord(root, 0)) != NULL)
 	{
 		// Get the entry from the memory table
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, node->key, node->keyLen);
 		if (node->valueLength > 0)
 		{
 			// If the value is not empty, we need to create/overwrite this value in memory
-			if (entry == NULL) { entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
-			memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->valueHash, SHA384HASHSIZE);
+			if (entry == NULL) { ++count;  entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
+			memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->hash, SHA384HASHSIZE);
 			entry->valueLength = node->valueLength;
-			entry->valueOffset = node->valueOffset;
+			entry->valueOffset = ILibSimpleDataStore_RecordHeader_ValueOffset(node);
 			ILibHashtable_Put(root->keyTable, NULL, node->key, node->keyLen, entry);
 		}
 		else if (entry != NULL)
 		{
 			// If value is empty, remove the in-memory entry.
+			--count;
 			ILibHashtable_Remove(root->keyTable, NULL, node->key, node->keyLen);
 			free(entry);
 		}
 	}
+	
+	if (count == 0)
+	{
+		// Check if this is Legacy32 Format
+		count = 0;
+		while ((node = ILibSimpleDataStore_ReadNextRecord(root, 32)) != NULL)
+		{
+			// Get the entry from the memory table
+			entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, ((ILibSimpleDataStore_RecordHeader_32*)node)->key, node->keyLen);
+			if (node->valueLength > 0)
+			{
+				// If the value is not empty, we need to create/overwrite this value in memory
+				if (entry == NULL) { ++count;  entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
+				memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->hash, SHA384HASHSIZE);
+				entry->valueLength = node->valueLength;
+				entry->valueOffset = ILibSimpleDataStore_RecordHeader_ValueOffset(node);
+				ILibHashtable_Put(root->keyTable, NULL, ((ILibSimpleDataStore_RecordHeader_32*)node)->key, node->keyLen, entry);
+			}
+			else if (entry != NULL)
+			{
+				// If value is empty, remove the in-memory entry.
+				--count;
+				ILibHashtable_Remove(root->keyTable, NULL, ((ILibSimpleDataStore_RecordHeader_32*)node)->key, node->keyLen);
+				free(entry);
+			}
+		}
 
-	// Set the size of the entire data store file
-	root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile);
+		if (count == 0)
+		{
+			// Check if this is Legacy64 Format
+			ILibHashtable_ClearEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root); // Wipe the key table, we will rebulit it
+			fseek(root->dataFile, 0, SEEK_SET); // See the start of the file
+			root->fileSize = -1; // Indicate we can't write to the data store
+
+			while ((node = ILibSimpleDataStore_ReadNextRecord(root, 64)) != NULL)
+			{
+				// Get the entry from the memory table
+				entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, ((ILibSimpleDataStore_RecordHeader_64*)node)->key, node->keyLen);
+				if (node->valueLength > 0)
+				{
+					// If the value is not empty, we need to create/overwrite this value in memory
+					if (entry == NULL) { ++count;  entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
+					memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->hash, SHA384HASHSIZE);
+					entry->valueLength = node->valueLength;
+					entry->valueOffset = ILibSimpleDataStore_RecordHeader_ValueOffset(node);
+					ILibHashtable_Put(root->keyTable, NULL, ((ILibSimpleDataStore_RecordHeader_64*)node)->key, node->keyLen, entry);
+				}
+				else if (entry != NULL)
+				{
+					// If value is empty, remove the in-memory entry.
+					--count;
+					ILibHashtable_Remove(root->keyTable, NULL, ((ILibSimpleDataStore_RecordHeader_64*)node)->key, node->keyLen);
+					free(entry);
+				}
+			}
+		}
+
+		// Set the size of the entire data store file, and call 'Compact', to convert the db to NG format
+		root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile);
+		ILibSimpleDataStore_Compact((ILibSimpleDataStore)root);
+	}
+	else
+	{
+		// No need to convert db format, because we're already NG format
+		root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile);
+	}
 }
 
 // Open the data store file
@@ -385,7 +483,7 @@ void ILibSimpleDataStore_Compact_EnumerateSink(ILibHashtable sender, void *Key1,
 	ILibSimpleDataStore_TableEntry *entry = (ILibSimpleDataStore_TableEntry*)Data;
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)((void**)user)[0];
 	FILE *compacted = (FILE*)((void**)user)[1];
-	DS_Long offset;
+	uint64_t offset;
 	char value[4096];
 	int valueLen;
 	int bytesLeft = entry->valueLength;
