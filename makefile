@@ -14,6 +14,9 @@
 #	Using YUM:
 #		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel
 #
+#	NOTE: If you install headers for jpeg8, you need to put the headers in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
+#		eg: make linux ARCHID=6 JPEGVER=v80
+#
 #
 # To build for 32 bit on 64 bit linux
 #  sudo apt-get install linux-libc-dev:i386
@@ -29,6 +32,7 @@
 # Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2
 #  64 bit-> ./configure --with-jpeg8 
 #  32 bit-> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
+#	NOTE: If you installed jpeg8 headers on your machine, you must specify --with-jpeg8 when building turbo jpeg, otherwise omit --with-jpeg8
 #
 # Standard builds
 #
