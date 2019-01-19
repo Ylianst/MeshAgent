@@ -97,12 +97,12 @@ if (process.argv.length > 1)
             if (process.argv[2] == 'CoreModule')
             {
                 db.target = require('fs').createWriteStream('CoreModule.js', { flags: 'wb' });
-                db.target.write(db.Get(process.argv[2]).slice(4), function () { console.log('finished exporting'); process.exit(); });
+                db.target.write(db.GetBuffer(process.argv[2]).slice(4), function () { console.log('finished exporting'); process.exit(); });
             }
             else
             {
                 db.target = require('fs').createWriteStream(process.argv[2], 'wb');
-                db.target.write(db.Get(process.argv[2]), function () { console.log('finished exporting'); process.exit(); });
+                db.target.write(db.GetBuffer(process.argv[2]), function () { console.log('finished exporting'); process.exit(); });
             }
             break;
         case 'import':
