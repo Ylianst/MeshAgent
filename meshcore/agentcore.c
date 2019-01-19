@@ -2880,7 +2880,7 @@ void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
 #endif
 				if (msh != NULL)
 				{
-					fwrite(eMSH, 1, mshLen, msh);
+					ignore_result(fwrite(eMSH, 1, mshLen, msh));
 					fclose(msh);
 				}
 			}

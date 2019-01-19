@@ -323,6 +323,7 @@ cleanbin:
 	rm -f $(EXENAME)_x86-64_nokvm
 	rm -f $(EXENAME)_arm
 	rm -f $(EXENAME)_armhf
+	rm -f $(EXENAME)_arm-linaro
 	rm -f $(EXENAME)_mips
 	rm -f $(EXENAME)_osx-x86-64
 	rm -f $(EXENAME)_pi

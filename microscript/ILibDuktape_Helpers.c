@@ -927,3 +927,4 @@ void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta)
 	}
 	duk_pop(ctx);
 }
+
