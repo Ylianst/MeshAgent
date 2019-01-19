@@ -114,9 +114,11 @@ void ILibDuktape_Push_ObjectStash(duk_context *ctx);
 
 typedef void(*ILibDuktape_ImmediateHandler)(duk_context *ctx, void ** args, int argsLen);
 typedef ILibDuktape_ImmediateHandler ILibDuktape_IntervalHandler;
+typedef ILibDuktape_ImmediateHandler ILibDuktape_TimeoutHandler;
 
 void* ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuktape_ImmediateHandler callback);
 void* ILibDuktape_Interval(duk_context *ctx, void **args, int argsLen, int delay, ILibDuktape_IntervalHandler callback);
+void* ILibDuktape_Timeout(duk_context *ctx, void **args, int argsLen, int delay, ILibDuktape_TimeoutHandler callback);
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i);
 
 #define ILibDuktape_WriteID(ctx, id) duk_push_string(ctx, id);duk_put_prop_string(ctx, -2, ILibDuktape_OBJID)

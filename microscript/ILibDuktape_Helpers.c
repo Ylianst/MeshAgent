@@ -645,7 +645,56 @@ void *ILibDuktape_Memory_AllocEx(duk_context *ctx, duk_idx_t index, duk_size_t s
 	duk_pop_2(ctx);													// ...
 	return(retVal);
 }
+duk_ret_t ILibDuktape_Timeout_Sink(duk_context *ctx)
+{
+	ILibDuktape_TimeoutHandler userCallback = (ILibDuktape_TimeoutHandler)duk_get_pointer(ctx, 0);
+	void **args = NULL;
+	int argsLen, i;
 
+	duk_push_this(ctx);													// [timeout]
+	duk_dup(ctx, 1);													// [timeout][array]
+	if ((argsLen = (int)duk_get_length(ctx, -1)) > 0)
+	{
+		args = ILibMemory_AllocateA(sizeof(void*)*argsLen);
+		for (i = 0; i < argsLen; ++i)
+		{
+			duk_get_prop_index(ctx, -1, i);								// [timeout][array][arg]
+			args[i] = duk_get_pointer(ctx, -1);
+			duk_pop(ctx);												// [timeout][array]
+		}
+	}
+
+	if (userCallback != NULL) { userCallback(ctx, args, argsLen); }
+	return(0);
+}
+void* ILibDuktape_Timeout(duk_context *ctx, void **args, int argsLen, int delay, ILibDuktape_TimeoutHandler callback)
+{
+	void *retval = NULL;
+	int i = 0;
+	duk_push_global_object(ctx);										// [g]
+	duk_get_prop_string(ctx, -1, "setTimeout");							// [g][setTimeout]
+	duk_swap_top(ctx, -2);												// [setTimeout][this]
+	duk_push_c_function(ctx, ILibDuktape_Timeout_Sink, DUK_VARARGS);	// [setTimeout][this][func]
+	duk_push_int(ctx, delay);											// [setTimeout][this][func][delay]
+	duk_push_pointer(ctx, callback);									// [setTimeout][this][func][delay][userFunc]
+	duk_push_array(ctx);												// [setTimeout][this][func][delay][userFunc][array]
+
+	while (args[i] != NULL && i < argsLen)
+	{
+		duk_get_prop_string(ctx, -1, "push");							// [setInterval][this][func][delay][userFunc][array][push]
+		duk_dup(ctx, -2);												// [setInterval][this][func][delay][userFunc][array][push][this]
+		duk_push_pointer(ctx, args[i]);									// [setInterval][this][func][delay][userFunc][array][push][this][val]
+		if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Timeout => Array.push(): "); }
+		duk_pop(ctx);													// [setInterval][this][func][delay][userFunc][array]
+		++i;
+	}
+
+	if (duk_pcall_method(ctx, 4) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ILibDuktape_Timeout => timeout(): "); duk_pop(ctx); return(NULL); }
+
+
+	retval = duk_get_heapptr(ctx, -1);											// [timeout]
+	return(retval);
+}
 duk_ret_t ILibDuktape_Immediate_Sink(duk_context *ctx)
 {
 	ILibDuktape_ImmediateHandler userCallback = (ILibDuktape_ImmediateHandler)duk_get_pointer(ctx, 0);
