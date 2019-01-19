@@ -355,6 +355,11 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	}
 	else if (strcmp(encoding, "hex") == 0)
 	{		
+		if (ILibString_StartsWith(str, (int)strlength, "0x", 2) != 0)
+		{
+			str += 2;
+			strlength -= 2;
+		}
 		buffer = duk_push_fixed_buffer(ctx, strlength / 2);
 		bufferLen = util_hexToBuf(str, (int)strlength, buffer);
 		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);

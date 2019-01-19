@@ -40,6 +40,11 @@ if (process.argv.length > 1)
             db.Put(process.argv[2], process.argv[3]);
             process.exit();
             break;
+        case 'putx':
+            console.log('PUTX ' + process.argv[2] + ' = ' + process.argv[3]);
+            db.Put(process.argv[2], Buffer.from(process.argv[3], 'hex'));
+            process.exit();
+            break;
         case 'get':
             console.log('GET ' + process.argv[2] + ' = ');
             var val = db.Get(process.argv[2]);
@@ -48,7 +53,7 @@ if (process.argv.length > 1)
             process.exit();
             break;
         case 'getx':
-            console.log('GET ' + process.argv[2] + ' = ');
+            console.log('GETX ' + process.argv[2] + ' = ');
             var val = db.GetBuffer(process.argv[2]);
             console.log('len = ' + val.length);
             console.log(val==null?'0x00':('0x' + val.toString('hex')));
