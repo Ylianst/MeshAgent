@@ -2259,7 +2259,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			{
 				char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule"); // Get the reference to the SHA384 hash for the currently running code
 				if (hashref == NULL || memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
-				{														
+				{					
+					agent->coreTimeout = NULL; // Setting this to null becuase we're going to stop the core. If we stop the core, this timeout will cleanup by itself.
+
 					// If server sends us the same core, just do nothing.
 					// Server sent us a new core, start by storing it in the data store
 					ILibSimpleDataStore_PutEx(agent->masterDb, "CoreModule", 10, cm->coreModule, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule));	// Store the JavaScript in the data store
@@ -2347,8 +2349,43 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_CoreOk: // Message from the server indicating our meshcore is ok. No update needed.
 		{
-			// TODO: Start the core if we have not done it already.
-			//printf("CORE OK\r\n");
+			printf("Server verified meshcore...");
+			if (agent->coreTimeout != NULL)
+			{
+				// Cancel the timeout
+				duk_push_global_object(agent->meshCoreCtx);					// [g]
+				duk_get_prop_string(agent->meshCoreCtx, -1, "clearTimeout");// [g][clearTimeout]
+				duk_swap_top(agent->meshCoreCtx, -2);						// [clearTimeout][this]
+				duk_push_heapptr(agent->meshCoreCtx, agent->coreTimeout);	// [clearTimeout][this][timeout]
+				duk_pcall_method(agent->meshCoreCtx, 1); duk_pop(agent->meshCoreCtx);
+				agent->coreTimeout = NULL;
+
+				int CoreModuleLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", NULL, 0);
+				if (CoreModuleLen <= 0)
+				{
+					printf(" meshcore not found...\n");
+				}
+				else
+				{
+					printf(" Launching meshcore...\n");
+					char *CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+					ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+
+					if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agent->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
+						ILibDuktape_ScriptContainer_ExecuteByteCode(agent->meshCoreCtx) != 0)
+					{
+						ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+							ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
+						duk_pop(agent->meshCoreCtx);
+					}
+					free(CoreModule);
+				}
+			}
+			else
+			{
+				// There's no timeout, probably because the core is already running
+				printf(" meshcore already running...\n");
+			}
 			break;
 		}
 		case MeshCommand_AgentHash:
@@ -3059,6 +3096,39 @@ void MeshAgent_AgentMost_dbRetryCallback(void *object)
 		ILibStopChain(agentHost->chain);
 	}
 }
+
+void MeshAgent_AgentMode_Core_ServerTimeout(duk_context *ctx, void ** args, int argsLen)
+{
+	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)args[0];
+	int CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
+	char *CoreModule;
+
+	duk_push_this(ctx);			// [timeout]
+	duk_push_heap_stash(ctx);	// [timeout][stash]
+	duk_del_prop_string(ctx, -1, Duktape_GetStashKey(duk_get_heapptr(ctx, -2)));
+	agentHost->coreTimeout = NULL;
+
+	printf("Timeout waiting for Server, launching cached meshcore...\n");
+	if (CoreModuleLen <= 0)
+	{
+		printf("   No meshcore found in db...\n");
+	}
+	else
+	{
+		CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+		ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+
+		if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
+			ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+				ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+			duk_pop(agentHost->meshCoreCtx);
+		}
+		free(CoreModule);
+	}
+}
+
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
@@ -3405,20 +3475,37 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 			if (CoreModuleLen > 0)
 			{
-				// There is a core module, launch it now.
-				CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
-				ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+				if (ILibSimpleDataStore_Get(agentHost->masterDb, "noUpdateCoreModule", NULL, 0) != 0) 
+				{ 
+					// CoreModule Updates are disabled
+					agentHost->localScript = 1; printf("** CoreModule: Update Disabled**\n"); 
 
-				if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
-					ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
-				{
-					ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
-						ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
-					duk_pop(agentHost->meshCoreCtx);
+					// If updates are disabled, then we should launch the core now
+					CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+					ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+
+					if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
+						ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
+					{
+						ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+							ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+						duk_pop(agentHost->meshCoreCtx);
+					}
+
+					free(CoreModule);
 				}
+				else
+				{
+					// There's a CoreModule, but we should try to wait for the Server to verify the CoreModule before we run it.
+					// Otherwise, we run the risk that if the module is bad and causes a crash, the server will have no way to
+					// update/remedy the situation. We'll set a timeout, so if the server is unavailable, we'll run the core anyways.
 
-				free(CoreModule);
-				if (ILibSimpleDataStore_Get(agentHost->masterDb, "noUpdateCoreModule", NULL, 0) != 0) { agentHost->localScript = 1; printf("** CoreModule: Update Disabled**\n"); }
+					agentHost->coreTimeout = ILibDuktape_Timeout(agentHost->meshCoreCtx, (void**)(void*[]) { agentHost }, 1, 60000, MeshAgent_AgentMode_Core_ServerTimeout);
+					duk_push_heap_stash(agentHost->meshCoreCtx);													// [stash]
+					duk_push_heapptr(agentHost->meshCoreCtx, agentHost->coreTimeout);								// [stash][timeout]
+					duk_put_prop_string(agentHost->meshCoreCtx, -2, Duktape_GetStashKey(agentHost->coreTimeout));	// [stash]
+					duk_pop(agentHost->meshCoreCtx);																// ...
+				}
 			}
 		}
 
