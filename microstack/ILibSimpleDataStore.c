@@ -59,7 +59,7 @@ Variable	- Key
 Variable	- Value
 ------------------------------------------ */
 
-#define ILibSimpleDataStore_RecordHeader_ValueOffset(h) (((uint64_t*)((char*)h) - sizeof(uint64_t))[0])
+#define ILibSimpleDataStore_RecordHeader_ValueOffset(h) (((uint64_t*)(((char*)h) - sizeof(uint64_t)))[0])
 
 #pragma pack(push, 1)
 typedef struct ILibSimpleDataStore_RecordHeader_NG
