@@ -1,6 +1,9 @@
 
 var http = require('http');
+var childProcess = require('child_process');
 var meshCoreObj = { "action": "coreinfo", "value": "MeshCore Recovery", "caps": 10 }; // Capability bitmask: 1 = Desktop, 2 = Terminal, 4 = Files, 8 = Console, 16 = JavaScript
+var nextTunnelIndex = 1;
+var tunnels = {};
 
 function sendConsoleText(msg)
 {
@@ -129,7 +132,7 @@ require('MeshAgent').AddCommandHandler(function (data)
                                     {
                                         if (this.httprequest.state == 0) {
                                             // Check if this is a relay connection
-                                            if (data == 'c') { this.httprequest.state = 1; /*sendConsoleText("Tunnel #" + this.httprequest.index + " now active", this.httprequest.sessionid);*/ }
+                                            if (data == 'c') { this.httprequest.state = 1; sendConsoleText("Tunnel #" + this.httprequest.index + " now active", this.httprequest.sessionid); }
                                         } else {
                                             // Handle tunnel data
                                             if (this.httprequest.protocol == 0)
@@ -146,6 +149,16 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                         this.httprequest._term.pipe(this, { dataTypeSkip: 1 });
                                                         this.pipe(this.httprequest._term, { dataTypeSkip: 1, end: false });
                                                         this.prependListener('end', function () { this.httprequest._term.end(function () { sendConsoleText('Terminal was closed'); }); });
+                                                    }
+                                                    else
+                                                    {
+                                                        this.httprequest.process = childProcess.execFile("/bin/sh", ["sh"], { type: childProcess.SpawnTypes.TERM });
+                                                        this.httprequest.process.tunnel = this;
+                                                        this.httprequest.process.on('exit', function (ecode, sig) { this.tunnel.end(); });
+                                                        this.httprequest.process.stderr.on('data', function (chunk) { this.parent.tunnel.write(chunk); });
+                                                        this.httprequest.process.stdout.pipe(this, { dataTypeSkip: 1 }); // 0 = Binary, 1 = Text.
+                                                        this.pipe(this.httprequest.process.stdin, { dataTypeSkip: 1, end: false }); // 0 = Binary, 1 = Text.
+                                                        this.prependListener('end', function () { this.httprequest.process.kill(); });
                                                     }
 
                                                     this.on('end', function () {
