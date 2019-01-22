@@ -2390,14 +2390,19 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_AgentHash:
 		{
-			if (agent->disableUpdate != 0) { break; }
-
 			// This is a request for the hash of the agent binary
 			// Built the response that includes our self hash
 			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
 			rcm->command = htons(MeshCommand_AgentHash);						// MeshCommand_AgentHash (12), SHA384 hash of the agent executable
 			rcm->request = htons(requestid);									// Request id
-			memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), agent->agentHash, UTIL_SHA384_HASHSIZE);// SHA384 hash of the agent executable
+			if (agent->disableUpdate != 0)
+			{
+				memset(rcm->coreModuleHash, 0, UTIL_SHA384_HASHSIZE);
+			}
+			else
+			{
+				memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), agent->agentHash, UTIL_SHA384_HASHSIZE);// SHA384 hash of the agent executable
+			}
 
 			// Send the self hash back to the server
 			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, sizeof(MeshCommand_BinaryPacket_CoreModule), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
