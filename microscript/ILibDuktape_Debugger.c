@@ -462,6 +462,38 @@ void* ILibDuktape_Debugger_StartEngine(duk_context *ctx, int transport, int webp
 		sem_init(&(retVal->hostlock), 0, 0);
 		retVal->webport = webport;
 
+		duk_push_global_object(DebugWebEngine_Context);									// *[g]
+		duk_push_object(DebugWebEngine_Context);										// *[g][obj]
+		char *strkey, *strval;
+		duk_double_t nval;
+
+		duk_push_heap_stash(ctx);												// [stash]
+		duk_get_prop_string(ctx, -1, ILibDuktape_Debugger_AttachOptions);		// [stash][options]
+		duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);						// [stash][options][enum]
+		while (duk_next(ctx, -1, 1))											// [stash][options][enum][key][val]
+		{																		
+			if (duk_is_string(ctx, -2) && duk_is_string(ctx, -1))
+			{
+				strkey = (char*)duk_get_string(ctx, -2);
+				strval = (char*)duk_get_string(ctx, -1);
+				duk_push_string(DebugWebEngine_Context, strkey);						// *[g][obj][key]
+				duk_push_string(DebugWebEngine_Context, strval);						// *[g][obj][key][val]
+				duk_put_prop(DebugWebEngine_Context, -3);								// *[g][obj]
+			}
+			else if (duk_is_string(ctx, -2) && duk_is_number(ctx, -1))
+			{
+				strkey = (char*)duk_get_string(ctx, -2);
+				nval = duk_get_number(ctx, -1);
+				duk_push_string(DebugWebEngine_Context, strkey);						// *[g][obj][key]
+				duk_push_number(DebugWebEngine_Context, nval);							// *[g][obj][key][val]
+				duk_put_prop(DebugWebEngine_Context, -3);								// *[g][obj]
+			}
+			duk_pop_2(ctx);														// [stash][options][enum]
+		}
+		duk_pop_3(ctx);															// ...
+		duk_put_prop_string(DebugWebEngine_Context, -2, "attachOptions");				// *[g]
+		duk_pop(DebugWebEngine_Context);												// ...
+
 		DebugWebEngine_Thread = ILibSpawnNormalThread(DebugWebEngine_Run, NULL);
 	}
 	return(retVal);
