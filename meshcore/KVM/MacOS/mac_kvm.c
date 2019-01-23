@@ -190,6 +190,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_REFRESH: // Refresh
 		{
+			void kvm_send_resolution();
+
 			int row, col;
 			if (size != 4) break;
 			if (g_tileInfo == NULL) {
