@@ -279,7 +279,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
 	char *buffer, *tmpBuffer;
-	duk_size_t bufferLen;
+	duk_size_t bufferLen = 0;
 	char *cType;
 
 	duk_push_this(ctx);									// [buffer]
@@ -287,8 +287,15 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 
 	if (nargs == 0)
 	{
-		// Just convert to a string
-		duk_push_lstring(ctx, buffer, strnlen_s(buffer, bufferLen));			// [buffer][string]
+		if (bufferLen == 0 || buffer == NULL)
+		{
+			duk_push_null(ctx);
+		}
+		else
+		{
+			// Just convert to a string
+			duk_push_lstring(ctx, buffer, strnlen_s(buffer, bufferLen));			// [buffer][string]
+		}
 	}
 	else
 	{

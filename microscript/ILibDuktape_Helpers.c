@@ -679,7 +679,7 @@ void* ILibDuktape_Timeout(duk_context *ctx, void **args, int argsLen, int delay,
 	duk_push_pointer(ctx, callback);									// [setTimeout][this][func][delay][userFunc]
 	duk_push_array(ctx);												// [setTimeout][this][func][delay][userFunc][array]
 
-	while (args[i] != NULL && i < argsLen)
+	while (i < argsLen && args[i] != NULL)
 	{
 		duk_get_prop_string(ctx, -1, "push");							// [setInterval][this][func][delay][userFunc][array][push]
 		duk_dup(ctx, -2);												// [setInterval][this][func][delay][userFunc][array][push][this]
