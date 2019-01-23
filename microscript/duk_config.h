@@ -2373,7 +2373,7 @@ typedef struct duk_hthread duk_context;
  * that too.  Android doesn't have log2; disable all of these for Android.
  */
 #if (defined(DUK_F_C99) || defined(DUK_F_CPP11) || (defined(_MSC_VER) && (_MSC_VER >= 1800))) && \
-    !defined(DUK_F_ANDROID) && !defined(DUK_F_MINT)
+    !defined(DUK_F_ANDROID) && !defined(DUK_F_MINT) && !defined(BADMATH)
 #if !defined(DUK_CBRT)
 #define DUK_CBRT             cbrt
 #endif

@@ -20,6 +20,9 @@
 #
 # To build for 32 bit on 64 bit linux
 #  sudo apt-get install linux-libc-dev:i386
+#  sudo apt-get install libc6-dev-i386
+#  sudo apt-get install libjpeg8-dev:i386
+#
 #
 # To install ARM Cross Compiler for Raspberry PI
 #  sudo apt-get install libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf
@@ -144,6 +147,9 @@ ARCHNAME = mips
 CC = $(PATH_MIPS)mipsel-linux-gcc
 STRIP = $(PATH_MIPS)mipsel-linux-strip
 CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CFLAGS += -DBADMATH 
+IPADDR_MONITOR_DISABLE = 1
+IFADDR_DISABLE = 1
 KVM = 0
 LMS = 0
 endif
@@ -284,6 +290,14 @@ endif
 
 ifeq ($(SSL_TRACE),1)
 CFLAGS += -DSSL_TRACE
+endif
+
+ifeq ($(IPADDR_MONITOR_DISABLE),1)
+CFLAGS += -DNO_IPADDR_MONITOR
+endif
+
+ifeq ($(IFADDR_DISABLE),1)
+CFLAGS += -DNO_IFADDR
 endif
 
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )

@@ -23,7 +23,9 @@ limitations under the License.
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <ifaddrs.h>
+#ifndef NO_IFADDR
+	#include <ifaddrs.h>
+#endif
 #ifndef __APPLE__
 #include <netpacket/packet.h>
 #else
@@ -1225,6 +1227,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 		padapters = padapters->Next;
 	}
 #else
+#ifndef NO_IFADDR
 	struct ifaddrs *addrlist;
 	struct ifaddrs *current;
 	if (getifaddrs(&addrlist) == 0)
@@ -1356,7 +1359,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 	}
 	duk_pop(ctx);
 #endif
-
+#endif
 	return(1);
 }
 #endif

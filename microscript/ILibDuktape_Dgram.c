@@ -27,7 +27,9 @@ limitations under the License.
 #include <WinBase.h>
 #else
 #include <sys/types.h>
-#include <ifaddrs.h>
+#ifndef NO_IFADDR
+	#include <ifaddrs.h>
+#endif
 #endif
 
 #include "ILibDuktape_Dgram.h"
@@ -123,6 +125,7 @@ void ILibDuktape_Dgram_Socket_OnSendOK(ILibAsyncUDPSocket_SocketModule socketMod
 int ILibDuktape_DGram_getIPv6ScopeID(struct in6_addr *addr)
 {
 	int retVal = 0;
+#ifndef NO_IFADDR
 	struct ifaddrs *addrlist;
 	struct ifaddrs *current;
 	if (getifaddrs(&addrlist) == 0)
@@ -142,6 +145,7 @@ int ILibDuktape_DGram_getIPv6ScopeID(struct in6_addr *addr)
 		}
 		freeifaddrs(addrlist);
 	}
+#endif
 	return(retVal);
 }
 #endif

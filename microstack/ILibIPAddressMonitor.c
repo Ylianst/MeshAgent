@@ -28,7 +28,7 @@ limitations under the License.
 
 #include "ILibParsers.h"
 
-#if defined(_POSIX) && !defined(__APPLE__)
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(NO_IPADDR_MONITOR)
 #include <netinet/in.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -42,20 +42,21 @@ typedef struct _ILibIPAddressMonitor
 	ILibChain_Link chainLink;
 	ILibIPAddressMonitor_Handler onUpdate;
 	void *user;
-#ifdef WIN32
-	SOCKET mSocket;
-	DWORD bytesReturned;
-	OVERLAPPED *reserved;
-#elif defined (_POSIX) && !defined(__APPLE__)
-	int mSocket;
-	struct sockaddr_nl addr;
+#ifndef NO_IPADDR_MONITOR
+	#ifdef WIN32
+		SOCKET mSocket;
+		DWORD bytesReturned;
+		OVERLAPPED *reserved;
+	#elif defined (_POSIX) && !defined(__APPLE__)
+		int mSocket;
+		struct sockaddr_nl addr;
+	#endif
 #endif
-
 }_ILibIPAddressMonitor;
 int ILibMemory_IPAddressMonitor_CONTAINER_SIZE = sizeof(_ILibIPAddressMonitor);
 void ILibIPAddressMonitor_MicrostackThreadDispatch(void *chain, void *user);
 
-#ifdef WIN32
+#if defined(WIN32) && !defined(NO_IPADDR_MONITOR)
 void CALLBACK ILibIPAddressMonitor_dispatch(
 	IN DWORD dwError,
 	IN DWORD cbTransferred,
@@ -84,6 +85,7 @@ void ILibIPAddressMonitor_MicrostackThreadDispatch(void *chain, void *user)
 }
 #endif
 
+#ifndef NO_IPADDR_MONITOR
 void ILibIPAddressMonitor_Destroy(void *object)
 {
 #ifndef __APPLE__
@@ -132,10 +134,12 @@ void ILibIPAddressMonitor_PostSelect(void* object, int slct, fd_set *readset, fd
 	}
 }
 #endif
-
+#endif
 ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonitor_Handler handler, void *user)
 {
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)ILibChain_Link_Allocate(ILibMemory_IPAddressMonitor_CONTAINER_SIZE, 0);
+#ifndef NO_IPADDR_MONITOR
+
 	obj->onUpdate = handler;
 	obj->user = user;
 #ifdef WIN32
@@ -165,5 +169,8 @@ ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonit
 
 	obj->chainLink.DestroyHandler = ILibIPAddressMonitor_Destroy;
 	ILibAddToChain(chain, obj);
+
+#endif
+
 	return((ILibIPAddressMonitor)obj);
 }
