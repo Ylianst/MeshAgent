@@ -125,6 +125,11 @@ void MouseAction(double absX, double absY, int button, short wheel, Display *dis
 		return;
 	}
 	
+	if (button == 0x88) {
+		// Double click, do nothing on Linux.
+		return;
+	}
+
 	if (!x11tst_exports->XTestFakeMotionEvent(display, -1, absX, absY, CurrentTime )) { return; }
 
 	if (button != 0) {
