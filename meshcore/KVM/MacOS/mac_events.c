@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <SystemConfiguration/SystemConfiguration.h>
 #include <string.h>
+#include "../../../microstack/ILibParsers.h"
+#include "../../meshdefines.h"
 
 static const int g_keymapLen = 114; // Modify this when you change anything in g_keymap.
 static int g_capsLock = 0;
@@ -124,6 +126,19 @@ static struct keymap_t g_keymap[] = {
 	{ kVK_ANSI_RightBracket,	   VK_OEM_6 },
 	{ kVK_ANSI_Quote,	   VK_OEM_7 }
 };
+extern int KVM_SEND(char *buffer, int bufferLen);
+
+void kvm_server_sendmsg(char *msg)
+{
+	int msgLen = strnlen_s(msg, 255);
+	char buffer[512];
+
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
+	memcpy_s(buffer + 4, 512 - 4, msg, msgLen);
+
+	KVM_SEND(buffer, msgLen + 4);
+}
 
 char* getCurrentSession() {
 	SCDynamicStoreRef store;
@@ -155,12 +170,6 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	CGEventRef e;
 	CGEventType event;
 	CGEventSourceRef source;
-
-	if (button == 0x88) {
-		// Double click, this is useful on MacOS.
-		// TODO
-		return;
-	}
 
 	curPos.x = absX;
 	curPos.y = absY;
@@ -202,22 +211,21 @@ void MouseAction(double absX, double absY, int button, short wheel)
 				break;
 		}
 
-		
-		/*
-		if (!strcmp(getCurrentSession(), "<none>"))
+		if (button == 0x88) 
 		{
-			// This call is deprecated in OSX 10.6
-			CGPostMouseEvent(curPos, TRUE, 3, (event == kCGEventLeftMouseDown) ? TRUE : FALSE, (event == kCGEventRightMouseDown) ? TRUE : FALSE, FALSE);  // mouse down
-		} 
+			// Double click, this is useful on MacOS.
+			e = CGEventCreateMouseEvent(source, kCGEventLeftMouseDown, curPos, 1);
+			CGEventSetIntegerValueField(e, kCGMouseEventClickState, 2);
+			CGEventPost(kCGHIDEventTap, e);
+			CGEventSetType(e, kCGEventLeftMouseUp);
+			CGEventPost(kCGHIDEventTap, e);
+		}
 		else
 		{
-		*/
 			e = CGEventCreateMouseEvent(source, event, curPos, 1);
 			CGEventPost(kCGHIDEventTap, e);
-			CFRelease(e);
-		/*
 		}
-		*/
+		CFRelease(e);
 	}
 	else if (wheel != 0)
 	{

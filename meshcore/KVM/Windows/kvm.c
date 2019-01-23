@@ -506,7 +506,7 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 
 				// Perform the mouse movement
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
-				MouseAction((((double)x / (double)SCREEN_WIDTH)), (((double)y / (double)SCREEN_HEIGHT)), block[5], w);
+				MouseAction((((double)x / (double)SCREEN_WIDTH)), (((double)y / (double)SCREEN_HEIGHT)), (int)(unsigned char)(block[5]), w);
 			}
 			break;
 		}

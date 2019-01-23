@@ -424,7 +424,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 				y = ((int)ntohs(((unsigned short*)(block))[4]));
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
 				// printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
-				if (g_enableEvents) MouseAction(x, y, block[5], w, eventdisplay);
+				if (g_enableEvents) MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
 			}
 			break;
 		}
