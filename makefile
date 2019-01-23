@@ -18,11 +18,8 @@
 #		eg: make linux ARCHID=6 JPEGVER=v80
 #
 #
-# To build for 32 bit on 64 bit linux
-#  sudo apt-get install linux-libc-dev:i386
-#  sudo apt-get install libc6-dev-i386
-#  sudo apt-get install libjpeg8-dev:i386
-#
+# To build for 32 bit on 64 bit linux 
+#  sudo apt-get install linux-libc-dev:i386 libc6-dev-i386 libjpeg8-dev:i386
 #
 # To install ARM Cross Compiler for Raspberry PI
 #  sudo apt-get install libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf
