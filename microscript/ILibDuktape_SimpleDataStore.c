@@ -167,8 +167,11 @@ duk_ret_t ILibDuktape_SimpleDataStore_Keys(duk_context *ctx)
 	if (enumerator.GuidHex != NULL) 
 	{ 
 		enumerator.GuidHexLen = 1 + (int)strnlen_s(enumerator.GuidHex, sizeof(ILibScratchPad)); 
-		enumerator.GuidHex[enumerator.GuidHexLen - 1] = '/';
-		enumerator.GuidHex[enumerator.GuidHexLen] = 0;
+		char *tmp = Duktape_PushBuffer(ctx, enumerator.GuidHexLen + 1);
+		memcpy_s(tmp, ILibMemory_Size(tmp), enumerator.GuidHex, enumerator.GuidHexLen - 1);
+		tmp[enumerator.GuidHexLen - 1] = '/';
+		tmp[enumerator.GuidHexLen] = 0;
+		enumerator.GuidHex = tmp;
 	}
 
 	duk_push_array(ctx);																			// [DataStore][ptr][retVal]
