@@ -156,6 +156,12 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	CGEventType event;
 	CGEventSourceRef source;
 
+	if (button == 0x88) {
+		// Double click, this is useful on MacOS.
+		// TODO
+		return;
+	}
+
 	curPos.x = absX;
 	curPos.y = absY;
 

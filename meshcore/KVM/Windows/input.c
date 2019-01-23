@@ -35,14 +35,21 @@ MOUSEEVENTF_MIDDLEDOWN		0x0020
 MOUSEEVENTF_LEFTUP			0x0004
 MOUSEEVENTF_RIGHTUP			0x0010
 MOUSEEVENTF_MIDDLEUP		0x0040
+MOUSEEVENTF_DOUBLECLK		0x0088
 */
 
 void MouseAction(double absX, double absY, int button, short wheel)
 {
 	INPUT mouse;
-	mouse.type = INPUT_MOUSE;	
-	mouse.mi.dx = (long) absX;
-	mouse.mi.dy = (long) absY;
+
+	if (button == 0x88) {
+		// Double click indication, no nothing on windows.
+		return;
+	}
+
+	mouse.type = INPUT_MOUSE;
+	mouse.mi.dx = (long)absX;
+	mouse.mi.dy = (long)absY;
 	mouse.mi.mouseData = wheel;
 	mouse.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE | button;
 	if (wheel) mouse.mi.dwFlags |= MOUSEEVENTF_WHEEL;
