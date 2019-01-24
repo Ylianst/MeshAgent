@@ -3243,29 +3243,48 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #ifndef MICROSTACK_NOTLS
 	// Check the local MacAddresses, to see if we need to reset our NodeId
 	duk_context *tmpCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, NULL, NULL);
-	if (duk_peval_string(tmpCtx, "function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); }; _getMac();") == 0)
+	if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
 	{
 		int len;
 		duk_size_t macLen;
 		char *mac = (char*)duk_get_lstring(tmpCtx, -1, &macLen);
-		if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", NULL, 0)) == 0)
+
+		if (macLen >= 19) // Only continue if we have at least 1 MAC Address
 		{
-			ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen);
-		}
-		else
-		{
-			char *curr = ILibMemory_AllocateA(len);
-			ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", curr, len);
-			int i = 0;
-			while (i < len)
+			if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", NULL, 0)) == 0)
 			{
-				if (strncmp(curr + i, "[00:00:00:00:00:00]", 19) != 0)
-				{
-					if (ILibString_IndexOf(mac, (int)macLen, curr + i, 19) >= 0) { break; }
-				}
-				i += 19;
+				// We didn't have any MAC addresses in the db, so put them there, and return
+				ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen);
 			}
-			if (i >= len) { resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); }
+			else
+			{
+				// We have MAC addresses in the db, so before we compare them, lets check that we have MAC addresses on the
+				// system that aren't just zeros. So lets count how many we have
+				int i = 0;
+				while (i < macLen)
+				{
+					if (strncmp(mac + i, "[00:00:00:00:00:00]", 19) != 0) { break; }
+					i += 19;
+				}
+				if (i < macLen)
+				{
+					// We have at least one valid MAC address, so we can continue with the checks
+
+					i = 0;
+					char *curr = ILibMemory_AllocateA(len);
+					ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", curr, len);
+
+					while (i < len)
+					{
+						if (strncmp(curr + i, "[00:00:00:00:00:00]", 19) != 0)
+						{
+							if (ILibString_IndexOf(mac, (int)macLen, curr + i, 19) >= 0) { break; }
+						}
+						i += 19;
+					}
+					if (i >= len) { resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); }
+				}
+			}
 		}
 	}
 	duk_destroy_heap(tmpCtx);
