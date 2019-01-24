@@ -87,6 +87,19 @@ typedef struct x11_struct
 }x11_struct;
 x11_struct *x11_exports = NULL;
 
+void kvm_send_error(char *msg)
+{
+	int msgLen = strnlen_s(msg, 255);
+	char buffer[512];
+
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
+	memcpy_s(buffer + 4, 512 - 4, msg, msgLen);
+
+	if (write(slave2master[1], buffer, msgLen + 4)) {}
+	fsync(slave2master[1]);
+}
+
 void kvm_send_resolution()
 {
 	char buffer[8];
@@ -341,6 +354,7 @@ int kvm_init(int displayNo)
 		//fprintf(logFile, "DisplayString=%s\n", displayString);
 		//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 		//fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
+		kvm_send_error("Error occured calling XOpenDisplay()");
 	}
 
 	if (eventdisplay != NULL) { current_display = (unsigned short)displayNo; }
