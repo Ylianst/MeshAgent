@@ -231,29 +231,6 @@ int getNextDisplay() {
 	return 0;
 }
 
-int setDisplay(unsigned short display_no) {
-	char cmd[BUFSIZ] = "";
-	char authFile[BUFSIZ] = "";
-	FILE *pfile = NULL;
-	int dispNo;
-
-	sprintf(cmd, "ps aux 2>/dev/null | grep '/X.* :[0-9][0-9]* .*-auth' | egrep -v 'startx|xinit' | sed -e 's,^.*/X.* :\\([0-9][0-9]*\\) .* -auth \\([^ ][^ ]*\\).*$,\\1\\,\\2,' | grep '%d,'", display_no);
-	pfile = popen(cmd, "r");
-
-	if (pfile == NULL) {
-		return -1;
-	}
-
-	if (fscanf(pfile, "%d,%510s", &dispNo, authFile) != 2) {
-		fclose(pfile);
-		return -1;
-	}
-
-	fclose(pfile);
-
-	return setenv("XAUTHORITY", authFile, 1);
-}
-
 void kvm_send_display_list()
 {
 	unsigned short *displays = NULL;
@@ -343,26 +320,26 @@ int kvm_init(int displayNo)
 
 	sprintf(displayString, ":%d", (int)displayNo);
 
-	while (setDisplay(displayNo) != 0 && count++ < 10);
-
 	if (count == 10) { return -1; }
 	count = 0;
 	eventdisplay = x11_exports->XOpenDisplay(displayString);
 	//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 	if (eventdisplay == NULL)
 	{
+		char tmpBuff[1024];
+		sprintf_s(tmpBuff, sizeof(tmpBuff), "XOpenDisplay(%s) failed, using XAUTHORITY: %s", displayString, getenv("XAUTHORITY"));
 		//fprintf(logFile, "DisplayString=%s\n", displayString);
 		//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 		//fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
-		kvm_send_error("Error occured calling XOpenDisplay()");
+		kvm_send_error(tmpBuff);
 	}
 
 	if (eventdisplay != NULL) { current_display = (unsigned short)displayNo; }
 
-	while (eventdisplay == NULL && count++ < 100) {
+	while (eventdisplay == NULL && count++ < 100) 
+	{
 		if (getNextDisplay() == -1) { return -1; }
 		sprintf(displayString, ":%d", (int)current_display);
-		if (setDisplay(current_display) != 0) { continue; }
 		eventdisplay = x11_exports->XOpenDisplay(displayString);
 	}
 
@@ -608,8 +585,6 @@ void* kvm_server_mainloop(void* parm)
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
 
-		setDisplay(current_display);
-
 		sprintf(displayString, ":%d", (int)current_display);
 		imagedisplay = x11_exports->XOpenDisplay(displayString);
 
@@ -756,7 +731,7 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen
 	}
 	*bytesConsumed = 0;
 }
-void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
+void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken)
 {
 	int r;
 	int count = 0;
@@ -794,6 +769,10 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (uid != 0) { ignore_result(setuid(uid)); }
 
 		//fprintf(logFile, "Starting kvm_server_mainloop\n");
+		if (authToken != NULL)
+		{
+			setenv("XAUTHORITY", authToken, 1);
+		}
 		kvm_server_mainloop((void*)0);
 		return(NULL);
 	}
@@ -810,11 +789,11 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
-void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
+void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *authToken)
 {
 	if (kvmthread != (pthread_t)NULL || g_slavekvm != 0) return 0;
 	g_restartcount = 0;
-	return kvm_relay_restart(1, processPipeMgr, writeHandler, reserved, uid);
+	return kvm_relay_restart(1, processPipeMgr, writeHandler, reserved, uid, authToken);
 }
 
 // Force a KVM reset & refresh

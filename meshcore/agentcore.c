@@ -1248,7 +1248,39 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 		}
 	#else
-		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		// For Linux, we need to determine where the XAUTHORITY is:
+		char *updateXAuth = NULL;
+		int needPop = 0;
+		if (getenv("XAUTHORITY") == NULL)
+		{
+			if (duk_peval_string(ctx, "(function getAuthToken()\
+			{\
+				var child = require('child_process').execFile('/bin/sh', ['sh']);\
+				child.stdout.str = '';\
+				child.stdin.write('ps -e -o user -o command | awk {\\'printf \"%s,\",$1;$1=\"\";printf \"%s\\\\n\", $0\\'} | grep X\\nexit\\n');\
+				child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
+				child.waitExit();\
+				var lines = child.stdout.str.split('\\n');\
+				for (var i in lines) {\
+					var tokens = lines[i].split(',');\
+					if (tokens[0]) {\
+						var items = tokens[1].split(' ');\
+						for (var x = 0; x < items.length; ++x) {\
+							if (items[x] == '-auth' && items.length >(x + 1)) {\
+								return (items[x + 1]);\
+							}\
+						}\
+					}\
+				}\
+				return (null);\
+			})();") == 0)
+			{
+				updateXAuth = (char*)duk_get_string(ctx, -1);
+			}
+			needPop = 1;
+		}
+		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth);
+		if (needPop!= 0) {duk_pop(ctx); }
 	#endif
 #endif
 	return 1;
