@@ -3261,12 +3261,12 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				// We have MAC addresses in the db, so before we compare them, lets check that we have MAC addresses on the
 				// system that aren't just zeros. So lets count how many we have
 				int i = 0;
-				while (i < macLen)
+				while (i < (int)macLen)
 				{
 					if (strncmp(mac + i, "[00:00:00:00:00:00]", 19) != 0) { break; }
 					i += 19;
 				}
-				if (i < macLen)
+				if (i < (int)macLen)
 				{
 					// We have at least one valid MAC address, so we can continue with the checks
 
