@@ -22,5 +22,6 @@ limitations under the License.
 extern int g_displayStreamPipeMessages;
 extern int g_displayFinalizerMessages;
 void ILibDuktape_Polyfills_Init(duk_context *ctx);
+void ILibDuktape_Polyfills_JS_Init(duk_context *ctx);
 
 #endif

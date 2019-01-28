@@ -136,7 +136,6 @@ int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, in
 	}
 	duk_pop(ctx);											// ...
 
-	//if (ILibHashtable_Get(table, NULL, id, idLen) != NULL || ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, idLen) != NULL) { return 1; }
 	char *newModule = (char*)ILibDuktape_Memory_Alloc(ctx, moduleLen+1);
 	memcpy_s(newModule, moduleLen + 1, module, moduleLen);
 	newModule[moduleLen] = 0;
@@ -194,22 +193,10 @@ duk_ret_t mod_Search_Files(duk_context *ctx, char* id)
 		duk_push_lstring(ctx, data, dataLen);
 		free(data);
 		return 1;
-		//if (duk_peval_string(ctx, data) == 0)
-		//{
-		//	duk_put_prop_string(ctx, 3, "exports");
-		//	return 0;
-		//}
-		//else
-		//{
-		//	snprintf(fileName, sizeof(fileName), "Module: %s (ERROR)", id);
-		//	duk_push_string(ctx, fileName);
-		//	duk_throw(ctx);
-		//	return DUK_RET_ERROR;
-		//}
 	}
 	else
 	{
-		return(ILibDuktape_Error(ctx, "Module: %s (NOT FOUND)", id));
+		return(0);
 	}
 }
 void ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(duk_context *ctx, char *js, size_t jsLen)
@@ -245,7 +232,7 @@ duk_ret_t mod_Search(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "ModSearchTable");
 	table = (ILibHashtable)duk_to_pointer(ctx, -1);
 
-	// First check if there is a JS override
+	// First check if there is a JS Object override
 	j = ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleObject, id, (int)idLen);
 	if (j != NULL)
 	{
@@ -253,21 +240,32 @@ duk_ret_t mod_Search(duk_context *ctx)
 		duk_put_prop_string(ctx, 3, "exports");
 		return(0);
 	}
-
+	 
+	// Check if there is a native handler
 	func = (ILibDuktape_ModSearch_PUSH_Object)ILibHashtable_Get(table, NULL, id, (int)idLen);
 	if (func == NULL)
 	{
+		// then check the local filesystem, becuase if present, those should take precedence
+		if(mod_Search_Files(ctx, id) == 1)
+		{
+			return(1);
+		}
+
+
+		// Next check if a handler was added via ILibDuktape_ModSearch_AddModule()
 		if ((module = (char*)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, (int)idLen)) != NULL)
 		{
 			duk_push_string(ctx, module);
 			return(1);
 		}
 		else if (mDS == NULL)
-		{
-			return mod_Search_Files(ctx, id);
+		{ 
+			// If No database, then nothing more we can do
+			return(ILibDuktape_Error(ctx, "Module: %s (NOT FOUND)", id));
 		}
 		else
 		{
+			// Next Check the database
 			char key[255];
 			int keyLen;
 			char *value;
@@ -284,7 +282,8 @@ duk_ret_t mod_Search(duk_context *ctx)
 			}
 			else
 			{
-				return mod_Search_Files(ctx, id);
+				// Not in database, then nothing more we can do
+				return(ILibDuktape_Error(ctx, "Module: %s (NOT FOUND)", id));
 			}
 		}
 	}

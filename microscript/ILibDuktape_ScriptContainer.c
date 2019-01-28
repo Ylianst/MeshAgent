@@ -1885,6 +1885,8 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 		ILibLifeTime_Add(ILibGetBaseTimer(Duktape_GetChain(ctx)), timeoutKey, executionTimeout, ILibDuktape_ScriptContainer_ExecTimeout, NULL);
 	}
 
+	ILibDuktape_Polyfills_JS_Init(ctx);
+
 	return ctx;
 }
 
