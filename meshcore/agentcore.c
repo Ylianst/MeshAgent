@@ -361,10 +361,10 @@ void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
 }
 
 
-int MeshAgent_GetSystemProxy(char *buffer, size_t bufferSize)
+int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t bufferSize)
 {
-#ifdef _POSIX
 	int retVal = 0;
+#ifdef _POSIX
 	for (char **env = environ; *env; ++env)
 	{
 		int envLen = (int)strnlen_s(*env, INT_MAX);
@@ -394,7 +394,84 @@ int MeshAgent_GetSystemProxy(char *buffer, size_t bufferSize)
 	}
 	return(retVal);
 #else
-	return(0);
+	char getProxy[] = "(function () {\
+		var isroot = false;\
+		var servers = [];\
+		/* First we need to see if we are running as admin */\
+		var GM = require('_GenericMarshal');\
+		var advapi = GM.CreateNativeProxy('Advapi32.dll');\
+		advapi.CreateMethod('AllocateAndInitializeSid');\
+		advapi.CreateMethod('CheckTokenMembership');\
+		advapi.CreateMethod('FreeSid');\
+		var NTAuthority = GM.CreateVariable(6);\
+		NTAuthority.toBuffer().writeInt8(5, 5);\
+		var AdministratorsGroup = GM.CreatePointer();\
+		if (advapi.AllocateAndInitializeSid(NTAuthority, 2, 32, 544, 0, 0, 0, 0, 0, 0, AdministratorsGroup).Val != 0)\
+		{\
+			var member = GM.CreateInteger();\
+			if (advapi.CheckTokenMembership(0, AdministratorsGroup.Deref(), member).Val != 0)\
+			{\
+				if (member.toBuffer().readUInt32LE() != 0) { isroot = true; }\
+			}\
+			advapi.FreeSid(AdministratorsGroup.Deref());\
+		}\
+		var reg = require('win-registry');\
+		if (isroot)\
+		{\
+			/* If running as admin, enumerate the users to find proxy settings */\
+			var users = reg.QueryKey(reg.HKEY.Users);\
+			var keys;\
+			for (var i in users.subkeys)\
+			{\
+				try\
+				{\
+					value = reg.QueryKey(reg.HKEY.Users, users.subkeys[i] + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', 'ProxyEnable');\
+					if (value == 1)\
+					{\
+						value = reg.QueryKey(reg.HKEY.Users, users.subkeys[i] + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', 'ProxyServer');\
+						servers.push(value);\
+					}\
+				}\
+				catch (e)\
+				{\
+				}\
+			}\
+			return (servers);\
+		}\
+		else\
+		{\
+			/* We're not admin, so we can only check HKEY_LOCAL_USERS for proxy settings */\
+			try\
+			{\
+				if (reg.QueryKey(reg.HKEY.CurrentUser, 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings', 'ProxyEnable') == 1)\
+				{\
+					servers.push(reg.QueryKey(reg.HKEY.CurrentUser, 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings', 'ProxyServer'));\
+				}\
+			}\
+			catch (e)\
+			{\
+			}\
+			return (servers);\
+		}\
+	})();";
+
+	if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
+	{
+		if (duk_get_length(agent->meshCoreCtx, -1) > 0)		// [array]
+		{
+			duk_get_prop_index(agent->meshCoreCtx, -1, 0);	// [array][0];
+			char *tmp;
+			duk_size_t tmpLen;
+
+			tmp = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &tmpLen);
+			strncpy_s(buffer, bufferSize, tmp, tmpLen);
+			duk_pop(agent->meshCoreCtx);					// [array]
+			retVal = (int)tmpLen;
+		}
+	}
+	duk_pop(agent->meshCoreCtx);							// ...
+
+	return(retVal);
 #endif
 }
 #ifdef _POSIX
@@ -2827,7 +2904,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		ILibWebClient_Request_SetSNI(reqToken, host, (int)strnlen_s(host, serverUrlLen));
 #endif
 
-		if ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0 || (len = MeshAgent_GetSystemProxy(ILibScratchPad, sizeof(ILibScratchPad))) != 0)
+		if ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0 || (len = MeshAgent_GetSystemProxy(agent, ILibScratchPad, sizeof(ILibScratchPad))) != 0)
 		{
 #ifdef MICROSTACK_PROXY
 			unsigned short proxyPort = 80;
