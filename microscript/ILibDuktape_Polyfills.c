@@ -402,6 +402,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_alloc(duk_context *ctx)
 	duk_push_buffer_object(ctx, -1, 0, sz, DUK_BUFOBJ_NODEJS_BUFFER);
 	return(1);
 }
+
 void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 {
 	char extras[] =
@@ -438,7 +439,6 @@ void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);	// [g][Buffer][prototype][func]
 	duk_put_prop_string(ctx, -2, "toString");										// [g][Buffer][prototype]
 	duk_pop_2(ctx);																	// [g]
-
 }
 duk_ret_t ILibDuktape_Polyfills_String_startsWith(duk_context *ctx)
 {
@@ -1487,7 +1487,7 @@ ILibTransport_DoneState ILibDuktape_Stream_Writable_WriteSink(struct ILibDuktape
 	duk_push_this(stream->ctx);																		// [writable]
 	duk_get_prop_string(stream->ctx, -1, "_write");													// [writable][_write]
 	duk_swap_top(stream->ctx, -2);																	// [_write][this]
-	if (stream->Reserved)
+	if (stream->Reserved == 0)
 	{
 		duk_push_external_buffer(stream->ctx);														// [_write][this][extBuffer]
 		duk_insert(stream->ctx, -3);																// [extBuffer][_write][this]
@@ -1511,6 +1511,10 @@ ILibTransport_DoneState ILibDuktape_Stream_Writable_WriteSink(struct ILibDuktape
 	if (duk_pcall_method(stream->ctx, 2) != 0)
 	{
 		ILibDuktape_Process_UncaughtExceptionEx(stream->ctx, "stream.writable.write(): "); retVal = ILibTransport_DoneState_ERROR;
+	}
+	else
+	{
+		retVal = duk_to_boolean(stream->ctx, -1) ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
 	}
 	duk_pop(stream->ctx);																			// ...
 

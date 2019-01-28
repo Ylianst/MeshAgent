@@ -910,8 +910,12 @@ duk_ret_t ILibDuktape_ReadableStream_unshift(duk_context *ctx)
 	else
 	{
 		duk_size_t bufferLen;
-		rs->unshiftReserved = (char*)Duktape_GetBuffer(ctx, 0, &bufferLen);
-		duk_push_int(ctx, rs->UnshiftHandler(rs, (int)bufferLen, rs->user));
+		char *unshiftBuffer = (char*)Duktape_GetBuffer(ctx, 0, &bufferLen);
+		if (bufferLen > 0)
+		{
+			rs->unshiftReserved = unshiftBuffer;
+			duk_push_int(ctx, rs->UnshiftHandler(rs, (int)bufferLen, rs->user));
+		}
 		return(1);
 	}
 }
