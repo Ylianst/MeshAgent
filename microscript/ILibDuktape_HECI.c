@@ -1027,10 +1027,19 @@ void ILibDuktape_HECI_PostSelect(void* object, int slct, fd_set *readset, fd_set
 		}
 		else
 		{
-			ILibDuktape_DuplexStream_WriteEnd(h->session->stream);
+			ILibDuktape_EventEmitter_SetupEmit(h->ctx, h->session->stream->ParentObject, "error");		// [emit][this][error]
+			duk_push_string(h->ctx, "HECI Read Error");													// [emit][this][error][msg]
+			duk_pcall_method(h->ctx, 2); duk_pop(h->ctx);												// ...
+
+			duk_push_heapptr(h->ctx, h->session->stream->ParentObject);									// [heci]
+			duk_del_prop_string(h->ctx, -1, ILibDuktape_HECI_Descriptor);								
+			duk_pop(h->ctx);																			// ...
+			
+			int td = h->descriptor;
+			h->descriptor = -1;
+			close(td);
 		}
 	}
-	if (h->descriptor <= 0) { return; }
 	if (FD_ISSET(h->descriptor, writeset))
 	{
 		ILibDuktape_HECI_Session_WriteHandler_Process(h->session);
