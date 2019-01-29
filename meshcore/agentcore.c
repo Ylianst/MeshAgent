@@ -365,34 +365,96 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 {
 	int retVal = 0;
 #ifdef _POSIX
-	for (char **env = environ; *env; ++env)
-	{
-		int envLen = (int)strnlen_s(*env, INT_MAX);
-		int i = ILibString_IndexOf(*env, envLen, "=", 1);
-		if (i > 0)
+	#ifndef __APPLE__
+		for (char **env = environ; *env; ++env)
 		{
-			if (i == 11 && strncmp(*env, "https_proxy", 11) == 0)
+			int envLen = (int)strnlen_s(*env, INT_MAX);
+			int i = ILibString_IndexOf(*env, envLen, "=", 1);
+			if (i > 0)
 			{
-				if (ILibString_StartsWith(*env + i + 1, envLen - i - 1, "http://", 7) != 0)
+				if (i == 11 && strncmp(*env, "https_proxy", 11) == 0)
 				{
-					strcpy_s(buffer, bufferSize, *env + i + 8);
-					retVal = envLen - i - 8;
+					if (ILibString_StartsWith(*env + i + 1, envLen - i - 1, "http://", 7) != 0)
+					{
+						strcpy_s(buffer, bufferSize, *env + i + 8);
+						retVal = envLen - i - 8;
+					}
+					else if(ILibString_StartsWith(*env + i + 1, envLen - i - 1, "https://", 8) != 0)
+					{
+						strcpy_s(buffer, bufferSize, *env + i + 9);
+						retVal = envLen - i - 9;
+					}
+					else
+					{
+						strcpy_s(buffer, bufferSize, *env + i + 1);
+						retVal = envLen - i - 1;
+					}
+					break;
 				}
-				else if(ILibString_StartsWith(*env + i + 1, envLen - i - 1, "https://", 8) != 0)
-				{
-					strcpy_s(buffer, bufferSize, *env + i + 9);
-					retVal = envLen - i - 9;
-				}
-				else
-				{
-					strcpy_s(buffer, bufferSize, *env + i + 1);
-					retVal = envLen - i - 1;
-				}
-				break;
 			}
 		}
+		return(retVal);
+	#else
+	char getProxyies[] = "(function getProxies(){\
+		var ret = {};\
+		var child = require('child_process').execFile('/bin/sh', ['sh']);\
+		child.stdout.str = '';\
+		child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
+		child.stdin.write('system_profiler SPNetworkDataType | grep \"Proxy\" \\nexit\\n');\
+		child.waitExit();\
+		var lines = child.stdout.str.split('\\n');\
+		for (var i in lines)\
+		{\
+			if (lines[i])\
+			{\
+				var val = lines[i].split(':')[1].trim().toLowerCase();\
+				var tokens = lines[i].split(':')[0].trim().split(' ');\
+				var key = tokens[0].toLowerCase();\
+				var t = tokens[2].toLowerCase();\
+				if (!ret[key]) { ret[key] = {}; }\
+				ret[key][t] = val;\
+			}\
+		}\
+		return(ret);\
+	})();";
+	if (duk_peval_string(agent->meshCoreCtx, getProxyies) == 0)
+	{
+		if (duk_has_prop_string(agent->meshCoreCtx, -1, "http"))
+		{
+			duk_get_prop_string(agent->meshCoreCtx, -1, "http");
+		}
+		else if (duk_has_prop_string(agent->meshCoreCtx, -1, "https"))
+		{
+			duk_get_prop_string(agent->meshCoreCtx, -1, "https");
+		}
+		else
+		{
+			duk_pop(agent->meshCoreCtx);
+			return(0); // No Proxies detected
+		}
+
+		if (strcmp(Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "enabled", "no"), "yes") == 0)
+		{
+			char *proxyserver, *proxyport;
+			duk_size_t proxyserverLen, proxyportLen;
+
+			proxyserver = (char*)Duktape_GetStringPropertyValueEx(agent->meshCoreCtx, -1, "server", NULL, &proxyserverLen);
+			proxyport = (char*)Duktape_GetStringPropertyValueEx(agent->meshCoreCtx, -1, "port", "8080", &proxyportLen);
+
+			strncpy_s(buffer, bufferSize, proxyserver, proxyserverLen);
+			strncpy_s(buffer + proxyserverLen, bufferSize - proxyserverLen, ":", 1);
+			strncpy_s(buffer + proxyserverLen + 1, bufferSize - proxyserverLen - 1, proxyport, proxyportLen);
+			duk_pop(agent->meshCoreCtx);
+			return(proxyserverLen + 1 + proxyportLen);
+		}
+		else
+		{
+			// Proxy is disabled
+			duk_pop(agent->meshCoreCtx);
+			return(0);
+		}
 	}
-	return(retVal);
+	#endif
 #else
 	char getProxy[] = "(function () {\
 		var isroot = false;\
