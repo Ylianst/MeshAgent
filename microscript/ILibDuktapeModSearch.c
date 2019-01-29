@@ -55,36 +55,41 @@ duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id)
 	}
 	duk_pop(ctx);											// ...
 
-	retVal = ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, idLen);
-	if (retVal == NULL)
-	{
-		duk_push_heap_stash(ctx);
-		char *mpath;
-		duk_size_t mpathLen;
-		mpath = Duktape_GetStringPropertyValueEx(ctx, -1, ILibDuktape_ModSearch_ModulePath, NULL, &mpathLen);
-		duk_pop(ctx);
 
-		char *fileName = ILibMemory_AllocateA(idLen + 4 + mpathLen + 1);
-		if (mpath == NULL)
-		{
-			sprintf_s(fileName, idLen + 4, "%s.js", id);
-		}
-		else
-		{
-			sprintf_s(fileName, idLen + 5 + mpathLen, "%s/%s.js", mpath, id);
-		}
-		int dataLen = ILibReadFileFromDiskEx(&retVal, fileName);
-		if (dataLen > 0) { duk_push_lstring(ctx, retVal, dataLen); free(retVal); }
-		else
-		{
-			return(0);
-		}
+	duk_push_heap_stash(ctx);
+	char *mpath;
+	duk_size_t mpathLen;
+	mpath = Duktape_GetStringPropertyValueEx(ctx, -1, ILibDuktape_ModSearch_ModulePath, NULL, &mpathLen);
+	duk_pop(ctx);
+
+	char *fileName = ILibMemory_AllocateA(idLen + 4 + mpathLen + 1);
+	if (mpath == NULL)
+	{
+		sprintf_s(fileName, idLen + 4, "%s.js", id);
 	}
 	else
 	{
-		duk_push_string(ctx, retVal);
+		sprintf_s(fileName, idLen + 5 + mpathLen, "%s/%s.js", mpath, id);
 	}
-	return(1);
+	int dataLen = ILibReadFileFromDiskEx(&retVal, fileName);
+	if (dataLen > 0) 
+	{ 
+		duk_push_lstring(ctx, retVal, dataLen); free(retVal); 
+		return(1);
+	}
+	else
+	{
+		retVal = ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, idLen);
+		if (retVal == NULL)
+		{
+			return(0);
+		}
+		else
+		{
+			duk_push_string(ctx, retVal);
+			return(1);
+		}
+	}
 }
 void ILibDuktape_ModSearch_AddModuleObject(duk_context *ctx, char *id, void *heapptr)
 {
