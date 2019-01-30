@@ -3435,7 +3435,8 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 	ILibTransport_DoneState retVal = ILibTransport_DoneState_ERROR;
 
 	ILibWebClient_WebSocket_FragmentFlags bufferFragment;
-	
+
+
 	buffer = _buffer;
 	bufferLen = _bufferLen;
 	bufferFragment = _bufferFragment;
@@ -3506,11 +3507,11 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 		else
 		{
 			// We're not on the Duktape Thread, so we need to merge these buffers, to make a single write
-			char *dataFrame = ILibMemory_AllocateA(headerLen + bufferLen);
-
+			char *dataFrame = ILibMemory_SmartAllocate(headerLen + bufferLen);
 			memcpy_s(dataFrame, headerLen, header, headerLen);
 			memcpy_s(dataFrame + headerLen, bufferLen, buffer, bufferLen);
 			retVal = ILibDuktape_DuplexStream_WriteData(state->encodedStream, dataFrame, headerLen + bufferLen) == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
+			ILibMemory_Free(dataFrame);
 		}
 	}
 
