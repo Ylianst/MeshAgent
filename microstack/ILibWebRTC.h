@@ -162,6 +162,8 @@ int ILibSCTP_DoesPeerSupportFeature(void* SctpSession, int feature);
 void ILibSCTP_Pause(void* SctpSession);
 void ILibSCTP_Resume(void* SctpSession);
 
+void* ILibWebRTC_Dtls2SSL(void *dtls);
+
 void ILibSCTP_SetCallbacks(void* StunModule, ILibSCTP_OnConnect onconnect, ILibSCTP_OnData ondata, ILibSCTP_OnSendOK onsendok);
 ILibTransport_DoneState ILibSCTP_Send(void* SctpSession, unsigned short streamId, char* data, int datalen);
 ILibTransport_DoneState ILibSCTP_SendEx(void* SctpSession, unsigned short streamId, char* data, int datalen, int dataType);

@@ -213,6 +213,7 @@ ILibWrapper_WebRTC_Connection ILibWrapper_WebRTC_ConnectionFactory_CreateConnect
 int ILibWrapper_WebRTC_Connection_GetID(ILibWrapper_WebRTC_Connection connection);
 char* ILibWrapper_WebRTC_Connection_GetLocalUsername(ILibWrapper_WebRTC_Connection connection);
 #define ILibWrapper_WebRTC_Connection2DtlsSession(connection) ((void**)(connection))[0]
+void* ILibWrapper_WebRTC_DtlsSessionToSSL(void *dtls);
 
 ILibTransport* ILibWrapper_WebRTC_Connection_GetRawTransport(ILibWrapper_WebRTC_Connection connection);
 //! Set the STUN Servers to use with the WebRTC Connection when gathering candidates

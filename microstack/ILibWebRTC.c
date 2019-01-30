@@ -912,6 +912,10 @@ typedef struct ILibSCTP_HoldingQueueFlags
 
 #define ILibSCTP_GetHoldingQueueFlags(node) ((ILibSCTP_HoldingQueueFlags*)ILibLinkedList_GetExtendedMemory(node))
 
+void* ILibWebRTC_Dtls2SSL(void *dtls)
+{
+	return((void*)((ILibStun_dTlsSession*)dtls)->ssl);
+}
 void ILibWebRTC_DTLS_HandshakeDetect(struct ILibStun_Module* obj, char* directionPrefix, char* buffer, int offset, int length)
 {
 	ILibWebRTC_DTLS_ContentTypes contentType = (ILibWebRTC_DTLS_ContentTypes)buffer[offset+0];
@@ -3273,7 +3277,7 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 		// Only set the T3RTX timer if it is not already running
 		obj->dTlsSessions[session]->T3RTXTIME = rpacket->LastSentTimeStamp;
 #ifdef _WEBRTCDEBUG
-		if (obj->dTlsSessions[session]->onT3RTX != NULL){ obj->dTlsSessions[session]->onT3RTX(obj, "OnT3RTX", obj->dTlsSessions[session]->RTO); }
+		if (obj->dTlsSessions[session]->onT3RTX != NULL){ obj->dTlsSessions[session]->onT3RTX(obj->dTlsSessions[session], "OnT3RTX", obj->dTlsSessions[session]->RTO); }
 #endif
 	}
 

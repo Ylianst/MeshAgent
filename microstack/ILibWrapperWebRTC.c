@@ -108,7 +108,10 @@ void* ILibWrapper_WebRTC_Connection_GetStunModule(ILibWrapper_WebRTC_Connection 
 {
 	return(((ILibWrapper_WebRTC_ConnectionStruct*)connection)->mFactory->mStunModule);
 }
-
+void* ILibWrapper_WebRTC_DtlsSessionToSSL(void *dtls)
+{
+	return(ILibWebRTC_Dtls2SSL(dtls));
+}
 ILibTransport_DoneState ILibWrapper_ILibTransport_SendSink(void *transport, char* buffer, int bufferLength, ILibTransport_MemoryOwnership ownership, ILibTransport_DoneState done)
 {
 	ILibTransport_DoneState retVal = ILibWrapper_WebRTC_DataChannel_Send((ILibWrapper_WebRTC_DataChannel*)transport, buffer, bufferLength);

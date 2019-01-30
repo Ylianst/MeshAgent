@@ -37,12 +37,16 @@ limitations under the License.
 #define ILibDuktape_WebRTC_ConnectionPtr			"\xFF_WebRTC_ConnectionPtr"
 #define ILibDuktape_WebRTC_DataChannelPtr			"\xFF_WebRTC_DataChannelPtr"
 extern void ILibWrapper_WebRTC_ConnectionFactory_RemoveFromChain(ILibWrapper_WebRTC_ConnectionFactory factory);
+int ILibDuktape_WebRTC_SSL2Duktape = -1;
 
 typedef struct ILibWebRTC_Duktape_Handlers
 {
 	duk_context *ctx;
 	void *ConnectionObject;
 	ILibDuktape_EventEmitter *emitter;
+#ifdef _WEBRTCDEBUG
+	int debugRegistered;
+#endif
 
 	void *OnConnectionSendOK;
 }ILibWebRTC_Duktape_Handlers;
@@ -233,9 +237,10 @@ duk_ret_t ILibDuktape_WebRTC_ConnectionFactory_Finalizer(duk_context *ctx)
 #ifdef _WEBRTCDEBUG
 void ILibDuktape_WebRTC_Connection_Debug(void* dtlsSession, char* debugField, int data)
 {
-	ILibHashtable *t = ILibChain_GetBaseHashtable(((ILibTransport*)dtlsSession)->ChainLink.ParentChain);
-	ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)ILibHashtable_Get(t, dtlsSession, NULL, 0);
-	if (ptrs != NULL)
+	SSL *ssl = (SSL*)ILibWrapper_WebRTC_DtlsSessionToSSL(dtlsSession);
+	ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)SSL_get_ex_data(ssl, ILibDuktape_WebRTC_SSL2Duktape);
+
+	if (ptrs != NULL && ptrs->ConnectionObject != NULL)
 	{
 		if (strcmp(debugField, "OnHold") == 0)
 		{
@@ -314,23 +319,7 @@ void ILibDuktape_WebRTC_OnConnection(ILibWrapper_WebRTC_Connection connection, i
 	if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
 	duk_pop(ptrs->ctx);																				// ...
 #ifdef _WEBRTCDEBUG
-	ILibHashtable *t = ILibChain_GetBaseHashtable(Duktape_GetChain(ptrs->ctx));
-
-	if (connected != 0)
-	{
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnHold", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnCongestionWindowSizeChanged", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnRTTCalculated", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnFastRecovery", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnReceiverCredits", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnT3RTX", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSendRetry", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSendFastRetry", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnRetryPacket", ILibDuktape_WebRTC_Connection_Debug);
-		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSACKReceived", ILibDuktape_WebRTC_Connection_Debug);
-		ILibHashtable_Put(t, ILibWrapper_WebRTC_Connection2DtlsSession(connection), NULL, 0, ptrs);
-	}
-	else
+	if (connected == 0 && ptrs->debugRegistered != 0)
 	{
 		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnHold", NULL);
 		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnCongestionWindowSizeChanged", NULL);
@@ -342,7 +331,6 @@ void ILibDuktape_WebRTC_OnConnection(ILibWrapper_WebRTC_Connection connection, i
 		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSendFastRetry", NULL);
 		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnRetryPacket", NULL);
 		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSACKReceived", NULL);
-		ILibHashtable_Remove(t, ILibWrapper_WebRTC_Connection2DtlsSession(connection), NULL, 0);
 	}
 #endif
 
@@ -478,10 +466,6 @@ duk_ret_t ILibDuktape_WebRTC_Connection_Finalizer(duk_context *ctx)
 	//printf("WebRTCConnection Finalizer on %p\n", (void*)connection);
 	if (connection == NULL) { return 0; }
 
-#ifdef _WEBRTCDEBUG
-	ILibHashtable_Remove(ILibChain_GetBaseHashtable(Duktape_GetChain(ctx)), ILibWrapper_WebRTC_Connection2DtlsSession(connection), NULL, 0);
-#endif
-
 	if (ILibWrapper_WebRTC_Connection_IsConnected(connection) != 0)
 	{
 		ILibWrapper_WebRTC_Connection_CloseAllDataChannels(connection);
@@ -490,6 +474,34 @@ duk_ret_t ILibDuktape_WebRTC_Connection_Finalizer(duk_context *ctx)
 
 	return 0;
 }
+#ifdef _WEBRTCDEBUG
+void ILibDuktape_WebRTC_Connection_DebugHook(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
+{
+	// Only register the debug handlers if someone actually subscribed to the event
+	duk_push_heapptr(sender->ctx, sender->object);									// [connection]
+	ILibWrapper_WebRTC_Connection connection = (ILibWrapper_WebRTC_Connection)Duktape_GetPointerProperty(sender->ctx, -1, ILibDuktape_WebRTC_ConnectionPtr);
+	ILibWebRTC_Duktape_Handlers *ptrs = (ILibWebRTC_Duktape_Handlers*)ILibMemory_Extra(connection);
+	duk_pop(sender->ctx);															// ...
+	
+	if (ptrs->debugRegistered == 0)
+	{
+		SSL* ssl = ILibWrapper_WebRTC_DtlsSessionToSSL(ILibWrapper_WebRTC_Connection2DtlsSession(connection));
+		if (ILibDuktape_WebRTC_SSL2Duktape < 0) { ILibDuktape_WebRTC_SSL2Duktape = SSL_get_ex_new_index(0, "ILibDuktape_WebRTC_SSL2Connection index", NULL, NULL, NULL); }
+		SSL_set_ex_data(ssl, ILibDuktape_WebRTC_SSL2Duktape, ptrs);
+
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnHold", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnCongestionWindowSizeChanged", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnRTTCalculated", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnFastRecovery", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnReceiverCredits", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnT3RTX", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSendRetry", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSendFastRetry", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnRetryPacket", ILibDuktape_WebRTC_Connection_Debug);
+		ILibSCTP_Debug_SetDebugCallback(ILibWrapper_WebRTC_Connection2DtlsSession(connection), "OnSACKReceived", ILibDuktape_WebRTC_Connection_Debug);
+	}
+}
+#endif
 duk_ret_t ILibDuktape_WebRTC_CreateConnection(duk_context *ctx)
 {
 	ILibWebRTC_Duktape_Handlers *ptrs;
@@ -513,6 +525,7 @@ duk_ret_t ILibDuktape_WebRTC_CreateConnection(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "disconnected");
 
 #ifdef _WEBRTCDEBUG
+	ptrs->debugRegistered = 0;
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "_hold");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "_lastSackTime");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "_lastSentTime");
@@ -524,6 +537,18 @@ duk_ret_t ILibDuktape_WebRTC_CreateConnection(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "_retransmit");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "_retransmitPacket");
 	ILibDuktape_EventEmitter_CreateEventEx(ptrs->emitter, "_sackReceived");
+
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_hold", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_lastSackTime", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_lastSentTime", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_congestionWindowSizeChange", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_fastRecovery", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_rttCalculated", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_receiverCredits", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_t3tx", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_retransmit", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_retransmitPacket", ILibDuktape_WebRTC_Connection_DebugHook);
+	ILibDuktape_EventEmitter_AddHook(ptrs->emitter, "_sackReceived", ILibDuktape_WebRTC_Connection_DebugHook);
 #endif
 	duk_push_pointer(ctx, connection);												// [factory][connection][ptr]
 	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_ConnectionPtr);					// [factory][connection]
