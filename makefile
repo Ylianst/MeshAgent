@@ -14,7 +14,7 @@
 #	Using YUM:
 #		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel
 #
-#	NOTE: If you install headers for jpeg8, you need to put the headers in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
+#	NOTE: If you install headers for jpeg8, you need to put the compiled .a in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
 #		eg: make linux ARCHID=6 JPEGVER=v80
 #
 #
