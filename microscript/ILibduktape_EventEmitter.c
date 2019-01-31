@@ -191,7 +191,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	self = duk_get_heapptr(ctx, -1);
 	duk_pop(ctx);														// ...
 
-	if (data->eventTable == NULL) { duk_push_false(ctx);  return(1); } // This probably means the finalizer was already run on the eventEmitter
+	if (data->eventTable == NULL || data->ctx == NULL) { duk_push_false(ctx);  return(1); } // This probably means the finalizer was already run on the eventEmitter
 
 	eventList = ILibHashtable_Get(data->eventTable, NULL, name, (int)nameLen);
 	if (eventList == NULL) 
