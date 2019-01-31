@@ -292,12 +292,13 @@ function serviceManager()
                     require('fs').chmodSync('/etc/init.d/' + options.name, m);
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                     this._update._moduleName = options.name;
-                    this._update.on('exit', function onUpdateRC_d() { console.log(this._moduleName + ' installed'); process.exit(); });
                     this._update.stdout.on('data', function (chunk) { });
                     this._update.stdin.write('update-rc.d ' + options.name + ' defaults\n');
                     this._update.stdin.write('exit\n');
                     //update-rc.d meshagent defaults # creates symlinks for rc.d
                     //service meshagent start
+
+                    this._update.waitExit();
 
                     break;
                 case 'systemd':
@@ -310,11 +311,10 @@ function serviceManager()
                     require('fs').writeFileSync('/lib/systemd/system/' + options.name + '.service', '[Unit]\nDescription=' + serviceDescription + '\n[Service]\nExecStart=/usr/local/mesh/' + options.name + '\nStandardOutput=null\nRestart=always\nRestartSec=3\n[Install]\nWantedBy=multi-user.target\nAlias=' + options.name + '.service\n', { flags: 'w' });
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                     this._update._moduleName = options.name;
-                    this._update.on('exit', function onUpdateRC_d() { console.log(this._moduleName + ' installed'); process.exit(); });
                     this._update.stdout.on('data', function (chunk) { });
                     this._update.stdin.write('systemctl enable ' + options.name + '.service\n');
                     this._update.stdin.write('exit\n');
-
+                    this._update.waitExit();
                     break;
                 default: // unknown platform service type
                     break;

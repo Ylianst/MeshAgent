@@ -187,14 +187,9 @@ function serviceHost(serviceName)
                         console.log(e);
                         process.exit();
                     }
-                    if (process.platform == 'win32' || process.platform == 'darwin')
-                    {
-                        // Only do this on Windows/MacOS, becuase Linux is async... It'll complete later
-                        console.log(this._ServiceOptions.name + ' installed');
-                        process.exit();
-                    }
-                    i = process.argv.length;
-                    serviceOperation = 1;
+
+                    console.log(this._ServiceOptions.name + ' installed');
+                    process.exit();
                     break;
                 case '-uninstall':
                     if (!this._svcManager) { this._svcManager = new serviceManager(); }
