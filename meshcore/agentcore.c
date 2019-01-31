@@ -1430,7 +1430,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				updateXAuth = (char*)duk_get_string(ctx, -1);
 				if (console_uid != 0 && updateXAuth == NULL)
 				{
-					ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is you DM configured to use X?");
+					ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is your DM configured to use X?");
 					duk_pop(ctx);
 					return(1);
 				}
