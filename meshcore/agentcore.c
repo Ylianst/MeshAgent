@@ -2587,10 +2587,17 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			rcm->request = htons(requestid);									// Request id
 			if (agent->disableUpdate != 0)
 			{
+				// Never update
 				memset(rcm->coreModuleHash, 0, UTIL_SHA384_HASHSIZE);
+			}
+			else if (agent->forceUpdate != 0)
+			{
+				// Always Update
+				memset(rcm->coreModuleHash, 0xFFFF, UTIL_SHA384_HASHSIZE);
 			}
 			else
 			{
+				// Update when necessary
 				memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), agent->agentHash, UTIL_SHA384_HASHSIZE);// SHA384 hash of the agent executable
 			}
 
@@ -2609,8 +2616,10 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			char updateFileHash[UTIL_SHA384_HASHSIZE];
 			MeshCommand_BinaryPacket_CoreModule *cm = (MeshCommand_BinaryPacket_CoreModule*)cmd;
 
-			if (cmdLen == 4) {
+			if (cmdLen == 4) 
+			{
 				// Indicates the start of the agent update transfer
+				if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Starting download..."); }
 				util_deletefile(updateFilePath);
 			} else if (cmdLen == sizeof(MeshCommand_BinaryPacket_CoreModule)) 
 			{
@@ -2619,6 +2628,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				if ((GenerateSHA384FileHash(updateFilePath, updateFileHash) == 0) && (memcmp(updateFileHash, cm->coreModuleHash, sizeof(cm->coreModuleHash)) == 0))
 				{
 					//printf("UPDATE: End OK\r\n");
+					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified"); }
 #ifdef WIN32
 					agent->performSelfUpdate = 1;
 #else
@@ -2628,9 +2638,17 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
 #endif
 					// Everything looks good, lets perform the update
+					if (agent->logUpdate != 0) 
+					{
+						char tmp[255];
+						sprintf_s(tmp, sizeof(tmp), "SelfUpdate -> Stopping Chain (%d)", agent->performSelfUpdate);
+						ILIBLOGMESSSAGE(tmp);
+					}
 					ILibStopChain(agent->chain);
-				} else {
+				} else 
+				{
 					// Hash check failed, delete the file and do nothing. On next server reconnect, we will try again.
+					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash FAILED, aborting update..."); }
 					util_deletefile(updateFilePath);
 				}
 			}
@@ -3045,6 +3063,8 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 
 	util_random(sizeof(int), (char*)&timeout);
 	agent->disableUpdate = ILibSimpleDataStore_Get(agent->masterDb, "disableUpdate", NULL, 0);
+	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
+	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
 
 	if (agent->retryTime == 0)
 	{
@@ -4063,7 +4083,9 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #else
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update"); // uses ILibScratchPad2
 #endif
-			char str[4096];
+			char str[4096];				
+
+			if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updating..."); }
 
 			// Build the argument list
 			str[0] = 0;
@@ -4075,6 +4097,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			if (!CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We tried to execute a bad executable... not good. Lets try to recover.
+				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> FAILED..."); }
 				if (updateFilePath != NULL && agentHost->exePath != NULL)
 				{
 					while (util_CopyFile(agentHost->exePath, updateFilePath, FALSE) == FALSE) Sleep(5000);
@@ -4094,6 +4117,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			if (MeshAgent_Helper_IsService() != 0)
 			{
 				// We were started as a service
+				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Service Check... [YES]"); }
+
 				MeshAgent_Posix_PlatformTypes pt = MeshAgent_Posix_GetPlatformType();
 				if (pt != MeshAgent_Posix_PlatformTypes_UNKNOWN)
 				{
@@ -4108,16 +4133,19 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 					{
 #ifdef __APPLE__
 						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [LAUNCHD should auto restart]"); }
 							write(STDOUT_FILENO, "Finishing update...\n", 20);
 							fsync(STDOUT_FILENO);
 							exit(1); // We're exiting here, to restart via KeepAlive (LaunchD doesn't support an explicit 'restart')
 							break;
 #endif
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Issuing SYSTEMD restart"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "systemctl restart meshagent"); // Restart the service
 							ignore_result(system(ILibScratchPad));
 							break;
 						case MeshAgent_Posix_PlatformTypes_INITD:
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service Start (INITD)"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent start");	// Restart the service
 							ignore_result(system(ILibScratchPad));
 							break;
@@ -4129,6 +4157,12 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			}
 			else
 			{
+				if (agentHost->logUpdate != 0) 
+				{
+					ILIBLOGMESSSAGE("SelfUpdate -> Service Check... [NO]");
+					ILIBLOGMESSSAGE("SelfUpdate -> Manual Mode (COMPLETE)");
+				}
+
 				// Generic update process, call our own update with arguments.
 				struct stat results;
 				stat(agentHost->exePath, &results); // This the mode of the current executable
