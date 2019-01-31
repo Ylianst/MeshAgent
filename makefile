@@ -9,7 +9,7 @@
 #
 # To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg-dev
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev
 #
 #	Using YUM:
 #		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel
@@ -19,7 +19,7 @@
 #
 #
 # To build for 32 bit on 64 bit linux 
-#  sudo apt-get install linux-libc-dev:i386 libc6-dev-i386 libjpeg8-dev:i386
+#  sudo apt-get install linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386
 #
 # To install ARM Cross Compiler for Raspberry PI
 #  sudo apt-get install libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf
@@ -30,9 +30,21 @@
 #   make linux ARCHID=6 DEBUG=1             # Linux x86 64 bit, with debug symbols and automated crash handling
 #
 # Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2
-#  64 bit-> ./configure --with-jpeg8 
-#  32 bit-> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
+#  64 bit JPEG8  -> ./configure --with-jpeg8 
+#  64 bit JPEG62 -> ./configure
+#  32 bit JPEG8  -> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
+#  32 bit JPEG62 -> ./configure --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
+
 #	NOTE: If you installed jpeg8 headers on your machine, you must specify --with-jpeg8 when building turbo jpeg, otherwise omit --with-jpeg8
+#
+#
+# Special Note about KVM Support on Linux:
+#    If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, you may need to:
+#    1. Open /etc/gdm/custom.conf and uncomment WaylandEnable=false.
+#    2. Add the following line to the [daemon] section:
+#       DefaultSession=gnome-xorg.desktop
+#
+#
 #
 # Standard builds
 #
