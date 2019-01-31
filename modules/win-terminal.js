@@ -193,6 +193,7 @@ function windows_terminal() {
                     this.terminal._WriteBuffer(chunk);
                     flush();
                 }
+                return (true);
             },
             'final': function (flush) {
                 var p = this.terminal._stop();
