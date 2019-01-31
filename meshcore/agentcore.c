@@ -1305,6 +1305,19 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_Sink(duk_context *ctx
 }
 #endif
 
+#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
+void ILibDuktape_MeshAgent_RemoteDesktop_SendError(RemoteDesktop_Ptrs* ptrs, char *msg)
+{
+	int msgLen = strnlen_s(msg, 255);
+	char buffer[512];
+
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
+	memcpy_s(buffer + 4, 512 - 4, msg, msgLen);
+	ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer, msgLen + 4, ptrs);
+}
+#endif
+
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 {
 #ifndef _LINKVM
@@ -1415,6 +1428,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			})();") == 0)
 			{
 				updateXAuth = (char*)duk_get_string(ctx, -1);
+				if (console_uid != 0 && updateXAuth == NULL)
+				{
+					ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is you DM configured to use X?");
+					duk_pop(ctx);
+					return(1);
+				}
 			}
 			needPop = 1;
 		}
