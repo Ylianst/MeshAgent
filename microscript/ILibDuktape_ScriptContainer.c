@@ -804,6 +804,20 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Kill(duk_context *ctx)
 #endif
 	return(0);
 }
+duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
+{
+#ifdef WIN32
+	GetCurrentDirectoryA((DWORD)sizeof(ILibScratchPad), ILibScratchPad);
+	duk_push_string(ctx, ILibScratchPad);
+	return(1);
+#elif defined(_POSIX)
+	getcwd(ILibScratchPad, sizeof(ILibScratchPad));
+	duk_push_string(ctx, ILibScratchPad);				
+	return(1);
+#else
+	return(ILibDuktape_Error(ctx, "Error"));
+#endif
+}
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -813,6 +827,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_push_object(ctx);																// [g][process]
 	ILibDuktape_WriteID(ctx, "process");
 	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
+	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
+
 
 #if defined(WIN32)																		// [g][process][platform]
 	duk_push_string(ctx, "win32");
