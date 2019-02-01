@@ -413,41 +413,39 @@ function serviceManager()
             {
                 case 'init':
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                    this._update._svcname = name;
-                    this._update.on('exit', function onUninstallExit() {
-                        try {
-                            require('fs').unlinkSync('/etc/init.d/' + this._svcname);
-                            console.log(this._svcname + ' uninstalled');
-
-                        }
-                        catch (e) {
-                            console.log(this._svcname + ' could not be uninstalled')
-                        }
-                        process.exit();
-                    });
                     this._update.stdout.on('data', function (chunk) { });
                     this._update.stdin.write('service ' + name + ' stop\n');
                     this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
                     this._update.stdin.write('exit\n');
+                    this._update.waitExit();
+                    try
+                    {
+                        require('fs').unlinkSync('/etc/init.d/' + name);
+                        console.log(name + ' uninstalled');
+
+                    }
+                    catch (e)
+                    {
+                        console.log(name + ' could not be uninstalled', e)
+                    }
                     break;
                 case 'systemd':
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                    this._update._svcname = name;
-                    this._update.on('exit', function onUninstallExit() {
-                        try {
-                            require('fs').unlinkSync('/usr/local/mesh/' + this._svcname);
-                            require('fs').unlinkSync('/lib/systemd/system/' + this._svcname + '.service');
-                            console.log(this._svcname + ' uninstalled');
-                        }
-                        catch (e) {
-                            console.log(this._svcname + ' could not be uninstalled')
-                        }
-                        process.exit();
-                    });
                     this._update.stdout.on('data', function (chunk) { });
                     this._update.stdin.write('systemctl stop ' + name + '.service\n');
                     this._update.stdin.write('systemctl disable ' + name + '.service\n');
                     this._update.stdin.write('exit\n');
+                    this._update.waitExit();
+                    try
+                    {
+                        require('fs').unlinkSync('/usr/local/mesh/' + name);
+                        require('fs').unlinkSync('/lib/systemd/system/' + name + '.service');
+                        console.log(name + ' uninstalled');
+                    }
+                    catch (e)
+                    {
+                        console.log(name + ' could not be uninstalled', e)
+                    }
                     break;
                 default: // unknown platform service type
                     break;
