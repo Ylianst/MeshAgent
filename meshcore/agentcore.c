@@ -363,7 +363,10 @@ void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
 
 int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t bufferSize)
 {
+#ifndef __APPLE__
 	int retVal = 0;
+#endif
+
 #ifdef _POSIX
 	#ifndef __APPLE__
 		for (char **env = environ; *env; ++env)
@@ -453,6 +456,10 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 			duk_pop(agent->meshCoreCtx);
 			return(0);
 		}
+	}
+	else
+	{
+		return(0);
 	}
 	#endif
 #else
@@ -3352,8 +3359,9 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	int pLen;
 #endif
 #ifdef _POSIX
+#ifndef __APPLE__
 	int options = 0;
-
+#endif
 	if (paramLen >= 2)
 	{
 		if ((strcmp(param[1], "stop") == 0 || strcmp(param[1], "-s") == 0))
@@ -3972,7 +3980,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #ifdef WIN32
 	int x;
 #elif defined(__APPLE__)
-	int len = 1024;
+	uint32_t len = 1024;
 #elif defined(NACL)
 	// Do nothing
 #else
@@ -3997,7 +4005,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		GetModuleFileName(NULL, exePath, sizeof(exePath));
 #elif defined(__APPLE__)
 		if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
-		exePath[len] = 0;
+		exePath[(int)len] = 0;
 		agentHost->exePath = exePath;
 #elif defined(NACL)
 #else

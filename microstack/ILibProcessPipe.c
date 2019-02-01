@@ -828,20 +828,22 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_
 #endif
 	if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 	{
+#ifndef __APPLE__
 		int pipe;
 		struct winsize w;
 		w.ws_row = CONSOLE_SCREEN_HEIGHT;
 		w.ws_col = CONSOLE_SCREEN_WIDTH;
 		w.ws_xpixel = 0;
 		w.ws_ypixel = 0;
-#ifndef __APPLE__
 		pid = forkpty(&pipe, NULL, NULL, &w);
-#endif
 		retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
 		retVal->stdIn->mProcess = retVal;
 		retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(retVal->stdOut, ILibProcessPipe_Process_BrokenPipeSink);
 		retVal->stdOut->mProcess = retVal;
+#else
+		pid = 0; // Apple LLVM is being dumb, and throws a warning if I don't do this, even tho it'll never run
+#endif
 	}
 	else
 	{

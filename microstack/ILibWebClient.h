@@ -291,8 +291,8 @@ typedef void(*ILibWebClient_WebSocket_PongHandler)(ILibWebClient_StateObject sta
 void ILibWebClient_AddWebSocketRequestHeaders(ILibHTTPPacket *packet, int FragmentReassemblyMaxBufferSize, ILibWebClient_OnSendOK OnSendOK);
 ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObject state, ILibWebClient_WebSocket_DataTypes bufferType, char* buffer, int bufferLen, ILibAsyncSocket_MemoryOwnership userFree, ILibWebClient_WebSocket_FragmentFlags bufferFragment);
 void ILibWebClient_WebSocket_SetPingPongHandler(ILibWebClient_StateObject state, ILibWebClient_WebSocket_PingHandler pingHandler, ILibWebClient_WebSocket_PongHandler pongHandler, void *user);
-#define ILibWebClient_WebSocket_Ping(stateObject) ILibWebClient_WebSocket_Send((stateObject), (ILibWebClient_WebSocket_DataTypes)WEBSOCKET_OPCODE_PING, NULL, 0, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebServer_WebSocket_FragmentFlag_Complete)
-#define ILibWebClient_WebSocket_Pong(stateObject) ILibWebClient_WebSocket_Send((stateObject), (ILibWebClient_WebSocket_DataTypes)WEBSOCKET_OPCODE_PONG, NULL, 0, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebServer_WebSocket_FragmentFlag_Complete)
+#define ILibWebClient_WebSocket_Ping(stateObject) ILibWebClient_WebSocket_Send((stateObject), (ILibWebClient_WebSocket_DataTypes)WEBSOCKET_OPCODE_PING, NULL, 0, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebClient_WebSocket_FragmentFlag_Complete)
+#define ILibWebClient_WebSocket_Pong(stateObject) ILibWebClient_WebSocket_Send((stateObject), (ILibWebClient_WebSocket_DataTypes)WEBSOCKET_OPCODE_PONG, NULL, 0, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebClient_WebSocket_FragmentFlag_Complete)
 
 typedef void(*ILibWebClient_TimeoutHandler)(ILibWebClient_StateObject state, void *user);
 void ILibWebClient_SetTimeout(ILibWebClient_StateObject state, int timeoutSeconds, ILibWebClient_TimeoutHandler handler, void *user);

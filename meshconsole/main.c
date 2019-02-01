@@ -95,7 +95,6 @@ extern void* kvm_server_mainloop(void *parm);
 extern void senddebug(int val);
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
 {
-	int len;
 	ignore_result(write(STDOUT_FILENO, (void*)buffer, bufferLen));
 	return ILibTransport_DoneState_COMPLETE;
 }

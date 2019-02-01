@@ -925,7 +925,7 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 	((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->descriptor = data->wd.p;
 	((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->user = data;
 	((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->flags = ILibDuktape_fs_descriptorFlags_REMOVE;
-	watcher->descriptors = d;
+	watcher->descriptors = (ILibDuktape_fs_descriptorInfo**)d;
 	write(watcher->unblocker[1], " ", 1);
 	sem_wait(&(watcher->inputWaiter));
 
@@ -1188,7 +1188,7 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 	struct kevent change[KEVENTBLOCKSIZE];
 	struct kevent event;
 	int inCount = 1;
-	int n, i, x;
+	int n, i;
 	char tmp[255];
 
 	EV_SET(&(change[0]), watcher->unblocker[0], EVFILT_READ, EV_ADD | EV_CLEAR,	0, 0, 0);
@@ -1208,7 +1208,7 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 					if ((watcher->descriptors[i]->flags & ILibDuktape_fs_descriptorFlags_ADD) == ILibDuktape_fs_descriptorFlags_ADD)
 					{
 						// Add Descriptor
-						EV_SET(&(change[inCount++]), watcher->descriptors[i]->descriptor, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR, NOTE_DELETE | NOTE_EXTEND | NOTE_WRITE | NOTE_ATTRIB | NOTE_RENAME | NOTE_LINK, 0, watcher->descriptors[i]->user);
+						EV_SET(&(change[inCount++]), (uintptr_t)watcher->descriptors[i]->descriptor, EVFILT_VNODE, EV_ADD | EV_ENABLE | EV_CLEAR, NOTE_DELETE | NOTE_EXTEND | NOTE_WRITE | NOTE_ATTRIB | NOTE_RENAME | NOTE_LINK, 0, watcher->descriptors[i]->user);
 						if (inCount == KEVENTBLOCKSIZE)
 						{
 							// Change List is full, let's set it to kevent now
@@ -1219,7 +1219,7 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 					if ((watcher->descriptors[i]->flags & ILibDuktape_fs_descriptorFlags_REMOVE) == ILibDuktape_fs_descriptorFlags_REMOVE)
 					{
 						// Remove Descriptor
-						EV_SET(&(change[inCount++]), watcher->descriptors[i]->descriptor, EVFILT_VNODE, EV_DELETE | EV_DISABLE, 0, 0, NULL);
+						EV_SET(&(change[inCount++]), (uintptr_t)watcher->descriptors[i]->descriptor, EVFILT_VNODE, EV_DELETE | EV_DISABLE, 0, 0, NULL);
 						if (inCount == KEVENTBLOCKSIZE)
 						{
 							// Change List is full, let's set it to kevent now
@@ -1233,9 +1233,6 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 			else
 			{
 				// One of the descriptors triggered!
-				char test[4096];
-				int testLen = 4096;
-
 				if ((event.fflags & NOTE_ATTRIB) == NOTE_ATTRIB)
 				{
 					ILibChain_RunOnMicrostackThreadEx(watcher->chain, ILibduktape_fs_watch_appleWorker_ATTRIB, event.udata);
@@ -1277,7 +1274,9 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	int nargs = duk_get_top(ctx);
 	int i;
 	ILibDuktape_fs_watcherData *data;
+#ifndef __APPLE__
 	void *chain = Duktape_GetChain(ctx);
+#endif
 
 #if defined(WIN32)
 	int recursive = 0;
@@ -1419,7 +1418,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->descriptor = data->wd.p;
 		((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->user = data;
 		((ILibDuktape_fs_descriptorInfo*)ILibMemory_Extra(d))->flags = ILibDuktape_fs_descriptorFlags_ADD;
-		watcher->descriptors = d;
+		watcher->descriptors = (ILibDuktape_fs_descriptorInfo**)d;
 		write(watcher->unblocker[1], " ", 1);
 		sem_wait(&(watcher->inputWaiter));
 	}
