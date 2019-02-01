@@ -93,6 +93,8 @@ void ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler(ILibDuktape_WritableSt
 void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
 	p->exitCode = exitCode;
 	p->childProcess = NULL;
 
@@ -112,18 +114,24 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 void ILibDuktape_ChildProcess_SubProcess_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
 	ILibDuktape_readableStream_WriteData(p->stdOut, buffer, bufferLen);
 	*bytesConsumed = bufferLen;
 }
 void ILibDuktape_ChildProcess_SubProcess_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
 	ILibDuktape_readableStream_WriteData(p->stdErr, buffer, bufferLen);
 	*bytesConsumed = bufferLen;
 }
 void ILibDuktape_ChildProcess_SubProcess_SendOK(ILibProcessPipe_Process sender, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
 	ILibDuktape_WritableStream_Ready(p->stdIn);
 }
 duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
@@ -161,11 +169,10 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 	ILibDuktape_WriteID(ctx, "childProcess.subProcess");
 	duk_push_pointer(ctx, mProcess);											// [ChildProcess][ptr]
 	duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Process);				// [ChildProcess]
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_ChildProcess_SubProcess));	// [ChildProcess][buffer]
-	ILibDuktape_ChildProcess_SubProcess *retVal = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBuffer(ctx, -1, NULL);
+
+	ILibDuktape_ChildProcess_SubProcess *retVal = (ILibDuktape_ChildProcess_SubProcess*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_ChildProcess_SubProcess));
 	duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_MemBuf); 				// [ChildProcess]
 
-	memset(retVal, 0, sizeof(ILibDuktape_ChildProcess_SubProcess));
 	retVal->ctx = ctx;
 	retVal->subProcess = duk_get_heapptr(ctx, -1);
 	retVal->childProcess = mProcess;
