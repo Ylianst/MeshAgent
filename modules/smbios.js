@@ -77,7 +77,8 @@ function SMBiosTables()
         var SMData;
         var structcount = 0;
 
-        while (SMData && i < SMData.length) {
+        while (SMData && i < SMData.length)
+        {
             var SMtype = SMData[i];
             var SMlength = SMData[i + 1];
 
@@ -88,12 +89,20 @@ function SMBiosTables()
 
             ret[SMtype].peek()._strings = [];
 
-            while (SMData[i] != 0) {
+            while (SMData[i] != 0 && i <= SMData.length)
+            {
                 var strstart = i;
 
                 // Start of String, find end of string
-                while (SMData[i++] != 0);
-                ret[SMtype].peek()._strings.push(SMData.slice(strstart, i).toString().trim());
+                while (SMData[i++] != 0 && i <= SMData.length);
+                try
+                {
+                    ret[SMtype].peek()._strings.push(SMData.slice(strstart, i).toString().trim());
+                }
+                catch (ee)
+                {
+                    console.log('oops');
+                }
             }
             i += (ret[SMtype].peek()._strings.length == 0) ? 2 : 1;
             ++structcount;
