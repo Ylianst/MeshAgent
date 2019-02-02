@@ -117,6 +117,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 
+	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
+	{
+		integratedJavaScript = ILibString_Copy(argv[2], -1);
+		integratedJavaScriptLen = strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+	}
+
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
