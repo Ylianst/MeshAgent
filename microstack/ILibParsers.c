@@ -9224,19 +9224,20 @@ void ILib6to4(struct sockaddr* addr)
 }
 
 // Log a critical error to file
+char ILibCriticalLogBuffer[sizeof(ILibScratchPad)];
 char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, int user2)
 {
 	char timeStamp[32];
 	int len = ILibGetLocalTime((char*)timeStamp, (int)sizeof(timeStamp));
 	if (file != NULL)
 	{
-		len = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "\r\n[%s] %s:%d (%d,%d) %s", timeStamp, file, line, user1, user2, msg);
+		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] %s:%d (%d,%d) %s", timeStamp, file, line, user1, user2, msg);
 	}
 	else
 	{
-		len = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "\r\n[%s] %s", timeStamp, msg);
+		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] %s", timeStamp, msg);
 	}
-	if (len > 0 && len < (int)sizeof(ILibScratchPad) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx(ILibCriticalLogFilename, ILibScratchPad, len);
+	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx(ILibCriticalLogFilename, ILibCriticalLogBuffer, len);
 	if (file != NULL)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "%s:%d (%d,%d) %s", file, line, user1, user2, msg);
@@ -9245,7 +9246,7 @@ char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, i
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "%s", msg);
 	}
-	return(ILibScratchPad);
+	return(ILibCriticalLogBuffer);
 }
 //! Platform Agnostic method to Spawn a detached worker thread with normal priority/affinity
 /*!

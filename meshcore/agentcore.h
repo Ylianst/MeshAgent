@@ -170,6 +170,7 @@ typedef struct MeshAgentHostContainer
 	int disableUpdate;
 	int forceUpdate;
 	int logUpdate;
+	int fakeUpdate;
 	void *coreTimeout;
 
 	char agentHash[UTIL_SHA384_HASHSIZE];

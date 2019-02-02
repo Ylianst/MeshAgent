@@ -2205,6 +2205,13 @@ void MeshServer_ServerAuthenticated(ILibWebClient_StateObject WebStateObject, Me
 		duk_push_int(agent->meshCoreCtx, 1);										// [emit][this][Connected][1]
 		if (duk_pcall_method(agent->meshCoreCtx, 2) != 0) { ILibDuktape_Process_UncaughtException(agent->meshCoreCtx); }
 		duk_pop(agent->meshCoreCtx);												// ...
+
+		if (agent->logUpdate != 0) 
+		{
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "Connection Established [%p]...", WebStateObject);
+			ILIBLOGMESSSAGE(ILibScratchPad);
+		}
+
 	}
 }
 
@@ -2601,6 +2608,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			{
 				// Always Update
 				memset(rcm->coreModuleHash, 0xFFFF, UTIL_SHA384_HASHSIZE);
+				if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Forcing Update..."); }
 			}
 			else
 			{
@@ -2636,6 +2644,19 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				{
 					//printf("UPDATE: End OK\r\n");
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified"); }
+					if (agent->fakeUpdate != 0)
+					{
+						int fsz;
+						char *fsc;
+						fsz = ILibReadFileFromDiskEx(&fsc, agent->exePath);
+						ILibWriteStringToDiskEx(updateFilePath, fsc, fsz);
+						if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Overriding update with same version..."); }
+					}
+					if (agent->fakeUpdate != 0 || agent->forceUpdate != 0)
+					{
+						ILibSimpleDataStore_Put(agent->masterDb, "disableUpdate", "1");
+						if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Disabling future updates..."); }
+					}
 #ifdef WIN32
 					agent->performSelfUpdate = 1;
 #else
@@ -2826,6 +2847,13 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		ILibRemoteLogging_printf(ILibChainGetLogger(ILibWebClient_GetChainFromWebStateObject(WebStateObject)), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent Host Container: Mesh Server Connection Error, trying again later.");
 		printf("Mesh Server Connection Error\n");
 
+		if (agent->logUpdate != 0) 
+		{
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "Connection Error [%p, %d]...\n", WebStateObject, InterruptFlag);
+			ILIBLOGMESSSAGE(ILibScratchPad); 
+		}
+
+
 		if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
 		MeshServer_Connect(agent);
 		return;
@@ -2956,6 +2984,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	}
 
 	printf("Connecting to: %s\n", serverUrl);
+	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE(serverUrl); }
+
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore: Attempting connection to: %s", serverUrl);
 	ILibDestructParserResults(rs);
 
@@ -3043,6 +3073,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 				{
 					memcpy_s(&(ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx)->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
 				}
+				if (agent->logUpdate != 0) { ILibScratchPad[delimiter] = ':';  ILIBLOGMESSSAGE(ILibScratchPad); }
 			}
 #else
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore.MeshServer_ConnectEx(): Proxy Specified, but support was not enabled in this build");
@@ -3072,6 +3103,10 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->disableUpdate = ILibSimpleDataStore_Get(agent->masterDb, "disableUpdate", NULL, 0);
 	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
+	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
+
+
+	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
 
 	if (agent->retryTime == 0)
 	{
@@ -3751,6 +3786,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 
 		ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);
+		
 		MeshServer_Connect(agentHost);
 
 
@@ -3974,6 +4010,29 @@ void MeshAgent_AgentMode_Dispatched(void *chain, void *user)
 	}
 }
 
+
+#ifdef _POSIX
+int MeshAgent_System(char *cmd)
+{
+	//int status = -1;
+	pid_t pid = fork();
+
+	if(pid == 0)
+	{
+		// Child
+		execv("/bin/sh", (char**)(char*[]) { "sh", "-c", cmd, (char*)0 });
+		_exit(1);
+	}
+	else if (pid > 0)
+	{
+		// Parent
+		//waitpid(pid, &status, 0);
+	}
+	return(0);
+}
+
+#endif
+
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
 	char exePath[1024];
@@ -4150,17 +4209,16 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Issuing SYSTEMD restart"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "systemctl restart meshagent"); // Restart the service
-							ignore_result(system(ILibScratchPad));
+							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						case MeshAgent_Posix_PlatformTypes_INITD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service Start (INITD)"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent start");	// Restart the service
-							ignore_result(system(ILibScratchPad));
+							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						default:
 							break;
 					}
-
 				}
 			}
 			else
