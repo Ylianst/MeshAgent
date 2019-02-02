@@ -239,6 +239,7 @@ void ILibDuktape_Debugger_AsyncWaitConn(ILibDuktape_Debugger *dbg)
 	if (dbg->chainedObject == NULL)
 	{
 		dbg->chainedObject = ILibChain_Link_Allocate(sizeof(ILibChain_Link), sizeof(void*));
+		dbg->chainedObject->MetaData = "ILibDuktape_Debugger_AsyncWaitConn";
 		((void**)dbg->chainedObject->ExtraMemoryPtr)[0] = dbg;
 		dbg->chainedObject->PreSelectHandler = ILibDuktape_Debugger_AsyncWaitConn_PreSelect;
 		dbg->chainedObject->PostSelectHandler = ILibDuktape_Debugger_AsyncWaitConn_PostSelect;

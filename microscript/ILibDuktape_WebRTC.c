@@ -192,9 +192,9 @@ void ILibDuktape_WebRTC_DataChannel_PUSH(duk_context *ctx, ILibWrapper_WebRTC_Da
 	if (dataChannel->userData != NULL) { duk_push_heapptr(((ILibDuktape_WebRTC_DataChannel*)dataChannel->userData)->ctx, ((ILibDuktape_WebRTC_DataChannel*)dataChannel->userData)->emitter->object); return; }
 	ILibDuktape_WebRTC_DataChannel *ptrs;
 
-	dataChannel->TransportSendOKPtr = ILibDuktape_WebRTC_OnDataChannelSendOK;
+	dataChannel->Header.transport.SendOkPtr = ILibDuktape_WebRTC_OnDataChannelSendOK;
 	dataChannel->OnClosed = ILibDuktape_WebRTC_DataChannel_OnClose;
-	dataChannel->OnRawData = ILibDuktape_WebRTC_DataChannel_OnData;
+	dataChannel->Header.DataChannelCallbacks.OnRawData = ILibDuktape_WebRTC_DataChannel_OnData;
 
 	duk_push_object(ctx);														// [dataChannel]
 	ILibDuktape_WriteID(ctx, "webRTC.dataChannel");

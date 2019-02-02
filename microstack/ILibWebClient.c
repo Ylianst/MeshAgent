@@ -2475,7 +2475,7 @@ ILibWebClient_RequestManager ILibCreateWebClient(int PoolSize, void *Chain)
 	if ((RetVal = (struct ILibWebClientManager*)malloc(sizeof(struct ILibWebClientManager))) == NULL) ILIBCRITICALEXIT(254);
 	memset(RetVal, 0, sizeof(struct ILibWebClientManager));
 	RetVal->MaxConnectionsToSameServer = 1;
-	
+	RetVal->ChainLink.MetaData = "ILibWebClient";
 	RetVal->ChainLink.DestroyHandler = &ILibDestroyWebClient;
 	RetVal->ChainLink.PreSelectHandler = &ILibWebClient_PreProcess;
 	//RetVal->PostSelect = &ILibWebClient_PreProcess;

@@ -2625,6 +2625,37 @@ void ILibChain_DisableWatchDog(void *chain)
 	((ILibBaseChain*)chain)->nowatchdog = 1;
 }
 
+void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
+{
+	void *ret = NULL;
+	ILibChain_Link *module;
+	void *node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+	int selectTimeout = UPNP_MAX_WAIT * 1000;
+
+	fd_set readset;
+	fd_set errorset;
+	fd_set writeset;
+
+	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+	{
+		if (module->PreSelectHandler != NULL)
+		{
+			FD_ZERO(&readset);
+			FD_ZERO(&errorset);
+			FD_ZERO(&writeset);
+
+			module->PreSelectHandler(module, &readset, &writeset, &errorset, &selectTimeout);
+			if (FD_ISSET(fd, &readset) || FD_ISSET(fd, &writeset) || FD_ISSET(fd, &errorset))
+			{
+				ret = module;
+				break;
+			}
+		}
+		node = ILibLinkedList_GetNextNode(node);
+	}
+	return(ret);
+}
+
 /*! \fn ILibStartChain(void *Chain)
 \brief Starts a Chain
 \par

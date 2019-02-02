@@ -66,16 +66,16 @@ typedef void(*ILibWrapper_WebRTC_DataChannel_OnClosed)(struct ILibWrapper_WebRTC
 /** DataChannel abstraction used to send/receive peer-to-peer data. */
 typedef struct ILibWrapper_WebRTC_DataChannel
 {	
-	ILibWrapper_WebRTC_DataChannel_OnData OnBinaryData; //!< Binary Data Event Handler
-	ILibWrapper_WebRTC_DataChannel_OnData OnStringData; //!< String Data Event Handler
-	ILibWrapper_WebRTC_DataChannel_OnRawData OnRawData; //!< Raw Data Event Handler
-	void* Chain; //!< Microstack Chain to which this object resides
-	void* ReservedMemory; //!< RESERVED
-	ILibTransport_SendPtr SendPtr; //!< RESERVED
-	ILibTransport_ClosePtr ClosePtr; //!< RESERVED
-	ILibTransport_PendingBytesToSendPtr PendingBytesPtr; //!< RESERVED
-	ILibTransport_OnSendOK TransportSendOKPtr; //!< RESERVED
-	unsigned int IdentifierFlags; //!< RESERVED
+	union ILibWrapper_WebRTC_DataChannel_Header
+	{
+		ILibTransport transport;
+		struct DataChannelCallbacks
+		{
+			ILibWrapper_WebRTC_DataChannel_OnData OnBinaryData; //!< Binary Data Event Handler
+			ILibWrapper_WebRTC_DataChannel_OnData OnStringData; //!< String Data Event Handler
+			ILibWrapper_WebRTC_DataChannel_OnRawData OnRawData; //!< Raw Data Event Handler
+		}DataChannelCallbacks;
+	}Header;
 	/*
 	*
 	* DO NOT MODIFY STRUCT DEFINITION ABOVE THIS COMMENT BLOCK

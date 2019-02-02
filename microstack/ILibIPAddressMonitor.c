@@ -138,6 +138,7 @@ void ILibIPAddressMonitor_PostSelect(void* object, int slct, fd_set *readset, fd
 ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonitor_Handler handler, void *user)
 {
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)ILibChain_Link_Allocate(ILibMemory_IPAddressMonitor_CONTAINER_SIZE, 0);
+	obj->chainLink.MetaData = "ILibIPAddressMonitor";
 #ifndef NO_IPADDR_MONITOR
 
 	obj->onUpdate = handler;

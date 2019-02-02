@@ -443,7 +443,7 @@ ILibTransport_DoneState ILibAsyncSocket_TransportSend(void *transport, char* buf
 ILibAsyncSocket_SocketModule ILibCreateAsyncSocketModuleWithMemory(void *Chain, int initialBufferSize, ILibAsyncSocket_OnData OnData, ILibAsyncSocket_OnConnect OnConnect, ILibAsyncSocket_OnDisconnect OnDisconnect, ILibAsyncSocket_OnSendOK OnSendOK, int UserMappedMemorySize)
 {
 	struct ILibAsyncSocketModule *RetVal = (struct ILibAsyncSocketModule*)ILibChain_Link_Allocate(sizeof(struct ILibAsyncSocketModule), UserMappedMemorySize);
-
+	RetVal->Transport.ChainLink.MetaData = "ILibAsyncSocket";
 	RetVal->Transport.IdentifierFlags = ILibTransports_AsyncSocket;
 	RetVal->Transport.SendPtr = &ILibAsyncSocket_TransportSend;
 	RetVal->Transport.ClosePtr = &ILibAsyncSocket_Disconnect;

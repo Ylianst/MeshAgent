@@ -1086,6 +1086,7 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Descriptor);								// [HECI]
 	
 	HECI_chainLink *hlink = ILibMemory_Allocate(sizeof(HECI_chainLink), 0, NULL, NULL);
+	hlink->link.MetaData = "ILibDuktape_HECI";
 	hlink->ctx = ctx;
 	hlink->descriptor = h;
 	hlink->link.PreSelectHandler = ILibDuktape_HECI_PreSelect;

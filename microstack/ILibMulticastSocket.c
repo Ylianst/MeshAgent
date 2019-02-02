@@ -297,6 +297,7 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 	addr6.sin6_port = htons(LocalPort);
 
 	// Setup the multicasting module
+	module->ChainLink.MetaData = "ILibMulticastSocket";
 	module->ChainLink.DestroyHandler = &ILibMulticastSocket_Destroy;
 	module->ChainLink.ParentChain = Chain;
 	module->LocalPort = LocalPort;
