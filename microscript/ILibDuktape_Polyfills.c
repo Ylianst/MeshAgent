@@ -1813,63 +1813,17 @@ void ILibDuktape_ChainViewer_PostSelect(void* object, int slct, fd_set *readset,
 {
 	duk_context *ctx = (duk_context*)((void**)((ILibTransport*)object)->ChainLink.ExtraMemoryPtr)[0];
 	void *hptr = ((void**)((ILibTransport*)object)->ChainLink.ExtraMemoryPtr)[1];
-	int i;
 	
 	ILibDuktape_EventEmitter_SetupEmit(ctx, hptr, "PostSelect");	// [emit][this][name]
 	duk_push_int(ctx, slct);										// [emit][this][name][select]
-	duk_push_array(ctx);											// [emit][this][name][select][readset
-	for (i = 0; i < 4096; ++i)
-	{
-		if (FD_ISSET(i, readset))
-		{
-			duk_push_int(ctx, i);
-			duk_put_prop_index(ctx, -2, duk_get_length(ctx, -1));	// [emit][this][name][select][readset]
-		}
-	}
-	duk_push_array(ctx);											// [emit][this][name][select][readset][writeset]
-	for (i = 0; i < 4096; ++i)
-	{
-		if (FD_ISSET(i, writeset))
-		{
-			duk_push_int(ctx, i);
-			duk_put_prop_index(ctx, -2, duk_get_length(ctx, -1));	// [emit][this][name][select][readset][writeset]
-		}
-	}
-	duk_push_array(ctx);											// [emit][this][name][select][readset][writeset][errorset]
-	for (i = 0; i < 4096; ++i)
-	{
-		if (FD_ISSET(i, errorset))
-		{
-			duk_push_int(ctx, i);
-			duk_put_prop_index(ctx, -2, duk_get_length(ctx, -1));	// [emit][this][name][select][readset][writeset][errorset]
-		}
-	}
-	if (duk_pcall_method(ctx, 5) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ChainViewer.emit('PostSelect'): Error "); }
+
+	char *m = ILibChain_GetMetaDataFromDescriptorSet(Duktape_GetChain(ctx), readset, writeset, errorset);
+	duk_push_string(ctx, m);
+	if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ChainViewer.emit('PostSelect'): Error "); }
 	duk_pop(ctx);
 }
-duk_ret_t ILibDuktape_ChainViewer_GetDescriptorInfo(duk_context *ctx)
-{
-	int fd = duk_require_int(ctx, 0);
-	void *chain = Duktape_GetChain(ctx);
 
-	void *module = ILibChain_GetObjectForDescriptor(chain, fd);
-	duk_push_object(ctx);
-	if (module != NULL)
-	{
-		duk_push_pointer(ctx, module);
-		duk_put_prop_string(ctx, -2, "_ptr");
-		duk_push_string(ctx, Duktape_GetStashKey(module));
-		duk_put_prop_string(ctx, -2, "pointer");
-		if (((ILibChain_Link*)module)->MetaData != NULL)
-		{
-			duk_push_string(ctx, ((ILibChain_Link*)module)->MetaData);
-			duk_put_prop_string(ctx, -2, "moduleType");
-		}
-	}
-
-
-	return(1);
-}
+extern void ILibPrependToChain(void *Chain, void *object);
 void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);			// [viewer]
@@ -1881,9 +1835,7 @@ void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 	((void**)t->ChainLink.ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "PostSelect");
-
-	ILibDuktape_CreateInstanceMethod(ctx, "GetDescriptorInfo", ILibDuktape_ChainViewer_GetDescriptorInfo, 1);
-	ILibAddToChain(chain, (void*)t);
+	ILibPrependToChain(chain, (void*)t);
 }
 
 void ILibDuktape_Polyfills_Init(duk_context *ctx)

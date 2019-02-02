@@ -924,6 +924,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_DestroyEx(void *chain);
 	void ILibChain_DisableWatchDog(void *chain);
 	void *ILibChain_GetObjectForDescriptor(void *chain, int fd);
+	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);

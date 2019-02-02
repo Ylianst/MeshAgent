@@ -1829,6 +1829,15 @@ void ILibAddToChain(void *Chain, void *object)
 	ILibLinkedList_AddTail(((ILibBaseChain*)Chain)->Links, object);
 	((ILibChain_Link*)object)->ParentChain = Chain;
 }
+void ILibPrependToChain(void *Chain, void *object)
+{
+	//
+	// Add link to the front of the chain (Linked List)
+	//
+	ILibLinkedList_AddHead(((ILibBaseChain*)Chain)->Links, object);
+	((ILibChain_Link*)object)->ParentChain = Chain;
+
+}
 
 //! Return the base timer for this chain. Most of the time, new timers probably don't need to be created
 /*!
@@ -2623,6 +2632,58 @@ void ILibChain_WatchDogStart(void *obj)
 void ILibChain_DisableWatchDog(void *chain)
 {
 	((ILibBaseChain*)chain)->nowatchdog = 1;
+}
+
+char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine)
+{
+	char *ret = NULL;
+	ILibChain_Link *module;
+	void *node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+	int selectTimeout = UPNP_MAX_WAIT * 1000;
+
+	fd_set readset;
+	fd_set errorset;
+	fd_set writeset;
+	fd_set emptyset; FD_ZERO(&emptyset);
+	struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
+	int len = 0;
+
+
+	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+	{
+		if (module->PreSelectHandler != NULL)
+		{
+			FD_ZERO(&readset);
+			FD_ZERO(&errorset);
+			FD_ZERO(&writeset);
+
+			module->PreSelectHandler(module, &readset, &writeset, &errorset, &selectTimeout);
+			if (memcmp(&readset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&writeset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&errorset, &emptyset, sizeof(fd_set)) != 0)
+			{
+				// Descriptors were added, lets test them
+				if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0)
+				{
+					len += sprintf_s(ILibScratchPad + len, sizeof(ILibScratchPad) - len, "%s ", ((ILibChain_Link*)module)->MetaData);
+				}
+			}
+		}
+		node = ILibLinkedList_GetNextNode(node);
+	}
+
+	if (len > 0) { ret = ILibScratchPad; }
+	if (ret == NULL)
+	{
+#if defined(WIN32)
+		if (FD_ISSET(((ILibBaseChain*)chain)->TerminateSock, ine) || FD_ISSET(((ILibBaseChain*)chain)->TerminateSock, inr)) { ret = "ILibForceUnblockChain"; }
+#else
+		if (FD_ISSET(fileno(((ILibBaseChain*)chain)->TerminateReadPipe), inr)) { ret = "ILibForceUnblockChain"; }
+#endif
+		if (ret == NULL)
+		{
+			ret = "UNKNOWN";
+		}
+	}
+	return(ret);
 }
 
 void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
@@ -6469,6 +6530,7 @@ void *ILibCreateLifeTime(void *Chain)
 	if ((RetVal = (struct ILibLifeTime*)malloc(sizeof(struct ILibLifeTime))) == NULL) ILIBCRITICALEXIT(254);
 	memset(RetVal,0,sizeof(struct ILibLifeTime));
 
+	RetVal->ChainLink.MetaData = "ILibLifeTime";
 	RetVal->ObjectList = ILibLinkedList_Create();
 	RetVal->ChainLink.PreSelectHandler = &ILibLifeTime_Check;
 	RetVal->ChainLink.DestroyHandler = &ILibLifeTime_Destroy;
