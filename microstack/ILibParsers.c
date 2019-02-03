@@ -1082,8 +1082,7 @@ typedef struct ILibBaseChain
 #if defined(WIN32)
 	SOCKET TerminateSock;
 #else
-	FILE *TerminateReadPipe;
-	FILE *TerminateWritePipe;
+	int TerminatePipe[2];
 #endif
 
 	void *Timer;
@@ -1876,10 +1875,9 @@ void ILibForceUnBlockChain(void* Chain)
 	//
 	// Writing data on the pipe will trigger the select on Posix
 	//
-	if (c->TerminateWritePipe != NULL)
+	if (c->TerminatePipe[1] != 0)
 	{
-		fprintf(c->TerminateWritePipe," ");
-		fflush(c->TerminateWritePipe);
+		ignore_result(write(c->TerminatePipe[1], " ", 1));
 	}
 #endif
 }
@@ -2028,7 +2026,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		//
 		// Put the Read end of the Pipe in the FDSET, for ILibForceUnBlockChain
 		//
-		FD_SET(fileno(root->TerminateReadPipe), &readset);
+		FD_SET(root->TerminatePipe[0], &readset);
 #endif
 		sem_wait(&ILibChainLock);
 		while (ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
@@ -2075,13 +2073,23 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		}
 
 #ifndef WIN32
-		if (FD_ISSET(fileno(root->TerminateReadPipe), &readset))
+		if (FD_ISSET(root->TerminatePipe[0], &readset))
 		{
 			//
 			// Empty the pipe
 			//
-			while (fgetc(((struct ILibBaseChain*)Chain)->TerminateReadPipe) != EOF)
+			while ((vX = read(root->TerminatePipe[0], ILibScratchPad, sizeof(ILibScratchPad))) > 0);
+			if (vX == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
 			{
+				// Something happened
+				close(root->TerminatePipe[0]);
+				close(root->TerminatePipe[1]);
+				root->TerminatePipe[0] = root->TerminatePipe[1] = 0;
+				if (pipe(root->TerminatePipe) == 0)
+				{
+					fcntl(root->TerminatePipe[0], F_SETFL, O_NONBLOCK);
+					fcntl(root->TerminatePipe[1], F_SETFL, O_NONBLOCK);
+				}
 			}
 		}
 #endif
@@ -2676,7 +2684,7 @@ char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *i
 #if defined(WIN32)
 		if (FD_ISSET(((ILibBaseChain*)chain)->TerminateSock, ine) || FD_ISSET(((ILibBaseChain*)chain)->TerminateSock, inr)) { ret = "ILibForceUnblockChain"; }
 #else
-		if (FD_ISSET(fileno(((ILibBaseChain*)chain)->TerminateReadPipe), inr)) { ret = "ILibForceUnblockChain"; }
+		if (FD_ISSET(((ILibBaseChain*)chain)->TerminatePipe[0], inr)) { ret = "ILibForceUnblockChain"; }
 #endif
 		if (ret == NULL)
 		{
@@ -2738,10 +2746,6 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	struct timeval tv;
 	int slct;
 	int vX;
-#if !defined(WIN32) && !defined(_WIN32_WCE)
-	int TerminatePipe[2];
-	int flags;
-#endif
 
 	if (Chain == NULL) { return; }
 	chain->PreSelectCount = chain->PostSelectCount = 0;
@@ -2781,18 +2785,16 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	FD_ZERO(&errorset);
 	FD_ZERO(&writeset);
 
-#if !defined(WIN32) && !defined(_WIN32_WCE)
+#if defined(_POSIX)
 	// 
 	// For posix, we need to use a pipe to force unblock the select loop
 	//
-	if (pipe(TerminatePipe) == -1) {} // TODO: Pipe error
-	flags = fcntl(TerminatePipe[0],F_GETFL,0);
-	//
-	// We need to set the pipe to nonblock, so we can blindly empty the pipe
-	//
-	fcntl(TerminatePipe[0],F_SETFL,O_NONBLOCK|flags);
-	((struct ILibBaseChain*)Chain)->TerminateReadPipe = fdopen(TerminatePipe[0],"r");
-	((struct ILibBaseChain*)Chain)->TerminateWritePipe = fdopen(TerminatePipe[1],"w");
+	if (pipe(chain->TerminatePipe) == 0)
+	{
+		// We need to set the pipe to nonblock, so we can blindly empty the pipe
+		fcntl(chain->TerminatePipe[0], F_SETFL, O_NONBLOCK);
+		fcntl(chain->TerminatePipe[1], F_SETFL, O_NONBLOCK);
+	}
 #endif
 
 	chain->RunningFlag = 1;
@@ -2845,7 +2847,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		//
 		// Put the Read end of the Pipe in the FDSET, for ILibForceUnBlockChain
 		//
-		FD_SET(TerminatePipe[0], &readset);
+		FD_SET(chain->TerminatePipe[0], &readset);
 #endif
 		sem_wait(&ILibChainLock);
 		while(ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
@@ -2892,13 +2894,23 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		}
 
 #ifndef WIN32
-		if (FD_ISSET(TerminatePipe[0], &readset))
+		if (FD_ISSET(chain->TerminatePipe[0], &readset))
 		{
 			//
 			// Empty the pipe
 			//
-			while (fgetc(((struct ILibBaseChain*)Chain)->TerminateReadPipe)!=EOF)
+			while ((vX = read(chain->TerminatePipe[0], ILibScratchPad, sizeof(ILibScratchPad))) > 0);
+			if (vX == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
 			{
+				// Something happened
+				close(chain->TerminatePipe[0]);
+				close(chain->TerminatePipe[1]);
+				chain->TerminatePipe[0] = chain->TerminatePipe[1] = 0;
+				if (pipe(chain->TerminatePipe) == 0)
+				{
+					fcntl(chain->TerminatePipe[0], F_SETFL, O_NONBLOCK);
+					fcntl(chain->TerminatePipe[1], F_SETFL, O_NONBLOCK);
+				}
 			}
 		}
 #endif
@@ -3028,10 +3040,11 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	//
 	// Free the pipe resources
 	//
-	fclose(((ILibBaseChain*)Chain)->TerminateReadPipe);
-	fclose(((ILibBaseChain*)Chain)->TerminateWritePipe);
-	((ILibBaseChain*)Chain)->TerminateReadPipe=0;
-	((ILibBaseChain*)Chain)->TerminateWritePipe=0;
+	close(((ILibBaseChain*)Chain)->TerminatePipe[0]); 
+	close(((ILibBaseChain*)Chain)->TerminatePipe[1]);
+
+	((ILibBaseChain*)Chain)->TerminatePipe[0] = 0;
+	((ILibBaseChain*)Chain)->TerminatePipe[1] = 0;
 #endif
 #if defined(WIN32)
 	if (((ILibBaseChain*)Chain)->TerminateSock != ~0)
