@@ -913,8 +913,9 @@ int main(int argc, char* argv[])
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
+#ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
-
+#endif
 		return(0);
 	}
 
@@ -1050,9 +1051,13 @@ int main(int argc, char* argv[])
 	else if (argc > 1 && strcasecmp(argv[1], "-signcheck") == 0 && GetModuleFileNameA(NULL, str2, _MAX_PATH) > 5)
 	{
 		// Check the signature of out own executable
+#ifndef MICROSTACK_NOTLS
 		util_openssl_init();
 		printf("%d", signcheck_verifysign(str2, 0));
 		util_openssl_uninit();
+#else
+		printf("Cannot verify without OpenSSL support");
+#endif
 		return 0;
 	}
 #endif
