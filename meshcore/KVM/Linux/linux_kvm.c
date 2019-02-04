@@ -21,6 +21,7 @@ limitations under the License.
 #include "microstack/ILibAsyncServerSocket.h"
 #include "microstack/ILibProcessPipe.h"
 #include <sys/wait.h>
+#include <limits.h>
 
 #include <sys/ipc.h>
 #include <sys/shm.h>

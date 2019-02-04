@@ -15,24 +15,25 @@ limitations under the License.
 */
 
 #if defined (__APPLE__)
-#include <sys/uio.h>
-#include <sys/mount.h>
-#include <pthread.h>
-//#include <CoreServices/CoreServices.h>
+	#include <sys/uio.h>
+	#include <sys/mount.h>
+	#include <pthread.h>
+	//#include <CoreServices/CoreServices.h>
 #else 
-#ifdef NACL
-#include <ifaddrs.h>
-#include "chrome/nacl.h"
-#endif
-#if defined(_POSIX)
-#ifndef _VX_CPU
-#include <sys/statfs.h>
-#endif
-#include <pthread.h>
-#ifndef _NOILIBSTACKDEBUG
-#include <execinfo.h>
-#endif
-#endif
+	#ifdef NACL
+		#include <ifaddrs.h>
+		#include "chrome/nacl.h"
+	#endif
+	#if defined(_POSIX)
+		#ifndef _VX_CPU
+		#include <sys/statfs.h>
+		#endif
+		#include <pthread.h>
+		#ifndef _NOILIBSTACKDEBUG
+			#include <execinfo.h>
+			#include <inttypes.h>
+		#endif
+	#endif
 #endif 
 
 #ifdef _MINCORE
