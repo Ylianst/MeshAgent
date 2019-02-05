@@ -3388,8 +3388,6 @@ void MeshAgent_AgentMode_Core_ServerTimeout(duk_context *ctx, void ** args, int 
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
-	//int x;
-	//size_t tmpLen;
 #ifdef WIN32
 	int pLen;
 #endif

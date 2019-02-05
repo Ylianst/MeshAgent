@@ -239,18 +239,19 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 
 	// Check if the tile is too large to send
 	DWORD jpegSize = (DWORD)Size.QuadPart;
-	if (jpegSize > 65500)
-	{
-		KVMDEBUG("jpegSize > 65500", jpegSize);
-		delete DIBImage;
-		*bufferSize = 0;
-		// ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
-		return jpegSize;
-	}
+
+	//if (jpegSize > 65500)
+	//{
+	//	KVMDEBUG("jpegSize > 65500", jpegSize);
+	//	delete DIBImage;
+	//	*bufferSize = 0;
+	//	// ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
+	//	return jpegSize;
+	//}
 
 	// Save the image stream in memory.
-	char* Tile = (char*)ILibMemory_Allocate(jpegSize + 8, 0, NULL, NULL);
-	if (jpegStream->Read(Tile + 8, jpegSize, NULL) != S_OK)
+	char* Tile = (char*)ILibMemory_Allocate(jpegSize > 65500 ? (jpegSize + 16):(jpegSize + 8), 0, NULL, NULL);
+	if (jpegStream->Read(Tile + (jpegSize > 65500 ? 16 : 8), jpegSize, NULL) != S_OK)
 	{
 		KVMDEBUG("jpegStream->Read() failed", 0);
 		delete DIBImage;
@@ -267,13 +268,26 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	jpegStream->Release();
 
 	*buffer = (unsigned char*)Tile;
-	*bufferSize = jpegSize + 8;
+	*bufferSize = jpegSize + (jpegSize > 65500 ? 16 : 8);
 
 	// Place the header
-	((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
-	((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
-	((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
-	((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
+	if (jpegSize > 65500)
+	{
+		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
+		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
+		((unsigned int*)*buffer)[1]   = (unsigned int)htonl(jpegSize + 8);						// Size of the Next Packet
+		((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+		((unsigned short*)*buffer)[5] = 0;														// RESERVED
+		((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
+		((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
+	}
+	else
+	{
+		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
+		((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
+		((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
+	}
 	return 0;
 }
 
@@ -324,11 +338,11 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 		{
 			tileInfo[row][rightcol].crc = CRC; 
 			// Here we check whether the size of the coalesced bitmap is greater than the threshold (65500)
-			if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * PIXEL_SIZE / COMPRESSION_RATIO > 65500) { 
-				tileInfo[row][rightcol].flags = (char)TILE_MARKED_NOT_SENT;
-				--rightcol;
-				break;
-			}
+			//if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * PIXEL_SIZE / COMPRESSION_RATIO > 65500) { 
+			//	tileInfo[row][rightcol].flags = (char)TILE_MARKED_NOT_SENT;
+			//	--rightcol;
+			//	break;
+			//}
 
 			tileInfo[row][rightcol].flags = (char)TILE_MARKED_NOT_SENT;
 			captureWidth += TILE_WIDTH;
@@ -344,7 +358,8 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 	// int TOLERANCE = (rightcol - col) / 4;
 
 	// Now go to the bottom tiles, check if they have changed and record them
-	while ((botrow + 1 < TILE_HEIGHT_COUNT) && ((captureHeight + TILE_HEIGHT) * captureWidth * PIXEL_SIZE / COMPRESSION_RATIO <= 65500))
+	//while ((botrow + 1 < TILE_HEIGHT_COUNT) && ((captureHeight + TILE_HEIGHT) * captureWidth * PIXEL_SIZE / COMPRESSION_RATIO <= 65500))
+	while ((botrow + 1 < TILE_HEIGHT_COUNT))
 	{
 		botrow++;
 		r_y = botrow * TILE_HEIGHT;
@@ -426,8 +441,8 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 			if (firstTime)
 			{
 				// Re-adjust the compression ratio.
-				COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
-				if (COMPRESSION_RATIO <= 1) COMPRESSION_RATIO = 2;
+				//COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
+				//if (COMPRESSION_RATIO <= 1) COMPRESSION_RATIO = 2;
 				firstTime = 0;
 			}
 
