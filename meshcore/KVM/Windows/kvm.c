@@ -1010,12 +1010,27 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 
 	if (bufferLen > 4)
 	{
-		size = ntohs(((unsigned short*)(buffer))[1]);
-		if (size <= bufferLen)
+		if (ntohs(((unsigned short*)(buffer))[0]) == (unsigned short)MNG_JUMBO)
 		{
-			*bytesConsumed = size;
-			writeHandler(buffer, size, reserved);
-			return;
+			if (bufferLen > 8)
+			{
+				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
+				{
+					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					writeHandler(buffer, *bytesConsumed, reserved);
+					return;
+				}
+			}
+		}
+		else
+		{
+			size = ntohs(((unsigned short*)(buffer))[1]);
+			if (size <= bufferLen)
+			{
+				*bytesConsumed = size;
+				writeHandler(buffer, size, reserved);
+				return;
+			}
 		}
 	}
 	*bytesConsumed = 0;

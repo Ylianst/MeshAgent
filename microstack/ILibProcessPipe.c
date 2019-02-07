@@ -958,14 +958,13 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		result = GetOverlappedResult(pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, &bytesRead, FALSE);
 		if (result == FALSE) { break; }
 #else
-		bytesRead = (int)read(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead);
+		bytesRead = (int)read(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead);
 		if(bytesRead <= 0)
 		{
 			break;
 		}
 
 #endif
-		
 		pipeObject->totalRead += bytesRead;
 		ILibRemoteLogging_printf(ILibChainGetLogger(pipeObject->manager->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Pipe, ILibRemoteLogging_Flags_VerbosityLevel_5, "ILibProcessPipe[ReadHandler]: %u bytes read on Pipe: %p", bytesRead, (void*)pipeObject);
 
@@ -983,8 +982,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		{
 			consumed = 0;
 			ILibRemoteLogging_printf(ILibChainGetLogger(pipeObject->manager->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_5, "ProcessPipe: buffer/%p offset/%d totalRead/%d", (void*)pipeObject->buffer, pipeObject->readOffset, pipeObject->totalRead);
-
-			((ILibProcessPipe_GenericReadHandler)pipeObject->handler)(pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead - pipeObject->readOffset, &consumed, pipeObject->user1, pipeObject->user2);
+			((ILibProcessPipe_GenericReadHandler)pipeObject->handler)(pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead, &consumed, pipeObject->user1, pipeObject->user2);
 			if (consumed == 0)
 			{
 				//
@@ -995,13 +993,12 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 				//
 				// We need to move the memory to the start of the buffer, or else we risk running past the end, if we keep reading like this
 				//
-				memmove_s(pipeObject->buffer, pipeObject->bufferSize, pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead - pipeObject->readOffset);
-				pipeObject->totalRead -= pipeObject->readOffset;
+				memmove_s(pipeObject->buffer, pipeObject->bufferSize, pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead);
 				pipeObject->readOffset = 0;
 
 				break; // Break out of inner while loop
 			}
-			else if (consumed == (pipeObject->totalRead - pipeObject->readOffset))
+			else if (consumed == pipeObject->totalRead)
 			{
 				//
 				// Entire Buffer was consumed
@@ -1018,12 +1015,21 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 				// Only part of the buffer was consumed
 				//
 				pipeObject->readOffset += consumed;
+				pipeObject->totalRead -= consumed;
 			}
 		}
+
+		if (pipeObject->bufferSize - pipeObject->totalRead == 0)
+		{
+			pipeObject->buffer = (char*)realloc(pipeObject->buffer, pipeObject->bufferSize * 2);
+			if (pipeObject->buffer == NULL) { ILIBCRITICALEXIT(254); }
+			pipeObject->bufferSize = pipeObject->bufferSize * 2;
+		}
+
 		if (pipeObject->PAUSED != 0) { break; }
 	}
 #ifdef WIN32
-	while ((result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer, pipeObject->bufferSize, NULL, pipeObject->mOverlapped)) == TRUE); // Note: This is actually the end of a do-while loop
+	while ((result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped)) == TRUE); // Note: This is actually the end of a do-while loop
 	if (pipeObject->PAUSED == 0 && (err = GetLastError()) != ERROR_IO_PENDING)
 #else
 	while(pipeObject->PAUSED == 0); // Note: This is actually the end of a do-while loop
@@ -1207,7 +1213,7 @@ void ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(ILibProcessPipe_PipeObject
 	while (p->readOffset != 0 && p->PAUSED == 0)
 	{
 		consumed = 0;
-		((ILibProcessPipe_GenericReadHandler)p->handler)(p->buffer + p->readOffset, p->totalRead - p->readOffset, &consumed, p->user1, p->user2);
+		((ILibProcessPipe_GenericReadHandler)p->handler)(p->buffer + p->readOffset, p->totalRead, &consumed, p->user1, p->user2);
 		if (consumed == 0)
 		{
 			//
@@ -1218,11 +1224,10 @@ void ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(ILibProcessPipe_PipeObject
 			//
 			// We need to move the memory to the start of the buffer, or else we risk running past the end, if we keep reading like this
 			//
-			memmove_s(p->buffer, p->bufferSize, p->buffer + p->readOffset, p->totalRead - p->readOffset);
-			p->totalRead -= p->readOffset;
+			memmove_s(p->buffer, p->bufferSize, p->buffer + p->readOffset, p->totalRead);
 			p->readOffset = 0;
 		}
-		else if (consumed == (p->totalRead - p->readOffset))
+		else if (consumed == p->totalRead)
 		{
 			//
 			// Entire Buffer was consumed
@@ -1239,6 +1244,7 @@ void ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(ILibProcessPipe_PipeObject
 			// Only part of the buffer was consumed
 			//
 			p->readOffset += consumed;
+			p->totalRead -= consumed;
 		}
 	}
 	p->processingLoop = 0;
