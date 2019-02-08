@@ -280,6 +280,62 @@ duk_ret_t ILibDuktape_Polyfills_String_endsWith(duk_context *ctx)
 
 	return 1;
 }
+duk_ret_t ILibDuktape_Polyfills_String_padStart(duk_context *ctx)
+{
+	int totalLen = (int)duk_require_int(ctx, 0);
+
+	duk_size_t padcharLen;
+	duk_size_t bufferLen;
+
+	char *padchars;
+	if (duk_get_top(ctx) > 1)
+	{
+		padchars = (char*)duk_get_lstring(ctx, 1, &padcharLen);
+	}
+	else
+	{
+		padchars = " ";
+		padcharLen = 1;
+	}
+
+	duk_push_this(ctx);
+	char *buffer = Duktape_GetBuffer(ctx, -1, &bufferLen);
+
+	if (bufferLen > totalLen)
+	{
+		duk_push_lstring(ctx, buffer, bufferLen);
+		return(1);
+	}
+	else
+	{
+		duk_size_t needs = totalLen - bufferLen;
+		duk_size_t i;
+
+		duk_push_array(ctx);											// [array]
+		while(needs > 0)
+		{
+			if (needs > padcharLen)
+			{
+				duk_push_string(ctx, padchars);							// [array][pad]
+				duk_put_prop_index(ctx, -2, duk_get_length(ctx, -2));	// [array]
+				needs -= padcharLen;
+			}
+			else
+			{
+				duk_push_lstring(ctx, padchars, needs);					// [array][pad]
+				duk_put_prop_index(ctx, -2, duk_get_length(ctx, -2));	// [array]
+				needs = 0;
+			}
+		}
+		duk_push_lstring(ctx, buffer, bufferLen);						// [array][pad]
+		duk_put_prop_index(ctx, -2, duk_get_length(ctx, -2));			// [array]
+		duk_get_prop_string(ctx, -1, "join");							// [array][join]
+		duk_swap_top(ctx, -2);											// [join][this]
+		duk_push_string(ctx, "");										// [join][this]['']
+		duk_call_method(ctx, 1);										// [result]
+		return(1);
+	}
+}
 void ILibDuktape_Polyfills_String(duk_context *ctx)
 {
 	// Polyfill 'String.startsWith'
@@ -289,6 +345,8 @@ void ILibDuktape_Polyfills_String(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "startsWith");										// [string][proto]
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_endsWith, DUK_VARARGS);	// [string][proto][func]
 	duk_put_prop_string(ctx, -2, "endsWith");										// [string][proto]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_padStart, DUK_VARARGS);				// [string][proto][func]
+	duk_put_prop_string(ctx, -2, "padStart");
 	duk_pop_2(ctx);
 }
 duk_ret_t ILibDuktape_Polyfills_Console_log(duk_context *ctx)
