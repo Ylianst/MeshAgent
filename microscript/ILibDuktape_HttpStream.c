@@ -2953,7 +2953,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 			if (duk_pcall_method(ctx, 1) != 0) ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpStream.onReceive(): Error dispatching 'end': %s", duk_safe_to_string(ctx, -1));
 			duk_pop(ctx);													// ...
 
-			if (header->Directive == NULL)
+			if (header->Directive == NULL && data->connectionCloseSpecified == 0)
 			{
 				duk_push_heapptr(ctx, data->DS->ParentObject);					// [httpStream]
 				duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);	// [httpStream][socket]
@@ -4008,6 +4008,22 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_http_generateNonce(duk_context *ctx)
+{
+	int len = (int)duk_require_int(ctx, 0);
+	if ((len+1) < sizeof(ILibScratchPad))
+	{
+		util_randomtext(len, ILibScratchPad);
+		ILibScratchPad[len] = 0;
+		duk_push_string(ctx, ILibScratchPad);
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "Specified length is too long. Please Specify a value < %d", sizeof(ILibScratchPad)));
+	}
+}
+
 void ILibDuktape_HttpStream_http_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);																							// [http]
@@ -4019,6 +4035,7 @@ void ILibDuktape_HttpStream_http_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "Agent", ILibDuktape_HttpStream_Agent_new, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "parseUri", ILibDuktape_httpStream_parseUri, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "webSocketStream", ILibDuktape_httpStream_webSocketStream_new, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "generateNonce", ILibDuktape_http_generateNonce, 1);
 
 	// HTTP Global Agent
 	duk_push_c_function(ctx, ILibDuktape_HttpStream_Agent_new, DUK_VARARGS);										// [http][newAgent]
