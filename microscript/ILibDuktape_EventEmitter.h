@@ -54,7 +54,8 @@ int ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter *emitter, char *ev
 int ILibDuktape_EventEmitter_AddOnceEx(ILibDuktape_EventEmitter *emitter, char *eventName, duk_c_function func, duk_idx_t funcArgs);
 int ILibDuktape_EventEmitter_AddOnceEx3(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func);
 int ILibDuktape_EventEmitter_PrependOnce(duk_context *ctx, duk_idx_t i, char *eventName, duk_c_function func);
-int ILibDuktape_EventEmitter_HasListeners(ILibDuktape_EventEmitter *emitter, char *eventName);	
+int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, char *eventName, int defaultValue);
+#define ILibDuktape_EventEmitter_HasListeners(emitter, eventName) ILibDuktape_EventEmitter_HasListeners2(emitter, eventName, 0)
 #define ILibDuktape_EventEmitter_HasListenersEx(ctx, idx, eventName) ILibDuktape_EventEmitter_HasListeners(ILibDuktape_EventEmitter_GetEmitter(ctx, idx), eventName)
 
 #define ILibDuktape_EventEmitter_AddOnceEx2(ctx, idx, eventName, func, argCount) ILibDuktape_EventEmitter_AddOnceEx3(ctx, idx, eventName, func)

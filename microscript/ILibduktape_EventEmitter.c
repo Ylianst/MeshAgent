@@ -151,9 +151,9 @@ void ILibDuktape_EventEmitter_FinalizerEx(ILibHashtable sender, void *Key1, char
 	}
 }
 
-int ILibDuktape_EventEmitter_HasListeners(ILibDuktape_EventEmitter *emitter, char *eventName)
+int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, char *eventName, int defaultValue)
 {
-	int retVal = 0;
+	int retVal = defaultValue;
 	if(ILibMemory_CanaryOK(emitter) && emitter!=NULL && emitter->eventTable != NULL && emitter->ctx != NULL)
 	{
 		ILibLinkedList eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, (int)strnlen_s(eventName, 255));
@@ -558,6 +558,16 @@ duk_ret_t ILibDuktape_EventEmitter_emitReturnValue(duk_context *ctx)
 
 	return(retVal);
 }
+duk_ret_t ILibDuktape_EventEmitter_listenerCount(duk_context *ctx)
+{
+	char *name = (char*)duk_require_string(ctx, 0);
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_TempObject);
+	duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_Data);
+	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)Duktape_GetBuffer(ctx, -1, NULL);
+	duk_push_int(ctx, ILibDuktape_EventEmitter_HasListeners2(data, name, -1));
+	return(1);
+}
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 {
 	ILibDuktape_EventEmitter *retVal;
@@ -589,7 +599,8 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethodWithProperties(ctx, "on", ILibDuktape_EventEmitter_on, 2, 2, "once", duk_push_int_ex(ctx, 0), "prepend", duk_push_int_ex(ctx, 0));
 	ILibDuktape_CreateInstanceMethodWithProperties(ctx, "prependOnceListener", ILibDuktape_EventEmitter_on, 2, 2, "once", duk_push_int_ex(ctx, 1), "prepend", duk_push_int_ex(ctx, 1));
 	ILibDuktape_CreateInstanceMethodWithProperties(ctx, "prependListener", ILibDuktape_EventEmitter_on, 2, 2, "once", duk_push_int_ex(ctx, 0), "prepend", duk_push_int_ex(ctx, 1));
-
+	
+	ILibDuktape_CreateInstanceMethod(ctx, "listenerCount", ILibDuktape_EventEmitter_listenerCount, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "removeListener", ILibDuktape_EventEmitter_removeListener, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "removeAllListeners", ILibDuktape_EventEmitter_removeAllListeners, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "emit", ILibDuktape_EventEmitter_emit, DUK_VARARGS);
