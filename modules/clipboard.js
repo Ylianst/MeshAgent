@@ -6,6 +6,33 @@ function nativeAddModule(name)
     module.exports(ret);
 }
 
+
+function win_readtext()
+{
+    var ret = '';
+    var CF_TEXT = 1;
+    var GM = require('_GenericMarshal');
+    var user32 = GM.CreateNativeProxy('user32.dll');
+    var kernel32 = GM.CreateNativeProxy('kernel32.dll');
+    kernel32.CreateMethod('GlobalAlloc');
+    kernel32.CreateMethod('GlobalLock');
+    kernel32.CreateMethod('GlobalUnlock');
+    user32.CreateMethod('OpenClipboard');
+    user32.CreateMethod('CloseClipboard');
+    user32.CreateMethod('GetClipboardData');
+
+    user32.OpenClipboard(0);
+    var h = user32.GetClipboardData(CF_TEXT);
+    if(h.Val!=0)
+    {
+        var hbuffer = kernel32.GlobalLock(h);
+        ret = hbuffer.String;
+        kernel32.GlobalUnlock(h);
+    }
+    user32.CloseClipboard();
+    return (ret);
+}
+
 function win_copytext(txt)
 {
     var GMEM_MOVEABLE = 0x0002;
@@ -41,6 +68,7 @@ switch(process.platform)
 {
     case 'win32':
         module.exports = win_copytext;
+        module.exports.read = win_readtext;
         break;
     case 'linux':
         break;
