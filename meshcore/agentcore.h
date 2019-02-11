@@ -37,7 +37,6 @@ typedef char JS_ENGINE_CONTEXT[16];
 #include "microstack/ILibProcessPipe.h"
 #include "microscript/duktape.h"
 #include "microscript/ILibDuktape_WebRTC.h"
-#include "microscript/ILibDuktape_http.h"
 #include "microscript/ILibDuktape_net.h"
 #include "microscript/ILibDuktapeModSearch.h"
 #include "microscript/ILibDuktape_GenericMarshal.h"

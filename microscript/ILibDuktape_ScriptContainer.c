@@ -50,7 +50,6 @@ limitations under the License.
 #include "../microstack/ILibCrypto.h"
 
 #include "ILibDuktape_net.h"
-#include "ILibDuktape_http.h"
 #include "ILibDuktape_WebRTC.h"
 #include "ILibDuktape_Dgram.h"
 #include "ILibDuktape_GenericMarshal.h"
