@@ -309,7 +309,6 @@ duk_ret_t ILibDuktape_Polyfills_String_padStart(duk_context *ctx)
 	else
 	{
 		duk_size_t needs = totalLen - bufferLen;
-		duk_size_t i;
 
 		duk_push_array(ctx);											// [array]
 		while(needs > 0)
