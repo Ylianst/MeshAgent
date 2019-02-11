@@ -43,9 +43,6 @@
     <ClCompile Include="..\microscript\ILibDuktape_Helpers.c">
       <Filter>Microscript</Filter>
     </ClCompile>
-    <ClCompile Include="..\microscript\ILibDuktape_http.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_net.c">
       <Filter>Microscript</Filter>
     </ClCompile>
@@ -184,9 +181,6 @@
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_Helpers.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
-    <ClInclude Include="..\microscript\ILibDuktape_http.h">
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_net.h">

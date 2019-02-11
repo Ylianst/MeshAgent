@@ -70,7 +70,6 @@
     <ClCompile Include="..\microscript\ILibDuktape_GenericMarshal.c" />
     <ClCompile Include="..\microscript\ILibDuktape_HECI.c" />
     <ClCompile Include="..\microscript\ILibDuktape_Helpers.c" />
-    <ClCompile Include="..\microscript\ILibDuktape_http.c" />
     <ClCompile Include="..\microscript\ILibDuktape_HttpStream.c" />
     <ClCompile Include="..\microscript\ILibDuktape_MemoryStream.c" />
     <ClCompile Include="..\microscript\ILibDuktape_net.c" />
@@ -120,7 +119,6 @@
     <ClInclude Include="..\microscript\ILibDuktape_GenericMarshal.h" />
     <ClInclude Include="..\microscript\ILibDuktape_HECI.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Helpers.h" />
-    <ClInclude Include="..\microscript\ILibDuktape_http.h" />
     <ClInclude Include="..\microscript\ILibDuktape_net.h" />
     <ClInclude Include="..\microscript\ILibDuktape_NetworkMonitor.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Polyfills.h" />

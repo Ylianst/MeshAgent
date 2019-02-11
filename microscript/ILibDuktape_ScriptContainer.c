@@ -1845,7 +1845,6 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	if ((securityFlags & SCRIPT_ENGINE_NO_NETWORK_ACCESS) == 0)
 	{
 		ILibDuktape_WebRTC_Init(ctx);						// WebRTC library (browser api)
-		ILibDuktape_http_init(ctx, chain);					// HTTP-Digest library (node api)
 		ILibDuktape_net_init(ctx, chain);					// Network library (node api)
 		ILibDuktape_DGram_Init(ctx);						// Datagram Sockets
 		ILibDuktape_HttpStream_Init(ctx);					// HTTP Library (node api)
