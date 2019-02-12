@@ -207,4 +207,24 @@ void MeshAgent_Stop(MeshAgentHostContainer *agent);
 void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv);
 char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath);
 
+
+
+/* List of DB Keys that can be set, to alter behavior of the Mesh Agent
+*
+*
+AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities			
+controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
+disableUpdate:				If set, will prevent the agent from self-updating
+noUpdateCoreModule:			If set, will prevent the agent from taking a new meshcore from the server
+enableILibRemoteLogging:	Integer value specifying the port number to enable Web Logging. Disabled otherwise
+fakeUpdate:					If set, when the agent self-updates, it will update to the same version. Will set disableUpdate upon completion
+forceUpdate:				If set, will cause the agent to perform a self-update on next start.
+ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
+logUpdate:					If set, will cause the agent to log self-update status
+WebProxy:					Manually specify proxy configuration
+webSocketMaskOverride:		If set, will disable the optimzation to skip WebSocket Masking for TLS protected Web Sockets
+*
+*
+*/
+
 #endif
