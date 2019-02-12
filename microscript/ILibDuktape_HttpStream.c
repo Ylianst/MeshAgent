@@ -478,7 +478,18 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	{
 		ILibDuktape_WriteID(ctx, "https.WebSocketStream");
 		ILibDuktape_WebSocket_State *state = Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
-		if (state != NULL) { state->noMasking = 1; }
+		if (state != NULL) 
+		{
+			state->noMasking = 1;
+			if (duk_peval_string(ctx, "(function _getOverride(){return(require('https')._webSocketMaskOverride);})();") == 0)	// [result]
+			{
+				if (duk_to_boolean(ctx, -1))
+				{
+					state->noMasking = 0;
+				}
+			}
+			duk_pop(ctx);																										// ...
+		}
 	}
 
 	duk_get_prop_string(ctx, -3, ILibDuktape_HTTP2CR);							// [HTTPStream][readable][websocket][clientRequest]

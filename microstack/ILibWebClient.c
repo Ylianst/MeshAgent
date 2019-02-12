@@ -211,6 +211,7 @@ typedef struct ILibWebClientDataObject
 	struct sockaddr_in6 proxy;
 	struct ILibWebClientManager *Parent;
 	char* DigestData;
+	int webSocketMaskOverride;
 
 	int PendingConnectionIndex;
 
@@ -550,6 +551,7 @@ void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo)
 		// Check the cancel request in the timer list
 		if ( plrt->timer != NULL ) ILibLifeTime_Remove(plrt->timer, plrt);
 	}
+	wcdo->webSocketMaskOverride = 0;
 	wcdo->PAUSE = 0;
 	wcdo->CancelRequest = 0;
 	wcdo->Chunked = 0;
@@ -1237,7 +1239,7 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 
 #ifndef MICROSTACK_NOTLS
 #ifdef MICROSTACK_TLS_DETECT
-	if (ILibAsyncSocket_IsUsingTls(wcdo->SOCK) == 1) flags = 0; // If we are using TLS, disable websocket masking
+	if (wcdo->webSocketMaskOverride == 0 && ILibAsyncSocket_IsUsingTls(wcdo->SOCK) == 1) flags = 0; // If we are using TLS, disable websocket masking
 #endif
 #endif
 
@@ -2585,6 +2587,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequest(
 		((ILibWebClient_PipelineRequestToken*)retVal)->WebSocketKey = tokenWebSocketKey;
 		((ILibWebClient_PipelineRequestToken*)retVal)->WebSocketMaxBuffer = u.i;
 		((ILibWebClient_PipelineRequestToken*)retVal)->WebSocketSendOK = ILibHTTPPacket_Stash_Get(packet, "_WebSocketOnSendOK", 18);
+		if (ILibHTTPPacket_Stash_HasKey(packet, "_WebSocketMaskOverride", 22)) { wcdo->webSocketMaskOverride = 1; }
 
 		for (i = 0; i < wcm->MaxConnectionsToSameServer; ++i)
 		{

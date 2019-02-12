@@ -1702,6 +1702,11 @@ void ILibDuktape_MeshAgent_Init(duk_context* ctx, void *chain, MeshAgentHostCont
 	duk_put_prop_string(ctx, -2, "MeshAgentPtr");	// [stash]
 	duk_pop(ctx);									// ...
 	ILibDuktape_ModSearch_AddHandler(ctx, "MeshAgent", ILibDuktape_MeshAgent_PUSH);
+
+	if (agent->webSocketMaskOverride != 0)
+	{
+		duk_peval_string_noresult(ctx, "Object.defineProperty(require('https'), '_webSocketMaskOverride', { value: true });");
+	}
 }
 
 /* ------------------------------ 
@@ -3034,6 +3039,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if (meshServer.sin6_family != AF_UNSPEC)
 	{
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
+		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(UINT_PTR)0x01); }
+
 		reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
 #ifndef MICROSTACK_NOTLS
 		ILibWebClient_Request_SetHTTPS(reqToken, result == ILibParseUriResult_TLS ? ILibWebClient_RequestToken_USE_HTTPS : ILibWebClient_RequestToken_USE_HTTP);
@@ -3104,7 +3111,6 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
-
 
 	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
 
@@ -3728,7 +3734,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		// Check if there is a CoreModule in the db
 		char *CoreModule;
 		int CoreModuleLen = agentHost->localScript == 0 ? ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0) : 0;
-		
+		agentHost->webSocketMaskOverride = ILibSimpleDataStore_Get(agentHost->masterDb, "webSocketMaskOverride", NULL, 0);
+
 		if (agentHost->meshCoreCtx != NULL)
 		{
 			ILibDuktape_MeshAgent_PUSH(agentHost->meshCoreCtx, agentHost->chain);								// [agent]
@@ -3744,7 +3751,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			// Create the context for the Local CoreModule, regardless if we have one yet
 			agentHost->meshCoreCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, agentHost->masterDb, agentHost->exePath, agentHost->pipeManager, NULL, NULL);
 			ILibDuktape_MeshAgent_Init(agentHost->meshCoreCtx, agentHost->chain, agentHost);
-
 			ILibDuktape_SetNativeUncaughtExceptionHandler(agentHost->meshCoreCtx, MeshAgent_CoreModule_UncaughtException, agentHost);
 
 			if (CoreModuleLen > 0)
