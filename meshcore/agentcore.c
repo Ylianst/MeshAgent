@@ -3039,7 +3039,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if (meshServer.sin6_family != AF_UNSPEC)
 	{
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
-		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(UINT_PTR)0x01); }
+		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(uintptr_t)0x01); }
 
 		reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
 #ifndef MICROSTACK_NOTLS
