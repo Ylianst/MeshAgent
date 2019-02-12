@@ -200,6 +200,7 @@ function monitorinfo()
             this._X11.CreateMethod('XCreateSimpleWindow');
             this._X11.CreateMethod('XDefaultColormap');
             this._X11.CreateMethod('XDefaultScreen');
+            this._X11.CreateMethod('XDestroyWindow');
             this._X11.CreateMethod('XDrawLine');
             this._X11.CreateMethod('XDisplayHeight');
             this._X11.CreateMethod('XDisplayWidth');

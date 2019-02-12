@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+var promise = require('promise');
 
 function nativeAddModule(name)
 {
@@ -22,6 +23,84 @@ function nativeAddModule(name)
     module.exports(ret);
 }
 
+function lin_readtext()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    try
+    {
+        require('monitor-info')
+    }
+    catch(exc)
+    {
+        ret._rej(exc);
+        return (ret);
+    }
+
+    var X11 = require('monitor-info')._X11;
+    if (!X11)
+    {
+        ret._rej('X11 required for Clipboard Manipulation');
+    }
+    else
+    {
+        var SelectionNotify = 31;
+        var AnyPropertyType = 0;
+        var GM = require('monitor-info')._gm;
+
+        ret._getInfoPromise = require('monitor-info').getInfo();
+        ret._getInfoPromise._masterPromise = ret;
+        ret._getInfoPromise.then(function (mon)
+        {
+            if (mon.length > 0)
+            {
+                var white = X11.XWhitePixel(mon[0].display, mon[0].screenId).Val;
+
+                this._masterPromise.CLIPID = X11.XInternAtom(mon[0].display, GM.CreateVariable('CLIPBOARD'), 0);
+                this._masterPromise.FMTID = X11.XInternAtom(mon[0].display, GM.CreateVariable('UTF8_STRING'), 0);
+                this._masterPromise.PROPID = X11.XInternAtom(mon[0].display, GM.CreateVariable('XSEL_DATA'), 0);
+                this._masterPromise.INCRID = X11.XInternAtom(mon[0].display, GM.CreateVariable('INCR'), 0);
+                this._masterPromise.ROOTWIN = X11.XRootWindow(mon[0].display, mon[0].screenId);
+                this._masterPromise.FAKEWIN = X11.XCreateSimpleWindow(mon[0].display, this._masterPromise.ROOTWIN, 0, 0, mon[0].right, 5, 0, white, white);
+
+                X11.XSync(mon[0].display, 0);
+                X11.XConvertSelection(mon[0].display, this._masterPromise.CLIPID, this._masterPromise.FMTID, this._masterPromise.PROPID, this._masterPromise.FAKEWIN, 0);
+                X11.XSync(mon[0].display, 0);
+
+                this._masterPromise.DescriptorEvent = require('DescriptorEvents').addDescriptor(X11.XConnectionNumber(mon[0].display).Val, { readset: true });
+                this._masterPromise.DescriptorEvent._masterPromise = this._masterPromise;
+                this._masterPromise.DescriptorEvent._display = mon[0].display;
+                this._masterPromise.DescriptorEvent.on('readset', function (fd)
+                {
+                    var XE = GM.CreateVariable(1024);
+                    while (X11.XPending(this._display).Val)
+                    {
+                        X11.XNextEventSync(this._display, XE);
+                        if(XE.Deref(0, 4).toBuffer().readUInt32LE() == SelectionNotify)
+                        {
+                            var id = GM.CreatePointer();
+                            var bits = GM.CreatePointer();
+                            var sz = GM.CreatePointer();
+                            var tail = GM.CreatePointer();
+                            var result = GM.CreatePointer();
+
+                            X11.XGetWindowProperty(this._display, this._masterPromise.FAKEWIN, this._masterPromise.PROPID, 0, 65535, 0, AnyPropertyType, id, bits, sz, tail, result);
+                            this._masterPromise._res(result.Deref().String);
+                            X11.XFree(result.Deref());
+                            X11.XDestroyWindow(this._display, this._masterPromise.FAKEWIN);
+
+                            this.removeDescriptor(fd);
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+    }
+    return (ret);
+}
+function lin_copytext()
+{
+}
 
 function win_readtext()
 {
@@ -46,7 +125,10 @@ function win_readtext()
         kernel32.GlobalUnlock(h);
     }
     user32.CloseClipboard();
-    return (ret);
+
+    var p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    p._res(ret);
+    return (p);
 }
 
 function win_copytext(txt)
@@ -87,6 +169,8 @@ switch(process.platform)
         module.exports.read = win_readtext;
         break;
     case 'linux':
+        module.exports = lin_copytext;
+        module.exports.read = lin_readtext;
         break;
     case 'darwin':
         break;
