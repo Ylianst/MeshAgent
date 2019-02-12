@@ -193,6 +193,8 @@ function monitorinfo()
             this._X11 = this._gm.CreateNativeProxy(this.Location_X11LIB);
             this._X11.CreateMethod('XChangeProperty');
             this._X11.CreateMethod('XCloseDisplay');
+            this._X11.CreateMethod('XConnectionNumber');
+            this._X11.CreateMethod('XConvertSelection');
             this._X11.CreateMethod('XCreateGC');
             this._X11.CreateMethod('XCreateWindow');
             this._X11.CreateMethod('XCreateSimpleWindow');
@@ -209,8 +211,11 @@ function monitorinfo()
             this._X11.CreateMethod('XInternAtom');
             this._X11.CreateMethod('XMapWindow');
             this._X11.CreateMethod({ method: 'XNextEvent', threadDispatch: true });
+            this._X11.CreateMethod({ method: 'XNextEvent', newName: 'XNextEventSync' });
             this._X11.CreateMethod('XOpenDisplay');
+            this._X11.CreateMethod('XPending');
             this._X11.CreateMethod('XRootWindow');
+            this._X11.CreateMethod('XSelectInput');
             this._X11.CreateMethod('XScreenCount');
             this._X11.CreateMethod('XScreenOfDisplay');
             this._X11.CreateMethod('XSelectInput');
@@ -220,7 +225,7 @@ function monitorinfo()
             this._X11.CreateMethod('XSetLineAttributes');
             this._X11.CreateMethod('XSetNormalHints');
             this._X11.CreateMethod('XSetSubwindowMode');
-
+            this._X11.CreateMethod('XSync');
             this._X11.CreateMethod('XBlackPixel');
             this._X11.CreateMethod('XWhitePixel');
         }
