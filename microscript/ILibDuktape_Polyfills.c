@@ -37,6 +37,10 @@ limitations under the License.
 #define ILibDuktape_Console_INFO_Level			"\xFF_Console_INFO_Level"
 #define ILibDuktape_Console_SessionID			"\xFF_Console_SessionID"
 
+#define ILibDuktape_DescriptorEvents_Table		"\xFF_DescriptorEvents_Table"
+#define ILibDuktape_DescriptorEvents_FD			"\xFF_DescriptorEvents_FD"
+#define ILibDuktape_DescriptorEvents_Options	"\xFF_DescriptorEvents_Options"
+
 typedef enum ILibDuktape_Console_DestinationFlags
 {
 	ILibDuktape_Console_DestinationFlags_DISABLED		= 0,
@@ -1964,6 +1968,138 @@ void ILibDuktape_httpHeaders_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_c_function(ctx, ILibDuktape_httpHeaders, DUK_VARARGS);
 }
+void ILibDuktape_DescriptorEvents_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
+{
+	duk_context *ctx = (duk_context*)((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[0];
+	void *h = ((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[1];
+	int i = duk_get_top(ctx);
+	int fd;
+
+	duk_push_heapptr(ctx, h);												// [obj]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);		// [obj][table]
+	duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);						// [obj][table][enum]
+	while (duk_next(ctx, -1, 1))											// [obj][table][enum][FD][emitter]
+	{
+		fd = (int)duk_to_int(ctx, -2);									
+		duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Options);	// [obj][table][enum][FD][emitter][options]
+		if (Duktape_GetBooleanProperty(ctx, -1, "readset", 0)) { FD_SET(fd, readset); }
+		if (Duktape_GetBooleanProperty(ctx, -1, "writeset", 0)) { FD_SET(fd, writeset); }
+		if (Duktape_GetBooleanProperty(ctx, -1, "errorset", 0)) { FD_SET(fd, errorset); }
+		duk_pop_3(ctx);														// [obj][table][enum]
+	}
+
+	duk_set_top(ctx, i);
+}
+void ILibDuktape_DescriptorEvents_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
+{
+	duk_context *ctx = (duk_context*)((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[0];
+	void *h = ((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[1];
+	int i = duk_get_top(ctx);
+	int fd;
+
+	duk_push_array(ctx);												// [array]
+	duk_push_heapptr(ctx, h);											// [array][obj]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);	// [array][obj][table]
+	duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);					// [array][obj][table][enum]
+	while (duk_next(ctx, -1, 1))										// [array][obj][table][enum][FD][emitter]
+	{
+		fd = (int)duk_to_int(ctx, -2);
+		if (FD_ISSET(fd, readset) || FD_ISSET(fd, writeset) || FD_ISSET(fd, errorset))
+		{
+			duk_put_prop_index(ctx, -6, duk_get_length(ctx, -6));		// [array][obj][table][enum][FD]
+			duk_pop(ctx);												// [array][obj][table][enum]
+		}
+		else
+		{
+			duk_pop_2(ctx);												// [array][obj][table][enum]
+
+		}
+	}
+	duk_pop_3(ctx);																						// [array]
+
+	while (duk_get_length(ctx, -1) > 0)
+	{
+		duk_get_prop_string(ctx, -1, "pop");															// [array][pop]
+		duk_dup(ctx, -2);																				// [array][pop][this]
+		if (duk_pcall_method(ctx, 0) == 0)																// [array][emitter]
+		{
+			if ((fd = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_DescriptorEvents_FD, -1)) != -1)
+			{
+				if (FD_ISSET(fd, readset))
+				{
+					ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "readset");		// [array][emitter][emit][this][readset]
+					duk_push_int(ctx, fd);																// [array][emitter][emit][this][readset][fd]
+					duk_pcall_method(ctx, 2); duk_pop(ctx);												// [array][emitter]
+				}
+				if (FD_ISSET(fd, writeset))
+				{
+					ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "writeset");		// [array][emitter][emit][this][writeset]
+					duk_push_int(ctx, fd);																// [array][emitter][emit][this][writeset][fd]
+					duk_pcall_method(ctx, 2); duk_pop(ctx);												// [array][emitter]
+				}
+				if (FD_ISSET(fd, errorset))
+				{
+					ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "errorset");		// [array][emitter][emit][this][errorset]
+					duk_push_int(ctx, fd);																// [array][emitter][emit][this][errorset][fd]
+					duk_pcall_method(ctx, 2); duk_pop(ctx);												// [array][emitter]
+				}
+			}
+		}
+		duk_pop(ctx);																					// [array]
+	}
+	duk_set_top(ctx, i);
+}
+duk_ret_t ILibDuktape_DescriptorEvents_Remove(duk_context *ctx)
+{
+	if (!duk_is_number(ctx, 0)) { return(ILibDuktape_Error(ctx, "Invalid Descriptor")); }
+	ILibForceUnBlockChain(Duktape_GetChain(ctx));
+
+	duk_push_this(ctx);													// [obj]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);	// [obj][table]
+	duk_dup(ctx, 0);													// [obj][table][key]
+	duk_del_prop(ctx, -2);												// [obj][table]
+	return(0);
+}
+duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
+{
+	if (!duk_is_number(ctx, 0)) { return(ILibDuktape_Error(ctx, "Invalid Descriptor")); }
+	ILibForceUnBlockChain(Duktape_GetChain(ctx));
+
+	duk_push_this(ctx);													// [obj]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);	// [obj][table]
+	duk_push_object(ctx);												// [obj][table][value]
+	duk_dup(ctx, 0);													// [obj][table][value][key]
+	duk_dup(ctx, -2);													// [obj][table][value][key][value]
+	ILibDuktape_EventEmitter *e = ILibDuktape_EventEmitter_Create(ctx);	
+	ILibDuktape_EventEmitter_CreateEventEx(e, "readset");
+	ILibDuktape_EventEmitter_CreateEventEx(e, "writeset");
+	ILibDuktape_EventEmitter_CreateEventEx(e, "errorset");
+	duk_dup(ctx, 0);													// [obj][table][value][key][value][FD]
+	duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_FD);		// [obj][table][value][key][value]
+	duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Options);
+
+	duk_put_prop(ctx, -4);												// [obj][table][value]
+
+	return(1);
+}
+void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
+{
+	ILibChain_Link *link = (ILibChain_Link*)ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
+	link->MetaData = "ILibDuktape_DescriptorEvents";
+	link->PreSelectHandler = ILibDuktape_DescriptorEvents_PreSelect;
+	link->PostSelectHandler = ILibDuktape_DescriptorEvents_PostSelect;
+
+	duk_push_object(ctx);
+	duk_push_object(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Table);
+
+	((void**)link->ExtraMemoryPtr)[0] = ctx;
+	((void**)link->ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);
+	ILibDuktape_CreateInstanceMethod(ctx, "addDescriptor", ILibDuktape_DescriptorEvents_Add, 2);
+	ILibDuktape_CreateInstanceMethod(ctx, "removeDescriptor", ILibDuktape_DescriptorEvents_Remove, 1);
+
+
+	ILibAddToChain(chain, link);
+}
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
@@ -1980,7 +2116,7 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_ModSearch_AddHandler(ctx, "dataGenerator", ILibDuktape_dataGenerator_Push);
 #endif
 	ILibDuktape_ModSearch_AddHandler(ctx, "ChainViewer", ILibDuktape_ChainViewer_Push);
-
+	ILibDuktape_ModSearch_AddHandler(ctx, "DescriptorEvents", ILibDuktape_DescriptorEvents_Push);
 
 	// Global Polyfills
 	duk_push_global_object(ctx);													// [g]
