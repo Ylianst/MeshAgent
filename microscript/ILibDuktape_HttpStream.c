@@ -474,6 +474,12 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	duk_push_buffer_object(ctx, -2, 0, decodedKeyLen, DUK_BUFOBJ_NODEJS_BUFFER);// [HTTPStream][readable][ext][wss][buffer]
 	duk_new(ctx, 1);															// [HTTPStream][readable][ext][websocket]
 	duk_remove(ctx, -2);														// [HTTPStream][readable][websocket]
+	if (strcmp(Duktape_GetStringPropertyValue(ctx, -3, ILibDuktape_OBJID, "http.httpStream"), "https.httpStream") == 0) 
+	{
+		ILibDuktape_WriteID(ctx, "https.WebSocketStream");
+		ILibDuktape_WebSocket_State *state = Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
+		if (state != NULL) { state->noMasking = 1; }
+	}
 
 	duk_get_prop_string(ctx, -3, ILibDuktape_HTTP2CR);							// [HTTPStream][readable][websocket][clientRequest]
 	//duk_dup(ctx, -2);															// [HTTPStream][readable][websocket][clientRequest][websocket]
@@ -749,6 +755,7 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	httpStream = duk_get_heapptr(ctx, -1);								// [socket][clientRequest][httpStream]
 	duk_dup(ctx, -3);													// [socket][clientRequest][httpStream][socket]
 	duk_dup(ctx, -2);													// [socket][clientRequest][httpStream][socket][httpStream]
+	if (strcmp(Duktape_GetStringPropertyValue(ctx, -2, ILibDuktape_OBJID, "net.socket"), "tls.socket") == 0) { ILibDuktape_WriteID(ctx, "https.httpStream"); }
 	duk_put_prop_string(ctx, -2, ILibDuktape_Socket2HttpStream);		// [socket][clientRequest][httpStream][socket]
 	duk_pop(ctx);														// [socket][clientRequest][httpStream]
 	duk_dup(ctx, -2);													// [socket][clientRequest][httpStream][clientRequest]
@@ -3424,7 +3431,6 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(ILibDuktape_WebSocket_State *state, int opcode, char *_buffer, int _bufferLen, ILibWebClient_WebSocket_FragmentFlags _bufferFragment)
 {
-	state->noMasking = 1;
 	char header[10];
 	int maskKeyInt;
 	int headerLen;
