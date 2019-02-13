@@ -216,6 +216,10 @@ char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen)
 		duk_json_encode(ctx, i);
 		retVal = (char*)duk_get_lstring(ctx, i, bufLen);
 	}
+	else if (duk_is_null_or_undefined(ctx, i))
+	{
+		retVal = NULL;
+	}
 	else
 	{
 		ILibDuktape_Error(ctx, "Duktape_GetBuffer(): Unknown parameter");
