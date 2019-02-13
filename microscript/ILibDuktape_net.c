@@ -242,12 +242,15 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	duk_size_t pathLen = 0;
 	ILibDuktape_net_socket *ptrs;
 	struct sockaddr_in6 dest;
+	struct sockaddr_in6 proxy;
+	memset(&proxy, 0, sizeof(struct sockaddr_in6));
 
 	if (nargs == 0) { return(ILibDuktape_Error(ctx, "Too few arguments")); }
 	duk_push_this(ctx);														// [socket]
 	duk_get_prop_string(ctx, -1, ILibDuktape_net_socket_ptr);				// [socket][ptrs]
 	ptrs = (ILibDuktape_net_socket*)duk_to_pointer(ctx, -1);
 	duk_pop(ctx);															// [socket]
+	
 	if (duk_is_object(ctx, 0))
 	{
 		/* This is an OPTIONS object
@@ -262,6 +265,12 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		host = Duktape_GetStringPropertyValue(ctx, 0, "host", "127.0.0.1");
 		port = Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
 		path = Duktape_GetStringPropertyValueEx(ctx, 0, "path", NULL, &pathLen);
+		if (duk_has_prop_string(ctx, 0, "proxy"))
+		{
+			duk_get_prop_string(ctx, 0, "proxy");
+			ILibResolveEx(Duktape_GetStringPropertyValue(ctx, -1, "host", NULL), (unsigned short)Duktape_GetIntPropertyValue(ctx, -1, "port", 0), &proxy);
+			duk_pop(ctx);
+		}
 		if (nargs >= 2 && duk_is_function(ctx, 1))
 		{
 			ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "connect", duk_require_heapptr(ctx, 1));
@@ -318,7 +327,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	duk_pop(ctx);											// ...
 
 	ILibResolveEx(host, (unsigned short)port, &dest);
-	if (dest.sin6_family == AF_UNSPEC)
+	if (dest.sin6_family == AF_UNSPEC || (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
 		// Can't resolve... Delay event emit, until next event loop, because if app called net.createConnection(), they don't have the socket yet
 		duk_push_heapptr(ctx, ptrs->object);													// [socket]																
@@ -327,6 +336,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		duk_swap_top(ctx, -2);																	// [socket][immediate][this]
 		duk_push_c_function(ctx, ILibDuktape_net_socket_connect_errorDispatch, DUK_VARARGS);	// [socket][immediate][this][callback]
 		duk_dup(ctx, -4);																		// [socket][immediate][this][callback][socket]
+
 		duk_push_error_object(ptrs->ctx, DUK_ERR_ERROR, "Cannot Resolve Hostname: %s", host);	// [socket][immediate][this][callback][socket][err]
 		if (duk_pcall_method(ptrs->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "socket.connect(): "); }
 		duk_put_prop_string(ptrs->ctx, -2, "\xFF_Immediate");									// [socket]
@@ -334,7 +344,16 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	}
 	else
 	{
-		ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&dest, NULL, ptrs);
+		if(duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy"))
+		{
+			duk_get_prop_string(ctx, 0, "proxy");
+			ILibAsyncSocket_ConnectToProxy(ptrs->socketModule, NULL, (struct sockaddr*)&dest, (struct sockaddr*)&proxy, Duktape_GetStringPropertyValue(ctx, -1, "username", NULL), Duktape_GetStringPropertyValue(ctx, -1, "password", NULL), NULL, ptrs);
+			duk_pop(ctx);
+		}
+		else
+		{
+			ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&dest, NULL, ptrs);
+		}
 
 		duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
 		duk_push_true(ptrs->ctx);									// [socket][connecting]
