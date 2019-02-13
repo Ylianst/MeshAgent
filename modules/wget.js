@@ -53,6 +53,10 @@ function wget(remoteUri, localFilePath)
     }
 
     ret._totalBytes = 0;
+    ret.abort = function()
+    {
+        this._request.abort();
+    }
     ret._request = http.get(remoteUri);
     ret._localFilePath = localFilePath;
     ret._request.promise = ret;

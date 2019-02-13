@@ -40,6 +40,7 @@ extern void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo);
 
 #define ILibDuktape_Agent_SocketJustCreated "\xFF_Agent_SocketJustCreated"
 #define ILibDuktape_ClientRequest			"\xFF_CR"
+#define ILibDuktape_CR_AbortCalled			"\xFF_CR_AbortCalled"
 #define ILibDuktape_CR_EndCalled			"\xFF_CR_EndCalled"
 #define ILibDuktape_CR_RequestBuffer		"\xFF_CR_RequestBuffer"
 #define ILibDuktape_CR2Agent				"\xFF_CR2Agent"
@@ -69,6 +70,7 @@ extern void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo);
 #define ILibDuktape_Socket2Agent			"\xFF_Socket2Agent"
 #define ILibDuktape_Socket2AgentKey			"\xFF_Socket2AgentKey"
 #define ILibDuktape_Socket2CR				"\xFF_Socket2CR"
+#define ILibDuktape_Socket2CR_Abort			"\xFF_Socket2CR_Abort"
 #define ILibDuktape_Socket2HttpServer		"\xFF_Socket2HttpServer"
 #define ILibDuktape_Socket2HttpStream		"\xFF_Socket2HttpStream"
 #define ILibDuktape_Socket2DiedListener		"\xFF_Socket2DiedListener"
@@ -673,8 +675,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketClosed(duk_context *ctx)
 	duk_push_this(ctx);													// [socket]
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2HttpStream))
 	{
-		duk_get_prop_string(ctx, -1, ILibDuktape_Socket2HttpStream);	// [socket][stream]
-		duk_pop(ctx);													// [socket]
 		duk_del_prop_string(ctx, -1, ILibDuktape_Socket2HttpStream);
 	}
 	duk_pop(ctx);														// ...
@@ -687,8 +687,26 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_dup(ctx, 0);													// [socket]
 	duk_push_c_function(ctx, ILibDuktape_HttpStream_http_SocketDiedPrematurely, DUK_VARARGS);
 	duk_put_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);		// [socket]
-
 	duk_push_this(ctx);													// [socket][clientRequest]
+
+	if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_CR_AbortCalled, 0))
+	{
+		//  We were aborted, so instead of continuing, lets just put the socket back, so someone else can use it
+		duk_del_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);
+
+		duk_get_prop_string(ctx, -2, ILibDuktape_Socket2Agent);			// [socket][clientRequest][Agent]
+		duk_get_prop_string(ctx, -1, "keepSocketAlive");				// [socket][clientRequest][Agent][keepAlive]
+		duk_swap_top(ctx, -2);											// [socket][clientRequest][keepAlive][this]
+		duk_dup(ctx, -4);												// [socket][clientRequest][keepAlive][this][socket]
+		duk_call_method(ctx, 1); 
+
+		duk_push_this(ctx);
+		ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "abort");	// [emit][this][abort]
+		duk_call_method(ctx, 1);
+		return(0);
+	}
+
+
 
 	// Register ourselves for the close event, becuase we'll need to put ourselves back in the Queue if the socket dies before we are done
 	duk_get_prop_string(ctx, -2, "prependOnceListener");				// [socket][clientRequest][prependOnce]
@@ -1056,6 +1074,38 @@ duk_ret_t ILibDuktape_ClientRequest_Finalizer(duk_context *ctx)
 	}
 	return(0);
 }
+
+duk_ret_t ILibDuktape_HttpStream_http_request_abort_closed(duk_context *ctx)
+{
+	duk_push_this(ctx);															// [socket]
+	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2CR_Abort);					// [socket][ClientRequest]
+	ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "abort");	// [socket][ClientRequest][emit][this][abort]
+	duk_call_method(ctx, 1); duk_pop(ctx);										// [socket][ClientRequest]
+	duk_del_prop_string(ctx, -2, ILibDuktape_Socket2CR_Abort);
+	return(0);
+}
+duk_ret_t ILibDuktape_HttpStream_http_request_abort(duk_context *ctx)
+{
+	duk_push_this(ctx);												// [ClientRequest]
+	duk_push_true(ctx);												// [ClientRequest][true]
+	duk_put_prop_string(ctx, -2, ILibDuktape_CR_AbortCalled);		// [ClientRequest]
+
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_CR2HTTPStream))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_CR2HTTPStream);	// [ClientRequest][HTTPStream]
+		duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);// [ClientRequest][HTTPStream][socket]
+
+		// Need to hookup close event, so we can propagate 'abort'
+		ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "close", ILibDuktape_HttpStream_http_request_abort_closed);	
+		duk_dup(ctx, -3); duk_put_prop_string(ctx, -2, ILibDuktape_Socket2CR_Abort);
+
+		duk_get_prop_string(ctx, -1, "end");						// [ClientRequest][HTTPStream][socket][end]
+		duk_swap_top(ctx, -2);										// [ClientRequest][HTTPStream][end][this]
+		duk_call_method(ctx, 0);									// [ClientRequest][HTTPStream][...]
+	}
+	return(0);
+}
+
 duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 {
 	char *proto;
@@ -1149,6 +1199,7 @@ duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "socket", ILibDuktape_HttpStream_http_OnSocketReady);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "~", ILibDuktape_ClientRequest_Finalizer);
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "abort", ILibDuktape_HttpStream_http_request_abort, 0);
 
 
 	if (nargs > 1 && duk_is_function(ctx, 1))
