@@ -1412,6 +1412,7 @@ duk_ret_t ILibDuktape_HttpStream_http_server_upgradeWebsocket(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "webSocketStream");	// [http][constructor]
 	duk_push_lstring(ctx, keyResult, keyResultLen);		// [http][constructor][key]
 	duk_new(ctx, 1);									// [http][wss]
+	((ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr))->noMasking = 1; // Server cannot mask WebSockets when sending data
 
 	duk_push_this(ctx);									// [http][wss][socket]
 	duk_get_prop_string(ctx, -1, "pipe");				// [http][wss][socket][pipe]
@@ -3490,7 +3491,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 	if (flags & WEBSOCKET_MASK) 
 	{
 		// We have to copy memory anyways to mask, so we might as well copy the extra few bytes and make a single buffer
-		char *dataFrame = ILibMemory_AllocateA(headerLen + bufferLen);
+		char *dataFrame = ILibMemory_AllocateA(headerLen + 4 + bufferLen);
 		char *maskKey = (dataFrame + headerLen);
 		memcpy_s(dataFrame, headerLen, header, headerLen);
 
