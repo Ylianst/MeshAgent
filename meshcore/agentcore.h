@@ -222,6 +222,7 @@ fakeUpdate:					If set, when the agent self-updates, it will update to the same 
 forceUpdate:				If set, will cause the agent to perform a self-update on next start.
 ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
 logUpdate:					If set, will cause the agent to log self-update status
+jsDebugPort:				Specify a JS Debugger Port
 WebProxy:					Manually specify proxy configuration
 webSocketMaskOverride:		If set, will disable the optimzation to skip WebSocket Masking for TLS protected Web Sockets
 *
