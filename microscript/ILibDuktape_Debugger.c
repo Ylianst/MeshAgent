@@ -680,8 +680,8 @@ duk_ret_t ILibDuktape_Debugger_JSAttach_promise(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, "_internal");								// [promise][internal]
 		duk_get_prop_string(ctx, -1, "once");									// [promise][internal][once]
 		duk_swap_top(ctx, -2);													// [promise][on][this]
-		duk_push_string(ctx, "_eventHook");										// [promise][on][this][eventHook]
-		duk_push_c_function(ctx, ILibDuktape_Debugger_JSAttach_promise_wait, 2);// [promise][on][this][eventHook][func]
+		duk_push_string(ctx, "newListener");									// [promise][on][this][newListener]
+		duk_push_c_function(ctx, ILibDuktape_Debugger_JSAttach_promise_wait, 2);// [promise][on][this][newListener][func]
 		duk_call_method(ctx, 2);
 	}
 

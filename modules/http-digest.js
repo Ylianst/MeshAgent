@@ -207,7 +207,7 @@ function http_digest_instance(options)
         // When somebody hooks up events to digest.clientRequest, we need to hook the real event on http.clientRequest
         ret._request = this.http.request(ret.options);
         ret._request.digRequest = ret;
-        ret.on('_eventHook', function (evName, callback)
+        ret.on('newListener', function (evName, callback)
         {
             if (evName != 'upgrade' && evName != 'error' && evName != 'continue' && evName != 'timeout' && evName != 'drain') { return; }
             if (this._request.listenerCount(evName) == 0)

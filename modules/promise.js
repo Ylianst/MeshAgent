@@ -43,9 +43,9 @@ function Promise(promiseFunc)
     this.promise = this;
     this._internal = { _ObjectID: 'promise.internal', promise: this, func: promiseFunc, completed: false, errors: false, completedArgs: [] };
     require('events').EventEmitter.call(this._internal);
-    this._internal.on('_eventHook', function (eventName, eventCallback)
+    this._internal.on('newListener', function (eventName, eventCallback)
     {
-        //console.log('hook', eventName, 'errors/' + this.errors + ' completed/' + this.completed);
+        //console.log('newListener', eventName, 'errors/' + this.errors + ' completed/' + this.completed);
         var r = null;
 
         if (eventName == 'resolved' && !this.errors && this.completed)
@@ -205,3 +205,4 @@ Promise.all = function all(promiseList)
 };
 
 module.exports = Promise;
+module.exports.event_switcher = event_switcher;
