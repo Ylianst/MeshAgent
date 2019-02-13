@@ -450,6 +450,7 @@ duk_ret_t ILibDuktape_Process_UncaughtExceptionExGetter(duk_context *ctx)
 }
 void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...)
 {
+	if (ctx == NULL) { return; }
 	char dest[4096];
 	int len = 0;
 	va_list argptr;
@@ -500,7 +501,7 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 // Error MUST be at top of stack when calling this method
 void ILibDuktape_Process_UncaughtException(duk_context *ctx)
 {
-	ILibDuktape_Process_UncaughtExceptionEx(ctx, "");
+	if (ctx != NULL) { ILibDuktape_Process_UncaughtExceptionEx(ctx, ""); }
 }
 char* Duktape_GetContextGuidHex(duk_context *ctx)
 {
