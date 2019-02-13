@@ -276,7 +276,6 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 {
 	ILibDuktape_readableStream_nextWriteablePipe *w;
 	int dispatchedNonNative = 0;
-	int noContinue = 0;
 	int dispatched = 0;
 	int needPause = 0;
 
@@ -321,13 +320,12 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 					case ILibTransport_DoneState_COMPLETE:
 						ws->OnWriteFlushEx = NULL;
 						ws->OnWriteFlushEx_User = NULL;
-						if (ILibDuktape_readableStream_WriteData_Flush(ws, stream)) { noContinue = 1; }
+						if (ILibDuktape_readableStream_WriteData_Flush(ws, stream)) {  }
 						break;
 					case ILibTransport_DoneState_ERROR:
-						if (ILibDuktape_readableStream_WriteData_Flush(ws, stream)) { noContinue = 1; }
+						if (ILibDuktape_readableStream_WriteData_Flush(ws, stream)) {  }
 						break;
 				}
-				if (noContinue != 0) { break; }
 			}
 			else if (w->writableStream != NULL && dispatchedNonNative == 0)
 			{
@@ -351,14 +349,12 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 							needPause = 1;
 							break;
 						case 1: // Complete
-							noContinue = 1;
 							break;
 						default: // NOP
 							break;
 					}
 				}
 			}
-			if (noContinue != 0) { break; }
 			w = w->next;
 		}
 	}
