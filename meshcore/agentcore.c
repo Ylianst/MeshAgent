@@ -2577,8 +2577,22 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				else
 				{
 					printf(" Launching meshcore...\n");
-					char *CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
-					ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+					char *CoreModule;
+
+					if (agent->jsDebugPort != 0)
+					{
+						char tmp[255];
+						int tmpLen = sprintf_s(tmp, sizeof(tmp), "attachDebugger({ webport: %d, wait: 1 }).then(function (prt) { console.log('Point Browser for Debug to port: ' + prt); });\n", agent->jsDebugPort);
+						CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen + tmpLen, 0, NULL, NULL);
+						ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule + tmpLen - 4, CoreModuleLen + tmpLen);
+						memcpy_s(CoreModule + 4, CoreModuleLen - 4, tmp, tmpLen);
+						CoreModuleLen += (tmpLen-4);
+					}
+					else
+					{
+						CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+						ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+					}
 
 					if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agent->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
 						ILibDuktape_ScriptContainer_ExecuteByteCode(agent->meshCoreCtx) != 0)
@@ -3735,6 +3749,16 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		char *CoreModule;
 		int CoreModuleLen = agentHost->localScript == 0 ? ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0) : 0;
 		agentHost->webSocketMaskOverride = ILibSimpleDataStore_Get(agentHost->masterDb, "webSocketMaskOverride", NULL, 0);
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "jsDebugPort", NULL, 0) != 0)
+		{
+			char tmp[16];
+			int tmpLen = ILibSimpleDataStore_Get(agentHost->masterDb, "jsDebugPort", tmp, 16);
+			if (tmpLen > 0)
+			{
+				tmp[tmpLen] = 0;
+				agentHost->jsDebugPort = atoi(tmp);
+			}
+		}
 
 		if (agentHost->meshCoreCtx != NULL)
 		{
