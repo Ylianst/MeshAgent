@@ -170,6 +170,7 @@ typedef struct MeshAgentHostContainer
 	int forceUpdate;
 	int logUpdate;
 	int fakeUpdate;
+	int controlChannelDebug;
 	void *coreTimeout;
 	int webSocketMaskOverride;
 	int jsDebugPort;
@@ -213,7 +214,8 @@ char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath);
 /* List of DB Keys that can be set, to alter behavior of the Mesh Agent
 *
 *
-AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities			
+AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities	
+controlChannelDebug:		If set, will log/display controlChannel messages (Except for JSON messages)
 controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
 disableUpdate:				If set, will prevent the agent from self-updating
 noUpdateCoreModule:			If set, will prevent the agent from taking a new meshcore from the server

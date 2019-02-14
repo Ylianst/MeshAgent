@@ -9355,6 +9355,18 @@ char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, i
 	}
 	return(ILibCriticalLogBuffer);
 }
+void ILIBLOGMESSAGEX(char *format, ...)
+{
+	char dest[4096];
+	int len = 0;
+	va_list argptr;
+
+	va_start(argptr, format);
+	len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+	va_end(argptr);
+
+	ILIBLOGMESSSAGE(dest);
+}
 //! Platform Agnostic method to Spawn a detached worker thread with normal priority/affinity
 /*!
 	\param method Handler to dispatch on the new thread

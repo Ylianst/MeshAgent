@@ -2249,6 +2249,12 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 	unsigned short command = ntohs(((unsigned short*)cmd)[0]);
 	unsigned short requestid;
 
+	if (agent->controlChannelDebug != 0)
+	{
+		printf("ProcessCommand(%u)...\n", command);
+		ILIBLOGMESSAGEX("ProcessCommand(%u)...\n", command);
+	}
+
 #ifndef MICROSTACK_NOTLS
 	// If we are not authenticated with the mesh server, we only support auth commands.
 	if (agent->serverAuthState != 3)
@@ -2260,6 +2266,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthRequest: // This is basic authentication information from the server, we need to sign this and return the signature.
 			if (cmdLen == sizeof(MeshCommand_BinaryPacket_AuthRequest))
 			{
+				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Request...\n"); }
 				MeshCommand_BinaryPacket_AuthRequest *AuthRequest = (MeshCommand_BinaryPacket_AuthRequest*)cmd;
 				int signLen;
 				SHA512_CTX c;
@@ -2268,10 +2275,16 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 				// Hash the server's web certificate and check if it matches the one in the auth request
 				util_certhash2(peer, ILibScratchPad2); // Hash the server certificate
-				if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) { 
+				if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) 
+				{ 
 					util_keyhash2(peer, ILibScratchPad2); // Hash the server certificate public key (this is the old way)
-					if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) {
+					if (memcmp(ILibScratchPad2, AuthRequest->serverHash, sizeof(AuthRequest->serverHash)) != 0) 
+					{
 						printf("Bad server certificate hash\r\n"); // TODO: Disconnect
+						if (agent->controlChannelDebug != 0)
+						{
+							ILIBLOGMESSAGEX("Bad server certificate hash\n");
+						}
 						break;
 					}
 				}
@@ -2327,6 +2340,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthVerify: // This is the signature from the server. We need to check everything is ok.
 			if (cmdLen > 8)
 			{
+				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Verification...\n"); }
+
 				MeshCommand_BinaryPacket_AuthVerify_Header *avh = (MeshCommand_BinaryPacket_AuthVerify_Header*)cmd;
 #ifdef WIN32
 				MeshCommand_BinaryPacket_AuthVerify *AuthVerify = (MeshCommand_BinaryPacket_AuthVerify*)_alloca(sizeof(MeshCommand_BinaryPacket_AuthVerify));
@@ -2353,8 +2368,10 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					X509_pubkey_digest(serverCert, EVP_sha384(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA384
 					if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA384_HASHSIZE) != 0) {
 						X509_pubkey_digest(serverCert, EVP_sha256(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA256 (For older .mshx policy file)
-						if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA256_HASHSIZE) != 0) {
+						if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA256_HASHSIZE) != 0) 
+						{
 							printf("Server certificate mismatch\r\n"); break; // TODO: Disconnect
+							if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server certificate mismatch\n"); }
 						}
 					}
 
@@ -2381,6 +2398,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						MeshServer_SendAgentInfo(agent, WebStateObject);
 					} else {
 						printf("Invalid server signature\r\n");
+						if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Invalid Server Signature\n"); }
 						// TODO: Disconnect
 					}
 
@@ -2391,6 +2409,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				break;
 			case MeshCommand_AuthConfirm: // Server indicates that we are authenticated, we can now send data.
 				{
+				if (agent->controlChannelDebug != 0) { printf("Authentication Complete...\n");  ILIBLOGMESSAGEX("Authentication Complete...\n"); }
+
 					// We have to wait for the server to indicate that it authenticated the agent (us) before sending any data to the server.
 					// Node authentication requires the server make database calls, so we need to delay.
 					agent->serverAuthState += 2;
@@ -2452,6 +2472,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 	// All these commands must have both a commandid and a requestid
 	if (cmdLen < 4) return;
 	requestid = ntohs(((unsigned short*)cmd)[1]);
+
+	if (agent->controlChannelDebug != 0) 
+	{
+		printf("BinaryCommand(%u, %u)...\n", command, requestid);
+		ILIBLOGMESSAGEX("BinaryCommand(%u, %u)...\n", command, requestid); 
+	}
+
 
 	// Process Core Module Commands here, but only if we aren't running a local script
 	switch (command)
@@ -2761,6 +2788,11 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			break;
 		case ILibWebClient_ReceiveStatus_Connection_Established: // New connection established.
 		{
+			if (agent->controlChannelDebug != 0)
+			{
+				printf("Control Channel Connection Established...\n");
+				ILIBLOGMESSAGEX("Control Channel Connection Established...\n");
+			}
 #ifndef MICROSTACK_NOTLS
 			int len;
 #endif
@@ -2805,11 +2837,23 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				util_certhash2(peer, ar->serverHash); // Hash the server certificate public key and place it
 
 				len = ILibSimpleDataStore_GetEx(agent->masterDb, "ServerTlsCertHash", 17, ILibScratchPad, sizeof(ILibScratchPad));
-				if ((len == UTIL_SHA384_HASHSIZE) && (memcmp(ILibScratchPad, ar->serverHash, UTIL_SHA384_HASHSIZE) == 0)) {
+				if ((len == UTIL_SHA384_HASHSIZE) && (memcmp(ILibScratchPad, ar->serverHash, UTIL_SHA384_HASHSIZE) == 0)) 
+				{
+					if (agent->controlChannelDebug != 0)
+					{
+						printf("TLS Server Cert matches Mesh Server Cert...\n");
+						ILIBLOGMESSAGEX("TLS Server Cert matches Mesh Server Cert...\n");
+					}
 					// The TLS certificate of this server is correct, no need to authenticate further.
 					unsigned short response = htons(MeshCommand_AuthConfirm); // Send indication to the server that it's already authenticated
 					agent->serverAuthState = 1;
 					ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)&response, 2, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+				}
+
+				if (agent->controlChannelDebug != 0)
+				{
+					printf("Sending Authentication Data...\n");
+					ILIBLOGMESSAGEX("Sending Authentication Data...\n");
 				}
 
 				// Start authentication by sending a auth nonce & server TLS cert hash - If we indicated AuthConfirm already, the server will use this data but not respond to it.
@@ -2827,6 +2871,12 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			break;
 		}
 		case ILibWebClient_ReceiveStatus_Complete: // Disconnection
+			if (agent->controlChannelDebug != 0)
+			{
+				printf("Control Channel Disconnected...\n");
+				ILIBLOGMESSAGEX("Control Channel Disconnected...\n");
+			}
+												   
 			// If the channel had been authenticates, inform JavaScript core module that we are not disconnected
 #ifndef MICROSTACK_NOTLS
 			if (agent->serverAuthState == 3)
@@ -3002,8 +3052,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		}
 	}
 
-	printf("Connecting to: %s\n", serverUrl);
-	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE(serverUrl); }
+	printf("Connecting to: %s\n", serverUrl);						
+	if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s\n", serverUrl); }
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore: Attempting connection to: %s", serverUrl);
 	ILibDestructParserResults(rs);
@@ -3125,8 +3175,15 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
+	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
 
 	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
+	if (agent->controlChannelDebug != 0)
+	{
+		ILIBLOGMESSSAGE("Attempting to connect to Server...");
+		printf("Attempting to connect to Server...\n");
+	}
+	else if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
 
 	if (agent->retryTime == 0)
 	{

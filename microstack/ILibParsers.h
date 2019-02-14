@@ -1370,6 +1370,8 @@ int ILibIsRunningOnChainThread(void* chain);
 
 #define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, NULL, 0, 0, 0)); exit(code);}
 #define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, NULL, 0, 0, 0)
+	void ILIBLOGMESSAGEX(char *format, ...);
+
 #if defined(WIN32)
 #define ILIBCRITICALERREXIT(ex) { ILibCriticalLog(NULL, __FILE__, __LINE__, GetLastError(), 0); exit(ex); }
 #define ILIBCRITICALEXIT(ex) {ILibCriticalLog(NULL, __FILE__, __LINE__, ex, GetLastError());printf("CRITICALEXIT, FILE: %s, LINE: %d\r\n", __FILE__, __LINE__); exit(ex);}
