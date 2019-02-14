@@ -97,7 +97,7 @@ void BCRYPT_FINAL(char *h, BCRYPT_CTX* ctx);
 
 #else
 #include "microstack/nossl/md5.h"
-#include "microstack/nossl/SHA.h"
+#include "microstack/nossl/sha.h"
 #include "microstack/nossl/sha1.h"
 
 #define SHA256_CTX SHA256Context
