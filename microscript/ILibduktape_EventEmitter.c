@@ -752,7 +752,9 @@ duk_ret_t ILibDuktape_EventEmitter_Inherits_addMethod(duk_context *ctx)
 
 	duk_push_heapptr(ctx, emitter->object);				// [emitterUtils][ptr][target]
 	ILibDuktape_CreateProperty_InstanceMethodEx(ctx, (char*)duk_require_string(ctx, 0), duk_require_heapptr(ctx, 1));
-	return(0);
+	
+	duk_push_this(ctx);
+	return(1);
 }
 duk_ret_t ILibDuktape_EventEmitter_EmitterUtils_Finalizer(duk_context *ctx)
 {

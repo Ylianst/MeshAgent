@@ -24,7 +24,10 @@ function wget(remoteUri, localFilePath)
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     var agentConnected = false;
-    require('events').EventEmitter.call(ret, true).createEvent('bytes');
+    require('events').EventEmitter.call(ret, true)
+        .createEvent('bytes')
+        .createEvent('abort')
+        .addMethod('abort', function () { this._request.abort(); });
 
     try
     {
@@ -53,14 +56,11 @@ function wget(remoteUri, localFilePath)
     }
 
     ret._totalBytes = 0;
-    ret.abort = function()
-    {
-        this._request.abort();
-    }
     ret._request = http.get(remoteUri);
     ret._localFilePath = localFilePath;
     ret._request.promise = ret;
     ret._request.on('error', function (e) { this.promise._rej(e); });
+    ret._request.on('abort', function () { this.promise.emit('abort'); });
     ret._request.on('response', function (imsg)
     {
         if(imsg.statusCode != 200)
