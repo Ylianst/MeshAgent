@@ -29,9 +29,6 @@ limitations under the License.
 #define ILibDuktape_EventEmitter_Data					"\xFF_EventEmitter_Data"
 #define ILibDuktape_EventEmitter_RetVal					"\xFF_EventEmitter_RetVal"
 #define ILibDuktape_EventEmitter_TempObject				"\xFF_EventEmitter_TempObject"
-#define ILibDuktape_EventEmitter_DispatcherFunc			"\xFF_EventEmitter_DispatcherFunc"
-#define ILibDuktape_EventEmitter_SetterFunc				((void*)0xFFFF)
-#define ILibDuktape_EventEmitter_HPTR_LIST				"\xFF_EventEmitter_HPTR_LIST"
 #define ILibDuktape_EventEmitter_Hook					((void*)0xEEEE)
 #define ILibDuktape_EventEmitter_LastRetValueTable		"\xFF_EventEmitter_LastRetValueTable"
 #define ILibDuktape_EventEmitter_GlobalListenerCount	"\xFF_EventEmitter_GlobalListenerCount"
@@ -126,28 +123,11 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromObject(duk_con
 void ILibDuktape_EventEmitter_FinalizerEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)user;
-	int count, i;
-	void  **hptr;
 
 	if (Key1 == NULL)
 	{
 		// If this is NULL, then 'Data' is a LinkedList of JavaScript Subscribers
 		ILibLinkedList_Destroy(Data);
-	}
-	else if(Key1 == ILibDuktape_EventEmitter_SetterFunc)
-	{
-		// If this is not NULL, this is the JavaScript Setter Func
-		duk_push_heapptr(data->ctx, Data);											// [Setter]
-		duk_get_prop_string(data->ctx, -1, ILibDuktape_EventEmitter_HPTR_LIST);		// [Setter][list]
-		count = (int)duk_get_length(data->ctx, -1);
-		for (i = 0; i < count; ++i)
-		{
-			duk_get_prop_index(data->ctx, -1, i);									// [Setter][list][pointer]
-			hptr = (void**)duk_get_pointer(data->ctx, -1);
-			if (hptr != NULL) { *hptr = NULL; }
-			duk_pop(data->ctx);														// [Setter][list]
-		}
-		duk_pop_2(data->ctx);														// ...
 	}
 }
 
@@ -568,6 +548,26 @@ duk_ret_t ILibDuktape_EventEmitter_listenerCount(duk_context *ctx)
 	duk_push_int(ctx, ILibDuktape_EventEmitter_HasListeners2(data, name, -1));
 	return(1);
 }
+void ILibDuktape_EventEmitter_eventNames_ex(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+{
+	ILibDuktape_EventEmitter *emitter = (ILibDuktape_EventEmitter*)user;
+
+	if (Key1 == NULL)
+	{
+		if (ILibLinkedList_GetCount(Data) > 0)
+		{
+			duk_push_lstring(emitter->ctx, Key2, Key2Len);
+			duk_put_prop_index(emitter->ctx, -2, duk_get_length(emitter->ctx, -2));
+		}
+	}
+}
+duk_ret_t ILibDuktape_EventEmitter_eventNames(duk_context *ctx)
+{
+	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx);
+	duk_push_array(ctx);
+	ILibHashtable_Enumerate(emitter->eventTable, ILibDuktape_EventEmitter_eventNames_ex, emitter);
+	return(1);
+}
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 {
 	ILibDuktape_EventEmitter *retVal;
@@ -600,6 +600,7 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethodWithProperties(ctx, "prependOnceListener", ILibDuktape_EventEmitter_on, 2, 2, "once", duk_push_int_ex(ctx, 1), "prepend", duk_push_int_ex(ctx, 1));
 	ILibDuktape_CreateInstanceMethodWithProperties(ctx, "prependListener", ILibDuktape_EventEmitter_on, 2, 2, "once", duk_push_int_ex(ctx, 0), "prepend", duk_push_int_ex(ctx, 1));
 	
+	ILibDuktape_CreateInstanceMethod(ctx, "eventNames", ILibDuktape_EventEmitter_eventNames, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "listenerCount", ILibDuktape_EventEmitter_listenerCount, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "removeListener", ILibDuktape_EventEmitter_removeListener, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "removeAllListeners", ILibDuktape_EventEmitter_removeAllListeners, DUK_VARARGS);
@@ -726,10 +727,6 @@ void ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter *emitter, c
 	ILibHashtable_Put(emitter->eventTable, NULL, eventName, eventNameLen, ILibLinkedList_CreateEx(sizeof(int)));
 }
 
-void *ILibDuktape_EventEmitter_GetDispatcher(ILibDuktape_EventEmitter *emitter, char *eventName)
-{
-	return ILibHashtable_Get(emitter->eventTable, ILibDuktape_EventEmitter_SetterFunc, eventName, (int)strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen));
-}
 duk_ret_t ILibDuktape_EventEmitter_Inherits_createEvent(duk_context *ctx)
 {
 	char *name = (char*)duk_require_string(ctx, 0);
