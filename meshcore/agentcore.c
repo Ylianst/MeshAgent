@@ -3016,7 +3016,14 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if (strcmp("wss://swarm.meshcentral.com:443/agent.ashx", agent->serveruri) == 0)
 	{
 		// Bad server value, from MeshCentral Migration... We need to fix the URI
+		if (agent->controlChannelDebug != 0)
+		{
+			printf("Swapping [%s] for [%s]\n", agent->serveruri, "wss://meshcentral.com:443/agent.ashx");
+			ILIBLOGMESSAGEX("Swapping [%s] for [%s]\n", agent->serveruri, "wss://meshcentral.com:443/agent.ashx");
+		}
 		strcpy_s(agent->serveruri, sizeof(agent->serveruri), "wss://meshcentral.com:443/agent.ashx");
+		strcpy_s(serverUrl, serverUrlLen, "wss://meshcentral.com:443/agent.ashx");
+		serverUrlLen = strnlen_s(serverUrl, serverUrlLen);
 	}
 
 #ifndef MICROSTACK_NOTLS
