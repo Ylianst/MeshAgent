@@ -1877,11 +1877,12 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 	{
 #if defined(WIN32)
 		// No cert in this .db file. Try to load or generate a root certificate from a Windows crypto provider. This can be TPM backed which is great.
-		if (wincrypto_open(FALSE) == 0)
+		// However, if we don't have the second cert created, we need to regen the root...
+		if (wincrypto_open(FALSE) == 0 && ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", NULL, 0) != 0)
 		{
 			char* str = NULL;
 			int l;
-			
+		
 			do {
 				// Finish off work with our own certificate
 				l = wincrypto_getcert(&str);

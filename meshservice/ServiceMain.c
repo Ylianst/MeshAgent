@@ -717,28 +717,26 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 		setup2[setup2len + 2] = 0;
 		remove(setup2);
 
-		if (uninstallonly != 0) {
-			// Remove "[Executable].tag" file
-			if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-			memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-			memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "tag", 4);
-			setup2[setup2len] = 0;
-			remove(setup2);
+		// Remove "[Executable].tag" file
+		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
+		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
+		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "tag", 4);
+		setup2[setup2len] = 0;
+		remove(setup2);
 
-			// Remove "[Executable].log" file
-			if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-			memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-			memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "log", 4);
-			setup2[setup2len] = 0;
-			remove(setup2);
+		// Remove "[Executable].log" file
+		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
+		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
+		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "log", 4);
+		setup2[setup2len] = 0;
+		remove(setup2);
 
-			// Remove "[Executable].db" file
-			if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 256) return;
-			memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-			memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "db", 3);
-			setup2[setup2len] = 0;
-			remove(setup2);
-		}
+		// Remove "[Executable].db" file
+		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 256) return;
+		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
+		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "db", 3);
+		setup2[setup2len] = 0;
+		remove(setup2);
 
 		// Remove the folder.
 		targetexe[targetexelen - 14] = 0;
