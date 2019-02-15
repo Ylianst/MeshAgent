@@ -122,8 +122,6 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromObject(duk_con
 }
 void ILibDuktape_EventEmitter_FinalizerEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
-	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)user;
-
 	if (Key1 == NULL)
 	{
 		// If this is NULL, then 'Data' is a LinkedList of JavaScript Subscribers
