@@ -3013,6 +3013,12 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		agent->serveruri[0] = 0;
 	}
 
+	if (strcmp("wss://swarm.meshcentral.com:443/agent.ashx", agent->serveruri) == 0)
+	{
+		// Bad server value, from MeshCentral Migration... We need to fix the URI
+		strcpy_s(agent->serveruri, sizeof(agent->serveruri), "wss://meshcentral.com:443/agent.ashx");
+	}
+
 #ifndef MICROSTACK_NOTLS
 	ILibParseUriResult result = ILibParseUri(serverUrl, &host, &port, &path, &meshServer);
 #else
