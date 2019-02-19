@@ -3397,6 +3397,11 @@ void MeshAgent_ChainEnd(void *chain, void *user)
 	{
 		if (g_displayFinalizerMessages) { printf("\n\n==> Stopping JavaScript Engine\n"); }
 		duk_destroy_heap(agent->meshCoreCtx); 
+		if (agent->bootstrapCoreCtx != NULL)
+		{
+			duk_destroy_heap(agent->bootstrapCoreCtx);
+			agent->bootstrapCoreCtx = NULL;
+		}
 	}
 	agent->meshCoreCtx = NULL;
 }
@@ -3950,7 +3955,38 @@ void MeshAgent_ScriptMode_MeshDesktop_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "getRemoteDesktopStream", ILibDuktape_MeshAgent_getRemoteDesktop, 0);
 	}
 }
+duk_ret_t MeshAgent_ScriptMode_StartAgent(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	if (agent->bootstrapCoreCtx != NULL)
+	{
+		return(ILibDuktape_Error(ctx, "Already Started"));
+	}
 
+	agent->localScript = 0;
+	agent->bootstrapCoreCtx = agent->meshCoreCtx;
+	agent->meshCoreCtx = NULL;
+
+	duk_eval_string(ctx, "(function _getParams(){return(process.argv);})();");	// [array]
+	int paramLength = (int)duk_get_length(ctx, -1);
+	int i;
+	char **params = (char**)ILibMemory_AllocateA(paramLength * sizeof(char*));
+
+	for (i = 0; i < paramLength; ++i)
+	{
+		duk_get_prop_index(ctx, -1, i);											// [array][value]
+		params[i] = duk_to_string(ctx, -1);
+		duk_pop(ctx);															// [array]
+	}
+
+	if (MeshAgent_AgentMode(agent, paramLength, params, 0) == 0)
+	{
+		duk_eval_string_noresult(ctx, "process.exit();"); // Agent Error, exit
+	}
+
+	return(0);
+}
 void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **argv)
 {
 	char *jsFile;
@@ -4069,6 +4105,13 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 		duk_put_prop_string(agentHost->meshCoreCtx, -2, "\xFF_MeshDesktop_AgentPtr");	// [stash]
 		duk_pop(agentHost->meshCoreCtx);												// ...
 		ILibDuktape_ModSearch_AddHandler(agentHost->meshCoreCtx, "meshDesktop", MeshAgent_ScriptMode_MeshDesktop_PUSH);
+
+		duk_push_global_object(agentHost->meshCoreCtx);									// [g]
+		duk_push_c_function(agentHost->meshCoreCtx, MeshAgent_ScriptMode_StartAgent, 0);// [g][startAgent]
+		duk_push_pointer(agentHost->meshCoreCtx, agentHost);							// [g][startAgent][agent]
+		duk_put_prop_string(agentHost->meshCoreCtx, -2, MESH_AGENT_PTR);				// [g][startAgent]
+		duk_put_prop_string(agentHost->meshCoreCtx, -2, "startMeshAgent");				// [g]
+		duk_pop(agentHost->meshCoreCtx);												// ...
 	}
 
 	if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, jsFile, jsFileLen, agentHost->meshCoreCtx_embeddedScript == NULL ? scriptArgs[0] : "[embedded].js", 0) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)

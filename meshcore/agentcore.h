@@ -144,6 +144,7 @@ typedef struct MeshAgentHostContainer
 	int slaveMode;
 
 	duk_context *meshCoreCtx;
+	duk_context *bootstrapCoreCtx;
 	char *meshCoreCtx_embeddedScript;
 	int meshCoreCtx_embeddedScriptLen;
 	ILibProcessPipe_Manager *pipeManager;

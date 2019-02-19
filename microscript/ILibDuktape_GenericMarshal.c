@@ -820,6 +820,7 @@ typedef struct ILibDuktape_FFI_AsyncData
 	int waitingForResult;
 	PTRSIZE *vars;
 	void *promise;
+	char *methodName;
 	uint32_t lastError;
 	sem_t workAvailable;
 	sem_t workStarted;
@@ -996,6 +997,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 			data->ctx = ctx;
 			data->chain = Duktape_GetChain(ctx);
 			data->fptr = Duktape_GetPointerProperty(ctx, -1, "_address");
+			data->methodName = Duktape_GetStringPropertyValue(ctx, -1, "_funcName", NULL);
 			sem_init(&(data->workAvailable), 0, 0);
 			sem_init(&(data->workStarted), 0, 0);
 			sem_init(&(data->workFinished), 0, 0);
@@ -1256,6 +1258,7 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateMethod(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync, DUK_VARARGS);			// [obj][func][func]
 	duk_push_pointer(ctx, funcAddress);																// [obj][func][func][addr]
 	duk_put_prop_string(ctx, -2, "_address");														// [obj][func][func]
+	duk_push_string(ctx, funcName); duk_put_prop_string(ctx, -2, "_funcName");
 	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_abort, 0); 				// [obj][func][func][func]
 	duk_put_prop_string(ctx, -2, "abort");															// [obj][func][func]
 	duk_push_this(ctx);	duk_put_prop_string(ctx, -2, "_obj");
