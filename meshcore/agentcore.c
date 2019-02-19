@@ -3976,7 +3976,7 @@ duk_ret_t MeshAgent_ScriptMode_StartAgent(duk_context *ctx)
 	for (i = 0; i < paramLength; ++i)
 	{
 		duk_get_prop_index(ctx, -1, i);											// [array][value]
-		params[i] = duk_to_string(ctx, -1);
+		params[i] = (char*)duk_to_string(ctx, -1);
 		duk_pop(ctx);															// [array]
 	}
 
