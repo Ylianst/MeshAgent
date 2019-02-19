@@ -396,6 +396,31 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 				}
 			}
 		}
+		if (retVal == 0)
+		{
+			// Check /etc/environment just in case it wasn't exported
+			char getProxy[] = "(function getProxies(){\
+									var e = require('fs').readFileSync('/etc/environment').toString();\
+									var tokens = e.split('\\n');\
+									for(var line in tokens)\
+									{\
+										var val = tokens[line].split('=');\
+										if(val.length == 2 && (val[0].trim() == 'http_proxy' || val[0].trim() == 'https_proxy'))\
+										{\
+											return(val[1].split('//')[1]);\
+										}\
+									}\
+									throw('No Proxy set');\
+								})();";
+			if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
+			{
+				duk_size_t proxyLen;
+				char *proxy = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &proxyLen);
+				strcpy_s(buffer, bufferSize, proxy);
+				retVal = (int)proxyLen;
+			}
+			duk_pop(agent->meshCoreCtx);
+		}
 		return(retVal);
 	#else
 	char getProxyies[] = "(function getProxies(){\
