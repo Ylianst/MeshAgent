@@ -170,6 +170,16 @@ function serviceHost(serviceName)
     
     this.run = function run()
     {
+        if (process.platform != 'win32')
+        {
+            var SIGTERM_Handler = function _SIGTERM_Handler()
+            {
+                _SIGTERM_Handler.parent.emit('serviceStop');
+            };
+            SIGTERM_Handler.parent = this;
+            process.on('SIGTERM', SIGTERM_Handler);
+        }
+
         for(var i = 0; i<process.argv.length; ++i)
         {
             switch(process.argv[i])

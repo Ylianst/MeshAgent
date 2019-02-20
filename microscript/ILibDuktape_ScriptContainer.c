@@ -68,7 +68,9 @@ limitations under the License.
 
 #ifdef _POSIX
 extern char **environ;
+int SignalDescriptors[2] = { 0, 0 };
 #endif
+
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
 
 char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
@@ -817,6 +819,49 @@ duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 	return(ILibDuktape_Error(ctx, "Error"));
 #endif
 }
+
+#ifdef _POSIX
+void ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
+{
+	if (SignalDescriptors[0] != 0)
+	{
+		FD_SET(SignalDescriptors[0], readset);
+	}
+}
+void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
+{
+	int stype = 0, bytesRead = 0;
+	ILibChain_Link *link = (ILibChain_Link*)object;
+	duk_context *ctx = (duk_context*)((void**)link->ExtraMemoryPtr)[0];
+	void *h = ((void**)link->ExtraMemoryPtr)[1];
+
+	if (FD_ISSET(SignalDescriptors[0], readset))
+	{
+		bytesRead = read(SignalDescriptors[0], (char*)&stype, sizeof(stype));
+		if (bytesRead == 4)
+		{
+			switch (stype)
+			{
+				case SIGTERM:
+					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");
+					if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
+					duk_pop(ctx);
+					break;
+				default:
+					break;
+			}
+		}
+	}
+}
+void ILibDuktape_ScriptContainer_Process_SignalListener(int signum)
+{
+	if (SignalDescriptors[1] != 0)
+	{
+		ignore_result(write(SignalDescriptors[1], &signum, sizeof(signum)));
+	}
+}
+#endif
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -881,6 +926,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "exit");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Process_Exit, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGTERM");
 
 	ILibDuktape_CreateEventWithGetter(ctx, "argv0", ILibDuktape_ScriptContainer_Process_Argv0);
 	duk_push_int(ctx, 1);
@@ -905,6 +951,30 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_pop(ctx);																		// ...
 
 	ILibDuktape_EventEmitter_AddOnceEx(emitter, "~", ILibDuktape_ScriptContainer_Process_Finalizer, 1);
+
+#ifdef _POSIX
+	if (SignalDescriptors[0] == 0 && SignalDescriptors[1] == 0)
+	{
+		if (pipe(SignalDescriptors) == 0)
+		{
+			fcntl(SignalDescriptors[0], F_SETFL, O_NONBLOCK);
+			fcntl(SignalDescriptors[1], F_SETFL, O_NONBLOCK);
+
+			void *chain = Duktape_GetChain(ctx);
+			ILibChain_Link *k = ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
+			((void**)k->ExtraMemoryPtr)[0] = ctx;
+			((void**)k->ExtraMemoryPtr)[1] = emitter->object;
+			k->MetaData = "Signal_Listener";
+			k->PreSelectHandler = ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect;
+			k->PostSelectHandler = ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect;
+			ILibAddToChain(chain, k);
+
+			signal(SIGTERM, ILibDuktape_ScriptContainer_Process_SignalListener);
+
+		}
+	}
+#endif
+
 }
 void ILibDuktape_ScriptContainer_ExecTimeout_Finalizer(duk_context *ctx, void *timeoutKey)
 {
