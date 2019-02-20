@@ -240,6 +240,8 @@ function serviceManager()
             // Before we start, we need to copy the binary to the right place
             var folder = this.getServiceFolder();
             if (!require('fs').existsSync(folder)) { require('fs').mkdirSync(folder); }
+            if (!require('fs').existsSync(folder + '\\' + options.name)) { require('fs').mkdirSync(folder + '\\' + options.name); }
+
             require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.name + '.exe');
             options.servicePath = folder + '\\' + options.name + '\\' + options.name + '.exe';
 
@@ -294,6 +296,13 @@ function serviceManager()
                     console.log('copying ' + options.files[i]);
                     require('fs').copyFileSync(options.files[i], folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
                 }
+            }
+            if (options.parameters)
+            {
+                var reg = require('win-registry');
+                var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
+                imagePath += (' ' + options.parameters.join(' '));
+                reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
             }
 
             return (this.getService(options.name));
