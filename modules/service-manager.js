@@ -14,6 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+function extractFileName(filePath)
+{
+    var tokens = filePath.split('\\').join('/').split('/');
+    var name;
+
+    while ((name = tokens.pop()) == '');
+    return (name);
+}
+
 function parseServiceStatus(token)
 {
     var j = {};
@@ -230,8 +240,8 @@ function serviceManager()
             // Before we start, we need to copy the binary to the right place
             var folder = this.getServiceFolder();
             if (!require('fs').existsSync(folder)) { require('fs').mkdirSync(folder); }
-            require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '.exe');
-            options.servicePath = folder + '\\' + options.name + '.exe';
+            require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.name + '.exe');
+            options.servicePath = folder + '\\' + options.name + '\\' + options.name + '.exe';
 
             var servicePath = this.GM.CreateVariable('"' + options.servicePath + '"');
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0002);
@@ -276,39 +286,81 @@ function serviceManager()
             }
             this.proxy.CloseServiceHandle(h);
             this.proxy.CloseServiceHandle(handle);
+
+            if (options.files)
+            {
+                for(var i in options.files)
+                {
+                    console.log('copying ' + options.files[i]);
+                    require('fs').copyFileSync(options.files[i], folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
+                }
+            }
+
             return (this.getService(options.name));
         }
         if(process.platform == 'linux')
         {
-            if (!this.isAdmin()) { throw ('Installing as Service, requires root'); }
-
+            if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
+            var parameters = options.parameters ? options.parameters.join(' ') : '';
+            var conf;
             switch (this.getServiceType())
             {
                 case 'init':
-                    require('fs').copyFileSync(options.servicePath, '/etc/init.d/' + options.name);
-                    console.log('copying ' + options.servicePath);
-                    var m = require('fs').statSync('/etc/init.d/' + options.name).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
-                    require('fs').chmodSync('/etc/init.d/' + options.name, m);
-                    this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                    this._update._moduleName = options.name;
-                    this._update.stdout.on('data', function (chunk) { });
-                    this._update.stdin.write('update-rc.d ' + options.name + ' defaults\n');
-                    this._update.stdin.write('exit\n');
-                    //update-rc.d meshagent defaults # creates symlinks for rc.d
-                    //service meshagent start
+                    if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
+                    if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
-                    this._update.waitExit();
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+                    console.log('copying ' + options.servicePath);
+
+                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+
+                    conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', {flags: 'wb'});
+                    conf.write('start on runlevel [2345]\n');
+                    conf.write('stop on runlevel [016]\n\n');
+                    conf.write('respawn\n\n');
+                    conf.write('chdir /usr/local/mesh_services/' + options.name + '\n');
+                    conf.write('exec /usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n\n');
+                    conf.end();
 
                     break;
                 case 'systemd':
                     var serviceDescription = options.description ? options.description : 'MeshCentral Agent';
-                    if (!require('fs').existsSync('/usr/local/mesh')) { require('fs').mkdirSync('/usr/local/mesh'); }
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh/' + options.name);
-                    var m = require('fs').statSync('/usr/local/mesh/' + options.name).mode;
+
+                    if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
+                    if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
+
+                    console.log('copying ' + options.servicePath);
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+
+                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
-                    require('fs').chmodSync('/usr/local/mesh/' + options.name, m);
-                    require('fs').writeFileSync('/lib/systemd/system/' + options.name + '.service', '[Unit]\nDescription=' + serviceDescription + '\n[Service]\nExecStart=/usr/local/mesh/' + options.name + '\nStandardOutput=null\nRestart=always\nRestartSec=3\n[Install]\nWantedBy=multi-user.target\nAlias=' + options.name + '.service\n', { flags: 'w' });
+                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+
+                    if (require('fs').existsSync('/lib/systemd/system'))
+                    {
+                        conf = require('fs').createWriteStream('/lib/systemd/system/' + options.name + '.service', { flags: 'wb' });
+                    }
+                    else if (require('fs').existsSync('/usr/lib/systemd/system'))
+                    {
+                        conf = require('fs').createWriteStream('/usr/lib/systemd/system/' + options.name + '.service', { flags: 'wb' });
+                    }
+                    else
+                    {
+                        throw ('unknown location for systemd configuration files');
+                    }
+
+                    conf.write('[Unit]\nDescription=' + serviceDescription + '\n');
+                    conf.write('[Service]\n');
+                    conf.write('WorkingDirectory=/usr/local/mesh_services/' + options.name + '\n');
+                    conf.write('ExecStart=/usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n');
+                    conf.write('StandardOutput=null\n');
+                    conf.write('Restart=on-failure\n');
+                    conf.write('RestartSec=3\n');
+                    conf.write('[Install]\nWantedBy=multi-user.target\nAlias=' + options.name + '.service\n');
+                    conf.end();
+
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                     this._update._moduleName = options.name;
                     this._update.stdout.on('data', function (chunk) { });
@@ -376,6 +428,13 @@ function serviceManager()
                 throw ('Service: ' + options.name + ' already exists');
             }
         }
+
+        if (options.files) {
+            for (var i in options.files) {
+                console.log('copying ' + options.files[i]);
+                require('fs').copyFileSync(options.files[i], '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
+            }
+        }
     }
     this.uninstallService = function uninstallService(name)
     {
@@ -412,15 +471,15 @@ function serviceManager()
             switch (this.getServiceType())
             {
                 case 'init':
-                    this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
+                    this._update = require('child_process').execFile('/bin/sh', ['sh']);
                     this._update.stdout.on('data', function (chunk) { });
                     this._update.stdin.write('service ' + name + ' stop\n');
-                    this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
                     this._update.stdin.write('exit\n');
                     this._update.waitExit();
                     try
                     {
-                        require('fs').unlinkSync('/etc/init.d/' + name);
+                        require('fs').unlinkSync('/etc/init/' + name + '.conf');
+                        require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
                         console.log(name + ' uninstalled');
 
                     }
@@ -438,8 +497,9 @@ function serviceManager()
                     this._update.waitExit();
                     try
                     {
-                        require('fs').unlinkSync('/usr/local/mesh/' + name);
-                        require('fs').unlinkSync('/lib/systemd/system/' + name + '.service');
+                        require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                        if (require('fs').existsSync('/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + name + '.service'); }
+                        if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + name + '.service'); }
                         console.log(name + ' uninstalled');
                     }
                     catch (e)

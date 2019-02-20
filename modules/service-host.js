@@ -170,8 +170,6 @@ function serviceHost(serviceName)
     
     this.run = function run()
     {
-        var serviceOperation = 0;
-
         for(var i = 0; i<process.argv.length; ++i)
         {
             switch(process.argv[i])
@@ -202,14 +200,9 @@ function serviceHost(serviceName)
                         console.log(e);
                         process.exit();
                     }
-                    if (process.platform == 'win32' || process.platform == 'darwin')
-                    {
-                        // Only do this on Windows/MacOS, becuase Linux is async... It'll complete later
-                        console.log(this._ServiceOptions.name + ' uninstalled');
-                        process.exit();
-                    }
-                    i = process.argv.length;
-                    serviceOperation = 1;
+
+                    console.log(this._ServiceOptions.name + ' uninstalled');
+                    process.exit();
                     break;
                 case 'start':
                 case '-d':
@@ -249,109 +242,35 @@ function serviceHost(serviceName)
         else if (process.platform == 'linux')
         {
             var moduleName = this._ServiceOptions ? this._ServiceOptions.name : process.execPath.substring(1 + process.execPath.lastIndexOf('/'));
+            var platformType = require('process-manager').getProcessInfo(1).Name;
 
-            for (var i = 0; i < process.argv.length; ++i) {
-                switch (process.argv[i]) {
-                    case 'start':
-                    case '-d':
-                        var child = require('child_process').execFile(process.execPath, [moduleName], { type: require('child_process').SpawnTypes.DETACHED });
-                        var pstream = null;
-                        try {
-                            pstream = require('fs').createWriteStream('/var/run/' + moduleName + '.pid', { flags: 'w' });
-                        }
-                        catch (e) {
-                        }
-                        if (pstream == null) {
-                            pstream = require('fs').createWriteStream('.' + moduleName + '.pid', { flags: 'w' });
-                        }
-                        pstream.end(child.pid.toString());
-
-                        console.log(moduleName + ' started!');
-                        process.exit();
-                        break;
-                    case 'stop':
-                    case '-s':
-                        var pid = null;
-                        try {
-                            pid = parseInt(require('fs').readFileSync('/var/run/' + moduleName + '.pid', { flags: 'r' }));
-                            require('fs').unlinkSync('/var/run/' + moduleName + '.pid');
-                        }
-                        catch (e) {
-                        }
-                        if (pid == null) {
-                            try {
-                                pid = parseInt(require('fs').readFileSync('.' + moduleName + '.pid', { flags: 'r' }));
-                                require('fs').unlinkSync('.' + moduleName + '.pid');
-                            }
-                            catch (e) {
-                            }
-                        }
-
-                        if (pid) {
-                            process.kill(pid);
-                            console.log(moduleName + ' stopped');
-                        }
-                        else {
-                            console.log(moduleName + ' not running');
-                        }
-                        process.exit();
-                        break;
-                }
+            if (platformType != 'systemd' && platformType != 'init')
+            {
+                this.emit('normalStart'); // Unknown Platform Type, so we're probably not a service
             }
-
-            if (serviceOperation == 0) {
-                // This is non-windows, so we need to check how this binary was started to determine if this was a service start
-
-                // Start by checking if we were started with start/stop
-                var pid = null;
-                try {
-                    pid = parseInt(require('fs').readFileSync('/var/run/' + moduleName + '.pid', { flags: 'r' }));
+            else
+            {
+                this._checkpid = require('child_process').execFile('/bin/sh', ['sh']);
+                this._checkpid.stdout.result = '';
+                this._checkpid.stdout.on('data', function (chunk) { this.result += chunk.toString(); });
+                switch(platformType)
+                {
+                    case 'init':
+                        this._checkpid.stdin.write('service ' + moduleName + " status | awk '{print $4}'\nexit\n");
+                        break;
+                    case 'systemd':
+                        this._checkpid.stdin.write('systemctl status ' + moduleName + " | grep 'Main PID:' | awk '{print $3}'\nexit\n");
+                        break;
                 }
-                catch (e) {
-                }
-                if (pid == null) {
-                    try {
-                        pid = parseInt(require('fs').readFileSync('.' + moduleName + '.pid', { flags: 'r' }));
-                    }
-                    catch (e) {
-                    }
-                }
+                this._checkpid.waitExit();
 
-                if (pid != null && pid == process.pid) {
+                if(this._checkpid.stdout.result != '' && parseInt(this._checkpid.stdout.result) == process.pid)
+                {
                     this.emit('serviceStart');
                 }
-                else {
-                    // Now we need to check if we were started with systemd
-                    if (require('process-manager').getProcessInfo(1).Name == 'systemd') {
-                        this._checkpid = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                        this._checkpid.result = '';
-                        this._checkpid.parent = this;
-                        this._checkpid.on('exit', function onCheckPIDExit() {
-                            var lines = this.result.split('\r\n');
-                            for (i in lines) {
-                                if (lines[i].startsWith(' Main PID:')) {
-                                    var tokens = lines[i].split(' ');
-                                    if (parseInt(tokens[3]) == process.pid) {
-                                        this.parent.emit('serviceStart');
-                                    }
-                                    else {
-                                        this.parent.emit('normalStart');
-                                    }
-                                    delete this.parent._checkpid;
-                                    return;
-                                }
-                            }
-                            this.parent.emit('normalStart');
-                            delete this.parent._checkpid;
-                        });
-                        this._checkpid.stdout.on('data', function (chunk) { this.parent.result += chunk.toString(); });
-                        this._checkpid.stdin.write("systemctl status " + moduleName + " | grep 'Main PID:'\n");
-                        this._checkpid.stdin.write('exit\n');
-                    }
-                    else {
-                        // This isn't even a systemd platform, so this couldn't have been a service start
-                        this.emit('normalStart');
-                    }
+                else
+                {
+                    this.emit('normalStart');
                 }
             }
         }
