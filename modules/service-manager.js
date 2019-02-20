@@ -325,8 +325,18 @@ function serviceManager()
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
                     require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
 
-                    conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', {flags: 'wb'});
-                    conf.write('start on runlevel [2345]\n');
+                    conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', { flags: 'wb' });
+                    switch (options.startType)
+                    {
+                        case 'BOOT_START':
+                        case 'SYSTEM_START':
+                        case 'AUTO_START':
+                            conf.write('start on runlevel [2345]\n');
+                            break;
+                        default:
+                            break;
+                    }
+                   
                     conf.write('stop on runlevel [016]\n\n');
                     conf.write('respawn\n\n');
                     conf.write('chdir /usr/local/mesh_services/' + options.name + '\n');
@@ -367,7 +377,17 @@ function serviceManager()
                     conf.write('StandardOutput=null\n');
                     conf.write('Restart=on-failure\n');
                     conf.write('RestartSec=3\n');
-                    conf.write('[Install]\nWantedBy=multi-user.target\nAlias=' + options.name + '.service\n');
+                    switch (options.startType)
+                    {
+                        case 'BOOT_START':
+                        case 'SYSTEM_START':
+                        case 'AUTO_START':
+                            conf.write('[Install]\n');
+                            conf.write('WantedBy=multi-user.target\n');
+                            conf.write('Alias=' + options.name + '.service\n'); break;
+                        default:
+                            break;
+                    }
                     conf.end();
 
                     this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
