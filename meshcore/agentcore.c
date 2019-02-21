@@ -713,32 +713,24 @@ int MeshAgent_Helper_IsService()
 
 	switch (MeshAgent_Posix_GetPlatformType())
 	{
-		case MeshAgent_Posix_PlatformTypes_SYSTEMD: // Linux Systemd			
-			if (MeshAgent_Helper_CommandLine((char*[]) { "systemctl status meshagent | grep 'Main PID:'\n", "exit\n", NULL }, &result, &resultLen) == 0)
+		case MeshAgent_Posix_PlatformTypes_SYSTEMD: // Linux Systemd		
+			if (MeshAgent_Helper_CommandLine((char*[]) { "systemctl status meshagent | grep 'Main PID:' | awk '{print $3}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
 			{
-				ILibAppendStringToDiskEx("/tmp/meshagent.log", result, resultLen);
-				parser_result *pr = ILibParseString(result, 0, resultLen, "\r\n", 2);
-				parser_result_field *f = pr->FirstResult;
-				while (f != NULL)
+				while (resultLen > 0 && (result[resultLen-1] == 10 || result[resultLen-1] == 13)) { resultLen--; }
+				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
 				{
-					if (ILibString_StartsWith(f->data, f->datalength, " Main PID:", 10) != 0)
-					{
-						int sx = ILibString_IndexOf(f->data, f->datalength, ":", 1) + 1;
-						int ex = ILibString_IndexOf(f->data, f->datalength, "(", 1) - 1;
-
-						char *syspid = f->data + sx;
-						int syspidLen = ILibTrimString(&syspid, ex - sx);
-						syspid[syspidLen] = 0;
-
-						if (syspidLen == pidStrLen && strncmp(syspid, pidStr, syspidLen) == 0)
-						{
-							retVal = 1;
-							break;
-						}
-					}
-					f = f->NextResult;
+					retVal = 1;
 				}
-				ILibDestructParserResults(pr);
+			}
+			break;
+		case MeshAgent_Posix_PlatformTypes_INITD:
+			if (MeshAgent_Helper_CommandLine((char*[]) { "service meshagent status | awk '{print $4}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
+			{
+				while (resultLen > 0 && (result[resultLen-1] == 10 || result[resultLen-1] == 13)) { resultLen--; }
+				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
+				{
+					retVal = 1;
+				}
 			}
 			break;
 		case MeshAgent_Posix_PlatformTypes_LAUNCHD: // MacOS Launchd
@@ -765,18 +757,6 @@ int MeshAgent_Helper_IsService()
 			}
 			break;
 		default: // Generic
-			// Just check to see if the pid file matches the current pid
-			{
-				char *diskpid;
-				int diskpidLen;
-		
-				if ((diskpidLen = ILibReadFileFromDiskEx(&diskpid, "/var/run/meshagent.pid")) == 0) { diskpidLen = ILibReadFileFromDiskEx(&diskpid, ".meshagent.pid"); }
-				if (diskpidLen != 0 && atoi(diskpid) == atoi(pidStr))
-				{
-					retVal = 1;
-				}
-			}
-			
 			break;
 	}
 	return(retVal);
@@ -3526,11 +3506,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			pid_t pid = 0;
 			size_t len;
 
-#ifdef _ANDROID
-			fd = fopen("/data/usr/tmp/meshagent.pid", "r");
-#else
 			fd = fopen("/var/run/meshagent.pid", "r");
-#endif
 			if (fd == NULL) fd = fopen(".meshagent.pid", "r");
 			if (fd != NULL)
 			{
@@ -3539,12 +3515,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				{
 					sscanf(str, "%d\r\n", &pid);
 					if (pid > 0 && kill(pid, SIGKILL) == 0) printf("Mesh agent stopped.\r\n"); else printf("Mesh agent not running.\r\n");
-#ifdef _ANDROID
-					remove("/data/usr/tmp/meshagent.pid");
-#else
 					remove("/var/run/meshagent.pid");
 					remove(".meshagent.pid");
-#endif
 				}
 				fclose(fd);
 				exit(EXIT_SUCCESS); 
@@ -3803,11 +3775,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			len = snprintf(str, 15, "%d\r\n", pid);
 
-#ifdef _ANDROID
-			fd = fopen("/data/usr/tmp/meshagent.pid", "w");
-#else
 			fd = fopen("/var/run/meshagent.pid", "w");
-#endif
 			if (fd == NULL) fd = fopen(".meshagent.pid", "w");
 			if (fd != NULL)
 			{
@@ -4379,8 +4347,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						case MeshAgent_Posix_PlatformTypes_INITD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service Start (INITD)"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent start");	// Restart the service
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent restart");	// Restart the service
 							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						default:
@@ -4464,34 +4432,6 @@ void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char *
 		CloseHandle(processInfo.hThread);
 	}
 }
-/*
-#elif defined(__APPLE__) && defined(_DAEMON)
-// Perform self-update (Apple Daemon)
-void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv)
-{
-int i;
-
-// First, we wait a little to give time for the calling process to exit
-sleep(5);
-
-// Attempt to copy our own exe over the
-remove(exepath);
-snprintf(ILibScratchPad2, 6000, "cp %s %s", selfpath, exepath);
-while (system(ILibScratchPad2) != 0)
-{
-sleep(5);
-remove(exepath);
-}
-
-// Now run the updated process
-i = system("/sbin/SystemStarter restart \"MeshAgent\"");
-UNREFERENCED_PARAMETER(i);
-}
-*/
-#elif ANDROID
-// no self update
-#elif NACL
-// no self update
 #else
 // Perform self-update (Linux version)
 void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv)
