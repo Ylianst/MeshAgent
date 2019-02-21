@@ -20,6 +20,7 @@ limitations under the License.
 #include <IPHlpApi.h>
 #include <Windows.h>
 #include <WinBase.h>
+#include <signal.h>
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -95,7 +96,7 @@ char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 #define ILibDuktape_ScriptContainer_Process_stdin				"\xFF_stdin"
 #define ILibDuktape_ScriptContainer_Process_stdout				"\xFF_stdout"
 #define ILibDuktape_ScriptContainer_Process_stderr				"\xFF_stderr"
-
+#define ILibDuktape_ScriptContainer_Signal_ListenerPtr				"\xFF_signalListener"
 
 #define ILibDuktape_ScriptContainer_ExitCode					"\xFF_ExitCode"
 #define ILibDuktape_ScriptContainer_Exitting					"\xFF_Exiting"
@@ -597,6 +598,8 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Finalizer(duk_context *ctx)
 	// We need to dispatch the 'exit' event
 	int exitCode = 0;
 	duk_push_this(ctx);											// [process]
+	ILibChain_Link *link = (ILibChain_Link*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ScriptContainer_Signal_ListenerPtr);
+
 	if (duk_has_prop_string(ctx, -1, "\xFF_ExitCode"))
 	{
 		duk_get_prop_string(ctx, -1, "\xFF_ExitCode");			// [process][exitCode]
@@ -606,6 +609,14 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Finalizer(duk_context *ctx)
 	ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "exit");	// [emit][this]['exit']
 	duk_push_int(ctx, exitCode);												// [emit][this]['exit'][exitCode]
 	duk_call_method(ctx, 2);
+
+	if (link != NULL)
+	{
+		((void**)link->ExtraMemoryPtr)[0] = NULL;
+		((void**)link->ExtraMemoryPtr)[1] = NULL;
+		ILibChain_SafeRemove(Duktape_GetChain(ctx), link);
+	}
+
 	return(0);
 }
 
@@ -884,6 +895,22 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_Destroy(void *object)
 }
 #endif
 
+void ILibDuktape_ScriptContainer_Process_SIGTERM_Hook(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
+{
+	int listenerCount = ILibDuktape_EventEmitter_HasListeners2(sender, "SIGTERM", 0);
+	if (listenerCount == 0)
+	{
+		// We are the first
+#ifdef _POSIX
+		signal(SIGTERM, ILibDuktape_ScriptContainer_Process_SignalListener);
+#else
+		UNREFERENCED_PARAMETER(eventName);
+		UNREFERENCED_PARAMETER(hookedCallback);
+#endif
+	}
+
+}
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -949,6 +976,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Process_Exit, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGTERM");
+	ILibDuktape_EventEmitter_AddHook(emitter, "SIGTERM", ILibDuktape_ScriptContainer_Process_SIGTERM_Hook);
 
 	ILibDuktape_CreateEventWithGetter(ctx, "argv0", ILibDuktape_ScriptContainer_Process_Argv0);
 	duk_push_int(ctx, 1);
@@ -992,8 +1020,10 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 			k->DestroyHandler = ILibDuktape_ScriptContainer_Process_SignalListener_Destroy;
 			ILibAddToChain(chain, k);
 
-			signal(SIGTERM, ILibDuktape_ScriptContainer_Process_SignalListener);
-
+			duk_push_heapptr(ctx, emitter->object);											// [process]
+			duk_push_pointer(ctx, k);														// [process][ptr]
+			duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Signal_ListenerPtr);	// [process]
+			duk_pop(ctx);																	// ...
 		}
 	}
 #endif
