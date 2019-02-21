@@ -710,13 +710,15 @@ int MeshAgent_Helper_IsService()
 	char pidStr[255];
 	int pidStrLen = sprintf_s(pidStr, sizeof(pidStr), "%d", (int)getpid());
 	int retVal = 0;
+	int i = 0;
 
 	switch (MeshAgent_Posix_GetPlatformType())
 	{
-		case MeshAgent_Posix_PlatformTypes_SYSTEMD: // Linux Systemd		
+		case MeshAgent_Posix_PlatformTypes_SYSTEMD: // Linux Systemd	
 			if (MeshAgent_Helper_CommandLine((char*[]) { "systemctl status meshagent | grep 'Main PID:' | awk '{print $3}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
 			{
-				while (resultLen > 0 && (result[resultLen-1] == 10 || result[resultLen-1] == 13)) { resultLen--; }
+				while (i<resultLen && result[i] != 10) { ++i; }
+				resultLen = i;
 				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
 				{
 					retVal = 1;
@@ -726,7 +728,8 @@ int MeshAgent_Helper_IsService()
 		case MeshAgent_Posix_PlatformTypes_INITD:
 			if (MeshAgent_Helper_CommandLine((char*[]) { "service meshagent status | awk '{print $4}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
 			{
-				while (resultLen > 0 && (result[resultLen-1] == 10 || result[resultLen-1] == 13)) { resultLen--; }
+				while (i<resultLen && result[i] != 10) { ++i; }
+				resultLen = i;
 				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
 				{
 					retVal = 1;
@@ -4342,9 +4345,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 							break;
 #endif
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Issuing SYSTEMD restart"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "systemctl restart meshagent"); // Restart the service
-							ignore_result(MeshAgent_System(ILibScratchPad));
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
+							exit(1);
 							break;
 						case MeshAgent_Posix_PlatformTypes_INITD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
