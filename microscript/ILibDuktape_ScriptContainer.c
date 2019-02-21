@@ -851,6 +851,16 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 					break;
 			}
 		}
+		else if(bytesRead == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
+		{
+			close(SignalDescriptors[0]);
+			close(SignalDescriptors[1]);
+			if (pipe(SignalDescriptors) == 0)
+			{
+				fcntl(SignalDescriptors[0], F_SETFL, O_NONBLOCK);
+				fcntl(SignalDescriptors[1], F_SETFL, O_NONBLOCK);
+			}
+		}
 	}
 }
 void ILibDuktape_ScriptContainer_Process_SignalListener(int signum)
@@ -859,6 +869,18 @@ void ILibDuktape_ScriptContainer_Process_SignalListener(int signum)
 	{
 		ignore_result(write(SignalDescriptors[1], &signum, sizeof(signum)));
 	}
+}
+void ILibDuktape_ScriptContainer_Process_SignalListener_Destroy(void *object)
+{
+	if (SignalDescriptors[0] != 0)
+	{
+		close(SignalDescriptors[0]);
+	}
+	if (SignalDescriptors[1] != 0)
+	{
+		close(SignalDescriptors[1]);
+	}
+	SignalDescriptors[0] = SignalDescriptors[1] = 0;
 }
 #endif
 
@@ -967,6 +989,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 			k->MetaData = "Signal_Listener";
 			k->PreSelectHandler = ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect;
 			k->PostSelectHandler = ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect;
+			k->DestroyHandler = ILibDuktape_ScriptContainer_Process_SignalListener_Destroy;
 			ILibAddToChain(chain, k);
 
 			signal(SIGTERM, ILibDuktape_ScriptContainer_Process_SignalListener);
