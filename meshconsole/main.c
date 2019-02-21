@@ -182,13 +182,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	{
 		if (argc >= 2 && strnlen_s(argv[1], 9) >= 8 && strncmp(argv[1], "-update:", 8) == 0)
 		{
-			/*
-			// If in OSX, attempt to clean up the KVM slave process.
-			#if defined(__APPLE__) && defined(_DAEMON) && defined(_LINKVM)
-			installOsx(0);
-			#endif
-			*/
-
 			// -update:"C:\Users\Public\Downloads\MeshManageability\Debug\MeshConsol2.exe"
 			MeshAgent_PerformSelfUpdate(argv[0], argv[1] + 8, argc, argv);
 			return 0;
