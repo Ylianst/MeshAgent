@@ -371,11 +371,6 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 			return(ILibDuktape_Error(ctx, "EventEmitter.on(): Event '%s' not found", propName));
 		}
 	}
-	hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
-
-	node = prepend ? ILibLinkedList_AddHead(eventList, callback) : ILibLinkedList_AddTail(eventList, callback);
-	((int*)ILibLinkedList_GetExtendedMemory(node))[0] = once;
-	data->totalListeners[0]++;
 
 	duk_push_heapptr(ctx, data->tmpObject);
 	duk_push_heapptr(ctx, callback);
@@ -390,6 +385,12 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 		duk_push_heapptr(ctx, callback);										// [emit][this][newListener][propName][callback]
 		duk_call_method(ctx, 3); duk_pop(ctx);									// ...
 	}
+
+	hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
+	node = prepend ? ILibLinkedList_AddHead(eventList, callback) : ILibLinkedList_AddTail(eventList, callback);
+	((int*)ILibLinkedList_GetExtendedMemory(node))[0] = once;
+	data->totalListeners[0]++;
+
 	return 0;
 }
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromThis(duk_context *ctx)
