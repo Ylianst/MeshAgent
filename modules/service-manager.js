@@ -325,6 +325,38 @@ function serviceManager()
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
                     require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
 
+                    conf = require('fs').createWriteStream('/etc/init.d/' + options.name, { flags: 'wb' });
+                    conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPS91c3IvbG9jYWwvbWVzaF9zZXJ2aWNlcy9YWFhYWC9YWFhYWApSVU5BUz1yb290CgpQSURGSUxFPS92YXIvcnVuL1hYWFhYLnBpZApMT0dGSUxFPS92YXIvbG9nL1hYWFhYLmxvZwoKc3RhcnQoKSB7CiAgaWYgWyAtZiAiJFBJREZJTEUiIF0gJiYga2lsbCAtMCAkKGNhdCAiJFBJREZJTEUiKSAyPi9kZXYvbnVsbDsgdGhlbgogICAgZWNobyAnU2VydmljZSBhbHJlYWR5IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBmaQogIGVjaG8gJ1N0YXJ0aW5nIHNlcnZpY2XigKYnID4mMgogIGxvY2FsIENNRD0iJFNDUklQVCAmPiBcIiRMT0dGSUxFXCIgJiBlY2hvIFwkISIKICBzdSAtYyAiJENNRCIgJFJVTkFTID4gIiRQSURGSUxFIgogIGVjaG8gJ1NlcnZpY2Ugc3RhcnRlZCcgPiYyCn0KCnN0b3AoKSB7CiAgaWYgWyAhIC1mICIkUElERklMRSIgXTsgdGhlbgogICAgZWNobyAnU2VydmljZSBub3QgcnVubmluZycgPiYyCiAgICByZXR1cm4gMQogIGVsc2UKCXBpZD0kKCBjYXQgIiRQSURGSUxFIiApCglpZiBraWxsIC0wICRwaWQgMj4vZGV2L251bGw7IHRoZW4KICAgICAgZWNobyAnU3RvcHBpbmcgc2VydmljZeKApicgPiYyCiAgICAgIGtpbGwgLTE2ICRwaWQKICAgICAgZWNobyAnU2VydmljZSBzdG9wcGVkJyA+JjIKCWVsc2UKCSAgZWNobyAnU2VydmljZSBub3QgcnVubmluZycKCWZpCglybSAtZiAkIlBJREZJTEUiCiAgZmkKfQpyZXN0YXJ0KCl7CglzdG9wCglzdGFydAp9CnN0YXR1cygpewoJaWYgWyAtZiAiJFBJREZJTEUiIF0KCXRoZW4KCQlwaWQ9JCggY2F0ICIkUElERklMRSIgKQoJCWlmIGtpbGwgLTAgJHBpZCAyPi9kZXYvbnVsbDsgdGhlbgoJCQllY2hvICJYWFhYWCBzdGFydC9ydW5uaW5nLCBwcm9jZXNzICRwaWQiCgkJZWxzZQoJCQllY2hvICdYWFhYWCBzdG9wL3dhaXRpbmcnCgkJZmkKCWVsc2UKCQllY2hvICdYWFhYWCBzdG9wL3dhaXRpbmcnCglmaQoKfQoKCmNhc2UgIiQxIiBpbgoJc3RhcnQpCgkJc3RhcnQKCQk7OwoJc3RvcCkKCQlzdG9wCgkJOzsKCXJlc3RhcnQpCgkJc3RvcAoJCXN0YXJ0CgkJOzsKCXN0YXR1cykKCQlzdGF0dXMKCQk7OwoJKikKCQllY2hvICJVc2FnZTogc2VydmljZSBYWFhYWCB7c3RhcnR8c3RvcHxyZXN0YXJ0fHN0YXR1c30iCgkJOzsKZXNhYwpleGl0IDAKCg==', 'base64').toString().split('XXXXX').join(options.name));
+                    conf.end();
+
+                    m = require('fs').statSync('/etc/init.d/' + options.name).mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    require('fs').chmodSync('/etc/init.d/' + options.name, m);
+                    switch (options.startType)
+                    {
+                        case 'BOOT_START':
+                        case 'SYSTEM_START':
+                        case 'AUTO_START':
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.on('data', function (chunk) { });
+                            child.stdin.write('update-rc.d ' + options.name + ' defaults\nexit\n');
+                            child.waitExit();
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case 'upstart':
+                    if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
+                    if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
+
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+                    console.log('copying ' + options.servicePath);
+
+                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+
                     conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', { flags: 'wb' });
                     switch (options.startType)
                     {
@@ -336,13 +368,11 @@ function serviceManager()
                         default:
                             break;
                     }
-                   
                     conf.write('stop on runlevel [016]\n\n');
                     conf.write('respawn\n\n');
                     conf.write('chdir /usr/local/mesh_services/' + options.name + '\n');
                     conf.write('exec /usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n\n');
                     conf.end();
-
                     break;
                 case 'systemd':
                     var serviceDescription = options.description ? options.description : 'MeshCentral Agent';
@@ -391,7 +421,6 @@ function serviceManager()
                             this._update.stdin.write('systemctl enable ' + options.name + '.service\n');
                             this._update.stdin.write('exit\n');
                             this._update.waitExit();
-
                         default:
                             break;
                     }
@@ -504,6 +533,22 @@ function serviceManager()
                     this._update = require('child_process').execFile('/bin/sh', ['sh']);
                     this._update.stdout.on('data', function (chunk) { });
                     this._update.stdin.write('service ' + name + ' stop\n');
+                    this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
+                    this._update.stdin.write('exit\n');
+                    this._update.waitExit();
+                    try {
+                        require('fs').unlinkSync('/etc/init.d/' + name);
+                        require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                        console.log(name + ' uninstalled');
+                    }
+                    catch (e) {
+                        console.log(name + ' could not be uninstalled', e)
+                    }
+                    break;
+                case 'upstart':
+                    this._update = require('child_process').execFile('/bin/sh', ['sh']);
+                    this._update.stdout.on('data', function (chunk) { });
+                    this._update.stdin.write('service ' + name + ' stop\n');
                     this._update.stdin.write('exit\n');
                     this._update.waitExit();
                     try
@@ -511,7 +556,6 @@ function serviceManager()
                         require('fs').unlinkSync('/etc/init/' + name + '.conf');
                         require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
                         console.log(name + ' uninstalled');
-
                     }
                     catch (e)
                     {
@@ -579,7 +623,15 @@ function serviceManager()
     {
         this.getServiceType = function getServiceType()
         {
-            return (require('process-manager').getProcessInfo(1).Name);
+            var platform = require('process-manager').getProcessInfo(1).Name;
+            if (platform == 'init')
+            {
+                if(require('fs').existsSync('/etc/init'))
+                {
+                    platform = 'upstart';
+                }
+            }
+            return (platform);
         };
     }
 }
