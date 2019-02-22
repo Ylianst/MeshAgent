@@ -376,6 +376,7 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	duk_push_heapptr(ctx, callback);
 	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(callback)); // Save the callback to the tmp object, so it won't get GC'ed
 
+	hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
 	if (hookHandler != NULL) { hookHandler(data, propName, callback); }
 	if (!(propNameLen == 11 && strncmp(propName, "newListener", 11) == 0))
 	{
@@ -386,7 +387,6 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 		duk_call_method(ctx, 3); duk_pop(ctx);									// ...
 	}
 
-	hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
 	node = prepend ? ILibLinkedList_AddHead(eventList, callback) : ILibLinkedList_AddTail(eventList, callback);
 	((int*)ILibLinkedList_GetExtendedMemory(node))[0] = once;
 	data->totalListeners[0]++;
