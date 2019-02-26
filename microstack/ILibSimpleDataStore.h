@@ -41,8 +41,10 @@ const extern int ILibMemory_SimpleDataStore_CONTAINERSIZE;
 typedef void(*ILibSimpleDataStore_KeyEnumerationHandler)(ILibSimpleDataStore sender, char* Key, int KeyLen, void *user);
 
 // Create the data store.
-__EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx(char* filePath, int userExtraMemorySize);
-#define ILibSimpleDataStore_Create(filePath) ILibSimpleDataStore_CreateEx(filePath, 0)
+__EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, int userExtraMemorySize, int readonly);
+#define ILibSimpleDataStore_Create(filePath) ILibSimpleDataStore_CreateEx2(filePath, 0, 0)
+#define ILibSimpleDataStore_CreateEx(filePath, userExtraMemorySize) ILibSimpleDataStore_CreateEx2(filePath, userExtraMemorySize, 0)
+
 
 // Check if the data store exists
 int ILibSimpleDataStore_Exists(char *filePath);

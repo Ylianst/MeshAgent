@@ -193,6 +193,8 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 {
 	ILibSimpleDataStore dataStore;
 	char *filePath;
+	int nargs = duk_get_top(ctx);
+	int rdonly = (nargs > 1 && duk_is_object(ctx, 1)) ? Duktape_GetIntPropertyValue(ctx, 1, "readOnly", 0) : 0;
 
 	duk_push_this(ctx);										// [DataStore]
 	duk_push_object(ctx);									// [DataStore][RetVal]
@@ -216,7 +218,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 	else
 	{
 		filePath = (char*)duk_require_string(ctx, 0);
-		dataStore = ILibSimpleDataStore_Create(filePath);
+		dataStore = ILibSimpleDataStore_CreateEx2(filePath, 0, rdonly);
 		duk_pop_2(ctx);												// [DataStore][RetVal]
 		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_SimpleDataStore_Finalizer);
 	}
@@ -224,11 +226,14 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 	duk_push_pointer(ctx, dataStore);						// [DataStore][RetVal][ds]
 	duk_put_prop_string(ctx, -2, ILibDuktape_DataStore_PTR);// [DataStore][RetVal]
 
-	ILibDuktape_CreateInstanceMethod(ctx, "Delete", ILibDuktape_SimpleDataStore_Delete, 1);
-	ILibDuktape_CreateInstanceMethod(ctx, "Put", ILibDuktape_SimpleDataStore_Put, 2);
+	if (rdonly == 0)
+	{
+		ILibDuktape_CreateInstanceMethod(ctx, "Delete", ILibDuktape_SimpleDataStore_Delete, 1);
+		ILibDuktape_CreateInstanceMethod(ctx, "Put", ILibDuktape_SimpleDataStore_Put, 2);
+		ILibDuktape_CreateInstanceMethod(ctx, "Compact", ILibDuktape_SimpleDataStore_Compact, 0);
+	}
 	ILibDuktape_CreateInstanceMethod(ctx, "Get", ILibDuktape_SimpleDataStore_Get, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "GetBuffer", ILibDuktape_SimpleDataStore_GetRaw, DUK_VARARGS);
-	ILibDuktape_CreateInstanceMethod(ctx, "Compact", ILibDuktape_SimpleDataStore_Compact, 0);
 	ILibDuktape_CreateEventWithGetter(ctx, "Keys", ILibDuktape_SimpleDataStore_Keys);
 
 	return 1;
@@ -237,7 +242,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 void ILibDuktape_SimpleDataStore_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);				// [DataStore]
-	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_shared", 0, "Create", ILibDuktape_SimpleDataStore_Create, 1);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_shared", 0, "Create", ILibDuktape_SimpleDataStore_Create, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_shared", 1, "Shared", ILibDuktape_SimpleDataStore_Create, 0);
 }
 

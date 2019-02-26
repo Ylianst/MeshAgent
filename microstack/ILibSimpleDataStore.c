@@ -21,6 +21,7 @@ limitations under the License.
 #include <unistd.h>
 #else
 #include <io.h>
+#include <fcntl.h>
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -321,28 +322,63 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 }
 
 // Open the data store file
-FILE* ILibSimpleDataStore_OpenFileEx(char* filePath, int forceTruncateIfNonZero)
+FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero, int readonly)
 {
 	FILE* f = NULL;
 
 #ifdef WIN32
-	if (forceTruncateIfNonZero !=0 || fopen_s(&f, filePath, "rb+N") != 0)
+	if (readonly == 0)
 	{
-		fopen_s(&f, filePath, "wb+N");
+		HANDLE h = NULL;
+		if (forceTruncateIfNonZero != 0)
+		{
+			h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
+			{
+				h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+			}
+		}
+		else
+		{
+			h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
+			{
+				h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+			}
+		}
+		int fd = _open_osfhandle((intptr_t)h, _O_RDWR);
+		if (fd == -1) { CloseHandle(h); return(NULL); }
+		f = _fdopen(fd, "wb+N");
+		if (f == NULL) { CloseHandle(h); return(NULL); }
+	}
+	else
+	{
+		HANDLE h = CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (h == INVALID_HANDLE_VALUE) 
+		{
+			int err = GetLastError();
+			return(NULL);
+		}
+		int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
+		if (fd == -1) { CloseHandle(h); return(NULL); }
+		f = _fdopen(fd, "rb");
+		if (f == NULL) { CloseHandle(h); return(NULL); }
 	}
 #else
-	if (forceTruncateIfNonZero != 0 || (f = fopen(filePath, "rb+")) == NULL)
+	char *flag = readonly == 0 ? "rb+": "rb";
+
+	if (forceTruncateIfNonZero != 0 || (f = fopen(filePath, flag)) == NULL)
 	{
 		f = fopen(filePath, "wb+");
 	}
 	if (f == NULL) { return NULL; } // If we failed to open the file, stop now.
-	if (flock(fileno(f), LOCK_EX | LOCK_NB) != 0) { fclose(f); return NULL; } // Request exclusive lock on this file, no blocking.
+	if (readonly == 0 && flock(fileno(f), LOCK_EX | LOCK_NB) != 0) { fclose(f); return NULL; } // Request exclusive lock on this file, no blocking.
 #endif
 
 	return f;
 }
-#define ILibSimpleDataStore_OpenFile(filePath) ILibSimpleDataStore_OpenFileEx(filePath, 0)
-
+#define ILibSimpleDataStore_OpenFile(filePath) ILibSimpleDataStore_OpenFileEx2(filePath, 0, 0)
+#define ILibSimpleDataStore_OpenFileEx(filePath, forceTruncate) ILibSimpleDataStore_OpenFileEx2(filePath, forceTruncate, 0)
 int ILibSimpleDataStore_Exists(char *filePath)
 {
 #ifdef WIN32
@@ -352,12 +388,12 @@ int ILibSimpleDataStore_Exists(char *filePath)
 #endif
 }
 // Open the data store file. Optionally allocate spare user memory
-__EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx(char* filePath, int userExtraMemorySize)
+__EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, int userExtraMemorySize, int readonly)
 {
 	ILibSimpleDataStore_Root* retVal = (ILibSimpleDataStore_Root*)ILibMemory_Allocate(ILibMemory_SimpleDataStore_CONTAINERSIZE, userExtraMemorySize, NULL, NULL);
 	
 	retVal->filePath = ILibString_Copy(filePath, (int)strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
-	retVal->dataFile = ILibSimpleDataStore_OpenFile(retVal->filePath);
+	retVal->dataFile = ILibSimpleDataStore_OpenFileEx2(retVal->filePath, 0, readonly);
 
 	if (retVal->dataFile == NULL)
 	{

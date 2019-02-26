@@ -16,13 +16,29 @@ limitations under the License.
 
 
 var db;
+var readonlyDb = true;
+
+if (process.argv.length > 1)
+{
+    switch (process.argv[1])
+    {
+        case 'compact':
+        case 'put':
+        case 'putx':       
+        case 'delete':
+        case 'import':
+            readonlyDb = false;
+            break;
+    }
+}
+
 if (process.platform == 'win32')
 {
-    db = require('SimpleDataStore').Create(process.execPath.replace('.exe', '.db'));
+    db = require('SimpleDataStore').Create(process.execPath.replace('.exe', '.db'), { readOnly: readonlyDb });
 }
 else
 {
-    db = require('SimpleDataStore').Create(process.execPath + '.db');
+    db = require('SimpleDataStore').Create(process.execPath + '.db', { readOnly: readonlyDb });
 }
 
 
