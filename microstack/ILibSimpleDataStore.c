@@ -354,11 +354,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 	else
 	{
 		HANDLE h = CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-		if (h == INVALID_HANDLE_VALUE) 
-		{
-			int err = GetLastError();
-			return(NULL);
-		}
+		if (h == INVALID_HANDLE_VALUE) { return(NULL); }
 		int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
 		if (fd == -1) { CloseHandle(h); return(NULL); }
 		f = _fdopen(fd, "rb");
