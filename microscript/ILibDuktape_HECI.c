@@ -990,7 +990,7 @@ void ILibDuktape_HECI_PreSelect(void* object, fd_set *readset, fd_set *writeset,
 	
 	if (h->descriptor <= 0) { return; }
 	if (h->paused == 0 && h->session != NULL) { FD_SET(h->descriptor, readset); }
-	if (h->session != NULL && ILibQueue_GetCount(h->session->PendingWrites) > 0) { FD_SET(h->descriptor, writeset); }
+	if (h->session != NULL && ILibMemory_CanaryOK(h->session) && ILibQueue_GetCount(h->session->PendingWrites) > 0) { FD_SET(h->descriptor, writeset); }
 
 	while (ILibQueue_GetCount(h->Q) > 0 && h->paused == 0)
 	{
@@ -1025,7 +1025,7 @@ void ILibDuktape_HECI_PostSelect(void* object, int slct, fd_set *readset, fd_set
 		{
 			ILibDuktape_DuplexStream_WriteData(h->session->stream, h->session->buffer, bytesRead);
 		}
-		else
+		else if(h->ctx != NULL && ILibMemory_CanaryOK(h->session))
 		{
 			ILibDuktape_EventEmitter_SetupEmit(h->ctx, h->session->stream->ParentObject, "error");		// [emit][this][error]
 			duk_push_string(h->ctx, "HECI Read Error");													// [emit][this][error][msg]
