@@ -276,12 +276,13 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 			ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "connect", duk_require_heapptr(ctx, 1));
 		}
 	}
-	if (duk_is_string(ctx, 0) || pathLen > 0)
+	if (duk_is_string(ctx, 0) || (pathLen > 0 && port == 0))
 	{
 		// This is a PATH string (Domain Socket)
 #ifndef _POSIX
 		//return(ILibDuktape_Error(ctx, "AF_UNIX sockets not supported on this platform"));
 #else
+		
 		if (pathLen > 0) 
 		{ 
 			host = path; 
