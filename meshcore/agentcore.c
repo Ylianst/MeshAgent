@@ -3694,7 +3694,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 #if defined(_WINSERVICE)
 		// If running as a Windows Service, save the key in LOCAL_MACHINE
-		if (RegCreateKey(HKEY_LOCAL_MACHINE, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
+		if (RegCreateKey(agentHost->runningAsConsole == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
 #else
 		// If running in Console mode, save the key in CURRENT_USER
 		if (RegCreateKey(HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
