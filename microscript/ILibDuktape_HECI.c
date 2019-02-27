@@ -974,7 +974,7 @@ duk_ret_t ILibDuktape_HECI_Finalizer(duk_context *ctx)
 		HECI_chainLink *h = (HECI_chainLink*)duk_get_pointer(ctx, -1);
 		h->ctx = NULL;
 		h->heciObject = NULL;
-		ILibChain_SafeRemove(h->link.ParentChain, h);
+		if (h->link.ParentChain != NULL) { ILibChain_SafeRemove(h->link.ParentChain, h); }
 	}
 #endif
 
