@@ -507,12 +507,17 @@ duk_ret_t ILibDuktape_Debugger_JSAttach_promise_wait(duk_context *ctx)
 	duk_push_heap_stash(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_Debugger_DebugObject);
 	ILibDuktape_Debugger *dbg = (ILibDuktape_Debugger*)Duktape_GetBuffer(ctx, -1, NULL);
-
-	listen(dbg->listener, 1);
-	ILibDuktape_Debugger_Socket_waitconn(dbg);
-	ILibDuktape_Debugger_StartMemoryReporting(dbg->ctx);
-	duk_debugger_attach(dbg->ctx, ILibDuktape_Debugger_ReadCB, ILibDuktape_Debugger_WriteCB, ILibDuktape_Debugger_PeekCB, NULL, NULL, NULL, ILibDuktape_Debugger_DetachCB, (void*)dbg);
-
+	if (dbg == NULL)
+	{
+		printf("Error setting up debugger...\n");
+	}
+	else
+	{
+		listen(dbg->listener, 1);
+		ILibDuktape_Debugger_Socket_waitconn(dbg);
+		ILibDuktape_Debugger_StartMemoryReporting(dbg->ctx);
+		duk_debugger_attach(dbg->ctx, ILibDuktape_Debugger_ReadCB, ILibDuktape_Debugger_WriteCB, ILibDuktape_Debugger_PeekCB, NULL, NULL, NULL, ILibDuktape_Debugger_DetachCB, (void*)dbg);
+	}
 	return(0);
 }
 
