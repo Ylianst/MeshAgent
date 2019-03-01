@@ -2999,7 +2999,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	f->data[f->datalength] = 0;
 	serverUrl = f->data;
 	serverUrlLen = f->datalength;
-	if (f->datalength > 5 && memcmp(f->data, "local", 5) == 0)
+	if (f->datalength == 5 && memcmp(f->data, "local", 5) == 0)
 	{
 		if (agent->multicastServerUrl != NULL) {
 			serverUrl = agent->multicastServerUrl;
