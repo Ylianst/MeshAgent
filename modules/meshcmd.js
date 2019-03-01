@@ -25,7 +25,6 @@ limitations under the License.
 //console.displayStreamPipeMessages = 1; // Display stream pipe and un-pipes
 //var __gc = setInterval(function () { console.log('GC'); _debugGC() }, 2000); //
 
-attachDebugger({webport: 9995, wait: 1}).then(console.log);
 
 var fs = require('fs');
 var os = require('os');
@@ -772,11 +771,9 @@ function startMeScriptEx() {
 // FETCH ALL INTEL AMT STATE
 //
 
-// Save the entire Intel AMT state
-function saveEntireAmtState() {
-    // See if MicroLMS needs to be started
-    if ((settings.hostname == '127.0.0.1') || (settings.hostname.toLowerCase() == 'localhost')) { settings.noconsole = true; startLms(); }
 
+function saveEntireAmtState2()
+{
     console.log('Fetching all Intel AMT state, this may take a few minutes...');
     var transport = require('amt-wsman-duk');
     var wsman = require('amt-wsman');
@@ -792,6 +789,22 @@ function saveEntireAmtState() {
     amtstack.BatchEnum(null, AllWsman, saveEntireAmtStateOk2, null, true);
     amtstack.GetAuditLog(saveEntireAmtStateOk3);
     amtstack.GetMessageLog(saveEntireAmtStateOk4);
+
+}
+
+// Save the entire Intel AMT state
+function saveEntireAmtState()
+{
+    // See if MicroLMS needs to be started
+    if ((settings.hostname == '127.0.0.1') || (settings.hostname.toLowerCase() == 'localhost'))
+    {
+        settings.noconsole = true;
+        startLms().then(saveEntireAmtState2);
+    }
+    else
+    {
+        saveEntireAmtState2();
+    }
 }
 
 function onWsmanProcessChanged(a, b) { var x = Math.floor((a * 100) / b); if (x < IntelAmtEntireStateProgress) { IntelAmtEntireStateProgress = x; console.log((100 - x) + '%'); } }
@@ -803,7 +816,7 @@ function saveEntireAmtStateOk4(stack, messages, tag, status) { if (status == 600
 function saveEntireAmtStateDone() {
     if (--IntelAmtEntireStateCalls != 0) return;
     var out = fs.openSync(settings.output, 'w');
-    fs.writeSync(out, Buffer.from(JSON.stringify(IntelAmtEntireState), 'utf8'));
+    fs.writeSync(out, Buffer.from(JSON.stringify(IntelAmtEntireState)));
     fs.closeSync(out);
     console.log('Done, results written to ' + settings.output + '.');
     exit(1);
@@ -878,7 +891,11 @@ var lmsControlSockets = {};
 var lmsControlSocketsNextId = 1;
 var lmsNotifications = [];
 var amtLms = null;
-function startLms(func) {
+var promise = require('promise');
+
+function startLms(func)
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     var lme_heci = require('amt-lme');
     //var amtLms = null;
     var http = require('http');
@@ -897,9 +914,11 @@ function startLms(func) {
     console.log('Setting up LME');
 
     amtLms = new lme_heci({ debug: settings.lmsdebug });
+    amtLms.promise = ret;
     amtLms.on('error', function (e) {
         console.log('LME connection failed', e);
         setupMeiOsAdmin(func, amtLms.connected == false ? 0 : 3);
+        this.promise._res();
     });
     amtLms.on('notify', function (data, options, str, code) {
         if (code == 'iAMT0052-3') {
@@ -913,18 +932,21 @@ function startLms(func) {
         }
     });
     //console.log('LME Connecting...');
-    //amtLms.on('connect', function () {
     amtLms.on('bind', function (mapping) {
-	if(mapping[16992])
-	{
-	   this.removeAllListeners('bind');
-	}
-	else
-	{
-	   return;
-	}
-        console.log('LMS Connected');
+        if (mapping[16992])
+        {
+            this.removeAllListeners('bind');
+        }
+        else
+        {
+            return;
+        }
+
+        console.log('LMS Bounded');
         amtLms.connected = true;
+
+        this.promise._res();
+
         //console.log("LME Connected.");
         if (settings.noconsole !== true) {
             amtLms.meshCommander = http.createServer();
@@ -983,6 +1005,7 @@ function startLms(func) {
         }
 
     });
+    return (ret);
 }
 
 function setupMeiOsAdmin(func, state) {
