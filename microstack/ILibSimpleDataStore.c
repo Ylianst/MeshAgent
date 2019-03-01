@@ -617,6 +617,9 @@ __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 	if (root->error == 0)
 	{
 		// Success in writing new temporary file
+#ifdef _POSIX
+		flock(fileno(root->dataFile), LOCK_UN);
+#endif
 		fclose(root->dataFile); // Close the data store
 		fclose(compacted); // Close the temporary data store
 
