@@ -1217,12 +1217,8 @@ void ILibDuktape_TLS_connect_resolveError(duk_context *ctx, void ** args, int ar
 {
 	ILibDuktape_net_socket *data = (ILibDuktape_net_socket*)args[0];
 
-	duk_push_heapptr(ctx, data->object);									// [socket]
-	duk_get_prop_string(ctx, -2, "emit");									// [socket][emit]
-	duk_swap_top(ctx, -2);													// [emit][this]
-	duk_dup(ctx, -3);														// [emit][this]
-	duk_push_string(ctx, "error");											// [emit][this][error]
-	duk_push_heapptr(ctx, args[1]);											// [emit][this][error][err]
+	ILibDuktape_EventEmitter_SetupEmit(ctx, data->emitter->object, "error");	// [emit][this][error]
+	duk_push_heapptr(ctx, args[1]);												// [emit][this][error][err]
 	if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "tls.socket.OnError(): "); }
 	duk_pop(ctx);
 }
@@ -1309,7 +1305,8 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		ILibDuktape_EventEmitter_AddOnce(data->emitter, "secureConnect", duk_require_heapptr(ctx, 1));
 	}
 
-	char *host = Duktape_GetStringPropertyValue(ctx, 0, "host", "127.0.0.1");
+	duk_size_t hostLen;
+	char *host = Duktape_GetStringPropertyValueEx(ctx, 0, "host", "127.0.0.1", &hostLen);
 	char *sniname = Duktape_GetStringPropertyValue(ctx, 0, "servername", host);
 	int port = Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
 	struct sockaddr_in6 dest;
@@ -1323,13 +1320,47 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		ILibResolveEx(Duktape_GetStringPropertyValue(ctx, -1, "host", NULL), (unsigned short)Duktape_GetIntPropertyValue(ctx, -1, "port", 0), &proxy);
 		duk_pop(ctx);
 	}
-	ILibResolveEx(host, (unsigned short)port, &dest);
+
+	if (hostLen > 0 && hostLen < 1024 && host[0] == '[')
+	{
+		char hostCopy[1024];
+		int pct = ILibString_LastIndexOf(host, (int)hostLen, "%", 1);
+
+		memcpy_s(hostCopy, sizeof(hostCopy), host, hostLen);
+
+		hostCopy[(int)hostLen - 1] = 0;
+		if (pct > 0)
+		{
+			hostCopy[pct] = 0;
+			pct = atoi(hostCopy + pct + 1);
+		}
+		else
+		{
+			pct = -1;
+		}
+
+		memset(&dest, 0, sizeof(struct sockaddr_in6));
+		dest.sin6_family = AF_INET6;
+		ILibInet_pton(AF_INET6, hostCopy + 1, &(dest.sin6_addr));
+		if (pct >= 0)
+		{
+			dest.sin6_scope_id = pct;
+		}
+		dest.sin6_port = (unsigned short)htons(port);
+	}
+	else
+	{
+		ILibResolveEx(host, (unsigned short)port, &dest);
+	}
 	if (dest.sin6_family == AF_UNSPEC || (duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
 		// Can't resolve... Delay event emit, until next event loop, because if app called net.createConnection(), they don't have the socket yet
 		duk_push_error_object(ctx, DUK_ERR_ERROR, "tls.socket.connect(): Cannot resolve host '%s'", host);
-		ILibDuktape_Immediate(ctx, (void*[]) { data, duk_get_heapptr(ctx, -1) }, 2, ILibDuktape_TLS_connect_resolveError);
-		duk_pop(ctx);																			// [socket]
+		void *imm = ILibDuktape_Immediate(ctx, (void*[]) { data, duk_get_heapptr(ctx, -1) }, 2, ILibDuktape_TLS_connect_resolveError);
+		duk_push_heapptr(ctx, imm);					// [socket][err][imm]
+		duk_swap_top(ctx, -2);						// [socket][imm][err]
+		duk_put_prop_string(ctx, -2, "\xFF_tmp");	// [socket][imm]
+		duk_pop(ctx);								// [socket]
 	}
 	else
 	{
