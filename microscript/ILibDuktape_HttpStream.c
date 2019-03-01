@@ -970,42 +970,27 @@ void ILibDuktape_HttpStream_http_request_transformPiped(struct ILibDuktape_Trans
 	int tmpLen;
 
 	ILibDuktape_Http_ClientRequest_WriteData *data = (ILibDuktape_Http_ClientRequest_WriteData*)user;
-	if (data->noMoreWrites != 0)
+	if(data->needRetry != 0)
 	{
-		// We have the entire request body
 		data->headersFinished = 1;
-		tmpLen = sprintf_s(tmp, sizeof(tmp), "Content-Length: %d\r\n\r\n", (int)data->bufferWriteLen);
-		ILibDuktape_readableStream_WriteData(sender->target, tmp, tmpLen);
-		if (data->bufferWriteLen > 0) { ILibDuktape_readableStream_WriteData(sender->target, data->buffer, (int)data->bufferWriteLen); }
-	}
-	else if(data->needRetry != 0)
-	{
-		if (data->headersFinished)
+		if (sender->writerEnded != 0)
 		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "%X\r\n", (unsigned int)data->bufferWriteLen);
+			tmpLen = sprintf_s(tmp, sizeof(tmp), "Content-Length: %d\r\n\r\n", (int)data->bufferWriteLen);
 		}
 		else
 		{
-			data->headersFinished = 1;
-			if (data->contentLengthSpecified)
-			{
-				tmpLen = sprintf_s(tmp, sizeof(tmp), "Content-Length: %d\r\n\r\n", (int)data->bufferWriteLen);
-			}
-			else
-			{
-				tmpLen = sprintf_s(tmp, sizeof(tmp), "Transfer-Encoding: chunked\r\n\r\n%X\r\n", (unsigned int)data->bufferWriteLen);
-			}
+			tmpLen = sprintf_s(tmp, sizeof(tmp), "Transfer-Encoding: chunked\r\n\r\n%X\r\n", (unsigned int)data->bufferWriteLen);
 		}
-
 		ILibDuktape_readableStream_WriteData(sender->target, tmp, tmpLen);
 		if (data->bufferWriteLen > 0)
 		{
 			ILibDuktape_readableStream_WriteData(sender->target, data->buffer, (int)data->bufferWriteLen);
-			if (!data->contentLengthSpecified) { ILibDuktape_readableStream_WriteData(sender->target, "\r\n", 2); }
+			if (sender->writerEnded == 0) { ILibDuktape_readableStream_WriteData(sender->target, "\r\n", 2); }
 
 			free(data->buffer);
 			data->buffer = NULL;
 		}
+
 		data->bufferLen = data->bufferWriteLen = 0;
 		data->needRetry = 0;
 	}
@@ -1021,6 +1006,13 @@ void ILibDuktape_HttpStream_http_request_transform(struct ILibDuktape_Transform 
 	{
 		// Need to write out the end of the headers
 		data->headersFinished = 1;
+		if (bufferLen > 0)
+		{
+			ILibMemory_AllocateRaw(data->buffer, bufferLen);
+			data->bufferLen = bufferLen;
+			memcpy_s(data->buffer, bufferLen, buffer, bufferLen);
+		}
+
 		if (flush != 0)
 		{
 			tmpLen = sprintf_s(tmp, sizeof(tmp), "Content-Length: %d\r\n\r\n", bufferLen);
@@ -1030,12 +1022,6 @@ void ILibDuktape_HttpStream_http_request_transform(struct ILibDuktape_Transform 
 				ILibDuktape_readableStream_WriteData(sender->target, buffer, bufferLen);
 			}
 			data->contentLengthSpecified = 1;
-			if (bufferLen > 0)
-			{
-				data->buffer = (char*)ILibMemory_Allocate(bufferLen, 0, NULL, NULL);
-				data->bufferLen = bufferLen;
-				memcpy_s(data->buffer, bufferLen, buffer, bufferLen);
-			}
 		}
 		else
 		{
@@ -1055,6 +1041,9 @@ void ILibDuktape_HttpStream_http_request_transform(struct ILibDuktape_Transform 
 		if (bufferLen > 0)
 		{
 			ILibDuktape_readableStream_WriteData(sender->target, buffer, bufferLen);
+			ILibMemory_ReallocateRaw(data->buffer, data->bufferLen + bufferLen);
+			memcpy_s(data->buffer + data->bufferLen, bufferLen, buffer, bufferLen);
+			data->bufferLen = data->bufferLen + bufferLen;
 		}
 		ILibDuktape_readableStream_WriteData(sender->target, "\r\n", 2);
 	}
