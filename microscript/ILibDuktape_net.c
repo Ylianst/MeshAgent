@@ -82,6 +82,7 @@ int ILibDuktape_TLS_ctx2server = -1;
 #define ILibDuktape_SERVER2OPTIONS				"\xFF_ServerToOptions"
 #define ILibDuktape_SERVER2LISTENOPTIONS		"\xFF_ServerToListenOptions"
 #define ILibDuktape_TLSSocket2SecureContext		"\xFF_TLSSocket2SecureContext"
+#define ILibDuktape_TLS_util_cert				"\xFF_TLS_util_cert"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
@@ -1554,6 +1555,46 @@ duk_ret_t ILibDuktape_TLS_generateRandomInteger(duk_context *ctx)
 	BN_CTX_free(binctx);
 	return(1);
 }
+duk_ret_t ILibDuktape_TLS_loadCertificate_finalizer(duk_context *ctx)
+{
+	struct util_cert *cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_TLS_util_cert);
+	util_freecert(cert);
+	return(0);
+}
+duk_ret_t ILibDuktape_TLS_loadCertificate_getKeyHash(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	struct util_cert *cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_TLS_util_cert);
+	char *hash = duk_push_fixed_buffer(ctx, UTIL_SHA384_HASHSIZE);
+	duk_push_buffer_object(ctx, -1, 0, UTIL_SHA384_HASHSIZE, DUK_BUFOBJ_NODEJS_BUFFER);
+	util_keyhash(cert[0], hash);
+	return(1);
+}
+duk_ret_t ILibDuktape_TLS_loadCertificate(duk_context *ctx)
+{
+	duk_size_t pfxLen;
+	char *pfx = Duktape_GetBufferPropertyEx(ctx, 0, "pfx", &pfxLen);
+
+	if (pfx != NULL)
+	{
+		duk_push_object(ctx);
+		ILibDuktape_WriteID(ctx, "tls.certificate");
+		struct util_cert *cert = (struct util_cert*)Duktape_PushBuffer(ctx, sizeof(struct util_cert));
+		duk_put_prop_string(ctx, -2, ILibDuktape_TLS_util_cert);
+		if (util_from_p12(pfx, (int)pfxLen, Duktape_GetStringPropertyValue(ctx, 0, "passphrase", NULL), cert) == 0)
+		{
+			// Failed to load certificate
+			return(ILibDuktape_Error(ctx, "tls.loadCertificate(): Invalid passphrase"));
+		}
+		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_TLS_loadCertificate_finalizer);
+		ILibDuktape_CreateInstanceMethod(ctx, "getKeyHash", ILibDuktape_TLS_loadCertificate_getKeyHash, 0);
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "tls.loadCertificate(): pfx not specified"));
+	}
+}
 void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);				// [TLS]
@@ -1561,6 +1602,7 @@ void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_TLS_connect, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createSecureContext", ILibDuktape_TLS_createSecureContext, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "loadCertificate", ILibDuktape_TLS_loadCertificate, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "generateRandomInteger", ILibDuktape_TLS_generateRandomInteger, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "loadpkcs7b", ILibDuktape_TLS_loadpkcs7b, 1);
 }

@@ -105,13 +105,14 @@ void *Duktape_GetHeapptrProperty(duk_context *ctx, duk_idx_t i, char* propertyNa
 	}
 	return retVal;
 }
-void *Duktape_GetBufferProperty(duk_context *ctx, duk_idx_t i, char* propertyName)
+void *Duktape_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyName, duk_size_t* bufferLen)
 {
 	void *retVal = NULL;
+	if (bufferLen != NULL) { *bufferLen = 0; }
 	if (duk_has_prop_string(ctx, i, propertyName))
 	{
 		duk_get_prop_string(ctx, i, propertyName);			// [prop]
-		retVal = (void*)Duktape_GetBuffer(ctx, -1, NULL);
+		retVal = (void*)Duktape_GetBuffer(ctx, -1, bufferLen);
 		duk_pop(ctx);										// ...
 	}
 	return(retVal);
