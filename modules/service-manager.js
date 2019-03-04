@@ -190,6 +190,13 @@ function serviceManager()
                     require('events').inherits(retVal);
                     retVal.on('~', function () { this._proxy.CloseServiceHandle(this); this._proxy.CloseServiceHandle(this._scm); });
                     retVal.name = name;
+
+                    retVal.appLocation = function ()
+                    {
+                        var reg = require('win-registry');
+                        var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + this.name, 'ImagePath').toString();
+                        return (imagePath.split('.exe')[0] + '.exe');
+                    };
                     retVal.isRunning = function ()
                     {
                         var bytesNeeded = this._GM.CreateVariable(this._GM.PointerSize);
@@ -255,6 +262,23 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
+                            ret.appLocation = function appLocation()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                if(appLocation.platform == 'init')
+                                {
+                                    child.stdin.write("cat /etc/init.d/" + this.name + " | grep 'SCRIPT=' | awk -F= '{print $2}'\nexit\n");
+                                }
+                                else
+                                {
+                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep 'exec ' | awk '{print $2}'\nexit\n");
+                                }
+                                child.waitExit();
+                                return (child.stdout.str.trim());
+                            };
+                            ret.appLocation.platform = platform;
                             ret.isRunning = function isRunning()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -305,6 +329,22 @@ function serviceManager()
                         if (require('fs').existsSync('/lib/systemd/system/' + name + '.service') ||
                             require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
                         {
+                            ret.appLocation = function ()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service'))
+                                {
+                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{print $2}'\n\exit\n");
+                                }
+                                else
+                                {
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{print $2}'\n\exit\n");
+                                }
+                                child.waitExit();
+                                return (child.stdout.str.trim() + '/' + this.name);
+                            };
                             ret.isRunning = function isRunning()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -656,36 +696,41 @@ function serviceManager()
             switch (this.getServiceType())
             {
                 case 'init':
-                    this._update = require('child_process').execFile('/bin/sh', ['sh']);
-                    this._update.stdout.on('data', function (chunk) { });
-                    this._update.stdin.write('service ' + name + ' stop\n');
-                    this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
-                    this._update.stdin.write('exit\n');
-                    this._update.waitExit();
-                    try {
-                        require('fs').unlinkSync('/etc/init.d/' + name);
-                        require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
-                        console.log(name + ' uninstalled');
-                    }
-                    catch (e) {
-                        console.log(name + ' could not be uninstalled', e)
-                    }
-                    break;
                 case 'upstart':
-                    this._update = require('child_process').execFile('/bin/sh', ['sh']);
-                    this._update.stdout.on('data', function (chunk) { });
-                    this._update.stdin.write('service ' + name + ' stop\n');
-                    this._update.stdin.write('exit\n');
-                    this._update.waitExit();
-                    try
+                    if (require('fs').existsSync('/etc/init.d/' + name))
                     {
-                        require('fs').unlinkSync('/etc/init/' + name + '.conf');
-                        require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
-                        console.log(name + ' uninstalled');
+                        // init.d service
+                        this._update = require('child_process').execFile('/bin/sh', ['sh']);
+                        this._update.stdout.on('data', function (chunk) { });
+                        this._update.stdin.write('service ' + name + ' stop\n');
+                        this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
+                        this._update.stdin.write('exit\n');
+                        this._update.waitExit();
+                        try {
+                            require('fs').unlinkSync('/etc/init.d/' + name);
+                            require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                            console.log(name + ' uninstalled');
+                        }
+                        catch (e) {
+                            console.log(name + ' could not be uninstalled', e)
+                        }
                     }
-                    catch (e)
+                    if (require('fs').existsSync('/etc/init/' + name + '.conf'))
                     {
-                        console.log(name + ' could not be uninstalled', e)
+                        // upstart service
+                        this._update = require('child_process').execFile('/bin/sh', ['sh']);
+                        this._update.stdout.on('data', function (chunk) { });
+                        this._update.stdin.write('service ' + name + ' stop\n');
+                        this._update.stdin.write('exit\n');
+                        this._update.waitExit();
+                        try {
+                            require('fs').unlinkSync('/etc/init/' + name + '.conf');
+                            require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                            console.log(name + ' uninstalled');
+                        }
+                        catch (e) {
+                            console.log(name + ' could not be uninstalled', e)
+                        }
                     }
                     break;
                 case 'systemd':

@@ -32,7 +32,7 @@ function nativeAddModule(name)
             ret += ('memcpy_s(_' + name.split('-').join('') + ' + ' + i + ', ' + (tmp.length - i) + ', "' + chunk + '", ' + chunk.length + ');\n');
             i += chunk.length;
         }
-        ret += ('ILibBase64DecodeEx(_' + name.split('-').join('') + ', ' + tmp.length + ', _' + name.split('-').join('') + ' + ' + tmp.length + ');\n');
+        ret += ('ILibBase64DecodeEx((unsigned char*)_' + name.split('-').join('') + ', ' + tmp.length + ', (unsigned char*)_' + name.split('-').join('') + ' + ' + tmp.length + ');\n');
         ret += ('duk_push_global_object(ctx);duk_get_prop_string(ctx, -1, "addModule");duk_swap_top(ctx, -2);duk_push_string(ctx, "' + name + '");duk_push_string(ctx, _' + name.split('-').join('') + ' + ' + tmp.length + ');\n');
         ret += ('duk_pcall_method(ctx, 2); duk_pop(ctx);\n');
         ret += ('free(_' + name.split('-').join('') + ');\n');
