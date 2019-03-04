@@ -20,6 +20,23 @@ function nativeAddModule(name)
 {
     var value = getJSModule(name);
     var ret = "duk_peval_string_noresult(ctx, \"addModule('" + name + "', Buffer.from('" + Buffer.from(value).toString('base64') + "', 'base64').toString());\");";
+    if (ret.length > 16300)
+    {
+        // MS Visual Studio has a maxsize limitation
+        var tmp = Buffer.from(value).toString('base64');
+        ret = 'char *_' + name.split('-').join('') + ' = ILibMemory_Allocate(' + (tmp.length + value.length + 2) + ', 0, NULL, NULL);\n';
+        var i = 0;
+        while (i < tmp.length)
+        {
+            var chunk = tmp.substring(i, i+16000);
+            ret += ('memcpy_s(_' + name.split('-').join('') + ' + ' + i + ', ' + (tmp.length - i) + ', "' + chunk + '", ' + chunk.length + ');\n');
+            i += chunk.length;
+        }
+        ret += ('ILibBase64DecodeEx(_' + name.split('-').join('') + ', ' + tmp.length + ', _' + name.split('-').join('') + ' + ' + tmp.length + ');\n');
+        ret += ('duk_push_global_object(ctx);duk_get_prop_string(ctx, -1, "addModule");duk_swap_top(ctx, -2);duk_push_string(ctx, "' + name + '");duk_push_string(ctx, _' + name.split('-').join('') + ' + ' + tmp.length + ');\n');
+        ret += ('duk_pcall_method(ctx, 2); duk_pop(ctx);\n');
+        ret += ('free(_' + name.split('-').join('') + ');\n');
+    }
     module.exports(ret);
 }
 
