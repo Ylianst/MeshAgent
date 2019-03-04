@@ -1266,6 +1266,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	int ILibBase64DecodeLength(const int inputLen);
 	int ILibBase64Encode(unsigned char* input, const int inputlen, unsigned char** output);
 	int ILibBase64Decode(unsigned char* input, const int inputlen, unsigned char** output);
+	int ILibBase64DecodeEx(unsigned char* input, const int inputlen, unsigned char* output);
 
 	/* Compression Handling Methods */
 	char* ILibDecompressString(unsigned char* CurrentCompressed, const int bufferLength, const int DecompressedLength);

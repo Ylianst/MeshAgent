@@ -6034,6 +6034,11 @@ int ILibBase64DecodeLength(const int inputLen)
 	return ((inputLen * 3) / 4) + 4;
 }
 
+int ILibBase64DecodeEx(unsigned char* input, const int inputlen, unsigned char* output)
+{
+	return(ILibBase64Decode(input, inputlen, &output));
+}
+
 /*! \fn ILibBase64Decode(unsigned char* input, const int inputlen, unsigned char** output)
 \brief Decode a base64 encoded stream discarding padding, line breaks and noise
 \par
