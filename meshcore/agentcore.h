@@ -54,7 +54,8 @@ typedef enum MeshCommand_AuthInfo_CapabilitiesMask
 	MeshCommand_AuthInfo_CapabilitiesMask_FILES = 0x04,
 	MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE = 0x08,
 	MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT = 0x10,
-	MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY = 0x20
+	MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY = 0x20,
+	MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY = 0x40
 }MeshCommand_AuthInfo_CapabilitiesMask;
 
 typedef enum AgentIdentifiers

@@ -2248,7 +2248,16 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 	// Send mesh agent information to the server
 	ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)info, sizeof(MeshCommand_BinaryPacket_AuthInfo) + hostnamelen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 	agent->retryTime = 0;
-	printf("Connected.\n");
+
+	if ((agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY)
+	{
+		printf("[Recovery Agent] Connected.\n");
+	}
+	else
+	{
+		printf("Connected.\n");
+	}
+
 	if (agent->serverAuthState == 3) { MeshServer_ServerAuthenticated(WebStateObject, agent); }
 }
 
@@ -3531,8 +3540,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 	}
-
 #endif
+
+	int ri;
+	for (ri = 0; ri < paramLen; ++ri) 
+	{
+		if (strcmp(param[ri], "-recovery") == 0) { agentHost->capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY; parseCommands = 0; }
+	}
+
 
 	// We are a Mesh Agent
 	if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")); }
@@ -3689,6 +3704,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 #ifdef WIN32
 	// If running as a Windows service, set basic values to the registry, this allows other applications to know what the mesh agent is doing.
+	if((agentHost->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == 0)
 	{
 		HKEY hKey;
 

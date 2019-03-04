@@ -190,6 +190,18 @@ function serviceManager()
                     require('events').inherits(retVal);
                     retVal.on('~', function () { this._proxy.CloseServiceHandle(this); this._proxy.CloseServiceHandle(this._scm); });
                     retVal.name = name;
+                    retVal.isRunning = function ()
+                    {
+                        var bytesNeeded = this._GM.CreateVariable(this._GM.PointerSize);
+                        this._proxy.QueryServiceStatusEx(this._service, 0, 0, 0, bytesNeeded);
+                        var st = this._GM.CreateVariable(bytesNeeded.toBuffer().readUInt32LE());
+                        if(this._proxy.QueryServiceStatusEx(this._service, 0, st, st._size, bytesNeeded).Val != 0)
+                        {
+                            var state = parseServiceStatus(st);
+                            return (state.state == 'RUNNING');
+                        }
+                        return (false);
+                    };
                     retVal.stop = function () {
                         if (this.status.state == 'RUNNING') {
                             var newstate = this._GM.CreateVariable(36);
@@ -229,6 +241,117 @@ function serviceManager()
         this.isAdmin = function isAdmin() 
         {
             return (require('user-sessions').isRoot());
+        }
+        if(process.platform == 'linux')
+        {
+            this.getService = function (name, platform)
+            {
+                if (!platform) { platform = this.getServiceType(); }
+                var ret = { name: name };
+                switch(platform)
+                {
+                    case 'init':
+                    case 'upstart':
+                        if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
+                            (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
+                        {
+                            ret.isRunning = function isRunning()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
+                                child.waitExit();
+                                return (child.stdout.str.trim() == 'start/running');
+                            };
+                            ret.start = function start()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.on('data', function (chunk) { });
+                                child.stdin.write('service ' + this.name + ' start\nexit\n');
+                                child.waitExit();
+                            };
+                            ret.stop = function stop()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.on('data', function (chunk) { });
+                                child.stdin.write('service ' + this.name + ' stop\nexit\n');
+                                child.waitExit();
+                            };
+                            ret.restart = function restart()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.on('data', function (chunk) { });
+                                child.stdin.write('service ' + this.name + ' restart\nexit\n');
+                                child.waitExit();
+                            };
+                            ret.status = function status()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout._str = '';
+                                child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
+                                child.stdin.write('service ' + this.name + ' status\nexit\n');
+                                child.waitExit();
+                                return (child.stdout._str);
+                            };
+                            return (ret);
+                        }
+                        else
+                        {
+                            throw (platform + ' Service (' + name + ') NOT FOUND');
+                        }
+                        break;
+                    case 'systemd':
+                        if (require('fs').existsSync('/lib/systemd/system/' + name + '.service') ||
+                            require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
+                        {
+                            ret.isRunning = function isRunning()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                child.stdin.write("systemctl status " + this.name + " | grep 'Active:' | awk '{print $2}'\nexit\n");
+                                child.waitExit();
+                                return (child.stdout.str.trim() == 'active');         
+                            };
+                            ret.start = function start() {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.on('data', function (chunk) { });
+                                child.stdin.write('systemctl start ' + this.name + '\nexit\n');
+                                child.waitExit();
+                            };
+                            ret.stop = function stop() {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.on('data', function (chunk) { });
+                                child.stdin.write('systemctl stop ' + this.name + '\nexit\n');
+                                child.waitExit();
+                            };
+                            ret.restart = function restart() {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.on('data', function (chunk) { });
+                                child.stdin.write('systemctl restart ' + this.name + '\nexit\n');
+                                child.waitExit();
+                            };
+                            ret.status = function status() {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout._str = '';
+                                child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
+                                child.stdin.write('systemctl status ' + this.name + '\nexit\n');
+                                child.waitExit();
+                                return (child.stdout._str);
+                            };
+                            return (ret);
+                        }
+                        else
+                        {
+                            throw (platform + ' Service (' + name + ') NOT FOUND');
+                        }
+                        break;
+                    default:
+                        throw ('Unknown Service Platform: ' + platform);
+                        break;
+                }
+            };
         }
     }
     this.installService = function installService(options)
@@ -312,7 +435,9 @@ function serviceManager()
             if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
             var parameters = options.parameters ? options.parameters.join(' ') : '';
             var conf;
-            switch (this.getServiceType())
+            if (!options.servicePlatform) { options.servicePlatform = this.getServiceType(); }
+           
+            switch (options.servicePlatform)
             {
                 case 'init':
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
