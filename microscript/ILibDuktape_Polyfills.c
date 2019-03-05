@@ -52,6 +52,7 @@ typedef enum ILibDuktape_Console_DestinationFlags
 
 int g_displayStreamPipeMessages = 0;
 int g_displayFinalizerMessages = 0;
+extern int GenerateSHA384FileHash(char *filePath, char *fileHash);
 
 duk_ret_t ILibDuktape_Pollyfills_Buffer_slice(duk_context *ctx)
 {
@@ -2129,6 +2130,19 @@ void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 
 	ILibAddToChain(chain, link);
 }
+duk_ret_t ILibDuktape_Polyfills_filehash(duk_context *ctx)
+{
+	char *hash = duk_push_fixed_buffer(ctx, UTIL_SHA384_HASHSIZE);
+	duk_push_buffer_object(ctx, -1, 0, UTIL_SHA384_HASHSIZE, DUK_BUFOBJ_NODEJS_BUFFER);
+	if (GenerateSHA384FileHash((char*)duk_require_string(ctx, 0), hash) == 0)
+	{
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "Error generating FileHash "));
+	}
+}
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
@@ -2163,6 +2177,7 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "_debugCrash", ILibDuktape_Polyfills_debugCrash, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "_debugGC", ILibDuktape_Polyfills_debugGC, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "_debug", ILibDuktape_Polyfills_debug, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "getSHA384FileHash", ILibDuktape_Polyfills_filehash, 1);
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_CreateInstanceMethod(ctx, "crc32c", ILibDuktape_Polyfills_crc32c, DUK_VARARGS);
 #endif
