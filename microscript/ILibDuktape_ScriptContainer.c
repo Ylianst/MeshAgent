@@ -956,15 +956,6 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 		}
 		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Process_ArgArray);		// [g][process]
 	}
-
-	if (duk_peval_string(ctx, "require('os').arch();") == 0)							// [g][process][arch]
-	{
-		ILibDuktape_CreateReadonlyProperty(ctx, "arch");								// [g][process]
-	}
-	else
-	{																				   // [g][process]
-		duk_pop(ctx);
-	}
 	
 #ifdef _POSIX
 	duk_push_int(ctx, (duk_int_t)getpid());
