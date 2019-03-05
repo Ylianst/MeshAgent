@@ -17,11 +17,22 @@ limitations under the License.
 
 function extractFileName(filePath)
 {
-    var tokens = filePath.split('\\').join('/').split('/');
-    var name;
+    if (typeof (filePath) == 'string')
+    {
+        var tokens = filePath.split('\\').join('/').split('/');
+        var name;
 
-    while ((name = tokens.pop()) == '');
-    return (name);
+        while ((name = tokens.pop()) == '');
+        return (name);
+    }
+    else
+    {
+        return(filePath.newName)
+    }
+}
+function extractFileSource(filePath)
+{
+    return (typeof (filePath) == 'string' ? filePath : filePath.source);
 }
 
 function parseServiceStatus(token)
@@ -420,19 +431,14 @@ function serviceManager()
             
 
             switch (options.startType) {
-                case 'BOOT_START':
-                    serviceType = 0x00;
-                    break;
-                case 'SYSTEM_START':
-                    serviceType = 0x01;
-                    break;
                 case 'AUTO_START':
-                    serviceType = 0x02;
+                    serviceType = 0x02; // Automatic
                     break;
                 case 'DEMAND_START':
-                    serviceType = 0x03;
-                    break;
                 default:
+                    serviceType = 0x03; // Manual
+                    break;
+                case 'DISABLED':
                     serviceType = 0x04; // Disabled
                     break;
             }
@@ -458,8 +464,8 @@ function serviceManager()
             {
                 for(var i in options.files)
                 {
-                    console.log('copying ' + options.files[i]);
-                    require('fs').copyFileSync(options.files[i], folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
+                    console.log('copying ' + extractFileSource(options.files[i]));
+                    require('fs').copyFileSync(extractFileSource(options.files[i]), folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
                 }
             }
             if (options.parameters)
@@ -658,8 +664,8 @@ function serviceManager()
 
         if (options.files) {
             for (var i in options.files) {
-                console.log('copying ' + options.files[i]);
-                require('fs').copyFileSync(options.files[i], '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
+                console.log('copying ' + extractFileSource(options.files[i]));
+                require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
             }
         }
     }
@@ -674,19 +680,16 @@ function serviceManager()
             var servicePath = service.appLocation();
             if (service.status.state == undefined || service.status.state == 'STOPPED')
             {
+                try
+                {
+                    require('fs').unlinkSync(servicePath);
+                }
+                catch (e)
+                {
+                }
                 if (this.proxy.DeleteService(service._service) == 0)
                 {
                     throw ('Uninstall Service for: ' + name + ', failed with error: ' + this.proxy2.GetLastError());
-                }
-                else
-                {
-                    try
-                    {
-                        require('fs').unlinkSync(servicePath);
-                    }
-                    catch(e)
-                    {
-                    }
                 }
             }
             else
