@@ -195,7 +195,9 @@ function serviceManager()
                     {
                         var reg = require('win-registry');
                         var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + this.name, 'ImagePath').toString();
-                        return (imagePath.split('.exe')[0] + '.exe');
+                        var ret = imagePath.split('.exe')[0] + '.exe';
+                        if (ret.startsWith('"')) { ret = ret.substring(1); }
+                        return (ret);
                     };
                     retVal.isRunning = function ()
                     {
@@ -669,6 +671,7 @@ function serviceManager()
         if (process.platform == 'win32')
         {
             var service = this.getService(name);
+            var servicePath = service.appLocation();
             if (service.status.state == undefined || service.status.state == 'STOPPED')
             {
                 if (this.proxy.DeleteService(service._service) == 0)
@@ -679,7 +682,7 @@ function serviceManager()
                 {
                     try
                     {
-                        require('fs').unlinkSync(this.getServiceFolder() + '\\' + name + '.exe');
+                        require('fs').unlinkSync(servicePath);
                     }
                     catch(e)
                     {
