@@ -20,7 +20,7 @@ var http = require('http');
 var writable = require('stream').Writable;
 
 
-function wget(remoteUri, localFilePath)
+function wget(remoteUri, localFilePath, wgetoptions)
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     var agentConnected = false;
@@ -55,8 +55,15 @@ function wget(remoteUri, localFilePath)
         }
     }
 
+    var reqOptions = require('http').parseUri(remoteUri);
+    if (wgetoptions)
+    {
+        for (var inputOption in wgetoptions) {
+            reqOptions[inputOption] = wgetoptions[inputOption];
+        }
+    }
     ret._totalBytes = 0;
-    ret._request = http.get(remoteUri);
+    ret._request = http.get(reqOptions);
     ret._localFilePath = localFilePath;
     ret._request.promise = ret;
     ret._request.on('error', function (e) { this.promise._rej(e); });
