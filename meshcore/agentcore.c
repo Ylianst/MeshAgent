@@ -3041,7 +3041,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		}
 		strcpy_s(agent->serveruri, sizeof(agent->serveruri), "wss://meshcentral.com:443/agent.ashx");
 		strcpy_s(serverUrl, serverUrlLen, "wss://meshcentral.com:443/agent.ashx");
-		serverUrlLen = strnlen_s(serverUrl, serverUrlLen);
+		serverUrlLen = (int)strnlen_s(serverUrl, serverUrlLen);
 	}
 
 #ifndef MICROSTACK_NOTLS

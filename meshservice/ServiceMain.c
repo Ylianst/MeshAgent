@@ -946,7 +946,7 @@ int main(int argc, char* argv[])
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integragedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
-		integragedJavaScriptLen = strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 
 

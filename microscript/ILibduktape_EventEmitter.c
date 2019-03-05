@@ -556,7 +556,7 @@ void ILibDuktape_EventEmitter_eventNames_ex(ILibHashtable sender, void *Key1, ch
 		if (ILibLinkedList_GetCount(Data) > 0)
 		{
 			duk_push_lstring(emitter->ctx, Key2, Key2Len);
-			duk_put_prop_index(emitter->ctx, -2, duk_get_length(emitter->ctx, -2));
+			duk_put_prop_index(emitter->ctx, -2, (duk_uarridx_t)duk_get_length(emitter->ctx, -2));
 		}
 	}
 }

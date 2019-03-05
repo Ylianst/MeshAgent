@@ -120,7 +120,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
-		integratedJavaScriptLen = strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
