@@ -504,7 +504,7 @@ void ILibDuktape_Process_UncaughtException(duk_context *ctx)
 {
 	if (ctx != NULL) { ILibDuktape_Process_UncaughtExceptionEx(ctx, ""); }
 }
-char* Duktape_GetContextGuidHex(duk_context *ctx)
+char* Duktape_GetContextGuidHex(duk_context *ctx, void *db)
 {
 	char *retVal = NULL;
 
@@ -512,7 +512,7 @@ char* Duktape_GetContextGuidHex(duk_context *ctx)
 	if (duk_has_prop_string(ctx, -1, "\xFF_ScriptContainerSettings_DB"))
 	{
 		duk_get_prop_string(ctx, -1, "\xFF_ScriptContainerSettings_DB");	// [stash][db]
-		if (duk_get_pointer(ctx, -1) != NULL) { retVal = "0"; }
+		if (duk_get_pointer(ctx, -1) != NULL && duk_get_pointer(ctx, -1) == db) { retVal = "0"; }
 		duk_pop(ctx);														// [stash]
 	}
 	duk_pop(ctx);															// ...

@@ -41,7 +41,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Finalizer(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_SimpleDataStore_Put(duk_context *ctx)
 {
-	char *cguid = Duktape_GetContextGuidHex(ctx);
+	char *cguid = NULL;
 	duk_size_t keyLen;
 	char *key;
 	char *value;
@@ -64,6 +64,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Put(duk_context *ctx)
 	duk_push_this(ctx);																						// [ds]
 	duk_get_prop_string(ctx, -1, ILibDuktape_DataStore_PTR);												// [ds][ptr]
 	dataStore = (ILibSimpleDataStore)duk_to_pointer(ctx, -1);
+	cguid = Duktape_GetContextGuidHex(ctx, dataStore);
 
 	if (cguid != NULL)
 	{
@@ -76,7 +77,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Put(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_SimpleDataStore_GetRaw(duk_context *ctx)
 {
-	char *cguid = Duktape_GetContextGuidHex(ctx);
+	char *cguid = NULL;
 	char *key = (char*)duk_require_string(ctx, 0);
 	ILibSimpleDataStore dataStore;
 	char *buffer;
@@ -87,6 +88,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_GetRaw(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_DataStore_PTR);				// [ds][ptr]
 	dataStore = (ILibSimpleDataStore)duk_to_pointer(ctx, -1);
 
+	cguid = Duktape_GetContextGuidHex(ctx, dataStore);
 	if (cguid != NULL)
 	{
 		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s/%s", cguid, key);
@@ -163,7 +165,7 @@ duk_ret_t ILibDuktape_SimpleDataStore_Keys(duk_context *ctx)
 
 	enumerator.ctx = ctx;
 	enumerator.count = 0;
-	enumerator.GuidHex = Duktape_GetContextGuidHex(ctx);
+	enumerator.GuidHex = Duktape_GetContextGuidHex(ctx, ds);
 	if (enumerator.GuidHex != NULL) 
 	{ 
 		enumerator.GuidHexLen = 1 + (int)strnlen_s(enumerator.GuidHex, sizeof(ILibScratchPad)); 

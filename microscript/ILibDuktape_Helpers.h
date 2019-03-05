@@ -47,7 +47,7 @@ typedef enum ILibDuktape_LogTypes
 }ILibDuktape_LogTypes;
 
 void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta);
-char* Duktape_GetContextGuidHex(duk_context *ctx);
+char* Duktape_GetContextGuidHex(duk_context *ctx, void *db);
 void *Duktape_GetChain(duk_context *ctx);
 char *Duktape_GetStashKey(void* value);
 char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen);
