@@ -122,7 +122,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
 		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
-
+	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
+	{
+		char script[] = "console.log(require('_agentNodeId')());process.exit();";
+		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);

@@ -948,7 +948,12 @@ int main(int argc, char* argv[])
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
 		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
-
+	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
+	{
+		char script[] = "console.log(require('_agentNodeId')());process.exit();";
+		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
