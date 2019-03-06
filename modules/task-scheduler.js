@@ -147,7 +147,7 @@ function task()
                             child.stdin.write("whereis service | awk '{print $2}'\n\exit\n");
                             child.waitExit();
                             child.stdout.str = child.stdout.str.trim();
-                            action += (child.stdout.str + ' ' + options.service + ' restart\n');
+                            action += (child.stdout.str + ' ' + options.service + ' restart >/dev/null 2>&1 \n');
                             break;
                         case 'systemd':
                             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -157,7 +157,7 @@ function task()
                             child.stdin.write("whereis systemctl | awk '{print $2}'\n\exit\n");
                             child.waitExit();
                             child.stdout.str = child.stdout.str.trim();
-                            action += (child.stdout.str + ' restart ' + options.service + '\n');
+                            action += (child.stdout.str + ' restart ' + options.service + ' >/dev/null 2>&1 \n');
                             break;
                         default:
                             ret._rej('Unknown Service Platform: ' + require('service-manager').manager.getServiceType());
