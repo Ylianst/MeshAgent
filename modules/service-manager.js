@@ -814,3 +814,4 @@ function serviceManager()
 }
 
 module.exports = serviceManager;
+module.exports.manager = new serviceManager();

@@ -71,6 +71,11 @@ function task()
                     ret.child.on('exit', function (code) { if (code == 0) { this.promise._res(); } else { this.promise._rej(code); }}); 
                     break;
                 case 'linux':
+                    if (require('fs').existsSync('/etc/cron.d/' + options.name.split('/').join('_').split('.').join('')))
+                    {
+                        ret._rej('Task [' + options.name + '] Already exists');
+                        return (ret);
+                    }
                     var minute = '*';
                     var hour = '*';
                     var day = '*';
@@ -128,7 +133,47 @@ function task()
                                 break;
                         }
                     }
-                    console.log(minute + ' ' + hour + ' ' + day + ' ' + month + ' ' + weekday);
+
+                    var action = 'SHELL=/bin/sh\nPATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\n';
+                    action += (minute + ' ' + hour + ' ' + day + ' ' + month + ' ' + weekday + '   root   ');
+                    switch(require('service-manager').manager.getServiceType())
+                    {
+                        case 'init':
+                        case 'upstart':
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stderr.on('data', function (chunk) { });
+                            child.stdin.write("whereis service | awk '{print $2}'\n\exit\n");
+                            child.waitExit();
+                            child.stdout.str = child.stdout.str.trim();
+                            action += (child.stdout.str + ' ' + options.service + ' restart\n');
+                            break;
+                        case 'systemd':
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stderr.on('data', function (chunk) { });
+                            child.stdin.write("whereis systemctl | awk '{print $2}'\n\exit\n");
+                            child.waitExit();
+                            child.stdout.str = child.stdout.str.trim();
+                            action += (child.stdout.str + ' restart ' + options.service + '\n');
+                            break;
+                        default:
+                            ret._rej('Unknown Service Platform: ' + require('service-manager').manager.getServiceType());
+                            return (ret);
+                    }
+                    try
+                    {
+                        var m = require('fs').CHMOD_MODES.S_IRUSR | require('fs').CHMOD_MODES.S_IWUSR | require('fs').CHMOD_MODES.S_IROTH;
+                        require('fs').writeFileSync('/etc/cron.d/' + options.name.split('/').join('_').split('.').join(''), action, { flags: 'wb', mode: m });
+                    }
+                    catch(e)
+                    {
+                        ret._rej(e);
+                        return (ret);
+                    }
+                    ret._res();
                     break;
                 default:
                     ret._rej('Not implemented on ' + process.platform);
@@ -164,6 +209,23 @@ function task()
                 ret.child.stderr.on('data', function (chunk) { });
                 ret.child.promise = ret;
                 ret.child.on('exit', function (code) { if (code == 0) { this.promise._res(); } else { this.promise._rej(code); } });
+                break;
+            case 'linux':
+                if (require('fs').existsSync('/etc/cron.d/' + name.split('/').join('_').split('.').join('')))
+                {
+                    try
+                    {
+                        require('fs').unlinkSync('/etc/cron.d/' + name.split('/').join('_').split('.').join(''));
+                    }
+                    catch(e)
+                    {
+                        ret._rej(e);
+                    }
+                }
+                else
+                {
+                    ret._rej('Task [' + name + '] does not exist');
+                }
                 break;
             default:
                 ret._rej('Not implemented on ' + process.platform);
