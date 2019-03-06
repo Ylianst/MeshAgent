@@ -45,6 +45,15 @@ function task()
                                 parms.push('/SC ' + ftype.toUpperCase());
                                 parms.push('/MO ' + options[ftype]);
                                 break;
+                            case 'DAY':
+                                parms.push('/D ' + options[ftype]);
+                                break;
+                            case 'MONTH':
+                                parms.push('/M ' + options[ftype]);
+                                break;
+                            case 'TIME':
+                                parms.push('/ST ' + options[ftype]);
+                                break;
                             case 'NAME':
                                 parms.push('/TN "' + options[ftype].split('/').join('\\') + '"');
                                 break;
@@ -61,6 +70,66 @@ function task()
                     ret.child.promise = ret;
                     ret.child.on('exit', function (code) { if (code == 0) { this.promise._res(); } else { this.promise._rej(code); }}); 
                     break;
+                case 'linux':
+                    var minute = '*';
+                    var hour = '*';
+                    var day = '*';
+                    var month = '*';
+                    var weekday = '*';
+                    for (var ftype in options)
+                    {
+                        switch(ftype.toUpperCase())
+                        {
+                            case 'MINUTE':
+                                if (!options.TIME && !options.time)
+                                {
+                                    minute = '*/' + options[ftype];
+                                }
+                                break;
+                            case 'HOURLY':
+                                if (!options.TIME && !options.time)
+                                {
+                                    hour = '*/' + options[ftype];
+                                }
+                                break;
+                            case 'DAILY':
+                                day = '*/' + options[ftype];
+                                break;
+                            case 'WEEKLY':
+                                if (options[ftype] == 1)
+                                {
+                                    if(!options.DAY && !options.day)
+                                    {
+                                        weekday = 0;
+                                    }
+                                }
+                                else
+                                {
+                                    ret._rej('Only Once/Weekly supported on Linux');
+                                    return (ret);
+                                }
+                                break;
+                            case 'DAY':
+                                if (options.weekly || options.WEEKLY)
+                                {
+                                    weekday = options[ftype];
+                                }
+                                else
+                                {
+                                    day = options[ftype];
+                                }
+                                break;
+                            case 'TIME':
+                                hour = options[ftype].split(':')[0];
+                                minute = options[ftype].split(':')[1];
+                                break;
+                            case 'MONTHLY':
+                                month = '*/' + options[ftype];
+                                break;
+                        }
+                    }
+                    console.log(minute + ' ' + hour + ' ' + day + ' ' + month + ' ' + weekday);
+                    break;
                 default:
                     ret._rej('Not implemented on ' + process.platform);
                     break;
@@ -68,12 +137,20 @@ function task()
         }
         else
         {
-            ret._rej('Invalid Parameers');
+            ret._rej('Invalid Parameters, must at least specify name and service');
         }
         return (ret);
     };
     this.info = function info(name)
     {
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        switch (process.platform)
+        {
+            default:
+                ret._rej('Not implemented on ' + process.platform);
+                break;
+        }
+        return (ret);
     };
     this.delete = function _delete(name)
     {
