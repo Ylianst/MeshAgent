@@ -39,6 +39,89 @@ function nativeAddModule(name)
     }
     module.exports(ret);
 }
+function dispatchRead(sid)
+{
+    var id = 0;
+
+    if(sid==null)
+    {
+        if (process.platform == 'win32')
+        {
+            var active = require('user-sessions').Current().Active;
+            if (active.length > 0)
+            {
+                id = parseInt(active[0].SessionId);
+            }
+        }
+    }
+    else
+    {
+        id = sid;
+    }
+
+    if(id == 0)
+    {
+        return (module.exports.read());
+    }
+    else
+    {
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        ret.success = false;
+        ret.master = require('ScriptContainer').Create({ sessionId: id });
+        ret.master.promise = ret;
+        ret.master.on('data', function (d)
+        {
+            this.promise.success = true;
+            this.promise._res(d);
+            this.exit();
+        });
+        ret.master.on('exit', function (code)
+        {
+            if (!this.promise.success)
+            {
+                this.promise._rej('Error reading clipboard');
+            }
+            delete this.promise.master;
+        });
+        ret.master.ExecuteString("var parent = require('ScriptContainer'); require('clipboard').read().then(parent.send, function(){process.exit();});");
+        return (ret);
+    }
+}
+
+function dispatchWrite(data, sid)
+{
+    var id = 0;
+
+    if(sid == null)
+    {
+        if(process.platform == 'win32')
+        {
+            var active = require('user-sessions').Current().Active;
+            if(active.length>0)
+            {
+                id = parseInt(active[0].SessionId);
+            }
+        }
+    }
+    else
+    {
+        id = sid;
+    }
+
+    if(id == 0)
+    {
+        module.exports(data);
+    }
+    else
+    {
+        this.master = require('ScriptContainer').Create({ sessionId: id });
+        this.master.parent = this;
+        this.master.on('exit', function (code) { delete this.parent.master; });
+        this.master.ExecuteString("var parent = require('ScriptContainer'); parent.on('data', function(d){try{require('clipboard')(d);}catch(e){}process.exit();});");
+        this.master.send(data);
+    }
+    
+}
 
 function lin_readtext()
 {
@@ -193,3 +276,5 @@ switch(process.platform)
         break;
 }
 module.exports.nativeAddModule = nativeAddModule;
+module.exports.dispatchWrite = dispatchWrite;
+module.exports.dispatchRead = dispatchRead;
