@@ -292,6 +292,15 @@ function serviceManager()
                                 return (child.stdout.str.trim());
                             };
                             ret.appLocation.platform = platform;
+                            ret.isMe = function isMe()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $4}'\nexit\n");
+                                child.waitExit();
+                                return (parseInt(child.stdout.str.trim()) == process.pid);
+                            };
                             ret.isRunning = function isRunning()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -357,6 +366,15 @@ function serviceManager()
                                 }
                                 child.waitExit();
                                 return (child.stdout.str.trim() + '/' + this.name);
+                            };
+                            ret.isMe = function isMe()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                child.stdin.write("systemctl status " + this.name + " | grep 'Main PID:' | awk '{print $3}'\nexit\n");
+                                child.waitExit();
+                                return (parseInt(child.stdout.str.trim()) == process.pid);
                             };
                             ret.isRunning = function isRunning()
                             {
