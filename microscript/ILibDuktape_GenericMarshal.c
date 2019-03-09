@@ -462,7 +462,7 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateVariable(duk_context *ctx)
 	{
 		return(ILibDuktape_Error(ctx, "_GenericMarshal.CreateVariable(): Invalid Parameter"));
 	}
-
+	if (size < 0) { return(ILibDuktape_Error(ctx, "Invalid Size: %d ", size)); }
 	ptr = (char*)ILibMemory_Allocate(size, 0, NULL, NULL);
 	if (str != NULL)
 	{
