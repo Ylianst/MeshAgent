@@ -342,10 +342,18 @@ char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 
-void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
+void MeshAgent_sendConsoleText(duk_context *ctx, char *format, ...)
 {
-	if (ctx != NULL && txt != NULL)
+	char dest[4096];
+	int len = 0;
+	va_list argptr;
+
+	if (ctx != NULL && format != NULL)
 	{
+		va_start(argptr, format);
+		len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+		va_end(argptr);
+
 		if (duk_peval_string(ctx, "require('MeshAgent');") == 0)
 		{
 			duk_get_prop_string(ctx, -1, "SendCommand");			// [agent][SendCommand]
@@ -353,7 +361,7 @@ void MeshAgent_sendConsoleText(duk_context *ctx, char *txt)
 			duk_push_object(ctx);									// [SendCommand][this][var]
 			duk_push_string(ctx, "msg"); duk_put_prop_string(ctx, -2, "action");
 			duk_push_string(ctx, "console"); duk_put_prop_string(ctx, -2, "type");
-			duk_push_string(ctx, txt); duk_put_prop_string(ctx, -2, "value");
+			duk_push_string(ctx, dest); duk_put_prop_string(ctx, -2, "value");
 			if (duk_pcall_method(ctx, 1) != 0) {}
 		}
 		duk_pop(ctx);												// ...
@@ -1420,38 +1428,40 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		int needPop = 0;
 		if (getenv("XAUTHORITY") == NULL)
 		{
-			if (duk_peval_string(ctx, "(function getAuthToken()\
+			if (duk_peval_string(ctx, "(function getAuthToken(ival)\
 			{\
 				var child = require('child_process').execFile('/bin/sh', ['sh']);\
 				child.stdout.str = '';\
-				child.stdin.write('ps -e -o user -o command | awk {\\'printf \"%s,\",$1;$1=\"\";printf \"%s\\\\n\", $0\\'} | grep X\\nexit\\n');\
+				child.stdin.write('ps -e -o user:999 -o command | grep X | awk {\\'printf \"%s,\",$1; split($0, a, \"-auth\"); split(a[2], b, \" \"); print b[1]\\'} \\nexit\\n');\
 				child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
 				child.waitExit();\
 				var lines = child.stdout.str.split('\\n');\
 				for (var i in lines) {\
 					var tokens = lines[i].split(',');\
-					if (tokens[0]) {\
-						var items = tokens[1].split(' ');\
-						for (var x = 0; x < items.length; ++x) {\
-							if (items[x] == '-auth' && items.length >(x + 1)) {\
-								return (items[x + 1]);\
-							}\
-						}\
+					if (tokens[0] && tokens[1].trim().length>0 && require('user-sessions')._uids()[ival] == tokens[0]) {\
+						return(tokens[1].trim());\
 					}\
 				}\
 				return (null);\
-			})();") == 0)
+			});") == 0)
 			{
-				updateXAuth = (char*)duk_get_string(ctx, -1);
-				if (console_uid != 0 && updateXAuth == NULL)
+				duk_push_int(ctx, console_uid);
+				if (duk_pcall(ctx, 1) == 0)
 				{
-					ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is your DM configured to use X?");
-					duk_pop(ctx);
-					return(1);
+					updateXAuth = (char*)duk_get_string(ctx, -1);
+					if (console_uid != 0 && updateXAuth == NULL)
+					{
+						ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is your DM configured to use X?");
+						duk_pop(ctx);
+						return(1);
+					}
 				}
 			}
 			needPop = 1;
 		}
+
+		//MeshAgent_sendConsoleText(ctx, "Using uid: %d, XAUTHORITY: %s\n", console_uid, getenv("XAUTHORITY")==NULL? updateXAuth : getenv("XAUTHORITY"));
+
 		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth);
 		if (needPop!= 0) {duk_pop(ctx); }
 	#endif
