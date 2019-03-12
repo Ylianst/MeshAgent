@@ -300,6 +300,59 @@ function monitorinfo()
                 resolver(ret);
             }));
         }
+        this.getXInfo = function getXInfo(consoleuid)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("ps -e -o user:999 -o tty -o command | grep X | awk '{ printf \"%s,%s,\",$1,$2;split($0, a, \"-auth\");split(a[2], b, \" \");print b[1];}'\nexit\n");
+            child.waitExit();
+            var lines = child.stdout.str.split('\n');
+            var uname = require('user-sessions')._uids()[consoleuid];
+            var ret = null;
+            for(var i in lines)
+            {
+                var tokens = lines[i].split(',');
+                if(tokens.length == 3 && tokens[0] == uname)
+                {
+                    ret = { tty: tokens[1], xauthority: tokens[2] };
+                    break;
+                }
+            }
+            if(ret!=null)
+            {
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("ps -e -o tty -o pid -o user:9999 | grep " + ret.tty + " | grep " + uname + " | awk '{ print $2 }' \nexit\n");
+                child.waitExit();
+
+                var lines = child.stdout.str.split('\n');
+                var ps, psx, v, vs = 0;
+                for(var x in lines)
+                {
+                    if(lines[x].trim().length>0)
+                    {
+                        ps = require('fs').readFileSync('/proc/' + lines[x].trim() + '/environ');
+                        vs = 0;
+                        for(psx=0;psx<ps.length;++psx)
+                        {
+                            if (ps[psx] == 0)
+                            {
+                                v = ps.slice(vs, psx).toString().split('=');
+                                if (v[0] == 'DISPLAY')
+                                {
+                                    ret.display = v[1];
+                                    return (ret);
+                                }
+                                vs = psx + 1;
+                            }
+                        }
+                    }
+                }
+            }
+            return (ret);
+        };
     }
     else
     {
