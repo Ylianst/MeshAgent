@@ -225,6 +225,7 @@ function monitorinfo()
             this._X11.CreateMethod('XSetFunction');
             this._X11.CreateMethod('XSetLineAttributes');
             this._X11.CreateMethod('XSetNormalHints');
+            this._X11.CreateMethod('XSetSelectionOwner');
             this._X11.CreateMethod('XSetSubwindowMode');
             this._X11.CreateMethod('XSync');
             this._X11.CreateMethod('XBlackPixel');
