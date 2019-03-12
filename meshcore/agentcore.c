@@ -1425,30 +1425,18 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	#else
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
+		char *updateDisplay = NULL;
 		int needPop = 0;
-		if (getenv("XAUTHORITY") == NULL)
+		if (getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
 		{
-			if (duk_peval_string(ctx, "(function getAuthToken(ival)\
-			{\
-				var child = require('child_process').execFile('/bin/sh', ['sh']);\
-				child.stdout.str = '';\
-				child.stdin.write('ps -e -o user:999 -o command | grep X | awk {\\'printf \"%s,\",$1; split($0, a, \"-auth\"); split(a[2], b, \" \"); print b[1]\\'} \\nexit\\n');\
-				child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
-				child.waitExit();\
-				var lines = child.stdout.str.split('\\n');\
-				for (var i in lines) {\
-					var tokens = lines[i].split(',');\
-					if (tokens[0] && tokens[1].trim().length>0 && require('user-sessions')._uids()[ival] == tokens[0]) {\
-						return(tokens[1].trim());\
-					}\
-				}\
-				return (null);\
-			});") == 0)
+			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
 				duk_push_int(ctx, console_uid);
 				if (duk_pcall(ctx, 1) == 0)
 				{
-					updateXAuth = (char*)duk_get_string(ctx, -1);
+					updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+					updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+
 					if (console_uid != 0 && updateXAuth == NULL)
 					{
 						ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is your DM configured to use X?");
@@ -1456,16 +1444,25 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 						return(1);
 					}
 				}
+				else
+				{
+					MeshAgent_sendConsoleText(ctx, "Error trying to determine XAUTHORITY/DISPLAY: %s ", duk_safe_to_string(ctx, -1));
+				}
+			}
+			else
+			{
+				MeshAgent_sendConsoleText(ctx, "Error trying to determine XAUTHORITY/DISPLAY: %s ", duk_safe_to_string(ctx, -1));
 			}
 			needPop = 1;
 		}
 
 		//MeshAgent_sendConsoleText(ctx, "Using uid: %d, XAUTHORITY: %s\n", console_uid, getenv("XAUTHORITY")==NULL? updateXAuth : getenv("XAUTHORITY"));
 
-		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth);
+		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth, updateDisplay);
 		if (needPop!= 0) {duk_pop(ctx); }
 	#endif
 #endif
+		
 	return 1;
 #endif
 }

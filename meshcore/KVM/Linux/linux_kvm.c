@@ -324,7 +324,9 @@ int kvm_init(int displayNo)
 	if (count == 10) { return -1; }
 	count = 0;
 	eventdisplay = x11_exports->XOpenDisplay(displayString);
-	//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
+	fprintf(logFile, "XAUTHORITY is %s\n", getenv("XAUTHORITY")); fflush(logFile);
+	fprintf(logFile, "DisplayString is %s\n", displayString); fflush(logFile);
+
 	if (eventdisplay == NULL)
 	{
 		char tmpBuff[1024];
@@ -535,6 +537,7 @@ void* kvm_server_mainloop(void* parm)
 	default_JPEG_error_handler = kvm_server_jpegerror;
 
 
+	fprintf(logFile, "Checking $DISPLAY\n");
 	for (char **env = environ; *env; ++env)
 	{
 		int envLen = (int)strnlen_s(*env, INT_MAX);
@@ -544,7 +547,7 @@ void* kvm_server_mainloop(void* parm)
 			if (i == 7 && strncmp("DISPLAY", *env, 7) == 0)
 			{
 				current_display = (unsigned short)atoi(*env + i + 2);
-				//fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2);
+				fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2);
 				break;
 			}
 		}
@@ -732,7 +735,7 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen
 	}
 	*bytesConsumed = 0;
 }
-void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken)
+void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
 {
 	int r;
 	int count = 0;
@@ -770,10 +773,9 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (uid != 0) { ignore_result(setuid(uid)); }
 
 		//fprintf(logFile, "Starting kvm_server_mainloop\n");
-		if (authToken != NULL)
-		{
-			setenv("XAUTHORITY", authToken, 1);
-		}
+		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
+		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
+
 		kvm_server_mainloop((void*)0);
 		return(NULL);
 	}
@@ -790,11 +792,11 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
-void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *authToken)
+void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *authToken, char *dispid)
 {
 	if (kvmthread != (pthread_t)NULL || g_slavekvm != 0) return 0;
 	g_restartcount = 0;
-	return kvm_relay_restart(1, processPipeMgr, writeHandler, reserved, uid, authToken);
+	return kvm_relay_restart(1, processPipeMgr, writeHandler, reserved, uid, authToken, dispid);
 }
 
 // Force a KVM reset & refresh
