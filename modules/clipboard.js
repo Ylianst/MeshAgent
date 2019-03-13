@@ -127,7 +127,14 @@ function dispatchWrite(data, sid)
     }
     else
     {
-        this.master = require('ScriptContainer').Create({ sessionId: id });
+        var childProperties = { sessionId: id };
+        if (process.platform == 'linux')
+        {
+            xinfo = require('monitor-info').getXInfo(id);
+            childProperties.env = { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display };
+        }
+
+        this.master = require('ScriptContainer').Create(childProperties);
         this.master.parent = this;
         this.master.on('exit', function (code) { delete this.parent.master; });
         this.master.ExecuteString("var parent = require('ScriptContainer'); parent.on('data', function(d){try{require('clipboard')(d);}catch(e){}process.exit();});");
@@ -212,28 +219,18 @@ function lin_readtext()
     }
     return (ret);
 }
-function lin_copytext()
+function lin_copytext(txt)
 {
-    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-    try
-    {
-        require('monitor-info')
-    }
-    catch(exc)
-    {
-        ret._rej(exc);
-        return (ret);
-    }
-
     var X11 = require('monitor-info')._X11;
     if (!X11)
     {
-        ret._rej('X11 required for Clipboard Manipulation');
+        throw('X11 required for Clipboard Manipulation');
     }
     else
     {
         var GM = require('monitor-info')._gm;
-
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        ret._txt = txt;
         ret._getInfoPromise = require('monitor-info').getInfo();
         ret._getInfoPromise._masterPromise = ret;
         ret._getInfoPromise.then(function (mon)
@@ -272,10 +269,8 @@ function lin_copytext()
                     }
                 });
             }
-        });
+        }, console.log);
     }
-
-    return (ret);
 }
 
 function win_readtext()
