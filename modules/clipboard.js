@@ -15,6 +15,12 @@ limitations under the License.
 */
 
 var promise = require('promise');
+var SelectionClear = 29;
+var SelectionNotify = 31;
+var SelectionRequest = 30;
+var AnyPropertyType = 0;
+var CurrentTime = 0;
+
 
 function nativeAddModule(name)
 {
@@ -65,9 +71,16 @@ function dispatchRead(sid)
     }
     else
     {
+        var childProperties = { sessionId: id };
+        if (process.platform == 'linux')
+        {
+            xinfo = require('monitor-info').getXInfo(id);
+            childProperties.env = { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display };
+        }
+
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         ret.success = false;
-        ret.master = require('ScriptContainer').Create({ sessionId: id });
+        ret.master = require('ScriptContainer').Create(childProperties);
         ret.master.promise = ret;
         ret.master.on('data', function (d)
         {
@@ -83,7 +96,7 @@ function dispatchRead(sid)
             }
             delete this.promise.master;
         });
-        ret.master.ExecuteString("var parent = require('ScriptContainer'); require('clipboard').read().then(parent.send, function(){process.exit();});");
+        ret.master.ExecuteString("var parent = require('ScriptContainer'); require('clipboard').read().then(function(v){parent.send(v);}, function(e){console.error(e);process.exit();});");
         return (ret);
     }
 }
@@ -143,9 +156,8 @@ function lin_readtext()
     }
     else
     {
-        var SelectionNotify = 31;
-        var AnyPropertyType = 0;
         var GM = require('monitor-info')._gm;
+
 
         ret._getInfoPromise = require('monitor-info').getInfo();
         ret._getInfoPromise._masterPromise = ret;
@@ -163,8 +175,9 @@ function lin_readtext()
                 this._masterPromise.FAKEWIN = X11.XCreateSimpleWindow(mon[0].display, this._masterPromise.ROOTWIN, 0, 0, mon[0].right, 5, 0, white, white);
 
                 X11.XSync(mon[0].display, 0);
-                X11.XConvertSelection(mon[0].display, this._masterPromise.CLIPID, this._masterPromise.FMTID, this._masterPromise.PROPID, this._masterPromise.FAKEWIN, 0);
+                X11.XConvertSelection(mon[0].display, this._masterPromise.CLIPID, this._masterPromise.FMTID, this._masterPromise.PROPID, this._masterPromise.FAKEWIN, CurrentTime);
                 X11.XSync(mon[0].display, 0);
+
 
                 this._masterPromise.DescriptorEvent = require('DescriptorEvents').addDescriptor(X11.XConnectionNumber(mon[0].display).Val, { readset: true });
                 this._masterPromise.DescriptorEvent._masterPromise = this._masterPromise;
@@ -184,6 +197,7 @@ function lin_readtext()
                             var result = GM.CreatePointer();
 
                             X11.XGetWindowProperty(this._display, this._masterPromise.FAKEWIN, this._masterPromise.PROPID, 0, 65535, 0, AnyPropertyType, id, bits, sz, tail, result);
+
                             this._masterPromise._res(result.Deref().String);
                             X11.XFree(result.Deref());
                             X11.XDestroyWindow(this._display, this._masterPromise.FAKEWIN);
@@ -194,12 +208,74 @@ function lin_readtext()
                     }
                 });
             }
-        });
+        }, console.error);
     }
     return (ret);
 }
 function lin_copytext()
 {
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    try
+    {
+        require('monitor-info')
+    }
+    catch(exc)
+    {
+        ret._rej(exc);
+        return (ret);
+    }
+
+    var X11 = require('monitor-info')._X11;
+    if (!X11)
+    {
+        ret._rej('X11 required for Clipboard Manipulation');
+    }
+    else
+    {
+        var GM = require('monitor-info')._gm;
+
+        ret._getInfoPromise = require('monitor-info').getInfo();
+        ret._getInfoPromise._masterPromise = ret;
+        ret._getInfoPromise.then(function (mon)
+        {
+            if (mon.length > 0)
+            {
+                var white = X11.XWhitePixel(mon[0].display, mon[0].screenId).Val;
+                this._masterPromise.CLIPID = X11.XInternAtom(mon[0].display, GM.CreateVariable('CLIPBOARD'), 0);
+                this._masterPromise.ROOTWIN = X11.XRootWindow(mon[0].display, mon[0].screenId);
+                this._masterPromise.FAKEWIN = X11.XCreateSimpleWindow(mon[0].display, this._masterPromise.ROOTWIN, 0, 0, mon[0].right, 5, 0, white, white);
+
+                X11.XSetSelectionOwner(mon[0].display, this._masterPromise.CLIPID, this._masterPromise.FAKEWIN, CurrentTime);
+                X11.XSync(mon[0].display, 0);
+
+                this._masterPromise.DescriptorEvent = require('DescriptorEvents').addDescriptor(X11.XConnectionNumber(mon[0].display).Val, { readset: true });
+                this._masterPromise.DescriptorEvent._masterPromise = this._masterPromise;
+                this._masterPromise.DescriptorEvent._display = mon[0].display;
+                this._masterPromise.DescriptorEvent.on('readset', function (fd)
+                {
+                    var XE = GM.CreateVariable(1024);
+                    while (X11.XPending(this._display).Val)
+                    {
+                        X11.XNextEventSync(this._display, XE);
+                        switch (XE.Deref(0, 4).toBuffer().readUInt32LE())
+                        {
+                            case SelectionClear:
+                                console.log('Somebody else owns clipboard');
+                                break;
+                            case SelectionNotify:
+                                console.log("Shouldn't really be getting this");
+                                break;
+                            case SelectionRequest:
+                                console.log('Somebody wants us to send them data');
+                                break;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    return (ret);
 }
 
 function win_readtext()

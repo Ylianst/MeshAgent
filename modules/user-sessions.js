@@ -40,6 +40,18 @@ var GUID_ACDC_POWER_SOURCE;
 var GUID_BATTERY_PERCENTAGE_REMAINING;
 var GUID_CONSOLE_DISPLAY_STATE;
 
+function columnParse(data, delimiter)
+{
+    var tokens = data.split(delimiter);
+    var ret = [];
+    for(var i in tokens)
+    {
+        if (tokens[i].length > 0) { ret.push(tokens[i]); }
+    }
+    return (ret);
+}
+
+
 function UserSessions()
 {
     this._ObjectID = 'user-sessions';
@@ -372,34 +384,6 @@ function UserSessions()
             }
             return (ret);
         }
-        this.Self = function Self()
-        {
-            var promise = require('promise');
-            var p = new promise(function (res, rej)
-            {
-                this.__resolver = res; this.__rejector = rej;
-                this.__child = require('child_process').execFile('/usr/bin/id', ['id', '-u']);
-                this.__child.promise = this;
-                this.__child.stdout._txt = '';
-                this.__child.stdout.on('data', function (chunk) { this._txt += chunk.toString(); });
-                this.__child.on('exit', function (code)
-                {
-                    try
-                    {
-                        parseInt(this.stdout._txt);
-                    }
-                    catch (e)
-                    {
-                        this.promise.__rejector('invalid uid');
-                        return;
-                    }
-
-                    var id = parseInt(this.stdout._txt);
-                    this.promise.__resolver(id);
-                });
-            });
-            return (p);
-        };
         this.Current = function Current(cb)
         {
             var retVal = {};
@@ -558,6 +542,52 @@ function UserSessions()
             });
 
         };
+        this.getUidConfig = function getUidConfig()
+        {
+            var ret = {};
+            var cfg = require('fs').readFileSync('/etc/login.defs').toString().split('\n');
+            var tokens;
+            for (var i in cfg)
+            {
+                tokens = columnParse(cfg[i], '\t'); //console.log(tokens);
+                if (tokens[0] == 'UID_MIN') { ret.MIN = parseInt(tokens[1]); }
+                if (tokens[0] == 'UID_MAX') { ret.MAX = parseInt(tokens[1]); }
+                if (ret.MIN != null && ret.MAX != null) { break; }
+            }
+            return (ret);
+        };
+        this.getUid = function getUid(username)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("cat /etc/passwd | awk -F: '($1==\"" + username + "\"){print $3}'\nexit\n");
+            child.waitExit();
+
+            var ret = parseInt(child.stdout.str);            
+            if (ret >= 0) { return (ret); }
+            throw ('username: ' + username + ' NOT FOUND');
+        };
+        this.getUsername = function getUsername(uid)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("cat /etc/passwd | awk -F: '($3==" + uid + "){print $1}'\nexit\n");
+            child.waitExit();
+            if (child.stdout.str.length > 0) { return (child.stdout.str.trim()); }
+            throw ('uid: ' + uid + ' NOT FOUND');
+        };
+        this.whoami = function whoami()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("whoami\nexit\n");
+            child.waitExit();
+            return (child.stdout.str.trim());
+        };
+
         this.on('changed', this._recheckLoggedInUsers); // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
 
         
@@ -664,7 +694,7 @@ function UserSessions()
 
     if(process.platform == 'linux' || process.platform == 'darwin')
     {
-        this._self = function _self()
+        this.Self = function Self()
         {
             var child = require('child_process').execFile('/usr/bin/id', ['id', '-u']);
             child.stdout.str = '';
@@ -674,7 +704,7 @@ function UserSessions()
         }
         this.isRoot = function isRoot()
         {
-            return (this._self() == 0);
+            return (this.Self() == 0);
         }
         this.consoleUid = function consoleUid()
         {

@@ -288,38 +288,51 @@ function monitorinfo()
         this.getInfo = function getInfo()
         {
             var info = this;
-            return (new promise(function (resolver, rejector)
+            var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            ret.parent = this;
+
+            if (!process.env.XAUTHORITY || !process.env.DISPLAY)
             {
-                var display = info._X11.XOpenDisplay(info._gm.CreateVariable(':0'));
-                var screenCount = info._X11.XScreenCount(display).Val;
-                var ret = [];
-                for(var i=0;i<screenCount;++i)
-                {
-                    var screen = info._X11.XScreenOfDisplay(display, i);
-                    ret.push({ left: 0, top: 0, right: info._X11.XDisplayWidth(display, i).Val, bottom: info._X11.XDisplayHeight(display, i).Val, screen: screen, screenId: i, display: display });
-                }
-                resolver(ret);
-            }));
+                var xinfo = this.getXInfo(require('user-sessions').getUid(require('user-sessions').whoami()));
+                process.setenv('XAUTHORITY', xinfo.xauthority);
+                process.setenv('DISPLAY', xinfo.display);
+            }
+
+            var display = info._X11.XOpenDisplay(info._gm.CreateVariable(process.env.DISPLAY));
+            if (display.Val == 0)
+            {
+                require('fs').writeFileSync('/var/tmp/agentSlave', 'XOpenDisplay Failed', { flags: 'a' });
+                ret._rej('XOpenDisplay Failed');
+                return (ret);
+            }
+
+            var screenCount = info._X11.XScreenCount(display).Val;
+            var ifo = [];
+            for(var i=0;i<screenCount;++i)
+            {
+                var screen = info._X11.XScreenOfDisplay(display, i);
+                ifo.push({ left: 0, top: 0, right: info._X11.XDisplayWidth(display, i).Val, bottom: info._X11.XDisplayHeight(display, i).Val, screen: screen, screenId: i, display: display });
+            }
+            ret._res(ifo);
+
+            return (ret);
         }
         this.getXInfo = function getXInfo(consoleuid)
         {
+            var ret = null;
+            var uname = require('user-sessions').getUsername(consoleuid);
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("ps -e -o user:999 -o tty -o command | grep X | awk '{ printf \"%s,%s,\",$1,$2;split($0, a, \"-auth\");split(a[2], b, \" \");print b[1];}'\nexit\n");
+            child.stdin.write("ps -e -o user:999 -o tty -o command | grep X | awk '{ split($0, a, \"-auth\"); split(a[2], b, \" \"); if($1==\"" + uname + "\" && b[1]!=\"\") { printf \"%s,%s,%s\",$1,$2,b[1] } }'\nexit\n");
             child.waitExit();
-            var lines = child.stdout.str.split('\n');
-            var uname = require('user-sessions')._uids()[consoleuid];
-            var ret = null;
-            for(var i in lines)
+            var tokens = child.stdout.str.trim().split(',');
+            if (tokens.length == 3)
             {
-                var tokens = lines[i].split(',');
-                if(tokens.length == 3 && tokens[0] == uname)
-                {
-                    ret = { tty: tokens[1], xauthority: tokens[2] };
-                    break;
-                }
+                ret = { tty: tokens[1], xauthority: tokens[2] };
+
             }
+
             if(ret!=null)
             {
                 child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -334,7 +347,14 @@ function monitorinfo()
                 {
                     if(lines[x].trim().length>0)
                     {
-                        ps = require('fs').readFileSync('/proc/' + lines[x].trim() + '/environ');
+                        try
+                        {
+                            ps = require('fs').readFileSync('/proc/' + lines[x].trim() + '/environ');
+                        }
+                        catch(pse)
+                        {
+                            continue;
+                        }
                         vs = 0;
                         for(psx=0;psx<ps.length;++psx)
                         {
