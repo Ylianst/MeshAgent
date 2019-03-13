@@ -703,7 +703,7 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 #endif
 }
 
-ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_Manager pipeManager, char* target, char* const* parameters, ILibProcessPipe_SpawnTypes spawnType, void *sid, int extraMemorySize)
+ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_Manager pipeManager, char* target, char* const* parameters, ILibProcessPipe_SpawnTypes spawnType, void *sid, void *envvars, int extraMemorySize)
 {
 	ILibProcessPipe_Process_Object* retVal = NULL;
 
@@ -790,8 +790,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_
 		info.dwFlags |= STARTF_USESTDHANDLES;
 	}
 
-	if ((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessA(target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo)) ||
-		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserA(userToken, target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo)))
+	if ((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessA(target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW, envvars, NULL, &info, &processInfo)) ||
+		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserA(userToken, target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW, envvars, NULL, &info, &processInfo)))
 	{
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 		{
@@ -896,6 +896,11 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx3(ILibProcessPipe_
 		if (UID != -1 && UID != 0)
 		{
 			ignore_result(setuid((uid_t)UID));
+		}
+		while (envvars != NULL && ((char**)envvars)[0] != NULL)
+		{
+			setenv(((char**)envvars)[0], ((char**)envvars)[1], 1);
+			envvars = (void*)((char*)envvars + 2 * sizeof(char*));
 		}
 		execv(target, parameters);
 		_exit(1);

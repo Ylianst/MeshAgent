@@ -910,7 +910,26 @@ void ILibDuktape_ScriptContainer_Process_SIGTERM_Hook(ILibDuktape_EventEmitter *
 	}
 
 }
+duk_ret_t ILibDuktape_Process_setenv(duk_context *ctx)
+{
+	char *name = (char*)duk_require_string(ctx, 0);
+	char *value = Duktape_GetBuffer(ctx, 1, NULL);
 
+#ifdef WIN32
+	SetEnvironmentVariableA((LPCSTR)name, (LPCTSTR)value);
+#else
+	if (value != NULL)
+	{
+		setenv(name, value, 1);
+	}
+	else
+	{
+		unsetenv(name);
+	}
+#endif
+
+	return(0);
+}
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -921,8 +940,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_WriteID(ctx, "process");
 	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
 	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
-
-
+	ILibDuktape_CreateInstanceMethod(ctx, "setenv", ILibDuktape_Process_setenv, 2);
+	
 #if defined(WIN32)																		// [g][process][platform]
 	duk_push_string(ctx, "win32");
 #elif defined(__APPLE__)
@@ -2240,13 +2259,27 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 						}
 						if (!duk_is_undefined(slave->ctx, -2))
 						{
-							duk_dup(slave->ctx, -2);										// [json][retJSON][retVal]
-							duk_json_encode(slave->ctx, -1);								// [json][retJSON][retValJSON]
-							duk_put_prop_string(slave->ctx, -2, "result");					// [json][retJSON]
+							if (duk_peval_string(slave->ctx, "JSON.stringify") == 0)		// [json][retJSON][stringify]
+							{
+								duk_dup(slave->ctx, -3);									// [json][retJSON][stringify][retVal]
+								if (duk_pcall(slave->ctx, 1) == 0)							// [json][retJSON][retValJSON]
+								{
+									duk_put_prop_string(slave->ctx, -2, "result");			// [json][retJSON]
+								}
+								else
+								{
+									duk_pop(slave->ctx);									// [json][retJSON]
+								}
+							}
+							else
+							{
+								duk_pop(slave->ctx);										// [json][retJSON]
+							}
 						}
 					}
 					else
 					{
+
 						// Failure															// [json][error]
 						char *errMsg = (char*)duk_safe_to_string(slave->ctx, -1);
 						duk_push_string(slave->ctx, errMsg);								// [json][error][errMsg]
@@ -2400,6 +2433,10 @@ int ILibDuktape_ScriptContainer_StartSlave(void *chain, ILibProcessPipe_Manager 
 	ILibRemoteLogging logger = ILibRemoteLogging_Create(NULL);
 	ILibRemoteLogging_SetRawForward(logger, 0, ILibDuktape_ScriptContainer_Slave_LogForwarder);
 	ILibChainSetLogger(chain, logger);
+#endif
+
+#if defined(_POSIX) && !defined(__APPLE__)
+	ILibCriticalLogFilename = "/var/tmp/agentSlave";
 #endif
 
 #ifndef MICROSTACK_NOTLS
@@ -3097,14 +3134,61 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 		unsigned int executionTimeout = duk_is_object(ctx, 0)?Duktape_GetIntPropertyValue(ctx, 0, "executionTimeout", 0): (unsigned int)duk_require_int(ctx, 0);
 		master->ChildSecurityFlags = (duk_is_object(ctx, 0) ? Duktape_GetIntPropertyValue(ctx, 0, "childSecurityFlags", 0): (unsigned int)duk_require_int(ctx, 1)) | SCRIPT_ENGINE_NO_MESH_AGENT_ACCESS;
 
-		if (sessionIdSpecified != 0)
+		if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "env"))
 		{
-			master->child = ILibProcessPipe_Manager_SpawnProcessEx3(manager, exePath, (char * const*)param, ILibProcessPipe_SpawnTypes_SPECIFIED_USER, sessionId, 2 * sizeof(void*));
+			char tmp[32768];	
+			size_t v = 0;
+#ifdef WIN32
+			char *key, *value;
+			duk_size_t keyLen, valueLen;
+#else
+			char **envvars = (char**)tmp;
+#endif
+
+
+			duk_get_prop_string(ctx, 0, "env");				// [env]
+			duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);// [env][enum]
+			while (duk_next(ctx, -1, 1))					// [env][enum][key][val]
+			{
+#ifdef WIN32
+				key = (char*)duk_to_lstring(ctx, -2, &keyLen);
+				value = (char*)duk_to_lstring(ctx, -1, &valueLen);
+				if (keyLen + valueLen + 3 + v > sizeof(tmp)) { return(ILibDuktape_Error(ctx, "Environment Variables too Large")); }
+				v += sprintf_s(tmp + v, sizeof(tmp) - v, "%s=%s", key, value);
+				(tmp + v)[0] = 0; ++v;
+#else
+				v += (2 * sizeof(char*));
+				if (v < sizeof(tmp))
+				{
+					envvars[0] = (char*)duk_to_string(ctx, -2);
+					envvars[1] = (char*)duk_to_string(ctx, -1);
+					envvars = (char**)((char*)envvars + 2 * sizeof(char*));
+				}
+#endif
+				duk_pop_2(ctx);								// [env][enum]
+			}
+			duk_pop_2(ctx);									// ...
+#ifdef WIN32
+			(tmp + v)[0] = 0; ++v;
+#else
+			v += sizeof(char*);
+			if (v < sizeof(tmp))
+			{
+				envvars[0] = NULL;
+			}
+			else
+			{
+				return(ILibDuktape_Error(ctx, "Environment Variables are too large"));
+			}
+#endif
+			master->child = ILibProcessPipe_Manager_SpawnProcessEx4(manager, exePath, (char * const*)param, sessionIdSpecified!=0?ILibProcessPipe_SpawnTypes_SPECIFIED_USER:spawnType, sessionId, (void*)tmp, 2 * sizeof(void*));
 		}
 		else
 		{
-			master->child = ILibProcessPipe_Manager_SpawnProcessEx2(manager, exePath, (char * const*)param, spawnType, 2 * sizeof(void*));
+			master->child = ILibProcessPipe_Manager_SpawnProcessEx3(manager, exePath, (char * const*)param, sessionIdSpecified!=0?ILibProcessPipe_SpawnTypes_SPECIFIED_USER:spawnType, sessionId, 2 * sizeof(void*));
 		}
+
+
 		if (master->child == NULL) { return(ILibDuktape_Error(ctx, "ScriptContainer.Create(): Error spawning child process, using [%s]", exePath)); }
 		
 		duk_push_true(ctx);
