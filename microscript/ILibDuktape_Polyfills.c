@@ -37,6 +37,7 @@ limitations under the License.
 #define ILibDuktape_Console_INFO_Level			"\xFF_Console_INFO_Level"
 #define ILibDuktape_Console_SessionID			"\xFF_Console_SessionID"
 
+#define ILibDuktape_DescriptorEvents_ChainLink	"\xFF_DescriptorEvents_ChainLink"
 #define ILibDuktape_DescriptorEvents_Table		"\xFF_DescriptorEvents_Table"
 #define ILibDuktape_DescriptorEvents_FD			"\xFF_DescriptorEvents_FD"
 #define ILibDuktape_DescriptorEvents_Options	"\xFF_DescriptorEvents_Options"
@@ -2041,6 +2042,8 @@ void ILibDuktape_DescriptorEvents_PreSelect(void* object, fd_set *readset, fd_se
 {
 	duk_context *ctx = (duk_context*)((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[0];
 	void *h = ((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[1];
+	if (h == NULL || ctx == NULL) { return; }
+
 	int i = duk_get_top(ctx);
 	int fd;
 
@@ -2063,6 +2066,8 @@ void ILibDuktape_DescriptorEvents_PostSelect(void* object, int slct, fd_set *rea
 {
 	duk_context *ctx = (duk_context*)((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[0];
 	void *h = ((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[1];
+	if (h == NULL || ctx == NULL) { return; }
+
 	int i = duk_get_top(ctx);
 	int fd;
 
@@ -2151,6 +2156,23 @@ duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
 
 	return(1);
 }
+duk_ret_t ILibDuktape_DescriptorEvents_Finalizer(duk_context *ctx)
+{
+	ILibChain_Link *link = (ILibChain_Link*)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_DescriptorEvents_ChainLink);
+	void *chain = Duktape_GetChain(ctx);
+
+	link->PreSelectHandler = NULL;
+	link->PostSelectHandler = NULL;
+	((void**)link->ExtraMemoryPtr)[0] = NULL;
+	((void**)link->ExtraMemoryPtr)[1] = NULL;
+	
+	if (ILibIsChainBeingDestroyed(chain) == 0)
+	{
+		ILibChain_SafeRemove(chain, link);
+	}
+
+	return(0);
+}
 void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 {
 	ILibChain_Link *link = (ILibChain_Link*)ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
@@ -2159,7 +2181,9 @@ void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 	link->PostSelectHandler = ILibDuktape_DescriptorEvents_PostSelect;
 
 	duk_push_object(ctx);
+	duk_push_pointer(ctx, link); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_ChainLink);
 	duk_push_object(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Table);
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_DescriptorEvents_Finalizer);
 
 	((void**)link->ExtraMemoryPtr)[0] = ctx;
 	((void**)link->ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);
