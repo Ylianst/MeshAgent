@@ -336,6 +336,7 @@ clean:
 	rm -f microscript/*.o
 	rm -f meshcore/*.o
 	rm -f meshcore/KVM/Linux/*.o
+	rm -f meshcore/KVM/MacOS/*.o
 	rm -f microlms/lms/*.o
 	rm -f microlms/heci/*.o
 
