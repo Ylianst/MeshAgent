@@ -62,6 +62,10 @@ function dispatchRead(sid)
                 id = parseInt(active[0].SessionId);
             }
         }
+        else
+        {
+            id = require('user-sessions').consoleUid();
+        }
     }
     else
     {
@@ -118,6 +122,10 @@ function dispatchWrite(data, sid)
                 id = parseInt(active[0].SessionId);
             }
         }
+        else
+        {
+            id = require('user-sessions').consoleUid();
+        }
     }
     else
     {
@@ -137,13 +145,31 @@ function dispatchWrite(data, sid)
             childProperties.env = { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display };
         }
 
-        this.master = require('ScriptContainer').Create(childProperties);
-        this.master.parent = this;
-        this.master.on('exit', function (code) { delete this.parent.master; });
-        this.master.ExecuteString("var parent = require('ScriptContainer'); parent.on('data', function(d){try{require('clipboard')(d);}catch(e){}process.exit();});");
+        if (process.platform == 'win32' || !this.master)
+        {
+            this.master = require('ScriptContainer').Create(childProperties);
+            this.master.parent = this;
+            this.master.on('exit', function (code) { if (this.parent.master) { delete this.parent.master; } });
+            this.master.on('data', function (d) { console.log(d); });
+            this.master.ExecuteString("var parent = require('ScriptContainer'); parent.on('data', function(d){try{require('clipboard')(d);}catch(e){require('ScriptContainer').send(e);}if(process.platform == 'win32'){process.exit();}});");
+        }
         this.master.send(data);
+
+        if(process.platform == 'linux' && this.master)
+        {
+            if(this.master.timeout)
+            {
+                clearTimeout(this.master.timeout);
+                this.master.timeout = null;
+            }
+            this.master.timeout = setTimeout(function (self)
+            {
+                self.master.exit();
+                self.master = null;
+            }, 60000, this);
+        }
+
     }
-    
 }
 
 function lin_readtext()
