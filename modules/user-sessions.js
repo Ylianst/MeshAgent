@@ -346,12 +346,15 @@ function UserSessions()
     else if(process.platform == 'linux')
     {
         var dbus = require('linux-dbus');
-        this._linuxWatcher = require('fs').watch('/var/run/utmp');
-        this._linuxWatcher.user_session = this;
-        this._linuxWatcher.on('change', function (a, b)
+        if (require('fs').watch)
         {
-            this.user_session.emit('changed');
-        });
+            this._linuxWatcher = require('fs').watch('/var/run/utmp');
+            this._linuxWatcher.user_session = this;
+            this._linuxWatcher.on('change', function (a, b)
+            {
+                this.user_session.emit('changed');
+            });
+        }
         this._users = function _users()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
