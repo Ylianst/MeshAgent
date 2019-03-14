@@ -15,12 +15,15 @@ limitations under the License.
 */
 
 var promise = require('promise');
+
+var AnyPropertyType = 0;
+var CurrentTime = 0;
+var None = 0;
+var PropModeReplace = 0;
 var SelectionClear = 29;
 var SelectionNotify = 31;
 var SelectionRequest = 30;
-var AnyPropertyType = 0;
-var CurrentTime = 0;
-
+var XA_PRIMARY = 1;
 
 function nativeAddModule(name)
 {
@@ -239,9 +242,11 @@ function lin_copytext(txt)
             {
                 var white = X11.XWhitePixel(mon[0].display, mon[0].screenId).Val;
                 this._masterPromise.CLIPID = X11.XInternAtom(mon[0].display, GM.CreateVariable('CLIPBOARD'), 0);
+                this._masterPromise.FMTID = X11.XInternAtom(mon[0].display, GM.CreateVariable('UTF8_STRING'), 0);
                 this._masterPromise.ROOTWIN = X11.XRootWindow(mon[0].display, mon[0].screenId);
                 this._masterPromise.FAKEWIN = X11.XCreateSimpleWindow(mon[0].display, this._masterPromise.ROOTWIN, 0, 0, mon[0].right, 5, 0, white, white);
 
+                X11.XSetSelectionOwner(mon[0].display, XA_PRIMARY, this._masterPromise.FAKEWIN, CurrentTime);
                 X11.XSetSelectionOwner(mon[0].display, this._masterPromise.CLIPID, this._masterPromise.FAKEWIN, CurrentTime);
                 X11.XSync(mon[0].display, 0);
 
@@ -257,13 +262,47 @@ function lin_copytext(txt)
                         switch (XE.Deref(0, 4).toBuffer().readUInt32LE())
                         {
                             case SelectionClear:
-                                console.log('Somebody else owns clipboard');
-                                break;
-                            case SelectionNotify:
-                                console.log("Shouldn't really be getting this");
+                                console.info1('Somebody else owns clipboard');
                                 break;
                             case SelectionRequest:
-                                console.log('Somebody wants us to send them data');
+                                console.info1('Somebody wants us to send them data');
+
+                                var ev = GM.CreateVariable(GM.PointerSize == 8 ? 72 : 36);
+                                var sr_requestor = GM.PointerSize == 8 ? XE.Deref(40, 8) : XE.Deref(20, 4);
+                                var sr_selection = GM.PointerSize == 8 ? XE.Deref(48, 8) : XE.Deref(24, 4);
+                                var sr_property = GM.PointerSize == 8 ? XE.Deref(64, 8) : XE.Deref(32, 4);
+                                var sr_target = GM.PointerSize == 8 ? XE.Deref(56, 8) : XE.Deref(28, 4);
+                                var sr_time = GM.PointerSize == 8 ? XE.Deref(72, 8) : XE.Deref(36, 4);
+                                var sr_display = GM.PointerSize == 8 ? XE.Deref(24, 8) : XE.Deref(12, 4);
+
+                                ev.Deref(0, 4).toBuffer().writeUInt32LE(SelectionNotify);
+                                var ev_requestor = GM.PointerSize == 8 ? ev.Deref(32, 8) : ev.Deref(16, 4);
+                                var ev_selection = GM.PointerSize == 8 ? ev.Deref(40, 8) : ev.Deref(20, 4);
+                                var ev_target = GM.PointerSize == 8 ? ev.Deref(48, 8) : ev.Deref(24, 4);
+                                var ev_time = GM.PointerSize == 8 ? ev.Deref(64, 8) : ev.Deref(32, 4);
+                                var ev_property = GM.PointerSize == 8 ? ev.Deref(56, 8) : ev.Deref(28, 4);
+                                var cliptext = GM.CreateVariable(this._masterPromise._txt);
+
+                                sr_requestor.Deref().pointerBuffer().copy(ev_requestor.toBuffer()); console.info1('REQUESTOR: ' + sr_requestor.Deref().pointerBuffer().toString('hex'));
+                                sr_selection.Deref().pointerBuffer().copy(ev_selection.toBuffer()); console.info1('SELECTION: ' + sr_selection.Deref().pointerBuffer().toString('hex'));
+                                sr_target.Deref().pointerBuffer().copy(ev_target.toBuffer()); console.info1('TARGET: ' + sr_target.Deref().pointerBuffer().toString('hex'));
+                                sr_time.Deref().pointerBuffer().copy(ev_time.toBuffer()); console.info1('TIME: ' + sr_time.Deref().pointerBuffer().toString('hex'));
+
+                                if (sr_target.Deref().Val == this._masterPromise.FMTID.Val)
+                                {
+                                    console.info1('UTF8 Request for: ' + cliptext.String);
+                                    console.info1(sr_display.Val, sr_requestor.Deref().Val, sr_property.Deref().Val, sr_target.Deref().Val);
+                                    X11.XChangeProperty(sr_display.Deref(), sr_requestor.Deref(), sr_property.Deref(), sr_target.Deref(), 8, PropModeReplace, cliptext, cliptext._size - 1);
+                                    X11.XSync(sr_display.Deref(), 0);
+                                    sr_property.Deref().pointerBuffer().copy(ev_property.toBuffer()); 
+                                }
+                                else
+                                {
+                                    console.info1('Unknown Format Request');
+                                    ev_property.pointerBuffer().writeUInt32LE(None);
+                                }
+
+                                X11.XSendEvent(sr_display.Deref(), sr_requestor.Deref(), 1, 0, ev);
                                 break;
                         }
                     }
