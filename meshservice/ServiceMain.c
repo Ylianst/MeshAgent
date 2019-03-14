@@ -1359,14 +1359,14 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** meshid, char** serverid, char** serverurl)
+char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** meshid, char** serverid, char** serverurl, char** installFlags)
 {
 	char* importFile;
 	int eq, importFileLen;
 	parser_result *pr;
 	parser_result_field *f;
 
-	*meshname = *meshid = *serverid = *serverurl = NULL;
+	*meshname = *meshid = *serverid = *serverurl = *installFlags = NULL;
 	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
 	if (importFile == NULL) {
 		// Could not find the .msh file, see if there is one inside our own executable.
@@ -1421,6 +1421,7 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 				if (keyLen == 6 && memcmp("MeshID", key, keyLen) == 0) { *meshid = val; }
 				if (keyLen == 8 && memcmp("ServerID", key, keyLen) == 0) { *serverid = val; }
 				if (keyLen == 10 && memcmp("MeshServer", key, keyLen) == 0) { *serverurl = val; }
+				if (keyLen == 12 && memcmp("InstallFlags", key, keyLen) == 0) { *installFlags = val; }
 			}
 		}
 		f = f->NextResult;
@@ -1518,7 +1519,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 // Message handler for dialog box.
 INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *mshfile = NULL;
+	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL;
 
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
@@ -1597,9 +1598,12 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				}
 			}
 
-			if ((mshfile = getMshSettings(fileName, selfexe, &meshname, &meshid, &serverid, &serverurl)) != NULL)
+			if ((mshfile = getMshSettings(fileName, selfexe, &meshname, &meshid, &serverid, &serverurl, &installFlags)) != NULL)
 			{
 				// Set text in the dialog box
+				int installFlagsInt = 0;
+				WINDOWPLACEMENT lpwndpl;
+				if (installFlags != NULL) { installFlagsInt = atoi(installFlags); }
 				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
 				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
 				SetWindowTextA(GetDlgItem(hDlg, IDC_POLICYTEXT), (meshid != NULL) ? meshname : "(None)");
@@ -1608,6 +1612,22 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
 				free(mshfile);
 				if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
+				if ((installFlagsInt & 3) == 1) {
+					// Temporary Agent Only
+					ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
+					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
+					GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
+					SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
+				}  else if ((installFlagsInt & 3) == 2) {
+					// Background Only
+					ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
+				} else if ((installFlagsInt & 3) == 3) {
+					// Uninstall only
+					GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
+					SetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
+					ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
+					ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
+				}
 			}
 			else
 			{
