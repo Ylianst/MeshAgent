@@ -272,6 +272,8 @@ function serviceManager()
                 {
                     case 'init':
                     case 'upstart':
+                        if (require('fs').existsSync('/etc/init.d/' + name)) { platform = 'init'; }
+                        if (require('fs').existsSync('/etc/init/' + name + '.conf')) { platform = 'upstart'; }
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
@@ -297,49 +299,97 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $4}'\nexit\n");
+                                if (isMe.platform == 'upstart')
+                                {
+                                    child.stdin.write("initctl status " + this.name + " | awk '{print $2}' | awk -F, '{print $4}'\nexit\n");
+                                }
+                                else
+                                {
+                                    child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $4}'\nexit\n");
+                                }
                                 child.waitExit();
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
                             };
+                            ret.isMe.platform = platform;
                             ret.isRunning = function isRunning()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
+                                if (isRunning.platform == 'upstart')
+                                {
+                                    child.stdin.write("initctl status " + this.name + " | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
+                                }
+                                else
+                                {
+                                    child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
+                                }
                                 child.waitExit();
                                 return (child.stdout.str.trim() == 'start/running');
                             };
+                            ret.isRunning.platform = platform;
                             ret.start = function start()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('service ' + this.name + ' start\nexit\n');
+                                if (start.platform == 'upstart')
+                                {
+                                    child.stdin.write('initctl start ' + this.name + '\nexit\n');
+                                }
+                                else
+                                {
+                                    child.stdin.write('service ' + this.name + ' start\nexit\n');
+                                }
                                 child.waitExit();
                             };
+                            ret.start.platform = platform;
                             ret.stop = function stop()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('service ' + this.name + ' stop\nexit\n');
+                                if (stop.platform == 'upstart')
+                                {
+                                    child.stdin.write('initctl stop ' + this.name + '\nexit\n');
+                                }
+                                else
+                                {
+                                    child.stdin.write('service ' + this.name + ' stop\nexit\n');
+                                }
                                 child.waitExit();
                             };
+                            ret.stop.platform = platform;
                             ret.restart = function restart()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('service ' + this.name + ' restart\nexit\n');
+                                if (restart.platform == 'upstart')
+                                {
+                                    child.stdin.write('initctl restart ' + this.name + '\nexit\n');
+                                }
+                                else
+                                {
+                                    child.stdin.write('service ' + this.name + ' restart\nexit\n');
+                                }
                                 child.waitExit();
                             };
+                            ret.restart.platform = platform;
                             ret.status = function status()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout._str = '';
                                 child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
-                                child.stdin.write('service ' + this.name + ' status\nexit\n');
+                                if (status.platform == 'upstart')
+                                {
+                                    child.stdin.write('initctl status ' + this.name + '\nexit\n');
+                                }
+                                else
+                                {
+                                    child.stdin.write('service ' + this.name + ' status\nexit\n');
+                                }
                                 child.waitExit();
                                 return (child.stdout._str);
                             };
+                            ret.status.platform = platform;
                             return (ret);
                         }
                         else

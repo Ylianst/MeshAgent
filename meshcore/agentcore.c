@@ -582,6 +582,7 @@ typedef enum MeshAgent_Posix_PlatformTypes
 	MeshAgent_Posix_PlatformTypes_UNKNOWN	= 0,
 	MeshAgent_Posix_PlatformTypes_SYSTEMD	= 1,
 	MeshAgent_Posix_PlatformTypes_INITD		= 2,
+	MeshAgent_Posix_PlatformTypes_INIT_UPSTART =4,
 	MeshAgent_Posix_PlatformTypes_LAUNCHD	= 3,
 }MeshAgent_Posix_PlatformTypes;
 
@@ -635,7 +636,16 @@ MeshAgent_Posix_PlatformTypes MeshAgent_Posix_GetPlatformType()
 					}
 					else if (tlen == 4 && strncasecmp(tstr, "init", 4) == 0)
 					{
-						retVal = MeshAgent_Posix_PlatformTypes_INITD;
+						struct stat result;
+						memset(&result, 0, sizeof(struct stat));
+						if (stat("/etc/init", &result) != 0) 
+						{
+							retVal = MeshAgent_Posix_PlatformTypes_INITD;
+						}
+						else
+						{
+							retVal = MeshAgent_Posix_PlatformTypes_INIT_UPSTART;
+						}
 					}
 					fini = 1;
 				}
@@ -735,6 +745,17 @@ int MeshAgent_Helper_IsService()
 			break;
 		case MeshAgent_Posix_PlatformTypes_INITD:
 			if (MeshAgent_Helper_CommandLine((char*[]) { "service meshagent status | awk '{print $4}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
+			{
+				while (i<resultLen && result[i] != 10) { ++i; }
+				resultLen = i;
+				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
+				{
+					retVal = 1;
+				}
+			}
+			break;
+		case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
+			if (MeshAgent_Helper_CommandLine((char*[]) { "initctl status meshagent | awk '{print $4}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
 			{
 				while (i<resultLen && result[i] != 10) { ++i; }
 				resultLen = i;
@@ -4396,6 +4417,11 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 						case MeshAgent_Posix_PlatformTypes_INITD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent restart");	// Restart the service
+							ignore_result(MeshAgent_System(ILibScratchPad));
+							break;
+						case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling initctl restart (UPSTART)"); }
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart meshagent");	// Restart the service
 							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						default:
