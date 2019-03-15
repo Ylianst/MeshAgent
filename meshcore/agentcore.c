@@ -1455,14 +1455,17 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				duk_push_int(ctx, console_uid);
 				if (duk_pcall(ctx, 1) == 0)
 				{
-					updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
-					updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
-
-					if (console_uid != 0 && updateXAuth == NULL)
+					if (!duk_is_null(ctx, -1))
 					{
-						ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is your DM configured to use X?");
-						duk_pop(ctx);
-						return(1);
+						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+
+						if (console_uid != 0 && updateXAuth == NULL)
+						{
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "Xauthority not found! Is your DM configured to use X?");
+							duk_pop(ctx);
+							return(1);
+						}
 					}
 				}
 				else
