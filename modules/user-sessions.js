@@ -590,6 +590,30 @@ function UserSessions()
             child.waitExit();
             return (child.stdout.str.trim());
         };
+        this.getEnvFromPid = function getEnvFromPid(pid)
+        {
+            var ret = {};
+            var ps, psx, v, vs = 0;
+            try
+            {
+                ps = require('fs').readFileSync('/proc/' + pid + '/environ');
+            }
+            catch(pse)
+            {
+                return (ret);
+            }
+
+            for (psx = 0; psx < ps.length; ++psx)
+            {
+                if (ps[psx] == 0)
+                {
+                    v = ps.slice(vs, psx).toString().split('=');
+                    ret[v[0]] = v[1];
+                    vs = psx + 1;
+                }
+            }
+            return (ret);
+        };
 
         this.on('changed', this._recheckLoggedInUsers); // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
 

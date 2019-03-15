@@ -330,11 +330,36 @@ function monitorinfo()
             if (tokens.length == 3)
             {
                 ret = { tty: tokens[1], xauthority: tokens[2] };
-
             }
 
-            if(ret!=null)
+            if (ret == null)
             {
+                // This Linux Distro does not spawn an XServer instance in the user session, that specifies the XAUTHORITY.
+                // So we're going to brute force it, by enumerating all processes owned by this user, and inspect the environment variables
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("ps -e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
+                child.waitExit();
+
+                var lines = child.stdout.str.split('\n');
+                for(var n in lines)
+                {
+                    var ln = lines[n].trim();
+                    if(ln.length>0)
+                    {
+                        var e = require('user-sessions').getEnvFromPid(ln);
+                        if(e.XAUTHORITY && e.DISPLAY)
+                        {
+                            ret = { tty: '?', xauthority: e.XAUTHORITY, display: e.DISPLAY };
+                            return (ret);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // We need to find $DISPLAY by looking at all the processes running on the same tty as the XServer instance for this user session
                 child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
