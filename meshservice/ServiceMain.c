@@ -497,7 +497,7 @@ int GetServiceState(LPCSTR servicename)
 
 	if (serviceControlManager)
 	{
-		SC_HANDLE service = OpenService( serviceControlManager, servicename, SERVICE_QUERY_STATUS | DELETE );
+		SC_HANDLE service = OpenService( serviceControlManager, servicename, SERVICE_QUERY_STATUS );
 		if (service)
 		{
 			SERVICE_STATUS serviceStatusEx;
