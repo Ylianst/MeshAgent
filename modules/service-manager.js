@@ -100,6 +100,7 @@ function serviceManager()
         this.proxy.CreateMethod('EnumServicesStatusExA');
         this.proxy.CreateMethod('OpenServiceA');
         this.proxy.CreateMethod('QueryServiceStatusEx');
+        this.proxy.CreateMethod('QueryServiceConfig2A');
         this.proxy.CreateMethod('ControlService');
         this.proxy.CreateMethod('StartServiceA');
         this.proxy.CreateMethod('CloseServiceHandle');
@@ -186,7 +187,7 @@ function serviceManager()
             var bytesNeeded = this.GM.CreateVariable(ptr._size);
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0001 | 0x0004 | 0x0020 | 0x0010);
             if (handle.Val == 0) { throw ('could not open ServiceManager'); }
-            var h = this.proxy.OpenServiceA(handle, serviceName, 0x0004 | 0x0020 | 0x0010 | 0x00010000);
+            var h = this.proxy.OpenServiceA(handle, serviceName, 0x0001 | 0x0004 | 0x0020 | 0x0010 | 0x00010000);
             if (h.Val != 0) {
                 var success = this.proxy.QueryServiceStatusEx(h, 0, 0, 0, bytesNeeded);
                 var status = this.GM.CreateVariable(bytesNeeded.toBuffer().readUInt32LE());
@@ -243,6 +244,36 @@ function serviceManager()
                         }
                         else {
                             throw ('cannot call ' + this.name + '.start(), when current state is: ' + this.status.state);
+                        }
+                    }
+
+                    var failureactions = this.GM.CreateVariable(8192);
+                    var bneeded = this.GM.CreateVariable(4);        
+                    if (this.proxy.QueryServiceConfig2A(h, 2, failureactions, 8192, bneeded).Val != 0)
+                    {
+                        var cActions = failureactions.toBuffer().readUInt32LE(this.GM.PointerSize == 8 ? 24 : 12);
+                        retVal.failureActions = {};
+                        retVal.failureActions.resetPeriod = failureactions.Deref(0, 4).toBuffer().readUInt32LE(0);
+                        retVal.failureActions.actions = [];
+                        for(var act = 0 ; act < cActions; ++act)
+                        {
+                            var action = failureactions.Deref(this.GM.PointerSize == 8 ? 32 : 16, this.GM.PointerSize).Deref().Deref(act*8,8).toBuffer();
+                            switch(action.readUInt32LE())
+                            {
+                                case 0:
+                                    retVal.failureActions.actions.push({ type: 'NONE' });
+                                    break;
+                                case 1:
+                                    retVal.failureActions.actions.push({ type: 'SERVICE_RESTART' });
+                                    break;
+                                case 2:
+                                    retVal.failureActions.actions.push({ type: 'REBOOT' });
+                                    break;
+                                default:
+                                    retVal.failureActions.actions.push({ type: 'OTHER' });
+                                    break;
+                            }
+                            retVal.failureActions.actions.peek().delay = action.readUInt32LE(4);
                         }
                     }
                     return (retVal);
@@ -513,16 +544,35 @@ function serviceManager()
 
             var h = this.proxy.CreateServiceA(handle, serviceName, displayName, allAccess, 0x10 | 0x100, serviceType, 0, servicePath, 0, 0, 0, 0, 0);
             if (h.Val == 0) { this.proxy.CloseServiceHandle(handle); throw ('Error Creating Service: ' + this.proxy2.GetLastError().Val); }
-            if (options.description) {
-                console.log(options.description);
+            if (options.description)
+            {
+                var dsc = this.GM.CreateVariable(options.description);
+                var serviceDescription = this.GM.CreateVariable(this.GM.PointerSize);
+                dsc.pointerBuffer().copy(serviceDescription.Deref(0, this.GM.PointerSize).toBuffer());
 
-                var dscPtr = this.GM.CreatePointer();
-                dscPtr.Val = this.GM.CreateVariable(options.description);
+                if (this.proxy.ChangeServiceConfig2A(h, 1, serviceDescription).Val == 0)
+                {
+                    console.log('unable to set description...');
+                }
+            }
+            if (options.failureRestart == null || options.failureRestart > 0)
+            {
+                var delay = options.failureRestart == null ? 5000 : options.failureRestart;             // Delay in milliseconds
+                var actions = this.GM.CreateVariable(3 * 8);                                            // 3*sizeof(SC_ACTION)
+                actions.Deref(0, 4).toBuffer().writeUInt32LE(1);                                        // SC_ACTION[0].type
+                actions.Deref(4, 4).toBuffer().writeUInt32LE(delay);                                     // SC_ACTION[0].delay
+                actions.Deref(8, 4).toBuffer().writeUInt32LE(1);                                        // SC_ACTION[1].type
+                actions.Deref(12, 4).toBuffer().writeUInt32LE(delay);                                    // SC_ACTION[1].delay
+                actions.Deref(16, 4).toBuffer().writeUInt32LE(1);                                       // SC_ACTION[2].type
+                actions.Deref(20, 4).toBuffer().writeUInt32LE(delay);                                    // SC_ACTION[2].delay
 
-                if (this.proxy.ChangeServiceConfig2A(h, 1, dscPtr) == 0) {
-                    this.proxy.CloseServiceHandle(h);
-                    this.proxy.CloseServiceHandle(handle);
-                    throw ('Unable to set description');
+                var failureActions = this.GM.CreateVariable(40);                                        // sizeof(SERVICE_FAILURE_ACTIONS)
+                failureActions.Deref(0, 4).toBuffer().writeUInt32LE(7200);                              // dwResetPeriod: 2 Hours
+                failureActions.Deref(this.GM.PointerSize == 8 ? 24 : 12, 4).toBuffer().writeUInt32LE(3);// cActions: 3
+                actions.pointerBuffer().copy(failureActions.Deref(this.GM.PointerSize == 8 ? 32 : 16, this.GM.PointerSize).toBuffer());
+                if (this.proxy.ChangeServiceConfig2A(h, 2, failureActions).Val == 0)
+                {
+                    console.log('Unable to set FailureActions...');
                 }
             }
             this.proxy.CloseServiceHandle(h);
@@ -611,7 +661,10 @@ function serviceManager()
                             break;
                     }
                     conf.write('stop on runlevel [016]\n\n');
-                    conf.write('respawn\n\n');
+                    if (options.failureRestart == null || options.failureRestart > 0)
+                    {
+                        conf.write('respawn\n\n');
+                    }
                     conf.write('chdir /usr/local/mesh_services/' + options.name + '\n');
                     conf.write('exec /usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n\n');
                     conf.end();
@@ -647,8 +700,18 @@ function serviceManager()
                     conf.write('WorkingDirectory=/usr/local/mesh_services/' + options.name + '\n');
                     conf.write('ExecStart=/usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n');
                     conf.write('StandardOutput=null\n');
-                    conf.write('Restart=on-failure\n');
-                    conf.write('RestartSec=3\n');
+                    if (options.failureRestart == null || options.failureRestart > 0)
+                    {
+                        conf.write('Restart=on-failure\n');
+                        if (options.failureRestart == null)
+                        {
+                            conf.write('RestartSec=3\n');
+                        }
+                        else
+                        {
+                            conf.write('RestartSec=' + (options.failureRestart / 1000) + '\n');
+                        }
+                    }
                     switch (options.startType)
                     {
                         case 'BOOT_START':
@@ -704,6 +767,21 @@ function serviceManager()
             plist += (stdoutpath + '\n');
             plist += '      <key>RunAtLoad</key>\n';
             plist += (autoStart + '\n');
+            plist += '      <key>KeepAlive</key>\n';
+            if(options.failureRestart == null || options.failureRestart > 0)
+            {
+                plist += '      <true/>\n';
+            }
+            else
+            {
+                plist += '      <false/>\n';
+            }
+            if(options.failureRestart != null)
+            {
+                plist += '      <key>ThrottleInterval</key>\n';
+                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
+            }
+
             plist += '  </dict>\n';
             plist += '</plist>';
 
