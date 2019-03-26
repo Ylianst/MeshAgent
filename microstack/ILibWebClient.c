@@ -538,7 +538,10 @@ void ILibWebClient_TimerInterruptSink(void *object)
 {
 	UNREFERENCED_PARAMETER( object );
 }
-
+int ILibWebClient_IsFinHeader(ILibWebClient_StateObject wcdo)
+{
+	return(((ILibWebClientDataObject*)wcdo)->FinHeader);
+}
 void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo)
 {
 	ILibWebClient_RequestToken rt = NULL;
@@ -1485,7 +1488,7 @@ void ILibWebClient_OnWebSocketData(ILibAsyncSocket_SocketModule socketModule, ch
 // <param name="InterruptPtr">Function Pointer that triggers when a connection is interrupted</param>
 // <param name="user">User data that can be set/received</param>
 // <param name="PAUSE">Flag to tell the underlying socket to pause reading data</param>
-void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, void (**InterruptPtr)(void *socketModule, void *user), void **user, int *PAUSE)
+ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, void (**InterruptPtr)(void *socketModule, void *user), void **user, int *PAUSE)
 {
 	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)(*user);
 	struct ILibWebRequest *wr;
@@ -1502,8 +1505,8 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 	//char *tempPath;
 	//unsigned short tempPort;
 
-	if (wcdo == NULL || wcdo->RequestQueue == NULL) return;
-	if (wcdo->IsWebSocket != 0 && wcdo->Server == 0) { ILibWebClient_OnWebSocketData(socketModule, buffer, p_beginPointer, endPointer, InterruptPtr, user, PAUSE); return; }
+	if (wcdo == NULL || wcdo->RequestQueue == NULL) return(ILibWebClient_DataResults_OK);
+	if (wcdo->IsWebSocket != 0 && wcdo->Server == 0) { ILibWebClient_OnWebSocketData(socketModule, buffer, p_beginPointer, endPointer, InterruptPtr, user, PAUSE); return(ILibWebClient_DataResults_OK); }
 
 	if (wcdo->Server == 0)
 	{
@@ -1525,7 +1528,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 		// of the time, it means the remote endpoint is sending invalid packets.
 		//
 		*p_beginPointer = endPointer;
-		return;
+		return(ILibWebClient_DataResults_OK);
 	}
 	if (wcdo->FinHeader == 0)
 	{
@@ -1589,6 +1592,11 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 					}
 					if (wcdo->header != NULL)
 					{
+						if (wcdo->header->Directive == NULL && wcdo->header->StatusCode != -1 && wcdo->Server != 0)
+						{
+							return(ILibWebClient_DataResults_InvalidRequest); // We're a server, but we received a Response Packet...
+						}
+
 						//
 						// Check to see if this has an absolute path. Might be able to convert it
 						// for easier processing
@@ -1654,6 +1662,11 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 								wcdo->WaitForClose = 0;
 								phfn->FieldData[phfn->FieldDataLength] = '\0';
 								wcdo->BytesLeft = atoi(phfn->FieldData);
+								if (wcdo->BytesLeft < 0)
+								{
+									wcdo->BytesLeft = 0;
+									return(ILibWebClient_DataResults_InvalidContentLength);
+								}
 							}
 							phfn = phfn->NextField;
 						}
@@ -1680,7 +1693,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 								int zro = 0;
 								if (wr->OnResponse != NULL) { wr->OnResponse(wcdo, 0, wcdo->header, NULL, &zro, 0, ILibWebClient_ReceiveStatus_Connection_Established, wr->user1, wr->user2, &(wcdo->PAUSE)); }
 								*p_beginPointer += wcdo->HeaderLength;
-								return;
+								return(ILibWebClient_DataResults_OK);
 							}
 							else if (wcdo->header->StatusCode == 101 && wr->requestToken->WebSocketKey != NULL)
 							{
@@ -1700,14 +1713,14 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 
 									if (wr->OnResponse != NULL) { wr->OnResponse(wcdo, 0, wcdo->header, NULL, &zro, 0, ILibWebClient_ReceiveStatus_Connection_Established, wr->user1, wr->user2, &(wcdo->PAUSE)); }
 									*p_beginPointer += hdrLen;
-									return;
+									return(ILibWebClient_DataResults_OK);
 								}
 								else
 								{
 									// WebSocket Handshake Error... Unrecoverable, Abort connection
 									ILibWebClient_Disconnect(wcdo);
 									ILibWebClient_DestroyWebClientDataObject(wcdo); // We are destroying here, because WebSockets have independent WCDO objects
-									return;
+									return(ILibWebClient_DataResults_OK);
 								}
 							}
 							if (wr->streamedState == NULL)
@@ -1897,14 +1910,14 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 										// VIOLATION of the http specification. 
 										//
 										*p_beginPointer = i + 4;
-										return;
+										return(ILibWebClient_DataResults_OK);
 									}
 									if (socketModule != NULL && ILibAsyncSocket_IsFree(socketModule)!=0)
 									{
 										//
 										// The user closed the socket, so just return
 										//
-										return;
+										return(ILibWebClient_DataResults_OK);
 									}						
 								}
 								
@@ -2011,6 +2024,7 @@ void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffe
 		//
 		*PAUSE = wcdo->PAUSE;
 	}
+	return(ILibWebClient_DataResults_OK);
 }
 
 //
@@ -2506,7 +2520,7 @@ ILibWebClient_RequestManager ILibCreateWebClient(int PoolSize, void *Chain)
 		RetVal->socks[i] = ILibCreateAsyncSocketModule(
 			Chain,
 			INITIAL_BUFFER_SIZE,
-			&ILibWebClient_OnData,
+			(ILibAsyncSocket_OnData)&ILibWebClient_OnData,
 			&ILibWebClient_OnConnect,
 			&ILibWebClient_OnDisconnectSink,
 			&ILibWebClient_OnSendOKSink);

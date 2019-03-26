@@ -760,7 +760,29 @@ void ILibWebServer_OnReceive(void *AsyncServerSocketModule, void *ConnectionToke
 	if (ILibWebServer_Session_GetSystemData(ws)->WebSocket_Request == NULL)
 	{
 		// Normal HTTP Processing Rules
-		ILibWebClient_OnData(ConnectionToken, buffer, p_beginPointer, endPointer, NULL, &(ILibWebServer_Session_GetSystemData(ws)->WebClientDataObject), PAUSE);
+		ILibWebClient_DataResults r;
+		int pbp = *p_beginPointer;
+		switch ((r = ILibWebClient_OnData(ConnectionToken, buffer, p_beginPointer, endPointer, NULL, &(ILibWebServer_Session_GetSystemData(ws)->WebClientDataObject), PAUSE)))
+		{
+			case ILibWebClient_DataResults_OK:
+				if (*p_beginPointer == pbp && (endPointer - pbp >= 4096) && ILibWebClient_IsFinHeader(ILibWebServer_Session_GetSystemData(ws)->WebClientDataObject) == 0)
+				{
+					// The headers is > 4k
+					ILibWebServer_Session_GetSystemData(ws)->CloseOverrideFlag = 1; // This will force close the socket when done
+					ILibWebServer_Send_Raw(ws, "HTTP/1.1 431 Header size too big\r\nConnection: close\r\n\r\n", 55, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebServer_DoneFlag_Done);
+				}
+				break;
+			case ILibWebClient_DataResults_InvalidRequest:
+				ILibWebServer_Session_GetSystemData(ws)->CloseOverrideFlag = 1; // This will force close the socket when done
+				ILibWebServer_Send_Raw(ws, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n", 47, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebServer_DoneFlag_Done);
+				break;
+			case ILibWebClient_DataResults_InvalidContentLength:
+				ILibWebServer_Session_GetSystemData(ws)->CloseOverrideFlag = 1; // This will force close the socket when done
+				ILibWebServer_Send_Raw(ws, "HTTP/1.1 400 Invalid content length\r\nConnection: close\r\n\r\n", 58, ILibAsyncSocket_MemoryOwnership_STATIC, ILibWebServer_DoneFlag_Done);
+				break;
+			default:
+				break;
+		}
 	}
 	else
 	{
@@ -801,7 +823,18 @@ enum ILibWebServer_Status ILibWebServer_RequestAnswered(struct ILibWebServer_Ses
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(session->Reserved_Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Web, ILibRemoteLogging_Flags_VerbosityLevel_1, "WebSession[%p] (Request Answered)", (void*)session);
 
-	if (hdr == NULL) return ILibWebServer_ALL_DATA_SENT;
+	if (hdr == NULL)
+	{
+		if (ILibWebServer_Session_GetSystemData(session)->CloseOverrideFlag != 0)
+		{
+			ILibLifeTime_Add(((struct ILibWebServer_StateModule*)session->Parent)->LifeTime, ILibWebServer_Session_GetSystemData(session)->ConnectionToken, 0, &ILibAsyncSocket_Disconnect, NULL);
+			return(ILibWebServer_SEND_RESULTED_IN_DISCONNECT);
+		}
+		else
+		{
+			return ILibWebServer_ALL_DATA_SENT;
+		}
+	}
 
 	//
 	// Virtual Directory State Object

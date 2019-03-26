@@ -172,11 +172,18 @@ typedef int(*ILibWebClient_OnHttpsConnection)(ILibWebClient_RequestToken sender,
 
 extern const int ILibMemory_WebClient_RequestToken_CONTAINERSIZE;
 
+typedef enum ILibWebClient_DataResults
+{
+	ILibWebClient_DataResults_OK = 0,
+	ILibWebClient_DataResults_InvalidRequest = 400,
+	ILibWebClient_DataResults_InvalidContentLength = 4001
+}ILibWebClient_DataResults;
+
 ILibWebClient_RequestManager ILibCreateWebClient(int PoolSize, void *Chain);
 ILibWebClient_StateObject ILibCreateWebClientEx(ILibWebClient_OnResponse OnResponse, ILibAsyncSocket_SocketModule socketModule, void *user1, void *user2);
 
 void ILibWebClient_OnBufferReAllocate(ILibAsyncSocket_SocketModule token, void *user, ptrdiff_t offSet);
-void ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule,char* buffer,int *p_beginPointer, int endPointer,ILibAsyncSocket_OnInterrupt *InterruptPtr, void **user, int *PAUSE);
+ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule socketModule,char* buffer,int *p_beginPointer, int endPointer,ILibAsyncSocket_OnInterrupt *InterruptPtr, void **user, int *PAUSE);
 void ILibDestroyWebClient(void *object);
 
 void ILibWebClient_DestroyWebClientDataObject(ILibWebClient_StateObject token);
@@ -240,6 +247,7 @@ void ILibWebClient_Pause(ILibWebClient_StateObject wcdo);
 void ILibWebClient_Disconnect(ILibWebClient_StateObject wcdo);
 void ILibWebClient_CancelRequest(ILibWebClient_RequestToken RequestToken);
 void ILibWebClient_ResetUserObjects(ILibWebClient_StateObject webstate, void *user1, void *user2);
+int ILibWebClient_IsFinHeader(ILibWebClient_StateObject wcdo);
 ILibWebClient_RequestToken ILibWebClient_GetRequestToken_FromStateObject(ILibWebClient_StateObject WebStateObject);
 ILibWebClient_StateObject ILibWebClient_GetStateObjectFromRequestToken(ILibWebClient_RequestToken token);
 void **ILibWebClient_RequestToken_GetUserObjects(ILibWebClient_RequestToken tok);
