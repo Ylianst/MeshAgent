@@ -88,6 +88,7 @@ extern void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo);
 #define ILibDuktape_WSDEC2WS				"\xFF_WSDEC2WS"
 
 extern void ILibWebServer_Digest_ParseAuthenticationHeader(void* table, char* value, int valueLen);
+extern int *ILibWebClient_WCDO_ServerFlag(ILibWebClient_StateObject j);
 void ILibDuktape_HttpStream_ServerResponse_PUSH(duk_context *ctx, void* writeStream, ILibHTTPPacket *header, void *httpStream);
 
 typedef struct ILibDuktape_Http_ClientRequest_WriteData
@@ -773,7 +774,7 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 		return(0);
 	}
 
-	if (duk_peval_string(ctx, "require('http').createStream();") != 0)	// [socket][clientRequest][error]
+	if (duk_peval_string(ctx, "require('http').createStream(false);") != 0)	// [socket][clientRequest][error]
 	{
 		// Need to Abort this connection
 		duk_get_prop_string(ctx, -2, "emit");							// [socket][clientRequest][error][emit]
@@ -1592,7 +1593,7 @@ duk_ret_t ILibDuktape_HttpStream_http_server_onConnection(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "pipe");								// [NS][socket][pipe]
 	duk_dup(ctx, -2);													// [NS][socket][pipe][this]
 
-	duk_eval_string(ctx, "require('http').createStream();");			// [NS][socket][pipe][this][httpStream]	
+	duk_eval_string(ctx, "require('http').createStream(true);");		// [NS][socket][pipe][this][httpStream]	
 	duk_get_prop_string(ctx, -5, ILibDuktape_NS2HttpServer);			// [NS][socket][pipe][this][httpStream][httpServer]
 	duk_dup(ctx, -1);													// [NS][socket][pipe][this][httpStream][httpServer][dup]
 	duk_put_prop_string(ctx, -3, ILibduktape_HttpStream2HttpServer);	// [NS][socket][pipe][this][httpStream][httpServer]
@@ -3162,6 +3163,7 @@ duk_ret_t ILibDuktape_HttpStream_pipeEvent(duk_context *ctx)
 }
 duk_ret_t ILibduktape_HttpStream_create(duk_context *ctx)
 {
+	int nargs = duk_get_top(ctx);
 	ILibDuktape_HttpStream_Data *data;
 	duk_push_object(ctx);														// [httpStream] 
 	duk_push_this(ctx);															// [httpStream][http]
@@ -3190,6 +3192,15 @@ duk_ret_t ILibduktape_HttpStream_create(duk_context *ctx)
 		NULL, NULL, NULL, data);
 	data->DS->readableStream->PipeHookHandler = ILibDuktape_HttpStream_piped;
 	data->WCDO = ILibCreateWebClientEx(ILibDuktape_HttpStream_OnReceive, (ILibAsyncSocket_SocketModule)NULL, data, NULL);
+	if (nargs > 0 && duk_is_boolean(ctx, 0)) 
+	{ 
+		ILibWebClient_WCDO_ServerFlag(data->WCDO)[0] = duk_require_boolean(ctx, 0) ? 1 : 2; 
+	}
+	else
+	{
+		ILibWebClient_WCDO_ServerFlag(data->WCDO)[0] = 2;
+	}
+
 	data->chain = Duktape_GetChain(ctx);
 
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "pipe", ILibDuktape_HttpStream_pipeEvent);
@@ -4178,7 +4189,7 @@ void ILibDuktape_HttpStream_http_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "request", ILibDuktape_HttpStream_http_request, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createServer", ILibDuktape_HttpStream_http_createServer, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "get", ILibDuktape_HttpStream_http_get, DUK_VARARGS);
-	ILibDuktape_CreateInstanceMethod(ctx, "createStream", ILibduktape_HttpStream_create, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "createStream", ILibduktape_HttpStream_create, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "Agent", ILibDuktape_HttpStream_Agent_new, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "parseUri", ILibDuktape_httpStream_parseUri, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "webSocketStream", ILibDuktape_httpStream_webSocketStream_new, 1);

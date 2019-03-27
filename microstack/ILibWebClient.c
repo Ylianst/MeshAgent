@@ -227,7 +227,7 @@ typedef struct ILibWebClientDataObject
 	int BytesLeft;
 	int WaitForClose;
 	int Closing;
-	int Server;
+	int Server;						// 0 = Client, 1 = Server, 2 = Server, but ignore header checks
 	int DisconnectSent;
 
 	int HeaderLength;
@@ -314,6 +314,10 @@ typedef struct ILibWebClient_WebSocketState
 	void* pingPongUser;
 }ILibWebClient_WebSocketState;
 
+int *ILibWebClient_WCDO_ServerFlag(ILibWebClient_StateObject j)
+{
+	return(&(((ILibWebClientDataObject*)j)->Server));
+}
 
 void ILibWebClient_Timeout_Sink(ILibAsyncSocket_SocketModule module, void *user)
 {
@@ -1592,7 +1596,7 @@ ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule sock
 					}
 					if (wcdo->header != NULL)
 					{
-						if (wcdo->header->Directive == NULL && wcdo->header->StatusCode != -1 && wcdo->Server != 0)
+						if (wcdo->header->Directive == NULL && wcdo->header->StatusCode != -1 && wcdo->Server == 1)
 						{
 							return(ILibWebClient_DataResults_InvalidRequest); // We're a server, but we received a Response Packet...
 						}
