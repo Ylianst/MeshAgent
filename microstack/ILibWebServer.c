@@ -765,7 +765,7 @@ void ILibWebServer_OnReceive(void *AsyncServerSocketModule, void *ConnectionToke
 		switch ((r = ILibWebClient_OnData(ConnectionToken, buffer, p_beginPointer, endPointer, NULL, &(ILibWebServer_Session_GetSystemData(ws)->WebClientDataObject), PAUSE)))
 		{
 			case ILibWebClient_DataResults_OK:
-				if (*p_beginPointer == pbp && (endPointer - pbp >= 4096) && ILibWebClient_IsFinHeader(ILibWebServer_Session_GetSystemData(ws)->WebClientDataObject) == 0)
+				if (*p_beginPointer == pbp && (endPointer - pbp >= HTTP_MAX_HEADER_SIZE) && ILibWebClient_IsFinHeader(ILibWebServer_Session_GetSystemData(ws)->WebClientDataObject) == 0)
 				{
 					// The headers is > 4k
 					ILibWebServer_Session_GetSystemData(ws)->CloseOverrideFlag = 1; // This will force close the socket when done

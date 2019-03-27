@@ -795,11 +795,11 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 		{
 #if defined(_WIN32_WCE) || defined(WIN32)
 #if defined(WINSOCK2)
-			shutdown(s, SD_BOTH);
+			shutdown(s, SD_SEND);
 #endif
 			closesocket(s);
 #elif defined(_POSIX)
-			shutdown(s, SHUT_RDWR);
+			shutdown(s, SHUT_RD);
 			close(s);
 #endif
 		}

@@ -88,6 +88,7 @@ extern void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo);
 #define ILibDuktape_WSDEC2WS				"\xFF_WSDEC2WS"
 
 extern void ILibWebServer_Digest_ParseAuthenticationHeader(void* table, char* value, int valueLen);
+void ILibDuktape_HttpStream_ServerResponse_PUSH(duk_context *ctx, void* writeStream, ILibHTTPPacket *header, void *httpStream);
 
 typedef struct ILibDuktape_Http_ClientRequest_WriteData
 {
@@ -115,6 +116,7 @@ typedef struct ILibDuktape_HttpStream_Data
 	void *chain;
 	int ConnectMethod;
 	int endPropagated;
+	int maxHeaderSize;
 }ILibDuktape_HttpStream_Data;
 
 typedef struct ILibDuktape_HttpStream_ServerResponse_State
@@ -680,6 +682,7 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketClosed(duk_context *ctx)
 	duk_pop(ctx);														// ...
 	return(0);
 }
+
 duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 {
 	void *httpStream;
@@ -1543,6 +1546,27 @@ duk_ret_t ILibDuktape_HttpStream_http_server_onConnectionTimeout(duk_context *ct
 	}
 	return(0);
 }
+duk_ret_t ILibDuktape_HttpStream_http_parseError(duk_context *ctx)
+{
+	duk_push_this(ctx);																							// [httpStream]
+	ILibDuktape_HttpStream_Data *data = (ILibDuktape_HttpStream_Data*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_HTTPStream2Data);
+
+	ILibDuktape_HttpStream_ServerResponse_PUSH(ctx, data->DS->writableStream->pipedReadable, NULL, data->DS->ParentObject);	// [httpStream][response]
+	duk_dup(ctx, -1); duk_put_prop_string(ctx, -3, "\xFF_tmpServerResponse");
+	duk_get_prop_string(ctx, -1, "writeHead");																				// [httpStream][response][writeHead]
+	duk_dup(ctx, -2);																										// [httpStream][response][writeHead][this]
+	duk_dup(ctx, 0);																										// [httpStream][response][writeHead][this][statusCode]
+	duk_dup(ctx, 1);																										// [httpStream][response][writeHead][this][statusCode][statusMessage]
+	duk_push_object(ctx);																									// [httpStream][response][writeHead][this][statusCode][statusMessage][headers]
+	duk_push_string(ctx, "close"); duk_put_prop_string(ctx, -2, "Connection");
+
+	duk_call_method(ctx, 3); duk_pop(ctx);																					// [httpStream][response]
+	duk_get_prop_string(ctx, -1, "end");																					// [httpStream][response][end]
+	duk_swap_top(ctx, -2);																									// [httpStream][end][this]
+	duk_call_method(ctx, 0); duk_pop(ctx);																					// [httpStream]
+
+	return(0);
+}
 duk_ret_t ILibDuktape_HttpStream_http_server_onConnection(duk_context *ctx)
 {
 	duk_push_this(ctx);													// [NS]
@@ -1578,6 +1602,8 @@ duk_ret_t ILibDuktape_HttpStream_http_server_onConnection(duk_context *ctx)
 	//ILibDuktape_EventEmitter_ForwardEvent(ctx, -2, "close", -1, "close");
 	ILibDuktape_EventEmitter_ForwardEvent(ctx, -2, "connect", -1, "connect");
 	ILibDuktape_EventEmitter_ForwardEvent(ctx, -2, "request", -1, "request");
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -2, "parseError", ILibDuktape_HttpStream_http_parseError);
+
 	if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "upgrade") > 0) { ILibDuktape_EventEmitter_AddOnceEx3(ctx, -2, "upgrade", ILibDuktape_HttpStream_http_server_onUpgrade); }
 	
 	duk_pop(ctx);														// [NS][socket][pipe][this][httpStream]
@@ -1754,8 +1780,34 @@ duk_ret_t ILibDuktape_HttpStream_WriteSink_ChainSink_DynamicBuffer_WriteSink(duk
 	data = (ILibDuktape_HttpStream_Data*)duk_get_pointer(ctx, -1);
 
 	buffer = (char*)Duktape_GetBuffer(ctx, 0, &bufferLen);
-	ILibWebClient_OnData(NULL, buffer, &beginPointer, (int)bufferLen, NULL, (void**)&(data->WCDO), &PAUSE);
-
+	ILibWebClient_DataResults r = ILibWebClient_OnData(NULL, buffer, &beginPointer, (int)bufferLen, NULL, (void**)&(data->WCDO), &PAUSE);
+	switch (r)
+	{
+		case ILibWebClient_DataResults_OK:
+			if (0 == beginPointer && ILibWebClient_IsFinHeader(data->WCDO) == 0 && ((int)bufferLen - beginPointer >= data->maxHeaderSize))
+			{			
+				ILibDuktape_EventEmitter_SetupEmit(ctx, data->DS->ParentObject, "parseError");	// [emit][this][parseError]
+				duk_push_int(ctx, 431);															// [emit][this][parseError][statusCode]
+				duk_push_string(ctx, "Headers too large");										// [emit][this][parseError][statusCode][statusMessage]
+				if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpStream: Error in Event handler for 'parseError' "); }
+				duk_pop(ctx);																	// ...
+			}
+			break;
+		case ILibWebClient_DataResults_InvalidRequest:
+			ILibDuktape_EventEmitter_SetupEmit(ctx, data->DS->ParentObject, "parseError");	// [emit][this][parseError]
+			duk_push_int(ctx, 400);															// [emit][this][parseError][statusCode]
+			duk_push_string(ctx, "Bad Request");											// [emit][this][parseError][statusCode][statusMessage]
+			if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpStream: Error in Event handler for 'parseError' "); }
+			duk_pop(ctx);																	// ...
+		case ILibWebClient_DataResults_InvalidContentLength:
+			ILibDuktape_EventEmitter_SetupEmit(ctx, data->DS->ParentObject, "parseError");	// [emit][this][parseError]
+			duk_push_int(ctx, 400);															// [emit][this][parseError][statusCode]
+			duk_push_string(ctx, "Invalid content-length specified");						// [emit][this][parseError][statusCode][statusMessage]
+			if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "httpStream: Error in Event handler for 'parseError' "); }
+			duk_pop(ctx);																	// ...
+		default:
+			break;
+	}
 	return(0);
 }
 duk_ret_t ILibDuktape_HttpStream_WriteSink_ChainSink_DynamicBuffer_EndSink(duk_context *ctx)
@@ -1826,9 +1878,41 @@ ILibTransport_DoneState ILibDuktape_HttpStream_WriteSink(ILibDuktape_DuplexStrea
 	int beginPointer = 0;
 	int PAUSE = 0;
 	int MustBuffer = 0;
+	int ibp = beginPointer;
 	ILibDuktape_WritableStream *stream = DS->writableStream;
 
-	ILibWebClient_OnData(NULL, buffer, &beginPointer, (int)bufferLen, NULL, (void**)&(data->WCDO), &PAUSE);
+	ILibWebClient_DataResults r = ILibWebClient_OnData(NULL, buffer, &beginPointer, (int)bufferLen, NULL, (void**)&(data->WCDO), &PAUSE);
+	switch (r)
+	{
+		case ILibWebClient_DataResults_OK:
+			if (ibp == beginPointer && ILibWebClient_IsFinHeader(data->WCDO) == 0 && (bufferLen - beginPointer >= data->maxHeaderSize))
+			{
+				ILibDuktape_EventEmitter_SetupEmit(DS->writableStream->ctx, DS->ParentObject, "parseError");	// [emit][this][parseError]
+				duk_push_int(DS->writableStream->ctx, 431);														// [emit][this][parseError][statusCode]
+				duk_push_string(DS->writableStream->ctx, "Headers too large");									// [emit][this][parseError][statusCode][statusMessage]
+				if (duk_pcall_method(DS->writableStream->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(DS->writableStream->ctx, "httpStream: Error in Event handler for 'parseError' "); }
+				duk_pop(DS->writableStream->ctx);																// ...
+				return(ILibTransport_DoneState_ERROR);
+			}
+			break;
+		case ILibWebClient_DataResults_InvalidRequest:
+			ILibDuktape_EventEmitter_SetupEmit(DS->writableStream->ctx, DS->ParentObject, "parseError");	// [emit][this][parseError]
+			duk_push_int(DS->writableStream->ctx, 400);														// [emit][this][parseError][statusCode]
+			duk_push_string(DS->writableStream->ctx, "Bad Request");										// [emit][this][parseError][statusCode][statusMessage]
+			if (duk_pcall_method(DS->writableStream->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(DS->writableStream->ctx, "httpStream: Error in Event handler for 'parseError' "); }
+			duk_pop(DS->writableStream->ctx);																// ...
+			return(ILibTransport_DoneState_ERROR);
+		case ILibWebClient_DataResults_InvalidContentLength:
+			ILibDuktape_EventEmitter_SetupEmit(DS->writableStream->ctx, DS->ParentObject, "parseError");	// [emit][this][parseError]
+			duk_push_int(DS->writableStream->ctx, 400);														// [emit][this][parseError][statusCode]
+			duk_push_string(DS->writableStream->ctx, "Invalid content-length specified");					// [emit][this][parseError][statusCode][statusMessage]
+			if (duk_pcall_method(DS->writableStream->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(DS->writableStream->ctx, "httpStream: Error in Event handler for 'parseError' "); }
+			duk_pop(DS->writableStream->ctx);																// ...
+			return(ILibTransport_DoneState_ERROR);
+		default:
+			break;
+	}
+
 
 	if ((bufferLen - beginPointer) > 0)
 	{
@@ -2314,6 +2398,10 @@ duk_ret_t ILibDuktape_HttpStream_ServerResponse_writeHead(duk_context *ctx)
 			statusMessageLen = 8;
 			break;
 		case 200:
+			statusMessage = "OK";
+			statusMessageLen = 2;
+			break;
+		case 400:
 			statusMessage = "Bad Request";
 			statusMessageLen = 11;
 			break;
@@ -2510,19 +2598,17 @@ void ILibDuktape_HttpStream_ServerResponse_PUSH(duk_context *ctx, void* writeStr
 	duk_put_prop_string(ctx, -2, ILibDuktape_OBJID);														// [resp]
 
 	ILibDuktape_WriteID(ctx, "http.serverResponse");
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_HttpStream_ServerResponse_State));			// [resp][state]
-	state = (ILibDuktape_HttpStream_ServerResponse_State*)Duktape_GetBuffer(ctx, -1, NULL);
-	duk_put_prop_string(ctx, -2, ILibDuktape_SR2State);											// [resp]
-	memset(state, 0, sizeof(ILibDuktape_HttpStream_ServerResponse_State));
+	state = Duktape_PushBuffer(ctx, sizeof(ILibDuktape_HttpStream_ServerResponse_State));					// [resp][state]
+	duk_put_prop_string(ctx, -2, ILibDuktape_SR2State);														// [resp]
 	state->ctx = ctx;
 	state->serverResponse = duk_get_heapptr(ctx, -1);
 	state->implicitHeaderHandling = 1;
 	state->chain = Duktape_GetChain(ctx);
 	state->writeStream = writeStream;
 	state->nativeWriteStream = ILibDuktape_DuplexStream_GetNativeWritable(ctx, writeStream);
-	state->chunkSupported = ILibDuktape_Headers_IsChunkSupported(header);
-	duk_push_object(ctx);																		// [resp][implicitHeaders]
-	duk_put_prop_string(ctx, -2, ILibDuktape_SR2ImplicitHeaders);								// [resp]
+	state->chunkSupported = header != NULL ? ILibDuktape_Headers_IsChunkSupported(header) : 0;
+	duk_push_object(ctx);																					// [resp][implicitHeaders]
+	duk_put_prop_string(ctx, -2, ILibDuktape_SR2ImplicitHeaders);											// [resp]
 	
 	duk_push_int(ctx, 200);
 	duk_put_prop_string(ctx, -2, "statusCode");
@@ -3085,8 +3171,11 @@ duk_ret_t ILibduktape_HttpStream_create(duk_context *ctx)
 	data = (ILibDuktape_HttpStream_Data*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_HttpStream_Data));
 	duk_put_prop_string(ctx, -2, ILibDuktape_HTTPStream2Data);					// [httpStream]
 
+	data->maxHeaderSize = 4096;
+
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "end");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "parseError");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "continue");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "response");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "upgrade");
