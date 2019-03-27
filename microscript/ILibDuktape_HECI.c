@@ -1058,6 +1058,19 @@ void ILibDuktape_HECI_Destroy(void *object)
 }
 #endif
 
+duk_ret_t ILibDuktape_HECI_reset(duk_context *ctx)
+{
+	duk_push_this(ctx);
+#ifdef WIN32
+	HANDLE h = (HANDLE)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_Descriptor);
+	CloseHandle(h);
+	h = ILibDuktape_HECI_windowsInit();
+	duk_push_pointer(ctx, h);
+	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Descriptor);
+#endif
+	return(0);
+}
+
 void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);																	// [HECI]
@@ -1101,6 +1114,7 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 	if (chain != NULL) { ILibDuktape_CreateInstanceMethod(ctx, "create", ILibDuktape_HECI_create, 0); }
 	ILibDuktape_CreateInstanceMethod(ctx, "doIoctl", ILibDuktape_HECI_doIoctl, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "disconnect", ILibDuktape_HECI_Session_close, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "reset", ILibDuktape_HECI_reset, 0);
 #if defined(_POSIX) && !defined(__APPLE__)
 	duk_push_pointer(ctx, hlink->Q);														// [HECI][Q]
 #else
