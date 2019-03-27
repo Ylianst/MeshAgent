@@ -799,7 +799,7 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 #endif
 			closesocket(s);
 #elif defined(_POSIX)
-			shutdown(s, SHUT_RD);
+			shutdown(s, SHUT_WR);
 			close(s);
 #endif
 		}
