@@ -211,6 +211,12 @@ function serviceManager()
                         if (ret.startsWith('"')) { ret = ret.substring(1); }
                         return (ret);
                     };
+                    retVal.appWorkingDirectory = function ()
+                    {
+                        var tokens = this.appLocation().split('\\');
+                        tokens.pop();
+                        return (tokens.join('\\'));
+                    };
                     retVal.isRunning = function ()
                     {
                         var bytesNeeded = this._GM.CreateVariable(this._GM.PointerSize);
@@ -308,6 +314,23 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
+                            ret.appWorkingDirectory = function appWorkingDirectory()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                if (appWorkingDirectory.platform == 'init')
+                                {
+                                    child.stdin.write("cat /etc/init.d/" + this.name + " | grep 'SCRIPT=' | awk -F= '{ len=split($2, a, \"/\"); print substr($2,0,length($2)-length(a[len])); }'\nexit\n");
+                                }
+                                else
+                                {
+                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep 'chdir ' | awk '{print $2}'\nexit\n");
+                                }
+                                child.waitExit();
+                                return (child.stdout.str.trim());
+                            };
+                            ret.appWorkingDirectory.platform = platform;
                             ret.appLocation = function appLocation()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -432,6 +455,20 @@ function serviceManager()
                         if (require('fs').existsSync('/lib/systemd/system/' + name + '.service') ||
                             require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
                         {
+                            ret.appWorkingDirectory = function appWorkingDirectory()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = '';
+                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                                if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service')) {
+                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{ print $2 }'\n\exit\n");
+                                }
+                                else {
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{ print $2 }'\n\exit\n");
+                                }
+                                child.waitExit();
+                                return (child.stdout.str.trim());
+                            };
                             ret.appLocation = function ()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -621,7 +658,7 @@ function serviceManager()
 
                     // The following is the init.d script I wrote. Rather than having to deal with escaping the thing, I just Base64 encoded it to prevent issues.
                     conf = require('fs').createWriteStream('/etc/init.d/' + options.name, { flags: 'wb' });
-                    conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPS91c3IvbG9jYWwvbWVzaF9zZXJ2aWNlcy9YWFhYWC9ZWVlZWQpSVU5BUz1yb290CgpQSURGSUxFPS92YXIvcnVuL1hYWFhYLnBpZApMT0dGSUxFPS92YXIvbG9nL1hYWFhYLmxvZwoKc3RhcnQoKSB7CiAgaWYgWyAtZiAiJFBJREZJTEUiIF0gJiYga2lsbCAtMCAkKGNhdCAiJFBJREZJTEUiKSAyPi9kZXYvbnVsbDsgdGhlbgogICAgZWNobyAnU2VydmljZSBhbHJlYWR5IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBmaQogIGVjaG8gJ1N0YXJ0aW5nIHNlcnZpY2XigKYnID4mMgogIGxvY2FsIENNRD0iJFNDUklQVCB7e1BBUk1TfX0gJj4gXCIkTE9HRklMRVwiICYgZWNobyBcJCEiCiAgc3UgLWMgIiRDTUQiICRSVU5BUyA+ICIkUElERklMRSIKICBlY2hvICdTZXJ2aWNlIHN0YXJ0ZWQnID4mMgp9CgpzdG9wKCkgewogIGlmIFsgISAtZiAiJFBJREZJTEUiIF07IHRoZW4KICAgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBlbHNlCglwaWQ9JCggY2F0ICIkUElERklMRSIgKQoJaWYga2lsbCAtMCAkcGlkIDI+L2Rldi9udWxsOyB0aGVuCiAgICAgIGVjaG8gJ1N0b3BwaW5nIHNlcnZpY2XigKYnID4mMgogICAgICBraWxsIC0xNiAkcGlkCiAgICAgIGVjaG8gJ1NlcnZpY2Ugc3RvcHBlZCcgPiYyCgllbHNlCgkgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnCglmaQoJcm0gLWYgJCJQSURGSUxFIgogIGZpCn0KcmVzdGFydCgpewoJc3RvcAoJc3RhcnQKfQpzdGF0dXMoKXsKCWlmIFsgLWYgIiRQSURGSUxFIiBdCgl0aGVuCgkJcGlkPSQoIGNhdCAiJFBJREZJTEUiICkKCQlpZiBraWxsIC0wICRwaWQgMj4vZGV2L251bGw7IHRoZW4KCQkJZWNobyAiWFhYWFggc3RhcnQvcnVubmluZywgcHJvY2VzcyAkcGlkIgoJCWVsc2UKCQkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJCWZpCgllbHNlCgkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJZmkKCn0KCgpjYXNlICIkMSIgaW4KCXN0YXJ0KQoJCXN0YXJ0CgkJOzsKCXN0b3ApCgkJc3RvcAoJCTs7CglyZXN0YXJ0KQoJCXN0b3AKCQlzdGFydAoJCTs7CglzdGF0dXMpCgkJc3RhdHVzCgkJOzsKCSopCgkJZWNobyAiVXNhZ2U6IHNlcnZpY2UgWFhYWFgge3N0YXJ0fHN0b3B8cmVzdGFydHxzdGF0dXN9IgoJCTs7CmVzYWMKZXhpdCAwCgo=', 'base64').toString().split('XXXXX').join(options.name).split('YYYYY').join(options.target).replace('{{PARMS}}', parameters));
+                    conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPS91c3IvbG9jYWwvbWVzaF9zZXJ2aWNlcy9YWFhYWC9ZWVlZWQpSVU5BUz1yb290CgpQSURGSUxFPS92YXIvcnVuL1hYWFhYLnBpZApMT0dGSUxFPS92YXIvbG9nL1hYWFhYLmxvZwoKc3RhcnQoKSB7CiAgaWYgWyAtZiAiJFBJREZJTEUiIF0gJiYga2lsbCAtMCAkKGNhdCAiJFBJREZJTEUiKSAyPi9kZXYvbnVsbDsgdGhlbgogICAgZWNobyAnU2VydmljZSBhbHJlYWR5IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBmaQogIGVjaG8gJ1N0YXJ0aW5nIHNlcnZpY2XigKYnID4mMgogIGxvY2FsIENNRD0iJFNDUklQVCB7e1BBUk1TfX0gJj4gXCIkTE9HRklMRVwiICYgZWNobyBcJCEiCiAgbG9jYWwgQ01EUEFUSD0kKGVjaG8gJFNDUklQVCB8IGF3ayAneyBsZW49c3BsaXQoJDAsIGEsICIvIik7IHByaW50IHN1YnN0cigkMCwgMCwgbGVuZ3RoKCQwKS1sZW5ndGgoYVtsZW5dKSk7IH0nKQogIGNkICRDTURQQVRICiAgc3UgLWMgIiRDTUQiICRSVU5BUyA+ICIkUElERklMRSIKICBlY2hvICdTZXJ2aWNlIHN0YXJ0ZWQnID4mMgp9CgpzdG9wKCkgewogIGlmIFsgISAtZiAiJFBJREZJTEUiIF07IHRoZW4KICAgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBlbHNlCglwaWQ9JCggY2F0ICIkUElERklMRSIgKQoJaWYga2lsbCAtMCAkcGlkIDI+L2Rldi9udWxsOyB0aGVuCiAgICAgIGVjaG8gJ1N0b3BwaW5nIHNlcnZpY2XigKYnID4mMgogICAgICBraWxsIC0xNiAkcGlkCiAgICAgIGVjaG8gJ1NlcnZpY2Ugc3RvcHBlZCcgPiYyCgllbHNlCgkgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnCglmaQoJcm0gLWYgJCJQSURGSUxFIgogIGZpCn0KcmVzdGFydCgpewoJc3RvcAoJc3RhcnQKfQpzdGF0dXMoKXsKCWlmIFsgLWYgIiRQSURGSUxFIiBdCgl0aGVuCgkJcGlkPSQoIGNhdCAiJFBJREZJTEUiICkKCQlpZiBraWxsIC0wICRwaWQgMj4vZGV2L251bGw7IHRoZW4KCQkJZWNobyAiWFhYWFggc3RhcnQvcnVubmluZywgcHJvY2VzcyAkcGlkIgoJCWVsc2UKCQkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJCWZpCgllbHNlCgkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJZmkKCn0KCgpjYXNlICIkMSIgaW4KCXN0YXJ0KQoJCXN0YXJ0CgkJOzsKCXN0b3ApCgkJc3RvcAoJCTs7CglyZXN0YXJ0KQoJCXN0b3AKCQlzdGFydAoJCTs7CglzdGF0dXMpCgkJc3RhdHVzCgkJOzsKCSopCgkJZWNobyAiVXNhZ2U6IHNlcnZpY2UgWFhYWFgge3N0YXJ0fHN0b3B8cmVzdGFydHxzdGF0dXN9IgoJCTs7CmVzYWMKZXhpdCAwCgo=', 'base64').toString().split('XXXXX').join(options.name).split('YYYYY').join(options.target).replace('{{PARMS}}', parameters));
                     conf.end();
 
                     m = require('fs').statSync('/etc/init.d/' + options.name).mode;
