@@ -439,14 +439,14 @@ function serviceManager()
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                                 if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service'))
                                 {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{print $2}'\n\exit\n");
+                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '{ split($2, a, \" \"); print a[1] }'\n\exit\n");
                                 }
                                 else
                                 {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{print $2}'\n\exit\n");
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '{ split($2, a, \" \"); print a[1] }'\n\exit\n");
                                 }
                                 child.waitExit();
-                                return (child.stdout.str.trim() + '/' + this.name);
+                                return (child.stdout.str.trim());
                             };
                             ret.isMe = function isMe()
                             {
@@ -508,6 +508,9 @@ function serviceManager()
     }
     this.installService = function installService(options)
     {
+        if (!options.target) { options.target = options.name; }
+        if (!options.displayName) { options.displayName = options.name; }
+
         if (process.platform == 'win32')
         {
             if (!this.isAdmin()) { throw ('Installing as Service, requires admin'); }
@@ -517,14 +520,14 @@ function serviceManager()
             if (!require('fs').existsSync(folder)) { require('fs').mkdirSync(folder); }
             if (!require('fs').existsSync(folder + '\\' + options.name)) { require('fs').mkdirSync(folder + '\\' + options.name); }
 
-            require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.name + '.exe');
-            options.servicePath = folder + '\\' + options.name + '\\' + options.name + '.exe';
+            require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
+            options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
 
             var servicePath = this.GM.CreateVariable('"' + options.servicePath + '"');
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0002);
             if (handle.Val == 0) { throw ('error opening SCManager'); }
             var serviceName = this.GM.CreateVariable(options.name);
-            var displayName = this.GM.CreateVariable(options.name);
+            var displayName = this.GM.CreateVariable(options.displayName);
             var allAccess = 0x000F01FF;
             var serviceType;
             
@@ -609,16 +612,16 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
                     console.log('copying ' + options.servicePath);
 
-                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
+                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
-                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
 
                     // The following is the init.d script I wrote. Rather than having to deal with escaping the thing, I just Base64 encoded it to prevent issues.
                     conf = require('fs').createWriteStream('/etc/init.d/' + options.name, { flags: 'wb' });
-                    conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPS91c3IvbG9jYWwvbWVzaF9zZXJ2aWNlcy9YWFhYWC9YWFhYWApSVU5BUz1yb290CgpQSURGSUxFPS92YXIvcnVuL1hYWFhYLnBpZApMT0dGSUxFPS92YXIvbG9nL1hYWFhYLmxvZwoKc3RhcnQoKSB7CiAgaWYgWyAtZiAiJFBJREZJTEUiIF0gJiYga2lsbCAtMCAkKGNhdCAiJFBJREZJTEUiKSAyPi9kZXYvbnVsbDsgdGhlbgogICAgZWNobyAnU2VydmljZSBhbHJlYWR5IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBmaQogIGVjaG8gJ1N0YXJ0aW5nIHNlcnZpY2XigKYnID4mMgogIGxvY2FsIENNRD0iJFNDUklQVCB7e1BBUk1TfX0gJj4gXCIkTE9HRklMRVwiICYgZWNobyBcJCEiCiAgc3UgLWMgIiRDTUQiICRSVU5BUyA+ICIkUElERklMRSIKICBlY2hvICdTZXJ2aWNlIHN0YXJ0ZWQnID4mMgp9CgpzdG9wKCkgewogIGlmIFsgISAtZiAiJFBJREZJTEUiIF07IHRoZW4KICAgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBlbHNlCglwaWQ9JCggY2F0ICIkUElERklMRSIgKQoJaWYga2lsbCAtMCAkcGlkIDI+L2Rldi9udWxsOyB0aGVuCiAgICAgIGVjaG8gJ1N0b3BwaW5nIHNlcnZpY2XigKYnID4mMgogICAgICBraWxsIC0xNiAkcGlkCiAgICAgIGVjaG8gJ1NlcnZpY2Ugc3RvcHBlZCcgPiYyCgllbHNlCgkgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnCglmaQoJcm0gLWYgJCJQSURGSUxFIgogIGZpCn0KcmVzdGFydCgpewoJc3RvcAoJc3RhcnQKfQpzdGF0dXMoKXsKCWlmIFsgLWYgIiRQSURGSUxFIiBdCgl0aGVuCgkJcGlkPSQoIGNhdCAiJFBJREZJTEUiICkKCQlpZiBraWxsIC0wICRwaWQgMj4vZGV2L251bGw7IHRoZW4KCQkJZWNobyAiWFhYWFggc3RhcnQvcnVubmluZywgcHJvY2VzcyAkcGlkIgoJCWVsc2UKCQkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJCWZpCgllbHNlCgkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJZmkKCn0KCgpjYXNlICIkMSIgaW4KCXN0YXJ0KQoJCXN0YXJ0CgkJOzsKCXN0b3ApCgkJc3RvcAoJCTs7CglyZXN0YXJ0KQoJCXN0b3AKCQlzdGFydAoJCTs7CglzdGF0dXMpCgkJc3RhdHVzCgkJOzsKCSopCgkJZWNobyAiVXNhZ2U6IHNlcnZpY2UgWFhYWFgge3N0YXJ0fHN0b3B8cmVzdGFydHxzdGF0dXN9IgoJCTs7CmVzYWMKZXhpdCAwCgo=', 'base64').toString().split('XXXXX').join(options.name).replace('{{PARMS}}', parameters));
+                    conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPS91c3IvbG9jYWwvbWVzaF9zZXJ2aWNlcy9YWFhYWC9ZWVlZWQpSVU5BUz1yb290CgpQSURGSUxFPS92YXIvcnVuL1hYWFhYLnBpZApMT0dGSUxFPS92YXIvbG9nL1hYWFhYLmxvZwoKc3RhcnQoKSB7CiAgaWYgWyAtZiAiJFBJREZJTEUiIF0gJiYga2lsbCAtMCAkKGNhdCAiJFBJREZJTEUiKSAyPi9kZXYvbnVsbDsgdGhlbgogICAgZWNobyAnU2VydmljZSBhbHJlYWR5IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBmaQogIGVjaG8gJ1N0YXJ0aW5nIHNlcnZpY2XigKYnID4mMgogIGxvY2FsIENNRD0iJFNDUklQVCB7e1BBUk1TfX0gJj4gXCIkTE9HRklMRVwiICYgZWNobyBcJCEiCiAgc3UgLWMgIiRDTUQiICRSVU5BUyA+ICIkUElERklMRSIKICBlY2hvICdTZXJ2aWNlIHN0YXJ0ZWQnID4mMgp9CgpzdG9wKCkgewogIGlmIFsgISAtZiAiJFBJREZJTEUiIF07IHRoZW4KICAgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnID4mMgogICAgcmV0dXJuIDEKICBlbHNlCglwaWQ9JCggY2F0ICIkUElERklMRSIgKQoJaWYga2lsbCAtMCAkcGlkIDI+L2Rldi9udWxsOyB0aGVuCiAgICAgIGVjaG8gJ1N0b3BwaW5nIHNlcnZpY2XigKYnID4mMgogICAgICBraWxsIC0xNiAkcGlkCiAgICAgIGVjaG8gJ1NlcnZpY2Ugc3RvcHBlZCcgPiYyCgllbHNlCgkgIGVjaG8gJ1NlcnZpY2Ugbm90IHJ1bm5pbmcnCglmaQoJcm0gLWYgJCJQSURGSUxFIgogIGZpCn0KcmVzdGFydCgpewoJc3RvcAoJc3RhcnQKfQpzdGF0dXMoKXsKCWlmIFsgLWYgIiRQSURGSUxFIiBdCgl0aGVuCgkJcGlkPSQoIGNhdCAiJFBJREZJTEUiICkKCQlpZiBraWxsIC0wICRwaWQgMj4vZGV2L251bGw7IHRoZW4KCQkJZWNobyAiWFhYWFggc3RhcnQvcnVubmluZywgcHJvY2VzcyAkcGlkIgoJCWVsc2UKCQkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJCWZpCgllbHNlCgkJZWNobyAnWFhYWFggc3RvcC93YWl0aW5nJwoJZmkKCn0KCgpjYXNlICIkMSIgaW4KCXN0YXJ0KQoJCXN0YXJ0CgkJOzsKCXN0b3ApCgkJc3RvcAoJCTs7CglyZXN0YXJ0KQoJCXN0b3AKCQlzdGFydAoJCTs7CglzdGF0dXMpCgkJc3RhdHVzCgkJOzsKCSopCgkJZWNobyAiVXNhZ2U6IHNlcnZpY2UgWFhYWFgge3N0YXJ0fHN0b3B8cmVzdGFydHxzdGF0dXN9IgoJCTs7CmVzYWMKZXhpdCAwCgo=', 'base64').toString().split('XXXXX').join(options.name).split('YYYYY').join(options.target).replace('{{PARMS}}', parameters));
                     conf.end();
 
                     m = require('fs').statSync('/etc/init.d/' + options.name).mode;
@@ -642,12 +645,12 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
                     console.log('copying ' + options.servicePath);
 
-                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
+                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
-                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
 
                     conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', { flags: 'wb' });
                     switch (options.startType)
@@ -666,7 +669,7 @@ function serviceManager()
                         conf.write('respawn\n\n');
                     }
                     conf.write('chdir /usr/local/mesh_services/' + options.name + '\n');
-                    conf.write('exec /usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n\n');
+                    conf.write('exec /usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '\n\n');
                     conf.end();
                     break;
                 case 'systemd':
@@ -676,11 +679,11 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
                     console.log('copying ' + options.servicePath);
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
 
-                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
+                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
-                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
 
                     if (require('fs').existsSync('/lib/systemd/system'))
                     {
@@ -698,7 +701,7 @@ function serviceManager()
                     conf.write('[Unit]\nDescription=' + serviceDescription + '\n');
                     conf.write('[Service]\n');
                     conf.write('WorkingDirectory=/usr/local/mesh_services/' + options.name + '\n');
-                    conf.write('ExecStart=/usr/local/mesh_services/' + options.name + '/' + options.name + ' ' + parameters + '\n');
+                    conf.write('ExecStart=/usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '\n');
                     conf.write('StandardOutput=null\n');
                     if (options.failureRestart == null || options.failureRestart > 0)
                     {
@@ -745,7 +748,7 @@ function serviceManager()
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
-            params += ('         <string>/usr/local/mesh_services/' + options.name + '/' + options.name + '</string>\n');
+            params += ('         <string>/usr/local/mesh_services/' + options.name + '/' + options.target + '</string>\n');
             if(options.parameters)
             {
                 for(var itm in options.parameters)
@@ -791,16 +794,16 @@ function serviceManager()
                 if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
                 if (options.binary)
                 {
-                    require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + options.name, options.binary);
+                    require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + options.target, options.binary);
                 }
                 else
                 {
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.name);
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
                 }
                 require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
-                var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.name).mode;
+                var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
                 m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
-                require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.name, m);
+                require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
             }
             else
             {
@@ -820,10 +823,11 @@ function serviceManager()
         if (!this.isAdmin()) { throw ('Uninstalling a service, requires admin'); }
 
         if (typeof (name) == 'object') { name = name.name; }
+        var service = this.getService(name);
+        var servicePath = service.appLocation();
+
         if (process.platform == 'win32')
         {
-            var service = this.getService(name);
-            var servicePath = service.appLocation();
             if (service.status.state == undefined || service.status.state == 'STOPPED')
             {
                 try
@@ -860,7 +864,7 @@ function serviceManager()
                         this._update.waitExit();
                         try {
                             require('fs').unlinkSync('/etc/init.d/' + name);
-                            require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                            require('fs').unlinkSync(servicePath);
                             console.log(name + ' uninstalled');
                         }
                         catch (e) {
@@ -877,7 +881,7 @@ function serviceManager()
                         this._update.waitExit();
                         try {
                             require('fs').unlinkSync('/etc/init/' + name + '.conf');
-                            require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                            require('fs').unlinkSync(servicePath);
                             console.log(name + ' uninstalled');
                         }
                         catch (e) {
@@ -894,7 +898,7 @@ function serviceManager()
                     this._update.waitExit();
                     try
                     {
-                        require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                        require('fs').unlinkSync(servicePath);
                         if (require('fs').existsSync('/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + name + '.service'); }
                         if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + name + '.service'); }
                         console.log(name + ' uninstalled');
@@ -921,7 +925,7 @@ function serviceManager()
 
                 try
                 {
-                    require('fs').unlinkSync('/usr/local/mesh_services/' + name + '/' + name);
+                    require('fs').unlinkSync(servicePath);
                     require('fs').unlinkSync('/Library/LaunchDaemons/' + name + '.plist');
                 }
                 catch(e)
