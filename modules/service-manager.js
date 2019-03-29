@@ -299,6 +299,59 @@ function serviceManager()
         {
             return (require('user-sessions').isRoot());
         }
+        if (process.platform == 'darwin')
+        {
+            // cat meshagent_osx64_LaunchDaemon.plist | tr '\n' '\.' | awk '{ split($0, a, "<key>WorkingDirectory</key>"); split(a[2], b, "</string>"); split(b[1], c, "<string>"); print c[2]; }'
+            this.getService = function (name)
+            {
+                if(!require('fs').existsSync('/Library/LaunchDaemons/' + name + '.plist'))
+                {
+                    throw (' LaunchDaemon (' + name + ') NOT FOUND');
+                }
+
+                var ret = { name: name };
+                ret.label = function label()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat /Library/LaunchDaemons/" + this.name + ".plist | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim());
+                }
+                ret.getPID = function getPID()
+                {
+                    var serviceName = this.label();
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("launchctl list | grep '" + serviceName + "' | awk '{ if($3==\"" + serviceName + "\"){print $1;}}'\nexit\n");
+                    child.waitExit();                   
+                    return (parseInt(child.stdout.str.trim()));
+                };
+                ret.appWorkingDirectory = function appWorkingDirectory()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat /Library/LaunchDaemons/" + this.name + ".plist | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.waitExit();
+                    child.stdout.str = child.stdout.str.trim();
+
+                    return (child.stdout.str.endsWith('/') ? child.stdout.str.substring(0, child.stdout.str.length - 1) : child.stdout.str);
+                };
+                ret.appLocation = function appLocation()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat /Library/LaunchDaemons/" + this.name + ".plist | tr '\n' '\.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim());
+                };
+                return (ret);
+            };
+        }
         if(process.platform == 'linux')
         {
             this.getService = function (name, platform)
