@@ -306,7 +306,23 @@ function serviceManager()
                 var ret = { name: name };
                 if(!require('fs').existsSync('/Library/LaunchDaemons/' + name + '.plist'))
                 {
-                    throw (' LaunchDaemon (' + name + ') NOT FOUND');
+                    // Before we throw in the towel, let's enumerate all the plist files, and see if one has a matching label
+                    var files = require('fs').readdirSync('/Library/LaunchDaemons');
+                    for (var file in files)
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = '';
+                        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stdin.write("cat /Library/LaunchDaemons/" + files[file] + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                        child.waitExit();
+                        if(child.stdout.str.trim() == name)
+                        {
+                            ret.name = files[file].endsWith('.plist') ? files[file].substring(0, files[file].length - 6) : files[file];
+                            Object.defineProperty(ret, 'alias', { value: name });
+                            break;
+                        }
+                    }
+                    if (ret.name == name) { throw (' LaunchDaemon (' + name + ') NOT FOUND'); }
                 }
                 ret.label = function label()
                 {
@@ -317,7 +333,7 @@ function serviceManager()
                     child.waitExit();
                     return (child.stdout.str.trim());
                 }
-                Object.defineProperty(ret, 'alias', { value: ret.label() });
+                if (!ret.alias) { Object.defineProperty(ret, 'alias', { value: ret.label() }); }
                 ret.label = null;
                 ret.getPID = function getPID()
                 {
