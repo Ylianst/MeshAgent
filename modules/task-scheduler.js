@@ -139,12 +139,21 @@ function task()
                     switch(require('service-manager').manager.getServiceType())
                     {
                         case 'init':
-                        case 'upstart':
                             var child = require('child_process').execFile('/bin/sh', ['sh']);
                             child.stdout.str = '';
                             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                             child.stderr.on('data', function (chunk) { });
                             child.stdin.write("whereis service | awk '{print $2}'\n\exit\n");
+                            child.waitExit();
+                            child.stdout.str = child.stdout.str.trim();
+                            action += (child.stdout.str + ' ' + options.service + ' restart >/dev/null 2>&1 \n');
+                            break;
+                        case 'upstart':
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stderr.on('data', function (chunk) { });
+                            child.stdin.write("whereis initctl | awk '{print $2}'\n\exit\n");
                             child.waitExit();
                             child.stdout.str = child.stdout.str.trim();
                             action += (child.stdout.str + ' ' + options.service + ' restart >/dev/null 2>&1 \n');
@@ -173,6 +182,104 @@ function task()
                         ret._rej(e);
                         return (ret);
                     }
+                    ret._res();
+                    break;
+                case 'darwin':
+                    var taskname = options.name.split('/').join('_').split('.').join('');
+                    var plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                       plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
+                       plist += '<plist version="1.0">\n';
+                       plist += '  <dict>\n';
+                       plist += '      <key>Label</key>\n';
+                       plist += ('     <string>' + taskname + '</string>\n');
+                       plist += '      <key>ProgramArguments</key>\n';
+                       plist += '      <array>\n';
+                       plist += '        <string>/bin/launchctl</string>\n';
+                       plist += '        <string>start</string>\n';
+                       plist += ('       <string>' + options.service + '</string>\n');
+                       plist += '      </array>\n';
+                       plist += '      <key>RunAtLoad</key>\n';
+                       plist += '      <false/>\n';
+                       plist += '{{{INTERVAL}}}';
+                       plist += '  </dict>\n';
+                       plist += '</plist>';
+
+                    var interval = null;
+                    var periodic = '';
+
+                    for (var ftype in options)
+                    {
+                        switch (ftype.toUpperCase())
+                        {
+                            case 'MINUTE':
+                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret); }
+                                interval = '      <integer>' + (parseInt(options[ftype]) * 60) + '</integer>\n';
+                                break;
+                            case 'HOURLY':
+                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret); }
+                                interval = '      <integer>' + (parseInt(options[ftype]) * 60 * 60) + '</integer>\n';
+                                break;
+                            case 'DAILY':
+                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret);}
+                                interval = '      <integer>' + (parseInt(options[ftype]) * 24 * 60 * 60) + '</integer>\n';
+                                break;
+                            case 'WEEKLY':
+                                if (interval != null) { ret._rej('Invalid Options'); return (ret); }
+                                if (!options.DAY && !options.day)
+                                {
+                                    interval = '      <integer>' + (parseInt(options[ftype]) * 60) + '</integer>\n';
+                                }
+                                else if(parseInt(options[ftype]) != 1)
+                                {
+                                    ret._rej('Invalid Options, Only Once Weekly Supported when DAY specified');
+                                    return (ret);
+                                }
+                                break;
+                            case 'MONTHLY':
+                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret);}
+                                interval = '      <integer>' + (parseInt(options[ftype]) * 30 * 24 * 60 * 60) + '</integer>\n';
+                                break;
+                            case 'DAY':
+                                if (interval != null) { ret._rej('Invalid Options'); return (ret);}
+                                if (parseInt(options.weekly) == 1 || parseInt(options.WEEKLY) == 1)
+                                {
+                                    periodic += '         <key>Weekday</key>\n';
+                                    periodic += ('         <integer>' + options[ftype] + '</integer>\n');
+                                }
+                                else
+                                {
+                                    periodic += '         <key>Day</key>\n';
+                                    periodic += ('         <integer>' + options[ftype] + '</integer>\n');
+                                }
+                                break;
+                            case 'MONTH':
+                                if (interval != null) { ret._rej('Invalid Options'); return (ret);}
+                                periodic += '         <key>Month</key>\n';
+                                periodic += ('         <integer>' + options[ftype] + '</integer>\n');
+                                break;
+                            case 'TIME':
+                                if (interval != null) { ret._rej('Invalid Options'); return (ret);}
+                                periodic += '         <key>Hour</key>\n';
+                                periodic += ('         <integer>' + options[ftype].split(':')[0] + '</integer>\n');
+                                periodic += '         <key>Minute</key>\n';
+                                periodic += ('         <integer>' + options[ftype].split(':')[1] + '</integer>\n');
+                                break;
+                        }
+                    }
+                    if (interval)
+                    {
+                        plist = plist.replace('{{{INTERVAL}}}', '      <key>StartInterval</key>\n' + interval);
+                    }
+                    if (periodic)
+                    {
+                        plist = plist.replace('{{{INTERVAL}}}', '      <key>StartCalendarInterval</key>\n      <dict>\n' + periodic + '      </dict>\n');
+                    }
+                    require('fs').writeFileSync('/Library/LaunchDaemons/' + taskname + '.plist', plist);
+
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.on('data', function (chunk) { });
+                    child.stdin.write('launchctl load /Library/LaunchDaemons/' + taskname + '.plist\nexit\n');
+                    child.waitExit();
                     ret._res();
                     break;
                 default:
@@ -220,7 +327,33 @@ function task()
                     catch(e)
                     {
                         ret._rej(e);
+                        return (ret);
                     }
+                    ret._res();
+                }
+                else
+                {
+                    ret._rej('Task [' + name + '] does not exist');
+                }
+                break;
+            case 'darwin':
+                var taskname = name.split('/').join('_').split('.').join('');
+                if (require('fs').existsSync('/Library/LaunchDaemons/' + taskname + '.plist'))
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.on('data', function (chunk) { });
+                    child.stdin.write('launchctl unload /Library/LaunchDaemons/' + taskname + '.plist\nexit\n');
+                    child.waitExit();
+                    try
+                    {
+                        require('fs').unlinkSync('/Library/LaunchDaemons/' + taskname + '.plist');
+                    }
+                    catch (e)
+                    {
+                        ret._rej(e);
+                        return (ret);
+                    }
+                    ret._res();
                 }
                 else
                 {
