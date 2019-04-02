@@ -1004,6 +1004,44 @@ duk_ret_t ILibDuktape_globalTunnel_finalizer(duk_context *ctx)
 	ILibHashtable_Destroy(data->exceptionsTable);
 	return 0;
 }
+duk_ret_t ILibDuktape_globalTunnel_isProxying(duk_context *ctx)
+{
+	ILibDuktape_globalTunnel_data *data;
+
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_GlobalTunnel_DataPtr);
+	data = (ILibDuktape_globalTunnel_data*)Duktape_GetBuffer(ctx, -1, NULL);
+	if (data->proxyServer.sin6_family == AF_UNSPEC)
+	{
+		duk_push_false(ctx);
+	}
+	else
+	{
+		duk_push_true(ctx);
+	}
+	return(1);
+}
+duk_ret_t ILibDuktape_globalTunnel_proxyConfig(duk_context *ctx)
+{
+	ILibDuktape_globalTunnel_data *data;
+
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_GlobalTunnel_DataPtr);
+	data = (ILibDuktape_globalTunnel_data*)Duktape_GetBuffer(ctx, -1, NULL);
+	if (data->proxyServer.sin6_family == AF_UNSPEC)
+	{
+		duk_push_null(ctx);
+	}
+	else
+	{
+		duk_push_object(ctx);
+		duk_push_string(ctx, ILibRemoteLogging_ConvertAddress((struct sockaddr*)&(data->proxyServer)));
+		duk_put_prop_string(ctx, -2, "host");
+		duk_push_int(ctx, (int)ntohs(data->proxyServer.sin6_port));
+		duk_put_prop_string(ctx, -2, "port");																		
+	}
+	return(1);
+}
 ILibDuktape_globalTunnel_data* ILibDuktape_GetNewGlobalTunnelEx(duk_context *ctx, int native)
 {
 	ILibDuktape_globalTunnel_data *retVal;
@@ -1024,6 +1062,8 @@ ILibDuktape_globalTunnel_data* ILibDuktape_GetNewGlobalTunnelEx(duk_context *ctx
 	retVal->exceptionsTable = ILibHashtable_Create();
 	ILibDuktape_CreateInstanceMethod(ctx, "initialize", ILibDuktape_globalTunnel_initialize, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "end", ILibDuktape_globalTunnel_end, 0);
+	ILibDuktape_CreateEventWithGetter(ctx, "proxyConfig", ILibDuktape_globalTunnel_proxyConfig);
+	ILibDuktape_CreateEventWithGetter(ctx, "isProxying", ILibDuktape_globalTunnel_isProxying);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_globalTunnel_finalizer);
 
 	if (native != 0) { duk_pop(ctx); }									// ...
@@ -1056,6 +1096,7 @@ ILibDuktape_globalTunnel_data* ILibDuktape_GetGlobalTunnel(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, ILibDuktape_GlobalTunnel_Stash);	// [stash][tunnel]
 		duk_get_prop_string(ctx, -1, ILibDuktape_GlobalTunnel_DataPtr);	// [stash][tunnel][buffer]
 		retVal = (ILibDuktape_globalTunnel_data*)Duktape_GetBuffer(ctx, -1, NULL);
+		if (retVal->proxyServer.sin6_family == AF_UNSPEC) { retVal = NULL; }
 		duk_pop_2(ctx);													// [stash]
 	}
 	duk_pop(ctx);														// ...

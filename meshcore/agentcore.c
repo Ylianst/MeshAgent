@@ -1650,6 +1650,25 @@ void ILibDuktape_MeshAgent_ConnectedHook(ILibDuktape_EventEmitter *sender, char 
 	}
 	duk_set_top(sender->ctx, top);
 }
+
+duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
+{
+	duk_push_this(ctx);								// [agent]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	
+	duk_push_object(ctx);
+
+	util_tohex(agent->meshId, sizeof(agent->meshId), ILibScratchPad);
+	duk_push_string(ctx, ILibScratchPad); duk_put_prop_string(ctx, -2, "MeshID");
+
+	util_tohex(agent->serverHash, sizeof(agent->serverHash), ILibScratchPad);
+	duk_push_string(ctx, ILibScratchPad); duk_put_prop_string(ctx, -2, "ServerID");
+
+	duk_push_string(ctx, agent->serveruri); duk_put_prop_string(ctx, -2, "ServerUri");
+
+	return(1);
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1702,6 +1721,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Command");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "DesktopSessionChanged");
 		ILibDuktape_EventEmitter_AddHook(emitter, "Connected", ILibDuktape_MeshAgent_ConnectedHook);
+
+		ILibDuktape_CreateEventWithGetter(ctx, "ServerInfo", ILibDuktape_MeshAgent_ServerInfo);
 
 
 		ILibDuktape_CreateEventWithGetter(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected);
