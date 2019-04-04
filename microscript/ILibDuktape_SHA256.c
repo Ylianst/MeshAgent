@@ -30,6 +30,9 @@ limitations under the License.
 #define ILibDuktape_SHA256_SIGNER_CERT			"\xFF_SHA256_SIGNER_CERT"
 #define ILibDuktape_SHA256_SIGNER_CERT_ALLOC	"\xFF_SHA256_SIGNER_CERT_ALLOC"
 #define ILibDuktape_SHA256_SIGNER_SIGBUFFER		"\xFF_SHA256_SIGNER_SIG_BUFFER"
+#define ILibDuktape_VERIFIER_PTR				"\xFF_VERIFIER_PTR"
+#define ILibDuktape_VERIFIER_SIG				"\xFF_VERIFIER_SIG"
+#define ILibDuktape_VERIFIER_CERT				"\xFF_VERIFIER_CERT"
 
 typedef struct ILibDuktape_SHA256_Data
 {
@@ -66,6 +69,16 @@ typedef struct ILibDuktape_SHA1_Data
 }ILibDuktape_SHA1_Data;
 
 #ifndef MICROSTACK_NOTLS
+typedef struct ILibDuktape_Verifier_Data
+{
+	duk_context *ctx;
+	EVP_MD_CTX* mdctx;
+	ILibDuktape_WritableStream *writableStream;
+	struct util_cert *cert;
+	void *promise;
+	char *sig;
+	int sigLen;
+}ILibDuktape_Verifier_Data;
 typedef struct ILibDuktape_SHA256_Signer_Data
 {
 	duk_context *ctx;
@@ -256,15 +269,140 @@ void ILibDuktape_SHA256_SIGNER_PUSH(duk_context *ctx, void *chain)
 	data->ctx = ctx;
 	ILibDuktape_CreateInstanceMethod(ctx, "Create", ILibDuktape_SHA256_SIGNER_Create, 1);
 }
+
+ILibTransport_DoneState ILibDuktape_VERIFIER_WriteSink(ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user)
+{
+	if (!ILibMemory_CanaryOK(user)) { return(ILibTransport_DoneState_ERROR); }
+	ILibDuktape_Verifier_Data *data = (ILibDuktape_Verifier_Data*)user;
+	EVP_DigestVerifyUpdate(data->mdctx, buffer, bufferLen);
+	return(ILibTransport_DoneState_COMPLETE);
+}
+void ILibDuktape_VERIFIER_EndSink(ILibDuktape_WritableStream *stream, void *user)
+{
+	if (!ILibMemory_CanaryOK(user)) { return; }
+	ILibDuktape_Verifier_Data *data = (ILibDuktape_Verifier_Data*)user;
+
+	duk_push_heapptr(data->ctx, data->promise);															// [promise]
+
+	switch (EVP_DigestVerifyFinal(data->mdctx, (const unsigned char*)data->sig, (unsigned int)data->sigLen))
+	{
+		case 0:
+			// SigFail
+			duk_get_prop_string(data->ctx, -1, "_rej");													// [promise][rejector]
+			duk_swap_top(data->ctx, -2);																// [rejector][this]
+			duk_push_string(data->ctx, "Signature Failed");												// [rejector][this][badsig]
+			duk_call_method(data->ctx, 1);																// [...]
+			break;
+		case 1:
+			// SigSuccess
+			duk_get_prop_string(data->ctx, -1, "_res");													// [promise][resolved]
+			duk_swap_top(data->ctx, -2);																// [resolved][this]
+			duk_call_method(data->ctx, 0);																// [...]
+			break;
+		default:
+			// Error
+			duk_get_prop_string(data->ctx, -1, "_rej");													// [promise][rejector]
+			duk_swap_top(data->ctx, -2);																// [rejector][this]
+			duk_push_sprintf(data->ctx, "EVP_VerifyFinal(): Returned error (%d) ", ERR_get_error());	// [rejector][this][error]
+			duk_call_method(data->ctx, 1);																// [...]
+			break;
+	}
+	duk_pop(data->ctx);																					// 
+}
+
+duk_ret_t ILibDuktape_VERIFIER_Create(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	const EVP_MD *mdtype = (const EVP_MD*)Duktape_GetPointerProperty(ctx, -1, "mdtype");
+	char *sig;
+	duk_size_t sigLen;
+	void *promise;
+	duk_eval_string(ctx, "(function verifyInit(){var p = require('promise'); var ret = new p(function(res, rej){this._res = res; this._rej = rej;}); return(ret);})();");	// [p]
+	promise = duk_get_heapptr(ctx, -1);
+
+	duk_dup(ctx, 1); 
+	sig = (char*)duk_to_lstring(ctx, -1, &sigLen);
+	duk_put_prop_string(ctx, -2, ILibDuktape_VERIFIER_SIG);
+	ILibDuktape_Verifier_Data *data = (ILibDuktape_Verifier_Data*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_Verifier_Data));
+	duk_put_prop_string(ctx, -2, ILibDuktape_VERIFIER_PTR);
+	data->ctx = ctx;
+		
+	data->mdctx = EVP_MD_CTX_create();
+
+	data->sig = sig;
+	data->sigLen = (int)sigLen;
+	data->promise = promise;
+
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, ILibDuktape_VERIFIER_CERT);
+	data->cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_TLS_util_cert);
+	EVP_PKEY *pkey = X509_get0_pubkey(data->cert->x509);
+
+
+	EVP_DigestVerifyInit(data->mdctx, NULL, mdtype, NULL, pkey);
+	data->writableStream = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_VERIFIER_WriteSink, ILibDuktape_VERIFIER_EndSink, data);
+	return(1);
+}
 void ILibDuktape_SHA256_VERIFY_PUSH(duk_context *ctx, void *chain)
 {
-	ILibDuktape_SHA256_Signer_Data* data;
-	duk_push_object(ctx);													// [signer]
-	data = (ILibDuktape_SHA256_Signer_Data*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_SHA256_Signer_Data));
-	duk_put_prop_string(ctx, -2, ILibDuktape_SHA256_SIGNER_PTR);			// [signer]
-	data->obj = duk_get_heapptr(ctx, -1);
-	data->ctx = ctx;
-	ILibDuktape_CreateInstanceMethod(ctx, "Create", ILibDuktape_SHA256_VERIFIER_Create, 1);
+	duk_push_object(ctx);
+	ILibDuktape_CreateInstanceMethodWithPointerProperty(ctx, "mdtype", (void*)EVP_sha256(), "Create", ILibDuktape_VERIFIER_Create, DUK_VARARGS);
+}
+void ILibDuktape_SHA384_VERIFY_PUSH(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);
+	ILibDuktape_CreateInstanceMethodWithPointerProperty(ctx, "mdtype", (void*)EVP_sha384(), "Create", ILibDuktape_VERIFIER_Create, DUK_VARARGS);
+}
+void ILibDuktape_SHA512_VERIFY_PUSH(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);
+	ILibDuktape_CreateInstanceMethodWithPointerProperty(ctx, "mdtype", (void*)EVP_sha512(), "Create", ILibDuktape_VERIFIER_Create, DUK_VARARGS);
+}
+duk_ret_t ILibDuktape_RSA_Sign(duk_context *ctx)
+{
+	struct util_cert *cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 1, ILibDuktape_TLS_util_cert);
+	if (cert->pkey == NULL) return(ILibDuktape_Error(ctx, "Private Key Access Denied"));
+
+	duk_size_t bufferLen;
+	char *buffer = Duktape_GetBuffer(ctx, 2, &bufferLen);
+	RSA *r = EVP_PKEY_get1_RSA(cert->pkey);
+	int rsalen = RSA_size(r);
+	char *sig = duk_push_fixed_buffer(ctx, rsalen);
+	duk_push_buffer_object(ctx, -1, 0, rsalen, DUK_BUFOBJ_NODEJS_BUFFER);
+
+	if (RSA_sign(duk_require_int(ctx, 0), (unsigned char*)buffer, (unsigned int)bufferLen, (unsigned char*)sig, (unsigned int*)&rsalen, r) != 1)
+	{
+		// Failed
+		unsigned long err = ERR_get_error();
+		char *reason = (char*)ERR_reason_error_string(err);
+		RSA_free(r);
+		return(ILibDuktape_Error(ctx, "RSA_sign() Error: (%d, %s)", err, reason));
+	}
+	RSA_free(r);
+	return(1);
+}
+duk_ret_t ILibDuktape_RSA_Verify(duk_context *ctx)
+{
+	duk_size_t bufferLen, sigLen;
+	char *buffer = Duktape_GetBuffer(ctx, 2, &bufferLen);
+	char *sig = Duktape_GetBuffer(ctx, 3, &sigLen);
+
+	struct util_cert *cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 1, ILibDuktape_TLS_util_cert);
+	RSA *r = EVP_PKEY_get1_RSA(X509_get0_pubkey(cert->x509));
+	int vstatus = RSA_verify(duk_require_int(ctx, 0), (unsigned char*)buffer, (unsigned int)bufferLen, (unsigned char*)sig, (unsigned int)sigLen, r);
+	duk_push_boolean(ctx, vstatus == 1);
+	RSA_free(r);
+	return(1);
+}
+void ILibDuktape_RSA_PUSH(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);
+	ILibDuktape_CreateInstanceMethod(ctx, "sign", ILibDuktape_RSA_Sign, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "verify", ILibDuktape_RSA_Verify, DUK_VARARGS);
+	duk_push_object(ctx);
+	duk_push_int(ctx, NID_sha256); duk_put_prop_string(ctx, -2, "SHA256");
+	duk_push_int(ctx, NID_sha384); duk_put_prop_string(ctx, -2, "SHA384");
+	duk_push_int(ctx, NID_sha512); duk_put_prop_string(ctx, -2, "SHA512");
+	duk_put_prop_string(ctx, -2, "TYPES");
 }
 #endif
 
@@ -583,6 +721,9 @@ void ILibDuktape_SHA256_Init(duk_context * ctx)
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA256Stream_Signer", ILibDuktape_SHA256_SIGNER_PUSH);
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA256Stream_Verifier", ILibDuktape_SHA256_VERIFY_PUSH);
+	ILibDuktape_ModSearch_AddHandler(ctx, "SHA384Stream_Verifier", ILibDuktape_SHA384_VERIFY_PUSH);
+	ILibDuktape_ModSearch_AddHandler(ctx, "SHA512Stream_Verifier", ILibDuktape_SHA512_VERIFY_PUSH);
+	ILibDuktape_ModSearch_AddHandler(ctx, "RSA", ILibDuktape_RSA_PUSH);
 #endif
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA512Stream", ILibDuktape_SHA512_PUSH);
 	ILibDuktape_ModSearch_AddHandler(ctx, "SHA384Stream", ILibDuktape_SHA384_PUSH);

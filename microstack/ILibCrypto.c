@@ -522,7 +522,7 @@ int __fastcall util_from_cer(char* data, int datalen, struct util_cert* cert)
 {
 	cert->pkey = NULL;
 	cert->x509 = d2i_X509(NULL, (const unsigned char**)&data, datalen);
-	return ((cert->x509) == NULL);
+	return ((cert->x509) != NULL);
 }
 
 int __fastcall util_from_pkcs7b_string(char *data, int datalen, char *out, int outLen)

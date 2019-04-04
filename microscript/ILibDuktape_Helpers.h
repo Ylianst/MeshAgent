@@ -35,6 +35,7 @@ typedef void(*ILibDuktape_HelperEvent)(duk_context *ctx, void *user);
 
 #define ILibDuktape_CR2HTTP									"\xFF_CR2HTTP"
 #define ILibDuktape_CR2Options								"\xFF_CR2Options"
+#define ILibDuktape_TLS_util_cert							"\xFF_TLS_util_cert"
 
 typedef enum ILibDuktape_LogTypes
 {
@@ -98,6 +99,7 @@ void ILibDuktape_CreateEventWithGetterAndSetterWithMetaData(duk_context *ctx, ch
 #define ILibDuktape_CreateInstanceMethodWithBooleanProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_c_function(context, funcImpl, numArgs);duk_push_boolean(context, propValue);duk_put_prop_string(ctx, -2, propName);duk_put_prop_string(ctx, -2, methodName);
 #define ILibDuktape_CreateInstanceMethodWithIntProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_c_function(context, funcImpl, numArgs);duk_push_int(context, propValue);duk_put_prop_string(ctx, -2, propName);duk_put_prop_string(ctx, -2, methodName);
 #define ILibDuktape_CreateInstanceMethodWithNumberProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_c_function(context, funcImpl, numArgs);duk_push_number(context, (propValue));duk_put_prop_string(ctx, -2, propName);duk_put_prop_string(ctx, -2, methodName);
+#define ILibDuktape_CreateInstanceMethodWithPointerProperty(context, propName, propValue, methodName, funcImpl, numArgs) duk_push_pointer(context, propValue);ILibDuktape_CreateInstanceMethodWithPropertyEx(context, propName, -1, methodName, funcImpl, numArgs);
 void ILibDuktape_CreateInstanceMethodWithProperties(duk_context *ctx, char *funcName, duk_c_function funcImpl, duk_idx_t numArgs, unsigned int propertyCount, ...);
 duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val);
 
