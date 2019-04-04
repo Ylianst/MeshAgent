@@ -24,7 +24,7 @@ int  __fastcall wincrypto_getregistry(LPCWSTR name, char** value);
 int  __fastcall wincrypto_getregistryA(char* name, char** value);
 int  __fastcall wincrypto_isopen();
 void __fastcall wincrypto_close();
-int  __fastcall wincrypto_open(int newcert);
+int  __fastcall wincrypto_open(int newcert, char *rootSubject);
 void __fastcall wincrypto_random(int length, char* result);
 int  __fastcall wincrypto_md5(char* data, int datalen, char* result);
 int  __fastcall wincrypto_sha256(char* data, int datalen, char* result);
@@ -32,6 +32,6 @@ int  __fastcall wincrypto_sha384(char* data, int datalen, char* result);
 int  __fastcall wincrypto_sign(char* data, int len, char** signature);
 int  __fastcall wincrypto_decrypt(char* encdata, int encdatalen, char** data);
 int  __fastcall wincrypto_getcert(char** data);
-int  __fastcall wincrypto_mkCert(wchar_t* subject, int certtype, wchar_t* password, char** data); // certtype: 1=Root, 2=Server, 3=Client
+int  __fastcall wincrypto_mkCert(char* rootSubject, wchar_t* subject, int certtype, wchar_t* password, char** data); // certtype: 1=Root, 2=Server, 3=Client
 
 #endif

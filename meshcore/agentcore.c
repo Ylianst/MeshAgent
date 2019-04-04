@@ -67,6 +67,7 @@ limitations under the License.
 #include <mach-o/dyld.h>
 #endif
 
+
 #define HEX_IDENTIFIER (unsigned short)12408
 #define EXE_IDENTIFIER (unsigned int)778401893
 #define MSH_IDENTIFIER (unsigned int)778924904
@@ -1851,7 +1852,8 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 	if (certfile == NULL)
 	{
 #if defined(WIN32)
-		if (wincrypto_open(TRUE) == 0) // Force certificate re-generation
+		char *rootSubject = (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "CN=MeshNodeDiagnosticCertificate" : "CN=MeshNodeCertificate";
+		if (wincrypto_open(TRUE, rootSubject) == 0) // Force certificate re-generation
 		{
 			int l;
 			do {
@@ -1861,14 +1863,14 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 				{
 					util_from_cer(str, l, &(agent->selfcert));
 					util_keyhash(agent->selfcert, agent->g_selfid);
-					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_close(); wincrypto_open(1); }
+					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_close(); wincrypto_open(1, rootSubject); }
 				}
 			} while (l != 0 && ((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
 
 			if (l > 0)
 			{
 				// Generate a new TLS certificate & save it.
-				l = wincrypto_mkCert(L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
+				l = wincrypto_mkCert(rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
 				util_from_p12(str, l, "hidden", &(agent->selftlscert));
 				ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
 				util_free(str);
@@ -1958,9 +1960,11 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 	if (len == 0 || util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selfcert)) == 0)
 	{
 #if defined(WIN32)
+		char *rootSubject = (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "CN=MeshNodeDiagnosticCertificate" : "CN=MeshNodeCertificate";
+
 		// No cert in this .db file. Try to load or generate a root certificate from a Windows crypto provider. This can be TPM backed which is great.
 		// However, if we don't have the second cert created, we need to regen the root...
-		if (wincrypto_open(FALSE) == 0 && ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", NULL, 0) != 0)
+		if (wincrypto_open(FALSE, rootSubject) == 0 && ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", NULL, 0) != 0)
 		{
 			char* str = NULL;
 			int l;
@@ -1972,7 +1976,7 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 				{
 					util_from_cer(str, l, &(agent->selfcert));
 					util_keyhash(agent->selfcert, agent->g_selfid);
-					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_open(TRUE); } // Force generation of a new certificate.
+					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_open(TRUE, rootSubject); } // Force generation of a new certificate.
 				}
 			} while (l != 0 && ((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
 
@@ -1985,7 +1989,7 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 				if (len == 0) {
 					// Generate a new TLS certificate & save it.
 					util_freecert(&(agent->selftlscert));
-					l = wincrypto_mkCert(L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
+					l = wincrypto_mkCert(rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
 					if (l > 0) {
 						util_from_p12(str, l, "hidden", &(agent->selftlscert));
 						ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
@@ -2419,7 +2423,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					// Create a PKCS7 signature using Windows crypto & send it
 					char* signature = NULL;
 					signLen = wincrypto_sign((unsigned char*)ILibScratchPad, sizeof(AuthRequest->serverHash) + UTIL_SHA384_HASHSIZE + UTIL_SHA384_HASHSIZE, &signature);
-					if (signLen > 0) {
+					if (signLen > 0) 
+					{
 						// Signature succesful, send the result to the server
 						memcpy_s((unsigned char*)(rav->data + certLen), sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) - certLen, signature, signLen);
 						ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rav, sizeof(MeshCommand_BinaryPacket_AuthVerify_Header) + certLen + signLen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
@@ -3619,7 +3624,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	int ri;
 	for (ri = 0; ri < paramLen; ++ri) 
 	{
-		if (strcmp(param[ri], "-recovery") == 0) { agentHost->capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY; parseCommands = 0; }
+		if (strcmp(param[ri], "-recovery") == 0) 
+		{ 
+			agentHost->capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY; parseCommands = 0; 
+		}
 	}
 
 
@@ -3745,8 +3753,18 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			char* str = NULL;
 			int len = (int)util_readfile(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".proxy"), &str, 1024);
-			if (str != NULL) { ILibSimpleDataStore_PutEx(agentHost->masterDb, "WebProxy", 8, str, len); free(str); }
-			else { ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "WebProxy", 8); }
+			if (str != NULL) 
+			{ 
+				if (len > 0)
+				{
+					ILibSimpleDataStore_PutEx(agentHost->masterDb, "WebProxy", 8, str, len);
+				}
+				else
+				{
+					ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "WebProxy", 8);
+				}
+				free(str);
+			}
 		}
 	}
 

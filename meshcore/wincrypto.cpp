@@ -32,8 +32,6 @@ HCRYPTPROV wincrypto_hProv = NULL;
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
 #define STATUS_UNSUCCESSFUL ((NTSTATUS)0xC0000001L)
 LPWSTR wincrypto_CngProviders[3] = { L"Microsoft Platform Crypto Provider", MS_KEY_STORAGE_PROVIDER, NULL };
-LPWSTR wincrypto_containername = L"MeshAgentContainer";
-LPCTSTR wincrypto_subject = "CN=MeshNodeCertificate";
 HANDLE wincrypto_hCertStore = NULL;
 PCCERT_CONTEXT wincrypto_certCtx = NULL;
 #define MY_ENCODING_TYPE (PKCS_7_ASN_ENCODING | X509_ASN_ENCODING)
@@ -134,7 +132,7 @@ void __fastcall wincrypto_close()
 	if (wincrypto_hCertStore != NULL) { CertCloseStore(wincrypto_hCertStore, 0); wincrypto_hCertStore = NULL; }
 }
 
-int __fastcall wincrypto_open(int newcert)
+int __fastcall wincrypto_open(int newcert, char *rootSubject)
 {
 	DWORD KeyLength = 3072;
 	NCRYPT_KEY_HANDLE hKeyNode = NULL;
@@ -166,6 +164,15 @@ int __fastcall wincrypto_open(int newcert)
 	CRYPT_BIT_BLOB keyusage2;
 	DWORD pkSize = 0;
 	
+	char wkeycontainer[255]; // MAX Length of X509 distinguished name is 64 characters, so this should be OK
+	char akeycontainer[255]; // MAX Length of X509 distinguished name is 64 characters, so this should be OK
+	int akeyLen;
+	size_t wkeyLen;
+	if (rootSubject == NULL || strnlen_s(rootSubject, 255) > 64) { return(1); } // X509 distinguished name must be specifified and limited to 64 characters.
+
+	akeyLen = sprintf_s(akeycontainer, sizeof(akeycontainer), "%s_privatekey", rootSubject);
+	if (mbstowcs_s(&wkeyLen, (wchar_t*)wkeycontainer, sizeof(wkeycontainer) / 2, (char*)akeycontainer, 64) != 0) { return(1); } // Error creating privatekey container name
+
 	ZeroMemory(&exts, sizeof(exts));
 	wincrypto_close();
 
@@ -179,9 +186,9 @@ int __fastcall wincrypto_open(int newcert)
 	if (wincrypto_hProv == NULL) goto error;
 	
 	// Create cert subject string in format csp understands
-	if (!CertStrToName(X509_ASN_ENCODING, wincrypto_subject, CERT_X500_NAME_STR, NULL, NULL, &subjectEncodedSize, NULL)) goto error;
+	if (!CertStrToName(X509_ASN_ENCODING, (LPCTSTR)rootSubject, CERT_X500_NAME_STR, NULL, NULL, &subjectEncodedSize, NULL)) goto error;
 	if ((subjectEncoded = (PBYTE)malloc(subjectEncodedSize)) == NULL) ILIBCRITICALEXIT(254);
-	if (!CertStrToName(X509_ASN_ENCODING, wincrypto_subject, CERT_X500_NAME_STR, NULL, subjectEncoded, &subjectEncodedSize, NULL)) goto error;
+	if (!CertStrToName(X509_ASN_ENCODING, (LPCTSTR)rootSubject, CERT_X500_NAME_STR, NULL, subjectEncoded, &subjectEncodedSize, NULL)) goto error;
 	sib.cbData = subjectEncodedSize;
 	sib.pbData = subjectEncoded;
 	 
@@ -210,9 +217,9 @@ int __fastcall wincrypto_open(int newcert)
 
 	// Generate node RSA key-pair
 #ifdef _CONSOLE
-    if (FAILED(status = NCryptCreatePersistedKey(wincrypto_hProv, &hKeyNode, BCRYPT_RSA_ALGORITHM, wincrypto_containername, 0, NCRYPT_OVERWRITE_KEY_FLAG))) goto error;
+    if (FAILED(status = NCryptCreatePersistedKey(wincrypto_hProv, &hKeyNode, BCRYPT_RSA_ALGORITHM, (LPCWSTR)wkeycontainer, 0, NCRYPT_OVERWRITE_KEY_FLAG))) goto error;
 #else
-    if (FAILED(status = NCryptCreatePersistedKey(wincrypto_hProv, &hKeyNode, BCRYPT_RSA_ALGORITHM, wincrypto_containername, 0, NCRYPT_MACHINE_KEY_FLAG | NCRYPT_OVERWRITE_KEY_FLAG))) goto error;
+    if (FAILED(status = NCryptCreatePersistedKey(wincrypto_hProv, &hKeyNode, BCRYPT_RSA_ALGORITHM, (LPCWSTR)wkeycontainer, 0, NCRYPT_MACHINE_KEY_FLAG | NCRYPT_OVERWRITE_KEY_FLAG))) goto error;
 #endif
 	if (FAILED(status = NCryptSetProperty(hKeyNode, NCRYPT_LENGTH_PROPERTY, (PBYTE)&KeyLength, 4, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG))) {
 		KeyLength = 2048; // If 3072 is not supported, go down to 2048.
@@ -222,7 +229,7 @@ int __fastcall wincrypto_open(int newcert)
 
 	// Create self signed cert 
 	ZeroMemory(&kpi, sizeof(kpi));
-	kpi.pwszContainerName = wincrypto_containername;
+	kpi.pwszContainerName = (LPWSTR)wkeycontainer;
 	kpi.pwszProvName = providerName;
 	kpi.dwProvType = 0;
 	kpi.dwFlags = 0;
@@ -480,7 +487,7 @@ int __fastcall wincrypto_getcert(char** data)
 }
 
 // Create an X509, RSA 3027bit certificate with the MeshAgent certificate as signing root.
-int __fastcall wincrypto_mkCert(wchar_t* subject, int certtype, wchar_t* password, char** data)
+int __fastcall wincrypto_mkCert(char* rootSubject, wchar_t* subject, int certtype, wchar_t* password, char** data)
 {
 	NCRYPT_KEY_HANDLE hKeyNode = NULL;
 	DWORD hKeyNodeSpec = 0;
@@ -553,9 +560,9 @@ int __fastcall wincrypto_mkCert(wchar_t* subject, int certtype, wchar_t* passwor
 	if (!CryptExportPublicKeyInfo(hNewKey, AT_KEYEXCHANGE, X509_ASN_ENCODING, pkInfo, &pkSize)) goto end;
 
 	// Create cert issuer string in format the CSP understands
-	if (!CertStrToName(X509_ASN_ENCODING, wincrypto_subject, CERT_X500_NAME_STR, NULL, NULL, &subject1EncodedSize, NULL)) goto end;
+	if (!CertStrToName(X509_ASN_ENCODING, (LPCTSTR)rootSubject, CERT_X500_NAME_STR, NULL, NULL, &subject1EncodedSize, NULL)) goto end;
 	if ((subject1Encoded = (PBYTE)malloc(subject1EncodedSize)) == NULL) ILIBCRITICALEXIT(254);
-	if (!CertStrToName(X509_ASN_ENCODING, wincrypto_subject, CERT_X500_NAME_STR, NULL, subject1Encoded, &subject1EncodedSize, NULL)) goto end;
+	if (!CertStrToName(X509_ASN_ENCODING, (LPCTSTR)rootSubject, CERT_X500_NAME_STR, NULL, subject1Encoded, &subject1EncodedSize, NULL)) goto end;
 	sib1.cbData = subject1EncodedSize;
 	sib1.pbData = subject1Encoded;
 
