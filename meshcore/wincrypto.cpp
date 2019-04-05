@@ -125,14 +125,21 @@ int __fastcall wincrypto_isopen()
 	return (wincrypto_hProv != NULL && wincrypto_hCertStore != NULL && wincrypto_certCtx != NULL);
 }
 
-void __fastcall wincrypto_close()
+void __fastcall wincrypto_close_ex(PCCERT_CONTEXT certCtx)
 {
-	if (wincrypto_certCtx != NULL) { CertFreeCertificateContext(wincrypto_certCtx); wincrypto_certCtx = NULL; }
-	if (wincrypto_hProv != NULL) { NCryptFreeObject(wincrypto_hProv); wincrypto_hProv = NULL; }
-	if (wincrypto_hCertStore != NULL) { CertCloseStore(wincrypto_hCertStore, 0); wincrypto_hCertStore = NULL; }
+	if (certCtx != NULL)
+	{
+		CertFreeCertificateContext(certCtx);
+	}
+	else
+	{
+		if (wincrypto_certCtx != NULL) { CertFreeCertificateContext(wincrypto_certCtx); wincrypto_certCtx = NULL; }
+		if (wincrypto_hProv != NULL) { NCryptFreeObject(wincrypto_hProv); wincrypto_hProv = NULL; }
+		if (wincrypto_hCertStore != NULL) { CertCloseStore(wincrypto_hCertStore, 0); wincrypto_hCertStore = NULL; }
+	}
 }
 
-int __fastcall wincrypto_open(int newcert, char *rootSubject)
+int __fastcall wincrypto_open_ex(int newcert, char *rootSubject, PCCERT_CONTEXT *certCtx)
 {
 	DWORD KeyLength = 3072;
 	NCRYPT_KEY_HANDLE hKeyNode = NULL;
@@ -172,9 +179,10 @@ int __fastcall wincrypto_open(int newcert, char *rootSubject)
 
 	akeyLen = sprintf_s(akeycontainer, sizeof(akeycontainer), "%s_privatekey", rootSubject);
 	if (mbstowcs_s(&wkeyLen, (wchar_t*)wkeycontainer, sizeof(wkeycontainer) / 2, (char*)akeycontainer, 64) != 0) { return(1); } // Error creating privatekey container name
+	if (certCtx == NULL) { certCtx = &wincrypto_certCtx; }
 
 	ZeroMemory(&exts, sizeof(exts));
-	wincrypto_close();
+	wincrypto_close_ex(*certCtx);
 
 	// Open the best CNG possible
 	while (providerName == NULL && wincrypto_CngProviders[r] != NULL) {
@@ -299,7 +307,7 @@ int __fastcall wincrypto_open(int newcert, char *rootSubject)
 error:
 	// Clean up
 	if (hKeyNode != NULL) NCryptFreeObject(hKeyNode);
-	wincrypto_close();
+	wincrypto_close_ex(*certCtx);
 	return 1;
 
 end:
@@ -479,11 +487,19 @@ end:
 }
 
 // Get the X509 certificate including the public key (Direct reference, no need to free this).
-int __fastcall wincrypto_getcert(char** data)
+int __fastcall wincrypto_getcert_ex(char** data, PCCERT_CONTEXT certCtx)
 {
-	if (wincrypto_certCtx == NULL) { *data = NULL; return 0; }
-	*data = (char*)wincrypto_certCtx->pbCertEncoded;
-	return (int)wincrypto_certCtx->cbCertEncoded;
+	if (certCtx != NULL)
+	{
+		*data = (char*)certCtx->pbCertEncoded;
+		return (int)certCtx->cbCertEncoded;
+	}
+	else
+	{
+		if (wincrypto_certCtx == NULL) { *data = NULL; return 0; }
+		*data = (char*)wincrypto_certCtx->pbCertEncoded;
+		return (int)wincrypto_certCtx->cbCertEncoded;
+	}
 }
 
 // Create an X509, RSA 3027bit certificate with the MeshAgent certificate as signing root.

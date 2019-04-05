@@ -1670,6 +1670,92 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx)
+{
+	char *rootSubject = (char*)duk_require_string(ctx, 0);
+	char tmp[UTIL_SHA384_HASHSIZE];
+	struct util_cert tmpCert;
+
+	duk_push_this(ctx);							
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	duk_push_object(ctx);
+
+#ifdef WIN32
+	PCCERT_CONTEXT certCtx = NULL;
+	char *certCtx_data = NULL;
+	if (wincrypto_open_ex(TRUE, rootSubject, &certCtx) == 0) // Force certificate re-generation
+	{
+		int l;
+		do {
+			// Finish off work with our own certificate
+			l = wincrypto_getcert_ex(&certCtx_data, certCtx);
+			if (l > 0)
+			{
+				util_from_cer(certCtx_data, l, &tmpCert);
+				util_keyhash(tmpCert, tmp);
+				if (((int*)tmp)[0] == 0) { wincrypto_close_ex(certCtx); wincrypto_open_ex(1, rootSubject, &certCtx); }
+			}
+		} while (l != 0 && ((int*)tmp)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
+
+		if (l > 0)
+		{
+			// Save the root cert in CER format
+			duk_push_object(ctx);												// [object][root]
+			char *rootBuffer = duk_push_fixed_buffer(ctx, l);					// [object][root][buffer]
+			duk_push_buffer_object(ctx, -1, 0, l, DUK_BUFOBJ_NODEJS_BUFFER);	// [object][root][buffer][nodeBuffer]
+			duk_put_prop_string(ctx, -3, "der");								// [object][root][buffer]
+			duk_pop(ctx);														// [object][root]
+			duk_put_prop_string(ctx, -2, "root");								// [object]
+			memcpy_s(rootBuffer, l, certCtx_data, l);
+
+			// Generate a new TLS certificate & save it.
+			l = wincrypto_mkCert(rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &certCtx_data);
+
+			duk_push_object(ctx);												// [object][tls]
+			char *buffer = duk_push_fixed_buffer(ctx, l);						// [object][tls][buffer]
+			duk_push_buffer_object(ctx, -1, 0, l, DUK_BUFOBJ_NODEJS_BUFFER);	// [object][tls][buffer][nodeBuffer]
+			duk_put_prop_string(ctx, -3, "pfx");								// [object][tls][buffer]
+			duk_pop(ctx);														// [object][tls]
+			duk_push_string(ctx, "hidden"); duk_put_prop_string(ctx, -2, "passphrase");
+			duk_put_prop_string(ctx, -2, "tls");								// [object]
+			memcpy_s(buffer, l, certCtx_data, l);
+			util_free(certCtx_data);
+			return(1);
+		}
+
+		// wincrypto error
+		return(ILibDuktape_Error(ctx, "Error Generating Certificates using WinCrypto"));
+	}
+	else 
+	{
+#endif
+		// Generate a new self-signed root certificate for this node using OpenSSL
+		do
+		{
+			if (util_mkCert(NULL, &(tmpCert), 3072, 10000, "MeshNodeCertificate", CERTIFICATE_ROOT, NULL) == 0)
+			{
+				return(ILibDuktape_Error(ctx, "Error Generating Certificates using OpenSSL"));
+			}
+			util_keyhash(tmpCert, tmp);
+		} while (((int*)tmp)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
+		
+		duk_push_object(ctx);													// [object][root]
+		char *pfx = NULL;
+		int pfxLen = util_to_p12(tmpCert, "hidden", &pfx);
+		char *jspfx = duk_push_fixed_buffer(ctx, pfxLen);						// [object][root][buffer]
+		duk_push_buffer_object(ctx, -1, 0, pfxLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [object][root][buffer][nodeBuffer]
+		duk_put_prop_string(ctx, -3, "pfx");									// [object][root][buffer]
+		duk_pop(ctx);															// [object][root]
+		duk_push_string(ctx, "hidden"); duk_put_prop_string(ctx, -2, "passphrase");
+		duk_put_prop_string(ctx, -2, "root");									// [object]
+
+		memcpy_s(jspfx, pfxLen, pfx, pfxLen);
+		util_free(pfx);
+		util_freecert(&tmpCert);
+		return(1);
+	}
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1715,6 +1801,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		// Always use the root cert for agent authentication
 		duk_push_pointer(ctx, &agent->selfcert);
 		duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_NonLeaf);
+		ILibDuktape_CreateInstanceMethod(ctx, "GenerateAgentCertificate", ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent, 1);
 #endif
 
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Ready");
