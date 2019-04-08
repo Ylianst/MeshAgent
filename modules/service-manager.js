@@ -100,6 +100,7 @@ function serviceManager()
         this.proxy.CreateMethod('EnumServicesStatusExA');
         this.proxy.CreateMethod('OpenServiceA');
         this.proxy.CreateMethod('QueryServiceStatusEx');
+        this.proxy.CreateMethod('QueryServiceConfigA');
         this.proxy.CreateMethod('QueryServiceConfig2A');
         this.proxy.CreateMethod('ControlService');
         this.proxy.CreateMethod('StartServiceA');
@@ -252,6 +253,19 @@ function serviceManager()
                             throw ('cannot call ' + this.name + '.start(), when current state is: ' + this.status.state);
                         }
                     }
+
+                    var query_service_configa_DWORD = this.GM.CreateVariable(4);
+                    this.proxy.QueryServiceConfigA(h, 0, 0, query_service_configa_DWORD);
+                    if (query_service_configa_DWORD.toBuffer().readUInt32LE() > 0)
+                    {
+                        var query_service_configa = this.GM.CreateVariable(query_service_configa_DWORD.toBuffer().readUInt32LE());
+                        if(this.proxy.QueryServiceConfigA(h, query_service_configa, query_service_configa._size, query_service_configa_DWORD).Val != 0)
+                        {
+                            var val = query_service_configa.Deref(this.GM.PointerSize == 4 ? 28 : 48, this.GM.PointerSize).Deref().String;
+                            Object.defineProperty(retVal, 'user', { value: val });
+                        }
+                    }
+
 
                     var failureactions = this.GM.CreateVariable(8192);
                     var bneeded = this.GM.CreateVariable(4);        
