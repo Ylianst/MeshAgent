@@ -31,12 +31,21 @@ function _meshNodeId()
             }
             break;
         case 'win32':
+            // First Check if the db Contains the NodeID
             try
             {
-                var reg = require('win-registry');
-                ret = Buffer.from(reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\MeshAgent2', 'NodeId').toString(), 'base64').toString('hex');
+                var db = require('SimpleDataStore').Create(process.execPath.replace('.exe', '.db'), { readOnly: true });
+                var v = db.GetBuffer('NodeID');
+                if(v!=null)
+                {
+                    ret = v.toString('hex');
+                }
+                else
+                {
+                    ret = require('tls').loadCertificate({ pfx: db.GetBuffer('SelfNodeCert'), passphrase: 'hidden' }).getKeyHash().toString('hex');
+                }
             }
-            catch(e)
+            catch (e)
             {
             }
             break;

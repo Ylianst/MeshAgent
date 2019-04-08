@@ -3883,30 +3883,34 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 #ifdef WIN32
 	// If running as a Windows service, set basic values to the registry, this allows other applications to know what the mesh agent is doing.
-	if((agentHost->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == 0)
-	{
-		HKEY hKey;
+	HKEY hKey;
 
 #if defined(_WINSERVICE)
-		// If running as a Windows Service, save the key in LOCAL_MACHINE
-		if (RegCreateKey(agentHost->runningAsConsole == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
+	// If running as a Windows Service, save the key in LOCAL_MACHINE
+	if (RegCreateKey(agentHost->runningAsConsole == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
 #else
-		// If running in Console mode, save the key in CURRENT_USER
-		if (RegCreateKey(HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
+	// If running in Console mode, save the key in CURRENT_USER
+	if (RegCreateKey(HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
 #endif
-		{
-			int i, len;
-			char* tmp = NULL;
+	{
+		int i, len;
+		char* tmp = NULL;
 
+
+
+		if ((agentHost->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == 0)
+		{
 			// Save the NodeId
 			len = ILibBase64Encode(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, &tmp);
-			if ((len > 0) && (tmp != NULL)) {
+			if ((len > 0) && (tmp != NULL)) 
+			{
 				for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
 				RegSetValueExA(hKey, "NodeId", 0, REG_SZ, tmp, len);
 				free(tmp);
 				tmp = NULL;
 			}
 			else { RegDeleteKeyA(hKey, "NodeId"); }
+		
 
 			// Save the AgentHash
 			util_tohex(agentHost->agentHash, UTIL_SHA384_HASHSIZE, ILibScratchPad);
@@ -3932,11 +3936,32 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "MeshServer", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "MeshServerUrl"); } else { RegSetValueExA(hKey, "MeshServerUrl", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the mesh server URL
 			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "MeshServerId"); } else { RegSetValueExA(hKey, "MeshServerId", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the mesh server id
 			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "WebProxy", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Proxy"); }  else { RegSetValueExA(hKey, "Proxy", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the proxy
-			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "Tag", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Tag"); } else { RegSetValueExA(hKey, "Tag", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the tag
-
-			// Close the registry key
-			RegCloseKey(hKey);
+			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "Tag", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Tag"); } else { RegSetValueExA(hKey, "Tag", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the tag	
 		}
+		else
+		{
+			// We're a Diagnostic Agent, so we only save a subset
+			// Save the NodeId
+			len = ILibBase64Encode(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, &tmp);
+			if ((len > 0) && (tmp != NULL))
+			{
+				for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
+				RegSetValueExA(hKey, "DiagnosticAgentNodeId", 0, REG_SZ, tmp, len);
+				free(tmp);
+				tmp = NULL;
+			}
+			else { RegDeleteKeyA(hKey, "DiagnosticAgentNodeId"); }
+		}
+
+		int NodeIDLen = 0;
+		if ((NodeIDLen = ILibSimpleDataStore_Get(agentHost->masterDb, "NodeID", ILibScratchPad, (int)sizeof(ILibScratchPad))) == 0 || !(NodeIDLen == (int)sizeof(agentHost->g_selfid) && memcmp(agentHost->g_selfid, ILibScratchPad, NodeIDLen)==0))
+		{
+			// NodeID isn't saved to db, so let's put it there
+			ILibSimpleDataStore_PutEx(agentHost->masterDb, "NodeID", 6, agentHost->g_selfid, (int)sizeof(agentHost->g_selfid));
+		}
+
+		// Close the registry key
+		RegCloseKey(hKey);
 	}
 #endif
 
