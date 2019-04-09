@@ -1683,7 +1683,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 #ifdef WIN32
 	PCCERT_CONTEXT certCtx = NULL;
 	char *certCtx_data = NULL;
-	if (wincrypto_open_ex(TRUE, rootSubject, &certCtx) == 0) // Force certificate re-generation
+	if (agent->noCertStore == 0 && wincrypto_open_ex(TRUE, rootSubject, &certCtx) == 0) // Force certificate re-generation
 	{
 		int l;
 		do {
