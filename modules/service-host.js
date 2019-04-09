@@ -316,3 +316,7 @@ function serviceHost(serviceName)
 }
 
 module.exports = serviceHost;
+module.exports.create = function create(options)
+{
+    return (new serviceHost(options));
+};

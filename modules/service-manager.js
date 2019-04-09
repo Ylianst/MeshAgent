@@ -731,8 +731,16 @@ function serviceManager()
             {
                 for(var i in options.files)
                 {
-                    console.log('copying ' + extractFileSource(options.files[i]));
-                    require('fs').copyFileSync(extractFileSource(options.files[i]), folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
+                    if (options.files[i]._buffer)
+                    {
+                        console.log('writing ' + extractFileName(options.files[i]));
+                        require('fs').writeFileSync(folder + '\\' + options.name + '\\' + extractFileName(options.files[i]), options.files[i]._buffer);
+                    }
+                    else
+                    {
+                        console.log('copying ' + extractFileSource(options.files[i]));
+                        require('fs').copyFileSync(extractFileSource(options.files[i]), folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
+                    }
                 }
             }
             if (options.parameters)
@@ -957,10 +965,20 @@ function serviceManager()
             }
         }
 
-        if (options.files) {
-            for (var i in options.files) {
-                console.log('copying ' + extractFileSource(options.files[i]));
-                require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
+        if (options.files)
+        {
+            for (var i in options.files)
+            {
+                if (options.files[i]._buffer)
+                {
+                    console.log('writing ' + extractFileName(options.files[i]));
+                    require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]), options.files[i]._buffer);
+                }
+                else
+                {
+                    console.log('copying ' + extractFileSource(options.files[i]));
+                    require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
+                }
             }
         }
     }
