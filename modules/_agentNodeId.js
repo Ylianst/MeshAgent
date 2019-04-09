@@ -35,14 +35,21 @@ function _meshNodeId()
             try
             {
                 var db = require('SimpleDataStore').Create(process.execPath.replace('.exe', '.db'), { readOnly: true });
-                var v = db.GetBuffer('NodeID');
-                if(v!=null)
+                var v = db.GetBuffer('SelfNodeCert');
+                if (v)
+                {
+                    try
+                    {
+                        ret = require('tls').loadCertificate({ pfx: v, passphrase: 'hidden' }).getKeyHash().toString('hex');
+                    }
+                    catch(e)
+                    {
+                        v = null;
+                    }
+                }
+                if (v == null && (v = db.GetBuffer('NodeID')) != NULL)
                 {
                     ret = v.toString('hex');
-                }
-                else
-                {
-                    ret = require('tls').loadCertificate({ pfx: db.GetBuffer('SelfNodeCert'), passphrase: 'hidden' }).getKeyHash().toString('hex');
                 }
             }
             catch (e)

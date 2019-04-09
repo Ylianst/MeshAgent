@@ -180,6 +180,9 @@ typedef struct MeshAgentHostContainer
 	char agentHash[UTIL_SHA384_HASHSIZE];
 	char serverHash[UTIL_SHA384_HASHSIZE];
 #ifndef MICROSTACK_NOTLS
+#ifdef WIN32
+	int noCertStore;
+#endif
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
 	char serverWebHash[UTIL_SHA384_HASHSIZE];
