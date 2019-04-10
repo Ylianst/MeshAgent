@@ -1681,19 +1681,19 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 	duk_push_object(ctx);
 
 #ifdef WIN32
-	PCCERT_CONTEXT certCtx = NULL;
-	char *certCtx_data = NULL;
-	if (agent->noCertStore == 0 && wincrypto_open_ex(TRUE, rootSubject, &certCtx) == 0) // Force certificate re-generation
+	wincrypto_object j = NULL;
+	char *cert_der = NULL, *cert_pfx = NULL;
+	if (agent->noCertStore == 0 && (j=wincrypto_open(TRUE, rootSubject)) != NULL) // Force certificate re-generation
 	{
 		int l;
 		do {
 			// Finish off work with our own certificate
-			l = wincrypto_getcert_ex(&certCtx_data, certCtx);
+			l = wincrypto_getcert(&cert_der, j);
 			if (l > 0)
 			{
-				util_from_cer(certCtx_data, l, &tmpCert);
+				util_from_cer(cert_der, l, &tmpCert);
 				util_keyhash(tmpCert, tmp);
-				if (((int*)tmp)[0] == 0) { wincrypto_close_ex(certCtx); wincrypto_open_ex(1, rootSubject, &certCtx); }
+				if (((int*)tmp)[0] == 0) { wincrypto_close(j); j=wincrypto_open(1, rootSubject); }
 			}
 		} while (l != 0 && ((int*)tmp)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
 
@@ -1706,10 +1706,10 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 			duk_put_prop_string(ctx, -3, "der");								// [object][root][buffer]
 			duk_pop(ctx);														// [object][root]
 			duk_put_prop_string(ctx, -2, "root");								// [object]
-			memcpy_s(rootBuffer, l, certCtx_data, l);
+			memcpy_s(rootBuffer, l, cert_der, l);
 
 			// Generate a new TLS certificate & save it.
-			l = wincrypto_mkCert(rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &certCtx_data);
+			l = wincrypto_mkCert(j, rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &cert_pfx);
 
 			duk_push_object(ctx);												// [object][tls]
 			char *buffer = duk_push_fixed_buffer(ctx, l);						// [object][tls][buffer]
@@ -1718,8 +1718,9 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 			duk_pop(ctx);														// [object][tls]
 			duk_push_string(ctx, "hidden"); duk_put_prop_string(ctx, -2, "passphrase");
 			duk_put_prop_string(ctx, -2, "tls");								// [object]
-			memcpy_s(buffer, l, certCtx_data, l);
-			util_free(certCtx_data);
+			memcpy_s(buffer, l, cert_pfx, l);
+			util_free(cert_pfx);
+			wincrypto_close(j);
 			return(1);
 		}
 
@@ -1945,24 +1946,26 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 	{
 #if defined(WIN32)
 		char *rootSubject = (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "CN=MeshNodeDiagnosticCertificate" : "CN=MeshNodeCertificate";
-		if (agent->noCertStore == 0 && wincrypto_open(TRUE, rootSubject) == 0) // Force certificate re-generation
+		
+		if (agent->noCertStore == 0 && (agent->certObject = wincrypto_open(TRUE, rootSubject)) != NULL) // Force certificate re-generation
 		{
 			int l;
-			do {
+			do 
+			{
 				// Finish off work with our own certificate
-				l = wincrypto_getcert(&str);
+				l = wincrypto_getcert(&str, agent->certObject);
 				if (l > 0)
 				{
 					util_from_cer(str, l, &(agent->selfcert));
 					util_keyhash(agent->selfcert, agent->g_selfid);
-					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_close(); wincrypto_open(1, rootSubject); }
+					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_close(agent->certObject); agent->certObject = wincrypto_open(1, rootSubject); }
 				}
 			} while (l != 0 && ((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
 
 			if (l > 0)
 			{
 				// Generate a new TLS certificate & save it.
-				l = wincrypto_mkCert(rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
+				l = wincrypto_mkCert(agent->certObject, rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
 				util_from_p12(str, l, "hidden", &(agent->selftlscert));
 				ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
 				util_free(str);
@@ -2056,19 +2059,19 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 
 		// No cert in this .db file. Try to load or generate a root certificate from a Windows crypto provider. This can be TPM backed which is great.
 		// However, if we don't have the second cert created, we need to regen the root...
-		if (agent->noCertStore == 0 && wincrypto_open(FALSE, rootSubject) == 0 && ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", NULL, 0) != 0)
+		if (agent->noCertStore == 0 && (agent->certObject = wincrypto_open(FALSE, rootSubject)) != NULL && ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", NULL, 0) != 0)
 		{
 			char* str = NULL;
 			int l;
 		
 			do {
 				// Finish off work with our own certificate
-				l = wincrypto_getcert(&str);
+				l = wincrypto_getcert(&str, agent->certObject);
 				if (l > 0)
 				{
 					util_from_cer(str, l, &(agent->selfcert));
 					util_keyhash(agent->selfcert, agent->g_selfid);
-					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_open(TRUE, rootSubject); } // Force generation of a new certificate.
+					if (((int*)agent->g_selfid)[0] == 0) { wincrypto_close(agent->certObject); agent->certObject = wincrypto_open(TRUE, rootSubject); } // Force generation of a new certificate.
 				}
 			} while (l != 0 && ((int*)agent->g_selfid)[0] == 0); // This removes any chance that the self_id starts with 32 bits of zeros.
 
@@ -2081,7 +2084,7 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 				if (len == 0) {
 					// Generate a new TLS certificate & save it.
 					util_freecert(&(agent->selftlscert));
-					l = wincrypto_mkCert(rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
+					l = wincrypto_mkCert(agent->certObject, rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
 					if (l > 0) {
 						util_from_p12(str, l, "hidden", &(agent->selftlscert));
 						ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
@@ -2514,7 +2517,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 					// Create a PKCS7 signature using Windows crypto & send it
 					char* signature = NULL;
-					signLen = wincrypto_sign((unsigned char*)ILibScratchPad, sizeof(AuthRequest->serverHash) + UTIL_SHA384_HASHSIZE + UTIL_SHA384_HASHSIZE, &signature);
+					signLen = wincrypto_sign(agent->certObject, (unsigned char*)ILibScratchPad, sizeof(AuthRequest->serverHash) + UTIL_SHA384_HASHSIZE + UTIL_SHA384_HASHSIZE, &signature);
 					if (signLen > 0) 
 					{
 						// Signature succesful, send the result to the server

@@ -182,6 +182,7 @@ typedef struct MeshAgentHostContainer
 #ifndef MICROSTACK_NOTLS
 #ifdef WIN32
 	int noCertStore;
+	void* certObject;
 #endif
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
