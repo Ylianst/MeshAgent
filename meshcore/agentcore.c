@@ -2756,16 +2756,14 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		{
 			// Tell the server what core module we are running
 			char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");						// Get the reference to the SHA384 hash
-			int len = 4;
-
-			// If the agent is running with a local core, ignore this command
-			if (agent->localScript != 0) break;
+			int len = agent->localScript == 0 ? 4 : (int)sizeof(MeshCommand_BinaryPacket_CoreModule);
 
 			// Confirm to the server what core we are running
 			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
+			memset(rcm, 0, sizeof(MeshCommand_BinaryPacket_CoreModule));
 			rcm->command = htons(MeshCommand_CoreModuleHash);										// MeshCommand_CoreModuleHash (11), SHA384 hash of the code module
 			rcm->request = htons(requestid);														// Request id
-			if (hashref != NULL) { memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), hashref, UTIL_SHA384_HASHSIZE); len = sizeof(MeshCommand_BinaryPacket_CoreModule); }
+			if (agent->localScript == 0 && hashref != NULL) { memcpy_s(rcm->coreModuleHash, sizeof(rcm->coreModuleHash), hashref, UTIL_SHA384_HASHSIZE); len = sizeof(MeshCommand_BinaryPacket_CoreModule); }
 
 			// Send the confirmation to the server
 			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)rcm, len, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
