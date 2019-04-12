@@ -1672,12 +1672,16 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 
 duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx)
 {
-	char *rootSubject = (char*)duk_require_string(ctx, 0);
 	char tmp[UTIL_SHA384_HASHSIZE];
 	struct util_cert tmpCert;
 
+#ifdef WIN32
+	char *rootSubject = (char*)duk_require_string(ctx, 0);
+
 	duk_push_this(ctx);							
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+#endif
+
 	duk_push_object(ctx);
 
 #ifdef WIN32
@@ -1754,7 +1758,9 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 		util_free(pfx);
 		util_freecert(&tmpCert);
 		return(1);
+#ifdef WIN32
 	}
+#endif
 }
 
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
@@ -2901,6 +2907,23 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					if (len > 0) { agent->performSelfUpdate = atoi(ILibScratchPad); }
 					if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
 #endif
+
+					if (duk_peval_string_noresult(agent->meshCoreCtx, "require('service-manager').manager.getService('meshagentDiagnostic').start();") == 0)
+					{
+						if (agent->logUpdate != 0)
+						{
+							ILIBLOGMESSSAGE("SelfUpdate -> Starting Diagnostic Agent, to assist with self update");
+						}
+					}
+					else
+					{
+						if (agent->logUpdate != 0)
+						{
+							ILIBLOGMESSSAGE("SelfUpdate -> Diagnostic Agent unavailable to assist with self update");
+						}
+					}
+
+
 					// Everything looks good, lets perform the update
 					if (agent->logUpdate != 0) 
 					{
