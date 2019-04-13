@@ -60,6 +60,8 @@ SERVICE_STATUS_HANDLE serviceStatusHandle = 0;
 INT_PTR CALLBACK DialogHandler(HWND, UINT, WPARAM, LPARAM);
 
 MeshAgentHostContainer *agent = NULL;
+DWORD g_serviceArgc;
+char **g_serviceArgv;
 
 /*
 extern int g_TrustedHashSet;
@@ -279,8 +281,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	CONTEXT winException;
 	size_t len = 0;
 	WCHAR str[_MAX_PATH];
-	char selfexe[_MAX_PATH];
-	char *selfexe_ptr[] = { selfexe };
+
 
 	UNREFERENCED_PARAMETER( argc );
 	UNREFERENCED_PARAMETER( argv );
@@ -307,10 +308,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		SetServiceStatus( serviceStatusHandle, &serviceStatus);
 
 		// Get our own executable name
-		if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5)
-		{
-			wcstombs_s(&len, selfexe, _MAX_PATH, str, _MAX_PATH);
-		}
+		GetModuleFileNameW(NULL, str, _MAX_PATH);
 
 #ifndef _MINCORE
 		// Setup firewall
@@ -323,7 +321,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		__try
 		{
 			agent = MeshAgent_Create(0);
-			MeshAgent_Start(agent, 1, selfexe_ptr);
+			MeshAgent_Start(agent, g_serviceArgc, g_serviceArgv);
 			agent = NULL;
 		}
 		__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
@@ -343,13 +341,15 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	}
 }
 
-int RunService()
+int RunService(int argc, char* argv[])
 {
 	SERVICE_TABLE_ENTRY serviceTable[2];
 	serviceTable[0].lpServiceName = serviceName;
 	serviceTable[0].lpServiceProc = (LPSERVICE_MAIN_FUNCTION)ServiceMain;
 	serviceTable[1].lpServiceName = NULL;
 	serviceTable[1].lpServiceProc = NULL;
+	g_serviceArgc = argc;
+	g_serviceArgv = argv;
 
 	return StartServiceCtrlDispatcher( serviceTable );
 }
@@ -1300,7 +1300,7 @@ int main(int argc, char* argv[])
 	else
 	{
 		UninstallService(serviceFileOld);
-		if (argc > 1)
+		if (argc > 1 && !strcmp(argv[1], "-recovery")==0)
 		{
 			// See if we need to run as a script engine
 			if (argc >= 2 && ILibString_EndsWith(argv[1], -1, ".js", 3) != 0)
@@ -1332,7 +1332,7 @@ int main(int argc, char* argv[])
 		else
 		{
 #ifndef _MINCORE
-			if (RunService() == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
+			if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
 			{
 				FreeConsole();
 
@@ -1350,7 +1350,7 @@ int main(int argc, char* argv[])
 			}
 		}
 #else
-		RunService();
+		RunService(argc, argv);
 #endif
 	}
 
