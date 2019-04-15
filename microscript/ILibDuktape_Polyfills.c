@@ -1747,6 +1747,15 @@ duk_ret_t ILibDuktape_bignum_mod(duk_context* ctx)
 	ILibDuktape_bignum_addBigNumMethods(ctx, ret);
 	return(1);
 }
+duk_ret_t ILibDuktape_bignum_cmp(duk_context *ctx)
+{
+	BIGNUM *r1, *r2;
+	duk_push_this(ctx);
+	r1 = (BIGNUM*)Duktape_GetPointerProperty(ctx, -1, "\xFF_BIGNUM");
+	r2 = (BIGNUM*)Duktape_GetPointerProperty(ctx, 0, "\xFF_BIGNUM");
+	duk_push_int(ctx, BN_cmp(r2, r1));
+	return(1);
+}
 
 duk_ret_t ILibDuktape_bignum_finalizer(duk_context *ctx)
 {
@@ -1767,8 +1776,19 @@ void ILibDuktape_bignum_addBigNumMethods(duk_context *ctx, BIGNUM *b)
 	ILibDuktape_CreateInstanceMethod(ctx, "mul", ILibDuktape_bignum_mul, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "div", ILibDuktape_bignum_div, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "mod", ILibDuktape_bignum_mod, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "cmp", ILibDuktape_bignum_cmp, 1);
+
 	duk_push_c_function(ctx, ILibDuktape_bignum_finalizer, 1); duk_set_finalizer(ctx, -2);
 	duk_eval_string(ctx, "(function toNumber(){return(parseInt(this.toString()));})"); duk_put_prop_string(ctx, -2, "toNumber");
+}
+duk_ret_t ILibDuktape_bignum_random(duk_context *ctx)
+{
+	BIGNUM *r = (BIGNUM*)Duktape_GetPointerProperty(ctx, 0, "\xFF_BIGNUM");
+	BIGNUM *rnd = BN_new();
+
+	if (BN_rand_range(rnd, r) == 0) { return(ILibDuktape_Error(ctx, "Error Generating Random Number")); }
+	ILibDuktape_bignum_addBigNumMethods(ctx, rnd);
+	return(1);
 }
 duk_ret_t ILibDuktape_bignum_fromBuffer(duk_context *ctx)
 {
@@ -1805,6 +1825,14 @@ void ILibDuktape_bignum_Push(duk_context *ctx, void *chain)
 {
 	duk_push_c_function(ctx, ILibDuktape_bignum_func, DUK_VARARGS);
 	duk_push_c_function(ctx, ILibDuktape_bignum_fromBuffer, DUK_VARARGS); duk_put_prop_string(ctx, -2, "fromBuffer");
+	duk_push_c_function(ctx, ILibDuktape_bignum_random, DUK_VARARGS); duk_put_prop_string(ctx, -2, "random");
+	
+	char randRange[] = "exports.randomRange = function randomRange(low, high)\
+						{\
+							var result = exports.random(high.sub(low)).add(low);\
+							return(result);\
+						};";
+	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, randRange, sizeof(randRange) - 1);
 }
 void ILibDuktape_dataGenerator_onPause(struct ILibDuktape_readableStream *sender, void *user)
 {

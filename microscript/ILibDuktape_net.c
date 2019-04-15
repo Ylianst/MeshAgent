@@ -1568,33 +1568,7 @@ duk_ret_t ILibDuktape_TLS_loadpkcs7b(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "Error reading pkcs7b data"));
 	}
 }
-duk_ret_t ILibDuktape_TLS_generateRandomInteger(duk_context *ctx)
-{
-	char *low = (char*)duk_require_string(ctx, 0);
-	char *hi = (char*)duk_require_string(ctx, 1);
 
-	BN_CTX *binctx = BN_CTX_new();
-	BIGNUM *bnlow = NULL;
-	BIGNUM *bnhi = NULL;
-
-	BN_dec2bn(&bnlow, low);
-	BN_dec2bn(&bnhi, hi);
-	if (BN_rand_range(bnlow, bnhi) == 0)
-	{
-		return(ILibDuktape_Error(ctx, "Error calling BN_rand_range()"));
-	}
-	else
-	{
-		char *v = BN_bn2dec(bnlow);
-		duk_push_string(ctx, v);
-		OPENSSL_free(v);
-	}
-
-	BN_free(bnlow);
-	BN_free(bnhi);
-	BN_CTX_free(binctx);
-	return(1);
-}
 duk_ret_t ILibDuktape_TLS_loadCertificate_finalizer(duk_context *ctx)
 {
 	struct util_cert *cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_TLS_util_cert);
@@ -1672,8 +1646,13 @@ void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "createSecureContext", ILibDuktape_TLS_createSecureContext, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "loadCertificate", ILibDuktape_TLS_loadCertificate, 1);
-	ILibDuktape_CreateInstanceMethod(ctx, "generateRandomInteger", ILibDuktape_TLS_generateRandomInteger, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "loadpkcs7b", ILibDuktape_TLS_loadpkcs7b, 1);
+
+	char generateRandomInteger[] = "exports.generateRandomInteger = function generateRandomInteger(low, high)\
+									{\
+										return(require('bignum').randomRange(require('bignum')(low), require('bignum')(high)).toString());\
+									};";
+	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, generateRandomInteger, sizeof(generateRandomInteger) - 1);
 }
 #endif
 
