@@ -182,7 +182,8 @@ function serviceManager()
             this.proxy.CloseServiceHandle(handle);
             return (retVal);
         }
-        this.getService = function (name) {
+        this.getService = function (name)
+        {
             var serviceName = this.GM.CreateVariable(name);
             var ptr = this.GM.CreatePointer();
             var bytesNeeded = this.GM.CreateVariable(ptr._size);
@@ -193,15 +194,27 @@ function serviceManager()
                 var success = this.proxy.QueryServiceStatusEx(h, 0, 0, 0, bytesNeeded);
                 var status = this.GM.CreateVariable(bytesNeeded.toBuffer().readUInt32LE());
                 success = this.proxy.QueryServiceStatusEx(h, 0, status, status._size, bytesNeeded);
-                if (success != 0) {
-                    retVal = {};
+                if (success != 0)
+                {
+                    var retVal = { _ObjectID: 'service-manager.service' }
+                    require('events').EventEmitter.call(retVal);
+
+                    retVal.close = function ()
+                    {
+                        if(this._service && this._scm)
+                        {
+                            this._proxy.CloseServiceHandle(this._service);
+                            this._proxy.CloseServiceHandle(this._scm);
+                            this._service = this._scm = null;
+                        }
+                    };
+
+                    retVal.on('~', retVal.close);
                     retVal.status = parseServiceStatus(status);
                     retVal._scm = handle;
                     retVal._service = h;
                     retVal._GM = this.GM;
                     retVal._proxy = this.proxy;
-                    require('events').inherits(retVal);
-                    retVal.on('~', function () { this._proxy.CloseServiceHandle(this); this._proxy.CloseServiceHandle(this._scm); });
                     retVal.name = name;
 
                     retVal.appLocation = function ()
@@ -212,6 +225,8 @@ function serviceManager()
                         if (ret.startsWith('"')) { ret = ret.substring(1); }
                         return (ret);
                     };
+
+
                     retVal.appWorkingDirectory = function ()
                     {
                         var tokens = this.appLocation().split('\\');
@@ -230,6 +245,7 @@ function serviceManager()
                         }
                         return (false);
                     };
+
                     retVal.stop = function () {
                         if (this.status.state == 'RUNNING') {
                             var newstate = this._GM.CreateVariable(36);
@@ -253,7 +269,6 @@ function serviceManager()
                             throw ('cannot call ' + this.name + '.start(), when current state is: ' + this.status.state);
                         }
                     }
-
                     var query_service_configa_DWORD = this.GM.CreateVariable(4);
                     this.proxy.QueryServiceConfigA(h, 0, 0, query_service_configa_DWORD);
                     if (query_service_configa_DWORD.toBuffer().readUInt32LE() > 0)
@@ -317,7 +332,7 @@ function serviceManager()
         {
             this.getService = function (name)
             {
-                var ret = { name: name };
+                var ret = { name: name, close: function () { }};
                 if(!require('fs').existsSync('/Library/LaunchDaemons/' + name + '.plist'))
                 {
                     // Before we throw in the towel, let's enumerate all the plist files, and see if one has a matching label
@@ -413,7 +428,7 @@ function serviceManager()
             this.getService = function (name, platform)
             {
                 if (!platform) { platform = this.getServiceType(); }
-                var ret = { name: name };
+                var ret = { name: name, close: function () { }};
                 switch(platform)
                 {
                     case 'init':
@@ -750,8 +765,6 @@ function serviceManager()
                 imagePath += (' ' + options.parameters.join(' '));
                 reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
             }
-
-            return (this.getService(options.name));
         }
         if(process.platform == 'linux')
         {
@@ -1010,6 +1023,8 @@ function serviceManager()
             {
                 throw ('Cannot uninstall service: ' + name + ', because it is: ' + service.status.state);
             }
+            service.close();
+            service = null;
         }
         else if(process.platform == 'linux')
         {
