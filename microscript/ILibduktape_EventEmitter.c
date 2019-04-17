@@ -752,15 +752,7 @@ duk_ret_t ILibDuktape_EventEmitter_Inherits_addMethod(duk_context *ctx)
 	duk_push_this(ctx);
 	return(1);
 }
-duk_ret_t ILibDuktape_EventEmitter_EmitterUtils_Finalizer(duk_context *ctx)
-{
-	duk_get_prop_string(ctx, 0, "\xFF_MainObject");		// [obj]
-	duk_get_prop_string(ctx, -1, "emit");				// [obj][emit]
-	duk_swap_top(ctx, -2);								// [emit][this]
-	duk_push_string(ctx, "~");							// [emit][this][~]
-	duk_call_method(ctx, 1);
-	return(0);
-}
+
 duk_ret_t ILibDuktape_EventEmitter_Inherits(duk_context *ctx)
 {
 	ILibDuktape_EventEmitter *emitter;
@@ -768,16 +760,12 @@ duk_ret_t ILibDuktape_EventEmitter_Inherits(duk_context *ctx)
 	duk_dup(ctx, 0);									// [target]
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
 	duk_push_object(ctx);								// [target][emitterUtils]
-	duk_dup(ctx, -2);									// [target][emitterUtils][target]
-	duk_put_prop_string(ctx, -2, "\xFF_MainObject");	// [target][emitterUtils]
 	duk_dup(ctx, -1);									// [target][emitterUtils][dup]
 	duk_put_prop_string(ctx, -3, "\xFF_emitterUtils");	// [target][emitterUtils]
 	duk_push_pointer(ctx, emitter);						// [target][emitterUtils][ptr]
 	duk_put_prop_string(ctx, -2, "emitter");			// [target][emitterUtils]
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_EventEmitter_EmitterUtils_Finalizer);
 	ILibDuktape_CreateInstanceMethod(ctx, "createEvent", ILibDuktape_EventEmitter_Inherits_createEvent, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "addMethod", ILibDuktape_EventEmitter_Inherits_addMethod, 2);
-	ILibDuktape_EventEmitter_CreateEventEx(emitter, "~");
 	return 1;
 }
 duk_ret_t ILibDuktape_EventEmitter_EventEmitter(duk_context *ctx)
@@ -789,13 +777,10 @@ duk_ret_t ILibDuktape_EventEmitter_EventEmitter(duk_context *ctx)
 	duk_push_this(ctx);									// [target]
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
 	duk_push_object(ctx);								// [target][emitterUtils]
-	duk_dup(ctx, -2);									// [target][emitterUtils][target]
-	duk_put_prop_string(ctx, -2, "\xFF_MainObject");	// [target][emitterUtils]
 	duk_dup(ctx, -1);									// [target][emitterUtils][dup]
 	duk_put_prop_string(ctx, -3, "\xFF_emitterUtils");	// [target][emitterUtils]
 	duk_push_pointer(ctx, emitter);						// [target][emitterUtils][ptr]
 	duk_put_prop_string(ctx, -2, "emitter");			// [target][emitterUtils]
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_EventEmitter_EmitterUtils_Finalizer);
 
 	if (nargs == 1 && duk_require_boolean(ctx, 0))
 	{
@@ -809,8 +794,6 @@ duk_ret_t ILibDuktape_EventEmitter_EventEmitter(duk_context *ctx)
 		// Implicit Events
 		emitter->eventType = ILibDuktape_EventEmitter_Type_IMPLICIT;
 	}
-
-	ILibDuktape_EventEmitter_CreateEventEx(emitter, "~");
 
 	return(retVal);
 }
