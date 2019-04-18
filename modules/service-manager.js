@@ -348,17 +348,36 @@ function serviceManager()
                         {
                             ret.name = files[file].endsWith('.plist') ? files[file].substring(0, files[file].length - 6) : files[file];
                             Object.defineProperty(ret, 'alias', { value: name });
+                            Object.defineProperty(ret, 'plist', { value: '/Library/LaunchDaemons' + '/' + files[file] });
                             break;
                         }
                     }
                     if (ret.name == name) { throw (' LaunchDaemon (' + name + ') NOT FOUND'); }
                 }
+                else
+                {
+                    Object.defineProperty(ret, 'plist', { value: '/Library/LaunchDaemons/' + name + '.plist' });
+                }
+                Object.defineProperty(ret, '_runAtLoad', {
+                    value: (function ()
+                    {
+                        // We need to see if this is an Auto-Starting service, in order to figure out how to implement 'start'
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = '';
+                        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>RunAtLoad</key>\"); split(a[2], b, \"/>\"); split(b[1], c, \"<\"); print c[2]; }'\nexit\n");
+                        child.waitExit();
+                        return (child.stdout.str.trim().toUpperCase() == "TRUE");
+                    })()
+                });
+
+
                 ret.label = function label()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = '';
                     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat /Library/LaunchDaemons/" + this.name + ".plist | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
                     child.waitExit();
                     return (child.stdout.str.trim());
                 }
@@ -386,7 +405,7 @@ function serviceManager()
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = '';
                     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat /Library/LaunchDaemons/" + this.name + ".plist | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
                     child.waitExit();
                     child.stdout.str = child.stdout.str.trim();
 
@@ -397,7 +416,7 @@ function serviceManager()
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = '';
                     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat /Library/LaunchDaemons/" + this.name + ".plist | tr '\n' '\.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
                     child.waitExit();
                     return (child.stdout.str.trim());
                 };
@@ -405,14 +424,17 @@ function serviceManager()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.on('data', function (chunk) { });
-                    child.stdin.write('launchctl start ' + this.alias + '\nexit\n');
+                    child.stdin.write('launchctl load ' + this.plist + '\n');
+                    if (!this._runAtLoad) { child.stdin.write('launchctl start ' + this.alias + '\n'); }
+                    child.stdin.write('exit\n');
                     child.waitExit();
+                    console.log('done');
                 };
                 ret.stop = function stop()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.on('data', function (chunk) { });
-                    child.stdin.write('launchctl stop ' + this.alias + '\nexit\n');
+                    child.stdin.write('launchctl unload ' + this.plist + '\nexit\n');
                     child.waitExit();
                 };
                 ret.restart = function restart()
