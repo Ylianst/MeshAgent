@@ -370,19 +370,33 @@ function serviceManager()
                         return (child.stdout.str.trim().toUpperCase() == "TRUE");
                     })()
                 });
-
-
-                ret.label = function label()
+                Object.defineProperty(ret, "_keepAlive", {
+                    value: (function ()
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = '';
+                        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{split($0, a, \"<key>KeepAlive</key>\"); split(a[2], b, \"<\"); split(b[2], c, \">\"); ");
+                        child.stdin.write(" if(c[1]==\"dict\"){ split(a[2], d, \"</dict>\"); if(split(d[1], truval, \"<true/>\")>1) { split(truval[1], kn1, \"<key>\"); split(kn1[2], kn2, \"</key>\"); print kn2[1]; } }");
+                        child.stdin.write(" else { split(c[1], ka, \"/\"); if(ka[1]==\"true\") {print \"ALWAYS\";} } }'\nexit\n");
+                        child.waitExit();
+                        return (child.stdout.str.trim());
+                    })()
+                });
+                if (!ret.alias)
                 {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim());
+                    Object.defineProperty(ret, 'alias', {
+                        value: (function ()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                            child.waitExit();
+                            return (child.stdout.str.trim());
+                        })()
+                    });
                 }
-                if (!ret.alias) { Object.defineProperty(ret, 'alias', { value: ret.label() }); }
-                ret.label = null;
                 ret.getPID = function getPID()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -425,16 +439,24 @@ function serviceManager()
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.on('data', function (chunk) { });
                     child.stdin.write('launchctl load ' + this.plist + '\n');
-                    if (!this._runAtLoad) { child.stdin.write('launchctl start ' + this.alias + '\n'); }
+                    child.stdin.write('launchctl start ' + this.alias + '\n'); 
                     child.stdin.write('exit\n');
                     child.waitExit();
-                    console.log('done');
                 };
                 ret.stop = function stop()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.on('data', function (chunk) { });
-                    child.stdin.write('launchctl unload ' + this.plist + '\nexit\n');
+                    if (this._keepAlive == 'Crashed' || this._keepAlive == '')
+                    {
+                        // We can call stop, so the service can stay loaded, so scheduled jobs will still work
+                        child.stdin.write('launchctl stop ' + this.alias + '\nexit\n');
+                    }
+                    else
+                    {
+                        // We must unload, otherwise the service is likely to just restart on it's own.
+                        child.stdin.write('launchctl unload ' + this.plist + '\nexit\n');
+                    }
                     child.waitExit();
                 };
                 ret.restart = function restart()
@@ -962,7 +984,10 @@ function serviceManager()
             plist += '      <key>KeepAlive</key>\n';
             if(options.failureRestart == null || options.failureRestart > 0)
             {
-                plist += '      <true/>\n';
+                plist += '      <dict>\n';
+                plist += '         <key>Crashed</key>\n';
+                plist += '         <true/>\n';
+                plist += '      </dict>\n';
             }
             else
             {
