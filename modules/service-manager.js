@@ -383,6 +383,7 @@ function serviceManager()
                         return (child.stdout.str.trim());
                     })()
                 });
+
                 if (!ret.alias)
                 {
                     Object.defineProperty(ret, 'alias', {
@@ -405,6 +406,23 @@ function serviceManager()
                     child.stdin.write("launchctl list | grep '" + this.alias + "' | awk '{ if($3==\"" + this.alias + "\"){print $1;}}'\nexit\n");
                     child.waitExit();                   
                     return (parseInt(child.stdout.str.trim()));
+                };
+                ret.isLoaded = function isLoaded()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("launchctl list | grep '" + this.alias + "' | awk '{ if($3==\"" + this.alias + "\"){print $1;}}'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim() != '');
+                };
+                ret.load = function load()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write('launchctl load ' + this.plist + '\nexit\n');
+                    child.waitExit();
                 };
                 ret.isRunning = function isRunning()
                 {
