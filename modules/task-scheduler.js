@@ -204,65 +204,109 @@ function task()
                        plist += '  </dict>\n';
                        plist += '</plist>';
 
+                    try
+                    {
+                        var svc = require('service-manager').manager.getService(options.service);
+                        if (!svc.isLoaded()) { svc.load(); }
+                        svc = null;
+                    }
+                    catch(se)
+                    {
+                        ret._rej(se); return (ret);
+                    }
+
                     var interval = null;
-                    var periodic = '';
+                    var periodic = [];
+
+                    for (var ftype in options)
+                    {
+                        switch (ftype.toUpperCase())
+                        {
+                            case 'DAILY':
+                                var dailyVal = parseInt(options[ftype]);
+                                if (dailyVal < 1 || dailyVal > 31)
+                                {
+                                    ret._rej('Invalid Options'); return (ret);
+                                }
+                                if (dailyVal > 1)
+                                {
+                                    var currentDay = (new Date()).getDate();  // 0 - 31
+                                    var actualDay = currentDay;
+                                    do
+                                    {
+                                        currentDay += dailyVal;
+                                        if (currentDay > 31) currentDay = currentDay % 31;
+                                        periodic.push(('         <key>Day</key>\n         <integer>' + currentDay + '</integer>\n'));
+                                    } while (!(currentDay < actualDay && (currentDay + dailyVal) > actualDay));
+                                }
+                                else
+                                {
+                                    periodic.push('');
+                                }
+                                break;
+                            case 'WEEKLY':
+                                if (parseInt(options[ftype]) != 1) { ret._rej('Only once weekly is supported'); return (ret); }
+                                if (options.DAY < 0 || options.DAY > 6 || options.day < 0 || options.day > 6) { ret._rej('DAY out of range'); return (ret); }
+                                if (options.DAY == null && options.day == null)
+                                {
+                                    periodic.push(('         <key>Day</key>\n         <integer>' + (new Date()).getDay() + '</integer>\n'));
+                                }
+                                else
+                                {
+                                    periodic.push('');
+                                }
+                                break;
+                            case 'MONTHLY':
+                                if (options.month == null && options.MONTH == null)
+                                {
+                                    var monthlyVal = parseInt(options[ftype]);
+                                    var currentMonth = (new Date()).getMonth();
+                                    var actualMonth= currentMonth;
+                                    do
+                                    {
+                                        currentMonth += monthlyVal;
+                                        if (currentMonth > 12) currentMonth = currentMonth % 12;
+                                        periodic.push(('         <key>Month</key>\n         <integer>' + currentMonth + '</integer>\n'));
+                                    } while (!(currentMonth < actualMonth && (currentMonth + monthlyVal) > actualMonth));
+                                }
+                                else
+                                {
+                                    periodic.push('');
+                                }
+                                break;
+                        }
+                    }
 
                     for (var ftype in options)
                     {
                         switch (ftype.toUpperCase())
                         {
                             case 'MINUTE':
-                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret); }
+                                if (interval != null || periodic.length > 0) { ret._rej('Invalid Options'); return (ret); }
                                 interval = '      <integer>' + (parseInt(options[ftype]) * 60) + '</integer>\n';
                                 break;
                             case 'HOURLY':
-                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret); }
+                                if (interval != null || periodic.length > 0) { ret._rej('Invalid Options'); return (ret); }
                                 interval = '      <integer>' + (parseInt(options[ftype]) * 60 * 60) + '</integer>\n';
-                                break;
-                            case 'DAILY':
-                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret);}
-                                interval = '      <integer>' + (parseInt(options[ftype]) * 24 * 60 * 60) + '</integer>\n';
-                                break;
-                            case 'WEEKLY':
-                                if (interval != null) { ret._rej('Invalid Options'); return (ret); }
-                                if (!options.DAY && !options.day)
-                                {
-                                    interval = '      <integer>' + (parseInt(options[ftype]) * 60) + '</integer>\n';
-                                }
-                                else if(parseInt(options[ftype]) != 1)
-                                {
-                                    ret._rej('Invalid Options, Only Once Weekly Supported when DAY specified');
-                                    return (ret);
-                                }
-                                break;
-                            case 'MONTHLY':
-                                if (interval != null || periodic != '') { ret._rej('Invalid Options'); return (ret);}
-                                interval = '      <integer>' + (parseInt(options[ftype]) * 30 * 24 * 60 * 60) + '</integer>\n';
-                                break;
+                                break;                            
                             case 'DAY':
-                                if (interval != null) { ret._rej('Invalid Options'); return (ret);}
-                                if (parseInt(options.weekly) == 1 || parseInt(options.WEEKLY) == 1)
+                                for (var d in periodic)
                                 {
-                                    periodic += '         <key>Weekday</key>\n';
-                                    periodic += ('         <integer>' + options[ftype] + '</integer>\n');
-                                }
-                                else
-                                {
-                                    periodic += '         <key>Day</key>\n';
-                                    periodic += ('         <integer>' + options[ftype] + '</integer>\n');
+                                    periodic[d] += ('         <key>Day</key>\n         <integer>' + options[ftype] + '</integer>\n');
                                 }
                                 break;
                             case 'MONTH':
-                                if (interval != null) { ret._rej('Invalid Options'); return (ret);}
-                                periodic += '         <key>Month</key>\n';
-                                periodic += ('         <integer>' + options[ftype] + '</integer>\n');
+                                for (var m in periodic)
+                                {
+                                    periodic[m] += ('         <key>Month</key>\n         <integer>' + options[ftype] + '</integer>\n');
+                                }
                                 break;
                             case 'TIME':
-                                if (interval != null) { ret._rej('Invalid Options'); return (ret);}
-                                periodic += '         <key>Hour</key>\n';
-                                periodic += ('         <integer>' + options[ftype].split(':')[0] + '</integer>\n');
-                                periodic += '         <key>Minute</key>\n';
-                                periodic += ('         <integer>' + options[ftype].split(':')[1] + '</integer>\n');
+                                if (interval != null) { ret._rej('Invalid Options'); return (ret); }
+                                for (var t in periodic)
+                                {
+                                    periodic[t] += ('         <key>Hour</key>\n         <integer>' + options[ftype].split(':')[0] + '</integer>\n' + '         <key>Minute</key>\n         <integer>' + options[ftype].split(':')[1] + '</integer>\n');
+                                }
                                 break;
                         }
                     }
@@ -270,9 +314,10 @@ function task()
                     {
                         plist = plist.replace('{{{INTERVAL}}}', '      <key>StartInterval</key>\n' + interval);
                     }
-                    if (periodic)
+
+                    if (periodic.length > 0)
                     {
-                        plist = plist.replace('{{{INTERVAL}}}', '      <key>StartCalendarInterval</key>\n      <dict>\n' + periodic + '      </dict>\n');
+                        plist = plist.replace('{{{INTERVAL}}}', '      <key>StartCalendarInterval</key>\n      <array><dict>\n' + periodic.join('      </dict>\n      <dict>\n') + '      </dict></array>\n');
                     }
                     require('fs').writeFileSync('/Library/LaunchDaemons/' + taskname + '.plist', plist);
 
@@ -280,6 +325,9 @@ function task()
                     child.stdout.on('data', function (chunk) { });
                     child.stdin.write('launchctl load /Library/LaunchDaemons/' + taskname + '.plist\nexit\n');
                     child.waitExit();
+
+
+
                     ret._res();
                     break;
                 default:
