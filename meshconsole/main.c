@@ -108,6 +108,12 @@ int main(int argc, char **argv)
 	int retCode = 0;
 	int capabilities = 0;
 
+	STARTUPINFOEX si;
+	printf("sizeof(STARTUPINFOEX) = %u\n", sizeof(STARTUPINFOEX));
+	printf("si.StartupInfo.cb = %u\n", (char*)&si.StartupInfo.cb - (char*)&si);
+	printf("si.lpAttributeList = %u\n", (char*)&si.lpAttributeList - (char*)&si);
+
+
 #if defined (_POSIX)
 #ifndef _NOILIBSTACKDEBUG
 char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);

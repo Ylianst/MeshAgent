@@ -28,6 +28,7 @@ function windows_terminal()
     this._kernel32 = GM.CreateNativeProxy('Kernel32.dll');
     this._kernel32.CreateMethod('CreatePipe');
     this._kernel32.CreateMethod('CreatePseudoConsole');
+    this._kernel32.CreateMethod('InitializeProcThreadAttributeList');
     this._kernel32.CreateMethod('ReadFile');
     this._kernel32.CreateMethod('WriteFile');
 
