@@ -627,6 +627,31 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 	if (IsAdmin() == FALSE) { printf("Requires administrator permissions.\r\n"); return; }
 	if (uninstallonly != 0) { printf("Performing uninstall...\r\n"); } else { printf("Performing install...\r\n"); }
 
+	HKEY hKey;
+	DWORD len = 0;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\Mesh Agent", 0, KEY_ALL_ACCESS, &hKey) == ERROR_SUCCESS)
+	{
+		if (RegQueryValueExA(hKey, "ImagePath", NULL, NULL, NULL, &len) == ERROR_SUCCESS && len > 0)
+		{
+			char *ipath = ILibMemory_Allocate(len, 0, NULL, NULL);
+			RegQueryValueExA(hKey, "ImagePath", NULL, NULL, ipath, &len);
+			printf("ImagePath: %s\n", ipath);
+
+			STARTUPINFOA info = { sizeof(info) };
+			PROCESS_INFORMATION processInfo;
+
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"try { require('service-manager').manager.uninstallService('meshagentDiagnostic'); require('task-scheduler').delete('meshagentDiagnostic/periodicStart').then(function(){process.exit();}, function(){process.exit();}); } catch(e){process.exit();}\"", ipath);
+			CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo);
+			CloseHandle(processInfo.hProcess);
+			CloseHandle(processInfo.hThread);
+			free(ipath);
+		}
+		RegCloseKey(hKey);
+	}
+
+
+
+
 	// Stop and remove the service
 	StopService(serviceFile);
 
