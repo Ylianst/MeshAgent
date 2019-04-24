@@ -131,6 +131,64 @@ void kvm_slave_OnRawForwardLog(ILibRemoteLogging sender, ILibRemoteLogging_Modul
 }
 #endif
 
+void kvm_inspect_displays(RECT* r, int rLen)
+{
+	MONITORINFOEX minfo;
+	HMONITOR hmon;
+	POINT p;
+	int deviceid;
+	int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+	int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+	int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+	int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+	memset(r, 0, sizeof(RECT)*rLen);
+
+	for (p.y = vy; p.y < (vy + vh); ++p.y)
+	{
+		for (p.x = vx; p.x < (vx + vw); ++p.x)
+		{
+			hmon = MonitorFromPoint(p, MONITOR_DEFAULTTONULL);
+			if (hmon != NULL)
+			{
+				memset(&minfo, 0, sizeof(minfo));
+				minfo.cbSize = sizeof(minfo);
+				GetMonitorInfoA(hmon, &minfo);
+				sscanf_s(minfo.szDevice, "\\\\.\\DISPLAY%d", &deviceid);
+
+				if (r[deviceid].left == r[deviceid].right)
+				{
+					// Not set yet
+					r[deviceid].left = p.x;
+					r[deviceid].right = p.x - 1;
+				}
+				else if (r[deviceid].right < p.x)
+				{
+					// Determining Width
+					r[deviceid].right = p.x;
+				}
+				else
+				{
+					// Already determined width, so we can FFWD
+					p.x = r[deviceid].right;
+				}
+				if (r[deviceid].top == r[deviceid].bottom)
+				{
+					// Not set yet
+					r[deviceid].top = p.y;
+					r[deviceid].bottom = p.y - 1;
+				}
+				else if (r[deviceid].bottom < p.y)
+				{
+					// Determining Heigth
+					r[deviceid].bottom = p.y;
+				}
+			}
+		}
+	}
+}
+
+
 void kvm_setupSasPermissions()
 {
 	DWORD dw = 3;
