@@ -139,6 +139,10 @@ typedef enum MeshAgentHost_BatteryInfo
 
 extern char* MeshAgentHost_BatteryInfo_STRINGS[];
 
+#ifdef WIN32
+typedef HRESULT (*DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
+#endif
+
 typedef struct MeshAgentHostContainer
 {
 	void* chain;
@@ -156,6 +160,11 @@ typedef struct MeshAgentHostContainer
 	ILibWebClient_StateObject controlChannel;
 	struct sockaddr_in6* proxyServer;
 	
+#ifdef WIN32
+	void *shCore;
+	DpiAwarenessFunc dpiAwareness;
+#endif
+
 	int localScript;
 	int version;
 	int capabilities; // Extra agent capabilities indicated to the server from MeshCommand_AuthInfo_CapabilitiesMask

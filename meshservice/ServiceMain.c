@@ -34,8 +34,8 @@ limitations under the License.
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibCrypto.h"
 #include "meshcore/agentcore.h"
-
 #include "microscript/ILibDuktape_ScriptContainer.h"
+#include <shellscalingapi.h>
 
 #ifndef _MINCORE
 // #include "../kvm/kvm.h"
@@ -984,10 +984,32 @@ int main(int argc, char* argv[])
 	
 	#if defined(_LINKVM)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
-	{
+	{		
 		void **parm = (void**)ILibMemory_Allocate(3 * sizeof(void*), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 0;
+
+		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+		DpiAwarenessFunc dpiAwareness = NULL;
+		if (shCORE != NULL)
+		{
+			if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+			{
+				FreeLibrary(shCORE);
+				shCORE = NULL;
+			}
+		}
+		if (dpiAwareness != NULL)
+		{
+			dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+			FreeLibrary(shCORE);
+			shCORE = NULL;
+		}
+		else
+		{
+			SetProcessDPIAware();
+		}
+
 		kvm_server_mainloop((void*)parm);
 		return 0;
 	}
@@ -996,6 +1018,29 @@ int main(int argc, char* argv[])
 		void **parm = (void**)ILibMemory_Allocate(3 * sizeof(void*), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 1;
+
+		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+		DpiAwarenessFunc dpiAwareness = NULL;
+		if (shCORE != NULL)
+		{
+			if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+			{
+				FreeLibrary(shCORE);
+				shCORE = NULL;
+			}
+		}
+		if (dpiAwareness != NULL)
+		{
+			dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+			FreeLibrary(shCORE);
+			shCORE = NULL;
+		}
+		else
+		{
+			SetProcessDPIAware();
+		}
+
+
 		kvm_server_mainloop((void*)parm);
 		return 0;
 	}

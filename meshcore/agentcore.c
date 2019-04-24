@@ -20,6 +20,7 @@ limitations under the License.
 #include <Windows.h>
 #include <WinBase.h>
 #include "wincrypto.h"
+#include <shellscalingapi.h>
 #endif
 
 #include "agentcore.h"
@@ -3566,6 +3567,15 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	MeshAgentHostContainer* retVal = (MeshAgentHostContainer*)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 #ifdef WIN32
 	SYSTEM_POWER_STATUS stats;
+
+	if ((retVal->shCore = (void*)LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
+	{
+		if ((retVal->dpiAwareness = (void*)GetProcAddress((HMODULE)retVal->shCore, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+		{
+			FreeLibrary(retVal->shCore);
+			retVal->shCore = NULL;
+		}
+	}
 #endif
 
 	retVal->agentID = (AgentIdentifiers)MESH_AGENTID;
@@ -4445,7 +4455,15 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 
 #if defined(WIN32) && defined(_LINKVM) && !defined(WINSERVICE)
-	SetProcessDPIAware();
+	if (agentHost->dpiAwareness != NULL)
+	{
+		printf("Setting DPIAwareness to per monitor\n");
+		agentHost->dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+	}
+	else
+	{
+		SetProcessDPIAware();
+	}
 #endif
 
 	if ((paramLen == 1 && strcmp(param[0], "--slave") == 0) || (paramLen == 2 && strcmp(param[1], "--slave") == 0)) { MeshAgent_Slave(agentHost); return 0; }
@@ -4660,6 +4678,12 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 
 	if (agent->masterDb != NULL) { ILibSimpleDataStore_Close(agent->masterDb); agent->masterDb = NULL; }
 	if (agent->chain != NULL) { ILibChain_DestroyEx(agent->chain); agent->chain = NULL; }
+#ifdef WIN32
+	if (agent->shCore != NULL)
+	{
+		FreeLibrary((HMODULE)agent->shCore);
+	}
+#endif
 	free(agent);
 }
 void MeshAgent_Stop(MeshAgentHostContainer *agent)

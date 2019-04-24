@@ -19,7 +19,6 @@ limitations under the License.
 
 typedef ILibTransport_DoneState(*ILibKVM_WriteHandler)(char *buffer, int bufferLen, void *reserved);
 
-void kvm_inspect_displays(RECT* r, int rLen);
 int kvm_relay_feeddata(char* buf, int len, ILibKVM_WriteHandler writeHandler, void *reserved);
 void kvm_pause(int pause);
 int kvm_relay_setup(char* exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved);
