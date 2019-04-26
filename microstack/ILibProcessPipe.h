@@ -44,6 +44,8 @@ typedef enum ILibProcessPipe_SpawnTypes
 }ILibProcessPipe_SpawnTypes;
 
 #ifdef WIN32
+typedef void(*ILibProcessPipe_Pipe_ReadExHandler)(ILibProcessPipe_Pipe sender, void *user, DWORD errorCode, char *buffer, int bufferLen);
+typedef void(*ILibProcessPipe_Pipe_WriteExHandler)(ILibProcessPipe_Pipe sender, void *user, DWORD errorCode, int bytesWritten);
 typedef enum ILibProcessPipe_Pipe_ReaderHandleType
 {
 	ILibProcessPipe_Pipe_ReaderHandleType_NotOverLapped = 0,	//!< Spawn a I/O processing thread
@@ -55,6 +57,8 @@ HANDLE ILibProcessPipe_Manager_GetWorkerThread(ILibProcessPipe_Manager mgr);
 ILibTransport_DoneState ILibProcessPipe_Pipe_Write(ILibProcessPipe_Pipe writePipe, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership);
 void ILibProcessPipe_Pipe_AddPipeReadHandler(ILibProcessPipe_Pipe targetPipe, int bufferSize, ILibProcessPipe_Pipe_ReadHandler OnReadHandler);
 #ifdef WIN32
+	void ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler);
+	void ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler);
 	ILibProcessPipe_Pipe ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(ILibProcessPipe_Manager manager, HANDLE existingPipe, ILibProcessPipe_Pipe_ReaderHandleType handleType, int extraMemorySize);
 	#define ILibProcessPipe_Pipe_CreateFromExisting(PipeManager, ExistingPipe, HandleType) ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(PipeManager, ExistingPipe, HandleType, 0)
 #else
@@ -100,6 +104,9 @@ typedef BOOL(*ILibProcessPipe_WaitHandle_Handler)(HANDLE event, ILibWaitHandle_E
 void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback);
 #define ILibProcessPipe_WaitHandle_Add(processPipeManager, eventHandle, user, callback) ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(processPipeManager, eventHandle, 0, user, callback)
 void ILibProcessPipe_WaitHandle_Remove(ILibProcessPipe_Manager mgr, HANDLE event);
+void ILibProcessPipe_WaitHandle_Add2_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback);
+#define ILibProcessPipe_WaitHandle_Add2(processPipeManager, eventHandle, user, callback) ILibProcessPipe_WaitHandle_Add2_WithNonZeroTimeout(processPipeManager, eventHandle, 0, user, callback)
+
 #endif
 #define ILibTransports_ProcessPipe 0x60
 #endif
