@@ -140,7 +140,7 @@ typedef enum MeshAgentHost_BatteryInfo
 extern char* MeshAgentHost_BatteryInfo_STRINGS[];
 
 #ifdef WIN32
-typedef HRESULT (*DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
+typedef HRESULT (__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
 #endif
 
 typedef struct MeshAgentHostContainer
