@@ -64,6 +64,7 @@
 #   make linux ARCHID=20					# Linux x86 64 bit NOKVM
 #   make linux ARCHID=24 					# Linux ARM 32 bit HardFloat (Linaro)
 #   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
+#   make linux ARCHID=26 					# Linux ARM 64 bit
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #
 
@@ -237,8 +238,19 @@ endif
 # Official Linux ARM 32bit HardFloat
 ifeq ($(ARCHID),25)
 ARCHNAME = armhf
-CC = arm-linux-gnueabihf-gcc
-STRIP = arm-linux-gnueabihf-strip
+#CC = arm-linux-gnueabihf-gcc
+#STRIP = arm-linux-gnueabihf-strip
+KVM = 1
+LMS = 0
+CFLAGS += -D_NOFSWATCHER 
+CEXTRA = -fno-strict-aliasing 
+endif
+
+# Official Linux ARM 64bit
+ifeq ($(ARCHID),26)
+ARCHNAME = arm64
+#CC = arm-linux-gnueabihf-gcc
+#STRIP = arm-linux-gnueabihf-strip
 KVM = 1
 LMS = 0
 CFLAGS += -D_NOFSWATCHER 
