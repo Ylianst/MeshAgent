@@ -1675,7 +1675,9 @@ void ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer,
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
 	if (j->mwOverlapped == NULL)
 	{
-		j->mwOverlapped = (OVERLAPPED*)ILibMemory_Allocate(sizeof(OVERLAPPED), 0, NULL, NULL);
+		void **extra;
+		j->mwOverlapped = (OVERLAPPED*)ILibMemory_Allocate(sizeof(OVERLAPPED), sizeof(void*), NULL, (void**)&extra);
+		extra[0] = j;
 	}
 	j->user3 = user;
 	j->user4 = OnWriteHandler;
