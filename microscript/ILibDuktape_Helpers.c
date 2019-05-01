@@ -574,9 +574,10 @@ duk_ret_t ILibDuktape_IndependentFinalizer_Dispatch(duk_context *ctx)
 	return 0;
 }
 
-void ILibDuktape_CreateFinalizer(duk_context *ctx, duk_c_function func)
+void ILibDuktape_CreateFinalizerEx(duk_context *ctx, duk_c_function func, int singleton)
 {
-	ILibDuktape_EventEmitter_Create(ctx);
+	ILibDuktape_EventEmitter *e = ILibDuktape_EventEmitter_Create(ctx);
+	if (singleton != 0) { ILibDuktape_EventEmitter_RemoveAllListeners(e, "~"); }
 	ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", func);
 }
 duk_ret_t ILibDuktape_CreateProperty_InstanceMethod_Sink(duk_context *ctx)
