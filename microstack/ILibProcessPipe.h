@@ -57,6 +57,7 @@ HANDLE ILibProcessPipe_Manager_GetWorkerThread(ILibProcessPipe_Manager mgr);
 ILibTransport_DoneState ILibProcessPipe_Pipe_Write(ILibProcessPipe_Pipe writePipe, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership);
 void ILibProcessPipe_Pipe_AddPipeReadHandler(ILibProcessPipe_Pipe targetPipe, int bufferSize, ILibProcessPipe_Pipe_ReadHandler OnReadHandler);
 #ifdef WIN32
+	int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe);
 	void ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler);
 	void ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler);
 	ILibProcessPipe_Pipe ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(ILibProcessPipe_Manager manager, HANDLE existingPipe, ILibProcessPipe_Pipe_ReaderHandleType handleType, int extraMemorySize);

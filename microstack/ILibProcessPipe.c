@@ -79,6 +79,7 @@ typedef struct ILibProcessPipe_PipeObject
 	ILibProcessPipe_GenericBrokenPipeHandler brokenPipeHandler;
 	void *user1, *user2;
 #ifdef WIN32
+	int usingCompletionRoutine;
 	HANDLE mPipe_Reader_ResumeEvent;
 	HANDLE mPipe_ReadEnd;
 	HANDLE mPipe_WriteEnd;
@@ -554,10 +555,13 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 	if (pipeObject->mPipe_ReadEnd != NULL) { CloseHandle(pipeObject->mPipe_ReadEnd); }
 	if (pipeObject->mPipe_WriteEnd != NULL && pipeObject->mPipe_WriteEnd != pipeObject->mPipe_ReadEnd) { CloseHandle(pipeObject->mPipe_WriteEnd); }
 	if (pipeObject->mOverlapped != NULL) { CloseHandle(pipeObject->mOverlapped->hEvent); free(pipeObject->mOverlapped); }
+	if (pipeObject->mwOverlapped != NULL) { free(pipeObject->mwOverlapped); }
 	if (pipeObject->mPipe_Reader_ResumeEvent != NULL) { CloseHandle(pipeObject->mPipe_Reader_ResumeEvent); }
+	if (pipeObject->buffer != NULL && pipeObject->usingCompletionRoutine == 0) { free(pipeObject->buffer); }
+#else
+	if (pipeObject->buffer != NULL) { free(pipeObject->buffer); }
 #endif
 
-	if (pipeObject->buffer != NULL) { free(pipeObject->buffer); }
 	if (pipeObject->WriteBuffer != NULL)
 	{
 		ILibProcessPipe_WriteData* data;
@@ -1661,9 +1665,16 @@ void __stdcall ILibProcessPipe_Pipe_Write_CompletionRoutine(DWORD dwErrorCode, D
 		((ILibProcessPipe_Pipe_WriteExHandler)j->user4)(j, j->user3, dwErrorCode, dwNumberOfBytesTransfered);
 	}
 }
+int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
+{
+	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
+	if (!ILibMemory_CanaryOK(j) || j->mPipe_ReadEnd == NULL) { return(2); }
+	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
+}
 void ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
+	j->usingCompletionRoutine = 1;
 	j->buffer = buffer;
 	j->bufferSize = bufferLength;
 	j->user1 = user;
