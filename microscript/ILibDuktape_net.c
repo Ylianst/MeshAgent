@@ -96,7 +96,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 	int bufferLength;
 	int bufferOffset;
 	int bytesLeft;
-
+	int unshiftedBytes;
 }ILibDuktape_net_WindowsIPC;
 #endif
 
@@ -128,6 +128,7 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void *user);
 void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, void *user);
 int ILibDuktape_net_server_IPC_unshiftSink(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user);
+duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx);
 #endif
 
 
@@ -385,6 +386,8 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
 
 			ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mSocket, "connect");		//[emit][this][connect]
+			ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -2, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
+
 			if (duk_pcall_method(winIPC->ctx, 1) != 0)
 			{
 				ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "Error in net.socket.connect.onConnect(): ");
@@ -809,9 +812,7 @@ int ILibDuktape_net_server_IPC_unshiftSink(ILibDuktape_DuplexStream *sender, int
 {
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	if (!ILibMemory_CanaryOK(user)) { return(0); }
-
-	winIPC->bufferOffset += (winIPC->bytesLeft - unshiftBytes);
-	winIPC->bytesLeft = unshiftBytes;
+	winIPC->unshiftedBytes = unshiftBytes;
 	return(unshiftBytes);
 }
 void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user, DWORD dwErrorCode, char *buffer, int bufferLen)
@@ -827,6 +828,22 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 	else
 	{
 		ILibDuktape_DuplexStream_Closed(winIPC->ds);
+		ILibProcessPipe_FreePipe(winIPC->mPipe);
+		winIPC->mPipe = NULL;
+
+		if (winIPC->mServer != NULL)
+		{
+			// Server IPC, so we can create a new Instance, and listen for a connection
+			duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
+			CloseHandle(winIPC->overlapped.hEvent);
+			if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
+
+			duk_push_heapptr(ctx, winIPC->mServer);							// [server]
+			duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
+			duk_swap_top(ctx, -2);											// [listen][this]
+			duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
+			duk_pcall_method(ctx, 1); duk_pop(ctx);							// ...
+		}
 	}
 }
 void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
@@ -856,19 +873,32 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 	else
 	{
 		// Check to see if we can drain any of the buffer first
-		int tmpBytesLeft;
 		while (winIPC->ds->readableStream->paused == 0)
 		{
-			tmpBytesLeft = winIPC->bytesLeft;
+			winIPC->unshiftedBytes = 0;
 			ILibDuktape_DuplexStream_WriteData(winIPC->ds, winIPC->buffer + winIPC->bufferOffset, winIPC->bytesLeft);
-			if (tmpBytesLeft == winIPC->bytesLeft) { break; } // No Data was consumed
-			if (winIPC->bytesLeft <= 0)
+			if (winIPC->unshiftedBytes > 0)
 			{
-				winIPC->bytesLeft = 0;
-				winIPC->bufferOffset = 0;
+				winIPC->bufferOffset += (winIPC->bytesLeft - winIPC->unshiftedBytes);
+				if (winIPC->bytesLeft == winIPC->unshiftedBytes)
+				{
+					winIPC->unshiftedBytes = 0;
+				}
+				winIPC->bytesLeft = winIPC->unshiftedBytes;
 			}
-			if (winIPC->ds->readableStream->paused == 0 && (winIPC->bytesLeft == 0 || (winIPC->bytesLeft > 0 && tmpBytesLeft == winIPC->bytesLeft)))
+			else
 			{
+				winIPC->bufferOffset = winIPC->bytesLeft = 0;
+			}
+
+			if (winIPC->ds->readableStream->paused == 0 && (winIPC->bytesLeft == 0 || (winIPC->bytesLeft > 0 && winIPC->unshiftedBytes == 0)))
+			{
+				if (winIPC->bufferLength - winIPC->bufferOffset - winIPC->bytesLeft == 0)
+				{
+					// We need to grow the buffer
+					ILibMemory_ReallocateRaw(&(winIPC->buffer), winIPC->bufferLength + ILibDuktape_net_IPC_BUFFERSIZE);
+					winIPC->bufferLength += ILibDuktape_net_IPC_BUFFERSIZE;
+				}
 				ILibProcessPipe_Pipe_ReadEx(winIPC->mPipe, winIPC->buffer + winIPC->bufferOffset + winIPC->bytesLeft, winIPC->bufferLength - winIPC->bufferOffset - winIPC->bytesLeft, winIPC, ILibDuktape_net_server_IPC_readsink);
 				break;
 			}
@@ -878,7 +908,7 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 }
 void ILibDuktape_net_server_IPC_WriteCompletionEvent(ILibProcessPipe_Pipe sender, void *user, DWORD errorCode, int bytesWritten)
 {
-	if (!ILibMemory_CanaryOK(user)) { return; }
+	if (!ILibMemory_CanaryOK(user) || errorCode != 0) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	duk_idx_t top = duk_get_top(winIPC->ctx);
 
@@ -931,8 +961,37 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	if (!ILibMemory_CanaryOK(user)) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 
-	ILibProcessPipe_FreePipe(winIPC->mPipe);
-	winIPC->mPipe = NULL;
+	if (ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe) == 0)
+	{
+		ILibProcessPipe_FreePipe(winIPC->mPipe);
+		winIPC->mPipe = NULL;
+		if (winIPC->mServer != NULL)
+		{
+			// Server IPC, so we can create a new Instance, and listen for a connection
+			duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
+			CloseHandle(winIPC->overlapped.hEvent);
+
+			duk_push_heapptr(ctx, winIPC->mServer);							// [server]
+			duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
+			duk_swap_top(ctx, -2);											// [listen][this]
+			duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
+			duk_pcall_method(ctx, 1); duk_pop(ctx);							// ...
+		}
+	}
+}
+duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
+{
+	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_net_WindowsIPC_Buffer);
+	if (winIPC->mPipe != NULL && winIPC->mPipeHandle != NULL)
+	{
+		// It's ok to do this, becuase the CancelEx happens on the same thread, and the completion routine will use an APC Queue, so the Canary will fail before it tries to deref
+		ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe);
+		ILibProcessPipe_FreePipe(winIPC->mPipe);
+		winIPC->mPipe = NULL;
+	}
+	if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
+
+	return(0);
 }
 BOOL ILibDuktape_net_server_IPC_ConnectSink(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user)
 {
@@ -942,12 +1001,19 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(HANDLE event, ILibWaitHandle_ErrorSt
 		ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mServer, "connection");	// [emit][this][connection]
 		duk_push_object(winIPC->ctx);													// [emit][this][connection][socket]
 		ILibDuktape_WriteID(winIPC->ctx, "net.socket.ipc");
+
+		duk_push_heapptr(winIPC->ctx, winIPC->mServer);									// [emit][this][connection][socket][server]
+		duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);		// [emit][this][connection][socket][server][buffer]
+		duk_remove(winIPC->ctx, -2);													// [emit][this][connection][socket][buffer]
+		duk_put_prop_string(winIPC->ctx, -2, ILibDuktape_net_WindowsIPC_Buffer);		// [emit][this][connection][socket]
+
 		duk_push_array(winIPC->ctx); duk_put_prop_string(winIPC->ctx, -2, ILibDuktape_net_WindowsIPC_PendingArray);
 		winIPC->mSocket = duk_get_heapptr(winIPC->ctx, -1);
 		winIPC->ds = ILibDuktape_DuplexStream_InitEx(winIPC->ctx, ILibDuktape_net_server_IPC_WriteSink, ILibDuktape_net_server_IPC_EndSink, ILibDuktape_net_server_IPC_PauseSink, ILibDuktape_net_server_IPC_ResumeSink, ILibDuktape_net_server_IPC_unshiftSink, winIPC);
 		winIPC->mPipe = ILibProcessPipe_Pipe_CreateFromExisting(winIPC->manager, winIPC->mPipeHandle, ILibProcessPipe_Pipe_ReaderHandleType_Overlapped);
 		winIPC->ds->readableStream->paused = 1;
 		ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
+		ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -1, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
 
 		if (duk_pcall_method(winIPC->ctx, 2) != 0)
 		{
