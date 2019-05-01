@@ -932,6 +932,11 @@ void ILibDuktape_net_server_IPC_WriteCompletionEvent(ILibProcessPipe_Pipe sender
 		duk_set_top(winIPC->ctx, top);												// ...
 		ILibProcessPipe_Pipe_WriteEx(winIPC->mPipe, buf, (int)bufLen, winIPC, ILibDuktape_net_server_IPC_WriteCompletionEvent);
 	}
+	else
+	{
+		// No more pending writes, so we can emit drain
+		ILibDuktape_DuplexStream_Ready(winIPC->ds);
+	}
 }
 ILibTransport_DoneState ILibDuktape_net_server_IPC_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
