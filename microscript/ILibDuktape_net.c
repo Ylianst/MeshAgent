@@ -868,7 +868,10 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 	{
 		winIPC->bytesLeft = 0;
 		winIPC->bufferOffset = 0;
-		ILibProcessPipe_Pipe_ReadEx(winIPC->mPipe, winIPC->buffer, winIPC->bufferLength, winIPC, ILibDuktape_net_server_IPC_readsink);
+		if (ILibProcessPipe_Pipe_ReadEx(winIPC->mPipe, winIPC->buffer, winIPC->bufferLength, winIPC, ILibDuktape_net_server_IPC_readsink) != 0)
+		{
+			ILibDuktape_DuplexStream_Closed(winIPC->ds);
+		}
 	}
 	else
 	{
@@ -899,7 +902,10 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 					ILibMemory_ReallocateRaw(&(winIPC->buffer), winIPC->bufferLength + ILibDuktape_net_IPC_BUFFERSIZE);
 					winIPC->bufferLength += ILibDuktape_net_IPC_BUFFERSIZE;
 				}
-				ILibProcessPipe_Pipe_ReadEx(winIPC->mPipe, winIPC->buffer + winIPC->bufferOffset + winIPC->bytesLeft, winIPC->bufferLength - winIPC->bufferOffset - winIPC->bytesLeft, winIPC, ILibDuktape_net_server_IPC_readsink);
+				if (ILibProcessPipe_Pipe_ReadEx(winIPC->mPipe, winIPC->buffer + winIPC->bufferOffset + winIPC->bytesLeft, winIPC->bufferLength - winIPC->bufferOffset - winIPC->bytesLeft, winIPC, ILibDuktape_net_server_IPC_readsink) != 0)
+				{
+					ILibDuktape_DuplexStream_Closed(winIPC->ds);
+				}
 				break;
 			}
 		}

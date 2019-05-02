@@ -1671,7 +1671,7 @@ int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
 	if (!ILibMemory_CanaryOK(j) || j->mPipe_ReadEnd == NULL) { return(2); }
 	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
 }
-void ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler)
+int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
 	j->usingCompletionRoutine = 1;
@@ -1679,9 +1679,16 @@ void ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, 
 	j->bufferSize = bufferLength;
 	j->user1 = user;
 	j->user2 = OnReadHandler;
-	ReadFileEx(j->mPipe_ReadEnd, j->buffer, j->bufferSize, j->mOverlapped, ILibProcessPipe_Pipe_Read_CompletionRoutine);
+	if (!ReadFileEx(j->mPipe_ReadEnd, j->buffer, j->bufferSize, j->mOverlapped, ILibProcessPipe_Pipe_Read_CompletionRoutine))
+	{
+		return(GetLastError());
+	}
+	else
+	{
+		return(0);
+	}
 }
-void ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler)
+int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
 	if (j->mwOverlapped == NULL)
@@ -1692,7 +1699,14 @@ void ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer,
 	}
 	j->user3 = user;
 	j->user4 = OnWriteHandler;
-	WriteFileEx(j->mPipe_WriteEnd, buffer, bufferLength, j->mwOverlapped, ILibProcessPipe_Pipe_Write_CompletionRoutine);
+	if (!WriteFileEx(j->mPipe_WriteEnd, buffer, bufferLength, j->mwOverlapped, ILibProcessPipe_Pipe_Write_CompletionRoutine))
+	{
+		return(GetLastError());
+	}
+	else
+	{
+		return(0);
+	}
 }
 DWORD ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p) { return(p != NULL ? (DWORD)((ILibProcessPipe_Process_Object*)p)->PID : 0); }
 #else
