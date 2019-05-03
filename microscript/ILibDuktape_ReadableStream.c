@@ -935,7 +935,7 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	retVal->ResumeHandler = OnResume;
 	retVal->UnshiftHandler = OnUnshift;
 	sem_init(&(retVal->pipeLock), 0, 1);
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_ReadableStream_PipeLockFinalizer);
+	ILibDuktape_CreateFinalizerEx(ctx, ILibDuktape_ReadableStream_PipeLockFinalizer, 1);
 
 	retVal->emitter = emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "end");

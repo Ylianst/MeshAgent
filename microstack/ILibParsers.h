@@ -385,7 +385,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibMemory_AllocateA_Init(void *buffer);
 
 #define ILibMemory_AllocateRaw(memPtr, memSize) if((memPtr = malloc(memSize)) == NULL) {ILIBCRITICALEXIT(254);}
-#define ILibMemory_ReallocateRaw(memPtr, memSize) if((memPtr = realloc(memPtr, memSize)) == NULL) {ILIBCRITICALEXIT(254);}
+#define ILibMemory_ReallocateRaw(ppMemory, memSize) if(((*ppMemory) = realloc(*ppMemory, memSize)) == NULL) {ILIBCRITICALEXIT(254);}
 
 	void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory);
 	int ILibMemory_GetExtraMemorySize(void* extraMemory);

@@ -4457,7 +4457,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #if defined(WIN32) && defined(_LINKVM) && !defined(WINSERVICE)
 	if (agentHost->dpiAwareness != NULL)
 	{
-		printf("Setting DPIAwareness to per monitor\n");
 		agentHost->dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 	}
 	else

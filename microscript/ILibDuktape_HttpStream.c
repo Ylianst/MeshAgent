@@ -1045,7 +1045,7 @@ void ILibDuktape_HttpStream_http_request_transform(struct ILibDuktape_Transform 
 		if (bufferLen > 0)
 		{
 			ILibDuktape_readableStream_WriteData(sender->target, buffer, bufferLen);
-			ILibMemory_ReallocateRaw(data->buffer, data->bufferLen + bufferLen);
+			ILibMemory_ReallocateRaw(&(data->buffer), data->bufferLen + bufferLen);
 			memcpy_s(data->buffer + data->bufferLen, bufferLen, buffer, bufferLen);
 			data->bufferLen = data->bufferLen + bufferLen;
 		}

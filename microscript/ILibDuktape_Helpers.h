@@ -107,7 +107,8 @@ void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodNam
 void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr);
 void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName);
 #define ILibDuktape_CreateReadonlyProperty_int(ctx, propName, propValue) duk_push_int(ctx, propValue);ILibDuktape_CreateReadonlyProperty(ctx, propName)
-void ILibDuktape_CreateFinalizer(duk_context *ctx, duk_c_function func);
+void ILibDuktape_CreateFinalizerEx(duk_context *ctx, duk_c_function func, int singleton);
+#define ILibDuktape_CreateFinalizer(ctx, func) ILibDuktape_CreateFinalizerEx(ctx, func, 0)
 
 void *ILibDuktape_Memory_Alloc(duk_context *ctx, duk_size_t size);
 void *ILibDuktape_Memory_AllocEx(duk_context *ctx, duk_idx_t index, duk_size_t size);
