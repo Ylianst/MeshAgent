@@ -47,7 +47,7 @@ function _meshNodeId()
                         v = null;
                     }
                 }
-                if (v == null && (v = db.GetBuffer('NodeID')) != NULL)
+                if (v == null && (v = db.GetBuffer('NodeID')) != null)
                 {
                     ret = v.toString('hex');
                 }
