@@ -35,6 +35,7 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "meshcore/agentcore.h"
 #include "microscript/ILibDuktape_ScriptContainer.h"
+#include "microscript/ILibDuktape_Commit.h"
 #include <shellscalingapi.h>
 
 #ifndef _MINCORE
@@ -936,6 +937,11 @@ int main(int argc, char* argv[])
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
+		if (SOURCE_COMMIT_HASH != NULL && SOURCE_COMMIT_DATE != NULL)
+		{
+			printf("   Commit Hash: %s\n", SOURCE_COMMIT_HASH);
+			printf("   Commit Date: %s\n", SOURCE_COMMIT_DATE);
+		}
 #ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif

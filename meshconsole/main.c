@@ -31,6 +31,7 @@ limitations under the License.
 
 #include "microscript/ILibDuktape_ScriptContainer.h"
 #include "microstack/ILibCrypto.h"
+#include "microscript/ILibDuktape_Commit.h"
 
 MeshAgentHostContainer *agentHost = NULL;
 
@@ -131,6 +132,11 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
+		if (SOURCE_COMMIT_HASH != NULL && SOURCE_COMMIT_DATE != NULL) 
+		{ 
+			printf("   Commit Hash: %s\n", SOURCE_COMMIT_HASH); 
+			printf("   Commit Date: %s\n", SOURCE_COMMIT_DATE);
+		}
 #ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
