@@ -1,0 +1,1 @@
+#define SOURCE_COMMIT_DATE NULL  

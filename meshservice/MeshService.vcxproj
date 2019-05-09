@@ -220,6 +220,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" "$(TargetPath)"</Command>
     </PostBuildEvent>
@@ -256,6 +263,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" "$(TargetPath)"</Command>
     </PostBuildEvent>
@@ -290,6 +304,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" "$(TargetPath)"</Command>
     </PostBuildEvent>
@@ -324,6 +345,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" "$(TargetPath)"</Command>
     </PostBuildEvent>
@@ -357,6 +385,13 @@
       <TargetMachine>MachineX86</TargetMachine>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>REM signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" /t http://timestamp.comodoca.com/authenticode "$(TargetPath)"
 "$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
@@ -391,6 +426,13 @@
       <TargetMachine>MachineX86</TargetMachine>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>REM signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" /t http://timestamp.comodoca.com/authenticode "$(TargetPath)"
 "$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
@@ -427,6 +469,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>REM signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" /t http://timestamp.comodoca.com/authenticode "$(TargetPath)"
 "$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
@@ -463,6 +512,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>REM signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" /t http://timestamp.comodoca.com/authenticode "$(TargetPath)"
 "$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
@@ -545,6 +601,7 @@
     <ClInclude Include="..\microscript\duk_module_duktape.h" />
     <ClInclude Include="..\microscript\ILibDuktapeModSearch.h" />
     <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_Commit.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Debugger.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Dgram.h" />
     <ClInclude Include="..\microscript\ILibDuktape_DuplexStream.h" />

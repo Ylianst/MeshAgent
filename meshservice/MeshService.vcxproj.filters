@@ -304,5 +304,8 @@
     <ClInclude Include="..\meshcore\wincrypto.h">
       <Filter>Meshcore</Filter>
     </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_Commit.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

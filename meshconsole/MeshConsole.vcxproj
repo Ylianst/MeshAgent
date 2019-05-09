@@ -110,6 +110,7 @@
     <ClInclude Include="..\microscript\duk_module_duktape.h" />
     <ClInclude Include="..\microscript\ILibDuktapeModSearch.h" />
     <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h" />
+    <ClInclude Include="..\microscript\ILibDuktape_Commit.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Debugger.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Dgram.h" />
     <ClInclude Include="..\microscript\ILibDuktape_DuplexStream.h" />
@@ -343,6 +344,11 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>git log -1 &gt; nul 2&gt;&amp;1
+IF %ERRORLEVEL% NEQ 0 exit 0
+git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|Win32'">
     <ClCompile>
@@ -358,6 +364,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Library_Debug_NoOpenSSL|Win32'">
     <ClCompile>
@@ -373,6 +386,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -388,6 +408,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>"$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
     </PostBuildEvent>
@@ -406,6 +433,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>"$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
     </PostBuildEvent>
@@ -424,6 +458,13 @@
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>"$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
     </PostBuildEvent>
@@ -442,6 +483,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|x64'">
     <ClCompile>
@@ -457,6 +505,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Library_Debug_NoOpenSSL|x64'">
     <ClCompile>
@@ -472,6 +527,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -487,6 +549,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>"$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
     </PostBuildEvent>
@@ -505,6 +574,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>"$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
     </PostBuildEvent>
@@ -523,6 +599,13 @@
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
+    <PreBuildEvent>
+      <Command>
+        git log -1 &gt; nul 2&gt;&amp;1
+        IF %ERRORLEVEL% NEQ 0 exit 0
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+      </Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>"$(OutputPath)$(TargetFileName)" ..\modules\PostBuild.js</Command>
     </PostBuildEvent>

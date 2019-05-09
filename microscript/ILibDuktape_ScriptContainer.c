@@ -66,6 +66,7 @@ limitations under the License.
 #include "ILibDuktape_ChildProcess.h"
 #include "ILibDuktape_HECI.h"
 #include "ILibDuktape_Debugger.h"
+#include "ILibDuktape_Commit.h"
 
 #ifdef _POSIX
 extern char **environ;
@@ -934,6 +935,9 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
 	ILibDuktape_EventEmitter *emitter;
+	char *sslv = (char*)SSLeay_version(SSLEAY_VERSION);
+	char *sslvS = strstr(sslv, " ") + 1;
+
 
 	duk_push_global_object(ctx);														// [g]
 	duk_push_object(ctx);																// [g][process]
@@ -942,6 +946,59 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "setenv", ILibDuktape_Process_setenv, 2);
 	
+	duk_push_object(ctx);
+	if (sslvS != ((char*)NULL + 1))
+	{
+		char *tmp = strstr(sslvS, " ");
+		if (tmp != NULL)
+		{
+			duk_push_lstring(ctx, sslvS, (duk_size_t)(tmp - sslvS));
+			duk_put_prop_string(ctx, -2, "openssl");
+		}
+	}
+	duk_push_string(ctx, DUK_GIT_DESCRIBE); duk_put_prop_string(ctx, -2, "duktape");
+	if (SOURCE_COMMIT_DATE != NULL)
+	{
+		duk_eval_string(ctx,
+			"(function translateDate(COMMIT_DATE)\
+		{\
+			var MONTH_TRANSLATE =\
+			{\
+				'Jan' : '01',\
+				'Feb' : '02',\
+				'Mar' : '03',\
+				'Apr' : '04',\
+				'May' : '05',\
+				'Jun' : '06',\
+				'Jul' : '07',\
+				'Aug' : '08',\
+				'Sep' : '09',\
+				'Oct' : '10',\
+				'Nov' : '11',\
+				'Dec' : '12'\
+			};\
+			var tz = COMMIT_DATE.substring(COMMIT_DATE.length-2);\
+			COMMIT_DATE = COMMIT_DATE.substring(0, COMMIT_DATE.length-2) + ':' + tz;\
+			var tmp = COMMIT_DATE.split('-');\
+			tmp[1] = MONTH_TRANSLATE[tmp[1]];\
+			var day = tmp[2];\
+			var day2 = day.split(' ');\
+			day2[0] = day2[0].padStart(2, '0');\
+			tmp[2] = day2.join(' ');\
+			return (new Date(tmp.join('-')));\
+		})");										// [func]
+		duk_push_string(ctx, SOURCE_COMMIT_DATE);	// [func][date]
+		if (duk_pcall(ctx, 1) == 0)
+		{
+			duk_put_prop_string(ctx, -2, "meshAgent");
+		}
+		else
+		{
+			duk_pop(ctx);
+		}
+	}
+	ILibDuktape_CreateReadonlyProperty(ctx, "versions");
+
 #if defined(WIN32)																		// [g][process][platform]
 	duk_push_string(ctx, "win32");
 #elif defined(__APPLE__)
