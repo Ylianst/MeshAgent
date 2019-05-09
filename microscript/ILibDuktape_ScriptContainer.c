@@ -990,6 +990,10 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 		duk_push_string(ctx, SOURCE_COMMIT_DATE);	// [func][date]
 		if (duk_pcall(ctx, 1) == 0)
 		{
+			if (SOURCE_COMMIT_HASH != NULL)
+			{
+				duk_push_string(ctx, SOURCE_COMMIT_HASH); duk_put_prop_string(ctx, -2, "commitHash");
+			}
 			duk_put_prop_string(ctx, -2, "meshAgent");
 		}
 		else
