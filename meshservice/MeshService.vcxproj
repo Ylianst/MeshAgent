@@ -224,7 +224,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -267,7 +269,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -308,7 +312,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -349,7 +355,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -389,7 +397,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -430,7 +440,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -473,7 +485,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
@@ -516,7 +530,9 @@
       <Command>
         git log -1 &gt; nul 2&gt;&amp;1
         IF %ERRORLEVEL% NEQ 0 exit 0
-        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
+        git log -1 2&gt;nul | FINDSTR /C:"commit" | FOR /F "tokens=2" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
       </Command>
     </PreBuildEvent>
     <PostBuildEvent>
