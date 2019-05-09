@@ -326,6 +326,13 @@ ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie
 endif
 
+GITTEST := $(shell git log -1 > /dev/null 2>&1 ; echo $$? )
+ifeq ($(GITTEST),0)
+$(shell echo "// This file is auto-generated, any edits may be overwritten" > microscript/ILibDuktape_Commit.h )
+$(shell git log -1 | grep "Date: " | awk '{ aLen=split($$0, a, " "); printf "#define SOURCE_COMMIT_DATE \"%s-%s-%s %s%s\"\n", a[6], a[3], a[4], a[5], a[7]; }' >> microscript/ILibDuktape_Commit.h )
+$(shell git log -1 --format=%H | awk '{ printf "#define SOURCE_COMMIT_HASH \"%s\"\n", $$0; }' >> microscript/ILibDuktape_Commit.h )
+endif
+
 .PHONY: all clean
 
 all: $(EXENAME) $(LIBNAME)
