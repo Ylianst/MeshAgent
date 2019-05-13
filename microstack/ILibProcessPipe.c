@@ -936,6 +936,10 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		{
 			ignore_result(setuid((uid_t)UID));
 		}
+		if (spawnType == ILibProcessPipe_SpawnTypes_POSIX_DETACHED)
+		{
+			ignore_result(setsid());
+		}
 		while (envvars != NULL && ((char**)envvars)[0] != NULL)
 		{
 			setenv(((char**)envvars)[0], ((char**)envvars)[1], 1);

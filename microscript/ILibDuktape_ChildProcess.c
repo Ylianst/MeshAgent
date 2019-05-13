@@ -276,6 +276,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 			// Options
 			spawnType = (ILibProcessPipe_SpawnTypes)Duktape_GetIntPropertyValue(ctx, i, "type", (int)ILibProcessPipe_SpawnTypes_DEFAULT);
 			uid = Duktape_GetIntPropertyValue(ctx, i, "uid", -1);
+			if (Duktape_GetBooleanProperty(ctx, i, "detached", 0) != 0) { spawnType = ILibProcessPipe_SpawnTypes_POSIX_DETACHED; }
 #ifdef WIN32
 			if (uid >= 0 && spawnType == ILibProcessPipe_SpawnTypes_USER) { spawnType = ILibProcessPipe_SpawnTypes_SPECIFIED_USER; }
 #endif
