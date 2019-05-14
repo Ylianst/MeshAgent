@@ -1764,6 +1764,17 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 #endif
 }
 
+duk_ret_t ILibDuktape_MeshAgent_forceExit(duk_context *ctx)
+{
+	int code = 0;
+	if (duk_get_top(ctx) > 0)
+	{
+		code = (int)duk_require_int(ctx, 0);
+	}
+
+	exit(code);
+	return(0);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1793,6 +1804,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 	duk_pop(ctx);												// [MeshAgent]
 
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
+	duk_push_boolean(ctx, agent->agentMode);
+	ILibDuktape_CreateReadonlyProperty(ctx, "agentMode");
 
 	if (agent->slaveMode == 0)
 	{
@@ -1842,6 +1855,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateEventWithGetter(ctx, "NetInfo", ILibDuktape_MeshAgent_NetInfo);
 		ILibDuktape_CreateInstanceMethod(ctx, "ExecPowerState", ILibDuktape_MeshAgent_ExecPowerState, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
+		ILibDuktape_CreateInstanceMethod(ctx, "forceExit", ILibDuktape_MeshAgent_forceExit, DUK_VARARGS);
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 	
@@ -2186,23 +2200,6 @@ void WritePipeResponse(AGENT_RECORD_TYPE recordType, JS_ENGINE_CONTEXT engineCon
 #endif
 }
 
-
-
-
-void ScriptEngine_Exit(MeshAgentHostContainer *agent, char *contextGUID, int exitCode)
-{
-	duk_context *ctx = agent->meshCoreCtx;
-	if (ctx != NULL)
-	{
-		void *procObj = ILibDuktape_GetProcessObject(ctx);
-		duk_push_heapptr(ctx, procObj);				// [process]
-		duk_get_prop_string(ctx, -1, "exit");		// [process][exitFunc]
-		duk_swap_top(ctx, -2);						// [exitFunc][this/process]
-		duk_push_int(ctx, exitCode);				// [exitFunc][this/process][exitCode]
-		duk_pcall_method(ctx, 1);					// [retVal]
-		duk_pop(ctx);								// ...
-	}
-}
 
 duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID)
 {
@@ -4101,6 +4098,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				agentHost->jsDebugPort = atoi(tmp);
 			}
 		}
+		agentHost->agentMode = 1;
 
 		if (agentHost->meshCoreCtx != NULL)
 		{
@@ -4155,8 +4153,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 
-		ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);
-		
+		ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);	
 		MeshServer_Connect(agentHost);
 
 
@@ -4202,7 +4199,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 void MeshAgent_ScriptMode_UncaughtExceptionSink(duk_context *ctx, char *msg, void *user)
 {
 	printf("*** UNCAUGHT EXCEPTION: %s ***\n", msg);
-	//ScriptEngine_Exit((MeshAgentHostContainer*)user, MeshAgent_JavaCore_ContextGuid, 254);
 }
 
 void MeshAgent_ScriptMode_MeshDesktop_PUSH(duk_context *ctx, void *chain)
@@ -4615,10 +4611,9 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 					{
 #ifdef __APPLE__
 						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [LAUNCHD should auto restart]"); }
-							write(STDOUT_FILENO, "Finishing update...\n", 20);
-							fsync(STDOUT_FILENO);
-							exit(1); // We're exiting here, to restart via KeepAlive (LaunchD doesn't support an explicit 'restart')
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/meshagent");	// Restart the service
+							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 #endif
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:

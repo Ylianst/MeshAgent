@@ -140,7 +140,6 @@ typedef struct SCRIPT_ENGINE_SETTINGS
 	char *argList[];
 }SCRIPT_ENGINE_SETTINGS;
 
-
 void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen);
 void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, int *scriptLen);
 

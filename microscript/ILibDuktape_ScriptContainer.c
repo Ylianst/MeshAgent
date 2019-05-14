@@ -491,22 +491,30 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Exit(duk_context *ctx)
 	void **tmp;
 	int nargs = duk_get_top(ctx);
 
-	duk_push_this(ctx);															// [process]
-	if (nargs == 1)
+	if (duk_peval_string(ctx, "require('MeshAgent').agentMode") == 0 && duk_get_boolean(ctx, -1))
 	{
-		duk_push_int(ctx, duk_require_int(ctx, 0));								// [process][code]
-		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_ExitCode);		// [process]
+		// Running in Agent Mode, so exiting process is not allowed
+		return(ILibDuktape_Error(ctx, "Process.exit() not allowed when running in Agent Mode"));
 	}
-	if (duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Exitting)) { return(ILibDuktape_Error(ctx, "Process.exit() forced script termination")); }
-	duk_push_int(ctx, 1);
-	duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Exitting);			// [process]
+	else
+	{
+		duk_push_this(ctx);															// [process]
+		if (nargs == 1)
+		{
+			duk_push_int(ctx, duk_require_int(ctx, 0));								// [process][code]
+			duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_ExitCode);		// [process]
+		}
+		if (duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Exitting)) { return(ILibDuktape_Error(ctx, "Process.exit() forced script termination")); }
+		duk_push_int(ctx, 1);
+		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Exitting);			// [process]
 
 
-	// Execute this later, so that this stack can unwind first, before we destroy the heap
-	tmp = (void**)Duktape_PushBuffer(ctx, sizeof(void*));						// [process][buffer]
-	duk_put_prop_string(ctx, -2, "\xFF_JUNK");									// [process]
-	tmp[0] = ctx;
-	ILibLifeTime_Add(ILibGetBaseTimer(Duktape_GetChain(ctx)), tmp, 0, ILibDuktape_ScriptContainer_Process_ExitCallback, NULL);
+		// Execute this later, so that this stack can unwind first, before we destroy the heap
+		tmp = (void**)Duktape_PushBuffer(ctx, sizeof(void*));						// [process][buffer]
+		duk_put_prop_string(ctx, -2, "\xFF_JUNK");									// [process]
+		tmp[0] = ctx;
+		ILibLifeTime_Add(ILibGetBaseTimer(Duktape_GetChain(ctx)), tmp, 0, ILibDuktape_ScriptContainer_Process_ExitCallback, NULL);
+	}
 	return(ILibDuktape_Error(ctx, "Process.exit() forced script termination"));
 }
 

@@ -166,6 +166,7 @@ typedef struct MeshAgentHostContainer
 #endif
 
 	int localScript;
+	int agentMode;
 	int version;
 	int capabilities; // Extra agent capabilities indicated to the server from MeshCommand_AuthInfo_CapabilitiesMask
 	char hostname[255];
