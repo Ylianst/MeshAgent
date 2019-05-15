@@ -1251,6 +1251,17 @@ duk_ret_t ILibDuktape_net_server_Finalizer(duk_context *ctx)
 		ILibAsyncServerSocket_RemoveFromChain(server->server);
 	}
 
+#ifdef WIN32
+	ILibDuktape_net_WindowsIPC *ipc = Duktape_GetBufferProperty(ctx, 0, ILibDuktape_net_WindowsIPC_Buffer);
+	if (ipc != NULL && ipc->mPipeHandle != NULL && ipc->overlapped.hEvent != NULL)
+	{
+		ILibProcessPipe_WaitHandle_Remove(ipc->manager, ipc->overlapped.hEvent);
+		CloseHandle(ipc->mPipeHandle);
+		CloseHandle(ipc->overlapped.hEvent);
+		ipc->overlapped.hEvent = NULL;
+	}
+#endif
+
 	return 0;
 }
 duk_ret_t ILibDuktape_net_server_address(duk_context *ctx)
