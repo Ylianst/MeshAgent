@@ -1627,7 +1627,6 @@ void ILibDuktape_MeshAgent_dumpCoreModuleEx(void *chain, void *user)
 		}
 		free(CoreModule);
 	}
-	agentHost->localScript = 1;
 }
 duk_ret_t ILibDuktape_MeshAgent_dumpCoreModule(duk_context *ctx)
 {
