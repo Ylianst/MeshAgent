@@ -67,6 +67,7 @@ function Promise(promiseFunc)
     });
     this._internal.resolver = function _resolver()
     {
+        if (_resolver._self.completed) { return; }
         _resolver._self.errors = false;
         _resolver._self.completed = true;
         _resolver._self.completedArgs = [];
@@ -89,6 +90,7 @@ function Promise(promiseFunc)
     };
     this._internal.rejector = function _rejector()
     {
+        if (_rejector._self.completed) { return; }
         _rejector._self.errors = true;
         _rejector._self.completed = true;
         _rejector._self.completedArgs = [];
