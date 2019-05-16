@@ -295,15 +295,15 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 				{
 					duk_pop(ctx);																// [env]
 					duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);							// [env][enum]
-					envargs = (void**)duk_push_fixed_buffer(ctx, (ecount+1) * 2*sizeof(void*));	// [env][enum][buf]
+					envargs = (char**)duk_push_fixed_buffer(ctx, (ecount+1) * 2*sizeof(void*));	// [env][enum][buf]
 					memset(envargs, 0, (ecount + 1) * 2*sizeof(void*));
 					duk_insert(ctx, -3);														// [buf][env][enum]					
 					ecount = 0;
 					while (duk_next(ctx, -1, 1))												// [buf][env][enum][key][val]
 					{
 						
-						envargs[ecount] = duk_get_string(ctx, -2);
-						envargs[ecount + 1] = duk_get_string(ctx, -1);
+						envargs[ecount] = (char*)duk_get_string(ctx, -2);
+						envargs[ecount + 1] = (char*)duk_get_string(ctx, -1);
 						ecount += 2;
 						duk_pop_2(ctx);															// [buf][env][enum]
 					}
