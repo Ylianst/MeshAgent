@@ -249,6 +249,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	ILibProcessPipe_Process p = NULL;
 	ILibProcessPipe_SpawnTypes spawnType = ILibProcessPipe_SpawnTypes_DEFAULT;
 	int uid = -1;
+	char **envargs = NULL;
 
 	for (i = 0; i < nargs; ++i)
 	{
@@ -280,6 +281,34 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 #ifdef WIN32
 			if (uid >= 0 && spawnType == ILibProcessPipe_SpawnTypes_USER) { spawnType = ILibProcessPipe_SpawnTypes_SPECIFIED_USER; }
 #endif
+			if (duk_has_prop_string(ctx, i, "env"))
+			{
+				int ecount = 0;
+				duk_get_prop_string(ctx, i, "env");												// [env]
+				duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);								// [env][enum]
+				while (duk_next(ctx, -1, 0))
+				{	
+					++ecount;
+					duk_pop(ctx);																// [env][enum]
+				}
+				if (ecount > 0)
+				{
+					duk_pop(ctx);																// [env]
+					duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);							// [env][enum]
+					envargs = (void**)duk_push_fixed_buffer(ctx, (ecount+1) * 2*sizeof(void*));	// [env][enum][buf]
+					memset(envargs, 0, (ecount + 1) * 2*sizeof(void*));
+					duk_insert(ctx, -3);														// [buf][env][enum]					
+					ecount = 0;
+					while (duk_next(ctx, -1, 1))												// [buf][env][enum][key][val]
+					{
+						
+						envargs[ecount] = duk_get_string(ctx, -2);
+						envargs[ecount + 1] = duk_get_string(ctx, -1);
+						ecount += 2;
+						duk_pop_2(ctx);															// [buf][env][enum]
+					}
+				}
+			}
 		}
 	}
 
@@ -301,11 +330,11 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 		}
 	}
 #endif
-
+	
 #ifdef WIN32
 	p = ILibProcessPipe_Manager_SpawnProcessEx3(manager, target, args, spawnType, (void*)(ILibPtrCAST)(uint64_t)(uid < 0 ? 0 : uid), 0);
 #else
-	p = ILibProcessPipe_Manager_SpawnProcessEx3(manager, target, args, spawnType, (void*)(ILibPtrCAST)(uint64_t)uid, 0);
+	p = ILibProcessPipe_Manager_SpawnProcessEx4(manager, target, args, spawnType, (void*)(ILibPtrCAST)(uint64_t)uid, envargs, 0);
 #endif
 	if (p == NULL)
 	{
