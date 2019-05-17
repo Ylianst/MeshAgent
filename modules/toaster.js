@@ -31,22 +31,27 @@ function Toaster()
         if (process.platform == 'win32')
         {
             emitter.createEvent('Clicked');
+            var GM = require('_GenericMarshal');
+            var kernel32 = GM.CreateNativeProxy('kernel32.dll');
+            kernel32.CreateMethod('ProcessIdToSessionId');
+            var psid = GM.CreateVariable(4);
+            var consoleUid = require('user-sessions').consoleUid();
+            if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0)
+            {
+                throw ('Internal Error');
+            }
 
-            var session = require('user-sessions').Current();
-            for (var i in session) {
-                console.log(session[i]);
-            }
-            try {
-                console.log('Attempting Toast Mechanism 1');
-                retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: session.Active[0].SessionId });
-            }
-            catch (e) {
-                console.log(e);
-                console.log('Attempting Toast Mechanism 2');
+            if (consoleUid == psid.toBuffer().readUInt32LE())
+            {
+                // We are running on the physical console
                 retVal._child = require('ScriptContainer').Create({ processIsolation: true });
             }
+            else
+            {
+                // We need so spawn the ScriptContainer into the correct session
+                retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: consoleUid });
+            }
             retVal._child.parent = retVal;
-
             retVal._child.on('exit', function (code) { this.parent.emit('Dismissed'); delete this.parent._child; });
             retVal._child.addModule('win-console', getJSModule('win-console'));
             retVal._child.addModule('win-message-pump', getJSModule('win-message-pump'));
@@ -75,44 +80,29 @@ function Toaster()
             {
                 throw ('Toast not supported on this platform');
             }
-            Object.defineProperty(retVal, '_sessions', {
-                value: require('user-sessions').Current(function onCurrentSession(sessions)
-                {
-                    this._cchild = require('child_process').execFile('/usr/bin/whoami', ['whoami'], { type: require('child_process').SpawnTypes.TERM });
-                    this._cchild.stdout.on('data', function (chunk)
-                    {
-                        if (chunk.toString().split('\r\n')[0] == 'root')
-                        {
-                            if (sessions[':0'].State != 'Connected' && sessions[':0'].State != 'Active')
-                            {
-                                // No logged in user owns the display
-                                this.parent.parent.Parent.emit('Dismissed');
-                                return;
-                            }
+            if (process.env['DISPLAY'])
+            {
+                // DISPLAY is set, so we good to go
+                retVal._notify = require('child_process').execFile('/usr/bin/notify-send', ['notify-send', retVal.title, retVal.caption]);
+            }
+            else
+            {
+                // We need to find the DISPLAY to use
+                var consoleUid = require('user-sessions').consoleUid();
+                var username = require('user-sessions').getUsername(consoleUid);
+                var display = require('monitor-info').getXInfo(consoleUid).display;
+                retVal._notify = require('child_process').execFile('/bin/sh', ['sh']);
+                retVal._notify.stdin.write('su - ' + username + ' -c "DISPLAY=' + display + ' notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\n');
+                retVal._notify.stdin.write('exit\n');
+            }
+            retVal._notify.stdout.on('data', function (chunk) { });
+            retVal._notify.waitExit();
 
-                            // We root, so we need to direct to DISPLAY=:0
-                            this.parent.parent._notify = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                            this.parent.parent._notify.stdin.write('su - ' + sessions[':0'].Username + ' -c "DISPLAY=:0 notify-send \'' + this.parent.parent.Parent.title + '\' \'' + this.parent.parent.Parent.caption + '\'"\n');
-                            this.parent.parent._notify.stdin.write('exit\n');
-                            this.parent.parent._notify.stdout.on('data', function (chunk) { });
-                        }
-                        else
-                        {
-                            // We ain't root, so that means we can just call send-notify directly
-                            this.parent.parent._notify = require('child_process').execFile('/usr/bin/notify-send', ['notify-send', this.parent.parent.Parent.title, this.parent.parent.Parent.caption], { type: require('child_process').SpawnTypes.TERM });
-                            this.parent.parent._notify.stdout.on('data', function (chunk) { });
-                        }
-
-                        // NOTIFY-SEND has a bug where timeouts don't work, so the default is 10 seconds
-                        this.parent.parent.Parent._timeout = setTimeout(function onFakeDismissed(obj)
-                        {
-                            obj.emit('Dismissed');
-                        }, 10000, this.parent.parent.Parent);
-                    });
-                    this._cchild.parent = this;
-                })
-            });
-            retVal._sessions.Parent = retVal;
+            // NOTIFY-SEND has a bug where timeouts don't work, so the default is 10 seconds
+            retVal._timeout = setTimeout(function onFakeDismissed(obj)
+            {
+                obj.emit('Dismissed');
+            }, 10000, retVal);
 
             toasters[retVal._hashCode()] = retVal;
             retVal.on('Dismissed', function () { delete toasters[this._hashCode()]; });
