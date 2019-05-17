@@ -90,6 +90,7 @@ function UserSessions()
         this._marshal = require('_GenericMarshal');
         this._kernel32 = this._marshal.CreateNativeProxy('Kernel32.dll');
         this._kernel32.CreateMethod('GetLastError');
+        this._kernel32.CreateMethod('WTSGetActiveConsoleSessionId')
         
         try
         {
@@ -202,7 +203,12 @@ function UserSessions()
             this._wts.WTSFreeMemory(buffer.Deref());
             return (retVal);
         };
-
+        this.consoleUid = function consoleUid()
+        {
+            var id = this._kernel32.WTSGetActiveConsoleSessionId().Val;
+            if(id==0xFFFFFFFF) {throw('Nobody logged in');}
+            return (id);
+        };
         this.Current = function Current(cb)
         {
             var retVal = {};

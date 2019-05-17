@@ -1047,8 +1047,11 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	
 #ifdef _POSIX
 	duk_push_int(ctx, (duk_int_t)getpid());
-	ILibDuktape_CreateReadonlyProperty(ctx, "pid");								
+#else
+	duk_push_int(ctx, (duk_int_t)GetCurrentProcessId());
 #endif
+	ILibDuktape_CreateReadonlyProperty(ctx, "pid");								
+
 
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "exit");

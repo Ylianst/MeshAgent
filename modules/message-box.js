@@ -74,12 +74,33 @@ function messageBox()
     this._ObjectID = 'message-box';
     this.create = function create(title, caption, timeout)
     {
+        var GM = require('_GenericMarshal');
+        var kernel32 = GM.CreateNativeProxy('kernel32.dll');
+        kernel32.CreateMethod('ProcessIdToSessionId');
+        var psid = GM.CreateVariable(4);
+        if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0)
+        {
+            ret._rej('Internal Error');
+            return (ret);
+        }
+
         if (timeout == null) { timeout = 10; }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        var options = { executionTimeout: timeout };
+
+        try
+        {
+            options.sessionId = require('user-sessions').consoleUid();
+            if (options.sessionId == psid.toBuffer().readUInt32LE()) { delete options.sessionId; }
+        }
+        catch(ee)
+        {
+            ret._rej('No logged on users');
+            return (ret);
+        }
         ret._title = title;
         ret._caption = caption;
-
-        ret._container = require('ScriptContainer').Create(timeout, ContainerPermissions.DEFAULT);
+        ret._container = require('ScriptContainer').Create(options);
         ret._container.promise = ret;
         ret._container.on('data', function (j)
         {
