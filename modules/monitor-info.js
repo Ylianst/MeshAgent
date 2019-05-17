@@ -356,6 +356,23 @@ function monitorinfo()
                         }
                     }
                 }
+                if(ret == null)
+                {
+                    // We couldn't find XAUTHORITY and DISPLAY, so as a last ditch effort, lets just look for DISPLAY
+                    for (var n in lines)
+                    {
+                        var ln = lines[n].trim();
+                        if (ln.length > 0)
+                        {
+                            var e = require('user-sessions').getEnvFromPid(ln);
+                            if (e.DISPLAY)
+                            {
+                                ret = { tty: '?', display: e.DISPLAY };
+                                return (ret);
+                            }
+                        }
+                    }
+                }
             }
             else
             {
