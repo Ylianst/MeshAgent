@@ -496,11 +496,17 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		nextNode = ILibLinkedList_GetNextNode(node);
-		if(FD_ISSET(j->mPipe_ReadEnd, readset) != 0)
+		if (ILibMemory_CanaryOK(j))
 		{
-			ILibProcessPipe_Process_ReadHandler(j);
+			if (FD_ISSET(j->mPipe_ReadEnd, readset) != 0)
+			{
+				ILibProcessPipe_Process_ReadHandler(j);
+			}
 		}
-
+		else
+		{
+			ILibLinkedList_Remove(node);
+		}
 		node = nextNode;
 	}
 }
