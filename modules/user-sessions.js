@@ -620,7 +620,30 @@ function UserSessions()
             }
             return (ret);
         };
+        this.findEnv = function findEnv(uid, env)
+        {
+            var uname = this.getUsername(uid);
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("ps -e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
+            child.waitExit();
 
+            var lines = child.stdout.str.split('\n');
+            for (var n in lines)
+            {
+                var ln = lines[n].trim();
+                if (ln.length > 0)
+                {
+                    var e = this.getEnvFromPid(ln);
+                    if (e[env])
+                    {
+                        return (e[env]);
+                    }
+                }
+            }
+            return (null);
+        };
         this.on('changed', this._recheckLoggedInUsers); // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
 
         
