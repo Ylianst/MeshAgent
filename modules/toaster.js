@@ -14,23 +14,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-var toasters = {};
+var promise = require('promise');
+
+if (process.platform == 'linux')
+{
+    function findPath(app)
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = '';
+        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdin.write("whereis " + app + " | awk '{ print $2 }'\nexit\n");
+        child.waitExit();
+        child.stdout.str = child.stdout.str.trim();
+        return (child.stdout.str == '' ? null : child.stdout.str);
+    }
+}
 
 function Toaster()
 {
     this._ObjectID = 'toaster';
     this.Toast = function Toast(title, caption)
     {
-        var retVal = {};
-        var emitter = require('events').inherits(retVal);
-        emitter.createEvent('Dismissed');
-
+        var retVal = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         retVal.title = title;
         retVal.caption = caption;
 
         if (process.platform == 'win32')
         {
-            emitter.createEvent('Clicked');
             var GM = require('_GenericMarshal');
             var kernel32 = GM.CreateNativeProxy('kernel32.dll');
             kernel32.CreateMethod('ProcessIdToSessionId');
@@ -38,7 +48,7 @@ function Toaster()
             var consoleUid = require('user-sessions').consoleUid();
             if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0)
             {
-                throw ('Internal Error');
+                retVal._rej('internal error'); return (retVal);
             }
 
             if (consoleUid == psid.toBuffer().readUInt32LE())
@@ -52,7 +62,7 @@ function Toaster()
                 retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: consoleUid });
             }
             retVal._child.parent = retVal;
-            retVal._child.on('exit', function (code) { this.parent.emit('Dismissed'); delete this.parent._child; });
+            retVal._child.on('exit', function (code) { this.parent._res('DISMISSED'); });
             retVal._child.addModule('win-console', getJSModule('win-console'));
             retVal._child.addModule('win-message-pump', getJSModule('win-message-pump'));
 
@@ -69,76 +79,104 @@ function Toaster()
                         require('ScriptContainer').send('done');\
                     ";
             retVal._child.ExecuteString(str);
-            toasters[retVal._hashCode()] = retVal;
-            retVal.on('Dismissed', function () { delete toasters[this._hashCode()]; });
-            console.log('Returning');
             return (retVal);
         }
         else
         {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("whereis notify-send | awk '{ print $2 }'\nexit\n");
-            child.waitExit();
-            if (child.stdout.str.trim() == '') {
-                // notify-send doesn't exist, lets check kdialog
-                child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("whereis kdialog | awk '{ print $2 }'\nexit\n");
-                child.waitExit();
-                if (child.stdout.str.trim() == '') { throw ('Toast not supported on this platform'); }
-                // Let's use kdialog 
-                if (process.env['DISPLAY'])
+            try
+            {
+                retVal.consoleUid = require('user-sessions').consoleUid();
+                retVal.xinfo = require('monitor-info').getXInfo(retVal.consoleUid);
+            }
+            catch(xxe)
+            {
+                retVal._rej(xxe);
+                return (retVal);
+            }
+            var util = findPath('zenity'); 
+            if (util)
+            {
+                // Use ZENITY
+                retVal.child = require('child_process').execFile(util, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                retVal.child.parent = retVal;
+                retVal.child.stderr.str = '';
+                retVal.child.stderr.on('data', function (chunk) { this.str += chunk.toString(); this.parent.kill(); });
+                retVal.child.stdout.on('data', function (chunk) { });
+                retVal.child.on('exit', function (code)
                 {
-                    retVal._notify = require('child_process').execFile(child.stdout.str.trim(), ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5']);
-                }
-                else
-                {
-                    var consoleUid = require('user-sessions').consoleUid();
-                    var xinfo = require('monitor-info').getXInfo(consoleUid);
-                    var xdg = require('user-sessions').findEnv(consoleUid, 'XDG_RUNTIME_DIR');
-                    if (!xinfo || !xinfo.display || !xinfo.xauthority || !xdg)
+                    if(this.stderr.str.trim() != '')
                     {
-                        throw ('Internal Error');
+                        if ((util = findPath('notify-send')) && this.stderr.str.split('GLib-CRITICAL').length > 1)
+                        {
+                            // This is a bug in zenity, so we should try notify-send
+                            if (process.env['DISPLAY'])
+                            {
+                                // DISPLAY is set, so we good to go
+                                this.parent.child = require('child_process').execFile(util, ['notify-send', this.parent.title, this.parent.caption]);
+                                this.parent.child.parent = this.parent;
+                            }
+                            else
+                            {
+                                // We need to find the DISPLAY to use
+                                var username = require('user-sessions').getUsername(consoleUid);
+                                this.parent.child = require('child_process').execFile('/bin/sh', ['sh']);
+                                this.parent.child.parent = this.parent;
+                                this.parent.child.stdin.write('su - ' + username + ' -c "DISPLAY=' + display + ' notify-send \'' + this.parent.title + '\' \'' + this.parent.caption + '\'"\n');
+                                this.parent.child.stdin.write('exit\n');
+                            }
+                            this.parent.child.stdout.on('data', function (chunk) { });
+                            this.parent.child.waitExit();
+
+                            // NOTIFY-SEND has a bug where timeouts don't work, so the default is 5 seconds
+                            this.parent._timeout = setTimeout(function onFakeDismissed(obj)
+                            {
+                                obj._res('DISMISSED');
+                            }, 10000, this.parent);
+                        }
+                        else
+                        {
+                            // Fake a toast using zenity --info
+                            util = findPath('zenity');
+                            this.parent.child = require('child_process').execFile(util, ['zenity', '--info', '--title=' + this.parent.title, '--text=' + this.parent.caption, '--timeout=5'], { uid: this.parent.consoleUid, env: { XAUTHORITY: this.parent.xinfo.xauthority, DISPLAY: this.parent.xinfo.display } });
+                            this.parent.child.parent = this.parent;
+                            this.parent.child.stderr.on('data', function (chunk) { });
+                            this.parent.child.stdout.on('data', function (chunk) { });
+                            this.parent.child.on('exit', function (code)
+                            {
+                                this.parent._res('DISMISSED');
+                            });
+                        }
                     }
-                    retVal._notify = require('child_process').execFile(child.stdout.str.trim(), ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: consoleUid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
-                }
-                retVal._notify.stdout.on('data', function (chunk) {  });
-                retVal._notify.stderr.on('data', function (chunk) {  });
-                retVal._notify.waitExit();
+                    else
+                    {
+                        this.parent._res('DISMISSED');
+                    }
+                });
             }
             else
             {
-                // Let's use notify-send 
-
-                if (process.env['DISPLAY'])
+                util = findPath('kdialog');
+                if (util)
                 {
-                    // DISPLAY is set, so we good to go
-                    retVal._notify = require('child_process').execFile(child.stdout.str.trim(), ['notify-send', retVal.title, retVal.caption]);
+                    // use KDIALOG
+                    var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR');
+                    if (!retVal.xinfo || !retVal.xinfo.display || !retVal.xinfo.xauthority || !xdg)
+                    {
+                        retVal._rej('Internal Error');
+                        return (retVal);
+                    }
+                    retVal._notify = require('child_process').execFile(util, ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: retVal.consoleUid, env: { DISPLAY: retVal.xinfo.display, XAUTHORITY: retVal.xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                    retVal._notify.parent = retVal;
+                    retVal._notify.stdout.on('data', function (chunk) { });
+                    retVal._notify.stderr.on('data', function (chunk) { });
+                    retVal._notify.on('exit', function (code) { this.parent._res('DISMISSED'); });
                 }
                 else
                 {
-                    // We need to find the DISPLAY to use
-                    var consoleUid = require('user-sessions').consoleUid();
-                    var username = require('user-sessions').getUsername(consoleUid);
-                    var display = require('monitor-info').getXInfo(consoleUid).display;
-                    retVal._notify = require('child_process').execFile('/bin/sh', ['sh']);
-                    retVal._notify.stdin.write('su - ' + username + ' -c "DISPLAY=' + display + ' notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\n');
-                    retVal._notify.stdin.write('exit\n');
+                    retVal._rej ('Zenity/KDialog not found');
                 }
-                retVal._notify.stdout.on('data', function (chunk) { });
-                retVal._notify.waitExit();
-
-                // NOTIFY-SEND has a bug where timeouts don't work, so the default is 10 seconds
-                retVal._timeout = setTimeout(function onFakeDismissed(obj) {
-                    obj.emit('Dismissed');
-                }, 10000, retVal);
-
-                toasters[retVal._hashCode()] = retVal;
-                retVal.on('Dismissed', function () { delete toasters[this._hashCode()]; });
             }
+
             return (retVal);
         }
     };

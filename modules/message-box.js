@@ -129,37 +129,77 @@ function linux_messageBox()
     this.create = function create(title, caption, timeout)
     {
         if (timeout == null) { timeout = 10; }
-        var zenity = '';
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        var zenity = '', kdialog = '';
+        var uid = require('user-sessions').consoleUid();
+        var xinfo = require('monitor-info').getXInfo(uid);
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = '';
         child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
         child.stdin.write("whereis zenity | awk '{ print $2 }'\nexit\n");
         child.waitExit();
         zenity = child.stdout.str.trim();
-        if (zenity == '') { throw ('Zenity not installed'); }
-        var uid = require('user-sessions').consoleUid();
-        var xinfo = require('monitor-info').getXInfo(uid);
-        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        ret.child = require('child_process').execFile(zenity, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
-        ret.child.promise = ret;
-        ret.child.stderr.on('data', function (chunk) { });
-        ret.child.stdout.on('data', function (chunk) { });
-        ret.child.on('exit', function (code)
+        if (zenity != '')
         {
-            switch(code)
+            // GNOME/ZENITY
+            ret.child = require('child_process').execFile(zenity, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+            ret.child.promise = ret;
+            ret.child.stderr.on('data', function (chunk) { });
+            ret.child.stdout.on('data', function (chunk) { });
+            ret.child.on('exit', function (code)
             {
-                case 0:
-                    this.promise._res();
-                    break;
-                case 1:
-                    this.promise._rej('denied');
-                    break;
-                default:
-                    this.promise._rej('timeout');
-                    break;
+                switch (code)
+                {
+                    case 0:
+                        this.promise._res();
+                        break;
+                    case 1:
+                        this.promise._rej('denied');
+                        break;
+                    default:
+                        this.promise._rej('timeout');
+                        break;
+                }
+            });
+        }
+        else
+        {
+            child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("whereis kdialog | awk '{ print $2 }'\nexit\n");
+            child.waitExit();
+            kdialog = child.stdout.str.trim();
+            if (kdialog == '') { ret._rej('Platform not supported (zenity or kdialog not found)'); return (ret); }
+            if (process.env['DISPLAY'])
+            {
+                ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption]);
+                ret.child.promise = ret;
             }
-        });
-
+            else
+            {
+                var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR');
+                if (!xinfo || !xinfo.display || !xinfo.xauthority || !xdg) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
+                ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                ret.child.promise = ret;
+            }
+            ret.child.stdout.on('data', function (chunk) { });
+            ret.child.stderr.on('data', function (chunk) { });
+            ret.child.on('exit', function (code)
+            {
+                switch (code) {
+                    case 0:
+                        this.promise._res();
+                        break;
+                    case 1:
+                        this.promise._rej('denied');
+                        break;
+                    default:
+                        this.promise._rej('timeout');
+                        break;
+                }
+            });
+        }
         return (ret);
 
 
