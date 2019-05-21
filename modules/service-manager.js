@@ -1060,6 +1060,72 @@ function serviceManager()
             }
         }
     }
+    if (process.platform == 'darwin')
+    {
+        this.installLaunchAgent = function installLaunchAgent(options)
+        {
+            if (!this.isAdmin()) { throw ('Installing a service, requires admin'); }
+            var servicePathTokens = options.servicePath.split('/');
+            servicePathTokens.pop();
+            if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
+            options.workingDirectory = servicePathTokens.join('/');
+
+            var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
+            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
+            var params =         '     <key>ProgramArguments</key>\n';
+            params +=            '     <array>\n';
+            params +=           ('         <string>' + options.servicePath + '</string>\n');
+            if (options.parameters) {
+                for (var itm in options.parameters)
+                {
+                    params +=   ('         <string>' + options.parameters[itm] + '</string>\n');
+                }
+            }
+            params +=            '     </array>\n';
+
+            var plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
+            plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
+            plist += '<plist version="1.0">\n';
+            plist += '  <dict>\n';
+            plist += '      <key>Label</key>\n';
+            plist += ('     <string>' + options.name + '</string>\n');
+            plist += (params + '\n');
+            plist += '      <key>WorkingDirectory</key>\n';
+            plist += ('     <string>' + options.workingDirectory + '</string>\n');
+            plist += (stdoutpath + '\n');
+            plist += '      <key>RunAtLoad</key>\n';
+            plist += (autoStart + '\n');
+            if (options.sessionTypes && options.sessionTypes.length > 0)
+            {
+                plist += '      <key>LimitLoadToSessionType</key>\n';
+                plist += '      <array>\n';
+                for (var stype in options.sessionTypes)
+                {
+                    plist += ('          <string>' + options.sessionTypes[stype] + '</string>\n');
+                }
+                plist += '      </array>\n';
+            }
+            plist += '      <key>KeepAlive</key>\n';
+            if (options.failureRestart == null || options.failureRestart > 0) {
+                plist += '      <dict>\n';
+                plist += '         <key>Crashed</key>\n';
+                plist += '         <true/>\n';
+                plist += '      </dict>\n';
+            }
+            else {
+                plist += '      <false/>\n';
+            }
+            if (options.failureRestart != null) {
+                plist += '      <key>ThrottleInterval</key>\n';
+                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
+            }
+
+            plist += '  </dict>\n';
+            plist += '</plist>';
+
+            require('fs').writeFileSync('/Library/LaunchAgents/' + options.name + '.plist', plist);
+        };
+    }
     this.uninstallService = function uninstallService(name)
     {
         if (!this.isAdmin()) { throw ('Uninstalling a service, requires admin'); }

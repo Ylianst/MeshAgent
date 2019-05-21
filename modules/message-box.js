@@ -208,6 +208,21 @@ function linux_messageBox()
     };
 }
 
+function macos_messageBox()
+{
+    this._ObjectID = 'message-box';
+    this.create = function create(title, caption, timeout)
+    {
+    };
+    this.notify = function notify(title, caption)
+    {
+    };
+    this.startServer = function startServer(options)
+    {
+    };
+}
+
+
 switch(process.platform)
 {
     case 'win32':
@@ -215,6 +230,9 @@ switch(process.platform)
         break;
     case 'linux':
         module.exports = new linux_messageBox();
+        break;
+    case 'darwin':
+
         break;
 }
 
