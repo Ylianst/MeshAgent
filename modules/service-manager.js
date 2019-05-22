@@ -89,6 +89,357 @@ function parseServiceStatus(token)
     return (j);
 }
 
+if (process.platform == 'darwin')
+{
+    function getOSVersion()
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = '';
+        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdin.write("sw_vers | grep ProductVersion | awk '{ print $2 }'\nexit\n");
+        child.waitExit();
+
+        //child.stdout.str = '10.9';
+
+        var ret = { raw: child.stdout.str.trim().split('.'), toString: function () { return (this.raw.join('.')); } };
+        ret.compareTo = function compareTo(val)
+        {
+            var raw = (typeof (val) == 'string') ? val.split('.') : val.raw; if (!raw) { throw ('Invalid parameter'); }
+            var self = this.raw.join('.').split('.');
+
+            var r = null, s = null;
+            while (self.length > 0 && raw.length > 0)
+            {
+                s = parseInt(self.shift()); r = parseInt(raw.shift());
+                if (s < r) { return (-1); }
+                if (s > r) { return (1); }
+            }
+            if (self.length == raw.length) { return (0); }
+            if (self.length < raw.length) { return (-1); } else { return (1); }    
+        }
+        return (ret);
+    };
+
+
+    function fetchPlist(folder, name)
+    {
+        if (folder.endsWith('/')) { folder = folder.substring(0, folder.length - 1); }
+        var ret = { name: name, close: function () { } };
+        if (!require('fs').existsSync(folder + '/' + name + '.plist'))
+        {
+            // Before we throw in the towel, let's enumerate all the plist files, and see if one has a matching label
+            var files = require('fs').readdirSync(folder);
+            for (var file in files)
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("cat " + folder + '/' + files[file] + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                child.waitExit();
+                if (child.stdout.str.trim() == name)
+                {
+                    ret.name = files[file].endsWith('.plist') ? files[file].substring(0, files[file].length - 6) : files[file];
+                    Object.defineProperty(ret, 'alias', { value: name });
+                    Object.defineProperty(ret, 'plist', { value: folder + '/' + files[file] });
+                    break;
+                }
+            }
+            if (ret.name == name) { throw (' ' + (folder.split('LaunchDaemon').length>1 ? 'LaunchDaemon' : 'LaunchAgent') + ' (' + name + ') NOT FOUND'); }
+        }
+        else
+        {
+            Object.defineProperty(ret, 'plist', { value: folder + '/' + name + '.plist' });
+            Object.defineProperty(ret, 'alias', {
+                value: (function () {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim());
+                })()
+            });
+        }
+        Object.defineProperty(ret, 'daemon', { value: ret.plist.split('/LaunchDaemons/').length > 1 ? true : false });
+
+        ret.appWorkingDirectory = function appWorkingDirectory()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+            child.waitExit();
+            child.stdout.str = child.stdout.str.trim();
+
+            return (child.stdout.str.endsWith('/') ? child.stdout.str.substring(0, child.stdout.str.length - 1) : child.stdout.str);
+        };
+        ret.appLocation = function appLocation()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+            child.waitExit();
+            return (child.stdout.str.trim());
+        };
+        Object.defineProperty(ret, '_runAtLoad', {
+            value: (function () {
+                // We need to see if this is an Auto-Starting service, in order to figure out how to implement 'start'
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>RunAtLoad</key>\"); split(a[2], b, \"/>\"); split(b[1], c, \"<\"); print c[2]; }'\nexit\n");
+                child.waitExit();
+                return (child.stdout.str.trim().toUpperCase() == "TRUE");
+            })()
+        });
+        Object.defineProperty(ret, "_keepAlive", {
+            value: (function () {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{split($0, a, \"<key>KeepAlive</key>\"); split(a[2], b, \"<\"); split(b[2], c, \">\"); ");
+                child.stdin.write(" if(c[1]==\"dict\"){ split(a[2], d, \"</dict>\"); if(split(d[1], truval, \"<true/>\")>1) { split(truval[1], kn1, \"<key>\"); split(kn1[2], kn2, \"</key>\"); print kn2[1]; } }");
+                child.stdin.write(" else { split(c[1], ka, \"/\"); if(ka[1]==\"true\") {print \"ALWAYS\";} } }'\nexit\n");
+                child.waitExit();
+                return (child.stdout.str.trim());
+            })()
+        });
+        ret.getPID = function getPID(uid, asString)
+        {
+            var options = undefined;
+            var command;
+
+            if (getOSVersion().compareTo('10.10') < 0)
+            {
+                command = "launchctl list | grep '" + this.alias + "' | awk '{ if($3==\"" + this.alias + "\"){print $1;}}'\nexit\n";
+                options = { uid: uid };
+            }
+            else
+            {
+                if (uid == null)
+                {
+                    command = 'launchctl print system | grep "' + this.alias + '" | awk \'{ if(split($0, tmp, " ")==3) { if($3=="' + this.alias + '") { print $1; } }}\'\nexit\n';
+                }
+                else
+                {
+                    command = 'launchctl print gui/' + uid + ' | grep "' + this.alias + '" | awk \'{ if(split($0, tmp, " ")==3) { if($3=="' + this.alias + '") { print $1; } }}\'\nexit\n';
+                }
+            }
+
+            var child = require('child_process').execFile('/bin/sh', ['sh'], options);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write(command);
+            child.waitExit();
+
+            if (asString == null || asString != true)
+            {
+                return (parseInt(child.stdout.str.trim()));
+            }
+            else
+            {
+                return (child.stdout.str.trim());
+            }
+        };
+        ret.isLoaded = function isLoaded(uid)
+        {
+            return (this.getPID(uid, true) != '');
+        };
+        ret.isRunning = function isRunning(uid)
+        {
+            return (this.getPID(uid) > 0);
+        };
+        ret.isMe = function isMe(uid)
+        {
+            return (this.getPID(uid) == process.pid);
+        };
+        ret.load = function load(uid)
+        {
+            var self = require('user-sessions').Self();
+            var ver = getOSVersion();
+            var options = undefined;
+            var command = 'load';
+
+            if (this.daemon)
+            {
+                if(uid!=null || uid!=0)
+                {
+                    throw ('LaunchDaemon must run as root');
+                }
+            }
+            else
+            {
+                if (uid == null) { uid = self; }
+                if(ver.compareTo('10.10') < 0 && uid != self && self != 0)
+                {
+                    throw ('On this version of MacOS, must be root to load this service into the specified user space');
+                }
+                else if (ver.compareTo('10.10') < 0)
+                {
+                    options = { uid: uid };
+                }
+                else
+                {
+                    command = 'bootstrap gui/' + uid;
+                }
+            }
+
+            var child = require('child_process').execFile('/bin/sh', ['sh'], options);
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('launchctl ' + command + ' ' + this.plist + '\n\exit\n');
+            child.waitExit();
+        };
+        ret.unload = function unload(uid)
+        {
+            var child = null;
+            var v = getOSVersion();
+            var self = require('user-sessions').Self();
+            var options = undefined;
+            var useBootout = false;
+
+            if(uid!=null)
+            {
+                if (v.compareTo('10.10') <= 0 && self == 0)
+                {
+                    // We must switch to user context to unload the service
+                    options = { uid: uid };
+                }
+                else
+                {
+                    if(v.compareTo('10.10') > 0)
+                    {
+                        if(self == 0 || self == uid)
+                        {
+                            // use bootout
+                            useBootout = true;
+                        }
+                        else
+                        {
+                            // insufficient access
+                            throw ('Needs elevated privileges')
+                        }
+                    }
+                    else
+                    {
+                        if (self == uid)
+                        {
+                            // just unload, becuase we are already in the right context
+                            useBootout = false;
+                        }
+                        else
+                        {
+                            // insufficient access
+                            throw ('Needs elevated privileges')
+                        }
+                    }
+                }
+            }
+            else
+            {
+                if(self == 0)
+                {
+                    if(v.compareTo('10.10') > 0)
+                    {
+                        // use bootout
+                        useBootout = true;
+                    }
+                    else
+                    {
+                        // just unload
+                        useBootout = false;
+                    }
+                }
+                else
+                {
+                    // Insufficient access
+                    throw ('Needs elevated privileges')
+                }
+            }
+
+            child = require('child_process').execFile('/bin/sh', ['sh'], options);
+            child.stdout.str = '';
+            child.stderr.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            if (useBootout)
+            {
+                child.stdin.write('launchctl bootout gui/' + uid + ' ' + this.plist + '\nexit\n');
+            }
+            else
+            {
+                child.stdin.write('launchctl unload ' + this.plist + '\nexit\n');
+            }
+            child.waitExit();
+        };
+        ret.start = function start(uid)
+        {
+            var options = undefined;
+            var self = require('user-sessions').Self();
+            if (!this.daemon && uid == null) { uid = self; }
+            if (!this.daemon && uid > 0 && self == 0) { options = { uid: uid }; }
+            if (!this.daemon && uid > 0 && self != 0 && uid != self) { throw ('Cannot start LaunchAgent into another user domain while not root'); }
+            if (this.daemon && self != 0) { throw ('Cannot start LaunchDaemon while not root'); }
+
+            this.load(uid);
+
+            var child = require('child_process').execFile('/bin/sh', ['sh'], options);
+            child.stdout.on('data', function (chunk) { });
+            child.stdin.write('launchctl start ' + this.alias + '\n\exit\n');
+            child.waitExit();
+        };
+        ret.stop = function stop(uid)
+        {
+            var options = undefined;
+            var self = require('user-sessions').Self();
+            if (!this.daemon && uid == null) { uid = self; }
+            if (!this.daemon && uid > 0 && self == 0) { options = { uid: uid }; }
+            if (!this.daemon && uid > 0 && self != 0 && uid != self) { throw ('Cannot stop LaunchAgent in another user domain while not root'); }
+            if (this.daemon && self != 0) { throw ('Cannot stop LaunchDaemon while not root'); }
+
+            if (!(this._keepAlive == 'Crashed' || this._keepAlive == ''))
+            {
+                // We must unload the service, rather than stopping it, because otherwise it'll likely restart
+                this.unload(uid);
+            }
+            else
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh'], options);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write('launchctl stop ' + this.alias + '\nexit\n');
+                child.waitExit();
+            }
+        };
+        ret.restart = function restart(uid)
+        {
+            if (getOSVersion().compareTo('10.10') < 0)
+            {
+                if (!this.daemon && uid == null) { uid = require('user-sessions').Self(); }
+                var command = 'launchctl unload ' + this.plist + '\nlaunchctl load ' + this.plist + '\nlaunchctl start ' + this.alias + '\nexit\n';
+                var child = require('child_process').execFile('/bin/sh', ['sh'], { detached: true, uid: uid });
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write(command);
+                child.waitExit();
+            }
+            else
+            {
+                var command = this.daemon ? ('system/' + this.alias) : ('gui/' + (uid != null ? uid : require('user-sessions').Self()) + '/' + this.alias);
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write('launchctl kickstart -k ' + command + '\nexit\n');
+                child.waitExit();
+            }
+        };
+        return (ret);
+    };
+}
+
+
+
 function serviceManager()
 {
     this._ObjectID = 'service-manager';
@@ -330,160 +681,8 @@ function serviceManager()
         }
         if (process.platform == 'darwin')
         {
-            this.getService = function (name)
-            {
-                var ret = { name: name, close: function () { }};
-                if(!require('fs').existsSync('/Library/LaunchDaemons/' + name + '.plist'))
-                {
-                    // Before we throw in the towel, let's enumerate all the plist files, and see if one has a matching label
-                    var files = require('fs').readdirSync('/Library/LaunchDaemons');
-                    for (var file in files)
-                    {
-                        var child = require('child_process').execFile('/bin/sh', ['sh']);
-                        child.stdout.str = '';
-                        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        child.stdin.write("cat /Library/LaunchDaemons/" + files[file] + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                        child.waitExit();
-                        if(child.stdout.str.trim() == name)
-                        {
-                            ret.name = files[file].endsWith('.plist') ? files[file].substring(0, files[file].length - 6) : files[file];
-                            Object.defineProperty(ret, 'alias', { value: name });
-                            Object.defineProperty(ret, 'plist', { value: '/Library/LaunchDaemons' + '/' + files[file] });
-                            break;
-                        }
-                    }
-                    if (ret.name == name) { throw (' LaunchDaemon (' + name + ') NOT FOUND'); }
-                }
-                else
-                {
-                    Object.defineProperty(ret, 'plist', { value: '/Library/LaunchDaemons/' + name + '.plist' });
-                }
-                Object.defineProperty(ret, '_runAtLoad', {
-                    value: (function ()
-                    {
-                        // We need to see if this is an Auto-Starting service, in order to figure out how to implement 'start'
-                        var child = require('child_process').execFile('/bin/sh', ['sh']);
-                        child.stdout.str = '';
-                        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>RunAtLoad</key>\"); split(a[2], b, \"/>\"); split(b[1], c, \"<\"); print c[2]; }'\nexit\n");
-                        child.waitExit();
-                        return (child.stdout.str.trim().toUpperCase() == "TRUE");
-                    })()
-                });
-                Object.defineProperty(ret, "_keepAlive", {
-                    value: (function ()
-                    {
-                        var child = require('child_process').execFile('/bin/sh', ['sh']);
-                        child.stdout.str = '';
-                        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{split($0, a, \"<key>KeepAlive</key>\"); split(a[2], b, \"<\"); split(b[2], c, \">\"); ");
-                        child.stdin.write(" if(c[1]==\"dict\"){ split(a[2], d, \"</dict>\"); if(split(d[1], truval, \"<true/>\")>1) { split(truval[1], kn1, \"<key>\"); split(kn1[2], kn2, \"</key>\"); print kn2[1]; } }");
-                        child.stdin.write(" else { split(c[1], ka, \"/\"); if(ka[1]==\"true\") {print \"ALWAYS\";} } }'\nexit\n");
-                        child.waitExit();
-                        return (child.stdout.str.trim());
-                    })()
-                });
-
-                if (!ret.alias)
-                {
-                    Object.defineProperty(ret, 'alias', {
-                        value: (function ()
-                        {
-                            var child = require('child_process').execFile('/bin/sh', ['sh']);
-                            child.stdout.str = '';
-                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                            child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                            child.waitExit();
-                            return (child.stdout.str.trim());
-                        })()
-                    });
-                }
-                ret.getPID = function getPID()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("launchctl list | grep '" + this.alias + "' | awk '{ if($3==\"" + this.alias + "\"){print $1;}}'\nexit\n");
-                    child.waitExit();                   
-                    return (parseInt(child.stdout.str.trim()));
-                };
-                ret.isLoaded = function isLoaded()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("launchctl list | grep '" + this.alias + "' | awk '{ if($3==\"" + this.alias + "\"){print $1;}}'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim() != '');
-                };
-                ret.load = function load()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write('launchctl load ' + this.plist + '\nexit\n');
-                    child.waitExit();
-                };
-                ret.isRunning = function isRunning()
-                {
-                    return (this.getPID() > 0);
-                };
-                ret.isMe = function isMe()
-                {
-                    return (this.getPID() == process.pid);
-                };
-                ret.appWorkingDirectory = function appWorkingDirectory()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                    child.waitExit();
-                    child.stdout.str = child.stdout.str.trim();
-
-                    return (child.stdout.str.endsWith('/') ? child.stdout.str.substring(0, child.stdout.str.length - 1) : child.stdout.str);
-                };
-                ret.appLocation = function appLocation()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim());
-                };
-                ret.start = function start()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.on('data', function (chunk) { });
-                    child.stdin.write('launchctl load ' + this.plist + '\n');
-                    child.stdin.write('launchctl start ' + this.alias + '\n'); 
-                    child.stdin.write('exit\n');
-                    child.waitExit();
-                };
-                ret.stop = function stop()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.on('data', function (chunk) { });
-                    if (this._keepAlive == 'Crashed' || this._keepAlive == '')
-                    {
-                        // We can call stop, so the service can stay loaded, so scheduled jobs will still work
-                        child.stdin.write('launchctl stop ' + this.alias + '\nexit\n');
-                    }
-                    else
-                    {
-                        // We must unload, otherwise the service is likely to just restart on it's own.
-                        child.stdin.write('launchctl unload ' + this.plist + '\nexit\n');
-                    }
-                    child.waitExit();
-                };
-                ret.restart = function restart()
-                {
-                    this.stop();
-                    this.start();
-                };
-                return (ret);
-            };
+            this.getService = function getService(name) { return (fetchPlist('/Library/LaunchDaemons', name)); };
+            this.getLaunchAgent = function getLaunchAgent(name) { return (fetchPlist('/Library/LaunchAgents', name)); };
         }
         if(process.platform == 'linux')
         {
@@ -1275,3 +1474,8 @@ function serviceManager()
 
 module.exports = serviceManager;
 module.exports.manager = new serviceManager();
+
+if (process.platform == 'darwin')
+{
+    module.exports.getOSVersion = getOSVersion;
+}
