@@ -270,7 +270,7 @@ function macos_messageBox()
         ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
 
         var n = 0;
-        while (require('fs').existsSync(ret.ipcPath + n)) { ++n; }
+        while (require('fs').existsSync(ret.ipcpath + n)) { ++n; }
         ret.ipcpath += n;
 
         ret.title = title;
@@ -364,6 +364,7 @@ function macos_messageBox()
         if (require('fs').existsSync(options.path)) { require('fs').unlinkSync(options.path); }
 
         this._messageServer = require('net').createServer();
+        this._messageServer._options = options;
         this._messageServer.timer = setTimeout(function (obj)
         {
             obj.close();
@@ -430,6 +431,17 @@ function macos_messageBox()
                 }
             });
         });
+
+        this._messageServer.on('~', function ()
+        {
+            try {
+                require('fs').unlinkSync(this._options.path);
+            }
+            catch (e)
+            {
+            }
+        });
+
         return (this._messageServer);
     };
 }
