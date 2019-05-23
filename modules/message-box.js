@@ -123,6 +123,7 @@ function messageBox()
     };
 }
 
+
 function linux_messageBox()
 {
     this._ObjectID = 'message-box';
@@ -208,17 +209,228 @@ function linux_messageBox()
     };
 }
 
+if (process.platform == 'darwin')
+{
+    function translateObject(obj)
+    {
+        var j = JSON.stringify(obj);
+        var b = Buffer.alloc(j.length + 4);
+        b.writeUInt32LE(j.length + 4);
+        Buffer.from(j).copy(b, 4);
+        return (b);
+    }
+}
+
 function macos_messageBox()
 {
     this._ObjectID = 'message-box';
+    this._initMessageServer = function _initMessageServer()
+    {
+        var ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
+        var n;
+
+        try
+        {
+            n = require('tls').generateRandomInteger('1', '99999');
+        }
+        catch(e)
+        {
+            n = 0;
+        }
+        while (require('fs').existsSync(ipcPath + n))
+        {
+            try
+            {
+                n = require('tls').generateRandomInteger('1', '99999');
+            }
+            catch (e)
+            {
+                ++n;
+            }
+        }
+        ipcpath = ipcpath + n;
+
+        var tmpServiceName = 'meshNotificationServer' + n;
+
+        require('service-manager').manager.installLaunchAgent(
+            {
+                name: tmpServiceName, servicePath: process.execPath, startType: 'AUTO_START',
+                sessionTypes: ['Aqua'], parameters: ['-exec', "require('message-box').startServer({path: '" + ipcpath + "}).on('close', function(){process.exit();});"]
+            });
+
+        return (ipcpath);
+    };
+
+
+
+
     this.create = function create(title, caption, timeout)
     {
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
+
+        var n = 0;
+        while (require('fs').existsSync(ret.ipcPath + n)) { ++n; }
+        ret.ipcpath += n;
+
+        ret.title = title;
+        ret.caption = caption;
+
+        //ToDo: Install the message server
+
+        this.startServer({ path: ret.ipcpath });
+
+        // Create the Client
+        ret.client = require('net').createConnection({ path: ret.ipcpath }, function ()
+        {
+            var b = translateObject({ command: 'DIALOG', title: ret.title, caption: ret.caption, icon: 'caution', buttons: ['"Yes"', '"No"'], buttonDefault: 2, timeout: timeout });
+            this.write(b);
+        });
+        ret.client.promise = ret;
+        ret.client.on('data', function (buffer)
+        {
+            if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+            var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+            switch (p.command)
+            {
+                case 'ERROR':
+                    this.promise._rej(p.reason);
+                    break;
+                case 'DIALOG':
+                    if (p.timeout)
+                    {
+                        this.promise._rej('TIMEOUT');
+                    }
+                    else
+                    {
+                        this.promise._res(p.button);
+                    }
+                    break;
+            }
+        });
+        ret.client.on('end', function ()
+        {
+            this.promise._rej('Message Server abruptly disconnected');
+        });
+
+        return (ret);
     };
     this.notify = function notify(title, caption)
     {
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
+
+        var n = 0;
+        while (require('fs').existsSync(ret.ipcPath + n)) { ++n; }
+        ret.ipcpath += n;
+
+        ret.title = title;
+        ret.caption = caption;
+
+        //ToDo: Install the message server
+        
+        this.startServer({ path: ret.ipcpath });
+
+        // Create the Client
+        ret.client = require('net').createConnection({ path: ret.ipcpath }, function ()
+        {
+            var b = translateObject({ command: 'NOTIFY', title: ret.title, caption: ret.caption });
+            this.write(b);
+        });
+        ret.client.promise = ret;
+        ret.client.on('data', function (buffer)
+        {
+            if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+            var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+            switch(p.command)
+            {
+                case 'ERROR':
+                    this.promise._rej(p.reason);
+                    break;
+                case 'NOTIFY':
+                    this.promise._res();
+                    break;
+            }
+        });
+        ret.client.on('end', function ()
+        {
+            this.promise._rej('Message Server abruptly disconnected');
+        });
+
+        return (ret);
     };
     this.startServer = function startServer(options)
     {
+        if (require('fs').existsSync(options.path)) { require('fs').unlinkSync(options.path); }
+
+        this._messageServer = require('net').createServer();
+        this._messageServer.timer = setTimeout(function (obj)
+        {
+            obj.close();
+        }, 5000, this._messageServer);
+        this._messageServer.listen(options);
+        this._messageServer.on('connection', function (c)
+        {
+            this._client = c;
+            this._client.timer = this.timer;
+            this._client.on('data', function (buffer)
+            {
+                if (buffer.length < 4) { this.unshift(buffer); }
+                if (buffer.length < buffer.readUInt32LE(0)) { this.unshift(buffer); }
+                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString().trim());
+                clearTimeout(this.timer);
+                switch (p.command)
+                {
+                    case 'NOTIFY':
+                        this._shell = require('child_process').execFile('/bin/sh', ['sh']);
+                        this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                        this._shell.stdin.write('osascript -e \'tell current application to display notification "' + p.caption + '" with title "' + p.title + '"\'\nexit\n');
+                        this._shell.waitExit();
+                        if (this._shell.stderr.str != '')
+                        {
+                            this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
+                        }
+                        else
+                        {
+                            this.end(translateObject({ command: 'NOTIFY', status: 0 }));
+                        }
+                        break;
+                    case 'DIALOG':
+                        var timeout = p.timeout ? (' giving up after ' + p.timeout) : '';
+                        var icon = p.icon ? ('with icon ' + p.icon) : '';
+                        var buttons = p.buttons ? ('buttons {' + p.buttons.toString() + '}') : '';
+                        if (p.buttonDefault != null)
+                        {
+                            buttons += (' default button ' + p.buttonDefault)
+                        }
+                        this._shell = require('child_process').execFile('/bin/sh', ['sh']);
+                        this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                        this._shell.stdin.write('osascript -e \'tell current application to display dialog "' + p.caption + '" with title "' + p.title + '" ' + icon + ' ' + buttons + timeout + '\' | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\n');
+                        this._shell.waitExit();
+                        if (this._shell.stderr.str != '')
+                        {
+                            this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
+                        }
+                        else
+                        {
+                            if (this._shell.stdout.str.trim() == '_TIMEOUT_')
+                            {
+                                this.end(translateObject({ command: 'DIALOG', timeout: true }));
+                            }
+                            else
+                            {
+                                this.end(translateObject({ command: 'DIALOG', button: this._shell.stdout.str.trim() }));
+                            }
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            });
+        });
+        return (this._messageServer);
     };
 }
 
@@ -232,7 +444,7 @@ switch(process.platform)
         module.exports = new linux_messageBox();
         break;
     case 'darwin':
-
+        module.exports = new macos_messageBox();
         break;
 }
 

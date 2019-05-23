@@ -1288,6 +1288,35 @@ duk_ret_t ILibDuktape_net_server_address(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_net_server_close(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx);
+
+	duk_push_this(ctx);
+	if (nargs > 0)
+	{
+		duk_get_prop_string(ctx, -1, "once");	// [server][once]
+		duk_dup(ctx, -2);						// [server][once][this]
+		duk_push_string(ctx, "close");			// [server][once][this][close]
+		duk_dup(ctx, 0);						// [server][once][this][close][callback]
+		duk_call_method(ctx, 2); duk_pop(ctx);	// [server]
+	}
+
+	ILibDuktape_net_server *server = (ILibDuktape_net_server*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_net_Server_buffer);
+	if (server != NULL && server->server != NULL)
+	{
+		if (!ILibIsChainBeingDestroyed(Duktape_GetChain(ctx)))
+		{
+			ILibAsyncServerSocket_RemoveFromChain(server->server);
+			server->server = NULL;
+
+			ILibDuktape_EventEmitter_SetupEmit(ctx, server->self, "close");		// [emit][this][close]
+			duk_call_method(ctx, 1);
+		}
+	}
+	return(0);
+}
+
 duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -1314,6 +1343,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 	server->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "close");
 	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "connection");
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "close", ILibDuktape_net_server_close, DUK_VARARGS);
 #ifndef MICROSTACK_NOTLS
 	if (isTLS)
 	{
