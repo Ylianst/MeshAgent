@@ -409,7 +409,7 @@ linux:
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -std=gnu99 -Os -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
 	$(STRIP)
 
 
