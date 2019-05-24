@@ -376,6 +376,7 @@ function macos_messageBox()
 
         this._messageServer = require('net').createServer();
         this._messageServer.uid = require('user-sessions').consoleUid();
+        this._messageServer.osversion = require('service-manager').getOSVersion();
         this._messageServer._options = options;
         this._messageServer.timer = setTimeout(function (obj)
         {
@@ -456,7 +457,6 @@ function macos_messageBox()
             }
 
             // Need to uninstall ourselves
-            var osVersion = require('service-manager').getOSVersion();
             var s;
             
             try
@@ -469,7 +469,7 @@ function macos_messageBox()
             }
 
             var child = require('child_process').execFile('/bin/sh', ['sh'], { detached: true });
-            if (osVersion.compareTo('10.10') < 0)
+            if (this.osversion.compareTo('10.10') < 0)
             {
                 // Just unload
                 child.stdin.write('launchctl unload ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
@@ -479,7 +479,13 @@ function macos_messageBox()
                 // Use bootout
                 child.stdin.write('launchctl bootout gui/' + this.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
             }
-            child.waitExit();
+            try
+            {
+                child.waitExit();
+            }
+            catch(e)
+            {
+            }
         });
 
         return (this._messageServer);
