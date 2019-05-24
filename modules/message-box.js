@@ -226,7 +226,19 @@ function macos_messageBox()
     this._ObjectID = 'message-box';
     this._initMessageServer = function _initMessageServer()
     {
-        var ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        
+        try
+        {
+            ret.uid = require('user-sessions').consoleUid();
+        }
+        catch(e)
+        {
+            ret._rej(e);
+            return (ret);
+        }
+
+        ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
         var n;
 
         try
@@ -237,7 +249,7 @@ function macos_messageBox()
         {
             n = 0;
         }
-        while (require('fs').existsSync(ipcPath + n))
+        while (require('fs').existsSync(ret.ipcpath + n))
         {
             try
             {
@@ -248,17 +260,16 @@ function macos_messageBox()
                 ++n;
             }
         }
-        ipcpath = ipcpath + n;
-
-        var tmpServiceName = 'meshNotificationServer' + n;
-
+        ret.ipcpath = ret.ipcpath + n;
+        ret.tmpServiceName = 'meshNotificationServer' + n;
         require('service-manager').manager.installLaunchAgent(
             {
                 name: tmpServiceName, servicePath: process.execPath, startType: 'AUTO_START',
-                sessionTypes: ['Aqua'], parameters: ['-exec', "require('message-box').startServer({path: '" + ipcpath + "}).on('close', function(){process.exit();});"]
+                sessionTypes: ['Aqua'], parameters: ['-exec', "require('message-box').startServer({path: '" + ret.ipcpath + ", service: '" + ret.tmpServiceName + "'}).on('close', function(){process.exit();});"]
             });
+        require('service-manager').getLaunchAgent(ret.tmpServiceName).load(ret.uid);
 
-        return (ipcpath);
+        return (ret);
     };
 
 
@@ -312,7 +323,7 @@ function macos_messageBox()
         {
             this.promise._rej('Message Server abruptly disconnected');
         });
-
+        ret.finally(function () { console.log('finally'); });
         return (ret);
     };
     this.notify = function notify(title, caption)
@@ -364,6 +375,7 @@ function macos_messageBox()
         if (require('fs').existsSync(options.path)) { require('fs').unlinkSync(options.path); }
 
         this._messageServer = require('net').createServer();
+        this._messageServer.uid = require('user-sessions').consoleUid();
         this._messageServer._options = options;
         this._messageServer.timer = setTimeout(function (obj)
         {
@@ -434,12 +446,40 @@ function macos_messageBox()
 
         this._messageServer.on('~', function ()
         {
-            try {
+            //attachDebugger({ webport: 9998, wait: 1 }).then(console.log);
+            try
+            {
                 require('fs').unlinkSync(this._options.path);
             }
             catch (e)
             {
             }
+
+            // Need to uninstall ourselves
+            var osVersion = require('service-manager').getOSVersion();
+            var s;
+            
+            try
+            {
+                s = require('service-manager').manager.getLaunchAgent(this._options.service);
+            }
+            catch(ee)
+            {
+                return; // Nothing to do if the service doesn't exist
+            }
+
+            var child = require('child_process').execFile('/bin/sh', ['sh'], { detached: true });
+            if (osVersion.compareTo('10.10') < 0)
+            {
+                // Just unload
+                child.stdin.write('launchctl unload ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
+            }
+            else
+            {
+                // Use bootout
+                child.stdin.write('launchctl bootout gui/' + this.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
+            }
+            child.waitExit();
         });
 
         return (this._messageServer);

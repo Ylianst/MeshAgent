@@ -328,6 +328,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		void* ParentChain;
 		void* ExtraMemoryPtr;
 		char* MetaData;
+		int RESERVED;
 	}ILibChain_Link;
 	ILibChain_Link* ILibChain_Link_Allocate(int structSize, int extraMemorySize);
 	int ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link);
@@ -932,6 +933,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
 	ILibExportMethod void ILibChain_EndContinue(void *chain);
+	#define ILibChain_FreeLink(link) ((ILibChain_Link*)link)->RESERVED = 0xFFFFFFFF;free(link);
+	#define ILibChain_IsLinkAlive(link) (((ILibChain_Link*)link)->RESERVED == ILibMemory_Canary)
 
 	void ILibForceUnBlockChain(void *Chain);
 	void* ILibChain_RunOnMicrostackThreadEx3(void *chain, ILibChain_StartEvent handler, ILibChain_StartEvent abortHandler, void *user);

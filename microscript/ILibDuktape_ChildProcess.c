@@ -147,9 +147,19 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
 	void *chain = Duktape_GetChain(ctx);
+	if (ILibIsChainBeingDestroyed(chain))
+	{
+		return(ILibDuktape_Error(ctx, "Cannot waitExit() because current thread is exiting"));
+	}
+
 	duk_push_this(ctx);									// [spawnedProcess]
 	duk_push_int(ctx, 1);								// [spawnedProcess][flag]
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
+
+	if (!ILibChain_IsLinkAlive(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager)))
+	{
+		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));
+	}
 
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
 	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, -1);
@@ -231,7 +241,6 @@ duk_ret_t ILibDuktape_ChildProcess_Manager_Finalizer(duk_context *ctx)
 {
 	duk_get_prop_string(ctx, 0, ILibDuktape_ChildProcess_Manager);
 	ILibProcessPipe_Manager manager = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);
-
 	ILibChain_SafeRemove(((ILibChain_Link*)manager)->ParentChain, manager);
 	return(0);
 }

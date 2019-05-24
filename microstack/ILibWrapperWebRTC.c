@@ -833,7 +833,7 @@ void ILibWrapper_WebRTC_ConnectionFactory_RemoveFromChainSink(void *chain, void 
 
 		if (obj == turnClient) { finished = 1; }
 		if (obj->DestroyHandler != NULL) { obj->DestroyHandler(obj); }
-		free(obj);
+		ILibChain_FreeLink(obj);
 		node = ILibLinkedList_Remove(node);
 	}
 }

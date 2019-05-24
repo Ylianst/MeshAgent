@@ -1724,7 +1724,7 @@ void ILibChain_SafeAdd(void *chain, void *object)
 	memset(data, 0, sizeof(struct ILibBaseChain_SafeData));
 	data->Chain = chain;
 	data->Object = object;
-
+	((ILibChain_Link*)object)->RESERVED = ILibMemory_Canary;
 	ILibLifeTime_Add(baseChain->Timer, data, 0, &ILibChain_SafeAddSink, &ILibChain_Safe_Destroy);
 }
 void ILibChain_SafeRemoveEx(void *chain, void *object)
@@ -1736,7 +1736,7 @@ void ILibChain_SafeRemoveEx(void *chain, void *object)
 	if (link != NULL)
 	{
 		if (link->DestroyHandler != NULL) { link->DestroyHandler(link); }
-		free(link);
+		ILibChain_FreeLink(link);
 		ILibLinkedList_Remove(node);
 	}
 }
@@ -1747,6 +1747,7 @@ void ILibChain_SafeRemoveEx(void *chain, void *object)
 */
 void ILibChain_SafeRemove(void *chain, void *object)
 {
+	((ILibChain_Link*)object)->RESERVED = 0xFFFFFFFF;
 	if (ILibIsChainBeingDestroyed(chain) == 0)
 	{
 		//
@@ -1826,6 +1827,7 @@ void ILibAddToChain(void *Chain, void *object)
 	//
 	// Add link to the end of the chain (Linked List)
 	//
+	((ILibChain_Link*)object)->RESERVED = ILibMemory_Canary;
 	ILibLinkedList_AddTail(((ILibBaseChain*)Chain)->Links, object);
 	((ILibChain_Link*)object)->ParentChain = Chain;
 }
@@ -1902,7 +1904,7 @@ void ILibChain_DestroyEx(void *subChain)
 	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
-		free(module);
+		ILibChain_FreeLink(module);
 		node = ILibLinkedList_GetNextNode(node);
 	}
 	ILibLinkedList_Destroy(((ILibBaseChain*)subChain)->Links);
@@ -2039,7 +2041,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 			if (module != NULL)
 			{
 				if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
-				free(module);
+				ILibChain_FreeLink(module);
 			}
 		}
 		sem_post(&ILibChainLock);
@@ -2860,7 +2862,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			if (module != NULL)
 			{
 				if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
-				free(module);
+				ILibChain_FreeLink(module);
 			}
 		}
 		sem_post(&ILibChainLock);
@@ -2997,7 +2999,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		//
 		// After calling the Destroy, we free the module and move to the next
 		//
-		free(module);
+		ILibChain_FreeLink(module);
 		chain->node = ILibLinkedList_Remove(chain->node);
 	}
 
@@ -3010,7 +3012,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	if (chain->node!=NULL && (module=(ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node))!=NULL)
 	{
 		module->DestroyHandler((void*)module);
-		free(module);
+		ILibChain_FreeLink(module);
 		((ILibBaseChain*)Chain)->Timer = NULL;
 	}
 
@@ -3020,7 +3022,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	while(chain->node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node)) != NULL)
 	{
 		if(module->DestroyHandler != NULL) {module->DestroyHandler((void*)module);}
-		free(module);
+		ILibChain_FreeLink(module);
 		chain->node = ILibLinkedList_GetNextNode(chain->node);
 	}
 	ILibLinkedList_Destroy(((ILibBaseChain*)Chain)->LinksPendingDelete);
