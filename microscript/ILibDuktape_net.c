@@ -1115,9 +1115,11 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		if (ipcLen > sizeof(ipcaddr.sun_path)) { return(ILibDuktape_Error(ctx, "Path too long")); }
 		ipcaddr.sun_family = AF_UNIX;
 		strcpy_s((char*)(ipcaddr.sun_path), sizeof(ipcaddr.sun_path), ipc);
-		server->server = ILibCreateAsyncServerSocketModuleWithMemoryEx(Duktape_GetChain(ctx), maxConnections, initalBufferSize, (struct sockaddr*)&ipcaddr,
+		int ipcmod = Duktape_GetBooleanProperty(ctx, 0, "writableAll", 0) == 0 ? 0 : 0777;
+		
+		server->server = ILibCreateAsyncServerSocketModuleWithMemoryExMOD(Duktape_GetChain(ctx), maxConnections, initalBufferSize, (struct sockaddr*)&ipcaddr,
 			ILibDuktape_net_server_OnConnect, ILibDuktape_net_server_OnDisconnect, ILibDuktape_net_server_OnReceive,
-			ILibDuktape_net_server_OnInterrupt, ILibDuktape_net_server_OnSendOK, sizeof(void*), sizeof(void*));
+			ILibDuktape_net_server_OnInterrupt, ILibDuktape_net_server_OnSendOK, ipcmod, sizeof(void*), sizeof(void*));
 #elif defined(WIN32)
 		// IPC on Windows Implemented as Named Pipe
 

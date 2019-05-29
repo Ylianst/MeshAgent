@@ -34,6 +34,7 @@ limitations under the License.
 #ifdef _POSIX
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #endif
 
 #define DEBUGSTATEMENT(x)
@@ -617,7 +618,7 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemory(v
 
 	return(ILibCreateAsyncServerSocketModuleWithMemoryEx(Chain, MaxConnections, initialBufferSize, (struct sockaddr*)&localif, OnConnect, OnDisconnect, OnReceive, OnInterrupt, OnSendOK, ServerUserMappedMemorySize, SessionUserMappedMemorySize));
 }
-ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx(void *Chain, int MaxConnections, int initialBufferSize, struct sockaddr *local, ILibAsyncServerSocket_OnConnect OnConnect, ILibAsyncServerSocket_OnDisconnect OnDisconnect, ILibAsyncServerSocket_OnReceive OnReceive, ILibAsyncServerSocket_OnInterrupt OnInterrupt, ILibAsyncServerSocket_OnSendOK OnSendOK, int ServerUserMappedMemorySize, int SessionUserMappedMemorySize)
+ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryExMOD(void *Chain, int MaxConnections, int initialBufferSize, struct sockaddr *local, ILibAsyncServerSocket_OnConnect OnConnect, ILibAsyncServerSocket_OnDisconnect OnDisconnect, ILibAsyncServerSocket_OnReceive OnReceive, ILibAsyncServerSocket_OnInterrupt OnInterrupt, ILibAsyncServerSocket_OnSendOK OnSendOK, int mod, int ServerUserMappedMemorySize, int SessionUserMappedMemorySize)
 {
 	int i;
 	int ra = 1;
@@ -683,6 +684,10 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 	if (local->sa_family == AF_UNIX)
 	{
 		if (bind(RetVal->ListenSocket, local, SUN_LEN((struct sockaddr_un*)local)) != 0) { close(RetVal->ListenSocket); free(RetVal->AsyncSockets); free(RetVal); return 0; }
+		if (mod != 0)
+		{
+			chmod(((struct sockaddr_un*)local)->sun_path, (mode_t)mod);
+		}
 	}
 	else
 	{
