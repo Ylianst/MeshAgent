@@ -391,7 +391,8 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	((int*)ILibLinkedList_GetExtendedMemory(node))[0] = once;
 	data->totalListeners[0]++;
 
-	return 0;
+	duk_push_this(ctx);
+	return 1;
 }
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromThis(duk_context *ctx)
 {
