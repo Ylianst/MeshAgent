@@ -224,271 +224,248 @@ if (process.platform == 'darwin')
 function macos_messageBox()
 {
     this._ObjectID = 'message-box';
-    this._initMessageServer = function _initMessageServer()
+    this._initIPCBase = function _initIPCBase()
     {
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        
+
         try
         {
             ret.uid = require('user-sessions').consoleUid();
         }
-        catch(e)
+        catch (e)
         {
             ret._rej(e);
             return (ret);
         }
 
-        ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
+        ret.path = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
         var n;
 
         try
         {
             n = require('tls').generateRandomInteger('1', '99999');
         }
-        catch(e)
+        catch (e)
         {
             n = 0;
         }
-        while (require('fs').existsSync(ret.ipcpath + n))
+        while (require('fs').existsSync(ret.path + n))
         {
-            try
-            {
+            try {
                 n = require('tls').generateRandomInteger('1', '99999');
             }
-            catch (e)
-            {
+            catch (e) {
                 ++n;
             }
         }
-        ret.ipcpath = ret.ipcpath + n;
+        ret.path = ret.path + n;
         ret.tmpServiceName = 'meshNotificationServer' + n;
-        require('service-manager').manager.installLaunchAgent(
+        return (ret);
+    };
+    
+    this.create = function create(title, caption, timeout)
+    {
+        // Start Local Server
+        var ret = this._initIPCBase();
+        ret.title = title; ret.caption = caption; ret.timeout = timeout;
+        ret.server = this.startMessageServer(ret);
+        ret.server.ret = ret;
+        ret.server.on('connection', function (c)
+        {
+            this._connection = c;
+            c.promise = this.ret;
+            c.on('data', function (buffer)
             {
-                name: tmpServiceName, servicePath: process.execPath, startType: 'AUTO_START',
-                sessionTypes: ['Aqua'], parameters: ['-exec', "require('message-box').startServer({path: '" + ret.ipcpath + ", service: '" + ret.tmpServiceName + "'}).on('close', function(){process.exit();});"]
+                if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+                switch (p.command)
+                {
+                    case 'ERROR':
+                        this.promise._rej(p.reason);
+                        break;
+                    case 'DIALOG':
+                        if (p.timeout)
+                        {
+                            this.promise._rej('TIMEOUT');
+                        }
+                        else
+                        {
+                            this.promise._res(p.button);
+                        }
+                        break;
+                }
             });
-        require('service-manager').getLaunchAgent(ret.tmpServiceName).load(ret.uid);
+            c.write(translateObject({ command: 'DIALOG', title: this.ret.title, caption: this.ret.caption, icon: 'caution', buttons: ['"Yes"', '"No"'], buttonDefault: 2, timeout: this.ret.timeout }));
+        });
 
         return (ret);
     };
-
-
-
-
-    this.create = function create(title, caption, timeout)
+    this.notify = function notify(title, caption)
     {
-        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
-
-        var n = 0;
-        while (require('fs').existsSync(ret.ipcpath + n)) { ++n; }
-        ret.ipcpath += n;
-
-        ret.title = title;
-        ret.caption = caption;
-
-        //ToDo: Install the message server
-
-        this.startServer({ path: ret.ipcpath });
-
-        // Create the Client
-        ret.client = require('net').createConnection({ path: ret.ipcpath }, function ()
+        // Start Local Server
+        var ret = this._initIPCBase();
+        ret.title = title; ret.caption = caption; 
+        ret.server = this.startMessageServer(ret);
+        ret.server.ret = ret;
+        ret.server.on('connection', function (c)
         {
-            var b = translateObject({ command: 'DIALOG', title: ret.title, caption: ret.caption, icon: 'caution', buttons: ['"Yes"', '"No"'], buttonDefault: 2, timeout: timeout });
-            this.write(b);
+            this._connection = c;
+            c.promise = this.ret;
+            c.on('data', function (buffer)
+            {
+                if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+                switch (p.command)
+                {
+                    case 'ERROR':
+                        this.promise._rej(p.reason);
+                        break;
+                    case 'NOTIFY':
+
+                        this.promise._res();
+                        break;
+                }
+            });
+            c.write(translateObject({ command: 'NOTIFY', title: this.ret.title, caption: this.ret.caption }));
         });
-        ret.client.promise = ret;
-        ret.client.on('data', function (buffer)
+
+        return (ret);
+    };
+    this.startClient = function startClient(options)
+    {
+        // Create the Client
+        console.log('Starting Client...');
+
+        options.osversion = require('service-manager').getOSVersion();
+        options.uid = require('user-sessions').consoleUid();
+        this.client = require('net').createConnection(options);
+        this.client._options = options;
+        this.client.on('data', function (buffer)
         {
             if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
             var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
             switch (p.command)
             {
-                case 'ERROR':
-                    this.promise._rej(p.reason);
-                    break;
-                case 'DIALOG':
-                    if (p.timeout)
+                case 'NOTIFY':
+                    this._shell = require('child_process').execFile('/bin/sh', ['sh']);
+                    this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stdin.write('osascript -e \'tell current application to display notification "' + p.caption + '" with title "' + p.title + '"\'\nexit\n');
+                    this._shell.waitExit();
+                    if (this._shell.stderr.str != '')
                     {
-                        this.promise._rej('TIMEOUT');
+                        this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
                     }
                     else
                     {
-                        this.promise._res(p.button);
+                        this.end(translateObject({ command: 'NOTIFY', status: 0 }));
                     }
                     break;
-            }
-        });
-        ret.client.on('end', function ()
-        {
-            this.promise._rej('Message Server abruptly disconnected');
-        });
-        ret.finally(function () { console.log('finally'); });
-        return (ret);
-    };
-    this.notify = function notify(title, caption)
-    {
-        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        ret.ipcpath = '/var/tmp/' + process.execPath.split('/').pop() + '_ev';
-
-        var n = 0;
-        while (require('fs').existsSync(ret.ipcPath + n)) { ++n; }
-        ret.ipcpath += n;
-
-        ret.title = title;
-        ret.caption = caption;
-
-        //ToDo: Install the message server
-        
-        this.startServer({ path: ret.ipcpath });
-
-        // Create the Client
-        ret.client = require('net').createConnection({ path: ret.ipcpath }, function ()
-        {
-            var b = translateObject({ command: 'NOTIFY', title: ret.title, caption: ret.caption });
-            this.write(b);
-        });
-        ret.client.promise = ret;
-        ret.client.on('data', function (buffer)
-        {
-            if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
-            var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
-            switch(p.command)
-            {
-                case 'ERROR':
-                    this.promise._rej(p.reason);
-                    break;
-                case 'NOTIFY':
-                    this.promise._res();
-                    break;
-            }
-        });
-        ret.client.on('end', function ()
-        {
-            this.promise._rej('Message Server abruptly disconnected');
-        });
-
-        return (ret);
-    };
-    this.startServer = function startServer(options)
-    {
-        if (require('fs').existsSync(options.path)) { require('fs').unlinkSync(options.path); }
-
-        this._messageServer = require('net').createServer();
-        this._messageServer.uid = require('user-sessions').consoleUid();
-        this._messageServer.osversion = require('service-manager').getOSVersion();
-        this._messageServer._options = options;
-        this._messageServer.timer = setTimeout(function (obj)
-        {
-            obj.close();
-        }, 5000, this._messageServer);
-        this._messageServer.listen(options);
-        this._messageServer.on('connection', function (c)
-        {
-            this._client = c;
-            this._client.timer = this.timer;
-            this._client.on('data', function (buffer)
-            {
-                if (buffer.length < 4) { this.unshift(buffer); }
-                if (buffer.length < buffer.readUInt32LE(0)) { this.unshift(buffer); }
-                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString().trim());
-                clearTimeout(this.timer);
-                switch (p.command)
-                {
-                    case 'NOTIFY':
-                        this._shell = require('child_process').execFile('/bin/sh', ['sh']);
-                        this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                        this._shell.stdin.write('osascript -e \'tell current application to display notification "' + p.caption + '" with title "' + p.title + '"\'\nexit\n');
-                        this._shell.waitExit();
-                        if (this._shell.stderr.str != '')
+                case 'DIALOG':
+                    var timeout = p.timeout ? (' giving up after ' + p.timeout) : '';
+                    var icon = p.icon ? ('with icon ' + p.icon) : '';
+                    var buttons = p.buttons ? ('buttons {' + p.buttons.toString() + '}') : '';
+                    if (p.buttonDefault != null)
+                    {
+                        buttons += (' default button ' + p.buttonDefault)
+                    }
+                    this._shell = require('child_process').execFile('/bin/sh', ['sh']);
+                    this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stdin.write('osascript -e \'tell current application to display dialog "' + p.caption + '" with title "' + p.title + '" ' + icon + ' ' + buttons + timeout + '\' | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\n');
+                    this._shell.waitExit();
+                    if (this._shell.stderr.str != '')
+                    {
+                        this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
+                    }
+                    else
+                    {
+                        if (this._shell.stdout.str.trim() == '_TIMEOUT_')
                         {
-                            this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
+                            this.end(translateObject({ command: 'DIALOG', timeout: true }));
                         }
                         else
                         {
-                            this.end(translateObject({ command: 'NOTIFY', status: 0 }));
+                            this.end(translateObject({ command: 'DIALOG', button: this._shell.stdout.str.trim() }));
                         }
-                        break;
-                    case 'DIALOG':
-                        var timeout = p.timeout ? (' giving up after ' + p.timeout) : '';
-                        var icon = p.icon ? ('with icon ' + p.icon) : '';
-                        var buttons = p.buttons ? ('buttons {' + p.buttons.toString() + '}') : '';
-                        if (p.buttonDefault != null)
-                        {
-                            buttons += (' default button ' + p.buttonDefault)
-                        }
-                        this._shell = require('child_process').execFile('/bin/sh', ['sh']);
-                        this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                        this._shell.stdin.write('osascript -e \'tell current application to display dialog "' + p.caption + '" with title "' + p.title + '" ' + icon + ' ' + buttons + timeout + '\' | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\n');
-                        this._shell.waitExit();
-                        if (this._shell.stderr.str != '')
-                        {
-                            this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
-                        }
-                        else
-                        {
-                            if (this._shell.stdout.str.trim() == '_TIMEOUT_')
-                            {
-                                this.end(translateObject({ command: 'DIALOG', timeout: true }));
-                            }
-                            else
-                            {
-                                this.end(translateObject({ command: 'DIALOG', button: this._shell.stdout.str.trim() }));
-                            }
-                        }
-                        break;
-                    default:
-                        break;
-                }
-            });
+                    }
+                    break;
+                default:
+                    break;
+            }
         });
-
-        this._messageServer.on('~', function ()
+        this.client.on('error', function () { this.uninstall(); }).on('end', function () { this.uninstall(); });
+        this.client.uninstall = function ()
         {
-            //attachDebugger({ webport: 9998, wait: 1 }).then(console.log);
-            try
-            {
-                require('fs').unlinkSync(this._options.path);
-            }
-            catch (e)
-            {
-            }
-
             // Need to uninstall ourselves
+            console.log('uninstall');
             var s;
-            
+
             try
             {
                 s = require('service-manager').manager.getLaunchAgent(this._options.service);
             }
-            catch(ee)
+            catch (ee)
             {
+                console.log('LaunchAgent not found');
                 return; // Nothing to do if the service doesn't exist
             }
 
             var child = require('child_process').execFile('/bin/sh', ['sh'], { detached: true });
-            if (this.osversion.compareTo('10.10') < 0)
+            if (this._options.osversion.compareTo('10.10') < 0)
             {
                 // Just unload
+                console.log('launchctl unload ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
                 child.stdin.write('launchctl unload ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
             }
             else
             {
                 // Use bootout
-                child.stdin.write('launchctl bootout gui/' + this.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
+                console.log('launchctl bootout gui/' + this._options.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
+                child.stdin.write('launchctl bootout gui/' + this._options.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
             }
             try
             {
                 child.waitExit();
             }
-            catch(e)
+            catch (e)
             {
             }
+        };
+        return (this.client);
+    };
+    this.startMessageServer = function startMessageServer(options)
+    {
+        if (require('fs').existsSync(options.path)) { require('fs').unlinkSync(options.path); }
+        options.writableAll = true;
+
+        var ret = require('net').createServer();
+        ret.uid = require('user-sessions').consoleUid();
+        ret.osversion = require('service-manager').getOSVersion();
+        ret._options = options;
+        ret.timer = setTimeout(function (obj)
+        {
+            obj.close();
+            obj._options._rej('Connection timeout');
+        }, 5000, ret);
+        ret.listen(options);
+        ret.on('connection', function (c)
+        {
+            clearTimeout(this.timer);
+        });
+        ret.on('~', function ()
+        {
+            require('fs').unlinkSync(this._options.path);
         });
 
-        return (this._messageServer);
+        require('service-manager').manager.installLaunchAgent(
+            {
+                name: options.tmpServiceName, servicePath: process.execPath, startType: 'AUTO_START',
+                sessionTypes: ['Aqua'], parameters: ['-exec', "require('message-box').startClient({ path: '" + options.path + "', service: '" + options.tmpServiceName + "' }).on('end', function () { process.exit(); }).on('error', function () { process.exit(); });"]
+            });
+        require('service-manager').manager.getLaunchAgent(options.tmpServiceName).load(options.uid);
+
+        return (ret);
     };
 }
 

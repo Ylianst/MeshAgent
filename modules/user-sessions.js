@@ -652,6 +652,38 @@ function UserSessions()
     }
     else if(process.platform == 'darwin')
     {
+        this.getUsername = function getUsername(uid)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("dscl . list /Users UniqueID | grep " + uid + " | awk '{ if($2==" + uid + "){ print $1 }}'\nexit\n");
+            child.waitExit();
+            if(child.stdout.str.trim() != '')
+            {
+                return (child.stdout.str.trim());
+            }
+            else
+            {
+                throw ('uid: ' + uid + ' not found');
+            }
+        };
+        this.getHomeFolder = function getHomeFolder(user)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("dscl . -read /Users/" + user + " | grep NFSHomeDirectory | awk -F: '{ print $2 }'\nexit\n");
+            child.waitExit();
+            if (child.stdout.str.trim() != '')
+            {
+                return (child.stdout.str.trim());
+            }
+            else
+            {
+                throw ('user: ' + user + ' not found');
+            }
+        };
         this._users = function ()
         {
             var child = require('child_process').execFile('/usr/bin/dscl', ['dscl', '.', 'list', '/Users', 'UniqueID']);
