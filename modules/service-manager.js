@@ -121,10 +121,10 @@ if (process.platform == 'darwin')
     };
 
 
-    function fetchPlist(folder, name)
+    function fetchPlist(folder, name, userid)
     {
         if (folder.endsWith('/')) { folder = folder.substring(0, folder.length - 1); }
-        var ret = { name: name, close: function () { } };
+        var ret = { name: name, close: function () { }, _uid: userid };
         if (!require('fs').existsSync(folder + '/' + name + '.plist'))
         {
             // Before we throw in the towel, let's enumerate all the plist files, and see if one has a matching label
@@ -209,6 +209,7 @@ if (process.platform == 'darwin')
         {
             var options = undefined;
             var command;
+            if (this._uid != null) { uid = this._uid; }
 
             if (getOSVersion().compareTo('10.10') < 0)
             {
@@ -244,14 +245,17 @@ if (process.platform == 'darwin')
         };
         ret.isLoaded = function isLoaded(uid)
         {
+            if (this._uid != null) { uid = this._uid; }
             return (this.getPID(uid, true) != '');
         };
         ret.isRunning = function isRunning(uid)
         {
+            if (this._uid != null) { uid = this._uid; }
             return (this.getPID(uid) > 0);
         };
         ret.isMe = function isMe(uid)
         {
+            if (this._uid != null) { uid = this._uid; }
             return (this.getPID(uid) == process.pid);
         };
         ret.load = function load(uid)
@@ -260,6 +264,7 @@ if (process.platform == 'darwin')
             var ver = getOSVersion();
             var options = undefined;
             var command = 'load';
+            if (this._uid != null) { uid = this._uid; }
 
             if (this.daemon)
             {
@@ -298,6 +303,7 @@ if (process.platform == 'darwin')
             var self = require('user-sessions').Self();
             var options = undefined;
             var useBootout = false;
+            if (this._uid != null) { uid = this._uid; }
 
             if(uid!=null)
             {
@@ -377,6 +383,7 @@ if (process.platform == 'darwin')
         {
             var options = undefined;
             var self = require('user-sessions').Self();
+            if (this._uid != null) { uid = this._uid; }
             if (!this.daemon && uid == null) { uid = self; }
             if (!this.daemon && uid > 0 && self == 0) { options = { uid: uid }; }
             if (!this.daemon && uid > 0 && self != 0 && uid != self) { throw ('Cannot start LaunchAgent into another user domain while not root'); }
@@ -393,6 +400,7 @@ if (process.platform == 'darwin')
         {
             var options = undefined;
             var self = require('user-sessions').Self();
+            if (this._uid != null) { uid = this._uid; }
             if (!this.daemon && uid == null) { uid = self; }
             if (!this.daemon && uid > 0 && self == 0) { options = { uid: uid }; }
             if (!this.daemon && uid > 0 && self != 0 && uid != self) { throw ('Cannot stop LaunchAgent in another user domain while not root'); }
@@ -414,6 +422,7 @@ if (process.platform == 'darwin')
         };
         ret.restart = function restart(uid)
         {
+            if (this._uid != null) { uid = this._uid; }
             if (getOSVersion().compareTo('10.10') < 0)
             {
                 if (!this.daemon && uid == null) { uid = require('user-sessions').Self(); }
@@ -682,7 +691,17 @@ function serviceManager()
         if (process.platform == 'darwin')
         {
             this.getService = function getService(name) { return (fetchPlist('/Library/LaunchDaemons', name)); };
-            this.getLaunchAgent = function getLaunchAgent(name) { return (fetchPlist('/Library/LaunchAgents', name)); };
+            this.getLaunchAgent = function getLaunchAgent(name, userid)
+            {
+                if (userid == null)
+                {
+                    return (fetchPlist('/Library/LaunchAgents', name));
+                }
+                else
+                {
+                    return (fetchPlist(require('user-sessions').getHomeFolder(require('user-sessions').getUsername(userid)) + '/Library/LaunchAgents', name, userid));
+                }
+            };
         }
         if(process.platform == 'linux')
         {
@@ -1263,7 +1282,11 @@ function serviceManager()
     {
         this.installLaunchAgent = function installLaunchAgent(options)
         {
-            if (!this.isAdmin()) { throw ('Installing a service, requires admin'); }
+            if (!(options.uid || options.user) && !this.isAdmin())
+            {
+                throw ('Installing a Global Agent/Daemon, requires admin');
+            }
+
             var servicePathTokens = options.servicePath.split('/');
             servicePathTokens.pop();
             if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
@@ -1322,7 +1345,23 @@ function serviceManager()
             plist += '  </dict>\n';
             plist += '</plist>';
 
-            require('fs').writeFileSync('/Library/LaunchAgents/' + options.name + '.plist', plist);
+            if (options.uid)
+            {
+                options.user = require('user-sessions').getUsername(options.uid);
+            }
+            
+            var folder = options.user ? (require('user-sessions').getHomeFolder(options.user) + '/Library/LaunchAgents/') : '/Library/LaunchAgents/';
+            options.gid = require('user-sessions').getGroupID(options.uid);
+            if (!require('fs').existsSync(folder))
+            {
+                require('fs').mkdirSync(folder);
+                require('fs').chownSync(folder, options.uid, options.gid);
+            }
+            require('fs').writeFileSync(folder + options.name + '.plist', plist);
+            if(options.user)
+            {
+                require('fs').chownSync(folder + options.name + '.plist', options.uid, options.gid);
+            }
         };
     }
     this.uninstallService = function uninstallService(name)

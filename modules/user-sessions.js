@@ -652,6 +652,15 @@ function UserSessions()
     }
     else if(process.platform == 'darwin')
     {
+        this.getGroupID = function getGroupID(uid)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("id " + uid + " | awk '{ split($2, gid, \"=\"); if(gid[1]==\"gid\") { split(gid[2], gidnum, \"(\"); print gidnum[1];  } }'\nexit\n");
+            child.waitExit();
+            return (parseInt(child.stdout.str.trim()));
+        }
         this.getUsername = function getUsername(uid)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
