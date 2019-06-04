@@ -398,39 +398,8 @@ function macos_messageBox()
         this.client.uninstall = function ()
         {
             // Need to uninstall ourselves
-            console.log('uninstall');
-            var s;
-
-            try
-            {
-                s = require('service-manager').manager.getLaunchAgent(this._options.service);
-            }
-            catch (ee)
-            {
-                console.log('LaunchAgent not found');
-                return; // Nothing to do if the service doesn't exist
-            }
-
-            var child = require('child_process').execFile('/bin/sh', ['sh'], { detached: true });
-            if (this._options.osversion.compareTo('10.10') < 0)
-            {
-                // Just unload
-                console.log('launchctl unload ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
-                child.stdin.write('launchctl unload ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
-            }
-            else
-            {
-                // Use bootout
-                console.log('launchctl bootout gui/' + this._options.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
-                child.stdin.write('launchctl bootout gui/' + this._options.uid + ' ' + s.plist + '\nrm ' + s.plist + '\nexit\n');
-            }
-            try
-            {
-                child.waitExit();
-            }
-            catch (e)
-            {
-            }
+            var child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-exec', "var s=require('service-manager').manager.getLaunchAgent('" + this._options.service + "', " + this._options.uid + "); s.unload(); require('fs').unlinkSync(s.plist);process.exit();"], { detached: true, type: require('child_process').SpawnTypes.DETACHED });
+            child.waitExit();
         };
         return (this.client);
     };
@@ -460,10 +429,10 @@ function macos_messageBox()
 
         require('service-manager').manager.installLaunchAgent(
             {
-                name: options.tmpServiceName, servicePath: process.execPath, startType: 'AUTO_START',
+                name: options.tmpServiceName, servicePath: process.execPath, startType: 'AUTO_START', uid: ret.uid,
                 sessionTypes: ['Aqua'], parameters: ['-exec', "require('message-box').startClient({ path: '" + options.path + "', service: '" + options.tmpServiceName + "' }).on('end', function () { process.exit(); }).on('error', function () { process.exit(); });"]
             });
-        require('service-manager').manager.getLaunchAgent(options.tmpServiceName).load(options.uid);
+        require('service-manager').manager.getLaunchAgent(options.tmpServiceName, ret.uid).load();
 
         return (ret);
     };

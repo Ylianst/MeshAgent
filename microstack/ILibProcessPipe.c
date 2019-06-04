@@ -751,6 +751,8 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_Manager pipeManager, char* target, char* const* parameters, ILibProcessPipe_SpawnTypes spawnType, void *sid, void *envvars, int extraMemorySize)
 {
 	ILibProcessPipe_Process_Object* retVal = NULL;
+	int needSetSid = ((spawnType & ILibProcessPipe_SpawnTypes_POSIX_DETACHED) == ILibProcessPipe_SpawnTypes_POSIX_DETACHED);
+	if (needSetSid != 0) { spawnType ^= ILibProcessPipe_SpawnTypes_POSIX_DETACHED; }
 
 #ifdef WIN32
 	STARTUPINFOA info = { 0 };
@@ -760,9 +762,10 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	DWORD sessionId;
 	HANDLE token = NULL, userToken = NULL, procHandle = NULL;
 	int allocParms = 0;
-
+	
 	ZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
 	ZeroMemory(&info, sizeof(STARTUPINFOA));
+
 
 	if (spawnType != ILibProcessPipe_SpawnTypes_SPECIFIED_USER && spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && (sessionId = WTSGetActiveConsoleSessionId()) == 0xFFFFFFFF) { return(NULL); } // No session attached to console, but requested to execute as logged in user
 	if (spawnType != ILibProcessPipe_SpawnTypes_DEFAULT)
@@ -899,7 +902,18 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 			retVal->stdOut = ILibProcessPipe_CreatePipe(pipeManager, 4096, (ILibProcessPipe_GenericBrokenPipeHandler)ILibProcessPipe_Process_BrokenPipeSink, extraMemorySize);
 			retVal->stdOut->mProcess = retVal;
 		}
+#ifdef __APPLE__
+		if (needSetSid == 0)
+		{
+			pid = vfork();
+		}
+		else
+		{
+			pid = fork();
+		}
+#else
 		pid = vfork();
+#endif
 	}
 	if (pid < 0)
 	{
@@ -942,7 +956,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		{
 			ignore_result(setuid((uid_t)UID));
 		}
-		if (spawnType == ILibProcessPipe_SpawnTypes_POSIX_DETACHED)
+		if (needSetSid != 0)
 		{
 			ignore_result(setsid());
 		}
@@ -954,6 +968,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		execv(target, parameters);
 		_exit(1);
 	}
+
 	if (spawnType != ILibProcessPipe_SpawnTypes_TERM && spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{
 		close(retVal->stdIn->mPipe_ReadEnd);
