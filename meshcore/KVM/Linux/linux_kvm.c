@@ -63,6 +63,8 @@ int slave2master[2];
 FILE *logFile = NULL;
 int g_enableEvents = 0;
 
+ILibQueue g_messageQ;
+
 extern void* tilebuffer;
 extern char **environ;
 
@@ -91,45 +93,42 @@ x11_struct *x11_exports = NULL;
 void kvm_send_error(char *msg)
 {
 	int msgLen = strnlen_s(msg, 255);
-	char buffer[512];
+	char *buffer = (char*)ILibMemory_SmartAllocate(msgLen + 4);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
-	memcpy_s(buffer + 4, 512 - 4, msg, msgLen);
+	memcpy_s(buffer + 4, msgLen, msg, msgLen);
 
-	if (write(slave2master[1], buffer, msgLen + 4)) {}
-	fsync(slave2master[1]);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 void kvm_send_resolution()
 {
-	char buffer[8];
+	char *buffer = (char*)ILibMemory_SmartAllocate(8);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
 
-	// Write the reply to the pipe.
-	//fprintf(logFile, "Writing from slave in kvm_send_resolution\n");
-	if (write(slave2master[1], buffer, 8)) {}
-	fsync(slave2master[1]);
-	//fprintf(logFile, "Written %d bytes to master in kvm_send_resolution\n", written);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 void kvm_send_display()
 {
-	char buffer[5];
+	char* buffer = (char*)ILibMemory_SmartAllocate(5);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SET_DISPLAY);	// Write the type
-	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);				// Write the size
-	buffer[4] = current_display;		// Display number
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+	buffer[4] = current_display;																// Display number
 
-	// Write the reply to the pipe.
-	//fprintf(logFile, "Writing from slave in kvm_send_display\n");
-	if (write(slave2master[1], buffer, 5)) {}
-	fsync(slave2master[1]);
-	//fprintf(logFile, "Written %d bytes to master in kvm_send_display\n", written);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 #define BUFSIZE 65535
@@ -242,7 +241,7 @@ void kvm_send_display_list()
 
 	getAvailableDisplays(&displays, &len);
 	totalSize = 2 /*Type*/ + 2 /*length of packet*/ + 2 /*length of data*/ + (len * 2) /*Data*/ + 2 /* Current display */;
-	if ((buffer = (char*)malloc(totalSize)) == NULL) ILIBCRITICALEXIT(254);
+	buffer = (char*)ILibMemory_SmartAllocate(totalSize);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)totalSize);			// Write the size
@@ -252,13 +251,9 @@ void kvm_send_display_list()
 	}
 	((unsigned short*)buffer)[i + 3] = (unsigned short)htons((unsigned short)current_display);	// Current display
 
-	// Write the reply to the pipe.
-	//fprintf(logFile, "Writing from slave in kvm_send_displays\n");
-	if (write(slave2master[1], buffer, totalSize)) {}
-	fsync(slave2master[1]);
-	//fprintf(logFile, "Written %d bytes to master in kvm_send_displays\n", written);
-
-	if (displays != NULL) free(displays);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 char Location_X11LIB[NAME_MAX];
@@ -506,14 +501,15 @@ void kvm_pause(int pause)
 void kvm_server_jpegerror(char *msg)
 {
 	int msgLen = strnlen_s(msg, 255);
-	char buffer[512];
+	char *buffer = (char*)ILibMemory_SmartAllocate(msgLen + 4);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
-	memcpy_s(buffer + 4, 512 - 4, msg, msgLen);
+	memcpy_s(buffer + 4, msgLen, msg, msgLen);
 
-	if (write(slave2master[1], buffer, msgLen + 4)) {}
-	fsync(slave2master[1]);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 void* kvm_server_mainloop(void* parm)
@@ -553,6 +549,7 @@ void* kvm_server_mainloop(void* parm)
 		}
 	}
 
+	g_messageQ = ILibQueue_Create();
 
 	// Init the kvm
 	//fprintf(logFile, "Before kvm_init.\n"); fflush(logFile);
@@ -564,21 +561,20 @@ void* kvm_server_mainloop(void* parm)
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, parm);
 	//fprintf(logFile, "Created the kvmthread.\n"); fflush(logFile);
 
-	while (!g_shutdown) {
-
-		/*
-		//printf("KVM/Loop");
-		ftime(&tp);
-		cur_timestamp = tp.time * 1000 + tp.millitm;
-		if (prev_timestamp != 0)
+	while (!g_shutdown) 
+	{
+		// Check if there are pending messages to be sent
+		ILibQueue_Lock(g_messageQ);
+		while (ILibQueue_IsEmpty(g_messageQ) == 0)
 		{
-			time_diff = (FRAME_RATE_TIMER - (cur_timestamp - prev_timestamp));
-			if (time_diff < 20) { time_diff = 20; }
+			if ((buf = (char*)ILibQueue_DeQueue(g_messageQ)) != NULL)
+			{
+				written = write(slave2master[1], buf, ILibMemory_Size(buf));
+				fsync(slave2master[1]);
+				ILibMemory_Free(buf);
+			}
 		}
-		usleep(time_diff * 1000);
-		prev_timestamp = cur_timestamp;
-		//printf("...\n");
-		*/
+		ILibQueue_UnLock(g_messageQ);
 
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) {
 			for (c = 0; c < TILE_WIDTH_COUNT; c++) {
@@ -713,6 +709,7 @@ void* kvm_server_mainloop(void* parm)
 		g_tileInfo = NULL;
 	}
 	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
+	ILibQueue_Destroy(g_messageQ);
 	return (void*)0;
 }
 
@@ -750,6 +747,12 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 	r = pipe(slave2master);
 	r = pipe(master2slave);
+
+	// Two Phase is ok here, because all our fork/vfork calls always happen on the same thread
+	fcntl(slave2master[0], F_SETFD, FD_CLOEXEC);
+	fcntl(slave2master[1], F_SETFD, FD_CLOEXEC);
+	fcntl(master2slave[0], F_SETFD, FD_CLOEXEC);
+	fcntl(master2slave[1], F_SETFD, FD_CLOEXEC);
 
 	slave_out = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(processPipeMgr, slave2master[0], 2 * sizeof(void*));	
 	((void**)ILibMemory_Extra(slave_out))[0] = writeHandler;
