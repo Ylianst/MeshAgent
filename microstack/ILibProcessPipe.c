@@ -475,19 +475,25 @@ void ILibProcessPipe_Process_ReadHandler(void* user);
 void ILibProcessPipe_Manager_OnPreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	ILibProcessPipe_Manager_Object *man = (ILibProcessPipe_Manager_Object*)object;
-	void *node;
+	void *node, *nextnode;
 	ILibProcessPipe_PipeObject *j;
 
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
+		nextnode = ILibLinkedList_GetNextNode(node);
+		if (((int*)ILibLinkedList_GetExtendedMemory(node))[0] != 0 || (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+		{
+			ILibLinkedList_Remove(node);
+			node = nextnode;
+			continue;
+		}
 		if (j->mPipe_ReadEnd != -1)
 		{
 			FD_SET(j->mPipe_ReadEnd, readset);
 		}
-		node = ILibLinkedList_GetNextNode(node);
+		node = nextnode;
 	}
-
 }
 void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
 {
@@ -534,7 +540,7 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 	memset(retVal, 0, sizeof(ILibProcessPipe_Manager_Object));
 	retVal->ChainLink.MetaData = "ILibProcessPipe_Manager";
 	retVal->ChainLink.ParentChain = chain;
-	retVal->ActivePipes = ILibLinkedList_Create();
+	retVal->ActivePipes = ILibLinkedList_CreateEx(sizeof(int));
 
 #ifdef WIN32
 	retVal->updateEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -588,7 +594,6 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 		if (pipeObject->mProcess->stdOut == pipeObject) { pipeObject->mProcess->stdOut = NULL; }
 		if (pipeObject->mProcess->stdErr == pipeObject) { pipeObject->mProcess->stdErr = NULL; }
 	}
-	printf("PipeFree => %p\n", (void*)pipeObject);
 	ILibMemory_Free(pipeObject);
 }
 
@@ -1007,6 +1012,7 @@ void ILibProcessPipe_Pipe_SwapBuffers(ILibProcessPipe_Pipe obj, char* newBuffer,
 	pipeObject->readOffset = newBufferReadOffset;
 	pipeObject->totalRead = newBufferTotalBytesRead;
 }
+
 #ifdef WIN32
 BOOL ILibProcessPipe_Process_ReadHandler(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 #else
@@ -1019,7 +1025,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
 	int consumed;
 	int err;
-
+	
 #ifdef WIN32
 	BOOL result;
 	DWORD bytesRead;
@@ -1110,7 +1116,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 #else
 	while(pipeObject->PAUSED == 0); // Note: This is actually the end of a do-while loop
 	err = 0;
-	if(bytesRead == 0 || ((err = errno) != EAGAIN && errno != EWOULDBLOCK && pipeObject->PAUSED == 0))
+	if (bytesRead == 0 || ((err = errno) != EAGAIN && errno != EWOULDBLOCK && pipeObject->PAUSED == 0))
 #endif
 	{
 		//
@@ -1119,11 +1125,15 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		ILibRemoteLogging_printf(ILibChainGetLogger(pipeObject->manager->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Pipe, ILibRemoteLogging_Flags_VerbosityLevel_1, "ILibProcessPipe[ReadHandler]: BrokenPipe(%d) on Pipe: %p", err, (void*)pipeObject);
 #ifdef WIN32
 		ILibProcessPipe_WaitHandle_Remove(pipeObject->manager, pipeObject->mOverlapped->hEvent); // Pipe Broken, so remove ourselves from the processing loop
-#else
-		// Sincc we are on the microstack thread, we can directly access the LinkedList
-
-#endif
 		ILibLinkedList_Remove(ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject));
+#else
+		void *pipenode = ILibLinkedList_GetNode_Search(pipeObject->manager->ActivePipes, NULL, pipeObject);
+		if (pipenode != NULL)
+		{
+			// Flag this node for removal
+			((int*)ILibLinkedList_GetExtendedMemory(pipenode))[0] = 1;
+		}
+#endif
 		if (pipeObject->brokenPipeHandler != NULL) 
 		{
 			((ILibProcessPipe_GenericBrokenPipeHandler)pipeObject->brokenPipeHandler)(pipeObject); 
