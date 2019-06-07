@@ -481,7 +481,10 @@ void ILibProcessPipe_Manager_OnPreSelect(void* object, fd_set *readset, fd_set *
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
-		FD_SET(j->mPipe_ReadEnd, readset);
+		if (j->mPipe_ReadEnd != -1)
+		{
+			FD_SET(j->mPipe_ReadEnd, readset);
+		}
 		node = ILibLinkedList_GetNextNode(node);
 	}
 
@@ -498,7 +501,7 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 		nextNode = ILibLinkedList_GetNextNode(node);
 		if (ILibMemory_CanaryOK(j))
 		{
-			if (FD_ISSET(j->mPipe_ReadEnd, readset) != 0)
+			if (j->mPipe_ReadEnd != -1 && FD_ISSET(j->mPipe_ReadEnd, readset) != 0)
 			{
 				ILibProcessPipe_Process_ReadHandler(j);
 			}
@@ -565,6 +568,8 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 	if (pipeObject->mPipe_Reader_ResumeEvent != NULL) { CloseHandle(pipeObject->mPipe_Reader_ResumeEvent); }
 	if (pipeObject->buffer != NULL && pipeObject->usingCompletionRoutine == 0) { free(pipeObject->buffer); }
 #else
+	if (pipeObject->mPipe_ReadEnd != -1) { close(pipeObject->mPipe_ReadEnd); }
+	if (pipeObject->mPipe_WriteEnd != -1 && pipeObject->mPipe_WriteEnd != pipeObject->mPipe_ReadEnd) { close(pipeObject->mPipe_WriteEnd); }
 	if (pipeObject->buffer != NULL) { free(pipeObject->buffer); }
 #endif
 
@@ -583,6 +588,7 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 		if (pipeObject->mProcess->stdOut == pipeObject) { pipeObject->mProcess->stdOut = NULL; }
 		if (pipeObject->mProcess->stdErr == pipeObject) { pipeObject->mProcess->stdErr = NULL; }
 	}
+	printf("PipeFree => %p\n", (void*)pipeObject);
 	ILibMemory_Free(pipeObject);
 }
 
@@ -714,7 +720,7 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
-	free(p);
+	ILibMemory_Free(p);
 #endif
 }
 #ifndef WIN32
@@ -730,6 +736,7 @@ void ILibProcessPipe_Process_BrokenPipeSink(ILibProcessPipe_Pipe sender)
 			waitpid((pid_t)p->PID, &status, 0);
 			p->exitHandler(p, WEXITSTATUS(status), p->userObject);
 		}
+		ILibProcessPipe_Process_Destroy(p);
 	}
 }
 #endif
@@ -971,12 +978,12 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 
 	if (spawnType != ILibProcessPipe_SpawnTypes_TERM && spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{
-		close(retVal->stdIn->mPipe_ReadEnd);
-		close(retVal->stdOut->mPipe_WriteEnd);
+		close(retVal->stdIn->mPipe_ReadEnd); retVal->stdIn->mPipe_ReadEnd = -1;
+		close(retVal->stdOut->mPipe_WriteEnd); retVal->stdOut->mPipe_WriteEnd = -1;
 	}
 	if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{
-		close(retVal->stdErr->mPipe_WriteEnd);
+		close(retVal->stdErr->mPipe_WriteEnd); retVal->stdErr->mPipe_WriteEnd = -1;
 	}
 	retVal->PID = pid;
 #endif
