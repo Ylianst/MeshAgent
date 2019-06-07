@@ -1442,7 +1442,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 		else
 		{
-			MeshAgent_sendConsoleText(ctx, "Spawning User Process for KVM");
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 		}
 	#else
