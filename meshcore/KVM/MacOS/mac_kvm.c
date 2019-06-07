@@ -74,6 +74,7 @@ extern void* tilebuffer;
 pid_t g_slavekvm = 0;
 pthread_t kvmthread = (pthread_t)NULL;
 ILibProcessPipe_Process gChildProcess;
+ILibQueue g_messageQ;
 
 //int logenabled = 1;
 //FILE *logfile = NULL;
@@ -89,20 +90,22 @@ ILibProcessPipe_Process gChildProcess;
 
 void senddebug(int val)
 {
-	char buffer[8];
+	char *buffer = (char*)ILibMemory_SmartAllocate(8);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_DEBUG);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);			// Write the size
 	((int*)buffer)[1] = val;
 
-	KVM_SEND(buffer, 8);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 
 
 void kvm_send_resolution() 
 {
-	char buffer[8];
+	char *buffer = ILibMemory_SmartAllocate(8);
 	
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
@@ -111,7 +114,9 @@ void kvm_send_resolution()
 	
 
 	// Write the reply to the pipe.
-	KVM_SEND(buffer, 8);
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 }
 
 #define BUFSIZE 65535
@@ -415,6 +420,7 @@ void* kvm_server_mainloop(void* param)
 		}
 	}
 	// Init the kvm
+	g_messageQ = ILibQueue_Create();
 	if (kvm_init() != 0) { return (void*)-1; }
 
 
@@ -464,6 +470,19 @@ void* kvm_server_mainloop(void* param)
 			}
 		}
 		
+		// Check if there are pending messages to be sent
+		ILibQueue_Lock(g_messageQ);
+		while (ILibQueue_IsEmpty(g_messageQ) == 0)
+		{
+			if ((buf = (char*)ILibQueue_DeQueue(g_messageQ)) != NULL)
+			{
+				KVM_SEND(buf, (int)ILibMemory_Size(buf));
+				ILibMemory_Free(buf);
+			}
+		}
+		ILibQueue_UnLock(g_messageQ);
+
+
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) {
 			for (c = 0; c < TILE_WIDTH_COUNT; c++) {
 				g_tileInfo[r][c].flag = TILE_TODO;
@@ -576,6 +595,7 @@ void* kvm_server_mainloop(void* param)
 		written = write(STDOUT_FILENO, "Exiting...\n", 11);
 		fsync(STDOUT_FILENO);
 	}
+	ILibQueue_Destroy(g_messageQ);
 	return (void*)0;
 }
 
@@ -643,14 +663,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	if (uid != 0)
 	{
 		// Spawn child kvm process into a specific user session
-
-		x = sprintf_s(tmp, sizeof(tmp), "Spawning Process: %d\n", uid);
-		write(STDOUT_FILENO, tmp, x);
 		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
-
-		x = sprintf_s(tmp, sizeof(tmp), "Result: %p\n", (void*)gChildProcess);
-		write(STDOUT_FILENO, tmp, x);
-
 		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
 		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
 
@@ -691,4 +704,9 @@ void kvm_cleanup()
 {
 	KvmDebugLog("kvm_cleanup\n");
 	g_shutdown = 1;
+	if (gChildProcess != NULL)
+	{
+		ILibProcessPipe_Process_SoftKill(gChildProcess);
+		gChildProcess = NULL;
+	}
 }
