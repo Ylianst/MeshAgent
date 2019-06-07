@@ -290,7 +290,14 @@ function macos_messageBox()
                         }
                         else
                         {
-                            this.promise._res(p.button);
+                            if (p.button == 'Yes')
+                            {
+                                this.promise._res(p.button);
+                            }
+                            else
+                            {
+                                this.promise._rej('denied');
+                            }
                         }
                         break;
                 }

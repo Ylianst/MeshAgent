@@ -393,6 +393,26 @@ function UserSessions()
             }
             return (ret);
         }
+        this.consoleUid = function consoleUid()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('who\nexit\n');
+            child.waitExit();
+
+            var lines = child.stdout.str.split('\n');
+            var tokens, i, j;
+            for (i in lines) {
+                tokens = lines[i].split(' ');
+                for (j = 1; j < tokens.length; ++j) {
+                    if (tokens[j].length > 0) {
+                        return (parseInt(this._users()[tokens[0]]));
+                    }
+                }
+            }
+            throw ('nobody logged into console');
+        }
         this.Current = function Current(cb)
         {
             var retVal = {};
@@ -652,6 +672,15 @@ function UserSessions()
     }
     else if(process.platform == 'darwin')
     {
+        this.getUid = function getUid(username)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("id " + username + " | awk '{ split($1, token, \"=\"); split(token[2], uid, \"(\"); print uid[1]; }'\nexit\n");
+            child.waitExit();
+            return (parseInt(child.stdout.str.trim()));
+        };
         this.getGroupID = function getGroupID(uid)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -664,8 +693,10 @@ function UserSessions()
         this.getUsername = function getUsername(uid)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stderr.str = '';
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write("dscl . list /Users UniqueID | grep " + uid + " | awk '{ if($2==" + uid + "){ print $1 }}'\nexit\n");
             child.waitExit();
             if(child.stdout.str.trim() != '')
@@ -677,6 +708,21 @@ function UserSessions()
                 throw ('uid: ' + uid + ' not found');
             }
         };
+        this.consoleUid = function consoleUid()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("who | tr '\n' '\.' | awk '{ print $1 }'\nexit\n");
+            child.waitExit();
+
+            var ret = child.stdout.str.trim();
+            if (ret != '')
+            {
+                return (this.getUid(ret));
+            }
+            throw ('nobody logged into console');     
+        }
         this.getHomeFolder = function getHomeFolder(user)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -697,9 +743,12 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/usr/bin/dscl', ['dscl', '.', 'list', '/Users', 'UniqueID']);
             child.stdout.str = '';
+            child.stderr.str = '';
+            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write('exit\n');
             child.waitExit();
+
 
             var lines = child.stdout.str.split('\n');
             var tokens, i;
@@ -802,31 +851,6 @@ function UserSessions()
         this.isRoot = function isRoot()
         {
             return (this.Self() == 0);
-        }
-        this.consoleUid = function consoleUid()
-        {
-            var checkstr = process.platform == 'darwin' ? 'console' : ((process.env['DISPLAY'])?process.env['DISPLAY']:':0')
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write('who\nexit\n');
-            child.waitExit();
-
-            var lines = child.stdout.str.split('\n');
-            var tokens, i, j;
-            for (i in lines)
-            {
-                tokens = lines[i].split(' ');
-                for (j = 1; j < tokens.length; ++j)
-                {
-                    if (tokens[j].length > 0)
-                    {
-                        return (parseInt(this._users()[tokens[0]]));
-                    }
-                }
-            }
-            
-            throw ('nobody logged into console');
         }
     }
 
