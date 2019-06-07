@@ -137,7 +137,7 @@ struct sockaddr_in6;
 
 #ifdef __APPLE__
 #include <dispatch/dispatch.h>
-#include <semaphore.h>
+#define sem_t dispatch_semaphore_t
 #define sem_init(x,pShared,InitValue) ILibDispatchSemaphore_Init((x), pShared, InitValue)
 #define sem_destroy(x) ILibDispatchSemaphore_Destroy(x)
 #define sem_wait(x) ILibDispatchSemaphore_wait(x)
@@ -918,10 +918,13 @@ int ILibIsRunningOnChainThread(void* chain);
 	\brief Chaining Methods
 	\{
 	*/
+	typedef void(*ILibChain_SignalHandler)(void *chain, int signum, void *user);
 	ILibExportMethod void *ILibCreateChain();
 	void *ILibCreateChainEx(int extraMemorySize);
 	void ILibAddToChain(void *chain, void *object);
 	void *ILibGetBaseTimer(void *chain);
+	int ILibChain_AddSignalHandler(void *chain, int signum, ILibChain_SignalHandler, void *user);
+	int ILibChain_RemoveSignalHandler(void *chain, int signum, ILibChain_SignalHandler, void *user);
 	void ILibChain_SafeAdd(void *chain, void *object);
 	void ILibChain_SafeRemove(void *chain, void *object);
 	void ILibChain_SafeRemoveEx(void *chain, void *object);

@@ -109,6 +109,17 @@ char ILibScratchPad[4096];   // General buffer
 char ILibScratchPad2[65536]; // Often used for UDP packet processing
 void* gILibChain = NULL;	 // Global Chain Instance used for Remote Logging when a chain instance isn't otherwise exposed
 
+#define ILibChain_SIGMAX 32
+ILibLinkedList g_signalHandlers[ILibChain_SIGMAX] = { NULL };
+typedef struct ILibChain_SignalHandlerData
+{
+	ILibChain_Link link;
+	int ipc[2];
+	int signum;
+	ILibChain_SignalHandler handler;
+	void *user;
+}ILibChain_SignalHandlerData;
+
 #define INET_SOCKADDR_LENGTH(x) ((x==AF_INET6?sizeof(struct sockaddr_in6):sizeof(struct sockaddr_in)))
 
 long long ILibGetUptime();
@@ -333,150 +344,27 @@ int ILibGetLocalIPAddressNetMask(unsigned int address)
 #endif
 
 #ifdef __APPLE__
-void* semaphore_table[2048] = { 0 };
 void ILibDispatchSemaphore_Init(sem_t* s, int pShared, int value)
 {
-	dispatch_semaphore_t ds;
-	int i;
-	for (i = 0; i < 2048; ++i)
-	{
-		if (semaphore_table[i] == NULL)
-		{
-			// This index is free
-			ds = dispatch_semaphore_create((long)value);
-			semaphore_table[i] = (void*)ds;
-			((int*)s)[0] = i;
-			break;
-		}
-	}
+	*s = dispatch_semaphore_create((long)value);
 }
 void ILibDispatchSemaphore_Destroy(sem_t* s)
 {
-	int i = ((int*)s)[0];
-	dispatch_semaphore_t ds = (dispatch_semaphore_t)semaphore_table[i];
-	semaphore_table[i] = NULL;
-	if (ds != NULL)
-	{
-		dispatch_release(ds);
-	}
+	dispatch_release(((dispatch_semaphore_t*)s)[0]);
 }
 void ILibDispatchSemaphore_wait(sem_t* s)
 {
-	dispatch_semaphore_wait((dispatch_semaphore_t)semaphore_table[((int*)s)[0]], DISPATCH_TIME_FOREVER);
+	dispatch_semaphore_wait(((dispatch_semaphore_t*)s)[0], DISPATCH_TIME_FOREVER);
 }
 void ILibDispatchSemaphore_trywait(sem_t* s)
 {
-	dispatch_semaphore_wait((dispatch_semaphore_t)semaphore_table[((int*)s)[0]], DISPATCH_TIME_NOW);
+	dispatch_semaphore_wait(((dispatch_semaphore_t*)s)[0], DISPATCH_TIME_NOW);
 }
 void ILibDispatchSemaphore_post(sem_t* s)
 {
-	dispatch_semaphore_signal((dispatch_semaphore_t)semaphore_table[((int*)s)[0]]);
+	dispatch_semaphore_signal(((dispatch_semaphore_t*)s)[0]);
 }
 #endif
-
-/*
-#if defined(__APPLE__)
-// #if defined (__IPHONE_OS_VERSION_MIN_REQUIRED)  // lame check for iPhone
-
-// several places the same check for interface, two functions identical, but returning 
-// slightly different form of interfaces
-
-// Helper functions
-typedef void * (* FN_GETMEM) (int ctr);
-typedef void (* FN_STOREVAL) (int ctr, void * p, struct ifaddrs * ifa);
-
-static int IsMacIPv4Address (struct ifaddrs * ifa);
-static int GetMacIPv4AddressesCount (struct ifaddrs * ifa);
-static void StoreValInt (int ctr, void * p, struct ifaddrs * ifa);
-static void * GetAddressMemInt (int ctr);
-static void StoreValStruct (int ctr, void * p, struct ifaddrs * ifa);
-static void * GetAddressMemStruct (int ctr);
-
-int IsMacIPv4Address(struct ifaddrs * ifa)
-{
-	// This should pick up eth0.. (desktop) or en0.. (mac / iphone)
-#if defined (__IPHONE_OS_VERSION_MIN_REQUIRED)
-	return (ifa->ifa_addr->sa_family == AF_INET &&      // is it IP4
-		strncmp (ifa->ifa_name, "pdp_ip", 6) != 0 &&	// iPhone is using it for 3G
-		strncmp (ifa->ifa_name, "lo0", 3) != 0);		// is it not lo0
-#else
-	return (ifa->ifa_addr->sa_family == AF_INET &&      // is it IP4
-		strncmp (ifa->ifa_name, "lo0", 3) != 0);		// is it not lo0
-#endif
-}
-
-int GetMacIPv4AddressesCount(struct ifaddrs * pifa)
-{
-	int ctr = 0;
-	while (pifa != NULL)
-	{
-		if (IsMacIPv4Address (pifa)) ctr++;
-		pifa = pifa->ifa_next;
-	}
-	return ctr;
-}
-
-void StoreValInt(int ctr, void * p, struct ifaddrs * pifa)
-{
-	if (!p || !pifa) return;
-	*((int *)p + ctr) = ((struct sockaddr_in *)pifa->ifa_addr)->sin_addr.s_addr;
-}
-
-void* GetAddressMemInt(int ctr)
-{
-	int * p;
-	if (0 >= ctr) return NULL;
-	if ((p = (int *)malloc (sizeof (int) * ctr)) == NULL) ILIBCRITICALEXIT(254);
-	return (void *)p;
-}
-
-void StoreValStruct(int ctr, void * p, struct ifaddrs * pifa)
-{
-	if (!p || !pifa) return;
-	memcpy ((struct sockaddr_in *)p + ctr, (struct sockaddr_in *)pifa->ifa_addr, sizeof(struct sockaddr_in));
-}
-
-void* GetAddressMemStruct(int ctr)
-{
-	struct sockaddr_in *p;
-	if (0 >= ctr) return NULL;
-	if ((p = (struct sockaddr_in *)malloc (sizeof (struct sockaddr_in) * ctr)) == NULL) ILIBCRITICALEXIT(254);
-	return (void *)p;
-}
-
-int GetMacIPv4Addresses(void** pp, FN_GETMEM fnGetMem, FN_STOREVAL fnStoreVal)
-{
-	int ctr = 0;
-	struct ifaddrs * ifaddr, * ifa;
-	*pp = NULL;
-
-	if (getifaddrs(&ifaddr) != 0) return 0;
-
-	// Count valid IPv4 interfaces
-	if (0 < (ctr = GetMacIPv4AddressesCount (ifaddr)))
-	{
-		*pp = (*fnGetMem)(ctr);
-
-		ctr = 0;
-		ifa = ifaddr;
-		// Copy valid IPv4 interfaces addresses
-		while (NULL != ifa) 
-		{
-			if (IsMacIPv4Address(ifa))
-			{
-				(*fnStoreVal)(ctr, *pp, ifa);
-				ctr++;
-			}
-
-			ifa = ifa->ifa_next;
-		}
-	}
-
-	freeifaddrs(ifaddr);
-	return ctr;
-}
-#endif
-*/
 
 //! Fetches the list of valid IPv4 adapters
 /*!
@@ -648,78 +536,6 @@ int ILibGetLocalIPv4AddressList(struct sockaddr_in** addresslist, int includeloo
 #endif
 }
 
-/*
-// Get the list of valid IPv6 adapters, skip loopback and other junk adapters.
-int ILibGetLocalIPv6AddressList(struct sockaddr_in6** addresslist)
-{
-#if defined(WINSOCK2)
-PIP_ADAPTER_ADDRESSES pAddresses = NULL;
-PIP_ADAPTER_ADDRESSES pAddressesPtr = NULL;
-PIP_ADAPTER_UNICAST_ADDRESS_LH AddrPtr;
-ULONG outBufLen = sizeof(IP_ADAPTER_ADDRESSES);
-int AddrCount = 0;
-struct sockaddr_in6 *ptr;
-
-// Perform first call
-pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(outBufLen);
-if (GetAdaptersAddresses(AF_INET6, GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_ANYCAST, NULL, pAddresses, &outBufLen) == ERROR_BUFFER_OVERFLOW)
-{
-free(pAddresses);
-pAddresses = (IP_ADAPTER_ADDRESSES *)malloc(outBufLen);
-}
-
-// Perform second call
-if (GetAdaptersAddresses(AF_INET6, GAA_FLAG_SKIP_FRIENDLY_NAME | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_ANYCAST, NULL, pAddresses, &outBufLen) != NO_ERROR)
-{
-free(pAddresses);
-return 0;
-}
-
-// Count the total number of local IPv6 addresses
-pAddressesPtr = pAddresses;
-while (pAddressesPtr != NULL)
-{
-// Skip any loopback adapters
-if (pAddressesPtr->PhysicalAddressLength != 0 && pAddressesPtr->NoMulticast == 0)
-{
-// For each adapter
-AddrPtr = pAddressesPtr->FirstUnicastAddress;
-while (AddrPtr != NULL)
-{
-AddrCount++;
-AddrPtr = AddrPtr->Next;
-}
-}
-pAddressesPtr = pAddressesPtr->Next;
-}
-
-// Allocate the array of IPv6 addresses
-*addresslist = ptr = malloc(AddrCount * sizeof(struct sockaddr_in6));
-
-// Copy each address into the array
-pAddressesPtr = pAddresses;
-while (pAddressesPtr != NULL)
-{
-// Skip any loopback adapters
-if (pAddressesPtr->PhysicalAddressLength != 0 && pAddressesPtr->NoMulticast == 0)
-{
-// For each adapter
-AddrPtr = pAddressesPtr->FirstUnicastAddress;
-while (AddrPtr != NULL)
-{
-memcpy(ptr, AddrPtr->Address.lpSockaddr, sizeof(struct sockaddr_in6));
-ptr++;
-AddrPtr = AddrPtr->Next;
-}
-}
-pAddressesPtr = pAddressesPtr->Next;
-}
-
-free(pAddresses);
-return AddrCount;
-#endif
-}
-*/
 
 //! Get the list of valid IPv6 adapter indexes, skip loopback and other junk adapters.
 /*!
@@ -1709,6 +1525,162 @@ void ILibChain_SafeAddSink(void *object)
 	free(data);
 }
 
+#ifdef _POSIX
+void ILibChain_SignalSink(int signum)
+{
+	if (g_signalHandlers[signum] != NULL)
+	{
+		void *node = ILibLinkedList_GetNode_Head(g_signalHandlers[signum]);
+		while (node != NULL)
+		{
+			ignore_result(write(((ILibChain_SignalHandlerData*)ILibLinkedList_GetDataFromNode(node))->ipc[1], " ", 1));
+			node = ILibLinkedList_GetNextNode(node);
+		}
+	}
+}
+
+void ILibChain_SignalHandler_DestroySelect(void* object)
+{
+	ILibChain_SignalHandlerData *data = (ILibChain_SignalHandlerData*)object;
+	void *node;
+	struct sigaction action;
+	struct sigaction ignore;
+
+	ignore.sa_handler = SIG_IGN;
+	sigemptyset(&ignore.sa_mask);
+	ignore.sa_flags = 0;
+
+	if (sigaction(data->signum, &ignore, &action) == 0)
+	{
+		close(data->ipc[0]);
+		close(data->ipc[1]);
+
+		if (g_signalHandlers[data->signum] != NULL)
+		{
+			node = ILibLinkedList_GetNode_Search(g_signalHandlers[data->signum], NULL, data);
+			if (node != NULL) { ILibLinkedList_Remove(node); }
+			if (ILibLinkedList_GetCount(g_signalHandlers[data->signum]) == 0)
+			{
+				ILibLinkedList_Destroy(g_signalHandlers[data->signum]);
+				g_signalHandlers[data->signum] = NULL;
+			}
+		}
+		sigaction(data->signum, &action, NULL);
+	}
+}
+void ILibChain_SignalHandler_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
+{
+	int vX;
+	ILibChain_SignalHandlerData *data = (ILibChain_SignalHandlerData*)object;
+	if (FD_ISSET(data->ipc[0], readset))
+	{
+		while ((vX = read(data->ipc[0], ILibScratchPad, sizeof(ILibScratchPad))) > 0);						// Empty the pipe
+		if (data->handler != NULL) { data->handler(data->link.ParentChain, data->signum, data->user); }		// Dispatch the signal
+	}
+
+	UNREFERENCED_PARAMETER(slct);
+	UNREFERENCED_PARAMETER(writeset);
+	UNREFERENCED_PARAMETER(errorset);
+}
+void ILibChain_SignalHandler_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
+{
+	ILibChain_SignalHandlerData *data = (ILibChain_SignalHandlerData*)object;
+	FD_SET(data->ipc[0], readset);
+
+	UNREFERENCED_PARAMETER(writeset);
+	UNREFERENCED_PARAMETER(errorset);
+	UNREFERENCED_PARAMETER(blocktime);
+}
+int ILibChain_RemoveSignalHandler_Finder(void* obj1, void *obj2)
+{
+	ILibChain_SignalHandlerData *data = (ILibChain_SignalHandlerData*)obj1;
+	void **data2 = (void**)obj2;
+
+	if (data->handler == data2[0] && data->user == data2[1])
+	{
+		return(0);
+	}
+	else
+	{
+		return(1);
+	}
+}
+int ILibChain_RemoveSignalHandler(void *chain, int signum, ILibChain_SignalHandler handler, void *user)
+{
+	if (signum > (ILibChain_SIGMAX - 1)) { return(-1); }
+	void *matchWith[2] = { handler, user };
+	struct sigaction action, ignore;
+	void *node;
+	int ret = -1;
+	ignore.sa_handler = SIG_IGN;
+	sigemptyset(&ignore.sa_mask);
+	ignore.sa_flags = 0;
+
+	if (sigaction(signum, &ignore, &action) == 0)
+	{
+		if (g_signalHandlers[signum] != NULL)
+		{
+			node = ILibLinkedList_GetNode_Search(g_signalHandlers[signum], ILibChain_RemoveSignalHandler_Finder, (void*)matchWith);
+			if (node != NULL)
+			{
+				ILibChain_SafeRemove(chain, ILibLinkedList_GetDataFromNode(node));
+				ILibLinkedList_Remove(node);
+				ret = 0;
+			}
+		}
+		sigaction(signum, &action, NULL);
+	}
+
+	return(ret);
+}
+int ILibChain_AddSignalHandler(void *chain, int signum, ILibChain_SignalHandler handler, void *user)
+{
+	ILibChain_SignalHandlerData *data = NULL;
+	struct sigaction action, ignore;
+	int ret = -1;
+	if (signum > (ILibChain_SIGMAX - 1)) { return(ret); }
+
+	ignore.sa_handler = SIG_IGN;
+	sigemptyset(&ignore.sa_mask);
+	ignore.sa_flags = 0;
+
+
+	if (sigaction(signum, &ignore, NULL) == 0)
+	{
+		if (g_signalHandlers[signum] == NULL) { g_signalHandlers[signum] = ILibLinkedList_Create(); }
+		data = (ILibChain_SignalHandlerData*)ILibChain_Link_Allocate(sizeof(ILibChain_SignalHandlerData), 0);
+		data->link.MetaData = "ILibChain_SignalHandler";
+		data->link.PreSelectHandler = ILibChain_SignalHandler_PreSelect;
+		data->link.PostSelectHandler = ILibChain_SignalHandler_PostSelect;
+		data->link.DestroyHandler = ILibChain_SignalHandler_DestroySelect;
+		data->signum = signum;
+		data->user = user;
+		data->handler = handler;
+		if (pipe(data->ipc) == 0)
+		{
+			fcntl(data->ipc[0], F_SETFL, O_NONBLOCK);
+			ILibLinkedList_AddTail(g_signalHandlers[signum], data);
+			ILibChain_SafeAdd(chain, data);
+
+			action.sa_handler = ILibChain_SignalSink;
+			sigemptyset(&action.sa_mask);
+			action.sa_flags = 0;
+			if (sigaction(signum, &action, NULL) == 0)
+			{
+				return(0);
+			}
+			ILibChain_SafeRemove(chain, data);
+		}
+		else
+		{
+			ILibChain_FreeLink(data);
+		}
+	}
+
+	return(ret);
+}
+#endif
+
 /*! \fn void ILibChain_SafeAdd(void *chain, void *object)
 \brief Dynamically add a link to a chain that is already running.
 \par
@@ -2121,6 +2093,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 			chain->node = ILibLinkedList_GetNextNode(chain->node);
 		}
 	}
+
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
 
 	root->continuationState = ILibChain_ContinuationState_INACTIVE;
