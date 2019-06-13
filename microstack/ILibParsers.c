@@ -255,6 +255,9 @@ typedef struct ILibLinkedListNode_Root
 	void *ExtraMemory;
 }ILibLinkedListNode_Root;
 
+const int ILibLinkedListNode_SIZE = sizeof(ILibLinkedListNode);
+const int ILibLinkedListNodeRoot_Size = sizeof(ILibLinkedListNode_Root);
+
 struct ILibReaderWriterLock_Data
 {
 	ILibChain_PreSelect Pre;
@@ -863,12 +866,6 @@ struct ILibBaseChain_SafeData
 	void *Object;
 };
 
-typedef enum ILibChain_ContinuationStates
-{
-	ILibChain_ContinuationState_INACTIVE	= 0,
-	ILibChain_ContinuationState_CONTINUE	= 1,
-	ILibChain_ContinuationState_END_CONTINUE= 2
-}ILibChain_ContinuationStates;
 
 typedef struct ILibBaseChain
 {
@@ -1921,6 +1918,10 @@ void ILibChain_UpdateEventHook(ILibChain_EventHookToken token, int maxTimeout)
 		memset(hook, 0, sizeof(ILibChain_Link_Hook));
 	}
 }
+ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain)
+{
+	return(((ILibBaseChain*)chain)->continuationState);
+}
 ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
 {
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
@@ -1936,7 +1937,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 	ILibLinkedListNode tmpNode;
 	memset(&tmpNode, 0, sizeof(tmpNode));
 
-	if (root->continuationState != ILibChain_ContinuationState_INACTIVE) { return; }
+	if (root->continuationState != ILibChain_ContinuationState_INACTIVE && root->continuationState != ILibChain_ContinuationState_END_CONTINUE) { return; }
 	root->continuationState = ILibChain_ContinuationState_CONTINUE;
 	currentNode = root->node;
 
@@ -1977,16 +1978,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 #endif
 #endif
 			}
-			nodeHook = (ILibChain_Link_Hook*)ILibLinkedList_GetExtendedMemory(chain->node);
-			if (nodeHook->MaxTimeout > 0 && nodeHook->MaxTimeout < chain->selectTimeout) { chain->selectTimeout = nodeHook->MaxTimeout; }
-			if (moduleCount > 0)
-			{
-				++mX;
-			}
-			else
-			{
-				chain->node = ILibLinkedList_GetNextNode(chain->node);
-			}
+			++mX;
 		}
 		tv.tv_sec = chain->selectTimeout / 1000;
 		tv.tv_usec = 1000 * (chain->selectTimeout % 1000);
@@ -2095,8 +2087,6 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
-
-	root->continuationState = ILibChain_ContinuationState_INACTIVE;
 	root->node = currentNode;
 }
 
@@ -2782,6 +2772,8 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		FD_ZERO(&writeset);
 		tv.tv_sec = UPNP_MAX_WAIT;
 		tv.tv_usec = 0;
+
+		if (chain->continuationState == ILibChain_ContinuationState_END_CONTINUE) { chain->continuationState = ILibChain_ContinuationState_INACTIVE; }
 
 		//
 		// Iterate through all the PreSelect function pointers in the chain
@@ -6694,15 +6686,14 @@ void* ILibLinkedList_GetTag(ILibLinkedList list)
 
 void* ILibLinkedList_AllocateNode(void *LinkedList)
 {
-	void* newNode;
-	ILibMemory_Allocate(sizeof(ILibLinkedListNode), ILibMemory_GetExtraMemorySize(((ILibLinkedListNode_Root*)LinkedList)->ExtraMemory), &newNode, NULL);
+	void* newNode = ILibMemory_SmartAllocateEx(sizeof(ILibLinkedListNode), ILibMemory_GetExtraMemorySize(((ILibLinkedListNode_Root*)LinkedList)->ExtraMemory));
 	return(newNode);
 }
 
 void* ILibLinkedList_GetExtendedMemory(void* LinkedList_Node)
 {
-	if (LinkedList_Node == NULL) { return(NULL); }
-	return(ILibMemory_GetExtraMemory(LinkedList_Node, sizeof(ILibLinkedListNode)));
+	if (LinkedList_Node == NULL || !ILibMemory_CanaryOK(LinkedList_Node)) { return(NULL); }
+	return(ILibMemory_Extra(LinkedList_Node));
 }
 /*! \fn ILibLinkedList_ShallowCopy(void *LinkedList)
 \brief Create a shallow copy of a linked list. That is, the structure is copied, but none of the data contents are copied. The pointer values are just copied.
@@ -6881,7 +6872,7 @@ void* ILibLinkedList_Remove(void *LinkedList_Node)
 		}
 	}
 	--r->count;
-	free(n);
+	ILibMemory_Free(n);
 	return RetVal;
 }
 

@@ -310,6 +310,12 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibServerScope_LocalSegment=2
 	}ILibServerScope;
 
+	typedef enum ILibChain_ContinuationStates
+	{
+		ILibChain_ContinuationState_INACTIVE = 0,
+		ILibChain_ContinuationState_CONTINUE = 1,
+		ILibChain_ContinuationState_END_CONTINUE = 2
+	}ILibChain_ContinuationStates;
 
 	typedef	void(*ILibChain_PreSelect)(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime);
 	typedef	void(*ILibChain_PostSelect)(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset);
@@ -936,6 +942,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
 	ILibExportMethod void ILibChain_EndContinue(void *chain);
+	ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain);
 	#define ILibChain_FreeLink(link) ((ILibChain_Link*)link)->RESERVED = 0xFFFFFFFF;free(link);
 	#define ILibChain_IsLinkAlive(link) (((ILibChain_Link*)link)->RESERVED == ILibMemory_Canary)
 
@@ -1092,6 +1099,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibLinkedList_SetTag(ILibLinkedList list, void *tag);
 	void* ILibLinkedList_GetTag(ILibLinkedList list);
 	int ILibLinkedList_GetIndex(void *node);
+	extern const int ILibLinkedListNode_SIZE;
+	extern const int ILibLinkedListNodeRoot_Size;
+
 
 	//! Comparer delegate is called to compare two values. Mimics behavior of .NET IComparer..
 	//! obj2 == obj1	: 0
