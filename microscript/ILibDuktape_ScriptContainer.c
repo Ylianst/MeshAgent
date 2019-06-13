@@ -832,7 +832,7 @@ duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 	duk_push_string(ctx, ILibScratchPad);
 	return(1);
 #elif defined(_POSIX)
-	getcwd(ILibScratchPad, sizeof(ILibScratchPad));
+	ignore_result((uint64_t)getcwd(ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_push_string(ctx, ILibScratchPad);				
 	return(1);
 #else
