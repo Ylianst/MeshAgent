@@ -1468,6 +1468,17 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 							return(1);
 						}
 					}
+					else
+					{
+						if (console_uid != 0)
+						{
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This system does not appear to have an XServer running");
+						}
+						else
+						{
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This system does not appear to have an XServer instance running when no users are logged in");
+						}
+					}
 				}
 				else
 				{
