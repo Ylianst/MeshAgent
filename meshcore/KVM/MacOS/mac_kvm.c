@@ -336,14 +336,9 @@ void ExitSink(int s)
 }
 void* kvm_server_mainloop(void* param)
 {
-	CGDirectDisplayID displays[10];
 	int x, y, height, width, r, c = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
-	long long prev_timestamp = 0;
-	long long cur_timestamp = 0;
-	long long time_diff = 50;
-	struct timeb tp;
 	void *desktop = NULL;
 	void *buf = NULL;
 	int screen_height, screen_width, screen_num;
@@ -601,10 +596,13 @@ void* kvm_server_mainloop(void* param)
 
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
-	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)user)[0];
-	void *reserved = ((void**)user)[1];
-	void *pipeMgr = ((void**)user)[2];
-	char *exePath = (char*)((void**)user)[3];
+	//ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)user)[0];
+	//void *reserved = ((void**)user)[1];
+	//void *pipeMgr = ((void**)user)[2];
+	//char *exePath = (char*)((void**)user)[3];
+	UNREFERENCED_PARAMETER(sender);
+	UNREFERENCED_PARAMETER(exitCode);
+	UNREFERENCED_PARAMETER(user);
 }
 void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
 {
@@ -656,9 +654,6 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	user[1] = reserved;
 	user[2] = processPipeMgr;
 	user[3] = exePath;
-
-	char tmp[255];
-	int x;
 
 	if (uid != 0)
 	{
