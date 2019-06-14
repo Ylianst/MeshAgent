@@ -46,23 +46,36 @@ function Toaster()
         retVal.title = title;
         retVal.caption = caption;
 
-        switch (process.platform) {
+        switch (process.platform)
+        {
             case 'win32':
                 {
                     var GM = require('_GenericMarshal');
                     var kernel32 = GM.CreateNativeProxy('kernel32.dll');
                     kernel32.CreateMethod('ProcessIdToSessionId');
                     var psid = GM.CreateVariable(4);
-                    var consoleUid = require('user-sessions').consoleUid();
-                    if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0) {
+                    var consoleUid = 0;
+                    try
+                    {
+                        consoleUid = require('user-sessions').consoleUid();
+                    }
+                    catch (e)
+                    {
+                        retVal._rej('Cannot display user notification when a user is not logged in');
+                        return (retVal);
+                    }
+                    if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0)
+                    {
                         retVal._rej('internal error'); return (retVal);
                     }
 
-                    if (consoleUid == psid.toBuffer().readUInt32LE()) {
+                    if (consoleUid == psid.toBuffer().readUInt32LE())
+                    {
                         // We are running on the physical console
                         retVal._child = require('ScriptContainer').Create({ processIsolation: true });
                     }
-                    else {
+                    else
+                    {
                         // We need so spawn the ScriptContainer into the correct session
                         retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: consoleUid });
                     }
@@ -89,32 +102,40 @@ function Toaster()
                 break;
             case 'linux':
                 {
-                    try {
+                    try
+                    {
                         retVal.consoleUid = require('user-sessions').consoleUid();
                         retVal.xinfo = require('monitor-info').getXInfo(retVal.consoleUid);
                     }
-                    catch (xxe) {
+                    catch (xxe)
+                    {
                         retVal._rej(xxe);
                         return (retVal);
                     }
                     var util = findPath('zenity');
-                    if (util) {
+                    if (util)
+                    {
                         // Use ZENITY
                         retVal.child = require('child_process').execFile(util, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
                         retVal.child.parent = retVal;
                         retVal.child.stderr.str = '';
                         retVal.child.stderr.on('data', function (chunk) { this.str += chunk.toString(); this.parent.kill(); });
                         retVal.child.stdout.on('data', function (chunk) { });
-                        retVal.child.on('exit', function (code) {
-                            if (this.stderr.str.trim() != '') {
-                                if ((util = findPath('notify-send')) && this.stderr.str.split('GLib-CRITICAL').length > 1) {
+                        retVal.child.on('exit', function (code)
+                        {
+                            if (this.stderr.str.trim() != '')
+                            {
+                                if ((util = findPath('notify-send')) && this.stderr.str.split('GLib-CRITICAL').length > 1)
+                                {
                                     // This is a bug in zenity, so we should try notify-send
-                                    if (process.env['DISPLAY']) {
+                                    if (process.env['DISPLAY'])
+                                    {
                                         // DISPLAY is set, so we good to go
                                         this.parent.child = require('child_process').execFile(util, ['notify-send', this.parent.title, this.parent.caption]);
                                         this.parent.child.parent = this.parent;
                                     }
-                                    else {
+                                    else
+                                    {
                                         // We need to find the DISPLAY to use
                                         var username = require('user-sessions').getUsername(consoleUid);
                                         this.parent.child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -126,23 +147,27 @@ function Toaster()
                                     this.parent.child.waitExit();
 
                                     // NOTIFY-SEND has a bug where timeouts don't work, so the default is 5 seconds
-                                    this.parent._timeout = setTimeout(function onFakeDismissed(obj) {
+                                    this.parent._timeout = setTimeout(function onFakeDismissed(obj)
+                                    {
                                         obj._res('DISMISSED');
                                     }, 10000, this.parent);
                                 }
-                                else {
+                                else
+{
                                     // Fake a toast using zenity --info
                                     util = findPath('zenity');
                                     this.parent.child = require('child_process').execFile(util, ['zenity', '--info', '--title=' + this.parent.title, '--text=' + this.parent.caption, '--timeout=5'], { uid: this.parent.consoleUid, env: { XAUTHORITY: this.parent.xinfo.xauthority, DISPLAY: this.parent.xinfo.display } });
                                     this.parent.child.parent = this.parent;
                                     this.parent.child.stderr.on('data', function (chunk) { });
                                     this.parent.child.stdout.on('data', function (chunk) { });
-                                    this.parent.child.on('exit', function (code) {
+                                    this.parent.child.on('exit', function (code)
+                                    {
                                         this.parent._res('DISMISSED');
                                     });
                                 }
                             }
-                            else {
+                            else
+                            {
                                 this.parent._res('DISMISSED');
                             }
                         });

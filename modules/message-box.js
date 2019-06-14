@@ -132,8 +132,26 @@ function linux_messageBox()
         if (timeout == null) { timeout = 10; }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         var zenity = '', kdialog = '';
-        var uid = require('user-sessions').consoleUid();
-        var xinfo = require('monitor-info').getXInfo(uid);
+        var uid;    
+        var xinfo;
+
+        try
+        {
+            uid = require('user-sessions').consoleUid();
+            xinfo = require('monitor-info').getXInfo(uid);
+        }
+        catch(e)
+        {
+            uid = 0;
+            xinfo = require('monitor-info').getXInfo(0);
+        }
+
+        if (xinfo == null)
+        {
+            ret._rej('This system cannot display a user dialog box when a user is not logged in');
+            return (ret);
+        }
+
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = '';
         child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
