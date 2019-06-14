@@ -3429,7 +3429,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 		if (agent->retryTime >= 240000)
 		{
 			// Cap at around 4 minutes
-			delay = agent->retryTime + (timeout % 120000);					// Random value between 4 and 6 minutes
+			delay = 240000 + (timeout % 120000);					// Random value between 4 and 6 minutes
 		}
 		else
 		{
