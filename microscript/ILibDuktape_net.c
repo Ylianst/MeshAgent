@@ -1319,6 +1319,22 @@ duk_ret_t ILibDuktape_net_server_close(duk_context *ctx)
 	return(0);
 }
 
+duk_ret_t ILibDuktape_net_server_listening(duk_context *ctx)
+{
+	duk_push_this(ctx);		// [server]
+	ILibDuktape_net_server *server = (ILibDuktape_net_server*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_net_Server_buffer);
+
+	if (server->server != NULL || duk_has_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer))
+	{
+		duk_push_true(ctx);
+	}
+	else
+	{
+		duk_push_false(ctx);
+	}
+
+	return(1);
+}
 duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -1358,6 +1374,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 #endif
 	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "error");
 	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "listening");
+	ILibDuktape_CreateEventWithGetter(ctx, "listening", ILibDuktape_net_server_listening);
 
 	ILibDuktape_CreateInstanceMethod(ctx, "listen", ILibDuktape_net_server_listen, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "address", ILibDuktape_net_server_address, 0);
