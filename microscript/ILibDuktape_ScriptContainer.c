@@ -27,10 +27,10 @@ limitations under the License.
 #ifndef NO_IFADDR
 	#include <ifaddrs.h>
 #endif
-#ifndef __APPLE__
-#include <netpacket/packet.h>
-#else
-#include <mach-o/dyld.h>
+#ifdef __APPLE__
+	#include <mach-o/dyld.h>
+#elif !defined(_FREEBSD)
+	#include <netpacket/packet.h>
 #endif
 #include <sys/utsname.h>
 #endif
@@ -467,7 +467,11 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
 	exePath[len] = 0;
 #elif defined(NACL)
-#else
+#elif defined(_FREEBSD)
+	int x = readlink("/proc/curproc/file", exePath, sizeof(exePath));
+	if (x < 0 || x >= sizeof(exePath)) ILIBCRITICALEXIT(246);
+	exePath[x] = 0;
+#elif
 	int x = readlink("/proc/self/exe", exePath, sizeof(exePath));
 	if (x < 0 || x >= sizeof(exePath)) ILIBCRITICALEXIT(246);
 	exePath[x] = 0;
@@ -1015,6 +1019,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_push_string(ctx, "win32");
 #elif defined(__APPLE__)
 	duk_push_string(ctx, "darwin");
+#elif defined(_FREEBSD)
+	duk_push_string(ctx, "freebsd");
 #else
 	duk_push_string(ctx, "linux");
 #endif
@@ -1346,7 +1352,7 @@ int ILibDuktape_ScriptContainer_os_isWirelessInterface(char *interfaceName)
 	return(retVal);
 }
 #endif
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(_FREEBSD)
 duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 {
 #if !defined(WIN32)
@@ -1607,7 +1613,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateInstanceMethod(ctx, "arch", ILibDuktape_ScriptContainer_OS_arch, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "platform", ILibDuktape_ScriptContainer_OS_platform, 0);
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(_FREEBSD)
 	ILibDuktape_CreateInstanceMethod(ctx, "networkInterfaces", ILibDuktape_ScriptContainer_OS_networkInterfaces, 0);
 #endif
 	ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_ScriptContainer_OS_hostname, 0);

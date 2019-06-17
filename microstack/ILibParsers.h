@@ -87,7 +87,7 @@ struct sockaddr_in6;
 #ifndef __APPLE__
 #include <semaphore.h>
 #endif
-#if !defined(__APPLE__) && !defined(_VX_CPU)
+#if !defined(__APPLE__) && !defined(_VX_CPU) && !defined(_FREEBSD)
 #include <malloc.h>
 #endif
 #include <fcntl.h>
@@ -95,7 +95,7 @@ struct sockaddr_in6;
 #define UNREFERENCED_PARAMETER(P)
 #endif
 
-#if defined(_POSIX) && !defined(__APPLE__)
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 #include <linux/limits.h>
 #endif
 

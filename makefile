@@ -52,7 +52,7 @@
 #   ARCHID=2                                # Windows Console x86 64 bit
 #   ARCHID=3                                # Windows Service x86 32 bit
 #   ARCHID=4                                # Windows Service x86 64 bit
-#	make macos ARCHID=16					# Mac OS x86 64 bit
+#   make macos ARCHID=16					# Mac OS x86 64 bit
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPS
@@ -66,7 +66,7 @@
 #   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
 #   make linux ARCHID=26 					# Linux ARM 64 bit
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
-#
+#   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 
 # Microstack & Microscript
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c
@@ -257,6 +257,15 @@ CFLAGS += -D_NOFSWATCHER
 CEXTRA = -fno-strict-aliasing 
 endif
 
+# Official FreeBSD x86-64
+ifeq ($(ARCHID),30)
+ARCHNAME = freebsd_x86-64
+CC = clang
+KVM = 0
+LMS = 0
+endif
+
+
 ifeq ($(WEBLOG),1)
 CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
 endif
@@ -293,9 +302,11 @@ SOURCES += microstack/nossl/sha384-512.c microstack/nossl/sha224-256.c microstac
 CFLAGS += -DMICROSTACK_NOTLS
 LINUXSSL = 
 MACSSL =
+BSDSSL =
 else
 LINUXSSL = -Lopenssl/libstatic/linux/$(ARCHNAME)
 MACSSL = -Lopenssl/libstatic/macos/$(ARCHNAME)
+BSDSSL = -Lopenssl/libstatic/bsd/$(ARCHNAME)
 CFLAGS += -DMICROSTACK_TLS_DETECT
 LDEXTRA += -lssl -lcrypto
 endif
@@ -412,4 +423,6 @@ macos:
 	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
 	$(STRIP)
 
+freebsd:
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
 

@@ -24,6 +24,7 @@ limitations under the License.
 #include "../microstack/ILibProcessPipe.h"
 #include "../microstack/ILibRemoteLogging.h"
 
+#ifndef _NOHECI
 
 #ifdef WIN32
 #include <windows.h>
@@ -1143,3 +1144,6 @@ void ILibDuktape_HECI_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "heci", ILibDuktape_HECI_Push);
 }
+
+#endif
+

@@ -42,8 +42,9 @@ limitations under the License.
 #include <net/if_arp.h>
 #include <arpa/inet.h>
 #include <sys/syscall.h>
-#include <linux/reboot.h>
-
+#ifndef _FREEBSD
+	#include <linux/reboot.h>
+#endif
 
 #define inaddrr(x) (*(struct in_addr *) &ifr->x[sizeof sa.sin_port])
 #define IFRSIZE   ((int)(size * sizeof (struct ifreq)))
@@ -333,7 +334,7 @@ int info_GetDefaultGateway(char* ifname, char** gateway)
 // This is the POSIX implementation of a method that gets information about local interfaces
 int info_GetLocalInterfaces(char* data, int maxdata)
 {
-#ifdef NACL
+#if defined NACL || defined(_FREEBSD)
 	return 0;
 #else
 
@@ -510,7 +511,7 @@ int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 #endif
 }
 
-#elif _VX_CPU // If VxWorks, we still need to implement this.
+#elif defined(_VX_CPU) || defined(_FREEBSD)  // If VxWorks, we still need to implement this.
 
 int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 {

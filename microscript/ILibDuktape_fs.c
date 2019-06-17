@@ -39,8 +39,8 @@ limitations under the License.
 
 #ifdef _POSIX
 #include <sys/stat.h>
-#if !defined(_NOFSWATCHER) && !defined(__APPLE__)
-#include <sys/inotify.h>
+#if !defined(_NOFSWATCHER) && !defined(__APPLE__) && !defined(_FREEBSD)
+	#include <sys/inotify.h>
 #endif
 #endif
 #ifdef __APPLE__
@@ -905,7 +905,7 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, data->overlapped.hEvent);
 	CloseHandle(data->h);
 	data->h = NULL;
-#elif defined(_POSIX) && !defined(__APPLE__)
+#elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	ILibHashtable_Remove(data->linuxWatcher->watchTable, data->wd.p, NULL, 0);
 	if (inotify_rm_watch(data->linuxWatcher->fd, data->wd.i) != 0) { ILibRemoteLogging_printf(ILibChainGetLogger(Duktape_GetChain(ctx)), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "FSWatcher.close(): Error removing wd[%d] from fd[%d]", data->wd.i, data->linuxWatcher->fd); }
 	else
@@ -1046,7 +1046,7 @@ duk_ret_t ILibDuktape_fs_watcher_finalizer(duk_context *ctx)
 	return 0;
 }
 
-#if defined(_POSIX) && !defined(__APPLE__)
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 void ILibDuktape_fs_notifyDispatcher_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
@@ -1296,7 +1296,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		duk_pop(ctx);														// ...
 	}
 #elif defined(_POSIX)
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(_FREEBSD)
 	// Linux
 	ILibDuktape_fs_linuxWatcher *notifyDispatcher = NULL;
 	duk_push_this(ctx);																// [fs]
@@ -1320,7 +1320,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		duk_put_prop_string(ctx, -2, FS_NOTIFY_DISPATCH_PTR);				// [fs]
 		duk_pop(ctx);														// ...
 	}
-#else
+#elif defined(__APPLE__)
 	// MacOS
 	ILibDuktape_fs_appleWatcher *watcher = NULL;
 	duk_push_this(ctx);																// [fs]
@@ -1363,7 +1363,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	data->chain = chain;
 	data->pipeManager = pipeMgr;
 	data->recursive = recursive;
-#elif defined(_POSIX) && !defined(__APPLE__)
+#elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	data->linuxWatcher = notifyDispatcher;
 #endif
 #ifdef __APPLE__
@@ -1396,7 +1396,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "fs.watch(): Error creating watcher"));
 	}
 	ILibProcessPipe_WaitHandle_Add(pipeMgr, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
-#elif defined(_POSIX) && !defined(__APPLE__)
+#elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	data->wd.i = inotify_add_watch(data->linuxWatcher->fd, path, IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO);
 	if (data->wd.i < 0)
 	{

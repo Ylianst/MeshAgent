@@ -4488,7 +4488,11 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		agentHost->exePath = exePath;
 #elif defined(NACL)
 #else
+	#ifdef _FREEBSD
+		x = readlink("/proc/curproc/file", exePath, 1024);
+	#else
 		x = readlink("/proc/self/exe", exePath, 1024);
+	#endif
 		if (x < 0 || x >= 1024) ILIBCRITICALEXIT(246);
 		exePath[x] = 0;
 #endif

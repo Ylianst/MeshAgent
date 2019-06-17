@@ -47,7 +47,7 @@ extern "C" {
 #if defined(WIN32) || defined(_WIN32_WCE)
 #include <STDDEF.h>
 #elif defined(_POSIX)
-#if !defined(__APPLE__) && !defined(_VX_CPU)
+#if !defined(__APPLE__) && !defined(_VX_CPU) && !defined(_FREEBSD)
 #include <malloc.h>
 #endif
 #endif

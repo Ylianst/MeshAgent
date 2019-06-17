@@ -25,8 +25,12 @@ limitations under the License.
 		#include "chrome/nacl.h"
 	#endif
 	#if defined(_POSIX)
-		#ifndef _VX_CPU
-		#include <sys/statfs.h>
+		#if !defined(_VX_CPU) && !defined(_FREEBSD)
+			#include <sys/statfs.h>
+		#endif
+		#ifdef _FREEBSD
+			#include <sys/param.h>
+			#include <sys/mount.h>
 		#endif
 		#include <pthread.h>
 		#ifndef _NOILIBSTACKDEBUG
@@ -8117,7 +8121,7 @@ int ILibGetCurrentTimezoneOffset_Minutes()
 	{
 		return(-1*(int)((u.QuadPart - l.QuadPart ) / 10000000 / 60));
 	}
-#elif defined(_ANDROID)
+#elif defined(_ANDROID) || defined(_FREEBSD)
 	return 0; // TODO
 #else
 	int offset;
@@ -8144,8 +8148,12 @@ int ILibIsDaylightSavingsTime()
 #elif defined(_ANDROID)
 	return 0; // TODO
 #else
-	tzset();
-	return daylight;
+	#ifdef _FREEBSD
+		return(0);
+	#else
+		tzset();
+		return daylight;
+	#endif
 #endif
 }
 

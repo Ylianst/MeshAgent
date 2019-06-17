@@ -28,7 +28,7 @@ limitations under the License.
 
 #include "ILibParsers.h"
 
-#if defined(_POSIX) && !defined(__APPLE__) && !defined(NO_IPADDR_MONITOR)
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(NO_IPADDR_MONITOR) && !defined(_FREEBSD)
 #include <netinet/in.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -47,7 +47,7 @@ typedef struct _ILibIPAddressMonitor
 		SOCKET mSocket;
 		DWORD bytesReturned;
 		OVERLAPPED *reserved;
-	#elif defined (_POSIX) && !defined(__APPLE__)
+	#elif defined (_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 		int mSocket;
 		struct sockaddr_nl addr;
 	#endif
@@ -96,13 +96,13 @@ void ILibIPAddressMonitor_Destroy(void *object)
 	obj->reserved->hEvent = NULL;
 	closesocket(obj->mSocket);
 	obj->mSocket = INVALID_SOCKET;
-#elif defined(_POSIX) && !defined(__APPLE__)
+#elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	close(obj->mSocket);
 	obj->mSocket = -1;
 #endif
 }
 
-#if defined(_POSIX) && !defined(__APPLE__)
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 void ILibIPAddressMonitor_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	_ILibIPAddressMonitor *obj = (_ILibIPAddressMonitor*)object;
@@ -148,7 +148,7 @@ ILibIPAddressMonitor ILibIPAddressMonitor_Create(void *chain, ILibIPAddressMonit
 	obj->reserved->hEvent = (HANDLE)obj;
 	obj->mSocket = socket(AF_INET, SOCK_DGRAM, 0);
 	WSAIoctl(obj->mSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &(obj->bytesReturned), obj->reserved, ILibIPAddressMonitor_dispatch);
-#elif defined (_POSIX) && !defined(__APPLE__)
+#elif defined (_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	obj->mSocket = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE);
 	int flags = fcntl(obj->mSocket, F_GETFL, 0);
 	fcntl(obj->mSocket, F_SETFL, O_NONBLOCK | flags);
