@@ -1937,9 +1937,10 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		var p = new promise(function(acc, rej) { this._acc = acc; this._rej = rej; });\
 		switch (process.platform)\
 		{\
+			case 'freebsd':\
 			case 'linux':\
 			case 'darwin':\
-				p.child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });\
+				p.child = require('child_process').execFile('/bin/sh', ['sh']);\
 				break;\
 			case 'win32':\
 				p.child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
@@ -1982,6 +1983,9 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 					}\
 					this.promise._acc(OSNAME + ' ' + OSVERSION);\
 					break;\
+				case 'freebsd':\
+					this.promise._acc(this.stdout.str.trim());\
+					break;\
 			}\
 		});\
 		switch (process.platform)\
@@ -1994,6 +1998,9 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				break;\
 			case 'win32':\
 				p.child.stdin.write('exit\\r\\n');\
+				break;\
+			case 'freebsd':\
+				p.child.stdin.write('uname -mrs\\nexit\\n');\
 				break;\
 		}\
 		return (p);\
