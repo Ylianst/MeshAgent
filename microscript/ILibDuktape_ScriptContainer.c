@@ -471,7 +471,7 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	int x = readlink("/proc/curproc/file", exePath, sizeof(exePath));
 	if (x < 0 || x >= sizeof(exePath)) ILIBCRITICALEXIT(246);
 	exePath[x] = 0;
-#elif
+#else
 	int x = readlink("/proc/self/exe", exePath, sizeof(exePath));
 	if (x < 0 || x >= sizeof(exePath)) ILIBCRITICALEXIT(246);
 	exePath[x] = 0;
