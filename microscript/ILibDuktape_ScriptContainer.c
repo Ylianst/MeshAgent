@@ -2006,7 +2006,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		return (p);\
 	};\
 	if(process.platform=='freebsd')\
-	{\		
+	{\
 		exports.nics = function nics()\
 		{\
 			var child = require('child_process').execFile('/bin/sh', ['sh']);\
