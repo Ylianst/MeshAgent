@@ -2004,6 +2004,18 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				break;\
 		}\
 		return (p);\
+	};\
+	if(process.platform=='freebsd')\
+	{\		
+		exports.nics = function nics()\
+		{\
+			var child = require('child_process').execFile('/bin/sh', ['sh']);\
+			child.stdout.str = '';\
+			child.stdout.on('data', function(c) { this.str += c.toString(); });\
+			child.stdin.write('ifconfig | awk -F: \\'{ split($2, tok, \"=\"); if(tok[1]==\" flags\") { print $1 } }\\'\\nexit\\n');\
+			child.waitExit();\
+			return(child.stdout.str.trim());\
+		};\
 	}";
 
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, jsExtras, sizeof(jsExtras) - 1);
