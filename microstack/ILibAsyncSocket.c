@@ -598,8 +598,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 				else if (bytesSent == module->writeBioBuffer->length)
 				{
 					retVal = ILibAsyncSocket_ALL_DATA_SENT;
-					module->writeBioBuffer->length = 0;
-					module->writeBioBuffer->data += bytesSent;
+					BIO_reset(module->writeBio);
 					module->TotalBytesSent += bytesSent;
 					module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
 				}
@@ -1077,8 +1076,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 					else if (j == (int)(Reader->writeBioBuffer->length))
 					{
 						// All Data was sent
-						Reader->writeBioBuffer->length = 0;
-						Reader->writeBioBuffer->data += j;
+						BIO_reset(Reader->writeBio);
 						retVal = ILibAsyncSocket_ALL_DATA_SENT;
 					}
 				}
@@ -1872,8 +1870,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 						else if(bytesSent == module->writeBioBuffer->length)
 						{
 							// All data was sent
-							module->writeBioBuffer->length = 0;
-							module->writeBioBuffer->data += bytesSent;
+							BIO_reset(module->writeBio);
 							module->TotalBytesSent += bytesSent;
 							module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
 
@@ -2115,12 +2112,13 @@ SSL* ILibAsyncSocket_SetSSLContextEx(ILibAsyncSocket_SocketModule socketModule, 
 			module->TLSHandshakeCompleted = 0;
 			module->readBio = BIO_new_mem_buf(module->readBioBuffer_mem, (int)sizeof(module->readBioBuffer_mem));
 			module->writeBio = BIO_new(BIO_s_mem());
-			BIO_get_mem_ptr(module->readBio, &(module->readBioBuffer));
-			BIO_get_mem_ptr(module->writeBio, &(module->writeBioBuffer));
 			BIO_set_mem_eof_return(module->readBio, -1);
 			BIO_set_mem_eof_return(module->writeBio, -1);
-			module->readBioBuffer->length = 0;
 			SSL_set_bio(module->ssl, module->readBio, module->writeBio);
+			BIO_get_mem_ptr(module->readBio, &(module->readBioBuffer));
+			BIO_get_mem_ptr(module->writeBio, &(module->writeBioBuffer));
+			module->readBioBuffer->length = 0;
+
 			if (server == ILibAsyncSocket_TLS_Mode_Client)
 			{
 				if (hostName != NULL) { SSL_set_tlsext_host_name(module->ssl, hostName); }
