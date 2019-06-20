@@ -3098,8 +3098,7 @@ ILibTransport_DoneState ILibStun_SendDtls(struct ILibStun_Module *obj, int sessi
 		{
 			r = (ILibTransport_DoneState)ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)obj->dTlsSessions[session]->remoteInterface, obj->dTlsSessions[session]->writeBIOBuffer->data, obj->dTlsSessions[session]->writeBIOBuffer->length, ILibAsyncSocket_MemoryOwnership_USER);
 		}
-		obj->dTlsSessions[session]->writeBIOBuffer->data += (obj->dTlsSessions[session]->writeBIOBuffer->length);
-		obj->dTlsSessions[session]->writeBIOBuffer->length = 0;
+		BIO_reset(obj->dTlsSessions[session]->writeBIO);
 	}
 	return r;
 }
@@ -6124,9 +6123,7 @@ void ILibStun_OnUDP(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, 
 					ILibAsyncUDPSocket_SendTo(((struct ILibStun_Module*)obj)->UDP, (struct sockaddr*)remoteInterface, obj->dTlsSessions[existingSession]->writeBIOBuffer->data, obj->dTlsSessions[existingSession]->writeBIOBuffer->length, ILibAsyncSocket_MemoryOwnership_USER);
 				}
 				if(obj->dTlsSessions[existingSession]->state == 4) {ILibWebRTC_DTLS_HandshakeDetect(obj, "S ", obj->dTlsSessions[existingSession]->writeBIOBuffer->data, 0, (int)obj->dTlsSessions[existingSession]->writeBIOBuffer->length);}
-			
-				obj->dTlsSessions[existingSession]->writeBIOBuffer->data += (obj->dTlsSessions[existingSession]->writeBIOBuffer->length);
-				obj->dTlsSessions[existingSession]->writeBIOBuffer->length = 0;
+				BIO_reset(obj->dTlsSessions[existingSession]->writeBIO);
 			}
 			sem_post(&(obj->dTlsSessions[existingSession]->Lock));
 		}

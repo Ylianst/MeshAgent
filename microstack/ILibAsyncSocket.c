@@ -583,15 +583,20 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 #endif
 				{
 					// Still Pending Data to be sent
-					data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), 0, NULL, NULL);
+					data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), bytesSent < 0 ? 0 : (int)(module->writeBioBuffer->length) - bytesSent, NULL, NULL);
 					data->UserFree = ILibAsyncSocket_MemoryOwnership_BIO;
+					data->bytesSent = 0;
 					module->PendingSend_Head = module->PendingSend_Tail = data;
 					if (bytesSent > 0) 
 					{ 
-						module->writeBioBuffer->data += bytesSent;
-						module->writeBioBuffer->length -= bytesSent;
+						// Some data was sent, so we need to pull the data and buffer it
+						module->PendingSend_Head->buffer = ILibMemory_GetExtraMemory(data, sizeof(ILibAsyncSocket_SendData));
+						module->PendingSend_Head->bufferSize = (int)(module->writeBioBuffer->length) - bytesSent;
+						memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer->data + bytesSent, module->PendingSend_Head->bufferSize);
+
 						module->TotalBytesSent += bytesSent;
-						module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
+						module->PendingBytesToSend = (unsigned int)(module->PendingSend_Head->bufferSize);
+						BIO_reset(module->writeBio);
 					}
 					retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 				}
