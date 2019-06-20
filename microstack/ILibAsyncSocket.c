@@ -1065,13 +1065,14 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 					if (j < (int)(Reader->writeBioBuffer->length))
 					{
 						// Not all data was sent
-						Reader->writeBioBuffer->data += j;
-						Reader->writeBioBuffer->length -= j;
-
-						data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), 0, NULL, NULL);
+						data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), Reader->writeBioBuffer->length - j, NULL, NULL);
+						data->buffer = ILibMemory_GetExtraMemory(data, sizeof(ILibAsyncSocket_SendData));
+						data->bufferSize = Reader->writeBioBuffer->length - j;
 						data->UserFree = ILibAsyncSocket_MemoryOwnership_BIO;
+						memcpy_s(data->buffer, data->bufferSize, Reader->writeBioBuffer->data + j, data->bufferSize);
 						Reader->PendingSend_Head = Reader->PendingSend_Tail = data;
 						retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
+						BIO_reset(Reader->writeBio);
 					}
 					else if (j == (int)(Reader->writeBioBuffer->length))
 					{
@@ -1845,50 +1846,76 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 #ifndef MICROSTACK_NOTLS
 			if (module->ssl != NULL)
 			{
-				if (module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_BIO)
+				// First check to see if there is a buffer for us to send
+				if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->bytesSent != module->PendingSend_Head->bufferSize)
 				{
-					if (module->writeBioBuffer->length > 0)
+					bytesSent = (int)send(module->internalSocket, module->PendingSend_Head->buffer + module->PendingSend_Head->bytesSent, module->PendingSend_Head->bufferSize - module->PendingSend_Head->bytesSent, MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
+					if (bytesSent > 0)
 					{
-						BIO_clear_retry_flags(module->writeBio);
-						bytesSent = (int)send(module->internalSocket, module->writeBioBuffer->data, (int)(module->writeBioBuffer->length), MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
-#ifdef WIN32
-						if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
-#else
-						if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && errno == EWOULDBLOCK))
-#endif
+						module->PendingSend_Head->bytesSent += bytesSent;
+						if (module->PendingSend_Head->bytesSent == module->PendingSend_Head->bufferSize && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN)
 						{
-							// Not all data was sent
-							if (bytesSent > 0) 
-							{ 
-								module->writeBioBuffer->data += bytesSent;
-								module->writeBioBuffer->length -= bytesSent;
-								module->TotalBytesSent += bytesSent;
-								module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
-							}
-							TRY_TO_SEND = 0;
+							free(module->PendingSend_Head->buffer);
+							module->PendingSend_Head->buffer = NULL;
 						}
-						else if(bytesSent == module->writeBioBuffer->length)
-						{
-							// All data was sent
-							BIO_reset(module->writeBio);
-							module->TotalBytesSent += bytesSent;
-							module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
+					}
+					if (bytesSent <= 0 || module->PendingSend_Head->bytesSent < module->PendingSend_Head->bufferSize)
+					{
+						TRY_TO_SEND = 0;
+					}
+				}
+				if (module->writeBioBuffer->length > 0 && TRY_TO_SEND != 0)
+				{
+					BIO_clear_retry_flags(module->writeBio);
+					bytesSent = (int)send(module->internalSocket, module->writeBioBuffer->data, (int)(module->writeBioBuffer->length), MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
+#ifdef WIN32
+					if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
+#else
+					if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && errno == EWOULDBLOCK))
+#endif
+					{
+						if (bytesSent > 0) 
+						{ 
+							// Some Data was sent, so we need to grab all the data from SSL and buffer it
+							module->PendingSend_Head->UserFree = ILibAsyncSocket_MemoryOwnership_CHAIN;
+							module->PendingSend_Head->buffer = ILibMemory_Allocate(module->writeBioBuffer->length - bytesSent, 0, NULL, NULL);
+							module->PendingSend_Head->bufferSize = module->writeBioBuffer->length - bytesSent;
+							module->PendingSend_Head->bytesSent = 0;
+							memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer + bytesSent, module->PendingSend_Head->bufferSize);
 
-							free(module->PendingSend_Head);
-							module->PendingSend_Head = module->PendingSend_Tail = NULL;
-							TRY_TO_SEND = 0;
+							module->TotalBytesSent += bytesSent;
+							module->PendingBytesToSend = (unsigned int)(module->PendingSend_Head->bufferSize);
+							BIO_reset(module->writeBio);
 						}
 						else
 						{
-							// Something went wrong
-							module->writeBioBuffer->length = 0;
-
-							free(module->PendingSend_Head);
-							module->PendingSend_Head = module->PendingSend_Tail = NULL;
-							TRY_TO_SEND = 0;
+							// No Data was sent, so we can just leave the data in the writeBio, and fetch it later
 						}
+						TRY_TO_SEND = 0;
+					}
+					else if(bytesSent == module->writeBioBuffer->length)
+					{
+						// All data was sent
+						BIO_reset(module->writeBio);
+						module->TotalBytesSent += bytesSent;
+						module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
+						if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(module->PendingSend_Head->buffer); }
+
+						free(module->PendingSend_Head);
+						module->PendingSend_Head = module->PendingSend_Tail = NULL;
+						TRY_TO_SEND = 0;
+					}
+					else
+					{
+						// Something went wrong
+						BIO_reset(module->writeBio);
+						if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(module->PendingSend_Head->buffer); }
+						free(module->PendingSend_Head);
+						module->PendingSend_Head = module->PendingSend_Tail = NULL;
+						TRY_TO_SEND = 0;
 					}
 				}
+				
 			}
 			else
 #endif
