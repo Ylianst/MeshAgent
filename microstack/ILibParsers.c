@@ -63,7 +63,7 @@ limitations under the License.
 
 #include <time.h>
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined (_FREEBSD)
 #include <ifaddrs.h>
 #include <sys/sysctl.h>
 #endif
@@ -410,7 +410,7 @@ int ILibGetLocalIPv4AddressList(struct sockaddr_in** addresslist, int includeloo
 	}
 	closesocket(sock);
 	return j;
-#elif __APPLE__
+#elif defined(__APPLE__) || defined(_FREEBSD)
 	//
 	// Enumerate local interfaces
 	//
