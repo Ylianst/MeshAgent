@@ -31,6 +31,7 @@ function processManager() {
             this._kernel32.CreateMethod('Process32First');
             this._kernel32.CreateMethod('Process32Next');
             break;
+	case 'freebsd':
         case 'linux':
         case 'darwin':
             this._childProcess = require('child_process');
@@ -133,6 +134,30 @@ function processManager() {
                     this.callback.apply(this.pm, this.args);
                 });
                 break;
+	    case 'freebsd':
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stderr.str = '';
+		child.stderr.on('data', function (c) {this.str += c.toString();});
+		child.stdout.str = '';
+                child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write("ps -xa | awk '{ printf \"%s\", $1; $1=\"\"; $2=\"\"; $3=\"\"; $4=\"\"; printf \"%s\\n\", $0; }' | awk '{ printf \"%s\", $1; $1=\"\"; printf \"%s\\n\", $0; }'\nexit\n");
+                child.waitExit();
+		
+		var tmp;
+		var ret = [];
+		var lines = child.stdout.str.trim().split('\n');
+		for(var i in lines)
+		{
+			tmp = {pid: lines[i].split(' ').shift()};
+			tmp['cmd'] = lines[i].substring(tmp.pid.length + 1);
+			tmp['pid'] = parseInt(tmp['pid']);
+			if(!isNaN(tmp['pid']))
+			{
+				ret.push(tmp);
+			}
+		}
+		if(callback) { callback.apply(this, [ret]); }
+		break;
         }
     };
 
