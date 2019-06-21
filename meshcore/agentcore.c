@@ -3285,9 +3285,6 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		}
 	}
 
-	printf("Connecting to: %s\n", serverUrl);						
-	if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s\n", serverUrl); }
-
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore: Attempting connection to: %s", serverUrl);
 	ILibDestructParserResults(rs);
 
@@ -3335,6 +3332,9 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 
 	if (meshServer.sin6_family != AF_UNSPEC)
 	{
+		printf("Connecting to: %s\n", serverUrl);
+		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s\n", serverUrl); }
+
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(uintptr_t)0x01); }
 
@@ -3393,6 +3393,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	else
 	{
 		ILibDestructPacket(req);
+		MeshServer_Connect(agent);
 	}
 	free(host);
 }
