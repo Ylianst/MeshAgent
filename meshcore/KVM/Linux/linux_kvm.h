@@ -29,7 +29,10 @@ limitations under the License.
 #include <sys/stat.h>
 #include <sys/timeb.h>
 #include <unistd.h>
-#include <linux/stat.h>
+
+#ifndef _FREEBSD
+	#include <linux/stat.h>
+#endif
 
 #include "linux_tile.h"
 #include "linux_events.h"

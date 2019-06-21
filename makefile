@@ -261,6 +261,7 @@ endif
 ifeq ($(ARCHID),30)
 ARCHNAME = freebsd_x86-64
 CC = clang
+CFLAGS += -I/usr/local/include
 KVM = 0
 LMS = 0
 endif
@@ -282,6 +283,7 @@ CFLAGS += -D_LINKVM
 		LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
 		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
 	endif
+		BSDFLAGS = /usr/local/lib/libjpeg.a
 endif
 
 ifeq ($(LMS),0)
@@ -424,5 +426,5 @@ macos:
 	$(STRIP)
 
 freebsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
 	$(STRIP)
