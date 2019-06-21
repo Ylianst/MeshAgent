@@ -1,1 +1,3 @@
 openssl-1.1.1.tar.gz in use on everything here.
+
+armhf2 - openssl-1.1.1c - This is a build of OpenSSL made on a Raspberry Pi 1 with a old 2015-02-02 build of Raspian 7.

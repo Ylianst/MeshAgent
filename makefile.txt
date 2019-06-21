@@ -65,6 +65,7 @@
 #   make linux ARCHID=24 					# Linux ARM 32 bit HardFloat (Linaro)
 #   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
 #   make linux ARCHID=26 					# Linux ARM 64 bit
+#   make linux ARCHID=27 					# Linux ARM 32 bit HardFloat NOKVM (Old Raspberry Pi on Raspian 7, 2015-02-02 build)
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 
@@ -252,6 +253,17 @@ ARCHNAME = arm64
 #CC = arm-linux-gnueabihf-gcc
 #STRIP = arm-linux-gnueabihf-strip
 KVM = 1
+LMS = 0
+CFLAGS += -D_NOFSWATCHER 
+CEXTRA = -fno-strict-aliasing 
+endif
+
+# Official Linux ARM 32bit HardFloat on Raspian 7 2015-02-02
+ifeq ($(ARCHID),27)
+ARCHNAME = armhf2
+#CC = arm-linux-gnueabihf-gcc
+#STRIP = arm-linux-gnueabihf-strip
+KVM = 0
 LMS = 0
 CFLAGS += -D_NOFSWATCHER 
 CEXTRA = -fno-strict-aliasing 
