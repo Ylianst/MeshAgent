@@ -28,6 +28,7 @@ function find(name)
 			var res = child.stdout.str.trim().split('\n');
 			for(var i in res)
 			{
+				if(!res[i].startsWith(name + '.so')) { continue; }
 				var v = {name: res[i]};
 				child = require('child_process').execFile('/bin/sh', ['sh']);
 				child.stdout.str = '';

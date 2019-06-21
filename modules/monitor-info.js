@@ -186,6 +186,16 @@ function monitorinfo()
                 } catch (ex) { }
             }
         }
+    }
+    if(process.platform == 'freebsd')
+    {
+	Object.defineProperty(this, 'Location_X11LIB', { value: require('lib-finder')('libX11')[0]?require('lib-finder')('libX11')[0].location: undefined });
+	Object.defineProperty(this, 'Location_X11TST', { value: require('lib-finder')('libXtst')[0]?require('lib-finder')('libXtst')[0].location:undefined });
+	Object.defineProperty(this, 'Location_X11EXT', { value: require('lib-finder')('libXext')[0]?require('lib-finder')('libXext')[0].location:undefined });
+    }
+
+    if(process.platform == 'linux' || process.platform == 'freebsd')
+    {
         Object.defineProperty(this, 'kvm_x11_support', { value: (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)?true:false });
 
         if (this.Location_X11LIB)
