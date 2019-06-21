@@ -838,7 +838,7 @@ function UserSessions()
         }
     }
 
-    if(process.platform == 'linux' || process.platform == 'darwin')
+    if(process.platform != 'win32') // Linux, MacOS, FreeBSD
     {
         this.Self = function Self()
         {
