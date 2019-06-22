@@ -729,17 +729,16 @@ function serviceManager()
                 ret.appLocation = function appLocation()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("cat " + this.rc + " grep command= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\\nexit\\n");
+		    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("cat " + this.rc + " | grep command= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\nexit\n");
                     child.waitExit();
-
-                    return (child.stdout.str.trim().replace('{name}', this.name));
+                    return (child.stdout.str.trim().split('${name}').join(this.name));
                 };
                 ret.isRunning = function isRunning()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onestatus | awk '{ print $3 }'\\nexit\\n");
+                    child.stdin.write("service " + this.name + " onestatus | awk '{ print $3 }'\nexit\n");
                     child.waitExit();
                     return (child.stdout.str.trim() == 'running');
                 };
@@ -747,7 +746,7 @@ function serviceManager()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onestatus | awk '{ split($6, res, \".\"); print res[1]; }'\\nexit\\n");
+                    child.stdin.write("service " + this.name + " onestatus | awk '{ split($6, res, \".\"); print res[1]; }'\nexit\n");
                     child.waitExit();
                     return (parseInt(child.stdout.str.trim()) == process.pid);
                 };
