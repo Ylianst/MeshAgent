@@ -684,10 +684,77 @@ function serviceManager()
     }
     else
     {
+        // Linux, MacOS, FreeBSD
+
         this.isAdmin = function isAdmin() 
         {
             return (require('user-sessions').isRoot());
         }
+
+        if (process.platform == 'freebsd')
+        {
+            this.getService = function getService(name)
+            {
+                var ret = { name: name};
+                if(require('fs').existsSync('/etc/rc.d/' + name)) 
+                {
+                    Object.defineProperty(ret, 'rc', { value: '/etc/rc.d/' + name });
+                }
+                else if(require('fs').existsSync('/usr/local/etc/rc.d/' + name))
+                {
+                    Object.defineProperty(ret, 'rc', { value: '/usr/local/etc/rc.d/' + name });
+                }
+                else
+                {
+                    throw ('Service: ' + name + ' not found');
+                }
+
+                ret.appWorkingDirectory = function appWorkingDirectory()
+                {
+                    var ret;
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("cat " + this.rc + " grep " + this.name + "_chdir= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\\nexit\\n");
+                    child.waitExit();
+
+                    ret = child.stdout.str.trim();
+                    if(ret == '')
+                    {
+                        ret = this.rc.split('/');
+                        ret.pop();
+                        ret = ret.join('/');
+                    }
+                    return (ret);
+                };
+                ret.appLocation = function appLocation()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("cat " + this.rc + " grep command= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\\nexit\\n");
+                    child.waitExit();
+
+                    return (child.stdout.str.trim().replace('{name}', this.name));
+                };
+                ret.isRunning = function isRunning()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("service " + this.name + " onestatus | awk '{ print $3 }'\\nexit\\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim() == 'running');
+                };
+                ret.isMe = function isMe()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("service " + this.name + " onestatus | awk '{ split($6, res, \".\"); print res[1]; }'\\nexit\\n");
+                    child.waitExit();
+                    return (parseInt(child.stdout.str.trim()) == process.pid);
+                };
+                return (ret);
+            };
+        }
+
         if (process.platform == 'darwin')
         {
             this.getService = function getService(name) { return (fetchPlist('/Library/LaunchDaemons', name)); };
