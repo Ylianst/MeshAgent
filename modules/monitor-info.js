@@ -334,7 +334,7 @@ function monitorinfo()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("ps -e -o user:999 -o tty -o command | grep X | awk '{ split($0, a, \"-auth\"); split(a[2], b, \" \"); if($1==\"" + uname + "\" && b[1]!=\"\") { printf \"%s,%s,%s\",$1,$2,b[1] } }'\nexit\n");
+            child.stdin.write("ps " + (process.platform == 'freebsd'?"-ax ":"") + "-e -o user" + (process.platform=='linux'?":999":"") + " -o tty -o command | grep X | awk '{ split($0, a, \"-auth\"); split(a[2], b, \" \"); if($1==\"" + uname + "\" && b[1]!=\"\") { printf \"%s,%s,%s\",$1,$2,b[1] } }'\nexit\n");
             child.waitExit();
             var tokens = child.stdout.str.trim().split(',');
             if (tokens.length == 3)
@@ -349,7 +349,7 @@ function monitorinfo()
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("ps -e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
+                child.stdin.write("ps " + (process.platform=='freebsd'?"-ax ":"") + "-e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
                 child.waitExit();
 
                 var lines = child.stdout.str.split('\n');
