@@ -596,23 +596,40 @@ function UserSessions()
         this.getEnvFromPid = function getEnvFromPid(pid)
         {
             var ret = {};
-            var ps, psx, v, vs = 0;
-            try
+            if (process.platform == 'linux')
             {
-                ps = require('fs').readFileSync('/proc/' + pid + '/environ');
-            }
-            catch(pse)
-            {
-                return (ret);
-            }
-
-            for (psx = 0; psx < ps.length; ++psx)
-            {
-                if (ps[psx] == 0)
+                var ps, psx, v, vs = 0;
+                try
                 {
-                    v = ps.slice(vs, psx).toString().split('=');
-                    ret[v[0]] = v[1];
-                    vs = psx + 1;
+                    ps = require('fs').readFileSync('/proc/' + pid + '/environ');
+                }
+                catch (pse)
+                {
+                    return (ret);
+                }
+
+                for (psx = 0; psx < ps.length; ++psx)
+                {
+                    if (ps[psx] == 0)
+                    {
+                        v = ps.slice(vs, psx).toString().split('=');
+                        ret[v[0]] = v[1];
+                        vs = psx + 1;
+                    }
+                }
+            }
+            else if (process.platform == 'freebsd')
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write("procstat -e " + pid + " | grep " + pid + " | awk '{ $1=\"\"; $2=\"\"; print $0 }' | tr \"\\ \" \"\\n\" | awk -F= '{ if($1==\"\") { print $0 }}'\nexit\n");
+                child.waitExit();
+                var env;
+                var tokens = child.stdout.str.trim().split('\n');
+                for(var i in tokens)
+                {
+                    env = tokens[i].split('=');
+                    ret[env[0]] = env[1];
                 }
             }
             return (ret);
