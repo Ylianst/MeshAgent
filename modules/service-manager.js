@@ -714,7 +714,7 @@ function serviceManager()
                     var ret;
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("cat " + this.rc + " grep " + this.name + "_chdir= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\\nexit\\n");
+                    child.stdin.write("cat " + this.rc + " | grep " + this.name + "_chdir= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\nexit\n");
                     child.waitExit();
 
                     ret = child.stdout.str.trim();
