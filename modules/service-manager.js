@@ -762,6 +762,27 @@ function serviceManager()
                     child.waitExit();
                     return (parseInt(child.stdout.str.trim()) == process.pid);
                 };
+                ret.stop = function stop()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("service " + this.name + " onestop\nexit\n");
+                    child.waitExit();
+                };
+                ret.start = function start()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("service " + this.name + " onestart\nexit\n");
+                    child.waitExit();
+                };
+                ret.restart = function restart()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("service " + this.name + " onerestart\nexit\n");
+                    child.waitExit();
+                };
                 return (ret);
             };
         }
@@ -1599,6 +1620,18 @@ function serviceManager()
             {
                 throw ('Service: ' + name + ' does not exist');
             }
+        }
+        else if(process.platform == 'freebsd')
+        {
+            service.stop();
+            require('fs').unlinkSync(service.appLocation());
+            require('fs').unlinkSync(service.rc);
+            try
+            {
+                require('fs').rmdirSync('/usr/local/mesh_services/' + name);
+            }
+            catch (e)
+            { }
         }
     }
     if(process.platform == 'linux')
