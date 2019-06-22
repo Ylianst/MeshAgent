@@ -732,19 +732,19 @@ function serviceManager()
 		            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                     child.stdin.write("cat " + this.rc + " | grep command= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\nexit\n");
                     child.waitExit();
-		    var tmp = child.stdout.str.trim().split('${name}').join(this.name);
-		    if(tmp=='/usr/sbin/daemon')
-		    {
-			child = require('child_process').execFile('/bin/sh', ['sh']);
-			child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-			child.stdin.write('cat ' + this.rc + ' | grep command_args= | awk -F"-f " \'{ $1=""; split($0, res, "\\""); split(res[1], t, " "); print t[1]; }\'\nexit\n');
-			child.waitExit();
-			return(child.stdout.str.trim());
-    		    }
-		    else
-		    {
-                       return(tmp);
-		    }
+		            var tmp = child.stdout.str.trim().split('${name}').join(this.name);
+		            if(tmp=='/usr/sbin/daemon')
+		            {
+			            child = require('child_process').execFile('/bin/sh', ['sh']);
+			            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+			            child.stdin.write('cat ' + this.rc + ' | grep command_args= | awk -F"-f " \'{ $1=""; split($0, res, "\\""); split(res[1], t, " "); print t[1]; }\'\nexit\n');
+			            child.waitExit();
+			            return(child.stdout.str.trim());
+    		        }
+		            else
+		            {
+                        return(tmp);
+		            }
                 };
                 ret.isRunning = function isRunning()
                 {
