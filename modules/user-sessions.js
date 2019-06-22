@@ -622,8 +622,9 @@ function UserSessions()
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stdin.write("procstat -e " + pid + " | grep " + pid + " | awk '{ $1=\"\"; $2=\"\"; print $0 }' | tr \"\\ \" \"\\n\" | awk -F= '{ if($1==\"\") { print $0 }}'\nexit\n");
+                child.stdin.write("procstat -e " + pid + " | grep " + pid + " | awk '{ $1=\"\"; $2=\"\"; print $0 }' | tr \"\\ \" \"\\n\"\nexit\n"); 
                 child.waitExit();
+		
                 var env;
                 var tokens = child.stdout.str.trim().split('\n');
                 for(var i in tokens)
