@@ -641,7 +641,7 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("ps -e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
+            child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax ":"") + "-e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
             child.waitExit();
 
             var lines = child.stdout.str.split('\n');
