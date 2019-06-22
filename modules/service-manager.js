@@ -1112,6 +1112,35 @@ function serviceManager()
                 reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
             }
         }
+        if (process.platform == 'freebsd')
+        {
+            if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
+            var parameters = options.parameters ? options.parameters.join(' ') : '';
+            if (!require('fs').existsSync('/usr/local/mesh_services')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
+            if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
+            require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+
+            var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
+            rc.write('#!/bin/sh\n');
+            rc.write('# PROVIDE: ' + options.name + '\n');
+            rc.write('# REQUIRE: FILESYSTEMS NETWORKING\n');
+            rc.write('# KEYWORD: shutdown\n');
+            rc.write('. /etc/rc.subr\n\n');
+            rc.write('name="' + options.name + '"\n');
+            rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
+            rc.write('rcvar=${name}_enable\n');
+            rc.write('pidfile="/var/run/' + options.name + '.pid"\n');
+            rc.write('command="/usr/sbin/daemon"\n');
+            rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0)?'-r':'') + ' -f /usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '"\n');
+            rc.write('command_chdir="/usr/local/mesh_services/' + options.name + '"\n\n');
+            rc.write('load_rc_config $name\n');
+            rc.write(': ${' + options.name + '_enable="' + ((options.startType == 'AUTO_START' || options.startType == 'BOOT_START')?'YES':'NO') + '"}\n');
+            rc.write('run_rc_command "$1"\n');
+            rc.end();
+            var m = require('fs').statSync('/usr/local/etc/rc.d/' + options.name).mode;
+            m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+            require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, m);
+        }
         if(process.platform == 'linux')
         {
             if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
