@@ -108,7 +108,7 @@ function Toaster()
                     {
                         retVal.consoleUid = require('user-sessions').consoleUid();
                         retVal.xinfo = require('monitor-info').getXInfo(retVal.consoleUid);
-			retVal.username = require('user-sessions').getUsername(retVal.consoleUid);
+			            retVal.username = require('user-sessions').getUsername(retVal.consoleUid);
                     }
                     catch (xxe)
                     {
@@ -175,17 +175,14 @@ function Toaster()
                             }
                         });
                     }
-                    else {
+                    else
+                    {
                         util = findPath('kdialog');
                         if (util) 
-			{
+			            {
                             // use KDIALOG
-                            var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR');
-   				if(xdg==null)
-				{
-					xdg = '/tmp/runtime-' + retVal.username;
-				}                   
-      if (!retVal.xinfo || !retVal.xinfo.display || !retVal.xinfo.xauthority)
+                            var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
+                            if (!retVal.xinfo || !retVal.xinfo.display || !retVal.xinfo.xauthority)
                             {
                                 retVal._rej('Internal Error');
                                 return (retVal);
