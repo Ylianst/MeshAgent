@@ -158,6 +158,7 @@ function linux_messageBox()
         child.stdin.write("whereis zenity | awk '{ print $2 }'\nexit\n");
         child.waitExit();
         zenity = child.stdout.str.trim();
+        if (process.platform == 'freebsd' && zenity == '' && require('fs').existsSync('/usr/local/bin/zenity')) { zenity = '/usr/local/bin/zenity'; }
         if (zenity != '')
         {
             // GNOME/ZENITY
@@ -189,6 +190,7 @@ function linux_messageBox()
             child.stdin.write("whereis kdialog | awk '{ print $2 }'\nexit\n");
             child.waitExit();
             kdialog = child.stdout.str.trim();
+            if (process.platform == 'freebsd' && kdialog == '' && require('fs').existsSync('/usr/local/bin/kdialog')) { kdialog = '/usr/local/bin/kdialog'; }
             if (kdialog == '') { ret._rej('Platform not supported (zenity or kdialog not found)'); return (ret); }
             if (process.env['DISPLAY'])
             {
@@ -198,7 +200,7 @@ function linux_messageBox()
             else
             {
                 var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR');
-                if (!xinfo || !xinfo.display || !xinfo.xauthority || !xdg) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
+                if (!xinfo || !xinfo.display || !xinfo.xauthority) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
                 ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                 ret.child.promise = ret;
             }
@@ -220,10 +222,6 @@ function linux_messageBox()
             });
         }
         return (ret);
-
-
-        console.log(child.stdout.str.trim() == '');
-
     };
 }
 
@@ -470,6 +468,7 @@ switch(process.platform)
         module.exports = new messageBox();
         break;
     case 'linux':
+    case 'freebsd':
         module.exports = new linux_messageBox();
         break;
     case 'darwin':
