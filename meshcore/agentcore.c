@@ -413,9 +413,9 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 			char getProxy[] = "(function getProxies(){\
 									var child = require('child_process').execFile('/bin/sh', ['sh']);\
 									child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
-									child.stdin.write('cat /etc/login.conf | grep :setenv = | awk - F\":setenv=\" \\'{ if(!($1 ~ /^#/)) { print $2 } }\\' | tr \\'\\,\\' \\'\\n\\' | awk -F= \\'{ if($1==\"https_proxy\") { gsub(/\\\\c/, \":\", $2); print $2  } }\\'\\n\\exit\\n');\
+									child.stdin.write('cat /etc/login.conf | grep :setenv= | awk -F\":setenv=\" \\'{ if(!($1 ~ /^#/)) { print $2  }  }\\' | tr \"\\,\" \"\\n\" | awk -F= \\'{ if($1==\"https_proxy\") { gsub(/\\\\\\\\c/, \":\", $2);  print $2  } }\\'\\n\\exit\\n');\
 									child.waitExit();\
-									return(child.stdout.str.trim().split('\\n')[0]);\
+									return(child.stdout.str.trim().split('\\n')[0].split('//')[1]);\
 								})();";
 #else
 			char getProxy[] = "(function getProxies(){\
@@ -3376,6 +3376,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			else
 			{
 				printf("Using proxy: %s\n", ILibScratchPad);
+				if(agent->logUpdate != 0)
+				{
+					ILIBLOGMESSAGEX("Using proxy: %s", ILibScratchPad);
+				}
 				if (delimiter > 0)
 				{
 					ILibScratchPad[delimiter] = 0;
