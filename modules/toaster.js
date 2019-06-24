@@ -33,6 +33,7 @@ if (process.platform == 'linux' || process.platform == 'darwin' || process.platf
         }
         child.waitExit();
         child.stdout.str = child.stdout.str.trim();
+        if (process.platform == 'freebsd' && child.stdout.str == '' && require('fs').existsSync('/usr/local/bin/' + app)) { return ('/usr/local/bin/' + app); }
         return (child.stdout.str == '' ? null : child.stdout.str);
     }
 }
