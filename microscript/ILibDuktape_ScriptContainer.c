@@ -1594,8 +1594,14 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 duk_ret_t ILibDuktape_ScriptContainer_OS_hostname(duk_context *ctx)
 {
 	char name[1024];
-	int len = gethostname(name, (int)sizeof(name));
-	duk_push_lstring(ctx, name, len);
+	if (gethostname(name, (int)sizeof(name)) == 0)
+	{
+		duk_push_string(ctx, name);
+	}
+	else
+	{
+		duk_push_string(ctx, "");
+	}
 	return(1);
 }
 void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
