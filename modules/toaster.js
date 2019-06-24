@@ -16,7 +16,7 @@ limitations under the License.
 
 var promise = require('promise');
 
-if (process.platform == 'linux' || process.platform == 'darwin')
+if (process.platform == 'linux' || process.platform == 'darwin' || process.platform == 'freebsd')
 {
     function findPath(app)
     {
