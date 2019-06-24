@@ -192,14 +192,14 @@ function linux_messageBox()
             kdialog = child.stdout.str.trim();
             if (process.platform == 'freebsd' && kdialog == '' && require('fs').existsSync('/usr/local/bin/kdialog')) { kdialog = '/usr/local/bin/kdialog'; }
             if (kdialog == '') { ret._rej('Platform not supported (zenity or kdialog not found)'); return (ret); }
-            if (process.env['DISPLAY'])
+            if (process.platform != 'freebsd' && process.env['DISPLAY'])
             {
                 ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption]);
                 ret.child.promise = ret;
             }
             else
             {
-                var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR');
+                var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                 if (!xinfo || !xinfo.display || !xinfo.xauthority) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
                 ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                 ret.child.promise = ret;
