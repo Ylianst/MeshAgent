@@ -409,6 +409,15 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 		if (retVal == 0)
 		{
 			// Check /etc/environment just in case it wasn't exported
+#ifdef _FREEBSD
+			char getProxy[] = "(function getProxies(){\
+									var child = require('child_process').execFile('/bin/sh', ['sh']);\
+									child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
+									child.stdin.write('cat /etc/login.conf | grep :setenv = | awk - F\":setenv=\" \\'{ if(!($1 ~ /^#/)) { print $2 } }\\' | tr \\'\\,\\' \\'\\n\\' | awk -F= \\'{ if($1==\"https_proxy\") { gsub(/\\\\c/, \":\", $2); print $2  } }\\'\\n\\exit\\n');\
+									child.waitExit();\
+									return(child.stdout.str.trim().split('\\n')[0]);\
+								})();";
+#else
 			char getProxy[] = "(function getProxies(){\
 									var e = require('fs').readFileSync('/etc/environment').toString();\
 									var tokens = e.split('\\n');\
@@ -422,6 +431,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 									}\
 									throw('No Proxy set');\
 								})();";
+#endif
 			if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
 			{
 				duk_size_t proxyLen;
