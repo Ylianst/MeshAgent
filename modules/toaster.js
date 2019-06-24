@@ -23,7 +23,7 @@ if (process.platform == 'linux' || process.platform == 'darwin')
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = '';
         child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-        if (process.platform == 'linux')
+        if (process.platform == 'linux' || process.platform == 'freebsd')
         {
             child.stdin.write("whereis " + app + " | awk '{ print $2 }'\nexit\n");
         }
@@ -100,12 +100,14 @@ function Toaster()
                     return (retVal);
                 }
                 break;
+	    case 'freebsd':
             case 'linux':
                 {
                     try
                     {
                         retVal.consoleUid = require('user-sessions').consoleUid();
                         retVal.xinfo = require('monitor-info').getXInfo(retVal.consoleUid);
+			retVal.username = require('user-sessions').getUsername(retVal.consoleUid);
                     }
                     catch (xxe)
                     {
@@ -174,14 +176,20 @@ function Toaster()
                     }
                     else {
                         util = findPath('kdialog');
-                        if (util) {
+                        if (util) 
+			{
                             // use KDIALOG
                             var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR');
-                            if (!retVal.xinfo || !retVal.xinfo.display || !retVal.xinfo.xauthority || !xdg)
+   				if(xdg==null)
+				{
+					xdg = '/tmp/runtime-' + retVal.username;
+				}                   
+      if (!retVal.xinfo || !retVal.xinfo.display || !retVal.xinfo.xauthority)
                             {
                                 retVal._rej('Internal Error');
                                 return (retVal);
                             }
+		
                             retVal._notify = require('child_process').execFile(util, ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: retVal.consoleUid, env: { DISPLAY: retVal.xinfo.display, XAUTHORITY: retVal.xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                             retVal._notify.parent = retVal;
                             retVal._notify.stdout.on('data', function (chunk) { });
