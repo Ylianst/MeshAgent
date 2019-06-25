@@ -1920,7 +1920,17 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 						TRY_TO_SEND = 0;
 					}
 				}
-				
+				else
+				{
+					// All data was sent
+					BIO_reset(module->writeBio);
+					module->TotalBytesSent += bytesSent;
+					module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
+					if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(module->PendingSend_Head->buffer); }
+					free(module->PendingSend_Head);
+					module->PendingSend_Head = module->PendingSend_Tail = NULL;
+					TRY_TO_SEND = 0;
+				}
 			}
 			else
 #endif
