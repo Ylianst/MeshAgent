@@ -1543,10 +1543,52 @@ duk_ret_t ILibDuktape_MeshAgent_ConnectedServer(duk_context *ctx)
 	return 1;
 }
 
+
 duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 {
-#ifdef __APPLE__
-	duk_push_null(ctx);
+#if defined(__APPLE__) || defined(_FREEBSD)
+	char *name;
+	char getDeviceName[] = "(function _getDeviceName(name){\
+				var child = require('child_process').execFile('/bin/sh', ['sh']);\
+				child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
+				child.stdin.write('networksetup -listallhardwareports | tr \\'\\\\n\\' \\'\\@\\' | awk \\'{ gsub(/@@/, \"\\\\n\", $0); gsub(/@Hardware Port/, \"Hardware Port\", $0); print $0; }\\' | awk -F@ \\'{ split($2, dv, \":\"); gsub(/^[ ]/, \"\", dv[2]); if(dv[2]==\"' + name + '\") { split($1, hw, \":\"); gsub(/^ /, \"\", hw[2]); print hw[2];  } }\\'\\nexit\\n');\
+				child.waitExit();\
+				return(child.stdout.str.trim());})";
+	char getGatewayInfo[] = "(function _getGatewayInfo(){\
+				var gwname;\
+				var child = require('child_process').execFile('/bin/sh', ['sh']);\
+				child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
+				child.stdin.write('route get default | grep gateway: | awk -F: \\'{ gsub(/^[ \t]/, \"\", $2); print $2; }\\'\\nexit\\n');\
+				child.waitExit();\
+				gwname = child.stdout.str.trim();\
+				child = require('child_process').execFile('/bin/sh', ['sh']); \
+				child.stdout.str = ''; child.stdout.on('data', function(c) { this.str += c.toString(); }); \
+				child.stdin.write('arp -n ' + gwname + ' | awk \\'{ gsub(/[(]/, \"\", $2); gsub(/[)]/, \"\", $2); printf \"%s,%s,%s\", $6, $4, $2; }\\'\\nexit\\n');\
+				child.waitExit();\
+				var tmp = child.stdout.str.trim().split(',');\
+				child = require('child_process').execFile('/bin/sh', ['sh']);\
+				child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
+				child.stdin.write('networksetup -listallhardwareports | tr \\'\\\\n\\' \\'\\@\\' | awk \\'{ gsub(/@@/, \"\\\\n\", $0); gsub(/@Hardware Port/, \"Hardware Port\", $0); print $0; }\\' | awk -F@ \\'{ split($2, dv, \":\"); gsub(/^[ ]/, \"\", dv[2]); if(dv[2]==\"' + tmp[0] + '\") { split($1, hw, \":\"); gsub(/^ /, \"\", hw[2]); print hw[2];  } }\\'\\nexit\\n');\
+				child.waitExit();\
+				var dvname = child.stdout.str.trim();\
+				var tmp2 = tmp[1].split(':');\
+				for(var i in tmp2)\
+				{\
+					tmp2[i] = tmp2[i].padStart(2, '0');\
+				}\
+				tmp[1] = tmp2.join('');\
+				var ni = require('os').networkInterfaces();\
+				for(var i in ni[tmp[0]])\
+				{\
+					if(ni[tmp[0]][i].family == 'IPv4')\
+					{\
+						var ret = {v4addr: ni[tmp[0]][i].address, v4mask: ni[tmp[0]][i].netmask, mac: ni[tmp[0]][i].mac.split(':').join(''), gatewaymac: tmp[1], name: tmp[0], desc: dvname};\
+						return({netif: {0: ret}});\
+					}\
+				}\
+				return({});})";
+	duk_eval_string(ctx, getGatewayInfo);	// [func]
+	duk_call(ctx, 0);						// [result]
 	return(1);
 #else
 	char *data;
@@ -1872,6 +1914,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 #endif
 
 		ILibDuktape_CreateEventWithGetter(ctx, "NetInfo", ILibDuktape_MeshAgent_NetInfo);
+
 		ILibDuktape_CreateInstanceMethod(ctx, "ExecPowerState", ILibDuktape_MeshAgent_ExecPowerState, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "forceExit", ILibDuktape_MeshAgent_forceExit, DUK_VARARGS);
