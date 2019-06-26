@@ -1816,7 +1816,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			return(defaultGateways);\
 		}\
 	}\
-	if(process.platform == 'darwin')\
+	if(process.platform == 'darwin' || process.platform == 'freebsd')\
 	{\
 		exports.networkInterfaces = function()\
 		{\

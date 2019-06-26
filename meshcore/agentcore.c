@@ -1582,7 +1582,8 @@ duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 				{\
 					if(ni[tmp[0]][i].family == 'IPv4')\
 					{\
-						var ret = {v4addr: ni[tmp[0]][i].address, v4mask: ni[tmp[0]][i].netmask, mac: ni[tmp[0]][i].mac.split(':').join(''), gatewaymac: tmp[1], name: tmp[0], desc: dvname};\
+						var ret = {v4addr: ni[tmp[0]][i].address, v4mask: ni[tmp[0]][i].netmask, mac: ni[tmp[0]][i].mac.split(':').join(''), gatewaymac: tmp[1], name: tmp[0]};\
+						if(dvname != '') {ret['desc'] = dvname;}\
 						return({netif: {0: ret}});\
 					}\
 				}\
