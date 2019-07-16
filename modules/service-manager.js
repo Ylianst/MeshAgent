@@ -1311,6 +1311,8 @@ function serviceManager()
 
                     break;
                 default: // unknown platform service type
+                    console.log('Unknown Service Platform Type: ' + options.servicePlatform);
+                    throw ('Unknown Service Platform Type: ' + options.servicePlatform);
                     break;
             }
         }
@@ -1639,6 +1641,14 @@ function serviceManager()
         this.getServiceType = function getServiceType()
         {
             var platform = require('process-manager').getProcessInfo(1).Name;
+            if (platform == "busybox")
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write("ps -ax -o pid -o command | awk '{ if($1==\"1\") { $1=\"\"; split($0, res, \" \"); print res[2]; }}'\nexit\n");
+                child.waitExit();
+                platform = child.stdout.str.trim();
+            }
             if (platform == 'init')
             {
                 if(require('fs').existsSync('/etc/init'))
