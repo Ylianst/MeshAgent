@@ -596,14 +596,14 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 
 						module->TotalBytesSent += bytesSent;
 						module->PendingBytesToSend = (unsigned int)(module->PendingSend_Head->bufferSize);
-						BIO_reset(module->writeBio);
+						ignore_result(BIO_reset(module->writeBio));
 					}
 					retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 				}
 				else if (bytesSent == module->writeBioBuffer->length)
 				{
 					retVal = ILibAsyncSocket_ALL_DATA_SENT;
-					BIO_reset(module->writeBio);
+					ignore_result(BIO_reset(module->writeBio));
 					module->TotalBytesSent += bytesSent;
 					module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
 				}
@@ -1077,12 +1077,12 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 						memcpy_s(data->buffer, data->bufferSize, Reader->writeBioBuffer->data + j, data->bufferSize);
 						Reader->PendingSend_Head = Reader->PendingSend_Tail = data;
 						retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
-						BIO_reset(Reader->writeBio);
+						ignore_result(BIO_reset(Reader->writeBio));
 					}
 					else if (j == (int)(Reader->writeBioBuffer->length))
 					{
 						// All Data was sent
-						BIO_reset(Reader->writeBio);
+						ignore_result(BIO_reset(Reader->writeBio));
 						retVal = ILibAsyncSocket_ALL_DATA_SENT;
 					}
 				}
@@ -1890,7 +1890,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 
 							module->TotalBytesSent += bytesSent;
 							module->PendingBytesToSend = (unsigned int)(module->PendingSend_Head->bufferSize);
-							BIO_reset(module->writeBio);
+							ignore_result(BIO_reset(module->writeBio));
 						}
 						else
 						{
@@ -1901,7 +1901,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 					else if(bytesSent == module->writeBioBuffer->length)
 					{
 						// All data was sent
-						BIO_reset(module->writeBio);
+						ignore_result(BIO_reset(module->writeBio));
 						module->TotalBytesSent += bytesSent;
 						module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
 						if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(module->PendingSend_Head->buffer); }
@@ -1913,7 +1913,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 					else
 					{
 						// Something went wrong
-						BIO_reset(module->writeBio);
+						ignore_result(BIO_reset(module->writeBio));
 						if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(module->PendingSend_Head->buffer); }
 						free(module->PendingSend_Head);
 						module->PendingSend_Head = module->PendingSend_Tail = NULL;
@@ -1923,7 +1923,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 				else
 				{
 					// All data was sent
-					BIO_reset(module->writeBio);
+					ignore_result(BIO_reset(module->writeBio));
 					module->TotalBytesSent += bytesSent;
 					module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
 					if (module->PendingSend_Head->buffer != NULL && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(module->PendingSend_Head->buffer); }
