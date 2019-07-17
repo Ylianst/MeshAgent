@@ -419,15 +419,27 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 								})();";
 #else
 			char getProxy[] = "(function getProxies(){\
-									var e = require('fs').readFileSync('/etc/environment').toString();\
-									var tokens = e.split('\\n');\
-									for(var line in tokens)\
+									if(require('fs').existsSync('/etc/environment'))\
 									{\
-										var val = tokens[line].split('=');\
-										if(val.length == 2 && (val[0].trim() == 'http_proxy' || val[0].trim() == 'https_proxy'))\
+										var e = require('fs').readFileSync('/etc/environment').toString();\
+										var tokens = e.split('\\n');\
+										for(var line in tokens)\
 										{\
-											return(val[1].split('//')[1]);\
+											var val = tokens[line].split('=');\
+											if(val.length == 2 && (val[0].trim() == 'http_proxy' || val[0].trim() == 'https_proxy'))\
+											{\
+												return(val[1].split('//')[1]);\
+											}\
 										}\
+									}\
+									if(require('fs').existsSync('/etc/profile.d/proxy_setup'))\
+									{\
+										var child = require('child_process').execFile('/bin/sh', ['sh']);\
+										child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
+										child.stdin.write('cat /etc/profile.d/proxy_setup | awk \\'{ split($2, tok, \"=\"); if(tok[1]==\"http_proxy\") { print tok[2]; }}\\'\\nexit\\n');\
+										child.waitExit();\
+										child.ret = child.stdout.str.trim().split('\\n')[0].split('//')[1];\
+										if(child.ret != '') { return(child.ret); }\
 									}\
 									throw('No Proxy set');\
 								})();";
