@@ -1197,8 +1197,8 @@ function serviceManager()
                     if (options.failureRestart == null || options.failureRestart > 0)
                     {
                         // Crash Restart is enabled, but it isn't inherently supported by INIT, so we must fake it with JS
-                        var tmp_parameters = parameters;                                                
-                        parameters = "-exec \\\"var child; process.on('SIGTERM', function () { child.removeAllListeners('exit'); child.kill(); process.exit(); }); function start() { child = require('child_process').execFile(process.execPath, ['sh']); child.stdout.on('data', function (c) { }); child.stderr.on('data', function (c) { }); child.on('exit', function (status) { start(); }); } start();\\\"";
+                        var tmp_parameters = parameters.split('"').join('\\"');
+                        parameters = "-exec \\\"var child; process.on('SIGTERM', function () { child.removeAllListeners('exit'); child.kill(); process.exit(); }); function start() { child = require('child_process').execFile(process.execPath, [process.argv0, \\\"" + tmp_parameters + "\\\"]); child.stdout.on('data', function (c) { }); child.stderr.on('data', function (c) { }); child.on('exit', function (status) { start(); }); } start();\\\"";
                     }
 
                     // The following is the init.d script I wrote. Rather than having to deal with escaping the thing, I just Base64 encoded it to prevent issues.
