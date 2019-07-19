@@ -323,6 +323,35 @@ function macos_messageBox()
 
         return (ret);
     };
+    this.lock = function lock()
+    {
+        // Start Local Server
+        var ret = this._initIPCBase();
+        ret.server = this.startMessageServer(ret);
+        ret.server.ret = ret;
+        ret.server.on('connection', function (c)
+        {
+            this._connection = c;
+            c.promise = this.ret;
+            c.on('data', function (buffer)
+            {
+                if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+                switch (p.command)
+                {
+                    case 'ERROR':
+                        this.promise._rej(p.reason);
+                        break;
+                    case 'LOCK':
+                        this.promise._res();
+                        break;
+                }
+            });
+            c.write(translateObject({ command: 'LOCK' }));
+        });
+
+        return (ret);
+    };
     this.notify = function notify(title, caption)
     {
         // Start Local Server
@@ -369,6 +398,21 @@ function macos_messageBox()
             var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
             switch (p.command)
             {
+                case 'LOCK':
+                    this._shell = require('child_process').execFile('/bin/sh', ['sh']);
+                    this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stdin.write('/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend\nexit\n');
+                    this._shell.waitExit();
+                    if (this._shell.stderr.str != '')
+                    {
+                        this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
+                    }
+                    else
+                    {
+                        this.end(translateObject({ command: 'LOCK', status: 0 }));
+                    }
+                    break;
                 case 'NOTIFY':
                     this._shell = require('child_process').execFile('/bin/sh', ['sh']);
                     this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
