@@ -68,6 +68,8 @@
 #   make linux ARCHID=27 					# Linux ARM 32 bit HardFloat NOKVM (Old Raspberry Pi on Raspian 7, 2015-02-02 build)
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
+#   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
+
 
 # Microstack & Microscript
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c

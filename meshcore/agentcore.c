@@ -608,6 +608,7 @@ typedef enum MeshAgent_Posix_PlatformTypes
 	MeshAgent_Posix_PlatformTypes_INITD		= 2,
 	MeshAgent_Posix_PlatformTypes_INIT_UPSTART =4,
 	MeshAgent_Posix_PlatformTypes_LAUNCHD	= 3,
+	MeshAgent_Posix_PlatformTypes_BSD		= 5
 }MeshAgent_Posix_PlatformTypes;
 
 size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
@@ -634,8 +635,10 @@ size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
 }
 MeshAgent_Posix_PlatformTypes MeshAgent_Posix_GetPlatformType()
 {
-#ifdef __APPLE__
+#if defined(__APPLE__)
 	return(MeshAgent_Posix_PlatformTypes_LAUNCHD);
+#elif defined(_FREEBSD)
+	return(MeshAgent_Posix_PlatformTypes_BSD);
 #else
 	MeshAgent_Posix_PlatformTypes retVal = MeshAgent_Posix_PlatformTypes_UNKNOWN, fini = 0;
 	char *status;
@@ -4688,11 +4691,20 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 					stat(agentHost->exePath, &results); // This the mode of the current executable
 					chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
 
-					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
-					if (system(ILibScratchPad)) {}
-
-					switch (pt)
+					if (pt == MeshAgent_Posix_PlatformTypes_BSD)
 					{
+						// FreeBSD doesn't support hot-swapping the binary
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Handing off to child to complete"); }
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"var s=require('service-manager').manager.getService('meshagent');s.stop();require('fs').copyFileSync('%s', '%s');s.start();process.exit();\"", updateFilePath, updateFilePath, agentHost->exePath);
+						ignore_result(MeshAgent_System(ILibScratchPad));
+					}
+					else
+					{
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
+						if (system(ILibScratchPad)) {}
+
+						switch (pt)
+						{
 #ifdef __APPLE__
 						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
@@ -4716,6 +4728,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 							break;
 						default:
 							break;
+						}
 					}
 				}
 			}
