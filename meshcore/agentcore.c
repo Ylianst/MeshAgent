@@ -1562,13 +1562,6 @@ duk_ret_t ILibDuktape_MeshAgent_ConnectedServer(duk_context *ctx)
 duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 {
 #if defined(__APPLE__) || defined(_FREEBSD)
-	//char *name;
-	//char getDeviceName[] = "(function _getDeviceName(name){\
-	//			var child = require('child_process').execFile('/bin/sh', ['sh']);\
-	//			child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
-	//			child.stdin.write('networksetup -listallhardwareports | tr \\'\\\\n\\' \\'\\@\\' | awk \\'{ gsub(/@@/, \"\\\\n\", $0); gsub(/@Hardware Port/, \"Hardware Port\", $0); print $0; }\\' | awk -F@ \\'{ split($2, dv, \":\"); gsub(/^[ ]/, \"\", dv[2]); if(dv[2]==\"' + name + '\") { split($1, hw, \":\"); gsub(/^ /, \"\", hw[2]); print hw[2];  } }\\'\\nexit\\n');\
-	//			child.waitExit();\
-	//			return(child.stdout.str.trim());})";
 	char getGatewayInfo[] = "(function _getGatewayInfo(){\
 				var gwname;\
 				var child = require('child_process').execFile('/bin/sh', ['sh']);\
