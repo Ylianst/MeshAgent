@@ -45,6 +45,17 @@
 #       DefaultSession=gnome-xorg.desktop
 #
 #
+# Special note about running on FreeBSD systems:
+#	1. You'll need to mount procfs, which isn't mounted by default on FreeBSD. Add the following line to /etc/fstab
+#		proc	/proc	procfs	rw	0	0
+#	2. If you don't reboot, then you can manually mount with the command:
+#		mount -t procfs proc /proc
+#	3. In addition, it is recommended to install bash, which you can do with the following command:
+#		pkg install bash
+#	4. For KVM, my FreeBSD system was setup using X11 and KDE. KVM should work out of the box with that configuration.
+#		4a. KVM is disabled by default. To build with KVM support, specify KVM=1 in when building (ie: gmake freebsd ARCHID=30 KVM=1)
+#	5. Also note, that to build on FreeBSD, you must use gmake, not make.
+#
 #
 # Standard builds
 #
