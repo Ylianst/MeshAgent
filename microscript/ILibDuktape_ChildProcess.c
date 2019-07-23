@@ -99,10 +99,19 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	p->childProcess = NULL;
 
 	duk_push_heapptr(p->ctx, p->subProcess);		// [childProcess]
+	
+#ifdef WIN32
+	HANDLE exitptr = (HANDLE)Duktape_GetPointerProperty(p->ctx, -1, "\xFF_WaitExit");
+	if (exitptr != NULL)
+	{
+		SetEvent(exitptr);
+	}
+#else
 	if (Duktape_GetIntPropertyValue(p->ctx, -1, "\xFF_WaitExit", 0) != 0)
 	{
 		ILibChain_EndContinue(Duktape_GetChain(p->ctx));
 	}
+#endif
 	duk_get_prop_string(p->ctx, -1, "emit");		// [childProcess][emit]
 	duk_swap_top(p->ctx, -2);						// [emit][this]
 	duk_push_string(p->ctx, "exit");				// [emit][this][exit]
@@ -153,16 +162,26 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	}
 
 	duk_push_this(ctx);									// [spawnedProcess]
-	duk_push_int(ctx, 1);								// [spawnedProcess][flag]
-	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
-
 	if (!ILibChain_IsLinkAlive(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager)))
 	{
 		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));
 	}
 
+#ifdef WIN32
+	HANDLE eptr = CreateEventA(NULL, TRUE, FALSE, NULL);
+	duk_push_pointer(ctx, (void*)eptr);
+#else
+	duk_push_int(ctx, 1);								// [spawnedProcess][flag]
+#endif
+	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
+
+#ifdef WIN32
+	while (WaitForSingleObjectEx(eptr, INFINITE, TRUE) != WAIT_OBJECT_0);
+	CloseHandle(eptr);
+#else
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
 	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, -1);
+#endif
 
 	return(0);
 }
@@ -195,10 +214,7 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 	ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", ILibDuktape_ChildProcess_SpawnedProcess_Finalizer);
 	ILibDuktape_CreateInstanceMethod(ctx, "kill", ILibDuktape_ChildProcess_Kill, 0);
-
-#ifndef WIN32
 	ILibDuktape_CreateInstanceMethod(ctx, "waitExit", ILibDuktape_ChildProcess_waitExit, 0);
-#endif
 
 	if (ILibProcessPipe_Process_IsDetached(mProcess) == 0)
 	{

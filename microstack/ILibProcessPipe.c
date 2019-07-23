@@ -1551,6 +1551,12 @@ void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 	// We can't destroy this now, because we're on the MicrostackThread. We must destroy this on the WindowsRunLoop Thread.
 	QueueUserAPC((PAPCFUNC)ILibProcessPipe_Process_OnExit_ChainSink_DestroySink, j->parent->workerThread, (ULONG_PTR)j);
 }
+#ifdef WIN32
+void __stdcall ILibProcessPipe_Process_OnExit_ChainSink_APC(ULONG_PTR obj)
+{
+	ILibProcessPipe_Process_OnExit_ChainSink(NULL, (void*)obj);
+}
+#endif
 BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 {
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)user;
@@ -1566,8 +1572,12 @@ BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus err
 	{
 		if (j->exitHandler != NULL)
 		{
-			// Everyone's lifes is made easier, by context switching to chain thread before making this call
+			// Everyone's lives will be made easier, by context switching to chain thread before making this call
+#ifdef WIN32
+			QueueUserAPC((PAPCFUNC)ILibProcessPipe_Process_OnExit_ChainSink_APC, ILibChain_GetMicrostackThreadHandle(j->parent->ChainLink.ParentChain), (ULONG_PTR)user);
+#else
 			ILibChain_RunOnMicrostackThread(j->parent->ChainLink.ParentChain, ILibProcessPipe_Process_OnExit_ChainSink, user);
+#endif
 		}
 		else
 		{

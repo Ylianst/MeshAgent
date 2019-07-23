@@ -271,6 +271,14 @@ void ILibDuktape_readableStream_WriteDataEx_Chain(void *chain, void *user)
 	}
 	free(data);
 }
+#ifdef WIN32
+void __stdcall ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC(ULONG_PTR obj)
+{
+	ILibDuktape_readableStream_bufferedData *data = (ILibDuktape_readableStream_bufferedData*)obj;
+	void *chain = ((void**)ILibMemory_GetExtraMemory((void*)obj, sizeof(ILibDuktape_readableStream_bufferedData) + data->bufferLen))[0];
+	ILibDuktape_readableStream_WriteData_OnData_ChainThread(chain, (void*)obj);
+}
+#endif
 
 int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, int streamReserved, char* buffer, int bufferLen)
 {
@@ -399,13 +407,25 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 			else
 			{
 				// Need to PAUSE, and context switch to Chain Thread, so we can dispatch into JavaScript
+#ifdef WIN32
+				ILibDuktape_readableStream_bufferedData *tmp = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(sizeof(ILibDuktape_readableStream_bufferedData) + bufferLen, sizeof(void*), NULL, NULL);
+#else
 				ILibDuktape_readableStream_bufferedData *tmp = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(sizeof(ILibDuktape_readableStream_bufferedData) + bufferLen, 0, NULL, NULL);
+#endif
 				tmp->bufferLen = bufferLen;
 				tmp->Reserved = streamReserved;
 				tmp->Next = (ILibDuktape_readableStream_bufferedData*)stream;
 				memcpy_s(tmp->buffer, bufferLen, buffer, bufferLen);
 				needPause = 1;
+#ifdef WIN32
+				// We are going to PAUSE first, do the APC, then exit, to prevent a race condition. We don't want to PAUSE after the APC completes.
+				if (stream->paused == 0 && stream->PauseHandler != NULL) { stream->paused = 1; stream->PauseHandler(stream, stream->user); }
+				((void**)ILibMemory_GetExtraMemory(tmp, sizeof(ILibDuktape_readableStream_bufferedData) + bufferLen))[0] = stream->chain;
+				QueueUserAPC((PAPCFUNC)ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC, ILibChain_GetMicrostackThreadHandle(stream->chain), (ULONG_PTR)tmp);
+				return(stream->paused); 
+#else
 				ILibChain_RunOnMicrostackThread(stream->chain, ILibDuktape_readableStream_WriteData_OnData_ChainThread, tmp);
+#endif
 			}
 		}
 		else if (stream->PauseHandler != NULL && ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") == 0)
