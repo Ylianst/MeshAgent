@@ -544,10 +544,12 @@ function UserSessions()
         this.consoleUid = function consoleUid()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write('who\nexit\n');
             child.waitExit();
+
+            if (child.stderr.str != '') { return (0); }
 
             var lines = child.stdout.str.split('\n');
             var tokens, i, j;
