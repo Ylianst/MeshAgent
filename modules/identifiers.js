@@ -14,6 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function trimIdentifiers(val)
+{
+    for(var v in val)
+    {
+        if (!val[v] || val[v] == 'None' || val[v] == '') { delete val[v]; }
+    }
+}
+
 function linux_identifiers()
 {
     var identifiers = {};
@@ -37,9 +45,11 @@ function linux_identifiers()
     identifiers['board_serial'] = ret['board_serial'];
     identifiers['board_vendor'] = ret['board_vendor'];
     identifiers['board_version'] = ret['board_version'];
-    
+    identifiers['product_uuid'] = ret['product_uuid'];
+
     values.identifiers = identifiers;
     values.linux = ret;
+    trimIdentifiers(values.identifiers);
     return (values);
 }
 function windows_identifiers()
@@ -75,9 +85,60 @@ function windows_identifiers()
     ret['identifiers']['board_serial'] = values['SerialNumber'];
     ret['identifiers']['board_vendor'] = values['Manufacturer'];
     ret['identifiers']['board_version'] = values['Version'];
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'CSProduct', 'get', '/VALUE']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+
+    var items = child.stdout.str.split('\r\r\n');
+    for (i in items)
+    {
+        item = items[i].split('=');
+        values[item[0]] = item[1];
+    }
+    ret['identifiers']['product_uuid'] = values['UUID'];
+
+    trimIdentifiers(ret.identifiers);
     return (ret);
 }
+function macos_identifiers()
+{
+    var ret = { identifiers: {} };
+    var child;
 
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('ioreg -d2 -c IOPlatformExpertDevice | grep board-id | awk -F= \'{ split($2, res, "\\""); print res[2]; }\'\nexit\n');
+    child.waitExit();
+    ret.identifiers.board_name = child.stdout.str.trim();
+
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('ioreg -d2 -c IOPlatformExpertDevice | grep IOPlatformSerialNumber | awk -F= \'{ split($2, res, "\\""); print res[2]; }\'\nexit\n');
+    child.waitExit();
+    ret.identifiers.board_serial = child.stdout.str.trim();
+
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('ioreg -d2 -c IOPlatformExpertDevice | grep manufacturer | awk -F= \'{ split($2, res, "\\""); print res[2]; }\'\nexit\n');
+    child.waitExit();
+    ret.identifiers.board_vendor = child.stdout.str.trim();
+
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('ioreg -d2 -c IOPlatformExpertDevice | grep version | awk -F= \'{ split($2, res, "\\""); print res[2]; }\'\nexit\n');
+    child.waitExit();
+    ret.identifiers.board_version = child.stdout.str.trim();
+
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('ioreg -d2 -c IOPlatformExpertDevice | grep IOPlatformUUID | awk -F= \'{ split($2, res, "\\""); print res[2]; }\'\nexit\n');
+    child.waitExit();
+    ret.identifiers.product_uuid = child.stdout.str.trim();
+
+    trimIdentifiers(ret.identifiers);
+    return (ret);
+}
 
 switch(process.platform)
 {
@@ -86,6 +147,9 @@ switch(process.platform)
         break;
     case 'win32':
         module.exports = { _ObjectID: 'identifiers', get: windows_identifiers };
+        break;
+    case 'darwin':
+        module.exports = { _ObjectID: 'identifiers', get: macos_identifiers };
         break;
     default:
         module.exports = { get: function () { throw ('Unsupported Platform'); } };
@@ -96,8 +160,8 @@ switch(process.platform)
 // bios_date = BIOS->ReleaseDate
 // bios_vendor = BIOS->Manufacturer
 // bios_version = BIOS->SMBIOSBIOSVersion
-// board_name = BASEBOARD->Product
-// board_serial = BASEBOARD->SerialNumber
-// board_vendor = BASEBOARD->Manufacturer
+// board_name = BASEBOARD->Product = ioreg/board-id
+// board_serial = BASEBOARD->SerialNumber = ioreg/serial-number | ioreg/IOPlatformSerialNumber
+// board_vendor = BASEBOARD->Manufacturer = ioreg/manufacturer
 // board_version = BASEBOARD->Version
 
