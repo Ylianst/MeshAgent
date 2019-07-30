@@ -1070,9 +1070,9 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 					if (j < (int)(Reader->writeBioBuffer->length))
 					{
 						// Not all data was sent
-						data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), Reader->writeBioBuffer->length - j, NULL, NULL);
-						data->buffer = ILibMemory_GetExtraMemory(data, sizeof(ILibAsyncSocket_SendData));
-						data->bufferSize = Reader->writeBioBuffer->length - j;
+						data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate((int)sizeof(ILibAsyncSocket_SendData), (int)Reader->writeBioBuffer->length - j, NULL, NULL);
+						data->buffer = ILibMemory_GetExtraMemory(data, (int)sizeof(ILibAsyncSocket_SendData));
+						data->bufferSize = (int)Reader->writeBioBuffer->length - j;
 						data->UserFree = ILibAsyncSocket_MemoryOwnership_BIO;
 						memcpy_s(data->buffer, data->bufferSize, Reader->writeBioBuffer->data + j, data->bufferSize);
 						Reader->PendingSend_Head = Reader->PendingSend_Tail = data;
@@ -1883,8 +1883,8 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 						{ 
 							// Some Data was sent, so we need to grab all the data from SSL and buffer it
 							module->PendingSend_Head->UserFree = ILibAsyncSocket_MemoryOwnership_CHAIN;
-							module->PendingSend_Head->buffer = ILibMemory_Allocate(module->writeBioBuffer->length - bytesSent, 0, NULL, NULL);
-							module->PendingSend_Head->bufferSize = module->writeBioBuffer->length - bytesSent;
+							module->PendingSend_Head->buffer = ILibMemory_Allocate((int)module->writeBioBuffer->length - bytesSent, 0, NULL, NULL);
+							module->PendingSend_Head->bufferSize = (int)module->writeBioBuffer->length - bytesSent;
 							module->PendingSend_Head->bytesSent = 0;
 							memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer + bytesSent, module->PendingSend_Head->bufferSize);
 
