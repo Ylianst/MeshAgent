@@ -52,9 +52,35 @@ function linux_identifiers()
     trimIdentifiers(values.identifiers);
     return (values);
 }
+
+function windows_wmic_results(str)
+{
+    var lines = str.trim().split('\r\n');
+    var keys = lines[0].split(',');
+    var i, key, keyval;
+    var tokens;
+    var result = [];
+
+    for (i = 1; i < lines.length; ++i)
+    {
+        var obj = {};
+        tokens = lines[i].split(',');
+        for (key = 0; key < keys.length; ++key)
+        {
+            if (tokens[key].trim())
+            {
+                obj[keys[key].trim()] = tokens[key].trim();
+            }
+        }
+        result.push(obj);
+    }
+    return (result);
+}
+
+
 function windows_identifiers()
 {
-    var ret = {}; values = {}; var items; var i; var item;
+    var ret = { windows: {}}; values = {}; var items; var i; var item;
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'bios', 'get', '/VALUE']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.waitExit();
@@ -97,8 +123,23 @@ function windows_identifiers()
         values[item[0]] = item[1];
     }
     ret['identifiers']['product_uuid'] = values['UUID'];
-
     trimIdentifiers(ret.identifiers);
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'MEMORYCHIP', 'LIST', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    ret.windows.memory = windows_wmic_results(child.stdout.str);
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'OS', 'GET', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    ret.windows.osinfo = windows_wmic_results(child.stdout.str)[0];
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'PARTITION', 'LIST', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    ret.windows.partitions = windows_wmic_results(child.stdout.str);
+
     return (ret);
 }
 function macos_identifiers()
