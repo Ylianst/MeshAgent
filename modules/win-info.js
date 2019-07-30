@@ -38,5 +38,33 @@ function qfe()
     }
     return (result);
 }
+function av()
+{
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', '/Namespace:\\\\root\\SecurityCenter2', 'Path', 'AntiVirusProduct', 'get', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
 
-module.exports = qfe;
+    var lines = child.stdout.str.trim().split('\r\n');
+    var keys = lines[0].split(',');
+    var i, key;
+    var tokens;
+    var result = [];
+
+    for (i = 1; i < lines.length; ++i)
+    {
+        var obj = {};
+        var status = {};
+        tokens = lines[i].split(',');
+        for (key = 0; key < keys.length; ++key)
+        {
+            if (tokens[key] != undefined) { obj[keys[key].trim()] = tokens[key]; }
+        }
+        status.product = obj.displayName;
+        status.updated = (parseInt(obj.productState) & 0x10) == 0;
+        status.enabled = (parseInt(obj.productState) & 0x1000) == 0x1000;
+        result.push(status);
+    }
+    return (result);
+}
+
+module.exports = { qfe: qfe, av: av }
