@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+var promise = require('promise');
+
 function qfe()
 {
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'qfe', 'list', 'full', '/FORMAT:CSV']);
@@ -66,5 +68,112 @@ function av()
     }
     return (result);
 }
+function defrag(options)
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    var path = '';
 
-module.exports = { qfe: qfe, av: av }
+    switch(require('os').arch())
+    {
+        case 'x64':
+            if (require('_GenericMarshal').PointerSize == 4)
+            {
+                // 32 Bit App on 64 Bit Windows
+                ret._rej('Cannot defrag volume on 64 bit Windows from 32 bit application');
+                return (ret);
+            }
+            else
+            {
+                // 64 Bit App
+                path = process.env['windir'] + '\\System32\\defrag.exe';
+            }
+            break;
+        case 'ia32':
+            // 32 Bit App on 32 Bit Windows
+            path = process.env['windir'] + '\\System32\\defrag.exe';
+            break;
+        default:
+            ret._rej(require('os').arch() + ' not supported');
+            return (ret);
+            break;
+    }
+
+    ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\defrag.exe', ['defrag', options.volume + ' /A']);
+    ret.child.promise = ret;
+    ret.child.promise.options = options;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function (code)
+    {
+        var lines = this.stdout.str.trim().split('\r\n');
+        var obj = { volume: this.promise.options.volume };
+        for (var i in lines)
+        {
+            var token = lines[i].split('=');
+            if(token.length == 2)
+            {
+                switch(token[0].trim().toLowerCase())
+                {
+                    case 'volume size':
+                        obj['size'] = token[1];
+                        break;
+                    case 'free space':
+                        obj['free'] = token[1];
+                        break;
+                    case 'total fragmented space':
+                        obj['fragmented'] = token[1];
+                        break;
+                    case 'largest free space size':
+                        obj['largestFragment'] = token[1];
+                        break;
+                }               
+            }
+        }
+        this.promise._res(obj);
+    });
+    return (ret);
+}
+function regQuery(H, Path, Key)
+{
+    try
+    {
+        return(require('win-registry').QueryKey(H, Path, Key));
+    }
+    catch(e)
+    {
+        return (null);
+    }
+}
+function pendingReboot()
+{
+    var tmp = null;
+    var ret = null;
+    var HKEY = require('win-registry').HKEY;
+    if(regQuery(HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing', 'RebootPending') !=null)
+    {
+        ret = 'Component Based Servicing';
+    }
+    else if(regQuery(HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate', 'RebootRequired'))
+    {
+        ret = 'Windows Update';
+    }
+    else if ((tmp=regQuery(HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\Session Manager', 'PendingFileRenameOperations'))!=null && tmp != 0 && tmp != '')
+    {
+        ret = 'File Rename';
+    }
+    else if (regQuery(HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ActiveComputerName', 'ComputerName') != regQuery(HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\ComputerName\\ComputerName', 'ComputerName'))
+    {
+        ret = 'System Rename';
+    }
+    return (ret);
+}
+
+if (process.platform == 'win32')
+{
+    module.exports = { qfe: qfe, av: av, defrag: defrag, pendingReboot: pendingReboot };
+}
+else
+{
+    var not_supported = function () { throw (process.platform + ' not supported'); };
+    module.exports = { qfe: not_supported, av: not_supported, defrag: not_supported, pendingReboot: not_supported };
+}
