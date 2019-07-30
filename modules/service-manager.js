@@ -519,19 +519,20 @@ function serviceManager()
             var resumeHandle = this.GM.CreatePointer();
             //var services = this.proxy.CreateVariable(262144);
             var success = this.proxy.EnumServicesStatusExA(handle, 0, 0x00000030, 0x00000003, 0x00, 0x00, bytesNeeded, servicesReturned, resumeHandle, 0x00);
-            if (bytesNeeded.IntVal <= 0) {
-                throw ('error enumerating services');
-            }
-            var sz = bytesNeeded.IntVal;
-            var services = this.GM.CreateVariable(sz);
-            this.proxy.EnumServicesStatusExA(handle, 0, 0x00000030, 0x00000003, services, sz, bytesNeeded, servicesReturned, resumeHandle, 0x00);
-            console.log("servicesReturned", servicesReturned.IntVal);
 
             var ptrSize = dbName._size;
+            var sz = bytesNeeded.Deref(0, dbName._size).toBuffer().readUInt32LE();
+
+            if (sz < 0) { throw ('error enumerating services'); }
+
+            var services = this.GM.CreateVariable(sz);
+            this.proxy.EnumServicesStatusExA(handle, 0, 0x00000030, 0x00000003, services, sz, bytesNeeded, servicesReturned, resumeHandle, 0x00);
+
             var blockSize = 36 + (2 * ptrSize);
             blockSize += ((ptrSize - (blockSize % ptrSize)) % ptrSize);
             var retVal = [];
-            for (var i = 0; i < servicesReturned.IntVal; ++i) {
+            for (var i = 0; i < servicesReturned.Deref(0, dbName._size).toBuffer().readUInt32LE(); ++i)
+{
                 var token = services.Deref(i * blockSize, blockSize);
                 var j = {};
                 j.name = token.Deref(0, ptrSize).Deref().String;
