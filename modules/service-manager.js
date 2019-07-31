@@ -818,6 +818,22 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
+                            ret.description = function description()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                if(description.platform == 'upstart')
+                                {
+                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep description | awk '" + '{ if($1=="description") { $1=""; a=split($0, res, "\\""); if(a>1) { print res[2]; } else { print $0; }}}\'\nexit\n');
+                                }
+                                else
+                                {
+                                    child.stdin.write("cat /etc/init.d/" + this.name + " | grep Short-Description: | awk '" + '{ if($2=="Short-Description:") { $1=""; $2=""; print $0; }}\'\nexit\n');
+                                }
+                                child.waitExit();
+                                return (child.stdout.str.trim());
+                            }
+                            ret.description.platform = platform;
                             ret.appWorkingDirectory = function appWorkingDirectory()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -1046,6 +1062,10 @@ function serviceManager()
                 }
             };
         }
+        this.enumerateService = function ()
+        {
+
+        };
     }
     this.installService = function installService(options)
     {
