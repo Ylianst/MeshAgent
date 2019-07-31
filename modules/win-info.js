@@ -168,12 +168,60 @@ function pendingReboot()
     return (ret);
 }
 
+function installedApps()
+{
+    var promise = require('promise');
+    var ret = new promise(function (a, r) { this._resolve = a; this._reject = r; });
+    
+    var code = "\
+    var reg = require('win-registry');\
+    var result = [];\
+    var val, tmp;\
+    var items = reg.QueryKey(reg.HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall');\
+    for (var key in items.subkeys)\
+    {\
+        val = {};\
+        try\
+        {\
+            val.name = reg.QueryKey(reg.HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\' + items.subkeys[key], 'DisplayName');\
+        }\
+        catch(e)\
+        {\
+            continue;\
+        }\
+        try\
+        {\
+            val.version = reg.QueryKey(reg.HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\' + items.subkeys[key], 'DisplayVersion');\
+            if (val.version == '') { delete val.version; }\
+        }\
+        catch(e)\
+        {\
+        }\
+        try\
+        {\
+            val.location = reg.QueryKey(reg.HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Uninstall\\\\' + items.subkeys[key], 'InstallLocation');\
+            if (val.location == '') { delete val.location; }\
+        }\
+        catch(e)\
+        {\
+        }\
+        result.push(val);\
+    }\
+    console.log(JSON.stringify(result,'', 1));process.exit();";
+
+    ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop().split('.exe')[0], '-exec "' + code + '"']);
+    ret.child.promise = ret;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function (c) { this.promise._resolve(JSON.parse(this.stdout.str.trim())); });
+    return (ret);
+}
+
 if (process.platform == 'win32')
 {
-    module.exports = { qfe: qfe, av: av, defrag: defrag, pendingReboot: pendingReboot };
+    module.exports = { qfe: qfe, av: av, defrag: defrag, pendingReboot: pendingReboot, installedApps: installedApps };
 }
 else
 {
     var not_supported = function () { throw (process.platform + ' not supported'); };
-    module.exports = { qfe: not_supported, av: not_supported, defrag: not_supported, pendingReboot: not_supported };
+    module.exports = { qfe: not_supported, av: not_supported, defrag: not_supported, pendingReboot: not_supported, installedApps: not_supported };
 }

@@ -811,7 +811,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 
 		while (parameters[i] != NULL)
 		{
-			sz += ((int)strnlen_s(parameters[i++], _MAX_PATH) + 1);
+			sz += ((int)strnlen_s(parameters[i++], sizeof(ILibScratchPad2)) + 1);
 		}
 		sz += (i - 1); // Need to make room for delimiter characters
 		parms = (char*)malloc(sz);
