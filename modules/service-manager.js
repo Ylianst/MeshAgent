@@ -149,16 +149,18 @@ if (process.platform == 'darwin')
         else
         {
             Object.defineProperty(ret, 'plist', { value: folder + '/' + name + '.plist' });
-            Object.defineProperty(ret, 'alias', {
-                value: (function () {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim());
-                })()
-            });
+            Object.defineProperty(ret, 'alias',
+                {
+                    get: function ()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                            child.waitExit();
+                            return (child.stdout.str.trim());
+                        }
+                });
         }
         Object.defineProperty(ret, 'daemon', { value: ret.plist.split('/LaunchDaemons/').length > 1 ? true : false });
 
@@ -182,29 +184,33 @@ if (process.platform == 'darwin')
             child.waitExit();
             return (child.stdout.str.trim());
         };
-        Object.defineProperty(ret, '_runAtLoad', {
-            value: (function () {
-                // We need to see if this is an Auto-Starting service, in order to figure out how to implement 'start'
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>RunAtLoad</key>\"); split(a[2], b, \"/>\"); split(b[1], c, \"<\"); print c[2]; }'\nexit\n");
-                child.waitExit();
-                return (child.stdout.str.trim().toUpperCase() == "TRUE");
-            })()
-        });
-        Object.defineProperty(ret, "_keepAlive", {
-            value: (function () {
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{split($0, a, \"<key>KeepAlive</key>\"); split(a[2], b, \"<\"); split(b[2], c, \">\"); ");
-                child.stdin.write(" if(c[1]==\"dict\"){ split(a[2], d, \"</dict>\"); if(split(d[1], truval, \"<true/>\")>1) { split(truval[1], kn1, \"<key>\"); split(kn1[2], kn2, \"</key>\"); print kn2[1]; } }");
-                child.stdin.write(" else { split(c[1], ka, \"/\"); if(ka[1]==\"true\") {print \"ALWAYS\";} } }'\nexit\n");
-                child.waitExit();
-                return (child.stdout.str.trim());
-            })()
-        });
+        Object.defineProperty(ret, '_runAtLoad',
+            {
+                get: function ()
+                {
+                    // We need to see if this is an Auto-Starting service, in order to figure out how to implement 'start'
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>RunAtLoad</key>\"); split(a[2], b, \"/>\"); split(b[1], c, \"<\"); print c[2]; }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim().toUpperCase() == "TRUE");
+                }
+            });
+        Object.defineProperty(ret, "_keepAlive",
+            {
+                get: function () 
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{split($0, a, \"<key>KeepAlive</key>\"); split(a[2], b, \"<\"); split(b[2], c, \">\"); ");
+                    child.stdin.write(" if(c[1]==\"dict\"){ split(a[2], d, \"</dict>\"); if(split(d[1], truval, \"<true/>\")>1) { split(truval[1], kn1, \"<key>\"); split(kn1[2], kn2, \"</key>\"); print kn2[1]; } }");
+                    child.stdin.write(" else { split(c[1], ka, \"/\"); if(ka[1]==\"true\") {print \"ALWAYS\";} } }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim());
+                }
+            });
         ret.getPID = function getPID(uid, asString)
         {
             var options = undefined;
