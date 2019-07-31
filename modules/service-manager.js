@@ -709,7 +709,14 @@ function serviceManager()
                 {
                     throw ('Service: ' + name + ' not found');
                 }
-
+                ret.description = function description()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("cat " + this.rc + " | grep desc= | awk -F= '" + '{ if($1=="desc") { $1=""; a=split($0, res, "\\""); if(a>1) { print res[2]; } else { print $0; } } }\'\nexit\n');
+                    child.waitExit();
+                    return (child.stdout.str.trim());
+                };
                 ret.appWorkingDirectory = function appWorkingDirectory()
                 {
                     var ret;
@@ -975,6 +982,22 @@ function serviceManager()
                         if (require('fs').existsSync('/lib/systemd/system/' + name + '.service') ||
                             require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
                         {
+                            ret.description = function description()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                if (require('fs').existsSync('/lib/systemd/system/' + name + '.service'))
+                                {
+                                    child.stdin.write('cat /lib/systemd/system/' + name + '.service');
+                                }
+                                else
+                                {
+                                    child.stdin.write('cat /usr/lib/systemd/system/' + name + '.service');
+                                }
+                                child.stdin.write(' | grep Description= | awk -F= \'{ if($1=="Description") { $1=""; print $0; }}\'\nexit\n');
+                                child.waitExit();
+                                return (child.stdout.str.trim());
+                            }
                             ret.appWorkingDirectory = function appWorkingDirectory()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -1062,9 +1085,101 @@ function serviceManager()
                 }
             };
         }
-        this.enumerateService = function ()
+        this.enumerateService = function (options)
         {
+            var results = [];
+            var paths = [];
+            switch(process.platform)
+            {
+                case 'linux':
+                    switch((options && options.platformType)?options.platformType : this.getServiceType())
+                    {
+                        case 'init':
+                            paths.push('/etc/init.d');
+                            break;
+                        case 'upstart':
+                            paths.push('/etc/init');
+                            break;
+                        case 'systemd':
+                            paths.push('/lib/systemd/system');
+                            paths.push('/usr/lib/systemd/system');
+                            break;
+                    }
+                    break;
+                case 'freebsd':
+                    paths.push('/etc/rc.d');
+                    paths.push('/usr/local/etc/rc.d');
+                    break;
+                case 'darwin':
+                    paths.push('/Library/LaunchDaemons');
+                    paths.push('/System/Library/LaunchDaemons');
+                    break;
+            }
 
+            for(var i in paths)
+            {
+                var files = require('fs').readdirSync(paths[i]);
+                for(var j in files)
+                {
+                    switch(process.platform)
+                    {
+                        case 'linux':
+                            switch ((options && options.platformType) ? options.platformType : this.getServiceType())
+                            {
+                                case 'init':
+                                    try
+                                    {
+                                        results.push(this.getService(files[j], 'init'));
+                                    }
+                                    catch (e)
+                                    {
+                                    }
+                                    break;
+                                case 'upstart':
+                                    if (files[j].endsWith('.conf'))
+                                    {
+                                        try
+                                        {
+                                            results.push(this.getService(files[j].split('.conf')[0], 'upstart'));
+                                        }
+                                        catch (e)
+                                        {
+                                        }
+                                    }
+                                    break;
+                                case 'systemd':
+                                    if (files[j].endsWith('.service'))
+                                    {
+                                        try
+                                        {
+                                            results.push(this.getService(files[j].split('.service')[0], 'systemd'));
+                                        }
+                                        catch(e)
+                                        {
+                                        }
+                                    }
+                                    break;
+                            }
+                            break;
+                        case 'freebsd':
+                            try
+                            {
+                                results.push(this.getService(files[j]));
+                            }
+                            catch (e)
+                            {
+                            }
+                            break;
+                        case 'darwin':
+                            break;
+                    }
+                }
+            }
+            for (var k in results)
+            {
+                if (results[k].description) { results[k].description = results[k].description(); }
+            }
+            return (results);
         };
     }
     this.installService = function installService(options)
