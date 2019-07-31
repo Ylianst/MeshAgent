@@ -1171,6 +1171,16 @@ function serviceManager()
                             }
                             break;
                         case 'darwin':
+                            if (files[j].endsWith('.plist'))
+                            {
+                                try
+                                {
+                                    results.push(fetchPlist(paths[i], files[j].split('.plist')[0]));
+                                }
+                                catch (e)
+                                {
+                                }
+                            }
                             break;
                     }
                 }
