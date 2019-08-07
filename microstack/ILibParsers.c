@@ -1510,6 +1510,10 @@ HANDLE ILibChain_GetMicrostackThreadHandle(void *chain)
 {
 	return(((struct ILibBaseChain*)chain)->MicrostackThreadHandle);
 }
+int ILibChain_SelectInterrupted(void *chain)
+{
+	return(((struct ILibBaseChain*)chain)->PreSelectCount == 0 ? 0 : !(((struct ILibBaseChain*)chain)->PreSelectCount == ((struct ILibBaseChain*)chain)->PostSelectCount && ((struct ILibBaseChain*)chain)->PreSelectCount != 0));
+}
 #endif
 
 void ILibChain_Safe_Destroy(void *object)

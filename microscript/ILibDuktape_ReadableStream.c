@@ -276,7 +276,18 @@ void __stdcall ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC(ULONG
 {
 	ILibDuktape_readableStream_bufferedData *data = (ILibDuktape_readableStream_bufferedData*)obj;
 	void *chain = ((void**)ILibMemory_GetExtraMemory((void*)obj, sizeof(ILibDuktape_readableStream_bufferedData) + data->bufferLen))[0];
-	ILibDuktape_readableStream_WriteData_OnData_ChainThread(chain, (void*)obj);
+
+	if (ILibChain_SelectInterrupted(chain) != 0)
+	{
+		// This APC interrupted a winsock (select) call, so we must unroll the callstack to continue,
+		// because winsock is not re-entrant, so we cannot risk making another winsock call directly. 
+		//
+		ILibChain_RunOnMicrostackThreadEx2(chain, ILibDuktape_readableStream_WriteData_OnData_ChainThread, (void*)obj, 0);
+	}
+	else
+	{
+		ILibDuktape_readableStream_WriteData_OnData_ChainThread(chain, (void*)obj);
+	}
 }
 #endif
 

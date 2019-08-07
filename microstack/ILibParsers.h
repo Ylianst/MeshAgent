@@ -954,6 +954,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibChain_RunOnMicrostackThread2(chain, handler, user, freeOnShutdown) if(ILibIsRunningOnChainThread(chain)==0){ILibChain_RunOnMicrostackThreadEx2(chain, handler, user, freeOnShutdown);}else{handler(chain,user);}
 #ifdef WIN32
 	HANDLE ILibChain_GetMicrostackThreadHandle(void *chain);
+	int ILibChain_SelectInterrupted(void *chain);
 #endif
 	/* \} */
 

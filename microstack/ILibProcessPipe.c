@@ -860,8 +860,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		info.dwFlags |= STARTF_USESTDHANDLES;
 	}
 
-	if ((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessA(target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW, envvars, NULL, &info, &processInfo)) ||
-		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserA(userToken, target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW, envvars, NULL, &info, &processInfo)))
+	if ((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessA(target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW | (needSetSid !=0? (DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)) ||
+		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserA(userToken, target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW | (needSetSid != 0 ? (DETACHED_PROCESS| CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)))
 	{
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 		{
@@ -1542,6 +1542,15 @@ void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)user;
 	DWORD exitCode;
 	BOOL result;
+
+	if (ILibChain_SelectInterrupted(j->chain) != 0)
+	{
+		// Winsock appears to be at a select call, so this must've been triggered by an APC, so we must unroll the callstack to continue,
+		// because winsock is not re-entrant, so we cannot risk making another winsock call directly. 
+		//
+		ILibChain_RunOnMicrostackThreadEx2(j->chain, ILibProcessPipe_Process_OnExit_ChainSink, user, 0);
+		return;
+	}
 
 	result = GetExitCodeProcess(j->hProcess, &exitCode);
 	j->exiting = 1;
