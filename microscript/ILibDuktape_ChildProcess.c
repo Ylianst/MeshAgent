@@ -168,6 +168,7 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	}
 
 #ifdef WIN32
+	DWORD result;
 	HANDLE eptr = CreateEventA(NULL, TRUE, FALSE, NULL);
 	duk_push_pointer(ctx, (void*)eptr);
 #else
@@ -176,8 +177,9 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
 
 #ifdef WIN32
-	while (WaitForSingleObjectEx(eptr, INFINITE, TRUE) != WAIT_OBJECT_0);
+	while ((result=WaitForSingleObjectEx(eptr, duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : INFINITE, TRUE)) != WAIT_OBJECT_0 && result != WAIT_TIMEOUT);
 	CloseHandle(eptr);
+	if (result == WAIT_TIMEOUT) { return(ILibDuktape_Error(ctx, "timeout")); }
 #else
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
 	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, -1);
@@ -214,7 +216,7 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 	ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", ILibDuktape_ChildProcess_SpawnedProcess_Finalizer);
 	ILibDuktape_CreateInstanceMethod(ctx, "kill", ILibDuktape_ChildProcess_Kill, 0);
-	ILibDuktape_CreateInstanceMethod(ctx, "waitExit", ILibDuktape_ChildProcess_waitExit, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "waitExit", ILibDuktape_ChildProcess_waitExit, DUK_VARARGS);
 
 	if (ILibProcessPipe_Process_IsDetached(mProcess) == 0)
 	{
