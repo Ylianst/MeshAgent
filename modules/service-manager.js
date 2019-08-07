@@ -44,6 +44,7 @@ function parseServiceStatus(token)
     j.isSharedProcess = ((serviceType & 0x00000020) == 0x00000020);
     j.isOwnProcess = ((serviceType & 0x00000010) == 0x00000010);
     j.isInteractive = ((serviceType & 0x00000100) == 0x00000100);
+    j.waitHint = token.Deref((6 * 4), 4).toBuffer().readUInt32LE();
     switch (token.Deref((1 * 4), 4).toBuffer().readUInt32LE())
     {
         case 0x00000005:
@@ -613,17 +614,80 @@ function serviceManager()
                         return (false);
                     };
 
-                    retVal.stop = function () {
-                        if (this.status.state == 'RUNNING') {
-                            var newstate = this._GM.CreateVariable(36);
-                            var success = this._proxy.ControlService(this._service, 0x00000001, newstate);
-                            if (success == 0) {
-                                throw (this.name + '.stop() failed');
+                    retVal._stopEx = function(s, p)
+                    {
+                        var bytesNeeded = s._GM.CreateVariable(s._GM.PointerSize);
+                        s._proxy.QueryServiceStatusEx(s._service, 0, 0, 0, bytesNeeded);
+                        var st = s._GM.CreateVariable(bytesNeeded.toBuffer().readUInt32LE());
+                        if (s._proxy.QueryServiceStatusEx(s._service, 0, st, st._size, bytesNeeded).Val != 0)
+                        {
+                            var currentState = parseServiceStatus(st).state;
+                            switch (currentState)
+                            {
+                                case 'STOPPED':
+                                    p._res('STOPPED');
+                                    break;
+                                case 'STOP_PENDING':
+                                    p._elapsedTime = Date.now() - p._startTime;
+                                    if (p._elapsedTime < 10000)
+                                    {
+                                        p.timer = setTimeout(s._stopEx, p._waitTime, s, p);
+                                    }
+                                    else
+                                    {
+                                        p._rej('timeout waiting for service to stop');
+                                    }
+                                    break;
+                                default:
+                                    p._rej('Unexpected state: ' + currentState);
+                                    break;
                             }
                         }
-                        else {
-                            throw ('cannot call ' + this.name + '.stop(), when current state is: ' + this.status.state);
+                        else
+                        {
+                            p._rej('Error fetching service state');
                         }
+                    }
+
+                    retVal.stop = function ()
+                    {
+                        var promise = require('promise');
+                        var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+                        var bytesNeeded = this._GM.CreateVariable(this._GM.PointerSize);
+                        this._proxy.QueryServiceStatusEx(this._service, 0, 0, 0, bytesNeeded);
+                        var st = this._GM.CreateVariable(bytesNeeded.toBuffer().readUInt32LE());
+                        if (this._proxy.QueryServiceStatusEx(this._service, 0, st, st._size, bytesNeeded).Val != 0)
+                        {
+                            var status = parseServiceStatus(st);
+                            if(status.state == 'RUNNING')
+                            {
+                                // Stop Service
+                                var newstate = this._GM.CreateVariable(36);
+                                if(this._proxy.ControlService(this._service, 0x00000001, newstate).Val == 0)
+                                {
+                                    ret._rej(this.name + '.stop() failed');
+                                }
+                                else
+                                {
+                                    // Now we need to setup a timed callback to check the status
+                                    ret._startTime = Date.now();
+                                    ret._elapsedTime = 0;
+                                    ret._waitTime = status.waitHint / 10;
+                                    if (ret._waitTime < 500) { ret._waitTime = 500; }
+                                    if (ret._waitTime > 5000) { ret._waitTime = 5000; }
+                                    ret.timer = setTimeout(this._stopEx, ret._waitTime, this, ret);
+                                }
+                            }
+                            else
+                            {
+                                ret._rej('cannot call ' + this.name + '.stop(), when current state is: ' + status.state);
+                            }
+                        }
+                        else
+                        {
+                            ret._rej('error determining if ' + this.name + ' is running');
+                        }
+                        return (ret);
                     }
                     retVal.start = function () {
                         if (this.status.state == 'STOPPED') {
@@ -635,6 +699,9 @@ function serviceManager()
                         else {
                             throw ('cannot call ' + this.name + '.start(), when current state is: ' + this.status.state);
                         }
+                    }
+                    retVal.restart = function ()
+                    {
                     }
                     var query_service_configa_DWORD = this.GM.CreateVariable(4);
                     this.proxy.QueryServiceConfigA(h, 0, 0, query_service_configa_DWORD);
