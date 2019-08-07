@@ -566,6 +566,7 @@ function serviceManager()
                 retVal._service = h;
                 retVal._GM = this.GM;
                 retVal._proxy = this.proxy;
+                retVal._proxy2 = this.proxy2;
                 retVal.name = name;
 
                 Object.defineProperty(retVal, 'status', 
@@ -628,7 +629,6 @@ function serviceManager()
                         switch (current)
                         {
                             case 'STOPPED':
-                                console.log('STOPPED');
                                 p._res('STOPPED');
                                 break;
                             case 'STOP_PENDING':
@@ -643,7 +643,6 @@ function serviceManager()
                                 }
                                 break;
                             default:
-                                console.log(current);
                                 p._rej('Unexpected state: ' + current);
                                 break;
                         }
@@ -657,9 +656,10 @@ function serviceManager()
                         {
                             // Stop Service
                             var newstate = this._GM.CreateVariable(36);
-                            if(this._proxy.ControlService(this._service, 0x00000001, newstate).Val == 0)
+                            var reason;
+                            if(this._proxy.ControlService(this._service, 0x00000001, newstate).Val == 0 && (reason = this._proxy2.GetLastError().Val)!=0)
                             {
-                                ret._rej(this.name + '.stop() failed');
+                                ret._rej(this.name + '.stop() failed with error: ' + reason);
                             }
                             else
                             {
@@ -717,7 +717,7 @@ function serviceManager()
                                     return;
                                 }
                                 this.startp._a();
-                            });
+                            }, function (e) { console.rawLog('stop() failed => ' + e.toString());});
                             return (p.startp);
                         }
                     }
