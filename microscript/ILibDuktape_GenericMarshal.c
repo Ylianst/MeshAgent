@@ -185,6 +185,22 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_ASTRING(duk_context *ctx)
 	return 1;
 }
 
+duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_UTFSTRING(duk_context *ctx)
+{
+	void *ptr;
+	int size;
+
+
+	duk_push_this(ctx);							// [var]
+	duk_get_prop_string(ctx, -1, "_ptr");		// [var][ptr]
+	ptr = duk_to_pointer(ctx, -1);
+	duk_get_prop_string(ctx, -2, "_size");		// [var][ptr][size]
+	size = duk_to_int(ctx, -1);
+
+	ILibDuktape_String_PushWideString(ctx, ptr, size == 0 ? -1 : size);
+	return 1;
+}
+
 duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_GET(duk_context *ctx)
 {
 	void *ptr;
@@ -414,6 +430,8 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 	ILibDuktape_CreateInstanceMethod(ctx, "Deref", ILibDuktape_GenericMarshal_Variable_Deref, DUK_VARARGS);
 	ILibDuktape_CreateEventWithGetter(ctx, "String", ILibDuktape_GenericMarshal_Variable_Val_STRING);
 	ILibDuktape_CreateEventWithGetter(ctx, "AnsiString", ILibDuktape_GenericMarshal_Variable_Val_ASTRING);
+	ILibDuktape_CreateEventWithGetter(ctx, "Wide2UTF8", ILibDuktape_GenericMarshal_Variable_Val_UTFSTRING);
+
 	ILibDuktape_CreateEventWithGetter(ctx, "HexString", ILibDuktape_GenericMarshal_Variable_Val_HSTRING);
 	ILibDuktape_CreateEventWithGetter(ctx, "HexString2", ILibDuktape_GenericMarshal_Variable_Val_HSTRING2);
 
@@ -448,7 +466,10 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateVariable(duk_context *ctx)
 #ifdef WIN32
 				wchar_t *wbuffer = (wchar_t*)ILibMemory_AllocateA(((int)strLen * 2) + 2);
 				size_t converted;
-				mbstowcs_s(&converted, wbuffer, (size_t)strLen+1, str, (size_t)strLen);
+				if (MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, size, wbuffer, strLen + 1) == 0)
+				{
+					return(ILibDuktape_Error(ctx, "UTF8 Conversion Error"));
+				}
 				str = (char*)wbuffer;
 				size = (int)ILibMemory_AllocateA_Size(str);
 				strLen = size - 1;

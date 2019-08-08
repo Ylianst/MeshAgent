@@ -209,6 +209,10 @@ function UserSessions()
             if(id==0xFFFFFFFF) {throw('Nobody logged in');}
             return (id);
         };
+        this.getUsername = function getUsername(uid)
+        {
+            return (this.getSessionAttribute(uid, this.InfoClass.WTSUserName));
+        }
         this.Current = function Current(cb)
         {
             var retVal = {};

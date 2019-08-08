@@ -28,8 +28,8 @@ function processManager() {
             this._kernel32 = GM.CreateNativeProxy('kernel32.dll');
             this._kernel32.CreateMethod('GetLastError');
             this._kernel32.CreateMethod('CreateToolhelp32Snapshot');
-            this._kernel32.CreateMethod('Process32First');
-            this._kernel32.CreateMethod('Process32Next');
+            this._kernel32.CreateMethod('Process32FirstW');
+            this._kernel32.CreateMethod('Process32NextW');
             break;
 	case 'freebsd':
         case 'linux':
@@ -44,7 +44,12 @@ function processManager() {
     {
         var promise = require('promise');
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        this.getProcesses(function (ps, prom) { prom._res(ps); }, ret);
+        ret.callback = function callback(ps)
+        {
+            callback.prom._res(ps);
+        }
+        ret.callback.prom = ret;
+        this.getProcesses(ret.callback);
         return (ret);
     }
     // Return a object of: pid -> process information.
@@ -58,13 +63,14 @@ function processManager() {
             case 'win32': // Windows processes
                 var retVal = {};
                 var h = this._kernel32.CreateToolhelp32Snapshot(2, 0);
-                var info = GM.CreateVariable(304);
-                info.toBuffer().writeUInt32LE(304, 0);
-                var nextProcess = this._kernel32.Process32First(h, info);
+                var info = GM.CreateVariable(GM.PointerSize==8 ? 568 : 556);
+                info.toBuffer().writeUInt32LE(info._size, 0);
+                var nextProcess = this._kernel32.Process32FirstW(h, info);
                 while (nextProcess.Val) 
                 {
-                    retVal[info.Deref(8, 4).toBuffer().readUInt32LE(0)] = { pid: info.Deref(8, 4).toBuffer().readUInt32LE(0), cmd: info.Deref(GM.PointerSize == 4 ? 36 : 44, 260).String };
-                    nextProcess = this._kernel32.Process32Next(h, info);
+                    if (info.Deref(8, 4).toBuffer().readUInt32LE(0) == 16912) { _debug(); }
+                    retVal[info.Deref(8, 4).toBuffer().readUInt32LE(0)] = { pid: info.Deref(8, 4).toBuffer().readUInt32LE(0), cmd: info.Deref(GM.PointerSize == 4 ? 36 : 44, 260).Wide2UTF8 };
+                    nextProcess = this._kernel32.Process32NextW(h, info);
                 }
                 if (callback) { callback.apply(this, [retVal]); }
                 break;

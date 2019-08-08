@@ -39,16 +39,16 @@ function windows_registry()
     this._ObjectId = 'win-registry';
     this._marshal = require('_GenericMarshal');
     this._AdvApi = this._marshal.CreateNativeProxy('Advapi32.dll');
-    this._AdvApi.CreateMethod('RegCreateKeyExA');
-    this._AdvApi.CreateMethod('RegEnumKeyExA');
-    this._AdvApi.CreateMethod('RegEnumValueA');
-    this._AdvApi.CreateMethod('RegOpenKeyExA');
-    this._AdvApi.CreateMethod('RegQueryInfoKeyA');
-    this._AdvApi.CreateMethod('RegQueryValueExA');
+    this._AdvApi.CreateMethod('RegCreateKeyExW');
+    this._AdvApi.CreateMethod('RegEnumKeyExW');
+    this._AdvApi.CreateMethod('RegEnumValueW');
+    this._AdvApi.CreateMethod('RegOpenKeyExW');
+    this._AdvApi.CreateMethod('RegQueryInfoKeyW');
+    this._AdvApi.CreateMethod('RegQueryValueExW');
     this._AdvApi.CreateMethod('RegCloseKey');
-    this._AdvApi.CreateMethod('RegDeleteKeyA');
-    this._AdvApi.CreateMethod('RegDeleteValueA');
-    this._AdvApi.CreateMethod('RegSetValueExA');
+    this._AdvApi.CreateMethod('RegDeleteKeyW');
+    this._AdvApi.CreateMethod('RegDeleteValueW');
+    this._AdvApi.CreateMethod('RegSetValueExW');
     this.HKEY = { Root: Buffer.from('80000000', 'hex').swap32(), CurrentUser: Buffer.from('80000001', 'hex').swap32(), LocalMachine: Buffer.from('80000002', 'hex').swap32(), Users: Buffer.from('80000003', 'hex').swap32() };
 
     this.QueryKey = function QueryKey(hkey, path, key)
@@ -59,11 +59,11 @@ function windows_registry()
         var valType = this._marshal.CreateVariable(4);
         var HK = this._marshal.CreatePointer(hkey);
         var retVal = null;
-        if (key) { key = this._marshal.CreateVariable(key); }
+        if (key) { key = this._marshal.CreateVariable(key, { wide: true }); }
         if (!path) { path = ''; }
 
 
-        if ((err = this._AdvApi.RegOpenKeyExA(HK, this._marshal.CreateVariable(path), 0, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, h).Val) != 0)
+        if ((err = this._AdvApi.RegOpenKeyExW(HK, this._marshal.CreateVariable(path, { wide: true }), 0, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, h).Val) != 0)
         {
             throw ('Opening Registry Key: ' + path + ' => Returned Error: ' + err);
         }
@@ -88,34 +88,34 @@ function windows_registry()
             var securityDescriptor = this._marshal.CreateVariable(4);
             var lastWriteTime = this._marshal.CreateVariable(8);
 
-            retVal = this._AdvApi.RegQueryInfoKeyA(h.Deref(), achClass, achClassSize, 0,
+            retVal = this._AdvApi.RegQueryInfoKeyW(h.Deref(), achClass, achClassSize, 0,
                 numSubKeys, longestSubkeySize, longestClassString, numValues,
                 longestValueName, longestValueData, securityDescriptor, lastWriteTime);
-            if (retVal.Val != 0) { throw ('RegQueryInfoKeyA() returned error: ' + retVal.Val); }
+            if (retVal.Val != 0) { throw ('RegQueryInfoKeyW() returned error: ' + retVal.Val); }
             for(var i = 0; i < numSubKeys.toBuffer().readUInt32LE(); ++i)
             {
                 nameSize.toBuffer().writeUInt32LE(1024);
-                retVal = this._AdvApi.RegEnumKeyExA(h.Deref(), i, achKey, nameSize, 0, 0, 0, lastWriteTime);
+                retVal = this._AdvApi.RegEnumKeyExW(h.Deref(), i, achKey, nameSize, 0, 0, 0, lastWriteTime);
                 if(retVal.Val == 0)
                 {
-                    result.subkeys.push(achKey.String);
+                    result.subkeys.push(achKey.Wide2UTF8);
                 }
             }
             for (var i = 0; i < numValues.toBuffer().readUInt32LE() ; ++i)
             {
                 achValueSize.toBuffer().writeUInt32LE(32768);
-                if(this._AdvApi.RegEnumValueA(h.Deref(), i, achValue, achValueSize, 0, 0, 0, 0).Val == 0)
+                if(this._AdvApi.RegEnumValueW(h.Deref(), i, achValue, achValueSize, 0, 0, 0, 0).Val == 0)
                 {
-                    result.values.push(achValue.String);
+                    result.values.push(achValue.Wide2UTF8);
                 }
             }
             return (result);
         }
 
-        if(this._AdvApi.RegQueryValueExA(h.Deref(), key, 0, 0, 0, len).Val == 0)
+        if(this._AdvApi.RegQueryValueExW(h.Deref(), key, 0, 0, 0, len).Val == 0)
         {
             var data = this._marshal.CreateVariable(len.toBuffer().readUInt32LE());
-            if (this._AdvApi.RegQueryValueExA(h.Deref(), key, 0, valType, data, len).Val == 0)
+            if (this._AdvApi.RegQueryValueExW(h.Deref(), key, 0, valType, data, len).Val == 0)
             {
                 switch(valType.toBuffer().readUInt32LE())
                 {
@@ -126,7 +126,7 @@ function windows_registry()
                         retVal = data.toBuffer().readUInt32BE();
                         break;
                     case KEY_DATA_TYPES.REG_SZ:
-                        retVal = data.String;
+                        retVal = data.Wide2UTF8;
                         break;
                     case KEY_DATA_TYPES.REG_BINARY:
                     default:
@@ -149,7 +149,7 @@ function windows_registry()
         var result;
         var h = this._marshal.CreatePointer();
 
-        if (this._AdvApi.RegCreateKeyExA(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path), 0, 0, 0, KEY_WRITE, 0, h, 0).Val != 0)
+        if (this._AdvApi.RegCreateKeyExW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true }), 0, 0, 0, KEY_WRITE, 0, h, 0).Val != 0)
         {
             throw ('Error Opening Registry Key: ' + path);
         }
@@ -171,7 +171,7 @@ function windows_registry()
                 break;
             case 'string':
                 dataType = KEY_DATA_TYPES.REG_SZ;
-                data = this._marshal.CreateVariable(value);
+                data = this._marshal.CreateVariable(value, { wide: true });
                 break;
             default:
                 dataType = KEY_DATA_TYPES.REG_BINARY;
@@ -180,7 +180,7 @@ function windows_registry()
                 break;
         }
 
-        if(this._AdvApi.RegSetValueExA(h.Deref(), this._marshal.CreateVariable(key), 0, dataType, data, data._size).Val != 0)
+        if (this._AdvApi.RegSetValueExW(h.Deref(), this._marshal.CreateVariable(key, { wide: true }), 0, dataType, data, data._size).Val != 0)
         {           
             this._AdvApi.RegCloseKey(h.Deref());
             throw ('Error writing reg key: ' + key);
@@ -191,7 +191,7 @@ function windows_registry()
     {
         if(!key)
         {
-            if(this._AdvApi.RegDeleteKeyA(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path)).Val != 0)
+            if (this._AdvApi.RegDeleteKeyW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true })).Val != 0)
             {
                 throw ('Error Deleting Key: ' + path);
             }
@@ -200,11 +200,11 @@ function windows_registry()
         {
             var h = this._marshal.CreatePointer();
             var result;
-            if (this._AdvApi.RegOpenKeyExA(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path), 0, KEY_QUERY_VALUE | KEY_WRITE, h).Val != 0)
+            if (this._AdvApi.RegOpenKeyExW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true }), 0, KEY_QUERY_VALUE | KEY_WRITE, h).Val != 0)
             {
                 throw ('Error Opening Registry Key: ' + path);
             }
-            if ((result = this._AdvApi.RegDeleteValueA(h.Deref(), this._marshal.CreateVariable(key)).Val) != 0)
+            if ((result = this._AdvApi.RegDeleteValueW(h.Deref(), this._marshal.CreateVariable(key, { wide: true })).Val) != 0)
             {
                 this._AdvApi.RegCloseKey(h.Deref());
                 throw ('Error[' + result + '] Deleting Key: ' + path + '.' + key);
