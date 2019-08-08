@@ -16,19 +16,21 @@ limitations under the License.
 
 
 const MB_OK = 0x00000000;
-const MB_OKCANCEL                = 0x00000001;
-const MB_ABORTRETRYIGNORE        = 0x00000002;
-const MB_YESNOCANCEL             = 0x00000003;
-const MB_YESNO                   = 0x00000004;
-const MB_RETRYCANCEL             = 0x00000005;
+const MB_OKCANCEL               = 0x00000001;
+const MB_ABORTRETRYIGNORE       = 0x00000002;
+const MB_YESNOCANCEL            = 0x00000003;
+const MB_YESNO                  = 0x00000004;
+const MB_RETRYCANCEL            = 0x00000005;
+const MB_TOPMOST                = 0x00040000;
+const MB_SETFOREGROUND          = 0x00010000;
 
-const MB_DEFBUTTON1              = 0x00000000;
-const MB_DEFBUTTON2              = 0x00000100;
-const MB_DEFBUTTON3              = 0x00000200;
-const MB_ICONHAND                = 0x00000010;
-const MB_ICONQUESTION            = 0x00000020;
-const MB_ICONEXCLAMATION         = 0x00000030;
-const MB_ICONASTERISK            = 0x00000040;
+const MB_DEFBUTTON1             = 0x00000000;
+const MB_DEFBUTTON2             = 0x00000100;
+const MB_DEFBUTTON3             = 0x00000200;
+const MB_ICONHAND               = 0x00000010;
+const MB_ICONQUESTION           = 0x00000020;
+const MB_ICONEXCLAMATION        = 0x00000030;
+const MB_ICONASTERISK           = 0x00000040;
 
 const IDOK     = 1;
 const IDCANCEL = 2;
@@ -50,7 +52,7 @@ var childScript = "\
                         var GM = require('_GenericMarshal');\
                         var user32 = GM.CreateNativeProxy('user32.dll');\
                         user32.CreateMethod('MessageBoxA');\
-                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), " + (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION).toString() + ").then(\
+                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), " + (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_SETFOREGROUND).toString() + ").then(\
                         function(r)\
                         {\
                             if(r.Val == " + IDYES.toString() + ")\
