@@ -101,13 +101,29 @@ ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *
 }
 #endif
 
+#ifdef WIN32
+#define wmain_free(argv) for(argvi=0;argvi<(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
+int wmain(int argc, char **wargv)
+#else
 int main(int argc, char **argv)
+#endif
 {
 	// Check if .JS file is integrated with executable
 	char *integratedJavaScript = NULL;
 	int integratedJavaScriptLen = 0;
 	int retCode = 0;
 	int capabilities = 0;
+
+#ifdef WIN32
+	int argvi, argvsz;
+	char **argv = (char**)ILibMemory_SmartAllocate(argc * sizeof(void*));
+	for (argvi = 0; argvi < argc; ++argvi)
+	{
+		argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, NULL, 0, NULL, NULL);
+		argv[argvi] = (char*)ILibMemory_SmartAllocate(argvsz);
+		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
+	}
+#endif
 
 #if defined (_POSIX)
 #ifndef _NOILIBSTACKDEBUG
@@ -140,6 +156,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
+#ifdef WIN32
+		wmain_free(argv);
+#endif
 		return(0);
 	}
 
@@ -171,6 +190,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 
 		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), (uint64_t)addrOffset);
 		printf("%s", ILibScratchPad);
+#ifdef WIN32
+		wmain_free(argv);
+#endif
 		return(0);
 	}
 
@@ -184,6 +206,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 		ILibChain_DebugDelta(ILibScratchPad, sizeof(ILibScratchPad), delta);
 		printf("%s", ILibScratchPad);
+#ifdef WIN32
+		wmain_free(argv);
+#endif
 		return(0);
 	}
 
@@ -195,6 +220,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		{
 			// -update:"C:\Users\Public\Downloads\MeshManageability\Debug\MeshConsol2.exe"
 			MeshAgent_PerformSelfUpdate(argv[0], argv[1] + 8, argc, argv);
+#ifdef WIN32
+			wmain_free(argv);
+#endif
 			return 0;
 		}
 	}
@@ -229,6 +257,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	{
 		ILib_WindowsExceptionDebug(&winExceptionContext);
 	}
+	wmain_free(argv);
 	_CrtDumpMemoryLeaks();
 #else
 	agentHost = MeshAgent_Create(capabilities);

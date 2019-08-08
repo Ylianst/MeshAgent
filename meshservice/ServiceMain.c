@@ -913,7 +913,9 @@ BOOL CtrlHandler(DWORD fdwCtrlType)
 		return FALSE;
 	}
 }
-int main(int argc, char* argv[])
+
+#define wmain_free(argv) for(argvi=0;argvi<(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
+int wmain(int argc, char* wargv[])
 {
 	int i;
 	size_t str2len = 0;// , proxylen = 0, taglen = 0;
@@ -923,6 +925,15 @@ int main(int argc, char* argv[])
 	char* tagarg = NULL;
 	CONTEXT winException;
 	int retCode = 0;
+
+	int argvi, argvsz;
+	char **argv = (char**)ILibMemory_SmartAllocate(argc * sizeof(void*));
+	for (argvi = 0; argvi < argc; ++argvi)
+	{
+		argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, NULL, 0, NULL, NULL);
+		argv[argvi] = (char*)ILibMemory_SmartAllocate(argvsz);
+		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
+	}
 
 	/*
 #ifndef NOMESHCMD
@@ -945,6 +956,7 @@ int main(int argc, char* argv[])
 #ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
+		wmain_free(argv);
 		return(0);
 	}
 
@@ -959,6 +971,7 @@ int main(int argc, char* argv[])
 #endif
 		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), (uint64_t)addrOffset);
 		printf("%s", ILibScratchPad);
+		wmain_free(argv);
 		return(0);
 	}
 
@@ -968,6 +981,7 @@ int main(int argc, char* argv[])
 		sscanf_s(argv[2], "%lld", &delta);
 		ILibChain_DebugDelta(ILibScratchPad, sizeof(ILibScratchPad), delta);
 		printf("%s", ILibScratchPad);
+		wmain_free(argv);
 		return(0);
 	}
 
@@ -1042,6 +1056,7 @@ int main(int argc, char* argv[])
 		}
 
 		kvm_server_mainloop((void*)parm);
+		wmain_free(argv);
 		return 0;
 	}
 	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
@@ -1073,6 +1088,7 @@ int main(int argc, char* argv[])
 
 
 		kvm_server_mainloop((void*)parm);
+		wmain_free(argv);
 		return 0;
 	}
 	#endif
@@ -1110,6 +1126,7 @@ int main(int argc, char* argv[])
 		{
 			ILib_WindowsExceptionDebug(&winException);
 		}
+		wmain_free(argv);
 		return(retCode);
 	}
 	else if (argc > 1 && (strcasecmp(argv[1], "state") == 0))
@@ -1131,6 +1148,7 @@ int main(int argc, char* argv[])
 		else if (serviceState == 6) { printf("Pause Pending"); }
 		else if (serviceState == 7) { printf("Paused"); }
 		else if (serviceState == 100) { printf("Not installed"); }
+		wmain_free(argv);
 		return serviceState;
 	}
 	else if (argc > 1 && strcasecmp(argv[1], "-signcheck") == 0 && GetModuleFileNameA(NULL, str2, _MAX_PATH) > 5)
@@ -1143,6 +1161,7 @@ int main(int argc, char* argv[])
 #else
 		printf("Cannot verify without OpenSSL support");
 #endif
+		wmain_free(argv);
 		return 0;
 	}
 #endif
@@ -1299,6 +1318,7 @@ int main(int argc, char* argv[])
 			RegCloseKey(hKey);
 		}
 		if (strEx != NULL) printf(strEx); else printf("Not defined, start the mesh service to create a nodeid.");
+		wmain_free(argv);
 		return 0;
 	}
 	else if (argc == 2 && (strcasecmp(argv[1], "-info") == 0))
@@ -1350,6 +1370,7 @@ int main(int argc, char* argv[])
 
 			RegCloseKey(hKey);
 		}
+		wmain_free(argv);
 		return 0;
 	}
 	else if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
@@ -1371,6 +1392,7 @@ int main(int argc, char* argv[])
 		{
 			printf("Error writing to registry, try running as administrator.");
 		}
+		wmain_free(argv);
 		return 0;
 	}
 	else
@@ -1431,7 +1453,7 @@ int main(int argc, char* argv[])
 	}
 
 	CoUninitialize();
-
+	wmain_free(argv);
 	return 0;
 }
 
