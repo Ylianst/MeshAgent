@@ -126,6 +126,7 @@ function windows_registry()
                         retVal = data.toBuffer().readUInt32BE();
                         break;
                     case KEY_DATA_TYPES.REG_SZ:
+                    case KEY_DATA_TYPES.REG_EXPAND_SZ:
                         retVal = data.Wide2UTF8;
                         break;
                     case KEY_DATA_TYPES.REG_BINARY:

@@ -465,16 +465,16 @@ function serviceManager()
         this.GM = require('_GenericMarshal');
         this.proxy = this.GM.CreateNativeProxy('Advapi32.dll');
         this.proxy.CreateMethod('OpenSCManagerA');
-        this.proxy.CreateMethod('EnumServicesStatusExA');
-        this.proxy.CreateMethod('OpenServiceA');
+        this.proxy.CreateMethod('EnumServicesStatusExW');
+        this.proxy.CreateMethod('OpenServiceW');
         this.proxy.CreateMethod('QueryServiceStatusEx');
         this.proxy.CreateMethod('QueryServiceConfigA');
         this.proxy.CreateMethod('QueryServiceConfig2A');
         this.proxy.CreateMethod('ControlService');
         this.proxy.CreateMethod('StartServiceA');
         this.proxy.CreateMethod('CloseServiceHandle');
-        this.proxy.CreateMethod('CreateServiceA');
-        this.proxy.CreateMethod('ChangeServiceConfig2A');
+        this.proxy.CreateMethod('CreateServiceW');
+        this.proxy.CreateMethod('ChangeServiceConfig2W');
         this.proxy.CreateMethod('DeleteService');
         this.proxy.CreateMethod('AllocateAndInitializeSid');
         this.proxy.CreateMethod('CheckTokenMembership');
@@ -526,7 +526,7 @@ function serviceManager()
             var servicesReturned = this.GM.CreatePointer();
             var resumeHandle = this.GM.CreatePointer();
             //var services = this.proxy.CreateVariable(262144);
-            var success = this.proxy.EnumServicesStatusExA(handle, 0, 0x00000030, 0x00000003, 0x00, 0x00, bytesNeeded, servicesReturned, resumeHandle, 0x00);
+            var success = this.proxy.EnumServicesStatusExW(handle, 0, 0x00000030, 0x00000003, 0x00, 0x00, bytesNeeded, servicesReturned, resumeHandle, 0x00);
 
             var ptrSize = dbName._size;
             var sz = bytesNeeded.Deref(0, dbName._size).toBuffer().readUInt32LE();
@@ -534,7 +534,7 @@ function serviceManager()
             if (sz < 0) { throw ('error enumerating services'); }
 
             var services = this.GM.CreateVariable(sz);
-            this.proxy.EnumServicesStatusExA(handle, 0, 0x00000030, 0x00000003, services, sz, bytesNeeded, servicesReturned, resumeHandle, 0x00);
+            this.proxy.EnumServicesStatusExW(handle, 0, 0x00000030, 0x00000003, services, sz, bytesNeeded, servicesReturned, resumeHandle, 0x00);
 
             var blockSize = 36 + (2 * ptrSize);
             blockSize += ((ptrSize - (blockSize % ptrSize)) % ptrSize);
@@ -543,8 +543,8 @@ function serviceManager()
 {
                 var token = services.Deref(i * blockSize, blockSize);
                 var j = {};
-                j.name = token.Deref(0, ptrSize).Deref().String;
-                j.displayName = token.Deref(ptrSize, ptrSize).Deref().String;
+                j.name = token.Deref(0, ptrSize).Deref().Wide2UTF8;
+                j.displayName = token.Deref(ptrSize, ptrSize).Deref().Wide2UTF8;
                 j.status = parseServiceStatus(token.Deref(2 * ptrSize, 36));
                 retVal.push(j);
             }
@@ -553,12 +553,12 @@ function serviceManager()
         }
         this.getService = function (name)
         {
-            var serviceName = this.GM.CreateVariable(name);
+            var serviceName = this.GM.CreateVariable(name, { wide: true });
             var ptr = this.GM.CreatePointer();
             var bytesNeeded = this.GM.CreateVariable(ptr._size);
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0001 | 0x0004 | 0x0020 | 0x0010);
             if (handle.Val == 0) { throw ('could not open ServiceManager'); }
-            var h = this.proxy.OpenServiceA(handle, serviceName, 0x0001 | 0x0004 | 0x0020 | 0x0010 | 0x00010000);
+            var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0004 | 0x0020 | 0x0010 | 0x00010000);
             if (h.Val != 0)
             {
                 var retVal = { _ObjectID: 'service-manager.service' }
@@ -1300,11 +1300,11 @@ function serviceManager()
             require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
             options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
 
-            var servicePath = this.GM.CreateVariable('"' + options.servicePath + '"');
+            var servicePath = this.GM.CreateVariable('"' + options.servicePath + '"', { wide: true });
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0002);
             if (handle.Val == 0) { throw ('error opening SCManager'); }
-            var serviceName = this.GM.CreateVariable(options.name);
-            var displayName = this.GM.CreateVariable(options.displayName);
+            var serviceName = this.GM.CreateVariable(options.name, { wide: true });
+            var displayName = this.GM.CreateVariable(options.displayName, { wide: true});
             var allAccess = 0x000F01FF;
             var serviceType;
             
@@ -1322,15 +1322,15 @@ function serviceManager()
                     break;
             }
 
-            var h = this.proxy.CreateServiceA(handle, serviceName, displayName, allAccess, 0x10 | 0x100, serviceType, 0, servicePath, 0, 0, 0, 0, 0);
+            var h = this.proxy.CreateServiceW(handle, serviceName, displayName, allAccess, 0x10 | 0x100, serviceType, 0, servicePath, 0, 0, 0, 0, 0);
             if (h.Val == 0) { this.proxy.CloseServiceHandle(handle); throw ('Error Creating Service: ' + this.proxy2.GetLastError().Val); }
             if (options.description)
             {
-                var dsc = this.GM.CreateVariable(options.description);
+                var dsc = this.GM.CreateVariable(options.description, { wide: true });
                 var serviceDescription = this.GM.CreateVariable(this.GM.PointerSize);
                 dsc.pointerBuffer().copy(serviceDescription.Deref(0, this.GM.PointerSize).toBuffer());
 
-                if (this.proxy.ChangeServiceConfig2A(h, 1, serviceDescription).Val == 0)
+                if (this.proxy.ChangeServiceConfig2W(h, 1, serviceDescription).Val == 0)
                 {
                     console.log('unable to set description...');
                 }
@@ -1350,7 +1350,7 @@ function serviceManager()
                 failureActions.Deref(0, 4).toBuffer().writeUInt32LE(7200);                              // dwResetPeriod: 2 Hours
                 failureActions.Deref(this.GM.PointerSize == 8 ? 24 : 12, 4).toBuffer().writeUInt32LE(3);// cActions: 3
                 actions.pointerBuffer().copy(failureActions.Deref(this.GM.PointerSize == 8 ? 32 : 16, this.GM.PointerSize).toBuffer());
-                if (this.proxy.ChangeServiceConfig2A(h, 2, failureActions).Val == 0)
+                if (this.proxy.ChangeServiceConfig2W(h, 2, failureActions).Val == 0)
                 {
                     console.log('Unable to set FailureActions...');
                 }
