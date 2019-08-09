@@ -1541,18 +1541,18 @@ function serviceManager()
                         case 'AUTO_START':
                             conf.write('[Install]\n');
                             conf.write('WantedBy=multi-user.target\n');
-                            conf.write('Alias=' + options.name + '.service\n'); break;
-                            this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
+                            conf.write('Alias=' + options.name + '.service\n');
+                            conf.end();
+                            this._update = require('child_process').execFile('/bin/sh', ['sh']);
                             this._update._moduleName = options.name;
                             this._update.stdout.on('data', function (chunk) { });
                             this._update.stdin.write('systemctl enable ' + options.name + '.service\n');
                             this._update.stdin.write('exit\n');
                             this._update.waitExit();
                         default:
+                            conf.end();
                             break;
                     }
-                    conf.end();
-
                     break;
                 default: // unknown platform service type
                     console.log('Unknown Service Platform Type: ' + options.servicePlatform);
