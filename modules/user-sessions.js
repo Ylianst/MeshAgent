@@ -513,12 +513,21 @@ function UserSessions()
             // First step, is to see if there is a user logged in:
             this._recheckLoggedInUsers();
         }
+        this.minUid =  function minUid()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("cat /etc/login.defs | grep UID_ | awk '{ if($1==\"UID_MIN\") { print $2; } }'\nexit\n");
+            child.waitExit();
+            return (parseInt(child.stdout.str.trim()) >= 0 ? parseInt(child.stdout.str.trim()) : 500);
+        }
         this._users = function _users()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write('awk -F: \'($3 >= 0) {printf "%s:%s\\n", $1, $3}\' /etc/passwd\nexit\n');
+            child.stdin.write("getent passwd | awk -F: '{ if($3>=0) { printf \"%s:%s\\n\", $1, $3; } }'\nexit\n");
             child.waitExit();
 
             var lines = child.stdout.str.split('\n');
@@ -534,7 +543,7 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write('awk -F: \'($3 >= 0) {printf "%s:%s\\n", $1, $3}\' /etc/passwd\nexit\n');
+            child.stdin.write("getent passwd | awk -F: '{ if($3>=0) { printf \"%s:%s\\n\", $1, $3; } }'\nexit\n");
             child.waitExit();
 
             var lines = child.stdout.str.split('\n');
@@ -568,12 +577,21 @@ function UserSessions()
             throw ('nobody logged into console');
         }
         
+        this.getHomeFolder = function getHomeFolder(id)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("getent passwd " + id + " | awk -F: '{print $6}'\nexit\n");
+            child.waitExit();
+            return (child.stdout.str.trim());
+        }
         this.getUid = function getUid(username)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("cat /etc/passwd | awk -F: '($1==\"" + username + "\"){print $3}'\nexit\n");
+            child.stdin.write("getent passwd \"" + username + "\" | awk -F: '{print $3}'\nexit\n");
             child.waitExit();
 
             var ret = parseInt(child.stdout.str);            
@@ -585,7 +603,7 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("cat /etc/passwd | awk -F: '($3==" + uid + "){print $1}'\nexit\n");
+            child.stdin.write("getent passwd " + uid + " | awk -F: '{print $1}'\nexit\n");
             child.waitExit();
             if (child.stdout.str.length > 0) { return (child.stdout.str.trim()); }
             throw ('uid: ' + uid + ' NOT FOUND');

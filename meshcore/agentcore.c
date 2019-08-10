@@ -379,6 +379,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 
 #ifdef _POSIX
 	#ifndef __APPLE__
+	// Linux and FreeBSD
 		for (char **env = environ; *env; ++env)
 		{
 			int envLen = (int)strnlen_s(*env, INT_MAX);
@@ -409,7 +410,8 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 		if (retVal == 0)
 		{
 			// Check /etc/environment just in case it wasn't exported
-#ifdef _FREEBSD
+	#ifdef _FREEBSD
+			// FreeBSD Only
 			char getProxy[] = "(function getProxies(){\
 									var child = require('child_process').execFile('/bin/sh', ['sh']);\
 									child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
@@ -417,7 +419,8 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 									child.waitExit();\
 									return(child.stdout.str.trim().split('\\n')[0].split('//')[1]);\
 								})();";
-#else
+	#else
+			// Linux Only
 			char getProxy[] = "(function getProxies(){\
 									if(require('fs').existsSync('/etc/environment'))\
 									{\
@@ -443,7 +446,8 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 									}\
 									throw('No Proxy set');\
 								})();";
-#endif
+	#endif
+			// Linux and FreeBSD
 			if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
 			{
 				duk_size_t proxyLen;
@@ -454,7 +458,8 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 			duk_pop(agent->meshCoreCtx);
 		}
 		return(retVal);
-	#else
+#else
+	// MacOS Only
 	char getProxyies[] = "(function getProxies(){\
 		var ret = {};\
 		var child = require('child_process').execFile('/bin/sh', ['sh']);\
@@ -520,6 +525,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 	}
 	#endif
 #else
+	// Windows Only
 	char getProxy[] = "(function () {\
 		var isroot = false;\
 		var servers = [];\
