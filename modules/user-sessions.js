@@ -554,6 +554,16 @@ function UserSessions()
             }
             return (ret);
         }
+        this.loginUids = function loginUids()
+        {
+            var min = this.minUid();
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write('getent passwd | awk -F: \'{ if($3 >= ' + min + ') { a=split($7,b,"/"); if(b[a]!="nologin") { print $3; } }}\' | tr "\\n" "\\," | awk \'{ printf "[%s]", $0; }\'\nexit\n');
+            child.waitExit();
+            return (JSON.parse(child.stdout.str.trim().replace(',]',']')));
+        }
         this.consoleUid = function consoleUid()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);

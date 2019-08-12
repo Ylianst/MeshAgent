@@ -444,6 +444,16 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 										child.ret = child.stdout.str.trim().split('\\n')[0].split('//')[1];\
 										if(child.ret != '') { return(child.ret); }\
 									}\
+									if (require('fs').existsSync('/usr/bin/gsettings'))\
+									{\
+										var setting;\
+										var ids = require('user-sessions').loginUids(); \
+										for (var i in ids)\
+										{\
+											setting = require('linux-gnome-helpers').getProxySettings(ids[i]);\
+											if (setting.mode == 'manual') { return(setting.host + ':' + setting.port);} \
+										}\
+									}\
 									throw('No Proxy set');\
 								})();";
 	#endif
