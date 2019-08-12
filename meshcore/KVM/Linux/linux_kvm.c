@@ -732,6 +732,23 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen
 	}
 	*bytesConsumed = 0;
 }
+
+void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
+{
+	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
+	void *reserved = ((void**)ILibMemory_Extra(sender))[1];
+
+	char msg[] = "KVM Child process has unexpectedly exited";
+	char buffer[4096];
+
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);		// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(sizeof(msg) + 3));// Write the size
+	memcpy_s(buffer + 4, sizeof(msg)-1, msg, sizeof(msg)-1);
+
+	writeHandler(buffer, sizeof(msg) + 3, reserved);
+
+}
+
 void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
 {
 	int r;
@@ -789,6 +806,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 		// We will asyncronously read from the pipe, so we can just return
 		ILibProcessPipe_Pipe_AddPipeReadHandler(slave_out, 65535, kvm_relay_readSink);
+		ILibProcessPipe_Pipe_SetBrokenPipeHandler(slave_out, kvm_relay_brokenPipeSink);
 		return(slave_out);
 	}
 }
