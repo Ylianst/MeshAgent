@@ -914,7 +914,7 @@ BOOL CtrlHandler(DWORD fdwCtrlType)
 	}
 }
 
-#define wmain_free(argv) for(argvi=0;argvi<(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
+#define wmain_free(argv) for(argvi=0;argvi<(int)(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
 int wmain(int argc, char* wargv[])
 {
 	int i;

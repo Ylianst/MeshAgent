@@ -465,7 +465,6 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateVariable(duk_context *ctx)
 			{
 #ifdef WIN32
 				wchar_t *wbuffer = (wchar_t*)ILibMemory_AllocateA(((int)strLen * 2) + 2);
-				size_t converted;
 				if (MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, size, wbuffer, strLen + 1) == 0)
 				{
 					return(ILibDuktape_Error(ctx, "UTF8 Conversion Error"));
