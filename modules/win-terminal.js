@@ -399,8 +399,8 @@ function windows_terminal() {
     }
     this._WriteCharacter = function (key, bControlKey)
     {
-        var scanCode = this._user32.VkKeyScanA(key).Val;
-        if (scanCode < 0 || scanCode > 255) { return; }
+        var scanCode = this._user32.VkKeyScanA(key).Val & 0xFF;
+        if (key == 10) { return; }
 
         var rec = GM.CreateVariable(20);
         rec.Deref(0, 2).toBuffer().writeUInt16LE(KEY_EVENT);                                // rec.EventType 
