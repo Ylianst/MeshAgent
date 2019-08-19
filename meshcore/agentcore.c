@@ -1861,6 +1861,13 @@ duk_ret_t ILibDuktape_MeshAgent_forceExit(duk_context *ctx)
 	exit(code);
 	return(0);
 }
+duk_ret_t ILibDuktape_MeshAgent_hostname(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	duk_push_string(ctx, agent->hostname);
+	return(1);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1943,6 +1950,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "ExecPowerState", ILibDuktape_MeshAgent_ExecPowerState, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "forceExit", ILibDuktape_MeshAgent_forceExit, DUK_VARARGS);
+		ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_MeshAgent_hostname, 0);
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 	
@@ -3671,7 +3679,16 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	retVal->chain = ILibCreateChainEx(3 * sizeof(void*));
 	retVal->pipeManager = ILibProcessPipe_Manager_Create(retVal->chain);
 	retVal->capabilities = capabilities | MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT;
+	
+#ifdef WIN32
+	WCHAR whostname[MAX_PATH];
+	if (GetHostNameW(whostname, MAX_PATH) == 0)
+	{
+		WideCharToMultiByte(CP_UTF8, 0, whostname, -1, retVal->hostname, (int)sizeof(retVal->hostname), NULL, NULL);
+	}
+#else
 	gethostname(retVal->hostname, (int)sizeof(retVal->hostname));
+#endif
 
 #ifdef WIN32
 	GetSystemPowerStatus(&stats);

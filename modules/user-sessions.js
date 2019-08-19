@@ -96,7 +96,7 @@ function UserSessions()
         {
             this._wts = this._marshal.CreateNativeProxy('Wtsapi32.dll');
             this._wts.CreateMethod('WTSEnumerateSessionsA');
-            this._wts.CreateMethod('WTSQuerySessionInformationA');
+            this._wts.CreateMethod('WTSQuerySessionInformationW');
             this._wts.CreateMethod('WTSRegisterSessionNotification');
             this._wts.CreateMethod('WTSUnRegisterSessionNotification');
             this._wts.CreateMethod('WTSFreeMemory');
@@ -193,12 +193,12 @@ function UserSessions()
             var buffer = this._marshal.CreatePointer();
             var bytesReturned = this._marshal.CreateVariable(4);
 
-            if (this._wts.WTSQuerySessionInformationA(0, sessionId, attr, buffer, bytesReturned).Val == 0)
+            if (this._wts.WTSQuerySessionInformationW(0, sessionId, attr, buffer, bytesReturned).Val == 0)
             {
-                throw ('Error calling WTSQuerySessionInformation: ' + this._kernel32.GetLastError.Val);
+                throw ('Error calling WTSQuerySessionInformationW: ' + this._kernel32.GetLastError.Val);
             }
 
-            var retVal = buffer.Deref().String;
+            var retVal = buffer.Deref().Wide2UTF8;
 
             this._wts.WTSFreeMemory(buffer.Deref());
             return (retVal);
