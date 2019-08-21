@@ -3973,7 +3973,22 @@ int ILibDuktape_httpStream_webSocket_EncodedUnshiftSink(ILibDuktape_DuplexStream
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_DecodedWriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
-	return(ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, bufferLen, ILibWebClient_WebSocket_FragmentFlag_Complete));
+	int maxsize = 30000;
+	int sendSize = 0;
+	if (bufferLen < maxsize)
+	{
+		return(ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, bufferLen, ILibWebClient_WebSocket_FragmentFlag_Complete));
+	}
+	else
+	{
+		while(bufferLen > 0)
+		{
+			sendSize = bufferLen > maxsize ? maxsize : bufferLen;
+			bufferLen -= sendSize;
+			ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, sendSize, bufferLen>0?ILibWebClient_WebSocket_FragmentFlag_Incomplete : ILibWebClient_WebSocket_FragmentFlag_Complete);
+			buffer += sendSize;
+		}
+	}
 }
 void ILibDuktape_httpStream_webSocket_DecodedEndSink(ILibDuktape_DuplexStream *stream, void *user)
 {

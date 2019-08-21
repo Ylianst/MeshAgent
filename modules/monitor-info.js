@@ -23,6 +23,7 @@ var _NET_WM_STATE_TOGGLE = 2;    // toggle property
 var SubstructureRedirectMask = (1 << 20);
 var SubstructureNotifyMask = (1 << 19);
 
+
 function getLibInfo(libname)
 {
     if (process.platform != 'linux') { throw ('Only supported on linux'); }
@@ -30,7 +31,15 @@ function getLibInfo(libname)
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = '';
     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-    child.stdin.write("ldconfig -p | grep '" + libname + ".so.'\nexit\n");
+    child.stdin.write("whereis ldconfig | awk '{ print $2 }'\nexit\n");
+    child.waitExit();
+
+    var ldconfig = child.stdout.str.trim();
+
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = '';
+    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+    child.stdin.write(ldconfig + " -p | grep '" + libname + ".so.'\nexit\n");
     child.waitExit();
 
     var v = [];
