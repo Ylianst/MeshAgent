@@ -129,11 +129,45 @@ function messageBox()
 function linux_messageBox()
 {
     this._ObjectID = 'message-box';
+    Object.defineProperty(this, 'zenity',
+        {
+            value: (function ()
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("whereis zenity | awk '{ print $2 }'\nexit\n");
+                child.waitExit();
+                var location = child.stdout.str.trim();
+                if (location == '' && require('fs').existsSync('/usr/local/bin/zenity')) { location = '/usr/local/bin/zenity'; }
+                if (location == '') { return (null); }
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
+                child.waitExit();
+
+                return ({ path: location, timeout: child.stdout.str.trim() == '' ? false : true });
+            })()
+        });
+    if (!this.zenity)
+    {
+        Object.defineProperty(this, 'kdialog',
+            {
+                value: (function ()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("whereis kdialog | awk '{ print $2 }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim() == '' ? null : { path: child.stdout.str.trim() });
+                })()
+            });
+    }
+
     this.create = function create(title, caption, timeout)
     {
         if (timeout == null) { timeout = 10; }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        var zenity = '', kdialog = '';
         var uid;    
         var xinfo;
 
@@ -154,22 +188,28 @@ function linux_messageBox()
             return (ret);
         }
 
-        var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = '';
-        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-        child.stdin.write("whereis zenity | awk '{ print $2 }'\nexit\n");
-        child.waitExit();
-        zenity = child.stdout.str.trim();
-        if (process.platform == 'freebsd' && zenity == '' && require('fs').existsSync('/usr/local/bin/zenity')) { zenity = '/usr/local/bin/zenity'; }
-        if (zenity != '')
+        if (this.zenity)
         {
             // GNOME/ZENITY
-            ret.child = require('child_process').execFile(zenity, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+            if (this.zenity.timeout)
+            {
+                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+            }
+            else
+            {
+                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+                ret.child.timeout = setTimeout(function (c)
+                {
+                    c.timeout = null;
+                    c.kill();
+                }, timeout * 1000, ret.child);
+            }
             ret.child.promise = ret;
             ret.child.stderr.on('data', function (chunk) { });
             ret.child.stdout.on('data', function (chunk) { });
             ret.child.on('exit', function (code)
             {
+                if (this.timeout) { clearTimeout(this.timeout); }
                 switch (code)
                 {
                     case 0:
@@ -184,42 +224,48 @@ function linux_messageBox()
                 }
             });
         }
-        else
+        else if(this.kdialog)
         {
-            child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("whereis kdialog | awk '{ print $2 }'\nexit\n");
-            child.waitExit();
-            kdialog = child.stdout.str.trim();
-            if (process.platform == 'freebsd' && kdialog == '' && require('fs').existsSync('/usr/local/bin/kdialog')) { kdialog = '/usr/local/bin/kdialog'; }
-            if (kdialog == '') { ret._rej('Platform not supported (zenity or kdialog not found)'); return (ret); }
             if (process.platform != 'freebsd' && process.env['DISPLAY'])
             {
-                ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption]);
+                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, '--yesno', caption]);
                 ret.child.promise = ret;
             }
             else
             {
                 var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                 if (!xinfo || !xinfo.display || !xinfo.xauthority) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
-                ret.child = require('child_process').execFile(kdialog, ['kdialog', '--title', title, '--yesno', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, '--yesno', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                 ret.child.promise = ret;
             }
+            ret.child.timeout = setTimeout(function (c)
+            {
+                c.timeout = null;
+                c.kill();
+            }, timeout * 1000, ret.child);
             ret.child.stdout.on('data', function (chunk) { });
             ret.child.stderr.on('data', function (chunk) { });
             ret.child.on('exit', function (code)
             {
-                switch (code) {
-                    case 0:
-                        this.promise._res();
-                        break;
-                    case 1:
-                        this.promise._rej('denied');
-                        break;
-                    default:
-                        this.promise._rej('timeout');
-                        break;
+                if (this.timeout)
+                {
+                    clearTimeout(this.timeout);
+                    switch (code)
+                    {
+                        case 0:
+                            this.promise._res();
+                            break;
+                        case 1:
+                            this.promise._rej('denied');
+                            break;
+                        default:
+                            this.promise._rej('timeout');
+                            break;
+                    }
+                }
+                else
+                {
+                    this.promise._rej('timeout');
                 }
             });
         }
