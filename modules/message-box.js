@@ -146,7 +146,15 @@ function linux_messageBox()
                 child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
                 child.waitExit();
 
-                return ({ path: location, timeout: child.stdout.str.trim() == '' ? false : true });
+                var ret = { path: location, timeout: child.stdout.str.trim() == '' ? false : true };
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write(location + ' --version | awk -F. \'{ printf "[%s, %s]\\n", $1, $2; } \'\nexit\n');
+                child.waitExit();
+
+                ret.version = JSON.parse(child.stdout.str.trim());
+                return (ret);
             })()
         });
     if (!this.zenity)
