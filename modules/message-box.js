@@ -153,7 +153,14 @@ function linux_messageBox()
                 child.stdin.write(location + ' --version | awk -F. \'{ printf "[%s, %s]\\n", $1, $2; } \'\nexit\n');
                 child.waitExit();
 
-                ret.version = JSON.parse(child.stdout.str.trim());
+                try
+                {
+                    ret.version = JSON.parse(child.stdout.str.trim());
+                }
+                catch(e)
+                {
+                    ret.version = [2, 16];
+                }
                 return (ret);
             })()
         });
