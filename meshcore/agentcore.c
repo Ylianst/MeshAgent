@@ -3923,9 +3923,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 #endif
-#ifndef MICROSTACK_NOTLS
-	// Check the local MacAddresses, to see if we need to reset our NodeId
+
+#if !defined(MICROSTACK_NOTLS) || defined(_POSIX)
 	duk_context *tmpCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, NULL, NULL);
+	duk_peval_string_noresult(tmpCtx, "require('linux-pathfix')();");
+#endif
+
+#if !defined(MICROSTACK_NOTLS)
+	// Check the local MacAddresses, to see if we need to reset our NodeId
 	if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
 	{
 		int len;
@@ -4484,6 +4489,11 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 		duk_put_prop_string(agentHost->meshCoreCtx, -2, "startMeshAgent");				// [g]
 		duk_pop(agentHost->meshCoreCtx);												// ...
 	}
+
+#if defined(_POSIX)
+	duk_peval_string_noresult(agentHost->meshCoreCtx, "require('linux-pathfix')();");
+#endif
+
 
 	if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, jsFile, jsFileLen, agentHost->meshCoreCtx_embeddedScript == NULL ? scriptArgs[0] : "[embedded].js", 0) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
 	{
