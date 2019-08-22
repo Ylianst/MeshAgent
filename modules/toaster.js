@@ -124,8 +124,17 @@ function Toaster()
                             if (require('message-box').notifysend)
                             {
                                 // Using notify-send
-                                retVal.child = require('child_process').execFile('/bin/sh', ['sh']);
-                                retVal.child.stdin.write('su - ' + retVal.username + ' -c "DISPLAY=\'' + retVal.xinfo.display + '\' notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\nexit\n');
+                                if (require('user-sessions').whoami() == 'root')
+                                {
+                                    // We're root, so we must run in correct context
+                                    retVal.child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    retVal.child.stdin.write('su - ' + retVal.username + ' -c "DISPLAY=\'' + retVal.xinfo.display + '\' notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\nexit\n');
+                                }
+                                else
+                                {
+                                    // We're a regular user, so we don't need to do anything special
+                                    retVal.child = require('child_process').execFile(require('message-box').notifysend.path, ['notify-send', retVal.title, retVal.caption]);
+                                }
                             }
                             else
                             {
