@@ -126,3 +126,12 @@ function dbus(address, uid)
 }
 
 module.exports = dbus;
+module.exports.hasService = function hasService(name)
+{
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('cat /usr/share/dbus-1/services/*.service | grep "' + name + '" | awk -F= \'{ if( $2=="' + name + '" ) { print $2; } }\'\nexit\n');
+    child.waitExit();
+    return (child.stdout.str.trim() != '');
+};

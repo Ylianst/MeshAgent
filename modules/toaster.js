@@ -118,7 +118,23 @@ function Toaster()
 
                     if (require('message-box').zenity)
                     {
-                        if (require('message-box').zenity.version[0] < 3 || (require('message-box').zenity.version[0] == 3 && require('message-box').zenity.version[1] < 10))
+                        if (process.platform == 'linux' && !require('linux-dbus').hasService('org.freedesktop.Notifications'))
+                        {
+                            // No D-Bus service to handle notifications, so we must fake a notification with ZENITY --info
+                            if (require('message-box').zenity.timeout)
+                            {
+                                // Timeout Supported
+                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                            }
+                            else
+                            {
+                                // No Timeout Support, so we must fake it
+                                retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                                retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
+                            }
+
+                        }                        
+                        else if (require('message-box').zenity.version[0] < 3 || (require('message-box').zenity.version[0] == 3 && require('message-box').zenity.version[1] < 10))
                         {
                             // ZENITY Notification is broken
                             if (require('message-box').notifysend)
