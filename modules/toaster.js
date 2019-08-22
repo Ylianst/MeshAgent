@@ -101,7 +101,7 @@ function Toaster()
                     return (retVal);
                 }
                 break;
-	    case 'freebsd':
+	        case 'freebsd':
             case 'linux':
                 {
                     try
@@ -115,64 +115,47 @@ function Toaster()
                         retVal._rej(xxe);
                         return (retVal);
                     }
-                    var util = findPath('zenity');
-                    if (util)
-                    {
-                        // Use ZENITY
-                        retVal.child = require('child_process').execFile(util, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
-                        retVal.child.parent = retVal;
-                        retVal.child.stderr.str = '';
-                        retVal.child.stderr.on('data', function (chunk) { this.str += chunk.toString(); this.parent.kill(); });
-                        retVal.child.stdout.on('data', function (chunk) { });
-                        retVal.child.on('exit', function (code)
-                        {
-                            if (this.stderr.str.trim() != '')
-                            {
-                                if ((util = findPath('notify-send')) && this.stderr.str.split('GLib-CRITICAL').length > 1)
-                                {
-                                    // This is a bug in zenity, so we should try notify-send
-                                    if (process.env['DISPLAY'])
-                                    {
-                                        // DISPLAY is set, so we good to go
-                                        this.parent.child = require('child_process').execFile(util, ['notify-send', this.parent.title, this.parent.caption]);
-                                        this.parent.child.parent = this.parent;
-                                    }
-                                    else
-                                    {
-                                        // We need to find the DISPLAY to use
-                                        var username = require('user-sessions').getUsername(consoleUid);
-                                        this.parent.child = require('child_process').execFile('/bin/sh', ['sh']);
-                                        this.parent.child.parent = this.parent;
-                                        this.parent.child.stdin.write('su - ' + username + ' -c "DISPLAY=' + display + ' notify-send \'' + this.parent.title + '\' \'' + this.parent.caption + '\'"\n');
-                                        this.parent.child.stdin.write('exit\n');
-                                    }
-                                    this.parent.child.stdout.on('data', function (chunk) { });
-                                    this.parent.child.waitExit();
 
-                                    // NOTIFY-SEND has a bug where timeouts don't work, so the default is 5 seconds
-                                    this.parent._timeout = setTimeout(function onFakeDismissed(obj)
-                                    {
-                                        obj._res('DISMISSED');
-                                    }, 10000, this.parent);
-                                }
-                                else
-{
-                                    // Fake a toast using zenity --info
-                                    util = findPath('zenity');
-                                    this.parent.child = require('child_process').execFile(util, ['zenity', '--info', '--title=' + this.parent.title, '--text=' + this.parent.caption, '--timeout=5'], { uid: this.parent.consoleUid, env: { XAUTHORITY: this.parent.xinfo.xauthority, DISPLAY: this.parent.xinfo.display } });
-                                    this.parent.child.parent = this.parent;
-                                    this.parent.child.stderr.on('data', function (chunk) { });
-                                    this.parent.child.stdout.on('data', function (chunk) { });
-                                    this.parent.child.on('exit', function (code)
-                                    {
-                                        this.parent._res('DISMISSED');
-                                    });
-                                }
+                    if (require('message-box').zenity)
+                    {
+                        if (require('message-box').zenity.version[0] < 3 || (require('message-box').zenity.version[0] == 3 && require('message-box').zenity.version[1] < 10))
+                        {
+                            // ZENITY Notification is broken
+                            if (require('message-box').notifysend)
+                            {
+                                // Using notify-send
+                                retVal.child = require('child_process').execFile('/bin/sh', ['sh']);
+                                retVal.child.stdin.write('su - ' + retVal.username + ' -c "DISPLAY=\'' + retVal.xinfo.display + '\' notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\nexit\n');
                             }
                             else
                             {
-                                this.parent._res('DISMISSED');
+                                // Faking notification with ZENITY --info
+                                if (require('message-box').zenity.timeout)
+                                {
+                                    // Timeout Supported
+                                    retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                                }
+                                else
+                                {
+                                    // No Timeout Support, so we must fake it
+                                    retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
+                                    retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
+                                }
                             }
+                        }
+                        else
+                        {
+                            // Use ZENITY Notification
+                            retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });                   
+                        }
+                        retVal.child.parent = retVal;
+                        retVal.child.stderr.str = '';
+                        retVal.child.stderr.on('data', function (chunk) { this.str += chunk.toString();  });
+                        retVal.child.stdout.on('data', function (chunk) { });
+                        retVal.child.on('exit', function (code)
+                        {
+                            if (this.timeout) { clearTimeout(this.timeout); }
+                            this.parent._res('DISMISSED');
                         });
                     }
                     else
