@@ -3981,13 +3981,15 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_DecodedWriteSink(ILibDu
 	}
 	else
 	{
+		ILibTransport_DoneState ret = ILibTransport_DoneState_COMPLETE;
 		while(bufferLen > 0)
 		{
 			sendSize = bufferLen > maxsize ? maxsize : bufferLen;
 			bufferLen -= sendSize;
-			ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, sendSize, bufferLen>0?ILibWebClient_WebSocket_FragmentFlag_Incomplete : ILibWebClient_WebSocket_FragmentFlag_Complete);
+			ret = ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, sendSize, bufferLen>0?ILibWebClient_WebSocket_FragmentFlag_Incomplete : ILibWebClient_WebSocket_FragmentFlag_Complete);
 			buffer += sendSize;
 		}
+		return(ret);
 	}
 }
 void ILibDuktape_httpStream_webSocket_DecodedEndSink(ILibDuktape_DuplexStream *stream, void *user)
