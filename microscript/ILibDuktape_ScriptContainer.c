@@ -1976,6 +1976,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 							break;\
 						}\
 					}\
+					this.promise._acc(lines[0]);\
 					break;\
 				case 'darwin':\
 					var OSNAME = '';\
