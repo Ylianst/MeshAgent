@@ -1972,7 +1972,16 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 						tokens = lines[i].split('=');\
 						if (tokens[0] == 'PRETTY_NAME')\
 						{\
-							this.promise._acc(tokens[1].substring(1, tokens[1].length - 2));\
+							this.promise._acc(tokens[1].substring(1, tokens[1].length - 1));\
+							break;\
+						}\
+					}\
+					for (i in lines)\
+					{\
+						tokens = lines[i].split('=');\
+						if (tokens[0] == 'DISTRIB_DESCRIPTION')\
+						{\
+							this.promise._acc(tokens[1].substring(1, tokens[1].length - 1));\
 							break;\
 						}\
 					}\
