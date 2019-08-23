@@ -221,3 +221,15 @@ function Toaster()
 }
 
 module.exports = new Toaster();
+if (process.platform == 'linux' && !require('linux-dbus').hasService)
+{
+    require('linux-dbus').hasService = function hasService(name)
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write('cat /usr/share/dbus-1/services/*.service | grep "' + name + '" | awk -F= \'{ if( $2=="' + name + '" ) { print $2; } }\'\nexit\n');
+        child.waitExit();
+        return (child.stdout.str.trim() != '');
+    };
+}
