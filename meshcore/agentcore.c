@@ -462,7 +462,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 			{
 				duk_size_t proxyLen;
 				char *proxy = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &proxyLen);
-				strcpy_s(buffer, bufferSize, proxy);
+				if (proxy != NULL && proxyLen > 0) { strcpy_s(buffer, bufferSize, proxy); }
 				retVal = (int)proxyLen;
 			}
 			duk_pop(agent->meshCoreCtx);
