@@ -1034,7 +1034,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 #endif
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
 	int consumed;
-	int err;
+	int err=0;
 	
 #ifdef WIN32
 	BOOL result;
@@ -1048,7 +1048,11 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 	{
 #ifdef WIN32
 		result = GetOverlappedResult(pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, &bytesRead, FALSE);
-		if (result == FALSE) { break; }
+		if (result == FALSE) 
+		{
+			err = GetLastError();
+			break; 
+		}
 #else
 		bytesRead = (int)read(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead);
 		if(bytesRead <= 0)
@@ -1122,7 +1126,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 	}
 #ifdef WIN32
 	while ((result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped)) == TRUE); // Note: This is actually the end of a do-while loop
-	if (pipeObject->PAUSED == 0 && (err = GetLastError()) != ERROR_IO_PENDING)
+	if((err = GetLastError()) != ERROR_IO_PENDING && (pipeObject->PAUSED == 0 || pipeObject->totalRead == 0))
 #else
 	while(pipeObject->PAUSED == 0); // Note: This is actually the end of a do-while loop
 	err = 0;
@@ -1573,7 +1577,7 @@ BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus err
 
 	UNREFERENCED_PARAMETER(event);
 	ILibProcessPipe_WaitHandle_Remove(j->parent, j->hProcess);
-	if (j->stdOut->PAUSED != 0 || j->stdErr->PAUSED != 0)
+	if ((j->stdOut->PAUSED != 0 && j->stdOut->totalRead > 0) || (j->stdErr->PAUSED != 0 && j->stdErr->totalRead > 0))
 	{
 		j->hProcess_needAdd = 1;
 	}
