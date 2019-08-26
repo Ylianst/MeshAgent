@@ -453,14 +453,14 @@ void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 }
 ILibProcessPipe_Manager_WindowsRunLoop(void *arg)
 {
-	CONTEXT winException;
+	ILib_DumpEnabledContext winException;
 	__try
 	{
 		ILibProcessPipe_Manager_WindowsRunLoopEx(arg);
 	}
-	__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
+	__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
 	{
-		ILib_WindowsExceptionDebug(&winException);
+		ILib_WindowsExceptionDebugEx(&winException);
 	}
 }
 void ILibProcessPipe_Manager_Start(void* chain, void* user)

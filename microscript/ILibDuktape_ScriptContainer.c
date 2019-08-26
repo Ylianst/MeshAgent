@@ -93,11 +93,12 @@ char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 #define ILibDuktape_ScriptContainer_Settings_ExitHandler		"\xFF_ScriptContainerSettings_ExitHandler"
 #define ILibDuktape_ScriptContainer_Settings_ExitUser			"\xFF_ScriptContainerSettings_ExitUser"
 #define ILibDuktape_ScriptContainer_Process_ArgArray			"\xFF_argArray"
+#define ILibDuktape_ScriptContainer_Process_CoreDumpPath		"\xFF_coreDumpPath"
 #define ILibDuktape_ScriptContainer_Process_Restart				"\xFF_ScriptContainer_Process_Restart"
 #define ILibDuktape_ScriptContainer_Process_stdin				"\xFF_stdin"
 #define ILibDuktape_ScriptContainer_Process_stdout				"\xFF_stdout"
 #define ILibDuktape_ScriptContainer_Process_stderr				"\xFF_stderr"
-#define ILibDuktape_ScriptContainer_Signal_ListenerPtr				"\xFF_signalListener"
+#define ILibDuktape_ScriptContainer_Signal_ListenerPtr			"\xFF_signalListener"
 
 #define ILibDuktape_ScriptContainer_ExitCode					"\xFF_ExitCode"
 #define ILibDuktape_ScriptContainer_Exitting					"\xFF_Exiting"
@@ -943,6 +944,42 @@ duk_ret_t ILibDuktape_Process_setenv(duk_context *ctx)
 
 	return(0);
 }
+duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_getter(duk_context *ctx)
+{
+	if (g_ILibCrashDump_path == NULL)
+	{
+		duk_push_null(ctx);
+	}
+	else
+	{
+#ifdef WIN32
+		ILibDuktape_String_PushWideString(ctx, g_ILibCrashDump_path, 0);
+#else
+		duk_push_string(ctx, g_ILibCrashDump_path);
+#endif
+	}
+	return(1);
+}
+duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_context *ctx)
+{
+	if (duk_is_null(ctx, 0))
+	{
+		g_ILibCrashDump_path = NULL;
+		duk_push_this(ctx);																// [process]
+		duk_del_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_CoreDumpPath);	// [process]
+		duk_pop(ctx);																	// ...
+	}
+	else
+	{
+		duk_push_this(ctx);																// [process]
+		ILibDuktape_String_UTF8ToWideEx(ctx, (char*)duk_require_string(ctx, 0));		// [process][path]
+		g_ILibCrashDump_path = Duktape_GetBuffer(ctx, -1, NULL);
+		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Process_CoreDumpPath);	// [process]
+		duk_pop(ctx);																	// ...
+	}
+	return(0);
+}
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -957,7 +994,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
 	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "setenv", ILibDuktape_Process_setenv, 2);
-	
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "coreDumpLocation", ILibDuktape_ScriptContainer_Process_coreDumpLocation_getter, ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter);
+
 	duk_push_object(ctx);
 	if (sslvS != ((char*)NULL + 1))
 	{

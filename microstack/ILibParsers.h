@@ -1382,9 +1382,18 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset);
 	char* ILibChain_Debug(void *chain, char* buffer, int bufferLen);
 	extern char* g_ILibCrashID;
+	extern char* g_ILibCrashDump_path;
+
 #if defined(WIN32)
-	int ILib_WindowsExceptionFilter(DWORD exceptionCode, void *exceptionInfo, CONTEXT *exceptionContext);
-	void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext);
+	typedef struct ILib_DumpEnabledContext
+	{
+		PEXCEPTION_RECORD prec;
+		PCONTEXT pctx;
+		EXCEPTION_RECORD rec;
+		CONTEXT ctx;
+	}ILib_DumpEnabledContext;
+	int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib_DumpEnabledContext *dumpEnabledExceptionContext);
+	void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionContext);
 #elif defined(_POSIX)
 	char* ILib_POSIX_InstallCrashHandler(char *exename);
 #endif

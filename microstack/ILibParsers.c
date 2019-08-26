@@ -2105,20 +2105,23 @@ ILibExportMethod void ILibChain_EndContinue(void *chain)
 }
 
 char* g_ILibCrashID = NULL;
+char* g_ILibCrashDump_path = NULL;
 
 #if defined(WIN32)
-int ILib_WindowsExceptionFilter(DWORD exceptionCode, void *exceptionInfo, CONTEXT *exceptionContext)
+int ILib_WindowsExceptionFilterEx(DWORD exceptionCode, void *exceptionInfo, ILib_DumpEnabledContext *exceptionContext)
 {
 	if (IsDebuggerPresent()) { return(EXCEPTION_CONTINUE_SEARCH); }
 	if (exceptionCode == EXCEPTION_ACCESS_VIOLATION || exceptionCode == EXCEPTION_STACK_OVERFLOW || exceptionCode == EXCEPTION_INVALID_HANDLE)
 	{
-		memcpy_s(exceptionContext, sizeof(CONTEXT), ((EXCEPTION_POINTERS*)exceptionInfo)->ContextRecord, sizeof(CONTEXT));
+		exceptionContext->pctx = &(exceptionContext->ctx); exceptionContext->prec = &(exceptionContext->rec);
+		memcpy_s(exceptionContext->pctx, sizeof(CONTEXT), ((EXCEPTION_POINTERS*)exceptionInfo)->ContextRecord, sizeof(CONTEXT));
+		memcpy_s(exceptionContext->prec, sizeof(EXCEPTION_RECORD), ((EXCEPTION_POINTERS*)exceptionInfo)->ExceptionRecord, sizeof(EXCEPTION_RECORD));
 		return(EXCEPTION_EXECUTE_HANDLER);
 	}
 	return(EXCEPTION_CONTINUE_SEARCH);
 }
 
-void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext)
+void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionContext)
 {
 	char buffer[4096];
 	STACKFRAME64 StackFrame;
@@ -2126,9 +2129,29 @@ void ILib_WindowsExceptionDebug(CONTEXT *exceptionContext)
 	char imgBuffer[4096];
 	DWORD MachineType;
 	int len = 0;
+	CONTEXT *exceptionContext = dumpEnabledExceptionContext->pctx;
 
 	ZeroMemory(&StackFrame, sizeof(STACKFRAME64));
 	buffer[0] = 0;
+
+	if (g_ILibCrashDump_path != NULL)
+	{
+		HANDLE hDumpFile = CreateFileW(g_ILibCrashDump_path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+		MINIDUMP_EXCEPTION_INFORMATION i;
+		i.ClientPointers = FALSE;
+		i.ExceptionPointers = dumpEnabledExceptionContext;
+		i.ThreadId = GetCurrentThreadId();
+		MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hDumpFile, 
+			MiniDumpWithIndirectlyReferencedMemory |
+			MiniDumpWithPrivateReadWriteMemory |
+			MiniDumpWithDataSegs |
+			MiniDumpWithHandleData |
+			MiniDumpWithFullMemoryInfo |
+			MiniDumpWithThreadInfo |
+			MiniDumpWithUnloadedModules , &i, NULL, NULL);
+		CloseHandle(hDumpFile);
+	}
+
 
 #ifndef WIN64
 	MachineType = IMAGE_FILE_MACHINE_I386;

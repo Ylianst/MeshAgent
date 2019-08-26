@@ -229,7 +229,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #ifdef WIN32
 	_CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 	SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
-	CONTEXT winExceptionContext;
+	ILib_DumpEnabledContext winExceptionContext;
 #elif defined(_POSIX)
 	signal(SIGPIPE, SIG_IGN); // Set a SIGNAL on Linux to listen for Ctrl-C						  
 	signal(SIGINT, BreakSink);// Shutdown on Ctrl + C
@@ -253,9 +253,9 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		MeshAgent_Destroy(agentHost);
 		agentHost = NULL;
 	}
-	__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winExceptionContext))
+	__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winExceptionContext))
 	{
-		ILib_WindowsExceptionDebug(&winExceptionContext);
+		ILib_WindowsExceptionDebugEx(&winExceptionContext);
 	}
 	wmain_free(argv);
 	_CrtDumpMemoryLeaks();

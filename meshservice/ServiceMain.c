@@ -279,7 +279,7 @@ void WINAPI RemoveUninstallIcon()
 
 void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 {
-	CONTEXT winException;
+	ILib_DumpEnabledContext winException;
 	size_t len = 0;
 	WCHAR str[_MAX_PATH];
 
@@ -325,9 +325,9 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 			MeshAgent_Start(agent, g_serviceArgc, g_serviceArgv);
 			agent = NULL;
 		}
-		__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
+		__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
 		{
-			ILib_WindowsExceptionDebug(&winException);
+			ILib_WindowsExceptionDebugEx(&winException);
 		}
 		CoUninitialize();
 
@@ -923,7 +923,7 @@ int wmain(int argc, char* wargv[])
 	char str2[_MAX_PATH];
 	char* proxyarg = NULL;
 	char* tagarg = NULL;
-	CONTEXT winException;
+	ILib_DumpEnabledContext winException;
 	int retCode = 0;
 
 	int argvi, argvsz;
@@ -1122,9 +1122,9 @@ int wmain(int argc, char* wargv[])
 			MeshAgent_Destroy(agent);
 			agent = NULL;
 		}
-		__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
+		__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
 		{
-			ILib_WindowsExceptionDebug(&winException);
+			ILib_WindowsExceptionDebugEx(&winException);
 		}
 		wmain_free(argv);
 		return(retCode);
@@ -1413,9 +1413,9 @@ int wmain(int argc, char* wargv[])
 					MeshAgent_Destroy(agent);
 					agent = NULL;
 				}
-				__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
+				__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
 				{
-					ILib_WindowsExceptionDebug(&winException);
+					ILib_WindowsExceptionDebugEx(&winException);
 				}
 			}
 			else
@@ -1534,7 +1534,7 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 // Start as a temporary mesh agent.
 DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 {
-	CONTEXT winException;
+	ILib_DumpEnabledContext winException;
 	char selfexe[_MAX_PATH];
 	char *selfexe_ptr[] = { selfexe };
 	WCHAR str[_MAX_PATH];
@@ -1605,9 +1605,9 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 		MeshAgent_Destroy(agent);
 		agent = NULL;
 	}
-	__except (ILib_WindowsExceptionFilter(GetExceptionCode(), GetExceptionInformation(), &winException))
+	__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
 	{
-		ILib_WindowsExceptionDebug(&winException);
+		ILib_WindowsExceptionDebugEx(&winException);
 	}
 
 	CoUninitialize();
