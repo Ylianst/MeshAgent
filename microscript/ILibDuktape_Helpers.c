@@ -960,6 +960,16 @@ char *ILibDuktape_String_WideToUTF8(duk_context *ctx, char *wstr)
 	return(wstr);
 #endif
 }
+void ILibDuktape_String_UTF8ToWideEx(duk_context *ctx, char *str)
+{
+#ifdef WIN32
+	size_t tmpLen = 2 + (2 * MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, -1, NULL, 0));
+	LPWSTR retVal = (LPWSTR)Duktape_PushBuffer(ctx, tmpLen);
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, -1, retVal, (int)tmpLen);
+#else
+	duk_push_string(ctx, str);
+#endif
+}
 char *ILibDuktape_String_UTF8ToWide(duk_context *ctx, char *str)
 {
 #ifdef WIN32

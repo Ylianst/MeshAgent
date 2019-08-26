@@ -70,6 +70,7 @@ char* ILibDuktape_String_AsWide(duk_context *ctx, duk_idx_t idx, duk_size_t *len
 void ILibDuktape_String_PushWideString(duk_context *ctx, char *wstr, size_t wstrlen);
 char *ILibDuktape_String_WideToUTF8(duk_context *ctx, char *wstr);
 char *ILibDuktape_String_UTF8ToWide(duk_context *ctx, char *str);
+void ILibDuktape_String_UTF8ToWideEx(duk_context *ctx, char *str);
 
 #define Duktape_PushBuffer(ctx, bufSize) ILibMemory_Init(duk_push_fixed_buffer(ctx, (duk_size_t)(bufSize) + sizeof(ILibMemory_Header)), (bufSize), 0, ILibMemory_Types_OTHER)
 void Duktape_Console_Log(duk_context *ctx, void *chain, ILibDuktape_LogTypes logType, char *msg, duk_size_t msgLen);
