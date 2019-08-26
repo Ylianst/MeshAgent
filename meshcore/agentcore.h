@@ -186,6 +186,7 @@ typedef struct MeshAgentHostContainer
 	void *coreTimeout;
 	int webSocketMaskOverride;
 	int jsDebugPort;
+	int coreDumpEnabled;
 
 	char agentHash[UTIL_SHA384_HASHSIZE];
 	char serverHash[UTIL_SHA384_HASHSIZE];

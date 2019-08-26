@@ -1196,6 +1196,7 @@ SCRIPT_ENGINE_SETTINGS *ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx
 
 	duk_push_global_object(ctx);													// [g]
 	duk_get_prop_string(ctx, -1, "process");										// [g][process]
+	retVal->coreDumpLocation = (char*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ScriptContainer_Process_CoreDumpPath);
 	duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_ArgArray);		// [g][process][array]
 
 	int i, count = (int)duk_get_length(ctx, -1);
@@ -1223,7 +1224,20 @@ SCRIPT_ENGINE_SETTINGS *ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx
 }
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_ENGINE_SETTINGS *settings)
 {
-	return(ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(settings->securityFlags, settings->executionTimeout, settings->chain, settings->argList, settings->db, settings->exePath, settings->pipeManager, settings->exitHandler, settings->exitUserObject));
+	duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(settings->securityFlags, settings->executionTimeout, settings->chain, settings->argList, settings->db, settings->exePath, settings->pipeManager, settings->exitHandler, settings->exitUserObject);
+	if (settings->coreDumpLocation != NULL)
+	{
+		duk_push_global_object(ctx);						// [g]
+		duk_get_prop_string(ctx, -1, "process");			// [g][process]
+#ifdef WIN32
+		ILibDuktape_String_PushWideString(ctx, settings->coreDumpLocation, 0);
+#else
+		duk_push_string(ctx, settings->coreDumpLocation);	// [g][process][location]
+#endif
+		duk_put_prop_string(ctx, -2, "coreDumpLocation");	// [g][process]
+		duk_pop_2(ctx);										// ...
+	}
+	return(ctx);
 }
 
 size_t ILibDuktape_ScriptContainer_TotalAllocations = 0;

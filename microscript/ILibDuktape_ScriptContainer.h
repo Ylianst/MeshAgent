@@ -135,6 +135,7 @@ typedef struct SCRIPT_ENGINE_SETTINGS
 	void* nExceptionUserObject;
 
 	char *exePath;
+	char *coreDumpLocation;
 	ILibProcessPipe_Manager pipeManager;
 
 	char *argList[];
