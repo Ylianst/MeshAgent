@@ -371,6 +371,10 @@ ifeq ($(FSWATCH_DISABLE),1)
 CFLAGS += -D_NOFSWATCHER
 endif
 
+ifeq ($(CRASH_HANDLER),0)
+CFLAGS += -D_NOILIBSTACKDEBUG
+endif
+
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie
