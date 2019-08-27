@@ -40,6 +40,10 @@ limitations under the License.
 	#endif
 #endif 
 
+#ifndef WIN32
+#include <sys/resource.h>
+#endif
+
 #ifdef _MINCORE
 #define strncmp(a,b,c) strcmp(a,b)
 #endif
@@ -2228,6 +2232,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 char ILib_POSIX_CrashParamBuffer[5 * sizeof(void*)];
 void ILib_POSIX_CrashHandler(int code)
 {
+	struct rlimit r;
 	char msgBuffer[16384];
 	int msgLen = 0;
 	void *buffer[100];
@@ -2320,7 +2325,22 @@ void ILib_POSIX_CrashHandler(int code)
 		}
 	}
 	msgBuffer[msgLen] = 0;
-	ILIBCRITICALEXITMSG(254, msgBuffer);
+	
+	if (getrlimit(RLIMIT_CORE, &r) == 0 && r.rlim_cur != 0)
+	{
+		ILIBLOGMESSSAGE(msgBuffer);
+
+		struct sigaction act;
+		memset(&act, 0, sizeof(act));
+		act.sa_sigaction = SIG_DFL;
+		act.sa_flags = SA_RESTART;
+		sigemptyset(&act.sa_mask);
+		sigaction(SIGSEGV, &act, NULL);
+	}
+	else
+	{
+		ILIBCRITICALEXITMSG(254, msgBuffer);
+	}
 }
 char* ILib_POSIX_InstallCrashHandler(char *exename)
 {
