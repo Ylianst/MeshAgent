@@ -551,7 +551,7 @@ function serviceManager()
             this.proxy.CloseServiceHandle(handle);
             return (retVal);
         }
-        this.getService = function (name)
+        this.getService = function getService(name)
         {
             var serviceName = this.GM.CreateVariable(name, { wide: true });
             var ptr = this.GM.CreatePointer();
@@ -730,6 +730,20 @@ function serviceManager()
                         {
                             var val = query_service_configa.Deref(this.GM.PointerSize == 4 ? 28 : 48, this.GM.PointerSize).Deref().String;
                             Object.defineProperty(retVal, 'user', { value: val });
+                            switch(query_service_configa.Deref(4,4).toBuffer().readUInt32LE())
+                            {
+                                case 0x00:
+                                case 0x01:
+                                case 0x02:
+                                    retVal.startType = 'AUTO_START';
+                                    break;
+                                case 0x03:
+                                    retVal.startType = 'DEMAND_START';
+                                    break;
+                                case 0x04:
+                                    retVal.startType = 'DISABLED';
+                                    break;
+                            }
                         }
                     }
 
@@ -903,10 +917,10 @@ function serviceManager()
         }
         if(process.platform == 'linux')
         {
-            this.getService = function (name, platform)
+            this.getService = function getService(name, platform)
             {
                 if (!platform) { platform = this.getServiceType(); }
-                var ret = { name: name, close: function () { }};
+                var ret = { name: name, close: function () { }, serviceType: platform};
                 switch(platform)
                 {
                     case 'init':
@@ -916,6 +930,29 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
+                            ret.conf = (platform == 'upstart' ? ('/etc/init' + name + '.conf') : ('/etc/init.d/' + name));
+                            ret.serviceType = platform;
+                            Object.defineProperty(ret, "startType",
+                                {
+                                    get: function ()
+                                    {
+                                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                        child.stderr.on('data', function (c) { });
+                                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                        if (this.serviceType == 'upstart')
+                                        {
+                                            child.stdin.write('cat ' + this.conf + ' | grep "start on runlevel"\nexit\n');
+                                        }
+                                        else
+                                        {
+                                            child.stdin.write('find /etc/rc* -maxdepth 2 -type l -ls | grep " ../init.d/' + this.name + '" | awk -F"-> " \'{ if($2=="../init.d/' + this.name + '") { print "true"; } }\'\nexit\n');
+                                        }
+                                        child.waitExit();
+                                        return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
+
+                                    }
+                                });
+
                             ret.description = function description()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
