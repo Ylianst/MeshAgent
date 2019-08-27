@@ -234,6 +234,7 @@ char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath);
 AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities	
 controlChannelDebug:		If set, will log/display controlChannel messages (Except for JSON messages)
 controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
+coreDumpEnabled:			If set, a dump file will be written when the agent crashes
 disableUpdate:				If set, will prevent the agent from self-updating
 noUpdateCoreModule:			If set, will prevent the agent from taking a new meshcore from the server
 enableILibRemoteLogging:	Integer value specifying the port number to enable Web Logging. Disabled otherwise
