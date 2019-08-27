@@ -814,6 +814,19 @@ function serviceManager()
                 {
                     throw ('Service: ' + name + ' not found');
                 }
+                Object.defineProperty(ret, "startType",
+                    {
+                        get: function ()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stderr.on('data', function (c) { });
+                            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                            child.stdin.write('service ' + this.name + ' rcvar | grep _enable= | awk \'{ a=split($0, b, "\\""); if(b[2]=="YES") { print "YES"; } }\'\nexit\n');
+                            child.waitExit();
+                            return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
+                        }
+                    });
+
                 ret.description = function description()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -1107,9 +1120,28 @@ function serviceManager()
                         }
                         break;
                     case 'systemd':
-                        if (require('fs').existsSync('/lib/systemd/system/' + name + '.service') ||
-                            require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
+                        if (require('fs').existsSync('/lib/systemd/system/' + name + '.service'))
                         {
+                            ret.conf = '/lib/systemd/system/' + name + '.service';
+                        }
+                        else if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
+                        {
+                            ret.conf = '/usr/lib/systemd/system/' + name + '.service';
+                        }
+                        if (ret.conf)
+                        {
+                            Object.defineProperty(ret, "startType",
+                                {
+                                    get: function ()
+                                    {
+                                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                        child.stderr.on('data', function (c) { });
+                                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                        child.stdin.write('systemctl status ' + this.name + ' | grep Loaded: | awk \'{ a=split($0, b, ";"); for(c=1;c<=a;++c) { if(b[c]=="enabled" || b[c]==" enabled") { print "true"; } } }\'\nexit\n');
+                                        child.waitExit();
+                                        return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
+                                    }
+                                });
                             ret.description = function description()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
