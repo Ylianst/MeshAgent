@@ -155,20 +155,22 @@ int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyNam
 	}
 	return retVal;
 }
-void Duktape_CreateEnum(duk_context *ctx, char* enumName, char** fieldNames, int * fieldValues, int numFields)
+void Duktape_CreateEnum(duk_context *ctx, char* enumName, char **fieldNames, int *fieldValues, int numFields)
+{
+	duk_push_global_object(ctx);
+	Duktape_CreateEnumEx(ctx, fieldNames, fieldValues, numFields);
+	duk_put_prop_string(ctx, -2, enumName);
+	duk_pop(ctx);
+}
+void Duktape_CreateEnumEx(duk_context *ctx, char** fieldNames, int * fieldValues, int numFields)
 {
 	int i;
-	duk_push_global_object(ctx);						// [global]
-	duk_push_object(ctx);								// [global][obj]
-
+	duk_push_object(ctx);								// [obj]
 	for (i = 0; i < numFields; ++i)
 	{
-		duk_push_int(ctx, fieldValues[i]);				// [global][obj][val]
-		duk_put_prop_string(ctx, -2, fieldNames[i]);	// [global][obj]
+		duk_push_int(ctx, fieldValues[i]);				// [obj][val]
+		duk_put_prop_string(ctx, -2, fieldNames[i]);	// [obj]
 	}
-	duk_put_prop_string(ctx, -2, enumName);				// [global]
-
-	duk_pop(ctx);
 }
 char *Duktape_GetStashKey(void* value)
 {

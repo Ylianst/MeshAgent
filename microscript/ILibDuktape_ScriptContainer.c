@@ -42,6 +42,10 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
+#ifndef WIN32
+#include <sys/resource.h>
+#endif
+
 #include "ILibDuktape_ScriptContainer.h"
 #include "ILibDuktapeModSearch.h"
 #include "ILibDuktape_EventEmitter.h"
@@ -979,6 +983,41 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_contex
 	}
 	return(0);
 }
+#ifndef WIN32
+duk_ret_t ILibDuktape_ScriptContainer_Process_rlimit_getterFunc(duk_context *ctx)
+{
+	int resource = duk_require_int(ctx, 0);
+	struct rlimit r;
+	if (getrlimit(resource, &r) == 0)
+	{
+		duk_push_object(ctx);
+		duk_push_int(ctx, (duk_int_t)r.rlim_cur); duk_put_prop_string(ctx, -2, "soft");
+		duk_push_int(ctx, (duk_int_t)r.rlim_max); duk_put_prop_string(ctx, -2, "hard");
+		return(1);
+	}
+	return(ILibDuktape_Error(ctx, "Error Occured fetching limits"));
+}
+duk_ret_t ILibDuktape_ScriptContainer_Process_rlimit_setterFunc(duk_context *ctx)
+{
+	int resource = duk_require_int(ctx, 0);
+	struct rlimit r;
+	r.rlim_cur = Duktape_GetIntPropertyValue(ctx, 1, "soft", -1);
+	r.rlim_max = Duktape_GetIntPropertyValue(ctx, 1, "hard", -1);
+
+	if (setrlimit(resource, &r) == 0)
+	{
+		return(0);
+	}
+	return(ILibDuktape_Error(ctx, "Error Occured settings limits"));
+}
+duk_ret_t ILibDuktape_ScriptContainer_Process_rlimit_getter(duk_context *ctx)
+{
+	duk_push_object(ctx);
+	duk_push_c_function(ctx, ILibDuktape_ScriptContainer_Process_rlimit_getterFunc, 1); duk_put_prop_string(ctx, -2, "get");
+	duk_push_c_function(ctx, ILibDuktape_ScriptContainer_Process_rlimit_setterFunc, 2); duk_put_prop_string(ctx, -2, "set");
+	return(1);
+}
+#endif
 
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
@@ -995,7 +1034,12 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "setenv", ILibDuktape_Process_setenv, 2);
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "coreDumpLocation", ILibDuktape_ScriptContainer_Process_coreDumpLocation_getter, ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter);
-
+#ifndef WIN32
+	ILibDuktape_CreateEventWithGetter(ctx, "rlimit", ILibDuktape_ScriptContainer_Process_rlimit_getter);
+	Duktape_CreateEnumEx(ctx, (char*[]) { "AS", "CORE", "CPU", "DATA", "FSIZE", "LOCKS", "MEMLOCK", "MGSQUEUE", "NICE", "NOFILE", "NPROC", "RSS", "RTPRIO", "SIGPENDING", "STACK" },
+		(int[]) {9, 4, 0, 2, 1, 10, 8, 12, 13, 7, 6, 5, 14, 11, 3}, 15);
+	duk_put_prop_string(ctx, -2, "RLIMITS");
+#endif
 	duk_push_object(ctx);
 	if (sslvS != ((char*)NULL + 1))
 	{

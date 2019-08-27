@@ -52,7 +52,8 @@ char* Duktape_GetContextGuidHex(duk_context *ctx, void *db);
 void *Duktape_GetChain(duk_context *ctx);
 char *Duktape_GetStashKey(void* value);
 char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen);
-void Duktape_CreateEnum(duk_context *ctx, char* enumName, char** fieldNames, int * fieldValues, int numFields);
+void Duktape_CreateEnumEx(duk_context *ctx, char** fieldNames, int * fieldValues, int numFields);
+void Duktape_CreateEnum(duk_context *ctx, char* enumName, char **fieldNames, int *fieldValues, int numFields);
 char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len);
 #define Duktape_GetStringPropertyValue(ctx, i, propertyName, defaultValue) Duktape_GetStringPropertyValueEx(ctx, i, propertyName, defaultValue, NULL)
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue);
