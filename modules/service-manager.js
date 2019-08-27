@@ -199,6 +199,20 @@ if (process.platform == 'darwin')
                     return (child.stdout.str.trim().toUpperCase() == "TRUE");
                 }
             });
+        Object.defineProperty(ret, 'startType',
+            {
+                get: function()
+                {
+                    if(this.daemon)
+                    {
+                        return (this._runAtLoad ? 'AUTO_START' : 'DEMAND_START');
+                    }
+                    else
+                    {
+                        return ('AUTO_START');
+                    }
+                }
+            });
         Object.defineProperty(ret, "_keepAlive",
             {
                 get: function () 
