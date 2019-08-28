@@ -15,6 +15,24 @@ limitations under the License.
 */
 var promise = require('promise');
 
+function failureActionToInteger(action)
+{
+    var ret;
+    switch(action)
+    {
+        default:
+        case 'NONE':
+            ret=0;
+            break;
+        case 'SERVICE_RESTART':
+            ret=1;
+            break;
+        case 'REBOOT':
+            ret=2;
+            break;
+    }
+    return(ret);
+}
 
 function extractFileName(filePath)
 {
@@ -572,7 +590,7 @@ function serviceManager()
             var bytesNeeded = this.GM.CreateVariable(ptr._size);
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0001 | 0x0004 | 0x0020 | 0x0010);
             if (handle.Val == 0) { throw ('could not open ServiceManager'); }
-            var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0004 | 0x0020 | 0x0010 | 0x00010000);
+            var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0002 | 0x0004 | 0x0020 | 0x0010 | 0x00010000);
             if (h.Val != 0)
             {
                 var retVal = { _ObjectID: 'service-manager.service' }
@@ -617,6 +635,27 @@ function serviceManager()
                     {
                         return (parseInt(this.status.pid) == process.pid);
                     }
+                    retVal.update = function update()
+                    {
+                        if (this.failureActions)
+                        {
+                            var actions = this._GM.CreateVariable(this.failureActions.actions.length * 8);                                // len*sizeof(SC_ACTION)
+                            for (var i = 0; i < this.failureActions.actions.length && i < 3; ++i)
+                            {
+                                actions.Deref(i*8, 4).toBuffer().writeUInt32LE(failureActionToInteger(this.failureActions.actions[i].type));   // SC_ACTION[i].type
+                                actions.Deref(4+(i*8), 4).toBuffer().writeUInt32LE(this.failureActions.actions[i].delay);                      // SC_ACTION[i].delay
+                            }
+
+                            var updatedFailureActions = this._GM.CreateVariable(40);                                         // sizeof(SERVICE_FAILURE_ACTIONS)
+                            updatedFailureActions.Deref(0, 4).toBuffer().writeUInt32LE(this.failureActions.resetPeriod);    // dwResetPeriod
+                            updatedFailureActions.Deref(this._GM.PointerSize == 8 ? 24 : 12, 4).toBuffer().writeUInt32LE(this.failureActions.actions.length); // cActions
+                            actions.pointerBuffer().copy(updatedFailureActions.Deref(this._GM.PointerSize == 8 ? 32 : 16, this._GM.PointerSize).toBuffer());
+                            if (this._proxy.ChangeServiceConfig2W(this._service, 2, updatedFailureActions).Val == 0)
+                            {
+                                throw('Unable to set FailureActions...');
+                            }
+                        }
+                    };
                     retVal.appLocation = function ()
                     {
                         var reg = require('win-registry');
