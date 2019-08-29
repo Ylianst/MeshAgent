@@ -141,6 +141,7 @@ extern char* MeshAgentHost_BatteryInfo_STRINGS[];
 
 #ifdef WIN32
 typedef HRESULT (__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
+typedef int (WSAAPI *GetHostNameWFunc)(PWSTR name, int namelen);
 #endif
 
 typedef struct MeshAgentHostContainer

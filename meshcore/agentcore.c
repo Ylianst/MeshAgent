@@ -3681,10 +3681,33 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	retVal->capabilities = capabilities | MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT;
 	
 #ifdef WIN32
-	WCHAR whostname[MAX_PATH];
-	if (GetHostNameW(whostname, MAX_PATH) == 0)
+
+	HMODULE wsCORE = LoadLibraryExA((LPCSTR)"Ws2_32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	GetHostNameWFunc ghnw = NULL;
+	if (wsCORE != NULL)
 	{
-		WideCharToMultiByte(CP_UTF8, 0, whostname, -1, retVal->hostname, (int)sizeof(retVal->hostname), NULL, NULL);
+		if ((ghnw = (GetHostNameWFunc)GetProcAddress(wsCORE, (LPCSTR)"GetHostNameW")) == NULL)
+		{
+			FreeLibrary(wsCORE);
+			wsCORE = NULL;
+		}
+	}
+	if (ghnw != NULL)
+	{
+		WCHAR whostname[MAX_PATH];
+		if (ghnw(whostname, MAX_PATH) == 0)
+		{
+			WideCharToMultiByte(CP_UTF8, 0, whostname, -1, retVal->hostname, (int)sizeof(retVal->hostname), NULL, NULL);
+		}
+	}
+	else
+	{
+		gethostname(retVal->hostname, (int)sizeof(retVal->hostname));
+	}
+	if (wsCORE != NULL)
+	{
+		FreeLibrary(wsCORE);
+		wsCORE = NULL;
 	}
 #else
 	gethostname(retVal->hostname, (int)sizeof(retVal->hostname));
