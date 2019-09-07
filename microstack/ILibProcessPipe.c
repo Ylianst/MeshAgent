@@ -972,6 +972,14 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 
 				close(retVal->stdIn->mPipe_ReadEnd);
 				close(retVal->stdOut->mPipe_WriteEnd);
+
+				int f = fcntl(STDIN_FILENO, F_GETFL);
+				f &= ~O_NONBLOCK;
+				fcntl(STDIN_FILENO, F_SETFL, f);
+
+				f = fcntl(STDOUT_FILENO, F_GETFL);
+				f &= ~O_NONBLOCK;
+				fcntl(STDOUT_FILENO, F_SETFL, f);
 			}
 		}
 		if (UID != -1 && UID != 0)
@@ -1621,6 +1629,20 @@ void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int buf
 #endif
 	}
 }
+void ILibProcessPipe_Pipe_Close(ILibProcessPipe_Pipe po)
+{
+	ILibProcessPipe_PipeObject* pipeObject = (ILibProcessPipe_PipeObject*)po;
+	if (pipeObject != NULL)
+	{
+#ifdef WIN32
+		CloseHandle(pipeObject->mPipe_WriteEnd);
+		pipeObject->mPipe_WriteEnd = NULL;
+#else
+		close(pipeObject->mPipe_WriteEnd);
+		pipeObject->mPipe_WriteEnd = -1;
+#endif
+	}
+}
 
 ILibTransport_DoneState ILibProcessPipe_Pipe_Write(ILibProcessPipe_Pipe po, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership)
 {
@@ -1697,7 +1719,14 @@ ILibTransport_DoneState ILibProcessPipe_Pipe_Write(ILibProcessPipe_Pipe po, char
 	
 	return retVal;
 }
-
+void ILibProcessPipe_Process_CloseStdIn(ILibProcessPipe_Process p)
+{
+	ILibProcessPipe_Process_Object *j = (ILibProcessPipe_Process_Object*)p;
+	if (ILibMemory_CanaryOK(j))
+	{
+		ILibProcessPipe_Pipe_Close(j->stdIn);
+	}
+}
 ILibTransport_DoneState ILibProcessPipe_Process_WriteStdIn(ILibProcessPipe_Process p, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership)
 {
 	ILibProcessPipe_Process_Object *j = (ILibProcessPipe_Process_Object*)p;

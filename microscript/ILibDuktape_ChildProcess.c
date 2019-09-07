@@ -88,6 +88,11 @@ ILibTransport_DoneState ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler(I
 }
 void ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler(ILibDuktape_WritableStream *sender, void *user)
 {
+	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
+	if (ILibMemory_CanaryOK(p->childProcess))
+	{
+		ILibProcessPipe_Process_CloseStdIn(p->childProcess);
+	}
 }
 
 void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)

@@ -82,6 +82,9 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p);
 void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int bufferSize, ILibProcessPipe_Process_ExitHandler exitHandler, ILibProcessPipe_Process_OutputHandler stdOut, ILibProcessPipe_Process_OutputHandler stdErr, ILibProcessPipe_Process_SendOKHandler sendOk, void *user);
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj);
 ILibTransport_DoneState ILibProcessPipe_Process_WriteStdIn(ILibProcessPipe_Process p, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership);
+void ILibProcessPipe_Process_CloseStdIn(ILibProcessPipe_Process p);
+
+void ILibProcessPipe_Pipe_Close(ILibProcessPipe_Pipe po);
 void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject);
 void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject);
 void ILibProcessPipe_Pipe_SwapBuffers(ILibProcessPipe_Pipe pipeObject, char* newBuffer, int newBufferLen, int newBufferReadOffset, int newBufferTotalBytesRead, char **oldBuffer, int *oldBufferLen, int *oldBufferReadOffset, int *oldBufferTotalBytesRead);
