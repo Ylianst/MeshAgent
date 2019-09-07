@@ -175,6 +175,32 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 		bufferLen = util_hexToBuf(str, (int)strlength, buffer);
 		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 	}
+	else if (strcmp(encoding, "utf8") == 0)
+	{
+		str = (char*)duk_get_lstring(ctx, 0, &strlength);
+		buffer = duk_push_fixed_buffer(ctx, strlength);
+		memcpy_s(buffer, strlength, str, strlength);
+		duk_push_buffer_object(ctx, -1, 0, strlength, DUK_BUFOBJ_NODEJS_BUFFER);
+		return(1);
+	}
+	else if (strcmp(encoding, "binary") == 0)
+	{
+		str = (char*)duk_get_lstring(ctx, 0, &strlength);
+
+#ifdef WIN32
+		int r = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, (int)strlength, NULL, 0);
+		buffer = duk_push_fixed_buffer(ctx, 2 + (2 * r));
+		strlength = (duk_size_t)MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, (int)strlength, (LPWSTR)buffer, r + 1);
+		r = (int)WideCharToMultiByte(CP_ISO8859_1, 0, (LPCWCH)buffer, strlength, NULL, 0, NULL, FALSE);
+		duk_push_fixed_buffer(ctx, r);
+		WideCharToMultiByte(CP_ISO8859_1, 0, (LPCWCH)buffer, strlength, (LPSTR)Duktape_GetBuffer(ctx, -1, NULL), r, NULL, FALSE);
+		duk_push_buffer_object(ctx, -1, 0, r, DUK_BUFOBJ_NODEJS_BUFFER);
+#else
+		duk_eval_string(ctx, "Buffer.fromBinary");	// [func]
+		duk_dup(ctx, 0);
+		duk_call(ctx, 1);
+#endif
+	}
 	else
 	{
 		return(ILibDuktape_Error(ctx, "unsupported encoding"));
@@ -221,8 +247,30 @@ void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 			return(this);\
 		}\
 	});";
-
 	duk_eval_string(ctx, extras); duk_pop(ctx);
+
+#ifdef _POSIX
+	char fromBinary[] =
+		"Object.defineProperty(Buffer, \"fromBinary\",\
+		{\
+			get: function()\
+			{\
+				return((function fromBinary(str)\
+						{\
+							var child = require('child_process').execFile('/usr/bin/iconv', ['iconv', '-c','-f', 'UTF-8', '-t', 'CP819']);\
+							child.stdout.buf = Buffer.alloc(0);\
+							child.stdout.on('data', function(c) { this.buf = Buffer.concat([this.buf, c]); });\
+							child.stdin.write(str);\
+							child.stderr.on('data', function(c) { });\
+							child.stdin.end();\
+							child.waitExit();\
+							return(child.stdout.buf);\
+						}));\
+			}\
+		});";
+	duk_eval_string_noresult(ctx, fromBinary);
+
+#endif
 
 	// Polyfill Buffer.from()
 	duk_get_prop_string(ctx, -1, "Buffer");											// [g][Buffer]
