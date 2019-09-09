@@ -41,7 +41,7 @@ limitations under the License.
 #define ILibDuktape_DescriptorEvents_Table		"\xFF_DescriptorEvents_Table"
 #define ILibDuktape_DescriptorEvents_FD			"\xFF_DescriptorEvents_FD"
 #define ILibDuktape_DescriptorEvents_Options	"\xFF_DescriptorEvents_Options"
-
+#define CP_ISO8859_1							28591
 typedef enum ILibDuktape_Console_DestinationFlags
 {
 	ILibDuktape_Console_DestinationFlags_DISABLED		= 0,
@@ -191,9 +191,9 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 		int r = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, (int)strlength, NULL, 0);
 		buffer = duk_push_fixed_buffer(ctx, 2 + (2 * r));
 		strlength = (duk_size_t)MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, (int)strlength, (LPWSTR)buffer, r + 1);
-		r = (int)WideCharToMultiByte(CP_ISO8859_1, 0, (LPCWCH)buffer, strlength, NULL, 0, NULL, FALSE);
+		r = (int)WideCharToMultiByte(CP_ISO8859_1, 0, (LPCWCH)buffer, (int)strlength, NULL, 0, NULL, FALSE);
 		duk_push_fixed_buffer(ctx, r);
-		WideCharToMultiByte(CP_ISO8859_1, 0, (LPCWCH)buffer, strlength, (LPSTR)Duktape_GetBuffer(ctx, -1, NULL), r, NULL, FALSE);
+		WideCharToMultiByte(CP_ISO8859_1, 0, (LPCWCH)buffer, (int)strlength, (LPSTR)Duktape_GetBuffer(ctx, -1, NULL), r, NULL, FALSE);
 		duk_push_buffer_object(ctx, -1, 0, r, DUK_BUFOBJ_NODEJS_BUFFER);
 #else
 		duk_eval_string(ctx, "Buffer.fromBinary");	// [func]
@@ -2336,6 +2336,14 @@ duk_ret_t ILibDuktape_Polyfills_filehash(duk_context *ctx)
 	}
 }
 
+duk_ret_t ILibDuktape_Polyfills_ipv4From(duk_context *ctx)
+{
+	int v = duk_require_int(ctx, 0);
+	ILibDuktape_IPV4AddressToOptions(ctx, v);
+	duk_get_prop_string(ctx, -1, "host");
+	return(1);
+}
+
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
@@ -2371,6 +2379,7 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "_debugGC", ILibDuktape_Polyfills_debugGC, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "_debug", ILibDuktape_Polyfills_debug, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "getSHA384FileHash", ILibDuktape_Polyfills_filehash, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "_ipv4From", ILibDuktape_Polyfills_ipv4From, 1);
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_CreateInstanceMethod(ctx, "crc32c", ILibDuktape_Polyfills_crc32c, DUK_VARARGS);
 #endif

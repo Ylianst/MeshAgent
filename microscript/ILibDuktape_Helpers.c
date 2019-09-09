@@ -249,6 +249,15 @@ struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short
 	ILibInet_pton(AF_INET6, address, &(duktape_internalAddress.sin6_addr));
 	return(&duktape_internalAddress);
 }
+void ILibDuktape_IPV4AddressToOptions(duk_context *ctx, int addr)
+{
+	struct sockaddr_in6 in6;
+	memset(&in6, 0, sizeof(struct sockaddr_in6));
+	in6.sin6_family = AF_INET;
+
+	((struct sockaddr_in*)&in6)->sin_addr.s_addr = addr;
+	ILibDuktape_SockAddrToOptions(ctx, &in6);
+}
 void ILibDuktape_SockAddrToOptions(duk_context *ctx, struct sockaddr_in6 *addr)
 {
 	char *str = ILibInet_ntop2((struct sockaddr*)addr, ILibScratchPad, sizeof(ILibScratchPad));

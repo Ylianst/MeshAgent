@@ -65,6 +65,7 @@ int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);
 struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short port);
 void ILibDuktape_SockAddrToOptions(duk_context *ctx, struct sockaddr_in6 *addr);
+void ILibDuktape_IPV4AddressToOptions(duk_context *ctx, int addr);
 void *ILibDuktape_GetProcessObject(duk_context *ctx);
 
 char* ILibDuktape_String_AsWide(duk_context *ctx, duk_idx_t idx, duk_size_t *len);

@@ -1515,6 +1515,8 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 			duk_push_string(ctx, padapters->PhysicalAddressLength>0 ? util_tohex2(padapters->PhysicalAddress, padapters->PhysicalAddressLength, ILibScratchPad) : "00:00:00:00:00:00");
 			duk_put_prop_string(ctx, -2, "mac");
 
+			duk_push_int(ctx, padapters->IfIndex); duk_put_prop_string(ctx, -2, "index");
+
 			duk_push_string(ctx, padapters->OperStatus == IfOperStatusUp ? "up" : "down");
 			duk_put_prop_string(ctx, -2, "status");
 
