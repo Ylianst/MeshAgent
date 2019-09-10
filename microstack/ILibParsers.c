@@ -2140,10 +2140,10 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 
 	if (g_ILibCrashDump_path != NULL)
 	{
-		HANDLE hDumpFile = CreateFileW(g_ILibCrashDump_path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+		HANDLE hDumpFile = CreateFileW((LPCWSTR)g_ILibCrashDump_path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 		MINIDUMP_EXCEPTION_INFORMATION i;
 		i.ClientPointers = FALSE;
-		i.ExceptionPointers = dumpEnabledExceptionContext;
+		i.ExceptionPointers = (PEXCEPTION_POINTERS)dumpEnabledExceptionContext;
 		i.ThreadId = GetCurrentThreadId();
 		MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), hDumpFile, 
 			MiniDumpWithIndirectlyReferencedMemory |
@@ -2332,7 +2332,7 @@ void ILib_POSIX_CrashHandler(int code)
 
 		struct sigaction act;
 		memset(&act, 0, sizeof(act));
-		act.sa_sigaction = SIG_DFL;
+		act.sa_sigaction = (void*)SIG_DFL;
 		act.sa_flags = SA_RESTART;
 		sigemptyset(&act.sa_mask);
 		sigaction(SIGSEGV, &act, NULL);
