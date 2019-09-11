@@ -972,7 +972,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_contex
 		duk_push_this(ctx);																// [process]
 		duk_del_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_CoreDumpPath);	// [process]
 		duk_pop(ctx);																	// ...
+#ifndef WIN32
 		duk_eval_string_noresult(ctx, "process.rlimit.set(process.RLIMITS.CORE, {soft: 0, hard: 0});");
+#endif
 	}
 	else
 	{
@@ -981,7 +983,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_contex
 		g_ILibCrashDump_path = Duktape_GetBuffer(ctx, -1, NULL);
 		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Process_CoreDumpPath);	// [process]
 		duk_pop(ctx);																	// ...
+#ifndef WIN32
 		duk_eval_string_noresult(ctx, "process.rlimit.set(process.RLIMITS.CORE, {soft: -1, hard: -1});");
+#endif
 	}
 	return(0);
 }
