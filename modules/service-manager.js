@@ -1076,11 +1076,11 @@ function serviceManager()
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                                 if (isMe.platform == 'upstart')
                                 {
-                                    child.stdin.write("initctl status " + this.name + " | awk '{print $2}' | awk -F, '{print $4}'\nexit\n");
+                                    child.stdin.write("initctl status " + this.name + " | awk '{print $NF}'\nexit\n");
                                 }
                                 else
                                 {
-                                    child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $4}'\nexit\n");
+                                    child.stdin.write("service " + this.name + " status | awk '{print $NF}'\nexit\n");
                                 }
                                 child.waitExit();
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
