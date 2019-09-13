@@ -1870,24 +1870,18 @@ function serviceManager()
 
         if (process.platform == 'win32')
         {
-            if (service.status.state == undefined || service.status.state == 'STOPPED')
+            try
             {
-                try
-                {
-                    require('fs').unlinkSync(servicePath);
-                }
-                catch (e)
-                {
-                }
-                if (this.proxy.DeleteService(service._service) == 0)
-                {
-                    throw ('Uninstall Service for: ' + name + ', failed with error: ' + this.proxy2.GetLastError());
-                }
+                require('fs').unlinkSync(servicePath);
             }
-            else
+            catch (e)
             {
-                throw ('Cannot uninstall service: ' + name + ', because it is: ' + service.status.state);
             }
+            if (this.proxy.DeleteService(service._service) == 0)
+            {
+                throw ('Uninstall Service for: ' + name + ', failed with error: ' + this.proxy2.GetLastError());
+            }
+            
             service.close();
             service = null;
         }
@@ -1969,8 +1963,8 @@ function serviceManager()
 
                 try
                 {
-                    require('fs').unlinkSync(servicePath);
                     require('fs').unlinkSync('/Library/LaunchDaemons/' + name + '.plist');
+                    require('fs').unlinkSync(servicePath);
                 }
                 catch(e)
                 {

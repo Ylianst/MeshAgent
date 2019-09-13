@@ -993,6 +993,10 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
 		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
+	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integragedJavaScriptLen == 0)
+	{
+		integragedJavaScriptLen = ILibBase64Decode(argv[2], strnlen_s(argv[2], sizeof(ILibScratchPad2)), &integratedJavaScript);
+	}
 	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId')());process.exit();";
