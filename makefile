@@ -375,6 +375,10 @@ ifeq ($(CRASH_HANDLER),0)
 CFLAGS += -D_NOILIBSTACKDEBUG
 endif
 
+ifeq ($(SSL_EXPORTABLE_KEYS),0)
+CFLAGS += -D_SSL_KEYS_EXPORTABLE
+endif
+
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie
