@@ -1732,6 +1732,25 @@ void ILibDuktape_TLS_connect_resolveError(duk_context *ctx, void ** args, int ar
 	if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "tls.socket.OnError(): "); }
 	duk_pop(ctx);
 }
+#ifdef _SSL_KEYS_EXPORTABLE
+duk_ret_t ILibDuktape_TLS_exportKeys(duk_context *ctx)
+{
+	char buffer[2000];
+	int bufferLen;
+
+	ILibDuktape_net_socket *data;
+	duk_push_this(ctx);			// [socket]
+
+	data = (ILibDuktape_net_socket*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_net_socket_ptr);
+	if (data != NULL)
+	{
+		bufferLen = util_exportkeys(data->ssl, buffer, sizeof(buffer));
+		duk_push_lstring(ctx, buffer, bufferLen);
+		return(1);
+	}
+	return(ILibDuktape_Error(ctx, "Error exporting OpenSSL Keys"));
+}
+#endif
 duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx), i;
@@ -1785,6 +1804,10 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 
 	ILibDuktape_net_socket_PUSH(ctx, module);													// [socket]
 	ILibDuktape_WriteID(ctx, "tls.socket");
+#ifdef _SSL_KEYS_EXPORTABLE
+	ILibDuktape_CreateInstanceMethod(ctx, "_exportKeys", ILibDuktape_TLS_exportKeys, 0);
+#endif
+
 	duk_dup(ctx, 0);																			// [socket][options]
 	if (duk_has_prop_string(ctx, -1, "secureContext"))
 	{

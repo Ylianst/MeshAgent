@@ -1046,6 +1046,32 @@ int __fastcall util_rsaverify(X509 *cert, char* data, int datalen, char* sign, i
 	return r;
 }
 
+#ifdef _SSL_KEYS_EXPORTABLE
+int  __fastcall util_exportkeys(SSL* ssl, char *buffer, size_t bufferSize)
+{
+	int len = 0;
+	char clientRandom[32], serverRandom[32], sessionSecret[48], clientRandomHex[65], serverRandomHex[65], sessionSecretHex[97];
+
+	// Get the client random and session key.
+	if (ssl == NULL) return(0);
+	if (SSL_get_client_random(ssl, (unsigned char*)clientRandom, 32) != 32) return(0);
+	if (SSL_get_server_random(ssl, (unsigned char*)serverRandom, 32) != 32) return(0);
+	if (SSL_SESSION_get_master_key(SSL_get_session(ssl), (unsigned char*)sessionSecret, 48) != 48) return(0);
+
+	// Convert the randoms and key into hex
+	util_tohex(clientRandom, 32, clientRandomHex);
+	util_tohex(serverRandom, 32, serverRandomHex);
+	util_tohex(sessionSecret, 48, sessionSecretHex);
+
+	// Append the client random and key to the log file.
+	if (buffer != NULL && bufferSize > 0)
+	{
+		len = sprintf_s(buffer, bufferSize, "CLIENT_RANDOM %s %s\r\nCLIENT_RANDOM %s %s\r\n", clientRandomHex, sessionSecretHex, serverRandomHex, sessionSecretHex);
+	}
+	return(len);
+}
+#endif
+
 #ifdef _DEBUG
 // Saves the SSL/TLS session private keys to file.
 // Because we do lots of DTLS, we will be saving both client and server randoms pointing to the same key.

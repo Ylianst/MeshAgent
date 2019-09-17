@@ -172,6 +172,10 @@ int   __fastcall util_rsaencrypt(X509 *cert, char* data, int datalen, char** enc
 int   __fastcall util_rsadecrypt(struct util_cert cert, char* data, int datalen, char** decdata);
 int   __fastcall util_rsaverify(X509 *cert, char* data, int datalen, char* sign, int signlen);
 
+#ifdef _SSL_KEYS_EXPORTABLE
+int  __fastcall util_exportkeys(SSL* ssl, char *buffer, size_t bufferSize);
+#endif
+
 #ifdef _DEBUG
 void  __fastcall util_savekeys(SSL* ssl);
 #endif

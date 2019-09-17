@@ -4146,6 +4146,24 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_encoded_Finalizer(duk_context *
 
 	return(0);
 }
+#ifdef _SSL_KEYS_EXPORTABLE
+duk_ret_t ILibDuktape_httpStream_webSocket_exportKeys(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);
+
+	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
+	if (state->encodedStream->writableStream->pipedReadable != NULL)
+	{
+		duk_push_heapptr(ctx, state->encodedStream->writableStream->pipedReadable);	// [readable]
+		duk_get_prop_string(ctx, -1, "_exportKeys");								// [readable][exportKeys]
+		duk_swap_top(ctx, -2);														// [exportKeys][this]
+		duk_call_method(ctx, 0);													// [ret]
+		return(1);
+	}
+	return(ILibDuktape_Error(ctx, "Error exporting keys"));
+}
+#endif
 duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 {
 	ILibDuktape_WebSocket_State *state;
@@ -4176,6 +4194,9 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_GetEmitter(ctx, -1), "pong");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "ping", ILibDuktape_httpStream_webSocketStream_sendPing, DUK_VARARGS);
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "pong", ILibDuktape_httpStream_webSocketStream_sendPong, DUK_VARARGS);
+#ifdef _SSL_KEYS_EXPORTABLE
+	ILibDuktape_CreateInstanceMethod(ctx, "_exportKeys", ILibDuktape_httpStream_webSocket_exportKeys, 0);
+#endif
 
 	ILibDuktape_CreateReadonlyProperty(ctx, "decoded");							// [WebSocket]
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_httpStream_webSocketStream_finalizer);
