@@ -3973,7 +3973,7 @@ int ILibDuktape_httpStream_webSocket_EncodedUnshiftSink(ILibDuktape_DuplexStream
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_DecodedWriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
-	int maxsize = 30000;
+	int maxsize = 15000;
 	int sendSize = 0;
 	if (bufferLen < maxsize)
 	{
