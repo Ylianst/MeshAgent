@@ -980,7 +980,7 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 	UNREFERENCED_PARAMETER(exitCode);
 	UNREFERENCED_PARAMETER(sender);
 
-	if (g_restartcount < 4)
+	if (g_restartcount < 4 && g_shutdown == 0)
 	{
 		kvm_relay_restart(1, pipeMgr, exePath, writeHandler, reserved);
 	}
