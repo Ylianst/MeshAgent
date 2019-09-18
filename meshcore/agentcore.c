@@ -94,6 +94,9 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 
 #ifdef _POSIX
 	extern char **environ;
+#ifndef __APPLE__
+	extern int SLAVELOG;
+#endif
 #endif
 
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
@@ -1868,6 +1871,13 @@ duk_ret_t ILibDuktape_MeshAgent_hostname(duk_context *ctx)
 	duk_push_string(ctx, agent->hostname);
 	return(1);
 }
+#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
+duk_ret_t ILibDuktape_MeshAgent_enableKvmSlaveLog(duk_context *ctx)
+{
+	SLAVELOG = (int)duk_require_int(ctx, 0);
+	return(0);
+}
+#endif
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1941,6 +1951,9 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
+#if defined(_POSIX) && !defined(__APPLE__)
+		ILibDuktape_CreateInstanceMethod(ctx, "enableKvmSlaveLog", ILibDuktape_MeshAgent_enableKvmSlaveLog, 1);
+#endif
 #else
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 0);
 #endif

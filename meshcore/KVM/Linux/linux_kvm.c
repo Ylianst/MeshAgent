@@ -35,6 +35,8 @@ limitations under the License.
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 
+int SLAVELOG = 0;
+
 int SCREEN_NUM = 0;
 int SCREEN_WIDTH = 0;
 int SCREEN_HEIGHT = 0;
@@ -319,8 +321,8 @@ int kvm_init(int displayNo)
 	if (count == 10) { return -1; }
 	count = 0;
 	eventdisplay = x11_exports->XOpenDisplay(displayString);
-	fprintf(logFile, "XAUTHORITY is %s\n", getenv("XAUTHORITY")); fflush(logFile);
-	fprintf(logFile, "DisplayString is %s\n", displayString); fflush(logFile);
+	if (logFile) { fprintf(logFile, "XAUTHORITY is %s\n", getenv("XAUTHORITY")); fflush(logFile); }
+	if (logFile) { fprintf(logFile, "DisplayString is %s\n", displayString); fflush(logFile); }
 
 	if (eventdisplay == NULL)
 	{
@@ -533,7 +535,7 @@ void* kvm_server_mainloop(void* parm)
 	default_JPEG_error_handler = kvm_server_jpegerror;
 
 
-	fprintf(logFile, "Checking $DISPLAY\n");
+	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)
 	{
 		int envLen = (int)strnlen_s(*env, INT_MAX);
@@ -543,7 +545,7 @@ void* kvm_server_mainloop(void* parm)
 			if (i == 7 && strncmp("DISPLAY", *env, 7) == 0)
 			{
 				current_display = (unsigned short)atoi(*env + i + 2);
-				fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2);
+				if (logFile) { fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2); fflush(logFile); }
 				break;
 			}
 		}
@@ -789,7 +791,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		close(slave2master[0]);
 		close(master2slave[1]);
 
-		logFile = fopen("/tmp/slave", "w");
+		if (SLAVELOG != 0) { logFile = fopen("/tmp/slave", "w"); }
 		if (uid != 0) { ignore_result(setuid(uid)); }
 
 		//fprintf(logFile, "Starting kvm_server_mainloop\n");
@@ -799,7 +801,8 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		kvm_server_mainloop((void*)0);
 		return(NULL);
 	}
-	else { //master
+	else 
+	{ //master
 		close(slave2master[1]);
 		close(master2slave[0]);
 		logFile = fopen("/tmp/master", "w");
