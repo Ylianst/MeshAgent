@@ -21,6 +21,27 @@ limitations under the License.
 #include <stdio.h>
 #include "input.h"
 
+#include "microstack/ILibCrypto.h"
+
+extern void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen);
+
+int CUR_CURRENT = 0;
+int CUR_APPSTARTING;
+int CUR_ARROW;
+int CUR_CROSS;
+int CUR_HAND;
+int CUR_HELP;
+int CUR_IBEAM;
+int CUR_NO;
+int CUR_SIZEALL;
+int CUR_SIZENESW;
+int CUR_SIZENS;
+int CUR_SIZENWSE;
+int CUR_SIZEWE;
+int CUR_UPARROW;
+int CUR_WAIT;
+
+
 /*
 #if defined(WIN32) && !defined(_WIN32_WCE)
 #define _CRTDBG_MAP_ALLOC
@@ -38,13 +59,72 @@ MOUSEEVENTF_MIDDLEUP		0x0040
 MOUSEEVENTF_DOUBLECLK		0x0088
 */
 
-void MouseAction(double absX, double absY, int button, short wheel)
+int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
+{
+	int crc = 0;
+	BITMAP bm;
+	ICONINFO ii;
+	
+	GetIconInfo(hc, &ii);
+	
+	if (GetObject(ii.hbmMask, sizeof(bm), &bm) == sizeof(bm))
+	{
+		//printf("CX: %ul, CY:%ul, Color: %ul, Showing: %d\n", bm.bmWidth, bm.bmHeight, ii.hbmColor, info.flags);
+		HDC hdcScreen = GetDC(NULL);
+		HDC hdcMem = CreateCompatibleDC(hdcScreen);
+		HBITMAP hbmCanvas = CreateCompatibleBitmap(hdcScreen, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2));
+		HGDIOBJ hbmold = SelectObject(hdcMem, hbmCanvas);
+		BITMAPINFO bmpInfo;
+		char *tmpBuffer;
+
+		ZeroMemory(&bmpInfo, sizeof(bmpInfo));
+		bmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bmpInfo.bmiHeader.biCompression = BI_RGB;
+
+		DrawIconEx(hdcMem, 0, 0, hc, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
+		GetDIBits(hdcScreen, hbmCanvas, 0, 0, NULL, &bmpInfo, DIB_RGB_COLORS);
+		tmpBuffer = (char*)malloc(bmpInfo.bmiHeader.biSizeImage);
+		bmpInfo.bmiHeader.biCompression = BI_RGB;
+
+		GetDIBits(hdcScreen, hbmCanvas, 0, (UINT)(ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2)), tmpBuffer, &bmpInfo, DIB_RGB_COLORS);
+
+		crc = util_crc((unsigned char*)tmpBuffer, bmpInfo.bmiHeader.biSizeImage, 0);
+
+		SelectObject(hdcMem, hbmold);
+		ReleaseDC(NULL, hdcMem);
+		ReleaseDC(NULL, hdcScreen);
+	}
+
+	return(crc);
+}
+
+void KVM_InitMouseCursors()
+{
+	CUR_ARROW = KVM_GetCursorHash(LoadCursorA(NULL, IDC_ARROW), NULL, 0);					
+	CUR_APPSTARTING = KVM_GetCursorHash(LoadCursorA(NULL, IDC_APPSTARTING), NULL, 0);		
+	CUR_CROSS = KVM_GetCursorHash(LoadCursorA(NULL, IDC_CROSS), NULL, 0);					
+	CUR_HAND = KVM_GetCursorHash(LoadCursorA(NULL, IDC_HAND), NULL, 0);						
+	CUR_HELP = KVM_GetCursorHash(LoadCursorA(NULL, IDC_HELP), NULL, 0);						
+	CUR_IBEAM = KVM_GetCursorHash(LoadCursorA(NULL, IDC_IBEAM), NULL, 0);					
+	CUR_NO = KVM_GetCursorHash(LoadCursorA(NULL, IDC_NO), NULL, 0);							
+	CUR_SIZEALL = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZEALL), NULL, 0);				
+	CUR_SIZENESW = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZENESW), NULL, 0);				
+	CUR_SIZENS = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZENS), NULL, 0);					
+	CUR_SIZENWSE = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZENWSE), NULL, 0);				
+	CUR_SIZEWE = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZEWE), NULL, 0);					
+	CUR_UPARROW = KVM_GetCursorHash(LoadCursorA(NULL, IDC_UPARROW), NULL, 0);				
+	CUR_WAIT = KVM_GetCursorHash(LoadCursorA(NULL, IDC_WAIT), NULL, 0);						
+}
+
+KVM_MouseCursors MouseAction(double absX, double absY, int button, short wheel)
 {
 	INPUT mouse;
+	KVM_MouseCursors ret = KVM_MouseCursor_NOCHANGE;
 
-	if (button == 0x88) {
+	if (button == 0x88) 
+	{
 		// Double click indication, no nothing on windows.
-		return;
+		return(ret);
 	}
 
 	mouse.type = INPUT_MOUSE;
@@ -56,6 +136,73 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	mouse.mi.time = 0;
 	mouse.mi.dwExtraInfo = 0;
 	SendInput(1, &mouse, sizeof(INPUT));
+
+	CURSORINFO info = { 0 };
+	info.cbSize = sizeof(info);
+	GetCursorInfo(&info);
+	int i = KVM_GetCursorHash(info.hCursor, NULL, 0);
+
+	if (i != CUR_CURRENT)
+	{
+		CUR_CURRENT = i;
+		if (CUR_CURRENT == CUR_APPSTARTING)
+		{
+			ret = KVM_MouseCursor_APPSTARTING;
+		}
+		else if (CUR_CURRENT == CUR_ARROW)
+		{
+			ret = KVM_MouseCursor_ARROW;
+		}
+		else if (CUR_CURRENT == CUR_CROSS)
+		{
+			ret = KVM_MouseCursor_CROSS;
+		}
+		else if (CUR_CURRENT == CUR_HAND)
+		{
+			ret = KVM_MouseCursor_HAND;
+		}
+		else if (CUR_CURRENT == CUR_HELP)
+		{
+			ret = KVM_MouseCursor_HELP;
+		}
+		else if (CUR_CURRENT == CUR_IBEAM)
+		{
+			ret = KVM_MouseCursor_IBEAM;
+		}
+		else if (CUR_CURRENT == CUR_NO)
+		{
+			ret = KVM_MouseCursor_NO;
+		}
+		else if (CUR_CURRENT == CUR_SIZEALL)
+		{
+			ret = KVM_MouseCursor_SIZEALL;
+		}
+		else if (CUR_CURRENT == CUR_SIZENESW)
+		{
+			ret = KVM_MouseCursor_SIZENESW;
+		}
+		else if (CUR_CURRENT == CUR_SIZENS)
+		{
+			ret = KVM_MouseCursor_SIZENS;
+		}
+		else if (CUR_CURRENT == CUR_SIZENWSE)
+		{
+			ret = KVM_MouseCursor_SIZENWSE;
+		}
+		else if (CUR_CURRENT == CUR_SIZEWE)
+		{
+			ret = KVM_MouseCursor_SIZEWE;
+		}
+		else if (CUR_CURRENT == CUR_UPARROW)
+		{
+			ret = KVM_MouseCursor_UPARROW;
+		}
+		else if (CUR_CURRENT == CUR_WAIT)
+		{
+			ret = KVM_MouseCursor_WAIT;
+		}
+	}
+	return(ret);
 }
 
 

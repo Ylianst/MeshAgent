@@ -16,7 +16,27 @@ limitations under the License.
 
 #if defined(_LINKVM)
 
-void MouseAction(double absX, double absY, int button, short wheel);
+typedef enum KVM_MouseCursors
+{
+	KVM_MouseCursor_NOCHANGE	= -1,
+	KVM_MouseCursor_ARROW		= 0, 
+	KVM_MouseCursor_APPSTARTING = 1,
+	KVM_MouseCursor_CROSS 		= 2,
+	KVM_MouseCursor_HAND		= 3,
+	KVM_MouseCursor_HELP		= 4,
+	KVM_MouseCursor_IBEAM 		= 5,
+	KVM_MouseCursor_NO 			= 6,
+	KVM_MouseCursor_SIZEALL 	= 7,
+	KVM_MouseCursor_SIZENESW 	= 8,
+	KVM_MouseCursor_SIZENS		= 9,
+	KVM_MouseCursor_SIZENWSE	= 10,
+	KVM_MouseCursor_SIZEWE 		= 11,
+	KVM_MouseCursor_UPARROW		= 12,
+	KVM_MouseCursor_WAIT		= 13
+}KVM_MouseCursors;
+
+void KVM_InitMouseCursors();
+KVM_MouseCursors MouseAction(double absX, double absY, int button, short wheel);
 void KeyAction(unsigned char keycode, int up);
 int TouchInit();
 void TouchUnInit();

@@ -490,6 +490,8 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 		{
 			double x, y;
 			short w = 0;
+			KVM_MouseCursors curcursor = KVM_MouseCursor_NOCHANGE;
+
 			if (size == 10 || size == 12)
 			{
 				// Get positions and scale correctly
@@ -506,7 +508,15 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 
 				// Perform the mouse movement
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
-				MouseAction((((double)x / (double)SCREEN_WIDTH)), (((double)y / (double)SCREEN_HEIGHT)), (int)(unsigned char)(block[5]), w);
+				curcursor = MouseAction((((double)x / (double)SCREEN_WIDTH)), (((double)y / (double)SCREEN_HEIGHT)), (int)(unsigned char)(block[5]), w);
+				if (curcursor != KVM_MouseCursor_NOCHANGE)
+				{
+					char buffer[8];
+					((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+					((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+					buffer[4] = (char)curcursor;																// Cursor Type
+					writeHandler((char*)buffer, 5, reserved);
+				}
 			}
 			break;
 		}
@@ -786,6 +796,7 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)parm)[0];
 	void *reserved = ((void**)parm)[1];
 
+	KVM_InitMouseCursors();
 
 #ifdef _WINSERVICE
 	if (!kvmConsoleMode)
