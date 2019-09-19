@@ -205,7 +205,20 @@ function monitorinfo()
 
     if(process.platform == 'linux' || process.platform == 'freebsd')
     {
-        Object.defineProperty(this, 'kvm_x11_support', { value: (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)?true:false });
+        if (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)
+        {
+            var ch = require('child_process').execFile('/bin/sh', ['sh']);
+            ch.stderr.on('data', function () { });
+            ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
+            ch.stdin.write('ps -e | grep X\nexit\n');
+            ch.waitExit();
+            Object.defineProperty(this, 'kvm_x11_support', { value: ch.stdout.str.trim() == '' ? false : true });
+        }
+        else
+        {
+            Object.defineProperty(this, 'kvm_x11_support', { value: false });
+        }
+
 
         if (this.Location_X11LIB)
         {

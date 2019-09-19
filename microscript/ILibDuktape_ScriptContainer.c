@@ -2986,7 +2986,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 	}
 
 #ifdef WIN32
-	ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child));
+	if (master->child != NULL) { ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child)); }
 #endif
 }
 void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
