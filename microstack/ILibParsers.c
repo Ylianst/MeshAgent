@@ -2782,7 +2782,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 #else
 	if (pipe(chain->WatchDogTerminator) == 0)
 	{
-		flags = fcntl(chain->WatchDogTerminator[0], F_GETFL, 0);
+		int flags = fcntl(chain->WatchDogTerminator[0], F_GETFL, 0);
 		fcntl(chain->WatchDogTerminator[0], F_SETFL, O_NONBLOCK | flags);
 #ifndef _NOILIBSTACKDEBUG
 		signal(SIGUSR1, ILib_POSIX_CrashHandler);
