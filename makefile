@@ -126,7 +126,7 @@ LDFLAGS ?= -L. -lpthread -ldl -lutil -lm
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
-
+WatchDog = 6000000
 SKIPFLAGS = 0
 ifeq ($(AID), 7)
 SKIPFLAGS = 1
@@ -328,7 +328,7 @@ ifeq ($(WEBRTCDEBUG),1)
 CFLAGS += -D_WEBRTCDEBUG
 endif
 
-ifneq ($(WatchDog),)
+ifneq ($(WatchDog),0)
 CWATCHDOG := -DILibChain_WATCHDOG_TIMEOUT=$(WatchDog)
 endif
 
