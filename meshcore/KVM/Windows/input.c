@@ -83,13 +83,13 @@ int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
 
 		DrawIconEx(hdcMem, 0, 0, hc, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
 		GetDIBits(hdcScreen, hbmCanvas, 0, 0, NULL, &bmpInfo, DIB_RGB_COLORS);
-		tmpBuffer = (char*)malloc(bmpInfo.bmiHeader.biSizeImage);
+		if ((tmpBuffer = (char*)malloc(bmpInfo.bmiHeader.biSizeImage)) == NULL) { ILIBCRITICALEXIT(254); }
+
 		bmpInfo.bmiHeader.biCompression = BI_RGB;
-
 		GetDIBits(hdcScreen, hbmCanvas, 0, (UINT)(ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2)), tmpBuffer, &bmpInfo, DIB_RGB_COLORS);
-
 		crc = util_crc((unsigned char*)tmpBuffer, bmpInfo.bmiHeader.biSizeImage, 0);
 
+		free(tmpBuffer);
 		SelectObject(hdcMem, hbmold);
 		ReleaseDC(NULL, hdcMem);
 		ReleaseDC(NULL, hdcScreen);
