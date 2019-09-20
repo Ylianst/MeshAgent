@@ -2596,7 +2596,7 @@ void ILibChain_WatchDogStart(void *obj)
 	tv.tv_usec = 0;
 	tv.tv_sec = ILibChain_WATCHDOG_TIMEOUT / 1000;
 #endif
-	int Pre1=0, Pre2=0, Post1=0, Post2=0;
+	int Pre1 = 0, Pre2 = 0, Post1 = 0;
 	sprintf_s(msg, sizeof(msg), "Microstack STUCK: @ ");
 	
 #ifdef WIN32
@@ -2647,7 +2647,6 @@ void ILibChain_WatchDogStart(void *obj)
 			else
 			{
 				Pre2 = Pre1;
-				Post2 = Post1;
 			}
 		}
 	}
