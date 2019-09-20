@@ -35,6 +35,27 @@ limitations under the License.
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 
+
+typedef enum KVM_MouseCursors
+{
+	KVM_MouseCursor_NOCHANGE = -1,
+	KVM_MouseCursor_ARROW = 0,
+	KVM_MouseCursor_APPSTARTING = 1,
+	KVM_MouseCursor_CROSS = 2,
+	KVM_MouseCursor_HAND = 3,
+	KVM_MouseCursor_HELP = 4,
+	KVM_MouseCursor_IBEAM = 5,
+	KVM_MouseCursor_NO = 6,
+	KVM_MouseCursor_SIZEALL = 7,
+	KVM_MouseCursor_SIZENESW = 8,
+	KVM_MouseCursor_SIZENS = 9,
+	KVM_MouseCursor_SIZENWSE = 10,
+	KVM_MouseCursor_SIZEWE = 11,
+	KVM_MouseCursor_UPARROW = 12,
+	KVM_MouseCursor_WAIT = 13
+}KVM_MouseCursors;
+
+
 int SLAVELOG = 0;
 
 int SCREEN_NUM = 0;
@@ -89,8 +110,25 @@ typedef struct x11_struct
 	int(*XFlush)(Display *d);
 	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
 	Bool(*XQueryExtension)(Display *d, char *name, int* maj, int *firstev, int *firsterr);
+
+	int(*XConnectionNumber)(Display *d);
+	char*(*XGetAtomName)(Display *d, Atom atom);
+	void(*XNextEvent)(Display *d, XEvent *event_return);
+	int(*XPending)(Display *d);
+	Window(*XRootWindow)(Display *d, int screen_number);
+	void(*XSync)(Display *d, Bool discard);
+	void(*XFree)(void *data);
 }x11_struct;
 x11_struct *x11_exports = NULL;
+
+typedef struct xfixes_struct
+{
+	void *xfixes_lib;
+	Bool(*XFixesSelectCursorInput)(Display *d, Window w, int i);
+	Bool(*XFixesQueryExtension)(Display *d, int *eventbase, int *errorbase);
+}xfixes_struct;
+xfixes_struct *xfixes_exports = NULL;
+
 
 void kvm_send_error(char *msg)
 {
@@ -261,11 +299,13 @@ void kvm_send_display_list()
 char Location_X11LIB[NAME_MAX];
 char Location_X11TST[NAME_MAX];
 char Location_X11EXT[NAME_MAX];
-void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext)
+char Location_X11FIXES[NAME_MAX];
+void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char *libxfixes)
 {
 	if (libx11 != NULL) { strcpy_s(Location_X11LIB, sizeof(Location_X11LIB), libx11); } else { strcpy_s(Location_X11LIB, sizeof(Location_X11LIB), "libX11.so"); }
 	if (libx11tst != NULL) { strcpy_s(Location_X11TST, sizeof(Location_X11TST), libx11tst); } else { strcpy_s(Location_X11TST, sizeof(Location_X11TST), "libXtst.so"); }
-	if (libx11ext != NULL) { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), libx11ext); } else { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), "libXext.so"); }
+	if (libx11ext != NULL) { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), libx11ext); } else { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), "libXext.so"); }		
+	if (libxfixes != NULL) { strcpy_s(Location_X11FIXES, sizeof(Location_X11FIXES), libxfixes); } else { strcpy_s(Location_X11FIXES, sizeof(Location_X11FIXES), "libXfixes.so"); }
 }
 
 int kvm_init(int displayNo)
@@ -311,10 +351,29 @@ int kvm_init(int displayNo)
 			((void**)x11_exports)[4] = (void*)dlsym(x11_exports->x11_lib, "XKeysymToKeycode");
 			((void**)x11_exports)[5] = (void*)dlsym(x11_exports->x11_lib, "XQueryExtension");
 
+			((void**)x11_exports)[6] = (void*)dlsym(x11_exports->x11_lib, "XConnectionNumber");
+			((void**)x11_exports)[7] = (void*)dlsym(x11_exports->x11_lib, "XGetAtomName");
+			((void**)x11_exports)[8] = (void*)dlsym(x11_exports->x11_lib, "XNextEvent");
+			((void**)x11_exports)[9] = (void*)dlsym(x11_exports->x11_lib, "XPending");
+			((void**)x11_exports)[10] = (void*)dlsym(x11_exports->x11_lib, "XRootWindow");
+			((void**)x11_exports)[11] = (void*)dlsym(x11_exports->x11_lib, "XSync");
+			((void**)x11_exports)[12] = (void*)dlsym(x11_exports->x11_lib, "XFree");
+
 			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
 			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
 		}
 	}
+	if (xfixes_exports == NULL)
+	{
+		xfixes_exports = ILibMemory_SmartAllocate(sizeof(xfixes_struct));
+		xfixes_exports->xfixes_lib = dlopen(Location_X11FIXES, RTLD_NOW);
+		if (xfixes_exports->xfixes_lib)
+		{
+			((void**)xfixes_exports)[1] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesSelectCursorInput");
+			((void**)xfixes_exports)[2] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesQueryExtension");
+		}
+	}
+
 
 	sprintf(displayString, ":%d", (int)displayNo);
 
@@ -526,14 +585,20 @@ void* kvm_server_mainloop(void* parm)
 	void *desktop = NULL;
 	XImage *image = NULL;
 	eventdisplay = NULL;
-	Display *imagedisplay = NULL;
+	Display *imagedisplay = NULL, *cursordisplay = NULL;
 	void *buf = NULL;
 	char displayString[256] = "";
+	int event_base = 0, error_base = 0, cursor_descriptor = -1;
 	int screen_height, screen_width, screen_depth, screen_num;
 	ssize_t written;
 	XShmSegmentInfo shminfo;
 	default_JPEG_error_handler = kvm_server_jpegerror;
 
+	struct timeval tv;
+	fd_set readset;
+	fd_set errorset;
+	fd_set writeset;
+	XEvent XE;
 
 	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)
@@ -592,7 +657,8 @@ void* kvm_server_mainloop(void* parm)
 
 		count = 0;
 
-		if (imagedisplay == NULL && count++ < 100) {
+		if (imagedisplay == NULL && count++ < 100) 
+		{
 			change_display = 1;
 			if (getNextDisplay() == -1) { return (void*)-1; }
 			//fprintf(logFile, "Before kvm_init1.\n"); fflush(logFile);
@@ -604,6 +670,86 @@ void* kvm_server_mainloop(void* parm)
 		}
 
 		if (count == 100 && imagedisplay == NULL) { g_shutdown = 1; break; }
+		if (cursordisplay == NULL)
+		{
+			if ((cursordisplay = x11_exports->XOpenDisplay(displayString)))
+			{
+				Window rootwin = x11_exports->XRootWindow(cursordisplay, 0);
+				if (xfixes_exports->XFixesQueryExtension(cursordisplay, &event_base, &error_base))
+				{
+					xfixes_exports->XFixesSelectCursorInput(cursordisplay, rootwin, 1); // Register for Cursor Change Notifications
+					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
+					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Get the FD to use in select
+				}
+			}
+		}
+		else if (cursor_descriptor > 0)
+		{
+			FD_ZERO(&readset);
+			FD_ZERO(&errorset);
+			FD_ZERO(&writeset);
+			tv.tv_sec = 0;
+			tv.tv_usec = 0;
+			FD_SET(cursor_descriptor, &readset);
+			if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(cursor_descriptor, &readset))
+			{
+				// We have a waiting event
+				while (x11_exports->XPending(cursordisplay))
+				{					
+					x11_exports->XNextEvent(cursordisplay, &XE);
+					if (XE.type == (event_base + 1))
+					{
+						if (sizeof(void*) == 8)
+						{
+							// 64bit
+							if (((uint64_t*)((char*)&XE + 64))[0] == 0)
+							{
+								continue; // Atom is NULL
+							}
+						}
+						else
+						{
+							// 32bit
+							if (((uint32_t*)((char*)&XE + 32))[0] == 0)
+							{
+								continue; // Atom is NULL
+							}
+						}
+
+						char buffer[8];
+						Atom cursor_atom = ((Atom*)((char*)&XE + (sizeof(void*) == 8 ? 64 : 32)))[0];
+						char *name = x11_exports->XGetAtomName(cursordisplay, cursor_atom);
+						int curcursor = KVM_MouseCursor_HELP;
+
+						if (name != NULL)
+						{
+							if (strcmp(name, "bottom_left_corner") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "bottom_right_corner") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "bottom_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
+							if (strcmp(name, "fleur") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
+							if (strcmp(name, "hand1") == 0) { curcursor = KVM_MouseCursor_HAND; }
+							if (strcmp(name, "hand2") == 0) { curcursor = KVM_MouseCursor_HAND; }
+							if (strcmp(name, "left_ptr") == 0) { curcursor = KVM_MouseCursor_ARROW; }
+							if (strcmp(name, "left_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "right_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "top_left_corner") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "top_right_corner") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
+							if (strcmp(name, "watch") == 0) { curcursor = KVM_MouseCursor_WAIT; }
+							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
+							if (strcmp(name, "xterm") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
+							x11_exports->XFree(name);
+
+							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+							buffer[4] = (char)curcursor;																// Cursor Type
+							written = write(slave2master[1], buffer, 5);
+							fsync(slave2master[1]);
+						}
+					}
+				}
+			}
+		}
 
 		screen_num = DefaultScreen(imagedisplay);
 		screen_height = DisplayHeight(imagedisplay, screen_num);
@@ -702,6 +848,13 @@ void* kvm_server_mainloop(void* parm)
 
 	x11_exports->XCloseDisplay(eventdisplay);
 	eventdisplay  = NULL;
+
+	if (cursordisplay != NULL)
+	{
+		x11_exports->XCloseDisplay(cursordisplay);
+		cursordisplay = NULL;
+	}
+
 	pthread_join(kvmthread, NULL);
 	kvmthread = (pthread_t)NULL;
 	if (g_tileInfo != NULL)

@@ -120,6 +120,7 @@ function monitorinfo()
             var x11info = getLibInfo('libX11');
             var xtstinfo = getLibInfo('libXtst');
             var xextinfo = getLibInfo('libXext');
+            var xfixesinfo = getLibInfo('libXfixes');
             var ix;
 
             for(ix in x11info)
@@ -158,6 +159,18 @@ function monitorinfo()
                 {
                 }
             }
+            for (ix in xfixesinfo)
+            {
+                try
+                {
+                    this._gm.CreateNativeProxy(xfixesinfo[ix].path);
+                    Object.defineProperty(this, 'Location_X11FIXES', { value: xfixesinfo[ix].path });
+                    break;
+                }
+                catch (ex)
+                {
+                }
+            }
         }
         else
         {
@@ -177,6 +190,10 @@ function monitorinfo()
                     if (files[i].split('libXext.so.').length > 1 && files[i].split('.').length == 3) {
                         Object.defineProperty(this, 'Location_X11EXT', { value: '/usr/lib/' + files[i] });
                     }
+                    if (files[i].split('libXfixes.so.').length > 1 && files[i].split('.').length == 3)
+                    {
+                        Object.defineProperty(this, 'Location_X11FIXES', { value: '/usr/lib/' + files[i] });
+                    }
 
                     if (files[i].split('-linux-').length > 1) {
                         files2 = fs.readdirSync('/usr/lib/' + files[i]);
@@ -190,6 +207,10 @@ function monitorinfo()
                             if (files2[j].split('libXext.so.').length > 1 && files2[j].split('.').length == 3) {
                                 Object.defineProperty(this, 'Location_X11EXT', { value: '/usr/lib/' + files[i] + '/' + files2[j] });
                             }
+                            if (files2[j].split('libXfixes.so.').length > 1 && files2[j].split('.').length == 3)
+                            {
+                                Object.defineProperty(this, 'Location_X11FIXES', { value: '/usr/lib/' + files[i] + '/' + files2[j] });
+                            }
                         }
                     }
                 } catch (ex) { }
@@ -198,9 +219,10 @@ function monitorinfo()
     }
     if(process.platform == 'freebsd')
     {
-	Object.defineProperty(this, 'Location_X11LIB', { value: require('lib-finder')('libX11')[0]?require('lib-finder')('libX11')[0].location: undefined });
-	Object.defineProperty(this, 'Location_X11TST', { value: require('lib-finder')('libXtst')[0]?require('lib-finder')('libXtst')[0].location:undefined });
-	Object.defineProperty(this, 'Location_X11EXT', { value: require('lib-finder')('libXext')[0]?require('lib-finder')('libXext')[0].location:undefined });
+	    Object.defineProperty(this, 'Location_X11LIB', { value: require('lib-finder')('libX11')[0]?require('lib-finder')('libX11')[0].location: undefined });
+	    Object.defineProperty(this, 'Location_X11TST', { value: require('lib-finder')('libXtst')[0]?require('lib-finder')('libXtst')[0].location:undefined });
+	    Object.defineProperty(this, 'Location_X11EXT', { value: require('lib-finder')('libXext')[0] ? require('lib-finder')('libXext')[0].location : undefined });
+	    Object.defineProperty(this, 'Location_X11FIXES', { value: require('lib-finder')('libXfixes')[0] ? require('lib-finder')('libXfixes')[0].location : undefined });
     }
 
     if(process.platform == 'linux' || process.platform == 'freebsd')
@@ -240,6 +262,7 @@ function monitorinfo()
             this._X11.CreateMethod('XFlush');
             this._X11.CreateMethod('XFree');
             this._X11.CreateMethod('XCreateGC');
+            this._X11.CreateMethod('XGetAtomName');
             this._X11.CreateMethod('XGetWindowProperty');
             this._X11.CreateMethod('XInternAtom');
             this._X11.CreateMethod('XMapWindow');

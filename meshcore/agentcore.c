@@ -1423,7 +1423,8 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		char *libx11 = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11LIB", NULL);
 		char *libx11tst = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11TST", NULL);
 		char *libx11ext = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11EXT", NULL);
-		kvm_set_x11_locations(libx11, libx11tst, libx11ext);
+		char *libxfixes = Duktape_GetStringPropertyValue(ctx, -1, "Location_X11FIXES", NULL);
+		kvm_set_x11_locations(libx11, libx11tst, libx11ext, libxfixes);
 	}
 #endif
 
