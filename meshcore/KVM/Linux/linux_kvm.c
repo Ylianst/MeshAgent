@@ -716,7 +716,7 @@ void* kvm_server_mainloop(void* parm)
 							// 32bit
 							if (((uint32_t*)((char*)&XE + 32))[0] != 0)
 							{
-								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 64))[0]);
+								name = x11_exports->XGetAtomName(cursordisplay, ((Atom*)((char*)&XE + 32))[0]);
 							}
 						}
 					
