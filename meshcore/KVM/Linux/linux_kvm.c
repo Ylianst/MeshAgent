@@ -727,7 +727,8 @@ void* kvm_server_mainloop(void* parm)
 							if (strcmp(name, "bottom_right_corner") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "bottom_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "fleur") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
-							if (strcmp(name, "hand1") == 0) { curcursor = KVM_MouseCursor_HAND; }
+							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0) { curcursor = 
+KVM_MouseCursor_HAND; }
 							if (strcmp(name, "hand2") == 0) { curcursor = KVM_MouseCursor_HAND; }
 							if (strcmp(name, "left_ptr") == 0) { curcursor = KVM_MouseCursor_ARROW; }
 							if (strcmp(name, "left_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
