@@ -751,15 +751,17 @@ void* kvm_server_mainloop(void* parm)
 								unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
 								unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
 								char *pixels = cursor_image + 24;
-								char alpha[1024];
+								char alpha[65535];
 								int i;
 
-								for (i = 0; i < (w*h); ++i)
+								if ((size_t)(w*h) <= sizeof(alpha))
 								{
-									alpha[i] = pixels[7 + (i * 8)];
-								}
-								switch (crc32c(0, (unsigned char*)alpha, (uint32_t)(w*h)))
-								{
+									for (i = 0; i < (w*h); ++i)
+									{
+										alpha[i] = pixels[7 + (i * 8)];
+									}
+									switch (crc32c(0, (unsigned char*)alpha, (uint32_t)(w*h)))
+									{
 									case 680869104:
 										curcursor = KVM_MouseCursor_SIZENS;
 										break;
@@ -780,6 +782,7 @@ void* kvm_server_mainloop(void* parm)
 									case 728953462:
 										curcursor = KVM_MouseCursor_ARROW;
 										break;
+									}
 								}
 							}
 						}
