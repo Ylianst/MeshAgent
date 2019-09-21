@@ -739,13 +739,13 @@ void* kvm_server_mainloop(void* parm)
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
 							x11_exports->XFree(name);
-
-							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-							buffer[4] = (char)curcursor;																// Cursor Type
-							written = write(slave2master[1], buffer, 5);
-							fsync(slave2master[1]);
 						}
+
+						((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+						((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+						buffer[4] = (char)curcursor;																// Cursor Type
+						written = write(slave2master[1], buffer, 5);
+						fsync(slave2master[1]);
 					}
 				}
 			}
