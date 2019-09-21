@@ -699,26 +699,26 @@ void* kvm_server_mainloop(void* parm)
 					x11_exports->XNextEvent(cursordisplay, &XE);
 					if (XE.type == (event_base + 1))
 					{
+						char buffer[8];
+						Atom cursor_atom = NULL;
 						if (sizeof(void*) == 8)
 						{
 							// 64bit
-							if (((uint64_t*)((char*)&XE + 64))[0] == 0)
+							if (((uint64_t*)((char*)&XE + 64))[0] != 0)
 							{
-								continue; // Atom is NULL
+								cursor_atom = ((Atom*)((char*)&XE + 64))[0];
 							}
 						}
 						else
 						{
 							// 32bit
-							if (((uint32_t*)((char*)&XE + 32))[0] == 0)
+							if (((uint32_t*)((char*)&XE + 32))[0] != 0)
 							{
-								continue; // Atom is NULL
+								cursor_atom = ((Atom*)((char*)&XE + 32))[0];
 							}
 						}
-
-						char buffer[8];
-						Atom cursor_atom = ((Atom*)((char*)&XE + (sizeof(void*) == 8 ? 64 : 32)))[0];
-						char *name = x11_exports->XGetAtomName(cursordisplay, cursor_atom);
+					
+						char *name = cursor_atom != NULL ? (x11_exports->XGetAtomName(cursordisplay, cursor_atom)) : NULL;
 						int curcursor = KVM_MouseCursor_HELP;
 
 						if (name != NULL)
