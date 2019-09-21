@@ -34,7 +34,7 @@ limitations under the License.
 
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
-
+extern uint32_t crc32c(uint32_t crc, const unsigned char* buf, uint32_t len);
 
 typedef enum KVM_MouseCursors
 {
@@ -126,6 +126,7 @@ typedef struct xfixes_struct
 	void *xfixes_lib;
 	Bool(*XFixesSelectCursorInput)(Display *d, Window w, int i);
 	Bool(*XFixesQueryExtension)(Display *d, int *eventbase, int *errorbase);
+	void*(*XFixesGetCursorImage)(Display *d);
 }xfixes_struct;
 xfixes_struct *xfixes_exports = NULL;
 
@@ -371,6 +372,7 @@ int kvm_init(int displayNo)
 		{
 			((void**)xfixes_exports)[1] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesSelectCursorInput");
 			((void**)xfixes_exports)[2] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesQueryExtension");
+			((void**)xfixes_exports)[3] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesGetCursorImage");
 		}
 	}
 
@@ -737,8 +739,49 @@ void* kvm_server_mainloop(void* parm)
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "watch") == 0) { curcursor = KVM_MouseCursor_WAIT; }
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
-							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
+							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
 							x11_exports->XFree(name);
+						}
+						else
+						{
+							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
+							char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
+							if (sizeof(void*) == 8)
+							{
+								unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
+								unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
+								char *pixels = cursor_image + 24;
+								char alpha[1024];
+								int i;
+
+								for (i = 0; i < (w*h); ++i)
+								{
+									alpha[i] = pixels[7 + (i * 8)];
+								}
+								switch (crc32c(0, (unsigned char*)alpha, (uint32_t)(w*h)))
+								{
+									case 680869104:
+										curcursor = KVM_MouseCursor_SIZENS;
+										break;
+									case 1094213267:
+										curcursor = KVM_MouseCursor_SIZEWE;
+										break;
+									case 318345513:
+									case 69513426:
+										curcursor = KVM_MouseCursor_SIZENESW;
+										break;
+									case (uint32_t)-1187377452:
+									case (uint32_t)-600127498:
+										curcursor = KVM_MouseCursor_SIZENWSE;
+										break;
+									case 733076101:
+										curcursor = KVM_MouseCursor_SIZEALL;
+										break;
+									case 728953462:
+										curcursor = KVM_MouseCursor_ARROW:
+										break;
+								}
+							}
 						}
 
 						((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
