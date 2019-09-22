@@ -763,23 +763,28 @@ void* kvm_server_mainloop(void* parm)
 									switch (crc32c(0, (unsigned char*)alpha, (uint32_t)(w*h)))
 									{
 									case 680869104:
+									case 503303936:
 										curcursor = KVM_MouseCursor_SIZENS;
 										break;
 									case 1094213267:
+									case 723082922:
 										curcursor = KVM_MouseCursor_SIZEWE;
 										break;
 									case 318345513:
 									case 69513426:
+									case 152373933:
 										curcursor = KVM_MouseCursor_SIZENESW;
 										break;
 									case (uint32_t)-1187377452:
 									case (uint32_t)-600127498:
+									case (uint32_t)-2000746020:
 										curcursor = KVM_MouseCursor_SIZENWSE;
 										break;
 									case 733076101:
 										curcursor = KVM_MouseCursor_SIZEALL;
 										break;
 									case 728953462:
+									case 310104114:
 										curcursor = KVM_MouseCursor_ARROW;
 										break;
 									}
