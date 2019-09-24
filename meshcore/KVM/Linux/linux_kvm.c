@@ -781,6 +781,7 @@ void* kvm_server_mainloop(void* parm)
 										curcursor = KVM_MouseCursor_SIZENWSE;
 										break;
 									case 733076101:
+									case 261159321:
 										curcursor = KVM_MouseCursor_SIZEALL;
 										break;
 									case 728953462:
