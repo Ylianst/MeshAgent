@@ -320,7 +320,7 @@ CFLAGS += -D_LINKVM
 			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
 		endif
 	endif
-		BSDFLAGS = /usr/local/lib/libjpeg.a
+	BSDFLAGS = /usr/local/lib/libjpeg.a
 endif
 
 ifeq ($(LMS),0)
