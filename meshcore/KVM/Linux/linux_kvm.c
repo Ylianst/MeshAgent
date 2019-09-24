@@ -762,32 +762,32 @@ void* kvm_server_mainloop(void* parm)
 									}
 									switch (crc32c(0, (unsigned char*)alpha, (uint32_t)(w*h)))
 									{
-									case 680869104:
-									case 503303936:
-										curcursor = KVM_MouseCursor_SIZENS;
-										break;
-									case 1094213267:
-									case 723082922:
-										curcursor = KVM_MouseCursor_SIZEWE;
-										break;
-									case 318345513:
-									case 69513426:
-									case 152373933:
-										curcursor = KVM_MouseCursor_SIZENESW;
-										break;
-									case (uint32_t)-1187377452:
-									case (uint32_t)-600127498:
-									case (uint32_t)-2000746020:
-										curcursor = KVM_MouseCursor_SIZENWSE;
-										break;
-									case 733076101:
-									case 261159321:
-										curcursor = KVM_MouseCursor_SIZEALL;
-										break;
-									case 728953462:
-									case 310104114:
-										curcursor = KVM_MouseCursor_ARROW;
-										break;
+										case 680869104:				// FreeBSD
+										case 503303936:				// openSUSE
+											curcursor = KVM_MouseCursor_SIZENS;
+											break;
+										case 1094213267:			// FreeBSD
+										case 723082922:				// openSUSE
+											curcursor = KVM_MouseCursor_SIZEWE;
+											break;
+										case 318345513:				// FreeBSD (Bottom Left)
+										case 69513426:				// FreeBSD (Upper Right)
+										case 152373933:				// openSUSE
+											curcursor = KVM_MouseCursor_SIZENESW;
+											break;
+										case (uint32_t)-1187377452:	// FreeBSD (Bottom Right)
+										case (uint32_t)-600127498:	// FreeBSD (Upper Left)
+										case (uint32_t)-2000746020:	// openSUSE
+											curcursor = KVM_MouseCursor_SIZENWSE;
+											break;
+										case 733076101:				// FreeBSD
+										case 261159321:				// openSUSE
+											curcursor = KVM_MouseCursor_SIZEALL;
+											break;
+										case 728953462:				// FreeBSD
+										case 310104114:				// openSUSE
+											curcursor = KVM_MouseCursor_ARROW;
+											break;
 									}
 								}
 							}
