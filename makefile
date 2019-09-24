@@ -354,9 +354,11 @@ ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
 CFLAGS += -g -D_DEBUG 
 STRIP = $(NOECHO) $(NOOP)
+SYMBOLCP = $(NOECHO) $(NOOP)
 else
 CFLAGS += -Os
 STRIP += ./$(EXENAME)_$(ARCHNAME)$(EXENAME2)
+SYMBOLCP = cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(EXENAME)_$(ARCHNAME)$(EXENAME2)_DEBUG
 endif
 
 ifeq ($(SSL_TRACE),1)
@@ -468,12 +470,15 @@ pi:
 
 linux:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA)"
+	$(SYMBOLCP)
 	$(STRIP)
 
 macos:
 	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(SYMBOLCP)
 	$(STRIP)
 
 freebsd:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	$(SYMBOLCP)
 	$(STRIP)
