@@ -309,12 +309,16 @@ CFLAGS += -D_LINKVM
 		endif
 		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
 	else
-		ifeq ($(LEGACY_LD),1)
-			LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+		ifeq ($(NOTURBOJPEG),1)
+			LINUXFLAGS = -ljpeg
 		else
-			LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+			ifeq ($(LEGACY_LD),1)
+				LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+			else
+				LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
+			endif
+			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
 		endif
-		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
 	endif
 		BSDFLAGS = /usr/local/lib/libjpeg.a
 endif
