@@ -618,6 +618,16 @@ function UserSessions()
             if (child.stdout.str.length > 0) { return (child.stdout.str.trim()); }
             throw ('uid: ' + uid + ' NOT FOUND');
         };
+        this.getGroupname = function getGroupname(gid)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("getent group " + gid + " | awk -F: '{print $1}'\nexit\n");
+            child.waitExit();
+            if (child.stdout.str.length > 0) { return (child.stdout.str.trim()); }
+            throw ('gid: ' + gid + ' NOT FOUND');
+        };
         this.whoami = function whoami()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -730,6 +740,24 @@ function UserSessions()
             else
             {
                 throw ('uid: ' + uid + ' not found');
+            }
+        };
+        this.getGroupname = function getGroupname(gid)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stderr.str = '';
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("dscl . list /Groups PrimaryGroupID | grep " + gid + " | awk '{ if($2==" + gid + "){ print $1 }}'\nexit\n");
+            child.waitExit();
+            if(child.stdout.str.trim() != '')
+            {
+                return (child.stdout.str.trim());
+            }
+            else
+            {
+                throw ('gid: ' + gid + ' not found');
             }
         };
         this.consoleUid = function consoleUid()
