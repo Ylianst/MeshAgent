@@ -658,9 +658,8 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 	HANDLE h;
 	WIN32_FIND_DATAW data;
 	duk_size_t pathLen;
-	char *path = (char*)ILibDuktape_String_AsWide(ctx, 0, &pathLen);
-	//char *path = (char*)duk_require_string(ctx, 0);
 
+	char *path = (char*)ILibDuktape_String_AsWide(ctx, 0, &pathLen);
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 	struct dirent *dir;
@@ -676,16 +675,14 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 		if (wcscmp(data.cFileName, L".") != 0)
 		{
 			ILibDuktape_String_PushWideString(ctx, (char*)data.cFileName, 0);	// [retVal][val]
-			//duk_push_string(ctx, data.cFileName);			// [retVal][val]
-			duk_put_prop_index(ctx, -2, i++);				// [retVal]
+			duk_put_prop_index(ctx, -2, i++);									// [retVal]
 		}
 		while (FindNextFileW(h, &data))
 		{
 			if (wcscmp(data.cFileName, L"..") != 0)
 			{
 				ILibDuktape_String_PushWideString(ctx, (char*)data.cFileName, 0);	// [retVal][val]
-				//duk_push_string(ctx, data.cFileName);		// [retVal][val]
-				duk_put_prop_index(ctx, -2, i++);							// [retVal]
+				duk_put_prop_index(ctx, -2, i++);									// [retVal]
 			}
 		}
 		FindClose(h);
@@ -797,7 +794,10 @@ duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 	duk_push_string(ctx, ILibDuktape_fs_convertTime(result.st_atime, ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_put_prop_string(ctx, -2, "atime");
 
-	duk_push_int(ctx, result.st_mode);
+	duk_push_int(ctx, (int)result.st_uid); duk_put_prop_string(ctx, -2, "uid");
+	duk_push_int(ctx, (int)result.st_gid); duk_put_prop_string(ctx, -2, "gid");
+
+	duk_push_int(ctx, result.st_mode); 
 	ILibDuktape_CreateReadonlyProperty(ctx, "mode");
 
 	ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, FS_STAT_METHOD_RETVAL, S_ISDIR(result.st_mode) || S_ISBLK(result.st_mode) ? 1 : 0, "isDirectory", ILibDuktape_fs_statSyncEx, 0);
@@ -1612,7 +1612,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "openSync", ILibDuktape_fs_openSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "readSync", ILibDuktape_fs_readSync, 5);
 	ILibDuktape_CreateInstanceMethod(ctx, "writeSync", ILibDuktape_fs_writeSync, DUK_VARARGS);
-	ILibDuktape_CreateInstanceMethod(ctx, "readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
+#ifdef WIN32
+	ILibDuktape_CreateInstanceMethod(ctx, "_readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
+#endif
 	ILibDuktape_CreateInstanceMethod(ctx, "createWriteStream", ILibDuktape_fs_createWriteStream, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createReadStream", ILibDuktape_fs_createReadStream, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "statSync", ILibDuktape_fs_statSync, 1);
@@ -1691,6 +1693,26 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 								}\
 								throw ('not found');\
 							}\
+						}\
+						if(process.platform == 'win32')\
+						{\
+							exports._fixwinpath = function _fixwinpath(p) { return(p.split('/').join('\\\\')); };\
+							exports.readdirSync = function readdirSync(pathstr)\
+							{\
+								pathstr = exports._fixwinpath(pathstr);\
+								if(!pathstr.endsWith('*'))\
+								{\
+									if(pathstr.endsWith('\\\\'))\
+									{\
+										pathstr += '*';\
+									}\
+									else\
+									{\
+										pathstr += '\\\\*';\
+									}\
+								}\
+								return(exports._readdirSync(pathstr));\
+							};\
 						}";
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, copyFile, sizeof(copyFile) - 1);
 }
