@@ -1614,10 +1614,13 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "writeSync", ILibDuktape_fs_writeSync, DUK_VARARGS);
 #ifdef WIN32
 	ILibDuktape_CreateInstanceMethod(ctx, "_readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "_statSync", ILibDuktape_fs_statSync, 1);
+#else
+	ILibDuktape_CreateInstanceMethod(ctx, "readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "statSync", ILibDuktape_fs_statSync, 1);
 #endif
 	ILibDuktape_CreateInstanceMethod(ctx, "createWriteStream", ILibDuktape_fs_createWriteStream, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createReadStream", ILibDuktape_fs_createReadStream, DUK_VARARGS);
-	ILibDuktape_CreateInstanceMethod(ctx, "statSync", ILibDuktape_fs_statSync, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "readDrivesSync", ILibDuktape_fs_readDrivesSync, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "readFileSync", ILibDuktape_fs_readFileSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "existsSync", ILibDuktape_fs_existsSync, 1);
@@ -1697,6 +1700,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 						if(process.platform == 'win32')\
 						{\
 							exports._fixwinpath = function _fixwinpath(p) { return(p.split('/').join('\\\\')); };\
+							exports.statSync = function statSync(pathstr) { return(this._statSync(this._fixwinpath(pathstr))); };\
 							exports.readdirSync = function readdirSync(pathstr)\
 							{\
 								pathstr = exports._fixwinpath(pathstr);\
