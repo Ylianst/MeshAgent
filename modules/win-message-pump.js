@@ -16,7 +16,7 @@ limitations under the License.
 
 var WH_CALLWNDPROC = 4;
 var WM_QUIT =  0x0012;
-
+var WM_CLOSE = 0x0010;
 var GM = require('_GenericMarshal');
 
 function WindowsMessagePump(options)
@@ -171,6 +171,13 @@ function WindowsMessagePump(options)
         if (this._hwnd)
         {
             this._user32.PostMessageA(this._hwnd, WM_QUIT, 0, 0);
+        }
+    };
+    this.close = function close()
+    {
+        if (this._hwnd)
+        {
+            this._user32.PostMessageA(this._hwnd, WM_CLOSE, 0, 0);
         }
     };
 }
