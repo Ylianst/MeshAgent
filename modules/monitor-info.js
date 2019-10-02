@@ -472,13 +472,11 @@ function monitorinfo()
             return (ret);
         };
     }
-    else
-    {
-        throw (process.platform + ' not supported');
-    }
 }
 
-module.exports = new monitorinfo();
-
+if (process.platform != 'darwin')
+{
+    module.exports = new monitorinfo();
+}
 
 
