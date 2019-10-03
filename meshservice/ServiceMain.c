@@ -636,7 +636,6 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 		{
 			char *ipath = ILibMemory_Allocate(len, 0, NULL, NULL);
 			RegQueryValueExA(hKey, "ImagePath", NULL, NULL, ipath, &len);
-			printf("ImagePath: %s\n", ipath);
 
 			STARTUPINFOA info = { sizeof(info) };
 			PROCESS_INFORMATION processInfo;
