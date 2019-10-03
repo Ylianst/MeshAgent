@@ -23,6 +23,13 @@ var PBT_APMSUSPEND = 0x4;
 var PBT_APMRESUMESUSPEND = 0x7;
 var PBT_APMRESUMEAUTOMATIC = 0x12;
 var PBT_APMPOWERSTATUSCHANGE = 0xA;
+var PROCESS_QUERY_INFORMATION = 0x0400;
+var TOKEN_QUERY = 0x0008;
+var TokenUser = 1;
+var TokenType = 8;
+var TokenSessionId = 12;
+var ERROR_INSUFFICIENT_BUFFER = 122;
+var HEAP_ZERO_MEMORY = 0x00000008;
 
 var WTS_CONSOLE_CONNECT         = (0x1);
 var WTS_CONSOLE_DISCONNECT      = (0x2);
@@ -91,7 +98,8 @@ function UserSessions()
         this._kernel32 = this._marshal.CreateNativeProxy('Kernel32.dll');
         this._kernel32.CreateMethod('GetLastError');
         this._kernel32.CreateMethod('WTSGetActiveConsoleSessionId')
-        
+        this._kernel32.CreateMethod('CloseHandle');
+
         try
         {
             this._wts = this._marshal.CreateNativeProxy('Wtsapi32.dll');
@@ -128,6 +136,19 @@ function UserSessions()
             }
         }
         this._rpcrt.StringToUUID.us = this;
+
+        try
+        {
+            this._kernel32.CreateMethod('OpenProcess')
+            this._advapi.CreateMethod('OpenProcessToken');
+            this._advapi.CreateMethod('GetTokenInformation');
+            this._advapi.CreateMethod('LookupAccountSidW');
+            this._advapi.CreateMethod('OpenThreadToken');
+        }
+        catch(e)
+        {
+        }
+
 
         GUID_ACDC_POWER_SOURCE = this._rpcrt.StringToUUID('5d3e9a59-e9D5-4b00-a6bd-ff34ff516548');
         GUID_BATTERY_PERCENTAGE_REMAINING = this._rpcrt.StringToUUID('a7ad8041-b45a-4cae-87a3-eecbb468a9e1');
@@ -187,6 +208,46 @@ function UserSessions()
             }
             return admin;
         }
+        this.getProcessOwnerName = function getProcessOwnerName(pid)
+        {
+            var ret = null;
+            var name = this._marshal.CreateVariable(1024);
+            var domain = this._marshal.CreateVariable(1024);
+            var nameDomainLength = this._marshal.CreateVariable(4); nameDomainLength.toBuffer().writeUInt32LE(1024);
+            var bufferLength = this._marshal.CreateVariable(4);
+            var sidtype = this._marshal.CreateVariable(4);
+            var tokenuser = 0;
+            var token = this._marshal.CreatePointer();
+
+            var h = this._kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, 1, pid);
+            if (h.Val == 0) { throw ('Failed to query process id: ' + pid); }
+
+            if(this._advapi.OpenProcessToken(h, TOKEN_QUERY, token).Val==0)
+            {
+                this._kernel32.CloseHandle(h);
+                throw ('Failed to Query Process Token for pid: ' + pid);
+            }
+
+            var tsid = this._marshal.CreateVariable(4);
+            this._advapi.GetTokenInformation(token.Deref(), TokenSessionId, tsid, 4, bufferLength);
+            this._advapi.GetTokenInformation(token.Deref(), TokenUser, tokenuser, 0, bufferLength);
+            tokenuser = this._marshal.CreateVariable(bufferLength.toBuffer().readUInt32LE());
+
+            if (this._advapi.GetTokenInformation(token.Deref(), TokenUser, tokenuser, bufferLength.toBuffer().readUInt32LE(), bufferLength).Val == 0) { throw ('Internal Error'); }
+            if(this._advapi.LookupAccountSidW(0, tokenuser.Deref(), name, nameDomainLength, domain, nameDomainLength, sidtype).Val == 0)
+            {
+                throw ('Lookup Error');
+            }
+            else
+            {
+                name._size = 0; domain._size = 0;
+                ret = { name: name.Wide2UTF8, domain: domain.Wide2UTF8, tsid: tsid.toBuffer().readUInt32LE() };
+            }
+
+            this._kernel32.CloseHandle(token.Deref());
+            this._kernel32.CloseHandle(h);
+            return (ret);
+        };
 
         this.getSessionAttribute = function getSessionAttribute(sessionId, attr)
         {
