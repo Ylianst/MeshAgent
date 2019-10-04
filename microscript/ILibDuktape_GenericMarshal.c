@@ -1577,6 +1577,7 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 				// No need to context switch
 				duk_push_heapptr(refList[i]->emitter->ctx, refList[i]->emitter->object);										// [obj]
 				duk_del_prop_string(refList[i]->emitter->ctx, -1, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID);
+				duk_del_prop_string(refList[i]->emitter->ctx, -1, ILibDuktape_GenericMarshal_GlobalSet);
 				duk_pop(refList[i]->emitter->ctx);																				// ...
 				ILibDuktape_EventEmitter_SetupEmit(refList[i]->emitter->ctx, refList[i]->emitter->object, "GlobalCallback");	// [emit][this][GlobalCallback]
 				if (numParms > 0)
@@ -2043,6 +2044,7 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	duk_push_object(ctx);												// [obj]
 	duk_push_object(ctx);												// [obj][stashTable]
 	duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_StashTable);// [obj]
+	ILibDuktape_WriteID(ctx, "_GenericMarshal");
 
 	ILibDuktape_CreateInstanceMethod(ctx, "CreateVariable", ILibDuktape_GenericMarshal_CreateVariable, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "CreateCallbackProxy", ILibDuktape_GenericMarshal_CreateCallbackProxy, 2);
