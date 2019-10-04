@@ -33,7 +33,9 @@ function windows_notifybar_system(title)
 
     var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
 
-    require('events').EventEmitter.call(ret, true).createEvent('close');
+    require('events').EventEmitter.call(ret, true)
+        .createEvent('close')
+        .addMethod('close', function close() { this.child.kill(); });
 
     console.log('switching');
     ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-b64exec', script], { type: 1 });
@@ -55,7 +57,15 @@ function windows_notifybar_local(title)
 
     ret._promise.notifybar = ret;
     require('events').EventEmitter.call(ret, true)
-    .createEvent('close');
+        .createEvent('close')
+        .addMethod('close', function close()
+        {
+            for (var i in this._pumps)
+            {
+                this._pumps[i].removeAllListeners('exit');
+                this._pumps[i].close();
+            }
+        });
 
     ret._promise.then(function (m)
     {
