@@ -17,12 +17,17 @@ limitations under the License.
 var promise = require('promise');
 var PPosition = 4;
 var PSize = 8;
+var PMinSize = 1 << 4;
+var PMaxSize = 1 << 5;
 var _NET_WM_STATE_REMOVE = 0;    // remove/unset property
 var _NET_WM_STATE_ADD = 1;    // add/set property
 var _NET_WM_STATE_TOGGLE = 2;    // toggle property
 var SubstructureRedirectMask = (1 << 20);
 var SubstructureNotifyMask = (1 << 19);
-
+var PropModeReplace = 0;
+var XA_ATOM = 4;
+var MWM_HINTS_FUNCTIONS = (1 << 0);
+var MWM_HINTS_DECORATIONS =  (1 << 1);
 
 function getLibInfo(libname)
 {
@@ -227,6 +232,17 @@ function monitorinfo()
 
     if(process.platform == 'linux' || process.platform == 'freebsd')
     {
+        this.MOTIF_FLAGS = 
+        {
+            MWM_FUNC_ALL        : (1 << 0) ,
+            MWM_FUNC_RESIZE     : (1 << 1) ,
+            MWM_FUNC_MOVE       : (1 << 2) ,
+            MWM_FUNC_MINIMIZE   : (1 << 3) ,
+            MWM_FUNC_MAXIMIZE   : (1 << 4) ,
+            MWM_FUNC_CLOSE      : (1 << 5) 
+        };
+
+
         if (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)
         {
             var ch = require('child_process').execFile('/bin/sh', ['sh']);
@@ -282,6 +298,7 @@ function monitorinfo()
             this._X11.CreateMethod('XSetNormalHints');
             this._X11.CreateMethod('XSetSelectionOwner');
             this._X11.CreateMethod('XSetSubwindowMode');
+            this._X11.CreateMethod('XStoreName');
             this._X11.CreateMethod('XSync');
             this._X11.CreateMethod('XBlackPixel');
             this._X11.CreateMethod('XWhitePixel');
@@ -299,14 +316,45 @@ function monitorinfo()
             MwmHints.Deref(0, 4).toBuffer().writeUInt32LE(1 << 1);
             this._X11.XChangeProperty(display, window, mwmHintsProperty, mwmHintsProperty, 32, 0, MwmHints, 5);
         }
-        this.setWindowSizeHints = function setWindowSizeHints(display, window, x, y, width, height)
+        this.setAllowedActions = function setAllowedActions(display, window, flags)
+        {
+            /*
+                MWM_HINTS_FUNCTIONS = (1L << 0),
+                MWM_HINTS_DECORATIONS =  (1L << 1),
+
+                MWM_FUNC_ALL = (1L << 0),
+                MWM_FUNC_RESIZE = (1L << 1),
+                MWM_FUNC_MOVE = (1L << 2),
+                MWM_FUNC_MINIMIZE = (1L << 3),
+                MWM_FUNC_MAXIMIZE = (1L << 4),
+                MWM_FUNC_CLOSE = (1L << 5)
+            */
+
+            var MwmHints = this._gm.CreateVariable(40);
+            var mwmHintsProperty = this._X11.XInternAtom(display, this._gm.CreateVariable('_MOTIF_WM_HINTS'), 0);
+
+            MwmHints.Deref(0, 4).toBuffer().writeUInt32LE(MWM_HINTS_FUNCTIONS);
+            MwmHints.Deref(8, 4).toBuffer().writeUInt32LE(flags);
+
+            this._X11.XChangeProperty(display, window, mwmHintsProperty, mwmHintsProperty, 32, PropModeReplace, MwmHints, 5);
+        }
+        this.setWindowSizeHints = function setWindowSizeHints(display, window, x, y, width, height, minWidth, minHeight, maxWidth, maxHeight)
         {
             var sizeHints = this._gm.CreateVariable(80);
-            sizeHints.Deref(0, 4).toBuffer().writeUInt32LE(PPosition | PSize);
+            var spec = PPosition | PSize;
+            if (minWidth != null && minHeight != null) { spec |= PMinSize; }
+            if (maxWidth != null && maxHeight != null) { spec |= PMaxSize; }
+
+            sizeHints.Deref(0, 4).toBuffer().writeUInt32LE(spec);
             sizeHints.Deref(8, 4).toBuffer().writeUInt32LE(x);
             sizeHints.Deref(12, 4).toBuffer().writeUInt32LE(y);
             sizeHints.Deref(16, 4).toBuffer().writeUInt32LE(width);
             sizeHints.Deref(20, 4).toBuffer().writeUInt32LE(height);
+            if (minWidth != null) { sizeHints.Deref(24, 4).toBuffer().writeUInt32LE(minWidth); }
+            if (minHeight != null) { sizeHints.Deref(28, 4).toBuffer().writeUInt32LE(minHeight); }
+            if (maxWidth != null) { sizeHints.Deref(32, 4).toBuffer().writeUInt32LE(maxWidth); }
+            if (maxHeight != null) { sizeHints.Deref(36, 4).toBuffer().writeUInt32LE(maxHeight); }
+
             this._X11.XSetNormalHints(display, window, sizeHints);
         }
         this.setAlwaysOnTop = function setAlwaysOnTop(display, rootWindow, window)
