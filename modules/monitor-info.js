@@ -27,7 +27,8 @@ var SubstructureNotifyMask = (1 << 19);
 var PropModeReplace = 0;
 var XA_ATOM = 4;
 var MWM_HINTS_FUNCTIONS = (1 << 0);
-var MWM_HINTS_DECORATIONS =  (1 << 1);
+var MWM_HINTS_DECORATIONS = (1 << 1);
+var ClientMessage = 33;
 
 function getLibInfo(libname)
 {
@@ -298,6 +299,7 @@ function monitorinfo()
             this._X11.CreateMethod('XSetNormalHints');
             this._X11.CreateMethod('XSetSelectionOwner');
             this._X11.CreateMethod('XSetSubwindowMode');
+            this._X11.CreateMethod('XSetWMProtocols');
             this._X11.CreateMethod('XStoreName');
             this._X11.CreateMethod('XSync');
             this._X11.CreateMethod('XBlackPixel');
