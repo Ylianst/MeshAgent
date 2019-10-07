@@ -946,6 +946,12 @@ duk_ret_t ILibDuktape_ReadableStream_unshift(duk_context *ctx)
 		return(1);
 	}
 }
+duk_ret_t ILibDuktape_ReadableStream__pipedStreams(duk_context *ctx)
+{
+	duk_push_this(ctx);														// [readable]
+	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_PipeArray);		// [readable][array]
+	return(1);
+}
 ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, ILibDuktape_readableStream_PauseResumeHandler OnPause, ILibDuktape_readableStream_PauseResumeHandler OnResume, ILibDuktape_readableStream_UnShiftHandler OnUnshift, void *user)
 {
 	ILibDuktape_readableStream *retVal;
@@ -979,5 +985,6 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "unpipe", ILibDuktape_readableStream_unpipe, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "isPaused", ILibDuktape_readableStream_isPaused, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "unshift", ILibDuktape_ReadableStream_unshift, 1);
+	ILibDuktape_CreateEventWithGetter(ctx, "_pipedStreams", ILibDuktape_ReadableStream__pipedStreams);
 	return retVal;
 }
