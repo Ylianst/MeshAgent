@@ -164,7 +164,7 @@ function x_notifybar_check(title)
             .createEvent('close')
             .addMethod('close', function close() { this.child.kill(); });
 
-        ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+        ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: xinfo.exportEnv() });
         ret.child.parent = ret;
         ret.child.stdout.on('data', function (c) { });
         ret.child.stderr.on('data', function (c) { });
@@ -213,6 +213,7 @@ function x_notifybar(title)
 
             require('monitor-info').setAllowedActions(m[i].display, this.notifybar._windows.peek().notifybar, require('monitor-info').MOTIF_FLAGS.MWM_FUNC_CLOSE);
             require('monitor-info').setAlwaysOnTop(m[i].display, this.notifybar._windows.peek().root, this.notifybar._windows.peek().notifybar);
+
 
             var wm_delete_window_atom = require('monitor-info')._X11.XInternAtom(m[i].display, require('_GenericMarshal').CreateVariable('WM_DELETE_WINDOW'), 0).Val;
             var atoms = require('_GenericMarshal').CreateVariable(4);

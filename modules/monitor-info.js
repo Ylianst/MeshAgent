@@ -221,6 +221,11 @@ function monitorinfo()
                     }
                 } catch (ex) { }
             }
+
+            if (process.env['Location_X11LIB']) { Object.defineProperty(this, 'Location_X11LIB', { value: process.env['Location_X11LIB'] }); }
+            if (process.env['Location_X11TST']) { Object.defineProperty(this, 'Location_X11TST', { value: process.env['Location_X11TST'] }); }
+            if (process.env['Location_X11EXT']) { Object.defineProperty(this, 'Location_X11EXT', { value: process.env['Location_X11EXT'] }); }
+            if (process.env['Location_X11FIXES']) { Object.defineProperty(this, 'Location_X11FIXES', { value: process.env['Location_X11FIXES'] }); }
         }
     }
     if(process.platform == 'freebsd')
@@ -434,7 +439,7 @@ function monitorinfo()
             var tokens = child.stdout.str.trim().split(',');
             if (tokens.length == 3)
             {
-                ret = { tty: tokens[1], xauthority: tokens[2] };
+                ret = { tty: tokens[1], xauthority: tokens[2], exportEnv: exportEnv };
             }
 
             if (ret == null)
@@ -456,7 +461,7 @@ function monitorinfo()
                         var e = require('user-sessions').getEnvFromPid(ln);
                         if(e.XAUTHORITY && e.DISPLAY)
                         {
-                            ret = { tty: '?', xauthority: e.XAUTHORITY, display: e.DISPLAY };
+                            ret = { tty: '?', xauthority: e.XAUTHORITY, display: e.DISPLAY, exportEnv: exportEnv };
                             return (ret);
                         }
                     }
@@ -472,7 +477,7 @@ function monitorinfo()
                             var e = require('user-sessions').getEnvFromPid(ln);
                             if (e.DISPLAY)
                             {
-                                ret = { tty: '?', display: e.DISPLAY };
+                                ret = { tty: '?', display: e.DISPLAY, exportEnv: exportEnv };
                                 return (ret);
                             }
                         }
@@ -522,6 +527,19 @@ function monitorinfo()
             return (ret);
         };
     }
+}
+
+function exportEnv()
+{
+    var r =
+        {
+            XAUTHORITY: this.xauthority, DISPLAY: this.display,
+            Location_X11LIB: require('monitor-info').Location_X11LIB,
+            Location_X11TST: require('monitor-info').Location_X11TST,
+            Location_X11EXT: require('monitor-info').Location_X11EXT,
+            Location_X11FIXES: require('monitor-info').Location_X11FIXES
+        };
+    return (r);
 }
 
 if (process.platform != 'darwin')
