@@ -49,7 +49,7 @@ limitations under the License.
 
 #define ILibDuktape_GenericMarshal_VariableType			"\xFF_GenericMarshal_VarType"
 #define ILibDuktape_GenericMarshal_GlobalSet			"\xFF_GenericMarshal_GlobalSet"
-#define ILibDuktape_GenericMarshal_GlobalSet_Dispatcher	"\XFF_GenericMArshal_GlobalSet_Dispatcher"
+#define ILibDuktape_GenericMarshal_GlobalSet_Dispatcher	"\xFF_GenericMArshal_GlobalSet_Dispatcher"
 #define ILibDuktape_GenericMarshal_Variable_AutoFree	"\xFF_GenericMarshal_Variable_AutoFree"
 #define ILibDuktape_GenericMarshal_Variable_Parms		"\xFF_GenericMarshal_Variable_Parms"
 #define ILibDuktape_GenericMarshal_StashTable			"\xFF_GenericMarshal_StashTable"
@@ -1791,7 +1791,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_StartDispatcher(duk_context 
 	Duktape_GlobalGeneric_Data *data;
 	duk_push_this(ctx);													// [var]
 	duk_get_prop_string(ctx, -1, ILibDuktape_GenericMarshal_GlobalSet);	// [var][array]
-	duk_get_prop_index(ctx, -1, duk_get_length(ctx, -1) - 1);
+	duk_get_prop_index(ctx, -1, (duk_uarridx_t)duk_get_length(ctx, -1) - 1);
 	data = (Duktape_GlobalGeneric_Data*)duk_get_pointer(ctx, -1);
 
 	if (data == NULL) { return(ILibDuktape_Error(ctx, "Internal Error")); }
