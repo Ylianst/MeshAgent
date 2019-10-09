@@ -1052,7 +1052,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		}
 	}
 #ifdef WIN32
-	if (duk_has_prop_string(ctx, 0, ILibDuktape_GenericMarshal_GlobalSet_Dispatcher))
+	if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, ILibDuktape_GenericMarshal_GlobalSet_Dispatcher))
 	{
 		Duktape_GlobalGeneric_Data *ggd = (Duktape_GlobalGeneric_Data*)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_GenericMarshal_GlobalSet_Dispatcher);
 		redirectionPtr = NULL;
