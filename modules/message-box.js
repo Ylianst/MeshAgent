@@ -222,11 +222,11 @@ function linux_messageBox()
             // GNOME/ZENITY
             if (this.zenity.timeout)
             {
-                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
             }
             else
             {
-                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority, DISPLAY: xinfo.display } });
+                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
                 ret.child.timeout = setTimeout(function (c)
                 {
                     c.timeout = null;
