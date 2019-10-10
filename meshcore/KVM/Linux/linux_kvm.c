@@ -725,20 +725,20 @@ void* kvm_server_mainloop(void* parm)
 
 						if (name != NULL)
 						{
-							if (strcmp(name, "bottom_left_corner") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
-							if (strcmp(name, "bottom_right_corner") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "bottom_left_corner") == 0 || strcmp(name, "sw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "bottom_right_corner") == 0 || strcmp(name, "se-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
 							if (strcmp(name, "bottom_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "fleur") == 0) { curcursor = KVM_MouseCursor_SIZEALL; }
 							if (strcmp(name, "hand1") == 0 || strcmp(name, "pointer")==0) { curcursor = KVM_MouseCursor_HAND; }
 							if (strcmp(name, "hand2") == 0) { curcursor = KVM_MouseCursor_HAND; }
 							if (strcmp(name, "left_ptr") == 0) { curcursor = KVM_MouseCursor_ARROW; }
-							if (strcmp(name, "left_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
+							if (strcmp(name, "left_side") == 0 || strcmp(name, "w-resize") == 0 || strcmp(name, "e-resize") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
 							if (strcmp(name, "right_side") == 0) { curcursor = KVM_MouseCursor_SIZEWE; }
-							if (strcmp(name, "top_left_corner") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
-							if (strcmp(name, "top_right_corner") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
+							if (strcmp(name, "top_left_corner") == 0 || strcmp(name, "nw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENWSE; }
+							if (strcmp(name, "top_right_corner") == 0 || strcmp(name, "ne-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
 							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "watch") == 0) { curcursor = KVM_MouseCursor_WAIT; }
-							if (strcmp(name, "top_side") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
+							if (strcmp(name, "top_side") == 0 || strcmp(name, "n-resize") == 0 || strcmp(name, "s-resize") == 0) { curcursor = KVM_MouseCursor_SIZENS; }
 							if (strcmp(name, "xterm") == 0 || strcmp(name, "ibeam") == 0 || strcmp(name, "text") == 0) { curcursor = KVM_MouseCursor_IBEAM; }
 							x11_exports->XFree(name);
 						}
