@@ -197,7 +197,6 @@ function x_notifybar(title)
             barHeight = Math.floor(monHeight * 0.035);
             offset = Math.floor(monWidth * 0.50) - Math.floor(barWidth * 0.50);
             start = m[i].left + offset;
-            console.log(start, barWidth, barHeight);
 
             var white = require('monitor-info')._X11.XWhitePixel(m[i].display, m[i].screenId).Val;
             this.notifybar._windows.push({
@@ -224,7 +223,6 @@ function x_notifybar(title)
             require('monitor-info')._X11.XFlush(m[i].display);
 
             this.notifybar._windows.peek().DescriptorEvent = require('DescriptorEvents').addDescriptor(require('monitor-info')._X11.XConnectionNumber(m[i].display).Val, { readset: true });
-            console.log(this.notifybar._windows.peek().DescriptorEvent);
             this.notifybar._windows.peek().DescriptorEvent.atom = wm_delete_window_atom;
             this.notifybar._windows.peek().DescriptorEvent.ret = this.notifybar;
             this.notifybar._windows.peek().DescriptorEvent._display = m[i].display;
