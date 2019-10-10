@@ -185,36 +185,82 @@ function monitorinfo()
             var files = fs.readdirSync('/usr/lib');
             var files2;
 
-            for (var i in files) {
-                try {
-                    if (files[i].split('libX11.so.').length > 1 && files[i].split('.').length == 3) {
+            for (var i = 0; i < files.length; ++i)
+            {
+                try
+                {
+                    if (files[i].split('libX11.so.').length > 1 && files[i].split('.').length == 3)
+                    {
+                        require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i]);
                         Object.defineProperty(this, 'Location_X11LIB', { value: '/usr/lib/' + files[i] });
                     }
-                    if (files[i].split('libXtst.so.').length > 1 && files[i].split('.').length == 3) {
+                    if (files[i].split('libXtst.so.').length > 1 && files[i].split('.').length == 3)
+                    {
+                        require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i]);
                         Object.defineProperty(this, 'Location_X11TST', { value: '/usr/lib/' + files[i] });
                     }
-                    if (files[i].split('libXext.so.').length > 1 && files[i].split('.').length == 3) {
+                    if (files[i].split('libXext.so.').length > 1 && files[i].split('.').length == 3)
+                    {
+                        require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i]);
                         Object.defineProperty(this, 'Location_X11EXT', { value: '/usr/lib/' + files[i] });
                     }
                     if (files[i].split('libXfixes.so.').length > 1 && files[i].split('.').length == 3)
                     {
+                        require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i]);
                         Object.defineProperty(this, 'Location_X11FIXES', { value: '/usr/lib/' + files[i] });
                     }
 
-                    if (files[i].split('-linux-').length > 1) {
+                    if (files[i].split('-linux-').length > 1)
+                    {
                         files2 = fs.readdirSync('/usr/lib/' + files[i]);
-                        for (j in files2) {
-                            if (files2[j].split('libX11.so.').length > 1 && files2[j].split('.').length == 3) {
+                        for (j = 0; j < files2.length; ++j)
+                        {
+                            if (files2[j].split('libX11.so.').length > 1 && files2[j].split('.').length == 3)
+                            {
+                                try
+                                {
+                                    require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i] + '/' + files2[j]);
+                                }
+                                catch (xx)
+                                {
+                                    break;
+                                }
                                 Object.defineProperty(this, 'Location_X11LIB', { value: '/usr/lib/' + files[i] + '/' + files2[j] });
                             }
-                            if (files2[j].split('libXtst.so.').length > 1 && files2[j].split('.').length == 3) {
+                            if (files2[j].split('libXtst.so.').length > 1 && files2[j].split('.').length == 3)
+                            {
+                                try
+                                {
+                                    require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i] + '/' + files2[j]);
+                                }
+                                catch (xx)
+                                {
+                                    break;
+                                }
                                 Object.defineProperty(this, 'Location_X11TST', { value: '/usr/lib/' + files[i] + '/' + files2[j] });
                             }
-                            if (files2[j].split('libXext.so.').length > 1 && files2[j].split('.').length == 3) {
+                            if (files2[j].split('libXext.so.').length > 1 && files2[j].split('.').length == 3)
+                            {
+                                try
+                                {
+                                    require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i] + '/' + files2[j]);
+                                }
+                                catch (xx)
+                                {
+                                    break;
+                                }
                                 Object.defineProperty(this, 'Location_X11EXT', { value: '/usr/lib/' + files[i] + '/' + files2[j] });
                             }
                             if (files2[j].split('libXfixes.so.').length > 1 && files2[j].split('.').length == 3)
                             {
+                                try
+                                {
+                                    require('_GenericMarshal').CreateNativeProxy('/usr/lib/' + files[i] + '/' + files2[j]);
+                                }
+                                catch (xx)
+                                {
+                                    break;
+                                }
                                 Object.defineProperty(this, 'Location_X11FIXES', { value: '/usr/lib/' + files[i] + '/' + files2[j] });
                             }
                         }
