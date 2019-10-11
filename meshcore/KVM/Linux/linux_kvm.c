@@ -764,30 +764,41 @@ void* kvm_server_mainloop(void* parm)
 									{
 										case 680869104:				// FreeBSD
 										case 503303936:				// openSUSE
+										case 424513050:				// PuppyLinux (Top)
+										case (uint32_t)-1492434837:	// PuppyLinux (Bottom)
 											curcursor = KVM_MouseCursor_SIZENS;
 											break;
 										case 1094213267:			// FreeBSD
 										case 723082922:				// openSUSE
+										case 1531198046:			// PuppyLinux (Left)
+										case 622167154:				// PuppyLinux (Right)
 											curcursor = KVM_MouseCursor_SIZEWE;
 											break;
-										case 318345513:				// FreeBSD (Bottom Left)
-										case 69513426:				// FreeBSD (Upper Right)
+										case 318345513:				// FreeBSD + PuppyLinux (Bottom Left)
+										case 69513426:				// FreeBSD + PuppyLinux (Upper Right)
 										case 152373933:				// openSUSE
 											curcursor = KVM_MouseCursor_SIZENESW;
 											break;
-										case (uint32_t)-1187377452:	// FreeBSD (Bottom Right)
-										case (uint32_t)-600127498:	// FreeBSD (Upper Left)
+										case (uint32_t)-1187377452:	// FreeBSD + PuppyLinux (Bottom Right)
+										case (uint32_t)-600127498:	// FreeBSD + PuppyLinux (Upper Left)
 										case (uint32_t)-2000746020:	// openSUSE
 											curcursor = KVM_MouseCursor_SIZENWSE;
 											break;
-										case 733076101:				// FreeBSD
+										case 733076101:				// FreeBSD + PuppyLinux
 										case 261159321:				// openSUSE
 											curcursor = KVM_MouseCursor_SIZEALL;
 											break;
-										case 728953462:				// FreeBSD
+										case 728953462:				// FreeBSD + PuppyLinux
 										case 310104114:				// openSUSE
 											curcursor = KVM_MouseCursor_ARROW;
 											break;
+										case (uint32_t)-1347586305:	// PuppyLinux
+											curcursor = KVM_MouseCursor_IBEAM;
+											break;
+										case (uint32_t)-1421461853:	// PuppyLinux
+											curcursor = KVM_MouseCursor_HAND;
+											break;
+
 									}
 								}
 							}
