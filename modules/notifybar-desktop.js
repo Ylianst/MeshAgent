@@ -142,7 +142,7 @@ function windows_notifybar_local(title)
 
 function x_notifybar_check(title)
 {
-    if(require('user-sessions').Self()!=0)
+    if(require('user-sessions').Self()!=0 || require('user-sessions').consoleUid() == 0)
     {
         return (x_notifybar(title)); // No Dispatching necessary
     }
@@ -152,11 +152,10 @@ function x_notifybar_check(title)
         var uid = require('user-sessions').consoleUid();
         var xinfo = require('monitor-info').getXInfo(uid);
         
-        if (!xinfo || !xinfo.xauthority)
+        if (!xinfo)
         {
             throw('XServer Initialization Error')
         }
-
         var ret = {};
         var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
 

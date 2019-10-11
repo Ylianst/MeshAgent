@@ -471,7 +471,7 @@ function exportEnv()
 {
     var r =
         {
-            XAUTHORITY: this.xauthority, DISPLAY: this.display,
+            XAUTHORITY: this.xauthority?this.xauthority:"", DISPLAY: this.display,
             Location_X11LIB: require('monitor-info').Location_X11LIB,
             Location_X11TST: require('monitor-info').Location_X11TST,
             Location_X11EXT: require('monitor-info').Location_X11EXT,
