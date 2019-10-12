@@ -279,7 +279,7 @@ function monitorinfo()
             var mwmHintsProperty = this._X11.XInternAtom(display, this._gm.CreateVariable('_MOTIF_WM_HINTS'), 0);
 
             MwmHints.Deref(0, 4).toBuffer().writeUInt32LE(MWM_HINTS_FUNCTIONS);
-            MwmHints.Deref(8, 4).toBuffer().writeUInt32LE(flags);
+            MwmHints.Deref(this._gm.PointerSize, 4).toBuffer().writeUInt32LE(flags);
 
             this._X11.XChangeProperty(display, window, mwmHintsProperty, mwmHintsProperty, 32, PropModeReplace, MwmHints, 5);
         }
@@ -291,14 +291,14 @@ function monitorinfo()
             if (maxWidth != null && maxHeight != null) { spec |= PMaxSize; }
 
             sizeHints.Deref(0, 4).toBuffer().writeUInt32LE(spec);
-            sizeHints.Deref(8, 4).toBuffer().writeUInt32LE(x);
-            sizeHints.Deref(12, 4).toBuffer().writeUInt32LE(y);
-            sizeHints.Deref(16, 4).toBuffer().writeUInt32LE(width);
-            sizeHints.Deref(20, 4).toBuffer().writeUInt32LE(height);
-            if (minWidth != null) { sizeHints.Deref(24, 4).toBuffer().writeUInt32LE(minWidth); }
-            if (minHeight != null) { sizeHints.Deref(28, 4).toBuffer().writeUInt32LE(minHeight); }
-            if (maxWidth != null) { sizeHints.Deref(32, 4).toBuffer().writeUInt32LE(maxWidth); }
-            if (maxHeight != null) { sizeHints.Deref(36, 4).toBuffer().writeUInt32LE(maxHeight); }
+            sizeHints.Deref(this._gm.PointerSize, 4).toBuffer().writeUInt32LE(x);
+            sizeHints.Deref(this._gm.PointerSize + 4, 4).toBuffer().writeUInt32LE(y);
+            sizeHints.Deref(this._gm.PointerSize + 8, 4).toBuffer().writeUInt32LE(width);
+            sizeHints.Deref(this._gm.PointerSize + 12, 4).toBuffer().writeUInt32LE(height);
+            if (minWidth != null) { sizeHints.Deref(this._gm.PointerSize + 16, 4).toBuffer().writeUInt32LE(minWidth); }
+            if (minHeight != null) { sizeHints.Deref(this._gm.PointerSize + 20, 4).toBuffer().writeUInt32LE(minHeight); }
+            if (maxWidth != null) { sizeHints.Deref(this._gm.PointerSize + 24, 4).toBuffer().writeUInt32LE(maxWidth); }
+            if (maxHeight != null) { sizeHints.Deref(this._gm.PointerSize + 28, 4).toBuffer().writeUInt32LE(maxHeight); }
 
             this._X11.XSetNormalHints(display, window, sizeHints);
         }
@@ -309,12 +309,11 @@ function monitorinfo()
 
             var xclient = this._gm.CreateVariable(96);
             xclient.Deref(0, 4).toBuffer().writeUInt32LE(33);                   // ClientMessage type
-            xclient.Deref(48, 4).toBuffer().writeUInt32LE(32);                  // Format 32
-            wmNetWmState.pointerBuffer().copy(xclient.Deref(40, 8).toBuffer()); // message_type
-            xclient.Deref(56, 8).toBuffer().writeUInt32LE(_NET_WM_STATE_ADD);   // data.l[0]
-            wmStateAbove.pointerBuffer().copy(xclient.Deref(64, 8).toBuffer()); // data.l[1]
-
-            window.pointerBuffer().copy(xclient.Deref(32, 8).toBuffer());       // window
+            xclient.Deref(this._gm.PointerSize == 8 ? 48 : 24, 4).toBuffer().writeUInt32LE(32);   // Format 32
+            wmNetWmState.pointerBuffer().copy(xclient.Deref(this._gm.PointerSize == 8 ? 40 : 20, this._gm.PointerSize).toBuffer()); // message_type
+            xclient.Deref(this._gm.PointerSize == 8 ? 56 : 28, this._gm.PointerSize).toBuffer().writeUInt32LE(_NET_WM_STATE_ADD);   // data.l[0]
+            wmStateAbove.pointerBuffer().copy(xclient.Deref(this._gm.PointerSize == 8 ? 64 : 32, this._gm.PointerSize).toBuffer());  // data.l[1]
+            window.pointerBuffer().copy(xclient.Deref(this._gm.PointerSize == 8 ? 32 : 16, this._gm.PointerSize).toBuffer());       // window
             this._X11.XSendEvent(display, rootWindow, 0, SubstructureRedirectMask | SubstructureNotifyMask, xclient);
         }
         this.hideWindowIcon = function hideWindowIcon(display, rootWindow, window)
@@ -323,13 +322,13 @@ function monitorinfo()
             var wmStateSkip = this._X11.XInternAtom(display, this._gm.CreateVariable('_NET_WM_STATE_SKIP_TASKBAR'), 1);
 
             var xclient = this._gm.CreateVariable(96);
-            xclient.Deref(0, 4).toBuffer().writeUInt32LE(33);                   // ClientMessage type
-            xclient.Deref(48, 4).toBuffer().writeUInt32LE(32);                  // Format 32
-            wmNetWmState.pointerBuffer().copy(xclient.Deref(40, 8).toBuffer()); // message_type
-            xclient.Deref(56, 8).toBuffer().writeUInt32LE(_NET_WM_STATE_ADD);   // data.l[0]
-            wmStateSkip.pointerBuffer().copy(xclient.Deref(64, 8).toBuffer());  // data.l[1]
+            xclient.Deref(0, 4).toBuffer().writeUInt32LE(33);                               // ClientMessage type
+            xclient.Deref(this._gm.PointerSize==8?48:24, 4).toBuffer().writeUInt32LE(32);   // Format 32
+            wmNetWmState.pointerBuffer().copy(xclient.Deref(this._gm.PointerSize==8?40:20, this._gm.PointerSize).toBuffer()); // message_type
+            xclient.Deref(this._gm.PointerSize==8?56:28, this._gm.PointerSize).toBuffer().writeUInt32LE(_NET_WM_STATE_ADD);   // data.l[0]
+            wmStateSkip.pointerBuffer().copy(xclient.Deref(this._gm.PointerSize==8?64:32, this._gm.PointerSize).toBuffer());  // data.l[1]
 
-            window.pointerBuffer().copy(xclient.Deref(32, 8).toBuffer());       // window
+            window.pointerBuffer().copy(xclient.Deref(this._gm.PointerSize==8?32:16, this._gm.PointerSize).toBuffer());       // window
             this._X11.XSendEvent(display, rootWindow, 0, SubstructureRedirectMask | SubstructureNotifyMask, xclient);
         }
 
