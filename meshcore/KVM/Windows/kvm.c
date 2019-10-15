@@ -741,7 +741,7 @@ void kvm_server_SetResolution(ILibKVM_WriteHandler writeHandler, void *reserved)
 
 #define BUFSIZE 65535
 #ifdef _WINSERVICE
-DWORD WINAPI kvm_mainloopinput(LPVOID Param)
+DWORD WINAPI kvm_mainloopinput_ex(LPVOID Param)
 {
 	int ptr = 0;
 	int ptr2 = 0;
@@ -779,10 +779,33 @@ DWORD WINAPI kvm_mainloopinput(LPVOID Param)
 
 	return 0;
 }
+
+DWORD WINAPI kvm_mainloopinput(LPVOID Param)
+{
+	DWORD ret = 0;
+	if (((int*)&(((void**)Param)[3]))[0] == 1)
+	{
+		ILib_DumpEnabledContext winException;
+		__try
+		{
+			ret = kvm_mainloopinput_ex(Param);
+		}
+		__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
+		{
+			ILib_WindowsExceptionDebugEx(&winException);
+		}
+	}
+	else
+	{
+		ret = kvm_mainloopinput_ex(Param);
+	}
+	return(ret);
+}
 #endif
 
+
 // This is the main KVM pooling loop. It will look at the display and see if any changes occur. [Runs as daemon if Windows Service]
-DWORD WINAPI kvm_server_mainloop(LPVOID parm)
+DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 {
 	//long cur_timestamp = 0;
 	//long prev_timestamp = 0;
@@ -845,6 +868,7 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 	}
 #endif
 	kvm_server_SetResolution(writeHandler, reserved);
+
 
 #ifdef _WINSERVICE
 	if (!kvmConsoleMode)
@@ -979,6 +1003,39 @@ DWORD WINAPI kvm_server_mainloop(LPVOID parm)
 	return 0;
 }
 
+DWORD WINAPI kvm_server_mainloop(LPVOID parm)
+{
+	DWORD ret = 0;
+	if (((int*)&(((void**)parm)[3]))[0] == 1)
+	{
+		// Enable Core Dump in KVM Child
+		ILib_DumpEnabledContext winException;
+		WCHAR str[_MAX_PATH];
+		DWORD strLen;
+		if ((strLen = GetModuleFileNameW(NULL, str, _MAX_PATH)) > 5)
+		{
+			str[strLen - 4] = 0;	// We're going to convert .exe to _kvm.dmp
+			g_ILibCrashDump_path = ILibMemory_Allocate((strLen * 2) + 10, 0, NULL, NULL); // Add enough space to add '.dmp' to the end of the path
+			swprintf_s((wchar_t*)g_ILibCrashDump_path, strLen + 5, L"%s_kvm.dmp", str);
+		}
+
+		__try
+		{
+			ret = kvm_server_mainloop_ex(parm);
+		}
+		__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
+		{
+			ILib_WindowsExceptionDebugEx(&winException);
+		}
+	}
+	else
+	{
+		// Core Dump not enabled in KVM Child
+		ret = kvm_server_mainloop_ex(parm);
+	}
+	return(ret);
+}
+
 #ifdef _WINSERVICE
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
@@ -1063,14 +1120,14 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int b
 
 int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
-	char * parms0[] = { " -kvm0", NULL };
-	char * parms1[] = { " -kvm1", NULL };
+	char * parms0[] = { " -kvm0", g_ILibCrashDump_path != NULL ? "-coredump" : NULL, NULL };
+	char * parms1[] = { " -kvm1", g_ILibCrashDump_path != NULL ? "-coredump" : NULL, NULL };
 	void **user = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
 	user[0] = writeHandler;
 	user[1] = reserved;
 	user[2] = pipeMgr;
 	user[3] = exePath;
-
+	
 	KVMDEBUG("kvm_relay_restart / start", paused);
 
 	// If we are re-launching the child process, wait a bit. The computer may be switching desktop, etc.

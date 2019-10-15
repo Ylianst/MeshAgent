@@ -1033,9 +1033,10 @@ int wmain(int argc, char* wargv[])
 	#if defined(_LINKVM)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{		
-		void **parm = (void**)ILibMemory_Allocate(3 * sizeof(void*), 0, 0, NULL);
+		void **parm = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 0;
+		((int*)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
 
 		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
@@ -1064,9 +1065,10 @@ int wmain(int argc, char* wargv[])
 	}
 	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
-		void **parm = (void**)ILibMemory_Allocate(3 * sizeof(void*), 0, 0, NULL);
+		void **parm = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 1;
+		((int*)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
 
 		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
