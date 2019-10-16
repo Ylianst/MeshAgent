@@ -2016,8 +2016,64 @@ function serviceManager()
                     platform = 'upstart';
                 }
             }
+            switch(platform)
+            {
+                case 'init':
+                case 'upstart':
+                case 'systemd':
+                    break;
+                default:
+                    platform = 'unknown';
+                    break;
+            }
             return (platform);
         };
+    }
+
+    function spawnDaemon(ret)
+    {
+        ret.child = require('child_process').execFile(process.execPath, ret.options._parms, ret.options);
+        if (!ret.child) { ret._reject('Error Spawning Process'); }
+
+        ret.child.promise = ret;
+        ret.child.stdout.on('data', function (c) { console.log(c.toString()); });
+        ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
+        ret.child.on('exit', function (c)
+        {
+            if (this.promise.options.crashRestart)
+            {
+                spawnDaemon(this.promise);
+            }
+            else
+            {
+                this.promise._accept('Finished');
+            }
+        });
+    }
+
+    this.daemon = function daemon(path, parameters, options)
+    {
+        var ret = new promise(function (a, r) { this._accept = a; this._reject = r; });    
+        var tmp = JSON.stringify(parameters);
+        tmp = tmp.substring(1, tmp.length - 1);
+
+        if (!options) { options = {}; }
+        ret.options = options;
+
+        var childParms = ("var child = require('child_process').execFile('" + path + "', ['" + (process.platform == 'win32' ? path.split('\\').pop() : path.split('/').pop() + "'" + (tmp != '' ? (", " + tmp) : "")) + "]);\n");
+        childParms += "if(!child) {console.log('error'); process.exit();}\n";
+        childParms += "child.stdout.on('data', function(c){ console.log(c.toString()); });\n";
+        childParms += "child.stderr.on('data', function(c){ console.log(c.toString()); });\n";
+        childParms += "child.on('exit', function(c){ process.exit(); });\n";
+
+        var parms = [process.platform == 'win32' ? process.execPath.split('\\').pop() : process.execPath.split('/').pop()];
+        parms.push('-b64exec');
+        parms.push(Buffer.from(childParms).toString('base64'));
+        ret.options._parms = parms;
+
+        spawnDaemon(ret);
+ 
+        return (ret);
     }
 }
 
