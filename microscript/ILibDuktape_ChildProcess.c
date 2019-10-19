@@ -219,12 +219,13 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "exit");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
-	ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", ILibDuktape_ChildProcess_SpawnedProcess_Finalizer);
 	ILibDuktape_CreateInstanceMethod(ctx, "kill", ILibDuktape_ChildProcess_Kill, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "waitExit", ILibDuktape_ChildProcess_waitExit, DUK_VARARGS);
 
 	if (ILibProcessPipe_Process_IsDetached(mProcess) == 0)
 	{
+		ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", ILibDuktape_ChildProcess_SpawnedProcess_Finalizer); // Kill child if object is collected while process is alive
+
 		duk_push_object(ctx);
 		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdout");
 		duk_dup(ctx, -2);
