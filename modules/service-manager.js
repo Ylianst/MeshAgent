@@ -1303,14 +1303,14 @@ function serviceManager()
                                 child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stderr.on('data', function (c) {  });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; respawn="0"; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} if(tok1[1]=="respawn") { respawn="1"; } } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s, \\\"respawn\\\": %s }", wd, parms, respawn }\'\nexit\n');
                                 child.waitExit();
 
                                 var info = JSON.parse(child.stdout.str.trim());
                                 info.exePath = info.wd + '/' + info.parms.shift();
 
-                                var options = { pidPath: info.wd + '/pid', logOutputs: false };
-                                require('service-manager').manager.daemon(info.exePath, info.parms , options);
+                                var options = { pidPath: info.wd + '/pid', logOutputs: false, crashRestart: info.respawn ? true : false };
+                                require('service-manager').manager.daemon(info.exePath, info.parms, options);
                             };
                             ret.stop = function stop()
                             {
@@ -1816,7 +1816,10 @@ function serviceManager()
                     options.parameters.unshift(options.name);
                     conf.write('parameters=' + JSON.stringify(options.parameters) + '\n');
                     options.parameters.shift();
-                    
+                    if (options.failureRestart == null || options.failureRestart > 0)
+                    {
+                        conf.write('respawn\n');
+                    }
                     conf.end();
                     break;
             }
