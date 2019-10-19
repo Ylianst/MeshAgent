@@ -47,6 +47,17 @@ typedef char JS_ENGINE_CONTEXT[16];
 
 #define ILibDuktape_MeshAgent_LoggedOnUsers	"\xFF_MeshAgent_LoggedOnUsers"
 
+typedef enum MeshAgent_Posix_PlatformTypes
+{
+	MeshAgent_Posix_PlatformTypes_UNKNOWN = 0,
+	MeshAgent_Posix_PlatformTypes_SYSTEMD = 1,
+	MeshAgent_Posix_PlatformTypes_INITD = 2,
+	MeshAgent_Posix_PlatformTypes_INIT_UPSTART = 4,
+	MeshAgent_Posix_PlatformTypes_LAUNCHD = 3,
+	MeshAgent_Posix_PlatformTypes_BSD = 5,
+	MeshAgent_Posix_PlatformTypes_WINDOWS = 10
+}MeshAgent_Posix_PlatformTypes;
+
 typedef enum MeshCommand_AuthInfo_CapabilitiesMask
 {
 	MeshCommand_AuthInfo_CapabilitiesMask_DESKTOP = 0x01,
@@ -214,6 +225,8 @@ typedef struct MeshAgentHostContainer
 	int serverConnectionState;
 	int exitCode;
 	int dbRetryCount;
+	MeshAgent_Posix_PlatformTypes platformType;
+	int JSRunningAsService;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

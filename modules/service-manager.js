@@ -1293,7 +1293,112 @@ function serviceManager()
                         }
                         break;
                     default:
-                        throw ('Unknown Service Platform: ' + platform);
+                        // Peudo Service (meshDaemon)
+                        if (require('fs').existsSync('/usr/local/mesh_daemons/' + name + '.service'))
+                        {
+                            ret.conf = '/usr/local/mesh_daemons/' + name + '.service';
+                            ret.start = function start()
+                            {
+                                var child;
+                                child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stderr.on('data', function (c) {  });
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.waitExit();
+
+                                var info = JSON.parse(child.stdout.str.trim());
+                                info.exePath = info.wd + '/' + info.parms.shift();
+
+                                var options = { pidPath: info.wd + '/pid', logOutputs: false };
+                                require('service-manager').manager.daemon(info.exePath, info.parms , options);
+                            };
+                            ret.stop = function stop()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
+                                child.waitExit();
+                                try
+                                {
+                                    process.kill(parseInt(child.stdout.str.trim()), 'SIGTERM');
+                                }
+                                catch(x)
+                                {
+                                }
+                            };
+                            ret.isMe = function isMe()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
+                                child.waitExit();
+                                return (parseInt(child.stdout.str.trim()) == process.pid);
+                            };
+                            ret.appWorkingDirectory = function appWorkingDirectory()
+                            {
+                                var child;
+                                child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stderr.on('data', function (c) { });
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.waitExit();
+
+                                var info = JSON.parse(child.stdout.str.trim());
+                                return (info.wd);
+                            };
+                            ret.appLocation = function appLocation()
+                            {
+                                var child;
+                                child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stderr.on('data', function (c) { });
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.waitExit();
+
+                                var info = JSON.parse(child.stdout.str.trim());
+                                return (info.wd + '/' + info.parms.shift());
+                            };
+                            ret.isRunning = function isRunning()
+                            {
+                                if(require('fs').existsSync('/usr/local/mesh_daemons/' + name + '/pid'))
+                                {
+                                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                    child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
+                                    child.waitExit();
+                                    var pid = child.stdout.str.trim();
+
+                                    child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                    child.stdin.write('ps -p ' + pid + ' -o pid h\nexit\n');
+                                    child.waitExit();
+                                    if(child.stdout.str.trim() == pid)
+                                    {
+                                        return (true);
+                                    }
+                                    else
+                                    {
+                                        try
+                                        {
+                                            require('fs').unlinkSync('/usr/local/mesh_daemons/' + name + '/pid');
+                                        }
+                                        catch(x)
+                                        {
+                                        }
+                                        return (false);
+                                    }
+                                }
+                                else
+                                {
+                                    return (false);
+                                }
+                            };
+                            return (ret);
+                        }
+                        else
+                        {
+                            throw ('MeshDaemon (' + name + ') NOT FOUND');
+                        }
                         break;
                 }
             };
@@ -1676,9 +1781,29 @@ function serviceManager()
                             break;
                     }
                     break;
-                default: // unknown platform service type
-                    console.log('Unknown Service Platform Type: ' + options.servicePlatform);
-                    throw ('Unknown Service Platform Type: ' + options.servicePlatform);
+                default: // Unknown Service Type, install as a Pseudo Service (MeshDaemon)
+                    if (!require('fs').existsSync('/usr/local/mesh_daemons/')) { require('fs').mkdirSync('/usr/local/mesh_daemons'); }
+                    if (!require('fs').existsSync('/usr/local/mesh_daemons/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_daemons/' + options.name); }
+                    if (!require('fs').existsSync('/usr/local/mesh_daemons/daemon'))
+                    {
+                        require('fs').copyFileSync(process.execPath, '/usr/local/mesh_daemons/daemon');
+                        require('fs').chmodSync('/usr/local/mesh_daemons/daemon', require('fs').statSync('/usr/local/mesh_daemons/daemon').mode | require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    }
+                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_daemons/' + options.name + '/' + options.target);
+
+                    var m = require('fs').statSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target).mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    require('fs').chmodSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target, m);
+
+                    conf = require('fs').createWriteStream('/usr/local/mesh_daemons/' + options.name + '.service', { flags: 'wb' });
+                    conf.write('workingDirectory=' + '/usr/local/mesh_daemons/' + options.name + '\n');
+
+                    if(!options.parameters) {options.parameters = [];}
+                    options.parameters.unshift(options.name);
+                    conf.write('parameters=' + JSON.stringify(options.parameters) + '\n');
+                    options.parameters.shift();
+                    
+                    conf.end();
                     break;
             }
         }
@@ -1996,84 +2121,99 @@ function serviceManager()
             { }
         }
     }
-    if(process.platform == 'linux')
+
+    this.getServiceType = function getServiceType()
     {
-        this.getServiceType = function getServiceType()
+        var platform = 'unknown';
+        switch(process.platform)
         {
-            var platform = require('process-manager').getProcessInfo(1).Name;
-            if (platform == "busybox")
-            {
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stdin.write("ps -ax -o pid -o command | awk '{ if($1==\"1\") { $1=\"\"; split($0, res, \" \"); print res[2]; }}'\nexit\n");
-                child.waitExit();
-                platform = child.stdout.str.trim();
-            }
-            if (platform == 'init')
-            {
-                if(require('fs').existsSync('/etc/init'))
+            case 'win32':
+                platform = 'windows';
+                break;
+            case 'freebsd':
+                platform = 'freebsd';
+                break;
+            case 'darwin':
+                platform = 'launchd';
+                break;
+            case 'linux':
+                platform = require('process-manager').getProcessInfo(1).Name;
+                if (platform == "busybox")
                 {
-                    platform = 'upstart';
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("ps -ax -o pid -o command | awk '{ if($1==\"1\") { $1=\"\"; split($0, res, \" \"); print res[2]; }}'\nexit\n");
+                    child.waitExit();
+                    platform = child.stdout.str.trim();
                 }
-            }
-            switch(platform)
-            {
-                case 'init':
-                case 'upstart':
-                case 'systemd':
-                    break;
-                default:
-                    platform = 'unknown';
-                    break;
-            }
-            return (platform);
-        };
-    }
+                if (platform == 'init')
+                {
+                    if (require('fs').existsSync('/etc/init'))
+                    {
+                        platform = 'upstart';
+                    }
+                }
+                switch (platform)
+                {
+                    case 'init':
+                    case 'upstart':
+                    case 'systemd':
+                        break;
+                    default:
+                        platform = 'unknown';
+                        break;
+                }
+                break;
+        }
+        return (platform);
+    };
 
-    function spawnDaemon(ret)
-    {
-        ret.child = require('child_process').execFile(process.execPath, ret.options._parms, ret.options);
-        if (!ret.child) { ret._reject('Error Spawning Process'); }
-
-        ret.child.promise = ret;
-        ret.child.stdout.on('data', function (c) { console.log(c.toString()); });
-        ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
-        ret.child.on('exit', function (c)
-        {
-            if (this.promise.options.crashRestart)
-            {
-                spawnDaemon(this.promise);
-            }
-            else
-            {
-                this.promise._accept('Finished');
-            }
-        });
-    }
 
     this.daemon = function daemon(path, parameters, options)
     {
-        var ret = new promise(function (a, r) { this._accept = a; this._reject = r; });    
         var tmp = JSON.stringify(parameters);
         tmp = tmp.substring(1, tmp.length - 1);
 
         if (!options) { options = {}; }
-        ret.options = options;
-
-        var childParms = ("var child = require('child_process').execFile('" + path + "', ['" + (process.platform == 'win32' ? path.split('\\').pop() : path.split('/').pop() + "'" + (tmp != '' ? (", " + tmp) : "")) + "]);\n");
-        childParms += "if(!child) {console.log('error'); process.exit();}\n";
-        childParms += "child.stdout.on('data', function(c){ console.log(c.toString()); });\n";
-        childParms += "child.stderr.on('data', function(c){ console.log(c.toString()); });\n";
-        childParms += "child.on('exit', function(c){ process.exit(); });\n";
-
+        var childParms = "\
+            var child = null; \
+            var options = " + JSON.stringify(options) + ";\
+            if(options.logOutput) { console.setDestination(console.Destinations.LOGFILE); console.log('Logging Outputs...'); }\
+            function cleanupAndExit()\
+            {\
+                if(options.pidPath) { require('fs').unlinkSync(options.pidPath); }\
+            }\
+            function spawnChild()\
+            {\
+                child = require('child_process').execFile('" + path + "', ['" + (process.platform == 'win32' ? path.split('\\').pop() : path.split('/').pop() + "'" + (tmp != '' ? (", " + tmp) : "")) + "]);\
+                if(child)\
+                {\
+                    child.stdout.on('data', function(c) { console.log(c.toString()); });\
+                    child.stderr.on('data', function(c) { console.log(c.toString()); });\
+                    child.once('exit', function (code) \
+                    {\
+                        if(options.crashRestart) { spawnChild(); } else { cleanupAndExit(); }\
+                    });\
+                }\
+            }\
+            if(options.pidPath) { require('fs').writeFileSync(options.pidPath, process.pid.toString()); }\
+            spawnChild();\
+            process.on('SIGTERM', function()\
+            {\
+                if(child) { child.kill(); }\
+                cleanupAndExit();\
+                process.exit();\
+            });";
+        
         var parms = [process.platform == 'win32' ? process.execPath.split('\\').pop() : process.execPath.split('/').pop()];
         parms.push('-b64exec');
         parms.push(Buffer.from(childParms).toString('base64'));
-        ret.options._parms = parms;
+        options._parms = parms;
+        options.detached = true;
+        options.type = 4;
 
-        spawnDaemon(ret);
- 
-        return (ret);
+        var child = require('child_process').execFile(process.execPath, options._parms, options);       
+        if (!child) { throw ('Error spawning process'); }
     }
 }
 

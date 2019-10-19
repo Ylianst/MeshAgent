@@ -620,16 +620,6 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 #endif
 }
 #ifdef _POSIX
-typedef enum MeshAgent_Posix_PlatformTypes
-{
-	MeshAgent_Posix_PlatformTypes_UNKNOWN	= 0,
-	MeshAgent_Posix_PlatformTypes_SYSTEMD	= 1,
-	MeshAgent_Posix_PlatformTypes_INITD		= 2,
-	MeshAgent_Posix_PlatformTypes_INIT_UPSTART =4,
-	MeshAgent_Posix_PlatformTypes_LAUNCHD	= 3,
-	MeshAgent_Posix_PlatformTypes_BSD		= 5
-}MeshAgent_Posix_PlatformTypes;
-
 size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
 {
 	size_t i = 0, r, sz = 4096;
@@ -652,59 +642,7 @@ size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
 	}
 	return(i);
 }
-MeshAgent_Posix_PlatformTypes MeshAgent_Posix_GetPlatformType()
-{
-#if defined(__APPLE__)
-	return(MeshAgent_Posix_PlatformTypes_LAUNCHD);
-#elif defined(_FREEBSD)
-	return(MeshAgent_Posix_PlatformTypes_BSD);
-#else
-	MeshAgent_Posix_PlatformTypes retVal = MeshAgent_Posix_PlatformTypes_UNKNOWN, fini = 0;
-	char *status;
-	size_t statusLen = MeshAgent_Linux_ReadMemFile("/proc/1/status", &status);
-	if (statusLen > 0)
-	{
-		parser_result *result = ILibParseString(status, 0, (int)statusLen, "\n", 1), *tokens;
-		parser_result_field *rf = result->FirstResult;
-		while (rf != NULL && fini == 0)
-		{
-			tokens = ILibParseString(rf->data, 0, rf->datalength, ":", 1);
-			if (tokens->NumResults == 2)
-			{
-				if (tokens->FirstResult->datalength == 4 && strncasecmp(tokens->FirstResult->data, "name", 4) == 0)
-				{
-					int tlen = tokens->LastResult->datalength;
-					char *tstr = tokens->LastResult->data;
-					tlen = ILibTrimString(&tstr, tlen);
-					if (tlen == 7 && strncasecmp(tstr, "systemd", 5) == 0)
-					{
-						retVal = MeshAgent_Posix_PlatformTypes_SYSTEMD;
-					}
-					else if (tlen == 4 && strncasecmp(tstr, "init", 4) == 0)
-					{
-						struct stat result;
-						memset(&result, 0, sizeof(struct stat));
-						if (stat("/etc/init", &result) != 0) 
-						{
-							retVal = MeshAgent_Posix_PlatformTypes_INITD;
-						}
-						else
-						{
-							retVal = MeshAgent_Posix_PlatformTypes_INIT_UPSTART;
-						}
-					}
-					fini = 1;
-				}
-			}
-			ILibDestructParserResults(tokens);
-			rf = rf->NextResult;
-		}
-		ILibDestructParserResults(result);
-		free(status);
-	}
-	return(retVal);
-#endif
-}
+
 int MeshAgent_Helper_CommandLine(char **commands, char **result, int *resultLen)
 {
 	int bytesRead, x;
@@ -766,78 +704,6 @@ int MeshAgent_Helper_CommandLine(char **commands, char **result, int *resultLen)
 	*resultLen = x;
 	waitpid(pid, &bytesRead, 0);
 	return(0);
-}
-int MeshAgent_Helper_IsService()
-{
-	char *result = NULL;
-	int resultLen = 0;
-	char pidStr[255];
-	int pidStrLen = sprintf_s(pidStr, sizeof(pidStr), "%d", (int)getpid());
-	int retVal = 0;
-	int i = 0;
-
-	switch (MeshAgent_Posix_GetPlatformType())
-	{
-		case MeshAgent_Posix_PlatformTypes_SYSTEMD: // Linux Systemd	
-			if (MeshAgent_Helper_CommandLine((char*[]) { "systemctl status meshagent | grep 'Main PID:' | awk '{print $3}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
-			{
-				while (i<resultLen && result[i] != 10) { ++i; }
-				resultLen = i;
-				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
-				{
-					retVal = 1;
-				}
-			}
-			break;
-		case MeshAgent_Posix_PlatformTypes_INITD:
-			if (MeshAgent_Helper_CommandLine((char*[]) { "service meshagent status | awk '{print $4}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
-			{
-				while (i<resultLen && result[i] != 10) { ++i; }
-				resultLen = i;
-				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
-				{
-					retVal = 1;
-				}
-			}
-			break;
-		case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
-			if (MeshAgent_Helper_CommandLine((char*[]) { "initctl status meshagent | awk '{print $4}'\n", "exit\n", NULL }, &result, &resultLen) == 0)
-			{
-				while (i<resultLen && result[i] != 10) { ++i; }
-				resultLen = i;
-				if (resultLen == pidStrLen && strncmp(result, pidStr, resultLen) == 0)
-				{
-					retVal = 1;
-				}
-			}
-			break;
-		case MeshAgent_Posix_PlatformTypes_LAUNCHD: // MacOS Launchd
-			if (MeshAgent_Helper_CommandLine((char*[]) { "launchctl list\n", "exit\n", NULL }, &result, &resultLen) == 0)
-			{
-				parser_result *pr = ILibParseString(result, 0, resultLen, "\n", 1), *p2;
-				parser_result_field *f = pr->FirstResult;
-				while (f != NULL)
-				{
-					if (f->datalength > 0)
-					{
-						p2 = ILibParseString(f->data, 0, f->datalength, "\t", 1);
-						if (p2->NumResults > 1 && p2->FirstResult->datalength == pidStrLen && strncmp(p2->FirstResult->data, pidStr, pidStrLen) == 0)
-						{
-							retVal = 1;
-							ILibDestructParserResults(p2);
-							break;
-						}
-						ILibDestructParserResults(p2);
-					}
-					f = f->NextResult;
-				}
-				ILibDestructParserResults(pr);
-			}
-			break;
-		default: // Generic
-			break;
-	}
-	return(retVal);
 }
 #endif
 
@@ -3973,6 +3839,18 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #if !defined(MICROSTACK_NOTLS) || defined(_POSIX)
 	duk_context *tmpCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, NULL, NULL);
 	duk_peval_string_noresult(tmpCtx, "require('linux-pathfix')();");
+
+	agentHost->platformType = MeshAgent_Posix_PlatformTypes_UNKNOWN;
+	agentHost->JSRunningAsService = 0;
+
+	if (duk_peval_string(tmpCtx, "(function foo() { var f = require('service-manager').manager.getServiceType(); switch(f){case 'windows': return(10); case 'launchd': return(3); case 'freebsd': return(5); case 'systemd': return(1); case 'init': return(2); case 'upstart': return(4); default: return(0);}})()") == 0)
+	{
+		agentHost->platformType = (MeshAgent_Posix_PlatformTypes)duk_get_int(tmpCtx, -1);
+	}
+	if (duk_peval_string(tmpCtx, "require('service-manager').manager.getService(process.platform=='win32'?'Mesh Agent':'meshagent').isMe();") == 0)
+	{
+		agentHost->JSRunningAsService = duk_get_int(tmpCtx, -1);
+	}
 #endif
 
 #if !defined(MICROSTACK_NOTLS)
@@ -4765,39 +4643,35 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				CloseHandle(processInfo.hThread);
 			}
 #else
-			if (MeshAgent_Helper_IsService() != 0)
+			if (agentHost->JSRunningAsService != 0)
 			{
 				// We were started as a service
 				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Service Check... [YES]"); }
 
-				MeshAgent_Posix_PlatformTypes pt = MeshAgent_Posix_GetPlatformType();
-				if (pt != MeshAgent_Posix_PlatformTypes_UNKNOWN)
+
+				struct stat results;
+				stat(agentHost->exePath, &results); // This the mode of the current executable
+				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
+
+
+				if (agentHost->platformType == MeshAgent_Posix_PlatformTypes_BSD)
 				{
-					struct stat results;
-					stat(agentHost->exePath, &results); // This the mode of the current executable
-					chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
-
-					if (pt == MeshAgent_Posix_PlatformTypes_BSD)
+					// FreeBSD doesn't support hot-swapping the binary
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Handing off to child to complete"); }
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"var s=require('service-manager').manager.getService('meshagent');s.stop();require('fs').copyFileSync('%s', '%s');s.start();process.exit();\"", updateFilePath, updateFilePath, agentHost->exePath);
+					ignore_result(MeshAgent_System(ILibScratchPad));
+				}
+				else
+				{
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
+					if (system(ILibScratchPad)) {}
+					switch (agentHost->platformType)
 					{
-						// FreeBSD doesn't support hot-swapping the binary
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Handing off to child to complete"); }
-						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"var s=require('service-manager').manager.getService('meshagent');s.stop();require('fs').copyFileSync('%s', '%s');s.start();process.exit();\"", updateFilePath, updateFilePath, agentHost->exePath);
-						ignore_result(MeshAgent_System(ILibScratchPad));
-					}
-					else
-					{
-						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
-						if (system(ILibScratchPad)) {}
-
-						switch (pt)
-						{
-#ifdef __APPLE__
 						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/meshagent");	// Restart the service
 							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
-#endif
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
 							exit(1);
@@ -4814,7 +4688,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 							break;
 						default:
 							break;
-						}
 					}
 				}
 			}
