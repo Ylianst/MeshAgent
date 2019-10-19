@@ -2203,7 +2203,7 @@ function serviceManager()
             }\
             function cleanupAndExit()\
             {\
-                if(options.pidPath) { require('fs').unlinkSync(options.pidPath); }\
+                if(options.pidPath) { try{require('fs').unlinkSync(options.pidPath);} catch(x){} }\
             }\
             function spawnChild()\
             {\
