@@ -1786,7 +1786,21 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_daemons/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_daemons/' + options.name); }
                     if (!require('fs').existsSync('/usr/local/mesh_daemons/daemon'))
                     {
-                        require('fs').copyFileSync(process.execPath, '/usr/local/mesh_daemons/daemon');
+                        var exeGuid = 'B996015880544A19B7F7E9BE44914C18';
+                        var daemonJS = Buffer.from('LyoKQ29weXJpZ2h0IDIwMTkgSW50ZWwgQ29ycG9yYXRpb24KCkxpY2Vuc2VkIHVuZGVyIHRoZSBBcGFjaGUgTGljZW5zZSwgVmVyc2lvbiAyLjAgKHRoZSAiTGljZW5zZSIpOwp5b3UgbWF5IG5vdCB1c2UgdGhpcyBmaWxlIGV4Y2VwdCBpbiBjb21wbGlhbmNlIHdpdGggdGhlIExpY2Vuc2UuCllvdSBtYXkgb2J0YWluIGEgY29weSBvZiB0aGUgTGljZW5zZSBhdAoKICAgIGh0dHA6Ly93d3cuYXBhY2hlLm9yZy9saWNlbnNlcy9MSUNFTlNFLTIuMAoKVW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IG9yIGFncmVlZCB0byBpbiB3cml0aW5nLCBzb2Z0d2FyZQpkaXN0cmlidXRlZCB1bmRlciB0aGUgTGljZW5zZSBpcyBkaXN0cmlidXRlZCBvbiBhbiAiQVMgSVMiIEJBU0lTLApXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC4KU2VlIHRoZSBMaWNlbnNlIGZvciB0aGUgc3BlY2lmaWMgbGFuZ3VhZ2UgZ292ZXJuaW5nIHBlcm1pc3Npb25zIGFuZApsaW1pdGF0aW9ucyB1bmRlciB0aGUgTGljZW5zZS4KKi8KCgppZiAocHJvY2Vzcy5hcmd2Lmxlbmd0aCA8IDMpCnsKICAgIGNvbnNvbGUubG9nKCd1c2FnZTogZGFlbW9uIFtjb21tYW5kXSBbc2VydmljZV0nKTsKICAgIHByb2Nlc3MuZXhpdCgpOwp9Cgp2YXIgcyA9IG51bGw7CnRyeQp7CiAgICBzID0gcmVxdWlyZSgnc2VydmljZS1tYW5hZ2VyJykubWFuYWdlci5nZXRTZXJ2aWNlKHByb2Nlc3MuYXJndlsyXSk7Cn0KY2F0Y2goeCkKewogICAgY29uc29sZS5sb2coeCk7CiAgICBwcm9jZXNzLmV4aXQoKTsKfQoKc3dpdGNoKHByb2Nlc3MuYXJndlsxXSkKewogICAgY2FzZSAnc3RhcnQnOgogICAgICAgIHMuc3RhcnQoKTsKICAgICAgICBjb25zb2xlLmxvZygnU3RhcnRpbmcuLi4nKTsKICAgICAgICBicmVhazsKICAgIGNhc2UgJ3N0b3AnOgogICAgICAgIHMuc3RvcCgpOwogICAgICAgIGNvbnNvbGUubG9nKCdTdG9wcGluZy4uLicpOwogICAgICAgIGJyZWFrOwogICAgY2FzZSAnc3RhdHVzJzoKICAgICAgICBpZiAocy5pc1J1bm5pbmcoKSkKICAgICAgICB7CiAgICAgICAgICAgIGNvbnNvbGUubG9nKCdSdW5uaW5nLCBQSUQgPSAnICsgcmVxdWlyZSgnZnMnKS5yZWFkRmlsZVN5bmMoJy91c3IvbG9jYWwvbWVzaF9kYWVtb25zLycgKyBwcm9jZXNzLmFyZ3ZbMl0gKyAnL3BpZCcpLnRvU3RyaW5nKCkpOwogICAgICAgIH0KICAgICAgICBlbHNlCiAgICAgICAgewogICAgICAgICAgICBjb25zb2xlLmxvZygnTm90IHJ1bm5pbmcnKTsKICAgICAgICB9CiAgICAgICAgYnJlYWs7CiAgICBkZWZhdWx0OgogICAgICAgIGNvbnNvbGUubG9nKCdVbmtub3duIGNvbW1hbmQ6ICcgKyBwcm9jZXNzLmFyZ3ZbMV0pOwogICAgICAgIGJyZWFrOwp9Cgpwcm9jZXNzLmV4aXQoKTsK', 'base64');
+                        var exe = require('fs').readFileSync(process.execPath);
+                        var padding = Buffer.alloc(8 - ((exe.length + daemonJS.length + 16 + 4) % 8));
+                        var w = require('fs').createWriteStream('/usr/local/mesh_daemons/daemon', { flags: "wb" });
+                        var daemonJSLen = Buffer.alloc(4);
+                        daemonJSLen.writeUInt32BE(daemonJS.length);
+
+                        w.write(exe);
+                        if (padding.length > 0) { w.write(padding); }
+                        w.write(daemonJS);
+                        w.write(daemonJSLen);
+                        w.write(Buffer.from(exeGuid, 'hex'));
+                        w.end();
+
                         require('fs').chmodSync('/usr/local/mesh_daemons/daemon', require('fs').statSync('/usr/local/mesh_daemons/daemon').mode | require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
                     }
                     require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_daemons/' + options.name + '/' + options.target);
