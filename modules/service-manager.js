@@ -2178,7 +2178,12 @@ function serviceManager()
         var childParms = "\
             var child = null; \
             var options = " + JSON.stringify(options) + ";\
-            if(options.logOutput) { console.setDestination(console.Destinations.LOGFILE); console.log('Logging Outputs...'); }\
+            if(options.logOutput)\
+            { console.setDestination(console.Destinations.LOGFILE); console.log('Logging Outputs...'); }\
+            else\
+            {\
+              console.setDestination(console.Destinations.DISABLED);\
+            }\
             function cleanupAndExit()\
             {\
                 if(options.pidPath) { require('fs').unlinkSync(options.pidPath); }\
