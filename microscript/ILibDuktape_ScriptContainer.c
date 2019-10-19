@@ -830,8 +830,27 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Kill(duk_context *ctx)
 		duk_eval_string(ctx, ILibScratchPad);	// [child_process]
 	}
 #else
-	kill((pid_t)pid, SIGKILL);
+	int s = SIGTERM;
+	if (duk_is_string(ctx, 1))
+	{
+		duk_push_this(ctx);							// [process]
+		duk_get_prop_string(ctx, -1, "SIGTABLE");	// [process][table]
+		duk_dup(ctx, 1);							// [process][table][key]
+		if (duk_get_prop(ctx, -2) != 0)				// [process][table][value]
+		{
+			s = duk_get_int(ctx, -1);
+		}
+	}
+	else if (duk_is_number(ctx, 1))
+	{
+		s = duk_require_int(ctx, 1);
+	}
+
+	kill((pid_t)pid, s);
 #endif
+
+
+
 	return(0);
 }
 duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
@@ -874,6 +893,11 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 				case SIGTERM:
 					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");
 					if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
+					duk_pop(ctx);
+					break;
+				case SIGCHLD:
+					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");
+					if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGCHLD: "); }
 					duk_pop(ctx);
 					break;
 				default:
@@ -926,7 +950,20 @@ void ILibDuktape_ScriptContainer_Process_SIGTERM_Hook(ILibDuktape_EventEmitter *
 		UNREFERENCED_PARAMETER(hookedCallback);
 #endif
 	}
-
+}
+void ILibDuktape_ScriptContainer_Process_SIGCHLD_Hook(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
+{
+	int listenerCount = ILibDuktape_EventEmitter_HasListeners2(sender, "SIGCHLD", 0);
+	if (listenerCount == 0)
+	{
+		// We are the first
+#ifdef _POSIX
+		signal(SIGCHLD, ILibDuktape_ScriptContainer_Process_SignalListener);
+#else
+		UNREFERENCED_PARAMETER(eventName);
+		UNREFERENCED_PARAMETER(hookedCallback);
+#endif
+	}
 }
 duk_ret_t ILibDuktape_Process_setenv(duk_context *ctx)
 {
@@ -1047,6 +1084,42 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_put_prop_string(ctx, -2, "RLIMITS");
 #endif
 	duk_push_object(ctx);
+	duk_push_int(ctx, 0);	duk_put_prop_string(ctx, -2, "UNKNOWN"	);
+	duk_push_int(ctx, 1);	duk_put_prop_string(ctx, -2, "SIGHUP"	);
+	duk_push_int(ctx, 2);	duk_put_prop_string(ctx, -2, "SIGINT"	);
+	duk_push_int(ctx, 3);	duk_put_prop_string(ctx, -2, "SIGQUIT"	);
+	duk_push_int(ctx, 4);	duk_put_prop_string(ctx, -2, "SIGILL"	);
+	duk_push_int(ctx, 5);	duk_put_prop_string(ctx, -2, "SIGTRAP"	);
+	duk_push_int(ctx, 6);	duk_put_prop_string(ctx, -2, "SIGABRT"	);
+	duk_push_int(ctx, 7);	duk_put_prop_string(ctx, -2, "SIGBUS"	);
+	duk_push_int(ctx, 8);	duk_put_prop_string(ctx, -2, "SIGFPE"	);
+	duk_push_int(ctx, 9);	duk_put_prop_string(ctx, -2, "SIGKILL"	);
+	duk_push_int(ctx, 10);  duk_put_prop_string(ctx, -2, "SIGUSR1"	);
+	duk_push_int(ctx, 11);  duk_put_prop_string(ctx, -2, "SIGEGV"	);
+	duk_push_int(ctx, 12);  duk_put_prop_string(ctx, -2, "SIGUSR2"	);
+	duk_push_int(ctx, 13);  duk_put_prop_string(ctx, -2, "SIGPIPE"	);
+	duk_push_int(ctx, 14);  duk_put_prop_string(ctx, -2, "SIGALRM"	);
+	duk_push_int(ctx, 15);  duk_put_prop_string(ctx, -2, "SIGTERM"	);
+	duk_push_int(ctx, 16);  duk_put_prop_string(ctx, -2, "SIGSTKFLT");
+	duk_push_int(ctx, 17);  duk_put_prop_string(ctx, -2, "SIGCHLD"	);
+	duk_push_int(ctx, 18);  duk_put_prop_string(ctx, -2, "SIGCONT"	);
+	duk_push_int(ctx, 19);  duk_put_prop_string(ctx, -2, "SIGSTOP"	);
+	duk_push_int(ctx, 20);  duk_put_prop_string(ctx, -2, "SIGTSTP"	);
+	duk_push_int(ctx, 21);  duk_put_prop_string(ctx, -2, "SIGTTIN"	);
+	duk_push_int(ctx, 22);  duk_put_prop_string(ctx, -2, "SIGTTOU"	);
+	duk_push_int(ctx, 23);  duk_put_prop_string(ctx, -2, "SIGURG"	);
+	duk_push_int(ctx, 24);  duk_put_prop_string(ctx, -2, "SIGXCPU"	);
+	duk_push_int(ctx, 25);  duk_put_prop_string(ctx, -2, "SIGXFSZ"	);
+	duk_push_int(ctx, 26);  duk_put_prop_string(ctx, -2, "SIGVTALRM");
+	duk_push_int(ctx, 27);  duk_put_prop_string(ctx, -2, "SIGPROF"	);
+	duk_push_int(ctx, 28);  duk_put_prop_string(ctx, -2, "SIGWINCH"	);
+	duk_push_int(ctx, 29);  duk_put_prop_string(ctx, -2, "SIGIO"	);
+	duk_push_int(ctx, 29);  duk_put_prop_string(ctx, -2, "SIGPOLL"	);
+	duk_push_int(ctx, 30);  duk_put_prop_string(ctx, -2, "SIGPWR"	);
+	duk_push_int(ctx, 31);  duk_put_prop_string(ctx, -2, "SIGSYS"	);
+	duk_put_prop_string(ctx, -2, "SIGTABLE");
+
+	duk_push_object(ctx);
 	if (sslvS != ((char*)NULL + 1))
 	{
 		char *tmp = strstr(sslvS, " ");
@@ -1152,7 +1225,9 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Process_Exit, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGTERM");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGCHLD");
 	ILibDuktape_EventEmitter_AddHook(emitter, "SIGTERM", ILibDuktape_ScriptContainer_Process_SIGTERM_Hook);
+	ILibDuktape_EventEmitter_AddHook(emitter, "SIGCHLD", ILibDuktape_ScriptContainer_Process_SIGCHLD_Hook);
 
 	ILibDuktape_CreateEventWithGetter(ctx, "argv0", ILibDuktape_ScriptContainer_Process_Argv0);
 	duk_push_int(ctx, 1);
