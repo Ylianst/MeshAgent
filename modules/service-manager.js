@@ -1422,6 +1422,9 @@ function serviceManager()
                             paths.push('/lib/systemd/system');
                             paths.push('/usr/lib/systemd/system');
                             break;
+                        default:
+                            paths.push('/usr/local/mesh_daemons');
+                            break;
                     }
                     break;
                 case 'freebsd':
@@ -1473,6 +1476,18 @@ function serviceManager()
                                             results.push(this.getService(files[j].split('.service')[0], 'systemd'));
                                         }
                                         catch(e)
+                                        {
+                                        }
+                                    }
+                                    break;
+                                default:
+                                    if (files[j].endsWith('.service'))
+                                    {
+                                        try
+                                        {
+                                            results.push(this.getService(files[j].split('.service')[0], 'unknown'));
+                                        }
+                                        catch (e)
                                         {
                                         }
                                     }
@@ -2072,6 +2087,25 @@ function serviceManager()
                     }
                     break;
                 default: // unknown platform service type
+                    if (service.isRunning())
+                    {
+                        service.stop();
+                    }
+                    try
+                    {
+                        require('fs').unlinkSync(servicePath);
+                    }
+                    catch(x)
+                    {
+                    }
+                    try
+                    {
+                        require('fs').unlinkSync(service.conf);
+                    }
+                    catch(x)
+                    {
+                    }
+                    console.log(name + ' uninstalled');
                     break;
             }
         }
