@@ -41,7 +41,7 @@ function addMsh(options)
         // Try to determine what the platform is
         try
         {
-            options.peinfo = require('PE_Parser')(options.sourcePath);
+            options.peinfo = require('PE_Parser')(options.sourceFileName);
             options.platform = 'win32';
         }
         catch(e)
@@ -58,7 +58,7 @@ function addMsh(options)
         if(!options.peinfo)
         {
             // We need to parse the PE headers first
-            options.peinfo = require('PE_Parser')(options.sourcePath);
+            options.peinfo = require('PE_Parser')(options.sourceFileName);
         }
     }
 
@@ -75,7 +75,10 @@ function addMsh(options)
             var sz = Buffer.alloc(4);
             sz.writeUInt32BE(this.options.msh.length, 0);
             this.options.destinationStream.write(sz); // Length in small endian
-            this.options.destinationStream.write(Buffer.from(exeMeshPolicyGuid, 'hex'), function () { this.end(); }); // GUID
+
+            var mshBuf = Buffer.from(exeMeshPolicyGuid, 'hex');
+            if (this.options.randomGuid) { mshBuf.randomFill(); }
+            this.options.destinationStream.write(mshBuf, function () { this.end(); }); // GUID
         });
         // Pipe the entire source binary without ending the stream.
         options.destinationStream.sourceStream.pipe(options.destinationStream, { end: false });
@@ -131,7 +134,10 @@ function addMsh(options)
                     var sz = Buffer.alloc(4);
                     sz.writeUInt32BE(this.options.msh.length, 0);
                     this.options.destinationStream.write(sz); // MSH Length, small-endian
-                    this.options.destinationStream.write(Buffer.from(exeMeshPolicyGuid, 'hex'), function () { this.end(); }); // MSH GUID
+
+                    var mshBuf = Buffer.from(exeMeshPolicyGuid, 'hex');
+                    if (this.options.randomGuid) { mshBuf.randomFill(); }
+                    this.options.destinationStream.write(mshBuf, function () { this.end(); }); // GUID
                 });
                 source3.pipe(this.options.destinationStream, { end: false });
                 this.options.sourceStream = source3;

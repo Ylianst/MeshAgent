@@ -79,6 +79,25 @@ duk_ret_t ILibDuktape_Pollyfills_Buffer_slice(duk_context *ctx)
 	memcpy_s(out, bufferLen, buffer + offset, bufferLen);
 	return 1;
 }
+duk_ret_t ILibDuktape_Polyfills_Buffer_randomFill(duk_context *ctx)
+{
+	int start, length;
+	char *buffer;
+	duk_size_t bufferLen;
+
+	start = (int)(duk_get_top(ctx) == 0 ? 0 : duk_require_int(ctx, 0));
+	length = (int)(duk_get_top(ctx) == 2 ? duk_require_int(ctx, 1) : -1);
+
+	duk_push_this(ctx);
+	buffer = (char*)Duktape_GetBuffer(ctx, -1, &bufferLen);
+	if ((duk_size_t)length > bufferLen || length < 0)
+	{
+		length = (int)(bufferLen - start);
+	}
+
+	util_random(length, buffer + start);
+	return(0);
+}
 duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -290,6 +309,8 @@ void ILibDuktape_Polyfills_Buffer(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "prototype");										// [g][Buffer][prototype]
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_toString, DUK_VARARGS);	// [g][Buffer][prototype][func]
 	duk_put_prop_string(ctx, -2, "toString");										// [g][Buffer][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Buffer_randomFill, DUK_VARARGS);			// [g][Buffer][prototype][func]
+	duk_put_prop_string(ctx, -2, "randomFill");										// [g][Buffer][prototype]
 	duk_pop_2(ctx);																	// [g]
 }
 duk_ret_t ILibDuktape_Polyfills_String_startsWith(duk_context *ctx)
