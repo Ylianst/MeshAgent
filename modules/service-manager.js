@@ -1921,12 +1921,26 @@ function serviceManager()
                 if (options.files[i]._buffer)
                 {
                     console.log('writing ' + extractFileName(options.files[i]));
-                    require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]), options.files[i]._buffer);
+                    if (options.servicePlatform == 'unknown')
+                    {
+                        require('fs').writeFileSync('/usr/local/mesh_daemons/' + options.name + '/' + extractFileName(options.files[i]), options.files[i]._buffer);
+                    }
+                    else
+                    {
+                        require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]), options.files[i]._buffer);
+                    }
                 }
                 else
                 {
                     console.log('copying ' + extractFileSource(options.files[i]));
-                    require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
+                    if (options.servicePlatform == 'unknown')
+                    {
+                        require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_daemons/' + options.name + '/' + extractFileName(options.files[i]));
+                    }
+                    else
+                    {
+                        require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
+                    }
                 }
             }
         }
