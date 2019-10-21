@@ -139,11 +139,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
 		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	} 
-	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integratedJavaScriptLen == 0)
+	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0)
 	{
+		integratedJavaScript = NULL;
 		integratedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char**)&integratedJavaScript);
 	}
-	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
+	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0 && integratedJavaScriptLen == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId')());process.exit();";
 		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);

@@ -1303,14 +1303,14 @@ function serviceManager()
                                 child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stderr.on('data', function (c) {  });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; respawn="0"; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} if(tok1[1]=="respawn") { respawn="1"; } } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s, \\\"respawn\\\": %s }", wd, parms, respawn }\'\nexit\n');
                                 child.waitExit();
 
                                 var info = JSON.parse(child.stdout.str.trim());
                                 info.exePath = info.wd + '/' + info.parms.shift();
 
-                                var options = { pidPath: info.wd + '/pid', logOutputs: false };
-                                require('service-manager').manager.daemon(info.exePath, info.parms , options);
+                                var options = { pidPath: info.wd + '/pid', logOutputs: false, crashRestart: info.respawn ? true : false };
+                                require('service-manager').manager.daemon(info.exePath, info.parms, options);
                             };
                             ret.stop = function stop()
                             {
@@ -1801,7 +1801,21 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_daemons/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_daemons/' + options.name); }
                     if (!require('fs').existsSync('/usr/local/mesh_daemons/daemon'))
                     {
-                        require('fs').copyFileSync(process.execPath, '/usr/local/mesh_daemons/daemon');
+                        var exeGuid = 'B996015880544A19B7F7E9BE44914C18';
+                        var daemonJS = Buffer.from('LyoKQ29weXJpZ2h0IDIwMTkgSW50ZWwgQ29ycG9yYXRpb24KCkxpY2Vuc2VkIHVuZGVyIHRoZSBBcGFjaGUgTGljZW5zZSwgVmVyc2lvbiAyLjAgKHRoZSAiTGljZW5zZSIpOwp5b3UgbWF5IG5vdCB1c2UgdGhpcyBmaWxlIGV4Y2VwdCBpbiBjb21wbGlhbmNlIHdpdGggdGhlIExpY2Vuc2UuCllvdSBtYXkgb2J0YWluIGEgY29weSBvZiB0aGUgTGljZW5zZSBhdAoKICAgIGh0dHA6Ly93d3cuYXBhY2hlLm9yZy9saWNlbnNlcy9MSUNFTlNFLTIuMAoKVW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IG9yIGFncmVlZCB0byBpbiB3cml0aW5nLCBzb2Z0d2FyZQpkaXN0cmlidXRlZCB1bmRlciB0aGUgTGljZW5zZSBpcyBkaXN0cmlidXRlZCBvbiBhbiAiQVMgSVMiIEJBU0lTLApXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC4KU2VlIHRoZSBMaWNlbnNlIGZvciB0aGUgc3BlY2lmaWMgbGFuZ3VhZ2UgZ292ZXJuaW5nIHBlcm1pc3Npb25zIGFuZApsaW1pdGF0aW9ucyB1bmRlciB0aGUgTGljZW5zZS4KKi8KCgppZiAocHJvY2Vzcy5hcmd2Lmxlbmd0aCA8IDMpCnsKICAgIGNvbnNvbGUubG9nKCd1c2FnZTogZGFlbW9uIFsgc3RhcnQgfCBzdG9wIHwgc3RhdHVzIF0gW3NlcnZpY2VdJyk7CiAgICBwcm9jZXNzLmV4aXQoKTsKfQoKdmFyIHMgPSBudWxsOwp0cnkKewogICAgcyA9IHJlcXVpcmUoJ3NlcnZpY2UtbWFuYWdlcicpLm1hbmFnZXIuZ2V0U2VydmljZShwcm9jZXNzLmFyZ3ZbMl0pOwp9CmNhdGNoKHgpCnsKICAgIGNvbnNvbGUubG9nKHgpOwogICAgcHJvY2Vzcy5leGl0KCk7Cn0KCnN3aXRjaChwcm9jZXNzLmFyZ3ZbMV0pCnsKICAgIGNhc2UgJ3N0YXJ0JzoKICAgICAgICBzLnN0YXJ0KCk7CiAgICAgICAgY29uc29sZS5sb2coJ1N0YXJ0aW5nLi4uJyk7CiAgICAgICAgYnJlYWs7CiAgICBjYXNlICdzdG9wJzoKICAgICAgICBzLnN0b3AoKTsKICAgICAgICBjb25zb2xlLmxvZygnU3RvcHBpbmcuLi4nKTsKICAgICAgICBicmVhazsKICAgIGNhc2UgJ3N0YXR1cyc6CiAgICAgICAgaWYgKHMuaXNSdW5uaW5nKCkpCiAgICAgICAgewogICAgICAgICAgICBjb25zb2xlLmxvZygnUnVubmluZywgUElEID0gJyArIHJlcXVpcmUoJ2ZzJykucmVhZEZpbGVTeW5jKCcvdXNyL2xvY2FsL21lc2hfZGFlbW9ucy8nICsgcHJvY2Vzcy5hcmd2WzJdICsgJy9waWQnKS50b1N0cmluZygpKTsKICAgICAgICB9CiAgICAgICAgZWxzZQogICAgICAgIHsKICAgICAgICAgICAgY29uc29sZS5sb2coJ05vdCBydW5uaW5nJyk7CiAgICAgICAgfQogICAgICAgIGJyZWFrOwogICAgZGVmYXVsdDoKICAgICAgICBjb25zb2xlLmxvZygnVW5rbm93biBjb21tYW5kOiAnICsgcHJvY2Vzcy5hcmd2WzFdKTsKICAgICAgICBicmVhazsKfQoKcHJvY2Vzcy5leGl0KCk7Cg==', 'base64');
+                        var exe = require('fs').readFileSync(process.execPath);
+                        var padding = Buffer.alloc(8 - ((exe.length + daemonJS.length + 16 + 4) % 8));
+                        var w = require('fs').createWriteStream('/usr/local/mesh_daemons/daemon', { flags: "wb" });
+                        var daemonJSLen = Buffer.alloc(4);
+                        daemonJSLen.writeUInt32BE(daemonJS.length);
+
+                        w.write(exe);
+                        if (padding.length > 0) { w.write(padding); }
+                        w.write(daemonJS);
+                        w.write(daemonJSLen);
+                        w.write(Buffer.from(exeGuid, 'hex'));
+                        w.end();
+
                         require('fs').chmodSync('/usr/local/mesh_daemons/daemon', require('fs').statSync('/usr/local/mesh_daemons/daemon').mode | require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
                     }
                     require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_daemons/' + options.name + '/' + options.target);
@@ -1817,7 +1831,10 @@ function serviceManager()
                     options.parameters.unshift(options.name);
                     conf.write('parameters=' + JSON.stringify(options.parameters) + '\n');
                     options.parameters.shift();
-                    
+                    if (options.failureRestart == null || options.failureRestart > 0)
+                    {
+                        conf.write('respawn\n');
+                    }
                     conf.end();
                     break;
             }
@@ -2212,10 +2229,15 @@ function serviceManager()
         var childParms = "\
             var child = null; \
             var options = " + JSON.stringify(options) + ";\
-            if(options.logOutput) { console.setDestination(console.Destinations.LOGFILE); console.log('Logging Outputs...'); }\
+            if(options.logOutput)\
+            { console.setDestination(console.Destinations.LOGFILE); console.log('Logging Outputs...'); }\
+            else\
+            {\
+              console.setDestination(console.Destinations.DISABLED);\
+            }\
             function cleanupAndExit()\
             {\
-                if(options.pidPath) { require('fs').unlinkSync(options.pidPath); }\
+                if(options.pidPath) { try{require('fs').unlinkSync(options.pidPath);} catch(x){} }\
             }\
             function spawnChild()\
             {\
