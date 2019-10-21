@@ -2894,14 +2894,14 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					{
 						if (agent->logUpdate != 0)
 						{
-							ILIBLOGMESSSAGE("SelfUpdate -> Starting Diagnostic Agent, to assist with self update");
+							ILIBLOGMESSSAGE("SelfUpdate -> Starting Secondary Agent, to assist with self update");
 						}
 					}
 					else
 					{
 						if (agent->logUpdate != 0)
 						{
-							ILIBLOGMESSSAGE("SelfUpdate -> Diagnostic Agent unavailable to assist with self update");
+							ILIBLOGMESSSAGE("SelfUpdate -> Secondary Agent unavailable to assist with self update");
 						}
 					}
 
@@ -3390,6 +3390,9 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
 	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
 
+	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("PLATFORM_TYPE: %d\n", agent->platformType); }
+	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("Running as Service: %d\n", agent->JSRunningAsService); }
+
 	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
 	if (agent->controlChannelDebug != 0)
 	{
@@ -3849,10 +3852,9 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 	if (duk_peval_string(tmpCtx, "require('service-manager').manager.getService(process.platform=='win32'?'Mesh Agent':'meshagent').isMe();") == 0)
 	{
-		agentHost->JSRunningAsService = duk_get_int(tmpCtx, -1);
+		agentHost->JSRunningAsService = duk_get_boolean(tmpCtx, -1);
 	}
 #endif
-
 #if !defined(MICROSTACK_NOTLS)
 	// Check the local MacAddresses, to see if we need to reset our NodeId
 	if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
