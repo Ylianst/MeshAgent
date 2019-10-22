@@ -181,7 +181,7 @@ function windows_registry()
                 break;
         }
 
-        if (this._AdvApi.RegSetValueExW(h.Deref(), this._marshal.CreateVariable(key, { wide: true }), 0, dataType, data, data._size).Val != 0)
+        if (this._AdvApi.RegSetValueExW(h.Deref(), key?this._marshal.CreateVariable(key, { wide: true }):0, 0, dataType, data, data._size).Val != 0)
         {           
             this._AdvApi.RegCloseKey(h.Deref());
             throw ('Error writing reg key: ' + key);
