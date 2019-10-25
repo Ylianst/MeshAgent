@@ -29,12 +29,17 @@ limitations under the License.
 #include <X11/keysym.h>
 #include <dlfcn.h>
 
+#if !defined(_FREEBSD)
+	#include <sys/prctl.h>
+#endif
+
 #include "linux_events.h"
 #include "linux_compression.h"
 
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 extern uint32_t crc32c(uint32_t crc, const unsigned char* buf, uint32_t len);
+extern char* g_ILibCrashDump_path;
 
 typedef enum KVM_MouseCursors
 {
@@ -617,7 +622,6 @@ void* kvm_server_mainloop(void* parm)
 			}
 		}
 	}
-
 	g_messageQ = ILibQueue_Create();
 
 	// Init the kvm
@@ -1009,6 +1013,19 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 		if (SLAVELOG != 0) { logFile = fopen("/tmp/slave", "w"); }
 		if (uid != 0) { ignore_result(setuid(uid)); }
+
+		if (g_ILibCrashDump_path != NULL)
+		{
+#if !defined(_FREEBSD)
+			prctl(PR_SET_DUMPABLE, 1);
+			if (logFile) { fprintf(logFile, "SLAVE/KVM DUMPABLE: %s\n", prctl(PR_GET_DUMPABLE, 0)?"YES":"NO"); fflush(logFile); }
+#endif
+		}
+		else
+		{
+			if (logFile) { fprintf(logFile, "SLAVE/KVM CoreDumps DISABLED\n"); fflush(logFile); }
+		}
+
 
 		//fprintf(logFile, "Starting kvm_server_mainloop\n");
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }

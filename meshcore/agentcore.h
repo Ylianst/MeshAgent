@@ -258,6 +258,7 @@ forceUpdate:				If set, will cause the agent to perform a self-update on next st
 ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
 logUpdate:					If set, will cause the agent to log self-update status
 jsDebugPort:				Specify a JS Debugger Port
+slaveKvmLog:				[Linux] If set, will enable logging inside the Child KVM Process.
 WebProxy:					Manually specify proxy configuration
 webSocketMaskOverride:		If set, will disable the optimzation to skip WebSocket Masking for TLS protected Web Sockets
 *

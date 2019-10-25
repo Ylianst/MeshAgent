@@ -35,6 +35,10 @@ limitations under the License.
 #include <sys/utsname.h>
 #endif
 
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+	#include <sys/prctl.h>
+#endif
+
 #include "duktape.h"
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -1021,6 +1025,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter(duk_contex
 		duk_put_prop_string(ctx, -2, ILibDuktape_ScriptContainer_Process_CoreDumpPath);	// [process]
 		duk_pop(ctx);																	// ...
 #ifndef WIN32
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+		prctl(PR_SET_DUMPABLE, 1);
+#endif
 		duk_eval_string_noresult(ctx, "process.rlimit.set(process.RLIMITS.CORE, {soft: -1, hard: -1});");
 #endif
 	}

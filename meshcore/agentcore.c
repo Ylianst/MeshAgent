@@ -3389,6 +3389,10 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
 	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
+	
+#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
+	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
+#endif
 
 	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("PLATFORM_TYPE: %d\n", agent->platformType); }
 	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("Running as Service: %d\n", agent->JSRunningAsService); }
