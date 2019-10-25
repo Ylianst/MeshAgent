@@ -45,7 +45,7 @@ function getLibInfo(libname)
     child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = '';
     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-    child.stdin.write(ldconfig + " -p | grep '" + libname + ".so.' | tr '\\n' '^' | awk -F^ '{ printf \"[\"; for(i=1;i<=NF;++i) {" + ' split($i, plat, ")"); split(plat[1], plat2, "("); split(plat2[2], ifo, ","); x=split($i, tok, " "); if(tok[1]!="") { printf "%s{\\"lib\\": \\"%s\\", \\"path\\": \\"%s\\", \\"info\\": \\"%s\\"}", (i!=1?",":""), tok[1], tok[x], ifo[2]; }} printf "]"; }\'\nexit\n');
+    child.stdin.write(ldconfig + " -p | grep '" + libname + ".so.' | tr '\\n' '^' | awk -F^ '{ printf \"[\"; for(i=1;i<=NF;++i) {" + ' split($i, plat, ")"); split(plat[1], plat2, "("); ifox=split(plat2[2], ifo, ","); libc=""; hwcap="0"; for(ifoi=1;ifoi<=ifox;++ifoi) { if(split(ifo[ifoi], jnk, "libc")==2) { libc=ifo[ifoi]; } if(split(ifo[ifoi], jnk, "hwcap:")==2) { split(ifo[ifoi], jnk, "0x"); hwcap=jnk[2]; }   }      x=split($i, tok, " "); if(tok[1]!="") { printf "%s{\\"lib\\": \\"%s\\", \\"path\\": \\"%s\\", \\"hwcap\\": \\"%s\\", \\"libc\\": \\"%s\\"}", (i!=1?",":""), tok[1], tok[x], hwcap, libc; }} printf "]"; }\'\nexit\n');
 
     child.waitExit();
     var v = JSON.parse(child.stdout.str.trim());
@@ -108,50 +108,62 @@ function monitorinfo()
 
         for (ix in x11info)
         {
-            try
+            if (x11info.length == 1 || x11info[ix].hwcap == "0")
             {
-                this._gm.CreateNativeProxy(x11info[ix].path);
-                Object.defineProperty(this, 'Location_X11LIB', { value: x11info[ix].path });
-                break;
-            }
-            catch (ex)
-            {
+                try
+                {
+                    this._gm.CreateNativeProxy(x11info[ix].path);
+                    Object.defineProperty(this, 'Location_X11LIB', { value: x11info[ix].path });
+                    break;
+                }
+                catch (ex)
+                {
+                }
             }
         }
         for (ix in xtstinfo)
         {
-            try
+            if (xtstinfo.length == 1 || xtstinfo[ix].hwcap == "0")
             {
-                this._gm.CreateNativeProxy(xtstinfo[ix].path);
-                Object.defineProperty(this, 'Location_X11TST', { value: xtstinfo[ix].path });
-                break;
-            }
-            catch (ex)
-            {
+                try
+                {
+                    this._gm.CreateNativeProxy(xtstinfo[ix].path);
+                    Object.defineProperty(this, 'Location_X11TST', { value: xtstinfo[ix].path });
+                    break;
+                }
+                catch (ex)
+                {
+                }
             }
         }
         for (ix in xextinfo)
         {
-            try
+            if (xextinfo.length == 1 || xextinfo[ix].hwcap == "0")
             {
-                this._gm.CreateNativeProxy(xextinfo[ix].path);
-                Object.defineProperty(this, 'Location_X11EXT', { value: xextinfo[ix].path });
-                break;
-            }
-            catch (ex)
-            {
+                try
+                {
+                    this._gm.CreateNativeProxy(xextinfo[ix].path);
+                    Object.defineProperty(this, 'Location_X11EXT', { value: xextinfo[ix].path });
+                    break;
+                }
+                catch (ex)
+                {
+                }
             }
         }
         for (ix in xfixesinfo)
         {
-            try
+            if (xfixesinfo.length == 1 || xfixesinfo[ix].hwcap == "0")
             {
-                this._gm.CreateNativeProxy(xfixesinfo[ix].path);
-                Object.defineProperty(this, 'Location_X11FIXES', { value: xfixesinfo[ix].path });
-                break;
-            }
-            catch (ex)
-            {
+                try
+                {
+                    this._gm.CreateNativeProxy(xfixesinfo[ix].path);
+                    Object.defineProperty(this, 'Location_X11FIXES', { value: xfixesinfo[ix].path });
+                    break;
+                }
+                catch (ex)
+                {
+                }
             }
         }   
 
