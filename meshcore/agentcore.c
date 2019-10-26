@@ -389,7 +389,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 			int i = ILibString_IndexOf(*env, envLen, "=", 1);
 			if (i > 0)
 			{
-				if (i == 11 && strncmp(*env, "https_proxy", 11) == 0)
+				if (i == 11 && (strncmp(*env, "https_proxy", 11) == 0 || strncmp(*env, "HTTPS_PROXY", 11) == 0))
 				{
 					if (ILibString_StartsWith(*env + i + 1, envLen - i - 1, "http://", 7) != 0)
 					{
