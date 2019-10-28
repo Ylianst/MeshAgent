@@ -768,6 +768,8 @@ void ILibDuktape_HECI_IoctlHandler_Dispatch(void *chain, void *user)
 	int i;
 	duk_context *ctx = data->ctx;
 
+	if (!ILibMemory_CanaryOK(data)) { return; } // Abort Dispatch, becuase the HECI object was GC'ed.
+
 	duk_push_heapptr(data->ctx, data->data);												// [array]
 	duk_push_heapptr(data->ctx, data->heciObject);											// [array][heci]
 	duk_get_prop_index(data->ctx, -2, 2);													// [array][heci][callback]
@@ -940,7 +942,7 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	{																				
 		duk_dup(ctx, i);															// [heci][stash][array][object]
 		duk_put_prop_index(ctx, -2, i-1);											// [heci][stash][array]
-	}																				
+	}		
 	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));	// [heci][stash]
 														
 
