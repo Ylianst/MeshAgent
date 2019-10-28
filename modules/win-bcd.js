@@ -76,12 +76,18 @@ function restart(delay)
     child.waitExit();
 }
 
-module.exports =
-    {
-        getKeys: getKeys, setKey: setKey, deleteKey: deleteKey, enableSafeModeService: enableSafeModeService,
-        disableSafeModeService: disableSafeModeService, getKey: getKey, restart: restart
-    };
-
+if (require('_GenericMarshal').PointerSize == 4 && require('os').arch() == 'x64')
+{
+    throw ('win-bcd on a 64 bit Platform can only be accessed from a 64 bit process');
+}
+else
+{
+    module.exports =
+        {
+            getKeys: getKeys, setKey: setKey, deleteKey: deleteKey, enableSafeModeService: enableSafeModeService,
+            disableSafeModeService: disableSafeModeService, getKey: getKey, restart: restart
+        };
+}
 Object.defineProperty(module.exports, "bootMode",
     {
         get: function()
