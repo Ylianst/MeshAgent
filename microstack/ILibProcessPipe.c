@@ -1055,15 +1055,17 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 	do
 	{
 #ifdef WIN32
+		err = 0;
 		result = GetOverlappedResult(pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, &bytesRead, FALSE);
-		if (result == FALSE) 
+		//printf("Overlapped(%p): %d bytes\n", pipeObject->mPipe_ReadEnd, bytesRead);
+		if (result == FALSE || bytesRead == 0)
 		{
 			err = GetLastError();
-			break; 
+			break;
 		}
 #else
 		bytesRead = (int)read(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead);
-		if(bytesRead <= 0)
+		if (bytesRead <= 0)
 		{
 			break;
 		}
@@ -1081,7 +1083,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 			pipeObject->totalRead = 0;
 			continue;
 		}
-		
+
 		while (pipeObject->PAUSED == 0)
 		{
 			consumed = 0;
@@ -1130,17 +1132,24 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 			pipeObject->bufferSize = pipeObject->bufferSize * 2;
 		}
 
-		if (pipeObject->PAUSED != 0) { break; }
+		if (pipeObject->PAUSED == 0)
+		{
+			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped) != TRUE)
+			{
+				break;
+			}
+		}
 	}
 #ifdef WIN32
-	while ((result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped)) == TRUE); // Note: This is actually the end of a do-while loop
-	if((err = GetLastError()) != ERROR_IO_PENDING && (pipeObject->PAUSED == 0 || pipeObject->totalRead == 0))
+	while (pipeObject->PAUSED == 0); // Note: This is actually the end of a do-while loop
+	if(bytesRead == 0 || (err != ERROR_IO_PENDING && err != 0 && pipeObject->PAUSED == 0))
 #else
 	while(pipeObject->PAUSED == 0); // Note: This is actually the end of a do-while loop
 	err = 0;
 	if (bytesRead == 0 || ((err = errno) != EAGAIN && errno != EWOULDBLOCK && pipeObject->PAUSED == 0))
 #endif
 	{
+		//printf("Broken Pipe(%p)? (err: %d, PAUSED: %d, totalRead: %d\n", pipeObject->mPipe_ReadEnd, err, pipeObject->PAUSED, pipeObject->totalRead);
 		//
 		// Broken Pipe
 		//
@@ -1318,7 +1327,7 @@ void ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(ILibProcessPipe_PipeObject
 	int consumed;
 	p->PAUSED = 0;
 	p->processingLoop = 1;
-	while (p->readOffset != 0 && p->PAUSED == 0)
+	while (p->PAUSED == 0 && p->totalRead > 0)
 	{
 		consumed = 0;
 		((ILibProcessPipe_GenericReadHandler)p->handler)(p->buffer + p->readOffset, p->totalRead, &consumed, p->user1, p->user2);
@@ -1334,6 +1343,7 @@ void ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(ILibProcessPipe_PipeObject
 			//
 			memmove_s(p->buffer, p->bufferSize, p->buffer + p->readOffset, p->totalRead);
 			p->readOffset = 0;
+			break;
 		}
 		else if (consumed == p->totalRead)
 		{
@@ -1376,7 +1386,8 @@ void __stdcall ILibProcessPipe_Pipe_ResumeEx_APC(ULONG_PTR obj)
 		{
 			ILibProcessPipe_WaitHandle_Add(p->manager, p->mOverlapped->hEvent, p, ILibProcessPipe_Process_ReadHandler);
 		}
-		ReadFile(p->mPipe_ReadEnd, p->buffer, p->bufferSize, NULL, p->mOverlapped);
+		//printf("ReadFile(%p, %d, %d) (ResumeEx_APC)\n", p->mPipe_ReadEnd, p->readOffset + p->totalRead, p->bufferSize - p->readOffset - p->totalRead);
+		ReadFile(p->mPipe_ReadEnd, p->buffer + p->readOffset + p->totalRead, p->bufferSize - p->readOffset - p->totalRead, NULL, p->mOverlapped);
 	}
 	else
 	{
@@ -1514,6 +1525,7 @@ void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObj
 	if (pipeObject->mOverlapped != NULL)
 	{
 		// This PIPE supports Overlapped I/O
+		//printf("ReadFile(%p, %d, %d) (StartPipeReader)\n", pipeObject->mPipe_ReadEnd, 0, pipeObject->bufferSize);
 		result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer, pipeObject->bufferSize, NULL, pipeObject->mOverlapped);
 		ILibProcessPipe_WaitHandle_Add(pipeObject->manager, pipeObject->mOverlapped->hEvent, pipeObject, &ILibProcessPipe_Process_ReadHandler);
 	}
