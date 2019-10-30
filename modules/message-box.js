@@ -52,7 +52,7 @@ var childScript = "\
                         var GM = require('_GenericMarshal');\
                         var user32 = GM.CreateNativeProxy('user32.dll');\
                         user32.CreateMethod('MessageBoxA');\
-                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), " + (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_SETFOREGROUND).toString() + ").then(\
+                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), " + (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST).toString() + ").then(\
                         function(r)\
                         {\
                             if(r.Val == " + IDYES.toString() + ")\
