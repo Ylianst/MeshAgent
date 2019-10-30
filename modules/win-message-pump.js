@@ -37,15 +37,16 @@ function WindowsMessagePump(options)
 
     this._user32 = GM.CreateNativeProxy('User32.dll');
     this._user32.mp = this;
-    this._user32.CreateMethod('GetMessageA');
     this._user32.CreateMethod('CreateWindowExA');
-    this._user32.CreateMethod('TranslateMessage');
-    this._user32.CreateMethod('DispatchMessageA');
-    this._user32.CreateMethod('RegisterClassExA');
     this._user32.CreateMethod('DefWindowProcA');
+    this._user32.CreateMethod('DestroyWindow');
+    this._user32.CreateMethod('DispatchMessageA');
+    this._user32.CreateMethod('GetMessageA');
     this._user32.CreateMethod('PostMessageA');
-    this._user32.CreateMethod('ShowWindow');
+    this._user32.CreateMethod('RegisterClassExA');
     this._user32.CreateMethod('SetWindowPos');
+    this._user32.CreateMethod('ShowWindow');
+    this._user32.CreateMethod('TranslateMessage');
 
 
     this.wndclass = GM.CreateVariable(GM.PointerSize == 4 ? 48 : 80);
@@ -160,8 +161,15 @@ function WindowsMessagePump(options)
             else
             {
                 // We got a 'QUIT' message
-                delete this.nativeProxy.mp._hwnd;
-                this.nativeProxy.mp.emit('exit', 0);
+                this.nativeProxy.DestroyWindow.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._hwnd).then(function ()
+                {
+                    this.nativeProxy.RegisterClassExA.async.abort();
+                    delete this.nativeProxy.mp._hwnd;
+                    this.nativeProxy.mp.emit('exit', 0);
+
+                    this.nativeProxy.mp.wndclass.wndproc.removeAllListeners('GlobalCallback');
+                    this.nativeProxy.mp.wndclass.wndproc = null;
+                });
             }
         }, function (err) { this.nativeProxy.mp.stop(); });
     }
