@@ -48,6 +48,7 @@ limitations under the License.
 #endif
 
 #define ILibDuktape_GenericMarshal_VariableType			"\xFF_GenericMarshal_VarType"
+#define ILibDuktape_GenericMarshal_GlobalSet_List		"\xFF_GenericMarshal_GlobalSet_List"
 #define ILibDuktape_GenericMarshal_GlobalSet			"\xFF_GenericMarshal_GlobalSet"
 #define ILibDuktape_GenericMarshal_GlobalSet_Dispatcher	"\xFF_GenericMArshal_GlobalSet_Dispatcher"
 #define ILibDuktape_GenericMarshal_Variable_AutoFree	"\xFF_GenericMarshal_Variable_AutoFree"
@@ -850,6 +851,7 @@ typedef struct ILibDuktape_FFI_AsyncData
 #endif
 	void *fptr;
 	void *fptr_redirection;
+	char *fptr_redirectionName;
 	int abort;
 	int waitingForResult;
 	PTRSIZE *vars;
@@ -865,6 +867,7 @@ void ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch(void *chain, voi
 {
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)user;
 	if (!ILibMemory_CanaryOK(data)) { return; }
+	duk_context *ctx = data->ctx;
 
 	duk_push_heapptr(data->ctx, data->promise);																// [promise]
 	duk_get_prop_string(data->ctx, -1, "_RES");																// [promise][resolver]
@@ -872,8 +875,9 @@ void ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch(void *chain, voi
 	ILibDuktape_GenericMarshal_Variable_PUSH(data->ctx, (void*)(PTRSIZE)data->vars, (int)sizeof(void*));	// [resolver][this][var]
 	duk_push_int(data->ctx, data->lastError); duk_put_prop_string(data->ctx, -2, "_LastError");
 	data->promise = NULL;
-	if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "Error Resolving Promise: "); }
-	duk_pop(data->ctx);																						// ...
+
+	if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Resolving Promise: "); }
+	duk_pop(ctx);																						// ...
 }
 void ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop(void *arg)
 {
@@ -935,6 +939,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_abort(duk_context *ctx)
 {
 	duk_push_this(ctx);
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI_AsyncData was already freed")); }
 
 	if (data != NULL)
 	{
@@ -980,7 +985,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer(duk_context
 {
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
 
-	if (data != NULL)
+	if (data != NULL && ILibMemory_CanaryOK(data))
 	{
 		data->abort = 1;
 		if (data->promise == NULL)
@@ -1003,6 +1008,7 @@ void __stdcall ILibDuktape_GenericMarshal_MethodInvokeAsync_Done_APC(ULONG_PTR u
 {
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)u;
 	duk_context *ctx;
+	if (!ILibMemory_CanaryOK(data)) { return; }
 
 	duk_push_heapptr(data->ctx, data->promise);																// [promise]
 	duk_get_prop_string(data->ctx, -1, "_RES");																// [promise][resolver]
@@ -1019,6 +1025,8 @@ void __stdcall ILibDuktape_GenericMarshal_MethodInvokeAsync_Done_APC(ULONG_PTR u
 }
 void __stdcall ILibDuktape_GenericMarshal_MethodInvokeAsync_APC(ULONG_PTR u)
 {
+	if (!ILibMemory_CanaryOK((void*)u)) { return; }
+
 	int i;
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)u;
 	int varCount = (int)(ILibMemory_Size(data->vars) / sizeof(PTRSIZE));
@@ -1037,7 +1045,7 @@ void __stdcall ILibDuktape_GenericMarshal_MethodInvokeAsync_APC(ULONG_PTR u)
 
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 {
-	void *redirectionPtr = NULL;
+	void *redirectionPtr = NULL, *redirectionPtrName = NULL;
 	int i;
 	int parms = duk_get_top(ctx);
 	ILibDuktape_FFI_AsyncData *data = NULL;
@@ -1048,7 +1056,14 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
 		if (data != NULL)
 		{
-			redirectionPtr = Duktape_GetPointerProperty(ctx, 0, "_address");
+			if (ILibMemory_CanaryOK(data))
+			{
+				redirectionPtr = Duktape_GetPointerProperty(ctx, 0, "_address");
+			}
+			else
+			{
+				return(ILibDuktape_Error(ctx, "FFI Object was already freed"));
+			}
 		}
 	}
 #ifdef WIN32
@@ -1107,6 +1122,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		{
 			duk_push_current_function(ctx);
 			redirectionPtr = Duktape_GetPointerProperty(ctx, -1, "_address");
+			redirectionPtrName = Duktape_GetStringPropertyValue(ctx, -1, "_funcName", NULL);		
 		}
 		if (data->promise != NULL) { return(ILibDuktape_Error(ctx, "Async Operation already in progress")); }
 		if (data->waitingForResult == 0)
@@ -1119,6 +1135,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		}
 		data->vars = (PTRSIZE*)ILibMemory_AllocateA(sizeof(PTRSIZE)*parms);
 		data->fptr_redirection = redirectionPtr;
+		data->fptr_redirectionName = redirectionPtrName;
 
 #ifdef WIN32
 	}
@@ -1310,6 +1327,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread(duk_context *ctx)
 	duk_push_this(ctx);		// [async]
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 	if (data == NULL) { return(ILibDuktape_Error(ctx, "No thread")); }
+	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI Object was already freed")); }
 	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, data->workerThread, sizeof(void*));
 	return(1);
 }
@@ -1317,7 +1335,8 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread_id(duk_context *ct
 {
 	duk_push_this(ctx);		// [async]
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
-	
+	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI Object was already freed")); }
+
 	char tmp[255];
 	sprintf_s(tmp, sizeof(tmp), "%ul", data->workerThreadId);
 	duk_push_string(ctx, tmp);
@@ -1813,7 +1832,6 @@ void __stdcall ILibDuktape_GenericMarshal_GlobalCallback_EndDispatcher_APC(ULONG
 {
 	((Duktape_GlobalGeneric_Data*)u)->dispatch->finished = 1;
 	CloseHandle(((Duktape_GlobalGeneric_Data*)u)->dispatch->WorkerThreadHandle);
-
 }
 duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_EndDispatcher(duk_context *ctx)
 {
@@ -1840,7 +1858,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 	int numParms = duk_require_int(ctx, 0);
 	Duktape_GlobalGeneric_Data *data = NULL;
 	duk_push_this(ctx);																		// [GenericMarshal]
-	if (!duk_has_prop_string(ctx, -1, ILibDuktape_GenericMarshal_GlobalSet))
+	if (!duk_has_prop_string(ctx, -1, ILibDuktape_GenericMarshal_GlobalSet_List))
 	{
 		if (GlobalCallbackList == NULL)
 		{
@@ -1857,7 +1875,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 		ILibLinkedList_AddTail(GlobalCallbackList, data);
 		ILibLinkedList_UnLock(GlobalCallbackList);
 		duk_push_true(ctx);
-		duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_GlobalSet);
+		duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_GlobalSet_List);
 	}
 	else
 	{
