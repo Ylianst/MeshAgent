@@ -1131,7 +1131,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 			if (pipeObject->buffer == NULL) { ILIBCRITICALEXIT(254); }
 			pipeObject->bufferSize = pipeObject->bufferSize * 2;
 		}
-
+#ifdef WIN32
 		if (pipeObject->PAUSED == 0)
 		{
 			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped) != TRUE)
@@ -1139,6 +1139,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 				break;
 			}
 		}
+#endif
 	}
 #ifdef WIN32
 	while (pipeObject->PAUSED == 0); // Note: This is actually the end of a do-while loop
