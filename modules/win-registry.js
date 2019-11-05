@@ -90,6 +90,7 @@ function windows_registry()
                     default:
                         retVal = data.toBuffer();
                         retVal._data = data;
+                        retVal._type = valType.toBuffer().readUInt32LE();
                         break;
                 }
             }
