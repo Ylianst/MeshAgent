@@ -68,9 +68,47 @@ function windows_registry()
             throw ('Opening Registry Key: ' + path + ' => Returned Error: ' + err);
         }
   
+
+        if (this._AdvApi.RegQueryValueExW(h.Deref(), key ? key : 0, 0, 0, 0, len).Val == 0)
+        {
+            var data = this._marshal.CreateVariable(len.toBuffer().readUInt32LE());
+            if (this._AdvApi.RegQueryValueExW(h.Deref(), key ? key : 0, 0, valType, data, len).Val == 0)
+            {
+                switch (valType.toBuffer().readUInt32LE())
+                {
+                    case KEY_DATA_TYPES.REG_DWORD:
+                        retVal = data.toBuffer().readUInt32LE();
+                        break;
+                    case KEY_DATA_TYPES.REG_DWORD_BIG_ENDIAN:
+                        retVal = data.toBuffer().readUInt32BE();
+                        break;
+                    case KEY_DATA_TYPES.REG_SZ:
+                    case KEY_DATA_TYPES.REG_EXPAND_SZ:
+                        retVal = data.Wide2UTF8;
+                        break;
+                    case KEY_DATA_TYPES.REG_BINARY:
+                    default:
+                        retVal = data.toBuffer();
+                        retVal._data = data;
+                        break;
+                }
+            }
+        }
+        else
+        {
+            if (key)    // Only throw an exception if an explicit key was specified, becuase it wasn't found. Otherwise, all we know is that a default value wasn't set
+            {
+                this._AdvApi.RegCloseKey(h.Deref());
+                throw ('Not Found');
+            }
+        }
+
+
+
         if ((path == '' && !key) || !key)
         {
-            var result = { subkeys: [], values: [] };
+            var result = { subkeys: [], values: [], default: retVal };
+            if (!key && !retVal) { delete result.default; }
 
             // Enumerate  keys
             var achClass = this._marshal.CreateVariable(1024);
@@ -112,36 +150,6 @@ function windows_registry()
             return (result);
         }
 
-        if(this._AdvApi.RegQueryValueExW(h.Deref(), key, 0, 0, 0, len).Val == 0)
-        {
-            var data = this._marshal.CreateVariable(len.toBuffer().readUInt32LE());
-            if (this._AdvApi.RegQueryValueExW(h.Deref(), key, 0, valType, data, len).Val == 0)
-            {
-                switch(valType.toBuffer().readUInt32LE())
-                {
-                    case KEY_DATA_TYPES.REG_DWORD:
-                        retVal = data.toBuffer().readUInt32LE();
-                        break;
-                    case KEY_DATA_TYPES.REG_DWORD_BIG_ENDIAN:
-                        retVal = data.toBuffer().readUInt32BE();
-                        break;
-                    case KEY_DATA_TYPES.REG_SZ:
-                    case KEY_DATA_TYPES.REG_EXPAND_SZ:
-                        retVal = data.Wide2UTF8;
-                        break;
-                    case KEY_DATA_TYPES.REG_BINARY:
-                    default:
-                        retVal = data.toBuffer();
-                        retVal._data = data;
-                        break;
-                }
-            }
-        }
-        else
-        {
-            this._AdvApi.RegCloseKey(h.Deref());
-            throw ('Not Found');
-        }
         this._AdvApi.RegCloseKey(h.Deref());
         return (retVal);
     };
