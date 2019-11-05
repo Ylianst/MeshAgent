@@ -222,6 +222,24 @@ function windows_registry()
             this._AdvApi.RegCloseKey(h.Deref());
         }
     };
+    this.usernameToUserKey = function usernameToUserKey(user)
+    {
+        var sid = user;
+        if (typeof (user) == 'string')
+        {
+            var r = this.QueryKey(this.HKEY.LocalMachine, 'SAM\\SAM\\Domains\\Account\\Users\\Names\\' + user);
+            sid = r.default._type;
+        }
+        var u = this.QueryKey(this.HKEY.Users);
+        for(i in u.subkeys)
+        {
+            if(u.subkeys[i].endsWith('-' + sid))
+            {
+                return (u.subkeys[i]);
+            }
+        }
+        throw (user + ': Not Found');
+    };
 }
 
 module.exports = new windows_registry();

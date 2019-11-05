@@ -249,6 +249,22 @@ function UserSessions()
             return (ret);
         };
 
+        this.getRawSessionAttribute = function getRawSessionAttribute(sessionId, attr)
+        {
+            var buffer = this._marshal.CreatePointer();
+            var bytesReturned = this._marshal.CreateVariable(4);
+
+            if (this._wts.WTSQuerySessionInformationW(0, sessionId, attr, buffer, bytesReturned).Val == 0)
+            {
+                throw ('Error calling WTSQuerySessionInformationW: ' + this._kernel32.GetLastError.Val);
+            }
+
+            var b = buffer.Deref().Deref(0, bytesReturned.toBuffer().readUInt32LE()).toBuffer();
+            var ret = Buffer.alloc(bytesReturned.toBuffer().readUInt32LE());
+            b.copy(ret);
+            this._wts.WTSFreeMemory(buffer.Deref());
+            return (ret);
+        }
         this.getSessionAttribute = function getSessionAttribute(sessionId, attr)
         {
             var buffer = this._marshal.CreatePointer();
