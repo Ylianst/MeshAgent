@@ -224,21 +224,46 @@ function windows_registry()
     };
     this.usernameToUserKey = function usernameToUserKey(user)
     {
-        var sid = user;
-        if (typeof (user) == 'string')
+        try
         {
-            var r = this.QueryKey(this.HKEY.LocalMachine, 'SAM\\SAM\\Domains\\Account\\Users\\Names\\' + user);
-            sid = r.default._type;
-        }
-        var u = this.QueryKey(this.HKEY.Users);
-        for(i in u.subkeys)
-        {
-            if(u.subkeys[i].endsWith('-' + sid))
+            var sid = user;
+            if (typeof (user) == 'string')
             {
-                return (u.subkeys[i]);
+                var r = this.QueryKey(this.HKEY.LocalMachine, 'SAM\\SAM\\Domains\\Account\\Users\\Names\\' + user);
+                sid = r.default._type;
+            }
+            var u = this.QueryKey(this.HKEY.Users);
+            for(i in u.subkeys)
+            {
+                if(u.subkeys[i].endsWith('-' + sid))
+                {
+                    return (u.subkeys[i]);
+                }
             }
         }
-        throw (user + ': Not Found');
+        catch(e)
+        {
+        }
+
+        // Not Found yet, so let's try to brute-force it
+        var entries = this.QueryKey(this.HKEY.Users);
+        for(i in entries.subkeys)
+        {
+            if(entries.subkeys[i].split('-').length>5 && !entries.subkeys[i].endsWith('_Classes'))
+            {
+                try
+                {
+                    if (this.QueryKey(this.HKEY.Users, entries.subkeys[i] + '\\Volatile Environment', 'USERNAME') == user)
+                    {
+                        return (entries.subkeys[i]);
+                    }
+                }
+                catch(ee)
+                {
+                }
+            }
+        }
+        throw ('Unable to determine HKEY_USERS key for: ' + user);
     };
 }
 
