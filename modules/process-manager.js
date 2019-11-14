@@ -189,6 +189,33 @@ function processManager() {
                 break;
         }
     };
+
+    Object.defineProperty(this, '_pgrep', {
+        value: (function ()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("whereis pgrep | awk '{ print $2 }'\nexit\n");
+            child.waitExit();
+            return (child.stdout.str.trim());
+        })()
+    });
+
+    if(this._pgrep != '')
+    {
+        this.getProcess = function getProcess(cmd)
+        {
+            var child = require('child_process').execFile(this._pgrep, ['pgrep', cmd]);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.waitExit();
+            if (child.stderr.str != '') { throw (child.stderr.str.trim()); }
+            if (child.stdout.str.trim() == '') { throw (cmd + ' not found'); }
+
+            return (parseInt(child.stdout.str.trim()));
+        };
+    }
 }
 
 module.exports = new processManager();

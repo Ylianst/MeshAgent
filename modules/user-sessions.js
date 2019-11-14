@@ -719,24 +719,21 @@ function UserSessions()
             var ret = {};
             if (process.platform == 'linux')
             {
-                var ps, psx, v, vs = 0;
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+
+                child.stdin.write("cat /proc/" + pid + "/environ | tr '\\0' '\\t' |" + ' awk -F"\t" \'{ printf "{"; for(i=1;i<NF;++i) { if(i>1) {printf ",";} x=split($i, tok, "="); printf "\\"%s\\": \\"%s\\"", tok[1], substr($i, 2+length(tok[1])); } printf "}"; }\'');
+                child.stdin.write('\nexit\n');
+                child.waitExit();
+
                 try
                 {
-                    ps = require('fs').readFileSync('/proc/' + pid + '/environ');
+                    return (JSON.parse(child.stdout.str.trim()));
                 }
-                catch (pse)
+                catch(ee)
                 {
-                    return (ret);
-                }
-
-                for (psx = 0; psx < ps.length; ++psx)
-                {
-                    if (ps[psx] == 0)
-                    {
-                        v = ps.slice(vs, psx).toString().split('=');
-                        ret[v[0]] = v[1];
-                        vs = psx + 1;
-                    }
+                    return ({});
                 }
             }
             else if (process.platform == 'freebsd')
