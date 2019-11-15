@@ -51,8 +51,19 @@ function gnome_getDesktopWallpaper(uid)
 function gnome_setDesktopWallpaper(uid, filePath)
 {
     if (!filePath) { filePath = '/dev/null'; }
-    var v = { HOME: require('user-sessions').getHomeFolder(uid), DBUS_SESSION_BUS_ADDRESS: require('user-sessions').getEnvFromPid(require('process-manager').getProcess('gnome-session')).DBUS_SESSION_BUS_ADDRESS };
 
+    var v = { HOME: require('user-sessions').getHomeFolder(uid) };
+    var pids = require('process-manager').getProcess('gnome-session');
+    for (var i in pids)
+    {
+        var e = require('user-sessions').getEnvFromPid(pids[i]);
+        if (e.USER && require('user-sessions').getUid(e.USER)!=uid)
+        {
+            continue;
+        }
+        v.DBUS_SESSION_BUS_ADDRESS = e.DBUS_SESSION_BUS_ADDRESS;
+        if (v.DBUS_SESSION_BUS_ADDRESS) { break; }
+    }
 
     var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: v });
     child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });

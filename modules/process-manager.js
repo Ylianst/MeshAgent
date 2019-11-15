@@ -206,14 +206,16 @@ function processManager() {
     {
         this.getProcess = function getProcess(cmd)
         {
-            var child = require('child_process').execFile(this._pgrep, ['pgrep', cmd]);
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdin.write("pgrep gnome-session | tr '\\n' '\\t' |" + ' awk -F"\\t" \'{ printf "["; for(i=1;i<NF;++i) { if(i>1) { printf ","; } printf "%d", $i; } printf "]"; }\'');
+            child.stdin.write('\nexit\n');         
             child.waitExit();
             if (child.stderr.str != '') { throw (child.stderr.str.trim()); }
             if (child.stdout.str.trim() == '') { throw (cmd + ' not found'); }
 
-            return (parseInt(child.stdout.str.trim()));
+            return (JSON.parse(child.stdout.str.trim()));
         };
     }
 
@@ -224,7 +226,7 @@ function processManager() {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write('ps -ax -o pid -o command | grep ' + cmd + " | tr '\\n' '\\t' | awk -F" + '"\\t" \'{ for(i=1;i<NF;++i) { split($i,r," "); if(r[2]!="grep") { print r[1]; break; } } }\'');
+            child.stdin.write('ps -ax -o pid -o command | grep ' + cmd + " | tr '\\n' '\\t' | awk -F" + '"\\t" \'{ printf "["; for(i=1;i<NF;++i) { split($i,r," "); if(r[2]!="grep") { if(i>1) { printf ","; } printf "%s", r[1]; } } printf "]"; }\'');
             child.stdin.write('\nexit\n');
             child.waitExit();
 
@@ -234,7 +236,7 @@ function processManager() {
             }
             else
             {
-                return (parseInt(child.stdout.str.trim()));
+                return (JSON.parse(child.stdout.str.trim()));
             }
         }
     }
