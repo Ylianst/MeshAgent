@@ -7,6 +7,7 @@ function gnome_getProxySettings(uid)
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
 
     child.stdin.write('gsettings list-recursively org.gnome.system.proxy | tr "\\n" "\\|" | tr "\\\'" "\\`" | awk \'{ count=split($0, res, "|");')
+    child.stdin.write('exc="[]";');
     child.stdin.write('for(a=0;a<count;++a)');
     child.stdin.write('{');
     child.stdin.write('split(res[a], modecheck, " ");');
@@ -16,10 +17,10 @@ function gnome_getProxySettings(uid)
     child.stdin.write('}');
     child.stdin.write('if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="host") { split(modecheck[3], hst, "`"); host = hst[2]; }');
     child.stdin.write('if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="port") { port = modecheck[3]; }');
+    child.stdin.write('if(modecheck[1]=="org.gnome.system.proxy" && modecheck[2]=="ignore-hosts") { exc = substr(res[a], 36); gsub("`", "\\"", exc); }');
     child.stdin.write('}');
-    child.stdin.write('printf "{\\"mode\\": \\"%s\\", \\"host\\": \\"%s\\", \\"port\\": %s}", mode, host, port; }\'\nexit\n');
+    child.stdin.write('printf "{\\"mode\\": \\"%s\\", \\"host\\": \\"%s\\", \\"port\\": %s, \\"exceptions\\": %s}", mode, host, port, exc; }\'\nexit\n');
     child.waitExit();
-    
     try
     {
         return (JSON.parse(child.stdout.str.trim()));
