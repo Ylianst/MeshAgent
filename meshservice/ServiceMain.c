@@ -108,6 +108,27 @@ BOOL RunAsAdmin(char* args) {
 	return FALSE;
 }
 
+void UpdateOwnerData()
+{
+	WCHAR str[_MAX_PATH];
+	DWORD strLen;
+	strLen = GetModuleFileNameW(NULL, str, _MAX_PATH);
+
+	int exePathLen = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)str, -1, NULL, 0, NULL, NULL);
+	char *exePath = (char*)ILibMemory_SmartAllocate(exePathLen);
+	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)str, -1, exePath, exePathLen, NULL, NULL);
+
+	void *chain = ILibCreateChain();
+	duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, chain, NULL, NULL, exePath, NULL, NULL, NULL);
+
+	duk_peval_string_noresult(ctx, "global._noMessagePump=true;var key=require('win-registry').usernameToUserKey(require('user-sessions').getProcessOwnerName(process.pid).name);var reg=require('win-registry');reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\\\CurrentControlSet\\\\Services\\\\Mesh Agent', '_InstalledBy', key);");
+
+	duk_destroy_heap(ctx);
+	ILibChain_DestroyEx(chain);
+	ILibMemory_Free(exePath);
+}
+
+
 DWORD WINAPI ServiceControlHandler( DWORD controlCode, DWORD eventType, void *eventData, void* eventContext )
 {
 	switch (controlCode)
@@ -874,6 +895,7 @@ void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int ta
 
 	// Add the uninstall icon in the control panel
 	AddUninstallIcon();
+	UpdateOwnerData();
 
 	/*
 #if defined(_LINKVM)

@@ -320,115 +320,117 @@ function UserSessions()
             return (retVal);
         };
 
-
-        // We need to spin up a message pump, and fetch a window handle
-        var message_pump = require('win-message-pump');
-        this._messagepump = new message_pump({ filter: WM_WTSSESSION_CHANGE }); this._messagepump.parent = this;     
-        this._messagepump.on('exit', function (code) { this.parent._wts.WTSUnRegisterSessionNotification(this.parent.hwnd); });
-        this._messagepump.on('hwnd', function (h)
+        if (!global._noMessagePump)
         {
-            this.parent.hwnd = h;
+            // We need to spin up a message pump, and fetch a window handle
+            var message_pump = require('win-message-pump');
+            this._messagepump = new message_pump({ filter: WM_WTSSESSION_CHANGE }); this._messagepump.parent = this;
+            this._messagepump.on('exit', function (code) { this.parent._wts.WTSUnRegisterSessionNotification(this.parent.hwnd); });
+            this._messagepump.on('hwnd', function (h)
+            {
+                this.parent.hwnd = h;
 
-            // We need to yield, and do this in the next event loop pass, becuase we don't want to call 'RegisterPowerSettingNotification'
-            // from the messagepump 'thread', because we are actually on the microstack thread, such that the message pump thread, is holding
-            // on a semaphore for us to return. If we call now, we may deadlock on Windows 7, becuase it will try to notify immediately
-            this.immediate = setImmediate(function (self)
+                // We need to yield, and do this in the next event loop pass, becuase we don't want to call 'RegisterPowerSettingNotification'
+                // from the messagepump 'thread', because we are actually on the microstack thread, such that the message pump thread, is holding
+                // on a semaphore for us to return. If we call now, we may deadlock on Windows 7, becuase it will try to notify immediately
+                this.immediate = setImmediate(function (self)
+                {
+                    // Now that we have a window handle, we can register it to receive Windows Messages
+                    if (self.parent._wts) { self.parent._wts.WTSRegisterSessionNotification(self.parent.hwnd, NOTIFY_FOR_ALL_SESSIONS); }
+                    self.parent._user32.ACDC_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_ACDC_POWER_SOURCE, 0);
+                    self.parent._user32.BATT_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_BATTERY_PERCENTAGE_REMAINING, 0);
+                    self.parent._user32.DISP_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_CONSOLE_DISPLAY_STATE, 0);
+                    //console.log(self.parent._user32.ACDC_H.Val, self.parent._user32.BATT_H.Val, self.parent._user32.DISP_H.Val);
+                }, this);
+            });
+            this._messagepump.on('message', function (msg)
             {
-                // Now that we have a window handle, we can register it to receive Windows Messages
-                if (self.parent._wts) { self.parent._wts.WTSRegisterSessionNotification(self.parent.hwnd, NOTIFY_FOR_ALL_SESSIONS); }
-                self.parent._user32.ACDC_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_ACDC_POWER_SOURCE, 0);
-                self.parent._user32.BATT_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_BATTERY_PERCENTAGE_REMAINING, 0);
-                self.parent._user32.DISP_H = self.parent._user32.RegisterPowerSettingNotification(self.parent.hwnd, GUID_CONSOLE_DISPLAY_STATE, 0);
-                //console.log(self.parent._user32.ACDC_H.Val, self.parent._user32.BATT_H.Val, self.parent._user32.DISP_H.Val);
-            }, this);
-        });
-        this._messagepump.on('message', function (msg)
-        {
-            switch(msg.message)
-            {
-                case WM_WTSSESSION_CHANGE:
-                    switch(msg.wparam)
-                    {
-                        case WTS_SESSION_LOCK:
-                            this.parent.enumerateUsers().then(function (users)
-                            {
-                                if (users[msg.lparam]) { this.parent.emit('locked', users[msg.lparam]); }
-                            });
-                            break;
-                        case WTS_SESSION_UNLOCK:
-                            this.parent.enumerateUsers().then(function (users)
-                            {
-                                if (users[msg.lparam]) { this.parent.emit('unlocked', users[msg.lparam]); }
-                            });
-                            break;
-                        case WTS_SESSION_LOGON:
-                        case WTS_SESSION_LOGOFF:
-                            this.parent.emit('changed');
-                            break;
-                    }
-                    break;
-                case WM_POWERBROADCAST:
-                    switch(msg.wparam)
-                    {
-                        default:
-                            console.log('WM_POWERBROADCAST [UNKNOWN wparam]: ' + msg.wparam);
-                            break;
-                        case PBT_APMSUSPEND:
-                            require('power-monitor').emit('sx', 'SLEEP');
-                            break;
-                        case PBT_APMRESUMEAUTOMATIC:
-                            require('power-monitor').emit('sx', 'RESUME_NON_INTERACTIVE');
-                            break;
-                        case PBT_APMRESUMESUSPEND:
-                            require('power-monitor').emit('sx', 'RESUME_INTERACTIVE');
-                            break;
-                        case PBT_APMPOWERSTATUSCHANGE:
-                            require('power-monitor').emit('changed');
-                            break;
-                        case PBT_POWERSETTINGCHANGE:
-                            var lparam = this.parent._marshal.CreatePointer(Buffer.from(msg.lparam_hex, 'hex'));
-                            var data = lparam.Deref(20, lparam.Deref(16, 4).toBuffer().readUInt32LE(0)).toBuffer();
-                            switch(lparam.Deref(0, 16).toBuffer().toString('hex'))
-                            {
-                                case GUID_ACDC_POWER_SOURCE.Deref(0, 16).toBuffer().toString('hex'):
-                                    switch(data.readUInt32LE(0))
-                                    {
-                                        case 0:
-                                            require('power-monitor').emit('acdc', 'AC');
-                                            break;
-                                        case 1:
-                                            require('power-monitor').emit('acdc', 'BATTERY');
-                                            break;
-                                        case 2:
-                                            require('power-monitor').emit('acdc', 'HOT');
-                                            break;
-                                    }
-                                    break;
-                                case GUID_BATTERY_PERCENTAGE_REMAINING.Deref(0, 16).toBuffer().toString('hex'):
-                                    require('power-monitor').emit('batteryLevel', data.readUInt32LE(0));
-                                    break;
-                                case GUID_CONSOLE_DISPLAY_STATE.Deref(0, 16).toBuffer().toString('hex'):
-                                    switch(data.readUInt32LE(0))
-                                    {
-                                        case 0:
-                                            require('power-monitor').emit('display', 'OFF');
-                                            break;
-                                        case 1:
-                                            require('power-monitor').emit('display', 'ON');
-                                            break;
-                                        case 2:
-                                            require('power-monitor').emit('display', 'DIMMED');
-                                            break;
-                                    }
-                                    break;
-                            }
-                            break;
-                    }
-                    break;
-                default:
-                    break;
-            }
-        });
+                switch (msg.message)
+                {
+                    case WM_WTSSESSION_CHANGE:
+                        switch (msg.wparam)
+                        {
+                            case WTS_SESSION_LOCK:
+                                this.parent.enumerateUsers().then(function (users)
+                                {
+                                    if (users[msg.lparam]) { this.parent.emit('locked', users[msg.lparam]); }
+                                });
+                                break;
+                            case WTS_SESSION_UNLOCK:
+                                this.parent.enumerateUsers().then(function (users)
+                                {
+                                    if (users[msg.lparam]) { this.parent.emit('unlocked', users[msg.lparam]); }
+                                });
+                                break;
+                            case WTS_SESSION_LOGON:
+                            case WTS_SESSION_LOGOFF:
+                                this.parent.emit('changed');
+                                break;
+                        }
+                        break;
+                    case WM_POWERBROADCAST:
+                        switch (msg.wparam)
+                        {
+                            default:
+                                console.log('WM_POWERBROADCAST [UNKNOWN wparam]: ' + msg.wparam);
+                                break;
+                            case PBT_APMSUSPEND:
+                                require('power-monitor').emit('sx', 'SLEEP');
+                                break;
+                            case PBT_APMRESUMEAUTOMATIC:
+                                require('power-monitor').emit('sx', 'RESUME_NON_INTERACTIVE');
+                                break;
+                            case PBT_APMRESUMESUSPEND:
+                                require('power-monitor').emit('sx', 'RESUME_INTERACTIVE');
+                                break;
+                            case PBT_APMPOWERSTATUSCHANGE:
+                                require('power-monitor').emit('changed');
+                                break;
+                            case PBT_POWERSETTINGCHANGE:
+                                var lparam = this.parent._marshal.CreatePointer(Buffer.from(msg.lparam_hex, 'hex'));
+                                var data = lparam.Deref(20, lparam.Deref(16, 4).toBuffer().readUInt32LE(0)).toBuffer();
+                                switch (lparam.Deref(0, 16).toBuffer().toString('hex'))
+                                {
+                                    case GUID_ACDC_POWER_SOURCE.Deref(0, 16).toBuffer().toString('hex'):
+                                        switch (data.readUInt32LE(0))
+                                        {
+                                            case 0:
+                                                require('power-monitor').emit('acdc', 'AC');
+                                                break;
+                                            case 1:
+                                                require('power-monitor').emit('acdc', 'BATTERY');
+                                                break;
+                                            case 2:
+                                                require('power-monitor').emit('acdc', 'HOT');
+                                                break;
+                                        }
+                                        break;
+                                    case GUID_BATTERY_PERCENTAGE_REMAINING.Deref(0, 16).toBuffer().toString('hex'):
+                                        require('power-monitor').emit('batteryLevel', data.readUInt32LE(0));
+                                        break;
+                                    case GUID_CONSOLE_DISPLAY_STATE.Deref(0, 16).toBuffer().toString('hex'):
+                                        switch (data.readUInt32LE(0))
+                                        {
+                                            case 0:
+                                                require('power-monitor').emit('display', 'OFF');
+                                                break;
+                                            case 1:
+                                                require('power-monitor').emit('display', 'ON');
+                                                break;
+                                            case 2:
+                                                require('power-monitor').emit('display', 'DIMMED');
+                                                break;
+                                        }
+                                        break;
+                                }
+                                break;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            });
+        }
     }
     else if(process.platform == 'linux' || process.platform == 'freebsd')
     {

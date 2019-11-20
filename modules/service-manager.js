@@ -618,6 +618,21 @@ function serviceManager()
                             }
                         }
                     });
+                Object.defineProperty(retVal, 'installedBy',
+                    {
+                        get: function()
+                        {
+                            var reg = require('win-registry');
+                            try
+                            {
+                                return(reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + this.name, '_InstalledBy'));
+                            }
+                            catch(xx)
+                            {
+                                return (null);
+                            }
+                        }
+                    });
                 if (retVal.status.state != 'UNKNOWN')
                 {
                     require('events').EventEmitter.call(retVal);
@@ -1532,6 +1547,7 @@ function serviceManager()
 
         if (process.platform == 'win32')
         {
+            var reg = require('win-registry');
             if (!this.isAdmin()) { throw ('Installing as Service, requires admin'); }
 
             // Before we start, we need to copy the binary to the right place
@@ -1616,12 +1632,23 @@ function serviceManager()
                     }
                 }
             }
+
+
+
+
             if (options.parameters)
             {
-                var reg = require('win-registry');
                 var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
                 imagePath += (' ' + options.parameters.join(' '));
                 reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
+            }
+
+            try
+            {
+                reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, '_InstalledBy', reg.usernameToUserKey(require('user-sessions').getProcessOwnerName(process.pid).name));
+            }
+            catch (xx)
+            {
             }
         }
         if (process.platform == 'freebsd')
