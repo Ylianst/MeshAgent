@@ -113,6 +113,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 #define ILibDuktape_SERVER2OPTIONS				"\xFF_ServerToOptions"
 #define ILibDuktape_SERVER2LISTENOPTIONS		"\xFF_ServerToListenOptions"
 #define ILibDuktape_TLSSocket2SecureContext		"\xFF_TLSSocket2SecureContext"
+#define ILibDuktape_IPAddress_SockAddr			"\xFF_IPAddress_SockAddr"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
@@ -2148,10 +2149,84 @@ void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 }
 #endif
 
+duk_ret_t ILibDuktape_ipaddress_address4_mask(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	struct sockaddr_in6* addr = (struct sockaddr_in6*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_IPAddress_SockAddr);
+	int mask = duk_require_int(ctx, 0);
+	mask = 0xFFFFFFFF >> (32 - mask);
+	((struct sockaddr_in*)addr)->sin_addr.s_addr &= mask;
+
+	duk_push_string(ctx, ILibRemoteLogging_ConvertAddress((struct sockaddr*)addr));
+	return(1);
+}
+duk_ret_t ILibDuktape_ipaddress_toString(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	struct sockaddr_in6* addr = (struct sockaddr_in6*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_IPAddress_SockAddr);
+	
+	duk_push_string(ctx, (char*)ILibRemoteLogging_ConvertAddress((struct sockaddr*)addr));
+	return(1);
+}
+void ILibDuktape_ipaddress_PUSH(duk_context *ctx, struct sockaddr_in6* addr)
+{
+	duk_push_object(ctx);																					// [Address4/6]
+	switch (addr->sin6_family)
+	{
+		case AF_INET:
+			ILibDuktape_WriteID(ctx, "ip-address.Address4");
+			ILibDuktape_CreateInstanceMethod(ctx, "mask", ILibDuktape_ipaddress_address4_mask, 1);
+			break;
+		case AF_INET6:
+			ILibDuktape_WriteID(ctx, "ip-address.Address6");
+			break;
+		default:
+			return(ILibDuktape_Error(ctx, "Unknown Address Family"));
+			break;
+	}
+
+	ILibDuktape_CreateInstanceMethod(ctx, "toString", ILibDuktape_ipaddress_toString, 1);
+	struct sockaddr_in6* _addr = (struct sockaddr_in6*)Duktape_PushBuffer(ctx, sizeof(struct sockaddr_in6));// [Address4][addr]
+	duk_put_prop_string(ctx, -2, ILibDuktape_IPAddress_SockAddr);											// [Address4]
+	memcpy(_addr, addr, sizeof(struct sockaddr_in6));
+}
+
+duk_ret_t ILibDuktape_ipaddress_address4_constructor(duk_context *ctx)
+{
+	if (!duk_is_constructor_call(ctx)) { return(ILibDuktape_Error(ctx, "Invalid call")); }
+	ILibDuktape_ipaddress_PUSH(ctx, Duktape_IPAddress4_FromString((char*)duk_require_string(ctx, 0), 0));
+	return(1);
+}
+duk_ret_t ILibDuktape_ipaddress_address4_fromInteger(duk_context *ctx)
+{
+	struct sockaddr_in6 addr;
+	memset(&addr, 0, sizeof(addr));
+	((struct sockaddr_in*)&addr)->sin_addr.s_addr = htonl(duk_require_int(ctx, 0));
+	((struct sockaddr_in*)&addr)->sin_family = AF_INET;
+	ILibDuktape_ipaddress_PUSH(ctx, &addr);
+	return(1);
+}
+duk_ret_t ILibDuktape_ipaddress_address4_fromString(duk_context *ctx)
+{
+	ILibDuktape_ipaddress_PUSH(ctx, Duktape_IPAddress4_FromString((char*)duk_require_string(ctx, 0), 0));
+	return(1);
+}
+
+void ILibDuktape_ipaddress(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);																					// [ip-address]
+	ILibDuktape_WriteID(ctx, "ip-address");
+	duk_push_c_function(ctx, ILibDuktape_ipaddress_address4_constructor, 1);								// [ip-address][Address4]
+	ILibDuktape_CreateInstanceMethod(ctx, "fromInteger", ILibDuktape_ipaddress_address4_fromInteger, 1);	// [ip-address][Address4]
+	ILibDuktape_CreateInstanceMethod(ctx, "fromString", ILibDuktape_ipaddress_address4_fromString, 1);		// [ip-address][Address4]
+	duk_put_prop_string(ctx, -2, "Address4");																// [ip-address]
+}
+
 void ILibDuktape_net_init(duk_context * ctx, void * chain)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "net", ILibDuktape_net_PUSH_net);
 	ILibDuktape_ModSearch_AddHandler(ctx, "global-tunnel", ILibDuktape_globalTunnel_PUSH);
+	ILibDuktape_ModSearch_AddHandler(ctx, "ip-address", ILibDuktape_ipaddress);
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_ModSearch_AddHandler(ctx, "tls", ILibDuktape_tls_PUSH);
 #endif
