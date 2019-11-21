@@ -190,37 +190,37 @@ function processManager() {
         }
     };
 
-    Object.defineProperty(this, '_pgrep', {
-        value: (function ()
-        {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("whereis pgrep | awk '{ print $2 }'\nexit\n");
-            child.waitExit();
-            return (child.stdout.str.trim());
-        })()
-    });
-
-    if(this._pgrep != '')
-    {
-        this.getProcess = function getProcess(cmd)
-        {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write("pgrep gnome-session | tr '\\n' '\\t' |" + ' awk -F"\\t" \'{ printf "["; for(i=1;i<NF;++i) { if(i>1) { printf ","; } printf "%d", $i; } printf "]"; }\'');
-            child.stdin.write('\nexit\n');         
-            child.waitExit();
-            if (child.stderr.str != '') { throw (child.stderr.str.trim()); }
-            if (child.stdout.str.trim() == '') { throw (cmd + ' not found'); }
-
-            return (JSON.parse(child.stdout.str.trim()));
-        };
-    }
-
     if(process.platform != 'win32')
     {
+        Object.defineProperty(this, '_pgrep', {
+            value: (function ()
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = '';
+                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("whereis pgrep | awk '{ print $2 }'\nexit\n");
+                child.waitExit();
+                return (child.stdout.str.trim());
+            })()
+        });
+
+        if (this._pgrep != '')
+        {
+            this.getProcess = function getProcess(cmd)
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write("pgrep gnome-session | tr '\\n' '\\t' |" + ' awk -F"\\t" \'{ printf "["; for(i=1;i<NF;++i) { if(i>1) { printf ","; } printf "%d", $i; } printf "]"; }\'');
+                child.stdin.write('\nexit\n');
+                child.waitExit();
+                if (child.stderr.str != '') { throw (child.stderr.str.trim()); }
+                if (child.stdout.str.trim() == '') { throw (cmd + ' not found'); }
+
+                return (JSON.parse(child.stdout.str.trim()));
+            };
+        }
+
         this.getProcessEx = function getProcessEx(cmd)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
