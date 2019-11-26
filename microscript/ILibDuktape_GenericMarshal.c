@@ -493,6 +493,14 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateVariable(duk_context *ctx)
 			}
 		}
 	}
+	else if (duk_is_buffer_data(ctx, 0))
+	{
+		ptr = Duktape_GetBuffer(ctx, 0, &strLen);
+		ILibDuktape_GenericMarshal_Variable_PUSH(ctx, ptr, (int)strLen);	
+		ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, -1);
+		duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "\xFF_DuplicateBuffer");
+		return(1);
+	}
 	else
 	{
 		return(ILibDuktape_Error(ctx, "_GenericMarshal.CreateVariable(): Invalid Parameter"));
