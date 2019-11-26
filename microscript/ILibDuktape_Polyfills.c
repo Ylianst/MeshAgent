@@ -41,6 +41,8 @@ limitations under the License.
 #define ILibDuktape_DescriptorEvents_Table		"\xFF_DescriptorEvents_Table"
 #define ILibDuktape_DescriptorEvents_FD			"\xFF_DescriptorEvents_FD"
 #define ILibDuktape_DescriptorEvents_Options	"\xFF_DescriptorEvents_Options"
+#define ILibDuktape_DescriptorEvents_WaitHandle "\xFF_DescriptorEvents_WindowsWaitHandle"
+
 #define CP_ISO8859_1							28591
 typedef enum ILibDuktape_Console_DestinationFlags
 {
@@ -50,6 +52,16 @@ typedef enum ILibDuktape_Console_DestinationFlags
 	ILibDuktape_Console_DestinationFlags_WebLog			= 4,
 	ILibDuktape_Console_DestinationFlags_LogFile		= 8
 }ILibDuktape_Console_DestinationFlags;
+
+#ifdef WIN32
+typedef struct ILibDuktape_DescriptorEvents_WindowsWaitHandle
+{
+	HANDLE waitHandle;
+	HANDLE eventThread;
+	duk_context *ctx;
+	void *object;
+}ILibDuktape_DescriptorEvents_WindowsWaitHandle;
+#endif
 
 int g_displayStreamPipeMessages = 0;
 int g_displayFinalizerMessages = 0;
@@ -2302,8 +2314,49 @@ duk_ret_t ILibDuktape_DescriptorEvents_Remove(duk_context *ctx)
 	duk_del_prop(ctx, -2);												// [obj][table]
 	return(0);
 }
+#ifdef WIN32
+void __stdcall ILibDuktape_DescriptorEvents_WaitHandleAPC(ULONG_PTR user)
+{
+	if (!ILibMemory_CanaryOK((void*)user)) { return; }
+	ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user;
+
+	UnregisterWait(v->waitHandle); v->waitHandle = NULL;
+	ILibDuktape_EventEmitter_SetupEmit(v->ctx, v->object, "signaled");		// [emit][this][signaled]
+	if (duk_pcall_method(v->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(v->ctx, "WaitHandleAPC Error "); }
+	duk_pop(v->ctx);
+}
+void __stdcall ILibDuktape_DescriptorEvents_WaitHandleSignaled(void *user, BOOLEAN TimerOrWaitFired)
+{
+	if (!ILibMemory_CanaryOK(user)) { return; }
+	QueueUserAPC((PAPCFUNC)ILibDuktape_DescriptorEvents_WaitHandleAPC, ((ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user)->eventThread, (ULONG_PTR)user);
+}
+#endif
 duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
 {
+#ifdef WIN32
+	if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "_ptr"))
+	{
+		HANDLE h = (HANDLE)Duktape_GetPointerProperty(ctx, 0, "_ptr");
+		if (h != NULL)
+		{
+			duk_push_object(ctx);												// [value]
+			ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_DescriptorEvents_WindowsWaitHandle));
+			duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_WaitHandle);
+
+			ILibDuktape_EventEmitter *e = ILibDuktape_EventEmitter_Create(ctx);
+			ILibDuktape_EventEmitter_CreateEventEx(e, "signaled");
+			v->ctx = ctx;
+			v->object = duk_get_heapptr(ctx, -1);
+			v->eventThread = ILibChain_GetMicrostackThreadHandle(Duktape_GetChain(ctx));
+			if (RegisterWaitForSingleObject(&(v->waitHandle), h, ILibDuktape_DescriptorEvents_WaitHandleSignaled, (void*)v, INFINITE, WT_EXECUTEINPERSISTENTTHREAD | WT_EXECUTEONLYONCE) == 0)
+			{
+				return(ILibDuktape_Error(ctx, "Error(%d) Calling RegisterWaitForSingleObject() ", GetLastError()));
+			}
+			return(1);
+		}
+	}
+#endif
+
 	if (!duk_is_number(ctx, 0)) { return(ILibDuktape_Error(ctx, "Invalid Descriptor")); }
 	ILibForceUnBlockChain(Duktape_GetChain(ctx));
 
