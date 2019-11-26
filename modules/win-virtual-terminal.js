@@ -14,9 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
-const EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
-const HEAP_ZERO_MEMORY = 0x00000008;
+var PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
+var EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+var HEAP_ZERO_MEMORY = 0x00000008;
 
 var duplex = require('stream').Duplex;
 
