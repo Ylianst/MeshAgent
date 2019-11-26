@@ -2181,7 +2181,7 @@ void ILibDuktape_ipaddress_PUSH(duk_context *ctx, struct sockaddr_in6* addr)
 			ILibDuktape_WriteID(ctx, "ip-address.Address6");
 			break;
 		default:
-			return(ILibDuktape_Error(ctx, "Unknown Address Family"));
+			ILibDuktape_Error(ctx, "Unknown Address Family");
 			break;
 	}
 
