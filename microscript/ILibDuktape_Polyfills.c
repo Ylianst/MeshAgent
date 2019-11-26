@@ -2388,7 +2388,11 @@ duk_ret_t ILibDuktape_Polyfills_global(duk_context *ctx)
 	duk_push_global_object(ctx);
 	return(1);
 }
-
+duk_ret_t ILibDuktape_Polyfills_isBuffer(duk_context *ctx)
+{
+	duk_push_boolean(ctx, duk_is_buffer_data(ctx, 0));
+	return(1);
+}
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
@@ -2426,6 +2430,8 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "_debug", ILibDuktape_Polyfills_debug, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "getSHA384FileHash", ILibDuktape_Polyfills_filehash, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "_ipv4From", ILibDuktape_Polyfills_ipv4From, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "_isBuffer", ILibDuktape_Polyfills_isBuffer, 1);
+
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_CreateInstanceMethod(ctx, "crc32c", ILibDuktape_Polyfills_crc32c, DUK_VARARGS);
 #endif
