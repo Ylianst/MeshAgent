@@ -451,7 +451,8 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteSink(ILibDuktape_DuplexStr
 	{
 #if defined(WIN32)
 		state->returnIgnored = 1;
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_WriteHandler, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)state);
+		ILibDuktape_HECI_Session_WriteHandler((ULONG_PTR)state);
+		//QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_WriteHandler, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)state);
 #elif defined(_POSIX)
 		if (ILibIsRunningOnChainThread(stream->readableStream->chain) != 0)
 		{
@@ -534,12 +535,15 @@ void ILibDuktape_HECI_Session_ResumeSink(ILibDuktape_DuplexStream *sender, void 
 	if (session->noPipelining != 0)
 	{
 		ILibChain_RunOnMicrostackThread(sender->readableStream->chain, ILibDuktape_HECI_Session_ResumeSink_NoPipeline, session);
-		// Note: DO NOT 'return' here, because we still need to QueueUserAPC, to resume the stream on Windows
+		// Note: DO NOT 'return' here, because we still need to resume the stream on Windows
 	}
 
 #ifdef WIN32
-	// To Resume, we need to first context switch to the Windows Thread
-	QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_ResumeSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session);
+	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &(session->bytesRead), &(session->v));
+	if (result == TRUE || GetLastError() == ERROR_IO_PENDING)
+	{
+		ILibProcessPipe_WaitHandle_Add(session->mgr, session->v.hEvent, session, ILibDuktape_HECI_Session_ReceiveSink);
+	}
 #endif
 }
 #ifdef WIN32
@@ -645,7 +649,8 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, ILibDuktape_HECI_ChildProcess);		// [HECI][childProcess]
 		duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);		// [HECI][childProcess][manager]
 		session->mgr = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);	
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_Start, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session);
+		ILibDuktape_HECI_Session_Start((ULONG_PTR)session);
+		//QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_Start, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session);
 #else
 		duk_push_this(ctx);													// [HECI]
 		session->descriptor = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Descriptor, -1);
@@ -727,7 +732,8 @@ duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
 		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->v.hEvent);
 		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->wv.hEvent);
 		session->stream = NULL;
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_CloseSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session->descriptor);
+		CloseHandle(session->descriptor);
+		//QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_CloseSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session->descriptor);
 	}
 #else
 	int d = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Descriptor, -1);
@@ -952,7 +958,8 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	duk_get_prop_string(ctx, -2, ILibDuktape_HECI_ChildProcess);					// [heci][stash][childProcess]
 	duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);					// [heci][stash][childProcess][manager]
 	data->pipeManager = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);
-	QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_apc_AddIoctl, ILibProcessPipe_Manager_GetWorkerThread(data->pipeManager), (ULONG_PTR)data);
+	ILibDuktape_HECI_apc_AddIoctl((ULONG_PTR)data);
+	//QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_apc_AddIoctl, ILibProcessPipe_Manager_GetWorkerThread(data->pipeManager), (ULONG_PTR)data);
 #elif defined(_POSIX)
 	ILibDuktape_HECI_AddIoctl(data);
 #endif
