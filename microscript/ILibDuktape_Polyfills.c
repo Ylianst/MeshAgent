@@ -58,6 +58,7 @@ typedef struct ILibDuktape_DescriptorEvents_WindowsWaitHandle
 {
 	HANDLE waitHandle;
 	HANDLE eventThread;
+	void *chain;
 	duk_context *ctx;
 	void *object;
 }ILibDuktape_DescriptorEvents_WindowsWaitHandle;
@@ -2317,7 +2318,7 @@ duk_ret_t ILibDuktape_DescriptorEvents_Remove(duk_context *ctx)
 	return(0);
 }
 #ifdef WIN32
-void __stdcall ILibDuktape_DescriptorEvents_WaitHandleAPC(ULONG_PTR user)
+void ILibDuktape_DescriptorEvents_WaitHandle_EventThread(void *chain, void *user)
 {
 	if (!ILibMemory_CanaryOK((void*)user)) { return; }
 	ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user;
@@ -2330,7 +2331,8 @@ void __stdcall ILibDuktape_DescriptorEvents_WaitHandleAPC(ULONG_PTR user)
 void __stdcall ILibDuktape_DescriptorEvents_WaitHandleSignaled(void *user, BOOLEAN TimerOrWaitFired)
 {
 	if (!ILibMemory_CanaryOK(user)) { return; }
-	QueueUserAPC((PAPCFUNC)ILibDuktape_DescriptorEvents_WaitHandleAPC, ((ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user)->eventThread, (ULONG_PTR)user);
+	ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user;
+	ILibChain_RunOnMicrostackThreadEx(v->chain, ILibDuktape_DescriptorEvents_WaitHandle_EventThread, user);
 }
 #endif
 duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
@@ -2349,7 +2351,8 @@ duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
 			ILibDuktape_EventEmitter_CreateEventEx(e, "signaled");
 			v->ctx = ctx;
 			v->object = duk_get_heapptr(ctx, -1);
-			v->eventThread = ILibChain_GetMicrostackThreadHandle(Duktape_GetChain(ctx));
+			v->chain = Duktape_GetChain(ctx);
+			v->eventThread = ILibChain_GetMicrostackThreadHandle(v->chain);
 			if (RegisterWaitForSingleObject(&(v->waitHandle), h, ILibDuktape_DescriptorEvents_WaitHandleSignaled, (void*)v, INFINITE, WT_EXECUTEINPERSISTENTTHREAD | WT_EXECUTEONLYONCE) == 0)
 			{
 				return(ILibDuktape_Error(ctx, "Error(%d) Calling RegisterWaitForSingleObject() ", GetLastError()));
