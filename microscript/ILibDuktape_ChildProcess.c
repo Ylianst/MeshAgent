@@ -102,7 +102,6 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 
 	p->exitCode = exitCode;
 	p->childProcess = NULL;
-
 	duk_push_heapptr(p->ctx, p->subProcess);		// [childProcess]
 	
 #ifdef WIN32
@@ -194,6 +193,9 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_SpawnedProcess_Finalizer(duk_context *ctx)
 {
+	ILibDuktape_ChildProcess_SubProcess *retVal = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_ChildProcess_MemBuf);
+	ILibProcessPipe_Process_RemoveHandlers(retVal->childProcess);
+
 	duk_get_prop_string(ctx, 0, "kill");	// [kill]
 	duk_dup(ctx, 0);						// [kill][this]
 	duk_call_method(ctx, 0);

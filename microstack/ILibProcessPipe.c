@@ -112,6 +112,7 @@ typedef struct ILibProcessPipe_Process_Object
 #ifdef WIN32
 	HANDLE hProcess;
 	int hProcess_needAdd;
+	int disabled;
 #endif
 	void *chain;
 }ILibProcessPipe_Process_Object;
@@ -1442,7 +1443,7 @@ void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject)
 	else
 	{
 		ILibProcessPipe_Pipe_ResumeEx(p);
-		if (p->mProcess != NULL && p->mProcess->hProcess_needAdd != 0)
+		if (p->mProcess != NULL && p->mProcess->hProcess_needAdd != 0 && p->mProcess->disabled == 0)
 		{
 			p->mProcess->hProcess_needAdd = 0;
 			ILibProcessPipe_WaitHandle_Add(p->manager, p->mProcess->hProcess, p->mProcess, ILibProcessPipe_Process_OnExit);
@@ -1567,6 +1568,7 @@ void ILibProcessPipe_Process_OnExit_ChainSink(void *chain, void *user)
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)user;
 	DWORD exitCode;
 	BOOL result;
+	if (j->disabled != 0) { return; }
 
 	if (ILibChain_SelectInterrupted(j->chain) != 0)
 	{
@@ -1598,6 +1600,7 @@ BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus err
 
 	UNREFERENCED_PARAMETER(event);
 	ILibProcessPipe_WaitHandle_Remove(j->parent, j->hProcess);
+
 	if ((j->stdOut->PAUSED != 0 && j->stdOut->totalRead > 0) || (j->stdErr->PAUSED != 0 && j->stdErr->totalRead > 0))
 	{
 		j->hProcess_needAdd = 1;
@@ -1624,6 +1627,15 @@ BOOL ILibProcessPipe_Process_OnExit(HANDLE event, ILibWaitHandle_ErrorStatus err
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj)
 {
 	((ILibProcessPipe_Process_Object*)module)->userObject = userObj;
+}
+void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module)
+{
+	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)module;
+	if (j != NULL && ILibMemory_CanaryOK(j))
+	{
+		j->disabled = 1;
+		ILibProcessPipe_WaitHandle_Remove(j->parent, j->hProcess);
+	}
 }
 void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int bufferSize, ILibProcessPipe_Process_ExitHandler exitHandler, ILibProcessPipe_Process_OutputHandler stdOut, ILibProcessPipe_Process_OutputHandler stdErr, ILibProcessPipe_Process_SendOKHandler sendOk, void *user)
 {

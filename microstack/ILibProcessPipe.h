@@ -80,6 +80,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 #define ILibProcessPipe_Manager_SpawnProcessWithExtraPipeMemory(pipeManager, target, parameters, memorySize) ILibProcessPipe_Manager_SpawnProcessEx2(pipeManager, target, parameters, ILibProcessPipe_SpawnTypes_DEFAULT, memorySize)
 void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p);
 void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int bufferSize, ILibProcessPipe_Process_ExitHandler exitHandler, ILibProcessPipe_Process_OutputHandler stdOut, ILibProcessPipe_Process_OutputHandler stdErr, ILibProcessPipe_Process_SendOKHandler sendOk, void *user);
+void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module);
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj);
 ILibTransport_DoneState ILibProcessPipe_Process_WriteStdIn(ILibProcessPipe_Process p, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership);
 void ILibProcessPipe_Process_CloseStdIn(ILibProcessPipe_Process p);
