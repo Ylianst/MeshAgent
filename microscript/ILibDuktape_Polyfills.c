@@ -1404,6 +1404,19 @@ duk_ret_t ILibDuktape_Stream_EndSink(duk_context *ctx)
 	ILibDuktape_readableStream_WriteEnd(RS);
 	return(0);
 }
+duk_ret_t ILibDuktape_Stream_readonlyError(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	duk_size_t len;
+	char *propName = Duktape_GetStringPropertyValueEx(ctx, -1, "propName", "<unknown>", &len);
+	duk_push_lstring(ctx, propName, len);
+	duk_get_prop_string(ctx, -1, "concat");					// [string][concat]
+	duk_swap_top(ctx, -2);									// [concat][this]
+	duk_push_string(ctx, " is readonly");					// [concat][this][str]
+	duk_call_method(ctx, 1);								// [str]
+	duk_throw(ctx);
+	return(0);
+}
 duk_idx_t ILibDuktape_Stream_newReadable(duk_context *ctx)
 {
 	ILibDuktape_readableStream *RS;
@@ -1421,6 +1434,10 @@ duk_idx_t ILibDuktape_Stream_newReadable(duk_context *ctx)
 	{
 		void *h = Duktape_GetHeapptrProperty(ctx, 0, "read");
 		if (h != NULL) { duk_push_heapptr(ctx, h); duk_put_prop_string(ctx, -2, "_read"); }
+		else
+		{
+			ILibDuktape_CreateEventWithSetterEx(ctx, "_read", ILibDuktape_Stream_readonlyError);
+		}
 	}
 	return(1);
 }
@@ -1548,6 +1565,7 @@ void ILibDuktape_Stream_Duplex_EndSink(ILibDuktape_DuplexStream *stream, void *u
 {
 	ILibDuktape_Stream_Writable_EndSink(stream->writableStream, user);
 }
+
 duk_ret_t ILibDuktape_Stream_newDuplex(duk_context *ctx)
 {
 	ILibDuktape_DuplexStream *DS;
@@ -1568,10 +1586,22 @@ duk_ret_t ILibDuktape_Stream_newDuplex(duk_context *ctx)
 	{
 		void *h = Duktape_GetHeapptrProperty(ctx, 0, "write");
 		if (h != NULL) { duk_push_heapptr(ctx, h); duk_put_prop_string(ctx, -2, "_write"); }
+		else
+		{
+			ILibDuktape_CreateEventWithSetterEx(ctx, "_write", ILibDuktape_Stream_readonlyError);
+		}
 		h = Duktape_GetHeapptrProperty(ctx, 0, "final");
 		if (h != NULL) { duk_push_heapptr(ctx, h); duk_put_prop_string(ctx, -2, "_final"); }
+		else
+		{
+			ILibDuktape_CreateEventWithSetterEx(ctx, "_final", ILibDuktape_Stream_readonlyError);
+		}
 		h = Duktape_GetHeapptrProperty(ctx, 0, "read");
 		if (h != NULL) { duk_push_heapptr(ctx, h); duk_put_prop_string(ctx, -2, "_read"); }
+		else
+		{
+			ILibDuktape_CreateEventWithSetterEx(ctx, "_read", ILibDuktape_Stream_readonlyError);
+		}
 	}
 	return(1);
 }
