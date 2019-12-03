@@ -883,12 +883,21 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 			ILibDuktape_DuplexStream_WriteData(winIPC->ds, winIPC->buffer + winIPC->bufferOffset, winIPC->bytesLeft);
 			if (winIPC->unshiftedBytes > 0)
 			{
-				winIPC->bufferOffset += (winIPC->bytesLeft - winIPC->unshiftedBytes);
-				if (winIPC->bytesLeft == winIPC->unshiftedBytes)
+				if (winIPC->unshiftedBytes == winIPC->bytesLeft)
 				{
+					// Unshift the entire buffer
 					winIPC->unshiftedBytes = 0;
 				}
-				winIPC->bytesLeft = winIPC->unshiftedBytes;
+				else
+				{
+					// Unshift some of the buffer
+					winIPC->bufferOffset += (winIPC->bytesLeft - winIPC->unshiftedBytes);
+					if (winIPC->bytesLeft == winIPC->unshiftedBytes)
+					{
+						winIPC->unshiftedBytes = 0;
+					}
+					winIPC->bytesLeft = winIPC->unshiftedBytes;
+				}
 			}
 			else
 			{
