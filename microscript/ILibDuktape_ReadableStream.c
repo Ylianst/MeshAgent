@@ -495,7 +495,8 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 				retVal = 0;
 			}
 		}
-		else if (ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") != 0)
+		
+		if (ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") != 0)
 		{
 			ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "end");	// [emit][this][end]
 			if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }

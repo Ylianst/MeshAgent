@@ -105,6 +105,8 @@ typedef struct ILibDuktape_net_WindowsIPC
 #define ILibDuktape_GlobalTunnel_DataPtr		"\xFF_GlobalTunnel_DataPtr"
 #define ILibDuktape_GlobalTunnel_Stash			"global-tunnel"
 #define ILibDuktape_net_Server_buffer			"\xFF_FixedBuffer"
+#define ILibDuktape_net_server_closed			"\xFF_ILibDuktape_net_server_closed"
+#define ILibDuktape_net_server_closed_needEmit	"\xFF_ILibDuktape_net_server_closed_needEmit"
 #define ILibDuktape_net_Server_Session_buffer	"\xFF_SessionFixedBuffer"
 #define ILibDuktape_net_socket_ptr				"\xFF_SocketPtr"
 #define ILibDuktape_net_WindowsIPC_Buffer		"\xFF_WindowsIPC"
@@ -830,20 +832,32 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 	{
 		ILibDuktape_DuplexStream_Closed(winIPC->ds);
 		ILibProcessPipe_FreePipe(winIPC->mPipe);
-		winIPC->mPipe = NULL;
+		winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
 
 		if (winIPC->mServer != NULL)
 		{
 			// Server IPC, so we can create a new Instance, and listen for a connection
 			duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
-			CloseHandle(winIPC->overlapped.hEvent);
+			CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
 			if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
 
-			duk_push_heapptr(ctx, winIPC->mServer);							// [server]
-			duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
-			duk_swap_top(ctx, -2);											// [listen][this]
-			duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
-			duk_pcall_method(ctx, 1); duk_pop(ctx);							// ...
+			duk_push_heapptr(winIPC->ctx, winIPC->mSocket);											// [connection]
+			duk_del_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer); duk_pop(winIPC->ctx);	// ...
+
+			duk_push_heapptr(ctx, winIPC->mServer);								// [server]
+			if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_net_server_closed, 0) == 0)
+			{
+				duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
+				duk_swap_top(ctx, -2);											// [listen][this]
+				duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
+				duk_pcall_method(ctx, 1);										// [ret]
+			}
+			else if(Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_net_server_closed_needEmit, 0) != 0)
+			{
+				ILibDuktape_EventEmitter_SetupEmit(ctx, winIPC->mServer, "close"); // [emit][this][closed]
+				duk_pcall_method(ctx, 1);											// [ret]
+			}
+			duk_pop(ctx);														// ...
 		}
 	}
 }
@@ -854,7 +868,7 @@ void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void
 void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
-	if (winIPC->processingRead != 0) { return; }
+	if (winIPC->processingRead != 0 || winIPC->mPipeHandle == NULL) { return; }
 	winIPC->processingRead = 1;
 
 	if (winIPC->buffer == NULL)
@@ -985,12 +999,12 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	if (ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe) == 0)
 	{
 		ILibProcessPipe_FreePipe(winIPC->mPipe);
-		winIPC->mPipe = NULL;
+		winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
 		if (winIPC->mServer != NULL)
 		{
 			// Server IPC, so we can create a new Instance, and listen for a connection
 			duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
-			CloseHandle(winIPC->overlapped.hEvent);
+			CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
 
 			duk_push_heapptr(ctx, winIPC->mServer);							// [server]
 			duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
@@ -1003,15 +1017,17 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 {
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_net_WindowsIPC_Buffer);
-	if (winIPC->mPipe != NULL && winIPC->mPipeHandle != NULL)
+	if (winIPC != NULL)
 	{
-		// It's ok to do this, becuase the CancelEx happens on the same thread, and the completion routine will use an APC Queue, so the Canary will fail before it tries to deref
-		ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe);
-		ILibProcessPipe_FreePipe(winIPC->mPipe);
-		winIPC->mPipe = NULL;
+		if (winIPC->mPipe != NULL && winIPC->mPipeHandle != NULL)
+		{
+			// It's ok to do this, becuase the CancelEx happens on the same thread, and the completion routine will use an APC Queue, so the Canary will fail before it tries to deref
+			ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe);
+			ILibProcessPipe_FreePipe(winIPC->mPipe);
+			winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
+		}
+		if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
 	}
-	if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
-
 	return(0);
 }
 BOOL ILibDuktape_net_server_IPC_ConnectSink(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user)
@@ -1101,6 +1117,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	duk_dup(ctx, 0);													// [server][Options]
 	duk_put_prop_string(ctx, -2, ILibDuktape_SERVER2LISTENOPTIONS);		// [server]
 
+
 	port = (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
 	backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", 64);
 	host = Duktape_GetStringPropertyValue(ctx, 0, "host", NULL);
@@ -1181,7 +1198,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			1, ILibDuktape_net_IPC_BUFFERSIZE, ILibDuktape_net_IPC_BUFFERSIZE, 0, pIPC_SA);
 		if (winIPC->mPipeHandle == INVALID_HANDLE_VALUE)
 		{
-			CloseHandle(winIPC->overlapped.hEvent);
+			CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
 			duk_del_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
 			return(ILibDuktape_Error(ctx, "Error Creating Named Pipe: %s", ipc));
 		}
@@ -1265,12 +1282,11 @@ duk_ret_t ILibDuktape_net_server_Finalizer(duk_context *ctx)
 
 #ifdef WIN32
 	ILibDuktape_net_WindowsIPC *ipc = Duktape_GetBufferProperty(ctx, 0, ILibDuktape_net_WindowsIPC_Buffer);
-	if (ipc != NULL && ipc->mPipeHandle != NULL && ipc->overlapped.hEvent != NULL)
+	if (ipc != NULL && ipc->overlapped.hEvent != NULL)
 	{
 		ILibProcessPipe_WaitHandle_Remove(ipc->manager, ipc->overlapped.hEvent);
-		CloseHandle(ipc->mPipeHandle);
-		CloseHandle(ipc->overlapped.hEvent);
-		ipc->overlapped.hEvent = NULL;
+		if (ipc->mPipeHandle != NULL) { CloseHandle(ipc->mPipeHandle); ipc->mPipeHandle = NULL; }
+		if (ipc->overlapped.hEvent != NULL) { CloseHandle(ipc->overlapped.hEvent); ipc->overlapped.hEvent = NULL; }	
 	}
 #endif
 
@@ -1326,6 +1342,37 @@ duk_ret_t ILibDuktape_net_server_close(duk_context *ctx)
 			duk_call_method(ctx, 1);
 		}
 	}
+#ifdef WIN32
+	else
+	{
+		duk_push_this(ctx);
+		ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
+		if (winIPC != NULL && winIPC->mPipeHandle != NULL)
+		{
+			if (winIPC->mPipe == NULL)
+			{
+				// Listening
+				DisconnectNamedPipe(winIPC->mPipeHandle);
+				CancelIoEx(winIPC->mPipeHandle, NULL);
+				CloseHandle(winIPC->mPipeHandle);
+				winIPC->mPipeHandle = NULL;
+
+				ILibDuktape_EventEmitter_SetupEmit(ctx, server->self, "close");		// [emit][this][close]
+				duk_call_method(ctx, 1);
+			}
+			else
+			{
+				// Connected
+				duk_push_this(ctx);
+				duk_push_true(ctx);
+				duk_put_prop_string(ctx, -2, ILibDuktape_net_server_closed_needEmit);
+			}
+		}
+	}
+#endif
+	duk_push_this(ctx);
+	duk_push_true(ctx);
+	duk_put_prop_string(ctx, -2, ILibDuktape_net_server_closed);
 	return(0);
 }
 
