@@ -1628,6 +1628,7 @@ void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, vo
 {
 	((ILibProcessPipe_Process_Object*)module)->userObject = userObj;
 }
+#ifdef WIN32
 void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module)
 {
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)module;
@@ -1637,6 +1638,7 @@ void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module)
 		ILibProcessPipe_WaitHandle_Remove(j->parent, j->hProcess);
 	}
 }
+#endif
 void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int bufferSize, ILibProcessPipe_Process_ExitHandler exitHandler, ILibProcessPipe_Process_OutputHandler stdOut, ILibProcessPipe_Process_OutputHandler stdErr, ILibProcessPipe_Process_SendOKHandler sendOk, void *user)
 {
 	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)module;
