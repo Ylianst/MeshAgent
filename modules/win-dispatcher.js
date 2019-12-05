@@ -39,7 +39,7 @@ function dispatch(options)
         {
         }
     }
-    var str = Buffer.from("/*require('win-console').hide();*/require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
+    var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
 
     ret._ipc.once('connection', function onConnect(s)
     {
