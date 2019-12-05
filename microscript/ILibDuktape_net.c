@@ -91,6 +91,8 @@ typedef struct ILibDuktape_net_WindowsIPC
 	OVERLAPPED overlapped;
 	ILibDuktape_DuplexStream *ds;
 
+	ULONG_PTR _reserved[5];
+
 	int processingRead;
 	char *buffer;
 	int bufferLength;
@@ -818,10 +820,14 @@ int ILibDuktape_net_server_IPC_unshiftSink(ILibDuktape_DuplexStream *sender, int
 	winIPC->unshiftedBytes = unshiftBytes;
 	return(unshiftBytes);
 }
-void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user, DWORD dwErrorCode, char *buffer, int bufferLen)
+void ILibDuktape_net_server_IPC_readsink_safe(void *chain, void *user)
 {
-	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	if (!ILibMemory_CanaryOK(user)) { return; }
+	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
+	ILibProcessPipe_Pipe sender = (ILibProcessPipe_Pipe)winIPC->_reserved[0];
+	DWORD dwErrorCode = (DWORD)winIPC->_reserved[2];
+	char *buffer = (char*)winIPC->_reserved[3];
+	int bufferLen = (int)winIPC->_reserved[4];
 
 	if (dwErrorCode == 0)
 	{
@@ -852,7 +858,7 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 				duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
 				duk_pcall_method(ctx, 1);										// [ret]
 			}
-			else if(Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_net_server_closed_needEmit, 0) != 0)
+			else if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_net_server_closed_needEmit, 0) != 0)
 			{
 				ILibDuktape_EventEmitter_SetupEmit(ctx, winIPC->mServer, "close"); // [emit][this][closed]
 				duk_pcall_method(ctx, 1);											// [ret]
@@ -860,6 +866,19 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 			duk_pop(ctx);														// ...
 		}
 	}
+}
+void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user, DWORD dwErrorCode, char *buffer, int bufferLen)
+{
+	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
+	if (!ILibMemory_CanaryOK(user)) { return; }
+	
+	winIPC->_reserved[0] = (ULONG_PTR)sender;
+	winIPC->_reserved[1] = (ULONG_PTR)user;
+	winIPC->_reserved[2] = (ULONG_PTR)dwErrorCode;
+	winIPC->_reserved[3] = (ULONG_PTR)buffer;
+	winIPC->_reserved[4] = (ULONG_PTR)bufferLen;
+
+	ILibChain_RunOnMicrostackThreadEx(Duktape_GetChain(winIPC->ctx), ILibDuktape_net_server_IPC_readsink_safe, winIPC);
 }
 void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
@@ -965,6 +984,7 @@ void ILibDuktape_net_server_IPC_WriteCompletionEvent(ILibProcessPipe_Pipe sender
 	else
 	{
 		// No more pending writes, so we can emit drain
+		duk_set_top(winIPC->ctx, top);												// ...
 		ILibDuktape_DuplexStream_Ready(winIPC->ds);
 	}
 }
