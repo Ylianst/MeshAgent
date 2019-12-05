@@ -99,6 +99,7 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #endif
 #endif
 
+	extern int ILibDuktape_ModSearch_ShowNames;
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 
@@ -4143,6 +4144,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 		agentHost->agentMode = 1;
+		ILibDuktape_ModSearch_ShowNames = ILibSimpleDataStore_Get(agentHost->masterDb, "showModuleNames", NULL, 0);
 
 		if (agentHost->meshCoreCtx != NULL)
 		{

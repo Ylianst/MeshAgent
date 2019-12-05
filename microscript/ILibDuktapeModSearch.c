@@ -34,6 +34,8 @@ limitations under the License.
 #define ILibDuktape_ModSearch_JSInclude		"\xFF_ModSearch_JSINCLUDE"
 #define ILibDuktape_ModSearch_ModulePath	"\xFF_ModSearch_Path"
 
+int ILibDuktape_ModSearch_ShowNames = 0;
+
 duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id)
 {
 	ILibHashtable table = NULL;
@@ -225,6 +227,8 @@ duk_ret_t mod_Search(duk_context *ctx)
 
 	if (!duk_is_string(ctx, 0)) { return ILibDuktape_Error(ctx, "mod_search(): Invalid 'ID' parameter"); }
 	id = (char*)duk_get_lstring(ctx, 0, &idLen);
+
+	if (ILibDuktape_ModSearch_ShowNames != 0) { printf("ModuleLoader: %s\n", (char*)duk_require_string(ctx, 0)); }
 
 	duk_push_current_function(ctx);				// [func]
 	duk_get_prop_string(ctx, -1, "chain");		// [func][chain]
