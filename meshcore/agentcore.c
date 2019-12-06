@@ -1022,6 +1022,8 @@ void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventNa
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *buffer, int bufferLen, void *reserved)
 {
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
+	if (!ILibMemory_CanaryOK(ptrs)) { return(ILibTransport_DoneState_ERROR); }
+
 	if (ptrs->stream != NULL)
 	{
 		if (ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen) != ILibTransport_DoneState_ERROR)
@@ -1309,13 +1311,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
 	duk_pop(ctx);
 
-	duk_push_object(ctx);										// [MeshAgent][RemoteDesktop]
+	duk_push_object(ctx);															// [MeshAgent][RemoteDesktop]
 	ILibDuktape_WriteID(ctx, "MeshAgent.kvmSession");
-	duk_dup(ctx, -1);											// [MeshAgent][RemoteDesktop][RemoteDesktop]
-	duk_put_prop_string(ctx, -3, REMOTE_DESKTOP_STREAM);		// [MeshAgent][RemoteDesktop]
-	duk_push_fixed_buffer(ctx, sizeof(RemoteDesktop_Ptrs));		// [MeshAgent][RemoteDesktop][buffer]
-	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);
-	duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_ptrs);			// [MeshAgent][RemoteDesktop]
+	duk_dup(ctx, -1);																// [MeshAgent][RemoteDesktop][RemoteDesktop]
+	duk_put_prop_string(ctx, -3, REMOTE_DESKTOP_STREAM);							// [MeshAgent][RemoteDesktop]
+	ptrs = (RemoteDesktop_Ptrs*)Duktape_PushBuffer(ctx, sizeof(RemoteDesktop_Ptrs));// [MeshAgent][RemoteDesktop][buffer]
+	duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_ptrs);								// [MeshAgent][RemoteDesktop]
 	memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	ptrs->MeshAgentObject = duk_get_heapptr(ctx, -2);
 	ptrs->ctx = ctx;
