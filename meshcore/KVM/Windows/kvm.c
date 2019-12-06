@@ -37,6 +37,7 @@ limitations under the License.
 
 // #define KVMDEBUGENABLED 1
 ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
+int gProcessTSID = -1;
 
 #pragma pack(push, 1)
 typedef struct KVMDebugLog
@@ -1057,17 +1058,6 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent KVM: g_restartcount = %d, aborting", g_restartcount);
 		writeHandler(NULL, 0, reserved);
 	}
-
-	//if (g_shutdown == 3 && g_restartcount < 4)
-	//{
-	//	g_restartcount++;
-	//	while (--r > 0 && g_shutdown == 3) { Sleep(50); }
-	//	if (g_shutdown != 3 || kvm_relay_restart(1) == 0) GuardPost_ILibKVMDisconnect();
-	//}
-	//else
-	//{
-	//	if (g_shutdown == 2) GuardPost_ILibKVMDisconnect();
-	//}
 }
 
 void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
@@ -1132,10 +1122,11 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 
 	// If we are re-launching the child process, wait a bit. The computer may be switching desktop, etc.
 	if (paused == 0) Sleep(500);
+	if (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER && gProcessTSID < 0) { gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER; }
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [Master]: Spawning Slave as %s", gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER ? "USER":"WIN_LOGON");
-	gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx(pipeMgr, exePath, paused == 0 ? parms0 : parms1, gProcessSpawnType);
-	gProcessSpawnType = gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER ? ILibProcessPipe_SpawnTypes_WINLOGON : ILibProcessPipe_SpawnTypes_USER;
+	gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(pipeMgr, exePath, paused == 0 ? parms0 : parms1, gProcessSpawnType, (void*)(ULONG_PTR)gProcessTSID, 0);
+	gProcessSpawnType = (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER || gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER) ? ILibProcessPipe_SpawnTypes_WINLOGON : (gProcessTSID < 0 ? ILibProcessPipe_SpawnTypes_USER : ILibProcessPipe_SpawnTypes_SPECIFIED_USER);
 
 	g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
 	ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
@@ -1151,14 +1142,15 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 #endif
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
-int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved)
+int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int tsid)
 {
 	if (processPipeMgr != NULL)
 	{
 #ifdef _WINSERVICE
 		if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); return 0; }
 		g_restartcount = 0;
-		gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
+		gProcessSpawnType = ILibProcessPipe_SpawnTypes_SPECIFIED_USER;
+		gProcessTSID = tsid;
 		KVMDEBUG("kvm_relay_setup() session starting", 0);
 		return kvm_relay_restart(1, processPipeMgr, exePath, writeHandler, reserved);
 #else

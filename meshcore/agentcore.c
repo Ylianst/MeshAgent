@@ -1286,6 +1286,10 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	RemoteDesktop_Ptrs *ptrs;
 	MeshAgentHostContainer *agent;
 
+#ifdef WIN32
+	int TSID = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
+#endif
+
 #if !defined(WIN32) && !defined(__APPLE__)
 	if (duk_peval_string(ctx, "require('monitor-info')") == 0)
 	{
@@ -1327,9 +1331,9 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	// Setup Remote Desktop
 #ifdef WIN32
 	#ifdef _WINSERVICE
-		kvm_relay_setup(agent->exePath, agent->runningAsConsole ? NULL : agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
+		kvm_relay_setup(agent->exePath, agent->runningAsConsole ? NULL : agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
 	#else
-		kvm_relay_setup(agent->exePath, NULL, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs);
+		kvm_relay_setup(agent->exePath, NULL, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
 	#endif	
 #else
 	int console_uid = 0;
@@ -1810,7 +1814,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
 		ILibDuktape_CreateEventWithGetter(ctx, "ConnectedServer", ILibDuktape_MeshAgent_ConnectedServer);
 		ILibDuktape_CreateEventWithGetter(ctx, "ServerUrl", ILibDuktape_MeshAgent_ServerUrl);
-		ILibDuktape_CreateInstanceMethod(ctx, "getRemoteDesktopStream", ILibDuktape_MeshAgent_getRemoteDesktop, 0);
+		ILibDuktape_CreateInstanceMethod(ctx, "getRemoteDesktopStream", ILibDuktape_MeshAgent_getRemoteDesktop, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "AddCommandHandler", ILibDuktape_MeshAgent_AddCommandHandler, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "AddConnectHandler", ILibDuktape_MeshAgent_AddConnectHandler, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "SendCommand", ILibDuktape_MeshAgent_SendCommand, 1);
