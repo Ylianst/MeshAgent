@@ -18,18 +18,18 @@ var ptrsize = require('_GenericMarshal').PointerSize;
 var ClientMessage = 33;
 
 
-function windows_notifybar_check(title)
+function windows_notifybar_check(title, tsid)
 {
     if(require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
     {
-        return (windows_notifybar_system(title));
+        return (windows_notifybar_system(title, tsid));
     }
     else
     {
         return (windows_notifybar_local(title));
     }
 }
-function windows_notifybar_system(title)
+function windows_notifybar_system(title, tsid)
 {
     var ret = {};
 
@@ -39,7 +39,7 @@ function windows_notifybar_system(title)
         .createEvent('close')
         .addMethod('close', function close() { this.child.kill(); });
 
-    ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-b64exec', script], { type: 1 });
+    ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-b64exec', script], { type: 1, uid: tsid });
     ret.child.parent = ret;
     ret.child.stdout.on('data', function (c) { });
     ret.child.stderr.on('data', function (c) { });
@@ -256,6 +256,7 @@ switch(process.platform)
 {
     case 'win32':
         module.exports = windows_notifybar_check;
+        module.exports.system = windows_notifybar_system;
         break;
     case 'linux':
     case 'freebsd':
