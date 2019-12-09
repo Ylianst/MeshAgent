@@ -150,7 +150,10 @@ int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyNam
 	if (ctx!=NULL && duk_has_prop_string(ctx, i, propertyName))
 	{
 		duk_get_prop_string(ctx, i, propertyName);
-		retVal = duk_to_int(ctx, -1);
+		if (!duk_is_null_or_undefined(ctx, -1))
+		{
+			retVal = duk_to_int(ctx, -1);
+		}
 		duk_pop(ctx);
 	}
 	return retVal;
