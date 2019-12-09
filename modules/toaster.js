@@ -41,7 +41,7 @@ if (process.platform == 'linux' || process.platform == 'darwin' || process.platf
 function Toaster()
 {
     this._ObjectID = 'toaster';
-    this.Toast = function Toast(title, caption)
+    this.Toast = function Toast(title, caption, tsid)
     {
         var retVal = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         retVal.title = title;
@@ -51,10 +51,7 @@ function Toaster()
         {
             case 'win32':
                 {
-                    var GM = require('_GenericMarshal');
-                    var kernel32 = GM.CreateNativeProxy('kernel32.dll');
-                    kernel32.CreateMethod('ProcessIdToSessionId');
-                    var psid = GM.CreateVariable(4);
+                    var id = require('user-sessions').getProcessOwnerName(process.pid).tsid;
                     var consoleUid = 0;
                     try
                     {
@@ -65,21 +62,26 @@ function Toaster()
                         retVal._rej('Cannot display user notification when a user is not logged in');
                         return (retVal);
                     }
-                    if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0)
-                    {
-                        retVal._rej('internal error'); return (retVal);
-                    }
+                   
 
-                    if (consoleUid == psid.toBuffer().readUInt32LE())
+                    if (id != 0)
                     {
-                        // We are running on the physical console
+                        // We are running as user
+                        if(tsid != null && tsid != id)
+                        {
+                            // If we aren't LocalSystem, we cannot spawn as a different user
+                            retVal._rej('Cannot display user notification to TSID: ' + tsid + ' from TSID: ' + id);
+                            return (retVal);
+                        }
                         retVal._child = require('ScriptContainer').Create({ processIsolation: true });
                     }
                     else
                     {
-                        // We need so spawn the ScriptContainer into the correct session
-                        retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: consoleUid });
+                        // We are running as LocalSystem
+                        if (tsid == null) { tsid = consoleUid; }
+                        retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: tsid });
                     }
+
                     retVal._child.parent = retVal;
                     retVal._child.on('exit', function (code) { this.parent._res('DISMISSED'); });
                     retVal._child.addModule('win-console', getJSModule('win-console'));
