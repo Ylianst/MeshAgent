@@ -121,8 +121,18 @@ function windows_notifybar_local(title)
                         {
                             case 4:
                                 flags = msg.lparam_raw.Deref(24, 4).toBuffer().readUInt32LE() | 0x0002; // Set SWP_NOMOVE
-                                msg.lparam_raw.Deref(24, 4).toBuffer().writeUInt32LE(flags);
-                                break;
+                                if (msg.lparam_raw.Deref(8, 4).toBuffer().readInt32LE() < this._options.window.left ||
+                                    (msg.lparam_raw.Deref(8, 4).toBuffer().readInt32LE() + this._options.window.width) >= this._options.window.right)
+                                {
+                                    // Disallow this move, because it will go out of bounds of the current monitor
+                                    msg.lparam_raw.Deref(24, 4).toBuffer().writeUInt32LE(flags);
+                                }
+                                else
+                                {
+                                    // Allow the move, but only on the X-axis
+                                    msg.lparam_raw.Deref(12, 4).toBuffer().writeInt32LE(this._options.window.y);
+                                }
+                                break; 
                             case 8:
                                 flags = msg.lparam_raw.Deref(32, 4).toBuffer().readUInt32LE() | 0x0002  // Set SWP_NOMOVE
                                 if (msg.lparam_raw.Deref(16, 4).toBuffer().readInt32LE() < this._options.window.left || 
