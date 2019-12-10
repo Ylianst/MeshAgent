@@ -82,14 +82,12 @@ function windows_notifybar_local(title)
             barHeight = Math.floor(monHeight * 0.035);
             offset = Math.floor(monWidth * 0.50) - Math.floor(barWidth * 0.50);
             start = m[i].left + offset;
-            //console.log('   ' + start + ', ' + barWidth + ', ' + barHeight);
-
             var options =
                 {
                     window:
                     {
                         winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_BORDER | MessagePump.WindowStyles.WS_CAPTION | MessagePump.WindowStyles.WS_SYSMENU,
-                        x: start, width: barWidth, height: barHeight, title: this.notifybar.title
+                        x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title
                     }
                 };
             
@@ -127,7 +125,17 @@ function windows_notifybar_local(title)
                                 break;
                             case 8:
                                 flags = msg.lparam_raw.Deref(32, 4).toBuffer().readUInt32LE() | 0x0002  // Set SWP_NOMOVE
-                                msg.lparam_raw.Deref(32, 4).toBuffer().writeUInt32LE(flags);
+                                if (msg.lparam_raw.Deref(16, 4).toBuffer().readInt32LE() < this._options.window.left || 
+                                    (msg.lparam_raw.Deref(16, 4).toBuffer().readInt32LE() + this._options.window.width) >= this._options.window.right)
+                                {
+                                    // Disallow this move, because it will go out of bounds of the current monitor
+                                    msg.lparam_raw.Deref(32, 4).toBuffer().writeUInt32LE(flags);
+                                }
+                                else
+                                {
+                                    // Allow the move, but only on the X-axis
+                                    msg.lparam_raw.Deref(20, 4).toBuffer().writeInt32LE(this._options.window.y);
+                                }
                                 break;
                         }
                     }
