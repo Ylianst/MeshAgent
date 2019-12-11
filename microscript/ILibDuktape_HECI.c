@@ -766,9 +766,10 @@ void ILibDuktape_HECI_IoctlHandler_Dispatch(void *chain, void *user)
 	ILibDuktape_HECI_ioctl_data *data = (ILibDuktape_HECI_ioctl_data*)user;
 	duk_size_t count;
 	int i;
-	duk_context *ctx = data->ctx;
+	duk_context *ctx;
 
 	if (!ILibMemory_CanaryOK(data)) { return; } // Abort Dispatch, becuase the HECI object was GC'ed.
+	ctx = data->ctx;
 
 	duk_push_heapptr(data->ctx, data->data);												// [array]
 	duk_push_heapptr(data->ctx, data->heciObject);											// [array][heci]
