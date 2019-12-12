@@ -1514,6 +1514,8 @@ void ILibDuktape_GlobalGenericCallback_ProcessEx(void *chain, void *user)
 	int i;
 	//void *retVal = NULL;
 	Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)user;
+	if (!ILibMemory_CanaryOK(data->emitter)) { return; }
+
 	char tmp[255];
 	sprintf_s(tmp, sizeof(tmp), "%ul", data->callingThread);
 	duk_push_heapptr(data->emitter->ctx, data->emitter->object);										// [obj]

@@ -91,6 +91,7 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define DEFAULT_IDLE_TIMEOUT	120
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
+extern int ILibDuktape_HECI_Debug;
 
 #ifdef _POSIX
 	extern char **environ;
@@ -3395,7 +3396,8 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
 	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
-	
+	ILibDuktape_HECI_Debug = (ILibSimpleDataStore_Get(agent->masterDb, "heciDebug", NULL, 0) != NULL);
+
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
 #endif
