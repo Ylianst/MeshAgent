@@ -1617,7 +1617,6 @@ void ILibDuktape_Polyfills_debugGC2(duk_context *ctx, void ** args, int argsLen)
 {
 	if (g_displayFinalizerMessages) { printf("=> GC();\n"); }
 	duk_gc(ctx, 0);
-	duk_gc(ctx, 0);
 }
 duk_ret_t ILibDuktape_Polyfills_debugGC(duk_context *ctx)
 {
