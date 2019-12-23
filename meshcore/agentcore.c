@@ -91,7 +91,7 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define DEFAULT_IDLE_TIMEOUT	120
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
-extern int ILibDuktape_HECI_Debug;
+int ILibDuktape_HECI_Debug = 0;
 
 #ifdef _POSIX
 	extern char **environ;

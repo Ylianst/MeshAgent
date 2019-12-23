@@ -155,7 +155,7 @@ typedef struct HECI_chainLink
 
 void ILibDuktape_HECI_Push(duk_context *ctx, void *chain);
 ILibTransport_DoneState ILibDuktape_HECI_Session_WriteHandler_Process(ILibDuktape_HECI_Session *session);
-int ILibDuktape_HECI_Debug = 0;
+extern int ILibDuktape_HECI_Debug;
 
 #ifdef WIN32
 HANDLE ILibDuktape_HECI_windowsInit()
