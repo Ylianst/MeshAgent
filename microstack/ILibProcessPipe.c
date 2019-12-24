@@ -84,6 +84,7 @@ typedef struct ILibProcessPipe_PipeObject
 	HANDLE mPipe_ReadEnd;
 	HANDLE mPipe_WriteEnd;
 	OVERLAPPED *mOverlapped,*mwOverlapped;
+	int inProgress;
 	void *mOverlapped_opaqueData, *user3, *user4;
 #else
 	int mPipe_ReadEnd, mPipe_WriteEnd;
@@ -1058,6 +1059,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 #ifdef WIN32
 		err = 0;
 		result = GetOverlappedResult(pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, &bytesRead, FALSE);
+		pipeObject->inProgress = 0;
 		//printf("Overlapped(%p): %d bytes\n", pipeObject->mPipe_ReadEnd, bytesRead);
 		if (result == FALSE || bytesRead == 0)
 		{
@@ -1135,6 +1137,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 #ifdef WIN32
 		if (pipeObject->PAUSED == 0)
 		{
+			pipeObject->inProgress = 1;
 			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped) != TRUE)
 			{
 				break;
@@ -1389,7 +1392,11 @@ void __stdcall ILibProcessPipe_Pipe_ResumeEx_APC(ULONG_PTR obj)
 			ILibProcessPipe_WaitHandle_Add(p->manager, p->mOverlapped->hEvent, p, ILibProcessPipe_Process_ReadHandler);
 		}
 		//printf("ReadFile(%p, %d, %d) (ResumeEx_APC)\n", p->mPipe_ReadEnd, p->readOffset + p->totalRead, p->bufferSize - p->readOffset - p->totalRead);
-		ReadFile(p->mPipe_ReadEnd, p->buffer + p->readOffset + p->totalRead, p->bufferSize - p->readOffset - p->totalRead, NULL, p->mOverlapped);
+		if (p->inProgress == 0)
+		{
+			p->inProgress = 1;
+			ReadFile(p->mPipe_ReadEnd, p->buffer + p->readOffset + p->totalRead, p->bufferSize - p->readOffset - p->totalRead, NULL, p->mOverlapped);
+		}
 	}
 	else
 	{
@@ -1528,6 +1535,7 @@ void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObj
 	{
 		// This PIPE supports Overlapped I/O
 		//printf("ReadFile(%p, %d, %d) (StartPipeReader)\n", pipeObject->mPipe_ReadEnd, 0, pipeObject->bufferSize);
+		pipeObject->inProgress = 1;
 		result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer, pipeObject->bufferSize, NULL, pipeObject->mOverlapped);
 		ILibProcessPipe_WaitHandle_Add(pipeObject->manager, pipeObject->mOverlapped->hEvent, pipeObject, &ILibProcessPipe_Process_ReadHandler);
 	}
