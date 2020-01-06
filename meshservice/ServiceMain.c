@@ -275,9 +275,6 @@ void WINAPI AddUninstallIcon()
 		i = 13;
 		RegSetValueEx(hKey, "VersionMinor", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
 
-		i = 0x00208000;
-		RegSetValueEx(hKey, "EstimatedSize", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
-
 		i = 1;
 		RegSetValueEx(hKey, "NoModify", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
 		RegSetValueEx(hKey, "NoRepair", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
