@@ -17,7 +17,7 @@ limitations under the License.
 
 function dispatch(options)
 {
-    if (!options || !options.user || !options.modules || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
+    if (!options || !options.modules || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
 
     var ipcInteger
     var ret = { options: options };
@@ -63,14 +63,24 @@ function dispatch(options)
         this.parent.emit('connection', s);
     });
 
+
     var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
     child.stderr.on('data', function (c) { });
     child.stdout.on('data', function (c) { });
-    child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU ' + options.user + ' /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+
+    if (options.user)
+    {
+        child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU ' + options.user + ' /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+    }
+    else
+    {
+        child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+    }
     child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
     child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
     child.stdin.write('exit\r\n');
     child.waitExit();
+    
 
     return (ret);
 }

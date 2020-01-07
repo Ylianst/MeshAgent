@@ -47,9 +47,12 @@ function vt()
 
         var GM = require('_GenericMarshal');
         var k32 = GM.CreateNativeProxy('kernel32.dll');
+        k32.CreateMethod('CancelIoEx');
         k32.CreateMethod('CreatePipe');
         k32.CreateMethod('CreateProcessW');
         k32.CreateMethod('CreatePseudoConsole');
+        k32.CreateMethod('CloseHandle');
+        k32.CreateMethod('ClosePseudoConsole');
         k32.CreateMethod('GetProcessHeap');
         k32.CreateMethod('HeapAlloc');
         k32.CreateMethod('InitializeProcThreadAttributeList');
@@ -101,16 +104,34 @@ function vt()
                         {
                             if (this.terminal._process)
                             {
-                                this.terminal.k32.TerminateProcess(this.terminal._process, 0);
                                 this.terminal._process = null;
-                                this.terminal.k32.ReadFile.async.abort();
+                                k32.ClosePseudoConsole(this._obj._h.Deref());
                             }
                             flush();
                         }
                     });
+                    ds._obj = ret;
                     ret._waiter = require('DescriptorEvents').addDescriptor(pi.Deref(0));
                     ret._waiter.ds = ds;
-                    ret._waiter.on('signaled', function () { this.ds.push(null); });
+                    ret._waiter._obj = ret;
+                    ret._waiter.on('signaled', function ()
+                    {
+                        k32.CancelIoEx(this._obj._output.Deref(), 0);
+
+                        // Child process has exited
+                        this.ds.push(null);
+
+                        if (this._obj._process)
+                        {
+                            this._obj._process = null;
+                            k32.ClosePseudoConsole(this._obj._h.Deref());
+                        }
+                       k32.CloseHandle(this._obj._input.Deref());
+                       k32.CloseHandle(this._obj._output.Deref());
+
+                       k32.CloseHandle(this._obj._consoleInput.Deref());
+                       k32.CloseHandle(this._obj._consoleOutput.Deref());
+                    });
 
                     ds.terminal = ret;
                     ds._rpbuf = GM.CreateVariable(4096);
@@ -121,6 +142,8 @@ function vt()
                         this._rp.then(function ()
                         {
                             var len = this.parent._rpbufRead.toBuffer().readUInt32LE();
+                            if (len <= 0) { return; }
+
                             this.parent.push(this.parent._rpbuf.toBuffer().slice(0, len));
                             this.parent.__read();
                         });
@@ -131,7 +154,6 @@ function vt()
                 }
                 else
                 {
-                    console.log('FAILED!');
                 }
             }
 
