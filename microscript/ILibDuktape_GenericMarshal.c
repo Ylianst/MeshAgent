@@ -1248,6 +1248,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_wait(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 {
+	char *exposedName = NULL;
 	void *fptr = NULL;
 	int parms = duk_get_top(ctx);
 	int i;
@@ -1255,12 +1256,13 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	if (parms > 20) { return(ILibDuktape_Error(ctx, "Too many parameters")); }
 	
 	duk_push_current_function(ctx);					// [func]
+	exposedName = Duktape_GetStringPropertyValue(ctx, -1, "_exposedName", NULL);
 	int spawnThread = Duktape_GetBooleanProperty(ctx, -1, "_spawnThread", 0);
 	PTRSIZE *vars = spawnThread == 0 ? ILibMemory_AllocateA(sizeof(PTRSIZE)*parms) : ILibMemory_SmartAllocateEx(sizeof(PTRSIZE)*parms, 5 * sizeof(void*));
 	duk_get_prop_string(ctx, -1, "_address");		// [func][addr]
 	fptr = duk_to_pointer(ctx, -1);
 
-	if (fptr == NULL)
+	if (fptr == NULL || exposedName == NULL)
 	{
 		return(ILibDuktape_Error(ctx, "Invalid Method"));
 	}
@@ -1394,6 +1396,7 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateMethod(duk_context *ctx)
 	}
 
 	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvoke, DUK_VARARGS);					// [obj][func]
+	duk_push_string(ctx, exposedMethod); duk_put_prop_string(ctx, -2, "_exposedName");
 	duk_push_pointer(ctx, funcAddress);																// [obj][func][addr]
 	duk_put_prop_string(ctx, -2, "_address");														// [obj][func]
 	if (threadDispatch != 0) { duk_push_true(ctx); duk_put_prop_string(ctx, -2, "_spawnThread"); }	// [obj][func]
