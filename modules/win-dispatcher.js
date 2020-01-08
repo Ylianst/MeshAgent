@@ -63,7 +63,6 @@ function dispatch(options)
         this.parent.emit('connection', s);
     });
 
-
     var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
     child.stderr.on('data', function (c) { });
     child.stdout.on('data', function (c) { });
@@ -74,7 +73,16 @@ function dispatch(options)
     }
     else
     {
-        child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+        if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
+        {
+            // LocalSystem
+            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU SYSTEM /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+        }
+        else
+        {
+            // Running as logged in user
+            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+        }
     }
     child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
     child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
