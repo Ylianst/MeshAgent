@@ -100,10 +100,10 @@ typedef struct ILibDuktape_HECI_ioctl_data
 	HANDLE device;
 	DWORD bytesReceived;
 	DWORD abort;
-	void *reserved;
 #elif defined(_POSIX)
 	int device;
 #endif
+	void *reserved;
 
 	int code;
 	char *outBuffer;
