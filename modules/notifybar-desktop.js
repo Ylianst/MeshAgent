@@ -66,6 +66,7 @@ function windows_notifybar_local(title)
                 this._pumps[i].removeAllListeners('exit');
                 this._pumps[i].close();
             }
+            this._pumps = [];
         });
 
     ret._promise.then(function (m)
@@ -105,6 +106,7 @@ function windows_notifybar_local(title)
                     this.notifybar._pumps[i].close();
                 }
                 this.notifybar.emit('close');
+                this.notifybar._pumps = [];
             });
             this.notifybar._pumps.peek().on('message', function onWindowsMessage(msg)
             {
@@ -132,7 +134,7 @@ function windows_notifybar_local(title)
                                     // Allow the move, but only on the X-axis
                                     msg.lparam_raw.Deref(12, 4).toBuffer().writeInt32LE(this._options.window.y);
                                 }
-                                break; 
+                                break;
                             case 8:
                                 flags = msg.lparam_raw.Deref(32, 4).toBuffer().readUInt32LE() | 0x0002  // Set SWP_NOMOVE
                                 if (msg.lparam_raw.Deref(16, 4).toBuffer().readInt32LE() < this._options.window.left || 

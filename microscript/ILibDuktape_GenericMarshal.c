@@ -47,6 +47,7 @@ limitations under the License.
 #include <dlfcn.h>
 #endif
 
+#define ILibDuktape_GenericMarshal_FuncHandler			"\xFF_GenericMarshal_FuncHandler"
 #define ILibDuktape_GenericMarshal_VariableType			"\xFF_GenericMarshal_VarType"
 #define ILibDuktape_GenericMarshal_GlobalSet_List		"\xFF_GenericMarshal_GlobalSet_List"
 #define ILibDuktape_GenericMarshal_GlobalSet			"\xFF_GenericMarshal_GlobalSet"
@@ -1866,6 +1867,22 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_EndDispatcher(duk_context *c
 }
 #endif
 
+duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_close(duk_context *ctx)
+{
+	// We need to unhook from a global event, becuase we are reference by the callback function
+	// which is referenced by the global event, meaning that a global object is referencing us.
+
+	duk_push_this(ctx);														// [Variable]
+	duk_eval_string(ctx, "require('_GenericMarshal');");					// [Variable][GenericMarshal]
+	duk_get_prop_string(ctx, -1, "removeListener");							// [Variable][GenericMarshal][removeListener]
+	duk_swap_top(ctx, -2);													// [Variable][removeListener][this]
+	duk_push_string(ctx, "GlobalCallback");									// [Variable][removeListener][this][GlobalCallback]
+	duk_get_prop_string(ctx, -4, ILibDuktape_GenericMarshal_FuncHandler);	// [Variable][removeListener][this][GlobalCallback][function]
+	duk_call_method(ctx, 2); duk_pop(ctx);									// [Variable]
+
+	return(0);
+}
+
 duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 {
 	int numParms = duk_require_int(ctx, 0);
@@ -1934,12 +1951,17 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 	duk_push_int(ctx, numParms); duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_Parms);
 	duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_GlobalSet);
 	ILibDuktape_CreateInstanceMethod(ctx, "CallingThread", ILibDuktape_GenericMarshal_GlobalCallback_CallingThread, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "close", ILibDuktape_GenericMarshal_GlobalCallback_close, 0);
 
 	duk_get_prop_string(ctx, -2, "on");																	// [GenericMarshal][Variable][on]
 	duk_dup(ctx, -3);																					// [GenericMarshal][Variable][on][this/GM]
 	duk_push_string(ctx, "GlobalCallback");																// [GenericMarshal][Variable][on][this/GM][GlobalCallback]
 	duk_push_c_function(ctx, ILibDuktape_GenericMarshal_GlobalGenericCallback_EventSink, DUK_VARARGS);	// [GenericMarshal][Variable][on][this/GM][GlobalCallback][func]
 	duk_dup(ctx, -5);																					// [GenericMarshal][Variable][on][this/GM][GlobalCallback][func][Variable]
+
+	duk_dup(ctx, -2);																					// [GenericMarshal][Variable][on][this/GM][GlobalCallback][func][Variable][func]
+	duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_FuncHandler);								// [GenericMarshal][Variable][on][this/GM][GlobalCallback][func][Variable]
+
 	duk_put_prop_string(ctx, -2, "self");																// [GenericMarshal][Variable][on][this/GM][GlobalCallback][func]
 	duk_call_method(ctx, 2); duk_pop(ctx);																// [GenericMarshal][Variable]
 

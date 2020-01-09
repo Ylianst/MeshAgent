@@ -37,6 +37,12 @@ limitations under the License.
 #define ILibDuktape_EventEmitter_Forward_SourceObject	"\xFF_EventEmitter_SourceObject"
 #define ILibDuktape_EventEmitter_ForwardTable			"\xFF_EventEmitter_ForwardTable"
 
+typedef struct ILibDuktape_EventEmitter_EmitStruct
+{
+	void *func;
+	int once;
+}ILibDuktape_EventEmitter_EmitStruct;
+
 #ifdef __DOXY__
 
 
@@ -153,7 +159,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	ILibDuktape_EventEmitter *data;
 	void *node, *nextNode, *func;
 	int i, j;
-	void **emitList;
+	ILibDuktape_EventEmitter_EmitStruct *emitList;
 	char *objid;
 	int wasReturnSpecified = 0;
 
@@ -186,18 +192,18 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 
 	// Copy the list, so we can enumerate with local memory, so the list can be manipulated while we are dispatching
 #ifdef WIN32
-	emitList = (void**)_alloca(((unsigned int)ILibLinkedList_GetCount(eventList) + 1) * sizeof(void*));
+	emitList = (ILibDuktape_EventEmitter_EmitStruct*)_alloca(((unsigned int)ILibLinkedList_GetCount(eventList) + 1) * sizeof(ILibDuktape_EventEmitter_EmitStruct));
 #else
-	emitList = (void**)alloca(((unsigned int)ILibLinkedList_GetCount(eventList) + 1) * sizeof(void*));
+	emitList = (ILibDuktape_EventEmitter_EmitStruct*)alloca(((unsigned int)ILibLinkedList_GetCount(eventList) + 1) * sizeof(ILibDuktape_EventEmitter_EmitStruct));
 #endif
 	node = ILibLinkedList_GetNode_Head(eventList);
 	i = 0;
 	while (node != NULL)
 	{
 		nextNode = ILibLinkedList_GetNextNode(node);
-		emitList[i++] = ILibLinkedList_GetDataFromNode(node);
-
-		if (((int*)ILibLinkedList_GetExtendedMemory(node))[0] == 1)
+		emitList[i].func = ILibLinkedList_GetDataFromNode(node);
+		emitList[i].once = ((int*)ILibLinkedList_GetExtendedMemory(node))[0];
+		if (emitList[i++].once == 1)
 		{
 			// Dispatch only Once
 			ILibLinkedList_Remove(node);
@@ -205,8 +211,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 		}
 		node = nextNode;
 	}
-	emitList[i] = NULL;
-
+	emitList[i].func = NULL;
 
 	// Before we dispatch, lets clear our last return values for this event
 	duk_push_heapptr(ctx, data->retValTable);				// [table]
@@ -215,7 +220,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 
 	// Now that we have all the housekeeping stuff out of the way, we can actually dispatch our events
 	i = 0;
-	while ((func = emitList[i++]) != NULL)
+	while ((func = emitList[i].func) != NULL)
 	{
 		duk_push_heapptr(ctx, func);						// [func]
 		duk_push_heapptr(ctx, self);						// [func][this]
@@ -225,8 +230,24 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 		}
 		if (duk_pcall_method(ctx, nargs - 1) != 0)
 		{
+			if (emitList[i].once != 0)
+			{
+				// Delete reference to callback function
+				duk_push_heapptr(ctx, data->tmpObject);		
+				duk_del_prop_string(ctx, -1, Duktape_GetStashKey(func));
+				duk_pop(ctx);
+			}
+
 			duk_push_heapptr(ctx, func);					// [func]
 			return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' on '%s' threw an exception: %s in method '%s()'", name, objid, duk_safe_to_string(ctx, -2), Duktape_GetStringPropertyValue(ctx, -1, "name", "unknown_method")));
+		}
+
+		if (emitList[i].once != 0)
+		{
+			// Delete reference to callback function
+			duk_push_heapptr(ctx, data->tmpObject);
+			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(func));
+			duk_pop(ctx);
 		}
 
 		// Check for return value
@@ -244,6 +265,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 			duk_pop(ctx);													// ...
 			wasReturnSpecified = 1;
 		}
+		++i;
 	}
 
 	if (wasReturnSpecified == 0)
@@ -433,6 +455,10 @@ duk_ret_t ILibDuktape_EventEmitter_removeListener(duk_context *ctx)
 		{
 			ILibLinkedList_Remove(node);
 			emitter->totalListeners[0]--;
+
+			// Delete reference to saved callback
+			duk_push_heapptr(ctx, emitter->tmpObject);		
+			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(callback));
 		}
 	}
 	
@@ -443,14 +469,21 @@ duk_ret_t ILibDuktape_EventEmitter_removeAllListeners(duk_context *ctx)
 	duk_size_t eventNameLen;
 	char *eventName = Duktape_GetBuffer(ctx, 0, &eventNameLen);
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx);
-	void *eventList;
+	void *eventList, *node;
 
 	if (emitter != NULL)
 	{
 		eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, (int)eventNameLen);
 		if (eventList == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.removeAllListeners(): Event '%s' not found", eventName)); }
 
-		ILibLinkedList_Clear(eventList);
+		duk_push_heapptr(ctx, emitter->tmpObject);
+		while ((node=ILibLinkedList_GetNode_Head(eventList)) != NULL) 
+		{
+			// Delete reference to callback function
+			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(((ILibDuktape_EventEmitter_EmitStruct*)ILibLinkedList_GetDataFromNode(node))->func));
+			ILibLinkedList_Remove(node);
+		}
+		duk_pop(ctx);
 		emitter->totalListeners[0] = 0;
 	}
 	return(0);

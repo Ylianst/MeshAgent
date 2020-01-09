@@ -88,7 +88,6 @@ function WindowsMessagePump(options)
         else if(this.mp._hwnd == null && this.CallingThread() == this.mp._user32.RegisterClassExA.async.threadId())
         {
             // This message was generated from our CreateWindowExA method
-
             var d = this.StartDispatcher();
 
             this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), hwnd: xhwnd, dispatcher: d });
@@ -179,6 +178,7 @@ function WindowsMessagePump(options)
         if (this._hwnd)
         {
             this._user32.PostMessageA(this._hwnd, WM_QUIT, 0, 0);
+            this.once('exit', function () { this.wndclass.wndproc.close() });
         }
     };
     this.close = function close()
@@ -186,8 +186,13 @@ function WindowsMessagePump(options)
         if (this._hwnd)
         {
             this._user32.PostMessageA(this._hwnd, WM_CLOSE, 0, 0);
+            this.once('exit', function () { this.wndclass.wndproc.close(); });
         }
     };
+    this.once('~', function ()
+    {
+        this.stop();
+    });
 }
 
 module.exports = WindowsMessagePump;
