@@ -491,10 +491,10 @@ int get_desktop_buffer(void **buffer, long long *bufferSize)
 	if ((hCapturedBitmap = CreateCompatibleBitmap(hDesktopDC, adjust_screen_size(SCALED_WIDTH), adjust_screen_size(SCALED_HEIGHT))) == NULL)
 	{
 		KVMDEBUG("CreateCompatibleBitmap() returned NULL", 0);
-		return 0;
+		return 1;
 	}
 	
-	if (SelectObject(hCaptureDC, hCapturedBitmap) == NULL) { KVMDEBUG("SelectObject() failed", 0); }
+	if (SelectObject(hCaptureDC, hCapturedBitmap) == NULL) { KVMDEBUG("SelectObject() failed", 0); return(1); }
 	if (SCALING_FACTOR == 1024)
 	{
 		if (BitBlt(hCaptureDC, 0, 0, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), hDesktopDC, SCREEN_X, SCREEN_Y, SRCCOPY | CAPTUREBLT) == FALSE)
@@ -505,7 +505,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize)
 	}
 	else
 	{
-		if (SetStretchBltMode(hCaptureDC, HALFTONE) == 0) { KVMDEBUG("SetStretchBltMode() failed", 0); }
+		if (SetStretchBltMode(hCaptureDC, HALFTONE) == 0) { KVMDEBUG("SetStretchBltMode() failed", 0); return(1); }
 		if (StretchBlt(hCaptureDC, 0, 0, adjust_screen_size(SCALED_WIDTH), adjust_screen_size(SCALED_HEIGHT), hDesktopDC, SCREEN_X, SCREEN_Y, adjust_screen_size(SCREEN_WIDTH), adjust_screen_size(SCREEN_HEIGHT), SRCCOPY | CAPTUREBLT) == FALSE)
 		{
 			KVMDEBUG("StretchBlt() returned FALSE", 0);
@@ -521,6 +521,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize)
 	{
 		KVMDEBUG("GetDIBits() failed", 0);
 		ILibCriticalLog(NULL, __FILE__, __LINE__, 252, GetLastError());
+		return(1);
 	}
 
 	if (bmpInfo.bmiHeader.biSizeImage <= 0)
@@ -530,10 +531,10 @@ int get_desktop_buffer(void **buffer, long long *bufferSize)
 
 	*bufferSize = bmpInfo.bmiHeader.biSizeImage;
 	PIXEL_SIZE = bmpInfo.bmiHeader.biBitCount / 8;
-	if ((*buffer = malloc((size_t)*bufferSize)) == NULL) { KVMDEBUG("malloc() failed", 0); return 0; }
+	if ((*buffer = malloc((size_t)*bufferSize)) == NULL) { KVMDEBUG("malloc() failed", 0); return 1; }
 	
 	bmpInfo.bmiHeader.biCompression = BI_RGB;
-	if (GetDIBits(hDesktopDC, hCapturedBitmap, 0, bmpInfo.bmiHeader.biHeight, *buffer, &bmpInfo, DIB_RGB_COLORS) == 0) { KVMDEBUG("GetDIBits() failed", 0); }
+	if (GetDIBits(hDesktopDC, hCapturedBitmap, 0, bmpInfo.bmiHeader.biHeight, *buffer, &bmpInfo, DIB_RGB_COLORS) == 0) { KVMDEBUG("GetDIBits() failed", 0); free(*buffer); return(1); }
 
 	return 0;
 }

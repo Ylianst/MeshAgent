@@ -919,7 +919,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		if (g_shutdown) break;
 
 		// Scan the desktop
-		if (get_desktop_buffer(&desktop, &desktopsize) == 1)
+		if (get_desktop_buffer(&desktop, &desktopsize) == 1 || desktop == NULL)
 		{
 #ifdef _WINSERVICE
 			if (!kvmConsoleMode)
