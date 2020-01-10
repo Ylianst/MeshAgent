@@ -1541,6 +1541,16 @@ duk_ret_t ILibDuktape_MeshAgent_ServerUrl(duk_context *ctx)
 	duk_push_string(ctx, agent->serveruri);						// [MeshAgent][ptr][uri]
 	return(1);
 }
+duk_ret_t ILibDuktape_MeshAgent_ServerIP(duk_context *ctx)
+{
+	duk_push_this(ctx);											// [MeshAgent]
+	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);				// [MeshAgent][ptr]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
+
+	duk_push_string(ctx, agent->serverip);						// [MeshAgent][ptr][ip]
+	return(1);
+}
+
 duk_ret_t ILibDuktape_MeshAgent_isControlChannelConnected(duk_context *ctx)
 {
 	duk_push_this(ctx);								// [agent]
@@ -1628,8 +1638,8 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 
 	util_tohex(agent->serverHash, sizeof(agent->serverHash), ILibScratchPad);
 	duk_push_string(ctx, ILibScratchPad); duk_put_prop_string(ctx, -2, "ServerID");
-
 	duk_push_string(ctx, agent->serveruri); duk_put_prop_string(ctx, -2, "ServerUri");
+	duk_push_string(ctx, agent->serverip); duk_put_prop_string(ctx, -2, "ServerIP");
 
 	return(1);
 }
@@ -1815,6 +1825,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
 		ILibDuktape_CreateEventWithGetter(ctx, "ConnectedServer", ILibDuktape_MeshAgent_ConnectedServer);
 		ILibDuktape_CreateEventWithGetter(ctx, "ServerUrl", ILibDuktape_MeshAgent_ServerUrl);
+		ILibDuktape_CreateEventWithGetter(ctx, "ServerIP", ILibDuktape_MeshAgent_ServerIP);
 		ILibDuktape_CreateInstanceMethod(ctx, "getRemoteDesktopStream", ILibDuktape_MeshAgent_getRemoteDesktop, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "AddCommandHandler", ILibDuktape_MeshAgent_AddCommandHandler, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "AddConnectHandler", ILibDuktape_MeshAgent_AddConnectHandler, 1);
@@ -3314,7 +3325,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 
 	if (meshServer.sin6_family != AF_UNSPEC)
 	{
-		printf("Connecting to: %s\n", serverUrl);
+		strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer));
+		printf("Connecting to: %s\n", agent->serveruri);
 		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s\n", serverUrl); }
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);

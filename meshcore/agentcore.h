@@ -184,6 +184,7 @@ typedef struct MeshAgentHostContainer
 	int capabilities; // Extra agent capabilities indicated to the server from MeshCommand_AuthInfo_CapabilitiesMask
 	char hostname[255];
 	char serveruri[1024];
+	char serverip[1024];
 	AgentIdentifiers agentID;
 	int serverIndex;
 	int triedNoProxy_Index;
