@@ -101,61 +101,23 @@ function processManager() {
 
                 break;
             case 'darwin':
-                var promise = require('promise');
-                var p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-                p.pm = this;
-                p.callback = callback;
-                p.args = [];
-                for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
-                p.child = this._childProcess.execFile("/bin/ps", ["ps", "-xa"]);
-                p.child.promise = p;
-                p.child.stdout.ps = '';
-                p.child.stdout.on('data', function (chunk) { this.ps += chunk.toString(); });
-                p.child.on('exit', function ()
+            case 'freebsd':
+                var p = require('child_process').execFile('/bin/sh', ['sh']);
+                p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
+                p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
+                p.stdin.write('ps -axo pid -o user -o command | tr ' + "'\\n' '\\t' | awk -F" + '"\\t" \'{ printf "{"; for(i=2;i<NF;++i) { split($i,tok," "); pid=tok[1]; user=tok[2]; cmd=substr($i,length(tok[1])+length(tok[2])+2); gsub(/\\\\/,"\\\\\\\\&",cmd); gsub(/"/,"\\\\\\\\&",cmd); gsub(/^[ ]+/,"",cmd); printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i!=2?",":""),pid,pid,user,cmd; } printf "}"; }\'\nexit\n');
+                p.waitExit();
+
+                if (callback)
                 {
-                    var lines = this.stdout.ps.split('\n');
-                    var pidX = lines[0].split('PID')[0].length + 3;
-                    var cmdX = lines[0].split('CMD')[0].length;
-                    var ret = {};
-                    for (var i = 1; i < lines.length; ++i)
-                    {
-                        if (lines[i].length > 0)
-                        {
-                            ret[lines[i].substring(0, pidX).trim()] = { pid: lines[i].substring(0, pidX).trim(), cmd: lines[i].substring(cmdX) };
-                        }
-                    }
-                    this.promise._res(ret);
-                });
-                p.then(function (ps)
-                {
-                    this.args.unshift(ps);
-                    this.callback.apply(this.pm, this.args);
-                });
+                    p.args = [];
+                    for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
+
+                    p.args.unshift(JSON.parse(p.stdout.str));
+                    callback.apply(this, p.args);
+                }
+
                 break;
-	    case 'freebsd':
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stderr.str = '';
-		child.stderr.on('data', function (c) {this.str += c.toString();});
-		child.stdout.str = '';
-                child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stdin.write("ps -xa | awk '{ printf \"%s\", $1; $1=\"\"; $2=\"\"; $3=\"\"; $4=\"\"; printf \"%s\\n\", $0; }' | awk '{ printf \"%s\", $1; $1=\"\"; printf \"%s\\n\", $0; }'\nexit\n");
-                child.waitExit();
-		
-		var tmp;
-		var ret = [];
-		var lines = child.stdout.str.trim().split('\n');
-		for(var i in lines)
-		{
-			tmp = {pid: lines[i].split(' ').shift()};
-			tmp['cmd'] = lines[i].substring(tmp.pid.length + 1);
-			tmp['pid'] = parseInt(tmp['pid']);
-			if(!isNaN(tmp['pid']))
-			{
-				ret.push(tmp);
-			}
-		}
-		if(callback) { callback.apply(this, [ret]); }
-		break;
         }
     };
 
