@@ -61,6 +61,7 @@ function processManager() {
                 throw ('Enumerating processes on ' + process.platform + ' not supported');
                 break;
             case 'win32': // Windows processes
+                var pid;
                 var retVal = {};
                 var h = this._kernel32.CreateToolhelp32Snapshot(2, 0);
                 var info = GM.CreateVariable(GM.PointerSize==8 ? 568 : 556);
@@ -68,45 +69,36 @@ function processManager() {
                 var nextProcess = this._kernel32.Process32FirstW(h, info);
                 while (nextProcess.Val) 
                 {
-                    if (info.Deref(8, 4).toBuffer().readUInt32LE(0) == 16912) { _debug(); }
-                    retVal[info.Deref(8, 4).toBuffer().readUInt32LE(0)] = { pid: info.Deref(8, 4).toBuffer().readUInt32LE(0), cmd: info.Deref(GM.PointerSize == 4 ? 36 : 44, 260).Wide2UTF8 };
+                    pid = info.Deref(8, 4).toBuffer().readUInt32LE(0);
+                    retVal[pid] = { pid: pid, cmd: info.Deref(GM.PointerSize == 4 ? 36 : 44, 260).Wide2UTF8 };
+                    try
+                    {
+                        retVal[pid].user = require('user-sessions').getProcessOwnerName(pid).name;
+                    }
+                    catch(ee)
+                    {
+                    }
+                    
                     nextProcess = this._kernel32.Process32NextW(h, info);
                 }
                 if (callback) { callback.apply(this, [retVal]); }
                 break;
             case 'linux': // Linux processes
-                if (!this._psp) { this._psp = {}; }
-                var p = this._childProcess.execFile("/bin/ps", ["ps", "-uxa"], { type: this._childProcess.SpawnTypes.TERM });
-                this._psp[p.pid] = p;
-                p.Parent = this;
-                p.ps = '';
-                p.callback = callback;
-                p.args = [];
-                for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
-                p.on('exit', function onGetProcesses()
+                var p = require('child_process').execFile('/bin/sh', ['sh']);
+                p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
+                p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
+                p.stdin.write('ps -ax -o pid -o user:99 -o command | tr ' + "'\\n' '\\t' | awk -F" + '"\\t" \'{ printf "{"; for(i=2;i<NF;++i) { split($i,tok," "); pid=tok[1]; user=tok[2]; cmd=substr($i,length(tok[1])+102); gsub(/\\\\/,"\\\\\\\\&",cmd); gsub(/"/,"\\\\\\\\&",cmd); gsub(/^[ ]+/,"",cmd); printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i!=2?",":""),pid,pid,user,cmd; } printf "}"; }\'\nexit\n');
+                p.waitExit();
+
+                if (callback)
                 {
-                    delete this.Parent._psp[this.pid]; 
-                    var retVal = {}, lines = this.ps.split('\x0D\x0A'), key = {}, keyi = 0;
-                    for (var i in lines)
-                    {
-                        var tokens = lines[i].split(' ');
-                        var tokenList = [];
-                        for(var x in tokens)
-                        {
-                            if (i == 0 && tokens[x]) { key[tokens[x]] = keyi++; }
-                            if (i > 0 && tokens[x]) { tokenList.push(tokens[x]);}
-                        }
-                        if (i > 0) {
-                            if (tokenList[key.PID]) { retVal[tokenList[key.PID]] = { pid: key.PID, user: tokenList[key.USER], cmd: tokenList[key.COMMAND] }; }
-                        }
-                    }
-                    if (this.callback)
-                    {
-                        this.args.unshift(retVal);
-                        this.callback.apply(this.parent, this.args);
-                    }
-                });
-                p.stdout.on('data', function (chunk) { this.parent.ps += chunk.toString(); });
+                    p.args = [];
+                    for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
+
+                    p.args.unshift(JSON.parse(p.stdout.str));
+                    callback.apply(this, p.args);
+                }
+
                 break;
             case 'darwin':
                 var promise = require('promise');
