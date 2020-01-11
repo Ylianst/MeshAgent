@@ -150,6 +150,52 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && strcasecmp(argv[1], "-licenses") == 0)
+	{
+		printf("========================================================================================\n");
+		printf(" MeshCentral MeshAgent: Copyright 2006 - 2020 Intel Corporation\n");
+		printf("                        https://github.com/Ylianst/MeshAgent \n");
+		printf("----------------------------------------------------------------------------------------\n");
+		printf("   Licensed under the Apache License, Version 2.0 (the \"License\");\n");
+		printf("   you may not use this file except in compliance with the License.\n");
+		printf("   You may obtain a copy of the License at\n");
+		printf("   \n");
+		printf("   http://www.apache.org/licenses/LICENSE-2.0\n");
+		printf("   \n");
+		printf("   Unless required by applicable law or agreed to in writing, software\n");
+		printf("   distributed under the License is distributed on an \"AS IS\" BASIS,\n");
+		printf("   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n");
+		printf("   See the License for the specific language governing permissions and\n");
+		printf("   limitations under the License.\n\n");
+		printf("========================================================================================\n");
+		printf(" Duktape Javascript Engine: Copyright (c) 2013-2019 by Duktape authors (see AUTHORS.rst)\n");
+		printf("                        https://github.com/svaarala/duktape \n");
+		printf("                        http://opensource.org/licenses/MIT \n");
+		printf("----------------------------------------------------------------------------------------\n");
+		printf("   Permission is hereby granted, free of charge, to any person obtaining a copy\n");
+		printf("   of this software and associated documentation files(the \"Software\"), to deal\n");
+		printf("   in the Software without restriction, including without limitation the rights\n");
+		printf("   to use, copy, modify, merge, publish, distribute, sublicense, and / or sell\n");
+		printf("   copies of the Software, and to permit persons to whom the Software is\n");
+		printf("   furnished to do so, subject to the following conditions :\n");
+		printf("   \n");
+		printf("   The above copyright notice and this permission notice shall be included in\n");
+		printf("   all copies or substantial portions of the Software.\n");
+		printf("   \n");
+		printf("   THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n");
+		printf("   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n");
+		printf("   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE\n");
+		printf("   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n");
+		printf("   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n");
+		printf("   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n");
+		printf("   THE SOFTWARE.\n");
+		printf("========================================================================================\n");
+
+#ifdef WIN32
+		wmain_free(argv);
+#endif
+		return(0);
+	}
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
