@@ -24,6 +24,8 @@ var SelectionClear = 29;
 var SelectionNotify = 31;
 var SelectionRequest = 30;
 var XA_PRIMARY = 1;
+var CF_TEXT = 1;
+var CF_UNICODETEXT = 13;
 
 function nativeAddModule(name)
 {
@@ -341,7 +343,6 @@ function lin_copytext(txt)
 function win_readtext()
 {
     var ret = '';
-    var CF_TEXT = 1;
     var GM = require('_GenericMarshal');
     var user32 = GM.CreateNativeProxy('user32.dll');
     var kernel32 = GM.CreateNativeProxy('kernel32.dll');
@@ -353,11 +354,11 @@ function win_readtext()
     user32.CreateMethod('GetClipboardData');
 
     user32.OpenClipboard(0);
-    var h = user32.GetClipboardData(CF_TEXT);
+    var h = user32.GetClipboardData(CF_UNICODETEXT);
     if(h.Val!=0)
     {
         var hbuffer = kernel32.GlobalLock(h);
-        ret = hbuffer.String;
+        ret = hbuffer.Wide2UTF8;
         kernel32.GlobalUnlock(h);
     }
     user32.CloseClipboard();
@@ -383,18 +384,18 @@ function win_copytext(txt)
     user32.CreateMethod('CloseClipboard');
     user32.CreateMethod('SetClipboardData');
 
-    var h = kernel32.GlobalAlloc(GMEM_MOVEABLE, txt.length + 2);
+    var mtxt = GM.CreateVariable(txt, { wide: true }); 
+    var h = kernel32.GlobalAlloc(GMEM_MOVEABLE, mtxt._size);
     h.autoFree(false);
     var hbuffer = kernel32.GlobalLock(h);
     hbuffer.autoFree(false);
-    var tmp = Buffer.alloc(txt.length + 1);
-    Buffer.from(txt).copy(tmp);
-    tmp.copy(hbuffer.Deref(0, txt.length + 1).toBuffer());
+
+    mtxt.toBuffer().copy(hbuffer.Deref(0, (2 * txt.length) + 2).toBuffer());
     kernel32.GlobalUnlock(h);
 
     user32.OpenClipboard(0);
     user32.EmptyClipboard();
-    user32.SetClipboardData(CF_TEXT, h);
+    user32.SetClipboardData(CF_UNICODETEXT, h);
     user32.CloseClipboard();
 }
 
