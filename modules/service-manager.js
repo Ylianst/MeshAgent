@@ -1554,7 +1554,7 @@ function serviceManager()
             var folder = this.getServiceFolder();
             if (!require('fs').existsSync(folder)) { require('fs').mkdirSync(folder); }
             if (!require('fs').existsSync(folder + '\\' + options.name)) { require('fs').mkdirSync(folder + '\\' + options.name); }
-
+            if (options.servicePath == process.execPath) { options._isMeshAgent = true; }
             require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
             options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
 
@@ -1649,6 +1649,30 @@ function serviceManager()
             }
             catch (xx)
             {
+            }
+
+
+            if (options._isMeshAgent)
+            {
+                //
+                // For now, we'll only provide an uninstaller if the binary is the mesh agent binary, so we
+                // won't need to copy the binary to run the uninstall script
+                //
+                var script = Buffer.from("try{require('service-manager').manager.uninstallService('" + options.name + "');}catch(x){}process.exit();").toString('base64');
+                try
+                {
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'DisplayName', options.displayName);
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'DisplayIcon', folder + '\\' + options.name + '\\' + options.target + '.exe');
+                    if (options.publisher) { reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'Publisher', options.publisher); }
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'InstallLocation', folder + '\\' + options.name);
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'EstimatedSize', Math.floor(require('fs').statSync(folder + '\\' + options.name + '\\' + options.target + '.exe').size / 1024));
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'NoModify', 0x1);
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'NoRepair', 0x1);
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', folder + '\\' + options.name + '\\' + options.target + '.exe -b64exec ' + script);
+                }
+                catch (xx)
+                {
+                }
             }
         }
         if (process.platform == 'freebsd')
@@ -2074,6 +2098,7 @@ function serviceManager()
             }
             catch (e)
             {
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C Y /N /D Y /T 2 & del "' + servicePath + '"'], { type: 4 });
             }
             if (this.proxy.DeleteService(service._service) == 0)
             {
@@ -2082,6 +2107,15 @@ function serviceManager()
             
             service.close();
             service = null;
+
+            try
+            {
+                var reg = require('win-registry');
+                reg.DeleteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + name);
+            }
+            catch(ee)
+            {
+            }
         }
         else if(process.platform == 'linux')
         {
