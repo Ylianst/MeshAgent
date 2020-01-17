@@ -93,6 +93,28 @@ switch(process.platform)
                 return (child.stdout.str.trim());
             })()
         });
-        Object.defineProperty(module.exports, 'available', { get: function () { return (this._location!='' ? true : false); } });
+        Object.defineProperty(module.exports, 'available', { get: function () { return (this._location != '' ? true : false); } });
+        Object.defineProperty(module.exports, 'scriptVersion',
+            {
+                value: (function()
+                {
+                    var ret = { major: 0, minor: 0 };
+                    if(require('fs').existsSync('/usr/bin/script'))
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stderr.on('data', function () { });
+                        child.stdin.write('script -V | awk \'{ split($NF, T, "."); printf "{\\"major\\":%s, \\"minor\\":%s}",T[1],T[2]; }\'\nexit\n');
+                        child.waitExit();
+                        try
+                        {
+                            ret = JSON.parse(child.stdout.str.trim());
+                        }
+                        catch (x)
+                        { }
+                    }
+                    return (ret);
+                })()
+            });
         break;
 }
