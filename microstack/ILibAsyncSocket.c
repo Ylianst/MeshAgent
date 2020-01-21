@@ -1215,7 +1215,9 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 					}
 					SSL_TRACE2("SSL_handshake()");
 				}
-				else
+				
+				// Even if we get completed the TLS handshake, we must still read if data remains, this is possible with TLS 1.3
+				if ((Reader->TLSHandshakeCompleted == 1) && (Reader->readBioBuffer->length > 0))
 				{
 					SSL_TRACE1("SSL_read()");
 					while ((j = SSL_read(Reader->ssl, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer))>0)

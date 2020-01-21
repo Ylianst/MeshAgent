@@ -1085,12 +1085,13 @@ void  __fastcall util_savekeys(SSL* ssl) {
 	if (ssl == NULL) return;
 	if (SSL_get_client_random(ssl, clientRandom, 32) != 32) return;
 	if (SSL_get_server_random(ssl, serverRandom, 32) != 32) return;
-	if (SSL_SESSION_get_master_key(SSL_get_session(ssl), sessionSecret, 48) != 48) return;
+	len = SSL_SESSION_get_master_key(SSL_get_session(ssl), sessionSecret, 48);
+	if (len <= 0) return;
 
 	// Convert the randoms and key into hex
 	util_tohex(clientRandom, 32, clientRandomHex);
 	util_tohex(serverRandom, 32, serverRandomHex);
-	util_tohex(sessionSecret, 48, sessionSecretHex);
+	util_tohex(sessionSecret, len, sessionSecretHex);
 
 	// Append the client random and key to the log file.
 	len = snprintf(text, 1000, "CLIENT_RANDOM %s %s\r\nCLIENT_RANDOM %s %s\r\n", clientRandomHex, sessionSecretHex, serverRandomHex, sessionSecretHex);
