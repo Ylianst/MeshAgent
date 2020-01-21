@@ -3075,6 +3075,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 				if (bodyBuffer != NULL && endPointer > 0)
 				{
 					ILibDuktape_readableStream_WriteData(data->bodyStream, bodyBuffer + *beginPointer, endPointer);
+					*beginPointer += endPointer;
 				}
 				break;
 		}
