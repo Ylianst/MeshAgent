@@ -57,6 +57,13 @@ function enableSafeModeService(serviceName)
 {
     require('win-registry').WriteKey(require('win-registry').HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\Safeboot\\Network\\' + serviceName, null, 'Service');
 }
+function isSafeModeService(serviceName)
+{
+    var reg = require('win-registry');
+    var key = { default: 'none' };
+    try { key = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\Safeboot\\Network\\' + serviceName); } catch (qke) { }
+    return (key.default == 'Service');
+}
 function disableSafeModeService(serviceName)
 {
     try
@@ -85,7 +92,7 @@ else
     module.exports =
         {
             getKeys: getKeys, setKey: setKey, deleteKey: deleteKey, enableSafeModeService: enableSafeModeService,
-            disableSafeModeService: disableSafeModeService, getKey: getKey, restart: restart
+            disableSafeModeService: disableSafeModeService, getKey: getKey, restart: restart, isSafeModeService: isSafeModeService
         };
 }
 Object.defineProperty(module.exports, "bootMode",
