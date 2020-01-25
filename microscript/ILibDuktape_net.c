@@ -450,6 +450,21 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	ILibResolveEx(host, (unsigned short)port, &dest);
 	if (dest.sin6_family == AF_UNSPEC || (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
+		// Can't resolve, check to see if it's cached
+		duk_push_heap_stash(ctx);
+		if (duk_has_prop_string(ctx, -1, "_sharedDB"))
+		{
+			ILibSimpleDataStore db = (ILibSimpleDataStore)Duktape_GetPointerProperty(ctx, -1, "_sharedDB");
+			char *dnsCache = (char*)duk_push_sprintf(ctx, "DNS[%s]", host);
+			char dnsCacheBuffer[255];
+			if (ILibSimpleDataStore_Get(db, dnsCache, dnsCacheBuffer, sizeof(dnsCacheBuffer)) > 0)
+			{
+				ILibResolveEx(dnsCacheBuffer, (unsigned short)port, &dest);
+			}
+		}
+	}
+	if (dest.sin6_family == AF_UNSPEC || (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
+	{
 		// Can't resolve... Delay event emit, until next event loop, because if app called net.createConnection(), they don't have the socket yet
 		duk_push_heapptr(ctx, ptrs->object);													// [socket]																
 		duk_push_global_object(ctx);															// [socket][g]
@@ -1961,6 +1976,21 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 	else
 	{
 		ILibResolveEx(host, (unsigned short)port, &dest);
+	}
+	if (dest.sin6_family == AF_UNSPEC || (duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
+	{
+		// Can't resolve, check to see if it's cached
+		duk_push_heap_stash(ctx);
+		if (duk_has_prop_string(ctx, -1, "_sharedDB"))
+		{
+			ILibSimpleDataStore db = (ILibSimpleDataStore)Duktape_GetPointerProperty(ctx, -1, "_sharedDB");
+			char *dnsCache = (char*)duk_push_sprintf(ctx, "DNS[%s]", host);
+			char dnsCacheBuffer[255];
+			if (ILibSimpleDataStore_Get(db, dnsCache, dnsCacheBuffer, sizeof(dnsCacheBuffer)) > 0)
+			{
+				ILibResolveEx(dnsCacheBuffer, (unsigned short)port, &dest);
+			}
+		}
 	}
 	if (dest.sin6_family == AF_UNSPEC || (duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
