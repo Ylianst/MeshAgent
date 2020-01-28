@@ -513,25 +513,43 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	if (duk_has_prop_string(ctx, -2, ILibDuktape_HTTP2PipedWritable))
 	{
 		// Web Socket Encoded => Destination Stream
-		duk_get_prop_string(ctx, -1, "encoded");									// [HTTPStream][websocket][WS_ENC]
-		duk_get_prop_string(ctx, -1, "pipe");										// [HTTPStream][websocket][WS_ENC][pipe]
-		duk_swap_top(ctx, -2);														// [HTTPStream][websocket][pipe][this]
-		duk_get_prop_string(ctx, -4, ILibDuktape_HTTP2PipedWritable);				// [HTTPStream][websocket][pipe][this][destination]
-		duk_call_method(ctx, 1);													// [HTTPStream][websocket][...]
-		duk_pop(ctx);																// [HTTPStream][websocket]
+		duk_get_prop_string(ctx, -1, "encoded");						// [HTTPStream][websocket][WS_ENC]
+		duk_get_prop_string(ctx, -1, "pipe");							// [HTTPStream][websocket][WS_ENC][pipe]
+		duk_swap_top(ctx, -2);											// [HTTPStream][websocket][pipe][this]
+		duk_get_prop_string(ctx, -4, ILibDuktape_HTTP2PipedWritable);	// [HTTPStream][websocket][pipe][this][destination]
+		duk_call_method(ctx, 1);										// [HTTPStream][websocket][...]
+		duk_pop(ctx);													// [HTTPStream][websocket]
 	}
-	
-	duk_get_prop_string(ctx, -1, ILibDuktape_WS2CR);							// [HTTPStream][websocket][clientRequest]
-	duk_get_prop_string(ctx, -1, "emit");										// [HTTPStream][websocket][clientRequest][emit]
 
-	duk_swap_top(ctx, -2);														// [HTTPStream][websocket][emit][this]
-	duk_push_string(ctx, "upgrade");											// [HTTPStream][websocket][emit][this][upgrade]
-	duk_dup(ctx, 0);															// [HTTPStream][websocket][emit][this][upgrade][imsg]
-	duk_dup(ctx, -5);															// [HTTPStream][websocket][emit][this][upgrade][imsg][websocket]
-	duk_get_prop_string(ctx, -1, "decoded");									// [HTTPStream][websocket][emit][this][upgrade][imsg][websocket][WS_DEC]
-	duk_remove(ctx, -2);														// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC]
-	duk_push_null(ctx);															// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][null]
-	duk_call_method(ctx, 4); duk_pop(ctx);										// [HTTPStream][websocket]
+	duk_get_prop_string(ctx, -1, ILibDuktape_WS2CR);					// [HTTPStream][websocket][clientRequest]
+	duk_get_prop_string(ctx, -1, "emit");								// [HTTPStream][websocket][clientRequest][emit]
+
+	duk_swap_top(ctx, -2);												// [HTTPStream][websocket][emit][this]
+	duk_push_string(ctx, "upgrade");									// [HTTPStream][websocket][emit][this][upgrade]
+	duk_dup(ctx, 0);													// [HTTPStream][websocket][emit][this][upgrade][imsg]
+	duk_dup(ctx, -5);													// [HTTPStream][websocket][emit][this][upgrade][imsg][websocket]
+	duk_get_prop_string(ctx, -1, "decoded");							// [HTTPStream][websocket][emit][this][upgrade][imsg][websocket][WS_DEC]
+	duk_remove(ctx, -2);												// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC]
+
+	// Relay 'timeout' events from socket
+	duk_eval_string(ctx, "require('promise').event_forwarder");			// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][FWD]
+	duk_get_prop_string(ctx, -3, "socket");								// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][FWD][SRCJ]
+	duk_push_string(ctx, "timeout");									// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][FWD][SRCJ][SRCN]
+	duk_dup(ctx, -4);													// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][FWD][SRCJ][SRCN][TARGJ]
+	duk_push_string(ctx, "timeout");									// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][FWD][SRCJ][SRCN][TARGJ][TARGN]
+	duk_pcall(ctx, 4); duk_pop(ctx);									// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC]
+
+	// Relay 'setTimeout' to socket
+	duk_eval_string(ctx, "require('promise').event_switcher");			// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][SWITCHER]
+	duk_get_prop_string(ctx, -3, "socket");								// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][SWITCHER][CALLEE]
+	duk_get_prop_string(ctx, -1, "setTimeout");							// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][SWITCHER][CALLEE][TARGET]
+	duk_call(ctx, 2);													// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][V]
+	duk_get_prop_string(ctx, -1, "func");								// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][V][FUNC]
+	duk_remove(ctx, -2);												// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][FUNC]
+	duk_put_prop_string(ctx, -2, "setTimeout");							// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC]
+
+	duk_push_null(ctx);													// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][null]
+	duk_call_method(ctx, 4); duk_pop(ctx);								// [HTTPStream][websocket]
 	
 	return(0);
 }
@@ -2839,6 +2857,11 @@ void ILibDuktape_HttpStream_IncomingMessage_PUSH(duk_context *ctx, ILibHTTPPacke
 	ILibDuktape_CreateInstanceMethod(ctx, "Digest_IsAuthenticated", ILibDuktape_HttpStream_IncomingMessage_Digest_IsAuthenticated, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "Digest_GetUsername", ILibDuktape_HttpStream_IncomingMessage_Digest_GetUsername, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "Digest_ValidatePassword", ILibDuktape_HttpStream_IncomingMessage_Digest_ValidatePassword, 1);
+
+	duk_push_heapptr(ctx, httpstream);											// [message][httpStream]
+	duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);				// [message][httpStream][socket]
+	duk_remove(ctx, -2);														// [message][socket]
+	ILibDuktape_CreateReadonlyProperty(ctx, "socket");							// [message]
 }
 
 void ILibDuktape_HttpStream_IncomingMessage_PauseSink(ILibDuktape_readableStream* sender, void *user)
@@ -4198,6 +4221,7 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	state->decodedStream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_httpStream_webSocket_DecodedWriteSink, ILibDuktape_httpStream_webSocket_DecodedEndSink, ILibDuktape_httpStream_webSocket_DecodedPauseSink, ILibDuktape_httpStream_webSocket_DecodedResumeSink, ILibDuktape_httpStream_webSocket_DecodedUnshiftSink, state);
 	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_GetEmitter(ctx, -1), "ping");
 	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_GetEmitter(ctx, -1), "pong");
+	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_GetEmitter(ctx, -1), "timeout");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "ping", ILibDuktape_httpStream_webSocketStream_sendPing, DUK_VARARGS);
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "pong", ILibDuktape_httpStream_webSocketStream_sendPong, DUK_VARARGS);
 #ifdef _SSL_KEYS_EXPORTABLE
