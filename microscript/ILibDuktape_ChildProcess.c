@@ -214,10 +214,8 @@ duk_ret_t ILibDuktape_ChildProcess_tcsetsize(duk_context *ctx)
 	ws.ws_col = (int)duk_require_int(ctx, 1);
 	if (ioctl(fd, TIOCSWINSZ, &ws) == -1)
 	{
-		printf("TIOCSWINSZ FAIL[%d]\n\n", fd);
 		return(ILibDuktape_Error(ctx, "Error making TIOCSWINSZ/IOCTL"));
 	}
-	printf("TIOCSWINSZ[%d] OK\n\n", fd);
 
 	return(0);
 }
