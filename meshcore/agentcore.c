@@ -1762,6 +1762,15 @@ duk_ret_t ILibDuktape_MeshAgent_enableKvmSlaveLog(duk_context *ctx)
 	return(0);
 }
 #endif
+duk_ret_t ILibDuktape_MeshAgent_getIdleTimeout(duk_context *ctx)
+{
+	MeshAgentHostContainer *agent;
+	duk_push_this(ctx);																		// [MeshAgent]
+	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	duk_push_int(ctx, agent->controlChannel_idleTimeout_seconds);
+	return(1);
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1844,7 +1853,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 #endif
 
 		ILibDuktape_CreateEventWithGetter(ctx, "NetInfo", ILibDuktape_MeshAgent_NetInfo);
-
+		ILibDuktape_CreateEventWithGetter(ctx, "idleTimeout", ILibDuktape_MeshAgent_getIdleTimeout);
 		ILibDuktape_CreateInstanceMethod(ctx, "ExecPowerState", ILibDuktape_MeshAgent_ExecPowerState, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "forceExit", ILibDuktape_MeshAgent_forceExit, DUK_VARARGS);
