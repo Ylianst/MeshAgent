@@ -193,8 +193,8 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_SpawnedProcess_Finalizer(duk_context *ctx)
 {
-	ILibDuktape_ChildProcess_SubProcess *retVal = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_ChildProcess_MemBuf);
 #ifdef WIN32
+	ILibDuktape_ChildProcess_SubProcess *retVal = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_ChildProcess_MemBuf);
 	ILibProcessPipe_Process_RemoveHandlers(retVal->childProcess);
 #endif
 	duk_get_prop_string(ctx, 0, "kill");	// [kill]
@@ -202,6 +202,27 @@ duk_ret_t ILibDuktape_ChildProcess_SpawnedProcess_Finalizer(duk_context *ctx)
 	duk_call_method(ctx, 0);
 	return(0);
 }
+
+#ifndef WIN32
+duk_ret_t ILibDuktape_ChildProcess_tcsetsize(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	int fd = (int)Duktape_GetIntPropertyValue(ctx, -1, "pty", 0);
+
+	struct winsize ws;
+	ws.ws_row = (int)duk_require_int(ctx, 0);
+	ws.ws_col = (int)duk_require_int(ctx, 1);
+	if (ioctl(fd, TIOCSWINSZ, &ws) == -1)
+	{
+		printf("TIOCSWINSZ FAIL[%d]\n\n", fd);
+		return(ILibDuktape_Error(ctx, "Error making TIOCSWINSZ/IOCTL"));
+	}
+	printf("TIOCSWINSZ[%d] OK\n\n", fd);
+
+	return(0);
+}
+#endif
+
 ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUSH(duk_context *ctx, ILibProcessPipe_Process mProcess, void *callback)
 {
 	duk_push_object(ctx);														// [ChildProcess]
@@ -249,6 +270,14 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
 		retVal->stdIn = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler, ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler, retVal);
 		ILibDuktape_CreateReadonlyProperty(ctx, "stdin");
+#ifndef WIN32
+		if (ILibProcessPipe_Process_GetPTY(mProcess) != 0)
+		{
+			duk_push_int(ctx, ILibProcessPipe_Process_GetPTY(mProcess));
+			ILibDuktape_CreateReadonlyProperty(ctx, "pty");
+			ILibDuktape_CreateInstanceMethod(ctx, "tcsetsize", ILibDuktape_ChildProcess_tcsetsize, 2);
+		}
+#endif
 
 		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
 

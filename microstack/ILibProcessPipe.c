@@ -103,6 +103,7 @@ typedef struct ILibProcessPipe_Process_Object
 	DWORD PID;
 #else
 	pid_t PID;
+	int PTY;
 #endif
 	void *userObject;
 	
@@ -908,9 +909,11 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		w.ws_xpixel = 0;
 		w.ws_ypixel = 0;
 		pid = forkpty(&pipe, NULL, NULL, &w);
+		retVal->PTY = pipe;
 		retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
-		retVal->stdIn->mProcess = retVal;
 		retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
+
+		retVal->stdIn->mProcess = retVal;
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(retVal->stdOut, ILibProcessPipe_Process_BrokenPipeSink);
 		retVal->stdOut->mProcess = retVal;
 #else
@@ -1850,5 +1853,6 @@ int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, 
 DWORD ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p) { return(p != NULL ? (DWORD)((ILibProcessPipe_Process_Object*)p)->PID : 0); }
 #else
 pid_t ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p) { return(p != NULL ? (pid_t)((ILibProcessPipe_Process_Object*)p)->PID : 0); }
+int ILibProcessPipe_Process_GetPTY(ILibProcessPipe_Process p) { return(p != NULL ? ((ILibProcessPipe_Process_Object*)p)->PTY : 0); }
 #endif
 

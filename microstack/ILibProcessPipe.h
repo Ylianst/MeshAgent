@@ -97,6 +97,7 @@ ILibProcessPipe_Pipe ILibProcessPipe_Process_GetStdOut(ILibProcessPipe_Process p
 DWORD ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p);
 #else
 pid_t ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p);
+int ILibProcessPipe_Process_GetPTY(ILibProcessPipe_Process p);
 #endif
 
 
