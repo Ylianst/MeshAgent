@@ -160,7 +160,7 @@ void ILibDuktape_WebRTC_OnDataChannelSendOK(void *dataChannel)
 void ILibDuktape_WebRTC_DataChannel_OnClose(struct ILibWrapper_WebRTC_DataChannel* dataChannel)
 {
 	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)dataChannel->userData;
-	if (ptrs != NULL) 
+	if (ptrs != NULL && ILibMemory_CanaryOK(ptrs))
 	{ 
 		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream); 
 		ptrs->dataChannel = NULL; 
@@ -196,12 +196,11 @@ void ILibDuktape_WebRTC_DataChannel_PUSH(duk_context *ctx, ILibWrapper_WebRTC_Da
 	dataChannel->OnClosed = ILibDuktape_WebRTC_DataChannel_OnClose;
 	dataChannel->Header.DataChannelCallbacks.OnRawData = ILibDuktape_WebRTC_DataChannel_OnData;
 
-	duk_push_object(ctx);														// [dataChannel]
+	duk_push_object(ctx);																						// [dataChannel]
 	ILibDuktape_WriteID(ctx, "webRTC.dataChannel");
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_WebRTC_DataChannel));			// [dataChannel][buffer]
-	ptrs = (ILibDuktape_WebRTC_DataChannel*)Duktape_GetBuffer(ctx, -1, NULL);
+	ptrs = (ILibDuktape_WebRTC_DataChannel*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_WebRTC_DataChannel));	// [dataChannel][buffers]
 	dataChannel->userData = ptrs;
-	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_DataChannelPtr);			// [dataChannel]
+	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_DataChannelPtr);											// [dataChannel]
 	ptrs->dataChannel = dataChannel;
 	ptrs->ctx = ctx;
 	ptrs->emitter = ILibDuktape_EventEmitter_Create(ctx);
