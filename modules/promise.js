@@ -16,12 +16,13 @@ limitations under the License.
 
 var refTable = {};
 
-function event_switcher_helper(desired_callee, target)
+function event_switcher_helper(desired_callee, target, forward)
 {
     this._ObjectID = 'event_switcher';
     this.func = function func()
     {
         var args = [];
+        if (func.forward != null) { args.push(func.forward); }
         for(var i in arguments)
         {
             args.push(arguments[i]);
@@ -30,11 +31,17 @@ function event_switcher_helper(desired_callee, target)
     };
     this.func.desired = desired_callee;
     this.func.target = target;
+    this.func.forward = forward;
     this.func.self = this;
 }
 function event_switcher(desired_callee, target)
 {
     return (new event_switcher_helper(desired_callee, target));
+}
+
+function event_forwarder(sourceObj, sourceName, targetObj, targetName)
+{
+    sourceObj.on(sourceName,   (new event_switcher_helper(targetObj, targetObj.emit, targetName)).func);      
 }
 
 function Promise(promiseFunc)
@@ -208,3 +215,4 @@ Promise.all = function all(promiseList)
 
 module.exports = Promise;
 module.exports.event_switcher = event_switcher;
+module.exports.event_forwarder = event_forwarder;
