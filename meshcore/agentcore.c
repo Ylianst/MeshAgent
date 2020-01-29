@@ -2443,16 +2443,6 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 		}
 	}
 
-	if ((info->hostnameLen = htons(ILibSimpleDataStore_Get(agent->masterDb, "agentName", info->hostname, sizeof(ILibScratchPad2) - sizeof(info)))) == 0)
-	{		
-		info->hostnameLen = htons(hostnamelen);
-		memcpy_s(info->hostname, sizeof(ILibScratchPad2) - sizeof(MeshCommand_BinaryPacket_AuthInfo), agent->hostname, hostnamelen);
-	}
-	else
-	{
-		hostnamelen = ntohs(info->hostnameLen) - 1;
-	}
-
 	// Send mesh agent information to the server
 	ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)info, sizeof(MeshCommand_BinaryPacket_AuthInfo) + hostnamelen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 	agent->retryTime = 0;
