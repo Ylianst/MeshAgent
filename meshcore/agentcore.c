@@ -3842,6 +3842,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 
+	int ixr = 0;
+	for (ri = 0; ri < paramLen; ++ri)
+	{
+		int len = strnlen_s(param[ri], 4096);
+		int ix;
+		if ((ix=ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2)==0)
+		{
+			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
+			++ixr;
+		}
+	}
+	paramLen -= ixr;
+
+
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: argv[0] = %s", param[0]);

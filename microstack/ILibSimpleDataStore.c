@@ -46,6 +46,7 @@ typedef struct ILibSimpleDataStore_Root
 	char* filePath;
 	char scratchPad[4096];
 	ILibHashtable keyTable; // keys --> ILibSimpleDataStore_TableEntry
+	ILibHashtable cacheTable;
 	uint64_t fileSize;
 	int error;
 } ILibSimpleDataStore_Root;
@@ -98,6 +99,11 @@ typedef struct ILibSimpleDataStore_TableEntry
 	char valueHash[SHA384HASHSIZE];
 	uint64_t valueOffset;
 } ILibSimpleDataStore_TableEntry;
+typedef struct ILibSimpleDataStore_CacheEntry
+{
+	int valueLength;
+	char value[];
+}ILibSimpleDataStore_CacheEntry;
 
 const int ILibMemory_SimpleDataStore_CONTAINERSIZE = sizeof(ILibSimpleDataStore_Root);
 void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root);
@@ -105,6 +111,17 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root);
 
 // Perform a SHA384 hash of some data
 void ILibSimpleDataStore_SHA384(char *data, int datalen, char* result) { util_sha384(data, datalen, result); }
+
+void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen)
+{
+	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
+	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen, 0, NULL, NULL);
+	entry->valueLength = valueLen;
+	memcpy_s(entry->value, valueLen, value, valueLen);
+	
+	ILibHashtable_Put(root->cacheTable, NULL, key, keyLen, entry);
+}
 
 // Write a key/value pair to file, the hash is already calculated
 uint64_t ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* value, int valueLen, char* hash)
@@ -403,6 +420,17 @@ __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, 
 	return retVal;
 }
 
+void ILibSimpleDataStore_CacheClear_Sink(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+{
+	if (Data != NULL) { free(Data); }
+
+	UNREFERENCED_PARAMETER(sender);
+	UNREFERENCED_PARAMETER(Key1);
+	UNREFERENCED_PARAMETER(Key2);
+	UNREFERENCED_PARAMETER(Key2Len);
+	UNREFERENCED_PARAMETER(user);
+}
+
 // Close the data store file
 __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 {
@@ -410,6 +438,7 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 
 	if (root == NULL) return;
 	ILibHashtable_DestroyEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root);
+	if (root->cacheTable != NULL) { ILibHashtable_DestroyEx(root->cacheTable, ILibSimpleDataStore_CacheClear_Sink, NULL); }
 
 	free(root->filePath);
 
@@ -458,6 +487,24 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 	
 	if (root == NULL) return 0;
 	if (keyLen > 1 && key[keyLen - 1] == 0) { keyLen -= 1; }
+
+	if (root->cacheTable != NULL)
+	{
+		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, keyLen);
+		if (centry != NULL)
+		{
+			if ((buffer != NULL) && (bufferLen >= centry->valueLength)) // If the buffer is not null and can hold the value, place the value in the buffer.
+			{
+				memcpy_s(buffer, bufferLen, centry->value, centry->valueLength);
+				return(centry->valueLength);
+			}
+			else
+			{
+				return(centry->valueLength);
+			}
+		}
+	}
+
 	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 
 	if (entry == NULL) return 0; // If there is no in-memory entry for this key, return zero now.
