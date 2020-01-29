@@ -2427,8 +2427,6 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 	info->platformType = htonl(((agent->batteryState != MeshAgentHost_BatteryInfo_NONE) && (agent->batteryState != MeshAgentHost_BatteryInfo_UNKNOWN)) ? MeshCommand_AuthInfo_PlatformType_LAPTOP : MeshCommand_AuthInfo_PlatformType_DESKTOP);
 	memcpy_s(info->MeshID, sizeof(info->MeshID), agent->meshId, sizeof(agent->meshId));
 	info->capabilities = htonl(agent->capabilities);
-	hostnamelen = ntohs(info->hostnameLen) - 1;
-
 	
 	if ((agentNameLen=ILibSimpleDataStore_Get(agent->masterDb, "agentName", NULL, 0)) > 0)
 	{
