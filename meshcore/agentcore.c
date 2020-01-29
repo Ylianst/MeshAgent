@@ -2415,6 +2415,7 @@ void MeshServer_SendJSON(MeshAgentHostContainer* agent, ILibWebClient_StateObjec
 void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject) 
 {
 	int hostnamelen = (int)strnlen_s(agent->hostname, sizeof(agent->hostname));
+
 	int agentNameLen = 0;
 
 	// Send to the server information about this agent
@@ -2428,6 +2429,9 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 	memcpy_s(info->MeshID, sizeof(info->MeshID), agent->meshId, sizeof(agent->meshId));
 	info->capabilities = htonl(agent->capabilities);
 	
+	memcpy_s(info->hostname, hostnamelen, agent->hostname, hostnamelen);
+	info->hostnameLen = htons(hostnamelen);
+
 	if ((agentNameLen=ILibSimpleDataStore_Get(agent->masterDb, "agentName", NULL, 0)) > 0)
 	{
 		if (agentNameLen < 255)
