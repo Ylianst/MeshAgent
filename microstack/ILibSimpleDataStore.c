@@ -496,6 +496,8 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 			if ((buffer != NULL) && (bufferLen >= centry->valueLength)) // If the buffer is not null and can hold the value, place the value in the buffer.
 			{
 				memcpy_s(buffer, bufferLen, centry->value, centry->valueLength);
+				if (bufferLen > centry->valueLength) { buffer[centry->valueLength] = 0; } // Add a zero at the end to be nice, if the buffer can take it.
+
 				return(centry->valueLength);
 			}
 			else

@@ -2408,9 +2408,14 @@ void MeshServer_ServerAuthenticated(ILibWebClient_StateObject WebStateObject, Me
 	}
 }
 
+void MeshServer_SendJSON(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject, char *JSON, int JSONLength)
+{
+	ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_TEXT, JSON, JSONLength, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+}
 void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject) 
 {
 	int hostnamelen = (int)strnlen_s(agent->hostname, sizeof(agent->hostname));
+	int agentNameLen = 0;
 
 	// Send to the server information about this agent
 	MeshCommand_BinaryPacket_AuthInfo *info = (MeshCommand_BinaryPacket_AuthInfo*)ILibScratchPad2;
@@ -2422,6 +2427,21 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 	info->platformType = htonl(((agent->batteryState != MeshAgentHost_BatteryInfo_NONE) && (agent->batteryState != MeshAgentHost_BatteryInfo_UNKNOWN)) ? MeshCommand_AuthInfo_PlatformType_LAPTOP : MeshCommand_AuthInfo_PlatformType_DESKTOP);
 	memcpy_s(info->MeshID, sizeof(info->MeshID), agent->meshId, sizeof(agent->meshId));
 	info->capabilities = htonl(agent->capabilities);
+	hostnamelen = ntohs(info->hostnameLen) - 1;
+
+	
+	if ((agentNameLen=ILibSimpleDataStore_Get(agent->masterDb, "agentName", NULL, 0)) > 0)
+	{
+		if (agentNameLen < 255)
+		{
+			char agentName[255];
+			int jsonlen;
+			
+			ILibSimpleDataStore_Get(agent->masterDb, "agentName", agentName, (int)sizeof(agentName));
+			jsonlen = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "{\"action\":\"agentName\",\"value\":\"%s\"}", agentName);
+			MeshServer_SendJSON(agent, WebStateObject, ILibScratchPad, jsonlen);
+		}
+	}
 
 	if ((info->hostnameLen = htons(ILibSimpleDataStore_Get(agent->masterDb, "agentName", info->hostname, sizeof(ILibScratchPad2) - sizeof(info)))) == 0)
 	{		
