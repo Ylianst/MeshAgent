@@ -85,7 +85,11 @@ function restart(delay)
 
 if (require('_GenericMarshal').PointerSize == 4 && require('os').arch() == 'x64')
 {
-    throw ('win-bcd on a 64 bit Platform can only be accessed from a 64 bit process');
+    module.exports =
+    {
+        enableSafeModeService: enableSafeModeService,
+        disableSafeModeService: disableSafeModeService, restart: restart, isSafeModeService: isSafeModeService
+    };
 }
 else
 {
@@ -94,28 +98,29 @@ else
             getKeys: getKeys, setKey: setKey, deleteKey: deleteKey, enableSafeModeService: enableSafeModeService,
             disableSafeModeService: disableSafeModeService, getKey: getKey, restart: restart, isSafeModeService: isSafeModeService
         };
-}
-Object.defineProperty(module.exports, "bootMode",
-    {
-        get: function()
+
+    Object.defineProperty(module.exports, "bootMode",
         {
-            try
+            get: function ()
             {
-                var v = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\Safeboot\\Option', 'OptionValue');
-                switch(v)
+                try
                 {
-                    case 2:
-                        return ('SAFE_MODE_NETWORK');
-                        break;
-                    default:
-                        return ('SAFE_MODE');
-                        break;
+                    var v = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Control\\Safeboot\\Option', 'OptionValue');
+                    switch (v)
+                    {
+                        case 2:
+                            return ('SAFE_MODE_NETWORK');
+                            break;
+                        default:
+                            return ('SAFE_MODE');
+                            break;
+                    }
+                    return (v);
                 }
-                return (v);
+                catch (x)
+                {
+                    return ('NORMAL');
+                }
             }
-            catch(x)
-            {
-                return ('NORMAL');
-            }
-        }
-    });
+        });
+}
