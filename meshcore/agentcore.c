@@ -3845,7 +3845,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	int ixr = 0;
 	for (ri = 0; ri < paramLen; ++ri)
 	{
-		int len = strnlen_s(param[ri], 4096);
+		int len = (int)strnlen_s(param[ri], 4096);
 		int ix;
 		if ((ix=ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2)==0)
 		{

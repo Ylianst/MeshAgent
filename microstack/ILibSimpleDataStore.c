@@ -118,7 +118,7 @@ void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int ke
 	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen, 0, NULL, NULL);
 	entry->valueLength = valueLen;
-	memcpy_s(entry->value, valueLen, value, valueLen);
+	if (valueLen > 0) { memcpy_s(entry->value, valueLen, value, valueLen); }
 	
 	ILibHashtable_Put(root->cacheTable, NULL, key, keyLen, entry);
 }
