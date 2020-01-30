@@ -299,7 +299,7 @@ void ILibDuktape_net_Socket_ipc_dataHookCallbackCont(duk_context *ctx, void ** a
 }
 void ILibDuktape_net_socket_ipc_dataHookCallback(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
 {
-	if (ILibDuktape_EventEmitter_HasListeners(sender, "data") == 0)
+	if (ILibDuktape_EventEmitter_HasListeners(sender, "data") == 0 && ILibDuktape_EventEmitter_HasListeners(sender, "end") == 0)
 	{
 		int top = duk_get_top(sender->ctx);
 		duk_push_heapptr(sender->ctx, sender->object);		// [stream]
@@ -389,6 +389,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 			winIPC->mPipe = ILibProcessPipe_Pipe_CreateFromExisting(winIPC->manager, winIPC->mPipeHandle, ILibProcessPipe_Pipe_ReaderHandleType_Overlapped);
 			winIPC->ds->readableStream->paused = 1;
 			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
+			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "end", ILibDuktape_net_socket_ipc_dataHookCallback);
 
 			ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mSocket, "connect");		//[emit][this][connect]
 			ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -2, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
@@ -875,6 +876,7 @@ void ILibDuktape_net_server_IPC_readsink_safe(void *chain, void *user)
 			}
 			else if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_net_server_closed_needEmit, 0) != 0)
 			{
+				duk_push_false(ctx);  duk_put_prop_string(ctx, -2, ILibDuktape_net_server_closed_needEmit);
 				ILibDuktape_EventEmitter_SetupEmit(ctx, winIPC->mServer, "close"); // [emit][this][closed]
 				duk_pcall_method(ctx, 1);											// [ret]
 			}
@@ -1085,6 +1087,8 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(HANDLE event, ILibWaitHandle_ErrorSt
 		winIPC->mPipe = ILibProcessPipe_Pipe_CreateFromExisting(winIPC->manager, winIPC->mPipeHandle, ILibProcessPipe_Pipe_ReaderHandleType_Overlapped);
 		winIPC->ds->readableStream->paused = 1;
 		ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
+		ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "end", ILibDuktape_net_socket_ipc_dataHookCallback);
+
 		ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -1, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
 
 		if (duk_pcall_method(winIPC->ctx, 2) != 0)
