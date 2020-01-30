@@ -56,6 +56,7 @@ function vt()
         k32.CreateMethod('GetProcessHeap');
         k32.CreateMethod('HeapAlloc');
         k32.CreateMethod('InitializeProcThreadAttributeList');
+        k32.CreateMethod('ResizePseudoConsole');
         k32.CreateMethod('UpdateProcThreadAttribute');
         k32.CreateMethod('WriteFile');
         k32.CreateMethod('ReadFile');
@@ -132,6 +133,18 @@ function vt()
                        k32.CloseHandle(this._obj._consoleInput.Deref());
                        k32.CloseHandle(this._obj._consoleOutput.Deref());
                     });
+                    ds.resizeTerminal = function (w, h)
+                    {
+                        console.setDestination(console.Destinations.LOGFILE);
+                        console.log('resizeTerminal(' + w + ', ' + h + ')');
+                        var hr;
+                        if((hr=k32.ResizePseudoConsole(this._obj._h.Deref(),  (h << 16) | w).Val) != 0)
+                        {
+                            console.log('HResult=' + hr);
+                            throw ('Resize returned HRESULT: ' + hr);
+                        }
+                        console.log('SUCCESS');
+                    };
 
                     ds.terminal = ret;
                     ds._rpbuf = GM.CreateVariable(4096);
