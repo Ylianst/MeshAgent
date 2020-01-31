@@ -342,6 +342,7 @@ function lin_copytext(txt)
 
 function win_readtext()
 {
+    var h;
     var ret = '';
     var GM = require('_GenericMarshal');
     var user32 = GM.CreateNativeProxy('user32.dll');
@@ -349,18 +350,33 @@ function win_readtext()
     kernel32.CreateMethod('GlobalAlloc');
     kernel32.CreateMethod('GlobalLock');
     kernel32.CreateMethod('GlobalUnlock');
-    user32.CreateMethod('OpenClipboard');
+
     user32.CreateMethod('CloseClipboard');
+    user32.CreateMethod('IsClipboardFormatAvailable');
     user32.CreateMethod('GetClipboardData');
+    user32.CreateMethod('OpenClipboard');
 
     user32.OpenClipboard(0);
-    var h = user32.GetClipboardData(CF_UNICODETEXT);
-    if(h.Val!=0)
+
+    if (user32.IsClipboardFormatAvailable(CF_UNICODETEXT).Val != 0)
     {
-        var hbuffer = kernel32.GlobalLock(h);
-        ret = hbuffer.Wide2UTF8;
-        kernel32.GlobalUnlock(h);
+        h = user32.GetClipboardData(CF_UNICODETEXT);
+        if (h.Val != 0)
+        {
+            var hbuffer = kernel32.GlobalLock(h);
+            hbuffer._size = -1;
+            ret = hbuffer.Wide2UTF8;
+            kernel32.GlobalUnlock(h);
+        }
     }
+    else
+    {
+        var p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        p._rej('Unknown Clipboard Data');
+        return (p);
+    }
+
+
     user32.CloseClipboard();
 
     var p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -379,9 +395,10 @@ function win_copytext(txt)
     kernel32.CreateMethod('GlobalAlloc');
     kernel32.CreateMethod('GlobalLock');
     kernel32.CreateMethod('GlobalUnlock');
-    user32.CreateMethod('OpenClipboard');
-    user32.CreateMethod('EmptyClipboard');
     user32.CreateMethod('CloseClipboard');
+    user32.CreateMethod('EmptyClipboard');
+    user32.CreateMethod('IsClipboardFormatAvailable');
+    user32.CreateMethod('OpenClipboard');
     user32.CreateMethod('SetClipboardData');
 
     var mtxt = GM.CreateVariable(txt, { wide: true }); 
