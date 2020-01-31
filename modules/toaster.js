@@ -87,6 +87,9 @@ function Toaster()
                     retVal._child.addModule('win-console', getJSModule('win-console'));
                     retVal._child.addModule('win-message-pump', getJSModule('win-message-pump'));
 
+                    caption = caption.split("'").join("\\'");
+                    title = title.split("'").join("\\'");
+
                     var str = "\
                             try{\
                             var toast = require('win-console');\
