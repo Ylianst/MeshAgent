@@ -366,7 +366,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 					{
 						
 						envargs[ecount] = (char*)duk_get_string(ctx, -2);
-						envargs[ecount + 1] = (char*)duk_get_string(ctx, -1);
+						envargs[ecount + 1] = (char*)duk_to_string(ctx, -1);
 						ecount += 2;
 						duk_pop_2(ctx);															// [buf][env][enum]
 					}
@@ -428,6 +428,12 @@ void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 	duk_push_int(ctx, 4);
 	duk_put_prop_string(ctx, -2, "DETACHED");
 	duk_put_prop_string(ctx, -2, "SpawnTypes");
+
+	char flags[] = "exports.c_iflags = {'IGNBRK': 01, 'BRKINT': 02, 'IGNPAR': 04, 'PARMRK': 010,'INPCK': 020, 'ISTRIP': 040, 'INLCR': 0100, 'IGNCR': 0200, 'ICRNL': 0400, 'IUCLC': 01000, 'IXON': 02000, 'IXANY': 04000, 'IXOFF': 010000, 'IMAXBEL': 020000};\
+					exports.c_oflags = {'OPOST': 001, 'OLCUC': 002, 'ONLCR': 004, 'OCRNL': 010, 'ONOCR': 020, 'ONLRET': 040, 'OFILL': 0100, 'OFDEL': 0200};\
+					exports.c_lflags = {'ISIG': 001, 'ICANON': 002, 'ECHO': 010, 'ECHOE': 020, 'ECHOK': 040, 'ECHONL': 0100, 'NOFLSH': 0200, 'IEXTEN': 0400, 'TOSTOP': 0100000, 'ITOSTOP': 0100000}\
+		";
+	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, flags, sizeof(flags) - 1);
 }
 void ILibDuktape_ChildProcess_Init(duk_context *ctx)
 {

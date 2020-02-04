@@ -887,7 +887,6 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		CloseHandle(retVal->stdErr->mPipe_WriteEnd);	retVal->stdErr->mPipe_WriteEnd = NULL;
 		CloseHandle(retVal->stdIn->mPipe_ReadEnd);		retVal->stdIn->mPipe_ReadEnd = NULL;
 	}
-
 	retVal->hProcess = processInfo.hProcess;
 	if (processInfo.hThread != NULL) CloseHandle(processInfo.hThread);
 	retVal->PID = processInfo.dwProcessId;
@@ -904,11 +903,54 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 #ifndef __APPLE__
 		int pipe;
 		struct winsize w;
+		struct termios tios;
+		char **options = (char**)envvars;
+		int flags = 0;
+		memset(&tios, 0, sizeof(tios));
+
 		w.ws_row = CONSOLE_SCREEN_HEIGHT;
 		w.ws_col = CONSOLE_SCREEN_WIDTH;
 		w.ws_xpixel = 0;
 		w.ws_ypixel = 0;
-		pid = forkpty(&pipe, NULL, NULL, &w);
+
+
+		while (options != NULL && options[0] != NULL)
+		{
+			if (strcasecmp("LINES", options[0]) == 0)
+			{
+				w.ws_row = atoi(options[1]);
+			}
+			else if (strcasecmp("COLUMNS", options[0]) == 0)
+			{
+				w.ws_col = atoi(options[1]);
+			}	
+			else if (strcasecmp("c_iflag", options[0]) == 0)
+			{
+				flags = 1;
+				tios.c_iflag = (tcflag_t)atoi(options[1]);
+			}
+			else if (strcasecmp("c_oflag", options[0]) == 0)
+			{
+				flags = 1;
+				tios.c_oflag = (tcflag_t)atoi(options[1]);
+			}
+			else if (strcasecmp("c_cflag", options[0]) == 0)
+			{
+				flags = 1;
+				tios.c_cflag = (tcflag_t)atoi(options[1]);
+			}
+			else if (strcasecmp("c_lflag", options[0]) == 0)
+			{
+				flags = 1;
+				tios.c_lflag = (tcflag_t)atoi(options[1]);
+			}
+
+			options += 2;
+		}
+
+
+
+		pid = forkpty(&pipe, NULL, flags == 0 ? NULL : &tios, &w);
 		retVal->PTY = pipe;
 		retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
 		retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
