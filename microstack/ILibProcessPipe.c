@@ -38,7 +38,12 @@ limitations under the License.
 #if !defined( __APPLE__) && !defined(_FREEBSD)
 	#include <pty.h>
 #else
-	#include <util.h>
+	#if defined(__APPLE__)
+		#include <util.h>
+	#else
+		#include <termios.h>
+		#include <libutil.h>
+	#endif
 #endif
 #endif
 
