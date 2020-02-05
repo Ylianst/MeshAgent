@@ -36,9 +36,12 @@ limitations under the License.
 #include <sys/types.h>
 #include <sys/wait.h>
 #if !defined( __APPLE__) && !defined(_FREEBSD)
-#include <pty.h>
+	#include <pty.h>
+#else
+	#include <util.h>
 #endif
 #endif
+
 
 #define CONSOLE_SCREEN_WIDTH 80
 #define CONSOLE_SCREEN_HEIGHT 25
@@ -895,12 +898,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	if (userToken != NULL) { CloseHandle(userToken); userToken = NULL; }
 #else
 	int UID = (int)(uint64_t)(ILibPtrCAST)sid;
-#ifdef __APPLE__
-	if (spawnType == ILibProcessPipe_SpawnTypes_TERM) { spawnType = ILibProcessPipe_SpawnTypes_DEFAULT; }
-#endif
 	if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 	{
-#ifndef __APPLE__
 		int pipe;
 		struct winsize w;
 		struct termios tios;
@@ -958,9 +957,6 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		retVal->stdIn->mProcess = retVal;
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(retVal->stdOut, ILibProcessPipe_Process_BrokenPipeSink);
 		retVal->stdOut->mProcess = retVal;
-#else
-		pid = 0; // Apple LLVM is being dumb, and throws a warning if I don't do this, even tho it'll never run
-#endif
 	}
 	else
 	{
