@@ -997,7 +997,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	}
 	if (pid == 0)
 	{
-		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
+		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED && spawnType != ILibProcessPipe_SpawnTypes_TERM)
 		{
 			close(retVal->stdErr->mPipe_ReadEnd); //close read end of stderr pipe
 			dup2(retVal->stdErr->mPipe_WriteEnd, STDERR_FILENO);
@@ -1006,6 +1006,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 		{
 			putenv("TERM=xterm");
+			close(retVal->stdErr->mPipe_ReadEnd); //close read end of stderr pipe
 		}
 		else
 		{
