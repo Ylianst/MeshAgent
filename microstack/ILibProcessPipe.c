@@ -955,13 +955,16 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 
 
 		pid = forkpty(&pipe, NULL, flags == 0 ? NULL : &tios, &w);
-		retVal->PTY = pipe;
-		retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
-		retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
+		if (pid > 0)
+		{
+			retVal->PTY = pipe;
+			retVal->stdIn = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
+			retVal->stdOut = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(pipeManager, pipe, extraMemorySize);
 
-		retVal->stdIn->mProcess = retVal;
-		ILibProcessPipe_Pipe_SetBrokenPipeHandler(retVal->stdOut, ILibProcessPipe_Process_BrokenPipeSink);
-		retVal->stdOut->mProcess = retVal;
+			retVal->stdIn->mProcess = retVal;
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(retVal->stdOut, ILibProcessPipe_Process_BrokenPipeSink);
+			retVal->stdOut->mProcess = retVal;
+		}
 	}
 	else
 	{
