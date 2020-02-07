@@ -141,80 +141,94 @@ function getFirewallRules(options)
 function disableFirewallRules(options)
 {
     var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
-    var p = getFirewallRules(options).on('firewallRule', function (r) { if (this._count == null) { this._count = 0; } ++this._count; });
-    p.options = options;
-    p.ret = ret;
-    p.then(function (a)
+    var command = 'Disable-NetFirewallRule';
+
+    if (options.program)
     {
-        if(this._count > 0)
+        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command;
+    }
+    else
+    {
+        var key, value;
+        for (key in options)
         {
-            var command = 'Disable-NetFirewallRule';
-            if (this.options.program) { command = 'Get-NetFirewallApplicationFilter -Program \\"' + this.options.program + '\\" | ' + command; }
-
-            var child;
-            if (require('os').arch() == 'x64')
-            {
-                child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-            }
-            else
-            {
-                child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-            }
-
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.waitExit();
-
-            if (child.stderr.str.trim() != "")
-            {
-                this.ret._rej(child.stderr.str.trim());
-            }
-            else
-            {
-                this.ret._res();
-            }
+            value = options[key];
+            if (value.indexOf(' ') >= 0) { value = '\\"' + options[key] + '\\"'; }
+            command += ('-' + key + ' ' + value);
         }
-    }, function (e) { this.ret._rej(e); });
+    }
+
+    if (require('os').arch() == 'x64')
+    {
+        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+    else
+    {
+        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+
+    ret.child.ret = ret;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function ()
+    {
+        if (this.stderr.str != '')
+        {
+            this.ret._rej(this.stderr.str.trim());
+        }
+        else
+        {
+            this.ret._res();
+        }
+    });
+
     return (ret);
 }
 
 function enableFirewallRules(options)
 {
     var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
-    var p = getFirewallRules(options).on('firewallRule', function (r) { if (this._count == null) { this._count = 0; } ++this._count; });
-    p.options = options;
-    p.ret = ret;
-    p.then(function (a)
+
+    var command = 'Enable-NetFirewallRule';
+    if (options.program)
     {
-        if (this._count > 0)
+        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command;
+    }
+    else
+    {
+        var key, value;
+        for (key in options)
         {
-            var command = 'Enable-NetFirewallRule';
-            if (this.options.program) { command = 'Get-NetFirewallApplicationFilter -Program \\"' + this.options.program + '\\" | ' + command; }
-
-            var child;
-            if (require('os').arch() == 'x64')
-            {
-                child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-            }
-            else
-            {
-                child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-            }
-
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.waitExit();
-
-            if (child.stderr.str.trim() != "")
-            {
-                this.ret._rej(child.stderr.str.trim());
-            }
-            else
-            {
-                this.ret._res();
-            }
+            value = options[key];
+            if (value.indexOf(' ') >= 0) { value = '\\"' + options[key] + '\\"'; }
+            command += ('-' + key + ' ' + value);
         }
-    }, function (e) { this.ret._rej(e); });
+    }
+
+    if (require('os').arch() == 'x64')
+    {
+        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+    else
+    {
+        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+
+    ret.child.ret = ret;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function ()
+    {
+        if(this.stderr.str != '')
+        {
+            this.ret._rej(this.stderr.str.trim());
+        }
+        else
+        {
+            this.ret._res();
+        }
+    });
+
     return (ret);
 }
 
@@ -299,12 +313,58 @@ function convertOptions(options)
     return (options);
 }
 
+function removeFirewallRule(options)
+{
+    if (typeof (options) == 'string') { options = { Name: options }; }
+    var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+
+    var command = 'Remove-NetFirewallRule';
+    if (options.program)
+    {
+        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command;
+    }
+    else
+    {
+        var key, value;
+        for(key in options)
+        {
+            value = options[key];
+            if (value.indexOf(' ') >= 0) { value = '\\"' + options[key] + '\\"'; }
+            command += ('-' + key + ' ' + value);
+        }
+    }
+
+    if (require('os').arch() == 'x64')
+    {
+        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+    else
+    {
+        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+
+    ret.child.ret = ret;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function ()
+    {
+        if(this.stderr.str != '')
+        {
+            this.ret._rej(this.stderr.str.trim());
+        }
+        else
+        {
+            this.ret._res();
+        }
+    });
+    return (ret);
+}
+
 function addFirewallRule(options)
 {
     var command = 'New-NetFirewallRule';
     var val = convertOptions(options);
     var key;
-    console.log(JSON.stringify(val, null, 1));
 
     for (key in val)
     {
@@ -318,9 +378,7 @@ function addFirewallRule(options)
         }
     }
 
-    console.log(command);
     var child;
-
     if (require('os').arch() == 'x64')
     {
         child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
@@ -346,5 +404,6 @@ module.exports =
         getFirewallRules: getFirewallRules,
         disableFirewallRules: disableFirewallRules,
         enableFirewallRules: enableFirewallRules,
-        addFirewallRule: addFirewallRule
+        addFirewallRule: addFirewallRule,
+        removeFirewallRule: removeFirewallRule
     };
