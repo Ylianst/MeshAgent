@@ -280,7 +280,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 		duk_pop(ctx);													// ...
 	}
 
-	duk_push_boolean(ctx, i > 1 ? 1 : 0);
+	duk_push_boolean(ctx, i > 0 ? 1 : 0);
 	return(1);
 }
 int ILibDuktape_EventEmitter_PrependOnce(duk_context *ctx, duk_idx_t i, char *eventName, duk_c_function func)
