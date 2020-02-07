@@ -122,8 +122,15 @@ function Promise(promiseFunc)
     this.then = function (resolved, rejected)
     {
         if (resolved) { this._internal.once('resolved', event_switcher(this, resolved).func); }
-        if (rejected) { this._internal.once('rejected', event_switcher(this, rejected).func); }
-
+        if (rejected)
+        {
+            this._internal.once('rejected', event_switcher(this, rejected).func);
+        }
+        else
+        {
+            this._internal.once('rejected', function (e) { process.emit('uncaughtException', 'promise.unhandledRejection: ' + e); });
+        }
+                      
         var retVal = new Promise(function (r, j) { });
         this._internal.once('resolved', retVal._internal.resolver);
         this._internal.once('rejected', retVal._internal.rejector);

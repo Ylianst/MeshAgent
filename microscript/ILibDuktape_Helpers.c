@@ -37,6 +37,8 @@ struct sockaddr_in6 duktape_internalAddress;
 #define ILibDuktape_Process_ExitCode						"\xFF_ExitCode"
 #define ILibDuktape_Memory_AllocTable						"\xFF_MemoryAllocTable"
 #define ILibDuktape_ObjectStashKey							"\xFF_ObjectStashKey"
+#define ILibDuktape_UncaughtException_NativeHandler			"\xFF_UncaughtNativeHandler"
+#define ILibDuktape_UncaughtException_NativeUser			"\xFF_UncaughtNativeUser"
 
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i)
 {
@@ -442,13 +444,36 @@ void *ILibDuktape_GetProcessObject(duk_context *ctx)
 	duk_pop(ctx);									// ...
 	return retVal;
 }
+duk_ret_t ILibDuktape_SetNativeUncaughtExceptionSink(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	ILibDuktape_NativeUncaughtExceptionHandler handler = (ILibDuktape_NativeUncaughtExceptionHandler)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_UncaughtException_NativeHandler);
+	void *user = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_UncaughtException_NativeUser);
 
+	if (handler != NULL)
+	{
+		handler(ctx, (char*)duk_safe_to_string(ctx, 0), user);
+	}
+	return(0);
+}
 void ILibDuktape_SetNativeUncaughtExceptionHandler(duk_context * ctx, ILibDuktape_NativeUncaughtExceptionHandler handler, void * user)
 {
 	void *j = ILibDuktape_GetProcessObject(ctx);
 	
 	if (j != NULL)
 	{
+		duk_push_heapptr(ctx, j);															// [process]
+		duk_get_prop_string(ctx, -1, "on");													// [process][on]
+		duk_swap_top(ctx, -2);																// [on][this]
+		duk_push_string(ctx, "uncaughtException");											// [on][this][exception]
+		duk_push_c_function(ctx, ILibDuktape_SetNativeUncaughtExceptionSink, DUK_VARARGS);	// [on][this][exception][func]
+		duk_push_pointer(ctx, handler);														// [on][this][exception][func][handler]
+		duk_put_prop_string(ctx, -2, ILibDuktape_UncaughtException_NativeHandler);			// [on][this][exception][func]
+		duk_push_pointer(ctx, user);
+		duk_put_prop_string(ctx, -2, ILibDuktape_UncaughtException_NativeUser);				// [on][this][exception][func]
+		duk_pcall_method(ctx, 2); duk_pop(ctx);												// ...
+
+		// This is only used when we dump the core, so we can re-set these events
 		duk_push_heapptr(ctx, j);													// [process]
 		duk_push_pointer(ctx, handler);												// [process][handler]
 		duk_put_prop_string(ctx, -2, ILibDuktape_NativeUncaughtExceptionPtr);		// [process]
@@ -487,19 +512,6 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 	if (errmsgLen + len < sizeof(dest))
 	{
 		len += sprintf_s(dest + len, sizeof(dest) - len, " => %s", errmsg);
-	}
-
-	if (j != NULL)
-	{
-		duk_push_heapptr(ctx, j);														// [process]
-		if (duk_has_prop_string(ctx, -1, ILibDuktape_NativeUncaughtExceptionPtr))
-		{
-			duk_get_prop_string(ctx, -1, ILibDuktape_NativeUncaughtExceptionPtr);		// [process][ptr]
-			duk_get_prop_string(ctx, -2, ILibDuktape_NativeUncaughtExceptionUserPtr);	// [process][ptr][user]
-			((ILibDuktape_NativeUncaughtExceptionHandler)duk_get_pointer(ctx, -2))(ctx, (char*)dest, duk_get_pointer(ctx, -1));
-			duk_pop_2(ctx);																// [process]
-		}
-		duk_pop(ctx);																	// ...
 	}
 
 	if (emitter != NULL)
