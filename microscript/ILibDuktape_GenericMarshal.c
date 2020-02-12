@@ -213,7 +213,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_UTFSTRING(duk_context *ctx)
 	duk_get_prop_string(ctx, -2, "_size");		// [var][ptr][size]
 	size = duk_to_int(ctx, -1);
 
-	ILibDuktape_String_PushWideString(ctx, ptr, size == 0 ? -1 : size);
+	ILibDuktape_String_PushWideString(ctx, ptr, size == 0 ? -1 : size/2);
 	return 1;
 }
 
