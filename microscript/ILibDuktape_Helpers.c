@@ -948,13 +948,13 @@ void ILibDuktape_String_PushWideString(duk_context *ctx, char *wstr, size_t wstr
 #ifdef WIN32
 	char *tmp;
 	size_t tmpLen;
-
 	tmpLen = 2 + (size_t)WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, (int)(wstrlen > 0 ? wstrlen : -1), NULL, 0, NULL, NULL);
-	tmp = (char*)ILibMemory_AllocateTemp(Duktape_GetChain(ctx), tmpLen);
+	tmp = (char*)duk_push_fixed_buffer(ctx, tmpLen);	// [buffer]
 
 	if (WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, (int)(wstrlen > 0 ? wstrlen : -1), (LPSTR)tmp, (int)tmpLen, NULL, NULL) != 0)
 	{
-		duk_push_string(ctx, tmp);
+		duk_push_string(ctx, tmp);						// [buffer][string]
+		duk_remove(ctx, -2);							// [string]
 	}
 	else
 	{
