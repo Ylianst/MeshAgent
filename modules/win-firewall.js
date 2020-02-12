@@ -17,6 +17,27 @@ limitations under the License.
 var promise = require('promise');
 var winreg = require('win-registry');
 
+//attachDebugger({ webport: 9995, wait: true }).then(console.log, console.log);
+
+function netsecurityExists()
+{
+    var child;
+    var command = 'Get-Module -ListAvailable -Name netsecurity';
+    if (require('os').arch() == 'x64')
+    {
+        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+    else
+    {
+        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+    }
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+
+    return (child.stdout.str != '');
+}
+
 function parseCmdletOutput(data)
 {
     var touched;
@@ -47,7 +68,14 @@ function fetchPortFilters(rules)
     }
     for (i = 0; i < rules.length; ++i)
     {
-        filter = winreg.QueryKey(winreg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules', rules[i].Name);
+        try
+        {
+            filter = winreg.QueryKey(winreg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules', rules[i].Name);
+        }
+        catch(fe)
+        {
+            continue;
+        }
         tokens = filter.split('|');
         for (k = 0; k < tokens.length; ++k)
         {
@@ -81,7 +109,8 @@ function getFirewallRules(options)
 
     var retVal = [], filter = [];
     var command = 'Get-NetFirewallRule';
-    if (options.program) { command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command; }
+    if (options.program) { options.Program = options.program; delete options.program; }
+    if (options.Program) { command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.Program + '\\" | ' + command; }
 
     if (require('os').arch() == 'x64')
     {
@@ -142,10 +171,11 @@ function disableFirewallRules(options)
 {
     var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
     var command = 'Disable-NetFirewallRule';
+    if (options.program) { options.Program = options.program; delete options.program; }
 
-    if (options.program)
+    if (options.Program)
     {
-        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command;
+        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.Program + '\\" | ' + command;
     }
     else
     {
@@ -188,11 +218,12 @@ function disableFirewallRules(options)
 function enableFirewallRules(options)
 {
     var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+    if (options.program) { options.Program = options.program; delete options.program; }
 
     var command = 'Enable-NetFirewallRule';
-    if (options.program)
+    if (options.Program)
     {
-        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command;
+        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.Program + '\\" | ' + command;
     }
     else
     {
@@ -280,6 +311,51 @@ function verifyValues(optionsInput, keyName, keyValues, defaultValue)
     }
 }
 
+function remapValues(obj, oldname, newname, table)
+{
+    if(obj[oldname] != null)
+    {
+        var value = obj[oldname];
+        delete obj[oldname]
+
+        if(!table)
+        {
+            obj[newname] = value;
+        }
+        else
+        {
+            if (value.indexOf(',') < 0)
+            {
+                obj[newname] = table[value];
+            }
+            else
+            {
+                var tokens = value.split(',');
+                for(var i=0;i<tokens.length;++i)
+                {
+                    if(obj[newname] == null)
+                    {
+                        obj[newname] = table[tokens[i].trim()];
+                    }
+                    else
+                    {
+                        obj[newname] = (obj[newname] + ', ' + table[tokens[i].trim()]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+function convertNetshValues(obj)
+{
+    remapValues(obj, 'Rule Name', 'Name');
+    remapValues(obj, 'Enabled', 'Enabled', { No: 'False', Yes: 'True' });
+    remapValues(obj, 'Profiles', 'Profile', { Any: 'Any', Domain: 'Domain', Public: 'Public', Private: 'Private' });
+    remapValues(obj, 'Edge traversal', 'EdgeTraversalPolicy', { No: 'Block', Yes: 'Allow' });
+    remapValues(obj, 'Direction', 'Direction', { In: 'Inbound', Out: 'Outbound' });
+}
+
 function convertOptions(options)
 {
     verifyValues(options, 'Action', ['NotConfigured', 'Allow', 'Block']);
@@ -317,11 +393,12 @@ function removeFirewallRule(options)
 {
     if (typeof (options) == 'string') { options = { Name: options }; }
     var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+    if (options.program) { options.Program = options.program; delete options.program; }
 
     var command = 'Remove-NetFirewallRule';
-    if (options.program)
+    if (options.Program)
     {
-        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.program + '\\" | ' + command;
+        command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.Program + '\\" | ' + command;
     }
     else
     {
@@ -398,12 +475,145 @@ function addFirewallRule(options)
     }
 }
 
-
-module.exports =
+function netsh_parseResults(str)
+{
+    var ret = [];
+    var i, j, k, obj, tokens;
+    var blocks = str.split('\r\n\r\n');
+    for(i=0;i<blocks.length;++i)
     {
-        getFirewallRules: getFirewallRules,
-        disableFirewallRules: disableFirewallRules,
-        enableFirewallRules: enableFirewallRules,
-        addFirewallRule: addFirewallRule,
-        removeFirewallRule: removeFirewallRule
-    };
+        obj = {};
+        tokens = blocks[i].split('\r\n');
+        for(j=0;j<tokens.length;++j)
+        {
+            if ((k = tokens[j].indexOf(':')) > 0)
+            {
+                obj[tokens[j].substring(0, k).trim()] = tokens[j].substring(k + 1).trim();
+            }
+        }
+        convertNetshValues(obj);
+        ret.push(obj);
+    }
+    return (ret);
+}
+
+function netsh_getFirewallRules(options)
+{
+    var p = new promise(function (a, r) { this._res = a; this._rej = r; });
+    require('events').EventEmitter.call(p, true)
+        .createEvent('firewallRule');
+
+    var command = 'netsh advfirewall firewall show rule name=all verbose';
+    p.options = options;
+    p._results = [];
+    p.child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
+    p.child.ret = p;
+    p.child.stderr.str = ''; p.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    p.child.stdout.str = '';
+    p.child.stdout.on('data', function (b)
+    {
+        var key, ok;
+        this.str += b.toString();
+        var eX = this.str.lastIndexOf('\r\n\r\n');
+
+        if (eX >= 0)
+        {
+            var rules = netsh_parseResults(this.str.substring(0, eX));
+            for (var i in rules)
+            {
+                ok = true;
+                for (key in this.parent.ret.options)
+                {
+                    if(this.parent.ret.options[key] == null || this.parent.ret.options[key] != rules[i][key])
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (ok)
+                {
+                    if (this.parent.ret.listenerCount('firewallRule') > 0)
+                    {
+                        this.parent.ret.emit('firewallRule', rules[i]);
+                    }
+                    else
+                    {
+                        this.parent.ret._results.push(rules[i]);
+                    }
+                }
+            }
+
+            if (this.str.length - eX > 4)
+            {
+                this.str = this.str.substring(eX + 4);
+            }
+        }
+    });
+    p.child.on('exit', function ()
+    {
+        if (this.ret.listenerCount('firewallRule') > 0)
+        {
+            this.ret._res();
+        }
+        else
+        {
+            if(this.ret._results.length>0)
+            {
+                this.ret._res(this.ret._results);
+            }
+            else
+            {
+                this.ret._rej('No matches');
+            }
+        }
+    });
+
+
+    return (p);
+}
+function netsh_disableFirewallRules(options)
+{
+
+}
+function netsh_enableFirewallRules(options)
+{
+
+}
+function netsh_addFirewallRule(options)
+{
+
+}
+function netsh_removeFirewallRule(options)
+{
+
+}
+function netsh_netsecurityExists(options)
+{
+
+}
+
+
+if (netsecurityExists())
+{
+    module.exports =
+        {
+            getFirewallRules:       getFirewallRules,
+            disableFirewallRules:   disableFirewallRules,
+            enableFirewallRules:    enableFirewallRules,
+            addFirewallRule:        addFirewallRule,
+            removeFirewallRule:     removeFirewallRule,
+            netsecurityExists:      netsecurityExists
+        };
+}
+else
+{
+    module.exports =
+        {
+            getFirewallRules:       netsh_getFirewallRules,
+            disableFirewallRules:   netsh_disableFirewallRules,
+            enableFirewallRules:    netsh_enableFirewallRules,
+            addFirewallRule:        netsh_addFirewallRule,
+            removeFirewallRule:     netsh_removeFirewallRule,
+            netsecurityExists:      netsh_netsecurityExists
+        };
+}
