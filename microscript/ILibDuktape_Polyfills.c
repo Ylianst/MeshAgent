@@ -423,6 +423,37 @@ duk_ret_t ILibDuktape_Polyfills_String_padStart(duk_context *ctx)
 		return(1);
 	}
 }
+duk_ret_t ILibDuktape_Polyfills_Array_includes(duk_context *ctx)
+{
+	duk_push_this(ctx);										// [array]
+	uint32_t count = (uint32_t)duk_get_length(ctx, -1);
+	uint32_t i;
+	for (i = 0; i < count; ++i)
+	{
+		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][val1]
+		duk_dup(ctx, 0);									// [array][val1][val2]
+		if (duk_equals(ctx, -2, -1))
+		{
+			duk_push_true(ctx);
+			return(1);
+		}
+		else
+		{
+			duk_pop_2(ctx);									// [array]
+		}
+	}
+	duk_push_false(ctx);
+	return(1);
+}
+void ILibDuktape_Polyfills_Array(duk_context *ctx)
+{
+	// Polyfill 'Array.includes'
+	duk_get_prop_string(ctx, -1, "Array");											// [Array]
+	duk_get_prop_string(ctx, -1, "prototype");										// [Array][proto]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Array_includes, 1);				// [Array][proto][func]
+	duk_put_prop_string(ctx, -2, "includes");										// [Array][proto]
+	duk_pop_2(ctx);																	// ...
+}
 void ILibDuktape_Polyfills_String(duk_context *ctx)
 {
 	// Polyfill 'String.startsWith'
@@ -432,7 +463,7 @@ void ILibDuktape_Polyfills_String(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "startsWith");										// [string][proto]
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_endsWith, DUK_VARARGS);	// [string][proto][func]
 	duk_put_prop_string(ctx, -2, "endsWith");										// [string][proto]
-	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_padStart, DUK_VARARGS);				// [string][proto][func]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_String_padStart, DUK_VARARGS);	// [string][proto][func]
 	duk_put_prop_string(ctx, -2, "padStart");
 	duk_pop_2(ctx);
 }
@@ -2542,7 +2573,7 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	// Global Polyfills
 	duk_push_global_object(ctx);													// [g]
 	ILibDuktape_WriteID(ctx, "Global");
-
+	ILibDuktape_Polyfills_Array(ctx);
 	ILibDuktape_Polyfills_String(ctx);
 	ILibDuktape_Polyfills_Buffer(ctx);
 	ILibDuktape_Polyfills_Console(ctx);
