@@ -38,6 +38,17 @@ function netsecurityExists()
     return (child.stdout.str != '');
 }
 
+function stripUnrecognizedKeys(obj, allowedKeys)
+{
+    for(var key in obj)
+    {
+        if(!allowedKeys.includes(key))
+        {
+            delete obj[key];
+        }
+    }
+}
+
 function parseCmdletOutput(data)
 {
     var touched;
@@ -339,7 +350,7 @@ function remapValues(obj, oldname, newname, table)
                     }
                     else
                     {
-                        obj[newname] = (obj[newname] + ', ' + table[tokens[i].trim()]);
+                        obj[newname] = (obj[newname] + ',' + table[tokens[i].trim()]);
                     }
                 }
             }
@@ -355,10 +366,29 @@ function convertNetshValues(obj)
     remapValues(obj, 'Edge traversal', 'EdgeTraversalPolicy', { No: 'Block', Yes: 'Allow' });
     remapValues(obj, 'Direction', 'Direction', { In: 'Inbound', Out: 'Outbound' });
 }
+function convertNetSecurityValues(obj)
+{
+    remapValues(obj, 'Action', 'action', { Allow: 'allow', Block: 'block' });
+    remapValues(obj, 'Description', 'description');
+    remapValues(obj, 'Direction', 'dir', { Inbound: 'in', Outbound: 'out' });
+    remapValues(obj, 'DisplayName', 'displayname');
+    remapValues(obj, 'Enabled', 'enabled', { False: 'no', True: 'yes' });
+
+    remapValues(obj, 'Program', 'program');
+    remapValues(obj, 'Protocol', 'protocol');
+    remapValues(obj, 'Profile', 'profile', { Any: 'any', Domain: 'domain', Private: 'private', Public: 'public', NotApplicable: 'any' });
+    remapValues(obj, 'InterfaceType', 'interfacetype', { Any: 'any', Wired: 'lan', Wireless: 'wireless', RemoteAccess: 'ras' });
+    remapValues(obj, 'EdgeTraversalPolicy', 'edge', { Allow: 'yes', Block: 'no', DeferToUser: 'deferuser', DeferToApp: 'deferapp' });
+
+    remapValues(obj, 'LocalAddress', 'localip');
+    remapValues(obj, 'LocalPort', 'localport');
+    remapValues(obj, 'RemoteAddress', 'remoteip');
+    remapValues(obj, 'RemotePort', 'remoteport');
+}
 
 function convertOptions(options)
 {
-    verifyValues(options, 'Action', ['NotConfigured', 'Allow', 'Block']);
+    verifyValues(options, 'Action', ['NotConfigured', 'Allow', 'Block'], 'Allow');
     verifyValues(options, 'Authentication', ['NotRequired', 'Required', 'NoEncap']);
     verifyValues(options, 'Description');
     verifyValues(options, 'Direction', ['Inbound', 'Outbound']);
@@ -499,6 +529,7 @@ function netsh_parseResults(str)
 
 function netsh_getFirewallRules(options)
 {
+    if (options.program) { options.Program = options.program; delete options.program; }
     var p = new promise(function (a, r) { this._res = a; this._rej = r; });
     require('events').EventEmitter.call(p, true)
         .createEvent('firewallRule');
@@ -573,23 +604,116 @@ function netsh_getFirewallRules(options)
 }
 function netsh_disableFirewallRules(options)
 {
-
+    var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+    ret.getp = netsh_getFirewallRules(options);
+    ret.getp.ret = ret;
+    ret.getp.then(function (rules)
+    {
+        var child;
+        var command;
+        for (var i in rules)
+        {
+            command = 'netsh advfirewall firewall set rule name="' + rules[i].Name + '"' + ' new enable=no';
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.waitExit();
+        }
+        this.ret._res();
+    }, function (e)
+    {
+        this.ret._rej(e);
+    });
+    return (ret);
 }
 function netsh_enableFirewallRules(options)
 {
-
+    var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+    ret.getp = netsh_getFirewallRules(options);
+    ret.getp.ret = ret;
+    ret.getp.then(function (rules)
+    {
+        var child;
+        var command;
+        for (var i in rules)
+        {
+            command = 'netsh advfirewall firewall set rule name="' + rules[i].Name + '"' + ' new enable=yes';
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.waitExit();
+        }
+        this.ret._res();
+    }, function (e)
+    {
+        this.ret._rej(e);
+    });
+    return (ret);
 }
 function netsh_addFirewallRule(options)
 {
+    var val = convertOptions(options);
+    convertNetSecurityValues(val);
 
+    if (!val.name)
+    {
+        if(val.displayname)
+        {
+            val.name = val.displayname + ' ' + require('uuid/v4')();
+            delete val.displayname;
+        }
+        else
+        {
+            val.name = require('uuid/v4')();
+        }
+    }
+    stripUnrecognizedKeys(val, ['name', 'dir', 'action', 'program', 'service', 'description', 'enable',
+                                'profile', 'localip', 'remoteip', 'localport', 'remoteport', 'protocol',
+                                'interfacetype', 'rmtcomputergrp', 'rmtusrgrp', 'edge', 'security']);
+
+    var command = 'netsh advfirewall firewall add rule name="' + val.name + '"'
+    delete val.name;
+
+    for (var i in val)
+    {
+        if (val[i].toString().indexOf(' ') >= 0 || val[i].toString().indexOf(',') >= 0) { val[i] = ('"' + val[i] + '"'); }
+        command += (' ' + i + '=' + val[i]);
+    }
+
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
+    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
 }
 function netsh_removeFirewallRule(options)
 {
+    var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+    ret.options = options;
+    ret.getp = netsh_getFirewallRules(options);
+    ret.getp.ret = ret;
+    ret.getp.then(function (rules)
+    {
+        var child, command, key, value;
+        convertNetSecurityValues(this.ret.options);
 
-}
-function netsh_netsecurityExists(options)
-{
+        for(var i in rules)
+        {
+            command = 'netsh advfirewall firewall delete rule name="' + rules[i].Name + '"';
+            for(key in this.ret.options)
+            {
+                value = this.ret.options[key].toString();
+                if (value.indexOf(' ') >= 0) { value = ('"' + value + '"'); }
+                command += (' ' + key + '=' + value);
+            }
 
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.waitExit();
+        }
+        this.ret._res();
+    }, function (e) { this.ret._rej(e); });
+    return(ret);
 }
 
 
@@ -614,6 +738,6 @@ else
             enableFirewallRules:    netsh_enableFirewallRules,
             addFirewallRule:        netsh_addFirewallRule,
             removeFirewallRule:     netsh_removeFirewallRule,
-            netsecurityExists:      netsh_netsecurityExists
+            netsecurityExists:      netsecurityExists
         };
 }
