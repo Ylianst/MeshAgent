@@ -147,6 +147,23 @@ void ILibSimpleDataStore_Cached_GetJSON_count(ILibHashtable sender, void *Key1, 
 	cache->bufferLen += (Key2Len + 3);
 	cache->bufferLen += (entry->valueLength + 2);
 }
+void ILibSimpleDataStore_Cached_GetJSONEx_count(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+{
+	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
+	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
+
+	if (cache->bufferLen == 0)
+	{
+		cache->bufferLen = 3;
+	}
+	else
+	{
+		++cache->bufferLen;
+	}
+
+	cache->bufferLen += (Key2Len + 5);
+	cache->bufferLen += (entry->valueLength + 4);
+}
 void ILibSimpleDataStore_Cached_GetJSON_write(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
@@ -160,7 +177,49 @@ void ILibSimpleDataStore_Cached_GetJSON_write(ILibHashtable sender, void *Key1, 
 	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, entry->value, entry->valueLength); cache->offset += entry->valueLength;
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"");
 }
+void ILibSimpleDataStore_Cached_GetJSONEx_write(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+{
+	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
+	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
 
+	if (cache->offset != 1) { cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, ","); }
+
+	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"--");
+	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, Key2, Key2Len); cache->offset += Key2Len;
+	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "=\\\"");
+	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, entry->value, entry->valueLength); cache->offset += entry->valueLength;
+	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\\\"");
+}
+
+int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen)
+{
+	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	if (root->cacheTable == NULL)
+	{
+		if (bufferLen < 3)
+		{
+			return(3);
+		}
+		else
+		{
+			return(sprintf_s(buffer, (size_t)bufferLen, "[]"));
+		}
+	}
+	ILibSimpleDateStore_JSONCache cache;
+	cache.buffer = NULL;
+	cache.offset = 0;
+	cache.bufferLen = 0;
+	ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetJSONEx_count, &cache);
+
+	if (buffer == NULL || bufferLen < cache.bufferLen) { return(cache.bufferLen); }
+	cache.buffer = buffer;
+	cache.offset = sprintf_s(buffer, bufferLen, "[");
+	cache.bufferLen = bufferLen;
+
+	ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetJSONEx_write, &cache);
+	cache.offset += sprintf_s(cache.buffer + cache.offset, cache.bufferLen - cache.offset, "]");
+	return(cache.offset);
+}
 int ILibSimpleDataStore_Cached_GetJSON(ILibSimpleDataStore dataStore, char *buffer, int bufferLen)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
