@@ -3855,6 +3855,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 
 	int ixr = 0;
+	int installFlag = 0;
 	for (ri = 0; ri < paramLen; ++ri)
 	{
 		int len = (int)strnlen_s(param[ri], 4096);
@@ -3864,8 +3865,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
 			++ixr;
 		}
+		if (strcmp("-finstall", param[ri]) == 0)
+		{
+			installFlag = 1;
+		}
 	}
 	paramLen -= ixr;
+
+	switch (installFlag)
+	{
+		case 1:
+			break;
+		default:
+			break;
+	}
 
 
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);

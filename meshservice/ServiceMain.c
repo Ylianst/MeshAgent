@@ -945,13 +945,22 @@ int wmain(int argc, char* wargv[])
 	int retCode = 0;
 
 	int argvi, argvsz;
-	char **argv = (char**)ILibMemory_SmartAllocate(argc * sizeof(void*));
+	char **argv = (char**)ILibMemory_SmartAllocate((argc+1) * sizeof(void*));
 	for (argvi = 0; argvi < argc; ++argvi)
 	{
 		argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, NULL, 0, NULL, NULL);
 		argv[argvi] = (char*)ILibMemory_SmartAllocate(argvsz);
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
+
+	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0))
+	{
+		argv[argc] = argv[1];
+		argv[1] = (char*)ILibMemory_SmartAllocate(4);
+		sprintf_s(argv[1], ILibMemory_Size(argv[1]), "run");
+		argc += 1;
+	}
+
 
 	/*
 #ifndef NOMESHCMD
