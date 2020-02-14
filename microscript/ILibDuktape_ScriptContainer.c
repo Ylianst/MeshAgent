@@ -1073,9 +1073,10 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
 	ILibDuktape_EventEmitter *emitter;
+#ifndef MICROSTACK_NOTLS
 	char *sslv = (char*)SSLeay_version(SSLEAY_VERSION);
 	char *sslvS = strstr(sslv, " ") + 1;
-
+#endif
 
 	duk_push_global_object(ctx);														// [g]
 	duk_push_object(ctx);																// [g][process]
@@ -1127,6 +1128,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	duk_put_prop_string(ctx, -2, "SIGTABLE");
 
 	duk_push_object(ctx);
+
+#ifndef MICROSTACK_NOTLS
 	if (sslvS != ((char*)NULL + 1))
 	{
 		char *tmp = strstr(sslvS, " ");
@@ -1136,6 +1139,8 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 			duk_put_prop_string(ctx, -2, "openssl");
 		}
 	}
+#endif
+
 	duk_push_string(ctx, DUK_GIT_DESCRIBE); duk_put_prop_string(ctx, -2, "duktape");
 	if (SOURCE_COMMIT_DATE != NULL)
 	{

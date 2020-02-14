@@ -1643,7 +1643,7 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 
 	return(1);
 }
-
+#ifndef MICROSTACK_NOTLS
 duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx)
 {
 	char tmp[UTIL_SHA384_HASHSIZE];
@@ -1736,6 +1736,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx
 	}
 #endif
 }
+#endif
 
 duk_ret_t ILibDuktape_MeshAgent_forceExit(duk_context *ctx)
 {
@@ -3820,6 +3821,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{ 
 			agentHost->capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY; parseCommands = 0; 
 		}
+#ifndef MICROSTACK_NOTLS
 		if (strcmp(param[ri], "-nocertstore") == 0)
 		{
 			parseCommands = 0;
@@ -3828,6 +3830,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			agentHost->noCertStore = 1;
 #endif
 		}
+#endif
 	}
 
 
@@ -3871,15 +3874,42 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 	paramLen -= ixr;
-
-	switch (installFlag)
+	if (installFlag != 0)
 	{
-		case 1:
-			break;
-		default:
-			break;
-	}
+		int bufLen = 0;
+		char *buf;
+		duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, NULL, NULL);
+		duk_eval_string(ctxx, "require('user-sessions').isRoot();");
+		if (!duk_get_boolean(ctxx, -1))
+		{
+			printf("   Administrator permissions needed...\n");
+			installFlag = 0;
+		}
 
+
+		switch (installFlag)
+		{
+			case 1:
+
+			
+
+
+
+				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
+				buf = (char*)ILibMemory_SmartAllocate(bufLen);
+				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
+			
+
+
+
+				ILibMemory_Free(buf);
+				break;
+			default:
+				break;
+		}
+
+		duk_destroy_heap(ctxx);
+	}
 
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);
 
