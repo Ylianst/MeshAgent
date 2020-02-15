@@ -3901,14 +3901,17 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
 				buf = (char*)ILibMemory_SmartAllocate(bufLen);
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
-				
+
 				duk_eval_string(ctxx, "require('agent-installer');");
 				duk_get_prop_string(ctxx, -1, "fullInstall");
 				duk_swap_top(ctxx, -2);
 				duk_push_string(ctxx, buf);
 				if (duk_pcall_method(ctxx, 1) != 0)
 				{
-					printf("%s\n", duk_safe_to_string(ctxx, -1));
+					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
+					{
+						printf("%s\n", duk_safe_to_string(ctxx, -1));
+					}
 				}
 				duk_pop(ctxx);
 

@@ -188,7 +188,7 @@ void ILibSimpleDataStore_Cached_GetJSONEx_write(ILibHashtable sender, void *Key1
 	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, Key2, Key2Len); cache->offset += Key2Len;
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "=\\\"");
 	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, entry->value, entry->valueLength); cache->offset += entry->valueLength;
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\\\"");
+	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\\\"\"");
 }
 
 int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen)

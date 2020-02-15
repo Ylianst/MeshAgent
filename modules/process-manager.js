@@ -133,7 +133,7 @@ function processManager() {
                 var status = require('fs').readFileSync('/proc/' + pid + '/status');
                 var info = {};
                 var lines = status.toString().split('\n');
-                for(var i in lines)
+                for(var i=0;i<lines.length;++i)
                 {
                     var tokens = lines[i].split(':');
                     if (tokens.length > 1) { tokens[1] = tokens[1].trim(); }
