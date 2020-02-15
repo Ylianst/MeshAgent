@@ -1476,9 +1476,11 @@ int wmain(int argc, char* wargv[])
 	else
 	{
 		UninstallService(serviceFileOld);
-		if (argc > 1 && !strcmp(argv[1], "-recovery")==0)
+
+		// See if we are running as a service
+		if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
 		{
-			// See if we need to run as a script engine
+			// Not running as service, so check if we need to run as a script engine
 			if (argc >= 2 && ILibString_EndsWith(argv[1], -1, ".js", 3) != 0)
 			{
 				SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
@@ -1498,36 +1500,21 @@ int wmain(int argc, char* wargv[])
 			}
 			else
 			{
-#ifdef _MINCORE
-				printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
-#else
-				printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
-#endif
-			}
-		}
-		else
-		{
-#ifndef _MINCORE
-			if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
-			{
-				FreeConsole();
-
-				/*
-				if (IsAdmin() == FALSE)
+				if (argc != 1)
 				{
-					MessageBox(NULL, TEXT("Must run as administrator"), TEXT("Mesh Agent"), MB_OK | MB_ICONERROR);
+#ifdef _MINCORE
+					printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
+#else
+					printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
+#endif
 				}
 				else
 				{
+					FreeConsole();
 					DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
 				}
-				*/
-				DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
 			}
 		}
-#else
-		RunService(argc, argv);
-#endif
 	}
 
 	CoUninitialize();
