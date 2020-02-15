@@ -3770,6 +3770,14 @@ void MeshAgent_AgentMode_Core_ServerTimeout(duk_context *ctx, void ** args, int 
 	}
 }
 
+void MeshAgent_AgentInstallerCTX_Finalizer(duk_context *ctx, void *user)
+{
+	if (ILibIsChainBeingDestroyed(user) == 0)
+	{
+		ILibStopChain(user);
+	}
+}
+
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
@@ -3878,7 +3886,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	{
 		int bufLen = 0;
 		char *buf;
-		duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, NULL, NULL);
+		duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, MeshAgent_AgentInstallerCTX_Finalizer, agentHost->chain);
 		duk_eval_string(ctxx, "require('user-sessions').isRoot();");
 		if (!duk_get_boolean(ctxx, -1))
 		{
@@ -3890,19 +3898,22 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		switch (installFlag)
 		{
 			case 1:
-
-			
-
-
-
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
 				buf = (char*)ILibMemory_SmartAllocate(bufLen);
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
-			
-
-
+				
+				duk_eval_string(ctxx, "require('agent-installer');");
+				duk_get_prop_string(ctxx, -1, "fullInstall");
+				duk_swap_top(ctxx, -2);
+				duk_push_string(ctxx, buf);
+				if (duk_pcall_method(ctxx, 1) != 0)
+				{
+					printf("%s\n", duk_safe_to_string(ctxx, -1));
+				}
+				duk_pop(ctxx);
 
 				ILibMemory_Free(buf);
+				return(1);
 				break;
 			default:
 				break;
