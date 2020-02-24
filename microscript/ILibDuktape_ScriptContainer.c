@@ -1509,15 +1509,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ScriptContainer_OS_platform(duk_context *ctx)
 {
-#ifdef WIN32
-	duk_push_string(ctx, "win32");
-#else
-#ifdef __APPLE__
-	duk_push_string(ctx, "darwin");
-#else
-	duk_push_string(ctx, "linux");
-#endif
-#endif
+	duk_eval_string(ctx, "process.platform");
 	return 1;
 }
 #ifndef WIN32
@@ -2154,7 +2146,17 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			switch (process.platform)\
 			{\
 				case 'win32':\
-					this.promise._acc(this.stdout.str.split('\\r\\n')[0]);\
+					var winstr = this.stdout.str.split('\\r\\n')[0];\
+					if(require('user-sessions').isRoot())\
+					{\
+						try\
+						{\
+							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
+							require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
+						}\
+						catch(xx) {}\
+					}\
+					this.promise._acc(winstr);\
 					break;\
 				case 'linux':\
 					lines = this.stdout.str.split('\\n');\
