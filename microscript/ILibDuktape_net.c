@@ -452,18 +452,19 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	if (dest.sin6_family == AF_UNSPEC || (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
 		// Can't resolve, check to see if it's cached
-		duk_push_heap_stash(ctx);
+		duk_push_heap_stash(ctx);																			// [stash]
 		if (duk_has_prop_string(ctx, -1, "_sharedDB"))
 		{
 			ILibSimpleDataStore db = (ILibSimpleDataStore)Duktape_GetPointerProperty(ctx, -1, "_sharedDB");
-			char *dnsCache = (char*)duk_push_sprintf(ctx, "DNS[%s]", host);	// [dnsCache]
+			char *dnsCache = (char*)duk_push_sprintf(ctx, "DNS[%s]", host);									// [stash][dnsCache]
 			char dnsCacheBuffer[255];
 			if (ILibSimpleDataStore_Get(db, dnsCache, dnsCacheBuffer, sizeof(dnsCacheBuffer)) > 0)
 			{
 				ILibResolveEx(dnsCacheBuffer, (unsigned short)port, &dest);
 			}
-			duk_pop(ctx);													// ...
+			duk_pop(ctx);																					// [stash]
 		}
+		duk_pop(ctx);																						// ...
 	}
 	if (dest.sin6_family == AF_UNSPEC || (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
@@ -1985,17 +1986,19 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 	if (dest.sin6_family == AF_UNSPEC || (duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
 		// Can't resolve, check to see if it's cached
-		duk_push_heap_stash(ctx);
+		duk_push_heap_stash(ctx);																				// [stash]
 		if (duk_has_prop_string(ctx, -1, "_sharedDB"))
 		{
 			ILibSimpleDataStore db = (ILibSimpleDataStore)Duktape_GetPointerProperty(ctx, -1, "_sharedDB");
-			char *dnsCache = (char*)duk_push_sprintf(ctx, "DNS[%s]", host);
+			char *dnsCache = (char*)duk_push_sprintf(ctx, "DNS[%s]", host);										// [stash][dnsCache]
 			char dnsCacheBuffer[255];
 			if (ILibSimpleDataStore_Get(db, dnsCache, dnsCacheBuffer, sizeof(dnsCacheBuffer)) > 0)
 			{
 				ILibResolveEx(dnsCacheBuffer, (unsigned short)port, &dest);
 			}
+			duk_pop(ctx);																						// [stash]
 		}
+		duk_pop(ctx);																							// ...
 	}
 	if (dest.sin6_family == AF_UNSPEC || (duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
