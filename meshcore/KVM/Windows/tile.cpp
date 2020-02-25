@@ -478,7 +478,7 @@ int get_tile_at(int x, int y, void** buffer, long long *bufferSize, void *deskto
 }
 
 // This function captures the entire desktop buffer to scan.
-int get_desktop_buffer(void **buffer, long long *bufferSize)
+int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 {
 	BITMAPINFO bmpInfo;
 
@@ -501,6 +501,36 @@ int get_desktop_buffer(void **buffer, long long *bufferSize)
 		{
 			KVMDEBUG("BitBlt() returned FALSE", 0);
 			return 1; // If the copy fails, error out.
+		}
+		if (mouseMove[0] != 0)
+		{
+			CURSORINFO info = { 0 };
+			BITMAP bm;
+			ICONINFO ii;
+			info.cbSize = sizeof(info);
+			GetCursorInfo(&info);
+			GetIconInfo(info.hCursor, &ii);
+			if (GetObject(ii.hbmMask, sizeof(bm), &bm) == sizeof(bm))
+			{
+				HDC hdcScreen = GetDC(NULL);
+				if (hdcScreen != NULL)
+				{
+					HDC hdcMem = CreateCompatibleDC(hdcScreen);
+					HBITMAP hbmCanvas = CreateCompatibleBitmap(hdcScreen, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2));
+					if(hdcMem!=NULL && hbmCanvas != NULL)
+					{
+						HGDIOBJ hbmold = SelectObject(hdcMem, hbmCanvas);
+
+						DrawIconEx(hdcMem, 0, 0, info.hCursor, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
+						BitBlt(hCaptureDC, mouseMove[1], mouseMove[2], bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), hdcMem, 0, 0, SRCPAINT);
+
+						SelectObject(hdcMem, hbmold);
+					}
+					if (hbmCanvas != NULL) { DeleteObject(hbmCanvas); }
+					if (hdcMem != NULL) { ReleaseDC(NULL, hdcMem); }
+					if (hdcScreen != NULL) { ReleaseDC(NULL, hdcScreen); }
+				}
+			}
 		}
 	}
 	else

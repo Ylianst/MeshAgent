@@ -38,6 +38,7 @@ limitations under the License.
 // #define KVMDEBUGENABLED 1
 ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
 int gProcessTSID = -1;
+extern int gRemoteMouseRenderDefault;
 
 #pragma pack(push, 1)
 typedef struct KVMDebugLog
@@ -114,6 +115,8 @@ HANDLE hStdOut = INVALID_HANDLE_VALUE;
 HANDLE hStdIn = INVALID_HANDLE_VALUE;
 int ThreadRunning = 0;
 int kvmConsoleMode = 0;
+
+ILibQueue gPendingPackets = NULL;
 
 ILibRemoteLogging gKVMRemoteLogging = NULL;
 #ifdef _WINSERVICE
@@ -509,15 +512,7 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 
 				// Perform the mouse movement
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
-				curcursor = MouseAction((((double)x / (double)SCREEN_WIDTH)), (((double)y / (double)SCREEN_HEIGHT)), (int)(unsigned char)(block[5]), w);
-				if (curcursor != KVM_MouseCursor_NOCHANGE)
-				{
-					char buffer[8];
-					((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-					((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-					buffer[4] = (char)curcursor;																// Cursor Type
-					writeHandler((char*)buffer, 5, reserved);
-				}
+				MouseAction((((double)x / (double)SCREEN_WIDTH)), (((double)y / (double)SCREEN_HEIGHT)), (int)(unsigned char)(block[5]), w);				
 			}
 			break;
 		}
@@ -819,7 +814,10 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	int row, col;
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)parm)[0];
 	void *reserved = ((void**)parm)[1];
-
+	char *tmoBuffer;
+	long mouseMove[3] = { 0,0,0 };
+	
+	gPendingPackets = ILibQueue_Create();
 	KVM_InitMouseCursors();
 
 #ifdef _WINSERVICE
@@ -895,18 +893,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// Loop and send only when a tile changes.
 	while (!g_shutdown)
 	{
-		/*
-		cur_timestamp = util_gettime();
-		if (prev_timestamp != 0)
-		{
-			time_diff = (FRAME_RATE_TIMER - (cur_timestamp - prev_timestamp));
-			if (time_diff < 20) { time_diff = 20; }
-		}
-		printf("%d\r\n", cur_timestamp);
-		Sleep(time_diff);
-		prev_timestamp = cur_timestamp;
-		*/
-
 		KVMDEBUG("kvm_server_mainloop / loop1", (int)GetCurrentThreadId());
 
 		// Reset all the flags to TILE_TODO
@@ -918,8 +904,29 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		CheckDesktopSwitch(1, writeHandler, reserved);
 		if (g_shutdown) break;
 
+
+		// Enter Alertable State, so we can dispatch any packets if necessary.
+		// We are doing it here, in case we need to merge any data with the bitmaps
+		SleepEx(0, TRUE);
+		mouseMove[0] = 0;
+		while ((tmoBuffer = ILibQueue_DeQueue(gPendingPackets)) != NULL)
+		{
+			if (ntohs(((unsigned short*)tmoBuffer)[0]) == MNG_KVM_MOUSE_MOVE)
+			{
+				mouseMove[0] = 1;
+				mouseMove[1] = ((long*)tmoBuffer)[1] - VSCREEN_X;
+				mouseMove[2] = ((long*)tmoBuffer)[2] - VSCREEN_Y;
+			}
+			else
+			{
+				writeHandler(tmoBuffer, (int)ILibMemory_Size(tmoBuffer), reserved);
+			}
+			ILibMemory_Free(tmoBuffer);
+		}
+
+
 		// Scan the desktop
-		if (get_desktop_buffer(&desktop, &desktopsize) == 1 || desktop == NULL)
+		if (get_desktop_buffer(&desktop, &desktopsize, mouseMove) == 1 || desktop == NULL)
 		{
 #ifdef _WINSERVICE
 			if (!kvmConsoleMode)
@@ -930,7 +937,8 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 			KVMDEBUG("get_desktop_buffer() failed, shutting down", (int)GetCurrentThreadId());
 			g_shutdown = 1;
 		}
-		else {
+		else 
+		{
 			bmpInfo = get_bmp_info(TILE_WIDTH, TILE_HEIGHT);
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
 				for (col = 0; col < TILE_WIDTH_COUNT; col++) {
@@ -983,7 +991,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	}
 
 	KVMDEBUG("kvm_server_mainloop / end3", (int)GetCurrentThreadId());
-
 	KVMDEBUG("kvm_server_mainloop / end2", (int)GetCurrentThreadId());
 
 	// if (kvmthread != NULL) { CloseHandle(kvmthread); kvmthread = NULL; }
@@ -996,6 +1003,15 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	teardown_gdiplus();
 
 	KVMDEBUG("kvm_server_mainloop / end", (int)GetCurrentThreadId());
+
+	KVM_UnInitMouseCursors();
+
+	while ((tmoBuffer = ILibQueue_DeQueue(gPendingPackets)) != NULL)
+	{
+		ILibMemory_Free(tmoBuffer);
+	}
+	ILibQueue_Destroy(gPendingPackets);
+
 
 	ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: Process Exiting...");
 

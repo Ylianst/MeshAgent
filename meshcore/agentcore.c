@@ -46,6 +46,8 @@ limitations under the License.
 #include <sys/wait.h>
 #endif
 
+int gRemoteMouseRenderDefault = 0;
+
 #ifdef _LINKVM
 	#ifdef WIN32
 		#include "KVM/Windows/kvm.h"
@@ -100,7 +102,7 @@ int ILibDuktape_HECI_Debug = 0;
 #endif
 #endif
 
-	extern int ILibDuktape_ModSearch_ShowNames;
+extern int ILibDuktape_ModSearch_ShowNames;
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 
@@ -3425,6 +3427,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	if (agent->serverConnectionState != 0) return;
 
 	util_random(sizeof(int), (char*)&timeout);
+	gRemoteMouseRenderDefault = ILibSimpleDataStore_Get(agent->masterDb, "remoteMouseRender", NULL, 0);
 	agent->disableUpdate = ILibSimpleDataStore_Get(agent->masterDb, "disableUpdate", NULL, 0);
 	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);

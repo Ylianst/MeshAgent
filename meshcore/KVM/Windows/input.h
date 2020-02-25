@@ -36,7 +36,8 @@ typedef enum KVM_MouseCursors
 }KVM_MouseCursors;
 
 void KVM_InitMouseCursors();
-KVM_MouseCursors MouseAction(double absX, double absY, int button, short wheel);
+void KVM_UnInitMouseCursors();
+void MouseAction(double absX, double absY, int button, short wheel);
 void KeyAction(unsigned char keycode, int up);
 int TouchInit();
 void TouchUnInit();

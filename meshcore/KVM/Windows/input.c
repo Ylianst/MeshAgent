@@ -22,8 +22,18 @@ limitations under the License.
 #include "input.h"
 
 #include "microstack/ILibCrypto.h"
+#include "meshcore/meshdefines.h"
 
 extern void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen);
+extern ILibQueue gPendingPackets;
+extern int gRemoteMouseRenderDefault;
+uint64_t gMouseInputTime = 0;
+
+HWINEVENTHOOK CUR_HOOK = NULL;
+WNDCLASSEXA CUR_WNDCLASS;
+HWND CUR_HWND = NULL;
+HANDLE CUR_APCTHREAD = NULL;
+HANDLE CUR_WORKTHREAD = NULL;
 
 int CUR_CURRENT = 0;
 int CUR_APPSTARTING;
@@ -59,6 +69,68 @@ MOUSEEVENTF_MIDDLEUP		0x0040
 MOUSEEVENTF_DOUBLECLK		0x0088
 */
 
+int KVM_CursorHashToMSG(int hashcode)
+{
+	int ret = KVM_MouseCursor_ARROW;
+	if (hashcode == CUR_APPSTARTING)
+	{
+		ret = KVM_MouseCursor_APPSTARTING;
+	}
+	else if (hashcode == CUR_ARROW)
+	{
+		ret = KVM_MouseCursor_ARROW;
+	}
+	else if (hashcode == CUR_CROSS)
+	{
+		ret = KVM_MouseCursor_CROSS;
+	}
+	else if (hashcode == CUR_HAND)
+	{
+		ret = KVM_MouseCursor_HAND;
+	}
+	else if (hashcode == CUR_HELP)
+	{
+		ret = KVM_MouseCursor_HELP;
+	}
+	else if (hashcode == CUR_IBEAM)
+	{
+		ret = KVM_MouseCursor_IBEAM;
+	}
+	else if (hashcode == CUR_NO)
+	{
+		ret = KVM_MouseCursor_NO;
+	}
+	else if (hashcode == CUR_SIZEALL)
+	{
+		ret = KVM_MouseCursor_SIZEALL;
+	}
+	else if (hashcode == CUR_SIZENESW)
+	{
+		ret = KVM_MouseCursor_SIZENESW;
+	}
+	else if (hashcode == CUR_SIZENS)
+	{
+		ret = KVM_MouseCursor_SIZENS;
+	}
+	else if (hashcode == CUR_SIZENWSE)
+	{
+		ret = KVM_MouseCursor_SIZENWSE;
+	}
+	else if (hashcode == CUR_SIZEWE)
+	{
+		ret = KVM_MouseCursor_SIZEWE;
+	}
+	else if (hashcode == CUR_UPARROW)
+	{
+		ret = KVM_MouseCursor_UPARROW;
+	}
+	else if (hashcode == CUR_WAIT)
+	{
+		ret = KVM_MouseCursor_WAIT;
+	}
+	return(ret);
+}
+
 int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
 {
 	int crc = 0;
@@ -71,31 +143,158 @@ int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
 	{
 		//printf("CX: %ul, CY:%ul, Color: %ul, Showing: %d\n", bm.bmWidth, bm.bmHeight, ii.hbmColor, info.flags);
 		HDC hdcScreen = GetDC(NULL);
-		HDC hdcMem = CreateCompatibleDC(hdcScreen);
-		HBITMAP hbmCanvas = CreateCompatibleBitmap(hdcScreen, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2));
-		HGDIOBJ hbmold = SelectObject(hdcMem, hbmCanvas);
-		BITMAPINFO bmpInfo;
-		char *tmpBuffer;
+		if (hdcScreen != NULL)
+		{
+			HDC hdcMem = CreateCompatibleDC(hdcScreen);
+			HBITMAP hbmCanvas = CreateCompatibleBitmap(hdcScreen, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2));
+			if (hdcMem != NULL && hbmCanvas != NULL)
+			{
+				HGDIOBJ hbmold = SelectObject(hdcMem, hbmCanvas);
+				BITMAPINFO bmpInfo;
+				char *tmpBuffer;
 
-		ZeroMemory(&bmpInfo, sizeof(bmpInfo));
-		bmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-		bmpInfo.bmiHeader.biCompression = BI_RGB;
+				ZeroMemory(&bmpInfo, sizeof(bmpInfo));
+				bmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+				bmpInfo.bmiHeader.biCompression = BI_RGB;
 
-		DrawIconEx(hdcMem, 0, 0, hc, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
-		GetDIBits(hdcScreen, hbmCanvas, 0, 0, NULL, &bmpInfo, DIB_RGB_COLORS);
-		if ((tmpBuffer = (char*)malloc(bmpInfo.bmiHeader.biSizeImage)) == NULL) { ILIBCRITICALEXIT(254); }
+				DrawIconEx(hdcMem, 0, 0, hc, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
+				GetDIBits(hdcScreen, hbmCanvas, 0, 0, NULL, &bmpInfo, DIB_RGB_COLORS);
+				if ((tmpBuffer = (char*)malloc(bmpInfo.bmiHeader.biSizeImage)) == NULL) { ILIBCRITICALEXIT(254); }
 
-		bmpInfo.bmiHeader.biCompression = BI_RGB;
-		GetDIBits(hdcScreen, hbmCanvas, 0, (UINT)(ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2)), tmpBuffer, &bmpInfo, DIB_RGB_COLORS);
-		crc = util_crc((unsigned char*)tmpBuffer, bmpInfo.bmiHeader.biSizeImage, 0);
+				bmpInfo.bmiHeader.biCompression = BI_RGB;
+				GetDIBits(hdcScreen, hbmCanvas, 0, (UINT)(ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2)), tmpBuffer, &bmpInfo, DIB_RGB_COLORS);
+				crc = util_crc((unsigned char*)tmpBuffer, bmpInfo.bmiHeader.biSizeImage, 0);
 
-		free(tmpBuffer);
-		SelectObject(hdcMem, hbmold);
-		ReleaseDC(NULL, hdcMem);
-		ReleaseDC(NULL, hdcScreen);
+				free(tmpBuffer);
+				SelectObject(hdcMem, hbmold);
+			}
+			if (hbmCanvas != NULL) { DeleteObject(hbmCanvas); }
+			if (hdcMem != NULL) { ReleaseDC(NULL, hdcMem); }
+			if (hdcScreen != NULL) { ReleaseDC(NULL, hdcScreen); }
+		}
 	}
 
 	return(crc);
+}
+
+void __stdcall KVM_APCSink(ULONG_PTR user)
+{
+	ILibQueue_EnQueue(gPendingPackets, (char*)user);
+}
+void CALLBACK KVMWinEventProc(
+	HWINEVENTHOOK hook,
+	DWORD event,
+	HWND hwnd,
+	LONG idObject,
+	LONG idChild,
+	DWORD idEventThread,
+	DWORD time)
+{
+	char *buffer;
+	CURSORINFO info = { 0 };
+	int i;
+
+	if (hwnd == NULL && idObject == OBJID_CURSOR)
+	{
+		switch (event)
+		{
+			case EVENT_OBJECT_LOCATIONCHANGE:
+				if (gRemoteMouseRenderDefault != 0 || ((uint64_t)ILibGetUptime() - gMouseInputTime) > 500)
+				{
+					info.cbSize = sizeof(info);
+					GetCursorInfo(&info);
+
+					buffer = (char*)ILibMemory_SmartAllocate(12);
+					((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_MOVE);	// Write the type
+					((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)12);					// Write the size
+					((long*)buffer)[1] = info.ptScreenPos.x;
+					((long*)buffer)[2] = info.ptScreenPos.y;
+					QueueUserAPC((PAPCFUNC)KVM_APCSink, CUR_APCTHREAD, (ULONG_PTR)buffer);
+				}
+				break;
+			case EVENT_OBJECT_NAMECHANGE:
+			case EVENT_OBJECT_HIDE:
+				// Mouse Cursor has changed
+				info.cbSize = sizeof(info);
+				GetCursorInfo(&info);
+				i = KVM_CursorHashToMSG(KVM_GetCursorHash(info.hCursor, NULL, 0));
+
+				buffer = (char*)ILibMemory_SmartAllocate(5);
+				((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+				((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+				buffer[4] = (char)i;																		// Cursor Type
+				QueueUserAPC((PAPCFUNC)KVM_APCSink, CUR_APCTHREAD, (ULONG_PTR)buffer);
+				break;
+			default:
+				//printf("Unknown: %ul\n", event);
+				break;
+		}
+	}
+}
+
+void KVM_StopMessagePump()
+{
+	if (CUR_HWND != NULL) 
+	{
+		PostMessageA(CUR_HWND, WM_QUIT, 0, 0);
+		WaitForSingleObject(CUR_WORKTHREAD, 5000);
+	}
+}
+
+void KVM_UnInitMouseCursors()
+{
+	if (CUR_HOOK != NULL)
+	{
+		UnhookWinEvent(CUR_HOOK);
+		CUR_HOOK = NULL;
+
+		KVM_StopMessagePump();
+	}
+}
+
+LRESULT CALLBACK KVMWindowProc(
+	_In_ HWND   hwnd,
+	_In_ UINT   uMsg,
+	_In_ WPARAM wParam,
+	_In_ LPARAM lParam
+)
+{
+	if (uMsg == WM_CREATE)
+	{
+		CUR_HOOK = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_NAMECHANGE, NULL, KVMWinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+	}
+	return(DefWindowProcA(hwnd, uMsg, wParam, lParam));
+}
+
+void KVM_PumpMessage()
+{
+	MSG m;
+	while (GetMessageA(&m, CUR_HWND, 0, 0) > 0)
+	{
+		TranslateMessage(&m);
+		DispatchMessageA(&m);
+	}
+}
+
+DWORD WINAPI KVM_InitMessagePumpEx(LPVOID parm)
+{
+	memset(&CUR_WNDCLASS, 0, sizeof(CUR_WNDCLASS));
+	CUR_WNDCLASS.hInstance = GetModuleHandleA(NULL);
+	CUR_WNDCLASS.lpszClassName = "MainWWW2Class";
+	CUR_WNDCLASS.cbSize = sizeof(CUR_WNDCLASS);
+	CUR_WNDCLASS.lpfnWndProc = KVMWindowProc;
+
+	if (RegisterClassExA(&CUR_WNDCLASS) != 0)
+	{
+		CUR_HWND = CreateWindowExA(0x00000088, "MainWWW2Class", "TestTitle", 0x00800000, 0, 0, 100, 100, 0, 0, 0, 0);
+		KVM_PumpMessage();
+	}
+	return(0);
+}
+void KVM_InitMessagePump()
+{
+	CUR_APCTHREAD = OpenThread(THREAD_ALL_ACCESS, FALSE, GetCurrentThreadId());
+	CUR_WORKTHREAD = CreateThread(NULL, 0, KVM_InitMessagePumpEx, NULL, 0, 0);
 }
 
 void KVM_InitMouseCursors()
@@ -113,18 +312,19 @@ void KVM_InitMouseCursors()
 	CUR_SIZENWSE = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZENWSE), NULL, 0);				
 	CUR_SIZEWE = KVM_GetCursorHash(LoadCursorA(NULL, IDC_SIZEWE), NULL, 0);					
 	CUR_UPARROW = KVM_GetCursorHash(LoadCursorA(NULL, IDC_UPARROW), NULL, 0);				
-	CUR_WAIT = KVM_GetCursorHash(LoadCursorA(NULL, IDC_WAIT), NULL, 0);						
+	CUR_WAIT = KVM_GetCursorHash(LoadCursorA(NULL, IDC_WAIT), NULL, 0);		
+	
+	KVM_InitMessagePump();
 }
 
-KVM_MouseCursors MouseAction(double absX, double absY, int button, short wheel)
+void MouseAction(double absX, double absY, int button, short wheel)
 {
 	INPUT mouse;
-	KVM_MouseCursors ret = KVM_MouseCursor_NOCHANGE;
 
 	if (button == 0x88) 
 	{
 		// Double click indication, no nothing on windows.
-		return(ret);
+		return;
 	}
 
 	mouse.type = INPUT_MOUSE;
@@ -135,74 +335,8 @@ KVM_MouseCursors MouseAction(double absX, double absY, int button, short wheel)
 	if (wheel) mouse.mi.dwFlags |= MOUSEEVENTF_WHEEL;
 	mouse.mi.time = 0;
 	mouse.mi.dwExtraInfo = 0;
+	gMouseInputTime = (uint64_t)ILibGetUptime();
 	SendInput(1, &mouse, sizeof(INPUT));
-
-	CURSORINFO info = { 0 };
-	info.cbSize = sizeof(info);
-	GetCursorInfo(&info);
-	int i = KVM_GetCursorHash(info.hCursor, NULL, 0);
-
-	if (i != CUR_CURRENT)
-	{
-		CUR_CURRENT = i;
-		if (CUR_CURRENT == CUR_APPSTARTING)
-		{
-			ret = KVM_MouseCursor_APPSTARTING;
-		}
-		else if (CUR_CURRENT == CUR_ARROW)
-		{
-			ret = KVM_MouseCursor_ARROW;
-		}
-		else if (CUR_CURRENT == CUR_CROSS)
-		{
-			ret = KVM_MouseCursor_CROSS;
-		}
-		else if (CUR_CURRENT == CUR_HAND)
-		{
-			ret = KVM_MouseCursor_HAND;
-		}
-		else if (CUR_CURRENT == CUR_HELP)
-		{
-			ret = KVM_MouseCursor_HELP;
-		}
-		else if (CUR_CURRENT == CUR_IBEAM)
-		{
-			ret = KVM_MouseCursor_IBEAM;
-		}
-		else if (CUR_CURRENT == CUR_NO)
-		{
-			ret = KVM_MouseCursor_NO;
-		}
-		else if (CUR_CURRENT == CUR_SIZEALL)
-		{
-			ret = KVM_MouseCursor_SIZEALL;
-		}
-		else if (CUR_CURRENT == CUR_SIZENESW)
-		{
-			ret = KVM_MouseCursor_SIZENESW;
-		}
-		else if (CUR_CURRENT == CUR_SIZENS)
-		{
-			ret = KVM_MouseCursor_SIZENS;
-		}
-		else if (CUR_CURRENT == CUR_SIZENWSE)
-		{
-			ret = KVM_MouseCursor_SIZENWSE;
-		}
-		else if (CUR_CURRENT == CUR_SIZEWE)
-		{
-			ret = KVM_MouseCursor_SIZEWE;
-		}
-		else if (CUR_CURRENT == CUR_UPARROW)
-		{
-			ret = KVM_MouseCursor_UPARROW;
-		}
-		else if (CUR_CURRENT == CUR_WAIT)
-		{
-			ret = KVM_MouseCursor_WAIT;
-		}
-	}
-	return(ret);
 }
 
 
