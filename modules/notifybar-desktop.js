@@ -61,7 +61,7 @@ function windows_notifybar_local(title)
         .createEvent('close')
         .addMethod('close', function close()
         {
-            for (var i in this._pumps)
+            for (var i = 0; i < this._pumps.length; ++i)
             {
                 this._pumps[i].removeAllListeners('exit');
                 this._pumps[i].close();
@@ -99,8 +99,8 @@ function windows_notifybar_local(title)
                 this._HANDLE = h;
             });
             this.notifybar._pumps.peek().on('exit', function (h)
-            {
-                for(var i in this.notifybar._pumps)
+            {             
+                for (var i = 0; i < this.notifybar._pumps.length; ++i)
                 {
                     this.notifybar._pumps[i].removeAllListeners('exit');
                     this.notifybar._pumps[i].close();
