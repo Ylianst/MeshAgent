@@ -151,6 +151,7 @@ if (process.platform == 'darwin')
             var files = require('fs').readdirSync(folder);
             for (var file in files)
             {
+                if (!files[file].endsWith('.plist')) { continue; }
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -411,7 +412,14 @@ if (process.platform == 'darwin')
             child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
             if (useBootout)
             {
-                child.stdin.write('launchctl bootout gui/' + uid + ' ' + this.plist + '\nexit\n');
+                if (uid == null)
+                {
+                    child.stdin.write('launchctl bootout system ' + this.plist + '\nexit\n');
+                }
+                else
+                {
+                    child.stdin.write('launchctl bootout gui/' + uid + ' ' + this.plist + '\nexit\n');
+                }
             }
             else
             {
@@ -2203,35 +2211,23 @@ function serviceManager()
         }
         else if(process.platform == 'darwin')
         {
-            if (require('fs').existsSync('/Library/LaunchDaemons/' + name + '.plist'))
+            service.unload();
+            try
             {
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.on('data', function (chunk) { });
-                child.stdin.write('launchctl stop ' + name + '\n');
-                child.stdin.write('launchctl unload /Library/LaunchDaemons/' + name + '.plist\n');
-                child.stdin.write('exit\n');
-                child.waitExit();
-
-                try
-                {
-                    require('fs').unlinkSync('/Library/LaunchDaemons/' + name + '.plist');
-                    require('fs').unlinkSync(servicePath);
-                }
-                catch(e)
-                {
-                    throw ('Error uninstalling service: ' + name + ' => ' + e);
-                }
-
-                try
-                {
-                    require('fs').rmdirSync('/usr/local/mesh_services/' + name);
-                }
-                catch(e)
-                {}
+                require('fs').unlinkSync(service.plist);
+                require('fs').unlinkSync(servicePath);
             }
-            else
+            catch (e)
             {
-                throw ('Service: ' + name + ' does not exist');
+                throw ('Error uninstalling service: ' + name + ' => ' + e);
+            }
+
+            try
+            {
+                require('fs').rmdirSync('/usr/local/mesh_services/' + name);
+            }
+            catch (e)
+            {
             }
         }
         else if(process.platform == 'freebsd')

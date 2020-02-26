@@ -194,7 +194,14 @@ function uninstallService(params)
         }
         else
         {
-            svc.stop();
+            if (process.platform == 'darwin')
+            {
+                svc.unload();
+            }
+            else
+            {
+                svc.stop();
+            }
             process.stdout.write(' [STOPPED]\n');
             uninstallService2(params);
         }
