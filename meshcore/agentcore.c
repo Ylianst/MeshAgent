@@ -4824,7 +4824,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
 							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/meshagent");	// Restart the service
-							ignore_result(MeshAgent_System(ILibScratchPad));
+							ignore_result(system(ILibScratchPad));
 							break;
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
