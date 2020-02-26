@@ -3883,6 +3883,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			installFlag = 1;
 		}
+		if (strcmp("-funinstall", param[ri]) == 0)
+		{
+			installFlag = 2;
+		}
 	}
 	paramLen -= ixr;
 	if (installFlag != 0)
@@ -3917,8 +3921,21 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					}
 				}
 				duk_pop(ctxx);
-
 				ILibMemory_Free(buf);
+				return(1);
+				break;
+			case 2:
+				duk_eval_string(ctxx, "require('agent-installer');");
+				duk_get_prop_string(ctxx, -1, "fullUninstall");
+				duk_swap_top(ctxx, -2);
+				if (duk_pcall_method(ctxx, 0) != 0)
+				{
+					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
+					{
+						printf("%s\n", duk_safe_to_string(ctxx, -1));
+					}
+				}
+				duk_pop(ctxx);
 				return(1);
 				break;
 			default:

@@ -308,7 +308,7 @@ if (process.platform == 'darwin')
 
             if (this.daemon)
             {
-                if(uid!=null || uid!=0)
+                if(uid!=null && uid!=0)
                 {
                     throw ('LaunchDaemon must run as root');
                 }

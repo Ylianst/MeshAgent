@@ -953,14 +953,13 @@ int wmain(int argc, char* wargv[])
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
 
-	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0))
+	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0))
 	{
 		argv[argc] = argv[1];
 		argv[1] = (char*)ILibMemory_SmartAllocate(4);
 		sprintf_s(argv[1], ILibMemory_Size(argv[1]), "run");
 		argc += 1;
 	}
-
 
 	/*
 #ifndef NOMESHCMD

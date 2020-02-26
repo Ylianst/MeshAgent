@@ -37,6 +37,11 @@ function installService(params)
         process.exit();
     }
     var svc = require('service-manager').manager.getService(process.platform=='win32'?'Mesh Agent':'meshagent');
+    if (process.platform == 'darwin')
+    {
+        svc.load();
+    }
+
 
     if(process.platform == 'win32')
     {
@@ -126,7 +131,14 @@ function uninstallService2(params)
     {
         process.stdout.write(' [ERROR]\n');
     }
-    installService(params);
+    if (params != null)
+    {
+        installService(params);
+    }
+    else
+    {
+        process.exit();
+    }
 }
 function uninstallService(params)
 {
@@ -185,7 +197,24 @@ function serviceExists(loc, params)
     }
 }
 
+function fullUninstall()
+{
+    console.setDestination(console.Destinations.DISABLED);
 
+    try
+    {
+        process.stdout.write('...Checking for previous installation');
+        var s = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        var loc = s.appLocation();
+        s.close();
+    }
+    catch (e)
+    {
+        process.stdout.write(' [NONE]\n');
+        process.exit();
+    }
+    serviceExists(loc, null);
+}
 
 function fullInstall(jsonString)
 {
@@ -211,5 +240,6 @@ function fullInstall(jsonString)
 
 module.exports =
     {
-        fullInstall: fullInstall
+        fullInstall: fullInstall,
+        fullUninstall: fullUninstall
     };
