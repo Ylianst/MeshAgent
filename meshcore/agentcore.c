@@ -1774,6 +1774,20 @@ duk_ret_t ILibDuktape_MeshAgent_getIdleTimeout(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_MeshAgent_getStartupOptions(duk_context *ctx)
+{
+	MeshAgentHostContainer *agent;
+	duk_push_this(ctx);																		// [MeshAgent]
+	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+
+	int varLen = ILibSimpleDataStore_Cached_GetJSON(agent->masterDb, NULL, 0);
+	char *buffer = duk_push_fixed_buffer(ctx, varLen);
+	ILibSimpleDataStore_Cached_GetJSON(agent->masterDb, buffer, varLen);
+	duk_push_string(ctx, buffer);
+	duk_json_decode(ctx, -1);
+	return(1);
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1845,6 +1859,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MeshAgent_Finalizer);
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "activeMicroLMS", (agent->microLMS != NULL ? 1 : 0));
 		ILibDuktape_CreateInstanceMethod(ctx, "restartCore", ILibDuktape_MeshAgent_dumpCoreModule, 0);
+		ILibDuktape_CreateInstanceMethod(ctx, "getStartupOptions", ILibDuktape_MeshAgent_getStartupOptions, 0);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");

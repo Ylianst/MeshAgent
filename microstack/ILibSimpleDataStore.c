@@ -114,6 +114,15 @@ void ILibSimpleDataStore_SHA384(char *data, int datalen, char* result) { util_sh
 
 void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen)
 {
+	if (valueLen > 2)
+	{
+		if (value[0] == '"' && value[valueLen - 1] == '"')
+		{
+			value = value + 1;
+			valueLen -= 2;
+		}
+	}
+
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen, 0, NULL, NULL);
