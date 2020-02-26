@@ -40,6 +40,23 @@ function installService(params)
     if (process.platform == 'darwin')
     {
         svc.load();
+        process.stdout.write('   -> setting up launch agent...');
+        try
+        {
+            require('service-manager').manager.installLaunchAgent(
+                {
+                    name: 'meshagent',
+                    servicePath: svc.appLocation(),
+                    startType: 'AUTO_START',
+                    sessionTypes: ['LoginWindow'],
+                    parameters: ['-kvm1']
+                });
+            process.stdout.write(' [DONE]\n');
+        }
+        catch (sie)
+        {
+            process.stdout.write(' [ERROR] ' + sie);
+        }
     }
 
 
@@ -130,6 +147,21 @@ function uninstallService2(params)
     catch (e)
     {
         process.stdout.write(' [ERROR]\n');
+    }
+    if (process.platform == 'darwin')
+    {
+        process.stdout.write('   -> Uninstalling launch agent...');
+        try
+        {
+            var launchagent = require('service-manager').manager.getLaunchAgent('meshagent');
+            launchagent.unload();
+            require('fs').unlinkSync(launchagent.plist);
+            process.stdout.write(' [DONE]\n');
+        }
+        catch (e)
+        {
+            process.stdout.write(' [ERROR]\n');
+        }
     }
     if (params != null)
     {
