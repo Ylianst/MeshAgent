@@ -1514,23 +1514,38 @@ duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 // Javascript ExecPowerState(int), executes power state command on the computer (Sleep, Hibernate...)
 duk_ret_t ILibDuktape_MeshAgent_ExecPowerState(duk_context *ctx)
 {
-#ifdef __APPLE__
-	duk_push_null(ctx);
-#else
 	int force = 0;
 	int numArgs = (int)duk_get_top(ctx);
-	duk_push_this(ctx);	// [MeshAgent]
-
 	if (numArgs == 2 && duk_is_number(ctx, 1)) { force = duk_get_int(ctx, 1); }
+
+
+	duk_push_this(ctx);	// [MeshAgent]
 	if (duk_is_number(ctx, 0))
 	{
+#ifdef __APPLE__
+		switch (duk_require_int(ctx, 0))
+		{
+			case 2: // SHUTDOWN
+				duk_peval_string_noresult(ctx, "require('mac-powerutil').shutdown();");
+				duk_push_int(ctx, 1);
+				break;
+			case 3: // REBOOT
+				duk_peval_string_noresult(ctx, "require('mac-powerutil').restart();");
+				duk_push_int(ctx, 1);
+				break;
+			default:
+				duk_push_int(ctx, 0);
+				break;
+		}
+#else
 		duk_push_int(ctx, MeshInfo_PowerState((AgentPowerStateActions)duk_get_int(ctx, 0), force));
+#endif
 	}
 	else
 	{
 		duk_push_null(ctx);
 	}
-#endif
+
 	return 1;
 }
 
@@ -2488,7 +2503,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("ProcessCommand(%u)...\n", command);
-		ILIBLOGMESSAGEX("ProcessCommand(%u)...\n", command);
+		ILIBLOGMESSAGEX("ProcessCommand(%u)...", command);
 	}
 
 #ifndef MICROSTACK_NOTLS
@@ -2502,7 +2517,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthRequest: // This is basic authentication information from the server, we need to sign this and return the signature.
 			if (cmdLen == sizeof(MeshCommand_BinaryPacket_AuthRequest))
 			{
-				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Request...\n"); }
+				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Request..."); }
 				MeshCommand_BinaryPacket_AuthRequest *AuthRequest = (MeshCommand_BinaryPacket_AuthRequest*)cmd;
 				int signLen;
 				SHA512_CTX c;
@@ -2519,7 +2534,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						printf("Bad server certificate hash\r\n"); // TODO: Disconnect
 						if (agent->controlChannelDebug != 0)
 						{
-							ILIBLOGMESSAGEX("Bad server certificate hash\n");
+							ILIBLOGMESSAGEX("Bad server certificate hash");
 						}
 						break;
 					}
@@ -2577,7 +2592,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthVerify: // This is the signature from the server. We need to check everything is ok.
 			if (cmdLen > 8)
 			{
-				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Verification...\n"); }
+				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Verification..."); }
 
 				MeshCommand_BinaryPacket_AuthVerify_Header *avh = (MeshCommand_BinaryPacket_AuthVerify_Header*)cmd;
 #ifdef WIN32
@@ -2608,7 +2623,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA256_HASHSIZE) != 0) 
 						{
 							printf("Server certificate mismatch\r\n"); break; // TODO: Disconnect
-							if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server certificate mismatch\n"); }
+							if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server certificate mismatch"); }
 						}
 					}
 
@@ -2635,7 +2650,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						MeshServer_SendAgentInfo(agent, WebStateObject);
 					} else {
 						printf("Invalid server signature\r\n");
-						if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Invalid Server Signature\n"); }
+						if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Invalid Server Signature"); }
 						// TODO: Disconnect
 					}
 
@@ -2646,7 +2661,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				break;
 			case MeshCommand_AuthConfirm: // Server indicates that we are authenticated, we can now send data.
 				{
-				if (agent->controlChannelDebug != 0) { printf("Authentication Complete...\n");  ILIBLOGMESSAGEX("Authentication Complete...\n"); }
+				if (agent->controlChannelDebug != 0) { printf("Authentication Complete...\n");  ILIBLOGMESSAGEX("Authentication Complete..."); }
 
 					// We have to wait for the server to indicate that it authenticated the agent (us) before sending any data to the server.
 					// Node authentication requires the server make database calls, so we need to delay.
@@ -2713,7 +2728,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 	if (agent->controlChannelDebug != 0) 
 	{
 		printf("BinaryCommand(%u, %u)...\n", command, requestid);
-		ILIBLOGMESSAGEX("BinaryCommand(%u, %u)...\n", command, requestid); 
+		ILIBLOGMESSAGEX("BinaryCommand(%u, %u)...", command, requestid); 
 	}
 
 
@@ -3043,7 +3058,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			if (agent->controlChannelDebug != 0)
 			{
 				printf("Control Channel Connection Established...\n");
-				ILIBLOGMESSAGEX("Control Channel Connection Established...\n");
+				ILIBLOGMESSAGEX("Control Channel Connection Established...");
 			}
 #ifndef MICROSTACK_NOTLS
 			int len;
@@ -3094,7 +3109,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 					if (agent->controlChannelDebug != 0)
 					{
 						printf("TLS Server Cert matches Mesh Server Cert...\n");
-						ILIBLOGMESSAGEX("TLS Server Cert matches Mesh Server Cert...\n");
+						ILIBLOGMESSAGEX("TLS Server Cert matches Mesh Server Cert...");
 					}
 					// The TLS certificate of this server is correct, no need to authenticate further.
 					unsigned short response = htons(MeshCommand_AuthConfirm); // Send indication to the server that it's already authenticated
@@ -3105,7 +3120,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				if (agent->controlChannelDebug != 0)
 				{
 					printf("Sending Authentication Data...\n");
-					ILIBLOGMESSAGEX("Sending Authentication Data...\n");
+					ILIBLOGMESSAGEX("Sending Authentication Data...");
 				}
 
 				// Start authentication by sending a auth nonce & server TLS cert hash - If we indicated AuthConfirm already, the server will use this data but not respond to it.
@@ -3126,7 +3141,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			if (agent->controlChannelDebug != 0)
 			{
 				printf("Control Channel Disconnected...\n");
-				ILIBLOGMESSAGEX("Control Channel Disconnected...\n");
+				ILIBLOGMESSAGEX("Control Channel Disconnected...");
 			}
 												   
 			// If the channel had been authenticates, inform JavaScript core module that we are not disconnected
@@ -3271,7 +3286,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		if (agent->controlChannelDebug != 0)
 		{
 			printf("Swapping [%s] for [%s]\n", agent->serveruri, "wss://meshcentral.com:443/agent.ashx");
-			ILIBLOGMESSAGEX("Swapping [%s] for [%s]\n", agent->serveruri, "wss://meshcentral.com:443/agent.ashx");
+			ILIBLOGMESSAGEX("Swapping [%s] for [%s]", agent->serveruri, "wss://meshcentral.com:443/agent.ashx");
 		}
 		strcpy_s(agent->serveruri, sizeof(agent->serveruri), "wss://meshcentral.com:443/agent.ashx");
 		strcpy_s(serverUrl, serverUrlLen, "wss://meshcentral.com:443/agent.ashx");
@@ -3366,7 +3381,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer));
 		printf("Connecting to: %s\n", agent->serveruri);
-		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s\n", agent->serveruri); }
+		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s", agent->serveruri); }
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(uintptr_t)0x01); }
@@ -3454,8 +3469,8 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
 #endif
 
-	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("PLATFORM_TYPE: %d\n", agent->platformType); }
-	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("Running as Service: %d\n", agent->JSRunningAsService); }
+	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("PLATFORM_TYPE: %d", agent->platformType); }
+	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("Running as Service: %d", agent->JSRunningAsService); }
 
 	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
 	if (agent->controlChannelDebug != 0)
@@ -4007,6 +4022,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 #endif
 #if !defined(MICROSTACK_NOTLS)
+
+#if defined(__APPLE__)
+	if (ILibSimpleDataStore_Get(agentHost->masterDb, "controlChannelDebug", NULL, 0) != 0)
+	{
+		ILIBLOGMESSAGEX("Waiting for network...");
+	}
+	duk_peval_string_noresult(tmpCtx, "process.stdout.write('waiting for network...');var child = require('child_process').execFile('/bin/sh', ['sh']);child.stdin.write('ipconfig waitall\\nexit\\n');child.waitExit();process.stdout.write('[OK]\\n');");
+	if (ILibSimpleDataStore_Get(agentHost->masterDb, "controlChannelDebug", NULL, 0) != 0)
+	{
+		ILIBLOGMESSAGEX("...[OK]\n");
+	}
+#endif
+
+
 	// Check the local MacAddresses, to see if we need to reset our NodeId
 	if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
 	{
