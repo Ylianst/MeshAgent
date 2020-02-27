@@ -522,7 +522,7 @@ int get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
 						HGDIOBJ hbmold = SelectObject(hdcMem, hbmCanvas);
 
 						DrawIconEx(hdcMem, 0, 0, info.hCursor, bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), 0, NULL, DI_NORMAL);
-						BitBlt(hCaptureDC, mouseMove[1], mouseMove[2], bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), hdcMem, 0, 0, SRCPAINT);
+						BitBlt(hCaptureDC, mouseMove[1], mouseMove[2], bm.bmWidth, ii.hbmColor ? bm.bmHeight : (bm.bmHeight / 2), hdcMem, 0, 0, SRCINVERT);
 
 						SelectObject(hdcMem, hbmold);
 					}
