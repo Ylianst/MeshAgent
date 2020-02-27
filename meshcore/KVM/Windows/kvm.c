@@ -913,9 +913,22 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		{
 			if (ntohs(((unsigned short*)tmoBuffer)[0]) == MNG_KVM_MOUSE_MOVE)
 			{
-				mouseMove[0] = 1;
-				mouseMove[1] = ((long*)tmoBuffer)[1] - VSCREEN_X;
-				mouseMove[2] = ((long*)tmoBuffer)[2] - VSCREEN_Y;
+				if (SCREEN_SEL_TARGET == 0)
+				{
+					mouseMove[0] = 1;
+					mouseMove[1] = ((long*)tmoBuffer)[1] - VSCREEN_X;
+					mouseMove[2] = ((long*)tmoBuffer)[2] - VSCREEN_Y;
+				}
+				else
+				{
+					if (((long*)tmoBuffer)[1] >= SCREEN_X && ((long*)tmoBuffer)[1] <= (SCREEN_X + SCREEN_WIDTH) &&
+						((long*)tmoBuffer)[2] >= SCREEN_Y && ((long*)tmoBuffer)[2] <= (SCREEN_Y + SCREEN_HEIGHT))
+					{
+						mouseMove[0] = 1;
+						mouseMove[1] = ((long*)tmoBuffer)[1] - SCREEN_X;
+						mouseMove[2] = ((long*)tmoBuffer)[2] - SCREEN_Y;
+					}
+				}
 			}
 			else
 			{
