@@ -27,6 +27,7 @@ limitations under the License.
 extern void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen);
 extern ILibQueue gPendingPackets;
 extern int gRemoteMouseRenderDefault;
+extern int gRemoteMouseMoved;
 uint64_t gMouseInputTime = 0;
 
 HWINEVENTHOOK CUR_HOOK = NULL;
@@ -179,6 +180,7 @@ int KVM_GetCursorHash(HCURSOR hc, char *buffer, size_t bufferLen)
 
 void __stdcall KVM_APCSink(ULONG_PTR user)
 {
+	if (ntohs(((unsigned short*)user)[0]) == MNG_KVM_MOUSE_MOVE) { gRemoteMouseMoved = 0; }
 	ILibQueue_EnQueue(gPendingPackets, (char*)user);
 }
 void CALLBACK KVMWinEventProc(

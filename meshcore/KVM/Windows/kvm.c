@@ -39,6 +39,7 @@ limitations under the License.
 ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
 int gProcessTSID = -1;
 extern int gRemoteMouseRenderDefault;
+int gRemoteMouseMoved = 0;
 
 #pragma pack(push, 1)
 typedef struct KVMDebugLog
@@ -498,6 +499,8 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 
 			if (size == 10 || size == 12)
 			{
+				gRemoteMouseMoved = 1;
+
 				// Get positions and scale correctly
 				x = (double)ntohs(((short*)(block))[3]) * 1024 / SCALING_FACTOR;
 				y = (double)ntohs(((short*)(block))[4]) * 1024 / SCALING_FACTOR;
@@ -936,7 +939,24 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 			}
 			ILibMemory_Free(tmoBuffer);
 		}
+		if (mouseMove[0] == 0 && (gRemoteMouseRenderDefault != 0 || gRemoteMouseMoved == 0))
+		{
+			mouseMove[0] = 1;
+			CURSORINFO info = { 0 };
+			info.cbSize = sizeof(info);
+			GetCursorInfo(&info);
 
+			if (SCREEN_SEL_TARGET == 0)
+			{
+				mouseMove[1] = info.ptScreenPos.x - VSCREEN_X;
+				mouseMove[2] = info.ptScreenPos.y - VSCREEN_Y;
+			}
+			else
+			{
+				mouseMove[1] = info.ptScreenPos.x - SCREEN_X;
+				mouseMove[2] = info.ptScreenPos.y - SCREEN_Y;
+			}
+		}
 
 		// Scan the desktop
 		if (get_desktop_buffer(&desktop, &desktopsize, mouseMove) == 1 || desktop == NULL)
