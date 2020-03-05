@@ -92,7 +92,8 @@ int slave2master[2];
 FILE *logFile = NULL;
 int g_enableEvents = 0;
 extern int gRemoteMouseRenderDefault;
-uint64_t gMouseInputTime = 0;
+
+int remoteMouseX = 0, remoteMouseY = 0;
 
 ILibQueue g_messageQ;
 
@@ -488,14 +489,16 @@ int kvm_server_inputdata(char* block, int blocklen)
 			short w = 0;
 			if (size == 10 || size == 12)
 			{
-				gMouseInputTime = (uint64_t)ILibGetUptime();
-
 				x = ((int)ntohs(((unsigned short*)(block))[3]));
 				y = ((int)ntohs(((unsigned short*)(block))[4]));
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
 				if (logFile) { fprintf(logFile, "RemoteMouseMove: (%d, %d)\n", x, y); }
 				// printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
-				if (g_enableEvents) MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
+				if (g_enableEvents)
+				{
+					remoteMouseX = x, remoteMouseY = y;
+					MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
+				}
 			}
 			break;
 		}
@@ -1014,9 +1017,7 @@ void* kvm_server_mainloop(void* parm)
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
 			if (rs == 1 && cursordisplay != NULL)
 			{
-				uint64_t ct = ILibGetUptime();
-
-				if (gRemoteMouseRenderDefault != 0 || ((gMouseInputTime < ct ? (ct - gMouseInputTime > 1500) : 0) != 0))
+				if (gRemoteMouseRenderDefault != 0 || (remoteMouseX != rx && remoteMouseY != ry))
 				{
 					cimage = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 					unsigned short w = ((unsigned short*)(cimage + 4))[0];
