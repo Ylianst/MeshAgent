@@ -1021,11 +1021,18 @@ void* kvm_server_mainloop(void* parm)
 					cimage = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 					unsigned short w = ((unsigned short*)(cimage + 4))[0];
 					unsigned short h = ((unsigned short*)(cimage + 6))[0];
+					unsigned short xhot = ((unsigned short*)(cimage + 8))[0];
+					unsigned short yhot = ((unsigned short*)(cimage + 10))[0];
+					unsigned short mx = rx - xhot, my = ry - yhot;
 					char *pixels = cimage + 24;
+
 					//if (logFile) { fprintf(logFile, "BBP: %d, pad: %d, unit: %d, BPP: %d, F: %d, XO: %d: PW: %d\n", image->bytes_per_line, image->bitmap_pad, image->bitmap_unit, image->bits_per_pixel, image->format, image->xoffset, (adjust_screen_size(SCREEN_WIDTH) - image->width) * 3); fflush(logFile); }
 					//if (logFile) { fprintf(logFile, "[%d/ %d x %d] (%d, %d) => (%d, %d | %u, %u)\n", image->bits_per_pixel, xa.width, xa.height, screen_width, screen_height, rx, ry,w , h); fflush(logFile); }
 
-					bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, screen_width, screen_height, rx, ry, 1);
+					if (xhot > rx) { mx = 0; } else if ((mx + w) > screen_width) { mx = screen_width - w; }
+					if (yhot > ry) { my = 0; } else if ((my + h) > screen_height) { my = screen_height - h; }
+
+					bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, screen_width, screen_height, mx, my, 1);
 				}
 			}
 			getScreenBuffer((char **)&desktop, &desktopsize, image);
