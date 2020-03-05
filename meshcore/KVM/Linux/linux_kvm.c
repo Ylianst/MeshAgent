@@ -27,6 +27,7 @@ limitations under the License.
 #include <sys/shm.h>
 #include <X11/extensions/XShm.h>
 #include <X11/keysym.h>
+#include <X11/Xlib.h>
 #include <dlfcn.h>
 
 #if !defined(_FREEBSD)
@@ -90,6 +91,8 @@ int master2slave[2];
 int slave2master[2];
 FILE *logFile = NULL;
 int g_enableEvents = 0;
+extern int gRemoteMouseRenderDefault;
+uint64_t gMouseInputTime = 0;
 
 ILibQueue g_messageQ;
 
@@ -123,6 +126,10 @@ typedef struct x11_struct
 	Window(*XRootWindow)(Display *d, int screen_number);
 	void(*XSync)(Display *d, Bool discard);
 	void(*XFree)(void *data);
+	void(*XSelectInput)(Display *d, Window w, long mask);
+	int(*XGetWindowAttributes)(Display *d, Window w, XWindowAttributes *a);
+	void(*XChangeWindowAttributes)(Display *d, Window w, unsigned long valuemask, XSetWindowAttributes *a);
+	int(*XQueryPointer)(Display *d, Window w, Window *rr, Window *cr, int *rx, int *ry, int *wx, int *wy, unsigned int *mr);
 }x11_struct;
 x11_struct *x11_exports = NULL;
 
@@ -364,6 +371,10 @@ int kvm_init(int displayNo)
 			((void**)x11_exports)[10] = (void*)dlsym(x11_exports->x11_lib, "XRootWindow");
 			((void**)x11_exports)[11] = (void*)dlsym(x11_exports->x11_lib, "XSync");
 			((void**)x11_exports)[12] = (void*)dlsym(x11_exports->x11_lib, "XFree");
+			((void**)x11_exports)[13] = (void*)dlsym(x11_exports->x11_lib, "XSelectInput");
+			((void**)x11_exports)[14] = (void*)dlsym(x11_exports->x11_lib, "XGetWindowAttributes");
+			((void**)x11_exports)[15] = (void*)dlsym(x11_exports->x11_lib, "XChangeWindowAttributes");
+			((void**)x11_exports)[16] = (void*)dlsym(x11_exports->x11_lib, "XQueryPointer");
 
 			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
 			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
@@ -477,9 +488,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 			short w = 0;
 			if (size == 10 || size == 12)
 			{
+				gMouseInputTime = (uint64_t)ILibGetUptime();
+
 				x = ((int)ntohs(((unsigned short*)(block))[3]));
 				y = ((int)ntohs(((unsigned short*)(block))[4]));
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
+				if (logFile) { fprintf(logFile, "RemoteMouseMove: (%d, %d)\n", x, y); }
 				// printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
 				if (g_enableEvents) MouseAction(x, y, (int)(unsigned char)(block[5]), w, eventdisplay);
 			}
@@ -580,15 +594,147 @@ void kvm_server_jpegerror(char *msg)
 	ILibQueue_UnLock(g_messageQ);
 }
 
+#pragma pack(push, 1)
+typedef struct bitmapdata
+{
+	int a;
+	int r;
+	int g;
+	int b;
+}bitmapdata;
+
+typedef struct bitmapdata2
+{
+	unsigned char b;
+	unsigned char g;
+	unsigned char r;
+	unsigned char a;
+}bitmapdata2;
+#pragma pack(pop)
+
+void kvm_test_disaplymatrix(char *source, int width, int height)
+{
+	int i;
+	int row = 0, column = 0;
+	for (i = 0; i < (width*height); ++i)
+	{
+		printf("[%d, %d, %d, %d] ", ((bitmapdata*)source)[i].a, ((bitmapdata*)source)[i].r, ((bitmapdata*)source)[i].g, ((bitmapdata*)source)[i].b);
+		if (++column == width)
+		{
+			column = 0;
+			++row;
+			printf("\n");
+		}
+	}
+}
+
+int kvm_createrect(char *sourcebitmap, int source_width, int source_height, int rx, int ry, int rw, int rh, char *buffer, int bufferSize)
+{
+	int i, len = rh * sizeof(bitmapdata*);
+	if (bufferSize < len || buffer == NULL) { return(len); }
+	memset(buffer, 0, len);
+
+	bitmapdata **rows = (bitmapdata**)buffer;
+	for (i = ry; (i - ry) < rh; ++i)
+	{
+		rows[i - ry] = (bitmapdata*)(sourcebitmap + (i*source_width * sizeof(bitmapdata)));
+	}
+
+	bitmapdata **rr = (bitmapdata**)buffer;
+	for (i = 0; i < rh; ++i)
+	{
+		rr[i] = &(rr[i][rx]);
+	}
+	return(0);
+}
+
+int kvm_createrect3(unsigned long *sourcebitmap, int source_width, int source_height, int rx, int ry, int rw, int rh, char *buffer, int bufferSize)
+{
+	int i, len = (rw * rh * sizeof(bitmapdata2)) + (rh * sizeof(bitmapdata2*));
+	if (bufferSize < len || buffer == NULL) { return(len); }
+	memset(buffer, 0, len);
+	
+	bitmapdata2 **ret = (bitmapdata2**)buffer;
+	bitmapdata2 *data = (bitmapdata2*)(buffer + (sizeof(bitmapdata2*) * rh));
+
+	int row = 0, col = 0;
+
+	for (i = 0; i < rh; ++i)
+	{
+		ret[i] = (bitmapdata2*)((char*)data + (i * rw * sizeof(bitmapdata2)));
+	}
+
+	for (i = 0; i < source_width*source_height; ++i, ++col)
+	{
+		if (col >= source_width) { col = 0; ++row; }
+		if (row >= ry && row < (ry + rh) &&
+			col >= rx && col < (rx + rw))
+		{
+			ret[row - rx][col - ry].a = (sourcebitmap[i] >> 24) & 0xFF;
+			ret[row - rx][col - ry].r = (sourcebitmap[i] >> 16) & 0xFF;
+			ret[row - rx][col - ry].g = (sourcebitmap[i] >> 8) & 0xFF;
+			ret[row - rx][col - ry].b = (sourcebitmap[i] >> 0) & 0xFF;
+		}
+	}
+
+	return(0);
+}
+int kvm_createrect2(char *sourcebitmap, int source_width, int source_height, int rx, int ry, int rw, int rh, char *buffer, int bufferSize)
+{
+	int i, len = rh * sizeof(bitmapdata2*);
+	if (bufferSize < len || buffer == NULL) { return(len); }
+	memset(buffer, 0, len);
+
+	bitmapdata2 **rows = (bitmapdata2**)buffer;
+
+	for (i = 0; i < rh; ++i)
+	{
+		rows[i] = (bitmapdata2*)(sourcebitmap + ((i + ry)*source_width * sizeof(bitmapdata2)) + (rx * sizeof(bitmapdata2)));
+	}
+
+	return(0);
+}
+void bitblt(char *sourcebitmap, int source_width, int source_height, int sx, int sy, int rw, int rh, char *destbitmap, int dest_width, int dest_height, int dx, int dy, int rmode)
+{
+	int x, y;
+	char *srect, *drect;
+	int srectLen = kvm_createrect3((unsigned long*)sourcebitmap, source_width, source_height, sx, sy, rw, rh, NULL, 0);
+	int drectLen = kvm_createrect2(destbitmap, dest_width, dest_height, dx, dy, rw, rh, NULL, 0);
+
+	srect = ILibMemory_SmartAllocate(srectLen);
+	drect = ILibMemory_SmartAllocate(drectLen);
+
+	kvm_createrect3((unsigned long*)sourcebitmap, source_width, source_height, sx, sy, rw, rh, srect, srectLen);
+	kvm_createrect2(destbitmap, dest_width, dest_height, dx, dy, rw, rh, drect, drectLen);
+
+	for (y = 0; y < rh; ++y)
+	{
+		for (x = 0; x < rw; ++x)
+		{
+			if (((bitmapdata2**)srect)[y][x].a > 128)
+			{
+				((bitmapdata2**)drect)[y][x].r = (255 - ((bitmapdata2**)srect)[y][x].r);
+				((bitmapdata2**)drect)[y][x].g = (255 - ((bitmapdata2**)srect)[y][x].g);
+				((bitmapdata2**)drect)[y][x].b = (255 - ((bitmapdata2**)srect)[y][x].b);
+			}
+		}
+	}
+
+	ILibMemory_Free(srect);
+	ILibMemory_Free(drect);
+}
+
 void* kvm_server_mainloop(void* parm)
 {
+	Window rr, cr;
+	int rx, ry, wx, wy, rs;
+	unsigned int mr;
+	char *cursor_image = NULL,*cimage;
+
 	int x, y, height, width, r, c, count = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
-	//long long prev_timestamp = 0;
-	//long long cur_timestamp = 0;
-	//long long time_diff = 50;
-	//struct timeb tp;
+
 	void *desktop = NULL;
 	XImage *image = NULL;
 	eventdisplay = NULL;
@@ -726,7 +872,6 @@ void* kvm_server_mainloop(void* parm)
 							}
 						}
 					
-
 						if (name != NULL)
 						{
 							if (strcmp(name, "bottom_left_corner") == 0 || strcmp(name, "sw-resize") == 0) { curcursor = KVM_MouseCursor_SIZENESW; }
@@ -749,7 +894,7 @@ void* kvm_server_mainloop(void* parm)
 						else
 						{
 							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
-							char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
+							cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
 							if (sizeof(void*) == 8)
 							{
 								unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
@@ -863,8 +1008,28 @@ void* kvm_server_mainloop(void* parm)
 		if (image == NULL) {
 			g_shutdown = 1;
 		}
-		else {
+		else 
+		{
+			rs = x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay)),
+				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
+			if (rs == 1 && cursordisplay != NULL)
+			{
+				uint64_t ct = ILibGetUptime();
+
+				if (gRemoteMouseRenderDefault != 0 || ((gMouseInputTime < ct ? (ct - gMouseInputTime > 1500) : 0) != 0))
+				{
+					cimage = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
+					unsigned short w = ((unsigned short*)(cimage + 4))[0];
+					unsigned short h = ((unsigned short*)(cimage + 6))[0];
+					char *pixels = cimage + 24;
+					//if (logFile) { fprintf(logFile, "BBP: %d, pad: %d, unit: %d, BPP: %d, F: %d, XO: %d: PW: %d\n", image->bytes_per_line, image->bitmap_pad, image->bitmap_unit, image->bits_per_pixel, image->format, image->xoffset, (adjust_screen_size(SCREEN_WIDTH) - image->width) * 3); fflush(logFile); }
+					//if (logFile) { fprintf(logFile, "[%d/ %d x %d] (%d, %d) => (%d, %d | %u, %u)\n", image->bits_per_pixel, xa.width, xa.height, screen_width, screen_height, rx, ry,w , h); fflush(logFile); }
+
+					bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, screen_width, screen_height, rx, ry, 1);
+				}
+			}
 			getScreenBuffer((char **)&desktop, &desktopsize, image);
+
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) {
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
 					height = TILE_HEIGHT * y;
