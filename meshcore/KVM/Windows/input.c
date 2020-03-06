@@ -29,6 +29,7 @@ extern ILibQueue gPendingPackets;
 extern int gRemoteMouseRenderDefault;
 extern int gRemoteMouseMoved;
 uint64_t gMouseInputTime = 0;
+int gCurrentCursor = KVM_MouseCursor_HELP;
 
 HWINEVENTHOOK CUR_HOOK = NULL;
 WNDCLASSEXA CUR_WNDCLASS;
@@ -194,7 +195,6 @@ void CALLBACK KVMWinEventProc(
 {
 	char *buffer;
 	CURSORINFO info = { 0 };
-	int i;
 
 	if (hwnd == NULL && idObject == OBJID_CURSOR)
 	{
@@ -219,12 +219,12 @@ void CALLBACK KVMWinEventProc(
 				// Mouse Cursor has changed
 				info.cbSize = sizeof(info);
 				GetCursorInfo(&info);
-				i = KVM_CursorHashToMSG(KVM_GetCursorHash(info.hCursor, NULL, 0));
+				gCurrentCursor = KVM_CursorHashToMSG(KVM_GetCursorHash(info.hCursor, NULL, 0));
 
 				buffer = (char*)ILibMemory_SmartAllocate(5);
 				((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
 				((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-				buffer[4] = (char)i;																		// Cursor Type
+				buffer[4] = (char)gCurrentCursor;															// Cursor Type
 				QueueUserAPC((PAPCFUNC)KVM_APCSink, CUR_APCTHREAD, (ULONG_PTR)buffer);
 				break;
 			default:

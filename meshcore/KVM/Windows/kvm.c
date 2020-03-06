@@ -40,6 +40,7 @@ ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
 int gProcessTSID = -1;
 extern int gRemoteMouseRenderDefault;
 int gRemoteMouseMoved = 0;
+extern int gCurrentCursor;
 
 #pragma pack(push, 1)
 typedef struct KVMDebugLog
@@ -819,7 +820,8 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	void *reserved = ((void**)parm)[1];
 	char *tmoBuffer;
 	long mouseMove[3] = { 0,0,0 };
-	
+	int sentHideCursor = 0;
+
 	gPendingPackets = ILibQueue_Create();
 	KVM_InitMouseCursors();
 
@@ -935,7 +937,10 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 			}
 			else
 			{
-				writeHandler(tmoBuffer, (int)ILibMemory_Size(tmoBuffer), reserved);
+				if (ntohs(((unsigned short*)tmoBuffer)[0]) != MNG_KVM_MOUSE_CURSOR || sentHideCursor==0)
+				{
+					writeHandler(tmoBuffer, (int)ILibMemory_Size(tmoBuffer), reserved);
+				}
 			}
 			ILibMemory_Free(tmoBuffer);
 		}
@@ -955,6 +960,30 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 			{
 				mouseMove[1] = info.ptScreenPos.x - SCREEN_X;
 				mouseMove[2] = info.ptScreenPos.y - SCREEN_Y;
+			}
+		}
+		if (mouseMove[0] != 0)
+		{
+			if (sentHideCursor == 0)
+			{
+				sentHideCursor = 1;
+				char tmpBuffer[5];
+				((unsigned short*)tmpBuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+				((unsigned short*)tmpBuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
+				tmpBuffer[4] = (char)KVM_MouseCursor_NONE;														// Cursor Type
+				writeHandler(tmpBuffer, 5, reserved);
+			}
+		}
+		else
+		{
+			if (sentHideCursor != 0)
+			{
+				sentHideCursor = 0;
+				char tmpBuffer[5];
+				((unsigned short*)tmpBuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+				((unsigned short*)tmpBuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
+				tmpBuffer[4] = (char)gCurrentCursor;															// Cursor Type
+				writeHandler(tmpBuffer, 5, reserved);
 			}
 		}
 

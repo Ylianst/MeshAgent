@@ -18,6 +18,7 @@ limitations under the License.
 
 typedef enum KVM_MouseCursors
 {
+	KVM_MouseCursor_NONE		= 255,
 	KVM_MouseCursor_NOCHANGE	= -1,
 	KVM_MouseCursor_ARROW		= 0, 
 	KVM_MouseCursor_APPSTARTING = 1,
