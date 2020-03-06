@@ -44,6 +44,7 @@ extern char* g_ILibCrashDump_path;
 
 typedef enum KVM_MouseCursors
 {
+	KVM_MouseCursor_NONE = 255,
 	KVM_MouseCursor_NOCHANGE = -1,
 	KVM_MouseCursor_ARROW = 0,
 	KVM_MouseCursor_APPSTARTING = 1,
@@ -61,7 +62,7 @@ typedef enum KVM_MouseCursors
 	KVM_MouseCursor_WAIT = 13
 }KVM_MouseCursors;
 
-
+int curcursor = KVM_MouseCursor_HELP;
 int SLAVELOG = 0;
 
 int SCREEN_NUM = 0;
@@ -735,6 +736,7 @@ void* kvm_server_mainloop(void* parm)
 	char *cursor_image = NULL,*cimage;
 
 	int x, y, height, width, r, c, count = 0;
+	int sentHideCursor = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
 
@@ -856,7 +858,6 @@ void* kvm_server_mainloop(void* parm)
 					{
 						char buffer[8];
 						char *name = NULL;
-						int curcursor = KVM_MouseCursor_HELP;
 
 						if (sizeof(void*) == 8)
 						{
@@ -956,11 +957,14 @@ void* kvm_server_mainloop(void* parm)
 							}
 						}
 
-						((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
-						((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-						buffer[4] = (char)curcursor;																// Cursor Type
-						written = write(slave2master[1], buffer, 5);
-						fsync(slave2master[1]);
+						if (sentHideCursor == 0)
+						{
+							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+							buffer[4] = (char)curcursor;																// Cursor Type
+							written = write(slave2master[1], buffer, 5);
+							fsync(slave2master[1]);
+						}
 					}
 				}
 			}
@@ -1034,6 +1038,31 @@ void* kvm_server_mainloop(void* parm)
 					if (yhot > ry) { my = 0; } else if ((my + h) > screen_height) { my = screen_height - h; }
 
 					bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, screen_width, screen_height, mx, my, 1);
+
+					if (sentHideCursor == 0)
+					{
+						char tmpbuffer[8];
+						sentHideCursor = 1;
+						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
+						tmpbuffer[4] = (char)KVM_MouseCursor_NONE;														// Cursor Type
+						written = write(slave2master[1], tmpbuffer, 5);
+						fsync(slave2master[1]);
+					}
+				}
+				else
+				{
+					if (sentHideCursor != 0)
+					{
+						char tmpbuffer[8];
+						sentHideCursor = 1;
+						((unsigned short*)tmpbuffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+						((unsigned short*)tmpbuffer)[1] = (unsigned short)htons((unsigned short)5);						// Write the size
+						tmpbuffer[4] = (char)curcursor;																	// Cursor Type
+						written = write(slave2master[1], tmpbuffer, 5);
+						fsync(slave2master[1]);
+					}
+					sentHideCursor = 0;
 				}
 			}
 			getScreenBuffer((char **)&desktop, &desktopsize, image);
