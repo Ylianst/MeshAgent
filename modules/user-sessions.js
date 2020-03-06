@@ -592,6 +592,27 @@ function UserSessions()
             // First step, is to see if there is a user logged in:
             this._recheckLoggedInUsers();
         }
+        else
+        {
+            this.Current = function Current(cb)
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
+                child.waitExit();
+
+                var ret = JSON.parse(child.stdout.str.trim());
+                for (var key in ret)
+                {
+                    ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+                }
+                if (cb)
+                {
+                    cb.call(this, ret);
+                }
+            }
+        }
         this.minUid =  function minUid()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
