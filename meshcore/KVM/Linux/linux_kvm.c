@@ -44,7 +44,6 @@ extern char* g_ILibCrashDump_path;
 
 typedef enum KVM_MouseCursors
 {
-	KVM_MouseCursor_NONE = 255,
 	KVM_MouseCursor_NOCHANGE = -1,
 	KVM_MouseCursor_ARROW = 0,
 	KVM_MouseCursor_APPSTARTING = 1,
@@ -59,7 +58,9 @@ typedef enum KVM_MouseCursors
 	KVM_MouseCursor_SIZENWSE = 10,
 	KVM_MouseCursor_SIZEWE = 11,
 	KVM_MouseCursor_UPARROW = 12,
-	KVM_MouseCursor_WAIT = 13
+	KVM_MouseCursor_WAIT = 13,
+	KVM_MouseCursor_NONE = 14,
+	KVM_MouseCursor_NOTALLOWED = 15
 }KVM_MouseCursors;
 
 int curcursor = KVM_MouseCursor_HELP;
