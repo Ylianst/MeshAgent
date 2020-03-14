@@ -20,7 +20,7 @@ try { Object.defineProperty(Array.prototype, "peek", { value: function () { retu
 
 function dbus(address, uid, env)
 {
-    console.log(address, uid, env);
+    //console.log(address, uid, env);
     this._ObjectID = 'linux-dbus';
     require('events').EventEmitter.call(this, true)
         .createEvent('signal');
