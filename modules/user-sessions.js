@@ -67,30 +67,6 @@ function UserSessions()
         .createEvent('locked')
         .createEvent('unlocked');
 
-    this.enumerateUsers = function enumerateUsers()
-    {
-        var promise = require('promise');
-        var p = new promise(function (res, rej)
-        {
-            this.__resolver = res;
-            this.__rejector = rej;
-        });
-        p.__handler = function __handler(users)
-        {
-            p.__resolver(users);
-        };
-        try
-        {
-            this.Current(p.__handler);
-        }
-        catch(e)
-        {
-            p.__rejector(e);
-        }
-        p.parent = this;
-        return (p);
-    }
-
     if (process.platform == 'win32')
     {
         this._serviceHooked = false;
@@ -434,6 +410,41 @@ function UserSessions()
     }
     else if(process.platform == 'linux' || process.platform == 'freebsd')
     {
+        this.getUid = function getUid(username)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("getent passwd \"" + username + "\" | awk -F: '{print $3}'\nexit\n");
+            child.waitExit();
+
+            var ret = parseInt(child.stdout.str);
+            if (ret >= 0) { return (ret); }
+            throw ('username: ' + username + ' NOT FOUND');
+        };
+        
+        this.Current = function Current(cb)
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
+            child.waitExit();
+
+            var ret = JSON.parse(child.stdout.str.trim());
+            for (var key in ret)
+            {
+                ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+            }
+
+            Object.defineProperty(ret, 'Active', { value: showActiveOnly(ret) });
+
+            if (cb)
+            {
+                cb.call(this, ret);
+            }
+        }
+
         if (process.platform == 'linux')
         {
             var dbus = require('linux-dbus');
@@ -444,129 +455,60 @@ function UserSessions()
                     this.user_session.emit('changed');
                 });
             }
-            this.Current = function Current(cb) {
-                var retVal = {};
-                retVal._ObjectID = 'UserSession'
-                Object.defineProperty(retVal, '_callback', { value: cb });
-                Object.defineProperty(retVal, '_child', { value: require('child_process').execFile('/usr/bin/last', ['last', '-f', '/var/run/utmp']) });
-
-                retVal._child.Parent = retVal;
-                retVal._child._txt = '';
-                retVal._child.on('exit', function (code) {
-                    var lines = this._txt.split('\n');
-                    var sessions = [];
-                    var users = {};
-
-                    for (var i in lines) {
-                        if (lines[i]) {
-                            var tokens = getTokens(lines[i]);
-                            var s = { Username: tokens[0], SessionId: tokens[1] }
-                            if (tokens[3].includes('still logged in')) {
-                                s.State = 'Active';
-                            }
-                            else {
-                                s.LastActive = tokens[3];
-                            }
-
-                            sessions.push(s);
-                        }
-                    }
-                    sessions.pop();
-
-
-                    var usernames = {};
-                    var promises = [];
-
-                    for (var i in sessions) {
-                        if (sessions[i].Username != 'reboot') {
-                            users[sessions[i].SessionId] = sessions[i];
-                            if (usernames[sessions[i].Username] == null) {
-                                usernames[sessions[i].Username] = -1;
-                            }
-                        }
-                    }
-
-                    try {
-                        require('promise');
-                    }
-                    catch (e) {
-                        Object.defineProperty(users, 'Active', { value: showActiveOnly(users) });
-                        if (this.Parent._callback) { this.Parent._callback.call(this.Parent, users); }
-                        return;
-                    }
-
-                    var promise = require('promise');
-                    for (var n in usernames) {
-                        var p = new promise(function (res, rej) {
-                            this.__username = n;
-                            this.__resolver = res; this.__rejector = rej;
-                            this.__child = require('child_process').execFile('/usr/bin/id', ['id', '-u', n]);
-                            this.__child.promise = this;
-                            this.__child.stdout._txt = '';
-                            this.__child.stdout.on('data', function (chunk) { this._txt += chunk.toString(); });
-                            this.__child.on('exit', function (code) {
-                                try {
-                                    parseInt(this.stdout._txt);
-                                }
-                                catch (e) {
-                                    this.promise.__rejector('invalid uid');
-                                    return;
-                                }
-
-                                var id = parseInt(this.stdout._txt);
-                                this.promise.__resolver(id);
-                            });
-                        });
-                        promises.push(p);
-                    }
-                    promise.all(promises).then(function (plist) {
-                        // Done
-                        var table = {};
-                        for (var i in plist) {
-                            table[plist[i].__username] = plist[i]._internal.completedArgs[0];
-                        }
-                        for (var i in users) {
-                            users[i].uid = table[users[i].Username];
-                        }
-                        Object.defineProperty(users, 'Active', { value: showActiveOnly(users) });
-                        if (retVal._callback) { retVal._callback.call(retVal, users); }
-                    }, function (reason) {
-                        // Failed
-                        Object.defineProperty(users, 'Active', { value: showActiveOnly(users) });
-                        if (retVal._callback) { retVal._callback.call(retVal, users); }
-                    });
-                });
-                retVal._child.stdout.Parent = retVal._child;
-                retVal._child.stdout.on('data', function (chunk) { this.Parent._txt += chunk.toString(); });
-
-                return (retVal);
-            }
+            
             this._recheckLoggedInUsers = function _recheckLoggedInUsers()
             {
                 this.enumerateUsers().then(function (u)
                 {
-                    if (u.Active.length > 0) {
+                    if (u.Active.length > 0)
+                    {
                         // There is already a user logged in, so we can monitor DBUS for lock/unlock
-                        if (this.parent._linux_lock_watcher != null && this.parent._linux_lock_watcher.uid != u.Active[0].uid) {
+                        if (this.parent._linux_lock_watcher != null && this.parent._linux_lock_watcher.uid != u.Active[0].uid)
+                        {
                             delete this.parent._linux_lock_watcher;
                         }
-                        this.parent._linux_lock_watcher = new dbus(process.env['XDG_CURRENT_DESKTOP'] == 'Unity' ? 'com.ubuntu.Upstart0_6' : 'org.gnome.ScreenSaver', u.Active[0].uid);
-                        this.parent._linux_lock_watcher.user_session = this.parent;
-                        this.parent._linux_lock_watcher.on('signal', function (s) {
-                            var p = this.user_session.enumerateUsers();
-                            p.signalData = s.data[0];
-                            p.then(function (u) {
-                                switch (this.signalData) {
-                                    case true:
-                                    case 'desktop-lock':
-                                        this.parent.emit('locked', u.Active[0]);
-                                        break;
-                                    case false:
-                                    case 'desktop-unlock':
-                                        this.parent.emit('unlocked', u.Active[0]);
-                                        break;
+                        var env = this.parent.findEnvEntry({ username: u.Active[0].Username, grep: 'dbus-daemon', values: ['DBUS_SESSION_BUS_ADDRESS', 'XDG_CURRENT_DESKTOP'] });
+                        if (Object.keys(env).length == 0) { env = this.parent.findEnvEntry({ username: u.Active[0].Username, grep: 'X', values: ['DBUS_SESSION_BUS_ADDRESS', 'XDG_CURRENT_DESKTOP'] }); }
+                        if (Object.keys(env).length == 0) { env = this.parent.findEnvEntry({ username: u.Active[0].Username, grep: 'dbus-daemon', values: ['DBUS_SESSION_BUS_ADDRESS'] }); }
+                        var service;
+                        switch(env['XDG_CURRENT_DESKTOP'])
+                        {
+                            case 'Unity':
+                                service = 'com.ubuntu.Upstart0_6';
+                                break;
+                            default:
+                                service = require('linux-dbus').getServices('ScreenSaver', { uid: u.Active[0].uid, env: env });
+                                if (service.includes('org.gnome.ScreenSaver'))
+                                {
+                                    service = 'org.gnome.ScreenSaver';
                                 }
-                            });
+                                else if (service.includes('org.freedesktop.ScreenSaver'))
+                                {
+                                    service = 'org.freedesktop.ScreenSaver';
+                                }
+                                else
+                                {
+                                    service = null;
+                                }
+                                break;
+                        }
+
+                        if (!service) { return; }
+                        this.parent._linux_lock_watcher = new dbus(service, u.Active[0].uid, env);
+                        this.parent._linux_lock_watcher.user_session = this.parent;
+                        this.parent._linux_lock_watcher.on('signal', function (s)
+                        {
+                            switch (s.value)
+                            {
+                                case true:
+                                case 'desktop-lock':
+                                    this.user_session.emit('locked');
+                                    break;
+                                case false:
+                                case 'desktop-unlock':
+                                    this.user_session.emit('unlocked');
+                                    break;
+                            }
                         });
                     }
                     else if (this.parent._linux_lock_watcher != null) {
@@ -588,31 +530,8 @@ function UserSessions()
                 return (ret);
             };
             this.on('changed', this._recheckLoggedInUsers); // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
-
-            // First step, is to see if there is a user logged in:
-            this._recheckLoggedInUsers();
         }
-        else
-        {
-            this.Current = function Current(cb)
-            {
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
-                child.waitExit();
 
-                var ret = JSON.parse(child.stdout.str.trim());
-                for (var key in ret)
-                {
-                    ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
-                }
-                if (cb)
-                {
-                    cb.call(this, ret);
-                }
-            }
-        }
         this.minUid =  function minUid()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -696,18 +615,7 @@ function UserSessions()
             child.waitExit();
             return (child.stdout.str.trim());
         }
-        this.getUid = function getUid(username)
-        {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("getent passwd \"" + username + "\" | awk -F: '{print $3}'\nexit\n");
-            child.waitExit();
 
-            var ret = parseInt(child.stdout.str);            
-            if (ret >= 0) { return (ret); }
-            throw ('username: ' + username + ' NOT FOUND');
-        };
         this.getUsername = function getUsername(uid)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -736,6 +644,73 @@ function UserSessions()
             child.stdin.write("whoami\nexit\n");
             child.waitExit();
             return (child.stdout.str.trim());
+        };
+        this.getPids = function getPids(options)
+        {
+            var grep = '';
+            switch(typeof(options))
+            {
+                default:
+                    throw ('Invalid type specified: ' + typeof (options));
+                    break;
+                case 'number':
+                    grep = ' | grep "' + this.getUsername(options) + '"';
+                    break;
+                case 'string':
+                    grep = ' | grep "' + options + '"';
+                    break;
+                case 'object':
+                    if (options.username) { grep = ' | grep "' + options.username + '"'; }
+                    else if (options.uid != null) { grep = ' | grep "' + this.getUsername(options.uid) + '"'; }
+                    if (options.grep)
+                    {
+                        grep += (' | grep "' + options.grep + '"');
+                    }
+                    break;
+            }
+
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function(c){this.str += c.toString();});
+            child.stderr.str = ''; child.stderr.on('data', function(c){this.str += c.toString();});
+            child.stdin.write('ps -e -o pid -o user -o cmd ' + grep + ' |' + " tr '\n' '`' | awk -F'`' '{ " + 'printf "["; for(i=1;i<NF;++i) { split($i, tok, " "); printf "%s%s",(i!=1?",":""), tok[1];  } printf "]"; }\'\nexit\n');
+            child.waitExit();
+            return (JSON.parse(child.stdout.str.trim()));
+        };
+        this.findEnvEntry = function findEnvEntry(options)
+        {
+            var broke = false;
+            var ret = {};
+            var pids = this.getPids(options);
+
+            var vals;
+            var j;
+            for(var i in pids)
+            {
+                broke = false;
+                ret = {};
+                vals = this.getEnvFromPid(pids[i]);
+
+                for (j in options.values)
+                {
+                    if(vals[options.values[j]])
+                    {
+                        ret[options.values[j]] = vals[options.values[j]];
+                    }
+                    else
+                    {
+                        broke = true;
+                        break;
+                    }
+                }
+            }
+            if (broke)
+            {
+                return ({});
+            }
+            else
+            {
+                return (ret);
+            }
         };
         this.getEnvFromPid = function getEnvFromPid(pid)
         {
@@ -1003,7 +978,35 @@ function UserSessions()
         }
     }
 
+    this.enumerateUsers = function enumerateUsers()
+    {
+        var promise = require('promise');
+        var p = new promise(function (res, rej)
+        {
+            this.__resolver = res;
+            this.__rejector = rej;
+        });
+        p.__handler = function __handler(users)
+        {
+            p.__resolver(users);
+        };
+        try
+        {
+            this.Current(p.__handler);
+        }
+        catch (e)
+        {
+            p.__rejector(e);
+        }
+        p.parent = this;
+        return (p);
+    }
 
+    if(process.platform == 'linux')
+    {
+        // First step, is to see if there is a user logged in:
+        this._recheckLoggedInUsers();
+    }
 }
 function showActiveOnly(source)
 {
