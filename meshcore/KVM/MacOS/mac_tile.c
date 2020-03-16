@@ -14,6 +14,7 @@
 extern CGDirectDisplayID SCREEN_NUM;
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
+extern int SCREEN_SCALE;
 extern int SCREEN_DEPTH;
 extern int TILE_WIDTH;
 extern int TILE_HEIGHT;
@@ -442,7 +443,7 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 						*output++ = (*tmpPtr1 & 0x0FF);
 						tmpPtr1++;
 					}
-					if (width_padding_size != 0) {
+					if (width_padding_size > 0) {
 						for (i = 0; i < width_padding_size; i++) {
 							*output++ = 0;
 						}
@@ -478,7 +479,7 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 	
 	height_padding_size = adjust_screen_size(SCREEN_HEIGHT) - height;
 	
-	if (height_padding_size != 0) {
+	if (height_padding_size > 0) {
 		for (row = 0; row < height_padding_size; row++) {
 			for (col = 0; col < (width * 3) + width_padding_size; col++) {
 				*output++ = 0;
@@ -487,7 +488,7 @@ int getScreenBuffer(unsigned char **desktop, long long *desktopsize, CGImageRef 
 	}
 	
 	CFRelease(dataRef);
-
+	
 	return 0;
 }
 
