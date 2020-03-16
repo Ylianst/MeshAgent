@@ -54,6 +54,8 @@ CGDirectDisplayID SCREEN_NUM = 0;
 int SH_HANDLE = 0;
 int SCREEN_WIDTH = 0;
 int SCREEN_HEIGHT = 0;
+int SCREEN_SCALE = 1;
+int SCREEN_SCALE_SET = 0;
 int SCREEN_DEPTH = 0;
 int TILE_WIDTH = 0;
 int TILE_HEIGHT = 0;
@@ -111,7 +113,7 @@ void kvm_send_resolution()
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
-	
+
 
 	// Write the reply to the pipe.
 	ILibQueue_Lock(g_messageQ);
@@ -126,9 +128,16 @@ int kvm_init()
 	int old_height_count = TILE_HEIGHT_COUNT;
 	
 	SCREEN_NUM = CGMainDisplayID();
-	SCREEN_HEIGHT = CGDisplayPixelsHigh(SCREEN_NUM);
-	SCREEN_WIDTH = CGDisplayPixelsWide(SCREEN_NUM);
+	
+	if (SCREEN_WIDTH > 0)
+	{
+		CGDisplayModeRef mode = CGDisplayCopyDisplayMode(SCREEN_NUM);
+		SCREEN_SCALE = (int) CGDisplayModeGetPixelWidth(mode) / SCREEN_WIDTH;
+		CGDisplayModeRelease(mode);
+	}
 
+	SCREEN_HEIGHT = CGDisplayPixelsHigh(SCREEN_NUM) * SCREEN_SCALE;
+	SCREEN_WIDTH = CGDisplayPixelsWide(SCREEN_NUM) * SCREEN_SCALE;
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
@@ -178,8 +187,9 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (KVM_AGENT_FD != -1) { break; }
 			if (size == 10 || size == 12)
 			{
-				x = ((int)ntohs(((unsigned short*)(block))[3]));
-				y = ((int)ntohs(((unsigned short*)(block))[4]));
+				x = ((int)ntohs(((unsigned short*)(block))[3])) / SCREEN_SCALE;
+				y = ((int)ntohs(((unsigned short*)(block))[4])) / SCREEN_SCALE;
+				
 				if (size == 12) w = ((short)ntohs(((short*)(block))[5]));
 				
 				//printf("x:%d, y:%d, b:%d, w:%d\n", x, y, block[5], w);
@@ -487,10 +497,22 @@ void* kvm_server_mainloop(void* param)
 		screen_num = CGMainDisplayID();
 
 		if (screen_num == 0) { g_shutdown = 1; senddebug(-2); break; }
-		screen_height = CGDisplayPixelsHigh(screen_num);
-		screen_width = CGDisplayPixelsWide(screen_num);
-
-		if ((SCREEN_HEIGHT != screen_height || SCREEN_WIDTH != screen_width || SCREEN_NUM != screen_num)) 
+		
+		if (SCREEN_SCALE_SET == 0)
+		{
+			CGDisplayModeRef mode = CGDisplayCopyDisplayMode(screen_num);
+			if (SCREEN_WIDTH > 0 && SCREEN_SCALE < (int) CGDisplayModeGetPixelWidth(mode) / SCREEN_WIDTH)
+			{
+				SCREEN_SCALE = (int) CGDisplayModeGetPixelWidth(mode) / SCREEN_WIDTH;
+				SCREEN_SCALE_SET = 1;
+			}			 
+			CGDisplayModeRelease(mode);
+		}
+		
+		screen_height = CGDisplayPixelsHigh(screen_num) * SCREEN_SCALE;
+		screen_width = CGDisplayPixelsWide(screen_num) * SCREEN_SCALE;
+		
+		if ((SCREEN_HEIGHT != screen_height || (SCREEN_WIDTH != screen_width) || SCREEN_NUM != screen_num)) 
 		{
 			kvm_init();
 			continue;
