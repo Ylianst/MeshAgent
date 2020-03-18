@@ -2007,6 +2007,12 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		var child = child_process.execFile('/bin/sh', ['sh']);\
 		child.stdout._lines = '';\
 		child.stdout.on('data', function (chunk) { this._lines += chunk.toString(); });\
+		child.stdin.write(\"route get default | grep : | tr '\\\\n' '`' | awk -F'`' '{\" + ' printf \"{\"; for(i=1;i<NF;++i) { split($i, B, \":\"); gsub(/[ ]/, \"\", B[1]); gsub(/[ ]/, \"\", B[2]); printf \"%s\\\\\"%s\\\\\": \\\\\"%s\\\\\"\", (i>1?\", \":\"\"),B[1], B[2];  } printf \"}\"; ' + \"}'\\nexit\\n\");\
+		child.waitExit();\
+		var gwinfo=JSON.parse(child.stdout._lines.trim());\
+		child = child_process.execFile('/bin/sh', ['sh']);\
+		child.stdout._lines = '';\
+		child.stdout.on('data', function (chunk) { this._lines += chunk.toString(); });\
 		child.stdin.write('ifconfig\\nexit\\n');\
 		child.waitExit();\
 		var adapters = [];\
@@ -2064,7 +2070,11 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			retval[adapter.device] = [];\
 			if (adapter.inet)\
 			{\
-				retval[adapter.device].push({ address: adapter.inet, netmask : adapter.netmask, mac : adapter.mac, family : 'IPv4' });\
+				if(adapter.device == gwinfo.interface && gwinfo.gateway != null)\
+				{\
+					adapter.gateway = gwinfo.gateway;\
+				}\
+				retval[adapter.device].push({ address: adapter.inet, netmask : adapter.netmask, mac : adapter.mac, gateway: adapter.gateway, family : 'IPv4' });\
 			}\
 			if (adapter.inet6)\
 			{\
