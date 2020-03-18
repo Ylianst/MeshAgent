@@ -670,6 +670,26 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 
 #ifdef WIN32
 	h = FindFirstFileW((LPCWSTR)path, &data);
+	if (h == INVALID_HANDLE_VALUE)
+	{
+		// Check if this was a Junction (Symbolic Link)
+		if (((wchar_t*)path)[pathLen - 2] == '*')
+		{
+			((wchar_t*)path)[pathLen - 2] = 0;
+			((wchar_t*)path)[pathLen - 3] = 0;
+			HANDLE tmp = CreateFileW((LPCWSTR)path, 0, 0, 0, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+			if (tmp != INVALID_HANDLE_VALUE)
+			{
+				DWORD tmpSZlen = 3+GetFinalPathNameByHandleW(tmp, NULL, 0, 0);
+				wchar_t *tmpSZ = (wchar_t*)ILibMemory_AllocateTemp(Duktape_GetChain(ctx), tmpSZlen * 2);
+				tmpSZlen = GetFinalPathNameByHandleW(tmp, tmpSZ, tmpSZlen, 0);
+				wcscpy_s(tmpSZ + tmpSZlen, 3, L"\\*");
+				CloseHandle(tmp);
+				h = FindFirstFileW((LPCWSTR)tmpSZ+4, &data);
+			}
+		}
+
+	}
 	if (h != INVALID_HANDLE_VALUE)
 	{
 		if (wcscmp(data.cFileName, L".") != 0)
