@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 
-const MB_OK = 0x00000000;
+const MB_OK                     = 0x00000000;
 const MB_OKCANCEL               = 0x00000001;
 const MB_ABORTRETRYIGNORE       = 0x00000002;
 const MB_YESNOCANCEL            = 0x00000003;
@@ -52,16 +52,22 @@ var childScript = "\
                         var GM = require('_GenericMarshal');\
                         var user32 = GM.CreateNativeProxy('user32.dll');\
                         user32.CreateMethod('MessageBoxA');\
-                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), " + (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST).toString() + ").then(\
+                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), j.layout).then(\
                         function(r)\
                         {\
-                            if(r.Val == " + IDYES.toString() + ")\
+                            switch(r.Val)\
                             {\
-                                require('ScriptContainer').send(" + IDYES.toString() + ");\
-                            }\
-                            else\
-                            {\
-                                require('ScriptContainer').send(" + IDNO.toString() + ");\
+                                case IDOK.toString():\
+                                case IDCANCEL.toString():\
+                                case IDABORT.toString():\
+                                case IDRETRY.toString():\
+                                case IDIGNORE.toString():\
+                                case IDYES.toString():\
+                                    require('ScriptContainer').send(r.Val);\
+                                    break;\
+                                default:\
+                                    require('ScriptContainer').send(IDNO.toString());\
+                                    break;\
                             }\
                             process.exit();\
                         });\
@@ -74,8 +80,16 @@ var childScript = "\
 function messageBox()
 {
     this._ObjectID = 'message-box';
-    this.create = function create(title, caption, timeout)
+    this.create = function create(title, caption, timeout, layout)
     {
+        if (layout == null)
+        {
+            layout = (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST);
+        }
+        else
+        {
+            layout = (MB_OK | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST);
+        }
         var GM = require('_GenericMarshal');
         var kernel32 = GM.CreateNativeProxy('kernel32.dll');
         kernel32.CreateMethod('ProcessIdToSessionId');
@@ -106,7 +120,7 @@ function messageBox()
         ret._container.promise = ret;
         ret._container.on('data', function (j)
         {
-            if(j == IDYES)
+            if(j == IDYES || j == IDOK)
             {
                 this.promise._res();
             }
@@ -120,7 +134,7 @@ function messageBox()
             this.promise._rej('Timeout');
         });
         ret._container.ExecuteString(childScript);
-        ret._container.send({ command: 'messageBox', caption: caption, title: title });
+        ret._container.send({ command: 'messageBox', caption: caption, title: title, layout: layout });
         return (ret);
     };
 }
@@ -193,7 +207,7 @@ function linux_messageBox()
             });
     }
 
-    this.create = function create(title, caption, timeout)
+    this.create = function create(title, caption, timeout, layout)
     {
         if (timeout == null) { timeout = 10; }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -222,11 +236,11 @@ function linux_messageBox()
             // GNOME/ZENITY
             if (this.zenity.timeout)
             {
-                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', layout==null?'--question':'--warning', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
             }
             else
             {
-                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', '--question', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', layout == null ? '--question' : '--warning', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
                 ret.child.timeout = setTimeout(function (c)
                 {
                     c.timeout = null;
@@ -257,14 +271,14 @@ function linux_messageBox()
         {
             if (process.platform != 'freebsd' && process.env['DISPLAY'])
             {
-                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, '--yesno', caption]);
+                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, layout==null?'--yesno':'--msgbox', caption]);
                 ret.child.promise = ret;
             }
             else
             {
                 var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                 if (!xinfo || !xinfo.display || !xinfo.xauthority) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
-                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, '--yesno', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, layout == null ? '--yesno' : '--msgbox', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                 ret.child.promise = ret;
             }
             ret.child.timeout = setTimeout(function (c)
@@ -356,11 +370,11 @@ function macos_messageBox()
         return (ret);
     };
     
-    this.create = function create(title, caption, timeout)
+    this.create = function create(title, caption, timeout, layout)
     {
         // Start Local Server
         var ret = this._initIPCBase();
-        ret.title = title; ret.caption = caption; ret.timeout = timeout;
+        ret.title = title; ret.caption = caption; ret.timeout = timeout; ret.layout = layout;
         ret.server = this.startMessageServer(ret);
         ret.server.ret = ret;
         ret.server.on('connection', function (c)
@@ -383,7 +397,7 @@ function macos_messageBox()
                         }
                         else
                         {
-                            if (p.button == 'Yes')
+                            if (p.button == 'Yes' || p.button == 'OK')
                             {
                                 this.promise._res(p.button);
                             }
@@ -395,7 +409,7 @@ function macos_messageBox()
                         break;
                 }
             });
-            c.write(translateObject({ command: 'DIALOG', title: this.ret.title, caption: this.ret.caption, icon: 'caution', buttons: ['"Yes"', '"No"'], buttonDefault: 2, timeout: this.ret.timeout }));
+            c.write(translateObject({ command: 'DIALOG', title: this.ret.title, caption: this.ret.caption, icon: 'caution', buttons: this.ret.layout==null?['"Yes"', '"No"']:['"OK"'], buttonDefault: this.ret.layout==null?2:1, timeout: this.ret.timeout }));
         });
 
         return (ret);
