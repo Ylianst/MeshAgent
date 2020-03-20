@@ -1168,7 +1168,17 @@ duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 			duk_swap_top(ctx, -2);						// [options][headers][concat][this]
 			duk_push_string(ctx, ":");					// [options][headers][concat][this][:]
 			duk_get_prop_string(ctx, -5, "port");		// [options][headers][concat][this][:][port]
-			duk_call_method(ctx, 2);					// [options][headers][hostname]
+			if ((strcmp("443", (char*)duk_to_string(ctx, -1)) == 0 && isTLS == 1) || (strcmp("80", (char*)duk_to_string(ctx, -1)) == 0 && isTLS == 0))
+			{
+				// No need to add port to host			   [options][headers][concat][this][:][port]
+				duk_pop_2(ctx);							// [options][headers][concat][this]
+				duk_remove(ctx, -2);					// [options][headers][host]
+			}
+			else
+			{
+				// Add port to host
+				duk_call_method(ctx, 2);				// [options][headers][hostname]
+			}
 			duk_put_prop_string(ctx, -2, "Host");		// [options][headers]
 			duk_put_prop_string(ctx, -2, "headers");	// [options]
 		}

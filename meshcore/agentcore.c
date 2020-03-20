@@ -3374,7 +3374,16 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	req = ILibCreateEmptyPacket();
 	ILibSetVersion(req, "1.1", 3);
 	ILibSetDirective(req, "GET", 3, path, (int)strnlen_s(path, serverUrlLen));
-	ILibAddHeaderLine(req, "Host", 4, host, (int)strnlen_s(host, serverUrlLen));
+	if ((port == 443 && strncmp("wss:", agent->serveruri, 4) == 0) || (port == 80 && strncmp("ws:", agent->serveruri, 3) == 0))
+	{
+		// Default Port, so host field only contains hostname
+		ILibAddHeaderLine(req, "Host", 4, host, (int)strnlen_s(host, serverUrlLen)); 
+	}
+	else
+	{
+		// Non default port, so host field needs to contain port number too
+		ILibAddHeaderLine(req, "Host", 4, ILibScratchPad, (int)sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s:%u", host, port));
+	}
 
 	free(path);
 
