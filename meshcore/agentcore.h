@@ -249,6 +249,7 @@ char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath);
 *
 AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities	
 agentName					If set, this will be sent to the server instead of the hostname
+compactDirtyMinimum			Minimum dirty bytes threshold for db.compact() operation
 controlChannelDebug:		If set, will log/display controlChannel messages (Except for JSON messages)
 controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
 coreDumpEnabled:			If set, a dump file will be written when the agent crashes

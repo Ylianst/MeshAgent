@@ -48,6 +48,8 @@ typedef struct ILibSimpleDataStore_Root
 	ILibHashtable keyTable; // keys --> ILibSimpleDataStore_TableEntry
 	ILibHashtable cacheTable;
 	uint64_t fileSize;
+	uint64_t dirtySize;
+	uint64_t minimumDirtySize;
 	int error;
 } ILibSimpleDataStore_Root;
 
@@ -388,7 +390,17 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 		if (node->valueLength > 0)
 		{
 			// If the value is not empty, we need to create/overwrite this value in memory
-			if (entry == NULL) { ++count;  entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
+			if (entry == NULL) 
+			{
+				// Create new entry in table
+				++count;  
+				entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL);
+			}
+			else
+			{
+				// Entry already exists in table
+				root->dirtySize += entry->valueLength;
+			}
 			memcpy_s(entry->valueHash, sizeof(entry->valueHash), node->hash, SHA384HASHSIZE);
 			entry->valueLength = node->valueLength;
 			entry->valueOffset = ILibSimpleDataStore_RecordHeader_ValueOffset(node);
@@ -397,6 +409,7 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 		else if (entry != NULL)
 		{
 			// If value is empty, remove the in-memory entry.
+			root->dirtySize += entry->valueLength;
 			--count;
 			ILibHashtable_Remove(root->keyTable, NULL, node->key, node->keyLen);
 			free(entry);
@@ -599,10 +612,14 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 	ILibSimpleDataStore_SHA384(value, valueLen, hash); // Hash the value
 
 	// Create a new record for the key and value
-	if (entry == NULL) {
-		entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); }
-	else {
+	if (entry == NULL) 
+	{
+		entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); 
+	}
+	else 
+	{
 		if (memcmp(entry->valueHash, hash, SHA384HASHSIZE) == 0) { return 0; }
+		root->dirtySize += entry->valueLength;
 	}
 
 	memcpy_s(entry->valueHash, sizeof(entry->valueHash), hash, SHA384HASHSIZE);
@@ -612,6 +629,13 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 
 	// Add the record to the data store
 	return ILibHashtable_Put(root->keyTable, NULL, key, keyLen, entry) == NULL ? 0 : 1;
+}
+
+__EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char* key, int defaultValue)
+{
+	int bufLen = ILibSimpleDataStore_Get(dataStore, key, ILibScratchPad, sizeof(ILibScratchPad));
+	if (bufLen == 0 || bufLen > sizeof(ILibScratchPad)) { return(defaultValue); }
+	return(atoi(ILibScratchPad));
 }
 
 // Get a value from the data store given a key
@@ -776,7 +800,11 @@ __EXPORT_TYPE void ILibSimpleDataStore_EnumerateKeys(ILibSimpleDataStore dataSto
 
 	if (handler != NULL) { ILibHashtable_Enumerate(root->keyTable, ILibSimpleDataStore_EnumerateKeysSink, users); }
 }
-
+__EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataStore, uint64_t minimumDirtySize)
+{
+	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	root->minimumDirtySize = minimumDirtySize;
+}
 // Compact the data store
 __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 {
@@ -786,7 +814,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 	void* state[2];
 	int retVal = 0;
 
-	if (root == NULL) return 1; // Error
+	if (root == NULL || root->dirtySize < root->minimumDirtySize) return 1; // Error
 	tmp = ILibString_Cat(root->filePath, -1, ".tmp", -1); // Create the name of the temporary data store
 
 	// Start by opening a temporary .tmp file. Will be used to write the compacted data store.

@@ -54,6 +54,7 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore);
 __EXPORT_TYPE void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen);
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSON(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
+__EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataStore, uint64_t minimumDirtySize);
 
 __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen);
 #define ILibSimpleDataStore_Put(dataStore, key, value) ILibSimpleDataStore_PutEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), value, (int)strnlen_s(value, ILibSimpleDataStore_MaxUnspecifiedValueLen))
@@ -61,6 +62,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 // Get a value from the datastore of given a key.
 __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* buffer, int bufferLen);
 #define ILibSimpleDataStore_Get(dataStore, key, buffer, bufferLen) ILibSimpleDataStore_GetEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), buffer, bufferLen)
+__EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char* key, int defaultValue);
 
 // Get the SHA256 hash value from the datastore for a given a key.
 __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen);
