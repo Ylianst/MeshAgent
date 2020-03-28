@@ -3459,6 +3459,11 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	}
 	free(host);
 }
+void MeshServer_DbWarning(ILibSimpleDataStore db, uint64_t size, void *user)
+{
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
+	MeshAgent_sendConsoleText(agent->meshCoreCtx, "Database Size Warning: [%u bytes]", size);
+}
 void MeshServer_Connect(MeshAgentHostContainer *agent)
 {
 	unsigned int timeout;
@@ -3469,6 +3474,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	util_random(sizeof(int), (char*)&timeout);
 	gRemoteMouseRenderDefault = ILibSimpleDataStore_Get(agent->masterDb, "remoteMouseRender", NULL, 0);
 	ILibSimpleDataStore_ConfigCompact(agent->masterDb, ILibSimpleDataStore_GetInt(agent->masterDb, "compactDirtyMinimum", 0));
+	ILibSimpleDataStore_ConfigSizeLimit(agent->masterDb, ILibSimpleDataStore_GetInt(agent->masterDb, "dbWarningSizeThreshold", 0), MeshServer_DbWarning, agent);
 	agent->disableUpdate = ILibSimpleDataStore_Get(agent->masterDb, "disableUpdate", NULL, 0);
 	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);

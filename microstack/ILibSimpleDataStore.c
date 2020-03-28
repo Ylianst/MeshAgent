@@ -50,6 +50,9 @@ typedef struct ILibSimpleDataStore_Root
 	uint64_t fileSize;
 	uint64_t dirtySize;
 	uint64_t minimumDirtySize;
+	uint64_t warningSize;
+	ILibSimpleDataStore_SizeWarningHandler warningSink;
+	void* warningSinkUser;
 	int error;
 } ILibSimpleDataStore_Root;
 
@@ -602,6 +605,7 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 // Store a key/value pair in the data store
 __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen)
 {
+	int ret;
 	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry;
@@ -628,7 +632,12 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 	root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile); // Update the size of the data store;
 
 	// Add the record to the data store
-	return ILibHashtable_Put(root->keyTable, NULL, key, keyLen, entry) == NULL ? 0 : 1;
+	ret = ILibHashtable_Put(root->keyTable, NULL, key, keyLen, entry) == NULL ? 0 : 1;
+	if (root->warningSize > 0 && root->fileSize > root->warningSize && root->warningSink != NULL)
+	{
+		root->warningSink(root, root->fileSize, root->warningSinkUser);
+	}
+	return(ret);
 }
 
 __EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char* key, int defaultValue)
@@ -799,6 +808,13 @@ __EXPORT_TYPE void ILibSimpleDataStore_EnumerateKeys(ILibSimpleDataStore dataSto
 	users[2] = (void*)user;
 
 	if (handler != NULL) { ILibHashtable_Enumerate(root->keyTable, ILibSimpleDataStore_EnumerateKeysSink, users); }
+}
+__EXPORT_TYPE void ILibSimpleDataStore_ConfigSizeLimit(ILibSimpleDataStore dataStore, uint64_t sizeLimit, ILibSimpleDataStore_SizeWarningHandler handler, void *user)
+{
+	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	root->warningSize = sizeLimit;
+	root->warningSink = sizeLimit > 0 ? handler : NULL;
+	root->warningSinkUser = sizeLimit > 0 ? user : NULL;
 }
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataStore, uint64_t minimumDirtySize)
 {
