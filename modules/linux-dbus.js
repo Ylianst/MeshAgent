@@ -21,13 +21,22 @@ try { Object.defineProperty(Array.prototype, "peek", { value: function () { retu
 function dbus(address, uid, env)
 {
     //console.log(address, uid, env);
+    var options = { env: env, uid: uid == null ? -1 : uid };
+    if (uid == null && env == null) { options = {}; }
+
     this._ObjectID = 'linux-dbus';
     require('events').EventEmitter.call(this, true)
         .createEvent('signal');
     Object.defineProperty(this, "uid", { value: uid });
-    //this._child = require('child_process').execFile("/bin/sh", ["sh"], { type: require('child_process').SpawnTypes.TERM, uid: uid == null ? -1 : uid });
-    this._child = require('child_process').execFile("/bin/sh", ["sh"], { env: env, uid: uid == null ? -1 : uid });
-    this._child.stdin.write('dbus-monitor --session "type=\'signal\', interface=\'' + address + '\'" | ( while read X; do echo "$X"; done )\n');
+    this._child = require('child_process').execFile("/bin/sh", ["sh"], options);
+    if (uid != null)
+    {
+        this._child.stdin.write('dbus-monitor --session "type=\'signal\', interface=\'' + address + '\'" | ( while read X; do echo "$X"; done )\n');
+    }
+    else
+    {
+        this._child.stdin.write('dbus-monitor --system "type=\'signal\'' + (address!=null?(', interface=\'' + address + '\''):('')) + '" | ( while read X; do echo "$X"; done )\n');
+    }
     this._child.stderr.on('data', function (c) {  });
     this._child.stdout.dbus = this;
     this._child.stdout._str = '';
@@ -45,7 +54,10 @@ function dbus(address, uid, env)
         for (i = 1; i < info.length; ++i)
         {
             var info2 = info[i].split('=');
-            sig[info2[0].trim()] = info2[1].trim();
+            if (info2[0] && info2[1])
+            {
+                sig[info2[0].trim()] = info2[1].trim();
+            }
         }
         for (i = 1; i < this._pending.length; ++i)
         {
@@ -62,12 +74,44 @@ function dbus(address, uid, env)
                 sig['data'] = [];
                 for (i = i + 1; i < this._pending.length; ++i)
                 {
-                    if (this._pending[i].startsWith('string '))
+		            if(this._pending[i].startsWith('dict entry'))
+		            {
+			            var dictEntry = {};
+			            var j;
+			            for(j=i;this._pending[j].indexOf(')')<0;++j) {}
+			            var tmpString = this._pending.slice(i,j).join(' ');
+			            var tmpKey = tmpString.split('"')[1];
+			            var tmpVal;
+			            try
+			            {			
+				            tmpVal  = tmpString.split('variant')[1].trim();
+			            }
+			            catch(e)
+			            {
+				            console.log('OOPS: ' + tmpString);
+				            console.log('\n');
+			            }
+			            if(tmpVal.startsWith('string '))
+			            {
+			               tmpVal = tmpVal.split('"')[1];
+			            }
+			            if(tmpVal.startsWith('uint') || tmpVal.startsWith('int'))
+			            {
+			               tmpVal = tmpVal.split(' ')[1];
+			            }
+			            dictEntry[tmpString.split('"')[1]] = tmpVal;
+			            sig['data'].push(dictEntry);
+			            i = j - 1;
+		            }
+                    else if (this._pending[i].startsWith('string '))
                     {
                         tmp = this._pending[i].split('"')[1].split('=');
-                        tmp2 = {};
-                        tmp2[tmp[0].trim()] = tmp[1].trim();
-                        sig['data'].push(tmp2);
+                        if(tmp[1])
+                        {
+                            tmp2 = {};
+                            tmp2[tmp[0].trim()] = tmp[1].trim();
+                            sig['data'].push(tmp2);
+                        }
                     }
                 }
                 break;
