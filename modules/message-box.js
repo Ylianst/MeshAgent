@@ -57,16 +57,16 @@ var childScript = "\
                         {\
                             switch(r.Val)\
                             {\
-                                case IDOK.toString():\
-                                case IDCANCEL.toString():\
-                                case IDABORT.toString():\
-                                case IDRETRY.toString():\
-                                case IDIGNORE.toString():\
-                                case IDYES.toString():\
+                                case " + IDOK.toString() + ":\
+                                case " + IDCANCEL.toString() + ":\
+                                case " + IDABORT.toString() + ":\
+                                case " + IDRETRY.toString() + ":\
+                                case " + IDIGNORE.toString() + ":\
+                                case " + IDYES.toString() + ":\
                                     require('ScriptContainer').send(r.Val);\
                                     break;\
                                 default:\
-                                    require('ScriptContainer').send(IDNO.toString());\
+                                    require('ScriptContainer').send(" + IDNO.toString() + ");\
                                     break;\
                             }\
                             process.exit();\
