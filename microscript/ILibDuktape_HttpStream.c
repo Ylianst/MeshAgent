@@ -191,6 +191,8 @@ int ILibDuktape_Headers_IsChunkSupported(ILibHTTPPacket *header)
 }
 void ILibDuktape_serverResponse_resetHttpStream(duk_context *ctx, void *serverResponse)
 {
+	duk_idx_t t = duk_get_top(ctx);
+
 	// Need to reset HttpStream
 	duk_push_heapptr(ctx, serverResponse);									// [serverResponse]
 	duk_get_prop_string(ctx, -1, ILibDuktape_SR2HttpStream);				// [serverResponse][httpStream]
@@ -204,7 +206,7 @@ void ILibDuktape_serverResponse_resetHttpStream(duk_context *ctx, void *serverRe
 		data->bodyStream = NULL;
 	}
 
-	duk_pop_n(ctx, 3);														// ...
+	duk_set_top(ctx, t);
 }
 void ILibDuktape_Digest_CalculateNonce(duk_context *ctx, void *heapptr, long long expiration, char *opaque, int opaqueLen, char* buffer)
 {
@@ -2359,7 +2361,7 @@ void ILibDuktape_HttpStream_ServerResponse_EndSink_ZeroChunk_Chain(void *chain, 
 void ILibDuktape_HttpStream_ServerResponse_EndSink(struct ILibDuktape_WritableStream *stream, void *user)
 {
 	ILibDuktape_HttpStream_ServerResponse_State *state = (ILibDuktape_HttpStream_ServerResponse_State*)user;
-	
+
 	if (state->implicitHeaderHandling)
 	{
 		if (ILibIsRunningOnChainThread(state->chain))
@@ -3136,17 +3138,28 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 			if (header->Directive == NULL && data->connectionCloseSpecified == 0)
 			{
 				duk_push_heapptr(ctx, data->DS->ParentObject);					// [httpStream]
-				duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);	// [httpStream][socket]
-				if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2Agent))
+				if (duk_has_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket))
 				{
-					duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);		// [httpStream][socket][agent]
-					duk_get_prop_string(ctx, -1, "keepSocketAlive");			// [httpStream][socket][agent][keepSocketAlive]
-					duk_swap_top(ctx, -2);										// [httpStream][socket][keepSocketAlive][this]
-					duk_dup(ctx, -3);											// [httpStream][socket][keepSocketAlive][this][socket]
-					if (duk_pcall_method(ctx, 1) != 0) {}
-					duk_pop(ctx);												// [httpStream][socket]
-					duk_pop_2(ctx);												// ...
-				}			
+					duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);	// [httpStream][socket]
+					if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2Agent))
+					{
+						duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);		// [httpStream][socket][agent]
+						duk_get_prop_string(ctx, -1, "keepSocketAlive");			// [httpStream][socket][agent][keepSocketAlive]
+						duk_swap_top(ctx, -2);										// [httpStream][socket][keepSocketAlive][this]
+						duk_dup(ctx, -3);											// [httpStream][socket][keepSocketAlive][this][socket]
+						if (duk_pcall_method(ctx, 1) != 0) {}
+						duk_pop(ctx);												// [httpStream][socket]
+						duk_pop_2(ctx);												// ...
+					}
+					else
+					{
+						duk_pop_2(ctx);
+					}
+				}
+				else
+				{
+					duk_pop(ctx);
+				}
 			}
 
 		}
