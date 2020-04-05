@@ -33,7 +33,14 @@ function netsecurityExists()
     }
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
+    try
+    {
+        child.waitExit(2000);
+    }
+    catch(e)
+    {
+        return (false);
+    }
 
     return (child.stdout.str != '');
 }
