@@ -431,10 +431,18 @@ function UserSessions()
             child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
             child.waitExit();
 
-            var ret = JSON.parse(child.stdout.str.trim());
-            for (var key in ret)
+            var ret = {};
+
+            try
             {
-                ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+                ret = JSON.parse(child.stdout.str.trim());
+                for (var key in ret)
+                {
+                    ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+                }
+            }
+            catch(e)
+            {
             }
 
             Object.defineProperty(ret, 'Active', { value: showActiveOnly(ret) });
@@ -451,7 +459,8 @@ function UserSessions()
             if (require('fs').watch) {
                 this._linuxWatcher = require('fs').watch('/var/run/utmp');
                 this._linuxWatcher.user_session = this;
-                this._linuxWatcher.on('change', function (a, b) {
+                this._linuxWatcher.on('change', function (a, b)
+                {
                     this.user_session.emit('changed');
                 });
             }
@@ -529,7 +538,15 @@ function UserSessions()
                 }
                 return (ret);
             };
-            this.on('changed', this._recheckLoggedInUsers); // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
+            this.on('changed', function ()
+            {
+                // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
+                this._changedTimeout = setTimeout(function (that)
+                {
+                    // Doing this in a timeout, becuase there is a race between when logon is detected, and when dbus session is spawned
+                    that._recheckLoggedInUsers.call(that);
+                }, 2000, this);
+            });
         }
 
         this.minUid =  function minUid()
@@ -674,7 +691,15 @@ function UserSessions()
             child.stderr.str = ''; child.stderr.on('data', function(c){this.str += c.toString();});
             child.stdin.write('ps -e -o pid -o user -o cmd ' + grep + ' |' + " tr '\n' '`' | awk -F'`' '{ " + 'printf "["; for(i=1;i<NF;++i) { split($i, tok, " "); printf "%s%s",(i!=1?",":""), tok[1];  } printf "]"; }\'\nexit\n');
             child.waitExit();
-            return (JSON.parse(child.stdout.str.trim()));
+
+            try
+            {
+                return (JSON.parse(child.stdout.str.trim()));
+            }
+            catch(ee)
+            {
+                return([]);
+            }
         };
         this.findEnvEntry = function findEnvEntry(options)
         {
