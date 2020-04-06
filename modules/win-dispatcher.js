@@ -43,6 +43,7 @@ function dispatch(options)
         {
         }
     }
+
     var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
     ret._ipc2.once('connection', function onConnect(s)
     {
@@ -86,26 +87,25 @@ function dispatch(options)
 
     if (options.user)
     {
-        child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU ' + options.user + ' /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+        child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU ' + options.user + ' /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
     }
     else
     {
         if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
         {
             // LocalSystem
-            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU SYSTEM /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU SYSTEM /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
         }
         else
         {
             // Running as logged in user
-            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "' + process.execPath + ' -b64exec ' + str + '"\r\n');
+            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
         }
     }
     child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
     child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
     child.stdin.write('exit\r\n');
     child.waitExit();
-    
 
     return (ret);
 }
