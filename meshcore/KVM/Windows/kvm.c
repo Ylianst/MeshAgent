@@ -1189,9 +1189,21 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int b
 
 int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
-	char * parms0[] = { " -kvm0", g_ILibCrashDump_path != NULL ? "-coredump" : NULL, NULL };
-	char * parms1[] = { " -kvm1", g_ILibCrashDump_path != NULL ? "-coredump" : NULL, NULL };
+	char * parms0[] = { " -kvm0", g_ILibCrashDump_path != NULL ? "-coredump" : NULL, NULL, NULL };
+	char * parms1[] = { " -kvm1", g_ILibCrashDump_path != NULL ? "-coredump" : NULL, NULL, NULL };
 	void **user = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
+
+	if (parms0[1] == NULL)
+	{
+		parms0[1] = (gRemoteMouseRenderDefault != 0 ? "-remotecursor" : NULL);
+		parms1[1] = (gRemoteMouseRenderDefault != 0 ? "-remotecursor" : NULL);
+	}
+	else
+	{
+		parms0[2] = (gRemoteMouseRenderDefault != 0 ? "-remotecursor" : NULL);
+		parms1[2] = (gRemoteMouseRenderDefault != 0 ? "-remotecursor" : NULL);
+	}
+
 	user[0] = writeHandler;
 	user[1] = reserved;
 	user[2] = pipeMgr;

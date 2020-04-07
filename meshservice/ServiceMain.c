@@ -63,6 +63,8 @@ INT_PTR CALLBACK DialogHandler(HWND, UINT, WPARAM, LPARAM);
 MeshAgentHostContainer *agent = NULL;
 DWORD g_serviceArgc;
 char **g_serviceArgv;
+extern int gRemoteMouseRenderDefault;
+
 
 /*
 extern int g_TrustedHashSet;
@@ -1109,6 +1111,11 @@ int wmain(int argc, char* wargv[])
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 0;
 		((int*)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
+		if ((argc > 2 && strcasecmp(argv[2], "-remotecursor") == 0) ||
+			(argc > 3 && strcasecmp(argv[3], "-remotecursor") == 0))
+		{
+			gRemoteMouseRenderDefault = 1;
+		}
 
 		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
@@ -1141,6 +1148,11 @@ int wmain(int argc, char* wargv[])
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 1;
 		((int*)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
+		if ((argc > 2 && strcasecmp(argv[2], "-remotecursor") == 0) ||
+			(argc > 3 && strcasecmp(argv[3], "-remotecursor") == 0))
+		{
+			gRemoteMouseRenderDefault = 1;
+		}
 
 		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;

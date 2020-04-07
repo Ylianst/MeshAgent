@@ -1804,6 +1804,18 @@ duk_ret_t ILibDuktape_MeshAgent_getStartupOptions(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_MeshAgent_remoteMouseRender_get(duk_context *ctx)
+{
+	duk_push_int(ctx, gRemoteMouseRenderDefault);
+	return(1);
+}
+
+duk_ret_t ILibDuktape_MeshAgent_remoteMouseRender_set(duk_context *ctx)
+{
+	gRemoteMouseRenderDefault = duk_require_int(ctx, 0);
+	return(0);
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1879,6 +1891,9 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
+
+		ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "remoteMouseRender", ILibDuktape_MeshAgent_remoteMouseRender_get, ILibDuktape_MeshAgent_remoteMouseRender_set);
+
 #if defined(_POSIX) && !defined(__APPLE__)
 		ILibDuktape_CreateInstanceMethod(ctx, "enableKvmSlaveLog", ILibDuktape_MeshAgent_enableKvmSlaveLog, 1);
 #endif
