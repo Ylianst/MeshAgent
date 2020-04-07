@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2019 Intel Corporation
+Copyright 2018-2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ function amt_heci() {
     emitterUtils.createEvent('error');
 
     var heci = require('heci');
+    var sendConsole = function (msg) { try { require('MeshAgent').SendCommand({ "action": "msg", "type": "console", "value": msg }); } catch (ex) { } }
 
     this._ObjectID = "pthi";
     this._rq = new Q();

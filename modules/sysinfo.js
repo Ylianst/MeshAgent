@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Intel Corporation
+Copyright 2019-2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-const PDH_FMT_LONG = 0x00000100;
-const PDH_FMT_DOUBLE = 0x00000200;
+var PDH_FMT_LONG = 0x00000100;
+var PDH_FMT_DOUBLE = 0x00000200;
 
 var promise = require('promise');
 if (process.platform == 'win32')
@@ -72,11 +72,11 @@ function windows_cpuUtilization()
             szName = item.Deref(0, GM.PointerSize).Deref();
             if (szName.String == '_Total')
             {
-                u.total = item.Deref(16, 8).toBuffer().readDoubleLE().toFixed(2);
+                u.total = item.Deref(16, 8).toBuffer().readDoubleLE();
             }
             else
             {
-                u.cpus[parseInt(szName.String)] = item.Deref(16, 8).toBuffer().readDoubleLE().toFixed(2);
+                u.cpus[parseInt(szName.String)] = item.Deref(16, 8).toBuffer().readDoubleLE();
             }
         }
 
@@ -99,8 +99,8 @@ function windows_memUtilization()
             MemFree: require('bignum').fromBuffer(info.Deref(16, 8).toBuffer(), { endian: 'little' })
         };
 
-    ret.percentFree = ((ret.MemFree.div(require('bignum')('1048576')).toNumber() / ret.MemTotal.div(require('bignum')('1048576')).toNumber()) * 100).toFixed(2);
-    ret.percentConsumed = ((ret.MemTotal.sub(ret.MemFree).div(require('bignum')('1048576')).toNumber() / ret.MemTotal.div(require('bignum')('1048576')).toNumber()) * 100).toFixed(2);
+    ret.percentFree = ((ret.MemFree.div(require('bignum')('1048576')).toNumber() / ret.MemTotal.div(require('bignum')('1048576')).toNumber()) * 100);//.toFixed(2);
+    ret.percentConsumed = ((ret.MemTotal.sub(ret.MemFree).div(require('bignum')('1048576')).toNumber() / ret.MemTotal.div(require('bignum')('1048576')).toNumber()) * 100);//.toFixed(2);
     ret.MemTotal = ret.MemTotal.toString();
     ret.MemFree = ret.MemFree.toString();
     return (ret);
@@ -123,7 +123,7 @@ function linux_cpuUtilization()
         while (columns[++x] == '');
         for (y = x; y < columns.length; ++y) { sum += parseInt(columns[y]); }
         idle = parseInt(columns[3 + x]);
-        utilization = (100 - ((idle / sum) * 100)).toFixed(2);
+        utilization = (100 - ((idle / sum) * 100)); //.toFixed(2);
         if (!ret.total)
         {
             ret.total = utilization;
@@ -157,8 +157,8 @@ function linux_memUtilization()
                 break;
         }
     }
-    ret.percentFree = ((ret.free / ret.total) * 100).toFixed(2);
-    ret.percentConsumed = (((ret.total - ret.free) / ret.total) * 100).toFixed(2);
+    ret.percentFree = ((ret.free / ret.total) * 100);//.toFixed(2);
+    ret.percentConsumed = (((ret.total - ret.free) / ret.total) * 100);//.toFixed(2);
     return (ret);
 }
 
@@ -205,8 +205,8 @@ function macos_memUtilization()
 
         mem.MemTotal = parseInt(bdown[0].trim().split(' ')[0]);
         mem.MemFree = parseInt(bdown[1].trim().split(' ')[0]);
-        mem.percentFree = ((mem.MemFree / mem.MemTotal) * 100).toFixed(2);
-        mem.percentConsumed = (((mem.MemTotal - mem.MemFree)/ mem.MemTotal) * 100).toFixed(2);
+        mem.percentFree = ((mem.MemFree / mem.MemTotal) * 100);//.toFixed(2);
+        mem.percentConsumed = (((mem.MemTotal - mem.MemFree) / mem.MemTotal) * 100);//.toFixed(2);
         return (mem);
     }
     else
