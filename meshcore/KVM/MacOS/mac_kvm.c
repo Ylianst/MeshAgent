@@ -27,7 +27,7 @@ limitations under the License.
 #include <sys/un.h>
 
 int KVM_Listener_FD = -1;
-#define KVM_Listener_Path "/usr/local/mesh_services/mesh2/kvm"
+#define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
 
 int KVM_AGENT_FD = -1;
 int KVM_SEND(char *buffer, int bufferLen)
