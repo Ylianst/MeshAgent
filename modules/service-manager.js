@@ -1676,7 +1676,14 @@ function serviceManager()
                     reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'EstimatedSize', Math.floor(require('fs').statSync(folder + '\\' + options.name + '\\' + options.target + '.exe').size / 1024));
                     reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'NoModify', 0x1);
                     reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'NoRepair', 0x1);
-                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', folder + '\\' + options.name + '\\' + options.target + '.exe -b64exec ' + script);
+                    if (options.name == 'Mesh Agent')
+                    {
+                        reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', folder + '\\' + options.name + '\\' + options.target + '.exe -funinstall');
+                    }
+                    else
+                    {
+                        reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', folder + '\\' + options.name + '\\' + options.target + '.exe -b64exec ' + script);
+                    }
                 }
                 catch (xx)
                 {

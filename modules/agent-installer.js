@@ -136,18 +136,9 @@ function installService(params)
     if (process.platform == 'win32') { svc.close(); }
     process.exit();
 }
-function uninstallService2(params)
+
+function uninstallService3(params)
 {
-    process.stdout.write('   -> Uninstalling previous installation...');
-    try
-    {
-        require('service-manager').manager.uninstallService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
-        process.stdout.write(' [DONE]\n');
-    }
-    catch (e)
-    {
-        process.stdout.write(' [ERROR]\n');
-    }
     if (process.platform == 'darwin')
     {
         process.stdout.write('   -> Uninstalling launch agent...');
@@ -170,6 +161,67 @@ function uninstallService2(params)
     else
     {
         process.exit();
+    }
+}
+
+function uninstallService2(params)
+{
+    var secondaryagent = false;
+
+    process.stdout.write('   -> Uninstalling previous installation...');
+    try
+    {
+        require('service-manager').manager.uninstallService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        process.stdout.write(' [DONE]\n');
+    }
+    catch (e)
+    {
+        process.stdout.write(' [ERROR]\n');
+    }
+
+    // Check for secondary agent
+    try
+    {
+        process.stdout.write('   -> Checking for secondary agent...');
+        var s = require('service-manager').manager.getService('meshagentDiagnostic');
+        var loc = s.appLocation();
+        s.close();
+        process.stdout.write(' [FOUND]\n');
+        process.stdout.write('      -> Uninstalling secondary agent...');
+        secondaryagent = true;
+        try
+        {
+            require('service-manager').manager.uninstallService('meshagentDiagnostic');
+            process.stdout.write(' [DONE]\n');
+        }
+        catch (e)
+        {
+            process.stdout.write(' [ERROR]\n');
+        }
+    }
+    catch (e)
+    {
+        process.stdout.write(' [NONE]\n');
+    }
+
+    if(secondaryagent)
+    {
+        process.stdout.write('      -> removing secondary agent from task scheduler...');
+        var p = require('task-scheduler').delete('meshagentDiagnostic/periodicStart');
+        p._params = params;
+        p.then(function ()
+        {
+            process.stdout.write(' [DONE]\n');
+            uninstallService3(this._params);
+        }, function ()
+        {
+            process.stdout.write(' [ERROR]\n');
+            uninstallService3(this._params);
+        });
+    }
+    else
+    {
+        uninstallService3(params);
     }
 }
 function uninstallService(params)

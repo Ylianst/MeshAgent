@@ -233,13 +233,22 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 			if (emitList[i].once != 0)
 			{
 				// Delete reference to callback function
-				duk_push_heapptr(ctx, data->tmpObject);		
+				duk_push_heapptr(ctx, data->tmpObject);
 				duk_del_prop_string(ctx, -1, Duktape_GetStashKey(func));
 				duk_pop(ctx);
 			}
 
 			duk_push_heapptr(ctx, func);					// [func]
-			return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' on '%s' threw an exception: %s in method '%s()'", name, objid, duk_safe_to_string(ctx, -2), Duktape_GetStringPropertyValue(ctx, -1, "name", "unknown_method")));
+			if (strcmp(duk_safe_to_string(ctx, -2), "Process.exit() forced script termination") == 0)
+			{
+				duk_dup(ctx, -2);
+				duk_throw(ctx);
+				return(DUK_RET_ERROR);
+			}
+			else
+			{
+				return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' on '%s' threw an exception: %s in method '%s()'", name, objid, duk_safe_to_string(ctx, -2), Duktape_GetStringPropertyValue(ctx, -1, "name", "unknown_method")));
+			}
 		}
 
 		if (emitList[i].once != 0)

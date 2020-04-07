@@ -218,7 +218,7 @@ void WINAPI AddUninstallIcon()
 
 	int i;
 	HKEY hKey;
-	if (RegCreateKey(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MeshCentralAgent", &hKey) == ERROR_SUCCESS)
+	if (RegCreateKey(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Mesh Agent", &hKey) == ERROR_SUCCESS)
 	{
 		LPCTSTR str;
 		char targetexe[_MAX_PATH + 40];
@@ -953,7 +953,7 @@ int wmain(int argc, char* wargv[])
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
 
-	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0))
+	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || strcasecmp(argv[1], "-fulluninstall") == 0))
 	{
 		argv[argc] = argv[1];
 		argv[1] = (char*)ILibMemory_SmartAllocate(4);

@@ -3894,26 +3894,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	// We are a Mesh Agent
 	if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")); }
-	if (agentHost->masterDb == NULL) 
-	{ 
-		void **data = (void**)ILibScratchPad;
-		data[0] = agentHost;
-		((int*)&(data[1]))[0] = paramLen;
-		data[2] = param;
-		((int*)&(data[3]))[0] = parseCommands;
-
-		switch (agentHost->dbRetryCount)
-		{
-		case 10:
-			printf("Unable to open database.\r\n");
-			return 0;
-		default:
-			printf("Unable to open database (%d/10)...\r\n", agentHost->dbRetryCount + 1);
-			agentHost->dbRetryCount++;
-			ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), data, 2000, MeshAgent_AgentMost_dbRetryCallback, NULL);
-			return 1;
-		}
-	}
 
 	int ixr = 0;
 	int installFlag = 0;
@@ -3930,7 +3910,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			installFlag = 1;
 		}
-		if (strcmp("-funinstall", param[ri]) == 0)
+		if (strcmp("-funinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0)
 		{
 			installFlag = 2;
 		}
@@ -3990,6 +3970,29 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 
 		duk_destroy_heap(ctxx);
+	}
+	else
+	{
+		if (agentHost->masterDb == NULL)
+		{
+			void **data = (void**)ILibScratchPad;
+			data[0] = agentHost;
+			((int*)&(data[1]))[0] = paramLen;
+			data[2] = param;
+			((int*)&(data[3]))[0] = parseCommands;
+
+			switch (agentHost->dbRetryCount)
+			{
+			case 10:
+				printf("Unable to open database.\r\n");
+				return 0;
+			default:
+				printf("Unable to open database (%d/10)...\r\n", agentHost->dbRetryCount + 1);
+				agentHost->dbRetryCount++;
+				ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), data, 2000, MeshAgent_AgentMost_dbRetryCallback, NULL);
+				return 1;
+			}
+		}
 	}
 
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);
