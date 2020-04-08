@@ -66,7 +66,7 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	get_tile_buffer(x, y, &tilebuffer, tilebuffersize, desktop, desktopsize, captureWidth, captureHeight);
 	
 	write_JPEG_buffer(tilebuffer, captureWidth, captureHeight, COMPRESSION_QUALITY);
-	
+
 	if (jpeg_buffer_length > 65500) {
 		return jpeg_buffer_length;
 	}
@@ -306,30 +306,35 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	int retval = 0;
 	int firstTime = 1;
 	
-	//This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
-	do {
+	////This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
+	do 
+	{
 		//retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
 		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
-		if (retval != 0) {
-			if (firstTime) {
-				//Re-adjust the compression ratio.
-				COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
-				if (COMPRESSION_RATIO <= 1) {
-					COMPRESSION_RATIO = 2;
-				}
-				
-				firstTime = 0;
-			}
+		if (retval != 0) 
+		{
+			//if (firstTime) 
+			//{
+			//	//Re-adjust the compression ratio.
+			//	COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
+			//	if (COMPRESSION_RATIO <= 1) {
+			//		COMPRESSION_RATIO = 2;
+			//	}
+			//	
+			//	firstTime = 0;
+			//}
 			
 			if (botrow > row) { //First time, try reducing the height.
 				botrow = row + ((botrow - row + 1) / 2);
 				captureHeight = (botrow - row + 1) * TILE_HEIGHT;
 			}
-			else if (rightcol > col){ //If it is not possible, reduce the width
+			else if (rightcol > col)
+			{ //If it is not possible, reduce the width
 				rightcol = col + ((rightcol - col + 1) / 2);
 				captureWidth = (rightcol - col + 1) * TILE_WIDTH;
 			}
-			else { //This never happens in any case.
+			else 
+			{ //This never happens in any case.
 				retval = 0;
 				break;
 			}
@@ -338,15 +343,30 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	} while (retval != 0);
 	
 	//Set the flags to TILE_SENT
-	if (jpeg_buffer != NULL) {
-		*bufferSize = jpeg_buffer_length + 8;
-		
+	if (jpeg_buffer != NULL) 
+	{
+		*bufferSize = jpeg_buffer_length + (jpeg_buffer_length > 65500 ? 16 : 8);
 		*buffer = malloc (*bufferSize);
-		((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
-		((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
-		((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
-		((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
-		memcpy((char *)(*buffer) + 8, jpeg_buffer, jpeg_buffer_length);
+
+		if (jpeg_buffer_length > 65500)
+		{
+			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_JUMBO);		// Write the type
+			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
+			((unsigned int*)*buffer)[1] = (unsigned int)htonl(jpeg_buffer_length + 8);				// Size of the Next Packet
+			((unsigned short*)*buffer)[4] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+			((unsigned short*)*buffer)[5] = 0;														// RESERVED
+			((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
+			((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
+			memcpy((char *)(*buffer) + 16, jpeg_buffer, jpeg_buffer_length);
+		}
+		else
+		{
+			((unsigned short*)*buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_PICTURE);	// Write the type
+			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
+			((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
+			((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
+			memcpy((char *)(*buffer) + 8, jpeg_buffer, jpeg_buffer_length);
+		}
 		free(jpeg_buffer);
 		jpeg_buffer = NULL;
 		jpeg_buffer_length = 0;
