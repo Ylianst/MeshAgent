@@ -1784,7 +1784,7 @@ duk_ret_t ILibDuktape_Polyfills_crc32c(duk_context *ctx)
 {
 	duk_size_t len;
 	char *buffer = Duktape_GetBuffer(ctx, 0, &len);
-	duk_push_int(ctx, crc32c(0, (unsigned char*)buffer, (uint32_t)len));
+	duk_push_uint(ctx, crc32c(0, (unsigned char*)buffer, (uint32_t)len));
 	return(1);
 }
 #endif
