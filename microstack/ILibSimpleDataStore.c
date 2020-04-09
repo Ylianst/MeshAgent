@@ -702,7 +702,11 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 	if (entry == NULL) return NULL; // If there is no in-memory entry for this key, return zero now.
 	return entry->valueHash;
 }
-
+int ILibSimpleDataStore_GetHashSize()
+{
+	ILibSimpleDataStore_TableEntry e;
+	return((int)sizeof(e.valueHash));
+}
 // Delete a key and value from the data store
 __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
 {

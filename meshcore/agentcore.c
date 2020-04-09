@@ -1815,7 +1815,17 @@ duk_ret_t ILibDuktape_MeshAgent_remoteMouseRender_set(duk_context *ctx)
 	gRemoteMouseRenderDefault = duk_require_int(ctx, 0);
 	return(0);
 }
+duk_ret_t ILibDuktape_MeshAgent_coreHash(duk_context *ctx)
+{
+	MeshAgentHostContainer *agent;
+	duk_push_this(ctx);																		// [MeshAgent]
+	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
 
+	char *hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");				// Get the reference to the SHA384 hash for the currently running code
+	util_tohex(hashref, ILibSimpleDataStore_GetHashSize(), ILibScratchPad);
+	duk_push_string(ctx, ILibScratchPad);
+	return(1);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1888,6 +1898,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "activeMicroLMS", (agent->microLMS != NULL ? 1 : 0));
 		ILibDuktape_CreateInstanceMethod(ctx, "restartCore", ILibDuktape_MeshAgent_dumpCoreModule, 0);
 		ILibDuktape_CreateInstanceMethod(ctx, "getStartupOptions", ILibDuktape_MeshAgent_getStartupOptions, 0);
+		ILibDuktape_CreateEventWithGetter(ctx, "coreHash", ILibDuktape_MeshAgent_coreHash);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");

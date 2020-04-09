@@ -66,9 +66,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 #define ILibSimpleDataStore_Get(dataStore, key, buffer, bufferLen) ILibSimpleDataStore_GetEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), buffer, bufferLen)
 __EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char* key, int defaultValue);
 
-// Get the SHA256 hash value from the datastore for a given a key.
+// Get the SHA384 hash value from the datastore for a given a key.
 __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen);
 #define ILibSimpleDataStore_GetHash(dataStore, key) ILibSimpleDataStore_GetHashEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength))
+int ILibSimpleDataStore_GetHashSize();
 
 // Delete a key from the data store
 __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, int keyLen);
