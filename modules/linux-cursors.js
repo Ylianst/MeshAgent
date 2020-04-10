@@ -40,9 +40,16 @@ catch(e)
 
 if (!process.env.XAUTHORITY || !process.env.DISPLAY)
 {
-    var xinfo = this.getXInfo(require('user-sessions').getUid(require('user-sessions').whoami()));
-    process.setenv('XAUTHORITY', xinfo.xauthority);
-    process.setenv('DISPLAY', xinfo.display);
+    try
+    {
+        var xinfo = this.getXInfo(require('user-sessions').getUid(require('user-sessions').whoami()));
+        process.setenv('XAUTHORITY', xinfo.xauthority);
+        process.setenv('DISPLAY', xinfo.display);
+    }
+    catch(ff)
+    {
+        console.log(ff);
+    }
 }
 
 var display = X11.XOpenDisplay(GM.CreateVariable(process.env.DISPLAY));
