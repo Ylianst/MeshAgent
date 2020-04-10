@@ -643,7 +643,7 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 				{
 					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
 					writeHandler(buffer, *bytesConsumed, reserved);
-					printf("JUMBO PACKET: %d\n", *bytesConsumed);
+					//printf("JUMBO PACKET: %d\n", *bytesConsumed);
 					return;
 				}
 			}
@@ -655,7 +655,7 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 			{
 				*bytesConsumed = size;
 				writeHandler(buffer, size, reserved);
-				printf("Normal PACKET: %d\n", *bytesConsumed);
+				//printf("Normal PACKET: %d\n", *bytesConsumed);
 				return;
 			}
 		}
