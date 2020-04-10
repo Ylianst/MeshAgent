@@ -142,6 +142,7 @@ typedef struct xfixes_struct
 	Bool(*XFixesSelectCursorInput)(Display *d, Window w, int i);
 	Bool(*XFixesQueryExtension)(Display *d, int *eventbase, int *errorbase);
 	void*(*XFixesGetCursorImage)(Display *d);
+	void*(*XFixesGetCursorImageAndName)(Display *d);
 }xfixes_struct;
 xfixes_struct *xfixes_exports = NULL;
 
@@ -160,6 +161,102 @@ void kvm_send_error(char *msg)
 	ILibQueue_UnLock(g_messageQ);
 }
 
+KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
+{
+	// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
+	char *cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
+	KVM_MouseCursors ret = KVM_MouseCursor_HELP;
+
+	unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
+	unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
+	char *pixels = cursor_image + (sizeof(void*) == 8 ? 24 : 16);
+	char alpha[65535];
+	int i;
+
+	if ((size_t)(w*h) <= sizeof(alpha))
+	{
+		for (i = 0; i < (w*h); ++i)
+		{
+			alpha[i] = pixels[(sizeof(void*)==8?(3 + (i * 8)):(3 + (i * 4)))];
+		}
+		switch (crc32c(0, (unsigned char*)alpha+6, (uint32_t)((w*h)-6)))
+		{
+			case 3911022957:			// Ubuntu/Peppermint (Top)
+			case 315617398:				// Ubuntu/Peppermint (Bottom)
+			case 313635327:				// FreeBSD
+			case 399455764:				// openSUSE
+			case 3867633865:			// PuppyLinux (Top)
+			case 2405141328:			// PuppyLinux (Bottom)
+			case 2017738775:			// Raspian/CentOS (Top)
+			case 1820008802:			// Raspian/CentOS (Bottom)
+				ret = KVM_MouseCursor_SIZENS;
+				break;
+
+			case 1206496159:			// Ubuntu (Left)
+			case 3947249005:			// Ubuntu (Right)
+			case 2065486748:			// FreeBSD
+			case 3817177836:			// openSUSE
+			case 2760825997:			// PuppyLinux (Left)
+			case 222646089:				// PuppyLinux (Right)
+			case 1924105758:			// Raspian (Left)
+			case 18444308:				// Raspian (Right)
+				ret = KVM_MouseCursor_SIZEWE;
+				break;
+
+			case 305612954:				// Ubuntu (Bottom Left)
+			case 1245488815:			// Ubuntu (Upper Right)
+			case 169817074:				// FreeBSD + PuppyLinux (Bottom Left)
+			case 482480649:				// FreeBSD + PuppyLinux (Upper Right)
+			case 1405624986:			// openSUSE
+			case 2989878302:			// Raspian (Bottom Left)
+			case 21344493:				// Raspian (Upper Right)
+				ret = KVM_MouseCursor_SIZENESW;
+				break;
+
+			case 799529566:				// Ubuntu (Upper Left)
+			case 4056118275:			// Ubuntu (Bottom Right)
+			case 2757619196:			// FreeBSD + PuppyLinux (Bottom Right)
+			case 3302778157:			// FreeBSD + PuppyLinux (Upper Left)
+			case 924333740:				// openSUSE
+			case 2843753620:			// Raspian (Upper Left)
+			case 4110212903:			// Raspian (Bottom Right)
+				ret = KVM_MouseCursor_SIZENWSE;
+				break;
+			case 2280086639:			// Ubuntu
+			case 920009133:				// FreeBSD + PuppyLinux
+			case 2321998854:			// openSUSE
+			case 926331252:				// Raspian
+				ret = KVM_MouseCursor_SIZEALL;
+				break;
+
+			case 3546300886:			// Ubuntu
+			case 1038978227:			// FreeBSD + PuppyLinux + openSUSE
+			case 4237429080:			// Raspian
+				ret = KVM_MouseCursor_ARROW;
+				break;
+			case 1176251007:			// Ubuntu
+			case 3320936845:			// FreeBSD
+			case 795881928:				// PuppyLinux
+			case 134935791:				// Raspian
+				ret = KVM_MouseCursor_IBEAM;
+				break;
+
+			case 3673902152:			// Ubuntu
+			case 27109234:				// Raspian
+			case (uint32_t)-1421461853:	// PuppyLinux
+				ret = KVM_MouseCursor_HAND;
+				break;
+
+			case 3463742778:			// Ubuntu
+				ret = KVM_MouseCursor_WAIT;
+				break;
+			default:
+				break;
+		}
+	}
+	
+	return(ret);
+}
 void kvm_send_resolution()
 {
 	char *buffer = (char*)ILibMemory_SmartAllocate(8);
@@ -392,6 +489,7 @@ int kvm_init(int displayNo)
 			((void**)xfixes_exports)[1] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesSelectCursorInput");
 			((void**)xfixes_exports)[2] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesQueryExtension");
 			((void**)xfixes_exports)[3] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesGetCursorImage");
+			((void**)xfixes_exports)[4] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesGetCursorImageAndName");
 		}
 	}
 
@@ -839,6 +937,8 @@ void* kvm_server_mainloop(void* parm)
 					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
 					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Get the FD to use in select
 				}
+
+				curcursor = kvm_fetch_currentCursor(cursordisplay);							// Cursor Type
 			}
 		}
 		else if (cursor_descriptor > 0)
@@ -899,63 +999,7 @@ void* kvm_server_mainloop(void* parm)
 						else
 						{
 							// Name was NULL, so as a last ditch effort, lets try to look at the XFixesCursorImage
-							cursor_image = (char*)xfixes_exports->XFixesGetCursorImage(cursordisplay);
-							if (sizeof(void*) == 8)
-							{
-								unsigned short w = ((unsigned short*)(cursor_image + 4))[0];
-								unsigned short h = ((unsigned short*)(cursor_image + 6))[0];
-								char *pixels = cursor_image + 24;
-								char alpha[65535];
-								int i;
-
-								if ((size_t)(w*h) <= sizeof(alpha))
-								{
-									for (i = 0; i < (w*h); ++i)
-									{
-										alpha[i] = pixels[7 + (i * 8)];
-									}
-									switch (crc32c(0, (unsigned char*)alpha, (uint32_t)(w*h)))
-									{
-										case 680869104:				// FreeBSD
-										case 503303936:				// openSUSE
-										case 424513050:				// PuppyLinux (Top)
-										case (uint32_t)-1492434837:	// PuppyLinux (Bottom)
-											curcursor = KVM_MouseCursor_SIZENS;
-											break;
-										case 1094213267:			// FreeBSD
-										case 723082922:				// openSUSE
-										case 1531198046:			// PuppyLinux (Left)
-										case 622167154:				// PuppyLinux (Right)
-											curcursor = KVM_MouseCursor_SIZEWE;
-											break;
-										case 318345513:				// FreeBSD + PuppyLinux (Bottom Left)
-										case 69513426:				// FreeBSD + PuppyLinux (Upper Right)
-										case 152373933:				// openSUSE
-											curcursor = KVM_MouseCursor_SIZENESW;
-											break;
-										case (uint32_t)-1187377452:	// FreeBSD + PuppyLinux (Bottom Right)
-										case (uint32_t)-600127498:	// FreeBSD + PuppyLinux (Upper Left)
-										case (uint32_t)-2000746020:	// openSUSE
-											curcursor = KVM_MouseCursor_SIZENWSE;
-											break;
-										case 733076101:				// FreeBSD + PuppyLinux
-										case 261159321:				// openSUSE
-											curcursor = KVM_MouseCursor_SIZEALL;
-											break;
-										case 728953462:				// FreeBSD + PuppyLinux
-										case 310104114:				// openSUSE
-											curcursor = KVM_MouseCursor_ARROW;
-											break;
-										case (uint32_t)-1347586305:	// PuppyLinux
-											curcursor = KVM_MouseCursor_IBEAM;
-											break;
-										case (uint32_t)-1421461853:	// PuppyLinux
-											curcursor = KVM_MouseCursor_HAND;
-											break;
-
-									}
-								}
-							}
+							curcursor = kvm_fetch_currentCursor(cursordisplay);
 						}
 
 						if (sentHideCursor == 0)
@@ -1030,7 +1074,7 @@ void* kvm_server_mainloop(void* parm)
 					unsigned short xhot = ((unsigned short*)(cimage + 8))[0];
 					unsigned short yhot = ((unsigned short*)(cimage + 10))[0];
 					unsigned short mx = rx - xhot, my = ry - yhot;
-					char *pixels = cimage + 24;
+					char *pixels = cimage + (sizeof(void*) == 8 ? 24 : 16);
 
 					//if (logFile) { fprintf(logFile, "BBP: %d, pad: %d, unit: %d, BPP: %d, F: %d, XO: %d: PW: %d\n", image->bytes_per_line, image->bitmap_pad, image->bitmap_unit, image->bits_per_pixel, image->format, image->xoffset, (adjust_screen_size(SCREEN_WIDTH) - image->width) * 3); fflush(logFile); }
 					//if (logFile) { fprintf(logFile, "[%d/ %d x %d] (%d, %d) => (%d, %d | %u, %u)\n", image->bits_per_pixel, xa.width, xa.height, screen_width, screen_height, rx, ry,w , h); fflush(logFile); }
@@ -1146,16 +1190,31 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen
 
 	if (bufferLen > 4)
 	{
-		size = ntohs(((unsigned short*)(buffer))[1]);
-		if (size <= bufferLen)
+		if (ntohs(((unsigned short*)(buffer))[0]) == (unsigned short)MNG_JUMBO)
 		{
-			//printf("KVM Data: %u bytes\n", size);
-			*bytesConsumed = size;
-			writeHandler(buffer, size, reserved);
-			return;
+			if (bufferLen > 8)
+			{
+				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
+				{
+					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					writeHandler(buffer, *bytesConsumed, reserved);
+					return;
+				}
+			}
+		}
+		else
+		{
+			size = ntohs(((unsigned short*)(buffer))[1]);
+			if (size <= bufferLen)
+			{
+				*bytesConsumed = size;
+				writeHandler(buffer, size, reserved);
+				return;
+			}
 		}
 	}
 	*bytesConsumed = 0;
+
 }
 
 void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)

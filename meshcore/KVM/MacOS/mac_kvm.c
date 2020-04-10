@@ -635,19 +635,29 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 
 	if (bufferLen > 4)
 	{
-		size = ntohs(((unsigned short*)(buffer))[1]);
-		if (size <= bufferLen)
+		if (ntohs(((unsigned short*)(buffer))[0]) == (unsigned short)MNG_JUMBO)
 		{
-			if (ntohs(((unsigned short*)(buffer))[0]) == MNG_DEBUG)
+			if (bufferLen > 8)
 			{
-				char tmp[255];
-				int x = sprintf_s(tmp, sizeof(tmp), "DEBUG: %d\n", ((int*)buffer)[1]);
-				
-				write(STDOUT_FILENO, tmp, x);
+				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
+				{
+					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					writeHandler(buffer, *bytesConsumed, reserved);
+					printf("JUMBO PACKET: %d\n", *bytesConsumed);
+					return;
+				}
 			}
-			*bytesConsumed = size;
-			writeHandler(buffer, size, reserved);
-			return;
+		}
+		else
+		{
+			size = ntohs(((unsigned short*)(buffer))[1]);
+			if (size <= bufferLen)
+			{
+				*bytesConsumed = size;
+				writeHandler(buffer, size, reserved);
+				printf("Normal PACKET: %d\n", *bytesConsumed);
+				return;
+			}
 		}
 	}
 	*bytesConsumed = 0;

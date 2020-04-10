@@ -299,8 +299,11 @@ void KVM_InitMessagePump()
 	CUR_WORKTHREAD = CreateThread(NULL, 0, KVM_InitMessagePumpEx, NULL, 0, 0);
 }
 
-void KVM_InitMouseCursors()
+void KVM_InitMouseCursors(void *pendingPackets)
 {
+	CURSORINFO info = { 0 };
+	char *buffer;
+
 	CUR_ARROW = KVM_GetCursorHash(LoadCursorA(NULL, IDC_ARROW), NULL, 0);					
 	CUR_APPSTARTING = KVM_GetCursorHash(LoadCursorA(NULL, IDC_APPSTARTING), NULL, 0);		
 	CUR_CROSS = KVM_GetCursorHash(LoadCursorA(NULL, IDC_CROSS), NULL, 0);					
@@ -316,6 +319,16 @@ void KVM_InitMouseCursors()
 	CUR_UPARROW = KVM_GetCursorHash(LoadCursorA(NULL, IDC_UPARROW), NULL, 0);				
 	CUR_WAIT = KVM_GetCursorHash(LoadCursorA(NULL, IDC_WAIT), NULL, 0);		
 	
+	info.cbSize = sizeof(info);
+	GetCursorInfo(&info);
+	gCurrentCursor = KVM_CursorHashToMSG(KVM_GetCursorHash(info.hCursor, NULL, 0));
+
+	buffer = (char*)ILibMemory_SmartAllocate(5);
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+	buffer[4] = (char)gCurrentCursor;															// Cursor Type
+	ILibQueue_EnQueue(pendingPackets, buffer);
+
 	KVM_InitMessagePump();
 }
 

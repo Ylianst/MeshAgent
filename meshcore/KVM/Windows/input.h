@@ -37,7 +37,7 @@ typedef enum KVM_MouseCursors
 	KVM_MouseCursor_WAIT		= 13
 }KVM_MouseCursors;
 
-void KVM_InitMouseCursors();
+void KVM_InitMouseCursors(void* pendingPackets);
 void KVM_UnInitMouseCursors();
 void MouseAction(double absX, double absY, int button, short wheel);
 void KeyAction(unsigned char keycode, int up);

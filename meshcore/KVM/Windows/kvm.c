@@ -823,7 +823,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	int sentHideCursor = 0;
 
 	gPendingPackets = ILibQueue_Create();
-	KVM_InitMouseCursors();
+	KVM_InitMouseCursors(gPendingPackets);
 
 #ifdef _WINSERVICE
 	if (!kvmConsoleMode)

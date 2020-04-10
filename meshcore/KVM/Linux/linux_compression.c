@@ -16,6 +16,12 @@ limitations under the License.
 
 #include "linux_compression.h"
 
+#if defined(JPEGMAXBUF)
+	#define MAX_TILE_SIZE JPEGMAXBUF
+#else
+	#define MAX_TILE_SIZE 65500
+#endif
+
 unsigned char *jpeg_buffer = NULL;
 int jpeg_buffer_length = 0;
 char jpegLastError[JMSG_LENGTH_MAX];
@@ -51,7 +57,9 @@ boolean empty_output_buffer(j_compress_ptr cinfo)
 	cinfo->dest->next_output_byte = next_output_byte;
 	cinfo->dest->free_in_buffer = MAX_BUFFER;
 
-	if (jpeg_buffer_length > 65500) return FALSE;
+#if MAX_TILE_SIZE > 0
+	if ( jpeg_buffer_length > MAX_TILE_SIZE) return FALSE;
+#endif
 	return TRUE;
 }
 
@@ -61,11 +69,15 @@ void term_destination (j_compress_ptr cinfo)
 
 	jpeg_buffer_length += remaining_buff_length;
 
-	if (jpeg_buffer_length > 65500) {
+#if MAX_TILE_SIZE > 0
+	if (jpeg_buffer_length > MAX_TILE_SIZE)
+	{
 		free(jpeg_buffer);
 		jpeg_buffer = NULL;
 	}
-	else {
+	else 
+#endif
+	{
 		jpeg_buffer = (unsigned char *) realloc(jpeg_buffer, jpeg_buffer_length);
 	}
 }

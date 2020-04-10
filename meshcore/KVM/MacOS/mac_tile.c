@@ -29,6 +29,13 @@ int tilebuffersize = 0;
 void* tilebuffer = NULL;
 int COMPRESSION_QUALITY = 50;
 
+#if defined(JPEGMAXBUF)
+	#define MAX_TILE_SIZE JPEGMAXBUF
+#else
+	#define MAX_TILE_SIZE 65500
+#endif
+
+
 /******************************************************************************
  * INTERNAL FUNCTIONS
  ******************************************************************************/
@@ -67,10 +74,14 @@ int calc_opt_compr_send(int x, int y, int captureWidth, int captureHeight, void*
 	
 	write_JPEG_buffer(tilebuffer, captureWidth, captureHeight, COMPRESSION_QUALITY);
 
-	if (jpeg_buffer_length > 65500) {
+#if MAX_TILE_SIZE > 0
+	if (jpeg_buffer_length > MAX_TILE_SIZE)
+	{
 		return jpeg_buffer_length;
 	}
-	else {
+	else
+#endif
+	{
 		return 0;
 	}
 }
@@ -222,17 +233,22 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 		
 		if (CRC != g_tileInfo[row][rightcol].crc || g_tileInfo[row][rightcol].flag == TILE_MARKED_NOT_SENT) { //If the tile has changed, increment the capturewidth.
 			g_tileInfo[row][rightcol].crc = CRC;
-			//Here we check whether the size of the coalesced bitmap is greater than the threshold (65500)
-			if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * 3 / COMPRESSION_RATIO > 65500) {
+
+#if MAX_TILE_SIZE > 0
+			//Here we check whether the size of the coalesced bitmap is greater than the threshold (MAX_TILE_SIZE)
+			if ((captureWidth + TILE_WIDTH) * TILE_HEIGHT * 3 / COMPRESSION_RATIO > MAX_TILE_SIZE)
+			{
 				g_tileInfo[row][rightcol].flag = TILE_MARKED_NOT_SENT;
 				--rightcol;
 				break;
 			}
-			
+#endif
+
 			g_tileInfo[row][rightcol].flag = TILE_MARKED_NOT_SENT;
 			captureWidth += TILE_WIDTH;
 		}
-		else {
+		else
+		{
 			g_tileInfo[row][rightcol].flag = TILE_DONT_SEND;
 			--rightcol;
 			break;
@@ -242,7 +258,12 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	//int TOLERANCE = (rightcol - col) / 3;
 	
 	// Now go to the bottom tiles, check if they have changed and record them
-	while ((botrow + 1 < TILE_HEIGHT_COUNT) && ((captureHeight + TILE_HEIGHT) * captureWidth * 3 / COMPRESSION_RATIO <= 65500)) {
+#if MAX_TILE_SIZE > 0
+	while ((botrow + 1 < TILE_HEIGHT_COUNT) && ((captureHeight + TILE_HEIGHT) * captureWidth * 3 / COMPRESSION_RATIO <= MAX_TILE_SIZE))
+#else
+	while ((botrow + 1 < TILE_HEIGHT_COUNT))
+#endif
+	{
 		botrow++;
 		r_y = botrow * TILE_HEIGHT;
 		int fail = 0;
@@ -306,42 +327,38 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	int retval = 0;
 	int firstTime = 1;
 	
-	////This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
-	do 
-	{
+#if MAX_TILE_SIZE == 0
+	retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
+#else
+	//This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
+	do {
 		//retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
 		retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
-		if (retval != 0) 
-		{
-			//if (firstTime) 
-			//{
-			//	//Re-adjust the compression ratio.
-			//	COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO/(double)retval) * 60000);//Magic number: 60000 ~= 65500
-			//	if (COMPRESSION_RATIO <= 1) {
-			//		COMPRESSION_RATIO = 2;
-			//	}
-			//	
-			//	firstTime = 0;
-			//}
-			
+		if (retval != 0) {
+			if (firstTime) {
+				// Re-adjust the compression ratio.
+				COMPRESSION_RATIO = (int)(((double)COMPRESSION_RATIO / (double)retval) * (0.92 * MAX_TILE_SIZE)); //Magic number: 92% of MAX_TILE_SIZE
+				if (COMPRESSION_RATIO <= 1) { COMPRESSION_RATIO = 2; }
+				firstTime = 0;
+			}
+
 			if (botrow > row) { //First time, try reducing the height.
 				botrow = row + ((botrow - row + 1) / 2);
 				captureHeight = (botrow - row + 1) * TILE_HEIGHT;
 			}
-			else if (rightcol > col)
-			{ //If it is not possible, reduce the width
+			else if (rightcol > col) { //If it is not possible, reduce the width
 				rightcol = col + ((rightcol - col + 1) / 2);
 				captureWidth = (rightcol - col + 1) * TILE_WIDTH;
 			}
-			else 
-			{ //This never happens in any case.
+			else { //This never happens in any case.
 				retval = 0;
 				break;
 			}
-			
+
 		}
 	} while (retval != 0);
-	
+#endif
+
 	//Set the flags to TILE_SENT
 	if (jpeg_buffer != NULL) 
 	{
