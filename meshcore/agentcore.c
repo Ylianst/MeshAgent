@@ -3801,17 +3801,22 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 }
 
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands);
+void MeshAgent_AgentMost_dbRetryAbort(void *object)
+{
+	ILibMemory_Free(object);
+}
 void MeshAgent_AgentMost_dbRetryCallback(void *object)
 {
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)((void**)object)[0];
-	int paramLen = ((int*)&((void**)object)[1])[0];
+	int paramLen = (int)(uintptr_t)((void**)object)[1];
 	char **param = (char**)((void**)object)[2];
-	int parseCommands = ((int*)&((void**)object)[3])[0];
+	int parseCommands = (int)(uintptr_t)((void**)object)[3];
 
 	if (MeshAgent_AgentMode(agentHost, paramLen, param, parseCommands) == 0)
 	{
 		ILibStopChain(agentHost->chain);
 	}
+	ILibMemory_Free(object);
 }
 
 void MeshAgent_AgentMode_Core_ServerTimeout(duk_context *ctx, void ** args, int argsLen)
@@ -4001,11 +4006,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	{
 		if (agentHost->masterDb == NULL)
 		{
-			void **data = (void**)ILibScratchPad;
+			void **data = (void**)ILibMemory_SmartAllocate(4 * sizeof(void*));
 			data[0] = agentHost;
-			((int*)&(data[1]))[0] = paramLen;
+			data[1] = (void*)(uintptr_t)paramLen;
 			data[2] = param;
-			((int*)&(data[3]))[0] = parseCommands;
+			data[3] = (void*)(uintptr_t)parseCommands;
 
 			switch (agentHost->dbRetryCount)
 			{
@@ -4015,7 +4020,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			default:
 				printf("Unable to open database (%d/10)...\r\n", agentHost->dbRetryCount + 1);
 				agentHost->dbRetryCount++;
-				ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), data, 2000, MeshAgent_AgentMost_dbRetryCallback, NULL);
+				ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), data, 2000, MeshAgent_AgentMost_dbRetryCallback, MeshAgent_AgentMost_dbRetryAbort);
 				return 1;
 			}
 		}

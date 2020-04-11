@@ -832,7 +832,7 @@ void* kvm_server_mainloop(void* parm)
 	Window rr, cr;
 	int rx, ry, wx, wy, rs;
 	unsigned int mr;
-	char *cursor_image = NULL,*cimage;
+	char *cimage;
 
 	int x, y, height, width, r, c, count = 0;
 	int sentHideCursor = 0;
