@@ -173,7 +173,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 	char alpha[65535];
 	int i;
 
-	if ((size_t)(w*h) <= sizeof(alpha))
+	if (((size_t)(w*h) <= sizeof(alpha)) && ((size_t)(w*h) > 6))
 	{
 		for (i = 0; i < (w*h); ++i)
 		{
