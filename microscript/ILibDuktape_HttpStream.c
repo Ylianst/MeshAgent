@@ -4020,29 +4020,7 @@ int ILibDuktape_httpStream_webSocket_EncodedUnshiftSink(ILibDuktape_DuplexStream
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_DecodedWriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
-#if defined(_POSIX)
-	int maxsize = 5000;			// Temporary Work-around until we figure out why on linux on old hardware, sending fragments bigger than this can cause OpenSSL to corrupt the TLS packet
-#else
-	int maxsize = bufferLen;
-#endif
-
-	int sendSize = 0;
-	if (bufferLen < maxsize)
-	{
-		return(ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, bufferLen, ILibWebClient_WebSocket_FragmentFlag_Complete));
-	}
-	else
-	{
-		ILibTransport_DoneState ret = ILibTransport_DoneState_COMPLETE;
-		while(bufferLen > 0)
-		{
-			sendSize = bufferLen > maxsize ? maxsize : bufferLen;
-			bufferLen -= sendSize;
-			ret = ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, sendSize, bufferLen>0?ILibWebClient_WebSocket_FragmentFlag_Incomplete : ILibWebClient_WebSocket_FragmentFlag_Complete);
-			buffer += sendSize;
-		}
-		return(ret);
-	}
+	return(ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, stream->writableStream->Reserved == 1 ? ILibWebClient_WebSocket_DataType_TEXT : ILibWebClient_WebSocket_DataType_BINARY, buffer, bufferLen, ILibWebClient_WebSocket_FragmentFlag_Complete));
 }
 void ILibDuktape_httpStream_webSocket_DecodedEndSink(ILibDuktape_DuplexStream *stream, void *user)
 {
