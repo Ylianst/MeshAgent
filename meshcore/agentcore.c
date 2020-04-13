@@ -1904,6 +1904,15 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
 
 		ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "remoteMouseRender", ILibDuktape_MeshAgent_remoteMouseRender_get, ILibDuktape_MeshAgent_remoteMouseRender_set);
+#if defined(WIN32)
+		ILibDuktape_CreateReadonlyProperty_int(ctx, "maxKvmTileSize", 0);
+#else
+	#if defined(JPEGMAXBUF)
+		ILibDuktape_CreateReadonlyProperty_int(ctx, "maxKvmTileSize", JPEGMAXBUF);
+	#else
+		ILibDuktape_CreateReadonlyProperty_int(ctx, "maxKvmTileSize", 65500);
+	#endif
+#endif
 
 #if defined(_POSIX) && !defined(__APPLE__)
 		ILibDuktape_CreateInstanceMethod(ctx, "enableKvmSlaveLog", ILibDuktape_MeshAgent_enableKvmSlaveLog, 1);
