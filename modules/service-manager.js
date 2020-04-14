@@ -877,7 +877,7 @@ function serviceManager()
         {
             this.getService = function getService(name)
             {
-                var ret = { name: name};
+                var ret = { name: name, close: function () { } };
                 if(require('fs').existsSync('/etc/rc.d/' + name)) 
                 {
                     Object.defineProperty(ret, 'rc', { value: '/etc/rc.d/' + name });
@@ -1697,6 +1697,9 @@ function serviceManager()
             if (!require('fs').existsSync('/usr/local/mesh_services')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
             if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
             require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+            var bm = require('fs').statSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
+            bm |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+            require('fs').chmodSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target, bm);
 
             var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
             rc.write('#!/bin/sh\n');
