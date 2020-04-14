@@ -251,7 +251,15 @@ void ILibDuktape_net_socket_OnSendOK(ILibAsyncSocket_SocketModule socketModule, 
 ILibTransport_DoneState ILibDuktape_net_socket_WriteHandler(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)user;
+#ifdef _DEBUG_NET_FRAGMENT_SEND
+	int x = bufferLen / 2;
+	printf("** Send 1/2: %d of %d bytes\n", x, bufferLen);
+	ILibAsyncSocket_Send(ptrs->socketModule, buffer, x, ILibAsyncSocket_MemoryOwnership_USER);
+	printf("** Send 2/2: %d  of %d bytes\n", bufferLen - x, bufferLen);
+	return((ILibTransport_DoneState)ILibAsyncSocket_Send(ptrs->socketModule, buffer + x, bufferLen - x, ILibAsyncSocket_MemoryOwnership_USER));
+#else
 	return((ILibTransport_DoneState)ILibAsyncSocket_Send(ptrs->socketModule, buffer, bufferLen, ILibAsyncSocket_MemoryOwnership_USER));
+#endif
 }
 void ILibDuktape_net_socket_EndHandler(ILibDuktape_DuplexStream *stream, void *user)
 {

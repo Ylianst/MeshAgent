@@ -82,6 +82,29 @@
 #   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
 
 
+# 
+# Required build switches:
+#	ARCHID									Architecture ID
+# 
+# 
+# Optional build switches:
+#	DEBUG									0 = Release, 1 = DEBUG				=> Default is Release
+#	FSWATCH_DISABLE							1 = Remove fswatchter support		=> Default is fswatcher supported
+#	IPADDR_MONITOR_DISABLE					1 = No IPAddress Monitoring			=> Default is IPAddress Monitoring Enabled
+#	IFADDR_DISABLE							1 = Don't use ifaddrs.h				=> Default is use IFADDR
+#	KVM										1 = KVM Enabled, 0 = KVM Disabled   => Default depends on ARCHID
+#	KVM_ALL_TILES							0 = Normal, 1 = All Tiles			=> Default is Normal Tiling Algorithm
+#	LEGACY_LD								0 = Standard, 1 = Legacy			=> Default is Standard (CentOS 5.11 requires Legacy)
+#	NET_SEND_FORCE_FRAGMENT					1 = net.send() fragments sends		=> Default is normal send operation
+#	NOTLS									1 = TLS Support Compiled Out		=> Default is TLS Support Compiled In
+#	NOTURBOJPEG								1 = Don't use Turbo JPEG			=> Default is USE TurboJPEG
+#	SSL_EXPORTABLE_KEYS						1 = Export SSL Keys for debugging	=> Default is DO NOT export SSL keys
+#	TLS_WRITE_TRACE							1 = Enable TLS Send Tracing			=> Default is tracing disabled
+#	WatchDog								WatchDog timer interval.			=> Default is 6000000
+#	WEBLOG									1 = Enable WebLogging Interface		=> Default is disabled
+#	WEBRTCDEBUG								1 = Enable WebRTC Instrumentation	=> Default is disabled
+#
+
 # Microstack & Microscript
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c
 SOURCES += microstack/ILibRemoteLogging.c microstack/ILibWebClient.c microstack/ILibWebRTC.c microstack/ILibWebServer.c microstack/ILibCrypto.c
@@ -389,6 +412,15 @@ endif
 ifeq ($(TLS_WRITE_TRACE),1)
 CFLAGS += -D_TLSLOG
 endif
+
+ifeq ($(NET_SEND_FORCE_FRAGMENT),1)
+CFLAGS += -D_DEBUG_NET_FRAGMENT_SEND
+endif
+
+ifeq ($(KVM_ALL_TILES),1)
+CFLAGS += -DKVM_ALL_TILES
+endif
+
 
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)

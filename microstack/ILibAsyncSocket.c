@@ -606,6 +606,10 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 
 						ignore_result(BIO_reset(module->writeBio));
 					}
+					else if (bytesSent < 0)
+					{
+						TLSLOG1("   -- > [INCOMPLETE] Accumulated into BIOBUFFER[%d]\n", module->internalSocket);
+					}
 					retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 				}
 				else if (bytesSent == module->writeBioBuffer->length)
@@ -634,7 +638,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 			// Send will happen in ILibAsyncSocket_PostSelect()
 			retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 			module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
-			TLSLOG1("   --> Accumulate[%d]...\n", module->internalSocket);
+			TLSLOG1("   --> [IN PROGRESS] Accumulated into BIOBUFFER[%d]...\n", module->internalSocket);
 		}
 
 		if (lockOverride == 0) { sem_post(&(module->SendLock)); }
@@ -1883,7 +1887,14 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 							}
 							else
 							{
-								TLSLOG1("     --> REMAINING: %d bytes --<\n", module->PendingSend_Head->bufferSize - module->PendingSend_Head->bytesSent);
+								if (module->PendingSend_Head->bufferSize - module->PendingSend_Head->bytesSent == 0 && module->PendingSend_Head->UserFree == ILibAsyncSocket_MemoryOwnership_BIO)
+								{
+									TLSLOG1("     --> DRAINED (BIOBUFFER still has %d bytes)\n", (int)(module->writeBioBuffer->length));
+								}
+								else
+								{
+									TLSLOG1("     --> REMAINING: %d bytes --<\n", module->PendingSend_Head->bufferSize - module->PendingSend_Head->bytesSent);
+								}
 							}
 						}
 						if (bytesSent <= 0)
@@ -1901,7 +1912,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 				{
 					BIO_clear_retry_flags(module->writeBio);
 					bytesSent = (int)send(module->internalSocket, module->writeBioBuffer->data, (int)(module->writeBioBuffer->length), MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
-					TLSLOG1("  << Accumulated Drain[%d]: %d bytes >>\n", module->internalSocket, bytesSent);
+					TLSLOG1("  << BIOBUFFER[%d] drain: %d of %d bytes >>\n", module->internalSocket, bytesSent, (int)module->writeBioBuffer->length);
 #ifdef WIN32
 					if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
 #else
@@ -1914,8 +1925,8 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 							module->PendingSend_Head->UserFree = ILibAsyncSocket_MemoryOwnership_CHAIN;
 							module->PendingSend_Head->buffer = ILibMemory_Allocate((int)module->writeBioBuffer->length - bytesSent, 0, NULL, NULL);
 							module->PendingSend_Head->bufferSize = (int)module->writeBioBuffer->length - bytesSent;
-							module->PendingSend_Head->bytesSent = 0;
-							memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer + bytesSent, module->PendingSend_Head->bufferSize);
+							module->PendingSend_Head->bytesSent = 0;						
+							memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer->data + bytesSent, module->PendingSend_Head->bufferSize);
 
 							TLSLOG1("  <<-- BUFFERING[%d]: %d bytes -->>\n", module->internalSocket, module->PendingSend_Head->bufferSize);
 

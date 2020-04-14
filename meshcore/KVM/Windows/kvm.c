@@ -901,9 +901,14 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		KVMDEBUG("kvm_server_mainloop / loop1", (int)GetCurrentThreadId());
 
 		// Reset all the flags to TILE_TODO
-		for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
-			for (col = 0; col < TILE_WIDTH_COUNT; col++) {
+		for (row = 0; row < TILE_HEIGHT_COUNT; row++) 
+		{
+			for (col = 0; col < TILE_WIDTH_COUNT; col++) 
+			{
 				tileInfo[row][col].flags = (char)TILE_TODO;
+#ifdef KVM_ALL_TILES
+				tileInfo[row][col].crc = 0xFF;
+#endif
 			}
 		}
 		CheckDesktopSwitch(1, writeHandler, reserved);

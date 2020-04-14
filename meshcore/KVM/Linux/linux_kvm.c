@@ -899,9 +899,14 @@ void* kvm_server_mainloop(void* parm)
 		}
 		ILibQueue_UnLock(g_messageQ);
 
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) {
-			for (c = 0; c < TILE_WIDTH_COUNT; c++) {
+		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
+		{
+			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
+			{
 				g_tileInfo[r][c].flag = TILE_TODO;
+#ifdef KVM_ALL_TILES
+				g_tileInfo[r][c].crc = 0xFF;
+#endif
 			}
 		}
 		//fprintf(logFile, "Before CheckDesktopSwitch.\n"); fflush(logFile);

@@ -28,6 +28,12 @@ limitations under the License.
 
 int KVM_Listener_FD = -1;
 #define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
+#if defined(_TLSLOG)
+#define TLSLOG1 printf
+#else
+#define TLSLOG1(...) ;
+#endif
+
 
 int KVM_AGENT_FD = -1;
 int KVM_SEND(char *buffer, int bufferLen)
@@ -488,12 +494,17 @@ void* kvm_server_mainloop(void* param)
 		ILibQueue_UnLock(g_messageQ);
 
 
-		for (r = 0; r < TILE_HEIGHT_COUNT; r++) {
-			for (c = 0; c < TILE_WIDTH_COUNT; c++) {
+		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
+		{
+			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
+			{
 				g_tileInfo[r][c].flag = TILE_TODO;
+#ifdef KVM_ALL_TILES
+				g_tileInfo[r][c].crc = 0xFF;
+#endif
 			}
 		}
-		//senddebug(2);
+
 		screen_num = CGMainDisplayID();
 
 		if (screen_num == 0) { g_shutdown = 1; senddebug(-2); break; }
@@ -537,8 +548,6 @@ void* kvm_server_mainloop(void* param)
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
 			}
-
-
 
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
 			{
@@ -642,7 +651,9 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
 				{
 					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					TLSLOG1("<< KVM/WRITE: %d bytes\n", *bytesConsumed);
 					writeHandler(buffer, *bytesConsumed, reserved);
+
 					//printf("JUMBO PACKET: %d\n", *bytesConsumed);
 					return;
 				}

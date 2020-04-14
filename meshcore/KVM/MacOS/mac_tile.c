@@ -325,11 +325,12 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 	}
 	
 	int retval = 0;
-	int firstTime = 1;
 	
 #if MAX_TILE_SIZE == 0
 	retval = calc_opt_compr_send(x, y, captureWidth, captureHeight, desktop, desktopsize, buffer, bufferSize);
 #else
+	int firstTime = 1;
+
 	//This loop is used to adjust the COMPRESSION_RATIO. This loop runs only once most of the time.
 	do {
 		//retval here is 0 if everything was good. It is > 0 if it contains the size of the jpeg that was created and not sent.
@@ -389,7 +390,8 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 		jpeg_buffer_length = 0;
 		
 		for (r = row; r <= botrow; r++) {
-			for (c = col; c <= rightcol; c++) {
+			for (c = col; c <= rightcol; c++) 
+			{
 				g_tileInfo[r][c].flag = TILE_SENT;
 			}
 		}
