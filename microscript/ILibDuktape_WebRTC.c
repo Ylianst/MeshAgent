@@ -226,7 +226,7 @@ duk_ret_t ILibDuktape_WebRTC_ConnectionFactory_Finalizer(duk_context *ctx)
 
 	//printf("WebRTC Factory Finalizer: %p\n", factory);
 
-	if (factory != NULL && ILibIsChainBeingDestroyed(chain) == 0)
+	if (factory != NULL && chain != NULL && ILibIsChainBeingDestroyed(chain) == 0)
 	{
 		ILibWrapper_WebRTC_ConnectionFactory_RemoveFromChain(factory);
 	}
