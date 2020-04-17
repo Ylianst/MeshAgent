@@ -60,6 +60,7 @@ struct HECI_CONNECT_client_data
 #define ILibDuktape_HECI_IoctlWaitHandle	"\xFF_HECI_IoctlWaitHandle"
 #define ILibDuktape_HECI_Child				"\xFF_HECI_Child"
 #define ILibDuktape_HECI_Parent				"\xFF_HECI_Parent"
+#define ILibDuktape_HECI_Root				"\xFF_HECI_Root"
 #define ILibDuktape_HECI_MaxBufferSize		"\xFF_HECI_MaxBufSize"
 #define ILibDuktape_HECI_SessionMemPtr		"\xFF_HECI_SessionMemPtr"
 #define ILibDuktape_HECI_Session_NoPipeline	"\xFF_HECI_Session_NoPipeline"
@@ -90,6 +91,7 @@ public:
 typedef struct ILibDuktape_HECI_ioctl_data
 {
 	duk_context *ctx;
+	uintptr_t ctxnonce;
 	void *heciObject;
 	void *data;
 	void *Q;
@@ -263,9 +265,9 @@ duk_ret_t ILibDuktape_HECI_SessionFinalizer(duk_context *ctx)
 
 void ILibDuktape_HECI_Session_EmitErrorEvent(void *chain, void *session)
 {
-	if (ILibIsRunningOnChainThread(chain) == 0) { ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_HECI_Session_EmitErrorEvent, session); return; }
 	ILibDuktape_HECI_Session *s = (ILibDuktape_HECI_Session*)session;
 	duk_context *ctx = s->stream->readableStream->ctx;
+	if (ILibIsRunningOnChainThread(chain) == 0) { Duktape_RunOnEventLoop(chain, duk_ctx_nonce(ctx), ctx, ILibDuktape_HECI_Session_EmitErrorEvent, NULL, session); return; }
 
 	duk_push_heapptr(ctx, s->stream->ParentObject);							// [session]
 	duk_get_prop_string(ctx, -1, "emit");									// [session][emit]
@@ -277,7 +279,7 @@ void ILibDuktape_HECI_Session_EmitErrorEvent(void *chain, void *session)
 }
 void ILibDuktape_HECI_Session_EmitStreamReady(void *chain, void *session)
 {
-	if (ILibIsRunningOnChainThread(chain) == 0) { ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_HECI_Session_EmitStreamReady, session); return; }
+	if (ILibIsRunningOnChainThread(chain) == 0) { Duktape_RunOnEventLoop(chain, duk_ctx_nonce(((ILibDuktape_HECI_Session*)session)->stream->writableStream->ctx), ((ILibDuktape_HECI_Session*)session)->stream->writableStream->ctx, ILibDuktape_HECI_Session_EmitStreamReady, NULL, session); return; }
 	ILibDuktape_DuplexStream_Ready(((ILibDuktape_HECI_Session*)session)->stream);
 }
 
@@ -492,7 +494,7 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteSink(ILibDuktape_DuplexStr
 		else
 		{
 			state->returnIgnored = 1;
-			ILibChain_RunOnMicrostackThreadEx(stream->readableStream->chain, (ILibChain_StartEvent)ILibDuktape_HECI_Session_WriteSink_NoPipeline, state);
+			Duktape_RunOnEventLoop(stream->readableStream->chain, duk_ctx_nonce(stream->readableStream->ctx), stream->readableStream->ctx, (Duktape_EventLoopDispatch)ILibDuktape_HECI_Session_WriteSink_NoPipeline, NULL, state);
 		}
 	}
 
@@ -553,7 +555,7 @@ void ILibDuktape_HECI_Session_ResumeSink(ILibDuktape_DuplexStream *sender, void 
 	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
 	if (session->noPipelining != 0)
 	{
-		ILibChain_RunOnMicrostackThread(sender->readableStream->chain, ILibDuktape_HECI_Session_ResumeSink_NoPipeline, session);
+		Duktape_RunOnEventLoop(sender->readableStream->chain, duk_ctx_nonce(sender->readableStream->ctx), sender->readableStream->ctx, ILibDuktape_HECI_Session_ResumeSink_NoPipeline, NULL, session);
 		// Note: DO NOT 'return' here, because we still need to QueueUserAPC, to resume the stream on Windows
 	}
 
@@ -587,7 +589,7 @@ BOOL ILibDuktape_HECI_Session_ReceiveSink(HANDLE event, ILibWaitHandle_ErrorStat
 	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
 	if (ILibMemory_CanaryOK(session))
 	{
-		if (GetOverlappedResult(session->descriptor, &(session->v), &(session->bytesRead), FALSE) == TRUE) { ILibChain_RunOnMicrostackThreadEx(session->chain, ILibDuktape_HECI_Session_ReceiveSink2, session); }
+		if (GetOverlappedResult(session->descriptor, &(session->v), &(session->bytesRead), FALSE) == TRUE) { Duktape_RunOnEventLoop(session->chain, duk_ctx_nonce(session->stream->readableStream->ctx), session->stream->readableStream->ctx, ILibDuktape_HECI_Session_ReceiveSink2, NULL, session); }
 	}
 	return(FALSE);
 }
@@ -770,6 +772,11 @@ duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
 	}
 #endif
 
+	duk_push_this(ctx);										// [Session]
+	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Root);	// [Session][root]
+	ILibDuktape_Push_ObjectStash(ctx);						// [Session][root][stash]
+	duk_del_prop_string(ctx, -1, Duktape_GetStashKey(duk_get_heapptr(ctx, -3)));
+
 	return(0);
 }
 duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
@@ -779,7 +786,16 @@ duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
 	ILibDuktape_HECI_Push(ctx, NULL);												// [Session][HECI]
 	duk_dup(ctx, -2);																// [Session][HECI][Session]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Parent);							// [Session][HECI]
+	duk_push_this(ctx);																// [session][HECI][root]
+	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Root);							// [session][HECI]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Child);							// [Session]
+
+	duk_push_this(ctx);																// [Session][root]
+	ILibDuktape_Push_ObjectStash(ctx);												// [Session][root][stash]
+	duk_dup(ctx, -3);																// [Session][root][stash][Session]
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));	// [Session][root][stash]
+	duk_pop(ctx);																	// [Session][root]
+	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Root);							// [Session]
 
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "connect");
@@ -872,7 +888,7 @@ BOOL ILibDuktape_HECI_IoctlHandler(HANDLE h, ILibWaitHandle_ErrorStatus errors, 
 		return(FALSE);
 	}
 
-	ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_HECI_IoctlHandler_Dispatch, data);
+	Duktape_RunOnEventLoop(data->chain, data->ctxnonce, data->ctx, ILibDuktape_HECI_IoctlHandler_Dispatch, NULL, data);
 
 	if (ILibQueue_GetCount(Q) > 0)
 	{
@@ -961,6 +977,7 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	duk_push_array(ctx);															// [heci][stash][array]
 	ILibDuktape_HECI_ioctl_data *data;
 	data = (ILibDuktape_HECI_ioctl_data*)ILibMemory_SmartAllocate(bufferLen + sizeof(ILibDuktape_HECI_ioctl_data));
+	data->ctxnonce = duk_ctx_nonce(ctx);
 	if (ILibDuktape_HECI_Debug) { printf("-> Allocate HECI Ioctl Data [%p]\n", (void*)data); }
 	data->reserved = Duktape_PushBuffer(ctx, sizeof(void*));						// [heci][stash][array][ptr]
 	duk_put_prop_index(ctx, -2, 0);													// [heci][stash][array]
@@ -1058,7 +1075,7 @@ duk_ret_t ILibDuktape_HECI_Finalizer(duk_context *ctx)
 		ILibQueue Q = (ILibQueue)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_HECI_Q);
 		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_ChildProcess);
 		ILibProcessPipe_Manager mgr = (ILibProcessPipe_Manager)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager);		
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Finalizer2, ILibProcessPipe_Manager_GetWorkerThread(mgr), (ULONG_PTR)Q);
+		if (mgr != NULL) { QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Finalizer2, ILibProcessPipe_Manager_GetWorkerThread(mgr), (ULONG_PTR)Q); }
 #else
 		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_Q);
 		ILibQueue_Destroy((ILibQueue)duk_get_pointer(ctx, -1));

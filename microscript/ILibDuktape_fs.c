@@ -1047,11 +1047,11 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 }
 BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
-	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
+	if (errors != ILibWaitHandle_ErrorStatus_NONE || !ILibMemory_CanaryOK(user)) { return(FALSE); }
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
 
 	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, h);
-	ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_fs_watch_iocompletionEx, data);
+	Duktape_RunOnEventLoop(data->chain, duk_ctx_nonce(data->ctx), data->ctx, ILibDuktape_fs_watch_iocompletionEx, NULL, data);
 	return(TRUE);
 }
 #endif

@@ -375,6 +375,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_SmartAllocate(len) ILibMemory_Init(malloc(len+sizeof(ILibMemory_Header)), (int)len, 0, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_Init(malloc(primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0)), (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
+
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
 

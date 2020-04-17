@@ -2274,22 +2274,22 @@ void WritePipeResponse(AGENT_RECORD_TYPE recordType, JS_ENGINE_CONTEXT engineCon
 
 duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID)
 {
-	duk_context *oldCtx = agent->meshCoreCtx;
-	agent->meshCoreCtx = NULL;
-	SCRIPT_ENGINE_SETTINGS *settings = ILibDuktape_ScriptContainer_GetSettings(oldCtx);
-	duk_context *newCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(settings);
-	ILibDuktape_MeshAgent_Init(newCtx, agent->chain, agent);
+	SCRIPT_ENGINE_SETTINGS *settings = ILibDuktape_ScriptContainer_GetSettings(agent->meshCoreCtx);
+	Duktape_SafeDestroyHeap(agent->meshCoreCtx);
 
-	ILibDuktape_SetNativeUncaughtExceptionHandler(newCtx, settings->nExeptionHandler, settings->nExceptionUserObject);
+	agent->meshCoreCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(settings);
+	ILibDuktape_MeshAgent_Init(agent->meshCoreCtx, agent->chain, agent);
+
+	ILibDuktape_SetNativeUncaughtExceptionHandler(agent->meshCoreCtx, settings->nExeptionHandler, settings->nExceptionUserObject);
 	if (g_displayFinalizerMessages) { printf("\n\n==> Stopping JavaScript Engine\n"); }
-	duk_destroy_heap(oldCtx);
-	agent->meshCoreCtx = newCtx;
+
 	if (agent->proxyServer != NULL)
 	{
 		memcpy_s(&(ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx)->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
 	}
 
-	return(newCtx);
+	ILibDuktape_ScriptContainer_FreeSettings(settings);
+	return(agent->meshCoreCtx);
 }
 char* ScriptEngine_Restart(MeshAgentHostContainer *agent, char *contextGUID, char *buffer, int bufferLen)
 {
@@ -3770,10 +3770,10 @@ void MeshAgent_ChainEnd(void *chain, void *user)
 	if (agent->meshCoreCtx != NULL) 
 	{
 		if (g_displayFinalizerMessages) { printf("\n\n==> Stopping JavaScript Engine\n"); }
-		duk_destroy_heap(agent->meshCoreCtx); 
+		Duktape_SafeDestroyHeap(agent->meshCoreCtx);
 		if (agent->bootstrapCoreCtx != NULL)
 		{
-			duk_destroy_heap(agent->bootstrapCoreCtx);
+			Duktape_SafeDestroyHeap(agent->bootstrapCoreCtx);
 			agent->bootstrapCoreCtx = NULL;
 		}
 	}
@@ -4009,7 +4009,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				break;
 		}
 
-		duk_destroy_heap(ctxx);
+		Duktape_SafeDestroyHeap(ctxx);
 	}
 	else
 	{
@@ -4141,7 +4141,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 	}
-	duk_destroy_heap(tmpCtx);
+	Duktape_SafeDestroyHeap(tmpCtx);
 
 	// Load the mesh agent certificates
 	if ((resetNodeId == 1 || agent_LoadCertificates(agentHost) != 0) && agent_GenerateCertificates(agentHost, NULL) != 0) { printf("Certificate error\r\n"); }

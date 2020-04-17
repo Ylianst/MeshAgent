@@ -84,7 +84,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 {
 	ILibProcessPipe_Manager manager;
 	duk_context *ctx;
-	void *mServer, *mSocket;
+	void *mServer, *mSocket, *mChain;
 	HANDLE mPipeHandle;
 	ILibProcessPipe_Pipe mPipe;
 
@@ -380,6 +380,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		winIPC->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		winIPC->ctx = ctx;
 		winIPC->mSocket = duk_get_heapptr(ctx, -1);
+		winIPC->mChain = Duktape_GetChain(ctx);
 
 		duk_eval_string(ctx, "require('child_process');");
 		winIPC->manager = (ILibProcessPipe_Manager)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager);
@@ -905,7 +906,7 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 	winIPC->_reserved[3] = (ULONG_PTR)buffer;
 	winIPC->_reserved[4] = (ULONG_PTR)bufferLen;
 
-	ILibChain_RunOnMicrostackThreadEx(Duktape_GetChain(winIPC->ctx), ILibDuktape_net_server_IPC_readsink_safe, winIPC);
+	Duktape_RunOnEventLoop(winIPC->mChain, duk_ctx_nonce(winIPC->ctx), winIPC->ctx, ILibDuktape_net_server_IPC_readsink_safe, NULL, winIPC);
 }
 void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
@@ -1211,7 +1212,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		winIPC->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		winIPC->ctx = ctx;
 		winIPC->mServer = duk_get_heapptr(ctx, -1);
-
+		winIPC->mChain = Duktape_GetChain(ctx);
 
 		duk_eval_string(ctx, "require('child_process');");
 		winIPC->manager = (ILibProcessPipe_Manager)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager);

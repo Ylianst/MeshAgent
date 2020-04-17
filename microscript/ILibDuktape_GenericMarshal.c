@@ -105,6 +105,7 @@ typedef struct Duktape_GlobalGeneric_DispatcherData
 typedef struct Duktape_GlobalGeneric_Data
 {
 	ILibDuktape_EventEmitter *emitter;
+	uintptr_t ctxnonce;
 	void *retVal;
 	void *chain;
 	sem_t contextWaiter;
@@ -836,15 +837,16 @@ void ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return(void *chain, void
 }
 void ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink(void *args)
 {
+	ILibDuktape_EventEmitter *e = (ILibDuktape_EventEmitter*)((void**)args)[0];
 	void *chain = ((void**)args)[1];
 	PTRSIZE *vars = (PTRSIZE*)((void**)args)[2];
 	int parms = (int)(PTRSIZE)((void**)args)[3];
 	void *fptr = ((void**)args)[4];
+	uintptr_t nonce = (uintptr_t)((void**)args)[5];
 	PTRSIZE retVal = ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars);
 
 	((void**)args)[3] = (void*)retVal;
-	ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return, args);
-
+	Duktape_RunOnEventLoop(chain, nonce, e->ctx, ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return, NULL, args);
 }
 
 #define ILibDuktape_FFI_AsyncDataPtr "\xFF_FFI_AsyncDataPtr"
@@ -927,7 +929,7 @@ void ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop(void *arg)
 		{
 			if (data->waitingForResult == 0)
 			{
-				ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch, data);
+				Duktape_RunOnEventLoop(data->chain, duk_ctx_nonce(data->ctx), data->ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch, NULL, data);
 			}
 			else
 			{
@@ -1259,7 +1261,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	duk_push_current_function(ctx);					// [func]
 	exposedName = Duktape_GetStringPropertyValue(ctx, -1, "_exposedName", NULL);
 	int spawnThread = Duktape_GetBooleanProperty(ctx, -1, "_spawnThread", 0);
-	PTRSIZE *vars = spawnThread == 0 ? ILibMemory_AllocateA(sizeof(PTRSIZE)*parms) : ILibMemory_SmartAllocateEx(sizeof(PTRSIZE)*parms, 5 * sizeof(void*));
+	PTRSIZE *vars = spawnThread == 0 ? ILibMemory_AllocateA(sizeof(PTRSIZE)*parms) : ILibMemory_SmartAllocateEx(sizeof(PTRSIZE)*parms, 6 * sizeof(void*));
 	duk_get_prop_string(ctx, -1, "_address");		// [func][addr]
 	fptr = duk_to_pointer(ctx, -1);
 
@@ -1319,6 +1321,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 			args[2] = vars;
 			args[3] = (void*)(PTRSIZE)parms;
 			args[4] = fptr;
+			args[5] = (void*)duk_ctx_nonce(ctx);
 
 			void *thptr = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink, args);
 			duk_push_fixed_buffer(ctx, sizeof(void*));									// [ret][buffer]
@@ -1591,6 +1594,7 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 #endif
 				sem_init(&(user->contextWaiter), 0, 0);
 				user->chain = refList[i]->chain;
+				user->ctxnonce = refList[i]->ctxnonce;
 				user->emitter = refList[i]->emitter;
 				user->numArgs = numParms;
 				if (numParms > 0)
@@ -1603,7 +1607,7 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 					}
 					va_end(vlist);
 				}
-				ILibChain_RunOnMicrostackThreadEx3(refList[i]->chain, ILibDuktape_GlobalGenericCallback_ProcessEx, ILibDuktape_GlobalGenericCallback_ProcessEx_Abort, user);
+				Duktape_RunOnEventLoop(refList[i]->chain, refList[i]->ctxnonce, refList[i]->emitter->ctx, ILibDuktape_GlobalGenericCallback_ProcessEx, ILibDuktape_GlobalGenericCallback_ProcessEx_Abort, user);
 			}
 			else
 			{
@@ -1897,6 +1901,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 		
 		data = (Duktape_GlobalGeneric_Data*)ILibMemory_SmartAllocate(sizeof(Duktape_GlobalGeneric_Data));
 		data->emitter = ILibDuktape_EventEmitter_Create(ctx);
+		data->ctxnonce = duk_ctx_nonce(ctx);
 		data->chain = Duktape_GetChain(ctx);
 		ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "GlobalCallback");
 		ILibDuktape_CreateInstanceMethod(ctx, "CallingThread", ILibDuktape_GenericMarshal_GlobalCallback_CallingThread, 0);

@@ -254,7 +254,7 @@ void ILibDuktape_Debugger_AsyncWaitConn(ILibDuktape_Debugger *dbg)
 
 void ILibDuktape_Debugger_DestroyEx(void *chain, void *user)
 {
-	duk_destroy_heap(DebugWebEngine_Context);
+	Duktape_SafeDestroyHeap(DebugWebEngine_Context);
 }
 
 void DebugWebEngine_RunEx(void *chain, void *user)
