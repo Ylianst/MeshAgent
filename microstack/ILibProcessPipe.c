@@ -271,7 +271,7 @@ BOOL ILibProcessPipe_WaitHandle_Add2_sink(HANDLE event, ILibWaitHandle_ErrorStat
 {
 	if (ILibMemory_CanaryOK(user))
 	{
-		if (status == ILibWaitHandle_ErrorStatus_REMOVED || ILibWaitHandle_ErrorStatus_MANAGER_EXITING)
+		if (status == ILibWaitHandle_ErrorStatus_REMOVED || status == ILibWaitHandle_ErrorStatus_MANAGER_EXITING)
 		{
 			ILibMemory_Free(user);
 		}
