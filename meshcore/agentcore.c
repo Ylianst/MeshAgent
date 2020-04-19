@@ -1595,13 +1595,14 @@ duk_ret_t ILibDuktape_MeshAgent_eval(duk_context *ctx)
 }
 duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID);
 
+int dumpcount = 0;
 void ILibDuktape_MeshAgent_dumpCoreModuleEx(void *chain, void *user)
 {
 	MeshAgentHostContainer* agentHost = (MeshAgentHostContainer*)user;
 	char *CoreModule;
 
 	ScriptEngine_Stop((MeshAgentHostContainer*)user, MeshAgent_JavaCore_ContextGuid);
-	printf("CoreModule was manually dumped, restarting!\n");
+	printf("CoreModule was manually dumped %d times, restarting!\n", ++dumpcount);
 
 	int CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
 	if (CoreModuleLen > 0)

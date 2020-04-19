@@ -50,6 +50,9 @@ typedef struct ILibDuktape_ContextData
 {
 	uintptr_t nonce;
 	uint32_t flags;
+#ifdef WIN32
+	uint32_t apc_flags;
+#endif
 	void *chain;
 	void *user;
 }ILibDuktape_ContextData;

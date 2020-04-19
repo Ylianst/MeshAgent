@@ -279,9 +279,9 @@ void __stdcall ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC(ULONG
 	ILibDuktape_readableStream_bufferedData *data = (ILibDuktape_readableStream_bufferedData*)obj;
 	void *chain = ((void**)ILibMemory_GetExtraMemory((void*)obj, sizeof(ILibDuktape_readableStream_bufferedData) + data->bufferLen))[0];
 
-	if (ILibChain_SelectInterrupted(chain) != 0)
+	if (duk_ctx_context_data(data->ctx)->apc_flags == 0)
 	{
-		// This APC interrupted a winsock (select) call, so we must unroll the callstack to continue,
+		// This APC interrupted an unknown alertable method, so we must unroll the callstack to continue,
 		// because winsock is not re-entrant, so we cannot risk making another winsock call directly. 
 		//
 		Duktape_RunOnEventLoop(chain, duk_ctx_nonce(data->ctx), data->ctx, ILibDuktape_readableStream_WriteData_OnData_ChainThread, NULL, (void*)obj);

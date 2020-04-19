@@ -1645,7 +1645,7 @@ void ILibDuktape_Stream_Init(duk_context *ctx, void *chain)
 }
 void ILibDuktape_Polyfills_debugGC2(duk_context *ctx, void ** args, int argsLen)
 {
-	if (duk_ctx_is_alive((duk_context*)args[1]) && duk_ctx_is_valid((uintptr_t)args[2], ctx))
+	if (duk_ctx_is_alive((duk_context*)args[1]) && duk_ctx_is_valid((uintptr_t)args[2], ctx) && duk_ctx_shutting_down(ctx)==0)
 	{
 		if (g_displayFinalizerMessages) { printf("=> GC();\n"); }
 		duk_gc(ctx, 0);
