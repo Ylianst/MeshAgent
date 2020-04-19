@@ -2021,7 +2021,6 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 {
-	void *tmp = NULL;
 	if (GlobalCallbackList != NULL)
 	{
 		ILibLinkedList_Lock(GlobalCallbackList);
@@ -2029,7 +2028,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 		while (node != NULL)
 		{
 			Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
-			if (data->chain == Duktape_GetChain(ctx))
+			if (data->chain == duk_ctx_chain(ctx) && data->ctxnonce == duk_ctx_nonce(ctx))
 			{
 				ILibMemory_Free(data);
 				void *next = ILibLinkedList_GetNextNode(node);
@@ -2041,14 +2040,8 @@ duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 				node = ILibLinkedList_GetNextNode(node);
 			}
 		}
-		if (ILibLinkedList_GetCount(GlobalCallbackList) == 0) { tmp = GlobalCallbackList; }
 		ILibLinkedList_UnLock(GlobalCallbackList);
-		if (tmp != NULL)
-		{
-			GlobalCallbackList = NULL;
-		}
 	}
-	if (tmp != NULL) { ILibLinkedList_Destroy(tmp); }
 	return(0);
 }
 duk_ret_t ILibDuktape_GenericMarshal_WrapObject(duk_context *ctx)
@@ -2167,9 +2160,29 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateReadonlyProperty(ctx, "PointerSize");
 }
 
+void ILibDuktape_GenericMarshal_ChainDestroySink(void *chain, void *user)
+{
+	if (GlobalCallbackList != NULL)
+	{
+		ILibLinkedList_Lock(GlobalCallbackList);
+		void *node = ILibLinkedList_GetNode_Head(GlobalCallbackList);
+		while (node != NULL)
+		{
+			Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
+			ILibMemory_Free(data);
+			void *next = ILibLinkedList_GetNextNode(node);
+			ILibLinkedList_Remove(node);
+			node = next;
+		}
+		ILibLinkedList_UnLock(GlobalCallbackList);
+		ILibLinkedList_Destroy(GlobalCallbackList);
+		GlobalCallbackList = NULL;
+	}
+}
 void ILibDuktape_GenericMarshal_init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "_GenericMarshal", ILibDuktape_GenericMarshal_Push);
+	ILibChain_OnDestroyEvent_AddHandler(duk_ctx_chain(ctx), ILibDuktape_GenericMarshal_ChainDestroySink, NULL);
 }
 
 #ifdef __DOXY__
