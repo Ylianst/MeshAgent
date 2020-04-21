@@ -143,10 +143,12 @@ struct sockaddr_in6;
 #define sem_wait(x) ILibDispatchSemaphore_wait(x)
 #define sem_trywait(x) ILibDispatchSemaphore_trywait(s)
 #define sem_post(x) ILibDispatchSemaphore_post(x)
+#define sem_timedwait(x, timeout) ILibDispatchSemaphore_timedwait(x, timeout)
 void ILibDispatchSemaphore_Init(sem_t* s, int pShared, int value);
 void ILibDispatchSemaphore_Destroy(sem_t* s);
 void ILibDispatchSemaphore_wait(sem_t* s);
 void ILibDispatchSemaphore_trywait(sem_t* s);
+int ILibDispatchSemaphore_timedwait(sem_t *x, struct timespec *timeout);
 void ILibDispatchSemaphore_post(sem_t* s);
 #endif
 
