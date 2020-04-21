@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+#define _GNU_SOURCE 
 
 #if defined (__APPLE__)
 	#include <sys/uio.h>
@@ -370,6 +371,17 @@ void ILibDispatchSemaphore_wait(sem_t* s)
 void ILibDispatchSemaphore_trywait(sem_t* s)
 {
 	dispatch_semaphore_wait(((dispatch_semaphore_t*)s)[0], DISPATCH_TIME_NOW);
+}
+int ILibDispatchSemaphore_timedwait(sem_t* s, struct timespec *ts)
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+
+	uint64_t seconds = ts->tv_sec - tv.tv_sec;
+	uint64_t ns = ts->tv_nsec - (tv.tv_usec * 1000);
+	uint64_t delta = ns + (seconds * 1000000000);
+
+	return((int)dispatch_semaphore_wait(((dispatch_semaphore_t*)s)[0], dispatch_time(DISPATCH_TIME_NOW, (int64_t)delta)));
 }
 void ILibDispatchSemaphore_post(sem_t* s)
 {
@@ -936,10 +948,29 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 {
 	if (ILibMemory_CanaryOK(ptr))
 	{
+		size_t originalRawSize = ILibMemory_Init_Size(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
+		size_t originalSize = ILibMemory_Size(ptr);
+		size_t originalExtraSize = ILibMemory_ExtraSize(ptr);
+		size_t newRawSize = ILibMemory_Init_Size(len, originalExtraSize);
+
+		if (newRawSize < originalRawSize && originalExtraSize > 0)
+		{
+			// Memory is going to contract, so we need to move the extra block before we realloc
+			size_t offset = originalSize - len;
+			memmove_s((char*)ILibMemory_Extra(ptr) - sizeof(ILibMemory_Header) - offset, originalExtraSize + sizeof(ILibMemory_Header), ILibMemory_Extra(ptr) - sizeof(ILibMemory_Header), originalExtraSize + sizeof(ILibMemory_Header));
+		}
+
 		void *ret = NULL;
 		void *raw = ILibMemory_RawPtr(ptr);
-		if ((raw = realloc(raw, len + sizeof(ILibMemory_Header))) == NULL) { ILIBCRITICALEXIT(254); }
+		if ((raw = realloc(raw, newRawSize)) == NULL) { ILIBCRITICALEXIT(254); }
 		ret = ILibMemory_FromRaw(raw);
+
+		if (newRawSize > originalRawSize && originalExtraSize > 0)
+		{
+			// Memory was expanded, so now we need to move the extra block, before we adjust the headers
+			size_t offset = len - originalSize;
+			memmove_s(ILibMemory_Extra(ret) - sizeof(ILibMemory_Header) + offset, originalExtraSize + sizeof(ILibMemory_Header), ILibMemory_Extra(ret) - sizeof(ILibMemory_Header), originalExtraSize + sizeof(ILibMemory_Header));
+		}
 
 		ILibMemory_Size(ret) = len;
 		return(ret);
@@ -1830,7 +1861,7 @@ void ILibPrependToChain(void *Chain, void *object)
 void* ILibGetBaseTimer(void *chain)
 {
 	//return ILibCreateLifeTime(chain);
-	return ((struct ILibBaseChain*)chain)->Timer;
+	return (chain == NULL ? NULL : ((struct ILibBaseChain*)chain)->Timer);
 }
 
 #ifdef WIN32
@@ -6473,7 +6504,7 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 	struct ILibLifeTime *UPnPLifeTime = (struct ILibLifeTime*)LifeTimeToken;
 	void *EventQueue;
 
-	if (UPnPLifeTime->ObjectList == NULL) return;
+	if (UPnPLifeTime == NULL || UPnPLifeTime->ObjectList == NULL) return;
 	EventQueue = ILibQueue_Create();
 	ILibLinkedList_Lock(UPnPLifeTime->ObjectList);
 
@@ -9392,22 +9423,57 @@ void ILIBLOGMESSAGEX(char *format, ...)
 
 	ILIBLOGMESSSAGE(dest);
 }
+
+#ifdef __APPLE__
+typedef struct ILibThread_AppleThread
+{
+	pthread_t tid;
+	voidfp1 method;
+	void *arg;
+	int joinable;
+	sem_t s;
+}ILibThread_AppleThread;
+void* ILibThread_AppleThread_Start(void *arg)
+{
+	ILibThread_AppleThread *apple = (ILibThread_AppleThread*)arg;
+	apple->method(apple->arg);
+	if (apple->joinable != 0)
+	{
+		sem_post(&(apple->s));
+	}
+	else
+	{
+		ILibMemory_Free(apple);
+	}
+	return(NULL);
+}
+#endif
 //! Platform Agnostic method to Spawn a detached worker thread with normal priority/affinity
 /*!
 	\param method Handler to dispatch on the new thread
 	\param arg Optional Parameter to dispatch [Can be NULL]
 	\return Thread Handle
 */
-void* ILibSpawnNormalThread(voidfp1 method, void* arg)
+void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 {
-#if defined (_POSIX) || defined (__APPLE__)
+#if defined (_POSIX)
 	intptr_t result;
 	void* (*fptr) (void* a);
 	pthread_t newThread;
 	fptr = (void*(*)(void*))method;
+#if defined(__APPLE__)
+	ILibThread_AppleThread *ret = (ILibThread_AppleThread*)ILibMemory_SmartAllocate(sizeof(ILibThread_AppleThread));
+	ret->method = method; ret->arg = arg;
+	if (detached != 0) { sem_init(&(ret->s), 0, 0); ret->joinable = 1; }
+	result = (intptr_t)pthread_create(&newThread, NULL, ILibThread_AppleThread_Start, ret);
+	ret->tid = newThread;
+	if (detached != 0) { pthread_detach(newThread); }
+	return(ret);
+#else
 	result = (intptr_t)pthread_create(&newThread, NULL, fptr, arg);
-	pthread_detach(newThread);
-	return (void*)result;
+	if (detached != 0) { pthread_detach(newThread); }
+	return(result == 0 ? (void*)newThread : NULL);
+#endif
 #endif
 
 #ifdef WIN32
@@ -9419,12 +9485,67 @@ void* ILibSpawnNormalThread(voidfp1 method, void* arg)
 #endif
 }
 
+#ifndef WIN32
+int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
+{
+#ifdef __APPLE__
+	int ret = 1;
+	if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable != 0)
+	{
+		ILibThread_AppleThread *ath = (ILibThread_AppleThread*)thr;
+		if ((ret = sem_timedwait(&(ath->s), timeout)) == 0) { sem_destroy(&(ath->s)); }
+		ILibMemory_Free(thr);
+	}
+	return(ret);
+#else
+	return(pthread_timedjoin_np((pthread_t)thr, NULL, timeout));
+#endif
+}
+struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts)
+{
+	struct timeval tv;
+	long lv;
+
+	gettimeofday(&tv, NULL);
+	ts->tv_sec = tv.tv_sec;
+	ts->tv_nsec = tv.tv_usec * 1000;
+
+	ts->tv_sec += (ms / 1000);
+	ts->tv_nsec += ((ms % 1000) * 1000000);
+
+	if ((lv = ts->tv_nsec % 1000000000) > 0)
+	{
+		ts->tv_sec += 1;
+		ts->tv_nsec = lv;
+	}
+
+	return(ts);
+}
+#endif
+int ILibThread_TimedJoin(void *thr, uint32_t timeout)
+{
+#ifdef WIN32
+	return(WaitForSingleObject((HANDLE)thr, timeout) == WAIT_TIMEOUT ? 1 : 0);
+#else
+	struct timespec ts;
+	return(ILibThread_TimedJoinEx(thr, ILibThread_ms2ts(timeout, &ts)));
+#endif
+}
+
 void ILibThread_Join(void *thr)
 {
 #ifdef WIN32
 	WaitForSingleObject((HANDLE)thr, INFINITE);
 #else
-	pthread_join((pthread_t)thr, NULL);
+	#ifdef __APPLE__
+		if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable!=0)
+		{
+			pthread_join(((ILibThread_AppleThread*)thr)->tid, NULL);
+			ILibMemory_Free(thr);
+		}
+	#else
+		pthread_join((pthread_t)thr, NULL);
+	#endif
 #endif
 }
 

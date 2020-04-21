@@ -181,6 +181,7 @@ typedef struct ILibProcessPipe_WaitHandle_APC
 	HANDLE ev;
 	ILibWaitHandle_ErrorStatus status;
 	ILibProcessPipe_WaitHandle_Handler callback;
+	void *chain;
 	void *user;
 }ILibProcessPipe_WaitHandle_APC;
 HANDLE ILibProcessPipe_Manager_GetWorkerThread(ILibProcessPipe_Manager mgr)
@@ -204,6 +205,7 @@ void __stdcall ILibProcessPipe_WaitHandle_Remove_APC(ULONG_PTR obj)
 	if (node != NULL) 
 	{ 
 		waiter = (ILibProcessPipe_WaitHandle*)ILibLinkedList_GetDataFromNode(node);
+		if (waiter->callback != NULL) { waiter->callback(waiter->event, ILibWaitHandle_ErrorStatus_REMOVED, waiter->user); }
 		free(waiter);
 		ILibLinkedList_Remove(node); 
 		SetEvent(manager->updateEvent);
@@ -256,7 +258,7 @@ void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager m
 	ILibProcessPipe_WaitHandle_AddEx(mgr, waitHandle);
 }
 
-void __stdcall ILibProcessPipe_WaitHandle_Add2_apcsink(ULONG_PTR obj)
+void ILibProcessPipe_WaitHandle_Add2_chainsink(void *chain, void *obj)
 {
 	if (ILibMemory_CanaryOK((void*)obj))
 	{
@@ -269,7 +271,14 @@ BOOL ILibProcessPipe_WaitHandle_Add2_sink(HANDLE event, ILibWaitHandle_ErrorStat
 {
 	if (ILibMemory_CanaryOK(user))
 	{
-		QueueUserAPC((PAPCFUNC)ILibProcessPipe_WaitHandle_Add2_apcsink, ((ILibProcessPipe_WaitHandle_APC*)user)->callingThread, (ULONG_PTR)user);
+		if (status == ILibWaitHandle_ErrorStatus_REMOVED || status == ILibWaitHandle_ErrorStatus_MANAGER_EXITING)
+		{
+			ILibMemory_Free(user);
+		}
+		else
+		{
+			ILibChain_RunOnMicrostackThread(((ILibProcessPipe_WaitHandle_APC*)user)->chain, ILibProcessPipe_WaitHandle_Add2_chainsink, user);
+		}
 	}
 	return(FALSE);
 }
@@ -279,9 +288,9 @@ void ILibProcessPipe_WaitHandle_Add2_WithNonZeroTimeout(ILibProcessPipe_Manager 
 	DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &apcState->callingThread, THREAD_SET_CONTEXT, FALSE, 0);
 	apcState->callback = callback;
 	apcState->user = user;
+	apcState->chain = ((ILibProcessPipe_Manager_Object*)mgr)->ChainLink.ParentChain;
 	ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(mgr, event, milliseconds, apcState, ILibProcessPipe_WaitHandle_Add2_sink);
 }
-
 void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 {
 	ILibProcessPipe_Manager_Object *manager = (ILibProcessPipe_Manager_Object*)arg;

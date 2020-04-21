@@ -61,9 +61,11 @@ function WindowsMessagePump(options)
     this.wndclass.hinstance.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 20 : 24, GM.PointerSize).toBuffer());
     this.wndclass.wndproc.on('GlobalCallback', function onWndProc(xhwnd, xmsg, wparam, lparam)
     {
+        var processed = false;
         if (this.mp._hwnd != null && this.mp._hwnd.Val == xhwnd.Val)
         {
             // This is for us
+            processed = true;
             var d = this.StartDispatcher();
             this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), lparam_raw: lparam, hwnd: xhwnd, dispatcher: d });
 
@@ -88,6 +90,8 @@ function WindowsMessagePump(options)
         else if(this.mp._hwnd == null && this.CallingThread() == this.mp._user32.RegisterClassExA.async.threadId())
         {
             // This message was generated from our CreateWindowExA method
+            processed = true;
+
             var d = this.StartDispatcher();
 
             this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), hwnd: xhwnd, dispatcher: d });
@@ -111,7 +115,7 @@ function WindowsMessagePump(options)
             }
         }
 
-        _debugGC();
+        if (processed) { _debugGC(); }
     });
 
     this._user32.RegisterClassExA.async(this.wndclass).then(function ()

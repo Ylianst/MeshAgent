@@ -102,6 +102,7 @@ public:
 typedef struct ILibDuktape_readableStream_bufferedData
 {
 	struct ILibDuktape_readableStream_bufferedData *Next;
+	duk_context *ctx;
 	int bufferLen;
 	int Reserved;
 	char buffer[];
@@ -123,6 +124,7 @@ void ILibDuktape_ReadableStream_DestroyPausedData(ILibDuktape_readableStream *st
 void ILibDuktape_readableStream_WriteData_buffer(ILibDuktape_readableStream *stream, int streamReserved, char *buffer, int bufferLen)
 {
 	ILibDuktape_readableStream_bufferedData *buffered = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(bufferLen + sizeof(ILibDuktape_readableStream_bufferedData), 0, NULL, NULL);
+	buffered->ctx = stream->ctx;
 	buffered->Reserved = streamReserved;
 	buffered->bufferLen = bufferLen;
 	memcpy_s(buffered->buffer, bufferLen,  buffer, bufferLen);
@@ -277,12 +279,12 @@ void __stdcall ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC(ULONG
 	ILibDuktape_readableStream_bufferedData *data = (ILibDuktape_readableStream_bufferedData*)obj;
 	void *chain = ((void**)ILibMemory_GetExtraMemory((void*)obj, sizeof(ILibDuktape_readableStream_bufferedData) + data->bufferLen))[0];
 
-	if (ILibChain_SelectInterrupted(chain) != 0)
+	if (duk_ctx_context_data(data->ctx)->apc_flags == 0)
 	{
-		// This APC interrupted a winsock (select) call, so we must unroll the callstack to continue,
+		// This APC interrupted an unknown alertable method, so we must unroll the callstack to continue,
 		// because winsock is not re-entrant, so we cannot risk making another winsock call directly. 
 		//
-		ILibChain_RunOnMicrostackThreadEx2(chain, ILibDuktape_readableStream_WriteData_OnData_ChainThread, (void*)obj, 0);
+		Duktape_RunOnEventLoop(chain, duk_ctx_nonce(data->ctx), data->ctx, ILibDuktape_readableStream_WriteData_OnData_ChainThread, NULL, (void*)obj);
 	}
 	else
 	{
@@ -351,13 +353,14 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 				if (ILibIsRunningOnChainThread(stream->chain) == 0)
 				{
 					ILibDuktape_readableStream_bufferedData *tmp = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(sizeof(ILibDuktape_readableStream_bufferedData) + bufferLen, 0, NULL, NULL);
+					tmp->ctx = stream->ctx;
 					tmp->Next = (ILibDuktape_readableStream_bufferedData*)stream;
 					tmp->Reserved = streamReserved;
 					tmp->bufferLen = bufferLen;
 					memcpy_s(tmp->buffer, bufferLen, buffer, bufferLen);
 					dispatchedNonNative = 1;
 					needPause = 1;
-					ILibChain_RunOnMicrostackThreadEx(stream->chain, ILibDuktape_readableStream_WriteDataEx_Chain, tmp);
+					Duktape_RunOnEventLoop(stream->chain, duk_ctx_nonce(stream->ctx), stream->ctx, ILibDuktape_readableStream_WriteDataEx_Chain, NULL, tmp);
 				}
 				else
 				{
@@ -423,6 +426,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 #else
 				ILibDuktape_readableStream_bufferedData *tmp = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(sizeof(ILibDuktape_readableStream_bufferedData) + bufferLen, 0, NULL, NULL);
 #endif
+				tmp->ctx = stream->ctx;
 				tmp->bufferLen = bufferLen;
 				tmp->Reserved = streamReserved;
 				tmp->Next = (ILibDuktape_readableStream_bufferedData*)stream;
@@ -435,7 +439,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 				QueueUserAPC((PAPCFUNC)ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC, ILibChain_GetMicrostackThreadHandle(stream->chain), (ULONG_PTR)tmp);
 				return(stream->paused); 
 #else
-				ILibChain_RunOnMicrostackThread(stream->chain, ILibDuktape_readableStream_WriteData_OnData_ChainThread, tmp);
+				Duktape_RunOnEventLoop(stream->chain, duk_ctx_nonce(stream->ctx), stream->ctx, ILibDuktape_readableStream_WriteData_OnData_ChainThread, NULL, tmp);
 #endif
 			}
 		}
@@ -469,7 +473,7 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 	if (ILibIsRunningOnChainThread(stream->chain) == 0)
 	{
 		// Must context switch to Microstack Thread, in order to dispatch into Java Script
-		ILibChain_RunOnMicrostackThread(stream->chain, ILibDuktape_readableStream_WriteEnd_ChainSink, stream);
+		Duktape_RunOnEventLoop(stream->chain, duk_ctx_nonce(stream->ctx), stream->ctx, ILibDuktape_readableStream_WriteEnd_ChainSink, NULL, stream);
 	}
 	else
 	{

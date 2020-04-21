@@ -138,7 +138,7 @@ typedef struct SCRIPT_ENGINE_SETTINGS
 	char *coreDumpLocation;
 	ILibProcessPipe_Manager pipeManager;
 
-	char *argList[];
+	char **argList;
 }SCRIPT_ENGINE_SETTINGS;
 
 void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen);
@@ -154,7 +154,8 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx2(SCRIPT_EN
 #define ILibDuktape_ScriptContainer_InitializeJavaScriptEngine(securityFlags, executionTimeout, chain, pp_argList, db, exitHandler, exitUser) ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx((securityFlags), (executionTimeout), (chain), (pp_argList), (db), NULL, NULL, (exitHandler), (exitUser))
 int ILibDuktape_ScriptContainer_DebuggingOK(duk_context *ctx);
 
-SCRIPT_ENGINE_SETTINGS *ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx);
+SCRIPT_ENGINE_SETTINGS* ILibDuktape_ScriptContainer_GetSettings(duk_context *ctx);
+void ILibDuktape_ScriptContainer_FreeSettings(SCRIPT_ENGINE_SETTINGS *settings);
 int ILibDuktape_ScriptContainer_CompileJavaScript_FromFile(duk_context *ctx, char *path, int pathLen);
 int ILibDuktape_ScriptContainer_CompileJavaScriptEx(duk_context *ctx, char *payload, int payloadLen, char *filename, int filenameLen);
 #define ILibDuktape_ScriptContainer_CompileJavaScript(ctx, payload, payloadLen) ILibDuktape_ScriptContainer_CompileJavaScriptEx(ctx, payload, payloadLen, NULL, 0)

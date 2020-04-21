@@ -114,6 +114,7 @@ int main(int argc, char **argv)
 	int retCode = 0;
 	int capabilities = 0;
 
+
 #ifdef WIN32
 	int argvi, argvsz;
 	char **argv = (char**)ILibMemory_SmartAllocate(argc * sizeof(void*));

@@ -125,7 +125,7 @@ void UpdateOwnerData()
 
 	duk_peval_string_noresult(ctx, "global._noMessagePump=true;var key=require('win-registry').usernameToUserKey(require('user-sessions').getProcessOwnerName(process.pid).name);var reg=require('win-registry');reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\\\CurrentControlSet\\\\Services\\\\Mesh Agent', '_InstalledBy', key);");
 
-	duk_destroy_heap(ctx);
+	Duktape_SafeDestroyHeap(ctx);
 	ILibChain_DestroyEx(chain);
 	ILibMemory_Free(exePath);
 }

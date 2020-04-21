@@ -30,7 +30,6 @@ typedef void(*ILibDuktape_HelperEvent)(duk_context *ctx, void *user);
 #define ILibDuktape_MeshAgent_Cert_NonLeaf					"\xFF_selfcert"		
 #define ILibDuktape_MeshAgent_Cert_Server					"\xFF_selftlscert"
 #define CONTEXT_GUID_BUFFER									"_CONTEXT_GUID"
-#define ILibDuktape_Context_Chain							"\xFF_chainptr"
 #define ILibDuktape_OBJID									"_ObjectID"
 
 #define ILibDuktape_CR2HTTP									"\xFF_CR2HTTP"
@@ -47,8 +46,33 @@ typedef enum ILibDuktape_LogTypes
 	ILibDuktape_LogType_Info3
 }ILibDuktape_LogTypes;
 
+typedef struct ILibDuktape_ContextData
+{
+	uintptr_t nonce;
+	uint32_t flags;
+#ifdef WIN32
+	uint32_t apc_flags;
+#endif
+	void *threads;
+	void *chain;
+	void *user;
+}ILibDuktape_ContextData;
+
+#define duk_destroy_heap_in_progress	0x01
+#define duk_ctx_context_data(ctx) ((ILibDuktape_ContextData*)(ILibMemory_CanaryOK(ctx)?((void**)ILibMemory_Extra(ctx))[0]:NULL))
+#define duk_ctx_nonce(ctx) (duk_ctx_context_data(ctx)->nonce)
+#define duk_ctx_is_alive(ctx) (ILibMemory_CanaryOK(ctx))
+#define duk_ctx_is_valid(nvalue, ctx) (duk_ctx_is_alive(ctx) && duk_ctx_nonce(ctx) == nvalue)
+#define duk_ctx_shutting_down(ctx) ((duk_ctx_context_data(ctx)->flags & duk_destroy_heap_in_progress)==duk_destroy_heap_in_progress)
+#define duk_ctx_chain(ctx) (duk_ctx_is_alive(ctx)?duk_ctx_context_data(ctx)->chain:NULL)
+
+typedef void(*Duktape_EventLoopDispatch)(void *chain, void *user);
+void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user);
+#define Duktape_RunOnEventLoopEx(chain, nonce, ctx, handler, user, freeOnShutdown) Duktape_RunOnEventLoop(chain, nonce, ctx, handler, (freeOnShutdown==0?NULL:(Duktape_EventLoopDispatch)(uintptr_t)0x01), user)
+
 void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta);
 char* Duktape_GetContextGuidHex(duk_context *ctx, void *db);
+void Duktape_SafeDestroyHeap(duk_context *ctx);
 void *Duktape_GetChain(duk_context *ctx);
 char *Duktape_GetStashKey(void* value);
 char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen);
@@ -61,6 +85,14 @@ void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyNa
 void *Duktape_GetHeapptrProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
 void *Duktape_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyName, duk_size_t* bufferLen);
 #define Duktape_GetBufferProperty(ctx, i, propertyName) Duktape_GetBufferPropertyEx(ctx, i, propertyName, NULL)
+
+char* Duktape_Duplicate_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len);
+#define Duktape_Duplicate_GetStringPropertyValue(ctx, i, propertyName, defaultValue) Duktape_Duplicate_GetStringPropertyValueEx(ctx, i, propertyName, defaultValue, NULL)
+void *Duktape_Duplicate_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyName, duk_size_t* bufferLen);
+#define Duktape_Duplicate_GetBufferProperty(ctx, i, propertyName) Duktape_Duplicate_GetBufferPropertyEx(ctx, i, propertyName, NULL)
+char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *len);
+#define Duktape_Duplicate_GetString(ctx, i) Duktape_Duplicate_GetStringEx(ctx, i, NULL)
+
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);
 struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short port);

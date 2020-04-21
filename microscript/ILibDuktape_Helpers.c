@@ -40,6 +40,56 @@ struct sockaddr_in6 duktape_internalAddress;
 #define ILibDuktape_UncaughtException_NativeHandler			"\xFF_UncaughtNativeHandler"
 #define ILibDuktape_UncaughtException_NativeUser			"\xFF_UncaughtNativeUser"
 
+typedef struct Duktape_EventLoopDispatchData
+{
+	duk_context *ctx;
+	uintptr_t nonce;
+	Duktape_EventLoopDispatch handler;
+	Duktape_EventLoopDispatch abortHandler;
+	void *user;
+}Duktape_EventLoopDispatchData;
+
+void Duktape_RunOnEventLoop_AbortSink(void *chain, void *user)
+{
+	Duktape_EventLoopDispatchData *tmp = (Duktape_EventLoopDispatchData*)user;
+	if (tmp->abortHandler == (Duktape_EventLoopDispatch)(uintptr_t)0x01)
+	{ 
+		if (tmp->user != NULL) { free(tmp->user); }
+	}
+	else if(tmp->abortHandler != NULL)
+	{
+		tmp->abortHandler(chain, tmp->user);
+	}
+	ILibMemory_Free(tmp);
+}
+void Duktape_RunOnEventLoop_Sink(void *chain, void *user)
+{
+	Duktape_EventLoopDispatchData *tmp = (Duktape_EventLoopDispatchData*)user;
+	if (duk_ctx_is_alive(tmp->ctx) && duk_ctx_is_valid(tmp->nonce, tmp->ctx))
+	{
+		// duk_context matches the intended context
+		if (tmp->handler != NULL) { tmp->handler(chain, tmp->user); }
+	}
+	else
+	{
+		// duk_context does not match the intended context
+		Duktape_RunOnEventLoop_AbortSink(chain, user);
+		return;
+	}
+	ILibMemory_Free(tmp);
+}
+void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user)
+{
+	Duktape_EventLoopDispatchData* tmp = (Duktape_EventLoopDispatchData*)ILibMemory_SmartAllocate(sizeof(Duktape_EventLoopDispatchData));
+	tmp->ctx = ctx;
+	tmp->nonce = nonce;
+	tmp->handler = handler;
+	tmp->abortHandler = abortHandler;
+	tmp->user = user;
+
+	ILibChain_RunOnMicrostackThreadEx3(chain, Duktape_RunOnEventLoop_Sink, Duktape_RunOnEventLoop_AbortSink, tmp);
+}
+
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i)
 {
 	int retVal = -1;
@@ -119,6 +169,21 @@ void *Duktape_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyN
 	}
 	return(retVal);
 }
+void *Duktape_Duplicate_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyName, duk_size_t* bufferLen)
+{
+	duk_size_t sourceLen = 0;
+	void *retVal = NULL, *source;
+	if (bufferLen != NULL) { *bufferLen = 0; }
+
+	source = Duktape_GetBufferPropertyEx(ctx, i, propertyName, &sourceLen);
+	if (sourceLen > 0)
+	{
+		retVal = ILibMemory_SmartAllocate(sourceLen);
+		memcpy_s(retVal, sourceLen, source, sourceLen);
+		if (bufferLen != NULL) { *bufferLen = sourceLen; }
+	}
+	return(retVal);
+}
 void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyName)
 {
 	void *retVal = NULL;
@@ -145,6 +210,36 @@ char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* prop
 		if (len != NULL) { *len = (defaultValue == NULL) ? 0 : strnlen_s(defaultValue, sizeof(ILibScratchPad)); }
 	}
 	return retVal;
+}
+char* Duktape_Duplicate_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len)
+{
+	char *ret = NULL;
+	if (len != NULL) { *len = 0; }
+
+	duk_size_t sourceLen = 0;
+	char *source = Duktape_GetStringPropertyValueEx(ctx, i, propertyName, defaultValue, &sourceLen);
+
+	if (sourceLen > 0)
+	{
+		if (len != NULL) { *len = sourceLen; }
+		ret = (char*)ILibMemory_SmartAllocate(sourceLen + 1);
+		memcpy_s(ret, sourceLen, source, sourceLen);
+	}
+
+	return(ret);
+}
+char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *len)
+{
+	char *ret = NULL;
+	duk_size_t srcLen = 0;
+	char* src = (char*)duk_get_lstring(ctx, i, &srcLen);
+	if (len != NULL) { *len = srcLen; }
+	if (srcLen > 0)
+	{
+		ret = ILibMemory_SmartAllocate(srcLen);
+		memcpy_s(ret, srcLen, src, srcLen);
+	}
+	return(ret);
 }
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue)
 {
@@ -544,21 +639,59 @@ char* Duktape_GetContextGuidHex(duk_context *ctx, void *db)
 	duk_pop(ctx);															// ...
 	return retVal;
 }
+ILibDuktape_ContextData* ILibDuktape_GetContextData(duk_context *ctx)
+{
+	duk_memory_functions mfuncs;
+	memset(&mfuncs, 0, sizeof(duk_memory_functions));
+	duk_get_memory_functions(ctx, &mfuncs);
+	return((ILibDuktape_ContextData*)mfuncs.udata);
+}
+
+void Duktape_SafeDestroyHeap(duk_context *ctx)
+{
+	ILibDuktape_ContextData *ctxd = duk_ctx_context_data(ctx);
+	
+	ctxd->flags |= duk_destroy_heap_in_progress;
+	duk_destroy_heap(ctx);
+
+	if (ILibLinkedList_GetCount(ctxd->threads) > 0)
+	{
+#ifdef WIN32
+		HANDLE* threadList = (HANDLE*)ILibMemory_SmartAllocate(sizeof(HANDLE) * ILibLinkedList_GetCount(ctxd->threads));
+		int i = 0;
+		void *node;
+		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
+		{
+			threadList[i++] = ILibLinkedList_GetDataFromNode(node);
+			ILibLinkedList_Remove(node);
+		}
+		WaitForMultipleObjects(i, threadList, TRUE, 5000);
+		ILibMemory_Free(threadList);
+#else
+		int rv;
+		struct timespec ts;
+		void *node;
+		void *thr;
+
+		ILibThread_ms2ts(5000, &ts);
+		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
+		{
+			thr = ILibLinkedList_GetDataFromNode(node);
+			if ((rv = ILibThread_TimedJoinEx(thr, &ts)) != 0)
+			{
+				break;
+			}
+			ILibLinkedList_Remove(node);
+		}	
+#endif
+	}
+	ILibLinkedList_Destroy(ctxd->threads);	
+	ILibMemory_Free(ctxd);
+}
 void *Duktape_GetChain(duk_context *ctx)
 {
-	void *retVal = NULL;
-	duk_push_heap_stash(ctx);										// [stash]
-	if (duk_has_prop_string(ctx, -1, ILibDuktape_Context_Chain))
-	{
-		duk_get_prop_string(ctx, -1, ILibDuktape_Context_Chain);	// [stash][ptr]
-		retVal = duk_get_pointer(ctx, -1);
-		duk_pop_2(ctx);												// ...
-	}
-	else
-	{
-		duk_pop(ctx);												// ...
-	}
-	return retVal;
+	void *ret = duk_ctx_chain(ctx);
+	return(ret);
 }
 duk_ret_t ILibDuktape_ExternalEventEmitter(duk_context *ctx)
 {

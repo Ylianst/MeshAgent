@@ -143,10 +143,12 @@ struct sockaddr_in6;
 #define sem_wait(x) ILibDispatchSemaphore_wait(x)
 #define sem_trywait(x) ILibDispatchSemaphore_trywait(s)
 #define sem_post(x) ILibDispatchSemaphore_post(x)
+#define sem_timedwait(x, timeout) ILibDispatchSemaphore_timedwait(x, timeout)
 void ILibDispatchSemaphore_Init(sem_t* s, int pShared, int value);
 void ILibDispatchSemaphore_Destroy(sem_t* s);
 void ILibDispatchSemaphore_wait(sem_t* s);
 void ILibDispatchSemaphore_trywait(sem_t* s);
+int ILibDispatchSemaphore_timedwait(sem_t *x, struct timespec *timeout);
 void ILibDispatchSemaphore_post(sem_t* s);
 #endif
 
@@ -160,7 +162,7 @@ void ILibDispatchSemaphore_post(sem_t* s);
 #endif
 
 #include<stdint.h>
-static inline void ignore_result(uint64_t result) { (void)result; }
+static inline void ignore_result(uintptr_t result) { (void)result; }
 
 #if defined(_DEBUG)
 #define PRINTERROR() printf("ERROR in %s, line %d\r\n", __FILE__, __LINE__);
@@ -375,6 +377,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_SmartAllocate(len) ILibMemory_Init(malloc(len+sizeof(ILibMemory_Header)), (int)len, 0, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_Init(malloc(primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0)), (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
+
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
 
@@ -1431,8 +1434,14 @@ extern void ILib_POSIX_CrashHandler(int code);
 	\ingroup ILibParsers
 	*@{
 	*/
-	void* ILibSpawnNormalThread(voidfp1 method, void* arg);
+	void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached);
+	#define ILibSpawnNormalThread(method, arg) ILibSpawnNormalThreadEx(method, arg, 1)
 	void ILibThread_Join(void *thr);
+	int ILibThread_TimedJoin(void *thr, uint32_t timeout);
+#ifndef WIN32
+	int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout);
+	struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts);
+#endif
 	void  ILibEndThisThread();
 #ifdef WIN32
 	void ILibHandle_DisableInherit(HANDLE *h);

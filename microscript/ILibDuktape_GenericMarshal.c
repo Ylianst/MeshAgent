@@ -47,6 +47,8 @@ limitations under the License.
 #include <dlfcn.h>
 #endif
 
+#define ILibDuktape_GenericMarshal_INVALID_PROMISE		((void*)(uintptr_t)0x01)
+
 #define ILibDuktape_GenericMarshal_FuncHandler			"\xFF_GenericMarshal_FuncHandler"
 #define ILibDuktape_GenericMarshal_VariableType			"\xFF_GenericMarshal_VarType"
 #define ILibDuktape_GenericMarshal_GlobalSet_List		"\xFF_GenericMarshal_GlobalSet_List"
@@ -105,6 +107,7 @@ typedef struct Duktape_GlobalGeneric_DispatcherData
 typedef struct Duktape_GlobalGeneric_Data
 {
 	ILibDuktape_EventEmitter *emitter;
+	uintptr_t ctxnonce;
 	void *retVal;
 	void *chain;
 	sem_t contextWaiter;
@@ -836,15 +839,16 @@ void ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return(void *chain, void
 }
 void ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink(void *args)
 {
+	ILibDuktape_EventEmitter *e = (ILibDuktape_EventEmitter*)((void**)args)[0];
 	void *chain = ((void**)args)[1];
 	PTRSIZE *vars = (PTRSIZE*)((void**)args)[2];
 	int parms = (int)(PTRSIZE)((void**)args)[3];
 	void *fptr = ((void**)args)[4];
+	uintptr_t nonce = (uintptr_t)((void**)args)[5];
 	PTRSIZE retVal = ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars);
 
 	((void**)args)[3] = (void*)retVal;
-	ILibChain_RunOnMicrostackThreadEx(chain, ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return, args);
-
+	Duktape_RunOnEventLoop(chain, nonce, e->ctx, ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink_Return, NULL, args);
 }
 
 #define ILibDuktape_FFI_AsyncDataPtr "\xFF_FFI_AsyncDataPtr"
@@ -853,6 +857,7 @@ typedef struct ILibDuktape_FFI_AsyncData
 	duk_context *ctx;
 	void *chain;
 	void *workerThread;
+	uintptr_t ctxnonce;
 #ifdef WIN32
 	DWORD workerThreadId;
 #else
@@ -927,7 +932,7 @@ void ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop(void *arg)
 		{
 			if (data->waitingForResult == 0)
 			{
-				ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch, data);
+				Duktape_RunOnEventLoop(data->chain, data->ctxnonce, data->ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_ChainDispatch, NULL, data);
 			}
 			else
 			{
@@ -936,6 +941,10 @@ void ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop(void *arg)
 			}
 		}
 	}
+	sem_destroy(&(data->workAvailable));
+	sem_destroy(&(data->workStarted));
+	sem_destroy(&(data->workFinished));
+	ILibMemory_Free(data);
 }
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_promise(duk_context *ctx)
 {
@@ -947,34 +956,42 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_promise(duk_context *ctx)
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_abort(duk_context *ctx)
 {
 	duk_push_this(ctx);
-	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI_AsyncData was already freed")); }
 
 	if (data != NULL)
 	{
-		data->abort = 1;
 		if (data->promise == NULL)
 		{
+			sem_t *workAvailable = &(data->workAvailable);
+			void *workerThread = data->workerThread;
+
 			// We can gracefully exit this thread
-			sem_post(&(data->workAvailable));
-#ifdef WIN32
-			ILibThread_Join(data->workerThread);
-#endif
+			data->abort = 1;
+			sem_post(workAvailable);
+			ILibThread_Join(workerThread);
 		}
 		else
 		{
 			if (data->waitingForResult == 0)
 			{
-				// We cannot gracefully exit the thread, so let's reject the promise, and let the app layer figure it out
-				duk_push_heapptr(data->ctx, data->promise);		// [promise]
-				duk_get_prop_string(data->ctx, -1, "_REJ");		// [promise][rej]
-				duk_swap_top(data->ctx, -2);					// [rej][this]
-				duk_push_string(data->ctx, "ABORT");			// [rej][this][abort]
-				duk_call_method(data->ctx, 1);
-				duk_pop(data->ctx);								// ...
+				if (data->promise != ILibDuktape_GenericMarshal_INVALID_PROMISE)
+				{
+					// We cannot gracefully exit the thread, so let's reject the promise, and let the app layer figure it out
+					duk_push_heapptr(data->ctx, data->promise);		// [promise]
+					duk_get_prop_string(data->ctx, -1, "_REJ");		// [promise][rej]
+					duk_swap_top(data->ctx, -2);					// [rej][this]
+					duk_push_string(data->ctx, "ABORT");			// [rej][this][abort]
 
-				// We are purposefully not clearing the promise, becuase the hope is that the above layer
-				// will receive this rejection, and do a proper cleanup, which may need the promise to accomplish that
+					data->abort = 1;
+					duk_call_method(ctx, 1);
+					duk_pop(ctx);									// ...
+
+					//
+					// We are purposefully not clearing the promise, becuase the hope is that the above layer
+					// will receive this rejection, and do a proper cleanup, which may need the promise to accomplish that.
+					// 
+				}
 			}
 			else
 			{
@@ -983,41 +1000,47 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_abort(duk_context *ctx)
 			}
 		}
 		duk_push_this(ctx);
-		sem_destroy(&(data->workAvailable));
-		sem_destroy(&(data->workStarted));
-		sem_destroy(&(data->workFinished));
 		duk_del_prop_string(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 	}
 	return(0);
 }
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer(duk_context *ctx)
 {
-	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
 
 	if (data != NULL && ILibMemory_CanaryOK(data))
 	{
-		data->abort = 1;
 		if (data->promise == NULL)
 		{
+			sem_t *workAvailable = &(data->workAvailable);
+			void *workerThread = data->workerThread;
+
 			data->abort = 1;
-			sem_post(&(data->workAvailable));
-#ifdef WIN32
-			ILibThread_Join(data->workerThread);
-#endif
-			sem_destroy(&(data->workAvailable));
-			sem_destroy(&(data->workStarted));
-			sem_destroy(&(data->workFinished));
+			sem_post(workAvailable);
+			ILibThread_Join(workerThread);
+		}
+		else
+		{
+			if (duk_ctx_shutting_down(ctx))
+			{
+				ILibLinkedList_AddTail(duk_ctx_context_data(ctx)->threads, data->workerThread);
+			}
+			data->abort = 1;
 		}
 	}
 	return(0);
 }
 
 #ifdef WIN32
-void __stdcall ILibDuktape_GenericMarshal_MethodInvokeAsync_Done_APC(ULONG_PTR u)
+void ILibDuktape_GenericMarshal_MethodInvokeAsync_Done_chain(void *chain, void* u)
 {
 	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)u;
 	duk_context *ctx;
 	if (!ILibMemory_CanaryOK(data)) { return; }
+	if (!ILibMemory_CanaryOK(data->ctx) || data->promise == NULL || data->promise == ILibDuktape_GenericMarshal_INVALID_PROMISE)
+	{
+		return;
+	}
 
 	duk_push_heapptr(data->ctx, data->promise);																// [promise]
 	duk_get_prop_string(data->ctx, -1, "_RES");																// [promise][resolver]
@@ -1048,10 +1071,20 @@ void __stdcall ILibDuktape_GenericMarshal_MethodInvokeAsync_APC(ULONG_PTR u)
 	data->workAvailable = (void*)ILibDuktape_GenericMarshal_MethodInvoke_Native(varCount-1, data->fptr, var);
 	data->lastError = (DWORD)GetLastError();
 
-	QueueUserAPC((PAPCFUNC)ILibDuktape_GenericMarshal_MethodInvokeAsync_Done_APC, data->workFinished, (ULONG_PTR)data);
+	ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_GenericMarshal_MethodInvokeAsync_Done_chain, data);
 }
 #endif
+duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_promfin(duk_context *ctx)
+{
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, 0, "_data");
+	void *h = duk_get_heapptr(ctx, 0);
 
+	if (ILibMemory_CanaryOK(data) && data->promise == h)
+	{
+		data->promise = ILibDuktape_GenericMarshal_INVALID_PROMISE;
+	}
+	return(0);
+}
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 {
 	void *redirectionPtr = NULL, *redirectionPtrName = NULL;
@@ -1062,7 +1095,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 
 	if (duk_is_function(ctx, 0))
 	{
-		data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
+		data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_FFI_AsyncDataPtr);
 		if (data != NULL)
 		{
 			if (ILibMemory_CanaryOK(data))
@@ -1081,15 +1114,21 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		Duktape_GlobalGeneric_Data *ggd = (Duktape_GlobalGeneric_Data*)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_GenericMarshal_GlobalSet_Dispatcher);
 		redirectionPtr = NULL;
 
+		data = (ILibDuktape_FFI_AsyncData*)ILibMemory_SmartAllocate(sizeof(ILibDuktape_FFI_AsyncData));
+		duk_push_pointer(ctx, data);
+		duk_put_prop_string(ctx, -2, ILibDuktape_FFI_AsyncDataPtr);
+
 		duk_eval_string(ctx, "require('promise');");		// [func][promise]
 		duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_promise, 2);
 		duk_new(ctx, 1);
+		ILibDuktape_CreateFinalizer(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_promfin);
+		duk_push_pointer(ctx, data); duk_put_prop_string(ctx, -2, "_data");
 		ggd->dispatch->promise = duk_get_heapptr(ctx, -1);
-		data = (ILibDuktape_FFI_AsyncData*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_FFI_AsyncData));
-		duk_put_prop_string(ctx, -2, ILibDuktape_FFI_AsyncDataPtr);
 
 		data->ctx = ctx;
+		data->ctxnonce = duk_ctx_nonce(ctx);
 		data->promise = ggd->dispatch->promise;
+		data->chain = duk_ctx_chain(ctx);
 
 		duk_push_current_function(ctx);																		// [promise][func]
 		data->fptr = Duktape_GetPointerProperty(ctx, -1, "_address");
@@ -1106,11 +1145,11 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		if (redirectionPtr == NULL)
 		{
 			duk_push_current_function(ctx);																		// [func]
-			data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+			data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 			if (data == NULL)
 			{
-				data = Duktape_PushBuffer(ctx, sizeof(ILibDuktape_FFI_AsyncData));								// [func][buff]
-
+				data = ILibMemory_SmartAllocate(sizeof(ILibDuktape_FFI_AsyncData));								// [func][buff]
+				duk_push_pointer(ctx, data);
 				duk_push_current_function(ctx);																	// [func][buff][func]
 				duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer, 1);		// [func][buff][func][cfunc]
 				duk_set_finalizer(ctx, -2);																		// [func][buff][func]
@@ -1118,13 +1157,14 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 
 				duk_put_prop_string(ctx, -2, ILibDuktape_FFI_AsyncDataPtr);										// [func]
 				data->ctx = ctx;
+				data->ctxnonce = duk_ctx_nonce(ctx);
 				data->chain = Duktape_GetChain(ctx);
 				data->fptr = Duktape_GetPointerProperty(ctx, -1, "_address");
 				data->methodName = Duktape_GetStringPropertyValue(ctx, -1, "_funcName", NULL);
 				sem_init(&(data->workAvailable), 0, 0);
 				sem_init(&(data->workStarted), 0, 0);
 				sem_init(&(data->workFinished), 0, 0);
-				data->workerThread = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data);
+				data->workerThread = ILibSpawnNormalThreadEx(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data, 0);
 			}
 		}
 		else
@@ -1140,6 +1180,8 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 			duk_eval_string(ctx, "require('promise');");		// [func][promise]
 			duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_promise, 2);
 			duk_new(ctx, 1);
+			ILibDuktape_CreateFinalizer(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_promfin);
+			duk_push_pointer(ctx, data); duk_put_prop_string(ctx, -2, "_data");
 			data->promise = duk_get_heapptr(ctx, -1);
 		}
 		data->vars = (PTRSIZE*)ILibMemory_AllocateA(sizeof(PTRSIZE)*parms);
@@ -1208,11 +1250,11 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_wait(duk_context *ctx)
 
 	ILibDuktape_FFI_AsyncData *data;
 	duk_push_this(ctx);																						// [func]
-	data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 	if (data == NULL)
 	{
-		data = Duktape_PushBuffer(ctx, sizeof(ILibDuktape_FFI_AsyncData));									// [func][buffer]
-
+		data = ILibMemory_SmartAllocate(sizeof(ILibDuktape_FFI_AsyncData));									// [func][buffer]
+		duk_push_pointer(ctx, data);
 		duk_push_this(ctx);																					// [func][buffer][func]
 		duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer, 1);			// [func][buffer][func][finalizer]
 		duk_set_finalizer(ctx, -2);																			// [func][buffer][func]
@@ -1220,12 +1262,13 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_wait(duk_context *ctx)
 
 		duk_put_prop_string(ctx, -2, ILibDuktape_FFI_AsyncDataPtr);											// [func]
 		data->ctx = ctx;
+		data->ctxnonce = duk_ctx_nonce(ctx);
 		data->chain = Duktape_GetChain(ctx);
 		data->fptr = Duktape_GetPointerProperty(ctx, -1, "_address");
 		sem_init(&(data->workAvailable), 0, 0);
 		sem_init(&(data->workStarted), 0, 0);
 		sem_init(&(data->workFinished), 0, 0);
-		data->workerThread = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data);
+		data->workerThread = ILibSpawnNormalThreadEx(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data, 0);
 	}
 
 	if (data->waitingForResult == WAITING_FOR_RESULT__DISPATCHER) { return(ILibDuktape_Error(ctx, "This method call is not waitable")); }
@@ -1259,7 +1302,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	duk_push_current_function(ctx);					// [func]
 	exposedName = Duktape_GetStringPropertyValue(ctx, -1, "_exposedName", NULL);
 	int spawnThread = Duktape_GetBooleanProperty(ctx, -1, "_spawnThread", 0);
-	PTRSIZE *vars = spawnThread == 0 ? ILibMemory_AllocateA(sizeof(PTRSIZE)*parms) : ILibMemory_SmartAllocateEx(sizeof(PTRSIZE)*parms, 5 * sizeof(void*));
+	PTRSIZE *vars = spawnThread == 0 ? ILibMemory_AllocateA(sizeof(PTRSIZE)*parms) : ILibMemory_SmartAllocateEx(sizeof(PTRSIZE)*parms, 6 * sizeof(void*));
 	duk_get_prop_string(ctx, -1, "_address");		// [func][addr]
 	fptr = duk_to_pointer(ctx, -1);
 
@@ -1319,6 +1362,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 			args[2] = vars;
 			args[3] = (void*)(PTRSIZE)parms;
 			args[4] = fptr;
+			args[5] = (void*)duk_ctx_nonce(ctx);
 
 			void *thptr = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvoke_ThreadSink, args);
 			duk_push_fixed_buffer(ctx, sizeof(void*));									// [ret][buffer]
@@ -1336,7 +1380,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread(duk_context *ctx)
 {
 	duk_push_this(ctx);		// [async]
-	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 	if (data == NULL) { return(ILibDuktape_Error(ctx, "No thread")); }
 	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI Object was already freed")); }
 	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, data->workerThread, sizeof(void*));
@@ -1345,7 +1389,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread(duk_context *ctx)
 duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread_id(duk_context *ctx)
 {
 	duk_push_this(ctx);		// [async]
-	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
+	ILibDuktape_FFI_AsyncData *data = (ILibDuktape_FFI_AsyncData*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_FFI_AsyncDataPtr);
 	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI Object was already freed")); }
 
 	char tmp[255];
@@ -1591,6 +1635,7 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 #endif
 				sem_init(&(user->contextWaiter), 0, 0);
 				user->chain = refList[i]->chain;
+				user->ctxnonce = refList[i]->ctxnonce;
 				user->emitter = refList[i]->emitter;
 				user->numArgs = numParms;
 				if (numParms > 0)
@@ -1603,7 +1648,7 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 					}
 					va_end(vlist);
 				}
-				ILibChain_RunOnMicrostackThreadEx3(refList[i]->chain, ILibDuktape_GlobalGenericCallback_ProcessEx, ILibDuktape_GlobalGenericCallback_ProcessEx_Abort, user);
+				Duktape_RunOnEventLoop(refList[i]->chain, refList[i]->ctxnonce, refList[i]->emitter->ctx, ILibDuktape_GlobalGenericCallback_ProcessEx, ILibDuktape_GlobalGenericCallback_ProcessEx_Abort, user);
 			}
 			else
 			{
@@ -1897,6 +1942,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 		
 		data = (Duktape_GlobalGeneric_Data*)ILibMemory_SmartAllocate(sizeof(Duktape_GlobalGeneric_Data));
 		data->emitter = ILibDuktape_EventEmitter_Create(ctx);
+		data->ctxnonce = duk_ctx_nonce(ctx);
 		data->chain = Duktape_GetChain(ctx);
 		ILibDuktape_EventEmitter_CreateEventEx(data->emitter, "GlobalCallback");
 		ILibDuktape_CreateInstanceMethod(ctx, "CallingThread", ILibDuktape_GenericMarshal_GlobalCallback_CallingThread, 0);
@@ -1975,7 +2021,6 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 {
-	void *tmp = NULL;
 	if (GlobalCallbackList != NULL)
 	{
 		ILibLinkedList_Lock(GlobalCallbackList);
@@ -1983,7 +2028,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 		while (node != NULL)
 		{
 			Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
-			if (data->chain == Duktape_GetChain(ctx))
+			if (data->chain == duk_ctx_chain(ctx) && data->ctxnonce == duk_ctx_nonce(ctx))
 			{
 				ILibMemory_Free(data);
 				void *next = ILibLinkedList_GetNextNode(node);
@@ -1995,14 +2040,8 @@ duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 				node = ILibLinkedList_GetNextNode(node);
 			}
 		}
-		if (ILibLinkedList_GetCount(GlobalCallbackList) == 0) { tmp = GlobalCallbackList; }
 		ILibLinkedList_UnLock(GlobalCallbackList);
-		if (tmp != NULL)
-		{
-			GlobalCallbackList = NULL;
-		}
 	}
-	if (tmp != NULL) { ILibLinkedList_Destroy(tmp); }
 	return(0);
 }
 duk_ret_t ILibDuktape_GenericMarshal_WrapObject(duk_context *ctx)
@@ -2121,9 +2160,29 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateReadonlyProperty(ctx, "PointerSize");
 }
 
+void ILibDuktape_GenericMarshal_ChainDestroySink(void *chain, void *user)
+{
+	if (GlobalCallbackList != NULL)
+	{
+		ILibLinkedList_Lock(GlobalCallbackList);
+		void *node = ILibLinkedList_GetNode_Head(GlobalCallbackList);
+		while (node != NULL)
+		{
+			Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
+			ILibMemory_Free(data);
+			void *next = ILibLinkedList_GetNextNode(node);
+			ILibLinkedList_Remove(node);
+			node = next;
+		}
+		ILibLinkedList_UnLock(GlobalCallbackList);
+		ILibLinkedList_Destroy(GlobalCallbackList);
+		GlobalCallbackList = NULL;
+	}
+}
 void ILibDuktape_GenericMarshal_init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "_GenericMarshal", ILibDuktape_GenericMarshal_Push);
+	ILibChain_OnDestroyEvent_AddHandler(duk_ctx_chain(ctx), ILibDuktape_GenericMarshal_ChainDestroySink, NULL);
 }
 
 #ifdef __DOXY__

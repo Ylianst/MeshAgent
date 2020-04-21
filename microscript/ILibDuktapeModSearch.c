@@ -353,11 +353,7 @@ duk_ret_t ILibDuktape_ModSearch_setModulePath(duk_context *ctx)
 void ILibDuktape_ModSearch_Init(duk_context * ctx, void * chain, ILibSimpleDataStore mDB)
 {
 	duk_module_duktape_init(ctx);
-
-	duk_push_heap_stash(ctx);									// [stash]
-	duk_push_pointer(ctx, chain);								// [stash][chain]
-	duk_put_prop_string(ctx, -2, ILibDuktape_Context_Chain);	// [stash]
-	duk_pop(ctx);												// ...
+	if (duk_ctx_chain(ctx) == NULL) { duk_ctx_context_data(ctx)->chain = chain; }
 
 	duk_get_global_string(ctx, "Duktape");		// [globalString]
 	duk_push_c_function(ctx, mod_Search, 4);	// [globalString][func]

@@ -94,11 +94,33 @@ void ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler(ILibDuktape_WritableSt
 		ILibProcessPipe_Process_CloseStdIn(p->childProcess);
 	}
 }
+void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user);
+void ILibDuktape_ChildProcess_SubProcess_ExitHandler_sink1(void *chain, void *user)
+{
+	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
+	if (!ILibMemory_CanaryOK(p)) { return; }
 
+	ILibDuktape_ChildProcess_SubProcess_ExitHandler(NULL, p->exitCode, p);
+}
 void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
 	if (!ILibMemory_CanaryOK(p)) { return; }
+
+#ifdef WIN32
+	if (duk_ctx_context_data(p->ctx)->apc_flags == 0)
+	{
+		// This method was called with an APC, but this thread was running an unknown alertable method when it was interrupted
+		// So we must unwind the stack, and use a non-apc method to re-dispatch to this thread, becuase we can't risk
+		// calling a winsock method, in case this thread was inside winsock when it was interrupted, because otherwise, it 
+		// will corrupt memory, resulting in a possible crash.
+		//
+		// We had to do the APC first, becuase otherwise child_process.waitExit() will not work, becuase that method is blocking
+		// the event loop thread with an alertable wait object, so APC is the only way to propagate this event
+		p->exitCode = exitCode;
+		Duktape_RunOnEventLoop(p->chain, duk_ctx_nonce(p->ctx), p->ctx, ILibDuktape_ChildProcess_SubProcess_ExitHandler_sink1, NULL, p);
+	}
+#endif
 
 	p->exitCode = exitCode;
 	p->childProcess = NULL;
@@ -181,8 +203,13 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
 
 #ifdef WIN32
+	duk_thread_state ts;
+	duk_suspend(ctx, &ts);
+	duk_ctx_context_data(ctx)->apc_flags = 1;
 	while ((result=WaitForSingleObjectEx(eptr, duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : INFINITE, TRUE)) != WAIT_OBJECT_0 && result != WAIT_TIMEOUT);
+	duk_ctx_context_data(ctx)->apc_flags = 0;
 	CloseHandle(eptr);
+	duk_resume(ctx, &ts);
 	if (result == WAIT_TIMEOUT) { return(ILibDuktape_Error(ctx, "timeout")); }
 #else
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };

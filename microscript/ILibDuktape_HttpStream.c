@@ -1894,7 +1894,7 @@ ILibTransport_DoneState ILibDuktape_HttpStream_WriteSink(ILibDuktape_DuplexStrea
 		tmp->httpStream = data;
 		tmp->bufferLen = bufferLen;
 		memcpy_s(tmp->buffer, bufferLen, buffer, bufferLen);
-		ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_HttpStream_WriteSink_ChainSink, tmp);
+		Duktape_RunOnEventLoop(data->chain, duk_ctx_nonce(data->DS->readableStream->ctx), data->DS->readableStream->ctx, ILibDuktape_HttpStream_WriteSink_ChainSink, NULL, tmp);
 		return(ILibTransport_DoneState_INCOMPLETE);
 	}
 
@@ -2195,8 +2195,8 @@ ILibTransport_DoneState ILibDuktape_HttpStream_ServerResponse_WriteSink(struct I
 			buffered->endBytes = stream->endBytes;
 			buffered->chunk = state->chunkSupported;
 			if (bufferLen > 0) { memcpy_s(buffered->buffer, bufferLen, buffer, bufferLen); }
-
-			ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_HttpStream_ServerResponse_WriteImplicitHeaders, buffered);
+			
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(state->ctx), state->ctx, ILibDuktape_HttpStream_ServerResponse_WriteImplicitHeaders, NULL, buffered);
 			return(ILibTransport_DoneState_INCOMPLETE);
 		}
 	}
@@ -2283,7 +2283,7 @@ ILibTransport_DoneState ILibDuktape_HttpStream_ServerResponse_WriteSink(struct I
 				data->writeStream = state->writeStream;
 				data->bufferLen = bufferLen;
 				memcpy_s(data->buffer, bufferLen, buffer, bufferLen);
-				ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_HttpStream_ServerResponse_WriteSink_Chain, data);
+				Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(state->ctx), state->ctx, ILibDuktape_HttpStream_ServerResponse_WriteSink_Chain, NULL, data);
 				return(ILibTransport_DoneState_INCOMPLETE);
 			}
 		}
@@ -2384,7 +2384,7 @@ void ILibDuktape_HttpStream_ServerResponse_EndSink(struct ILibDuktape_WritableSt
 		else
 		{
 			// Need to context switch before sending Implicit Headers
-			ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_HttpStream_ServerResponse_EndSink_Chain, stream);
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(stream->ctx), stream->ctx, ILibDuktape_HttpStream_ServerResponse_EndSink_Chain, NULL, stream);
 		}
 	}
 	else
@@ -2396,7 +2396,7 @@ void ILibDuktape_HttpStream_ServerResponse_EndSink(struct ILibDuktape_WritableSt
 		}
 		else
 		{
-			ILibChain_RunOnMicrostackThread(state->chain, ILibDuktape_HttpStream_ServerResponse_EndSink_ZeroChunk_Chain, state);
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(stream->ctx), stream->ctx, ILibDuktape_HttpStream_ServerResponse_EndSink_ZeroChunk_Chain, NULL, state);
 		}
 	}
 }
@@ -2890,6 +2890,10 @@ int ILibDuktape_HttpStream_IncomingMessage_UnshiftBytes(ILibDuktape_readableStre
 	data->bodyStream_unshiftedBytes = unshiftBytes;
 	return(unshiftBytes);
 }
+void ILibDuktape_HttpStream_DispatchEnd_ABORT(void *chain, void *user)
+{
+	free(user);
+}
 void ILibDuktape_HttpStream_DispatchEnd(void *chain, void *user)
 {
 	if(ILibMemory_CanaryOK(((void**)user)[1]))
@@ -2931,6 +2935,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 {
 	ILibDuktape_HttpStream_Data *data = (ILibDuktape_HttpStream_Data*)user1;
 	duk_context *ctx = data->DS->writableStream->ctx;
+	uintptr_t ctxnonce = duk_ctx_nonce(ctx);
 
 	if (data->bodyStream != NULL)
 	{
@@ -3170,7 +3175,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 			tmp[0] = ctx;
 			tmp[1] = data->DS;
 			tmp[2] = data;
-			ILibChain_RunOnMicrostackThread(data->chain, ILibDuktape_HttpStream_DispatchEnd, tmp);
+			Duktape_RunOnEventLoop(data->chain, ctxnonce, ctx, ILibDuktape_HttpStream_DispatchEnd, ILibDuktape_HttpStream_DispatchEnd_ABORT, tmp);
 		}
 	}
 }
@@ -3221,7 +3226,6 @@ duk_ret_t ILibduktape_HttpStream_create(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, ILibDuktape_HTTPStream2Data);					// [httpStream]
 
 	data->maxHeaderSize = 4096;
-
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "end");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "parseError");
@@ -3972,7 +3976,7 @@ void ILibDuktape_httpStream_webSocket_EncodedPauseSink(ILibDuktape_DuplexStream 
 		}
 		else
 		{
-			ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_httpStream_webSocket_EncodedPauseSink_Chain, state);
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(state->ctx), state->ctx, ILibDuktape_httpStream_webSocket_EncodedPauseSink_Chain, NULL, state);
 		}
 	}
 }
@@ -4007,7 +4011,7 @@ void ILibDuktape_httpStream_webSocket_EncodedResumeSink(ILibDuktape_DuplexStream
 		}
 		else
 		{
-			ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_httpStream_webSocket_EncodedResumeSink_Chain, state);
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(state->ctx), state->ctx, ILibDuktape_httpStream_webSocket_EncodedResumeSink_Chain, NULL, state);
 		}
 	}
 }
@@ -4064,7 +4068,7 @@ void ILibDuktape_httpStream_webSocket_DecodedPauseSink(ILibDuktape_DuplexStream 
 		}
 		else
 		{
-			ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_httpStream_webSocket_DecodedPauseSink_Chain, state);
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(state->ctx), state->ctx, ILibDuktape_httpStream_webSocket_DecodedPauseSink_Chain, NULL, state);
 		}
 	}
 }
@@ -4102,7 +4106,7 @@ void ILibDuktape_httpStream_webSocket_DecodedResumeSink(ILibDuktape_DuplexStream
 		}
 		else
 		{
-			ILibChain_RunOnMicrostackThreadEx(state->chain, ILibDuktape_httpStream_webSocket_DecodedResumeSink_Chain, state);
+			Duktape_RunOnEventLoop(state->chain, duk_ctx_nonce(state->ctx), state->ctx, ILibDuktape_httpStream_webSocket_DecodedResumeSink_Chain, NULL, state);
 		}
 	}
 }
