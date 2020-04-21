@@ -1,7 +1,6 @@
 ./openssl-arm
 ./openssl-arm2
 ./openssl-armhf
-./openssl-arm-linaro
 ./openssl-mips
 ./openssl-mipsel
 ./openssl-pogo

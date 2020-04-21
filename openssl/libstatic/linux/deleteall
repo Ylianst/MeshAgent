@@ -1,5 +1,6 @@
 rm ./arm/*
 rm ./arm2/*
+rm ./armhf/*
 rm ./mips/*
 rm ./mipsel/*
 rm ./pogo/*
