@@ -1164,7 +1164,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 				sem_init(&(data->workAvailable), 0, 0);
 				sem_init(&(data->workStarted), 0, 0);
 				sem_init(&(data->workFinished), 0, 0);
-				data->workerThread = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data);
+				data->workerThread = ILibSpawnNormalThreadEx(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data, 0);
 			}
 		}
 		else
@@ -1268,7 +1268,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_wait(duk_context *ctx)
 		sem_init(&(data->workAvailable), 0, 0);
 		sem_init(&(data->workStarted), 0, 0);
 		sem_init(&(data->workFinished), 0, 0);
-		data->workerThread = ILibSpawnNormalThread(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data);
+		data->workerThread = ILibSpawnNormalThreadEx(ILibDuktape_GenericMarshal_MethodInvokeAsync_WorkerRunLoop, data, 0);
 	}
 
 	if (data->waitingForResult == WAITING_FOR_RESULT__DISPATCHER) { return(ILibDuktape_Error(ctx, "This method call is not waitable")); }

@@ -669,21 +669,15 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 		ILibMemory_Free(threadList);
 #else
 		int rv;
-		void *status;
-		long ts = ILibGetTimeStamp(), ts2;
-		struct timespec t;
-		t.tv_sec = 5;
-		t.tv_nsec = 0;
-
+		struct timespec ts;
 		void *node;
+		void *thr;
+
+		ILibThread_ms2ts(5000, &ts);
 		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
 		{
-			if ((rv = pthread_timedjoin_np((pthread_t)ILibLinkedList_GetDataFromNode(node), &status, &t)) == 0)
-			{
-				t.tv_sec -= (((ts2 = ILibGetTimeStamp()) - ts) / 1000); ts = ts2;
-				if (t.tv_sec == 0) { break; }
-			}
-			else if (rv == ETIMEDOUT)
+			thr = ILibLinkedList_GetDataFromNode(node);
+			if ((rv = ILibThread_TimedJoinEx(thr, &ts)) != 0)
 			{
 				break;
 			}

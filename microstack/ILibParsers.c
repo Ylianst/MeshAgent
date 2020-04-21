@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+#define _GNU_SOURCE 
 
 #if defined (__APPLE__)
 	#include <sys/uio.h>
@@ -9417,7 +9418,7 @@ void ILIBLOGMESSAGEX(char *format, ...)
 	\param arg Optional Parameter to dispatch [Can be NULL]
 	\return Thread Handle
 */
-void* ILibSpawnNormalThread(voidfp1 method, void* arg)
+void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 {
 #if defined (_POSIX) || defined (__APPLE__)
 	intptr_t result;
@@ -9425,8 +9426,8 @@ void* ILibSpawnNormalThread(voidfp1 method, void* arg)
 	pthread_t newThread;
 	fptr = (void*(*)(void*))method;
 	result = (intptr_t)pthread_create(&newThread, NULL, fptr, arg);
-	pthread_detach(newThread);
-	return (void*)result;
+	if (detached != 0) { pthread_detach(newThread); }
+	return(result == 0 ? (void*)newThread : NULL);
 #endif
 
 #ifdef WIN32
@@ -9438,12 +9439,49 @@ void* ILibSpawnNormalThread(voidfp1 method, void* arg)
 #endif
 }
 
+#ifndef WIN32
+int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
+{
+	return(pthread_timedjoin_np((pthread_t)thr, NULL, timeout));
+}
+struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts)
+{
+	struct timeval tv;
+	long lv;
+
+	gettimeofday(&tv, NULL);
+	ts->tv_sec = tv.tv_sec + (ms / 1000);
+	ts->tv_nsec = tv.tv_usec * 1000;
+
+	ts->tv_sec += (ms / 1000);
+	ts->tv_nsec += ((ms % 1000) * 1000000);
+
+	if ((lv = ts->tv_nsec % 1000000000) > 0)
+	{
+		ts->tv_sec += 1;
+		ts->tv_nsec = lv;
+	}
+
+	return(ts);
+}
+#endif
+int ILibThread_TimedJoin(void *thr, uint32_t timeout)
+{
+#ifdef WIN32
+	return(WaitForSingleObject((HANDLE)thr, timeout) == WAIT_TIMEOUT ? 1 : 0);
+#else
+	struct timespec ts;
+	return(ILibThread_TimedJoinEx(thr, ILibThread_ms2ts(timeout, &ts)));
+#endif
+}
+
 void ILibThread_Join(void *thr)
 {
 #ifdef WIN32
 	WaitForSingleObject((HANDLE)thr, INFINITE);
 #else
-	pthread_join((pthread_t)thr, NULL);
+	void *r;
+	pthread_join((pthread_t)thr, &r);
 #endif
 }
 

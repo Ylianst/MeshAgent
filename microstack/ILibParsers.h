@@ -1432,8 +1432,14 @@ extern void ILib_POSIX_CrashHandler(int code);
 	\ingroup ILibParsers
 	*@{
 	*/
-	void* ILibSpawnNormalThread(voidfp1 method, void* arg);
+	void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached);
+	#define ILibSpawnNormalThread(method, arg) ILibSpawnNormalThreadEx(method, arg, 1)
 	void ILibThread_Join(void *thr);
+	int ILibThread_TimedJoin(void *thr, uint32_t timeout);
+#ifndef WIN32
+	int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout);
+	struct timespec *ILibThread_ms2ts(uint32_t ms, struct timespec *ts);
+#endif
 	void  ILibEndThisThread();
 #ifdef WIN32
 	void ILibHandle_DisableInherit(HANDLE *h);
