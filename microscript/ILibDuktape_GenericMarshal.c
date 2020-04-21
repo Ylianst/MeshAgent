@@ -969,9 +969,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_abort(duk_context *ctx)
 			// We can gracefully exit this thread
 			data->abort = 1;
 			sem_post(workAvailable);
-#ifdef WIN32
 			ILibThread_Join(workerThread);
-#endif
 		}
 		else
 		{
@@ -1018,13 +1016,15 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_dataFinalizer(duk_context
 			void *workerThread = data->workerThread;
 
 			data->abort = 1;
-			sem_post(&(data->workAvailable));
-#ifdef WIN32
+			sem_post(workAvailable);
 			ILibThread_Join(workerThread);
-#endif
 		}
 		else
 		{
+			if (duk_ctx_shutting_down(ctx))
+			{
+				ILibLinkedList_AddTail(duk_ctx_context_data(ctx)->threads, data->workerThread);
+			}
 			data->abort = 1;
 		}
 	}

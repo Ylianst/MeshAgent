@@ -53,6 +53,7 @@ typedef struct ILibDuktape_ContextData
 #ifdef WIN32
 	uint32_t apc_flags;
 #endif
+	void *threads;
 	void *chain;
 	void *user;
 }ILibDuktape_ContextData;

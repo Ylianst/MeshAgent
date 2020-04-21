@@ -865,7 +865,7 @@ duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 	duk_push_string(ctx, ILibScratchPad);
 	return(1);
 #elif defined(_POSIX)
-	ignore_result((uint64_t)getcwd(ILibScratchPad, sizeof(ILibScratchPad)));
+	ignore_result((uintptr_t)getcwd(ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_push_string(ctx, ILibScratchPad);				
 	return(1);
 #else
@@ -1447,7 +1447,6 @@ void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_siz
 void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
 {
 	size_t sz = ptr == NULL ? 0 : ILibMemory_Size(ptr);
-	ILibDuktape_ContextData *x = ptr != NULL ? (ILibDuktape_ContextData*)ILibMemory_Extra(ptr) : NULL;
 
 	if (ptr != NULL) 
 	{
@@ -2275,6 +2274,7 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal()
 {
 	ILibDuktape_ContextData *ctxd = (ILibDuktape_ContextData*)ILibMemory_SmartAllocate(sizeof(ILibDuktape_ContextData));
 	do { util_random(sizeof(ctxd->nonce), (char*)&(ctxd->nonce)); } while (ctxd->nonce == 0);
+	ctxd->threads = ILibLinkedList_Create();
 
 	duk_context *ctx = duk_create_heap(ILibDuktape_ScriptContainer_Engine_malloc, ILibDuktape_ScriptContainer_Engine_realloc, ILibDuktape_ScriptContainer_Engine_free, ctxd, ILibDuktape_ScriptContainer_Engine_fatal);
 	if (ctx == NULL) { ILIBCRITICALEXIT(254); }

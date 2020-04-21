@@ -653,6 +653,45 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 	
 	ctxd->flags |= duk_destroy_heap_in_progress;
 	duk_destroy_heap(ctx);
+
+	if (ILibLinkedList_GetCount(ctxd->threads) > 0)
+	{
+#ifdef WIN32
+		HANDLE* threadList = (HANDLE*)ILibMemory_SmartAllocate(sizeof(HANDLE) * ILibLinkedList_GetCount(ctxd->threads));
+		int i = 0;
+		void *node;
+		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
+		{
+			threadList[i++] = ILibLinkedList_GetDataFromNode(node);
+			ILibLinkedList_Remove(node);
+		}
+		WaitForMultipleObjects(i, threadList, TRUE, 5000);
+		ILibMemory_Free(threadList);
+#else
+		int rv;
+		void *status;
+		long ts = ILibGetTimeStamp(), ts2;
+		struct timespec t;
+		t.tv_sec = 5;
+		t.tv_nsec = 0;
+
+		void *node;
+		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
+		{
+			if ((rv = pthread_timedjoin_np((pthread_t)ILibLinkedList_GetDataFromNode(node), &status, &t)) == 0)
+			{
+				t.tv_sec -= (((ts2 = ILibGetTimeStamp()) - ts) / 1000); ts = ts2;
+				if (t.tv_sec == 0) { break; }
+			}
+			else if (rv == ETIMEDOUT)
+			{
+				break;
+			}
+			ILibLinkedList_Remove(node);
+		}	
+#endif
+	}
+	ILibLinkedList_Destroy(ctxd->threads);	
 	ILibMemory_Free(ctxd);
 }
 void *Duktape_GetChain(duk_context *ctx)

@@ -160,7 +160,7 @@ void ILibDispatchSemaphore_post(sem_t* s);
 #endif
 
 #include<stdint.h>
-static inline void ignore_result(uint64_t result) { (void)result; }
+static inline void ignore_result(uintptr_t result) { (void)result; }
 
 #if defined(_DEBUG)
 #define PRINTERROR() printf("ERROR in %s, line %d\r\n", __FILE__, __LINE__);
