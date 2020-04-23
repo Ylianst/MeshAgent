@@ -181,6 +181,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 		}
 		switch (crc32c(0, (unsigned char*)alpha+6, (uint32_t)((w*h)-6)))
 		{
+			case 1722092522:			// Ubuntu 9/10 (Top)
+			case 2893151230:			// Ubuntu 9/10 (Bottom)
 			case 3911022957:			// Ubuntu/Peppermint (Top)
 			case 315617398:				// Ubuntu/Peppermint (Bottom)
 			case 313635327:				// FreeBSD
@@ -192,6 +194,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZENS;
 				break;
 
+			case 3756583870:			// Ubuntu 9/10 (Left)
+			case 2797106708:			// Ubuntu 9/10 (Right)
 			case 1206496159:			// Ubuntu (Left)
 			case 3947249005:			// Ubuntu (Right)
 			case 2065486748:			// FreeBSD
@@ -203,6 +207,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZEWE;
 				break;
 
+			case 465233379:				// Ubuntu 9/10 (Bottom Left)
+			case 1129233427:			// Ubuntu 9/10  (Upper Right)
 			case 305612954:				// Ubuntu (Bottom Left)
 			case 1245488815:			// Ubuntu (Upper Right)
 			case 169817074:				// FreeBSD + PuppyLinux (Bottom Left)
@@ -213,6 +219,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZENESW;
 				break;
 
+			case 1292166613:			// Ubuntu 9/10 (Upper Left)
+			case 4017655526:			// Ubuntu 9/10 (Bottom Right)
 			case 799529566:				// Ubuntu (Upper Left)
 			case 4056118275:			// Ubuntu (Bottom Right)
 			case 2757619196:			// FreeBSD + PuppyLinux (Bottom Right)
@@ -222,6 +230,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 			case 4110212903:			// Raspian (Bottom Right)
 				ret = KVM_MouseCursor_SIZENWSE;
 				break;
+			
+			case 3694153785:			// Ubuntu 9/10
 			case 2280086639:			// Ubuntu
 			case 920009133:				// FreeBSD + PuppyLinux
 			case 2321998854:			// openSUSE
@@ -229,11 +239,14 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZEALL;
 				break;
 
+			case 3097204904:			// Ubuntu 9/10
 			case 3546300886:			// Ubuntu
 			case 1038978227:			// FreeBSD + PuppyLinux + openSUSE
 			case 4237429080:			// Raspian
 				ret = KVM_MouseCursor_ARROW;
 				break;
+
+			case 2170379861:			// Ubuntu 9/10
 			case 1176251007:			// Ubuntu
 			case 3320936845:			// FreeBSD
 			case 795881928:				// PuppyLinux
@@ -241,6 +254,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_IBEAM;
 				break;
 
+			case 990896914:				// Ubuntu 9/10
 			case 3673902152:			// Ubuntu
 			case 27109234:				// Raspian
 			case (uint32_t)-1421461853:	// PuppyLinux
