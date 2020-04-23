@@ -71,6 +71,13 @@ limitations under the License.
 #if defined(__APPLE__) || defined (_FREEBSD)
 #include <ifaddrs.h>
 #include <sys/sysctl.h>
+#else
+	#if defined(_POSIX) 
+		// On Linux Platforms, we need to check glibc version of the compiler
+		#if (__GLIBC__ == 2 && __GLIBC_MINOR__ <= 3) || (__GLIBC__ < 2)
+			#define ILIB_NO_TIMEDJOIN
+		#endif
+	#endif
 #endif
 
 #if defined(WIN32) && !defined(WSA_FLAG_NO_HANDLE_INHERIT)
@@ -9424,7 +9431,7 @@ void ILIBLOGMESSAGEX(char *format, ...)
 	ILIBLOGMESSSAGE(dest);
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
 typedef struct ILibThread_AppleThread
 {
 	pthread_t tid;
@@ -9461,7 +9468,7 @@ void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 	void* (*fptr) (void* a);
 	pthread_t newThread;
 	fptr = (void*(*)(void*))method;
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
 	ILibThread_AppleThread *ret = (ILibThread_AppleThread*)ILibMemory_SmartAllocate(sizeof(ILibThread_AppleThread));
 	ret->method = method; ret->arg = arg;
 	if (detached != 0) { sem_init(&(ret->s), 0, 0); ret->joinable = 1; }
@@ -9488,7 +9495,7 @@ void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 #ifndef WIN32
 int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
 {
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
 	int ret = 1;
 	if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable != 0)
 	{
@@ -9537,7 +9544,7 @@ void ILibThread_Join(void *thr)
 #ifdef WIN32
 	WaitForSingleObject((HANDLE)thr, INFINITE);
 #else
-	#ifdef __APPLE__
+	#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
 		if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable!=0)
 		{
 			pthread_join(((ILibThread_AppleThread*)thr)->tid, NULL);

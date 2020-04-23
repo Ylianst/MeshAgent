@@ -1564,7 +1564,9 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 {
 #if !defined(WIN32)
 	duk_eval_string(ctx, "require('os').getDefaultGateways();");
-	void *gwTable = duk_get_heapptr(ctx, -1);
+	#ifndef NO_IFADDR
+		void *gwTable = duk_get_heapptr(ctx, -1);
+	#endif
 #endif
 
 	duk_push_object(ctx);			// [retVal]
