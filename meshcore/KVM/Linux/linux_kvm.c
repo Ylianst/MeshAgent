@@ -181,6 +181,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 		}
 		switch (crc32c(0, (unsigned char*)alpha+6, (uint32_t)((w*h)-6)))
 		{
+			case 2788757291:			// Ubuntu 20
 			case 1722092522:			// Ubuntu 9/10 (Top)
 			case 2893151230:			// Ubuntu 9/10 (Bottom)
 			case 3911022957:			// Ubuntu/Peppermint (Top)
@@ -194,6 +195,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZENS;
 				break;
 
+			case 2098355412:			// Ubuntu 20 (Left)
+			case 1870927140:			// Ubuntu 20 (Right)
 			case 3756583870:			// Ubuntu 9/10 (Left)
 			case 2797106708:			// Ubuntu 9/10 (Right)
 			case 1206496159:			// Ubuntu (Left)
@@ -207,6 +210,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZEWE;
 				break;
 
+			case 1022545981:			// Ubuntu 20 (Bottom Left)
+			case 587249781:				// Ubuntu 20 (Upper Right)
 			case 465233379:				// Ubuntu 9/10 (Bottom Left)
 			case 1129233427:			// Ubuntu 9/10  (Upper Right)
 			case 305612954:				// Ubuntu (Bottom Left)
@@ -219,6 +224,9 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZENESW;
 				break;
 
+			
+			case 1016474413:			// Ubuntu 20 (Upper Left)
+			case 2912730571:			// Ubuntu 20 (Bottom Right)
 			case 1292166613:			// Ubuntu 9/10 (Upper Left)
 			case 4017655526:			// Ubuntu 9/10 (Bottom Right)
 			case 799529566:				// Ubuntu (Upper Left)
@@ -231,6 +239,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZENWSE;
 				break;
 			
+			case 3606431443:			// Ubuntu 20
 			case 3694153785:			// Ubuntu 9/10
 			case 2280086639:			// Ubuntu
 			case 920009133:				// FreeBSD + PuppyLinux
@@ -239,6 +248,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZEALL;
 				break;
 
+			case 2550770000:			// Ubuntu 20
 			case 3097204904:			// Ubuntu 9/10
 			case 3546300886:			// Ubuntu
 			case 1038978227:			// FreeBSD + PuppyLinux + openSUSE
@@ -246,6 +256,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_ARROW;
 				break;
 
+			case 4197067144:			// Ubuntu 20
 			case 2170379861:			// Ubuntu 9/10
 			case 1176251007:			// Ubuntu
 			case 3320936845:			// FreeBSD
@@ -254,6 +265,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_IBEAM;
 				break;
 
+			case 1393241229:			// Ubuntu 20
 			case 990896914:				// Ubuntu 9/10
 			case 3673902152:			// Ubuntu
 			case 27109234:				// Raspian
@@ -261,6 +273,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_HAND;
 				break;
 
+			case 620546299:				// Ubuntu 20
 			case 3463742778:			// Ubuntu
 				ret = KVM_MouseCursor_WAIT;
 				break;
