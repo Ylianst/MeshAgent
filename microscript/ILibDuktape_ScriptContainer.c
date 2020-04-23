@@ -2760,7 +2760,7 @@ void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, 
 	((void**)ILibMemory_Extra(sender))[1] = buffer;
 
 	ILibProcessPipe_Pipe_Pause(sender);
-	Duktape_RunOnEventLoop(slave->chain, duk_ctx_nonce(slave->ctx), slave->ctx, ILibDuktape_ScriptContainer_Slave_OnReadStdInEx, NULL, sender);
+	ILibChain_RunOnMicrostackThread(slave->chain, ILibDuktape_ScriptContainer_Slave_OnReadStdInEx, sender);
 #else
 	ILibDuktape_ScriptContainer_Slave_ProcessCommands(slave, buffer, sender);
 #endif
