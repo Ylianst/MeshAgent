@@ -110,10 +110,10 @@ if (process.argv.length > 1)
             process.exit();
             break;
         case 'export':
-            if (process.argv[2] == 'CoreModule')
+            if (process.argv[2] == 'CoreModule' || process.argv[2] == 'RecoveryModule')
             {
-                db.target = require('fs').createWriteStream('CoreModule.js', { flags: 'wb' });
-                db.target.write(db.GetBuffer(process.argv[2]).slice(4), function () { console.log('finished exporting'); process.exit(); });
+                db.target = require('fs').createWriteStream(process.argv[2]+'.js', { flags: 'wb' });
+                db.target.write(db.GetBuffer('CoreModule').slice(4), function () { console.log('finished exporting'); process.exit(); });
             }
             else
             {
@@ -122,12 +122,12 @@ if (process.argv.length > 1)
             }
             break;
         case 'import':
-            if (process.argv[2] == 'CoreModule')
+            if (process.argv[2] == 'CoreModule' || process.argv[2] == 'RecoveryModule')
             {
-                var src = require('fs').readFileSync('CoreModule.js', 'rb');
+                var src = require('fs').readFileSync(process.argv[2] + '.js', 'rb');
                 var src2 = Buffer.concat([Buffer.alloc(4), src]);
-                db.Put(process.argv[2], src2);
-                console.log('CoreModule imported');
+                db.Put('CoreModule', src2);
+                console.log(process.argv[2] + ' imported');
             }
             process.exit();
             break;
