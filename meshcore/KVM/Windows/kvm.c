@@ -225,10 +225,9 @@ BOOL CALLBACK DisplayInfoEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
 {
 	int w, h, deviceid = 0;
     MONITORINFOEX mi;
-
+	DWORD *selection = (DWORD*)dwData;
 	UNREFERENCED_PARAMETER( hdcMonitor );
 	UNREFERENCED_PARAMETER( lprcMonitor );
-	UNREFERENCED_PARAMETER( dwData );
 
 	ZeroMemory(&mi, sizeof(mi));
     mi.cbSize = sizeof(mi);
@@ -236,7 +235,7 @@ BOOL CALLBACK DisplayInfoEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
 	// Get the display information
     if (!GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) return TRUE;
 	if (sscanf_s(mi.szDevice, "\\\\.\\DISPLAY%d", &deviceid) != 1) return TRUE;
-	if (deviceid != SCREEN_SEL_TARGET) return TRUE;
+	if (--selection[0] > 0) { return TRUE; }
 	
 	// See if anything changed
 	w = abs(mi.rcMonitor.left - mi.rcMonitor.right);
@@ -402,7 +401,8 @@ void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *r
 			// Get the list of monitors
 			if (SCREEN_SEL_PROCESS == 0)
 			{
-				if (EnumDisplayMonitors(NULL, NULL, DisplayInfoEnumProc, 0))
+				DWORD selection = SCREEN_SEL_TARGET;
+				if (EnumDisplayMonitors(NULL, NULL, DisplayInfoEnumProc, (LPARAM)&selection))
 				{
 					// Set the resolution
 					if (SCREEN_SEL_PROCESS & 1) kvm_server_SetResolution(writeHandler, reserved);
