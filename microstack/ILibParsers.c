@@ -6343,6 +6343,11 @@ void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, ILibLife
 	struct ILibLifeTime *LifeTimeMonitor = (struct ILibLifeTime*)LifetimeMonitorObject;
 	void *node;
 
+	if (LifetimeMonitorObject == NULL)
+	{
+		if (Destroy != NULL) { Destroy(data); }
+		return;
+	}
 	if ((ltms = (struct LifeTimeMonitorData*)malloc(sizeof(struct LifeTimeMonitorData))) == NULL) ILIBCRITICALEXIT(254);
 	memset(ltms,0,sizeof(struct LifeTimeMonitorData));
 

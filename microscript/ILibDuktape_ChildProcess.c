@@ -204,12 +204,10 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 
 #ifdef WIN32
 	duk_thread_state ts;
-	duk_suspend(ctx, &ts);
 	duk_ctx_context_data(ctx)->apc_flags = 1;
 	while ((result=WaitForSingleObjectEx(eptr, duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : INFINITE, TRUE)) != WAIT_OBJECT_0 && result != WAIT_TIMEOUT);
 	duk_ctx_context_data(ctx)->apc_flags = 0;
 	CloseHandle(eptr);
-	duk_resume(ctx, &ts);
 	if (result == WAIT_TIMEOUT) { return(ILibDuktape_Error(ctx, "timeout")); }
 #else
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
