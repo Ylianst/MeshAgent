@@ -46,6 +46,8 @@ typedef struct Duktape_EventLoopDispatchData
 	uintptr_t nonce;
 	Duktape_EventLoopDispatch handler;
 	Duktape_EventLoopDispatch abortHandler;
+	ILibDuktape_ContextData *ctxd;
+	void *chain;
 	void *user;
 }Duktape_EventLoopDispatchData;
 
@@ -78,6 +80,18 @@ void Duktape_RunOnEventLoop_Sink(void *chain, void *user)
 	}
 	ILibMemory_Free(tmp);
 }
+void __stdcall Duktape_RunOnEventLoop_SanityCheck(ULONG_PTR u)
+{
+	if (!ILibMemory_CanaryOK((void*)u)) { return; }
+	Duktape_EventLoopDispatchData* d = (Duktape_EventLoopDispatchData*)((void**)u)[2];
+	if (ILibMemory_CanaryOK(d) && ILibMemory_CanaryOK(d->ctxd))
+	{
+		if ((d->ctxd->flags & duk_destroy_heap_in_progress) == duk_destroy_heap_in_progress)
+		{
+			if (d->abortHandler != NULL) { d->abortHandler(d->chain, d->user); }
+		}
+	}
+}
 void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user)
 {
 	Duktape_EventLoopDispatchData* tmp = (Duktape_EventLoopDispatchData*)ILibMemory_SmartAllocate(sizeof(Duktape_EventLoopDispatchData));
@@ -86,8 +100,11 @@ void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Dukt
 	tmp->handler = handler;
 	tmp->abortHandler = abortHandler;
 	tmp->user = user;
+	tmp->ctxd = duk_ctx_context_data(ctx);
+	tmp->chain = chain;
 
-	ILibChain_RunOnMicrostackThreadEx3(chain, Duktape_RunOnEventLoop_Sink, Duktape_RunOnEventLoop_AbortSink, tmp);
+	void *tobj = ILibChain_RunOnMicrostackThreadEx3(chain, Duktape_RunOnEventLoop_Sink, Duktape_RunOnEventLoop_AbortSink, tmp);
+	QueueUserAPC((PAPCFUNC)Duktape_RunOnEventLoop_SanityCheck, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tobj);
 }
 
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i)
@@ -665,7 +682,7 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 			threadList[i++] = ILibLinkedList_GetDataFromNode(node);
 			ILibLinkedList_Remove(node);
 		}
-		WaitForMultipleObjects(i, threadList, TRUE, 5000);
+		while (WaitForMultipleObjectsEx(i, threadList, TRUE, 5000, TRUE) == WAIT_IO_COMPLETION);
 		ILibMemory_Free(threadList);
 #else
 		int rv;
