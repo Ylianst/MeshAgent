@@ -158,12 +158,14 @@ typedef struct MeshCommand_BinaryPacket_AuthVerify
 }MeshCommand_BinaryPacket_AuthVerify;
 typedef enum MeshCommand_AuthInfo_PlatformType
 {
-	MeshCommand_AuthInfo_PlatformType_DESKTOP	     = 1,
-	MeshCommand_AuthInfo_PlatformType_LAPTOP	     = 2,
-	MeshCommand_AuthInfo_PlatformType_MOBILE	     = 3,
-	MeshCommand_AuthInfo_PlatformType_SERVER	     = 4,
-	MeshCommand_AuthInfo_PlatformType_DISK		     = 5,
-	MeshCommand_AuthInfo_PlatformType_ROUTER	     = 6
+	MeshCommand_AuthInfo_PlatformType_DESKTOP	    = 1,
+	MeshCommand_AuthInfo_PlatformType_LAPTOP	    = 2,
+	MeshCommand_AuthInfo_PlatformType_MOBILE	    = 3,
+	MeshCommand_AuthInfo_PlatformType_SERVER	    = 4,
+	MeshCommand_AuthInfo_PlatformType_DISK		    = 5,
+	MeshCommand_AuthInfo_PlatformType_ROUTER	    = 6,
+	MeshCommand_AuthInfo_PlatformType_PI			= 7,
+	MeshCommand_AuthInfo_PlatformType_VIRTUAL		= 8
 }MeshCommand_BinaryPacket_AuthInfo_PlatformType;
 typedef struct MeshCommand_BinaryPacket_AuthInfo
 {
@@ -2514,6 +2516,20 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 			MeshServer_SendJSON(agent, WebStateObject, ILibScratchPad, jsonlen);
 		}
 	}
+
+	if (agent->meshCoreCtx != NULL)
+	{
+		if (duk_peval_string(agent->meshCoreCtx, "require('identifiers').isVM();") == 0)
+		{
+			if (duk_get_boolean(agent->meshCoreCtx, -1))
+			{
+				info->platformType = htonl(MeshCommand_AuthInfo_PlatformType_VIRTUAL);
+			}
+		}
+		duk_pop(agent->meshCoreCtx);
+	}
+
+
 
 	// Send mesh agent information to the server
 	ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)info, sizeof(MeshCommand_BinaryPacket_AuthInfo) + hostnamelen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);

@@ -80,6 +80,7 @@ void Duktape_RunOnEventLoop_Sink(void *chain, void *user)
 	}
 	ILibMemory_Free(tmp);
 }
+#ifdef WIN32
 void __stdcall Duktape_RunOnEventLoop_SanityCheck(ULONG_PTR u)
 {
 	if (!ILibMemory_CanaryOK((void*)u)) { return; }
@@ -92,6 +93,7 @@ void __stdcall Duktape_RunOnEventLoop_SanityCheck(ULONG_PTR u)
 		}
 	}
 }
+#endif 
 void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user)
 {
 	Duktape_EventLoopDispatchData* tmp = (Duktape_EventLoopDispatchData*)ILibMemory_SmartAllocate(sizeof(Duktape_EventLoopDispatchData));
@@ -103,8 +105,12 @@ void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Dukt
 	tmp->ctxd = duk_ctx_context_data(ctx);
 	tmp->chain = chain;
 
+#ifdef WIN32
 	void *tobj = ILibChain_RunOnMicrostackThreadEx3(chain, Duktape_RunOnEventLoop_Sink, Duktape_RunOnEventLoop_AbortSink, tmp);
 	QueueUserAPC((PAPCFUNC)Duktape_RunOnEventLoop_SanityCheck, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tobj);
+#else
+	ILibChain_RunOnMicrostackThreadEx3(chain, Duktape_RunOnEventLoop_Sink, Duktape_RunOnEventLoop_AbortSink, tmp);
+#endif
 }
 
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i)

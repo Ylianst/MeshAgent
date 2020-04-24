@@ -196,6 +196,40 @@ switch(process.platform)
         module.exports = { get: function () { throw ('Unsupported Platform'); } };
         break;
 }
+module.exports.isVM = function isVM()
+{
+    var ret = false;
+    var id = this.get();
+    if (id.linux && id.linux.sys_vendor)
+    {
+        switch(id.linux.sys_vendor)
+        {
+            case 'VMware, Inc.':
+            case 'QEMU':
+                ret = true;
+                break;
+            default:
+                break;
+        }
+    }
+    if (id.identifiers.bios_vendor && id.identifiers.bios_vendor == 'VMware, Inc.') { ret = true; }
+    if (id.identifiers.board_vendor && id.identifiers.board_vendor == 'VMware, Inc.') { ret = true; }
+    if (id.identifiers.board_name)
+    {
+        switch(id.identifiers.board_name)
+        {
+            case 'VirtualBox':
+            case 'Virtual Machine':
+            case 'SeaBIOS':
+            case 'Xen':
+                ret = true;
+                break;
+            default:
+                break;
+        }
+    }
+    return (ret);
+}
 
 
 // bios_date = BIOS->ReleaseDate
