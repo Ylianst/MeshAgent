@@ -195,6 +195,7 @@ function monitorinfo()
 
     if(process.platform == 'linux' || process.platform == 'freebsd')
     {
+        require('events').EventEmitter.call(this, true).createEvent('kvmSupportDetected');
         this.MOTIF_FLAGS = 
         {
             MWM_FUNC_ALL        : (1 << 0) ,
@@ -208,12 +209,38 @@ function monitorinfo()
 
         if (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)
         {
-            var ch = require('child_process').execFile('/bin/sh', ['sh']);
-            ch.stderr.on('data', function () { });
-            ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
-            ch.stdin.write('ps -e | grep X\nexit\n');
-            ch.waitExit();
-            Object.defineProperty(this, 'kvm_x11_support', { value: ch.stdout.str.trim() == '' ? false : true });
+            this._xtries = 0;
+            this._kvmCheck = function _kvmCheck()
+            {
+                var ch = require('child_process').execFile('/bin/sh', ['sh']);
+                ch.stderr.on('data', function () { });
+                ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
+                ch.stdin.write('ps -e | grep X\nexit\n');
+                ch.waitExit();
+
+                if (ch.stdout.str.trim() != '')
+                {
+                    // X Server found
+                    Object.defineProperty(this, 'kvm_x11_serverFound', { value: true });
+                    this.emit('kvmSupportDetected', true);
+                }
+                else
+                {
+                    if (this._xtries++ < 18)
+                    {
+                        this._xtry = setTimeout(function (that) { that._kvmCheck.call(that); }, 10000, this);
+                    }
+                }
+            }
+            this._kvmCheck();
+            Object.defineProperty(this, 'kvm_x11_support', { get: function () { return (this.kvm_x11_serverFound); } });
+            this.on('newListener', function (name, handler)
+            {
+                if(name == 'kvmSupportDetected' && this.kvm_x11_serverFound)
+                {
+                    handler.call(this, true);
+                }
+            });
         }
         else
         {
