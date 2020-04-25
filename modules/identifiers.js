@@ -196,13 +196,23 @@ switch(process.platform)
         module.exports = { get: function () { throw ('Unsupported Platform'); } };
         break;
 }
+module.exports.isDocker = function isDocker()
+{
+    if (process.platform != 'linux') { return (false); }
+
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("cat /proc/self/cgroup | tr '\n' '`' | awk -F'`' '{ split($1, res, " + '"/"); if(res[2]=="docker"){print "1";} }\'\nexit\n');
+    child.waitExit();
+    return (child.stdout.str != '');
+};
 module.exports.isVM = function isVM()
 {
     var ret = false;
     var id = this.get();
     if (id.linux && id.linux.sys_vendor)
     {
-        switch(id.linux.sys_vendor)
+        switch (id.linux.sys_vendor)
         {
             case 'VMware, Inc.':
             case 'QEMU':
@@ -216,7 +226,7 @@ module.exports.isVM = function isVM()
     if (id.identifiers.board_vendor && id.identifiers.board_vendor == 'VMware, Inc.') { ret = true; }
     if (id.identifiers.board_name)
     {
-        switch(id.identifiers.board_name)
+        switch (id.identifiers.board_name)
         {
             case 'VirtualBox':
             case 'Virtual Machine':
@@ -228,8 +238,10 @@ module.exports.isVM = function isVM()
                 break;
         }
     }
+
+    if (!ret) { ret = this.isDocker(); }
     return (ret);
-}
+};
 
 
 // bios_date = BIOS->ReleaseDate
