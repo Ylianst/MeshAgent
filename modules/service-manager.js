@@ -1326,7 +1326,7 @@ function serviceManager()
                                 child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stderr.on('data', function (c) {  });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; respawn="0"; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} if(tok1[1]=="respawn") { respawn="1"; } } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s, \\\"respawn\\\": %s }", wd, parms, respawn }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; respawn="0"; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=substr($i,12);} if(tok1[1]=="respawn") { respawn="1"; } } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s, \\\"respawn\\\": %s }", wd, parms, respawn }\'\nexit\n');
                                 child.waitExit();
 
                                 var info = JSON.parse(child.stdout.str.trim());
@@ -1375,7 +1375,7 @@ function serviceManager()
                                 child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stderr.on('data', function (c) { });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=substr($i,12);} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
                                 child.waitExit();
 
                                 var info = JSON.parse(child.stdout.str.trim());
