@@ -223,7 +223,19 @@ module.exports.isVM = function isVM()
                 break;
         }
     }
-    if (id.identifiers.bios_vendor && (id.identifiers.bios_vendor == 'VMware, Inc.' || id.identifiers.bios_vendor == 'Xen')) { ret = true; }
+    if (id.identifiers.bios_vendor)
+    {
+        switch(id.identifiers.bios_vendor)
+        {
+            case 'VMware, Inc.':
+            case 'Xen':
+            case 'SeaBIOS':
+                ret = true;
+                break;
+            default:
+                break;
+        }
+    }
     if (id.identifiers.board_vendor && id.identifiers.board_vendor == 'VMware, Inc.') { ret = true; }
     if (id.identifiers.board_name)
     {
@@ -231,7 +243,6 @@ module.exports.isVM = function isVM()
         {
             case 'VirtualBox':
             case 'Virtual Machine':
-            case 'SeaBIOS':
                 ret = true;
                 break;
             default:
