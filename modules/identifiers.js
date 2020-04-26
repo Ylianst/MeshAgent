@@ -53,6 +53,14 @@ function linux_identifiers()
     child.waitExit();
     identifiers['cpu_name'] = child.stdout.str.trim();
 
+
+    // Fetch GPU info
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("lspci | grep ' VGA ' | tr '\\n' '`' | awk '{ a=split($0,lines" + ',"`"); printf "["; for(i=1;i<a;++i) { split(lines[i],gpu,"r: "); printf "%s\\"%s\\"", (i==1?"":","),gpu[2]; } printf "]"; }\'\nexit\n');
+    child.waitExit();
+    try { identifiers['gpu_name'] = JSON.parse(child.stdout.str.trim()); } catch (xx) { }
+
     values.identifiers = identifiers;
     values.linux = ret;
     trimIdentifiers(values.identifiers);
@@ -161,6 +169,13 @@ function windows_identifiers()
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.waitExit();
     ret.windows.drives = windows_wmic_results(child.stdout.str);
+
+    // Insert GPU names
+    ret.identifiers.gpu_name = [];
+    for (var gpuinfo in ret.windows.gpu)
+    {
+        if (ret.windows.gpu[gpuinfo].Name) { ret.identifiers.gpu_name.push(ret.windows.gpu[gpuinfo].Name); }
+    }
 
 
     try { ret.identifiers.cpu_name = ret.windows.cpu[0].Name; } catch (x) { }
