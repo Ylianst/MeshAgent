@@ -191,6 +191,17 @@ function linux_messageBox()
                     return (child.stdout.str.trim() == '' ? null : { path: child.stdout.str.trim() });
                 })()
             });
+        Object.defineProperty(this, 'xmessage',
+            {
+                value: (function ()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("whereis xmessage | awk '{ print $2 }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim() == '' ? null : { path: child.stdout.str.trim() });
+                })()
+            });
     }
     else
     {
@@ -311,6 +322,34 @@ function linux_messageBox()
                     this.promise._rej('timeout');
                 }
             });
+        }
+        else if (this.xmessage)
+        {
+            // title, caption, timeout, layout
+            ret.child = require('child_process').execFile(this.xmessage.path, ['xmessage', '-center', '-buttons', layout == null ? 'No:1,Yes:2' : 'OK:2', '-timeout', timeout.toString(), '-default', layout==null?'No':'OK', caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+            ret.child.stdout.on('data', function (c) {  });
+            ret.child.stderr.on('data', function (c) {  });
+
+            ret.child.promise = ret;
+            ret.child.on('exit', function (code)
+            {
+                switch(code)
+                {
+                    case 2:
+                        this.promise._res();
+                        break;
+                    case 1:
+                        this.promise._rej('denied');
+                        break;
+                    default:
+                        this.promise._rej('timeout');
+                        break;
+                }
+            });
+        }
+        else
+        {
+            ret._rej('Unable to create dialog box');
         }
         return (ret);
     };
