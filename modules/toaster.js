@@ -211,7 +211,7 @@ function Toaster()
                         {
                             if (require('message-box').xmessage)
                             {
-                                retVal._mb = require('message-box').create('Mesh Central', caption, 5, 'OK');
+                                retVal._mb = require('message-box').create(title, caption, 5, 'OK');
                                 retVal._mb.ret = retVal;
                                 retVal._mb.then(function () { this.ret._res('DISMISSED'); }, function () { this.ret._res('DISMISSED'); });
                             }
