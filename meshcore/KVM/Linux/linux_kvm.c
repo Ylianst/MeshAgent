@@ -239,6 +239,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZENWSE;
 				break;
 			
+			case 177740762:				// Deepin 20
 			case 3606431443:			// Ubuntu 20
 			case 3694153785:			// Ubuntu 9/10
 			case 2280086639:			// Ubuntu
@@ -248,6 +249,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_SIZEALL;
 				break;
 
+			case 539866054:				// Deepin 20 (Normal)
+			case 1802968862:			// Deepin 20 (Large)
 			case 2550770000:			// Ubuntu 20
 			case 3097204904:			// Ubuntu 9/10
 			case 3546300886:			// Ubuntu
@@ -265,6 +268,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_IBEAM;
 				break;
 
+			case 3805997719:			// Deepin 20
 			case 1393241229:			// Ubuntu 20
 			case 990896914:				// Ubuntu 9/10
 			case 3673902152:			// Ubuntu
@@ -273,6 +277,7 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				ret = KVM_MouseCursor_HAND;
 				break;
 
+			case 3503643429:			// Deepin 20
 			case 620546299:				// Ubuntu 20
 			case 3463742778:			// Ubuntu
 				ret = KVM_MouseCursor_WAIT;
