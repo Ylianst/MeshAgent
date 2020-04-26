@@ -2204,7 +2204,10 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
 						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
 					}\
-					catch(xx) {}\
+					catch(xx)\
+					{\
+						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' ' + winstr.substring(winstr.indexOf('['));\
+					}\
 				}\
 				ret = winstr;\
 				break;\
@@ -2282,7 +2285,10 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
 							require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
 						}\
-						catch(xx) {}\
+						catch(xx)\
+						{\
+							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' ' + winstr.substring(winstr.indexOf('['));\
+						}\
 					}\
 					this.promise._acc(winstr);\
 					break;\

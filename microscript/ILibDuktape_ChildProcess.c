@@ -203,7 +203,6 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
 
 #ifdef WIN32
-	duk_thread_state ts;
 	duk_ctx_context_data(ctx)->apc_flags = 1;
 	while ((result=WaitForSingleObjectEx(eptr, duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : INFINITE, TRUE)) != WAIT_OBJECT_0 && result != WAIT_TIMEOUT);
 	duk_ctx_context_data(ctx)->apc_flags = 0;
