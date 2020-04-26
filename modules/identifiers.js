@@ -47,6 +47,12 @@ function linux_identifiers()
     identifiers['board_version'] = ret['board_version'];
     identifiers['product_uuid'] = ret['product_uuid'];
 
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('cat /proc/cpuinfo | grep "model name" | ' + "tr '\\n' ':' | awk -F: '{ print $2 }'\nexit\n");
+    child.waitExit();
+    identifiers['cpu_name'] = child.stdout.str.trim();
+
     values.identifiers = identifiers;
     values.linux = ret;
     trimIdentifiers(values.identifiers);
