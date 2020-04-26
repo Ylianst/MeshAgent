@@ -34,6 +34,9 @@ typedef struct ILibDuktape_ChildProcess_SubProcess
 	void *subProcess;
 	void *chain;
 	ILibProcessPipe_Process childProcess;
+#ifdef WIN32
+	int dispatchFlags;
+#endif
 
 	ILibDuktape_readableStream *stdOut;
 	ILibDuktape_readableStream *stdErr;
@@ -108,7 +111,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
 #ifdef WIN32
-	if (duk_ctx_context_data(p->ctx)->apc_flags == 0)
+	if (duk_ctx_context_data(p->ctx)->apc_flags == 0 && p->dispatchFlags == 0)
 	{
 		// This method was called with an APC, but this thread was running an unknown alertable method when it was interrupted
 		// So we must unwind the stack, and use a non-apc method to re-dispatch to this thread, becuase we can't risk
@@ -118,6 +121,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 		// We had to do the APC first, becuase otherwise child_process.waitExit() will not work, becuase that method is blocking
 		// the event loop thread with an alertable wait object, so APC is the only way to propagate this event
 		p->exitCode = exitCode;
+		p->dispatchFlags = 1;
 		Duktape_RunOnEventLoop(p->chain, duk_ctx_nonce(p->ctx), p->ctx, ILibDuktape_ChildProcess_SubProcess_ExitHandler_sink1, NULL, p);
 	}
 #endif
