@@ -72,6 +72,7 @@ function windows_wmic_results(str)
                 obj[keys[key].trim()] = tokens[key].trim();
             }
         }
+        delete obj.Node;
         result.push(obj);
     }
     return (result);
@@ -140,6 +141,23 @@ function windows_identifiers()
     child.waitExit();
     ret.windows.partitions = windows_wmic_results(child.stdout.str);
 
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'CPU', 'LIST', 'BRIEF', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    ret.windows.cpu = windows_wmic_results(child.stdout.str);
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'PATH', 'Win32_VideoController', 'GET', 'Name,CurrentHorizontalResolution,CurrentVerticalResolution', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    ret.windows.gpu = windows_wmic_results(child.stdout.str);
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'diskdrive', 'LIST', 'BRIEF', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    ret.windows.drives = windows_wmic_results(child.stdout.str);
+
+
+    try { ret.identifiers.cpu_name = ret.windows.cpu[0].Name; } catch (x) { }
     return (ret);
 }
 function macos_identifiers()
