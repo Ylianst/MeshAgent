@@ -1698,7 +1698,7 @@ function serviceManager()
             if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
             require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
             var bm = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-            bm |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+            bm |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
             require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, bm);
 
             var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
@@ -1719,7 +1719,7 @@ function serviceManager()
             rc.write('run_rc_command "$1"\n');
             rc.end();
             var m = require('fs').statSync('/usr/local/etc/rc.d/' + options.name).mode;
-            m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+            m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
             require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, m);
         }
         if(process.platform == 'linux')
@@ -1739,7 +1739,8 @@ function serviceManager()
                     console.log('copying ' + options.servicePath);
 
                     var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+
                     require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
 
                     if (options.failureRestart == null || options.failureRestart > 0)
@@ -1755,7 +1756,7 @@ function serviceManager()
                     conf.end();
 
                     m = require('fs').statSync('/etc/init.d/' + options.name).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                     require('fs').chmodSync('/etc/init.d/' + options.name, m);
                     switch (options.startType)
                     {
@@ -1779,7 +1780,7 @@ function serviceManager()
                     console.log('copying ' + options.servicePath);
 
                     var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                     require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
 
                     conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', { flags: 'wb' });
@@ -1812,7 +1813,7 @@ function serviceManager()
                     require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
 
                     var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                     require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
 
                     if (require('fs').existsSync('/lib/systemd/system'))
@@ -1890,7 +1891,7 @@ function serviceManager()
                     require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_daemons/' + options.name + '/' + options.target);
 
                     var m = require('fs').statSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                     require('fs').chmodSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target, m);
 
                     conf = require('fs').createWriteStream('/usr/local/mesh_daemons/' + options.name + '.service', { flags: 'wb' });
@@ -1974,7 +1975,7 @@ function serviceManager()
                 }
                 require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
                 var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
+                m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                 require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
             }
             else

@@ -2158,6 +2158,96 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		return(retval);\
 		};\
 	}\
+	exports.Name = (function Name()\
+	{\
+		var child;\
+		switch (process.platform)\
+		{\
+			case 'freebsd':\
+			case 'linux':\
+			case 'darwin':\
+				child = require('child_process').execFile('/bin/sh', ['sh']);\
+				break;\
+			case 'win32':\
+				child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
+				break;\
+		}\
+		child.stdout.str=''; child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
+		switch (process.platform)\
+		{\
+			case 'linux':\
+				child.stdin.write('cat /etc/*release\\nexit\\n');\
+				break;\
+			case 'darwin':\
+				child.stdin.write('sw_vers\\nexit\\n');\
+				break;\
+			case 'win32':\
+				child.stdin.write('exit\\r\\n');\
+				break;\
+			case 'freebsd':\
+				child.stdin.write('uname -mrs\\nexit\\n');\
+				break;\
+		}\
+		child.waitExit();\
+		var ret=null;\
+		var lines;\
+		var tokens;\
+		var i, j;\
+		switch (process.platform)\
+		{\
+			case 'win32':\
+				var winstr = child.stdout.str.split('\\r\\n')[0];\
+				if(require('user-sessions').isRoot())\
+				{\
+					try\
+					{\
+						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
+						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
+					}\
+					catch(xx) {}\
+				}\
+				ret = winstr;\
+				break;\
+			case 'linux':\
+				lines = child.stdout.str.split('\\n');\
+				for (i in lines)\
+				{\
+					tokens = lines[i].split('=');\
+					if (tokens[0] == 'PRETTY_NAME')\
+					{\
+						if(ret==null) { ret = (tokens[1].substring(1, tokens[1].length - 1)); }\
+						break;\
+					}\
+				}\
+				for (i in lines)\
+				{\
+					tokens = lines[i].split('=');\
+					if (tokens[0] == 'DISTRIB_DESCRIPTION')\
+					{\
+						if(ret==null) { ret = (tokens[1].substring(1, tokens[1].length - 1)); }\
+						break;\
+					}\
+				}\
+				if(ret==null) { ret = (lines[0]);}\
+				break;\
+			case 'darwin':\
+				var OSNAME = '';\
+				var OSVERSION = '';\
+				lines = child.stdout.str.split('\\n');\
+				for (i in lines)\
+				{\
+					tokens = lines[i].split(':');\
+					if (tokens[0] == 'ProductName') { OSNAME = tokens[1].trim(); }\
+					if (tokens[0] == 'ProductVersion') { OSVERSION = tokens[1].trim(); }\
+				}\
+				ret = (OSNAME + ' ' + OSVERSION);\
+				break;\
+			case 'freebsd':\
+				ret = (child.stdout.str.trim());\
+				break;\
+		}\
+		return(ret);\
+	})();\
 	exports.name = function name()\
 	{\
 		var promise = require('promise');\
