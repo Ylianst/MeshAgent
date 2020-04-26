@@ -61,6 +61,13 @@ function linux_identifiers()
     child.waitExit();
     try { identifiers['gpu_name'] = JSON.parse(child.stdout.str.trim()); } catch (xx) { }
 
+    // Fetch Storage Info
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("lshw -class disk | tr '\\n' '`' | awk '" + '{ len=split($0,lines,"*"); printf "["; for(i=2;i<len;++i) { model=""; caption=""; size=""; clen=split(lines[i],item,"`"); for(j=2;j<clen;++j) { split(item[j],tokens,":"); split(tokens[1],key," "); if(key[1]=="description") { caption=substr(tokens[2],2); } if(key[1]=="product") { model=substr(tokens[2],2); } if(key[1]=="size") { size=substr(tokens[2],2);  } } if(model=="") { model=caption; } printf "%s{\\"Caption\\":\\"%s\\",\\"Model\\":\\"%s\\",\\"Size\\":\\"%s\\"}",(i==2?"":","),caption,model,size;  } printf "]"; }\'\nexit\n');
+    child.waitExit();
+    try { identifiers['storage_devices'] = JSON.parse(child.stdout.str.trim()); } catch (xx) { }
+
     values.identifiers = identifiers;
     values.linux = ret;
     trimIdentifiers(values.identifiers);
@@ -177,6 +184,12 @@ function windows_identifiers()
         if (ret.windows.gpu[gpuinfo].Name) { ret.identifiers.gpu_name.push(ret.windows.gpu[gpuinfo].Name); }
     }
 
+    // Insert Storage Devices
+    ret.identifiers.storage_devices = [];
+    for (var dv in ret.windows.drives)
+    {
+        ret.identifiers.storage_devices.push({ Caption: ret.windows.drives[dv].Caption, Model: ret.windows.drives[dv].Model, Size: ret.windows.drives[dv].Size });
+    }
 
     try { ret.identifiers.cpu_name = ret.windows.cpu[0].Name; } catch (x) { }
     return (ret);
@@ -288,6 +301,19 @@ module.exports.isVM = function isVM()
                 break;
         }
     }
+
+    if (process.platform == 'win32' && !ret)
+    {
+        for(var i in id.identifiers.gpu_name)
+        {
+            if(id.identifiers.gpu_name[i].startsWith('VMware '))
+            {
+                ret = true;
+                break;
+            }
+        }
+    }
+
 
     if (!ret) { ret = this.isDocker(); }
     return (ret);
