@@ -229,6 +229,13 @@ function macos_identifiers()
     child.waitExit();
     ret.identifiers.product_uuid = child.stdout.str.trim();
 
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('sysctl -n machdep.cpu.brand_string\nexit\n');
+    child.waitExit();
+    ret.identifiers.cpu_name = child.stdout.str.trim();
+
+
     trimIdentifiers(ret.identifiers);
     return (ret);
 }
