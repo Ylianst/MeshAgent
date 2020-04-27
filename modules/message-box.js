@@ -571,7 +571,7 @@ function macos_messageBox()
                     this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                     this._shell.stdin.write('osascript -e \'tell current application to display dialog "' + p.caption + '" with title "' + p.title + '" ' + icon + ' ' + buttons + timeout + '\' | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\n');
                     this._shell.waitExit();
-                    if (this._shell.stderr.str != '')
+                    if (this._shell.stderr.str != '' && !this._shell.stderr.str.includes('OpenGL'))
                     {
                         this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
                     }
