@@ -290,8 +290,8 @@ function linux_messageBox()
                 ret.child = require('child_process').execFile(this.zenity.path, ['zenity', layout == null ? '--question' : '--warning', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
                 ret.child.timeout = setTimeout(function (c)
                 {
-                    c.promise._rej('timeout');
                     c.timeout = null;
+                    c.promise._rej('timeout');
                     c.kill();
                 }, timeout * 1000, ret.child);
             }
@@ -387,6 +387,16 @@ function linux_messageBox()
         else
         {
             ret._rej('Unable to create dialog box');
+        }
+
+        ret.close = function close()
+        {
+            if (this.timeout) { clearTimeout(this.timeout); }
+            if (this.child)
+            {
+                this._rej('denied');
+                this.child.kill();
+            }
         }
         return (ret);
     };
