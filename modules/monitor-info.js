@@ -534,18 +534,25 @@ function exportEnv()
     return (r);
 }
 
-function workspaceSetup(v)
+function workspaceSetup(oldV)
 {
-    v.once('~', function ()
-    {
-        this._X11.XCloseDisplay(this);
-    });
-    Object.defineProperty(v, "_setup", { value: true });
-    Object.defineProperty(v, "_ROOTWIN", { value: v._X11.XRootWindow(v, 0) });
-    Object.defineProperty(v, "_ACTIVE_DESKTOP", { value: v._X11.XInternAtom(v, require('_GenericMarshal').CreateVariable('_NET_CURRENT_DESKTOP'), 0) });
+    var GM = require('_GenericMarshal');
+    Object.defineProperty(oldV, "_setup", { value: true });
 
-    var mask = require('_GenericMarshal').CreateVariable(require('_GenericMarshal').PointerSize == 8 ? 112 : 60);
-    mask.Deref(require('_GenericMarshal').PointerSize == 8 ? 72 : 40, 4).toBuffer().writeUInt32LE(PropertyChangeMask);
+    var v = oldV._X11.XOpenDisplay(GM.CreateVariable(process.env.DISPLAY));
+    v._X11 = oldV._X11;
+    v.parent = oldV;
+    v.on('~', function ()
+    {
+        v._X11.XCloseDisplay(v);
+    });
+    
+    Object.defineProperty(oldV, "_v2", { value: v });
+    Object.defineProperty(v, "_ROOTWIN", { value: v._X11.XRootWindow(v, 0) });
+    Object.defineProperty(v, "_ACTIVE_DESKTOP", { value: v._X11.XInternAtom(v, GM.CreateVariable('_NET_CURRENT_DESKTOP'), 0) });
+
+    var mask = GM.CreateVariable(GM.PointerSize == 8 ? 112 : 60);
+    mask.Deref(GM.PointerSize == 8 ? 72 : 40, 4).toBuffer().writeUInt32LE(PropertyChangeMask);
 
     v._X11.XChangeWindowAttributes(v, v._ROOTWIN, CWEventMask, mask);
     v._X11.XSync(v, 0);
@@ -563,7 +570,7 @@ function workspaceSetup(v)
                 case PropertyNotify:
                     if (XE.Deref(require('_GenericMarshal').PointerSize == 8 ? 40 : 20, 4).toBuffer().readUInt32LE() == this._display._ACTIVE_DESKTOP.Val)
                     {
-                        this._display.emit('workspaceChanged', this._display.getCurrentWorkspace());
+                        this._display.parent.emit('workspaceChanged', this._display.parent.getCurrentWorkspace());
                     }
                     break;
                 default:
@@ -594,7 +601,7 @@ function addWorkspaceHandler(v,X11)
         var tail = GM.CreatePointer();
         var result = GM.CreatePointer();
 
-        this._X11.XGetWindowProperty(this, this._ROOTWIN, this._ACTIVE_DESKTOP, 0, 64, 0, AnyPropertyType, id, bits, sz, tail, result);
+        this._X11.XGetWindowProperty(this._v2, this._v2._ROOTWIN, this._v2._ACTIVE_DESKTOP, 0, 64, 0, AnyPropertyType, id, bits, sz, tail, result);
         if (sz.Deref().Val > 0)
         {
             return (result.Deref().Deref(0, 4).toBuffer().readUInt32LE());

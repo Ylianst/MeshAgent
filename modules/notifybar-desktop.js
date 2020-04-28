@@ -195,7 +195,7 @@ function x_notifybar_check(title)
 
 function x_notifybar(title)
 {
-    ret = { _ObjectID: 'notifybar-desktop.X', title: title, _windows: [], _promise: require('monitor-info').getInfo() };
+    ret = { _ObjectID: 'notifybar-desktop.X', title: title, _windows: [], _promise: require('monitor-info').getInfo(), monitors: [], workspaces: {} };
 
     ret._promise.notifybar = ret;
     require('events').EventEmitter.call(ret, true)
@@ -204,10 +204,8 @@ function x_notifybar(title)
         {
         });
 
-    ret._promise.then(function (m)
+    ret._promise.createBars = function (m)
     {
-        var offset;
-        var barWidth, monWidth, offset, barHeight, monHeight;
         for (var i in m)
         {
             monWidth = (m[i].right - m[i].left);
@@ -266,6 +264,29 @@ function x_notifybar(title)
                 }
             });
         }
+    };
+    ret._promise.then(function (m)
+    {
+        var offset;
+        var barWidth, monWidth, offset, barHeight, monHeight;
+        this.notifybar.monitors = m;
+        if (m.length > 0)
+        {
+            var ws = m[0].display.getCurrentWorkspace();
+
+            this.notifybar.workspaces[ws] = true;
+            this.createBars(m);
+            m[0].display._notifyBar = this.notifybar;
+            m[0].display.on('workspaceChanged', function (w)
+            {
+                if(!this._notifyBar.workspaces[w])
+                {
+                    this._notifyBar.workspaces[w] = true;
+                    this._notifyBar._promise.createBars(this._notifyBar.monitors);
+                }
+            });
+        }
+       
     });
     return (ret);
 }
