@@ -3960,7 +3960,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		int ix;
 		if ((ix=ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2)==0)
 		{
-			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
+			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
 			++ixr;
 		}
 		if (strcmp("-finstall", param[ri]) == 0)
