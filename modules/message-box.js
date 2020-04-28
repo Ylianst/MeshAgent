@@ -120,6 +120,7 @@ function messageBox()
         ret._container.promise = ret;
         ret._container.on('data', function (j)
         {
+            this.promise._container = null;
             if(j == IDYES || j == IDOK)
             {
                 this.promise._res();
@@ -131,10 +132,15 @@ function messageBox()
         });
         ret._container.on('exit', function ()
         {
+            this.promise._container = null;
             this.promise._rej('Timeout');
         });
         ret._container.ExecuteString(childScript);
         ret._container.send({ command: 'messageBox', caption: caption, title: title, layout: layout });
+        ret.close = function ()
+        {
+            this._container.exit2();
+        };
         return (ret);
     };
 }

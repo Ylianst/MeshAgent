@@ -3005,6 +3005,21 @@ duk_ret_t ILibDuktape_ScriptContainer_Exit(duk_context *ctx)
 
 	return 0;
 }
+duk_ret_t ILibDuktape_ScriptContainer_Exit2(duk_context *ctx)
+{
+	ILibDuktape_ScriptContainer_Exit(ctx);
+
+	duk_push_this(ctx);
+	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ScriptContainer_MasterPtr);
+	if (ILibIsChainBeingDestroyed(duk_ctx_chain(ctx)) == 0 && master->child != NULL)
+	{
+		ILibProcessPipe_Process p = (ILibProcessPipe_Process)master->child;
+		master->child = NULL;
+		ILibProcessPipe_Process_SoftKill(p);
+	}
+
+	return(0);
+}
 duk_ret_t ILibDuktape_ScriptContainer_ExecuteScript(duk_context *ctx)
 {
 	return 0;
@@ -3567,6 +3582,8 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(master->emitter, "data");
 	ILibDuktape_EventEmitter_CreateEventEx(master->emitter, "ready");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Exit, DUK_VARARGS);
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit2", ILibDuktape_ScriptContainer_Exit2, DUK_VARARGS);
+
 	ILibDuktape_CreateInstanceMethod(master->ctx, "ExecuteScript", ILibDuktape_ScriptContainer_ExecuteScript, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(master->ctx, "ExecuteString", ILibDuktape_ScriptContainer_ExecuteString, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(master->ctx, "send", ILibDuktape_ScriptContainer_SendToSlave, 1);
