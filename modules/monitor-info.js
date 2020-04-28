@@ -29,6 +29,10 @@ var XA_ATOM = 4;
 var MWM_HINTS_FUNCTIONS = (1 << 0);
 var MWM_HINTS_DECORATIONS = (1 << 1);
 var ClientMessage = 33;
+var CWEventMask = (1 << 11);
+var PropertyChangeMask = (1 << 22);
+var PropertyNotify = 28;
+var AnyPropertyType = 0;
 
 function getLibInfo(libname)
 {
@@ -252,6 +256,7 @@ function monitorinfo()
         {
             this._X11 = this._gm.CreateNativeProxy(this.Location_X11LIB);
             this._X11.CreateMethod('XChangeProperty');
+            this._X11.CreateMethod('XChangeWindowAttributes');
             this._X11.CreateMethod('XCloseDisplay');
             this._X11.CreateMethod('XConnectionNumber');
             this._X11.CreateMethod('XConvertSelection');
@@ -406,6 +411,10 @@ function monitorinfo()
                 var screen = info._X11.XScreenOfDisplay(display, i);
                 ifo.push({ left: 0, top: 0, right: info._X11.XDisplayWidth(display, i).Val, bottom: info._X11.XDisplayHeight(display, i).Val, screen: screen, screenId: i, display: display });
             }
+            if (i > 0)
+            {
+                addWorkspaceHandler(display, info._X11);
+            }
             ret._res(ifo);
 
             return (ret);
@@ -523,6 +532,78 @@ function exportEnv()
             Location_X11FIXES: require('monitor-info').Location_X11FIXES
         };
     return (r);
+}
+
+function workspaceSetup(v)
+{
+    v.once('~', function ()
+    {
+        this._X11.XCloseDisplay(this);
+    });
+    Object.defineProperty(v, "_setup", { value: true });
+    Object.defineProperty(v, "_ROOTWIN", { value: v._X11.XRootWindow(v, 0) });
+    Object.defineProperty(v, "_ACTIVE_DESKTOP", { value: v._X11.XInternAtom(v, require('_GenericMarshal').CreateVariable('_NET_CURRENT_DESKTOP'), 0) });
+
+    var mask = require('_GenericMarshal').CreateVariable(require('_GenericMarshal').PointerSize == 8 ? 112 : 60);
+    mask.Deref(require('_GenericMarshal').PointerSize == 8 ? 72 : 40, 4).toBuffer().writeUInt32LE(PropertyChangeMask);
+
+    v._X11.XChangeWindowAttributes(v, v._ROOTWIN, CWEventMask, mask);
+    v._X11.XSync(v, 0);
+
+    v._DescriptorEvent = require('DescriptorEvents').addDescriptor(v._X11.XConnectionNumber(v).Val, { readset: true });
+    v._DescriptorEvent._display = v;
+    v._DescriptorEvent.on('readset', function (fd)
+    {
+        var XE = require('_GenericMarshal').CreateVariable(1024);
+        while (this._display._X11.XPending(this._display).Val)
+        {
+            this._display._X11.XNextEventSync(this._display, XE);
+            switch (XE.Deref(0, 4).toBuffer().readUInt32LE())
+            {
+                case PropertyNotify:
+                    if (XE.Deref(require('_GenericMarshal').PointerSize == 8 ? 40 : 20, 4).toBuffer().readUInt32LE() == this._display._ACTIVE_DESKTOP.Val)
+                    {
+                        this._display.emit('workspaceChanged', this._display.getCurrentWorkspace());
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+    });
+}
+
+function addWorkspaceHandler(v,X11)
+{
+    if (!v._X11) { Object.defineProperty(v, "_X11", { value: X11 }); }
+    require('events').EventEmitter.call(v, true)
+        .createEvent('workspaceChanged');
+    v.on('newListener', function (name, handler)
+    {
+        if (name != 'workspaceChanged' || this._setup) { return; }
+        workspaceSetup(v);
+    });
+    v.getCurrentWorkspace = function getCurrentWorkspace()
+    {
+        if (!this._setup) { workspaceSetup(this); }
+        var GM = require('_GenericMarshal');
+
+        var id = GM.CreatePointer();
+        var bits = GM.CreatePointer();
+        var sz = GM.CreatePointer();
+        var tail = GM.CreatePointer();
+        var result = GM.CreatePointer();
+
+        this._X11.XGetWindowProperty(this, this._ROOTWIN, this._ACTIVE_DESKTOP, 0, 64, 0, AnyPropertyType, id, bits, sz, tail, result);
+        if (sz.Deref().Val > 0)
+        {
+            return (result.Deref().Deref(0, 4).toBuffer().readUInt32LE());
+        }
+        else
+        {
+            throw ('Error fetching current workspace');
+        }
+    }
 }
 
 if (process.platform != 'darwin')
