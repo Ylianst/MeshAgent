@@ -291,7 +291,17 @@ function x_notifybar(title)
     return (ret);
 }
 
-
+function macos_messagebox(title)
+{
+    var ret = {};
+    require('events').EventEmitter.call(ret, true)
+        .createEvent('close')
+        .addMethod('close', function close() { this._messageBox.close(); });
+    ret._messageBox = require('message-box').create('', title, 0, ['Disconnect']);
+    ret._messageBox.that = ret;
+    ret._messageBox.then(function () { this.that.emit('close'); }, function () { this.that.emit('close'); });
+    return (ret);
+}
 
 switch(process.platform)
 {
@@ -302,6 +312,9 @@ switch(process.platform)
     case 'linux':
     case 'freebsd':
         module.exports = x_notifybar_check;
+        break;
+    case 'darwin':
+        module.exports = macos_messagebox;
         break;
 }
 

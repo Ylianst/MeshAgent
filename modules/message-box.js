@@ -450,7 +450,20 @@ function macos_messageBox()
     {
         // Start Local Server
         var ret = this._initIPCBase();
-        ret.title = title; ret.caption = caption; ret.timeout = timeout; ret.layout = layout;
+        ret.title = title; ret.caption = caption; ret.timeout = timeout;
+        if (layout == null)
+        {
+            ret.layout = ['Yes', 'No'];
+        }
+        else if(typeof(layout)!='object')
+        {
+            ret.layout = ['OK'];
+        }
+        else
+        {
+            ret.layout = layout;
+            Object.defineProperty(ret.layout, "user", { value: true });
+        }
         ret.server = this.startMessageServer(ret);
         ret.server.ret = ret;
         ret.server.on('connection', function (c)
@@ -473,7 +486,7 @@ function macos_messageBox()
                         }
                         else
                         {
-                            if (p.button == 'Yes' || p.button == 'OK')
+                            if (p.button == 'Yes' || p.button == 'OK' || this.promise.layout.user)
                             {
                                 this.promise._res(p.button);
                             }
@@ -485,9 +498,16 @@ function macos_messageBox()
                         break;
                 }
             });
-            c.write(translateObject({ command: 'DIALOG', title: this.ret.title, caption: this.ret.caption, icon: 'caution', buttons: this.ret.layout==null?['"Yes"', '"No"']:['"OK"'], buttonDefault: this.ret.layout==null?2:1, timeout: this.ret.timeout }));
+            for (var x in this.ret.layout)
+            {
+                this.ret.layout[x] = '"' + this.ret.layout[x] + '"';
+            }
+            c.write(translateObject({ command: 'DIALOG', title: this.ret.title, caption: this.ret.caption, icon: 'caution', buttons: this.ret.layout, buttonDefault: this.ret.layout[this.ret.layout.length-1], timeout: this.ret.timeout }));
         });
-
+        ret.close = function close()
+        {
+            if (this.server) { this.server.close(); }
+        };
         return (ret);
     };
     this.lock = function lock()
@@ -598,31 +618,57 @@ function macos_messageBox()
                 case 'DIALOG':
                     var timeout = p.timeout ? (' giving up after ' + p.timeout) : '';
                     var icon = p.icon ? ('with icon ' + p.icon) : '';
+
                     var buttons = p.buttons ? ('buttons {' + p.buttons.toString() + '}') : '';
                     if (p.buttonDefault != null)
                     {
                         buttons += (' default button ' + p.buttonDefault)
                     }
                     this._shell = require('child_process').execFile('/bin/sh', ['sh']);
+                    this._shell.that = this;
                     this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                     this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                     this._shell.stdin.write('osascript -e \'tell current application to display dialog "' + p.caption + '" with title "' + p.title + '" ' + icon + ' ' + buttons + timeout + '\' | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\n');
-                    this._shell.waitExit();
-                    if (this._shell.stderr.str != '' && !this._shell.stderr.str.includes('OpenGL'))
+                    this._shell.on('exit', function ()
                     {
-                        this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
-                    }
-                    else
-                    {
-                        if (this._shell.stdout.str.trim() == '_TIMEOUT_')
+                        if (this.stderr.str != '' && !this.stderr.str.includes('OpenGL'))
                         {
-                            this.end(translateObject({ command: 'DIALOG', timeout: true }));
+                            this.that.end(translateObject({ command: 'ERROR', reason: this.stderr.str }));
                         }
                         else
                         {
-                            this.end(translateObject({ command: 'DIALOG', button: this._shell.stdout.str.trim() }));
+                            if (this.stdout.str.trim() == '_TIMEOUT_')
+                            {
+                                this.that.end(translateObject({ command: 'DIALOG', timeout: true }));
+                            }
+                            else
+                            {
+                                this.that.end(translateObject({ command: 'DIALOG', button: this.stdout.str.trim() }));
+                            }
                         }
-                    }
+                        this.that._shell = null;
+                    });
+                    this.on('close', function ()
+                    {
+                        if (this._shell) { this._shell.kill(); }
+                    });
+
+                    //this._shell.waitExit();
+                    //if (this._shell.stderr.str != '' && !this._shell.stderr.str.includes('OpenGL'))
+                    //{
+                    //    this.end(translateObject({ command: 'ERROR', reason: this._shell.stderr.str }));
+                    //}
+                    //else
+                    //{
+                    //    if (this._shell.stdout.str.trim() == '_TIMEOUT_')
+                    //    {
+                    //        this.end(translateObject({ command: 'DIALOG', timeout: true }));
+                    //    }
+                    //    else
+                    //    {
+                    //        this.end(translateObject({ command: 'DIALOG', button: this._shell.stdout.str.trim() }));
+                    //    }
+                    //}
                     break;
                 default:
                     break;
