@@ -24,6 +24,42 @@ function task()
 {
     this._ObjectID = 'task-scheduler';
 
+    if (process.platform == 'win32')
+    {
+        this.getActionCommand = function getActionCommand(name)
+        {
+            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY','/TN ' + name, '/XML']);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.waitExit();
+            if (child.stderr.str.trim() != '') { throw ('Unable to fetch task: ' + name); }
+
+            var xElement = child.stdout.str.split('</Exec>')[0].split('<Exec>')[1];
+            var command = xElement.split('</Command>')[0].split('<Command>')[1];
+            return (command);
+        };
+        this.advancedEditActionCommand = function advancedEditActionCommand(name, action, argString)
+        {
+            var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell.exe']);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdin.write('$Act1 = New-ScheduledTaskAction -Execute "' + action + '" -Argument "' + argString + '"\nexit\n');
+            child.waitExit();
+            console.log(child.stdout.str.trim());
+        };
+        Object.defineProperty(this, "advancedSupport", {
+            value: (function ()
+            {
+                var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "Get-Module -ListAvailable -Name ScheduledTasks"']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.waitExit();
+                return (child.stdout.str.trim() != '');
+            })()
+        });
+    }
+
+
     this.create = function create(options)
     {
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
