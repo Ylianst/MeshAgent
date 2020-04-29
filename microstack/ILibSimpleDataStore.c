@@ -501,18 +501,18 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 		HANDLE h = NULL;
 		if (forceTruncateIfNonZero != 0)
 		{
-			h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
 			{
-				h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+				h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 			}
 		}
 		else
 		{
-			h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
 			{
-				h = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+				h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 			}
 		}
 		int fd = _open_osfhandle((intptr_t)h, _O_RDWR);
@@ -522,7 +522,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 	}
 	else
 	{
-		HANDLE h = CreateFile(filePath, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		HANDLE h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (h == INVALID_HANDLE_VALUE) { return(NULL); }
 		int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
 		if (fd == -1) { CloseHandle(h); return(NULL); }
@@ -547,7 +547,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 int ILibSimpleDataStore_Exists(char *filePath)
 {
 #ifdef WIN32
-	return(_access(filePath, 0) == 0 ? 1 : 0);
+	return(_waccess(ILibUTF8ToWide(filePath, -1), 0) == 0 ? 1 : 0);
 #else
 	return(access(filePath, 0) == 0 ? 1 : 0);
 #endif
@@ -858,8 +858,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 
 		// Now we copy the temporary data store over the data store, making it the new valid version
 #ifdef WIN32
-		if (CopyFileA(tmp, root->filePath, FALSE) == FALSE) { retVal = 1; }
-		DeleteFile(tmp);
+		WCHAR tmptmp[4096];
+		MultiByteToWideChar(CP_UTF8, 0, (LPCCH)tmp, -1, (LPWSTR)tmptmp, (int)sizeof(tmptmp) / 2);
+		if (CopyFileW(tmptmp, ILibUTF8ToWide(root->filePath, -1), FALSE) == FALSE) { retVal = 1; }
+		DeleteFileW(tmptmp);
 #else
 		if (rename(tmp, root->filePath) != 0) { retVal = 1; }
 #endif

@@ -1287,7 +1287,7 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 {
 #ifdef WIN32
-	char *path = (char*)duk_require_string(ctx, 0);
+	WCHAR *path = (WCHAR*)ILibDuktape_String_AsWide(ctx, 0, NULL);
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 #endif
@@ -1408,7 +1408,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 
 #if defined(WIN32)
 	if ((data->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL) { return(ILibDuktape_Error(ctx, "Could not create handle")); }
-	data->h = CreateFile(path, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
+	data->h = CreateFileW(path, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
 	if (data->h == INVALID_HANDLE_VALUE) { return(ILibDuktape_Error(ctx, "fs.watch(): Invalid Path or Access Denied")); }
 
 	if (ReadDirectoryChangesW(data->h, data->results, sizeof(data->results), recursive, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_CREATION | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_LAST_ACCESS, NULL, &(data->overlapped), NULL) == 0)

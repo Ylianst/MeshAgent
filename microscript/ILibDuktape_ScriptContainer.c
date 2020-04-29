@@ -260,7 +260,7 @@ void ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(char *exePath, char **script,
 	int integratedJavaScriptLen = 0;
 	FILE* tmpFile = NULL;
 
-	fopen_s(&tmpFile, exePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(exePath, -1), L"rb");
 	if (tmpFile != NULL)
 	{
 		// Read the PE Headers, to determine where to look for the Embedded JS
@@ -338,7 +338,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 	{
 		i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s_", exePath);
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", exePath);
-		fopen_s(&tmpFile, ILibScratchPad, "rb");
+		_wfopen_s(&tmpFile, ILibUTF8ToWide(ILibScratchPad, -1), L"rb");
 	}
 	else
 	{
@@ -373,7 +373,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 	}
 
 #ifdef WIN32
-	fopen_s(&tmpFile, exePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(exePath, -1), L"rb");
 #else
 	tmpFile = fopen(exePath, "rb");
 #endif
@@ -3144,6 +3144,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 	int bufferLen = ((int*)buffer)[0];
 	void *ptr;
 	int i;
+	duk_context *ctx = master->ctx;
 
 	if (ILibDuktape_ScriptContainer_DecodeJSON(master->ctx, buffer+4, bufferLen-4) == 0)
 	{
@@ -3160,7 +3161,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 						duk_push_string(master->ctx, json);													// [emit][this][data][str]
 						duk_json_decode(master->ctx, -1);													// [emit][this][data][json]
 						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer.OnData(): "); }
-						duk_pop(master->ctx);
+						duk_pop(ctx);
 					}
 				}
 				break;
@@ -3181,7 +3182,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 						ILibDuktape_EventEmitter_SetupEmit(master->ctx, master->emitter->object, "error");	// [emit][this][error]
 						duk_get_prop_string(master->ctx, -4, "error");										// [emit][this][error][errorObj]
 						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnError_Dispatch(): "); }
-						duk_pop(master->ctx);																// ...
+						duk_pop(ctx);																// ...
 					}
 					else
 					{
@@ -3193,7 +3194,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 							duk_push_false(master->ctx);													// [func][this][false]
 							duk_get_prop_string(master->ctx, -4, "error");									// [func][this][false][error]
 							if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnError_Dispatch(): "); }
-							duk_pop(master->ctx);															// ...
+							duk_pop(ctx);															// ...
 						}
 					}
 				}
@@ -3215,7 +3216,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 							duk_push_undefined(master->ctx);											// [func][this][true][undefined]
 						}
 						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnExec_Dispatch(): "); }
-						duk_pop(master->ctx);															// ...
+						duk_pop(ctx);															// ...
 					}
 				}
 				break;
@@ -3223,11 +3224,14 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 			default:
 				break;
 		}
-		duk_pop(master->ctx);		// ...
+		duk_pop(ctx);		// ...
 	}
 
 #ifdef WIN32
-	if (master->child != NULL) { ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child)); }
+	if (ILibMemory_CanaryOK(master))
+	{
+		if (master->child != NULL) { ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child)); }
+	}
 #endif
 }
 void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)

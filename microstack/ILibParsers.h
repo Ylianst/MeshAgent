@@ -170,6 +170,21 @@ static inline void ignore_result(uintptr_t result) { (void)result; }
 #define PRINTERROR()
 #endif
 
+#ifdef WIN32
+char *ILibWideToUTF8(WCHAR* wstr, int len);
+WCHAR* ILibUTF8ToWideEx(char* str, int len, WCHAR* buffer, int bufferCharacterSize);
+#define ILibUTF8ToWide(utf8string, len) ILibUTF8ToWideEx(utf8string, len, NULL, 0)
+#else
+#define ILibWideToUTF8(wstr, len) (wstr)
+#define ILibUTF8toWide(str, len) (str)
+#endif
+
+
+
+
+
+
+
 int ILibGetLocalTime(char *dest, int destLen);
 long ILibGetTimeStamp();
 

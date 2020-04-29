@@ -797,7 +797,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	if (needSetSid != 0) { spawnType ^= ILibProcessPipe_SpawnTypes_POSIX_DETACHED; }
 
 #ifdef WIN32
-	STARTUPINFOA info = { 0 };
+	STARTUPINFOW info = { 0 };
 	PROCESS_INFORMATION processInfo = { 0 };
 	SECURITY_ATTRIBUTES saAttr;
 	char* parms = NULL;
@@ -806,7 +806,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	int allocParms = 0;
 	
 	ZeroMemory(&processInfo, sizeof(PROCESS_INFORMATION));
-	ZeroMemory(&info, sizeof(STARTUPINFOA));
+	ZeroMemory(&info, sizeof(STARTUPINFOW));
 
 
 	if (spawnType != ILibProcessPipe_SpawnTypes_SPECIFIED_USER && spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && (sessionId = WTSGetActiveConsoleSessionId()) == 0xFFFFFFFF) { return(NULL); } // No session attached to console, but requested to execute as logged in user
@@ -817,7 +817,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		if (DuplicateTokenEx(token, MAXIMUM_ALLOWED, 0, SecurityImpersonation, TokenPrimary, &userToken) == 0) { CloseHandle(token); ILIBMARKPOSITION(2); return(NULL); }
 		if (spawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER) { sessionId = (DWORD)(uint64_t)sid; }
 		if (SetTokenInformation(userToken, (TOKEN_INFORMATION_CLASS)TokenSessionId, &sessionId, sizeof(sessionId)) == 0) { CloseHandle(token); CloseHandle(userToken); ILIBMARKPOSITION(2); return(NULL); }
-		if (spawnType == ILibProcessPipe_SpawnTypes_WINLOGON) { info.lpDesktop = "Winsta0\\Winlogon"; }
+		if (spawnType == ILibProcessPipe_SpawnTypes_WINLOGON) { info.lpDesktop = L"Winsta0\\Winlogon"; }
 	}
 	if (parameters != NULL && parameters[0] != NULL && parameters[1] == NULL)
 	{
@@ -861,8 +861,10 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	retVal->parent = (ILibProcessPipe_Manager_Object*)pipeManager;
 	retVal->chain = retVal->parent->ChainLink.ParentChain;
 #ifdef WIN32
+	WCHAR tmp1[4096];
+	WCHAR tmp2[4096];
 
-	info.cb = sizeof(STARTUPINFOA);
+	info.cb = sizeof(STARTUPINFOW);
 	if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{
 		retVal->stdIn = ILibProcessPipe_CreatePipe(pipeManager, 4096, NULL, extraMemorySize);
@@ -880,8 +882,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		info.dwFlags |= STARTF_USESTDHANDLES;
 	}
 
-	if (((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT || spawnType == ILibProcessPipe_SpawnTypes_DETACHED) && !CreateProcessA(target, parms, NULL, NULL, spawnType == ILibProcessPipe_SpawnTypes_DETACHED ? FALSE: TRUE, CREATE_NO_WINDOW | (needSetSid !=0? (DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)) ||
-		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserA(userToken, target, parms, NULL, NULL, TRUE, CREATE_NO_WINDOW | (needSetSid != 0 ? (DETACHED_PROCESS| CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)))
+	if (((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT || spawnType == ILibProcessPipe_SpawnTypes_DETACHED) && !CreateProcessW(ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, spawnType == ILibProcessPipe_SpawnTypes_DETACHED ? FALSE: TRUE, CREATE_NO_WINDOW | (needSetSid !=0? (DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)) ||
+		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserW(userToken, ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, TRUE, CREATE_NO_WINDOW | (needSetSid != 0 ? (DETACHED_PROCESS| CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)))
 	{
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 		{

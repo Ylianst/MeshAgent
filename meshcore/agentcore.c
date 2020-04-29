@@ -2341,7 +2341,7 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 
 #ifdef WIN32
 	int retVal = 1;
-	fopen_s(&tmpFile, filePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(filePath, -1), L"rb");
 #else
 	tmpFile = fopen(filePath, "rb");
 #endif
@@ -3587,7 +3587,7 @@ void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
 	int mshLen;
 
 #ifdef WIN32
-	fopen_s(&tmpFile, agent->exePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(agent->exePath, -1), L"rb");
 #else
 	tmpFile = fopen(agent->exePath, "rb");
 #endif
@@ -3608,7 +3608,7 @@ void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
 			{
 				FILE *msh = NULL;
 #ifdef WIN32
-				fopen_s(&msh, MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
+				_wfopen_s(&msh, ILibUTF8ToWide(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), -1), L"wb");
 #else
 				msh = fopen(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
 #endif
@@ -4779,7 +4779,9 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		exePath[0] = 0;
 
 #ifdef WIN32
-		GetModuleFileName(NULL, exePath, sizeof(exePath));
+		WCHAR tmpExePath[2048];
+		GetModuleFileNameW(NULL, tmpExePath, sizeof(tmpExePath)/2);
+		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, (LPSTR)exePath, (int)sizeof(exePath), NULL, NULL);
 #elif defined(__APPLE__)
 		if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
 		exePath[(int)len] = 0;
@@ -4831,7 +4833,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	{
 		strncpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), param[0], x);
 		ILibScratchPad2[x] = 0;
-		SetCurrentDirectory(ILibScratchPad2);
+		SetCurrentDirectoryW(ILibUTF8ToWide(ILibScratchPad2, -1));
 	}
 #endif
 
@@ -4863,7 +4865,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		{
 			int i, ptr = 0;
 #ifdef WIN32
-			STARTUPINFOA info = { sizeof(info) };
+			STARTUPINFOW info = { sizeof(info) };
 			PROCESS_INFORMATION processInfo;
 #endif
 			// Get the update executable path
@@ -4883,14 +4885,14 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #ifdef WIN32
 			// Windows version
 			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:\"%s\"%s", updateFilePath, agentHost->exePath, str);
-			if (!CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
+			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We tried to execute a bad executable... not good. Lets try to recover.
 				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> FAILED..."); }
 				if (updateFilePath != NULL && agentHost->exePath != NULL)
 				{
 					while (util_CopyFile(agentHost->exePath, updateFilePath, FALSE) == FALSE) Sleep(5000);
-					if (CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
+					if (CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 					{
 						CloseHandle(processInfo.hProcess);
 						CloseHandle(processInfo.hThread);
@@ -5008,7 +5010,7 @@ void MeshAgent_Stop(MeshAgentHostContainer *agent)
 void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv)
 {
 	int i, ptr = 0;
-	STARTUPINFOA info = { sizeof(info) };
+	STARTUPINFOW info = { sizeof(info) };
 	PROCESS_INFORMATION processInfo;
 
 	// Sleep for 5 seconds, this will give some time for the calling process to get going.
@@ -5023,7 +5025,7 @@ void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char *
 	while (util_CopyFile(selfpath, exepath, FALSE) == FALSE) Sleep(5000);
 
 	// Now run the process
-	if (!CreateProcessA(NULL, ILibScratchPad2, NULL, NULL, TRUE, 0, NULL, NULL, &info, &processInfo))
+	if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad2, -1), NULL, NULL, TRUE, 0, NULL, NULL, &info, &processInfo))
 	{
 		// TODO: Failed to run update.
 	}

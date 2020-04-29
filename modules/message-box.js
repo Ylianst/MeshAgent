@@ -120,7 +120,6 @@ function messageBox()
         ret._container.promise = ret;
         ret._container.on('data', function (j)
         {
-            this.promise._container = null;
             if(j == IDYES || j == IDOK)
             {
                 this.promise._res();
@@ -129,6 +128,7 @@ function messageBox()
             {
                 this.promise._rej('Denied');
             }
+            this.promise._container = null;
         });
         ret._container.on('exit', function ()
         {

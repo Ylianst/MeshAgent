@@ -179,6 +179,22 @@ int ILibWhichPowerOfTwo(int number)
 	return retVal;
 }
 
+#ifdef WIN32
+WCHAR ILibWideScratchPad[4096];
+char ILibUTF8ScratchPad[4096];
+char *ILibWideToUTF8(WCHAR* wstr, int len)
+{
+	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, len, (LPSTR)ILibUTF8ScratchPad, (int)sizeof(ILibUTF8ScratchPad), NULL, NULL);
+	return((char*)ILibUTF8ScratchPad);
+}
+WCHAR* ILibUTF8ToWideEx(char* str, int len, WCHAR* buffer, int bufferCharacterSize)
+{
+	if (buffer == NULL) { buffer = (WCHAR*)ILibWideScratchPad; bufferCharacterSize = (int)sizeof(ILibWideScratchPad) / 2; }
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)str, len, (LPWSTR)buffer, bufferCharacterSize);
+	return(buffer);
+}
+#endif
+
 
 //
 // All of the following structures are meant to be private internal structures
@@ -8062,7 +8078,7 @@ int ILibReadFileFromDiskEx(char **Target, char *FileName)
 	FILE *SourceFile = NULL;
 
 #ifdef WIN32
-	fopen_s(&SourceFile, FileName, "rb");
+	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"rb");
 #else
 	SourceFile = fopen(FileName, "rb");
 #endif
@@ -8111,7 +8127,7 @@ void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen)
 	FILE *SourceFile = NULL;
 
 #ifdef WIN32
-	fopen_s(&SourceFile, FileName, "wb");
+	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"wb");
 #else
 	SourceFile = fopen(FileName, "wb");
 #endif
@@ -8127,7 +8143,7 @@ void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen)
 	FILE *SourceFile = NULL;
 
 #ifdef WIN32
-	fopen_s(&SourceFile, FileName, "ab");
+	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
 #else
 	SourceFile = fopen(FileName, "ab");
 #endif
@@ -9647,7 +9663,7 @@ void ILibLinkedList_FileBacked_Reset(ILibLinkedList_FileBacked_Root *root)
 	fclose(source);
 	source = NULL;
 #ifdef WIN32
-	fopen_s(&source, (char*)ptr[1], "wb+N");
+	_wfopen_s(&source, ILibUTF8ToWide((char*)ptr[1], -1), L"wb+N");
 #else
 	source = fopen((char*)ptr[1], "wb+");
 #endif
@@ -9721,9 +9737,9 @@ ILibLinkedList_FileBacked_Root* ILibLinkedList_FileBacked_Create(char* path, uns
 	ILibLinkedList_FileBacked_Root *retVal = NULL;
 
 #ifdef WIN32
-	if (fopen_s(&source, path, "rb+N") != 0)
+	if (_wfopen_s(&source, ILibUTF8ToWide(path, -1), L"rb+N") != 0)
 	{
-		fopen_s(&source, path, "wb+N");
+		_wfopen_s(&source, ILibUTF8ToWide(path, -1), L"wb+N");
 	}
 #else
 	if ((source = fopen(path, "rb+")) == NULL)

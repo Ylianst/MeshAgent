@@ -125,7 +125,7 @@ int   __fastcall util_sha384file(char* filename, char* result)
 
 	if (filename == NULL) return -1;
 #ifdef WIN32 
-	fopen_s(&pFile, filename, "rbN");
+	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rbN");
 #else
 	pFile = fopen(filename, "rb");
 #endif
@@ -264,7 +264,7 @@ size_t __fastcall util_writefile(char* filename, char* data, int datalen)
 	size_t count = 0;
 
 #ifdef WIN32 
-	fopen_s(&pFile, filename, "wbN");
+	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"wbN");
 #else
 	pFile = fopen(filename, "wb");
 #endif
@@ -283,7 +283,7 @@ size_t __fastcall util_appendfile(char* filename, char* data, int datalen)
 	size_t count = 0;
 
 #ifdef WIN32 
-	fopen_s(&pFile, filename, "abN");
+	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"abN");
 #else
 	pFile = fopen(filename, "ab");
 #endif
@@ -306,7 +306,7 @@ size_t __fastcall util_readfile(char* filename, char** data, size_t maxlen)
 	if (filename == NULL) return 0;
 
 #ifdef WIN32 
-	fopen_s(&pFile, filename, "rbN");
+	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rbN");
 #else
 	pFile = fopen(filename, "rb");
 #endif
@@ -367,7 +367,11 @@ int __fastcall util_readfile2(char* filename, char** data)
 int __fastcall util_deletefile(char* filename)
 {
 	if (filename == NULL) return 0;
-	return remove(filename);
+#ifdef WIN32
+	return(_wremove(ILibUTF8ToWide(filename, -1)));
+#else
+	return(remove(filename));
+#endif
 }
 
 #ifdef WIN32
@@ -407,8 +411,26 @@ BOOL util_CopyFile(_In_ LPCSTR lpExistingFileName, _In_ LPCSTR lpNewFileName, _I
 	return (CopyFile2(lpExistingFileNameW, lpNewFileNameW, NULL) == S_OK);
 }
 #else
-BOOL util_MoveFile(_In_ LPCSTR lpExistingFileName, _In_  LPCSTR lpNewFileName) { return MoveFileA(lpExistingFileName, lpNewFileName); }
-BOOL util_CopyFile(_In_ LPCSTR lpExistingFileName, _In_ LPCSTR lpNewFileName, _In_ BOOL bFailIfExists) { return CopyFileA(lpExistingFileName, lpNewFileName, bFailIfExists); }
+BOOL util_MoveFile(_In_ LPCSTR lpExistingFileName, _In_  LPCSTR lpNewFileName)
+{
+	WCHAR wExisting[4096];
+	WCHAR wNew[4096];
+	
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)lpExistingFileName, -1, (LPWSTR)wExisting, (int)sizeof(wExisting) / 2);
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)lpNewFileName, -1, (LPWSTR)wNew, (int)sizeof(wNew) / 2);
+
+	return MoveFileW(wExisting, wNew);
+}
+BOOL util_CopyFile(_In_ LPCSTR lpExistingFileName, _In_ LPCSTR lpNewFileName, _In_ BOOL bFailIfExists) 
+{
+	WCHAR wExisting[4096];
+	WCHAR wNew[4096];
+
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)lpExistingFileName, -1, (LPWSTR)wExisting, (int)sizeof(wExisting) / 2);
+	MultiByteToWideChar(CP_UTF8, 0, (LPCCH)lpNewFileName, -1, (LPWSTR)wNew, (int)sizeof(wNew) / 2);
+
+	return CopyFileW(wExisting, wNew, bFailIfExists);
+}
 #endif
 #endif
 
@@ -593,7 +615,7 @@ int __fastcall util_from_pem(char* filename, struct util_cert* cert)
 
 	if (filename == NULL) return -1;
 #ifdef WIN32 
-	fopen_s(&pFile, filename, "rbN");
+	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rbN");
 #else
 	pFile = fopen(filename, "rb");
 #endif
