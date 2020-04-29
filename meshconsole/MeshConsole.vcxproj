@@ -297,7 +297,7 @@
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <OutDir>$(SolutionDir)$(Configuration)\愚蠢的\</OutDir>
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
     <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
