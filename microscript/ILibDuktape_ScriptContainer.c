@@ -863,16 +863,23 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Kill(duk_context *ctx)
 duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 {
 #ifdef WIN32
-	GetCurrentDirectoryA((DWORD)sizeof(ILibScratchPad), ILibScratchPad);
-	duk_push_string(ctx, ILibScratchPad);
-	return(1);
-#elif defined(_POSIX)
+	GetCurrentDirectoryW((DWORD)sizeof(ILibScratchPad)/2, (LPWSTR)ILibScratchPad);
+	ILibDuktape_String_PushWideString(ctx, ILibScratchPad, 0);
+#else
 	ignore_result((uintptr_t)getcwd(ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_push_string(ctx, ILibScratchPad);				
-	return(1);
-#else
-	return(ILibDuktape_Error(ctx, "Error"));
 #endif
+
+	duk_get_prop_string(ctx, -1, "concat");		// [string][concat]
+	duk_swap_top(ctx, -2);						// [concat][this]
+#ifdef WIN32
+	duk_push_string(ctx, "\\"); 
+#else
+	duk_push_string(ctx, "/");
+#endif
+
+	duk_call_method(ctx, 1);
+	return(1);
 }
 
 #ifdef _POSIX
@@ -1822,7 +1829,7 @@ duk_ret_t ILibDuktape_tmpdir(duk_context *ctx)
 #ifdef WIN32
 	WCHAR tmp[1024];
 	if (GetTempPathW(sizeof(tmp) / 2, (LPWSTR)tmp) == 0) { return(ILibDuktape_Error(ctx, "Error getting temp folder")); }
-	ILibDuktape_String_PushWideString(ctx, (char*)tmp, -1);
+	ILibDuktape_String_PushWideString(ctx, (char*)tmp, 0);
 #elif defined (_POSIX)
 	#if defined(__APPLE__)
 		duk_eval_string(ctx, "process.env['TMPDIR']");

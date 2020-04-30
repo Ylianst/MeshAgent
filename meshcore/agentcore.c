@@ -4584,18 +4584,6 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 		strncpy_s(jsPath, ILibMemory_GetExtraMemorySize(jsPath), ILibScratchPad2, ILibMemory_GetExtraMemorySize(jsPath));
 		scriptArgs[0] = jsPath;
 
-#ifdef WIN32
-		i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "\\", 1);
-#else
-		i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "/", 1);
-#endif
-		ILibScratchPad2[i] = 0;
-#ifdef WIN32
-		SetCurrentDirectory(ILibScratchPad2);
-#else
-		ignore_result(chdir(ILibScratchPad2));
-#endif
-
 		// Parse arguments. Handle the ones we can, others will be passed to the JavaScript engine. 
 		for (i = 2; i < argc; ++i)
 		{
