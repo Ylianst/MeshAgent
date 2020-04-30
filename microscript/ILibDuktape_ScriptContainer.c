@@ -465,13 +465,15 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	// Check if .JS file is integrated with executable
 
 #ifndef __APPLE__
-	char exePath[_MAX_PATH];
+	char exePath[_MAX_PATH*2];
 #else
 	char exePath[PATH_MAX+1];
 #endif
 
 #ifdef WIN32
-	GetModuleFileName(NULL, exePath, sizeof(exePath));
+	WCHAR tmpExePath[_MAX_PATH];
+	GetModuleFileNameW(NULL, tmpExePath, sizeof(tmpExePath)/2);
+	WideCharToMultiByte(CP_UTF8, 0, tmpExePath, -1, exePath, sizeof(exePath), NULL, NULL);
 #elif defined(__APPLE__)
 	uint32_t len = sizeof(exePath);
 	if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
@@ -1815,6 +1817,22 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_hostname(duk_context *ctx)
 	}
 	return(1);
 }
+duk_ret_t ILibDuktape_tmpdir(duk_context *ctx)
+{
+#ifdef WIN32
+	WCHAR tmp[1024];
+	if (GetTempPathW(sizeof(tmp) / 2, (LPWSTR)tmp) == 0) { return(ILibDuktape_Error(ctx, "Error getting temp folder")); }
+	ILibDuktape_String_PushWideString(ctx, (char*)tmp, -1);
+#elif defined (_POSIX)
+	#if defined(__APPLE__)
+		duk_eval_string(ctx, "process.env['TMPDIR']");
+		if (duk_is_undefined(ctx, -1)) { duk_push_string(ctx, "/private/tmp/"); }
+	#else
+		duk_push_string(ctx, "/var/tmp/");
+	#endif
+#endif
+	return(1);
+}
 void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);							// [os]
@@ -1834,6 +1852,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "networkInterfaces", ILibDuktape_ScriptContainer_OS_networkInterfaces, 0);
 #endif
 	ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_ScriptContainer_OS_hostname, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "tmpdir", ILibDuktape_tmpdir, 0);
 
 	char jsExtras[] = "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
 	{\

@@ -157,6 +157,15 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 			util_tohex2(buffer, (int)bufferLen, tmpBuffer);
 			duk_push_string(ctx, tmpBuffer);
 		}
+#ifdef WIN32
+		else if (strcmp(cType, "utf16") == 0)
+		{
+			int sz = (MultiByteToWideChar(CP_UTF8, 0, buffer, bufferLen, NULL, 0) * 2);
+			WCHAR* b = duk_push_fixed_buffer(ctx, sz);
+			duk_push_buffer_object(ctx, -1, 0, sz, DUK_BUFOBJ_NODEJS_BUFFER);
+			MultiByteToWideChar(CP_UTF8, 0, buffer, bufferLen, b, sz / 2);
+		}
+#endif
 		else
 		{
 			return(ILibDuktape_Error(ctx, "Unrecognized parameter"));

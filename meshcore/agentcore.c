@@ -4568,7 +4568,9 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	{
 		// Get the full path name of the JavaScript file
 #ifdef WIN32
-		pathLen = GetFullPathName(argv[1], sizeof(ILibScratchPad2), ILibScratchPad2, NULL);
+		WCHAR wjsPath[4096];
+		GetFullPathNameW(ILibUTF8ToWide(argv[1], -1), sizeof(wjsPath) / 2, wjsPath, NULL);
+		pathLen = WideCharToMultiByte(CP_UTF8, 0, wjsPath, -1, (LPSTR)ILibScratchPad2, sizeof(ILibScratchPad2), NULL, NULL);
 #else
 		if (realpath(argv[1], ILibScratchPad2) != NULL) { pathLen = strnlen_s(ILibScratchPad2, PATH_MAX); }
 #endif
