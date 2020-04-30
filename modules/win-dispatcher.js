@@ -100,23 +100,37 @@ function dispatch(options)
             child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
         }
     }
-    //child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
-    //child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
-    child.stdin.write('exit\r\n');
-    child.waitExit();
 
-    var xml = require('task-scheduler').getTaskXml('MeshUserTask');
-    require('task-scheduler').editActionCommand('MeshUserTask', '"' + process.execPath + '"', '-b64exec ' + str, xml);
+    if (process.execPath.length == Buffer.from(process.execPath).length)
+    {
+        // execPath contains only ASCII, so we can run the task as is
+        child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
+        child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
+        child.stdin.write('exit\r\n');
+        child.waitExit();
+    }
+    else
+    {
+        // execPath contains UTF8, so we must use UTF-16 to create the Task
+        child.stdin.write('exit\r\n');
+        child.waitExit();
 
+        // Get the Task XML from Windows, which will have the execPath garbled
+        var xml = require('task-scheduler').getTaskXml('MeshUserTask');
 
-    child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
-    child.stderr.on('data', function (c) { });
-    child.stdout.on('data', function (c) { });
-    child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
-    child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
-    child.stdin.write('exit\r\n');
+        // Edit the <Exec> elements
+        require('task-scheduler').editActionCommand('MeshUserTask', '"' + process.execPath + '"', '-b64exec ' + str, xml);
 
-    child.waitExit();
+        // Run the edited Task
+        child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
+        child.stderr.on('data', function (c) { });
+        child.stdout.on('data', function (c) { });
+        child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
+        child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
+        child.stdin.write('exit\r\n');
+
+        child.waitExit();
+    }
     return (ret);
 }
 
