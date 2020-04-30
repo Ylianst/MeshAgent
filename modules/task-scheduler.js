@@ -26,24 +26,95 @@ function task()
 
     if (process.platform == 'win32')
     {
-        this.getActionCommand = function getActionCommand(name)
+        this.getTaskXml = function getTaskXml(name)
         {
-            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY','/TN ' + name, '/XML']);
+            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN ' + name, '/XML']);
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
             child.waitExit();
             if (child.stderr.str.trim() != '') { throw ('Unable to fetch task: ' + name); }
-
-            var xElement = child.stdout.str.split('</Exec>')[0].split('<Exec>')[1];
+            return (child.stdout.str.trim());
+        }
+        this.getActionCommand = function getActionCommand(name, xml)
+        {
+            if (!xml)
+            {
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN ' + name, '/XML']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.waitExit();
+                if (child.stderr.str.trim() != '') { throw ('Unable to fetch task: ' + name); }
+                xml = child.stdout.str;
+            }
+            var xElement = xml.split('</Exec>')[0].split('<Exec>')[1];
             var command = xElement.split('</Command>')[0].split('<Command>')[1];
             return (command);
         };
+        this.editActionCommand = function editActionCommand(name, action, argString, xml)
+        {
+            if (!xml)
+            {
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN ' + name, '/XML']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.waitExit();
+                if (child.stderr.str.trim() != '') { throw ('Unable to fetch task: ' + name); }
+                xml = child.stdout.str;
+            }
+
+            var pt1 = xml.split('</Exec>');             // xml = pt1.join('</Exec>');
+            var pt2 = pt1[0].split('<Exec>');           // pt1[0] = pt2.join('<Exec>');
+            var xElement = pt2[1];                      // pt2[1] = xElement;
+
+            var pt3 = xElement.split('</Command>');      // xElement = pt3.join('</Command>');
+            var pt4 = pt3[0].split('<Command>');        // pt3[0] = pt4.join('<Command>');
+            var command = pt4[1];                       // pt4[1] = command;
+
+            pt4[1] = action;
+            pt3[0] = pt4.join('<Command>');
+            xElement = pt3.join('</Command>');
+
+            var pt5 = xElement.split('</Arguments>');   // xElement = pt5.join('</Arguments>');
+            var pt6 = pt5[0].split('<Arguments>');      // pt5[0] = pt6.join('<Arguments>');
+            var arg = pt6[1];                           // pt6[1] = arg;
+
+            arg = argString;
+            pt6[1] = arg;
+            pt5[0] = pt6.join('<Arguments>');
+            xElement = pt5.join('</Arguments>');
+
+            pt2[1] = xElement;
+            pt1[0] = pt2.join('<Exec>');
+            xml = pt1.join('</Exec>');
+
+            var s = require('fs').createWriteStream(require('os').tmpdir() + name + '.xml', { flags: 'wb' });
+            var b = Buffer.alloc(2);
+            b[0] = 0xFF;
+            b[1] = 0xFE;
+
+            s.write(b);
+            s.write(Buffer.from(xml).toString('utf16'));
+            s.end();
+
+            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdin.write('SCHTASKS /DELETE /TN ' + name + ' /F \n');
+            child.stdin.write('SCHTASKS /CREATE /TN ' + name + ' /XML ' + require('os').tmpdir() + name + '.xml\n');
+            child.stdin.write('erase ' + require('os').tmpdir() + name + '.xml\nexit\n');
+            child.waitExit();
+
+            //console.log(child.stdout.str.trim());
+            //console.log(child.stderr.str.trim());
+        };
+
         this.advancedEditActionCommand = function advancedEditActionCommand(name, action, argString)
         {
             var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell.exe']);
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write('$Act1 = New-ScheduledTaskAction -Execute "' + action + '" -Argument "' + argString + '"\nexit\n');
+            child.stdin.write('$Act1 = New-ScheduledTaskAction -Execute "' + action + '" -Argument "' + argString + '"\n');
+            child.stdin.write('Set-ScheduledTask "' + name + '" -Action $Act1\nexit\n');
             child.waitExit();
             console.log(child.stdout.str.trim());
         };

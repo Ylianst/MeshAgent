@@ -43,7 +43,6 @@ function dispatch(options)
         {
         }
     }
-
     var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
     ret._ipc2.once('connection', function onConnect(s)
     {
@@ -72,7 +71,6 @@ function dispatch(options)
             s.write(h);
             s.write(d);
         }
-
         d = Buffer.from(JSON.stringify({ command: 'launch', value: { module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
         h.writeUInt32LE(d.length + 4);
         s.write(h);
@@ -82,8 +80,8 @@ function dispatch(options)
     });
 
     var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
-    child.stderr.on('data', function (c) { console.log(c.toString());});
-    child.stdout.on('data', function (c) { console.log(c.toString()); });
+    child.stderr.on('data', function (c) { });
+    child.stdout.on('data', function (c) { });
 
     if (options.user)
     {
@@ -102,25 +100,23 @@ function dispatch(options)
             child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
         }
     }
-    child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
+    //child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
     //child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
     child.stdin.write('exit\r\n');
     child.waitExit();
 
-    if (require('task-scheduler').getActionCommand('MeshUserTask') != process.execPath)
-    {
-        console.log('Command Mistmatch => Fixing ');
-        require('task-scheduler').advancedEditActionCommand('MeshUserTask', process.execPath, '-b64exec ' + str);
+    var xml = require('task-scheduler').getTaskXml('MeshUserTask');
+    require('task-scheduler').editActionCommand('MeshUserTask', '"' + process.execPath + '"', '-b64exec ' + str, xml);
 
-        var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
-        child.stderr.on('data', function (c) { console.log(c.toString()); });
-        child.stdout.on('data', function (c) { console.log(c.toString()); });
-        child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
-        child.stdin.write('exit\r\n');
-        child.waitExit();
 
-    }
+    child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
+    child.stderr.on('data', function (c) { });
+    child.stdout.on('data', function (c) { });
+    child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
+    child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
+    child.stdin.write('exit\r\n');
 
+    child.waitExit();
     return (ret);
 }
 
@@ -137,7 +133,6 @@ function connect(ipc)
                 this.unshift(c);
                 return;
             }
-
             var cmd = JSON.parse(c.slice(4, cLen).toString());
             switch (cmd.command)
             {
@@ -159,7 +154,6 @@ function connect(ipc)
                 this.unshift(c);
                 return;
             }
-
             var cmd = JSON.parse(c.slice(4, cLen).toString());
             switch (cmd.command)
             {
