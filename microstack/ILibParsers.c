@@ -182,10 +182,21 @@ int ILibWhichPowerOfTwo(int number)
 #ifdef WIN32
 WCHAR ILibWideScratchPad[4096];
 char ILibUTF8ScratchPad[4096];
-char *ILibWideToUTF8(WCHAR* wstr, int len)
+char *ILibWideToUTF8Ex(WCHAR* wstr, int len, char *buffer, int bufferLen)
 {
-	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, len, (LPSTR)ILibUTF8ScratchPad, (int)sizeof(ILibUTF8ScratchPad), NULL, NULL);
-	return((char*)ILibUTF8ScratchPad);
+	if (buffer == NULL) { buffer = ILibUTF8ScratchPad; bufferLen = (int)sizeof(ILibUTF8ScratchPad); }
+	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wstr, len, (LPSTR)buffer, bufferLen, NULL, NULL);
+	return(buffer);
+}
+char *ILibWideToUTF8_stupidEx(WCHAR* wstr, int wstrBYTESIZE, char *buffer, int bufferLen)
+{
+	char *ret = NULL;
+	char *tmp = ILibMemory_SmartAllocate(wstrBYTESIZE + 2);
+	memcpy_s(tmp, wstrBYTESIZE + 2, (char*)wstr, wstrBYTESIZE);
+
+	ret = ILibWideToUTF8Ex((WCHAR*)tmp, -1, buffer, bufferLen);
+	ILibMemory_Free(tmp);
+	return(ret);
 }
 WCHAR* ILibUTF8ToWideEx(char* str, int len, WCHAR* buffer, int bufferCharacterSize)
 {

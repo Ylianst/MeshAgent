@@ -1213,6 +1213,27 @@ int wmain(int argc, char* wargv[])
 				else
 				{
 					FreeConsole();
+					HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+					DpiAwarenessFunc dpiAwareness = NULL;
+					if (shCORE != NULL)
+					{
+						if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+						{
+							FreeLibrary(shCORE);
+							shCORE = NULL;
+						}
+					}
+					if (dpiAwareness != NULL)
+					{
+						dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+						FreeLibrary(shCORE);
+						shCORE = NULL;
+					}
+					else
+					{
+						SetProcessDPIAware();
+					}
+
 					DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
 				}
 			}
@@ -1303,9 +1324,8 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 {
 	ILib_DumpEnabledContext winException;
 	char selfexe[_MAX_PATH];
-	char *selfexe_ptr[] = { selfexe };
+	char *selfexe_ptr[] = { selfexe, "--disableUpdate=1", "--serviceTemp=1" };
 	WCHAR str[_MAX_PATH];
-	size_t len;
 	char *integratedJavaScript;
 	int integragedJavaScriptLen;
 	char setup1[_MAX_PATH];
@@ -1316,7 +1336,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
 	// Get our own executable name
-	if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5) { wcstombs_s(&len, selfexe, _MAX_PATH, str, _MAX_PATH); }
+	if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5) { ILibWideToUTF8Ex(str, -1, selfexe, sizeof(selfexe)); }
 
 	// Setup proxy filenames
 	if ((setup1len = (int)strnlen_s(selfexe, sizeof(selfexe))) >= 4) {
@@ -1367,7 +1387,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 		agent->meshCoreCtx_embeddedScript = integratedJavaScript;
 		agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
 		agent->runningAsConsole = 1;
-		MeshAgent_Start(agent, 1, selfexe_ptr);
+		MeshAgent_Start(agent, 3, selfexe_ptr);
 		//retCode = agent->exitCode;
 		MeshAgent_Destroy(agent);
 		agent = NULL;
@@ -1429,9 +1449,10 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			SetWindowTextA( GetDlgItem( hDlg, IDC_STATUSTEXT ), txt);
 
 			// Get current executable path
-			GetModuleFileNameA(NULL, selfexe, MAX_PATH);
+			WCHAR wselfexe[MAX_PATH];
+			GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
+			ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
 			fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
-
 			{
 				DWORD               dwSize = 0;
 				BYTE                *pVersionInfo = NULL;
@@ -1439,10 +1460,10 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				UINT                pLenFileInfo = 0;
 				int major, minor, hotfix, other;
 
-				if ((dwSize = GetFileVersionInfoSize(selfexe, NULL)))
+				if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
 				{					
 					if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
-					if (GetFileVersionInfo(selfexe, 0, dwSize, pVersionInfo))
+					if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
 					{
 						if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
 						{

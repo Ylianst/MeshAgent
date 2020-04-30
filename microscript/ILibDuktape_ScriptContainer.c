@@ -1586,9 +1586,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 	ILibDuktape_CreateReadonlyProperty(ctx, "interfaceIndexes");
 
 	char fqdn[4096];
-	size_t fqdnLen;
 	int i = 0;
-	size_t converted;
 	char tmpBuffer[32768];
 	DWORD tmpBufferSize = sizeof(tmpBuffer);
 	IP_ADAPTER_ADDRESSES *padapters = (IP_ADAPTER_ADDRESSES*)tmpBuffer;
@@ -1612,7 +1610,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 				duk_put_prop_string(ctx, -2, "gateway");
 			}
 
-			wcstombs_s(&fqdnLen, fqdn, sizeof(fqdn), (const wchar_t*)padapters->DnsSuffix, wcsnlen_s(padapters->DnsSuffix, sizeof(fqdn)));
+			ILibWideToUTF8Ex((wchar_t*)padapters->DnsSuffix, -1, fqdn, (int)sizeof(fqdn));
 			duk_push_string(ctx, fqdn);
 			duk_put_prop_string(ctx, -2, "fqdn");
 
@@ -1663,7 +1661,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 			duk_put_prop_index(ctx, -2, i++);
 			addr = addr->Next;
 		}
-		wcstombs_s(&converted, ILibScratchPad, sizeof(ILibScratchPad), padapters->FriendlyName, sizeof(ILibScratchPad));
+		ILibWideToUTF8Ex(padapters->FriendlyName, -1, ILibScratchPad, (int)sizeof(ILibScratchPad));
 		duk_put_prop_string(ctx, -2, ILibScratchPad);
 
 		duk_push_heapptr(ctx, indexTable);				// [table]

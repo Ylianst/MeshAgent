@@ -974,7 +974,7 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 
 	while (n != NULL)
 	{
-		wcstombs_s(&filenameLen, filename, sizeof(filename), n->FileName, n->FileNameLength);
+		filenameLen = ILibWideToUTF8_stupidEx(n->FileName, n->FileNameLength, filename, (int)sizeof(filename));
 		switch (n->Action)
 		{
 			case FILE_ACTION_RENAMED_OLD_NAME:
