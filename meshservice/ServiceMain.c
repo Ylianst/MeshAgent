@@ -52,7 +52,6 @@ int ClearWindowsFirewall(wchar_t* processname);
 #include <WtsApi32.h>
 
 TCHAR* serviceFile = TEXT("Mesh Agent");
-TCHAR* serviceFileOld = TEXT("Mesh Agent v2");
 TCHAR* serviceName = TEXT("Mesh Agent background service");
 TCHAR* serviceDesc = TEXT("Remote monitoring and management service.");
 
@@ -376,134 +375,6 @@ int RunService(int argc, char* argv[])
 	return StartServiceCtrlDispatcher( serviceTable );
 }
 
-BOOL InstallService()
-{
-	SC_HANDLE serviceControlManager = OpenSCManager( 0, 0, SC_MANAGER_CREATE_SERVICE );
-	SERVICE_DESCRIPTION sd;
-	SERVICE_DELAYED_AUTO_START_INFO as;
-	SERVICE_FAILURE_ACTIONS fa;
-	SC_ACTION failactions[3];
-	BOOL r = FALSE;
-
-	if ( serviceControlManager )
-	{
-		char path[1024];
-		if (GetModuleFileName( 0, (LPTSTR)path, 1024) > 0)
-		{
-			// Install the service
-			SC_HANDLE service = CreateService( 
-				serviceControlManager,
-				serviceFile,
-				serviceName,
-				SERVICE_ALL_ACCESS,
-				SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS,
-				SERVICE_AUTO_START,
-				SERVICE_ERROR_IGNORE,
-				(LPCTSTR)path,
-				0, 0, 0, 0, 0 );
-
-			if (service)
-			{
-				// Update the service description
-				sd.lpDescription = serviceDesc;
-				ChangeServiceConfig2(service, SERVICE_CONFIG_DESCRIPTION, &sd);
-
-				// Update the service auto-start
-				as.fDelayedAutostart = FALSE;
-				ChangeServiceConfig2(service, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, &as);
-
-				// Update the faliure action
-				failactions[0].Type = SC_ACTION_RESTART;
-				failactions[0].Delay = 60000;                          // Wait 1 minutes before faliure restart (milliseconds)
-				failactions[1].Type = SC_ACTION_RESTART;
-				failactions[1].Delay = 60000;                          // Wait 1 minutes before faliure restart (milliseconds)
-				failactions[2].Type = SC_ACTION_RESTART;
-				failactions[2].Delay = 60000;
-				memset(&fa, 0, sizeof(SERVICE_FAILURE_ACTIONS));
-				fa.dwResetPeriod = 86400;					// After 1 days, reset the faliure counters (seconds)
-				fa.cActions = 3;
-				fa.lpsaActions = failactions;
-				r = ChangeServiceConfig2(service, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
-
-				// Cleanup
-				CloseServiceHandle( service );
-				#ifdef _DEBUG
-				//ILIBMESSAGE("Mesh service installed successfully");
-				#endif
-			}
-			else
-			{
-				#ifdef _DEBUG
-				if(GetLastError() == ERROR_SERVICE_EXISTS)
-				{
-					ILIBMESSAGE("Mesh service already exists.");
-				}
-				else
-				{
-					ILIBMESSAGE("Mesh service was not Installed Successfully.");
-				}
-				#endif
-			}
-		}
-
-		CloseServiceHandle( serviceControlManager );
-	}
-	return r;
-}
-
-int UninstallService(TCHAR* serviceName)
-{
-	int r = 0;
-	SC_HANDLE serviceControlManager = OpenSCManager( 0, 0, SC_MANAGER_CONNECT);
-
-	if (serviceControlManager)
-	{
-		SC_HANDLE service = OpenService( serviceControlManager, serviceName, SERVICE_QUERY_STATUS | DELETE );
-		if (service)
-		{
-			SERVICE_STATUS serviceStatusEx;
-			if ( QueryServiceStatus( service, &serviceStatusEx ) )
-			{
-				if ( serviceStatusEx.dwCurrentState == SERVICE_STOPPED )
-				{
-					if (DeleteService(service))
-					{
-						#ifdef _DEBUG
-						//ILIBMESSAGE("Mesh service removed successfully");
-						#endif
-						r = 1;
-					}
-					else
-					{
-						#ifdef _DEBUG
-						DWORD dwError = GetLastError();
-						if(dwError == ERROR_ACCESS_DENIED) {
-							ILIBMESSAGE("Access denied while trying to remove mesh service");
-						}
-						else if(dwError == ERROR_INVALID_HANDLE) {
-							ILIBMESSAGE("Handle invalid while trying to remove mesh service");
-						}
-						else if(dwError == ERROR_SERVICE_MARKED_FOR_DELETE) {
-							ILIBMESSAGE("Mesh service already marked for deletion");
-						}
-						#endif
-					}
-				}
-				else
-				{
-					r = 2;
-					#ifdef _DEBUG
-					ILIBMESSAGE("Mesh service is still running");
-					#endif
-				}
-			}
-			CloseServiceHandle( service );
-		}
-		CloseServiceHandle( serviceControlManager );
-	}
-	return r;
-}
-
 // SERVICE_STOPPED				  1    The service is not running.
 // SERVICE_START_PENDING		  2    The service is starting.
 // SERVICE_STOP_PENDING			  3    The service is stopping.
@@ -654,7 +525,9 @@ int wmain(int argc, char* wargv[])
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
 
-	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || strcasecmp(argv[1], "-fulluninstall") == 0))
+	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || 
+		strcasecmp(argv[1], "-fulluninstall") == 0 || strcasecmp(argv[1], "-fullinstall") == 0 ||
+		strcasecmp(argv[1], "-install")==0 || strcasecmp(argv[1], "-uninstall") == 0))
 	{
 		argv[argc] = argv[1];
 		argv[1] = (char*)ILibMemory_SmartAllocate(4);
@@ -977,69 +850,6 @@ int wmain(int argc, char* wargv[])
 			else if (r == 2) { printf("Mesh agent failed to stop"); }
 		}
 	}
-	else if (argc > 1 && strcasecmp(argv[1], "-install") == 0)
-	{
-		// Setup the service
-		StopService(serviceFile);
-		UninstallService(serviceFile);
-		UninstallService(serviceFileOld);
-		if (InstallService() == TRUE) { printf("Mesh agent installed"); } else { printf("Failed to install mesh agent"); }
-
-#ifndef _MINCORE
-		// Setup the Windows firewall
-		if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5)
-		{
-			ClearWindowsFirewall(str);
-			if (SetupWindowsFirewall(str) != 0)
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Firewall rules added successfully");
-				#endif
-			}
-			else
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Unable to add firewall rules");
-				#endif
-			}
-		}
-#endif
-	}
-	else if (argc > 1 && ((strcasecmp(argv[1], "-remove") == 0) || (strcasecmp(argv[1], "-uninstall") == 0)))
-	{
-		// Ask the service manager to stop the service
-		StopService(serviceFile);
-
-		// Remove the service
-		UninstallService(serviceFileOld);
-		i = UninstallService(serviceFile);
-		if (i == 0) { printf("Failed to uninstall mesh agent"); }
-		else if (i == 1) { printf("Mesh agent uninstalled"); }
-		else if (i == 2) { printf("Mesh agent still running"); }
-
-#ifndef _MINCORE
-		// Remove the MeshAgent registry keys
-		RegDeleteKey(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2");
-		RegDeleteKey(HKEY_CURRENT_USER, "Software\\Open Source\\MeshAgent2");
-
-		// Cleanup the firewall rules
-		if (GetModuleFileNameW( NULL, str, _MAX_PATH ) > 5)
-		{
-			if (ClearWindowsFirewall(str) != 0)
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Firewall rules removed successfully");
-				#endif
-			}
-			else
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Unable to remove firewall rules");
-				#endif
-			}
-		}
-#endif
-	}
 #ifdef _MINCORE
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
 	{
@@ -1177,8 +987,6 @@ int wmain(int argc, char* wargv[])
 	}
 	else
 	{
-		UninstallService(serviceFileOld);
-
 		// See if we are running as a service
 		if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
 		{

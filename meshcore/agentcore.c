@@ -3963,11 +3963,28 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
 			++ixr;
 		}
-		if (strcmp("-finstall", param[ri]) == 0)
+		if (strcmp("-finstall", param[ri]) == 0 || strcmp("-fullinstall", param[ri]) == 0)
 		{
 			installFlag = 1;
 		}
+		if (strcmp("-install", param[ri]) == 0)
+		{
+			installFlag = 5;
+			if (agentHost->masterDb != NULL)
+			{
+				ILibSimpleDataStore_Cached(agentHost->masterDb, "_localService", 13, "1", 1);
+			}
+		}
 		if (strcmp("-funinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0)
+		{
+			installFlag = 2;
+			if (agentHost->masterDb != NULL)
+			{
+				ILibSimpleDataStore_Cached(agentHost->masterDb, "_deleteData", 11, "1", 1);
+			}
+
+		}
+		if (strcmp("-uninstall", param[ri]) == 0)
 		{
 			installFlag = 2;
 		}
@@ -3989,6 +4006,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		switch (installFlag)
 		{
 			case 1:
+			case 5:
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
 				buf = (char*)ILibMemory_SmartAllocate(bufLen);
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
@@ -4009,10 +4027,15 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				return(1);
 				break;
 			case 2:
+				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
+				buf = (char*)ILibMemory_SmartAllocate(bufLen);
+				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
+
 				duk_eval_string(ctxx, "require('agent-installer');");
 				duk_get_prop_string(ctxx, -1, "fullUninstall");
 				duk_swap_top(ctxx, -2);
-				if (duk_pcall_method(ctxx, 0) != 0)
+				duk_push_string(ctxx, buf);
+				if (duk_pcall_method(ctxx, 1) != 0)
 				{
 					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
 					{
@@ -4020,6 +4043,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					}
 				}
 				duk_pop(ctxx);
+				ILibMemory_Free(buf);
 				return(1);
 				break;
 			default:

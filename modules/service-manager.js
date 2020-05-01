@@ -54,6 +54,21 @@ function extractFileSource(filePath)
     return (typeof (filePath) == 'string' ? filePath : filePath.source);
 }
 
+function perpareFolders(folderPath)
+{
+    var dlmtr = process.platform == 'win32' ? '\\' : '/';
+
+    var tokens = folderPath.split(dlmtr);
+    var path = null;
+
+    while (tokens.length>0)
+    {
+        path = (path == null ? tokens.shift() : (path + dlmtr + tokens.shift()));
+        if (path.indexOf(process.platform == 'win32' ? '\\' : '/') < 0) { continue; }
+        if (!require('fs').existsSync(path)) { require('fs').mkdirSync(path); }
+    }
+}
+
 function parseServiceStatus(token)
 {
     var j = {};
@@ -580,7 +595,7 @@ function serviceManager()
             blockSize += ((ptrSize - (blockSize % ptrSize)) % ptrSize);
             var retVal = [];
             for (var i = 0; i < servicesReturned.Deref(0, dbName._size).toBuffer().readUInt32LE(); ++i)
-{
+            {
                 var token = services.Deref(i * blockSize, blockSize);
                 var j = {};
                 j.name = token.Deref(0, ptrSize).Deref().Wide2UTF8;
@@ -931,22 +946,22 @@ function serviceManager()
                 ret.appLocation = function appLocation()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
-		            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                     child.stdin.write("cat " + this.rc + " | grep command= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\nexit\n");
                     child.waitExit();
-		            var tmp = child.stdout.str.trim().split('${name}').join(this.name);
-		            if(tmp=='/usr/sbin/daemon')
-		            {
-			            child = require('child_process').execFile('/bin/sh', ['sh']);
-			            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-			            child.stdin.write('cat ' + this.rc + ' | grep command_args= | awk -F"-f " \'{ $1=""; split($0, res, "\\""); split(res[1], t, " "); print t[1]; }\'\nexit\n');
-			            child.waitExit();
-			            return(child.stdout.str.trim());
-    		        }
-		            else
-		            {
+                    var tmp = child.stdout.str.trim().split('${name}').join(this.name);
+                    if(tmp=='/usr/sbin/daemon')
+                    {
+                        child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write('cat ' + this.rc + ' | grep command_args= | awk -F"-f " \'{ $1=""; split($0, res, "\\""); split(res[1], t, " "); print t[1]; }\'\nexit\n');
+                        child.waitExit();
+                        return(child.stdout.str.trim());
+                    }
+                    else
+                    {
                         return(tmp);
-		            }
+                    }
                 };
                 ret.isRunning = function isRunning()
                 {
@@ -1552,6 +1567,9 @@ function serviceManager()
     {
         if (!options.target) { options.target = options.name; }
         if (!options.displayName) { options.displayName = options.name; }
+        if (options.installPath) { if (!options.installPath.endsWith(process.platform == 'win32' ? '\\' : '/')) { options.installPath += (process.platform == 'win32' ? '\\' : '/'); } }
+        if (options.installPath && options.installInPlace) { throw ('Cannot specify both installPath and installInPlace'); }
+        if (process.platform != 'win32' && (options.installInPlace || options.installPath)) { throw ('Installation into non standard location is not supported on this platform'); }
 
         if (process.platform == 'win32')
         {
@@ -1559,12 +1577,24 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires admin'); }
 
             // Before we start, we need to copy the binary to the right place
-            var folder = this.getServiceFolder();
-            if (!require('fs').existsSync(folder)) { require('fs').mkdirSync(folder); }
-            if (!require('fs').existsSync(folder + '\\' + options.name)) { require('fs').mkdirSync(folder + '\\' + options.name); }
+            var folder = options.installPath == null ? this.getServiceFolder() : options.installPath;
+            if (folder.endsWith('\\')) { folder = folder.substring(0, folder.length - 1); }
+            if (!options.installInPlace) { perpareFolders(folder + '\\' + options.name); }
             if (options.servicePath == process.execPath) { options._isMeshAgent = true; }
-            require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
-            options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
+
+            if (!options.installInPlace)
+            {
+                require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
+                options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
+                if (!options.installPath) { options.installPath = folder + '\\' + options.name + '\\'; }
+            }
+            else
+            {
+                options.servicePath = process.execPath;
+                options.installPath = process.execPath.split('\\');
+                options.installPath.pop();
+                options.installPath = options.installPath.join('\\') + '\\';
+            }
 
             var servicePath = this.GM.CreateVariable('"' + options.servicePath + '"', { wide: true });
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0002);
@@ -1631,18 +1661,15 @@ function serviceManager()
                     if (options.files[i]._buffer)
                     {
                         console.log('writing ' + extractFileName(options.files[i]));
-                        require('fs').writeFileSync(folder + '\\' + options.name + '\\' + extractFileName(options.files[i]), options.files[i]._buffer);
+                        require('fs').writeFileSync(options.installPath + extractFileName(options.files[i]), options.files[i]._buffer);
                     }
                     else
                     {
                         console.log('copying ' + extractFileSource(options.files[i]));
-                        require('fs').copyFileSync(extractFileSource(options.files[i]), folder + '\\' + options.name + '\\' + extractFileName(options.files[i]));
+                        require('fs').copyFileSync(extractFileSource(options.files[i]), options.installPath + extractFileName(options.files[i]));
                     }
                 }
             }
-
-
-
 
             if (options.parameters)
             {
@@ -1670,19 +1697,19 @@ function serviceManager()
                 try
                 {
                     reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'DisplayName', options.displayName);
-                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'DisplayIcon', folder + '\\' + options.name + '\\' + options.target + '.exe');
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'DisplayIcon', options.servicePath);
                     if (options.publisher) { reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'Publisher', options.publisher); }
-                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'InstallLocation', folder + '\\' + options.name);
-                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'EstimatedSize', Math.floor(require('fs').statSync(folder + '\\' + options.name + '\\' + options.target + '.exe').size / 1024));
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'InstallLocation', options.installPath);
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'EstimatedSize', Math.floor(require('fs').statSync(options.servicePath).size / 1024));
                     reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'NoModify', 0x1);
                     reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'NoRepair', 0x1);
                     if (options.name == 'Mesh Agent')
                     {
-                        reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', folder + '\\' + options.name + '\\' + options.target + '.exe -funinstall');
+                        reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', options.servicePath + ' -funinstall');
                     }
                     else
                     {
-                        reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', folder + '\\' + options.name + '\\' + options.target + '.exe -b64exec ' + script);
+                        reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', options.servicePath + ' -b64exec ' + script);
                     }
                 }
                 catch (xx)
