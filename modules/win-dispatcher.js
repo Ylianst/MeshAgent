@@ -96,8 +96,8 @@ function dispatch(options)
     parms += ('/TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"');
 
     var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', [parms]);
-    child.stderr.on('data', function (c) { console.log(c.toString()); });
-    child.stdout.on('data', function (c) { console.log(c.toString()); });
+    child.stderr.on('data', function (c) { });
+    child.stdout.on('data', function (c) { });
     child.waitExit();
 
     var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
