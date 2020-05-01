@@ -3965,19 +3965,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (strcmp("-install", param[ri]) == 0)
 		{
 			installFlag = 5;
-			if (agentHost->masterDb != NULL)
-			{
-				ILibSimpleDataStore_Cached(agentHost->masterDb, "_localService", 13, "1", 1);
-			}
+			if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, "_localService", 13, "1", 1);
 		}
 		if (strcmp("-funinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0)
 		{
 			installFlag = 2;
-			if (agentHost->masterDb != NULL)
-			{
-				ILibSimpleDataStore_Cached(agentHost->masterDb, "_deleteData", 11, "1", 1);
-			}
-
+			if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, "_deleteData", 11, "1", 1);
 		}
 		if (strcmp("-uninstall", param[ri]) == 0)
 		{

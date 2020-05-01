@@ -218,22 +218,24 @@ function uninstallService2(params)
         if (dataFolder && appPrefix)
         {
             process.stdout.write('   -> Deleting agent data...');
-            var child = require('child_process').execFile(process.platform == 'win32' ? (process.env['windir'] + '\\system32\\cmd.exe') : ('/bin/sh'), [process.platform == 'win32' ? 'cmd.exe' : 'sh']);
-            child.stdout.on('data', function (c) { });
-            child.stderr.on('data', function (c) { });
-            if (process.platform == 'win32')
+            if (process.platform != 'win32')
             {
-                child.stdin.write('cd /D ' + dataFolder + '\r\n');
-                child.stdin.write('erase ' + appPrefix + '.*\r\n');
-                child.stdin.write('exit\r\n');
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.on('data', function (c) { });
+                child.stderr.on('data', function (c) { });
+                child.stdin.write('cd ' + dataFolder + '\n');
+                child.stdin.write('rm ' + appPrefix + '.*\r\n');
+                child.stdin.write('exit\n');       
+                child.waitExit();
             }
             else
             {
-                child.stdin.write('cd ' + dataFolder + '\n');
-                child.stdin.write('rm ' + appPrefix + '.*\r\n');
-                child.stdin.write('exit\n');
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C del "' + dataFolder + '\\' + appPrefix + '.*"']);
+                child.stdout.on('data', function (c) { });
+                child.stderr.on('data', function (c) { });
+                child.waitExit();
             }
-            child.waitExit();
+
             process.stdout.write(' [DONE]\n');
         }
     }
