@@ -69,20 +69,6 @@ function perpareFolders(folderPath)
     }
 }
 
-function win_deleteLater(delaySeconds, commandPath, arguments)
-{
-    if (process.platform != 'win32') { throw ('This Method is only supported on Windows'); }
-    var needFix = (commandPath.length != Buffer.from(commandPath).length) || (arguments.length != Buffer.from(arguments).length);
-    var info = require('user-sessions').getProcessOwnerName(process.pid);
-
-    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-    //child.stdin.write('SCHTASKS /CREATE /TN _ServiceTask /ST 00:00 /ONCE /RU ' + info.domain + '\\' + info.user + ' /TR "\\"' + process.env['windir'] + '\\system32\\cmd.exe /C choice /C Y /N /D Y /T 2 & del'
-
-}
-
-
 function parseServiceStatus(token)
 {
     var j = {};

@@ -79,58 +79,35 @@ function dispatch(options)
         this.parent.emit('connection', s);
     });
 
-    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
-    child.stderr.on('data', function (c) { });
-    child.stdout.on('data', function (c) { });
-
+    var parms = '/C SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ';
     if (options.user)
     {
-        child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU ' + options.user + ' /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
+        // Specified User
+        parms += ('/RU ' + options.user + ' ');
     }
     else
     {
         if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
         {
             // LocalSystem
-            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /RU SYSTEM /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
-        }
-        else
-        {
-            // Running as logged in user
-            child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 /TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"\r\n');
+            parms += ('/RU SYSTEM ');
         }
     }
+    parms += ('/TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"');
 
-    if (process.execPath.length == Buffer.from(process.execPath).length)
-    {
-        // execPath contains only ASCII, so we can run the task as is
-        child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
-        child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
-        child.stdin.write('exit\r\n');
-        child.waitExit();
-    }
-    else
-    {
-        // execPath contains UTF8, so we must use UTF-16 to create the Task
-        child.stdin.write('exit\r\n');
-        child.waitExit();
+    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', [parms]);
+    child.stderr.on('data', function (c) { console.log(c.toString()); });
+    child.stdout.on('data', function (c) { console.log(c.toString()); });
+    child.waitExit();
 
-        // Get the Task XML from Windows, which will have the execPath garbled
-        var xml = require('task-scheduler').getTaskXml('MeshUserTask');
+    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
+    child.stderr.on('data', function (c) { });
+    child.stdout.on('data', function (c) { });
+    child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
+    child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\nexit\r\n');
 
-        // Edit the <Exec> elements
-        require('task-scheduler').editActionCommand('MeshUserTask', '"' + process.execPath + '"', '-b64exec ' + str, xml);
+    child.waitExit();
 
-        // Run the edited Task
-        child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
-        child.stderr.on('data', function (c) { });
-        child.stdout.on('data', function (c) { });
-        child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
-        child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\n');
-        child.stdin.write('exit\r\n');
-
-        child.waitExit();
-    }
     return (ret);
 }
 
