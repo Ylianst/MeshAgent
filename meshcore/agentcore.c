@@ -3958,11 +3958,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	{
 		int len = (int)strnlen_s(param[ri], 4096);
 		int ix;
-		if ((ix=ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2)==0)
-		{
-			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
-			++ixr;
-		}
 		if (strcmp("-finstall", param[ri]) == 0 || strcmp("-fullinstall", param[ri]) == 0)
 		{
 			installFlag = 1;
@@ -3987,6 +3982,13 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (strcmp("-uninstall", param[ri]) == 0)
 		{
 			installFlag = 2;
+		}
+
+		if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+		if ((ix = ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2) == 0)
+		{
+			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
+			++ixr;
 		}
 	}
 	paramLen -= ixr;

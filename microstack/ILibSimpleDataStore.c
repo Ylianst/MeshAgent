@@ -557,18 +557,21 @@ __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, 
 {
 	ILibSimpleDataStore_Root* retVal = (ILibSimpleDataStore_Root*)ILibMemory_Allocate(ILibMemory_SimpleDataStore_CONTAINERSIZE, userExtraMemorySize, NULL, NULL);
 	
-	retVal->filePath = ILibString_Copy(filePath, (int)strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
-	retVal->dataFile = ILibSimpleDataStore_OpenFileEx2(retVal->filePath, 0, readonly);
-
-	if (retVal->dataFile == NULL)
+	if (filePath != NULL)
 	{
-		free(retVal->filePath);
-		free(retVal);
-		return NULL;
+		retVal->filePath = ILibString_Copy(filePath, (int)strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
+		retVal->dataFile = ILibSimpleDataStore_OpenFileEx2(retVal->filePath, 0, readonly);
+
+		if (retVal->dataFile == NULL)
+		{
+			free(retVal->filePath);
+			free(retVal);
+			return NULL;
+		}
 	}
 
 	retVal->keyTable = ILibHashtable_Create();
-	ILibSimpleDataStore_RebuildKeyTable(retVal);
+	if (retVal->dataFile != NULL) { ILibSimpleDataStore_RebuildKeyTable(retVal); }
 	return retVal;
 }
 
@@ -592,13 +595,15 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 	ILibHashtable_DestroyEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root);
 	if (root->cacheTable != NULL) { ILibHashtable_DestroyEx(root->cacheTable, ILibSimpleDataStore_CacheClear_Sink, NULL); }
 
-	free(root->filePath);
-
+	if (root->filePath != NULL)
+	{
+		free(root->filePath);
 #ifdef _POSIX
-	flock(fileno(root->dataFile), LOCK_UN);
+		flock(fileno(root->dataFile), LOCK_UN);
 #endif
+		fclose(root->dataFile);
+	}
 
-	fclose(root->dataFile);
 	free(root);
 }
 

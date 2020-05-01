@@ -45,7 +45,7 @@ typedef void(*ILibSimpleDataStore_SizeWarningHandler)(ILibSimpleDataStore sender
 __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, int userExtraMemorySize, int readonly);
 #define ILibSimpleDataStore_Create(filePath) ILibSimpleDataStore_CreateEx2(filePath, 0, 0)
 #define ILibSimpleDataStore_CreateEx(filePath, userExtraMemorySize) ILibSimpleDataStore_CreateEx2(filePath, userExtraMemorySize, 0)
-
+#define ILibSimpleDataStore_CreateCachedOnly() ILibSimpleDataStore_Create(NULL)
 
 // Check if the data store exists
 int ILibSimpleDataStore_Exists(char *filePath);
