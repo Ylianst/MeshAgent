@@ -2175,8 +2175,14 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 				// Load the TLS certificate from the database. If not present, generate one.
 				len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", ILibScratchPad2, sizeof(ILibScratchPad2));
 				if ((len != 0) && (util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selftlscert)) == 0)) { len = 0; } // Unable to decode this certificate
-				if (agent_VerifyMeshCertificates(agent) != 0) { len = 0; } // Check that the load TLS cert is signed by our root.
-				if (len == 0) {
+				if (agent_VerifyMeshCertificates(agent) != 0) 
+				{
+					// Check that the load TLS cert is signed by our root.
+					len = 0; 
+					ILIBLOGMESSAGEX("Certificate loaded from DB was not signed by our root cert in the Cert Store");
+				} 
+				if (len == 0) 
+				{
 					// Generate a new TLS certificate & save it.
 					util_freecert(&(agent->selftlscert));
 					l = wincrypto_mkCert(agent->certObject, rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
@@ -2185,9 +2191,25 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 						ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
 					}
 					util_free(str);
-					if (l <= 0) { return 1; } // Problem generating the TLS cert, reset everything.
+					if (l <= 0) 
+					{
+						// Problem generating the TLS cert, reset everything.
+						ILIBLOGMESSAGEX("Error occured trying to generate a TLS cert that is signed by our root in Cert Store");
+						return 1; 
+					} 
 				}
 				return 0; // All good. We loaded or generated a root agent cert and TLS cert.
+			}
+			else
+			{
+				ILIBLOGMESSAGEX("No certificate found in Microsoft Certificate Store");
+			}
+		}
+		else
+		{
+			if (agent->noCertStore == 0 && agent->certObject == NULL)
+			{
+				ILIBLOGMESSAGEX("Error opening Microsoft Certificate Store");
 			}
 		}
 #endif
@@ -2195,6 +2217,7 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 		// No certificate in the database. Return 1 here so we can generate one.
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load Node Certificate from Database");
 		SSL_TRACE2("agent_LoadCertificates([ERROR: SelfNodeCert])");
+		ILIBLOGMESSAGEX("Info: No certificate was found in db");
 		return 1;
 	}
 
@@ -4086,7 +4109,12 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			if (RegQueryValueExA(hKey, TEXT("ResetNodeId"), NULL, NULL, NULL, &len) == ERROR_SUCCESS && len > 0)
 			{
-				if (RegDeleteValue(hKey, TEXT("ResetNodeId")) == ERROR_SUCCESS) { resetNodeId = 1; } // Force certificate reset
+				if (RegDeleteValue(hKey, TEXT("ResetNodeId")) == ERROR_SUCCESS) 
+				{
+					// Force certificate reset
+					ILIBLOGMESSAGEX("NodeID will reset, because ResetNodeID key was found in registry");
+					resetNodeId = 1;
+				} 
 			}
 			RegCloseKey(hKey);
 		}
@@ -4098,7 +4126,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		int i;
 		// Parse command-line arguments
 		for (i = 0; i < paramLen; ++i) {
-			if (strcmp(param[i], "--resetnodeid") == 0) { resetNodeId = 1; }
+			if (strcmp(param[i], "--resetnodeid") == 0) 
+			{
+				resetNodeId = 1; 
+				ILIBLOGMESSAGEX("NodeID will reset, because --resetnodeid command line switch was specified");
+			}
 		}
 	}
 #endif
@@ -4163,7 +4195,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					// We have at least one valid MAC address, so we can continue with the checks
 
 					i = 0;
-					char *curr = ILibMemory_AllocateA(len);
+					char *curr = ILibMemory_AllocateA(len+1);
 					ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", curr, len);
 
 					while (i < len)
@@ -4174,7 +4206,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 						}
 						i += 19;
 					}
-					if (i >= len) { resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); }
+					if (i >= len) 
+					{
+						ILIBLOGMESSAGEX("NodeID will reset, MAC Address Mismatch: %s <==> %s", mac, curr);
+						resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); 
+					}
 				}
 			}
 		}
