@@ -965,7 +965,6 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
 	FILE_NOTIFY_INFORMATION *n = (FILE_NOTIFY_INFORMATION*)data->results;
 	char filename[4096];
-	size_t filenameLen;
 
 	int changed = 0, renamed = 0;
 
@@ -974,37 +973,37 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 
 	while (n != NULL)
 	{
-		filenameLen = ILibWideToUTF8_stupidEx(n->FileName, n->FileNameLength, filename, (int)sizeof(filename));
+		ILibWideToUTF8_stupidEx(n->FileName, n->FileNameLength, filename, (int)sizeof(filename));
 		switch (n->Action)
 		{
 			case FILE_ACTION_RENAMED_OLD_NAME:
-				duk_push_lstring(data->ctx, filename, filenameLen-1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "oldname");
 				renamed = 1;
 				break;
 			case FILE_ACTION_RENAMED_NEW_NAME:
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "newname");
 				renamed = 1;
 				break;
 			case FILE_ACTION_ADDED:
 				duk_push_string(data->ctx, "ADDED");
 				duk_put_prop_string(data->ctx, -2, "changeType");
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "\xFF_FileName");
 				changed = 1;
 				break;
 			case FILE_ACTION_REMOVED:
 				duk_push_string(data->ctx, "REMOVED");
 				duk_put_prop_string(data->ctx, -2, "changeType");
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "\xFF_FileName");
 				changed = 1;
 				break;
 			case FILE_ACTION_MODIFIED:
 				duk_push_string(data->ctx, "MODIFIED");
 				duk_put_prop_string(data->ctx, -2, "changeType");
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "\xFF_FileName");
 				changed = 1;
 				break;

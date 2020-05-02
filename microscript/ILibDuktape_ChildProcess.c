@@ -123,6 +123,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 		p->exitCode = exitCode;
 		p->dispatchFlags = 1;
 		Duktape_RunOnEventLoop(p->chain, duk_ctx_nonce(p->ctx), p->ctx, ILibDuktape_ChildProcess_SubProcess_ExitHandler_sink1, NULL, p);
+		return;
 	}
 #endif
 
