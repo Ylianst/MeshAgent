@@ -88,6 +88,7 @@ typedef struct ILibProcessPipe_PipeObject
 	void *user1, *user2;
 #ifdef WIN32
 	int usingCompletionRoutine;
+	int cancelInProgress;
 	HANDLE mPipe_Reader_ResumeEvent;
 	HANDLE mPipe_ReadEnd;
 	HANDLE mPipe_WriteEnd;
@@ -584,7 +585,7 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 #ifdef WIN32
 	if (pipeObject->mPipe_ReadEnd != NULL) { CloseHandle(pipeObject->mPipe_ReadEnd); }
 	if (pipeObject->mPipe_WriteEnd != NULL && pipeObject->mPipe_WriteEnd != pipeObject->mPipe_ReadEnd) { CloseHandle(pipeObject->mPipe_WriteEnd); }
-	if (pipeObject->mOverlapped != NULL) { CloseHandle(pipeObject->mOverlapped->hEvent); free(pipeObject->mOverlapped); }
+	if (pipeObject->mOverlapped != NULL && pipeObject->usingCompletionRoutine == 0) { CloseHandle(pipeObject->mOverlapped->hEvent); free(pipeObject->mOverlapped); }
 	if (pipeObject->mwOverlapped != NULL) { free(pipeObject->mwOverlapped); }
 	if (pipeObject->mPipe_Reader_ResumeEvent != NULL) { CloseHandle(pipeObject->mPipe_Reader_ResumeEvent); }
 	if (pipeObject->buffer != NULL && pipeObject->usingCompletionRoutine == 0) { free(pipeObject->buffer); }
@@ -617,7 +618,11 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 		if (pipeObject->mProcess->stdOut == pipeObject) { pipeObject->mProcess->stdOut = NULL; }
 		if (pipeObject->mProcess->stdErr == pipeObject) { pipeObject->mProcess->stdErr = NULL; }
 	}
+#ifdef WIN32
+	if (pipeObject->usingCompletionRoutine == 0) { ILibMemory_Free(pipeObject); }
+#else
 	ILibMemory_Free(pipeObject);
+#endif
 }
 
 #ifdef WIN32
@@ -1851,7 +1856,14 @@ void __stdcall ILibProcessPipe_Pipe_Read_CompletionRoutine(DWORD dwErrorCode, DW
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)((void**)ILibMemory_GetExtraMemory(lpOverlapped, sizeof(OVERLAPPED)))[0];
 	if (!ILibMemory_CanaryOK(j)) { return; }
-	
+	if (j->cancelInProgress != 0)
+	{
+		CloseHandle(j->mOverlapped);
+		free(j->mOverlapped);
+		ILibMemory_Free(j);
+		return;
+	}
+
 	ILibProcessPipe_Pipe_ReadExHandler callback = (ILibProcessPipe_Pipe_ReadExHandler)j->user2;
 	if (callback != NULL) { callback(j, j->user1, dwErrorCode, j->buffer, dwNumberOfBytesTransfered); }
 }
@@ -1869,6 +1881,7 @@ int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
 	if (!ILibMemory_CanaryOK(j) || j->mPipe_ReadEnd == NULL) { return(2); }
+	j->cancelInProgress = 1;
 	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
 }
 int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler)

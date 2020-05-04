@@ -502,6 +502,18 @@ void ILibDuktape_ScriptContainer_Process_ExitCallback(void *obj)
 		Duktape_SafeDestroyHeap(ctx);
 	}
 }
+duk_ret_t ILibDuktape_ScriptContainer_Process_ExitEx(duk_context *ctx)
+{
+	if (duk_is_number(ctx, 0))
+	{
+		exit(duk_require_int(ctx, 0));
+	}
+	else
+	{
+		exit(0);
+	}
+	return(0);
+}
 duk_ret_t ILibDuktape_ScriptContainer_Process_Exit(duk_context *ctx)
 {
 	void **tmp;
@@ -1245,6 +1257,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "exit");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Process_Exit, DUK_VARARGS);
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "_exit", ILibDuktape_ScriptContainer_Process_ExitEx, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGTERM");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGCHLD");
@@ -3271,6 +3284,7 @@ void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char
 		void **ptr = (void**)ILibMemory_Extra(ILibProcessPipe_Process_GetStdErr(sender));
 		ptr[0] = master;
 		ptr[1] = buffer;
+
 		ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Process_GetStdErr(sender));
 		Duktape_RunOnEventLoop(master->chain, duk_ctx_nonce(master->ctx), master->ctx, ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread, NULL, ptr);
 	}

@@ -942,6 +942,7 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 		{
 			winIPC->unshiftedBytes = 0;
 			ILibDuktape_DuplexStream_WriteData(winIPC->ds, winIPC->buffer + winIPC->bufferOffset, winIPC->bytesLeft);
+			if (winIPC->mPipe == NULL) { return; } // We return here without resetting processingRead, because IO was canceled
 			if (winIPC->unshiftedBytes > 0)
 			{
 				if (winIPC->unshiftedBytes == winIPC->bytesLeft)
@@ -1252,7 +1253,6 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			duk_del_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
 			return(ILibDuktape_Error(ctx, "Error Creating Named Pipe: %s", ipc));
 		}
-
 		ConnectNamedPipe(winIPC->mPipeHandle, &winIPC->overlapped);
 		ILibProcessPipe_WaitHandle_Add2(winIPC->manager, winIPC->overlapped.hEvent, winIPC, ILibDuktape_net_server_IPC_ConnectSink);
 
