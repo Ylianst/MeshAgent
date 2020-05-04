@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Intel Corporation
+Copyright 2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ const MB_YESNO                  = 0x00000004;
 const MB_RETRYCANCEL            = 0x00000005;
 const MB_TOPMOST                = 0x00040000;
 const MB_SETFOREGROUND          = 0x00010000;
+const MB_SYSTEMMODAL            = 0x00001000;
 
 const MB_DEFBUTTON1             = 0x00000000;
 const MB_DEFBUTTON2             = 0x00000100;
@@ -39,110 +40,126 @@ const IDRETRY  = 4;
 const IDIGNORE = 5;
 const IDYES    = 6;
 const IDNO     = 7;
+const WM_CLOSE = 0x0010;
 
 var promise = require('promise');
-var childScript = "\
-        require('ScriptContainer').on('data', function (j)\
-        {\
-            switch(j.command)\
-            {\
-                case 'messageBox':\
-                    if(process.platform == 'win32')\
-                    {\
-                        var GM = require('_GenericMarshal');\
-                        var user32 = GM.CreateNativeProxy('user32.dll');\
-                        user32.CreateMethod('MessageBoxA');\
-                        user32.MessageBoxA.async(0, GM.CreateVariable(j.caption), GM.CreateVariable(j.title), j.layout).then(\
-                        function(r)\
-                        {\
-                            switch(r.Val)\
-                            {\
-                                case " + IDOK.toString() + ":\
-                                case " + IDCANCEL.toString() + ":\
-                                case " + IDABORT.toString() + ":\
-                                case " + IDRETRY.toString() + ":\
-                                case " + IDIGNORE.toString() + ":\
-                                case " + IDYES.toString() + ":\
-                                    require('ScriptContainer').send(r.Val);\
-                                    break;\
-                                default:\
-                                    require('ScriptContainer').send(" + IDNO.toString() + ");\
-                                    break;\
-                            }\
-                            process.exit();\
-                        });\
-                    }\
-                    break;\
-            }\
-        });\
-    ";
 
 function messageBox()
 {
     this._ObjectID = 'message-box';
     this.create = function create(title, caption, timeout, layout)
     {
-        if (layout == null)
-        {
-            layout = (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST);
-        }
-        else
-        {
-            layout = (MB_OK | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST);
-        }
-        var GM = require('_GenericMarshal');
-        var kernel32 = GM.CreateNativeProxy('kernel32.dll');
-        kernel32.CreateMethod('ProcessIdToSessionId');
-        var psid = GM.CreateVariable(4);
-        if (kernel32.ProcessIdToSessionId(process.pid, psid).Val == 0)
-        {
-            ret._rej('Internal Error');
-            return (ret);
-        }
-
-        if (timeout == null) { timeout = 10; }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        var options = { executionTimeout: timeout };
+        ret.options = { launch: { module: 'message-box', method: 'slave', args: [] } };
+        ret.title = title;
+        ret.caption = caption;
+        ret.timeout = timeout;
+        ret.layout = layout;
+
+        //ret.options._debugIPC = true;
+        //ret.options._ipcInteger = 1500;
 
         try
         {
-            options.sessionId = require('user-sessions').consoleUid();
-            if (options.sessionId == psid.toBuffer().readUInt32LE()) { delete options.sessionId; }
+            ret.options.uid = require('user-sessions').consoleUid();
+            if (ret.options.uid == require('user-sessions').getProcessOwnerName(process.pid).tsid) { delete ret.options.uid; }
         }
-        catch(ee)
+        catch (ee)
         {
             ret._rej('No logged on users');
             return (ret);
         }
-        ret._title = title;
-        ret._caption = caption;
-        ret._container = require('ScriptContainer').Create(options);
-        ret._container.promise = ret;
-        ret._container.on('data', function (j)
+
+        ret._ipc = require('child-container').create(ret.options);
+        ret._ipc.master = ret;
+        ret._ipc.on('ready', function ()
         {
-            if(j == IDYES || j == IDOK)
+            if (this.master.timeout != null) { this.master._timeout = setTimeout(function (mstr) { mstr._ipc.exit(); }, this.master.timeout * 1000, this.master); }
+            if (this.master.layout == null)
             {
-                this.promise._res();
+                this.message({ command: 'YESNO', caption: this.master.caption, title: this.master.title });
             }
             else
             {
-                this.promise._rej('Denied');
+                this.message({ command: 'ALERT', caption: this.master.caption, title: this.master.title });
             }
-            this.promise._container = null;
         });
-        ret._container.on('exit', function ()
+        ret._ipc.on('message', function (msg)
         {
-            this.promise._container = null;
-            this.promise._rej('Timeout');
+            try
+            {
+                switch(msg.command)
+                {
+                    case 'response':
+                        if (this.master._timeout) { clearTimeout(this.master._timeout); this.master._timeout = null; }
+                        if (msg.response == IDYES || msg.response == IDOK)
+                        {
+                            this.master._res();
+                        }
+                        else
+                        {
+                            this.master._rej(msg.response);
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+            catch(ff)
+            {
+            }
         });
-        ret._container.ExecuteString(childScript);
-        ret._container.send({ command: 'messageBox', caption: caption, title: title, layout: layout });
-        ret.close = function ()
+        ret._ipc.on('exit', function (c) { this.master._rej('child exited with code: ' + c); });
+        ret.close = function close()
         {
-            this._container.exit2();
+            ret._ipc.exit();
         };
         return (ret);
     };
+    this.slave = function()
+    {
+        var master = require('child-container');
+        master.on('message', function (msg)
+        {
+            switch(msg.command)
+            {
+                case 'YESNO':
+                case 'ALERT':
+                    this.GM = require('_GenericMarshal');
+                    this.user32 = this.GM.CreateNativeProxy('user32.dll');
+                    this.user32.CreateMethod('MessageBoxA');
+                    layout = msg.command == 'YESNO' ? (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST | MB_SYSTEMMODAL) : (MB_OK | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST | MB_SYSTEMMODAL);
+                    this.user32.MessageBoxA.async(0, this.GM.CreateVariable(msg.caption), this.GM.CreateVariable(msg.title), layout)
+                        .then(function (r)
+                        {
+                            try
+                            {
+                                switch(r.Val)
+                                {
+                                    case IDOK:
+                                    case IDCANCEL:
+                                    case IDABORT:
+                                    case IDRETRY:
+                                    case IDIGNORE:
+                                    case IDYES:
+                                        this.that.message({command: 'response', response: r.Val});
+                                        break;
+                                    default:
+                                        this.that.message({command: 'response', response: IDNO});
+                                        break;
+                                }
+                            }
+                            catch(ff)
+                            {
+                            }
+                            process.exit();
+                        }, function () { process.exit(); }).parentPromise.that = this;
+                    break;
+                default:
+                    break;
+            }
+        });
+    }
 }
 
 
@@ -180,7 +197,7 @@ function linux_messageBox()
                         var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
                         child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                         child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
-                        child.stderr.on('data', function (e) { console.log(e); });
+                        child.stderr.on('data', function (e) { });
                         child.waitExit();
                         return (child.stdout.str.trim() == '' ? false : true);
                     }
@@ -589,8 +606,6 @@ function macos_messageBox()
     this.startClient = function startClient(options)
     {
         // Create the Client
-        console.log('Starting Client...');
-
         options.osversion = require('service-manager').getOSVersion();
         options.uid = require('user-sessions').consoleUid();
         this.client = require('net').createConnection(options);
