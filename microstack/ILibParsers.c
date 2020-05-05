@@ -945,13 +945,11 @@ typedef struct ILibBaseChain
 	HANDLE ChainProcessHandle;
 	HANDLE MicrostackThreadHandle;
 	CONTEXT MicrostackThreadContext;
-#else
-	pthread_t ChainThreadID;
-#endif
-#if defined(WIN32)
 	int UnblockFlag;
 	void* auxSelectHandles;
+	HANDLE WaitHandles[FD_SETSIZE * 2];
 #else
+	pthread_t ChainThreadID;
 	int TerminatePipe[2];
 #endif
 
@@ -2845,9 +2843,8 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	void *node;
 	DWORD waitTimeout;
 	HANDLE selectHandles[FD_SETSIZE];
-	HANDLE selectEvents[FD_SETSIZE*2];
 	memset(selectHandles, 0, sizeof(selectHandles));
-	memset(selectEvents, 0, sizeof(selectEvents));
+	memset(chain->WaitHandles, 0, sizeof(chain->WaitHandles));
 	struct timeval currentTime;
 	struct timeval expirationTime;
 #endif
@@ -3005,21 +3002,21 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			}
 			for (i = 0; i < x; ++i)
 			{
-				if (selectEvents[i] == NULL || selectEvents[ILibChain_HandleInfoIndex(i)] != NULL) 
+				if (chain->WaitHandles[i] == NULL || chain->WaitHandles[ILibChain_HandleInfoIndex(i)] != NULL)
 				{
-					selectEvents[i] = WSACreateEvent(); 
+					chain->WaitHandles[i] = WSACreateEvent();
 				}
 				else
 				{
-					WSAResetEvent(selectEvents[i]);
+					WSAResetEvent(chain->WaitHandles[i]);
 				}
 				flags = 0;
-				selectEvents[ILibChain_HandleInfoIndex(i)] = NULL;
+				chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = NULL;
 
 				if (FD_ISSET(selectHandles[i], &readset)) { flags |= (FD_READ | FD_ACCEPT); }
 				if (FD_ISSET(selectHandles[i], &writeset)) { flags |= (FD_WRITE | FD_CONNECT); }
 				if (FD_ISSET(selectHandles[i], &errorset)) { flags |= FD_CLOSE; }
-				WSAEventSelect((SOCKET)selectHandles[i], selectEvents[i], flags);
+				WSAEventSelect((SOCKET)selectHandles[i], chain->WaitHandles[i], flags);
 			}
 			ILibGetTimeOfDay(&currentTime);
 			memcpy_s(&expirationTime, sizeof(struct timeval), &currentTime, sizeof(struct timeval));
@@ -3029,12 +3026,12 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			while (node != NULL)
 			{
 				i = x++;
-				if (selectEvents[i] != NULL && selectEvents[ILibChain_HandleInfoIndex(i)] == NULL) 
+				if (chain->WaitHandles[i] != NULL && chain->WaitHandles[ILibChain_HandleInfoIndex(i)] == NULL)
 				{
-					WSACloseEvent(selectEvents[i]);
+					WSACloseEvent(chain->WaitHandles[i]);
 				}
-				selectEvents[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
-				selectEvents[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
+				chain->WaitHandles[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
+				chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
 				if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
 				{
 					// Timeout was specified
@@ -3049,20 +3046,20 @@ ILibExportMethod void ILibStartChain(void *Chain)
 				}
 				node = ILibLinkedList_GetNextNode(node);
 			}
-			expirationTime.tv_sec -= currentTime.tv_sec;
-			expirationTime.tv_usec -= currentTime.tv_usec;
+			expirationTime.tv_sec -= currentTime.tv_sec; if (expirationTime.tv_sec < 0) { expirationTime.tv_sec = 0; }
+			expirationTime.tv_usec -= currentTime.tv_usec; if (expirationTime.tv_usec < 0) { expirationTime.tv_usec = 0; }
 			waitTimeout = (DWORD)((expirationTime.tv_sec * 1000) + (expirationTime.tv_usec / 0.001));
 
-			while ((slct = WaitForMultipleObjectsEx(x, selectEvents, FALSE, (DWORD)((tv.tv_sec * 1000) + (tv.tv_usec / 0.001)), TRUE)) == WAIT_IO_COMPLETION && chain->UnblockFlag == 0) {}
+			while ((slct = WaitForMultipleObjectsEx(x, chain->WaitHandles, FALSE, waitTimeout, TRUE)) == WAIT_IO_COMPLETION && chain->UnblockFlag == 0) {}
 			ILibGetTimeOfDay(&currentTime);
-			if (slct != WAIT_IO_COMPLETION && (slct - WAIT_OBJECT_0 >= 0) && (slct - WAIT_OBJECT_0 < x))
+			if (slct != WAIT_IO_COMPLETION && (slct - (int)WAIT_OBJECT_0 >= 0) && (slct - (int)WAIT_OBJECT_0 < x))
 			{
-				if (selectEvents[ILibChain_HandleInfoIndex(slct)] != NULL)
+				if (chain->WaitHandles[ILibChain_HandleInfoIndex(slct)] != NULL)
 				{
-					ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(slct)];
-					HANDLE h = selectEvents[slct];
-					selectEvents[ILibChain_HandleInfoIndex(slct)] = NULL;
-					selectEvents[slct] = NULL;
+					ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(slct)];
+					HANDLE h = chain->WaitHandles[slct];
+					chain->WaitHandles[ILibChain_HandleInfoIndex(slct)] = NULL;
+					chain->WaitHandles[slct] = NULL;
 					if (info->handler != NULL)
 					{
 						if (info->handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
@@ -3077,16 +3074,18 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			{
 				for (i = 0; i < x; ++i)
 				{
-					if (selectEvents[ILibChain_HandleInfoIndex(i)] != NULL && tvnonzero(&(((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->expiration)))
+					if (chain->WaitHandles[ILibChain_HandleInfoIndex(i)] != NULL && tvnonzero(&(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->expiration)))
 					{
-						if (tv2LTEtv1(&currentTime, &(((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->expiration)))
+						if (tv2LTEtv1(&currentTime, &(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->expiration)))
 						{
 							// TIMEOUT occured
-							if (((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->handler != NULL)
+							if (((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler != NULL)
 							{
-								((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->handler(chain, selectEvents[i], ILibWaitHandle_ErrorStatus_TIMEOUT, ((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->user);
+								((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler(chain, chain->WaitHandles[i], ILibWaitHandle_ErrorStatus_TIMEOUT, ((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->user);
 							}
-							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->node);
+							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->node);
+							chain->WaitHandles[i] = NULL;
+							chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = NULL;
 						}
 					}
 				}
@@ -3096,15 +3095,17 @@ ILibExportMethod void ILibStartChain(void *Chain)
 				// One of the handles is invalid... Kick it out
 				for (i = 0; i < x; ++i)
 				{
-					if (selectEvents[ILibChain_HandleInfoIndex(i)] != NULL)
+					if (chain->WaitHandles[ILibChain_HandleInfoIndex(i)] != NULL)
 					{
-						if (WaitForSingleObject(selectEvents[i], 0) == WAIT_FAILED)
+						if (WaitForSingleObject(chain->WaitHandles[i], 0) == WAIT_FAILED)
 						{
-							if (((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->handler != NULL)
+							if (((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler != NULL)
 							{
-								((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->handler(chain, selectEvents[i], ILibWaitHandle_ErrorStatus_INVALID_HANDLE, ((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->user);
+								((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler(chain, chain->WaitHandles[i], ILibWaitHandle_ErrorStatus_INVALID_HANDLE, ((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->user);
 							}
-							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(i)])->node);
+							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->node);
+							chain->WaitHandles[i] = NULL;
+							chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = NULL;
 						}
 					}
 				}
@@ -3238,9 +3239,9 @@ ILibExportMethod void ILibStartChain(void *Chain)
 
 	for (vX = 0; vX < FD_SETSIZE; ++vX)
 	{
-		if (selectHandles[vX] != NULL && selectHandles[ILibChain_HandleInfoIndex(vX)] == NULL)
+		if (chain->WaitHandles[vX] != NULL && chain->WaitHandles[ILibChain_HandleInfoIndex(vX)] == NULL)
 		{
-			WSACloseEvent(selectHandles[vX]);
+			WSACloseEvent(chain->WaitHandles[vX]);
 		}
 	}
 	ILibLinkedList_Destroy(chain->auxSelectHandles);
