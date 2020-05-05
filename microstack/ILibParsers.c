@@ -2988,14 +2988,12 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			for (i = 0; i < (int)readset.fd_count; ++i)
 			{
 				selectHandles[x++] = (HANDLE)readset.fd_array[i];
-				selectEvents[ILibChain_HandleInfoIndex(x - 1)] = NULL;
 			}
 			for (i = 0; i < (int)writeset.fd_count; ++i)
 			{
 				if (!FD_ISSET(writeset.fd_array[i], &readset))
 				{
 					selectHandles[x++] = (HANDLE)writeset.fd_array[i];
-					selectEvents[ILibChain_HandleInfoIndex(x - 1)] = NULL;
 				}
 			}
 			for (i = 0; i < (int)errorset.fd_count; ++i)
@@ -3003,7 +3001,6 @@ ILibExportMethod void ILibStartChain(void *Chain)
 				if (!FD_ISSET(errorset.fd_array[i], &readset) && !FD_ISSET(errorset.fd_array[i], &writeset))
 				{
 					selectHandles[x++] = (HANDLE)errorset.fd_array[i];
-					selectEvents[ILibChain_HandleInfoIndex(x - 1)] = NULL;
 				}
 			}
 			for (i = 0; i < x; ++i)
@@ -3017,6 +3014,8 @@ ILibExportMethod void ILibStartChain(void *Chain)
 					WSAResetEvent(selectEvents[i]);
 				}
 				flags = 0;
+				selectEvents[ILibChain_HandleInfoIndex(i)] = NULL;
+
 				if (FD_ISSET(selectHandles[i], &readset)) { flags |= (FD_READ | FD_ACCEPT); }
 				if (FD_ISSET(selectHandles[i], &writeset)) { flags |= (FD_WRITE | FD_CONNECT); }
 				if (FD_ISSET(selectHandles[i], &errorset)) { flags |= FD_CLOSE; }
@@ -3030,7 +3029,10 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			while (node != NULL)
 			{
 				i = x++;
-				if (selectEvents[i] != NULL && selectEvents[ILibChain_HandleInfoIndex(i)] == NULL) { WSACloseEvent(selectEvents[i]); }
+				if (selectEvents[i] != NULL && selectEvents[ILibChain_HandleInfoIndex(i)] == NULL) 
+				{
+					WSACloseEvent(selectEvents[i]);
+				}
 				selectEvents[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
 				selectEvents[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
 				if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
@@ -3058,10 +3060,12 @@ ILibExportMethod void ILibStartChain(void *Chain)
 				if (selectEvents[ILibChain_HandleInfoIndex(slct)] != NULL)
 				{
 					ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)selectEvents[ILibChain_HandleInfoIndex(slct)];
+					HANDLE h = selectEvents[slct];
 					selectEvents[ILibChain_HandleInfoIndex(slct)] = NULL;
+					selectEvents[slct] = NULL;
 					if (info->handler != NULL)
 					{
-						if (info->handler(chain, selectEvents[slct], ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
+						if (info->handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
 						{
 							// FALSE means to remove tha HANDLE
 							ILibLinkedList_Remove(info->node);
