@@ -2819,6 +2819,33 @@ void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_Wai
 
 	ILibForceUnBlockChain(chain);
 }
+void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
+{
+	ILibBaseChain *chain = (ILibBaseChain*)((void**)u)[0];
+	HANDLE h = (HANDLE)((void**)u)[1];
+
+	void *node = ILibLinkedList_GetNode_Search(chain->auxSelectHandles, NULL, h);
+	if (node != NULL)
+	{
+		//
+		// We found the HANDLE, so if we remove the HANDLE from the list, and
+		// set the unblock flag, we'll be good to go
+		//
+		ILibLinkedList_Remove(node);
+		chain->UnblockFlag = 1;
+	}
+}
+void ILibChain_RemoveWaitHandle(void *chain, HANDLE h)
+{
+	//
+	// We must dispatch an APC to remove the wait handle,
+	// because we can't change the wait list during a WaitForMultipleObjectsEx() call
+	//
+	void **tmp = (void**)ILibMemory_SmartAllocate(2 * sizeof(void*));
+	tmp[0] = chain;
+	tmp[1] = h;
+	QueueUserAPC((PAPCFUNC)ILibChain_RemoveWaitHandle_APC, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tmp);
+}
 #endif
 
 /*! \fn ILibStartChain(void *Chain)

@@ -1868,6 +1868,34 @@ int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, i
 		return(0);
 	}
 }
+BOOL ILibProcessPipe_Pipe_WriteEx_sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
+{
+	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)user;
+	DWORD bytesWritten;
+
+	if (GetOverlappedResult(j->mPipe_WriteEnd, j->mwOverlapped, &bytesWritten, FALSE))
+	{
+		if (j->user4 != NULL)
+		{
+			((ILibProcessPipe_Pipe_WriteExHandler)j->user4)(j, j->user3, bytesWritten > 0 ? 0 : 1, (int)bytesWritten);
+		}
+	}
+	else
+	{
+		if (GetLastError() == ERROR_IO_PENDING)
+		{
+			return(TRUE);
+		}
+		else
+		{
+			if (j->user4 != NULL)
+			{
+				((ILibProcessPipe_Pipe_WriteExHandler)j->user4)(j, j->user3, 1, 0);
+			}
+		}
+	}
+	return(FALSE);
+}
 int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
@@ -1875,18 +1903,48 @@ int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, 
 	{
 		void **extra;
 		j->mwOverlapped = (OVERLAPPED*)ILibMemory_Allocate(sizeof(OVERLAPPED), sizeof(void*), NULL, (void**)&extra);
+		if ((j->mwOverlapped->hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL) { ILIBCRITICALEXIT(254); }
 		extra[0] = j;
 	}
 	j->user3 = user;
 	j->user4 = OnWriteHandler;
-	if (!WriteFileEx(j->mPipe_WriteEnd, buffer, bufferLength, j->mwOverlapped, ILibProcessPipe_Pipe_Write_CompletionRoutine))
+
+	if (!WriteFile(j->mPipe_WriteEnd, buffer, bufferLength, NULL, j->mwOverlapped))
 	{
-		return(GetLastError());
+		if (GetLastError() == ERROR_IO_PENDING)
+		{
+			ILibChain_AddWaitHandle(j->manager->ChainLink.ParentChain, j->mwOverlapped->hEvent, -1, ILibProcessPipe_Pipe_WriteEx_sink, j);
+			return(0);
+		}
+		// Error
+		if (OnWriteHandler != NULL) { OnWriteHandler(j, user, 1, 0); }
+		return(1);
 	}
 	else
 	{
+		// Write completed
+		if (OnWriteHandler != NULL) { OnWriteHandler(j, user, 0, bufferLength); }
 		return(0);
 	}
+
+
+//	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
+//	if (j->mwOverlapped == NULL)
+//	{
+//		void **extra;
+//		j->mwOverlapped = (OVERLAPPED*)ILibMemory_Allocate(sizeof(OVERLAPPED), sizeof(void*), NULL, (void**)&extra);
+//		extra[0] = j;
+//}
+//	j->user3 = user;
+//	j->user4 = OnWriteHandler;
+//	if (!WriteFileEx(j->mPipe_WriteEnd, buffer, bufferLength, j->mwOverlapped, ILibProcessPipe_Pipe_Write_CompletionRoutine))
+//	{
+//		return(GetLastError());
+//	}
+//	else
+//	{
+//		return(0);
+//	}
 }
 DWORD ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p) { return(p != NULL ? (DWORD)((ILibProcessPipe_Process_Object*)p)->PID : 0); }
 #else
