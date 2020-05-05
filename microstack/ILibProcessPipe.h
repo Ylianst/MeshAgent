@@ -60,7 +60,7 @@ void ILibProcessPipe_Pipe_AddPipeReadHandler(ILibProcessPipe_Pipe targetPipe, in
 #ifdef WIN32
 	int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe);
 	int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler);
-	int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler);
+	ILibTransport_DoneState ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler);
 	ILibProcessPipe_Pipe ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(ILibProcessPipe_Manager manager, HANDLE existingPipe, ILibProcessPipe_Pipe_ReaderHandleType handleType, int extraMemorySize);
 	#define ILibProcessPipe_Pipe_CreateFromExisting(PipeManager, ExistingPipe, HandleType) ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(PipeManager, ExistingPipe, HandleType, 0)
 #else

@@ -1015,7 +1015,7 @@ ILibTransport_DoneState ILibDuktape_net_server_IPC_WriteSink(ILibDuktape_DuplexS
 	if (len == 0)
 	{
 		// No Pending Writes
-		ILibProcessPipe_Pipe_WriteEx(winIPC->mPipe, q, bufferLen, winIPC, ILibDuktape_net_server_IPC_WriteCompletionEvent);
+		return(ILibProcessPipe_Pipe_WriteEx(winIPC->mPipe, q, bufferLen, winIPC, ILibDuktape_net_server_IPC_WriteCompletionEvent));
 	}
 
 	return(ILibTransport_DoneState_INCOMPLETE);
@@ -1025,8 +1025,8 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	if (!ILibMemory_CanaryOK(user)) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 
-	if (ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe) == 0)
-	{
+	//if (ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe) == 0)
+	//{
 		ILibProcessPipe_FreePipe(winIPC->mPipe);
 		winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
 		if (winIPC->mServer != NULL)
@@ -1041,7 +1041,7 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 			duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
 			duk_pcall_method(ctx, 1); duk_pop(ctx);							// ...
 		}
-	}
+	//}
 }
 duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 {
@@ -1051,7 +1051,7 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 		if (winIPC->mPipe != NULL && winIPC->mPipeHandle != NULL)
 		{
 			// It's ok to do this, becuase the CancelEx happens on the same thread, and the completion routine will use an APC Queue, so the Canary will fail before it tries to deref
-			ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe);
+			//ILibProcessPipe_Pipe_CancelEx(winIPC->mPipe);
 			ILibProcessPipe_FreePipe(winIPC->mPipe);
 			winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
 		}

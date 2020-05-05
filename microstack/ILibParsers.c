@@ -2803,8 +2803,33 @@ void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
 }
 
 #ifdef WIN32
+void __stdcall ILibChain_AddWaitHandle_apc(ULONG_PTR u)
+{
+	void *chain = ((void**)u)[0];
+	HANDLE h = (HANDLE)((void**)u)[1];
+	int msTIMEOUT = (int)(uintptr_t)((void**)u)[2];
+	ILibChain_WaitHandleHandler handler = (ILibChain_WaitHandleHandler)((void**)u)[3];
+	void *user = ((void**)u)[4];
+
+	ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user);
+
+	ILibMemory_Free((void*)u);
+}
 void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user)
 {
+	if (!ILibIsRunningOnChainThread(chain))
+	{
+		void **tmp = ILibMemory_SmartAllocate(5 * sizeof(void*));
+		tmp[0] = chain;
+		tmp[1] = h;
+		tmp[2] = (void*)(uintptr_t)msTIMEOUT;
+		tmp[3] = handler;
+		tmp[4] = user;
+		QueueUserAPC((PAPCFUNC)ILibChain_AddWaitHandle_apc, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tmp);
+		return;
+	}
+
+
 	void *node = ILibLinkedList_AddTail(((ILibBaseChain*)chain)->auxSelectHandles, h);
 	ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
 	info->handler = handler;

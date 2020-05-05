@@ -550,8 +550,14 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 {
 	if (!ILibMemory_CanaryOK(pipeObject)) { return; }
 #ifdef WIN32
-	if (pipeObject->mPipe_ReadEnd != NULL) { CloseHandle(pipeObject->mPipe_ReadEnd); }
-	if (pipeObject->mPipe_WriteEnd != NULL && pipeObject->mPipe_WriteEnd != pipeObject->mPipe_ReadEnd) { CloseHandle(pipeObject->mPipe_WriteEnd); }
+	if (pipeObject->mPipe_ReadEnd != NULL) 
+	{
+		CloseHandle(pipeObject->mPipe_ReadEnd);
+	}
+	if (pipeObject->mPipe_WriteEnd != NULL && pipeObject->mPipe_WriteEnd != pipeObject->mPipe_ReadEnd) 
+	{
+		CloseHandle(pipeObject->mPipe_WriteEnd); 
+	}
 	if (pipeObject->mOverlapped != NULL && pipeObject->usingCompletionRoutine == 0) { CloseHandle(pipeObject->mOverlapped->hEvent); free(pipeObject->mOverlapped); }
 	if (pipeObject->mwOverlapped != NULL) { free(pipeObject->mwOverlapped); }
 	if (pipeObject->mPipe_Reader_ResumeEvent != NULL) { CloseHandle(pipeObject->mPipe_Reader_ResumeEvent); }
@@ -1844,13 +1850,13 @@ void __stdcall ILibProcessPipe_Pipe_Write_CompletionRoutine(DWORD dwErrorCode, D
 		((ILibProcessPipe_Pipe_WriteExHandler)j->user4)(j, j->user3, dwErrorCode, dwNumberOfBytesTransfered);
 	}
 }
-int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
-{
-	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
-	if (!ILibMemory_CanaryOK(j) || j->mPipe_ReadEnd == NULL) { return(2); }
-	j->cancelInProgress = 1;
-	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
-}
+//int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
+//{
+//	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
+//	if (!ILibMemory_CanaryOK(j) || j->mPipe_ReadEnd == NULL) { return(2); }
+//	j->cancelInProgress = 1;
+//	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
+//}
 BOOL ILibProcessPipe_Pipe_ReadEx_sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)user;
@@ -1931,7 +1937,7 @@ BOOL ILibProcessPipe_Pipe_WriteEx_sink(void *chain, HANDLE h, ILibWaitHandle_Err
 	}
 	return(FALSE);
 }
-int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler)
+ILibTransport_DoneState ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_WriteExHandler OnWriteHandler)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
 	if (j->mwOverlapped == NULL)
@@ -1949,17 +1955,17 @@ int ILibProcessPipe_Pipe_WriteEx(ILibProcessPipe_Pipe targetPipe, char *buffer, 
 		if (GetLastError() == ERROR_IO_PENDING)
 		{
 			ILibChain_AddWaitHandle(j->manager->ChainLink.ParentChain, j->mwOverlapped->hEvent, -1, ILibProcessPipe_Pipe_WriteEx_sink, j);
-			return(0);
+			return(ILibTransport_DoneState_INCOMPLETE);
 		}
 		// Error
 		if (OnWriteHandler != NULL) { OnWriteHandler(j, user, 1, 0); }
-		return(1);
+		return(ILibTransport_DoneState_ERROR);
 	}
 	else
 	{
 		// Write completed
 		if (OnWriteHandler != NULL) { OnWriteHandler(j, user, 0, bufferLength); }
-		return(0);
+		return(ILibTransport_DoneState_COMPLETE);
 	}
 
 
