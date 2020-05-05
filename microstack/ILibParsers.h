@@ -347,6 +347,17 @@ int ILibIsRunningOnChainThread(void* chain);
 	typedef void*(*ILibChain_Link_GetUserMemory)(void *ChainLinkObject, int *len);
 	typedef void* ILibChain_EventHookToken;
 	typedef void(*ILibChain_EventHookHandler)(void *hookedObject, ILibChain_EventHookToken token);
+#ifdef WIN32
+	typedef enum ILibWaitHandle_ErrorStatus
+	{
+		ILibWaitHandle_ErrorStatus_NONE = 0,
+		ILibWaitHandle_ErrorStatus_INVALID_HANDLE = 1,
+		ILibWaitHandle_ErrorStatus_TIMEOUT = 2,
+		ILibWaitHandle_ErrorStatus_REMOVED = 3,
+		ILibWaitHandle_ErrorStatus_MANAGER_EXITING = 4
+	}ILibWaitHandle_ErrorStatus;
+	typedef BOOL(*ILibChain_WaitHandleHandler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus, void* user);
+#endif
 
 	typedef struct ILibChain_Link
 	{
@@ -961,6 +972,13 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_DisableWatchDog(void *chain);
 	void *ILibChain_GetObjectForDescriptor(void *chain, int fd);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
+#ifdef WIN32
+	void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user);
+	#define tv2LTtv1(ptv1, ptv2) ((ptv2)->tv_sec < (ptv1)->tv_sec || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec < (ptv1)->tv_usec))
+	#define tv2LTEtv1(ptv1, ptv2) (tv2LTtv1(ptv2,ptv1) || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec <= (ptv1)->tv_usec))
+	#define tvnonzero(ptv) ((ptv)->tv_sec != 0 || (ptv)->tv_usec != 0)
+#endif
+
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);

@@ -102,25 +102,12 @@ int ILibProcessPipe_Process_GetPTY(ILibProcessPipe_Process p);
 
 
 #ifdef WIN32
-typedef enum ILibWaitHandle_ErrorStatus
-{
-	ILibWaitHandle_ErrorStatus_NONE = 0,
-	ILibWaitHandle_ErrorStatus_INVALID_HANDLE = 1,
-	ILibWaitHandle_ErrorStatus_TIMEOUT = 2,
-	ILibWaitHandle_ErrorStatus_REMOVED = 3,
-	ILibWaitHandle_ErrorStatus_MANAGER_EXITING = 4
-}ILibWaitHandle_ErrorStatus;
-
 typedef BOOL(*ILibProcessPipe_WaitHandle_Handler)(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user);
 void ILibProcessPipe_WaitHandle_Remove(ILibProcessPipe_Manager mgr, HANDLE event);
 
 // These methods will dispatch the callback on the worker thread
 void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback);
 #define ILibProcessPipe_WaitHandle_Add(processPipeManager, eventHandle, user, callback) ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(processPipeManager, eventHandle, 0, user, callback)
-
-// These methods will context switch to the chain thread when dispatching
-void ILibProcessPipe_WaitHandle_Add2_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback);
-#define ILibProcessPipe_WaitHandle_Add2(processPipeManager, eventHandle, user, callback) ILibProcessPipe_WaitHandle_Add2_WithNonZeroTimeout(processPipeManager, eventHandle, 0, user, callback)
 
 #endif
 #define ILibTransports_ProcessPipe 0x60

@@ -259,39 +259,6 @@ void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager m
 	ILibProcessPipe_WaitHandle_AddEx(mgr, waitHandle);
 }
 
-void ILibProcessPipe_WaitHandle_Add2_chainsink(void *chain, void *obj)
-{
-	if (ILibMemory_CanaryOK((void*)obj))
-	{
-		ILibProcessPipe_WaitHandle_APC *apcState = (ILibProcessPipe_WaitHandle_APC*)obj;
-		if (apcState->callback != NULL) { apcState->callback(apcState->ev, apcState->status, apcState->user); }
-		ILibMemory_Free(apcState);
-	}
-}
-BOOL ILibProcessPipe_WaitHandle_Add2_sink(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user)
-{
-	if (ILibMemory_CanaryOK(user))
-	{
-		if (status == ILibWaitHandle_ErrorStatus_REMOVED || status == ILibWaitHandle_ErrorStatus_MANAGER_EXITING)
-		{
-			ILibMemory_Free(user);
-		}
-		else
-		{
-			ILibChain_RunOnMicrostackThread(((ILibProcessPipe_WaitHandle_APC*)user)->chain, ILibProcessPipe_WaitHandle_Add2_chainsink, user);
-		}
-	}
-	return(FALSE);
-}
-void ILibProcessPipe_WaitHandle_Add2_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback)
-{
-	ILibProcessPipe_WaitHandle_APC *apcState = ILibMemory_SmartAllocate(sizeof(ILibProcessPipe_WaitHandle_APC));
-	DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &apcState->callingThread, THREAD_SET_CONTEXT, FALSE, 0);
-	apcState->callback = callback;
-	apcState->user = user;
-	apcState->chain = ((ILibProcessPipe_Manager_Object*)mgr)->ChainLink.ParentChain;
-	ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(mgr, event, milliseconds, apcState, ILibProcessPipe_WaitHandle_Add2_sink);
-}
 void ILibProcessPipe_Manager_WindowsRunLoopEx(void *arg)
 {
 	ILibProcessPipe_Manager_Object *manager = (ILibProcessPipe_Manager_Object*)arg;

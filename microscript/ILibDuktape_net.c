@@ -1079,9 +1079,10 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 	}
 	return(0);
 }
-BOOL ILibDuktape_net_server_IPC_ConnectSink(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user)
+//BOOL ILibDuktape_net_server_IPC_ConnectSink(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user)
+BOOL ILibDuktape_net_server_IPC_ConnectSink(void *chain, HANDLE event, ILibWaitHandle_ErrorStatus status, void* user)
 {
-	if (ILibMemory_CanaryOK(user))
+	if (ILibMemory_CanaryOK(user) && status == ILibWaitHandle_ErrorStatus_NONE)
 	{
 		ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 		ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mServer, "connection");	// [emit][this][connection]
@@ -1253,8 +1254,10 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			duk_del_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
 			return(ILibDuktape_Error(ctx, "Error Creating Named Pipe: %s", ipc));
 		}
+		//printf("ConnectNamedPipe(%s)\n", ipc);
 		ConnectNamedPipe(winIPC->mPipeHandle, &winIPC->overlapped);
-		ILibProcessPipe_WaitHandle_Add2(winIPC->manager, winIPC->overlapped.hEvent, winIPC, ILibDuktape_net_server_IPC_ConnectSink);
+		//ILibProcessPipe_WaitHandle_Add2(winIPC->manager, winIPC->overlapped.hEvent, winIPC, ILibDuktape_net_server_IPC_ConnectSink);
+		ILibChain_AddWaitHandle(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC);
 
 		if (pIPC_SA != NULL) { LocalFree(IPC_ACL); }
 		return(1);
