@@ -1851,22 +1851,57 @@ int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
 	j->cancelInProgress = 1;
 	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
 }
-int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler)
+BOOL ILibProcessPipe_Pipe_ReadEx_sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {
-	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
-	j->usingCompletionRoutine = 1;
-	j->buffer = buffer;
-	j->bufferSize = bufferLength;
-	j->user1 = user;
-	j->user2 = OnReadHandler;
-	if (!ReadFileEx(j->mPipe_ReadEnd, j->buffer, j->bufferSize, j->mOverlapped, ILibProcessPipe_Pipe_Read_CompletionRoutine))
+	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)user;
+	DWORD bytesRead = 0;
+
+	if (GetOverlappedResult(j->mPipe_ReadEnd, j->mOverlapped, &bytesRead, FALSE))
 	{
-		return(GetLastError());
+		if (j->user2 != NULL) { ((ILibProcessPipe_Pipe_ReadExHandler)j->user2)(j, j->user1, 0, j->buffer, (int)bytesRead); }
 	}
 	else
 	{
-		return(0);
+		if (GetLastError() == ERROR_IO_PENDING)
+		{
+			return(TRUE);
+		}
+		else
+		{
+			if (j->user2 != NULL) { ((ILibProcessPipe_Pipe_ReadExHandler)j->user2)(j, j->user1, 1, j->buffer, 0); }
+		}
 	}
+
+	return(FALSE);
+}
+int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, int bufferLength, void *user, ILibProcessPipe_Pipe_ReadExHandler OnReadHandler)
+{
+	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
+	DWORD bytesRead = 0;
+	int ret = 0;
+
+	if (ReadFile(j->mPipe_ReadEnd, buffer, bufferLength, &bytesRead, j->mOverlapped))
+	{
+		// Complete
+		if (OnReadHandler != NULL) { OnReadHandler(j, user, 0, buffer, (int)bytesRead); }
+	}
+	else
+	{
+		if (GetLastError() == ERROR_IO_PENDING)
+		{
+			j->usingCompletionRoutine = 1;
+			j->buffer = buffer;
+			j->bufferSize = bufferLength;
+			j->user1 = user;
+			j->user2 = OnReadHandler;
+			ILibChain_AddWaitHandle(j->manager->ChainLink.ParentChain, j->mOverlapped->hEvent, -1, ILibProcessPipe_Pipe_ReadEx_sink, j);
+		}
+		else
+		{
+			ret = 1;
+		}
+	}
+	return(ret);
 }
 BOOL ILibProcessPipe_Pipe_WriteEx_sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {

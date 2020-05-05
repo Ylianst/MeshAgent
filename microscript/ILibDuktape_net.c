@@ -93,7 +93,6 @@ typedef struct ILibDuktape_net_WindowsIPC
 
 	ULONG_PTR _reserved[5];
 
-	int processingRead;
 	char *buffer;
 	int bufferLength;
 	int bufferOffset;
@@ -847,14 +846,10 @@ int ILibDuktape_net_server_IPC_unshiftSink(ILibDuktape_DuplexStream *sender, int
 	winIPC->unshiftedBytes = unshiftBytes;
 	return(unshiftBytes);
 }
-void ILibDuktape_net_server_IPC_readsink_safe(void *chain, void *user)
+void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user, DWORD dwErrorCode, char *buffer, int bufferLen)
 {
 	if (!ILibMemory_CanaryOK(user)) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
-	ILibProcessPipe_Pipe sender = (ILibProcessPipe_Pipe)winIPC->_reserved[0];
-	DWORD dwErrorCode = (DWORD)winIPC->_reserved[2];
-	char *buffer = (char*)winIPC->_reserved[3];
-	int bufferLen = (int)winIPC->_reserved[4];
 
 	if (dwErrorCode == 0)
 	{
@@ -895,19 +890,6 @@ void ILibDuktape_net_server_IPC_readsink_safe(void *chain, void *user)
 		}
 	}
 }
-void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user, DWORD dwErrorCode, char *buffer, int bufferLen)
-{
-	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
-	if (!ILibMemory_CanaryOK(user)) { return; }
-	
-	winIPC->_reserved[0] = (ULONG_PTR)sender;
-	winIPC->_reserved[1] = (ULONG_PTR)user;
-	winIPC->_reserved[2] = (ULONG_PTR)dwErrorCode;
-	winIPC->_reserved[3] = (ULONG_PTR)buffer;
-	winIPC->_reserved[4] = (ULONG_PTR)bufferLen;
-
-	Duktape_RunOnEventLoop(winIPC->mChain, duk_ctx_nonce(winIPC->ctx), winIPC->ctx, ILibDuktape_net_server_IPC_readsink_safe, NULL, winIPC);
-}
 void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	// No-OP, becuase all we need to so is set Paused flag, which is already the  case when we get here
@@ -915,8 +897,7 @@ void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void
 void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
-	if (winIPC->processingRead != 0 || winIPC->mPipeHandle == NULL) { return; }
-	winIPC->processingRead = 1;
+	if (winIPC->mPipeHandle == NULL) { return; }
 
 	if (winIPC->buffer == NULL)
 	{
@@ -982,7 +963,6 @@ void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, voi
 			}
 		}
 	}
-	winIPC->processingRead = 0;
 }
 void ILibDuktape_net_server_IPC_WriteCompletionEvent(ILibProcessPipe_Pipe sender, void *user, DWORD errorCode, int bytesWritten)
 {
