@@ -2862,14 +2862,24 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 }
 void ILibChain_RemoveWaitHandle(void *chain, HANDLE h)
 {
-	//
-	// We must dispatch an APC to remove the wait handle,
-	// because we can't change the wait list during a WaitForMultipleObjectsEx() call
-	//
-	void **tmp = (void**)ILibMemory_SmartAllocate(2 * sizeof(void*));
-	tmp[0] = chain;
-	tmp[1] = h;
-	QueueUserAPC((PAPCFUNC)ILibChain_RemoveWaitHandle_APC, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tmp);
+	if (ILibIsRunningOnChainThread(chain))
+	{
+		void *tmp[2];
+		tmp[0] = chain;
+		tmp[1] = h;
+		ILibChain_RemoveWaitHandle_APC((ULONG_PTR)tmp);
+	}
+	else
+	{
+		//
+		// We must dispatch an APC to remove the wait handle,
+		// because we can't change the wait list during a WaitForMultipleObjectsEx() call
+		//
+		void **tmp = (void**)ILibMemory_SmartAllocate(2 * sizeof(void*));
+		tmp[0] = chain;
+		tmp[1] = h;
+		QueueUserAPC((PAPCFUNC)ILibChain_RemoveWaitHandle_APC, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tmp);
+	}
 }
 #endif
 

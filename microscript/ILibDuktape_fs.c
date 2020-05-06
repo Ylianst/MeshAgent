@@ -922,7 +922,7 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 
 #if defined(WIN32)
 	int r = CancelIo(data->h);
-	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, data->overlapped.hEvent);
+	ILibChain_RemoveWaitHandle(data->chain, data->overlapped.hEvent);
 	CloseHandle(data->h);
 	data->h = NULL;
 #elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
@@ -959,15 +959,14 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 #endif
 
 #ifdef WIN32
-BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user);
-void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
+BOOL ILibDuktape_fs_watch_iocompletion(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
+	if (errors != ILibWaitHandle_ErrorStatus_NONE || !ILibMemory_CanaryOK(user)) { return(FALSE); }
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
 	FILE_NOTIFY_INFORMATION *n = (FILE_NOTIFY_INFORMATION*)data->results;
 	char filename[4096];
-
 	int changed = 0, renamed = 0;
-
+	BOOL ret = FALSE;
 	
 	duk_push_object(data->ctx);										// [detail]
 
@@ -1040,18 +1039,10 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 		}
 		else
 		{
-			ILibProcessPipe_WaitHandle_Add(data->pipeManager, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
+			ret = TRUE;
 		}
 	}
-}
-BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
-{
-	if (errors != ILibWaitHandle_ErrorStatus_NONE || !ILibMemory_CanaryOK(user)) { return(FALSE); }
-	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
-
-	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, h);
-	Duktape_RunOnEventLoop(data->chain, duk_ctx_nonce(data->ctx), data->ctx, ILibDuktape_fs_watch_iocompletionEx, NULL, data);
-	return(TRUE);
+	return(ret);
 }
 #endif
 
@@ -1414,7 +1405,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	{
 		return(ILibDuktape_Error(ctx, "fs.watch(): Error creating watcher"));
 	}
-	ILibProcessPipe_WaitHandle_Add(pipeMgr, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
+	ILibChain_AddWaitHandle(data->chain, data->overlapped.hEvent, -1, ILibDuktape_fs_watch_iocompletion, data);
 #elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	data->wd.i = inotify_add_watch(data->linuxWatcher->fd, path, IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO);
 	if (data->wd.i < 0)
