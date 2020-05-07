@@ -973,6 +973,7 @@ typedef struct ILibBaseChain
 	void *node;
 }ILibBaseChain;
 
+#ifdef WIN32
 typedef struct ILibChain_WaitHandleInfo
 {
 	void *node;
@@ -980,6 +981,7 @@ typedef struct ILibChain_WaitHandleInfo
 	void *user;
 	struct timeval expiration;
 }ILibChain_WaitHandleInfo;
+#endif
 
 void* ILibMemory_AllocateA_Init(void *buffer)
 {
@@ -3328,7 +3330,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		chain->node = ILibLinkedList_Remove(chain->node);
 	}
 
-
+#ifdef WIN32
 	for (vX = 0; vX < FD_SETSIZE; ++vX)
 	{
 		if (chain->WaitHandles[vX] != NULL && chain->WaitHandles[ILibChain_HandleInfoIndex(vX)] == NULL)
@@ -3337,6 +3339,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		}
 	}
 	ILibLinkedList_Destroy(chain->auxSelectHandles);
+#endif
 
 	if (gILibChain ==  Chain) { gILibChain = NULL; } // Reset the global instance if it was set
 
