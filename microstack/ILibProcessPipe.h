@@ -100,15 +100,5 @@ pid_t ILibProcessPipe_Process_GetPID(ILibProcessPipe_Process p);
 int ILibProcessPipe_Process_GetPTY(ILibProcessPipe_Process p);
 #endif
 
-
-#ifdef WIN32
-typedef BOOL(*ILibProcessPipe_WaitHandle_Handler)(HANDLE event, ILibWaitHandle_ErrorStatus status, void* user);
-void ILibProcessPipe_WaitHandle_Remove(ILibProcessPipe_Manager mgr, HANDLE event);
-
-// These methods will dispatch the callback on the worker thread
-void ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(ILibProcessPipe_Manager mgr, HANDLE event, int milliseconds, void *user, ILibProcessPipe_WaitHandle_Handler callback);
-#define ILibProcessPipe_WaitHandle_Add(processPipeManager, eventHandle, user, callback) ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(processPipeManager, eventHandle, 0, user, callback)
-
-#endif
 #define ILibTransports_ProcessPipe 0x60
 #endif

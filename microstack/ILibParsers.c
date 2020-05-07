@@ -1998,6 +1998,181 @@ void ILibChain_UpdateEventHook(ILibChain_EventHookToken token, int maxTimeout)
 		memset(hook, 0, sizeof(ILibChain_Link_Hook));
 	}
 }
+
+
+#ifdef WIN32
+int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_set *errorset, HANDLE *waitList, int waitListCount, DWORD waitTimeout)
+{
+	int slct = -1;
+	int i;
+	struct timeval currentTime;
+	struct timeval tv;
+
+	if (waitListCount == 0)
+	{
+		SleepEx(waitTimeout, TRUE);
+		slct = -1;
+	}
+	else
+	{
+		while ((slct = WaitForMultipleObjectsEx(waitListCount, waitList, FALSE, waitTimeout, TRUE)) == WAIT_IO_COMPLETION && ((ILibBaseChain*)chain)->UnblockFlag == 0) {}
+		ILibGetTimeOfDay(&currentTime);
+		if (slct != WAIT_IO_COMPLETION && (slct - (int)WAIT_OBJECT_0 >= 0) && (slct - (int)WAIT_OBJECT_0 < waitListCount))
+		{
+			if (waitList[ILibChain_HandleInfoIndex(slct)] != NULL)
+			{
+				ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(slct)];
+				HANDLE h = waitList[slct];
+				waitList[ILibChain_HandleInfoIndex(slct)] = NULL;
+				waitList[slct] = NULL;
+				if (info->handler != NULL)
+				{
+					if (info->handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
+					{
+						// FALSE means to remove tha HANDLE
+						if (ILibMemory_CanaryOK(info))
+						{
+							ILibLinkedList_Remove(info->node);
+						}
+					}
+				}
+			}
+		}
+		if (slct == WAIT_TIMEOUT)
+		{
+			for (i = 0; i < waitListCount; ++i)
+			{
+				if (waitList[ILibChain_HandleInfoIndex(i)] != NULL && tvnonzero(&(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->expiration)))
+				{
+					if (tv2LTEtv1(&currentTime, &(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->expiration)))
+					{
+						// TIMEOUT occured
+						if (((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler != NULL)
+						{
+							((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler(chain, waitList[i], ILibWaitHandle_ErrorStatus_TIMEOUT, ((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->user);
+						}
+						ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->node);
+						waitList[i] = NULL;
+						waitList[ILibChain_HandleInfoIndex(i)] = NULL;
+					}
+				}
+			}
+		}
+		if (slct == WAIT_FAILED)
+		{
+			// One of the handles is invalid... Kick it out
+			for (i = 0; i < waitListCount; ++i)
+			{
+				if (waitList[ILibChain_HandleInfoIndex(i)] != NULL)
+				{
+					if (WaitForSingleObject(waitList[i], 0) == WAIT_FAILED)
+					{
+						if (((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler != NULL)
+						{
+							((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler(chain, waitList[i], ILibWaitHandle_ErrorStatus_INVALID_HANDLE, ((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->user);
+						}
+						ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->node);
+						waitList[i] = NULL;
+						waitList[ILibChain_HandleInfoIndex(i)] = NULL;
+					}
+				}
+			}
+		}
+		tv.tv_sec = 0; tv.tv_usec = 0;
+		slct = select(FD_SETSIZE, readset, writeset, errorset, &tv);
+		((ILibBaseChain*)chain)->UnblockFlag = 0;
+	}
+	return(slct);
+}
+void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, struct timeval *tv, DWORD *timeout, fd_set *readset, fd_set *writeset, fd_set *errorset, ILibLinkedList handleList)
+{
+	HANDLE selectHandles[FD_SETSIZE];
+	memset(selectHandles, 0, sizeof(selectHandles));
+
+	if (readset->fd_count == 0 && writeset->fd_count == 0 && ILibLinkedList_GetNode_Head(handleList) == NULL)
+	{
+		*waitListCount = 0;
+		return;
+	}
+
+	void *node;
+	struct timeval currentTime;
+	struct timeval expirationTime;
+	int i;
+	int x = 0;
+	long flags;
+	for (i = 0; i < (int)readset->fd_count; ++i)
+	{
+		selectHandles[x++] = (HANDLE)readset->fd_array[i];
+	}
+	for (i = 0; i < (int)writeset->fd_count; ++i)
+	{
+		if (!FD_ISSET(writeset->fd_array[i], readset))
+		{
+			selectHandles[x++] = (HANDLE)writeset->fd_array[i];
+		}
+	}
+	for (i = 0; i < (int)errorset->fd_count; ++i)
+	{
+		if (!FD_ISSET(errorset->fd_array[i], readset) && !FD_ISSET(errorset->fd_array[i], writeset))
+		{
+			selectHandles[x++] = (HANDLE)errorset->fd_array[i];
+		}
+	}
+	for (i = 0; i < x; ++i)
+	{
+		if (waitList[i] == NULL || waitList[ILibChain_HandleInfoIndex(i)] != NULL)
+		{
+			waitList[i] = WSACreateEvent();
+		}
+		else
+		{
+			WSAResetEvent(waitList[i]);
+		}
+		flags = 0;
+		waitList[ILibChain_HandleInfoIndex(i)] = NULL;
+
+		if (FD_ISSET(selectHandles[i], readset)) { flags |= (FD_READ | FD_ACCEPT); }
+		if (FD_ISSET(selectHandles[i], writeset)) { flags |= (FD_WRITE | FD_CONNECT); }
+		if (FD_ISSET(selectHandles[i], errorset)) { flags |= FD_CLOSE; }
+		WSAEventSelect((SOCKET)selectHandles[i], waitList[i], flags);
+	}
+	ILibGetTimeOfDay(&currentTime);
+	memcpy_s(&expirationTime, sizeof(struct timeval), &currentTime, sizeof(struct timeval));
+	expirationTime.tv_sec += tv->tv_sec;
+	expirationTime.tv_usec += tv->tv_usec;
+	node = ILibLinkedList_GetNode_Head(handleList);
+	while (node != NULL)
+	{
+		i = x++;
+		if (waitList[i] != NULL && waitList[ILibChain_HandleInfoIndex(i)] == NULL)
+		{
+			WSACloseEvent(waitList[i]);
+		}
+		waitList[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
+		waitList[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
+		if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
+		{
+			// Timeout was specified
+			if (tv2LTtv1(&expirationTime, &(((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration)))
+			{
+				expirationTime.tv_sec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec;
+				expirationTime.tv_usec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec;
+
+				// If the expiration happens in the past, we need to set the timeout to zero
+				if (tv2LTtv1(&expirationTime, &currentTime)) { expirationTime.tv_sec = currentTime.tv_sec; expirationTime.tv_usec = currentTime.tv_usec; }
+			}
+		}
+		node = ILibLinkedList_GetNextNode(node);
+	}
+	expirationTime.tv_sec -= currentTime.tv_sec; if (expirationTime.tv_sec < 0) { expirationTime.tv_sec = 0; }
+	expirationTime.tv_usec -= currentTime.tv_usec; if (expirationTime.tv_usec < 0) { expirationTime.tv_usec = 0; }
+	*timeout = (DWORD)((expirationTime.tv_sec * 1000) + (expirationTime.tv_usec / 0.001));
+	*waitListCount = x;
+}
+#endif
+
+
 ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain)
 {
 	return(((ILibBaseChain*)chain)->continuationState);
@@ -2090,15 +2265,11 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		//
 		chain->PreSelectCount++;
 #ifdef WIN32
-		if (readset.fd_count == 0 && writeset.fd_count == 0)
-		{
-			SleepEx((DWORD)chain->selectTimeout, TRUE); // If there is no pending IO, we must force the thread into an alertable wait state, so ILibForceUnblockChain can function.
-			slct = -1;
-		}
-		else
-		{
-			slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
-		}
+		int x = 0;
+		DWORD waitTimeout = 0;
+
+		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles);
+		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
 #endif
@@ -2902,13 +3073,9 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	fd_set writeset;
 
 #ifdef WIN32
-	void *node;
-	DWORD waitTimeout;
 	HANDLE selectHandles[FD_SETSIZE];
 	memset(selectHandles, 0, sizeof(selectHandles));
 	memset(chain->WaitHandles, 0, sizeof(chain->WaitHandles));
-	struct timeval currentTime;
-	struct timeval expirationTime;
 #endif
   	struct timeval tv;
 	int slct;
@@ -3034,148 +3201,11 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		//
 		chain->PreSelectCount++;
 #ifdef WIN32
-		if (readset.fd_count == 0 && writeset.fd_count == 0 && ILibLinkedList_GetNode_Head(chain->auxSelectHandles)==NULL)
-		{
-			SleepEx((DWORD)chain->selectTimeout, TRUE); // If there is no pending IO, we must force the thread into an alertable wait state, so ILibForceUnblockChain can function.
-			slct = -1;
-		}
-		else
-		{
-			int i;
-			int x = 0;
-			long flags;
-			for (i = 0; i < (int)readset.fd_count; ++i)
-			{
-				selectHandles[x++] = (HANDLE)readset.fd_array[i];
-			}
-			for (i = 0; i < (int)writeset.fd_count; ++i)
-			{
-				if (!FD_ISSET(writeset.fd_array[i], &readset))
-				{
-					selectHandles[x++] = (HANDLE)writeset.fd_array[i];
-				}
-			}
-			for (i = 0; i < (int)errorset.fd_count; ++i)
-			{
-				if (!FD_ISSET(errorset.fd_array[i], &readset) && !FD_ISSET(errorset.fd_array[i], &writeset))
-				{
-					selectHandles[x++] = (HANDLE)errorset.fd_array[i];
-				}
-			}
-			for (i = 0; i < x; ++i)
-			{
-				if (chain->WaitHandles[i] == NULL || chain->WaitHandles[ILibChain_HandleInfoIndex(i)] != NULL)
-				{
-					chain->WaitHandles[i] = WSACreateEvent();
-				}
-				else
-				{
-					WSAResetEvent(chain->WaitHandles[i]);
-				}
-				flags = 0;
-				chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = NULL;
+		int x = 0;
+		DWORD waitTimeout = 0;
 
-				if (FD_ISSET(selectHandles[i], &readset)) { flags |= (FD_READ | FD_ACCEPT); }
-				if (FD_ISSET(selectHandles[i], &writeset)) { flags |= (FD_WRITE | FD_CONNECT); }
-				if (FD_ISSET(selectHandles[i], &errorset)) { flags |= FD_CLOSE; }
-				WSAEventSelect((SOCKET)selectHandles[i], chain->WaitHandles[i], flags);
-			}
-			ILibGetTimeOfDay(&currentTime);
-			memcpy_s(&expirationTime, sizeof(struct timeval), &currentTime, sizeof(struct timeval));
-			expirationTime.tv_sec += tv.tv_sec;
-			expirationTime.tv_usec += tv.tv_usec;
-			node = ILibLinkedList_GetNode_Head(chain->auxSelectHandles);
-			while (node != NULL)
-			{
-				i = x++;
-				if (chain->WaitHandles[i] != NULL && chain->WaitHandles[ILibChain_HandleInfoIndex(i)] == NULL)
-				{
-					WSACloseEvent(chain->WaitHandles[i]);
-				}
-				chain->WaitHandles[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
-				chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
-				if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
-				{
-					// Timeout was specified
-					if (tv2LTtv1(&expirationTime, &(((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration)))
-					{
-						expirationTime.tv_sec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec;
-						expirationTime.tv_usec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec;
-
-						// If the expiration happens in the past, we need to set the timeout to zero
-						if (tv2LTtv1(&expirationTime, &currentTime)) { expirationTime.tv_sec = currentTime.tv_sec; expirationTime.tv_usec = currentTime.tv_usec; }
-					}
-				}
-				node = ILibLinkedList_GetNextNode(node);
-			}
-			expirationTime.tv_sec -= currentTime.tv_sec; if (expirationTime.tv_sec < 0) { expirationTime.tv_sec = 0; }
-			expirationTime.tv_usec -= currentTime.tv_usec; if (expirationTime.tv_usec < 0) { expirationTime.tv_usec = 0; }
-			waitTimeout = (DWORD)((expirationTime.tv_sec * 1000) + (expirationTime.tv_usec / 0.001));
-
-			while ((slct = WaitForMultipleObjectsEx(x, chain->WaitHandles, FALSE, waitTimeout, TRUE)) == WAIT_IO_COMPLETION && chain->UnblockFlag == 0) {}
-			ILibGetTimeOfDay(&currentTime);
-			if (slct != WAIT_IO_COMPLETION && (slct - (int)WAIT_OBJECT_0 >= 0) && (slct - (int)WAIT_OBJECT_0 < x))
-			{
-				if (chain->WaitHandles[ILibChain_HandleInfoIndex(slct)] != NULL)
-				{
-					ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(slct)];
-					HANDLE h = chain->WaitHandles[slct];
-					chain->WaitHandles[ILibChain_HandleInfoIndex(slct)] = NULL;
-					chain->WaitHandles[slct] = NULL;
-					if (info->handler != NULL)
-					{
-						if (info->handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
-						{
-							// FALSE means to remove tha HANDLE
-							ILibLinkedList_Remove(info->node);
-						}
-					}
-				}
-			}
-			if (slct == WAIT_TIMEOUT)
-			{
-				for (i = 0; i < x; ++i)
-				{
-					if (chain->WaitHandles[ILibChain_HandleInfoIndex(i)] != NULL && tvnonzero(&(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->expiration)))
-					{
-						if (tv2LTEtv1(&currentTime, &(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->expiration)))
-						{
-							// TIMEOUT occured
-							if (((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler != NULL)
-							{
-								((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler(chain, chain->WaitHandles[i], ILibWaitHandle_ErrorStatus_TIMEOUT, ((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->user);
-							}
-							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->node);
-							chain->WaitHandles[i] = NULL;
-							chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = NULL;
-						}
-					}
-				}
-			}
-			if (slct == WAIT_FAILED)
-			{
-				// One of the handles is invalid... Kick it out
-				for (i = 0; i < x; ++i)
-				{
-					if (chain->WaitHandles[ILibChain_HandleInfoIndex(i)] != NULL)
-					{
-						if (WaitForSingleObject(chain->WaitHandles[i], 0) == WAIT_FAILED)
-						{
-							if (((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler != NULL)
-							{
-								((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->handler(chain, chain->WaitHandles[i], ILibWaitHandle_ErrorStatus_INVALID_HANDLE, ((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->user);
-							}
-							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)chain->WaitHandles[ILibChain_HandleInfoIndex(i)])->node);
-							chain->WaitHandles[i] = NULL;
-							chain->WaitHandles[ILibChain_HandleInfoIndex(i)] = NULL;
-						}
-					}
-				}
-			}
-			tv.tv_sec = 0; tv.tv_usec = 0;
-			slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
-			chain->UnblockFlag = 0;
-		}
+		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles);
+		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
 #endif
@@ -7176,6 +7206,7 @@ void* ILibLinkedList_InsertAfter(void *LinkedList_Node, void *data)
 */
 void* ILibLinkedList_Remove(void *LinkedList_Node)
 {
+	if (!ILibMemory_CanaryOK(LinkedList_Node)) { return(NULL); }
 	struct ILibLinkedListNode_Root *r;
 	struct ILibLinkedListNode *n;
 	void* RetVal;

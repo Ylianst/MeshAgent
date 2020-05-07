@@ -867,7 +867,6 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 			// Server IPC, so we can create a new Instance, and listen for a connection
 			duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
 			CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
-			if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
 
 			duk_push_heapptr(winIPC->ctx, winIPC->mSocket);											// [connection]
 			duk_del_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer); duk_pop(winIPC->ctx);	// ...
@@ -1055,7 +1054,6 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 			ILibProcessPipe_FreePipe(winIPC->mPipe);
 			winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
 		}
-		if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
 	}
 	return(0);
 }
@@ -1317,7 +1315,7 @@ duk_ret_t ILibDuktape_net_server_Finalizer(duk_context *ctx)
 	ILibDuktape_net_WindowsIPC *ipc = Duktape_GetBufferProperty(ctx, 0, ILibDuktape_net_WindowsIPC_Buffer);
 	if (ipc != NULL && ipc->overlapped.hEvent != NULL)
 	{
-		ILibProcessPipe_WaitHandle_Remove(ipc->manager, ipc->overlapped.hEvent);
+		ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), ipc->overlapped.hEvent);
 		if (ipc->mPipeHandle != NULL) { CloseHandle(ipc->mPipeHandle); ipc->mPipeHandle = NULL; }
 		if (ipc->overlapped.hEvent != NULL) { CloseHandle(ipc->overlapped.hEvent); ipc->overlapped.hEvent = NULL; }	
 	}
