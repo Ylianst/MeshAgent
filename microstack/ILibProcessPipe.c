@@ -1428,6 +1428,8 @@ BOOL ILibProcessPipe_Pipe_ReadEx_sink(void *chain, HANDLE h, ILibWaitHandle_Erro
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)user;
 	DWORD bytesRead = 0;
 
+	if (status == ILibWaitHandle_ErrorStatus_INVALID_HANDLE) { return(FALSE); }
+
 	if (GetOverlappedResult(j->mPipe_ReadEnd, j->mOverlapped, &bytesRead, FALSE))
 	{
 		if (j->user2 != NULL) { ((ILibProcessPipe_Pipe_ReadExHandler)j->user2)(j, j->user1, 0, j->buffer, (int)bytesRead); }
