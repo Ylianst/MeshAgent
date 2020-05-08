@@ -4054,6 +4054,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);
 
+
+#ifdef _REMOTELOGGINGSERVER
+	if (agentHost->masterDb != NULL)
+	{
+		int len;
+		if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "enableILibRemoteLogging", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
+		{
+			ILibScratchPad[len] = 0;
+			ILibStartDefaultLoggerEx(agentHost->chain, (unsigned short)atoi(ILibScratchPad), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
+		}
+	}
+#endif
+
+
 	ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: argv[0] = %s", param[0]);
 
 #if defined(_WINSERVICE)
@@ -4799,25 +4813,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	// Perform a self SHA384 Hash
 	GenerateSHA384FileHash(agentHost->exePath, agentHost->agentHash);
 
-#ifdef _REMOTELOGGINGSERVER
-	{
-		int len;
-		if (agentHost->masterDb == NULL && ILibSimpleDataStore_Exists(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")) != 0)
-		{
-			agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
-			if (agentHost->masterDb != NULL)
-			{
-				if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "enableILibRemoteLogging", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
-				{
-					ILibScratchPad[len] = 0;
-					ILibStartDefaultLoggerEx(agentHost->chain, (unsigned short)atoi(ILibScratchPad), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
-				}
-				ILibSimpleDataStore_Close(agentHost->masterDb);
-				agentHost->masterDb = NULL;
-			}
-		}
-	}
-#endif
 	ILibCriticalLogFilename = ILibString_Copy(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".log"), -1);
 #ifndef MICROSTACK_NOTLS
 	util_openssl_init();
