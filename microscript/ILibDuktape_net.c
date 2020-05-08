@@ -861,7 +861,7 @@ void ILibDuktape_net_server_IPC_readsink(ILibProcessPipe_Pipe sender, void *user
 		ILibDuktape_DuplexStream_Closed(winIPC->ds);
 		ILibProcessPipe_FreePipe(winIPC->mPipe);
 		winIPC->mPipe = NULL; winIPC->mPipeHandle = NULL;
-
+		if (winIPC->buffer != NULL) { free(winIPC->buffer); winIPC->buffer = NULL; }
 		if (winIPC->mServer != NULL)
 		{
 			// Server IPC, so we can create a new Instance, and listen for a connection

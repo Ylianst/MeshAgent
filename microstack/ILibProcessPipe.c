@@ -75,6 +75,7 @@ typedef struct ILibProcessPipe_PipeObject
 {
 	char* buffer;
 	int bufferSize;
+	ILibTransport_MemoryOwnership bufferOwner;
 
 	int readOffset, readNewOffset;
 	int totalRead;
@@ -278,7 +279,7 @@ void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 		free(pipeObject->mwOverlapped);
 	}
 	if (pipeObject->mPipe_Reader_ResumeEvent != NULL) { CloseHandle(pipeObject->mPipe_Reader_ResumeEvent); }
-	if (pipeObject->buffer != NULL) { free(pipeObject->buffer); }
+	if (pipeObject->buffer != NULL && pipeObject->bufferOwner == ILibTransport_MemoryOwnership_CHAIN) { free(pipeObject->buffer); pipeObject->buffer = NULL; }
 #else
 	if (pipeObject->manager != NULL)
 	{
@@ -1391,38 +1392,6 @@ void ILibProcessPipe_Pipe_AddPipeReadHandler(ILibProcessPipe_Pipe targetPipe, in
 	ILibProcessPipe_Process_StartPipeReader(targetPipe, bufferSize, &ILibProcessPipe_Pipe_ReadSink, targetPipe, OnReadHandler);
 }
 #ifdef WIN32
-void __stdcall ILibProcessPipe_Pipe_Read_CompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped)
-{
-	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)((void**)ILibMemory_GetExtraMemory(lpOverlapped, sizeof(OVERLAPPED)))[0];
-	if (!ILibMemory_CanaryOK(j)) { return; }
-	if (j->cancelInProgress != 0)
-	{
-		CloseHandle(j->mOverlapped);
-		free(j->mOverlapped);
-		ILibMemory_Free(j);
-		return;
-	}
-
-	ILibProcessPipe_Pipe_ReadExHandler callback = (ILibProcessPipe_Pipe_ReadExHandler)j->user2;
-	if (callback != NULL) { callback(j, j->user1, dwErrorCode, j->buffer, dwNumberOfBytesTransfered); }
-}
-void __stdcall ILibProcessPipe_Pipe_Write_CompletionRoutine(DWORD dwErrorCode, DWORD dwNumberOfBytesTransfered, LPOVERLAPPED lpOverlapped)
-{
-	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)((void**)ILibMemory_GetExtraMemory(lpOverlapped, sizeof(OVERLAPPED)))[0];
-	if (!ILibMemory_CanaryOK(j)) { return; }
-
-	if (j->user4 != NULL)
-	{
-		((ILibProcessPipe_Pipe_WriteExHandler)j->user4)(j, j->user3, dwErrorCode, dwNumberOfBytesTransfered);
-	}
-}
-//int ILibProcessPipe_Pipe_CancelEx(ILibProcessPipe_Pipe targetPipe)
-//{
-//	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)targetPipe;
-//	if (!ILibMemory_CanaryOK(j) || j->mPipe_ReadEnd == NULL) { return(2); }
-//	j->cancelInProgress = 1;
-//	return(CancelIoEx(j->mPipe_ReadEnd, NULL));
-//}
 BOOL ILibProcessPipe_Pipe_ReadEx_sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {
 	ILibProcessPipe_PipeObject *j = (ILibProcessPipe_PipeObject*)user;
@@ -1465,6 +1434,7 @@ int ILibProcessPipe_Pipe_ReadEx(ILibProcessPipe_Pipe targetPipe, char *buffer, i
 		{
 			j->buffer = buffer;
 			j->bufferSize = bufferLength;
+			j->bufferOwner = ILibTransport_MemoryOwnership_USER;
 			j->user1 = user;
 			j->user2 = OnReadHandler;
 			ILibChain_AddWaitHandle(j->manager->ChainLink.ParentChain, j->mOverlapped->hEvent, -1, ILibProcessPipe_Pipe_ReadEx_sink, j);
