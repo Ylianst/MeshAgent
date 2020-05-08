@@ -2187,6 +2187,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 	ILibChain_Link *module;
 	int slct = 0, vX = 0, mX = 0;
 	struct timeval tv;
+	struct timeval startTime;
 	fd_set readset;
 	fd_set errorset;
 	fd_set writeset;
@@ -2198,16 +2199,25 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 	root->continuationState = ILibChain_ContinuationState_CONTINUE;
 	currentNode = root->node;
 
-	gettimeofday(&tv, NULL);
+	gettimeofday(&startTime, NULL);
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...");
 
 	while (root->TerminateFlag == 0 && root->continuationState == ILibChain_ContinuationState_CONTINUE)
 	{
+		if (maxTimeout > 0)
+		{
+			gettimeofday(&tv, NULL);
+			if (tv.tv_sec < (startTime.tv_sec + maxTimeout / 1000))
+			{
+				root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
+				break;
+			}
+		}
 		slct = 0;
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
-		tv.tv_sec = UPNP_MAX_WAIT;
+		tv.tv_sec = maxTimeout < 0 ? UPNP_MAX_WAIT : maxTimeout/1000;
 		tv.tv_usec = 0;
 
 		//

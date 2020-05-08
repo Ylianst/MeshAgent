@@ -162,6 +162,7 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
+	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
 	{
@@ -178,7 +179,7 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
 
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
-	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, -1);
+	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout);
 
 	return(0);
 }
