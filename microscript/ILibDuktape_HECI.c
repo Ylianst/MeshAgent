@@ -853,7 +853,7 @@ void ILibDuktape_HECI_IoctlHandler_Dispatch(void *chain, void *user)
 void ILibDuktape_HECI_NextIoctl(ILibQueue q);
 BOOL ILibDuktape_HECI_IoctlHandler(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
-	if (errors == ILibWaitHandle_ErrorStatus_INVALID_HANDLE) { return(FALSE); }
+	if (errors == ILibWaitHandle_ErrorStatus_INVALID_HANDLE || errors == ILibWaitHandle_ErrorStatus_REMOVED) { return(FALSE); }
 	if (!ILibMemory_CanaryOK(user)) { return(FALSE); }
 
 	ILibDuktape_HECI_ioctl_data *data = (ILibDuktape_HECI_ioctl_data*)user;
