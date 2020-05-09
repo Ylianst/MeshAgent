@@ -294,7 +294,7 @@ DWORD WINAPI KVM_InitMessagePumpEx(LPVOID parm)
 		KVM_PumpMessage();
 		DestroyWindow(CUR_HWND);
 		CUR_HWND = NULL;
-		UnregisterClassA(a, GetModuleHandleA(NULL));
+		UnregisterClassA((LPCSTR)a, GetModuleHandleA(NULL));
 	}
 	return(0);
 }
