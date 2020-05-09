@@ -280,16 +280,21 @@ void KVM_PumpMessage()
 
 DWORD WINAPI KVM_InitMessagePumpEx(LPVOID parm)
 {
+	ATOM a;
+	printf("MessagePump ThreadID: %u\n", GetCurrentThreadId());
 	memset(&CUR_WNDCLASS, 0, sizeof(CUR_WNDCLASS));
 	CUR_WNDCLASS.hInstance = GetModuleHandleA(NULL);
 	CUR_WNDCLASS.lpszClassName = "MainWWW2Class";
 	CUR_WNDCLASS.cbSize = sizeof(CUR_WNDCLASS);
 	CUR_WNDCLASS.lpfnWndProc = KVMWindowProc;
 
-	if (RegisterClassExA(&CUR_WNDCLASS) != 0)
+	if ((a=RegisterClassExA(&CUR_WNDCLASS)) != 0)
 	{
 		CUR_HWND = CreateWindowExA(0x00000088, "MainWWW2Class", "TestTitle", 0x00800000, 0, 0, 100, 100, 0, 0, 0, 0);
 		KVM_PumpMessage();
+		DestroyWindow(CUR_HWND);
+		CUR_HWND = NULL;
+		UnregisterClassA(a, GetModuleHandleA(NULL));
 	}
 	return(0);
 }
