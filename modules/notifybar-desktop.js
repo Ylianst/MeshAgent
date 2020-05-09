@@ -33,7 +33,7 @@ function windows_notifybar_system(title, tsid)
 {
     var ret = {};
 
-    var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
+    var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process._exit();});").toString('base64');
 
     require('events').EventEmitter.call(ret, true)
         .createEvent('close')
