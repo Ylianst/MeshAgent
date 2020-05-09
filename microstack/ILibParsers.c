@@ -948,6 +948,7 @@ typedef struct ILibBaseChain
 	int UnblockFlag;
 	void* auxSelectHandles;
 	HANDLE WaitHandles[FD_SETSIZE * 2];
+	HANDLE currentHandle;
 #else
 	pthread_t ChainThreadID;
 	int TerminatePipe[2];
@@ -2024,20 +2025,21 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 			if (waitList[ILibChain_HandleInfoIndex(slct)] != NULL)
 			{
 				ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(slct)];
-				HANDLE h = waitList[slct];
+				((ILibBaseChain*)chain)->currentHandle = waitList[slct];
 				waitList[ILibChain_HandleInfoIndex(slct)] = NULL;
 				waitList[slct] = NULL;
 				if (info->handler != NULL)
 				{
-					if (info->handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
+					if (info->handler(chain, ((ILibBaseChain*)chain)->currentHandle, ILibWaitHandle_ErrorStatus_NONE, info->user) == FALSE)
 					{
 						// FALSE means to remove tha HANDLE
-						if (ILibMemory_CanaryOK(info))
+						if (((ILibBaseChain*)chain)->currentHandle != NULL && ILibMemory_CanaryOK(info))
 						{
 							ILibLinkedList_Remove(info->node);
 						}
 					}
 				}
+				((ILibBaseChain*)chain)->currentHandle = NULL;
 			}
 		}
 		if (slct == WAIT_TIMEOUT)
@@ -3039,6 +3041,7 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 		// We found the HANDLE, so if we remove the HANDLE from the list, and
 		// set the unblock flag, we'll be good to go
 		//
+		if (chain->currentHandle == h) { chain->currentHandle = NULL; }
 		ILibLinkedList_Remove(node);
 		chain->UnblockFlag = 1;
 	}

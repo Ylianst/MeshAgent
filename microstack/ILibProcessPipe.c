@@ -767,24 +767,31 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 	int err=0;
 	
 #ifdef WIN32
-	BOOL result;
-	DWORD bytesRead;
+	int firstPass = 1;
+	DWORD bytesRead = 0;
 	UNREFERENCED_PARAMETER(event);
 #else
-	int bytesRead;
+	int bytesRead = 0;
 #endif
 	pipeObject->processingLoop = 1;
 	do
 	{
 #ifdef WIN32
 		err = 0;
-		result = GetOverlappedResult(pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, &bytesRead, FALSE);
-		pipeObject->inProgress = 0;
-		//printf("Overlapped(%p): %d bytes\n", pipeObject->mPipe_ReadEnd, bytesRead);
-		if (result == FALSE || bytesRead == 0)
+		if (firstPass != 0)
 		{
-			err = GetLastError();
-			break;
+			firstPass = 0;
+			if (pipeObject->inProgress != 0)
+			{
+				if (GetOverlappedResult(pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, &bytesRead, FALSE) == 0 || bytesRead == 0)
+				{
+					pipeObject->inProgress = 0;
+					err = GetLastError();
+					if (err == ERROR_IO_PENDING) { return(TRUE); }
+					break;
+				}
+				pipeObject->inProgress = 0;
+			}
 		}
 #else
 		bytesRead = (int)read(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead);
@@ -858,8 +865,9 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		if (pipeObject->PAUSED == 0)
 		{
 			pipeObject->inProgress = 1;
-			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, NULL, pipeObject->mOverlapped) != TRUE)
+			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, &bytesRead, pipeObject->mOverlapped) != TRUE)
 			{
+				if (GetLastError() == ERROR_IO_PENDING) { return(TRUE); }
 				break;
 			}
 		}
