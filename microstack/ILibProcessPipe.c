@@ -1001,7 +1001,7 @@ void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject)
 	else
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(p->manager->ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ProcessPipe.Pause(): Opaque = %p",(void*)p->mOverlapped_opaqueData);
-		ILibChain_RemoveWaitHandle(p->manager->ChainLink.ParentChain, p->mOverlapped->hEvent);
+		//ILibChain_RemoveWaitHandle(p->manager->ChainLink.ParentChain, p->mOverlapped->hEvent);
 	}
 #else
 	ILibLinkedList_Remove(ILibLinkedList_GetNode_Search(p->manager->ActivePipes, NULL, pipeObject));
@@ -1072,6 +1072,9 @@ void ILibProcessPipe_Pipe_ResumeEx(ILibProcessPipe_PipeObject* p)
 		ILibLifeTime_Add(ILibGetBaseTimer(p->manager->ChainLink.ParentChain), p, 0, &ILibProcessPipe_Process_StartPipeReaderWriterEx, NULL); // Need to context switch to Chain Thread
 	}
 }
+#ifdef WIN32
+BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
+#endif
 void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject)
 {
 	ILibProcessPipe_PipeObject *p = (ILibProcessPipe_PipeObject*)pipeObject;
@@ -1083,7 +1086,9 @@ void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject)
 	}
 	else
 	{
-		ILibProcessPipe_Pipe_ResumeEx(p);
+		//ILibProcessPipe_Pipe_ResumeEx(p);
+		p->PAUSED = 0;
+		ILibProcessPipe_Process_Pipe_ReadExHandler(p->manager->ChainLink.ParentChain, p->mPipe_ReadEnd, ILibWaitHandle_ErrorStatus_NONE, NULL, 0, pipeObject);
 		if (p->mProcess != NULL && p->mProcess->hProcess_needAdd != 0 && p->mProcess->disabled == 0)
 		{
 			p->mProcess->hProcess_needAdd = 0;
@@ -1151,7 +1156,49 @@ DWORD ILibProcessPipe_Pipe_BackgroundReader(void *arg)
 	return 0;
 }
 #endif
-
+#ifdef WIN32
+BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user)
+{
+	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
+	ILibProcessPipe_GenericReadHandler handler = (ILibProcessPipe_GenericReadHandler)pipeObject->handler;
+	int consumed = 0;
+	if (status == ILibWaitHandle_ErrorStatus_NONE)
+	{
+		pipeObject->totalRead += bytesRead;
+		do
+		{
+			handler(pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead, &consumed, pipeObject->user1, pipeObject->user2);
+			pipeObject->readOffset += consumed;
+			pipeObject->totalRead -= consumed;
+		} while (pipeObject->PAUSED == 0 && consumed != 0 && pipeObject->totalRead > 0);
+		if (pipeObject->totalRead == 0) { pipeObject->readOffset = 0; }
+		if (pipeObject->PAUSED == 0)
+		{
+			if (pipeObject->readOffset > 0)
+			{
+				memmove_s(pipeObject->buffer, pipeObject->bufferSize, pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead);
+				pipeObject->readOffset = 0;
+			}
+			else if (pipeObject->totalRead == pipeObject->bufferSize)
+			{
+				ILibMemory_ReallocateRaw(&(pipeObject->buffer), pipeObject->bufferSize * 2);
+				pipeObject->bufferSize = pipeObject->bufferSize * 2;
+			}
+			ILibChain_ReadEx(chain, h, pipeObject->mOverlapped, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject);
+			return(TRUE);
+		}
+		else
+		{
+			return(FALSE);
+		}
+	}
+	else
+	{
+		// I/O Errors
+		return(FALSE);
+	}
+}
+#endif
 void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObject, int bufferSize, ILibProcessPipe_GenericReadHandler handler, void* user1, void* user2)
 {
 #ifdef WIN32
@@ -1168,10 +1215,12 @@ void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObj
 	if (pipeObject->mOverlapped != NULL)
 	{
 		// This PIPE supports Overlapped I/O
-		//printf("ReadFile(%p, %d, %d) (StartPipeReader)\n", pipeObject->mPipe_ReadEnd, 0, pipeObject->bufferSize);
-		pipeObject->inProgress = 1;
-		result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer, pipeObject->bufferSize, NULL, pipeObject->mOverlapped);
-		ILibChain_AddWaitHandle(pipeObject->manager->ChainLink.ParentChain, pipeObject->mOverlapped->hEvent, -1, ILibProcessPipe_Process_ReadHandler, pipeObject);
+		ILibChain_ReadEx(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject);
+
+		////printf("ReadFile(%p, %d, %d) (StartPipeReader)\n", pipeObject->mPipe_ReadEnd, 0, pipeObject->bufferSize);
+		//pipeObject->inProgress = 1;
+		//result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer, pipeObject->bufferSize, NULL, pipeObject->mOverlapped);
+		//ILibChain_AddWaitHandle(pipeObject->manager->ChainLink.ParentChain, pipeObject->mOverlapped->hEvent, -1, ILibProcessPipe_Process_ReadHandler, pipeObject);
 	}
 	else
 	{

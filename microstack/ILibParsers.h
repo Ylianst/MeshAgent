@@ -354,7 +354,8 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibWaitHandle_ErrorStatus_INVALID_HANDLE = 1,
 		ILibWaitHandle_ErrorStatus_TIMEOUT = 2,
 		ILibWaitHandle_ErrorStatus_REMOVED = 3,
-		ILibWaitHandle_ErrorStatus_MANAGER_EXITING = 4
+		ILibWaitHandle_ErrorStatus_MANAGER_EXITING = 4,
+		ILibWaitHandle_ErrorStatus_IO_ERROR = 5
 	}ILibWaitHandle_ErrorStatus;
 	typedef BOOL(*ILibChain_WaitHandleHandler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus, void* user);
 #endif
@@ -973,8 +974,18 @@ int ILibIsRunningOnChainThread(void* chain);
 	void *ILibChain_GetObjectForDescriptor(void *chain, int fd);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 #ifdef WIN32
+	typedef BOOL(*ILibChain_ReadEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
+	typedef struct ILibChain_ReadEx_data
+	{
+		char *buffer;
+		ILibChain_ReadEx_Handler handler;
+		HANDLE fileHandle;
+		OVERLAPPED *p;
+		void *user;
+	}ILibChain_ReadEx_data;
 	void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user);
 	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);
+	void ILibChain_ReadEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user);
 	#define tv2LTtv1(ptv1, ptv2) ((ptv2)->tv_sec < (ptv1)->tv_sec || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec < (ptv1)->tv_usec))
 	#define tv2LTEtv1(ptv1, ptv2) (tv2LTtv1(ptv2,ptv1) || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec <= (ptv1)->tv_usec))
 	#define tvnonzero(ptv) ((ptv)->tv_sec != 0 || (ptv)->tv_usec != 0)

@@ -921,6 +921,15 @@ struct ILibBaseChain_SafeData
 	void *Object;
 };
 
+#ifdef WIN32
+typedef struct ILibChain_WaitHandleInfo
+{
+	void *node;
+	ILibChain_WaitHandleHandler handler;
+	void *user;
+	struct timeval expiration;
+}ILibChain_WaitHandleInfo;
+#endif
 
 typedef struct ILibBaseChain
 {
@@ -949,6 +958,7 @@ typedef struct ILibBaseChain
 	void* auxSelectHandles;
 	HANDLE WaitHandles[FD_SETSIZE * 2];
 	HANDLE currentHandle;
+	ILibChain_WaitHandleInfo *currentInfo;
 #else
 	pthread_t ChainThreadID;
 	int TerminatePipe[2];
@@ -974,15 +984,6 @@ typedef struct ILibBaseChain
 	void *node;
 }ILibBaseChain;
 
-#ifdef WIN32
-typedef struct ILibChain_WaitHandleInfo
-{
-	void *node;
-	ILibChain_WaitHandleHandler handler;
-	void *user;
-	struct timeval expiration;
-}ILibChain_WaitHandleInfo;
-#endif
 
 void* ILibMemory_AllocateA_Init(void *buffer)
 {
@@ -2026,6 +2027,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 			{
 				ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(slct)];
 				((ILibBaseChain*)chain)->currentHandle = waitList[slct];
+				((ILibBaseChain*)chain)->currentInfo = info;
 				waitList[ILibChain_HandleInfoIndex(slct)] = NULL;
 				waitList[slct] = NULL;
 				if (info->handler != NULL)
@@ -2040,6 +2042,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 					}
 				}
 				((ILibBaseChain*)chain)->currentHandle = NULL;
+				((ILibBaseChain*)chain)->currentInfo = NULL;
 			}
 		}
 		if (slct == WAIT_TIMEOUT)
@@ -2988,6 +2991,69 @@ void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
 }
 
 #ifdef WIN32
+BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user)
+{
+	ILibChain_ReadEx_data *data = (ILibChain_ReadEx_data*)user;
+	DWORD bytesRead = 0;
+
+	if (GetOverlappedResult(data->fileHandle, data->p, &bytesRead, FALSE) && bytesRead > 0)
+	{
+		if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->buffer, bytesRead, data->user); }
+		ILibMemory_Free(data);
+		return(FALSE);
+	}
+	else
+	{
+		if (GetLastError() == ERROR_IO_PENDING)
+		{
+			// Still pending, so wait for another callback
+			return(TRUE);
+		}
+		else
+		{
+			// ERROR
+			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, data->buffer, 0, data->user); }
+			ILibMemory_Free(data);
+			return(FALSE);
+		}
+	}
+}
+void ILibChain_ReadEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user)
+{
+	DWORD bytesRead = 0;
+	int e = 0;
+	if (!ReadFile(h, buffer, bufferLen, &bytesRead, p))
+	{
+		if ((e = GetLastError()) == ERROR_IO_PENDING)
+		{
+			ILibChain_ReadEx_data *state = (ILibChain_ReadEx_data*)ILibMemory_SmartAllocate(sizeof(ILibChain_ReadEx_data));
+			state->buffer = buffer;
+			state->p = p;
+			state->handler = handler;
+			state->fileHandle = h;
+			state->user = user;
+			ILibChain_AddWaitHandle(chain, p->hEvent, -1, ILibChain_ReadEx_Sink, state);
+		}
+		else
+		{
+			if (handler != NULL) { handler(chain, h, ILibWaitHandle_ErrorStatus_IO_ERROR, buffer, 0, user); }
+		}
+	}
+	else
+	{
+		if (bytesRead > 0)
+		{
+			if (handler != NULL) { handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, buffer, bytesRead, user); }
+		}
+		else
+		{
+			if (handler != NULL) { handler(chain, h, ILibWaitHandle_ErrorStatus_IO_ERROR, buffer, 0, user); }
+		}
+	}
+}
+
+
+
 void __stdcall ILibChain_AddWaitHandle_apc(ULONG_PTR u)
 {
 	void *chain = ((void**)u)[0];
@@ -3014,20 +3080,27 @@ void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_Wai
 		return;
 	}
 
-
-	void *node = ILibLinkedList_AddTail(((ILibBaseChain*)chain)->auxSelectHandles, h);
-	ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
-	info->handler = handler;
-	info->user = user;
-	info->node = node;
-	if (msTIMEOUT != INFINITE && msTIMEOUT >= 0)
+	if (((ILibBaseChain*)chain)->currentHandle != h)
 	{
-		ILibGetTimeOfDay(&(info->expiration));
-		info->expiration.tv_sec += (long)(msTIMEOUT / 1000);
-		info->expiration.tv_usec += ((msTIMEOUT % 1000) * 1000);
+		void *node = ILibLinkedList_AddTail(((ILibBaseChain*)chain)->auxSelectHandles, h);
+		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
+		info->handler = handler;
+		info->user = user;
+		info->node = node;
+		if (msTIMEOUT != INFINITE && msTIMEOUT >= 0)
+		{
+			ILibGetTimeOfDay(&(info->expiration));
+			info->expiration.tv_sec += (long)(msTIMEOUT / 1000);
+			info->expiration.tv_usec += ((msTIMEOUT % 1000) * 1000);
+		}
+		ILibForceUnBlockChain(chain);
 	}
-
-	ILibForceUnBlockChain(chain);
+	else
+	{
+		// We are trying to add ourselves, so we can optimize by not deleting, intead of adding new
+		((ILibBaseChain*)chain)->currentHandle = NULL;
+		if (((ILibBaseChain*)chain)->currentInfo->user != user) { ((ILibBaseChain*)chain)->currentInfo->user = user; }
+	}
 }
 void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 {
@@ -3041,7 +3114,7 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 		// We found the HANDLE, so if we remove the HANDLE from the list, and
 		// set the unblock flag, we'll be good to go
 		//
-		if (chain->currentHandle == h) { chain->currentHandle = NULL; }
+		if (chain->currentHandle == h) { chain->currentHandle = NULL; chain->currentInfo = NULL; }
 		ILibLinkedList_Remove(node);
 		chain->UnblockFlag = 1;
 	}
