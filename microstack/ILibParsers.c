@@ -2174,7 +2174,7 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 	}
 	expirationTime.tv_sec -= currentTime.tv_sec; if (expirationTime.tv_sec < 0) { expirationTime.tv_sec = 0; }
 	expirationTime.tv_usec -= currentTime.tv_usec; if (expirationTime.tv_usec < 0) { expirationTime.tv_usec = 0; }
-	*timeout = (DWORD)((expirationTime.tv_sec * 1000) + (expirationTime.tv_usec / 0.001));
+	*timeout = (DWORD)((expirationTime.tv_sec * 1000) + (expirationTime.tv_usec * 0.001));
 	*waitListCount = x;
 }
 #endif
