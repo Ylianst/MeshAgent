@@ -1201,10 +1201,6 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 #endif
 void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObject, int bufferSize, ILibProcessPipe_GenericReadHandler handler, void* user1, void* user2)
 {
-#ifdef WIN32
-	BOOL result;
-#endif
-
 	if ((pipeObject->buffer = (char*)malloc(bufferSize)) == NULL) { ILIBCRITICALEXIT(254); }
 	pipeObject->bufferSize = bufferSize;
 	pipeObject->handler = (void*)handler;
@@ -1216,11 +1212,6 @@ void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObj
 	{
 		// This PIPE supports Overlapped I/O
 		ILibChain_ReadEx(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject);
-
-		////printf("ReadFile(%p, %d, %d) (StartPipeReader)\n", pipeObject->mPipe_ReadEnd, 0, pipeObject->bufferSize);
-		//pipeObject->inProgress = 1;
-		//result = ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer, pipeObject->bufferSize, NULL, pipeObject->mOverlapped);
-		//ILibChain_AddWaitHandle(pipeObject->manager->ChainLink.ParentChain, pipeObject->mOverlapped->hEvent, -1, ILibProcessPipe_Process_ReadHandler, pipeObject);
 	}
 	else
 	{

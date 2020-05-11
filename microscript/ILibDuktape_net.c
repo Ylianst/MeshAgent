@@ -1000,7 +1000,8 @@ ILibTransport_DoneState ILibDuktape_net_server_IPC_WriteSink(ILibDuktape_DuplexS
 {
 	if (!ILibMemory_CanaryOK(user)) { return(ILibTransport_DoneState_ERROR); }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
-	
+	if (!duk_ctx_is_alive(winIPC->ctx) || winIPC->mPipe == NULL) { return(ILibTransport_DoneState_ERROR); }
+
 	duk_push_heapptr(winIPC->ctx, winIPC->mSocket);											// [obj]
 	duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_WindowsIPC_PendingArray);			// [obj][array]
 	
