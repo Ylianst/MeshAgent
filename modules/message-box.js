@@ -283,6 +283,7 @@ function linux_messageBox()
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         var uid;    
         var xinfo;
+        var min = require('user-sessions').minUid();
 
         try
         {
@@ -295,7 +296,7 @@ function linux_messageBox()
             xinfo = require('monitor-info').getXInfo(0);
         }
 
-        if (xinfo == null)
+        if (xinfo == null || (uid != 0 && uid < min))
         {
             ret._rej('This system cannot display a user dialog box when a user is not logged in');
             return (ret);
