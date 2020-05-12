@@ -410,6 +410,28 @@ function UserSessions()
     }
     else if(process.platform == 'linux' || process.platform == 'freebsd')
     {
+        Object.defineProperty(this, "gdmUid", {
+            get: function ()
+            {
+                var ret = null;
+                var min = this.minUid();
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write('getent passwd | grep "Gnome Display Manager" | ' + "tr '\\n' '`' | awk -F: '{ print $3 }'\nexit\n");
+                child.waitExit();
+                if (child.stdout.str.trim() != '' && (ret = parseInt(child.stdout.str.trim())) < min) { return (parseInt(child.stdout.str.trim())); }
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { console.log(c.toString()); });
+                child.stdin.write('getent passwd | grep gdm | ' + "tr '\\n' '`' | awk -F'`' '" + '{ for(i=1;i<NF;++i) { split($i, f, ":"); if(f[3]+0<' + min + '+0) { print f[3]; break; } } }' + "'\nexit\n");
+                child.waitExit();
+                if (child.stdout.str.trim() != '' && (ret = parseInt(child.stdout.str.trim())) < min) { return (parseInt(child.stdout.str.trim())); }
+
+                return (0);
+            }
+        });
         this.getUid = function getUid(username)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -605,22 +627,32 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write('who\nexit\n');
+            child.stdin.write("who | tr '\\n' '\`' | awk '{ print $1 }'\nexit\n");
             child.waitExit();
 
             if (child.stderr.str != '') { return (0); }
-
-            var lines = child.stdout.str.split('\n');
-            var tokens, i, j;
-            for (i in lines) {
-                tokens = lines[i].split(' ');
-                for (j = 1; j < tokens.length; ++j) {
-                    if (tokens[j].length > 0) {
-                        return (parseInt(this._users()[tokens[0]]));
-                    }
+            if (child.stdout.str.trim() != '')
+            {
+                try
+                {
+                    return (this.getUid(child.stdout.str.trim()));
+                }
+                catch (e)
+                {
                 }
             }
-            throw ('nobody logged into console');
+
+            // Before we say nobody is logged on, let's check to see if there is a GDM session
+            var gdm = this.gdmUid;
+            var info = require('monitor-info').getXInfo(gdm);
+            if (info == null || !info.xauthority || !info.display)
+            {
+                throw ('nobody logged into console');
+            }
+            else
+            {
+                return (gdm);
+            }
         }
         
         this.getHomeFolder = function getHomeFolder(id)

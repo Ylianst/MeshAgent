@@ -38,10 +38,12 @@
 #	NOTE: If you installed jpeg8 headers on your machine, you must specify --with-jpeg8 when building turbo jpeg, otherwise omit --with-jpeg8
 #
 #
-# Special Note about KVM Support on Linux:
-#    If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, you may need to:
-#    1. Open /etc/gdm/custom.conf and uncomment WaylandEnable=false.
-#    2. Add the following line to the [daemon] section:
+# Special Note about KVM Support on Linux: 
+#    If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, 
+#    or if you get a black screen when connecting to the login screen, you may need to: 
+#    1. Open /etc/gdm/custom.conf or /etc/gdm3/custom.conf
+#    2. Uncomment: WaylandEnable=false.
+#    3. Add the following line to the [daemon] section:
 #       DefaultSession=gnome-xorg.desktop
 #
 #

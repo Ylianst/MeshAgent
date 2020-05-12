@@ -91,6 +91,8 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define REMOTE_DESKTOP_STREAM	"\xFF_RemoteDesktopStream"
 #define REMOTE_DESKTOP_ptrs		"\xFF_RemoteDesktopPTRS"
 #define DEFAULT_IDLE_TIMEOUT	120
+#define MESH_USER_CHANGED_CB	"\xFF_MeshAgent_UserChangedCallback"
+#define REMOTE_DESKTOP_UID		"\xFF_RemoteDesktopUID"
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
 int ILibDuktape_HECI_Debug = 0;
@@ -1282,6 +1284,48 @@ void ILibDuktape_MeshAgent_RemoteDesktop_SendError(RemoteDesktop_Ptrs* ptrs, cha
 }
 #endif
 
+#ifdef _POSIX
+extern void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid);
+duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
+{
+	char *d, *x;
+	void *s;
+	RemoteDesktop_Ptrs *ptrs;
+	MeshAgentHostContainer *agent;
+
+	duk_eval_string(ctx, "require('MeshAgent')");					// [MeshAgent]
+	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+
+	if (!duk_has_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM)) { return(0); }
+	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM);			// [MeshAgent][stream]
+	s = duk_get_heapptr(ctx, -1);
+	if (Duktape_GetIntPropertyValue(ctx, -1, REMOTE_DESKTOP_UID, -1) == 0) { return(0); }
+
+	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_ptrs);
+	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);	// [MeshAgent][stream][ptrs]
+
+	duk_peval_string(ctx, "require('user-sessions').consoleUid()");
+	int id = duk_to_int(ctx, -1);
+	duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
+	duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
+	duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
+	duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
+	if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
+	x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+	d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+
+	duk_push_heapptr(ctx, s);							// [stream]
+	duk_push_int(ctx, id);								// [stream][id]
+	duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);	// [stream]
+	duk_pop(ctx);										// ...
+
+	ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+	ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
+
+	return(0);
+}
+#endif
+
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 {
 #ifndef _LINKVM
@@ -1367,6 +1411,24 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 		}
 	#else
+		duk_push_int(ctx, console_uid); duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);
+		duk_push_this(ctx);																// [MeshAgent]
+		if (!duk_has_prop_string(ctx, -1, MESH_USER_CHANGED_CB))
+		{
+			duk_eval_string(ctx, "require('user-sessions')");							// [MeshAgent][usersessions]
+			duk_get_prop_string(ctx, -1, "on");											// [MeshAgent][usersessions][on]
+			duk_swap_top(ctx, -2);														// [MeshAgent][on][this]
+			duk_push_string(ctx, "changed");											// [MeshAgent][on][this][changed]
+			duk_push_c_function(ctx, ILibDuktape_MeshAgent_userChanged, DUK_VARARGS);	// [MeshAgent][on][this][changed][func]
+			duk_dup(ctx, -5);															// [MeshAgent][on][this][changed][func][MeshAgent]
+			duk_dup(ctx, -2);															// [MeshAgent][on][this][changed][func][MeshAgent][func]
+			duk_put_prop_string(ctx, -2, MESH_USER_CHANGED_CB);							// [MeshAgent][on][this][changed][func][MeshAgent]
+			duk_pop(ctx);																// [MeshAgent][on][this][changed][func]
+			duk_call_method(ctx, 2); duk_pop(ctx);										// [MeshAgent]
+		}
+		duk_pop(ctx);																	// ...
+
+
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
