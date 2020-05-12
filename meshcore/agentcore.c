@@ -1293,13 +1293,13 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 	RemoteDesktop_Ptrs *ptrs;
 	MeshAgentHostContainer *agent;
 
+
 	duk_eval_string(ctx, "require('MeshAgent')");					// [MeshAgent]
 	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
 
 	if (!duk_has_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM)) { return(0); }
 	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM);			// [MeshAgent][stream]
 	s = duk_get_heapptr(ctx, -1);
-	if (Duktape_GetIntPropertyValue(ctx, -1, REMOTE_DESKTOP_UID, -1) == 0) { return(0); }
 
 	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_ptrs);
 	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);	// [MeshAgent][stream][ptrs]
@@ -1313,6 +1313,7 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 	if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
 	x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 	d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+
 
 	duk_push_heapptr(ctx, s);							// [stream]
 	duk_push_int(ctx, id);								// [stream][id]
@@ -1433,7 +1434,10 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
 		int needPop = 0;
-		if (getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
+		duk_eval_string(ctx, "require('user-sessions').Self()");
+		int self = duk_get_int(ctx, -1); duk_pop(ctx);
+
+		if (self==0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
 		{
 			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
@@ -1477,7 +1481,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 
 		//MeshAgent_sendConsoleText(ctx, "Using uid: %d, XAUTHORITY: %s\n", console_uid, getenv("XAUTHORITY")==NULL? updateXAuth : getenv("XAUTHORITY"));
-
 		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth, updateDisplay);
 		if (needPop!= 0) {duk_pop(ctx); }
 	#endif
