@@ -109,97 +109,142 @@ function monitorinfo()
     else if (process.platform == 'linux')
     {
         // First thing we need to do, is determine where the X11 libraries are
+        this._check = function _check()
+        {
+            var ix;
+            if(!this.Location_X11LIB)
+            {
+                var x11info = getLibInfo('libX11');
+                for (ix in x11info)
+                {
+                    if (x11info.length == 1 || x11info[ix].hwcap == "0")
+                    {
+                        try
+                        {
+                            Object.defineProperty(this, 'Location_X11LIB', { value: x11info[ix].path });
+                            break;
+                        }
+                        catch (ex)
+                        {
+                        }
+                    }
+                }
+                try
+                {
+                    if (process.env['Location_X11LIB']) { Object.defineProperty(this, 'Location_X11LIB', { value: process.env['Location_X11LIB'] }); }
+                }
+                catch(xx)
+                {
+                }
+            }
+            if(!this.Location_X11TST)
+            {
+                var xtstinfo = getLibInfo('libXtst');
+                for (ix in xtstinfo)
+                {
+                    if (xtstinfo.length == 1 || xtstinfo[ix].hwcap == "0")
+                    {
+                        try
+                        {
+                            Object.defineProperty(this, 'Location_X11TST', { value: xtstinfo[ix].path });
+                            break;
+                        }
+                        catch (ex)
+                        {
+                        }
+                    }
+                }
+                try
+                {
+                    if (process.env['Location_X11TST']) { Object.defineProperty(this, 'Location_X11TST', { value: process.env['Location_X11TST'] }); }
+                }
+                catch (xx)
+                {
+                }
 
-        // Sufficient access rights to use ldconfig
-        var x11info = getLibInfo('libX11');
-        var xtstinfo = getLibInfo('libXtst');
-        var xextinfo = getLibInfo('libXext');
-        var xfixesinfo = getLibInfo('libXfixes');
-        var ix;
+            }
+            if(!this.Location_X11EXT)
+            {
+                var xextinfo = getLibInfo('libXext');
+                for (ix in xextinfo)
+                {
+                    if (xextinfo.length == 1 || xextinfo[ix].hwcap == "0")
+                    {
+                        try
+                        {
+                            Object.defineProperty(this, 'Location_X11EXT', { value: xextinfo[ix].path });
+                            break;
+                        }
+                        catch (ex)
+                        {
+                        }
+                    }
+                }
+                try
+                {
+                    if (process.env['Location_X11EXT']) { Object.defineProperty(this, 'Location_X11EXT', { value: process.env['Location_X11EXT'] }); }
+                }
+                catch(xx)
+                {
+                }
 
-        for (ix in x11info)
-        {
-            if (x11info.length == 1 || x11info[ix].hwcap == "0")
+            }
+            if(!this.Location_X11FIXES)
             {
+                var xfixesinfo = getLibInfo('libXfixes');
+                for (ix in xfixesinfo)
+                {
+                    if (xfixesinfo.length == 1 || xfixesinfo[ix].hwcap == "0")
+                    {
+                        try
+                        {
+                            Object.defineProperty(this, 'Location_X11FIXES', { value: xfixesinfo[ix].path });
+                            break;
+                        }
+                        catch (ex)
+                        {
+                        }
+                    }
+                }
                 try
                 {
-                    this._gm.CreateNativeProxy(x11info[ix].path);
-                    Object.defineProperty(this, 'Location_X11LIB', { value: x11info[ix].path });
-                    break;
+                    if (process.env['Location_X11FIXES']) { Object.defineProperty(this, 'Location_X11FIXES', { value: process.env['Location_X11FIXES'] }); }
                 }
-                catch (ex)
+                catch(xx)
                 {
                 }
-            }
-        }
-        for (ix in xtstinfo)
-        {
-            if (xtstinfo.length == 1 || xtstinfo[ix].hwcap == "0")
-            {
-                try
-                {
-                    this._gm.CreateNativeProxy(xtstinfo[ix].path);
-                    Object.defineProperty(this, 'Location_X11TST', { value: xtstinfo[ix].path });
-                    break;
-                }
-                catch (ex)
-                {
-                }
-            }
-        }
-        for (ix in xextinfo)
-        {
-            if (xextinfo.length == 1 || xextinfo[ix].hwcap == "0")
-            {
-                try
-                {
-                    this._gm.CreateNativeProxy(xextinfo[ix].path);
-                    Object.defineProperty(this, 'Location_X11EXT', { value: xextinfo[ix].path });
-                    break;
-                }
-                catch (ex)
-                {
-                }
-            }
-        }
-        for (ix in xfixesinfo)
-        {
-            if (xfixesinfo.length == 1 || xfixesinfo[ix].hwcap == "0")
-            {
-                try
-                {
-                    this._gm.CreateNativeProxy(xfixesinfo[ix].path);
-                    Object.defineProperty(this, 'Location_X11FIXES', { value: xfixesinfo[ix].path });
-                    break;
-                }
-                catch (ex)
-                {
-                }
-            }
-        }   
 
-        try
-        {
-            if (process.env['Location_X11LIB']) { Object.defineProperty(this, 'Location_X11LIB', { value: process.env['Location_X11LIB'] }); }
-            if (process.env['Location_X11TST']) { Object.defineProperty(this, 'Location_X11TST', { value: process.env['Location_X11TST'] }); }
-            if (process.env['Location_X11EXT']) { Object.defineProperty(this, 'Location_X11EXT', { value: process.env['Location_X11EXT'] }); }
-            if (process.env['Location_X11FIXES']) { Object.defineProperty(this, 'Location_X11FIXES', { value: process.env['Location_X11FIXES'] }); }
-        }
-        catch(ex)
-        {
-        }
+            }
+        };
     }
     if(process.platform == 'freebsd')
     {
-	    Object.defineProperty(this, 'Location_X11LIB', { value: require('lib-finder')('libX11')[0]?require('lib-finder')('libX11')[0].location: undefined });
-	    Object.defineProperty(this, 'Location_X11TST', { value: require('lib-finder')('libXtst')[0]?require('lib-finder')('libXtst')[0].location:undefined });
-	    Object.defineProperty(this, 'Location_X11EXT', { value: require('lib-finder')('libXext')[0] ? require('lib-finder')('libXext')[0].location : undefined });
-	    Object.defineProperty(this, 'Location_X11FIXES', { value: require('lib-finder')('libXfixes')[0] ? require('lib-finder')('libXfixes')[0].location : undefined });
+        this._check = function _check()
+        {
+            var lib;
+            if(!this.Location_X11LIB)
+            {
+                if ((lib = require('lib-finder')('libX11')[0])) { Object.defineProperty(this, 'Location_X11LIB', { value: lib.location }); }
+            }
+            if(!this.Location_X11TST)
+            {
+                if ((lib = require('lib-finder')('libXtst')[0])) { Object.defineProperty(this, 'Location_X11TST', { value: lib.location }); }
+            }
+            if (!this.Location_X11EXT)
+            {
+                if ((lib = require('lib-finder')('libXext')[0])) { Object.defineProperty(this, 'Location_X11EXT', { value: lib.location }); }
+            }
+            if (!this.Location_X11FIXES)
+            {
+                if ((lib = require('lib-finder')('libXfixes')[0])) { Object.defineProperty(this, 'Location_X11FIXES', { value: lib.location }); }
+            }
+        }
     }
 
     if(process.platform == 'linux' || process.platform == 'freebsd')
     {
         require('events').EventEmitter.call(this, true).createEvent('kvmSupportDetected');
+        this.kvm_x11_serverFound = false;
         this.MOTIF_FLAGS = 
         {
             MWM_FUNC_ALL        : (1 << 0) ,
@@ -209,13 +254,64 @@ function monitorinfo()
             MWM_FUNC_MAXIMIZE   : (1 << 4) ,
             MWM_FUNC_CLOSE      : (1 << 5) 
         };
-
-
-        if (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)
+        this._xtries = 0;
+        this._kvmcheck = function _kvmcheck()
         {
-            this._xtries = 0;
-            this._kvmCheck = function _kvmCheck()
+            var retry = false;
+            if (!(this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT))
             {
+                this._check();
+            }
+            if (this.Location_X11LIB && this.Location_X11TST && this.Location_X11EXT)
+            {
+                if (!this._X11)
+                {
+                    this._X11 = this._gm.CreateNativeProxy(this.Location_X11LIB);
+                    this._X11.CreateMethod('XChangeProperty');
+                    this._X11.CreateMethod('XChangeWindowAttributes');
+                    this._X11.CreateMethod('XCloseDisplay');
+                    this._X11.CreateMethod('XConnectionNumber');
+                    this._X11.CreateMethod('XConvertSelection');
+                    this._X11.CreateMethod('XCreateGC');
+                    this._X11.CreateMethod('XCreateWindow');
+                    this._X11.CreateMethod('XCreateSimpleWindow');
+                    this._X11.CreateMethod('XDefaultColormap');
+                    this._X11.CreateMethod('XDefaultScreen');
+                    this._X11.CreateMethod('XDestroyWindow');
+                    this._X11.CreateMethod('XDrawLine');
+                    this._X11.CreateMethod('XDisplayHeight');
+                    this._X11.CreateMethod('XDisplayWidth');
+                    this._X11.CreateMethod('XFetchName');
+                    this._X11.CreateMethod('XFlush');
+                    this._X11.CreateMethod('XFree');
+                    this._X11.CreateMethod('XCreateGC');
+                    this._X11.CreateMethod('XGetAtomName');
+                    this._X11.CreateMethod('XGetWindowProperty');
+                    this._X11.CreateMethod('XInternAtom');
+                    this._X11.CreateMethod('XMapWindow');
+                    this._X11.CreateMethod({ method: 'XNextEvent', threadDispatch: true });
+                    this._X11.CreateMethod({ method: 'XNextEvent', newName: 'XNextEventSync' });
+                    this._X11.CreateMethod('XOpenDisplay');
+                    this._X11.CreateMethod('XPending');
+                    this._X11.CreateMethod('XRootWindow');
+                    this._X11.CreateMethod('XSelectInput');
+                    this._X11.CreateMethod('XScreenCount');
+                    this._X11.CreateMethod('XScreenOfDisplay');
+                    this._X11.CreateMethod('XSelectInput');
+                    this._X11.CreateMethod('XSendEvent');
+                    this._X11.CreateMethod('XSetForeground');
+                    this._X11.CreateMethod('XSetFunction');
+                    this._X11.CreateMethod('XSetLineAttributes');
+                    this._X11.CreateMethod('XSetNormalHints');
+                    this._X11.CreateMethod('XSetSelectionOwner');
+                    this._X11.CreateMethod('XSetSubwindowMode');
+                    this._X11.CreateMethod('XSetWMProtocols');
+                    this._X11.CreateMethod('XStoreName');
+                    this._X11.CreateMethod('XSync');
+                    this._X11.CreateMethod('XBlackPixel');
+                    this._X11.CreateMethod('XWhitePixel');
+                }
+
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);
                 ch.stderr.on('data', function () { });
                 ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
@@ -230,75 +326,27 @@ function monitorinfo()
                 }
                 else
                 {
-                    if (this._xtries++ < 18)
-                    {
-                        this._xtry = setTimeout(function (that) { that._kvmCheck.call(that); }, 10000, this);
-                    }
+                    retry = true;
                 }
             }
-            this._kvmCheck();
-            Object.defineProperty(this, 'kvm_x11_support', { get: function () { return (this.kvm_x11_serverFound); } });
-            this.on('newListener', function (name, handler)
+            else
             {
-                if(name == 'kvmSupportDetected' && this.kvm_x11_serverFound)
-                {
-                    handler.call(this, true);
-                }
-            });
-        }
-        else
+                retry = true;
+            }
+            if(retry && this._xtries++ < 18)
+            {
+                this._xtry = setTimeout(function (that) { that._kvmcheck.call(that); }, 10000, this);
+            }
+        };
+        this._kvmcheck();
+        Object.defineProperty(this, 'kvm_x11_support', { get: function () { return (this.kvm_x11_serverFound); } });
+        this.on('newListener', function (name, handler)
         {
-            Object.defineProperty(this, 'kvm_x11_support', { value: false });
-        }
-
-
-        if (this.Location_X11LIB)
-        {
-            this._X11 = this._gm.CreateNativeProxy(this.Location_X11LIB);
-            this._X11.CreateMethod('XChangeProperty');
-            this._X11.CreateMethod('XChangeWindowAttributes');
-            this._X11.CreateMethod('XCloseDisplay');
-            this._X11.CreateMethod('XConnectionNumber');
-            this._X11.CreateMethod('XConvertSelection');
-            this._X11.CreateMethod('XCreateGC');
-            this._X11.CreateMethod('XCreateWindow');
-            this._X11.CreateMethod('XCreateSimpleWindow');
-            this._X11.CreateMethod('XDefaultColormap');
-            this._X11.CreateMethod('XDefaultScreen');
-            this._X11.CreateMethod('XDestroyWindow');
-            this._X11.CreateMethod('XDrawLine');
-            this._X11.CreateMethod('XDisplayHeight');
-            this._X11.CreateMethod('XDisplayWidth');
-            this._X11.CreateMethod('XFetchName');
-            this._X11.CreateMethod('XFlush');
-            this._X11.CreateMethod('XFree');
-            this._X11.CreateMethod('XCreateGC');
-            this._X11.CreateMethod('XGetAtomName');
-            this._X11.CreateMethod('XGetWindowProperty');
-            this._X11.CreateMethod('XInternAtom');
-            this._X11.CreateMethod('XMapWindow');
-            this._X11.CreateMethod({ method: 'XNextEvent', threadDispatch: true });
-            this._X11.CreateMethod({ method: 'XNextEvent', newName: 'XNextEventSync' });
-            this._X11.CreateMethod('XOpenDisplay');
-            this._X11.CreateMethod('XPending');
-            this._X11.CreateMethod('XRootWindow');
-            this._X11.CreateMethod('XSelectInput');
-            this._X11.CreateMethod('XScreenCount');
-            this._X11.CreateMethod('XScreenOfDisplay');
-            this._X11.CreateMethod('XSelectInput');
-            this._X11.CreateMethod('XSendEvent');
-            this._X11.CreateMethod('XSetForeground');
-            this._X11.CreateMethod('XSetFunction');
-            this._X11.CreateMethod('XSetLineAttributes');
-            this._X11.CreateMethod('XSetNormalHints');
-            this._X11.CreateMethod('XSetSelectionOwner');
-            this._X11.CreateMethod('XSetSubwindowMode');
-            this._X11.CreateMethod('XSetWMProtocols');
-            this._X11.CreateMethod('XStoreName');
-            this._X11.CreateMethod('XSync');
-            this._X11.CreateMethod('XBlackPixel');
-            this._X11.CreateMethod('XWhitePixel');
-        }
+            if (name == 'kvmSupportDetected' && this.kvm_x11_serverFound)
+            {
+                handler.call(this, true);
+            }
+        });
 
         this.isUnity = function isUnity()
         {
