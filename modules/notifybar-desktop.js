@@ -183,8 +183,8 @@ function x_notifybar_check(title)
                 .createEvent('close')
                 .addMethod('close', function close()
                 {
-                    this.removeListener('changed', this._changed);
-                    this._close2()
+                    require('user-sessions').removeListener('changed', this._changed);
+                    this._close2();
                 });
             ret._changed = function _changed()
             {
@@ -192,7 +192,10 @@ function x_notifybar_check(title)
                 var uid = require('user-sessions').consoleUid();
                 if (uid >= that.min)
                 {
-                    that._close2 = function () { this.child.kill(); };
+                    that._close2 = function ()
+                    {
+                        this.child.kill();
+                    };
                     var xinfo = require('monitor-info').getXInfo(uid);
                     that.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: xinfo.exportEnv() });
                     that.child.parent = that;
@@ -203,7 +206,10 @@ function x_notifybar_check(title)
             };
             ret._changed.self = ret;
             require('user-sessions').on('changed', ret._changed);
-            ret._close2 = function _close2() { this.emit('close'); };
+            ret._close2 = function _close2()
+            {
+                this.emit('close');
+            };
             return (ret);
         }
 
@@ -310,13 +316,13 @@ function x_notifybar(title)
             try
             {
                 ws = m[0].display.getCurrentWorkspace();
+                this.notifybar.workspaces[ws] = true;
+                this.createBars(m);
             } 
             catch(wex)
             {
             }
 
-            this.notifybar.workspaces[ws] = true;
-            this.createBars(m);
             m[0].display._notifyBar = this.notifybar;
             m[0].display.on('workspaceChanged', function (w)
             {
