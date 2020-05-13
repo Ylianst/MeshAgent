@@ -162,23 +162,57 @@ function windows_notifybar_local(title)
 
 function x_notifybar_check(title)
 {
-    if(require('user-sessions').Self()!=0 || require('user-sessions').consoleUid() == 0)
+    var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
+
+    var min = require('user-sessions').minUid();
+    var uid = require('user-sessions').consoleUid();
+    var self = require('user-sessions').Self();
+
+    if (self != 0 || uid == 0)
     {
         return (x_notifybar(title)); // No Dispatching necessary
     }
     else
     {
         // We are root, so we should try to spawn a child into the user's desktop
-        var uid = require('user-sessions').consoleUid();
+        if (uid < min && uid != 0)
+        {
+            // Lets hook login event, so we can respawn the bars later
+            var ret = { min: min };
+            require('events').EventEmitter.call(ret, true)
+                .createEvent('close')
+                .addMethod('close', function close()
+                {
+                    this.removeListener('changed', this._changed);
+                    this._close2()
+                });
+            ret._changed = function _changed()
+            {
+                var that = _changed.self;
+                var uid = require('user-sessions').consoleUid();
+                if (uid >= that.min)
+                {
+                    that._close2 = function () { this.child.kill(); };
+                    var xinfo = require('monitor-info').getXInfo(uid);
+                    that.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: xinfo.exportEnv() });
+                    that.child.parent = that;
+                    that.child.stdout.on('data', function (c) { });
+                    that.child.stderr.on('data', function (c) { });
+                    that.child.on('exit', function (code) { this.parent.emit('close', code); });
+                }
+            };
+            ret._changed.self = ret;
+            require('user-sessions').on('changed', ret._changed);
+            ret._close2 = function _close2() { this.emit('close'); };
+            return (ret);
+        }
+
         var xinfo = require('monitor-info').getXInfo(uid);
-        
         if (!xinfo)
         {
             throw('XServer Initialization Error')
         }
         var ret = {};
-        var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
-
         require('events').EventEmitter.call(ret, true)
             .createEvent('close')
             .addMethod('close', function close() { this.child.kill(); });
@@ -272,7 +306,14 @@ function x_notifybar(title)
         this.notifybar.monitors = m;
         if (m.length > 0)
         {
-            var ws = m[0].display.getCurrentWorkspace();
+            var ws = 0;
+            try
+            {
+                ws = m[0].display.getCurrentWorkspace();
+            } 
+            catch(wex)
+            {
+            }
 
             this.notifybar.workspaces[ws] = true;
             this.createBars(m);
