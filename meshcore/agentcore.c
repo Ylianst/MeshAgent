@@ -432,41 +432,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 								})();";
 	#else
 			// Linux Only
-			char getProxy[] = "(function getProxies(){\
-									if(require('fs').existsSync('/etc/environment'))\
-									{\
-										var e = require('fs').readFileSync('/etc/environment').toString();\
-										var tokens = e.split('\\n');\
-										for(var line in tokens)\
-										{\
-											var val = tokens[line].split('=');\
-											if(val.length == 2 && (val[0].trim() == 'http_proxy' || val[0].trim() == 'https_proxy'))\
-											{\
-												return(val[1].split('//')[1]);\
-											}\
-										}\
-									}\
-									if(require('fs').existsSync('/etc/profile.d/proxy_setup'))\
-									{\
-										var child = require('child_process').execFile('/bin/sh', ['sh']);\
-										child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
-										child.stdin.write('cat /etc/profile.d/proxy_setup | awk \\'{ split($2, tok, \"=\"); if(tok[1]==\"http_proxy\") { print tok[2]; }}\\'\\nexit\\n');\
-										child.waitExit();\
-										child.ret = child.stdout.str.trim().split('\\n')[0].split('//')[1];\
-										if(child.ret != '') { return(child.ret); }\
-									}\
-									if (require('fs').existsSync('/usr/bin/gsettings'))\
-									{\
-										var setting;\
-										var ids = require('user-sessions').loginUids(); \
-										for (var i in ids)\
-										{\
-											setting = require('linux-gnome-helpers').getProxySettings(ids[i]);\
-											if (setting.mode == 'manual') { return(setting.host + ':' + setting.port);} \
-										}\
-									}\
-									throw('No Proxy set');\
-								})();";
+			char getProxy[] = "require('proxy-helper').getProxy()";
 	#endif
 			// Linux and FreeBSD
 			if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
