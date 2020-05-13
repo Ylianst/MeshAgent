@@ -419,6 +419,21 @@ function monitorinfo()
 
             return (ret);
         }
+        function xinfo_xdm(info, uid)
+        {
+            if (process.platform != 'linux') { return(info); }
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("ps -e -o uid -o cmd | grep X | grep " + uid + " | tr '\\n' '`' | awk '{ xl=split($2,x,\"/\"); print x[xl]; }'\nexit\n");
+            child.waitExit();
+            if(child.stdout.str.trim() != '')
+            {
+                if (info == null) { info = {}; }
+                info.xdm = child.stdout.str.trim().toLowerCase();
+            }
+            return (info);
+        }
         this.getXInfo = function getXInfo(consoleuid)
         {
             var ret = null;
@@ -454,7 +469,7 @@ function monitorinfo()
                         if(e.XAUTHORITY && e.DISPLAY)
                         {
                             ret = { tty: '?', xauthority: e.XAUTHORITY, display: e.DISPLAY, exportEnv: exportEnv };
-                            return (ret);
+                            return (xinfo_xdm(ret, consoleuid));
                         }
                     }
                 }
@@ -470,7 +485,7 @@ function monitorinfo()
                             if (e.DISPLAY)
                             {
                                 ret = { tty: '?', display: e.DISPLAY, exportEnv: exportEnv };
-                                return (ret);
+                                return (xinfo_xdm(ret, consoleuid));
                             }
                         }
                     }
@@ -508,7 +523,7 @@ function monitorinfo()
                                 if (v[0] == 'DISPLAY')
                                 {
                                     ret.display = v[1];
-                                    return (ret);
+                                    return (xinfo_xdm(ret, consoleuid));
                                 }
                                 vs = psx + 1;
                             }
@@ -516,7 +531,7 @@ function monitorinfo()
                     }
                 }
             }
-            return (ret);
+            return (xinfo_xdm(ret, consoleuid));
         };
     }
 }

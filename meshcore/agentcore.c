@@ -1433,6 +1433,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
+		char *xdm = NULL;
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);
@@ -1448,6 +1449,15 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", NULL);
+
+						if (strcmp(xdm, "xwayland") == 0)
+						{
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This platform is configured to use Xwayland");
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "please modify config to use Xorg");
+							duk_pop(ctx);
+							return(1);
+						}
 
 						if (console_uid != 0 && updateXAuth == NULL)
 						{
