@@ -2198,34 +2198,31 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	exports.Name = (function Name()\
 	{\
 		var child;\
-		switch (process.platform)\
+		if(process.platform!='win32')\
 		{\
-			case 'freebsd':\
-			case 'linux':\
-			case 'darwin':\
-				child = require('child_process').execFile('/bin/sh', ['sh']);\
-				break;\
-			case 'win32':\
-				child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
-				break;\
+			switch (process.platform)\
+			{\
+				case 'freebsd':\
+				case 'linux':\
+				case 'darwin':\
+					child = require('child_process').execFile('/bin/sh', ['sh']);\
+					break;\
+			}\
+			child.stdout.str=''; child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
+			switch (process.platform)\
+			{\
+				case 'linux':\
+					child.stdin.write('cat /etc/*release\\nexit\\n');\
+					break;\
+				case 'darwin':\
+					child.stdin.write('sw_vers\\nexit\\n');\
+					break;\
+				case 'freebsd':\
+					child.stdin.write('uname -mrs\\nexit\\n');\
+					break;\
+			}\
+			child.waitExit();\
 		}\
-		child.stdout.str=''; child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
-		switch (process.platform)\
-		{\
-			case 'linux':\
-				child.stdin.write('cat /etc/*release\\nexit\\n');\
-				break;\
-			case 'darwin':\
-				child.stdin.write('sw_vers\\nexit\\n');\
-				break;\
-			case 'win32':\
-				child.stdin.write('exit\\r\\n');\
-				break;\
-			case 'freebsd':\
-				child.stdin.write('uname -mrs\\nexit\\n');\
-				break;\
-		}\
-		child.waitExit();\
 		var ret=null;\
 		var lines;\
 		var tokens;\
@@ -2233,17 +2230,15 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		switch (process.platform)\
 		{\
 			case 'win32':\
-				var winstr = child.stdout.str.split('\\r\\n')[0];\
-				if(require('user-sessions').isRoot())\
 				{\
 					try\
 					{\
 						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
-						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
+						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID');\
 					}\
 					catch(xx)\
 					{\
-						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' ' + winstr.substring(winstr.indexOf('['));\
+						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName');\
 					}\
 				}\
 				ret = winstr;\
@@ -2292,97 +2287,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	{\
 		var promise = require('promise');\
 		var p = new promise(function(acc, rej) { this._acc = acc; this._rej = rej; });\
-		switch (process.platform)\
-		{\
-			case 'freebsd':\
-			case 'linux':\
-			case 'darwin':\
-				p.child = require('child_process').execFile('/bin/sh', ['sh']);\
-				break;\
-			case 'win32':\
-				p.child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
-				break;\
-		}\
-		p.child.promise = p;\
-		p.child.stdout.str = '';\
-		p.child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
-		p.child.on('exit', function(code)\
-		{\
-			var lines;\
-			var tokens;\
-			var i, j;\
-			switch (process.platform)\
-			{\
-				case 'win32':\
-					var winstr = this.stdout.str.split('\\r\\n')[0];\
-					if(require('user-sessions').isRoot())\
-					{\
-						try\
-						{\
-							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
-							require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
-						}\
-						catch(xx)\
-						{\
-							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' ' + winstr.substring(winstr.indexOf('['));\
-						}\
-					}\
-					this.promise._acc(winstr);\
-					break;\
-				case 'linux':\
-					lines = this.stdout.str.split('\\n');\
-					for (i in lines)\
-					{\
-						tokens = lines[i].split('=');\
-						if (tokens[0] == 'PRETTY_NAME')\
-						{\
-							this.promise._acc(tokens[1].substring(1, tokens[1].length - 1));\
-							break;\
-						}\
-					}\
-					for (i in lines)\
-					{\
-						tokens = lines[i].split('=');\
-						if (tokens[0] == 'DISTRIB_DESCRIPTION')\
-						{\
-							this.promise._acc(tokens[1].substring(1, tokens[1].length - 1));\
-							break;\
-						}\
-					}\
-					this.promise._acc(lines[0]);\
-					break;\
-				case 'darwin':\
-					var OSNAME = '';\
-					var OSVERSION = '';\
-					lines = this.stdout.str.split('\\n');\
-					for (i in lines)\
-					{\
-						tokens = lines[i].split(':');\
-						if (tokens[0] == 'ProductName') { OSNAME = tokens[1].trim(); }\
-						if (tokens[0] == 'ProductVersion') { OSVERSION = tokens[1].trim(); }\
-					}\
-					this.promise._acc(OSNAME + ' ' + OSVERSION);\
-					break;\
-				case 'freebsd':\
-					this.promise._acc(this.stdout.str.trim());\
-					break;\
-			}\
-		});\
-		switch (process.platform)\
-		{\
-			case 'linux':\
-				p.child.stdin.write('cat /etc/*release\\nexit\\n');\
-				break;\
-			case 'darwin':\
-				p.child.stdin.write('sw_vers\\nexit\\n');\
-				break;\
-			case 'win32':\
-				p.child.stdin.write('exit\\r\\n');\
-				break;\
-			case 'freebsd':\
-				p.child.stdin.write('uname -mrs\\nexit\\n');\
-				break;\
-		}\
+		p._acc(this.Name);\
 		return (p);\
 	};\
 	if(process.platform=='freebsd')\
