@@ -1318,6 +1318,16 @@ void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int buf
 #endif
 	}
 }
+#ifdef WIN32
+void ILibProcessPipe_Process_GetWaitHandles(ILibProcessPipe_Process p, HANDLE *hProcess, HANDLE *read, HANDLE *write, HANDLE *error)
+{
+	ILibProcessPipe_Process_Object* j = (ILibProcessPipe_Process_Object*)p;
+	*hProcess = j->hProcess;
+	*read = j->stdOut->mOverlapped->hEvent;
+	*error = j->stdErr->mOverlapped->hEvent;
+	*write = j->stdIn->mOverlapped->hEvent;
+}
+#endif
 void ILibProcessPipe_Pipe_Close(ILibProcessPipe_Pipe po)
 {
 	ILibProcessPipe_PipeObject* pipeObject = (ILibProcessPipe_PipeObject*)po;

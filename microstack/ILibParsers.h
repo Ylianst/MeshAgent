@@ -974,7 +974,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	void *ILibChain_GetObjectForDescriptor(void *chain, int fd);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 #ifdef WIN32
+	typedef void(*ILib_GenericReadHandler)(char *buffer, int bufferLen, int* bytesConsumed, void* user1, void *user2);
 	typedef BOOL(*ILibChain_ReadEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
+	typedef BOOL(*ILibChain_WriteEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void* user);
 	typedef struct ILibChain_ReadEx_data
 	{
 		char *buffer;
@@ -983,9 +985,20 @@ int ILibIsRunningOnChainThread(void* chain);
 		OVERLAPPED *p;
 		void *user;
 	}ILibChain_ReadEx_data;
+	typedef struct ILibChain_WriteEx_data
+	{
+		ILibChain_WriteEx_Handler handler;
+		char *buffer;
+		int bytesLeft;
+		int totalWritten;
+		HANDLE fileHandle;
+		OVERLAPPED *p;
+		void *user;
+	}ILibChain_WriteEx_data;
 	void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user);
 	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);
 	void ILibChain_ReadEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user);
+	ILibTransport_DoneState ILibChain_WriteEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user);
 	#define tv2LTtv1(ptv1, ptv2) ((ptv2)->tv_sec < (ptv1)->tv_sec || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec < (ptv1)->tv_usec))
 	#define tv2LTEtv1(ptv1, ptv2) (tv2LTtv1(ptv2,ptv1) || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec <= (ptv1)->tv_usec))
 	#define tvnonzero(ptv) ((ptv)->tv_sec != 0 || (ptv)->tv_usec != 0)
@@ -993,7 +1006,11 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
+#ifdef WIN32
+	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles);
+#else
 	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
+#endif
 	ILibExportMethod void ILibChain_EndContinue(void *chain);
 	ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain);
 	#define ILibChain_FreeLink(link) ((ILibChain_Link*)link)->RESERVED = 0xFFFFFFFF;free(link);

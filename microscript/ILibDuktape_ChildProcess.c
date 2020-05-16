@@ -170,6 +170,7 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	}
 
 	duk_push_this(ctx);									// [spawnedProcess]
+	char *_target = Duktape_GetStringPropertyValue(ctx, -1, "_target", NULL);
 	if (!ILibChain_IsLinkAlive(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager)))
 	{
 		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));
@@ -179,7 +180,14 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
 
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
+#ifdef WIN32
+	HANDLE handles[] = { NULL, NULL, NULL, NULL };
+	ILibProcessPipe_Process p = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
+	ILibProcessPipe_Process_GetWaitHandles(p, &(handles[0]), &(handles[1]), &(handles[2]), &(handles[3]));
+	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, (HANDLE**)handles);
+#else
 	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout);
+#endif
 
 	return(0);
 }
@@ -396,6 +404,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "child_process.execFile(): Could not exec [%s]", target));
 	}
 	ILibDuktape_ChildProcess_SpawnedProcess_PUSH(ctx, p, callback);
+	duk_push_string(ctx, target); duk_put_prop_string(ctx, -2, "_target");
 	duk_push_pointer(ctx, manager); duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Manager);
 	return(1);
 }

@@ -86,6 +86,9 @@ void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module);
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj);
 ILibTransport_DoneState ILibProcessPipe_Process_WriteStdIn(ILibProcessPipe_Process p, char* buffer, int bufferLen, ILibTransport_MemoryOwnership ownership);
 void ILibProcessPipe_Process_CloseStdIn(ILibProcessPipe_Process p);
+#ifdef WIN32
+void ILibProcessPipe_Process_GetWaitHandles(ILibProcessPipe_Process p, HANDLE *hProcess, HANDLE *read, HANDLE *write, HANDLE *error);
+#endif
 
 void ILibProcessPipe_Pipe_Close(ILibProcessPipe_Pipe po);
 void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject);

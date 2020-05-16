@@ -2091,7 +2091,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 	}
 	return(slct);
 }
-void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, struct timeval *tv, DWORD *timeout, fd_set *readset, fd_set *writeset, fd_set *errorset, ILibLinkedList handleList)
+void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, struct timeval *tv, DWORD *timeout, fd_set *readset, fd_set *writeset, fd_set *errorset, ILibLinkedList handleList, HANDLE **onlyHandles)
 {
 	HANDLE selectHandles[FD_SETSIZE];
 	memset(selectHandles, 0, sizeof(selectHandles));
@@ -2101,7 +2101,7 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 		*waitListCount = 0;
 		return;
 	}
-
+	int chkIndex;
 	void *node;
 	struct timeval currentTime;
 	struct timeval expirationTime;
@@ -2151,6 +2151,22 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 	node = ILibLinkedList_GetNode_Head(handleList);
 	while (node != NULL)
 	{
+		if (onlyHandles != NULL)
+		{
+			for (chkIndex = 0; onlyHandles[chkIndex] != NULL; ++chkIndex)
+			{
+				if ((HANDLE)ILibLinkedList_GetDataFromNode(node) == onlyHandles[chkIndex])
+				{
+					chkIndex = -1;
+					break;
+				}
+			}
+			if (chkIndex != -1)
+			{
+				node = ILibLinkedList_GetNextNode(node);
+				continue;
+			}
+		}
 		i = x++;
 		if (waitList[i] != NULL && waitList[ILibChain_HandleInfoIndex(i)] == NULL)
 		{
@@ -2184,7 +2200,11 @@ ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain)
 {
 	return(((ILibBaseChain*)chain)->continuationState);
 }
+#ifdef WIN32
+ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles)
+#else
 ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
+#endif
 {
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
 	ILibChain_Link_Hook *nodeHook;
@@ -2206,6 +2226,11 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 
 	gettimeofday(&startTime, NULL);
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...");
+
+#ifdef WIN32
+	HANDLE currentHandle = chain->currentHandle;
+	ILibChain_WaitHandleInfo* currentInfo = chain->currentInfo;
+#endif
 
 	while (root->TerminateFlag == 0 && root->continuationState == ILibChain_ContinuationState_CONTINUE)
 	{
@@ -2285,7 +2310,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		int x = 0;
 		DWORD waitTimeout = 0;
 
-		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles);
+		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
 		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
@@ -2351,6 +2376,10 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
 	root->node = currentNode;
+#ifdef WIN32
+	root->currentHandle = currentHandle;
+	root->currentInfo = currentInfo;
+#endif
 }
 
 ILibExportMethod void ILibChain_EndContinue(void *chain)
@@ -2991,16 +3020,46 @@ void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
 }
 
 #ifdef WIN32
-BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user)
+BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user)
 {
-	ILibChain_ReadEx_data *data = (ILibChain_ReadEx_data*)user;
-	DWORD bytesRead = 0;
+	ILibChain_WriteEx_data *data = (ILibChain_WriteEx_data*)user;
+	DWORD bytesWritten = 0;
 
-	if (GetOverlappedResult(data->fileHandle, data->p, &bytesRead, FALSE) && bytesRead > 0)
+	if (GetOverlappedResult(data->fileHandle, data->p, &bytesWritten, FALSE) && bytesWritten > 0)
 	{
-		if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->buffer, bytesRead, data->user); }
-		ILibMemory_Free(data);
-		return(FALSE);
+		data->bytesLeft -= (int)bytesWritten;
+		data->totalWritten += (int)bytesWritten;
+		data->buffer = data->buffer + bytesWritten;
+		if (data->bytesLeft == 0)
+		{
+			// Done Writing
+			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->totalWritten, data->user); }
+			ILibMemory_Free(data);
+			return(FALSE);
+		}
+		else
+		{
+			// More Data to write
+			BOOL ret = FALSE;
+			switch (ILibChain_WriteEx(chain, h, data->p, data->buffer, data->bytesLeft, ILibChain_WriteEx_Sink, data))
+			{
+				case ILibTransport_DoneState_COMPLETE:
+					data->totalWritten += data->bytesLeft;
+					data->bytesLeft = 0;
+					if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->totalWritten, data->user); }
+					ILibMemory_Free(data);
+					ret = FALSE;
+					break;
+				case ILibTransport_DoneState_INCOMPLETE:
+					ret = TRUE;
+				case ILibTransport_DoneState_ERROR:
+					if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, 0, data->user); }
+					ILibMemory_Free(data);
+					ret = FALSE;
+					break;
+			}
+			return(ret);
+		}
 	}
 	else
 	{
@@ -3012,10 +3071,70 @@ BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus sta
 		else
 		{
 			// ERROR
+			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, 0, data->user); }
+			ILibMemory_Free(data);
+			return(FALSE);
+		}
+
+	}
+}
+BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user)
+{
+	ILibChain_ReadEx_data *data = (ILibChain_ReadEx_data*)user;
+	DWORD bytesRead = 0;
+	DWORD err;
+
+	if (GetOverlappedResult(data->fileHandle, data->p, &bytesRead, FALSE) && bytesRead > 0)
+	{
+		if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->buffer, bytesRead, data->user); }
+		ILibMemory_Free(data);
+		return(FALSE);
+	}
+	else
+	{
+		if ((err=GetLastError()) == ERROR_IO_PENDING)
+		{
+			// Still pending, so wait for another callback
+			return(TRUE);
+		}
+		else
+		{
+			// ERROR
 			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, data->buffer, 0, data->user); }
 			ILibMemory_Free(data);
 			return(FALSE);
 		}
+	}
+}
+ILibTransport_DoneState ILibChain_WriteEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user)
+{
+	int e = 0;
+	if (!WriteFile(h, buffer, (DWORD)bufferLen, NULL, p))
+	{
+		if ((e = GetLastError()) == ERROR_IO_PENDING)
+		{
+			// Completing Asynchronously
+			ILibChain_WriteEx_data *state = (ILibChain_WriteEx_data*)ILibMemory_SmartAllocate(sizeof(ILibChain_WriteEx_data));
+			state->buffer = buffer;
+			state->bytesLeft = bufferLen;
+			state->totalWritten = 0;
+			state->p = p;
+			state->handler = handler;
+			state->fileHandle = h;
+			state->user = user;
+			ILibChain_AddWaitHandle(chain, p->hEvent, -1, ILibChain_WriteEx_Sink, state);
+			return(ILibTransport_DoneState_INCOMPLETE);
+		}
+		else
+		{
+			// IO Error
+			return(ILibTransport_DoneState_ERROR);
+		}
+	}
+	else
+	{
+		// Write Completed 
+		return(ILibTransport_DoneState_COMPLETE);
 	}
 }
 void ILibChain_ReadEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user)
@@ -3080,26 +3199,30 @@ void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_Wai
 		return;
 	}
 
+	ILibChain_WaitHandleInfo *info = NULL;
+
 	if (((ILibBaseChain*)chain)->currentHandle != h)
 	{
 		void *node = ILibLinkedList_AddTail(((ILibBaseChain*)chain)->auxSelectHandles, h);
-		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
+		info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
+		info->node = node;
+		ILibForceUnBlockChain(chain);
+	}
+	else
+	{
+		((ILibBaseChain*)chain)->currentHandle = NULL;
+		info = ((ILibBaseChain*)chain)->currentInfo;
+	}
+	if (info != NULL)
+	{
 		info->handler = handler;
 		info->user = user;
-		info->node = node;
 		if (msTIMEOUT != INFINITE && msTIMEOUT >= 0)
 		{
 			ILibGetTimeOfDay(&(info->expiration));
 			info->expiration.tv_sec += (long)(msTIMEOUT / 1000);
 			info->expiration.tv_usec += ((msTIMEOUT % 1000) * 1000);
 		}
-		ILibForceUnBlockChain(chain);
-	}
-	else
-	{
-		// We are trying to add ourselves, so we can optimize by not deleting, intead of adding new
-		((ILibBaseChain*)chain)->currentHandle = NULL;
-		if (((ILibBaseChain*)chain)->currentInfo->user != user) { ((ILibBaseChain*)chain)->currentInfo->user = user; }
 	}
 }
 void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
@@ -3114,7 +3237,10 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 		// We found the HANDLE, so if we remove the HANDLE from the list, and
 		// set the unblock flag, we'll be good to go
 		//
-		if (chain->currentHandle == h) { chain->currentHandle = NULL; chain->currentInfo = NULL; }
+		if (chain->currentHandle == h) 
+		{
+			chain->currentHandle = NULL; chain->currentInfo = NULL; 
+		}
 		ILibLinkedList_Remove(node);
 		chain->UnblockFlag = 1;
 	}
@@ -3292,7 +3418,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		int x = 0;
 		DWORD waitTimeout = 0;
 
-		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles);
+		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles, NULL);
 		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
