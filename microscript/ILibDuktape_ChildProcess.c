@@ -181,7 +181,7 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
 #ifdef WIN32
-	HANDLE handles[] = { NULL, NULL, NULL, NULL };
+	HANDLE handles[] = { NULL, NULL, NULL, NULL, NULL };
 	ILibProcessPipe_Process p = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
 	ILibProcessPipe_Process_GetWaitHandles(p, &(handles[0]), &(handles[1]), &(handles[2]), &(handles[3]));
 	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, (HANDLE**)handles);
