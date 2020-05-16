@@ -125,7 +125,7 @@ function childContainer()
         }
 
         // Spawn the child
-        if(options.user)
+        if(options.user && process.platform == 'win32')
         {
             // Use Task Scheduler
             var parms = '/C SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ';

@@ -51,58 +51,44 @@ function Toaster()
         {
             case 'win32':
                 {
-                    var id = require('user-sessions').getProcessOwnerName(process.pid).tsid;
-                    var consoleUid = 0;
+                    var cid;
+                    retVal.options = { };
                     try
                     {
-                        consoleUid = require('user-sessions').consoleUid();
+                        retVal.options.uid = tsid == null ? require('user-sessions').consoleUid() : tsid;
+                        if (retVal.options.uid == (cid = require('user-sessions').getProcessOwnerName(process.pid).tsid))
+                        {
+                            delete retVal.options.uid;
+                        }
+                        else
+                        {
+                            if(tsid != null && cid != 0)
+                            {
+                                retVal._rej('Insufficient permission to display toast as uid: ' + tsid);
+                                return (retVal);
+                            }
+                            retVal.options.type = require('child_process').SpawnTypes.USER;
+                        }
                     }
-                    catch (e)
+                    catch (ee)
                     {
                         retVal._rej('Cannot display user notification when a user is not logged in');
                         return (retVal);
                     }
-                   
 
-                    if (id != 0)
-                    {
-                        // We are running as user
-                        if(tsid != null && tsid != id)
-                        {
-                            // If we aren't LocalSystem, we cannot spawn as a different user
-                            retVal._rej('Cannot display user notification to TSID: ' + tsid + ' from TSID: ' + id);
-                            return (retVal);
-                        }
-                        retVal._child = require('ScriptContainer').Create({ processIsolation: true });
-                    }
-                    else
-                    {
-                        // We are running as LocalSystem
-                        if (tsid == null) { tsid = consoleUid; }
-                        retVal._child = require('ScriptContainer').Create({ processIsolation: true, sessionId: tsid });
-                    }
-
-                    retVal._child.parent = retVal;
-                    retVal._child.on('exit', function (code) { this.parent._res('DISMISSED'); });
-                    retVal._child.addModule('win-console', getJSModule('win-console'));
-                    retVal._child.addModule('win-message-pump', getJSModule('win-message-pump'));
-
-                    caption = caption.split("'").join("\\'");
-                    title = title.split("'").join("\\'");
-
-                    var str = "\
-                            try{\
-                            var toast = require('win-console');\
-                            var balloon = toast.SetTrayIcon({ szInfo: '" + caption + "', szInfoTitle: '" + title + "', balloonOnly: true });\
-                            balloon.on('ToastDismissed', function(){process.exit();});\
-                            }\
-                            catch(e)\
-                            {\
-                                require('ScriptContainer').send(e);\
-                            }\
-                                require('ScriptContainer').send('done');\
-                            ";
-                    retVal._child.ExecuteString(str);
+                    retVal.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo'], retVal.options);
+                    retVal.child.toast = retVal;
+                    retVal.child.stdout.stdin = retVal.child.stdin;
+                    retVal.child.stderr.stdin = retVal.child.stdin;
+                    retVal.child.stdout.on('data', function (c) { if (c.toString().includes('<DISMISSED>')) { this.stdin.write('exit\n'); } });
+                    retVal.child.stderr.on('data', function (c) { this.stdin.write('exit\n'); });
+                    retVal.child.stdin.write('[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")\r\n');
+                    retVal.child.stdin.write('$objBalloon = New-Object System.Windows.Forms.NotifyIcon\r\n');
+                    retVal.child.stdin.write('$objBalloon.Icon = [System.Drawing.SystemIcons]::Information\r\n');
+                    retVal.child.stdin.write('$objBalloon.Visible = $True\r\n');
+                    retVal.child.stdin.write('Register-ObjectEvent -InputObject $objBalloon -EventName BalloonTipClosed -Action { Write-Host "<`DISMISSED`>" }')
+                    retVal.child.stdin.write('$objBalloon.ShowBalloonTip(10000,"' + title + '", "' + caption + '", 0)\r\n');
+                    retVal.child.on('exit', function () { this.toast._res('DISMISSED'); });
                     return (retVal);
                 }
                 break;
@@ -232,6 +218,34 @@ function Toaster()
 
         return (retVal);
     };
+    if(process.platform == 'win32')
+    {
+        this._containerToast = function _containerToast(caption, title)
+        {
+            var toast;
+            var balloon;
+
+            try
+            {
+                toast = require('win-console');
+                balloon = toast.SetTrayIcon({ szInfo: caption, szInfoTitle: title, balloonOnly: true });
+                balloon.on('ToastDismissed', function () { process.exit(); });
+            }
+            catch(e)
+            {
+                process.exit();
+            }
+            try
+            {
+                require('child-container').message({ status: 'ok', pid: process.pid});
+            }
+            catch(ee)
+            {
+                process.exit();
+            }
+            var t = setTimeout(function (b) { b.remove(); process.exit(); }, 7000, balloon);
+        }
+    }
 }
 
 module.exports = new Toaster();
