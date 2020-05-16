@@ -86,7 +86,7 @@ function Toaster()
                     retVal.child.stdin.write('$objBalloon = New-Object System.Windows.Forms.NotifyIcon\r\n');
                     retVal.child.stdin.write('$objBalloon.Icon = [System.Drawing.SystemIcons]::Information\r\n');
                     retVal.child.stdin.write('$objBalloon.Visible = $True\r\n');
-                    retVal.child.stdin.write('Register-ObjectEvent -InputObject $objBalloon -EventName BalloonTipClosed -Action { Write-Host "<`DISMISSED`>" }')
+                    retVal.child.stdin.write('Register-ObjectEvent -InputObject $objBalloon -EventName BalloonTipClosed -Action { $objBalloon.dispose();Write-Host "<`DISMISSED`>" }')
                     retVal.child.stdin.write('$objBalloon.ShowBalloonTip(10000,"' + title + '", "' + caption + '", 0)\r\n');
                     retVal.child.on('exit', function () { this.toast._res('DISMISSED'); });
                     return (retVal);
