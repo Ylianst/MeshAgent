@@ -76,19 +76,29 @@ function Toaster()
                         return (retVal);
                     }
 
-                    retVal.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo'], retVal.options);
+                    retVal.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], retVal.options);
                     retVal.child.toast = retVal;
                     retVal.child.stdout.stdin = retVal.child.stdin;
                     retVal.child.stderr.stdin = retVal.child.stdin;
                     retVal.child.stdout.on('data', function (c) { if (c.toString().includes('<DISMISSED>')) { this.stdin.write('exit\n'); } });
-                    retVal.child.stderr.on('data', function (c) { this.stdin.write('exit\n'); });
+                    retVal.child.stderr.once('data', function (c) { this.stdin.write('$objBalloon.dispose();exit\n'); });
                     retVal.child.stdin.write('[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")\r\n');
                     retVal.child.stdin.write('$objBalloon = New-Object System.Windows.Forms.NotifyIcon\r\n');
                     retVal.child.stdin.write('$objBalloon.Icon = [System.Drawing.SystemIcons]::Information\r\n');
                     retVal.child.stdin.write('$objBalloon.Visible = $True\r\n');
                     retVal.child.stdin.write('Register-ObjectEvent -InputObject $objBalloon -EventName BalloonTipClosed -Action { $objBalloon.dispose();Write-Host "<`DISMISSED`>" }')
                     retVal.child.stdin.write('$objBalloon.ShowBalloonTip(10000,"' + title + '", "' + caption + '", 0)\r\n');
-                    retVal.child.on('exit', function () { this.toast._res('DISMISSED'); });
+                    retVal.child.timeout = setTimeout(function (c)
+                    {
+                        c.timeout = null;
+                        c.stdin.write('$objBalloon.dispose();exit\n');
+                    }, 10000, retVal.child);
+                    retVal.child.on('exit', function ()
+                    {
+                        if (this.timeout != null) { clearTimeout(this.timeout); }
+                        this.toast._res('DISMISSED');
+                    });
+                    
                     return (retVal);
                 }
                 break;
