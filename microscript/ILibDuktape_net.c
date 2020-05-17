@@ -1019,11 +1019,13 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 		}
 		if (winIPC->read_overlapped.hEvent != NULL)
 		{
+			ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), winIPC->read_overlapped.hEvent);
 			CloseHandle(winIPC->read_overlapped.hEvent);
 			winIPC->read_overlapped.hEvent = NULL;
 		}
 		if (winIPC->write_overlapped.hEvent != NULL)
 		{
+			ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), winIPC->write_overlapped.hEvent);
 			CloseHandle(winIPC->write_overlapped.hEvent);
 			winIPC->write_overlapped.hEvent = NULL;
 		}
