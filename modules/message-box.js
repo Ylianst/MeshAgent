@@ -47,7 +47,7 @@ var promise = require('promise');
 function messageBox()
 {
     this._ObjectID = 'message-box';
-    this.create = function create(title, caption, timeout, layout)
+    this.create = function create(title, caption, timeout, layout, sid)
     {
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         ret.options = { launch: { module: 'message-box', method: 'slave', args: [] } };
@@ -61,7 +61,7 @@ function messageBox()
 
         try
         {
-            ret.options.uid = require('user-sessions').consoleUid();
+            ret.options.uid = sid == null ? require('user-sessions').consoleUid() : sid;
             if (ret.options.uid == require('user-sessions').getProcessOwnerName(process.pid).tsid) { delete ret.options.uid; }
         }
         catch (ee)
