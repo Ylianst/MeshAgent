@@ -3949,11 +3949,14 @@ void MeshAgent_AgentInstallerCTX_Finalizer(duk_context *ctx, void *user)
 	}
 }
 
+#ifdef WIN32
 BOOL MeshAgent_PidWaiter(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {
 	ILibStopChain(chain);
 	return(FALSE);
 }
+#endif
+
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
