@@ -1389,7 +1389,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			
 			DWORD pid = GetCurrentProcessId();
 			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u", pid);
-			RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE);
+			if (RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE) == 0) { RunAsAdmin(ILibScratchPad, 1); }
 			return (INT_PTR)TRUE;
 		}
 		break;
