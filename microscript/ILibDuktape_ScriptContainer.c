@@ -2240,6 +2240,13 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 					{\
 						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName');\
 					}\
+					try\
+					{\
+						winstr += (' [' + require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'CurrentBuild') + ']');\
+					}\
+					catch(ee)\
+					{\
+					}\
 				}\
 				ret = winstr;\
 				break;\
