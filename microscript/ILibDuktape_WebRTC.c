@@ -56,6 +56,7 @@ typedef struct ILibDuktape_WebRTC_DataChannel
 	duk_context *ctx;
 	ILibDuktape_EventEmitter *emitter;
 	ILibDuktape_DuplexStream *stream;
+	int maxFragmentSize;
 }ILibDuktape_WebRTC_DataChannel;
 
 extern void* ILibWrapper_WebRTC_Connection_GetStunModule(ILibWrapper_WebRTC_Connection connection);
@@ -119,7 +120,23 @@ ILibTransport_DoneState ILibDuktape_WebRTC_DataChannel_Stream_WriteSink(ILibDukt
 	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)user;
 	if (ptrs->dataChannel != NULL)
 	{
-		return(ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, bufferLen, stream->writableStream->Reserved == 1 ? 51 : 53));
+		if (stream->writableStream->Reserved == 0 && ptrs->maxFragmentSize > 0 && bufferLen > ptrs->maxFragmentSize)
+		{
+			// We need to fragment the send
+			ILibTransport_DoneState ret = ILibTransport_DoneState_ERROR;
+			while (bufferLen > 0)
+			{
+				ret = ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, ptrs->maxFragmentSize > bufferLen ? ptrs->maxFragmentSize : bufferLen, 53);
+				buffer = buffer + (ptrs->maxFragmentSize > bufferLen ? ptrs->maxFragmentSize : bufferLen);
+				bufferLen -= (ptrs->maxFragmentSize > bufferLen ? ptrs->maxFragmentSize : bufferLen);
+			}
+			return(ret);
+		}
+		else
+		{
+			// Normal Send
+			return(ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, bufferLen, stream->writableStream->Reserved == 1 ? 51 : 53));
+		}
 	}
 	else
 	{
@@ -186,6 +203,20 @@ duk_ret_t ILibDuktape_WebRTC_DataChannel_Finalizer(duk_context *ctx)
 	return 0;
 }
 
+duk_ret_t ILibDuktape_WebRTC_DataChannel_MaxFragmentSize_SETTER(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebRTC_DataChannelPtr);
+	ptrs->maxFragmentSize = (int)duk_require_int(ctx, 0);
+	return(0);
+}
+duk_ret_t ILibDuktape_WebRTC_DataChannel_MaxFragmentSize_GETTER(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebRTC_DataChannelPtr);
+	duk_push_int(ctx, ptrs->maxFragmentSize);
+	return(1);
+}
 void ILibDuktape_WebRTC_DataChannel_PUSH(duk_context *ctx, ILibWrapper_WebRTC_DataChannel *dataChannel)
 {
 	if (dataChannel == NULL) { duk_push_null(ctx); return; }
@@ -215,6 +246,7 @@ void ILibDuktape_WebRTC_DataChannel_PUSH(duk_context *ctx, ILibWrapper_WebRTC_Da
 
 	ptrs->stream = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_WebRTC_DataChannel_Stream_WriteSink, ILibDuktape_WebRTC_DataChannel_Stream_EndSink,
 		ILibDuktape_WebRTC_DataChannel_Stream_PauseSink, ILibDuktape_WebRTC_DataChannel_Stream_ResumeSink, ptrs);
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "maxFragmentSize", ILibDuktape_WebRTC_DataChannel_MaxFragmentSize_GETTER, ILibDuktape_WebRTC_DataChannel_MaxFragmentSize_SETTER);
 }
 
 duk_ret_t ILibDuktape_WebRTC_ConnectionFactory_Finalizer(duk_context *ctx)
