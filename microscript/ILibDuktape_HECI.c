@@ -160,6 +160,8 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteHandler_Process(ILibDuktap
 extern int ILibDuktape_HECI_Debug;
 
 #ifdef WIN32
+BOOL ILibDuktape_HECI_Session_ReceiveSink(void *chain, HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user);
+
 HANDLE ILibDuktape_HECI_windowsInit()
 {
 	PSP_DEVICE_INTERFACE_DETAIL_DATA deviceDetail = NULL;
@@ -284,7 +286,7 @@ void ILibDuktape_HECI_Session_EmitStreamReady(void *chain, void *session)
 }
 
 #ifdef WIN32
-BOOL ILibDuktape_HECI_Session_WriteHandler_Ready(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
+BOOL ILibDuktape_HECI_Session_WriteHandler_Ready(void *chain, HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 {
 	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
 
@@ -293,8 +295,8 @@ BOOL ILibDuktape_HECI_Session_WriteHandler_Ready(HANDLE event, ILibWaitHandle_Er
 
 	if (!ILibMemory_CanaryOK(session)) { return(FALSE); }
 
-	ILibProcessPipe_WaitHandle_Remove(session->mgr, session->wv.hEvent);
-	
+	ILibChain_RemoveWaitHandle(session->chain, session->wv.hEvent);
+
 	if (session->noPipelining == 0)
 	{
 		ILibDuktape_HECI_WriteState *state = (ILibDuktape_HECI_WriteState*)ILibQueue_DeQueue(session->PendingWrites);
@@ -378,7 +380,7 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteHandler_Process(ILibDuktap
 		{
 			// Not done writing
 			retVal = ILibTransport_DoneState_INCOMPLETE;
-			ILibProcessPipe_WaitHandle_Add(session->mgr, session->wv.hEvent, session, ILibDuktape_HECI_Session_WriteHandler_Ready);
+			ILibChain_AddWaitHandle(session->chain, session->wv.hEvent, -1, ILibDuktape_HECI_Session_WriteHandler_Ready, session);
 		}
 		else
 		{
@@ -471,7 +473,7 @@ ILibTransport_DoneState ILibDuktape_HECI_Session_WriteSink(ILibDuktape_DuplexStr
 	{
 #if defined(WIN32)
 		state->returnIgnored = 1;
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_WriteHandler, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)state);
+		ILibDuktape_HECI_Session_WriteHandler((ULONG_PTR)state);
 #elif defined(_POSIX)
 		if (ILibIsRunningOnChainThread(stream->readableStream->chain) != 0)
 		{
@@ -520,20 +522,6 @@ void ILibDuktape_HECI_Session_PauseSink(ILibDuktape_DuplexStream *sender, void *
 	UNREFERENCED_PARAMETER(user);
 #endif
 }
-#ifdef WIN32
-BOOL ILibDuktape_HECI_Session_ReceiveSink(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user);
-void __stdcall ILibDuktape_HECI_Session_ResumeSink2(ULONG_PTR obj)
-{
-	//if (ILibDuktape_HECI_Debug) { printf("ILibDuktape_HECI_Session_ResumeSink2()\n"); }
-	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)obj;
-	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &(session->bytesRead), &(session->v));
-	if (result == TRUE || GetLastError() == ERROR_IO_PENDING)
-	{
-		//if (ILibDuktape_HECI_Debug) { printf("...[Wait Handle Added]\n"); }
-		ILibProcessPipe_WaitHandle_Add(session->mgr, session->v.hEvent, session, ILibDuktape_HECI_Session_ReceiveSink);
-	}
-}
-#endif
 void ILibDuktape_HECI_Session_ResumeSink_NoPipeline(void *chain, void *user)
 {
 	// This is always called from the Microstack Thread
@@ -555,13 +543,16 @@ void ILibDuktape_HECI_Session_ResumeSink(ILibDuktape_DuplexStream *sender, void 
 	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
 	if (session->noPipelining != 0)
 	{
-		Duktape_RunOnEventLoop(sender->readableStream->chain, duk_ctx_nonce(sender->readableStream->ctx), sender->readableStream->ctx, ILibDuktape_HECI_Session_ResumeSink_NoPipeline, NULL, session);
-		// Note: DO NOT 'return' here, because we still need to QueueUserAPC, to resume the stream on Windows
+		ILibDuktape_HECI_Session_ResumeSink_NoPipeline(sender->readableStream->chain, session);
 	}
 
 #ifdef WIN32
-	// To Resume, we need to first context switch to the Windows Thread
-	QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_ResumeSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session);
+	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &(session->bytesRead), &(session->v));
+	if (result == TRUE || GetLastError() == ERROR_IO_PENDING)
+	{
+		//if (ILibDuktape_HECI_Debug) { printf("...[Wait Handle Added]\n"); }
+ 		ILibChain_AddWaitHandle(session->chain, session->v.hEvent, -1, ILibDuktape_HECI_Session_ReceiveSink, session);
+	}
 #endif
 }
 #ifdef WIN32
@@ -576,7 +567,7 @@ void ILibDuktape_HECI_Session_ReceiveSink2(void *chain, void *user)
 		ILibDuktape_HECI_Session_ResumeSink(session->stream, session->stream->user);
 	}
 }
-BOOL ILibDuktape_HECI_Session_ReceiveSink(HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
+BOOL ILibDuktape_HECI_Session_ReceiveSink(void *chain, HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
 {
 	//if (ILibDuktape_HECI_Debug) { printf("ILibDuktape_HECI_Session_ReceiveSink\n"); }
 	if (errors != ILibWaitHandle_ErrorStatus_NONE) 
@@ -589,7 +580,14 @@ BOOL ILibDuktape_HECI_Session_ReceiveSink(HANDLE event, ILibWaitHandle_ErrorStat
 	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)user;
 	if (ILibMemory_CanaryOK(session))
 	{
-		if (GetOverlappedResult(session->descriptor, &(session->v), &(session->bytesRead), FALSE) == TRUE) { Duktape_RunOnEventLoop(session->chain, duk_ctx_nonce(session->stream->readableStream->ctx), session->stream->readableStream->ctx, ILibDuktape_HECI_Session_ReceiveSink2, NULL, session); }
+		if (GetOverlappedResult(session->descriptor, &(session->v), &(session->bytesRead), FALSE) == TRUE) 
+		{
+			ILibDuktape_DuplexStream_WriteData(session->stream, session->buffer, session->bytesRead);
+			if (session->stream != NULL && !session->stream->readableStream->paused)
+			{
+				ILibDuktape_HECI_Session_ResumeSink(session->stream, session->stream->user);
+			}
+		}
 	}
 	return(FALSE);
 }
@@ -601,7 +599,7 @@ void __stdcall ILibDuktape_HECI_Session_Start(ULONG_PTR obj)
 	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &bytesRead, &(session->v));
 	//if (ILibDuktape_HECI_Debug) { printf("...[WaitHandle Added]\n"); }
 
-	ILibProcessPipe_WaitHandle_Add(session->mgr, session->v.hEvent, session, ILibDuktape_HECI_Session_ReceiveSink);
+	ILibChain_AddWaitHandle(session->chain, session->v.hEvent, -1, ILibDuktape_HECI_Session_ReceiveSink, session);
 }
 #endif
 
@@ -677,7 +675,7 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, ILibDuktape_HECI_ChildProcess);		// [HECI][childProcess]
 		duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);		// [HECI][childProcess][manager]
 		session->mgr = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);	
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_Start, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session);
+		ILibDuktape_HECI_Session_Start((ULONG_PTR)session);
 #else
 		duk_push_this(ctx);													// [HECI]
 		session->descriptor = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Descriptor, -1);
@@ -756,10 +754,10 @@ duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, ILibDuktape_HECI_SessionMemPtr);								// [HECI][SESSION]
 		session = (ILibDuktape_HECI_Session*)Duktape_GetBuffer(ctx, -1, NULL);
 
-		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->v.hEvent);
-		ILibProcessPipe_WaitHandle_Remove(session->mgr, session->wv.hEvent);
+		ILibChain_RemoveWaitHandle(session->chain, session->v.hEvent);
+		ILibChain_RemoveWaitHandle(session->chain, session->wv.hEvent);
 		session->stream = NULL;
-		QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Session_CloseSink2, ILibProcessPipe_Manager_GetWorkerThread(session->mgr), (ULONG_PTR)session->descriptor);
+		CloseHandle(session->descriptor);
 	}
 #else
 	int d = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Descriptor, -1);
@@ -851,7 +849,7 @@ void ILibDuktape_HECI_IoctlHandler_Dispatch(void *chain, void *user)
 }
 #ifdef WIN32
 void ILibDuktape_HECI_NextIoctl(ILibQueue q);
-BOOL ILibDuktape_HECI_IoctlHandler(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
+BOOL ILibDuktape_HECI_IoctlHandler(void * chain, HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
 	if (errors == ILibWaitHandle_ErrorStatus_INVALID_HANDLE || errors == ILibWaitHandle_ErrorStatus_REMOVED) { return(FALSE); }
 	if (!ILibMemory_CanaryOK(user)) { return(FALSE); }
@@ -870,7 +868,7 @@ BOOL ILibDuktape_HECI_IoctlHandler(HANDLE h, ILibWaitHandle_ErrorStatus errors, 
 	}
 
 	ILibQueue_DeQueue(data->Q);
-	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, h);
+	ILibChain_RemoveWaitHandle(data->chain, h);
 
 	if (data->abort != 0 || !ILibMemory_CanaryOK(data->reserved))
 	{
@@ -888,7 +886,7 @@ BOOL ILibDuktape_HECI_IoctlHandler(HANDLE h, ILibWaitHandle_ErrorStatus errors, 
 		return(FALSE);
 	}
 
-	Duktape_RunOnEventLoop(data->chain, data->ctxnonce, data->ctx, ILibDuktape_HECI_IoctlHandler_Dispatch, NULL, data);
+	ILibDuktape_HECI_IoctlHandler_Dispatch(data->chain, data);
 
 	if (ILibQueue_GetCount(Q) > 0)
 	{
@@ -906,8 +904,7 @@ void ILibDuktape_HECI_NextIoctl(ILibQueue q)
 
 	ResetEvent(data->v.hEvent);
 	res = DeviceIoControl(data->device, (DWORD)data->code, data->buffer, (DWORD)data->bufferLen, data->outBuffer, (DWORD)data->outBufferLen, &(data->bytesReceived), &(data->v));
-	ILibProcessPipe_WaitHandle_Add_WithNonZeroTimeout(data->pipeManager, data->v.hEvent, 2000, data, ILibDuktape_HECI_IoctlHandler);
-
+	ILibChain_AddWaitHandle(data->chain, data->v.hEvent, 2000, ILibDuktape_HECI_IoctlHandler, data);
 }
 void __stdcall ILibDuktape_HECI_apc_AddIoctl(ULONG_PTR obj)
 {
@@ -1031,7 +1028,8 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	duk_get_prop_string(ctx, -2, ILibDuktape_HECI_ChildProcess);					// [heci][stash][childProcess]
 	duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);					// [heci][stash][childProcess][manager]
 	data->pipeManager = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);
-	QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_apc_AddIoctl, ILibProcessPipe_Manager_GetWorkerThread(data->pipeManager), (ULONG_PTR)data);
+
+	ILibDuktape_HECI_apc_AddIoctl((ULONG_PTR)data);
 #elif defined(_POSIX)
 	ILibDuktape_HECI_AddIoctl(data);
 #endif
@@ -1074,8 +1072,8 @@ duk_ret_t ILibDuktape_HECI_Finalizer(duk_context *ctx)
 #ifdef WIN32
 		ILibQueue Q = (ILibQueue)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_HECI_Q);
 		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_ChildProcess);
-		ILibProcessPipe_Manager mgr = (ILibProcessPipe_Manager)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager);		
-		if (mgr != NULL) { QueueUserAPC((PAPCFUNC)ILibDuktape_HECI_Finalizer2, ILibProcessPipe_Manager_GetWorkerThread(mgr), (ULONG_PTR)Q); }
+		ILibProcessPipe_Manager mgr = (ILibProcessPipe_Manager)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager);
+		ILibDuktape_HECI_Finalizer2((ULONG_PTR)Q);
 #else
 		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_Q);
 		ILibQueue_Destroy((ILibQueue)duk_get_pointer(ctx, -1));

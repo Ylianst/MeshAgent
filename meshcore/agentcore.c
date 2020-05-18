@@ -91,6 +91,8 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define REMOTE_DESKTOP_STREAM	"\xFF_RemoteDesktopStream"
 #define REMOTE_DESKTOP_ptrs		"\xFF_RemoteDesktopPTRS"
 #define DEFAULT_IDLE_TIMEOUT	120
+#define MESH_USER_CHANGED_CB	"\xFF_MeshAgent_UserChangedCallback"
+#define REMOTE_DESKTOP_UID		"\xFF_RemoteDesktopUID"
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
 int ILibDuktape_HECI_Debug = 0;
@@ -430,41 +432,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t
 								})();";
 	#else
 			// Linux Only
-			char getProxy[] = "(function getProxies(){\
-									if(require('fs').existsSync('/etc/environment'))\
-									{\
-										var e = require('fs').readFileSync('/etc/environment').toString();\
-										var tokens = e.split('\\n');\
-										for(var line in tokens)\
-										{\
-											var val = tokens[line].split('=');\
-											if(val.length == 2 && (val[0].trim() == 'http_proxy' || val[0].trim() == 'https_proxy'))\
-											{\
-												return(val[1].split('//')[1]);\
-											}\
-										}\
-									}\
-									if(require('fs').existsSync('/etc/profile.d/proxy_setup'))\
-									{\
-										var child = require('child_process').execFile('/bin/sh', ['sh']);\
-										child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
-										child.stdin.write('cat /etc/profile.d/proxy_setup | awk \\'{ split($2, tok, \"=\"); if(tok[1]==\"http_proxy\") { print tok[2]; }}\\'\\nexit\\n');\
-										child.waitExit();\
-										child.ret = child.stdout.str.trim().split('\\n')[0].split('//')[1];\
-										if(child.ret != '') { return(child.ret); }\
-									}\
-									if (require('fs').existsSync('/usr/bin/gsettings'))\
-									{\
-										var setting;\
-										var ids = require('user-sessions').loginUids(); \
-										for (var i in ids)\
-										{\
-											setting = require('linux-gnome-helpers').getProxySettings(ids[i]);\
-											if (setting.mode == 'manual') { return(setting.host + ':' + setting.port);} \
-										}\
-									}\
-									throw('No Proxy set');\
-								})();";
+			char getProxy[] = "require('proxy-helper').getProxy()";
 	#endif
 			// Linux and FreeBSD
 			if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
@@ -1282,6 +1250,49 @@ void ILibDuktape_MeshAgent_RemoteDesktop_SendError(RemoteDesktop_Ptrs* ptrs, cha
 }
 #endif
 
+#ifdef _POSIX
+extern void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid);
+duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
+{
+	char *d, *x;
+	void *s;
+	RemoteDesktop_Ptrs *ptrs;
+	MeshAgentHostContainer *agent;
+
+
+	duk_eval_string(ctx, "require('MeshAgent')");					// [MeshAgent]
+	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+
+	if (!duk_has_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM)) { return(0); }
+	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM);			// [MeshAgent][stream]
+	s = duk_get_heapptr(ctx, -1);
+
+	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_ptrs);
+	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);	// [MeshAgent][stream][ptrs]
+
+	duk_peval_string(ctx, "require('user-sessions').consoleUid()");
+	int id = duk_to_int(ctx, -1);
+	duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
+	duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
+	duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
+	duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
+	if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
+	x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+	d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+
+
+	duk_push_heapptr(ctx, s);							// [stream]
+	duk_push_int(ctx, id);								// [stream][id]
+	duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);	// [stream]
+	duk_pop(ctx);										// ...
+
+	ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+	ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
+
+	return(0);
+}
+#endif
+
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 {
 #ifndef _LINKVM
@@ -1367,11 +1378,33 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 		}
 	#else
+		duk_push_int(ctx, console_uid); duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);
+		duk_push_this(ctx);																// [MeshAgent]
+		if (!duk_has_prop_string(ctx, -1, MESH_USER_CHANGED_CB))
+		{
+			duk_eval_string(ctx, "require('user-sessions')");							// [MeshAgent][usersessions]
+			duk_get_prop_string(ctx, -1, "on");											// [MeshAgent][usersessions][on]
+			duk_swap_top(ctx, -2);														// [MeshAgent][on][this]
+			duk_push_string(ctx, "changed");											// [MeshAgent][on][this][changed]
+			duk_push_c_function(ctx, ILibDuktape_MeshAgent_userChanged, DUK_VARARGS);	// [MeshAgent][on][this][changed][func]
+			duk_dup(ctx, -5);															// [MeshAgent][on][this][changed][func][MeshAgent]
+			duk_dup(ctx, -2);															// [MeshAgent][on][this][changed][func][MeshAgent][func]
+			duk_put_prop_string(ctx, -2, MESH_USER_CHANGED_CB);							// [MeshAgent][on][this][changed][func][MeshAgent]
+			duk_pop(ctx);																// [MeshAgent][on][this][changed][func]
+			duk_call_method(ctx, 2); duk_pop(ctx);										// [MeshAgent]
+		}
+		duk_pop(ctx);																	// ...
+
+
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
+		char *xdm = NULL;
 		int needPop = 0;
-		if (getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
+		duk_eval_string(ctx, "require('user-sessions').Self()");
+		int self = duk_get_int(ctx, -1); duk_pop(ctx);
+
+		if (self==0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
 		{
 			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
@@ -1382,6 +1415,15 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", NULL);
+
+						if (strcmp(xdm, "xwayland") == 0)
+						{
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This platform is configured to use Xwayland");
+							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "please modify config to use Xorg");
+							duk_pop(ctx);
+							return(1);
+						}
 
 						if (console_uid != 0 && updateXAuth == NULL)
 						{
@@ -1415,7 +1457,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 
 		//MeshAgent_sendConsoleText(ctx, "Using uid: %d, XAUTHORITY: %s\n", console_uid, getenv("XAUTHORITY")==NULL? updateXAuth : getenv("XAUTHORITY"));
-
 		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth, updateDisplay);
 		if (needPop!= 0) {duk_pop(ctx); }
 	#endif
@@ -2175,8 +2216,14 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 				// Load the TLS certificate from the database. If not present, generate one.
 				len = ILibSimpleDataStore_Get(agent->masterDb, "SelfNodeTlsCert", ILibScratchPad2, sizeof(ILibScratchPad2));
 				if ((len != 0) && (util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selftlscert)) == 0)) { len = 0; } // Unable to decode this certificate
-				if (agent_VerifyMeshCertificates(agent) != 0) { len = 0; } // Check that the load TLS cert is signed by our root.
-				if (len == 0) {
+				if (agent_VerifyMeshCertificates(agent) != 0) 
+				{
+					// Check that the load TLS cert is signed by our root.
+					len = 0; 
+					ILIBLOGMESSAGEX("Certificate loaded from DB was not signed by our root cert in the Cert Store");
+				} 
+				if (len == 0) 
+				{
 					// Generate a new TLS certificate & save it.
 					util_freecert(&(agent->selftlscert));
 					l = wincrypto_mkCert(agent->certObject, rootSubject, L"CN=localhost", CERTIFICATE_TLS_SERVER, L"hidden", &str);
@@ -2185,9 +2232,25 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 						ILibSimpleDataStore_PutEx(agent->masterDb, "SelfNodeTlsCert", 15, str, l);
 					}
 					util_free(str);
-					if (l <= 0) { return 1; } // Problem generating the TLS cert, reset everything.
+					if (l <= 0) 
+					{
+						// Problem generating the TLS cert, reset everything.
+						ILIBLOGMESSAGEX("Error occured trying to generate a TLS cert that is signed by our root in Cert Store");
+						return 1; 
+					} 
 				}
 				return 0; // All good. We loaded or generated a root agent cert and TLS cert.
+			}
+			else
+			{
+				ILIBLOGMESSAGEX("No certificate found in Microsoft Certificate Store");
+			}
+		}
+		else
+		{
+			if (agent->noCertStore == 0 && agent->certObject == NULL)
+			{
+				ILIBLOGMESSAGEX("Error opening Microsoft Certificate Store");
 			}
 		}
 #endif
@@ -2195,6 +2258,7 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 		// No certificate in the database. Return 1 here so we can generate one.
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load Node Certificate from Database");
 		SSL_TRACE2("agent_LoadCertificates([ERROR: SelfNodeCert])");
+		ILIBLOGMESSAGEX("Info: No certificate was found in db");
 		return 1;
 	}
 
@@ -2341,7 +2405,7 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 
 #ifdef WIN32
 	int retVal = 1;
-	fopen_s(&tmpFile, filePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(filePath, -1), L"rb");
 #else
 	tmpFile = fopen(filePath, "rb");
 #endif
@@ -3587,7 +3651,7 @@ void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
 	int mshLen;
 
 #ifdef WIN32
-	fopen_s(&tmpFile, agent->exePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(agent->exePath, -1), L"rb");
 #else
 	tmpFile = fopen(agent->exePath, "rb");
 #endif
@@ -3608,7 +3672,7 @@ void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
 			{
 				FILE *msh = NULL;
 #ifdef WIN32
-				fopen_s(&msh, MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
+				_wfopen_s(&msh, ILibUTF8ToWide(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), -1), L"wb");
 #else
 				msh = fopen(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
 #endif
@@ -3958,18 +4022,32 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	{
 		int len = (int)strnlen_s(param[ri], 4096);
 		int ix;
-		if ((ix=ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2)==0)
-		{
-			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
-			++ixr;
-		}
-		if (strcmp("-finstall", param[ri]) == 0)
+		if (strcmp("-finstall", param[ri]) == 0 || strcmp("-fullinstall", param[ri]) == 0)
 		{
 			installFlag = 1;
+		}
+		if (strcmp("-install", param[ri]) == 0)
+		{
+			installFlag = 5;
+			if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, "_localService", 13, "1", 1);
 		}
 		if (strcmp("-funinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0)
 		{
 			installFlag = 2;
+			if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, "_deleteData", 11, "1", 1);
+		}
+		if (strcmp("-uninstall", param[ri]) == 0)
+		{
+			installFlag = 2;
+		}
+
+		if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+		if ((ix = ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2) == 0)
+		{
+			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
+			++ixr;
 		}
 	}
 	paramLen -= ixr;
@@ -3989,6 +4067,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		switch (installFlag)
 		{
 			case 1:
+			case 5:
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
 				buf = (char*)ILibMemory_SmartAllocate(bufLen);
 				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
@@ -4009,10 +4088,15 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				return(1);
 				break;
 			case 2:
+				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
+				buf = (char*)ILibMemory_SmartAllocate(bufLen);
+				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
+
 				duk_eval_string(ctxx, "require('agent-installer');");
 				duk_get_prop_string(ctxx, -1, "fullUninstall");
 				duk_swap_top(ctxx, -2);
-				if (duk_pcall_method(ctxx, 0) != 0)
+				duk_push_string(ctxx, buf);
+				if (duk_pcall_method(ctxx, 1) != 0)
 				{
 					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
 					{
@@ -4020,6 +4104,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					}
 				}
 				duk_pop(ctxx);
+				ILibMemory_Free(buf);
 				return(1);
 				break;
 			default:
@@ -4079,7 +4164,12 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			if (RegQueryValueExA(hKey, TEXT("ResetNodeId"), NULL, NULL, NULL, &len) == ERROR_SUCCESS && len > 0)
 			{
-				if (RegDeleteValue(hKey, TEXT("ResetNodeId")) == ERROR_SUCCESS) { resetNodeId = 1; } // Force certificate reset
+				if (RegDeleteValue(hKey, TEXT("ResetNodeId")) == ERROR_SUCCESS) 
+				{
+					// Force certificate reset
+					ILIBLOGMESSAGEX("NodeID will reset, because ResetNodeID key was found in registry");
+					resetNodeId = 1;
+				} 
 			}
 			RegCloseKey(hKey);
 		}
@@ -4091,7 +4181,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		int i;
 		// Parse command-line arguments
 		for (i = 0; i < paramLen; ++i) {
-			if (strcmp(param[i], "--resetnodeid") == 0) { resetNodeId = 1; }
+			if (strcmp(param[i], "--resetnodeid") == 0) 
+			{
+				resetNodeId = 1; 
+				ILIBLOGMESSAGEX("NodeID will reset, because --resetnodeid command line switch was specified");
+			}
 		}
 	}
 #endif
@@ -4156,7 +4250,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					// We have at least one valid MAC address, so we can continue with the checks
 
 					i = 0;
-					char *curr = ILibMemory_AllocateA(len);
+					char *curr = ILibMemory_AllocateA(len+1);
 					ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", curr, len);
 
 					while (i < len)
@@ -4167,7 +4261,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 						}
 						i += 19;
 					}
-					if (i >= len) { resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); }
+					if (i >= len) 
+					{
+						ILIBLOGMESSAGEX("NodeID will reset, MAC Address Mismatch: %s <==> %s", mac, curr);
+						resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); 
+					}
 				}
 			}
 		}
@@ -4582,7 +4680,9 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	{
 		// Get the full path name of the JavaScript file
 #ifdef WIN32
-		pathLen = GetFullPathName(argv[1], sizeof(ILibScratchPad2), ILibScratchPad2, NULL);
+		WCHAR wjsPath[4096];
+		GetFullPathNameW(ILibUTF8ToWide(argv[1], -1), sizeof(wjsPath) / 2, wjsPath, NULL);
+		pathLen = WideCharToMultiByte(CP_UTF8, 0, wjsPath, -1, (LPSTR)ILibScratchPad2, sizeof(ILibScratchPad2), NULL, NULL);
 #else
 		if (realpath(argv[1], ILibScratchPad2) != NULL) { pathLen = strnlen_s(ILibScratchPad2, PATH_MAX); }
 #endif
@@ -4595,18 +4695,6 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 		scriptArgs = (char**)ILibMemory_Allocate((1 + argc) * sizeof(char*), 1 + pathLen, NULL, (void**)&jsPath);		// KLOCWORK is being dumb, becuase ILibScratchpad2 is gauranteed to be NULL terminated
 		strncpy_s(jsPath, ILibMemory_GetExtraMemorySize(jsPath), ILibScratchPad2, ILibMemory_GetExtraMemorySize(jsPath));
 		scriptArgs[0] = jsPath;
-
-#ifdef WIN32
-		i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "\\", 1);
-#else
-		i = ILibString_LastIndexOf(ILibScratchPad2, pathLen, "/", 1);
-#endif
-		ILibScratchPad2[i] = 0;
-#ifdef WIN32
-		SetCurrentDirectory(ILibScratchPad2);
-#else
-		ignore_result(chdir(ILibScratchPad2));
-#endif
 
 		// Parse arguments. Handle the ones we can, others will be passed to the JavaScript engine. 
 		for (i = 2; i < argc; ++i)
@@ -4793,7 +4881,9 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		exePath[0] = 0;
 
 #ifdef WIN32
-		GetModuleFileName(NULL, exePath, sizeof(exePath));
+		WCHAR tmpExePath[2048];
+		GetModuleFileNameW(NULL, tmpExePath, sizeof(tmpExePath)/2);
+		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, (LPSTR)exePath, (int)sizeof(exePath), NULL, NULL);
 #elif defined(__APPLE__)
 		if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
 		exePath[(int)len] = 0;
@@ -4826,7 +4916,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	{
 		strncpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), param[0], x);
 		ILibScratchPad2[x] = 0;
-		SetCurrentDirectory(ILibScratchPad2);
+		SetCurrentDirectoryW(ILibUTF8ToWide(ILibScratchPad2, -1));
 	}
 #endif
 
@@ -4858,7 +4948,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		{
 			int i, ptr = 0;
 #ifdef WIN32
-			STARTUPINFOA info = { sizeof(info) };
+			STARTUPINFOW info = { sizeof(info) };
 			PROCESS_INFORMATION processInfo;
 #endif
 			// Get the update executable path
@@ -4878,14 +4968,14 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #ifdef WIN32
 			// Windows version
 			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:\"%s\"%s", updateFilePath, agentHost->exePath, str);
-			if (!CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
+			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We tried to execute a bad executable... not good. Lets try to recover.
 				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> FAILED..."); }
 				if (updateFilePath != NULL && agentHost->exePath != NULL)
 				{
 					while (util_CopyFile(agentHost->exePath, updateFilePath, FALSE) == FALSE) Sleep(5000);
-					if (CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
+					if (CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 					{
 						CloseHandle(processInfo.hProcess);
 						CloseHandle(processInfo.hThread);
@@ -5003,7 +5093,7 @@ void MeshAgent_Stop(MeshAgentHostContainer *agent)
 void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv)
 {
 	int i, ptr = 0;
-	STARTUPINFOA info = { sizeof(info) };
+	STARTUPINFOW info = { sizeof(info) };
 	PROCESS_INFORMATION processInfo;
 
 	// Sleep for 5 seconds, this will give some time for the calling process to get going.
@@ -5018,7 +5108,7 @@ void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char *
 	while (util_CopyFile(selfpath, exepath, FALSE) == FALSE) Sleep(5000);
 
 	// Now run the process
-	if (!CreateProcessA(NULL, ILibScratchPad2, NULL, NULL, TRUE, 0, NULL, NULL, &info, &processInfo))
+	if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad2, -1), NULL, NULL, TRUE, 0, NULL, NULL, &info, &processInfo))
 	{
 		// TODO: Failed to run update.
 	}

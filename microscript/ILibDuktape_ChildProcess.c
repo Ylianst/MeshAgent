@@ -110,38 +110,15 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
 	if (!ILibMemory_CanaryOK(p)) { return; }
 
-#ifdef WIN32
-	if (duk_ctx_context_data(p->ctx)->apc_flags == 0 && p->dispatchFlags == 0)
-	{
-		// This method was called with an APC, but this thread was running an unknown alertable method when it was interrupted
-		// So we must unwind the stack, and use a non-apc method to re-dispatch to this thread, becuase we can't risk
-		// calling a winsock method, in case this thread was inside winsock when it was interrupted, because otherwise, it 
-		// will corrupt memory, resulting in a possible crash.
-		//
-		// We had to do the APC first, becuase otherwise child_process.waitExit() will not work, becuase that method is blocking
-		// the event loop thread with an alertable wait object, so APC is the only way to propagate this event
-		p->exitCode = exitCode;
-		p->dispatchFlags = 1;
-		Duktape_RunOnEventLoop(p->chain, duk_ctx_nonce(p->ctx), p->ctx, ILibDuktape_ChildProcess_SubProcess_ExitHandler_sink1, NULL, p);
-	}
-#endif
-
 	p->exitCode = exitCode;
 	p->childProcess = NULL;
 	duk_push_heapptr(p->ctx, p->subProcess);		// [childProcess]
 	
-#ifdef WIN32
-	HANDLE exitptr = (HANDLE)Duktape_GetPointerProperty(p->ctx, -1, "\xFF_WaitExit");
-	if (exitptr != NULL)
-	{
-		SetEvent(exitptr);
-	}
-#else
 	if (Duktape_GetIntPropertyValue(p->ctx, -1, "\xFF_WaitExit", 0) != 0)
 	{
 		ILibChain_EndContinue(Duktape_GetChain(p->ctx));
 	}
-#endif
+
 	duk_get_prop_string(p->ctx, -1, "emit");		// [childProcess][emit]
 	duk_swap_top(p->ctx, -2);						// [emit][this]
 	duk_push_string(p->ctx, "exit");				// [emit][this][exit]
@@ -185,6 +162,7 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
+	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
 	{
@@ -192,29 +170,23 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	}
 
 	duk_push_this(ctx);									// [spawnedProcess]
+	char *_target = Duktape_GetStringPropertyValue(ctx, -1, "_target", NULL);
 	if (!ILibChain_IsLinkAlive(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager)))
 	{
 		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));
 	}
 
-#ifdef WIN32
-	DWORD result;
-	HANDLE eptr = CreateEventA(NULL, TRUE, FALSE, NULL);
-	duk_push_pointer(ctx, (void*)eptr);
-#else
 	duk_push_int(ctx, 1);								// [spawnedProcess][flag]
-#endif
 	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
 
-#ifdef WIN32
-	duk_ctx_context_data(ctx)->apc_flags = 1;
-	while ((result=WaitForSingleObjectEx(eptr, duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : INFINITE, TRUE)) != WAIT_OBJECT_0 && result != WAIT_TIMEOUT);
-	duk_ctx_context_data(ctx)->apc_flags = 0;
-	CloseHandle(eptr);
-	if (result == WAIT_TIMEOUT) { return(ILibDuktape_Error(ctx, "timeout")); }
-#else
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager) };
-	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, -1);
+#ifdef WIN32
+	HANDLE handles[] = { NULL, NULL, NULL, NULL, NULL };
+	ILibProcessPipe_Process p = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
+	ILibProcessPipe_Process_GetWaitHandles(p, &(handles[0]), &(handles[1]), &(handles[2]), &(handles[3]));
+	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, (HANDLE**)handles);
+#else
+	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout);
 #endif
 
 	return(0);
@@ -432,6 +404,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "child_process.execFile(): Could not exec [%s]", target));
 	}
 	ILibDuktape_ChildProcess_SpawnedProcess_PUSH(ctx, p, callback);
+	duk_push_string(ctx, target); duk_put_prop_string(ctx, -2, "_target");
 	duk_push_pointer(ctx, manager); duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Manager);
 	return(1);
 }

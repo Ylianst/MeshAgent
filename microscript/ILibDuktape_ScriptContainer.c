@@ -260,7 +260,7 @@ void ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(char *exePath, char **script,
 	int integratedJavaScriptLen = 0;
 	FILE* tmpFile = NULL;
 
-	fopen_s(&tmpFile, exePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(exePath, -1), L"rb");
 	if (tmpFile != NULL)
 	{
 		// Read the PE Headers, to determine where to look for the Embedded JS
@@ -338,7 +338,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 	{
 		i = sprintf_s(g_AgentCrashID, sizeof(g_AgentCrashID), "%s_", exePath);
 		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.exe", exePath);
-		fopen_s(&tmpFile, ILibScratchPad, "rb");
+		_wfopen_s(&tmpFile, ILibUTF8ToWide(ILibScratchPad, -1), L"rb");
 	}
 	else
 	{
@@ -373,7 +373,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 	}
 
 #ifdef WIN32
-	fopen_s(&tmpFile, exePath, "rb");
+	_wfopen_s(&tmpFile, ILibUTF8ToWide(exePath, -1), L"rb");
 #else
 	tmpFile = fopen(exePath, "rb");
 #endif
@@ -465,13 +465,15 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	// Check if .JS file is integrated with executable
 
 #ifndef __APPLE__
-	char exePath[_MAX_PATH];
+	char exePath[_MAX_PATH*2];
 #else
 	char exePath[PATH_MAX+1];
 #endif
 
 #ifdef WIN32
-	GetModuleFileName(NULL, exePath, sizeof(exePath));
+	WCHAR tmpExePath[_MAX_PATH];
+	GetModuleFileNameW(NULL, tmpExePath, sizeof(tmpExePath)/2);
+	WideCharToMultiByte(CP_UTF8, 0, tmpExePath, -1, exePath, sizeof(exePath), NULL, NULL);
 #elif defined(__APPLE__)
 	uint32_t len = sizeof(exePath);
 	if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
@@ -499,6 +501,18 @@ void ILibDuktape_ScriptContainer_Process_ExitCallback(void *obj)
 		duk_context *ctx = ((void**)obj)[0];
 		Duktape_SafeDestroyHeap(ctx);
 	}
+}
+duk_ret_t ILibDuktape_ScriptContainer_Process_ExitEx(duk_context *ctx)
+{
+	if (duk_is_number(ctx, 0))
+	{
+		exit(duk_require_int(ctx, 0));
+	}
+	else
+	{
+		exit(0);
+	}
+	return(0);
 }
 duk_ret_t ILibDuktape_ScriptContainer_Process_Exit(duk_context *ctx)
 {
@@ -861,16 +875,23 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Kill(duk_context *ctx)
 duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 {
 #ifdef WIN32
-	GetCurrentDirectoryA((DWORD)sizeof(ILibScratchPad), ILibScratchPad);
-	duk_push_string(ctx, ILibScratchPad);
-	return(1);
-#elif defined(_POSIX)
+	GetCurrentDirectoryW((DWORD)sizeof(ILibScratchPad)/2, (LPWSTR)ILibScratchPad);
+	ILibDuktape_String_PushWideString(ctx, ILibScratchPad, 0);
+#else
 	ignore_result((uintptr_t)getcwd(ILibScratchPad, sizeof(ILibScratchPad)));
 	duk_push_string(ctx, ILibScratchPad);				
-	return(1);
-#else
-	return(ILibDuktape_Error(ctx, "Error"));
 #endif
+
+	duk_get_prop_string(ctx, -1, "concat");		// [string][concat]
+	duk_swap_top(ctx, -2);						// [concat][this]
+#ifdef WIN32
+	duk_push_string(ctx, "\\"); 
+#else
+	duk_push_string(ctx, "/");
+#endif
+
+	duk_call_method(ctx, 1);
+	return(1);
 }
 
 #ifdef _POSIX
@@ -1236,6 +1257,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "exit");
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Process_Exit, DUK_VARARGS);
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "_exit", ILibDuktape_ScriptContainer_Process_ExitEx, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGTERM");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGCHLD");
@@ -1577,9 +1599,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 	ILibDuktape_CreateReadonlyProperty(ctx, "interfaceIndexes");
 
 	char fqdn[4096];
-	size_t fqdnLen;
 	int i = 0;
-	size_t converted;
 	char tmpBuffer[32768];
 	DWORD tmpBufferSize = sizeof(tmpBuffer);
 	IP_ADAPTER_ADDRESSES *padapters = (IP_ADAPTER_ADDRESSES*)tmpBuffer;
@@ -1603,7 +1623,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 				duk_put_prop_string(ctx, -2, "gateway");
 			}
 
-			wcstombs_s(&fqdnLen, fqdn, sizeof(fqdn), (const wchar_t*)padapters->DnsSuffix, wcsnlen_s(padapters->DnsSuffix, sizeof(fqdn)));
+			ILibWideToUTF8Ex((wchar_t*)padapters->DnsSuffix, -1, fqdn, (int)sizeof(fqdn));
 			duk_push_string(ctx, fqdn);
 			duk_put_prop_string(ctx, -2, "fqdn");
 
@@ -1654,7 +1674,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_networkInterfaces(duk_context *ctx)
 			duk_put_prop_index(ctx, -2, i++);
 			addr = addr->Next;
 		}
-		wcstombs_s(&converted, ILibScratchPad, sizeof(ILibScratchPad), padapters->FriendlyName, sizeof(ILibScratchPad));
+		ILibWideToUTF8Ex(padapters->FriendlyName, -1, ILibScratchPad, (int)sizeof(ILibScratchPad));
 		duk_put_prop_string(ctx, -2, ILibScratchPad);
 
 		duk_push_heapptr(ctx, indexTable);				// [table]
@@ -1815,6 +1835,22 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_hostname(duk_context *ctx)
 	}
 	return(1);
 }
+duk_ret_t ILibDuktape_tmpdir(duk_context *ctx)
+{
+#ifdef WIN32
+	WCHAR tmp[1024];
+	if (GetTempPathW(sizeof(tmp) / 2, (LPWSTR)tmp) == 0) { return(ILibDuktape_Error(ctx, "Error getting temp folder")); }
+	ILibDuktape_String_PushWideString(ctx, (char*)tmp, 0);
+#elif defined (_POSIX)
+	#if defined(__APPLE__)
+		duk_eval_string(ctx, "process.env['TMPDIR']");
+		if (duk_is_undefined(ctx, -1)) { duk_push_string(ctx, "/private/tmp/"); }
+	#else
+		duk_push_string(ctx, "/var/tmp/");
+	#endif
+#endif
+	return(1);
+}
 void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);							// [os]
@@ -1834,6 +1870,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "networkInterfaces", ILibDuktape_ScriptContainer_OS_networkInterfaces, 0);
 #endif
 	ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_ScriptContainer_OS_hostname, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "tmpdir", ILibDuktape_tmpdir, 0);
 
 	char jsExtras[] = "exports.getPrimaryDnsSuffix = function getPrimaryDnsSuffix()\
 	{\
@@ -2161,34 +2198,31 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	exports.Name = (function Name()\
 	{\
 		var child;\
-		switch (process.platform)\
+		if(process.platform!='win32')\
 		{\
-			case 'freebsd':\
-			case 'linux':\
-			case 'darwin':\
-				child = require('child_process').execFile('/bin/sh', ['sh']);\
-				break;\
-			case 'win32':\
-				child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
-				break;\
+			switch (process.platform)\
+			{\
+				case 'freebsd':\
+				case 'linux':\
+				case 'darwin':\
+					child = require('child_process').execFile('/bin/sh', ['sh']);\
+					break;\
+			}\
+			child.stdout.str=''; child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
+			switch (process.platform)\
+			{\
+				case 'linux':\
+					child.stdin.write('cat /etc/*release\\nexit\\n');\
+					break;\
+				case 'darwin':\
+					child.stdin.write('sw_vers\\nexit\\n');\
+					break;\
+				case 'freebsd':\
+					child.stdin.write('uname -mrs\\nexit\\n');\
+					break;\
+			}\
+			child.waitExit();\
 		}\
-		child.stdout.str=''; child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
-		switch (process.platform)\
-		{\
-			case 'linux':\
-				child.stdin.write('cat /etc/*release\\nexit\\n');\
-				break;\
-			case 'darwin':\
-				child.stdin.write('sw_vers\\nexit\\n');\
-				break;\
-			case 'win32':\
-				child.stdin.write('exit\\r\\n');\
-				break;\
-			case 'freebsd':\
-				child.stdin.write('uname -mrs\\nexit\\n');\
-				break;\
-		}\
-		child.waitExit();\
 		var ret=null;\
 		var lines;\
 		var tokens;\
@@ -2196,17 +2230,15 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		switch (process.platform)\
 		{\
 			case 'win32':\
-				var winstr = child.stdout.str.split('\\r\\n')[0];\
-				if(require('user-sessions').isRoot())\
 				{\
 					try\
 					{\
 						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
-						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
+						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID');\
 					}\
 					catch(xx)\
 					{\
-						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' ' + winstr.substring(winstr.indexOf('['));\
+						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName');\
 					}\
 				}\
 				ret = winstr;\
@@ -2255,97 +2287,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	{\
 		var promise = require('promise');\
 		var p = new promise(function(acc, rej) { this._acc = acc; this._rej = rej; });\
-		switch (process.platform)\
-		{\
-			case 'freebsd':\
-			case 'linux':\
-			case 'darwin':\
-				p.child = require('child_process').execFile('/bin/sh', ['sh']);\
-				break;\
-			case 'win32':\
-				p.child = require('child_process').execFile('%windir%\\\\system32\\\\cmd.exe');\
-				break;\
-		}\
-		p.child.promise = p;\
-		p.child.stdout.str = '';\
-		p.child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
-		p.child.on('exit', function(code)\
-		{\
-			var lines;\
-			var tokens;\
-			var i, j;\
-			switch (process.platform)\
-			{\
-				case 'win32':\
-					var winstr = this.stdout.str.split('\\r\\n')[0];\
-					if(require('user-sessions').isRoot())\
-					{\
-						try\
-						{\
-							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
-							require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID') + ' ' + winstr.substring(winstr.indexOf('['));\
-						}\
-						catch(xx)\
-						{\
-							winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' ' + winstr.substring(winstr.indexOf('['));\
-						}\
-					}\
-					this.promise._acc(winstr);\
-					break;\
-				case 'linux':\
-					lines = this.stdout.str.split('\\n');\
-					for (i in lines)\
-					{\
-						tokens = lines[i].split('=');\
-						if (tokens[0] == 'PRETTY_NAME')\
-						{\
-							this.promise._acc(tokens[1].substring(1, tokens[1].length - 1));\
-							break;\
-						}\
-					}\
-					for (i in lines)\
-					{\
-						tokens = lines[i].split('=');\
-						if (tokens[0] == 'DISTRIB_DESCRIPTION')\
-						{\
-							this.promise._acc(tokens[1].substring(1, tokens[1].length - 1));\
-							break;\
-						}\
-					}\
-					this.promise._acc(lines[0]);\
-					break;\
-				case 'darwin':\
-					var OSNAME = '';\
-					var OSVERSION = '';\
-					lines = this.stdout.str.split('\\n');\
-					for (i in lines)\
-					{\
-						tokens = lines[i].split(':');\
-						if (tokens[0] == 'ProductName') { OSNAME = tokens[1].trim(); }\
-						if (tokens[0] == 'ProductVersion') { OSVERSION = tokens[1].trim(); }\
-					}\
-					this.promise._acc(OSNAME + ' ' + OSVERSION);\
-					break;\
-				case 'freebsd':\
-					this.promise._acc(this.stdout.str.trim());\
-					break;\
-			}\
-		});\
-		switch (process.platform)\
-		{\
-			case 'linux':\
-				p.child.stdin.write('cat /etc/*release\\nexit\\n');\
-				break;\
-			case 'darwin':\
-				p.child.stdin.write('sw_vers\\nexit\\n');\
-				break;\
-			case 'win32':\
-				p.child.stdin.write('exit\\r\\n');\
-				break;\
-			case 'freebsd':\
-				p.child.stdin.write('uname -mrs\\nexit\\n');\
-				break;\
-		}\
+		p._acc(this.Name);\
 		return (p);\
 	};\
 	if(process.platform=='freebsd')\
@@ -3144,6 +3086,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 	int bufferLen = ((int*)buffer)[0];
 	void *ptr;
 	int i;
+	duk_context *ctx = master->ctx;
 
 	if (ILibDuktape_ScriptContainer_DecodeJSON(master->ctx, buffer+4, bufferLen-4) == 0)
 	{
@@ -3160,7 +3103,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 						duk_push_string(master->ctx, json);													// [emit][this][data][str]
 						duk_json_decode(master->ctx, -1);													// [emit][this][data][json]
 						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer.OnData(): "); }
-						duk_pop(master->ctx);
+						duk_pop(ctx);
 					}
 				}
 				break;
@@ -3181,7 +3124,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 						ILibDuktape_EventEmitter_SetupEmit(master->ctx, master->emitter->object, "error");	// [emit][this][error]
 						duk_get_prop_string(master->ctx, -4, "error");										// [emit][this][error][errorObj]
 						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnError_Dispatch(): "); }
-						duk_pop(master->ctx);																// ...
+						duk_pop(ctx);																// ...
 					}
 					else
 					{
@@ -3193,7 +3136,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 							duk_push_false(master->ctx);													// [func][this][false]
 							duk_get_prop_string(master->ctx, -4, "error");									// [func][this][false][error]
 							if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnError_Dispatch(): "); }
-							duk_pop(master->ctx);															// ...
+							duk_pop(ctx);															// ...
 						}
 					}
 				}
@@ -3215,7 +3158,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 							duk_push_undefined(master->ctx);											// [func][this][true][undefined]
 						}
 						if (duk_pcall_method(master->ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(master->ctx, "ScriptContainer_OnExec_Dispatch(): "); }
-						duk_pop(master->ctx);															// ...
+						duk_pop(ctx);															// ...
 					}
 				}
 				break;
@@ -3223,11 +3166,14 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 			default:
 				break;
 		}
-		duk_pop(master->ctx);		// ...
+		duk_pop(ctx);		// ...
 	}
 
 #ifdef WIN32
-	if (master->child != NULL) { ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child)); }
+	if (ILibMemory_CanaryOK(master))
+	{
+		if (master->child != NULL) { ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdErr(master->child)); }
+	}
 #endif
 }
 void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
@@ -3243,6 +3189,7 @@ void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char
 		void **ptr = (void**)ILibMemory_Extra(ILibProcessPipe_Process_GetStdErr(sender));
 		ptr[0] = master;
 		ptr[1] = buffer;
+
 		ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Process_GetStdErr(sender));
 		Duktape_RunOnEventLoop(master->chain, duk_ctx_nonce(master->ctx), master->ctx, ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread, NULL, ptr);
 	}

@@ -18,17 +18,39 @@ limitations under the License.
 function installService(params)
 {
     process.stdout.write('...Installing service');
+
+
+    var options =
+        {
+            name: process.platform == 'win32' ? 'Mesh Agent' : 'meshagent',
+            target: process.platform == 'win32' ? 'MeshAgent' : 'meshagent',
+            displayName: 'Mesh Agent background service',
+            servicePath: process.execPath,
+            startType: 'AUTO_START',
+            parameters: params
+        };
+    var i;
+    if ((i=params.indexOf('--_localService="1"'))>=0)
+    {
+        // install in place
+        options.parameters.splice(i, 1);
+        options.installInPlace = true;
+    }
+    for (i = 0; i < options.parameters.length; ++i)
+    {
+        if(options.parameters[i].startsWith('--installPath='))
+        {
+            options.installPath = options.parameters[i].split('=')[1];
+            if (options.installPath.startsWith('"')) { options.installPath = options.installPath.substring(1, options.installPath.length - 1); }
+            options.parameters.splice(i, 1);
+            options.installInPlace = false;
+            break;
+        }
+    }
+
     try
     {
-        require('service-manager').manager.installService(
-            {
-                name: process.platform == 'win32' ? 'Mesh Agent' : 'meshagent',
-                target: process.platform == 'win32' ? 'MeshAgent' : 'meshagent',
-                displayName: 'Mesh Agent background service',
-                servicePath: process.execPath,
-                startType: 'AUTO_START',
-                parameters: params
-            });
+        require('service-manager').manager.installService(options);
         process.stdout.write(' [DONE]\n');
     }
     catch(sie)
@@ -154,7 +176,7 @@ function uninstallService3(params)
             process.stdout.write(' [ERROR]\n');
         }
     }
-    if (params != null)
+    if (params != null && !params.includes('_stop'))
     {
         installService(params);
     }
@@ -167,12 +189,55 @@ function uninstallService3(params)
 function uninstallService2(params)
 {
     var secondaryagent = false;
+    var i;
+    var dataFolder = null;
+    var appPrefix = null;
+
+    if (params && params.includes('--_deleteData="1"'))
+    {
+        for (i = 0; i < params.length; ++i)
+        {
+            if (params[i].startsWith('_workingDir='))
+            {
+                dataFolder = params[i].split('=')[1];
+                if (dataFolder.startsWith('"')) { dataFolder = dataFolder.substring(1, dataFolder.length - 1); }
+            }
+            if (params[i].startsWith('_appPrefix='))
+            {
+                appPrefix = params[i].split('=')[1];
+                if (appPrefix.startsWith('"')) { appPrefix = appPrefix.substring(1, appPrefix.length - 1); }
+            }
+        }
+    }
 
     process.stdout.write('   -> Uninstalling previous installation...');
     try
     {
         require('service-manager').manager.uninstallService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
         process.stdout.write(' [DONE]\n');
+        if (dataFolder && appPrefix)
+        {
+            process.stdout.write('   -> Deleting agent data...');
+            if (process.platform != 'win32')
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.on('data', function (c) { });
+                child.stderr.on('data', function (c) { });
+                child.stdin.write('cd ' + dataFolder + '\n');
+                child.stdin.write('rm ' + appPrefix + '.*\r\n');
+                child.stdin.write('exit\n');       
+                child.waitExit();
+            }
+            else
+            {
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C del "' + dataFolder + '\\' + appPrefix + '.*"']);
+                child.stdout.on('data', function (c) { });
+                child.stderr.on('data', function (c) { });
+                child.waitExit();
+            }
+
+            process.stdout.write(' [DONE]\n');
+        }
     }
     catch (e)
     {
@@ -288,15 +353,23 @@ function serviceExists(loc, params)
     }
 }
 
-function fullUninstall()
+function fullUninstall(jsonString)
 {
     console.setDestination(console.Destinations.DISABLED);
+    var parms = JSON.parse(jsonString);
+    parms.push('_stop');
 
     try
     {
         process.stdout.write('...Checking for previous installation');
         var s = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
         var loc = s.appLocation();
+        var appPrefix = loc.split(process.platform == 'win32' ? '\\' : '/').pop();
+        if (process.platform == 'win32') { appPrefix = appPrefix.substring(0, appPrefix.length - 4); }
+
+        parms.push('_workingDir=' + s.appWorkingDirectory());
+        parms.push('_appPrefix=' + appPrefix);
+
         s.close();
     }
     catch (e)
@@ -304,7 +377,7 @@ function fullUninstall()
         process.stdout.write(' [NONE]\n');
         process.exit();
     }
-    serviceExists(loc, null);
+    serviceExists(loc, parms);
 }
 
 function fullInstall(jsonString)

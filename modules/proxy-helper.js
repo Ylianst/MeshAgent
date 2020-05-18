@@ -14,6 +14,96 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+function linux_getProxy()
+{
+    // Check Environment Variabels
+    if(require('fs').existsSync('/etc/environment'))
+    {
+	    var e = require('fs').readFileSync('/etc/environment').toString();
+	    var tokens = e.split('\\n');
+	    for(var line in tokens)
+	    {
+		    var val = tokens[line].split('=');
+		    if(val.length == 2 && (val[0].trim() == 'http_proxy' || val[0].trim() == 'https_proxy'))
+		    {
+			    return(val[1].split('//')[1]);
+		    }
+	    }
+    }
+
+    // Check profile.d
+    if(require('fs').existsSync('/etc/profile.d/proxy_setup'))
+    {
+	    var child = require('child_process').execFile('/bin/sh', ['sh']);
+	    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+	    child.stdin.write("cat /etc/profile.d/proxy_setup | awk '" + '{ split($2, tok, "="); if(tok[1]=="http_proxy") { print tok[2]; }}\'\nexit\n');
+	    child.waitExit();
+	    child.ret = child.stdout.str.trim().split('\n')[0].split('//')[1];
+	    if(child.ret != '') { return(child.ret); }
+    }
+
+    // Check gsettings
+    if (require('fs').existsSync('/usr/bin/gsettings'))
+    {
+	    var setting;
+	    var ids = require('user-sessions').loginUids(); 
+	    for (var i in ids)
+	    {
+		    setting = require('linux-gnome-helpers').getProxySettings(ids[i]);
+		    if (setting.mode == 'manual') { return(setting.host + ':' + setting.port);} 
+	    }
+    }
+
+    if (require('fs').existsSync('/etc/apt/apt.conf.d/proxy.conf'))
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stderr.on('data', function (c) { console.log(c.toString()); });
+        child.stdin.write("cat /etc/apt/apt.conf.d/proxy.conf | tr '\\n' '`' | awk -F'`' '{");
+        child.stdin.write('for(n=1;n<NF;++n) { ln=split($n,tok,"::"); split(tok[ln],px,"\\""); split(px[2],x,"://"); if(x[2]!="") { print x[2]; break; } }');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+        if (child.stdout.str.trim() != "") { return (child.stdout.str.trim()); }
+    }
+    if (require('fs').existsSync('/etc/yum.conf'))
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stderr.on('data', function (c) { console.log(c.toString()); });
+        child.stdin.write('cat /etc/yum.conf | grep "proxy=" | ' + "tr '\\n' '`' | awk -F'`' '{");
+        child.stdin.write('for(n=1;n<NF;++n) { cl=split($n,c,"#"); split($n,px,"://"); if(px[2]!="" && cl==1) { print px[2]; break; } }');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+        if (child.stdout.str.trim() != "") { return (child.stdout.str.trim()); }
+    }
+    if (require('fs').existsSync('/etc/sysconfig/proxy'))
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stderr.on('data', function (c) { console.log(c.toString()); });
+        child.stdin.write('cat /etc/sysconfig/proxy | grep PROXY_ENABLED= | awk \'{');
+        child.stdin.write('split($0,res,"\\""); if(res[2]=="yes") { print res[2]; }')
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+        if (child.stdout.str.trim() != "")
+        {
+            // Enabled
+            child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.on('data', function (c) { console.log(c.toString()); });
+            child.stdin.write('cat /etc/sysconfig/proxy | grep _PROXY | ' + "tr '\\n' '`' | awk -F'`' '{");
+            child.stdin.write('for(i=1;i<NF;++i) { if(split($i,r,"HTTP_PROXY=")>1 || split($i,r,"HTTPS_PROXY=")>1) {');
+            child.stdin.write('cl=split($i,c,"#");');
+            child.stdin.write('split($i,px,"\\""); split(px[2],pxx,"://"); if(pxx[2]!="" && cl==1) { print pxx[2]; break; }');
+            child.stdin.write('} }');
+            child.stdin.write("}'\nexit\n");
+            child.waitExit();
+            if (child.stdout.str.trim() != '') { return (child.stdout.str.trim()); }
+        }
+    }
+    throw ('No proxies');
+}
 function posix_proxyCheck(uid, checkAddr)
 {
     var g;
@@ -104,7 +194,7 @@ switch (process.platform)
 {
     case 'linux':
     case 'freebsd':
-        module.exports = { ignoreProxy: posix_proxyCheck };
+        module.exports = { ignoreProxy: posix_proxyCheck, getProxy: linux_getProxy };
         break;
     case 'win32':
         module.exports = { ignoreProxy: windows_proxyCheck };

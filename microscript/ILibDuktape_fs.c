@@ -922,7 +922,7 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 
 #if defined(WIN32)
 	int r = CancelIo(data->h);
-	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, data->overlapped.hEvent);
+	ILibChain_RemoveWaitHandle(data->chain, data->overlapped.hEvent);
 	CloseHandle(data->h);
 	data->h = NULL;
 #elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
@@ -959,52 +959,50 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 #endif
 
 #ifdef WIN32
-BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user);
-void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
+BOOL ILibDuktape_fs_watch_iocompletion(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
+	if (errors != ILibWaitHandle_ErrorStatus_NONE || !ILibMemory_CanaryOK(user)) { return(FALSE); }
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
 	FILE_NOTIFY_INFORMATION *n = (FILE_NOTIFY_INFORMATION*)data->results;
 	char filename[4096];
-	size_t filenameLen;
-
 	int changed = 0, renamed = 0;
-
+	BOOL ret = FALSE;
 	
 	duk_push_object(data->ctx);										// [detail]
 
 	while (n != NULL)
 	{
-		wcstombs_s(&filenameLen, filename, sizeof(filename), n->FileName, n->FileNameLength);
+		ILibWideToUTF8_stupidEx(n->FileName, n->FileNameLength, filename, (int)sizeof(filename));
 		switch (n->Action)
 		{
 			case FILE_ACTION_RENAMED_OLD_NAME:
-				duk_push_lstring(data->ctx, filename, filenameLen-1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "oldname");
 				renamed = 1;
 				break;
 			case FILE_ACTION_RENAMED_NEW_NAME:
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "newname");
 				renamed = 1;
 				break;
 			case FILE_ACTION_ADDED:
 				duk_push_string(data->ctx, "ADDED");
 				duk_put_prop_string(data->ctx, -2, "changeType");
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "\xFF_FileName");
 				changed = 1;
 				break;
 			case FILE_ACTION_REMOVED:
 				duk_push_string(data->ctx, "REMOVED");
 				duk_put_prop_string(data->ctx, -2, "changeType");
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "\xFF_FileName");
 				changed = 1;
 				break;
 			case FILE_ACTION_MODIFIED:
 				duk_push_string(data->ctx, "MODIFIED");
 				duk_put_prop_string(data->ctx, -2, "changeType");
-				duk_push_lstring(data->ctx, filename, filenameLen - 1);
+				duk_push_string(data->ctx, filename);
 				duk_put_prop_string(data->ctx, -2, "\xFF_FileName");
 				changed = 1;
 				break;
@@ -1041,18 +1039,10 @@ void ILibDuktape_fs_watch_iocompletionEx(void *chain, void *user)
 		}
 		else
 		{
-			ILibProcessPipe_WaitHandle_Add(data->pipeManager, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
+			ret = TRUE;
 		}
 	}
-}
-BOOL ILibDuktape_fs_watch_iocompletion(HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
-{
-	if (errors != ILibWaitHandle_ErrorStatus_NONE || !ILibMemory_CanaryOK(user)) { return(FALSE); }
-	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
-
-	ILibProcessPipe_WaitHandle_Remove(data->pipeManager, h);
-	Duktape_RunOnEventLoop(data->chain, duk_ctx_nonce(data->ctx), data->ctx, ILibDuktape_fs_watch_iocompletionEx, NULL, data);
-	return(TRUE);
+	return(ret);
 }
 #endif
 
@@ -1287,7 +1277,7 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 {
 #ifdef WIN32
-	char *path = (char*)duk_require_string(ctx, 0);
+	WCHAR *path = (WCHAR*)ILibDuktape_String_AsWide(ctx, 0, NULL);
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 #endif
@@ -1408,14 +1398,14 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 
 #if defined(WIN32)
 	if ((data->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL) { return(ILibDuktape_Error(ctx, "Could not create handle")); }
-	data->h = CreateFile(path, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
+	data->h = CreateFileW(path, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
 	if (data->h == INVALID_HANDLE_VALUE) { return(ILibDuktape_Error(ctx, "fs.watch(): Invalid Path or Access Denied")); }
 
 	if (ReadDirectoryChangesW(data->h, data->results, sizeof(data->results), recursive, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_CREATION | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_LAST_ACCESS, NULL, &(data->overlapped), NULL) == 0)
 	{
 		return(ILibDuktape_Error(ctx, "fs.watch(): Error creating watcher"));
 	}
-	ILibProcessPipe_WaitHandle_Add(pipeMgr, data->overlapped.hEvent, data, ILibDuktape_fs_watch_iocompletion);
+	ILibChain_AddWaitHandle(data->chain, data->overlapped.hEvent, -1, ILibDuktape_fs_watch_iocompletion, data);
 #elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
 	data->wd.i = inotify_add_watch(data->linuxWatcher->fd, path, IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO);
 	if (data->wd.i < 0)

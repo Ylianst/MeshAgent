@@ -152,7 +152,7 @@ int signcheck_verifysign(char* filename, int upgrade)
 	cert.x509 = NULL;
 
 #ifdef WIN32 
-	fopen_s(&pFile, filename, "rb");
+	_wfopen_s(&pFile, ILibUTF8ToWide(filename, -1), L"rb");
 #else
 	pFile = fopen(filename, "rb");
 #endif

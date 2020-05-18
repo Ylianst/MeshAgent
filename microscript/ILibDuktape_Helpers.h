@@ -93,6 +93,9 @@ void *Duktape_Duplicate_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char*
 char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *len);
 #define Duktape_Duplicate_GetString(ctx, i) Duktape_Duplicate_GetStringEx(ctx, i, NULL)
 
+#define duk_array_shift(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "shift");duk_swap_top(ctx, -2);duk_call_method(ctx, 0);
+#define duk_array_pop(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "pop");duk_swap_top(ctx, -2);duk_call_method(ctx, 0);
+
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);
 struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short port);

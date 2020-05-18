@@ -52,7 +52,6 @@ int ClearWindowsFirewall(wchar_t* processname);
 #include <WtsApi32.h>
 
 TCHAR* serviceFile = TEXT("Mesh Agent");
-TCHAR* serviceFileOld = TEXT("Mesh Agent v2");
 TCHAR* serviceName = TEXT("Mesh Agent background service");
 TCHAR* serviceDesc = TEXT("Remote monitoring and management service.");
 
@@ -95,17 +94,18 @@ BOOL IsAdmin()
 	return admin;
 }
 
-BOOL RunAsAdmin(char* args) {
-	char szPath[_MAX_PATH + 100];
-	if (GetModuleFileNameA(NULL, szPath, _MAX_PATH))
+BOOL RunAsAdmin(char* args, int isAdmin)
+{
+	WCHAR szPath[_MAX_PATH + 100];
+	if (GetModuleFileNameW(NULL, szPath, sizeof(szPath)/2))
 	{
-		SHELLEXECUTEINFO sei = { sizeof(sei) };
+		SHELLEXECUTEINFOW sei = { sizeof(sei) };
 		sei.hwnd = NULL;
 		sei.nShow = SW_NORMAL;
-		sei.lpVerb = "runas";
+		sei.lpVerb = isAdmin?L"open":L"runas";
 		sei.lpFile = szPath;
-		sei.lpParameters = args;
-		return ShellExecuteExA(&sei);
+		sei.lpParameters = ILibUTF8ToWide(args, -1);
+		return ShellExecuteExW(&sei);
 	}
 	return FALSE;
 }
@@ -375,134 +375,6 @@ int RunService(int argc, char* argv[])
 	return StartServiceCtrlDispatcher( serviceTable );
 }
 
-BOOL InstallService()
-{
-	SC_HANDLE serviceControlManager = OpenSCManager( 0, 0, SC_MANAGER_CREATE_SERVICE );
-	SERVICE_DESCRIPTION sd;
-	SERVICE_DELAYED_AUTO_START_INFO as;
-	SERVICE_FAILURE_ACTIONS fa;
-	SC_ACTION failactions[3];
-	BOOL r = FALSE;
-
-	if ( serviceControlManager )
-	{
-		char path[1024];
-		if (GetModuleFileName( 0, (LPTSTR)path, 1024) > 0)
-		{
-			// Install the service
-			SC_HANDLE service = CreateService( 
-				serviceControlManager,
-				serviceFile,
-				serviceName,
-				SERVICE_ALL_ACCESS,
-				SERVICE_WIN32_OWN_PROCESS | SERVICE_INTERACTIVE_PROCESS,
-				SERVICE_AUTO_START,
-				SERVICE_ERROR_IGNORE,
-				(LPCTSTR)path,
-				0, 0, 0, 0, 0 );
-
-			if (service)
-			{
-				// Update the service description
-				sd.lpDescription = serviceDesc;
-				ChangeServiceConfig2(service, SERVICE_CONFIG_DESCRIPTION, &sd);
-
-				// Update the service auto-start
-				as.fDelayedAutostart = FALSE;
-				ChangeServiceConfig2(service, SERVICE_CONFIG_DELAYED_AUTO_START_INFO, &as);
-
-				// Update the faliure action
-				failactions[0].Type = SC_ACTION_RESTART;
-				failactions[0].Delay = 60000;                          // Wait 1 minutes before faliure restart (milliseconds)
-				failactions[1].Type = SC_ACTION_RESTART;
-				failactions[1].Delay = 60000;                          // Wait 1 minutes before faliure restart (milliseconds)
-				failactions[2].Type = SC_ACTION_RESTART;
-				failactions[2].Delay = 60000;
-				memset(&fa, 0, sizeof(SERVICE_FAILURE_ACTIONS));
-				fa.dwResetPeriod = 86400;					// After 1 days, reset the faliure counters (seconds)
-				fa.cActions = 3;
-				fa.lpsaActions = failactions;
-				r = ChangeServiceConfig2(service, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
-
-				// Cleanup
-				CloseServiceHandle( service );
-				#ifdef _DEBUG
-				//ILIBMESSAGE("Mesh service installed successfully");
-				#endif
-			}
-			else
-			{
-				#ifdef _DEBUG
-				if(GetLastError() == ERROR_SERVICE_EXISTS)
-				{
-					ILIBMESSAGE("Mesh service already exists.");
-				}
-				else
-				{
-					ILIBMESSAGE("Mesh service was not Installed Successfully.");
-				}
-				#endif
-			}
-		}
-
-		CloseServiceHandle( serviceControlManager );
-	}
-	return r;
-}
-
-int UninstallService(TCHAR* serviceName)
-{
-	int r = 0;
-	SC_HANDLE serviceControlManager = OpenSCManager( 0, 0, SC_MANAGER_CONNECT);
-
-	if (serviceControlManager)
-	{
-		SC_HANDLE service = OpenService( serviceControlManager, serviceName, SERVICE_QUERY_STATUS | DELETE );
-		if (service)
-		{
-			SERVICE_STATUS serviceStatusEx;
-			if ( QueryServiceStatus( service, &serviceStatusEx ) )
-			{
-				if ( serviceStatusEx.dwCurrentState == SERVICE_STOPPED )
-				{
-					if (DeleteService(service))
-					{
-						#ifdef _DEBUG
-						//ILIBMESSAGE("Mesh service removed successfully");
-						#endif
-						r = 1;
-					}
-					else
-					{
-						#ifdef _DEBUG
-						DWORD dwError = GetLastError();
-						if(dwError == ERROR_ACCESS_DENIED) {
-							ILIBMESSAGE("Access denied while trying to remove mesh service");
-						}
-						else if(dwError == ERROR_INVALID_HANDLE) {
-							ILIBMESSAGE("Handle invalid while trying to remove mesh service");
-						}
-						else if(dwError == ERROR_SERVICE_MARKED_FOR_DELETE) {
-							ILIBMESSAGE("Mesh service already marked for deletion");
-						}
-						#endif
-					}
-				}
-				else
-				{
-					r = 2;
-					#ifdef _DEBUG
-					ILIBMESSAGE("Mesh service is still running");
-					#endif
-				}
-			}
-			CloseServiceHandle( service );
-		}
-		CloseServiceHandle( serviceControlManager );
-	}
-	return r;
-}
-
 // SERVICE_STOPPED				  1    The service is not running.
 // SERVICE_START_PENDING		  2    The service is starting.
 // SERVICE_STOP_PENDING			  3    The service is stopping.
@@ -596,27 +468,6 @@ int StopService(LPCSTR servicename)
 	return r;
 }
 
-int RunProcess(char* exe, int waitForExit)
-{
-	BOOL r = TRUE;
-	int count = 50;
-	DWORD exitcode;
-	STARTUPINFOA info = {sizeof(info)};
-	PROCESS_INFORMATION processInfo;
-	if (CreateProcessA(NULL, exe, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo) == 0) return 0;
-	if (waitForExit != 0) {
-		do
-		{
-			Sleep(100);
-			r = GetExitCodeProcess(processInfo.hProcess, &exitcode);
-			if (exitcode == STILL_ACTIVE) r = 0;
-		} while (r == 0 && count-- > 0);
-	}
-	CloseHandle(processInfo.hProcess);
-	CloseHandle(processInfo.hThread);
-	return r;
-}
-
 /*
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
@@ -629,287 +480,6 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	return _tmain( 0, NULL );
 }
 */
-
-#ifndef _MINCORE
-void fullinstall(int uninstallonly, char* proxy, int proxylen, char* tag, int taglen)
-{
-	int r = 0;
-	int loops = 0;
-	char targetexe2[_MAX_PATH + 40];
-	char *targetexe = targetexe2 + 1;
-	size_t targetexelen = 0;
-	char selfexe[_MAX_PATH];
-	size_t selfexelen = 0;
-	char setup1[_MAX_PATH];
-	char setup2[_MAX_PATH];
-	int setup1len;
-	int setup2len;
-
-	if (IsAdmin() == FALSE) { printf("Requires administrator permissions.\r\n"); return; }
-	if (uninstallonly != 0) { printf("Performing uninstall...\r\n"); } else { printf("Performing install...\r\n"); }
-
-	HKEY hKey;
-	DWORD len = 0;
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Services\\Mesh Agent", 0, KEY_ALL_ACCESS, &hKey) == ERROR_SUCCESS)
-	{
-		if (RegQueryValueExA(hKey, "ImagePath", NULL, NULL, NULL, &len) == ERROR_SUCCESS && len > 0)
-		{
-			char *ipath = ILibMemory_Allocate(len, 0, NULL, NULL);
-			RegQueryValueExA(hKey, "ImagePath", NULL, NULL, ipath, &len);
-
-			STARTUPINFOA info = { sizeof(info) };
-			PROCESS_INFORMATION processInfo;
-
-			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"try { require('service-manager').manager.uninstallService('meshagentDiagnostic'); require('task-scheduler').delete('meshagentDiagnostic/periodicStart').then(function(){process.exit();}, function(){process.exit();}); } catch(e){process.exit();}\"", ipath);
-			CreateProcessA(NULL, ILibScratchPad, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo);
-			CloseHandle(processInfo.hProcess);
-			CloseHandle(processInfo.hThread);
-			free(ipath);
-		}
-		RegCloseKey(hKey);
-	}
-
-
-
-
-	// Stop and remove the service
-	StopService(serviceFile);
-
-	// Wait for the service to stop
-	int serviceStateLoopCount = 0;;
-	int serviceState;
-	do {
-		serviceStateLoopCount++;
-		Sleep(100);
-		serviceState = GetServiceState(serviceFile);
-	} while ((serviceState == 3) && (serviceStateLoopCount < 400));
-	UninstallService(serviceFile);
-	UninstallService(serviceFileOld);
-
-	// Get our own executable
-	selfexelen = GetModuleFileNameA(NULL, selfexe, _MAX_PATH);
-
-	// Get the target executable
-	if (SHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, targetexe) != S_FALSE)
-	{
-		targetexe2[0] = '\"';
-		targetexelen = strnlen_s(targetexe, _MAX_PATH + 40);
-		if (targetexelen <= MAX_PATH) memcpy_s(targetexe + targetexelen, _MAX_PATH + 40 - targetexelen, "\\Mesh Agent\\MeshAgent.exe\" -uninstall", 38);
-		targetexelen += 25;
-	}
-
-	// Check if we are uninstalling ourself
-	if ((uninstallonly != 0) && (targetexelen == selfexelen) && (memcmp(selfexe, targetexe, targetexelen) == 0)) {
-		// Copy ourself to a temp folder and run full uninstall.
-		char tempPath[_MAX_PATH + 40];
-		int tempPathLen = GetTempPathA(_MAX_PATH, tempPath);
-		memcpy_s(tempPath + tempPathLen, _MAX_PATH + 40 - tempPathLen, "MeshAgent.exe\0", 15);
-		remove(tempPath);
-		util_CopyFile(selfexe, tempPath, FALSE);
-		memcpy_s(tempPath + tempPathLen, _MAX_PATH + 40 - tempPathLen, "MeshAgent.exe -fulluninstall\0", 30);
-		RunProcess(tempPath, 0); // Don't wait for the process to terminate since we want to self-delete.
-		return;
-	}
-
-	// Call uninstall, this will remove the firewall rules.
-	RunProcess(targetexe2, 1);
-
-#ifdef _MINCORE
-	// Remove the MeshAgent registry keys
-	RegDeleteKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", KEY_WOW64_32KEY, 0);
-	RegDeleteKeyEx(HKEY_CURRENT_USER, "Software\\Open Source\\MeshAgent2", KEY_WOW64_32KEY, 0);
-#else
-	// Remove the MeshAgent registry keys
-	RegDeleteKey(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2");
-	RegDeleteKey(HKEY_CURRENT_USER, "Software\\Open Source\\MeshAgent2");
-#endif
-
-	// Remove the uninstall icon from the control panel if present
-	RemoveUninstallIcon();
-
-	// Check if selfexe is already located at the target, if so, skip to copy steps.
-	if ((uninstallonly != 0) || (targetexelen != selfexelen) || (memcmp(selfexe, targetexe, targetexelen) != 0))
-	{
-		// Remove the target executable, wait if needed
-		int selfExeDelLoopCount = 0;;
-		int selfExeDel;
-		targetexe[targetexelen] = 0;
-		do {
-			Sleep(100);
-			selfExeDelLoopCount++;
-			selfExeDel = remove(targetexe);
-		} while ((selfExeDel != 0) && (selfExeDel != -1) && (selfExeDelLoopCount < 400));
-
-		// Remove "[Executable].msh" file
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "msh", 4);
-		setup2[setup2len] = 0;
-		remove(setup2);
-
-		// Remove "[Executable].mshx" file
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "mshx", 5);
-		setup2[setup2len + 1] = 0;
-		remove(setup2);
-
-
-		// Remove "[Executable].proxy" file
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 257) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "proxy", 6);
-		setup2[setup2len + 2] = 0;
-		remove(setup2);
-
-		// Remove "[Executable].tag" file
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "tag", 4);
-		setup2[setup2len] = 0;
-		remove(setup2);
-
-		// Remove "[Executable].log" file
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "log", 4);
-		setup2[setup2len] = 0;
-		remove(setup2);
-
-		// Remove "[Executable].db" file
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 256) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "db", 3);
-		setup2[setup2len] = 0;
-		remove(setup2);
-
-		// Remove the folder.
-		targetexe[targetexelen - 14] = 0;
-		RemoveDirectoryA(targetexe);
-
-		if (uninstallonly != 0) return;
-
-		// Get the target executable, create folders if needed
-		if (!CreateDirectoryA(targetexe, NULL) && GetLastError() == ERROR_ACCESS_DENIED) { ILIBMESSAGE("Access denied (1)"); return; }
-		targetexe[targetexelen - 14] = '\\';
-
-		// Attempt to copy our own exe over the original exe
-		loops = 0;
-		while (!util_CopyFile(selfexe, targetexe, TRUE))
-		{
-			if (GetLastError() == ERROR_ACCESS_DENIED) { ILIBMESSAGE("Access denied (2)"); return; }
-			if (loops++ > 5) { ILIBMESSAGE("Error copying executable file"); return; }
-			Sleep(5000);
-		}
-
-		// Try to copy "[Executable].msh" file to target directory
-		if ((setup1len = (int)strnlen_s(selfexe, sizeof(selfexe))) < 4) return;
-		memcpy_s(setup1, sizeof(setup1), selfexe, setup1len);
-		memcpy_s(setup1 + (setup1len - 3), sizeof(setup1) - setup1len - 3, "msh", 4);
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "msh", 4);
-		util_CopyFile(setup1, setup2, TRUE);
-
-		// Write the tag if one was passed
-		if (tag != NULL)
-		{
-			FILE *SourceFile = NULL;
-			if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-			memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-			memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "tag", 4);
-			if (taglen > 0) {
-				fopen_s(&SourceFile, setup2, "wb");
-				if (SourceFile != NULL)
-				{
-					if (fwrite(tag, sizeof(char), taglen, SourceFile)) {}
-					fclose(SourceFile);
-				}
-			}
-			else
-			{
-				remove(setup2);
-			}
-		}
-
-		// Setup proxy filenames
-		if ((setup1len = (int)strnlen_s(selfexe, sizeof(selfexe))) < 4) return;
-		memcpy_s(setup1, sizeof(setup1), selfexe, setup1len);
-		memcpy_s(setup1 + (setup1len - 3), sizeof(setup1) - setup1len - 3, "proxy", 6);
-		if ((setup2len = (int)strnlen_s(targetexe, _MAX_PATH + 40)) < 4 || setup2len > 259) return;
-		memcpy_s(setup2, sizeof(setup2), targetexe, setup2len);
-		memcpy_s(setup2 + (setup2len - 3), sizeof(setup2) - setup2len - 3, "proxy", 6);
-
-		if (proxy != NULL && proxylen > 0)
-		{
-			// Use the specified proxy in the command line switch
-			FILE *SourceFile = NULL;
-			fopen_s(&SourceFile, setup2, "wb");
-			if (SourceFile != NULL)
-			{
-				if (fwrite(proxy, sizeof(char), proxylen, SourceFile)) {}
-				fclose(SourceFile);
-			}
-		}
-		else
-		{
-			// Try to copy "[Executable].proxy" file to target directory
-			if (util_CopyFile(setup1, setup2, TRUE) == FALSE)
-			{
-				// Failed to copy proxy file, lets try to create one.
-				WINHTTP_CURRENT_USER_IE_PROXY_CONFIG proxyEx;
-				if (WinHttpGetIEProxyConfigForCurrentUser(&proxyEx))
-				{
-					if (proxyEx.lpszProxy != NULL)
-					{
-						FILE *SourceFile = NULL;
-						size_t len;
-						if (wcstombs_s(&len, ILibScratchPad, 4095, proxyEx.lpszProxy, 2000) == 0)
-						{
-							char* ptr = strstr(ILibScratchPad, "https=");
-							if (ptr != NULL) {
-								char* ptr2 = strstr(ptr, ";");
-								ptr += 6;
-								if (ptr2 != NULL) ptr2[0] = 0;
-							} else {
-								ptr = ILibScratchPad;
-							}
-							fopen_s(&SourceFile, setup2, "wb");
-							if (SourceFile != NULL)
-							{
-								if (fwrite(ptr, sizeof(char), strnlen_s(ptr, sizeof(ILibScratchPad)), SourceFile)) {}
-								fclose(SourceFile);
-							}
-						}
-						GlobalFree(proxyEx.lpszProxy);
-					}
-
-					// Release the rest of the proxy settings
-					if (proxyEx.lpszAutoConfigUrl != NULL) GlobalFree(proxyEx.lpszAutoConfigUrl);
-					if (proxyEx.lpszProxyBypass != NULL) GlobalFree(proxyEx.lpszProxyBypass);
-				}
-			}
-		}
-	}
-
-	// Add the uninstall icon in the control panel
-	AddUninstallIcon();
-	UpdateOwnerData();
-
-	/*
-#if defined(_LINKVM)
-	// Setup the SendSAS permission
-	kvm_setupSasPermissions();
-#endif
-	*/
-
-	// Attempt to start the updated service up again
-	memcpy(targetexe + targetexelen, "\" -install", 11);
-	r = RunProcess(targetexe2, 1);
-	memcpy(targetexe + targetexelen, "\" -start", 9);
-	r = RunProcess(targetexe2, 1);
-}
-#endif
 
 
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
@@ -955,7 +525,9 @@ int wmain(int argc, char* wargv[])
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
 
-	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || strcasecmp(argv[1], "-fulluninstall") == 0))
+	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || 
+		strcasecmp(argv[1], "-fulluninstall") == 0 || strcasecmp(argv[1], "-fullinstall") == 0 ||
+		strcasecmp(argv[1], "-install")==0 || strcasecmp(argv[1], "-uninstall") == 0))
 	{
 		argv[argc] = argv[1];
 		argv[1] = (char*)ILibMemory_SmartAllocate(4);
@@ -1278,69 +850,6 @@ int wmain(int argc, char* wargv[])
 			else if (r == 2) { printf("Mesh agent failed to stop"); }
 		}
 	}
-	else if (argc > 1 && strcasecmp(argv[1], "-install") == 0)
-	{
-		// Setup the service
-		StopService(serviceFile);
-		UninstallService(serviceFile);
-		UninstallService(serviceFileOld);
-		if (InstallService() == TRUE) { printf("Mesh agent installed"); } else { printf("Failed to install mesh agent"); }
-
-#ifndef _MINCORE
-		// Setup the Windows firewall
-		if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5)
-		{
-			ClearWindowsFirewall(str);
-			if (SetupWindowsFirewall(str) != 0)
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Firewall rules added successfully");
-				#endif
-			}
-			else
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Unable to add firewall rules");
-				#endif
-			}
-		}
-#endif
-	}
-	else if (argc > 1 && ((strcasecmp(argv[1], "-remove") == 0) || (strcasecmp(argv[1], "-uninstall") == 0)))
-	{
-		// Ask the service manager to stop the service
-		StopService(serviceFile);
-
-		// Remove the service
-		UninstallService(serviceFileOld);
-		i = UninstallService(serviceFile);
-		if (i == 0) { printf("Failed to uninstall mesh agent"); }
-		else if (i == 1) { printf("Mesh agent uninstalled"); }
-		else if (i == 2) { printf("Mesh agent still running"); }
-
-#ifndef _MINCORE
-		// Remove the MeshAgent registry keys
-		RegDeleteKey(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2");
-		RegDeleteKey(HKEY_CURRENT_USER, "Software\\Open Source\\MeshAgent2");
-
-		// Cleanup the firewall rules
-		if (GetModuleFileNameW( NULL, str, _MAX_PATH ) > 5)
-		{
-			if (ClearWindowsFirewall(str) != 0)
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Firewall rules removed successfully");
-				#endif
-			}
-			else
-			{
-				#ifdef _DEBUG
-				ILIBMESSAGE("Unable to remove firewall rules");
-				#endif
-			}
-		}
-#endif
-	}
 #ifdef _MINCORE
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
 	{
@@ -1365,14 +874,6 @@ int wmain(int argc, char* wargv[])
 		char* data;
 		int len = MeshInfo_GetSystemInformation(&data);
 		if (len > 0) { printf(data); }
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "-fullinstall") == 0))
-	{
-		fullinstall( 0, proxyarg, (int)strnlen_s(proxyarg, _MAX_PATH), tagarg, (int)strnlen_s(tagarg, _MAX_PATH));
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "-fulluninstall") == 0))
-	{
-		fullinstall(1, NULL, 0, NULL, 0);
 	}
 	else if (argc > 1 && (strcasecmp(argv[1], "-setfirewall") == 0))
 	{
@@ -1486,8 +987,6 @@ int wmain(int argc, char* wargv[])
 	}
 	else
 	{
-		UninstallService(serviceFileOld);
-
 		// See if we are running as a service
 		if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
 		{
@@ -1522,6 +1021,27 @@ int wmain(int argc, char* wargv[])
 				else
 				{
 					FreeConsole();
+					HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+					DpiAwarenessFunc dpiAwareness = NULL;
+					if (shCORE != NULL)
+					{
+						if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+						{
+							FreeLibrary(shCORE);
+							shCORE = NULL;
+						}
+					}
+					if (dpiAwareness != NULL)
+					{
+						dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+						FreeLibrary(shCORE);
+						shCORE = NULL;
+					}
+					else
+					{
+						SetProcessDPIAware();
+					}
+
 					DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
 				}
 			}
@@ -1548,7 +1068,7 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 		char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB7, 0xF7, 0xE9, 0xBE, 0x44, 0x91, 0x4C, 0x19 };
 		char tmpHash[16];
 
-		fopen_s(&tmpFile, selfexe, "rb");
+		_wfopen_s(&tmpFile, ILibUTF8ToWide(selfexe, -1), L"rb");
 		if (tmpFile == NULL) { return NULL; } // Could not open our own executable
 
 		fseek(tmpFile, -16, SEEK_END);
@@ -1612,9 +1132,8 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 {
 	ILib_DumpEnabledContext winException;
 	char selfexe[_MAX_PATH];
-	char *selfexe_ptr[] = { selfexe };
+	char *selfexe_ptr[] = { selfexe, "--disableUpdate=1", "--serviceTemp=1" };
 	WCHAR str[_MAX_PATH];
-	size_t len;
 	char *integratedJavaScript;
 	int integragedJavaScriptLen;
 	char setup1[_MAX_PATH];
@@ -1625,7 +1144,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
 	// Get our own executable name
-	if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5) { wcstombs_s(&len, selfexe, _MAX_PATH, str, _MAX_PATH); }
+	if (GetModuleFileNameW(NULL, str, _MAX_PATH) > 5) { ILibWideToUTF8Ex(str, -1, selfexe, sizeof(selfexe)); }
 
 	// Setup proxy filenames
 	if ((setup1len = (int)strnlen_s(selfexe, sizeof(selfexe))) >= 4) {
@@ -1653,7 +1172,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 					{
 						ptr = ILibScratchPad;
 					}
-					fopen_s(&SourceFile, setup1, "wb");
+					_wfopen_s(&SourceFile, ILibUTF8ToWide(setup1, -1), L"wb");
 					if (SourceFile != NULL)
 					{
 						if (fwrite(ptr, sizeof(char), strnlen_s(ptr, sizeof(ILibScratchPad)), SourceFile)) {}
@@ -1676,7 +1195,7 @@ DWORD WINAPI StartTempAgent(_In_ LPVOID lpParameter)
 		agent->meshCoreCtx_embeddedScript = integratedJavaScript;
 		agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
 		agent->runningAsConsole = 1;
-		MeshAgent_Start(agent, 1, selfexe_ptr);
+		MeshAgent_Start(agent, 3, selfexe_ptr);
 		//retCode = agent->exitCode;
 		MeshAgent_Destroy(agent);
 		agent = NULL;
@@ -1738,9 +1257,10 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			SetWindowTextA( GetDlgItem( hDlg, IDC_STATUSTEXT ), txt);
 
 			// Get current executable path
-			GetModuleFileNameA(NULL, selfexe, MAX_PATH);
+			WCHAR wselfexe[MAX_PATH];
+			GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
+			ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
 			fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
-
 			{
 				DWORD               dwSize = 0;
 				BYTE                *pVersionInfo = NULL;
@@ -1748,10 +1268,10 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				UINT                pLenFileInfo = 0;
 				int major, minor, hotfix, other;
 
-				if ((dwSize = GetFileVersionInfoSize(selfexe, NULL)))
+				if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
 				{					
 					if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
-					if (GetFileVersionInfo(selfexe, 0, dwSize, pVersionInfo))
+					if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
 					{
 						if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
 						{
@@ -1830,16 +1350,13 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			EnableWindow( GetDlgItem( hDlg, IDC_UNINSTALLBUTTON ), FALSE );
 			EnableWindow( GetDlgItem( hDlg, IDCANCEL ), FALSE );
 
-			if (IsAdmin() == TRUE)
+			if (LOWORD(wParam) == IDC_INSTALLBUTTON)
 			{
-				// We are already administrator, just install/uninstall now.
-				if (LOWORD(wParam) == IDC_INSTALLBUTTON) { fullinstall(0, NULL, 0, NULL, 0); } else { fullinstall(1, NULL, 0, NULL, 0); }
-				result = TRUE;
+				result = RunAsAdmin("-fullinstall", IsAdmin() == TRUE);
 			}
 			else
 			{
-				// We need to request admin escalation
-				if (LOWORD(wParam) == IDC_INSTALLBUTTON) { result = RunAsAdmin("-fullinstall"); } else { result = RunAsAdmin("-fulluninstall"); }
+				result = RunAsAdmin("-fulluninstall", IsAdmin() == TRUE);
 			}
 
 			if (result)

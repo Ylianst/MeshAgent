@@ -149,4 +149,60 @@ function addMsh(options)
     }
 }
 
-module.exports = addMsh;
+try
+{
+    module.exports = addMsh;
+}
+catch(e)
+{
+    // We were run from the command line
+
+    var outputFile = null;
+    var inputFile = null;
+    var msh = null;
+
+    for (var i = 1; i < process.argv.length; i += 2)
+    {
+        switch (process.argv[i])
+        {
+            case '-o':
+                outputFile = process.argv[i + 1];
+                break;
+            case '-i':
+                inputFile = process.argv[i + 1];
+                break;
+            default:
+                console.log('unrecognized parameter: ' + process.argv[i]);
+                break;
+        }
+    }
+
+
+    if (process.argv.length != 5 || outputFile == null || inputFile == null)
+    {
+
+        console.log('usage: ' + process.execPath.split(process.platform == 'win32' ? '\\' : '/').pop() + ' MSH_Installer.js -o outputFile -i mshFile');
+        process.exit();
+    }
+
+    try
+    {
+        msh = require('fs').readFileSync(inputFile);
+    }
+    catch(e)
+    {
+        console.log('Unable to read ' + inputFile, e);
+        process.exit();
+    }
+
+    var options =
+        {
+            destinationStream: require('fs').createWriteStream(outputFile, { flags: 'wb' }),
+            sourceFileName: process.execPath,
+            msh: msh
+        };
+
+    console.log('Creating MSH integrated binary...');
+    options.destinationStream.on('close', function () { console.log('DONE'); process.exit(); });
+    addMsh(options);
+}
