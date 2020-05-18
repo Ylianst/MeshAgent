@@ -1415,7 +1415,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
-						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", NULL);
+						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", "");
 
 						if (strcmp(xdm, "xwayland") == 0)
 						{
