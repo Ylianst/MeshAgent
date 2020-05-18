@@ -1377,12 +1377,19 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			return (INT_PTR)TRUE;
 		}
-		else if (LOWORD(wParam) == IDC_CONNECTBUTTON) {
+		else if (LOWORD(wParam) == IDC_CONNECTBUTTON) 
+		{
+			//
+			// Temporary Agent
+			//
 			EnableWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
 			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), "Running as temporary agent");
-			CreateThread(NULL, 0, &StartTempAgent, NULL, 0, NULL);
+			
+			DWORD pid = GetCurrentProcessId();
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u", pid);
+			RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE);
 			return (INT_PTR)TRUE;
 		}
 		break;

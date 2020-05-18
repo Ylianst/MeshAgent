@@ -3949,6 +3949,11 @@ void MeshAgent_AgentInstallerCTX_Finalizer(duk_context *ctx, void *user)
 	}
 }
 
+BOOL MeshAgent_PidWaiter(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
+{
+	ILibStopChain(chain);
+	return(FALSE);
+}
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
@@ -4567,6 +4572,18 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 
+#ifdef WIN32
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "exitPID", NULL, 0) > 0)
+		{
+			int pidLen = ILibSimpleDataStore_Get(agentHost->masterDb, "exitPID", ILibScratchPad, (int)sizeof(ILibScratchPad));
+			HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)atoi(ILibScratchPad));
+			if (h != NULL) { ILibChain_AddWaitHandle(agentHost->chain, h, -1, MeshAgent_PidWaiter, agentHost); }
+		}
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "hideConsole", NULL, 0) > 0 && agentHost->meshCoreCtx != NULL)
+		{
+			duk_peval_string_noresult(agentHost->meshCoreCtx, "require('win-console').hide()");
+		}
+#endif
 		ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);	
 		MeshServer_Connect(agentHost);
 
