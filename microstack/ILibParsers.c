@@ -3020,6 +3020,11 @@ void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
 }
 
 #ifdef WIN32
+BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user);
+BOOL ILibChain_WriteEx_Sink2(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void *user)
+{
+	return(ILibChain_WriteEx_Sink(chain, h, status, user));
+}
 BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user)
 {
 	ILibChain_WriteEx_data *data = (ILibChain_WriteEx_data*)user;
@@ -3041,7 +3046,7 @@ BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus st
 		{
 			// More Data to write
 			BOOL ret = FALSE;
-			switch (ILibChain_WriteEx(chain, h, data->p, data->buffer, data->bytesLeft, ILibChain_WriteEx_Sink, data))
+			switch (ILibChain_WriteEx(chain, h, data->p, data->buffer, data->bytesLeft, ILibChain_WriteEx_Sink2, data))
 			{
 				case ILibTransport_DoneState_COMPLETE:
 					data->totalWritten += data->bytesLeft;
