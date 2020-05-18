@@ -126,9 +126,9 @@ ILibTransport_DoneState ILibDuktape_WebRTC_DataChannel_Stream_WriteSink(ILibDukt
 			ILibTransport_DoneState ret = ILibTransport_DoneState_ERROR;
 			while (bufferLen > 0)
 			{
-				ret = ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, ptrs->maxFragmentSize > bufferLen ? ptrs->maxFragmentSize : bufferLen, 53);
-				buffer = buffer + (ptrs->maxFragmentSize > bufferLen ? ptrs->maxFragmentSize : bufferLen);
-				bufferLen -= (ptrs->maxFragmentSize > bufferLen ? ptrs->maxFragmentSize : bufferLen);
+				ret = ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, bufferLen  > ptrs->maxFragmentSize ? ptrs->maxFragmentSize : bufferLen, 53);
+				buffer = buffer + (bufferLen > ptrs->maxFragmentSize ? ptrs->maxFragmentSize : bufferLen);
+				bufferLen -= (bufferLen > ptrs->maxFragmentSize ? ptrs->maxFragmentSize : bufferLen);
 			}
 			return(ret);
 		}
