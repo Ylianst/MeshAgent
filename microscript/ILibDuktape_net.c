@@ -871,7 +871,7 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 				ILibMemory_ReallocateRaw(&(winIPC->buffer), winIPC->bufferLength == 0 ? ILibDuktape_net_IPC_BUFFERSIZE : winIPC->bufferLength * 2);
 				winIPC->bufferLength = winIPC->bufferLength == 0 ? ILibDuktape_net_IPC_BUFFERSIZE : winIPC->bufferLength * 2;
 			}
-			ILibChain_ReadEx(chain, h, &(winIPC->read_overlapped), winIPC->buffer + winIPC->bufferOffset + winIPC->totalRead, winIPC->bufferLength - winIPC->totalRead, ILibDuktape_server_ipc_ReadSink, winIPC);
+			ILibChain_ReadEx2(chain, h, &(winIPC->read_overlapped), winIPC->buffer + winIPC->bufferOffset + winIPC->totalRead, winIPC->bufferLength - winIPC->totalRead, ILibDuktape_server_ipc_ReadSink, winIPC, "server_ipc_ReadSink()");
 			return(TRUE);
 		}
 		else
@@ -882,6 +882,7 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 	else
 	{
 		// I/O Errors
+		if (winIPC->mServer != NULL) { winIPC->clientConnected = 0; }
 		ILibDuktape_DuplexStream_Closed(winIPC->ds);
 		return(FALSE);
 	}
@@ -909,7 +910,7 @@ BOOL ILibDuktape_server_ipc_WriteSink(void *chain, HANDLE h, ILibWaitHandle_Erro
 		if (duk_get_length(winIPC->ctx, -1) == 0) { break; }
 		duk_get_prop_index(winIPC->ctx, -1, 0);															// [obj][array][buffer]
 		buf = Duktape_GetBuffer(winIPC->ctx, -1, &bufLen);						
-		d = ILibChain_WriteEx(chain, h, &(winIPC->write_overlapped), buf, (int)bufLen, ILibDuktape_server_ipc_WriteSink, winIPC);
+		d = ILibChain_WriteEx2(chain, h, &(winIPC->write_overlapped), buf, (int)bufLen, ILibDuktape_server_ipc_WriteSink, winIPC, "server_ipc_WriteSink()");
 		duk_pop(winIPC->ctx);																			// [obj][array]
 	}
 
@@ -972,7 +973,7 @@ ILibTransport_DoneState ILibDuktape_net_server_IPC_WriteSink(ILibDuktape_DuplexS
 	if (len == 0)
 	{
 		// No Pending Writes
-		ILibTransport_DoneState ret = ILibChain_WriteEx(winIPC->mChain, winIPC->mPipeHandle, &(winIPC->write_overlapped), q, bufferLen, ILibDuktape_server_ipc_WriteSink, winIPC);
+		ILibTransport_DoneState ret = ILibChain_WriteEx2(winIPC->mChain, winIPC->mPipeHandle, &(winIPC->write_overlapped), q, bufferLen, ILibDuktape_server_ipc_WriteSink, winIPC, "net_server_IPC_WriteSink()");
 		if (ret != ILibTransport_DoneState_INCOMPLETE)
 		{
 			duk_push_heapptr(winIPC->ctx, winIPC->mSocket);											// [obj]
@@ -989,6 +990,7 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 {
 	if (!ILibMemory_CanaryOK(user)) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
+	if (winIPC->mServer != NULL && winIPC->mPipeHandle == NULL) { return; } // Already Closed
 
 	if (winIPC->mPipeHandle != NULL) 
 	{
@@ -1004,11 +1006,15 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 		duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
 		CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
 
-		duk_push_heapptr(ctx, winIPC->mServer);							// [server]
-		duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
-		duk_swap_top(ctx, -2);											// [listen][this]
-		duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
-		duk_pcall_method(ctx, 1); duk_pop(ctx);							// ...
+		duk_push_heapptr(ctx, winIPC->mServer);								// [server]
+		if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_net_server_closed_needEmit, 0) == 0)
+		{
+			duk_get_prop_string(ctx, -1, "listen");							// [server][listen]
+			duk_swap_top(ctx, -2);											// [listen][this]
+			duk_get_prop_string(ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
+			duk_pcall_method(ctx, 1);										// [ret]
+		}
+		duk_pop(ctx);														// ...
 	}
 }
 duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
@@ -1219,7 +1225,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		}
 		//printf("ConnectNamedPipe(%s)\n", ipc);
 		ConnectNamedPipe(winIPC->mPipeHandle, &winIPC->overlapped);
-		ILibChain_AddWaitHandle(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC);
+		ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC, "net_server_listen()");
 
 		if (pIPC_SA != NULL) { LocalFree(IPC_ACL); }
 		return(1);

@@ -42,6 +42,7 @@ limitations under the License.
 #define ILibDuktape_DescriptorEvents_FD			"\xFF_DescriptorEvents_FD"
 #define ILibDuktape_DescriptorEvents_Options	"\xFF_DescriptorEvents_Options"
 #define ILibDuktape_DescriptorEvents_WaitHandle "\xFF_DescriptorEvents_WindowsWaitHandle"
+#define ILibDuktape_ChainViewer_PromiseList		"\xFF_ChainViewer_PromiseList"
 
 #define CP_ISO8859_1							28591
 typedef enum ILibDuktape_Console_DestinationFlags
@@ -2252,17 +2253,54 @@ void ILibDuktape_ChainViewer_PostSelect(void* object, int slct, fd_set *readset,
 {
 	duk_context *ctx = (duk_context*)((void**)((ILibTransport*)object)->ChainLink.ExtraMemoryPtr)[0];
 	void *hptr = ((void**)((ILibTransport*)object)->ChainLink.ExtraMemoryPtr)[1];
-	
-	ILibDuktape_EventEmitter_SetupEmit(ctx, hptr, "PostSelect");	// [emit][this][name]
-	duk_push_int(ctx, slct);										// [emit][this][name][select]
+	int top = duk_get_top(ctx);
+	char *m;
+	duk_push_heapptr(ctx, hptr);										// [this]
+	if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "PostSelect"))
+	{
+		ILibDuktape_EventEmitter_SetupEmit(ctx, hptr, "PostSelect");	// [this][emit][this][name]
+		duk_push_int(ctx, slct);										// [this][emit][this][name][select]
+		m = ILibChain_GetMetaDataFromDescriptorSet(Duktape_GetChain(ctx), readset, writeset, errorset);
+		duk_push_string(ctx, m);										// [this][emit][this][name][select][string]
+		if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ChainViewer.emit('PostSelect'): Error "); }
+		duk_pop(ctx);													// [this]
+	}
 
-	char *m = ILibChain_GetMetaDataFromDescriptorSet(Duktape_GetChain(ctx), readset, writeset, errorset);
-	duk_push_string(ctx, m);
-	if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "ChainViewer.emit('PostSelect'): Error "); }
-	duk_pop(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_ChainViewer_PromiseList);	// [this][list]
+	while (duk_get_length(ctx, -1) > 0)
+	{
+		m = ILibChain_GetMetaDataFromDescriptorSetEx(duk_ctx_chain(ctx), readset, writeset, errorset);
+		duk_array_shift(ctx, -1);										// [this][list][promise]
+		duk_get_prop_string(ctx, -1, "_RES");							// [this][list][promise][RES]
+		duk_swap_top(ctx, -2);											// [this][list][RES][this]
+		duk_push_string(ctx, m);										// [this][list][RES][this][str]
+		duk_pcall_method(ctx, 1); duk_pop(ctx);							// [this][list]
+	}
+
+	duk_set_top(ctx, top);
 }
 
 extern void ILibPrependToChain(void *Chain, void *object);
+
+duk_ret_t ILibDuktape_ChainViewer_getSnapshot_promise(duk_context *ctx)
+{
+	duk_push_this(ctx);										// [promise]
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "_RES");
+	duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, "_REJ");
+	return(0);
+}
+duk_ret_t ILibDuktape_ChainViewer_getSnapshot(duk_context *ctx)
+{
+	duk_push_this(ctx);															// [viewer]
+	duk_get_prop_string(ctx, -1, ILibDuktape_ChainViewer_PromiseList);			// [viewer][list]
+	duk_eval_string(ctx, "require('promise')");									// [viewer][list][promise]
+	duk_push_c_function(ctx, ILibDuktape_ChainViewer_getSnapshot_promise, 2);	// [viewer][list][promise][func]
+	duk_new(ctx, 1);															// [viewer][list][promise]
+	duk_dup(ctx, -1);															// [viewer][list][promise][promise]
+	duk_put_prop_index(ctx, -3, (duk_uarridx_t)duk_get_length(ctx, -3));						// [viewer][list][promise]
+	ILibForceUnBlockChain(duk_ctx_chain(ctx));
+	return(1);
+}
 void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);			// [viewer]
@@ -2274,6 +2312,8 @@ void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 	((void**)t->ChainLink.ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "PostSelect");
+	ILibDuktape_CreateInstanceMethod(ctx, "getSnapshot", ILibDuktape_ChainViewer_getSnapshot, 0);
+	duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_ChainViewer_PromiseList);
 	ILibPrependToChain(chain, (void*)t);
 }
 

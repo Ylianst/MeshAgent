@@ -1271,6 +1271,7 @@ BOOL ILibProcessPipe_Process_OnExit(void *chain, HANDLE event, ILibWaitHandle_Er
 	if ((j->stdOut->PAUSED != 0 && j->stdOut->totalRead > 0) || (j->stdErr->PAUSED != 0 && j->stdErr->totalRead > 0))
 	{
 		j->hProcess_needAdd = 1;
+		return(TRUE);
 	}
 	else
 	{
@@ -1282,8 +1283,8 @@ BOOL ILibProcessPipe_Process_OnExit(void *chain, HANDLE event, ILibWaitHandle_Er
 		{
 			ILibProcessPipe_Process_Destroy(j);
 		}
+		return(FALSE);
 	}
-	return(TRUE);
 }
 #endif
 void ILibProcessPipe_Process_UpdateUserObject(ILibProcessPipe_Process module, void *userObj)

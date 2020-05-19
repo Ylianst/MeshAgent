@@ -927,6 +927,7 @@ typedef struct ILibChain_WaitHandleInfo
 	void *node;
 	ILibChain_WaitHandleHandler handler;
 	void *user;
+	char *metadata;
 	struct timeval expiration;
 }ILibChain_WaitHandleInfo;
 #endif
@@ -2991,6 +2992,85 @@ char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *i
 	}
 	return(ret);
 }
+char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set *inw, fd_set *ine)
+{
+	ILibBaseChain *bchain = (ILibBaseChain*)chain;
+	char *retStr = (char*)ILibMemory_SmartAllocate(65535);
+	int len = 0;
+	void *node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+	ILibChain_Link *module;
+	fd_set readset;
+	fd_set errorset;
+	fd_set writeset;
+	fd_set emptyset; FD_ZERO(&emptyset);
+	struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
+	int selectTimeout = UPNP_MAX_WAIT * 1000;
+	int f;
+	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+	{
+		if (module->PreSelectHandler != NULL)
+		{
+			FD_ZERO(&readset);
+			FD_ZERO(&errorset);
+			FD_ZERO(&writeset);
+
+			module->PreSelectHandler(module, &readset, &writeset, &errorset, &selectTimeout);
+			if (memcmp(&readset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&writeset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&errorset, &emptyset, sizeof(fd_set)) != 0)
+			{
+				// Descriptors were added
+#ifdef WIN32
+				SOCKET slist[FD_SETSIZE];
+				int scount = 0;
+				for (f = 0; f < readset.fd_count; ++f)
+				{
+					slist[scount++] = readset.fd_array[f];
+				}
+				for (f = 0; f < writeset.fd_count; ++f)
+				{
+					if (FD_ISSET(writeset.fd_array[f], &readset) == 0)
+					{
+						slist[scount++] = writeset.fd_array[f];
+					}
+				}
+				for (f = 0; f < errorset.fd_count; ++f)
+				{
+					if (FD_ISSET(errorset.fd_array[f], &readset) == 0 && FD_ISSET(errorset.fd_array[f], &writeset) == 0)
+					{
+						slist[scount++] = errorset.fd_array[f];
+					}
+				}
+				for (f = 0; f < scount; ++f)
+				{
+					len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->MetaData);
+				}
+				
+#else
+				for (f = 0; f < FD_SETSIZE; ++f)
+				{
+					if (FD_ISSET(f, &readset) || FD_ISSET(f, &writeset) || FD_ISSET(f, &errorset))
+					{
+						len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->MetaData);
+					}
+				}
+#endif
+			}
+		}
+		node = ILibLinkedList_GetNextNode(node);
+	}
+
+#ifdef WIN32
+	for (f = 0; f < FD_SETSIZE && f < bchain->lastDescriptorCount; ++f)
+	{
+		if (bchain->WaitHandles[f] != NULL && bchain->WaitHandles[ILibChain_HandleInfoIndex(f)] != NULL)
+		{
+			len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " H[%p] (Signaled: %d) => %s\n", bchain->WaitHandles[f], WaitForSingleObjectEx(bchain->WaitHandles[f], 0, FALSE) == 0, ((ILibChain_WaitHandleInfo*)bchain->WaitHandles[ILibChain_HandleInfoIndex(f)])->metadata);
+		}
+	}
+#endif
+
+	retStr[len] = 0;
+	return(retStr);
+}
 
 void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
 {
@@ -3050,7 +3130,7 @@ BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus st
 		{
 			// More Data to write
 			BOOL ret = FALSE;
-			switch (ILibChain_WriteEx(chain, h, data->p, data->buffer, data->bytesLeft, ILibChain_WriteEx_Sink2, data))
+			switch (ILibChain_WriteEx2(chain, h, data->p, data->buffer, data->bytesLeft, ILibChain_WriteEx_Sink2, data, data->metadata))
 			{
 				case ILibTransport_DoneState_COMPLETE:
 					data->totalWritten += data->bytesLeft;
@@ -3115,7 +3195,7 @@ BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus sta
 		}
 	}
 }
-ILibTransport_DoneState ILibChain_WriteEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user)
+ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata)
 {
 	int e = 0;
 	if (!WriteFile(h, buffer, (DWORD)bufferLen, NULL, p))
@@ -3131,7 +3211,8 @@ ILibTransport_DoneState ILibChain_WriteEx(void *chain, HANDLE h, OVERLAPPED *p, 
 			state->handler = handler;
 			state->fileHandle = h;
 			state->user = user;
-			ILibChain_AddWaitHandle(chain, p->hEvent, -1, ILibChain_WriteEx_Sink, state);
+			state->metadata = metadata;
+			ILibChain_AddWaitHandleEx(chain, p->hEvent, -1, ILibChain_WriteEx_Sink, state, metadata);
 			return(ILibTransport_DoneState_INCOMPLETE);
 		}
 		else
@@ -3146,7 +3227,7 @@ ILibTransport_DoneState ILibChain_WriteEx(void *chain, HANDLE h, OVERLAPPED *p, 
 		return(ILibTransport_DoneState_COMPLETE);
 	}
 }
-void ILibChain_ReadEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user)
+void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
 {
 	DWORD bytesRead = 0;
 	int e = 0;
@@ -3160,7 +3241,7 @@ void ILibChain_ReadEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bu
 			state->handler = handler;
 			state->fileHandle = h;
 			state->user = user;
-			ILibChain_AddWaitHandle(chain, p->hEvent, -1, ILibChain_ReadEx_Sink, state);
+			ILibChain_AddWaitHandleEx(chain, p->hEvent, -1, ILibChain_ReadEx_Sink, state, metadata);
 		}
 		else
 		{
@@ -3189,21 +3270,23 @@ void __stdcall ILibChain_AddWaitHandle_apc(ULONG_PTR u)
 	int msTIMEOUT = (int)(uintptr_t)((void**)u)[2];
 	ILibChain_WaitHandleHandler handler = (ILibChain_WaitHandleHandler)((void**)u)[3];
 	void *user = ((void**)u)[4];
+	void *metadata = (char*)((void**)u)[5];
 
-	ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user);
+	ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, metadata);
 
 	ILibMemory_Free((void*)u);
 }
-void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user)
+void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata)
 {
 	if (!ILibIsRunningOnChainThread(chain))
 	{
-		void **tmp = ILibMemory_SmartAllocate(5 * sizeof(void*));
+		void **tmp = ILibMemory_SmartAllocate(6 * sizeof(void*));
 		tmp[0] = chain;
 		tmp[1] = h;
 		tmp[2] = (void*)(uintptr_t)msTIMEOUT;
 		tmp[3] = handler;
 		tmp[4] = user;
+		tmp[5] = metadata;
 		QueueUserAPC((PAPCFUNC)ILibChain_AddWaitHandle_apc, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tmp);
 		return;
 	}
@@ -3215,12 +3298,14 @@ void ILibChain_AddWaitHandle(void *chain, HANDLE h, int msTIMEOUT, ILibChain_Wai
 		void *node = ILibLinkedList_AddTail(((ILibBaseChain*)chain)->auxSelectHandles, h);
 		info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
 		info->node = node;
+		info->metadata = metadata;
 		ILibForceUnBlockChain(chain);
 	}
 	else
 	{
 		((ILibBaseChain*)chain)->currentHandle = NULL;
 		info = ((ILibBaseChain*)chain)->currentInfo;
+		info->metadata = metadata;
 	}
 	if (info != NULL)
 	{
