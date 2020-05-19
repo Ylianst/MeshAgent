@@ -1893,9 +1893,9 @@ void ILibAddToChain(void *Chain, void *object)
 void ILibPrependToChain(void *Chain, void *object)
 {
 	//
-	// Add link to the front of the chain (Linked List)
+	// Add link to the front of the chain (Linked List), right after the Timer
 	//
-	ILibLinkedList_AddHead(((ILibBaseChain*)Chain)->Links, object);
+	ILibLinkedList_InsertAfter(ILibLinkedList_GetNode_Head(((ILibBaseChain*)Chain)->Links), object);
 	((ILibChain_Link*)object)->ParentChain = Chain;
 
 }

@@ -2275,6 +2275,7 @@ void ILibDuktape_ChainViewer_PostSelect(void* object, int slct, fd_set *readset,
 		duk_swap_top(ctx, -2);											// [this][list][RES][this]
 		duk_push_string(ctx, m);										// [this][list][RES][this][str]
 		duk_pcall_method(ctx, 1); duk_pop(ctx);							// [this][list]
+		ILibMemory_Free(m);
 	}
 
 	duk_set_top(ctx, top);
