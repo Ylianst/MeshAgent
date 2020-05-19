@@ -2518,6 +2518,51 @@ duk_ret_t ILibDuktape_DescriptorEvents_Finalizer(duk_context *ctx)
 
 	return(0);
 }
+
+#ifndef WIN32
+void ILibDuktape_DescriptorEvents_GetCount_results_final(void *chain, void *user)
+{
+	duk_context *ctx = (duk_context*)((void**)user)[0];
+	void *hptr = ((void**)user)[1];
+	duk_push_heapptr(ctx, hptr);											// [promise]
+	duk_get_prop_string(ctx, -1, "_RES");									// [promise][res]
+	duk_swap_top(ctx, -2);													// [res][this]
+	duk_push_int(ctx, ILibChain_GetDescriptorCount(duk_ctx_chain(ctx)));	// [res][this][count]
+	duk_pcall_method(ctx, 1); duk_pop(ctx);									// ...
+	free(user);
+}
+void ILibDuktape_DescriptorEvents_GetCount_results(void *chain, void *user)
+{
+	ILibChain_RunOnMicrostackThreadEx2(chain, ILibDuktape_DescriptorEvents_GetCount_results_final, user, 1);
+}
+#endif
+duk_ret_t ILibDuktape_DescriptorEvents_GetCount_promise(duk_context *ctx)
+{
+	duk_push_this(ctx);		// [promise]
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "_RES");
+	duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, "_REJ");
+	return(0);
+}
+duk_ret_t ILibDuktape_DescriptorEvents_GetCount(duk_context *ctx)
+{
+	duk_eval_string(ctx, "require('promise');");								// [promise]
+	duk_push_c_function(ctx, ILibDuktape_DescriptorEvents_GetCount_promise, 2);	// [promise][func]
+	duk_new(ctx, 1);															// [promise]
+	
+#ifdef WIN32
+	duk_get_prop_string(ctx, -1, "_RES");										// [promise][res]
+	duk_dup(ctx, -2);															// [promise][res][this]
+	duk_push_int(ctx, ILibChain_GetDescriptorCount(duk_ctx_chain(ctx)));		// [promise][res][this][count]
+	duk_call_method(ctx, 1); duk_pop(ctx);										// [promise]
+#else
+	void **data = (void**)ILibMemory_Allocate(2 * sizeof(void*), 0, NULL, NULL);
+	data[0] = ctx;
+	data[1] = duk_get_heapptr(ctx, -1);
+	ILibChain_InitDescriptorCount(duk_ctx_chain(ctx));
+	ILibChain_RunOnMicrostackThreadEx2(duk_ctx_chain(ctx), ILibDuktape_DescriptorEvents_GetCount_results, data, 1);
+#endif
+	return(1);
+}
 void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 {
 	ILibChain_Link *link = (ILibChain_Link*)ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
@@ -2534,7 +2579,7 @@ void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 	((void**)link->ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);
 	ILibDuktape_CreateInstanceMethod(ctx, "addDescriptor", ILibDuktape_DescriptorEvents_Add, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "removeDescriptor", ILibDuktape_DescriptorEvents_Remove, 1);
-
+	ILibDuktape_CreateInstanceMethod(ctx, "getDescriptorCount", ILibDuktape_DescriptorEvents_GetCount, 0);
 
 	ILibAddToChain(chain, link);
 }

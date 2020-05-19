@@ -1003,7 +1003,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define tv2LTEtv1(ptv1, ptv2) (tv2LTtv1(ptv2,ptv1) || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec <= (ptv1)->tv_usec))
 	#define tvnonzero(ptv) ((ptv)->tv_sec != 0 || (ptv)->tv_usec != 0)
 #endif
-
+	void ILibChain_InitDescriptorCount(void *chain);
+	int ILibChain_GetDescriptorCount(void *chain);
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 #ifdef WIN32

@@ -982,6 +982,7 @@ typedef struct ILibBaseChain
 #endif
 	int selectTimeout;
 	void *node;
+	int lastDescriptorCount;
 }ILibBaseChain;
 
 
@@ -3371,9 +3372,9 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		//
 		chain->node = ILibLinkedList_GetNode_Head(chain->Links);
 		chain->selectTimeout = (int)((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
-		while(chain->node!=NULL && (module=(ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node))!=NULL)
+		while (chain->node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node)) != NULL)
 		{
-			if(module->PreSelectHandler != NULL)
+			if (module->PreSelectHandler != NULL)
 			{
 #ifdef MEMORY_CHECK
 #ifdef WIN32
@@ -3404,7 +3405,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		FD_SET(chain->TerminatePipe[0], &readset);
 #endif
 		sem_wait(&ILibChainLock);
-		while(ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
+		while (ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
 		{
 			chain->node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)Chain)->LinksPendingDelete);
 			module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node);
@@ -3427,8 +3428,18 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		DWORD waitTimeout = 0;
 
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles, NULL);
+		chain->lastDescriptorCount = x;
 		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
 #else
+		if (chain->lastDescriptorCount < 0)
+		{
+			int z;
+			chain->lastDescriptorCount = 0;
+			for (z = 0; z < FD_SETSIZE; ++z)
+			{
+				if (FD_ISSET(z, &readset) || FD_ISSET(z, &writeset) || FD_ISSET(z, &errorset)) { chain->lastDescriptorCount += 1; }
+			}
+		}
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
 #endif
 		chain->PostSelectCount++;
@@ -3617,6 +3628,15 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	}
 	--ILibChainLock_RefCounter;
 	free(Chain);
+}
+
+void ILibChain_InitDescriptorCount(void *chain)
+{
+	((ILibBaseChain*)chain)->lastDescriptorCount = -1;
+}
+int ILibChain_GetDescriptorCount(void *chain)
+{
+	return(((ILibBaseChain*)chain)->lastDescriptorCount);
 }
 
 /*! \fn ILibStopChain(void *Chain)
