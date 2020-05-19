@@ -990,7 +990,11 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	if (!ILibMemory_CanaryOK(user)) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 
-	if (winIPC->mPipeHandle != NULL) { CloseHandle(winIPC->mPipeHandle); winIPC->mPipeHandle = NULL; }
+	if (winIPC->mPipeHandle != NULL) 
+	{
+		if (winIPC->mServer != NULL) { DisconnectNamedPipe(winIPC->mPipeHandle); }
+		CloseHandle(winIPC->mPipeHandle); winIPC->mPipeHandle = NULL; 
+	}
 	if (winIPC->read_overlapped.hEvent != NULL) { CloseHandle(winIPC->read_overlapped.hEvent); winIPC->read_overlapped.hEvent = NULL; }
 	if (winIPC->write_overlapped.hEvent != NULL) { CloseHandle(winIPC->write_overlapped.hEvent); winIPC->write_overlapped.hEvent = NULL; }
 

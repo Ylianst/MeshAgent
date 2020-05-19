@@ -160,6 +160,12 @@ function Promise(promiseFunc)
         refTable[this._internal._hashCode()] = this._internal;
         this._internal.once('settled', function () { refTable[this._hashCode()] = null; });
     }
+    Object.defineProperty(this, "completed", {
+        get: function ()
+        {
+            return (this._internal.completed);
+        }
+    });
 }
 
 Promise.resolve = function resolve()

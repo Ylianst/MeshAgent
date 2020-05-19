@@ -137,6 +137,7 @@ function connect(ipc)
     });
     global.ipcClient = require('net').createConnection({ path: ipcPath }, function ()
     {
+        this.on('close', function () { process.exit(); });
         this.on('data', function (c)
         {
             var cLen = c.readUInt32LE(0);
@@ -165,6 +166,8 @@ function connect(ipc)
             if (cLen < c.length) { this.unshift(c.slice(cLen)); }
         });
     });
+    global.ipcClient.on('error', function () { process.exit(); });
+    global.ipc2Client.on('error', function () { process.exit(); });
 }
 
 module.exports = { dispatch: dispatch, connect: connect };

@@ -2167,23 +2167,26 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 				continue;
 			}
 		}
-		i = x++;
-		if (waitList[i] != NULL && waitList[ILibChain_HandleInfoIndex(i)] == NULL)
+		if (i + 1 < FD_SETSIZE)
 		{
-			WSACloseEvent(waitList[i]);
-		}
-		waitList[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
-		waitList[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
-		if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
-		{
-			// Timeout was specified
-			if (tv2LTtv1(&expirationTime, &(((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration)))
+			i = x++;
+			if (waitList[i] != NULL && waitList[ILibChain_HandleInfoIndex(i)] == NULL)
 			{
-				expirationTime.tv_sec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec;
-				expirationTime.tv_usec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec;
+				WSACloseEvent(waitList[i]);
+			}
+			waitList[i] = (HANDLE)ILibLinkedList_GetDataFromNode(node);
+			waitList[ILibChain_HandleInfoIndex(i)] = (HANDLE)ILibMemory_Extra(node);
+			if (((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec != 0 || ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec != 0)
+			{
+				// Timeout was specified
+				if (tv2LTtv1(&expirationTime, &(((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration)))
+				{
+					expirationTime.tv_sec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_sec;
+					expirationTime.tv_usec = ((ILibChain_WaitHandleInfo*)ILibMemory_Extra(node))->expiration.tv_usec;
 
-				// If the expiration happens in the past, we need to set the timeout to zero
-				if (tv2LTtv1(&expirationTime, &currentTime)) { expirationTime.tv_sec = currentTime.tv_sec; expirationTime.tv_usec = currentTime.tv_usec; }
+					// If the expiration happens in the past, we need to set the timeout to zero
+					if (tv2LTtv1(&expirationTime, &currentTime)) { expirationTime.tv_sec = currentTime.tv_sec; expirationTime.tv_usec = currentTime.tv_usec; }
+				}
 			}
 		}
 		node = ILibLinkedList_GetNextNode(node);
