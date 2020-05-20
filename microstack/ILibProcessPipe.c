@@ -95,10 +95,10 @@ typedef struct ILibProcessPipe_PipeObject
 	OVERLAPPED *mOverlapped,*mwOverlapped;
 	int inProgress;
 	void *mOverlapped_opaqueData, *user3, *user4;
-	char *metadata;
 #else
 	int mPipe_ReadEnd, mPipe_WriteEnd;
 #endif
+	char *metadata;
 	int PAUSED;
 }ILibProcessPipe_PipeObject;
 

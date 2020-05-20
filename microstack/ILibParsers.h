@@ -998,8 +998,6 @@ int ILibIsRunningOnChainThread(void* chain);
 		char *metadata;
 	}ILibChain_WriteEx_data;
 
-	char *ILibChain_MetaData(char *file, int number);
-	int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2);
 	void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h);
 	void ILibChain_WaitHandle_RestoreState(void *chain, void *state);
 	BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h);
@@ -1011,10 +1009,14 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata);
 	#define ILibChain_WriteEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_WriteEx2(chain, h, overlapped, buffer, bufferLen, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 
+#endif
+	char *ILibChain_MetaData(char *file, int number);
+	int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2);
+
 	#define tv2LTtv1(ptv1, ptv2) ((ptv2)->tv_sec < (ptv1)->tv_sec || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec < (ptv1)->tv_usec))
 	#define tv2LTEtv1(ptv1, ptv2) (tv2LTtv1(ptv2,ptv1) || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec <= (ptv1)->tv_usec))
 	#define tvnonzero(ptv) ((ptv)->tv_sec != 0 || (ptv)->tv_usec != 0)
-#endif
+
 	void ILibChain_InitDescriptorCount(void *chain);
 	int ILibChain_GetDescriptorCount(void *chain);
 	ILibExportMethod void ILibStartChain(void *chain);
