@@ -1250,7 +1250,7 @@ void ILibDuktape_MeshAgent_RemoteDesktop_SendError(RemoteDesktop_Ptrs* ptrs, cha
 }
 #endif
 
-#if defined(_POSIX) && defined(_LINKVM)
+#if defined(_POSIX) && defined(_LINKVM) && !defined(__APPLE__)
 extern void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid);
 duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 {
