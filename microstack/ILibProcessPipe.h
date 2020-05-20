@@ -90,6 +90,8 @@ void ILibProcessPipe_Process_CloseStdIn(ILibProcessPipe_Process p);
 void ILibProcessPipe_Process_GetWaitHandles(ILibProcessPipe_Process p, HANDLE *hProcess, HANDLE *read, HANDLE *write, HANDLE *error);
 #endif
 
+#define ILibProcessPipe_Process_StartPipeReader(pipeObject, bufferSize, handler, user1, user2) ILibProcessPipe_Process_StartPipeReaderEx(pipeObject, bufferSize, handler, user1, user2, ILibChain_MetaData(__FILE__, __LINE__))
+
 void ILibProcessPipe_Pipe_Close(ILibProcessPipe_Pipe po);
 void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject);
 void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject);

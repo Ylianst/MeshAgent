@@ -998,13 +998,14 @@ int ILibIsRunningOnChainThread(void* chain);
 		char *metadata;
 	}ILibChain_WriteEx_data;
 
+	char *ILibChain_MetaData(char *file, int number);
 	void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata);
-	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, NULL)
+	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);
 	void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
-	#define ILibChain_ReadEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_ReadEx2(chain, h, overlapped, buffer, bufferLen, handler, user, NULL)
+	#define ILibChain_ReadEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_ReadEx2(chain, h, overlapped, buffer, bufferLen, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 	ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata);
-	#define ILibChain_WriteEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_WriteEx2(chain, h, overlapped, buffer, bufferLen, handler, user, NULL)
+	#define ILibChain_WriteEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_WriteEx2(chain, h, overlapped, buffer, bufferLen, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 
 	#define tv2LTtv1(ptv1, ptv2) ((ptv2)->tv_sec < (ptv1)->tv_sec || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec < (ptv1)->tv_usec))
 	#define tv2LTEtv1(ptv1, ptv2) (tv2LTtv1(ptv2,ptv1) || ((ptv2)->tv_sec == (ptv1)->tv_sec && (ptv2)->tv_usec <= (ptv1)->tv_usec))

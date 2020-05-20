@@ -95,6 +95,7 @@ typedef struct ILibProcessPipe_PipeObject
 	OVERLAPPED *mOverlapped,*mwOverlapped;
 	int inProgress;
 	void *mOverlapped_opaqueData, *user3, *user4;
+	char *metadata;
 #else
 	int mPipe_ReadEnd, mPipe_WriteEnd;
 #endif
@@ -1184,7 +1185,7 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 				ILibMemory_ReallocateRaw(&(pipeObject->buffer), pipeObject->bufferSize * 2);
 				pipeObject->bufferSize = pipeObject->bufferSize * 2;
 			}
-			ILibChain_ReadEx(chain, h, pipeObject->mOverlapped, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject);
+			ILibChain_ReadEx2(chain, h, pipeObject->mOverlapped, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
 			return(TRUE);
 		}
 		else
@@ -1199,19 +1200,20 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 	}
 }
 #endif
-void ILibProcessPipe_Process_StartPipeReader(ILibProcessPipe_PipeObject *pipeObject, int bufferSize, ILibProcessPipe_GenericReadHandler handler, void* user1, void* user2)
+void ILibProcessPipe_Process_StartPipeReaderEx(ILibProcessPipe_PipeObject *pipeObject, int bufferSize, ILibProcessPipe_GenericReadHandler handler, void* user1, void* user2, char *metadata)
 {
 	if ((pipeObject->buffer = (char*)malloc(bufferSize)) == NULL) { ILIBCRITICALEXIT(254); }
 	pipeObject->bufferSize = bufferSize;
 	pipeObject->handler = (void*)handler;
 	pipeObject->user1 = user1;
 	pipeObject->user2 = user2;
+	pipeObject->metadata = metadata;
 
 #ifdef WIN32
 	if (pipeObject->mOverlapped != NULL)
 	{
 		// This PIPE supports Overlapped I/O
-		ILibChain_ReadEx(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject);
+		ILibChain_ReadEx2(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, metadata);
 	}
 	else
 	{
@@ -1310,12 +1312,12 @@ void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int buf
 		j->userObject = user;
 		j->exitHandler = exitHandler;
 
-		ILibProcessPipe_Process_StartPipeReader(j->stdOut, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdOut);
-		ILibProcessPipe_Process_StartPipeReader(j->stdErr, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdErr);
+		ILibProcessPipe_Process_StartPipeReaderEx(j->stdOut, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdOut, "process_handle_stdout");
+		ILibProcessPipe_Process_StartPipeReaderEx(j->stdErr, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdErr, "process_handle_stderr");
 		ILibProcessPipe_Process_SetWriteHandler(j->stdIn, &ILibProcessPipe_Process_PipeHandler_StdIn, j, sendOk);
 
 #ifdef WIN32
-		ILibChain_AddWaitHandle(j->parent->ChainLink.ParentChain, j->hProcess, -1, ILibProcessPipe_Process_OnExit, j);
+		ILibChain_AddWaitHandleEx(j->parent->ChainLink.ParentChain, j->hProcess, -1, ILibProcessPipe_Process_OnExit, j, "process_handle_exit");
 #endif
 	}
 }

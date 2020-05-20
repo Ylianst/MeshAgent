@@ -2039,6 +2039,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 						// FALSE means to remove tha HANDLE
 						if (((ILibBaseChain*)chain)->currentHandle != NULL && ILibMemory_CanaryOK(info))
 						{
+							ILibMemory_Free(info->metadata);
 							ILibLinkedList_Remove(info->node);
 						}
 					}
@@ -3103,6 +3104,12 @@ void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
 	return(ret);
 }
 
+char *ILibChain_MetaData(char *file, int number)
+{
+	char *ret = ILibMemory_SmartAllocate(strnlen_s(file, 1024) + 16);
+	sprintf_s(ret, ILibMemory_Size(ret), "%s:%d", file, number);
+	return(ret);
+}
 #ifdef WIN32
 BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user);
 BOOL ILibChain_WriteEx_Sink2(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void *user)
@@ -3123,6 +3130,7 @@ BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus st
 		{
 			// Done Writing
 			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->totalWritten, data->user); }
+			ILibMemory_Free(data->metadata);
 			ILibMemory_Free(data);
 			return(FALSE);
 		}
@@ -3136,13 +3144,16 @@ BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus st
 					data->totalWritten += data->bytesLeft;
 					data->bytesLeft = 0;
 					if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->totalWritten, data->user); }
+					ILibMemory_Free(data->metadata);
 					ILibMemory_Free(data);
 					ret = FALSE;
 					break;
 				case ILibTransport_DoneState_INCOMPLETE:
 					ret = TRUE;
+					ILibMemory_Free(data);
 				case ILibTransport_DoneState_ERROR:
 					if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, 0, data->user); }
+					ILibMemory_Free(data->metadata);
 					ILibMemory_Free(data);
 					ret = FALSE;
 					break;
@@ -3161,6 +3172,7 @@ BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus st
 		{
 			// ERROR
 			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, 0, data->user); }
+			ILibMemory_Free(data->metadata);
 			ILibMemory_Free(data);
 			return(FALSE);
 		}
@@ -3334,6 +3346,11 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 		if (chain->currentHandle == h) 
 		{
 			chain->currentHandle = NULL; chain->currentInfo = NULL; 
+		}
+		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
+		if (info != NULL)
+		{
+			ILibMemory_Free(info->metadata);
 		}
 		ILibLinkedList_Remove(node);
 		chain->UnblockFlag = 1;
