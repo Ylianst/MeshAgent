@@ -3274,7 +3274,55 @@ void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int b
 }
 
 
+BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h)
+{
+	return(ILibLinkedList_GetNode_Search(((ILibBaseChain*)chain)->auxSelectHandles, NULL, h) != NULL);
+}
+void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h)
+{
+	ILibChain_WaitHandleInfo *ret = NULL;
+	void *node = ILibLinkedList_GetNode_Search(((ILibBaseChain*)chain)->auxSelectHandles, NULL, h);
+	if (node != NULL)
+	{
+		ret = (ILibChain_WaitHandleInfo*)ILibMemory_SmartAllocate(sizeof(ILibChain_WaitHandleInfo));
+		memcpy_s(ret, ILibMemory_Size(ret), ILibMemory_Extra(node), ILibMemory_Size(ret));
+		ret->node = h;
+		ILibLinkedList_Remove(node);
 
+		if (((ILibBaseChain*)chain)->currentHandle == h)
+		{
+			((ILibBaseChain*)chain)->currentHandle = NULL; ((ILibBaseChain*)chain)->currentInfo = NULL;
+		}
+		((ILibBaseChain*)chain)->UnblockFlag = 1;
+	}
+	return(ret);
+}
+void ILibChain_WaitHandle_RestoreState(void *chain, void *state)
+{
+	ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)state;
+	int msTIMEOUT = -1;
+	struct timeval current;
+
+	if (tvnonzero(&(info->expiration)))
+	{
+		// Expiration was specified
+		ILibGetTimeOfDay(&current);
+		
+		if (tv2LTEtv1(&(info->expiration), &current))
+		{
+			// Expiration happened in the past
+			msTIMEOUT = 1;
+		}
+		else
+		{
+			// Expiration is in the future
+			msTIMEOUT = ILibGetMillisecondTimeSpan(&(info->expiration), &current);
+		}
+	}	
+
+	ILibChain_AddWaitHandleEx(chain, info->node, msTIMEOUT, info->handler, info->user, info->metadata);
+	ILibMemory_Free(info);
+}
 void __stdcall ILibChain_AddWaitHandle_apc(ULONG_PTR u)
 {
 	void *chain = ((void**)u)[0];
@@ -8782,6 +8830,42 @@ void ILibGetDiskFreeSpace(void *i64FreeBytesToCaller, void *i64TotalBytes)
 	*((uint64_t *)i64TotalBytes)= (uint64_t)stfs.f_blocks * stfs.f_bsize;
 #endif
 }
+
+int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2)
+{
+	struct timeval a;
+	struct timeval b;
+	int seconds;
+
+	if (tv2LTtv1(tv1, tv2))
+	{
+		memcpy_s(&a, sizeof(a), tv2, sizeof(a));
+		memcpy_s(&b, sizeof(b), tv1, sizeof(b));
+	}
+	else
+	{
+		memcpy_s(&b, sizeof(b), tv2, sizeof(b));
+		memcpy_s(&a, sizeof(a), tv1, sizeof(a));
+	}
+
+	if (b.tv_usec < a.tv_usec) 
+	{
+		seconds = (a.tv_usec - b.tv_usec) / 1000000 + 1;
+		a.tv_usec -= (1000000 * seconds);
+		a.tv_sec += seconds;
+	}
+	if (b.tv_usec - a.tv_usec > 1000000) 
+	{
+		seconds = (b.tv_usec - a.tv_usec) / 1000000;
+		a.tv_usec += (1000000 * seconds);
+		a.tv_sec -= seconds;
+	}
+
+	// Millisecond Span
+	return(((b.tv_sec - a.tv_sec) * 1000) + ((b.tv_usec - a.tv_usec) / 1000));
+}
+
+
 long ILibGetTimeStamp()
 {
 	struct timeval tv;

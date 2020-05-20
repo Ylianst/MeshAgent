@@ -999,6 +999,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	}ILibChain_WriteEx_data;
 
 	char *ILibChain_MetaData(char *file, int number);
+	int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2);
+	void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h);
+	void ILibChain_WaitHandle_RestoreState(void *chain, void *state);
+	BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h);
 	void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata);
 	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);

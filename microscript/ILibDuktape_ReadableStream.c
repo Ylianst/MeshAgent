@@ -701,6 +701,8 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	duk_call_method(ctx, 2); duk_pop(ctx);				// ...
 	if (rstream->paused != 0)
 	{
+		rstream->paused = 0; // Set state now, so nobody tries to resume before we can finish piping
+
 		// We are paused, so we should yield and resume... We yield, so in case the user tries to chain multiple pipes, it will chain first
 		rstream->resumeImmediate = ILibDuktape_Immediate(ctx, (void*[]) { rstream, duk_get_heapptr(ctx, 0) }, 1, ILibDuktape_ReadableStream_pipe_ResumeLater);
 		duk_push_heapptr(ctx, rstream->resumeImmediate);		// [immediate]

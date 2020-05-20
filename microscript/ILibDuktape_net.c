@@ -94,7 +94,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 	OVERLAPPED overlapped;
 	ILibDuktape_DuplexStream *ds;
 	BOOL clientConnected;
-
+	void *reservedState;
 	ULONG_PTR _reserved[5];
 
 	char *buffer;
@@ -947,12 +947,22 @@ void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void
 	// No-OP, becuase all we need to so is set Paused flag, which is already the  case when we get here
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	winIPC->paused = 1;
+	
+	winIPC->reservedState = ILibChain_WaitHandle_RemoveAndSaveState(winIPC->mChain, winIPC->read_overlapped.hEvent);
 }
 void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	winIPC->paused = 0;
-	ILibDuktape_server_ipc_ReadSink(winIPC->mChain, winIPC->mPipeHandle, ILibWaitHandle_ErrorStatus_NONE, NULL, 0, winIPC);
+	if (winIPC->reservedState != NULL)
+	{
+		ILibChain_WaitHandle_RestoreState(winIPC->mChain, winIPC->reservedState);
+		winIPC->reservedState = NULL;
+	}
+	else
+	{
+		ILibDuktape_server_ipc_ReadSink(winIPC->mChain, winIPC->mPipeHandle, ILibWaitHandle_ErrorStatus_NONE, NULL, 0, winIPC);
+	}
 }
 
 ILibTransport_DoneState ILibDuktape_net_server_IPC_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
