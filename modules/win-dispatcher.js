@@ -48,6 +48,7 @@ function dispatch(options)
     {
         this.parent._control = s;
         this.parent._control._parent = this;
+        this.close();
         this.parent.invoke = function (method, args)
         {
             var d, h = Buffer.alloc(4);
@@ -56,12 +57,12 @@ function dispatch(options)
             this._control.write(h);
             this._control.write(d);
         };
-        s.once('end', function () { this._parent.close(); });
     });
     ret._ipc.once('connection', function onConnect(s)
     {
         this.parent._client = s;
         this.parent._client._parent = this;
+        this.close();
         var d, h = Buffer.alloc(4);
 
         for (var m in this.parent.options.modules)
@@ -75,7 +76,6 @@ function dispatch(options)
         h.writeUInt32LE(d.length + 4);
         s.write(h);
         s.write(d);
-        s.once('end', function () { this._parent.close(); });
         this.parent.emit('connection', s);
     });
 
