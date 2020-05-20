@@ -531,6 +531,7 @@ function macos_messageBox()
                         }
                         break;
                 }
+                this.promise.server.close();
             });
             for (var x in this.ret.layout)
             {
