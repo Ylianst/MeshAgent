@@ -3004,7 +3004,6 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 	fd_set errorset;
 	fd_set writeset;
 	fd_set emptyset; FD_ZERO(&emptyset);
-	struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
 	int selectTimeout = UPNP_MAX_WAIT * 1000;
 	int f;
 	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
