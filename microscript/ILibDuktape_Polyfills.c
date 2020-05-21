@@ -667,7 +667,7 @@ duk_ret_t ILibDuktape_Polyfills_Console_log(duk_context *ctx)
 			duk_push_string(ctx, tmp);											// [writeFileSync][this][logPath][log]
 			duk_push_object(ctx);												// [writeFileSync][this][logPath][log][options]
 			duk_push_string(ctx, "a"); duk_put_prop_string(ctx, -2, "flags");
-			duk_call_method(ctx, 3);
+			duk_pcall_method(ctx, 3);
 		}
 	}
 	return 0;
