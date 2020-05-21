@@ -618,6 +618,8 @@ void ILibDuktape_net_socket_PUSH(duk_context *ctx, ILibAsyncSocket_SocketModule 
 	ptrs->chain = ((ILibChain_Link*)module)->ParentChain;
 	ptrs->object = duk_get_heapptr(ctx, -1);
 	ptrs->socketModule = module;
+	ILibChain_Link_SetMetadata(module, "net.socket");
+	duk_push_pointer(ctx, ptrs->socketModule); duk_put_prop_string(ctx, -2, ILibDuktape_ChainLinkPtr);
 
 	duk_push_pointer(ctx, ptrs);								// [obj][ptrs]
 	duk_put_prop_string(ctx, -2, ILibDuktape_net_socket_ptr);	// [obj]
@@ -1892,6 +1894,7 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 
 	ILibDuktape_net_socket_PUSH(ctx, module);													// [socket]
 	ILibDuktape_WriteID(ctx, "tls.socket");
+	ILibChain_Link_SetMetadata(module, "tls.socket")
 #ifdef _SSL_KEYS_EXPORTABLE
 	ILibDuktape_CreateInstanceMethod(ctx, "_exportKeys", ILibDuktape_TLS_exportKeys, 0);
 #endif

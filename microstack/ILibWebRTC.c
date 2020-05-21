@@ -6377,9 +6377,11 @@ void* ILibStunClient_Start(void *Chain, unsigned short LocalPort, ILibStunClient
 	obj->ChainLink.DestroyHandler = &ILibStun_OnDestroy;
 	obj->UDP = ILibAsyncUDPSocket_CreateEx(Chain, ILibRUDP_MaxMTU, (struct sockaddr*)&(obj->LocalIf), ILibAsyncUDPSocket_Reuse_EXCLUSIVE, &ILibStun_OnUDP, NULL, obj);
 	if (obj->UDP == NULL) { free(obj); return NULL; }
+	ILibChain_Link_SetMetadata(obj->UDP, "ILibWebRTC_stun_listener_ipv4");
 #ifdef WIN32
 	obj->UDP6 = ILibAsyncUDPSocket_CreateEx(Chain, ILibRUDP_MaxMTU, (struct sockaddr*)&(obj->LocalIf6), ILibAsyncUDPSocket_Reuse_EXCLUSIVE, &ILibStun_OnUDP, NULL, obj);
 	if (obj->UDP6 == NULL) { free(obj); return NULL; }
+	ILibChain_Link_SetMetadata(obj->UDP6, "ILibWebRTC_stun_listener_ipv6");
 #endif
 
 	ILibAddToChain(Chain, obj);

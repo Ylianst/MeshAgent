@@ -388,6 +388,8 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibMemory_Types memoryType;
 	}ILibMemory_Header;
 
+	#define ILibChain_Link_SetMetadata(chainLink, value) if((chainLink)!=NULL) { ILibMemory_Free(((ILibChain_Link*)chainLink)->MetaData); ((ILibChain_Link*)chainLink)->MetaData = value; }
+	#define ILibChain_Link_GetMetadata(chainLink) ((chainLink)==NULL?"":(((ILibChain_Link*)chainLink)->MetaData))
 	#define ILibMemory_Canary (((int*)((char*)(const char*)"broe"))[0])
 	#define ILibMemory_RawPtr(ptr) ((char*)(ptr) - sizeof(ILibMemory_Header))
 	#define ILibMemory_RawSize(ptr) (ILibMemory_Size((ptr)) + ILibMemory_ExtraSize((ptr)) + sizeof(ILibMemory_Header))
@@ -971,6 +973,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_SafeRemoveEx(void *chain, void *object);
 	void ILibChain_DestroyEx(void *chain);
 	void ILibChain_DisableWatchDog(void *chain);
+	ILibChain_Link* ILibChain_GetCurrentLink(void *chain);
 	void *ILibChain_GetObjectForDescriptor(void *chain, int fd);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 	char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);

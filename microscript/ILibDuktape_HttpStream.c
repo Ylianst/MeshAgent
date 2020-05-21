@@ -498,7 +498,9 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 			duk_pop(ctx);																										// ...
 		}
 	}
-
+	
+	ILibChain_Link_SetMetadata(Duktape_GetPointerProperty(ctx, -2, ILibDuktape_ChainLinkPtr), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "http.webSocketStream"));
+	
 	duk_get_prop_string(ctx, -3, ILibDuktape_HTTP2CR);							// [HTTPStream][readable][websocket][clientRequest]
 	//duk_dup(ctx, -2);															// [HTTPStream][readable][websocket][clientRequest][websocket]
 	//duk_put_prop_string(ctx, -2, ILibDuktape_CR2WS);							// [HTTPStream][readable][websocket][clientRequest]
@@ -729,8 +731,8 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 		duk_call_method(ctx, 1);
 		return(0);
 	}
-
-
+	
+	ILibChain_Link_SetMetadata(Duktape_GetPointerProperty(ctx, -2, ILibDuktape_ChainLinkPtr), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "http.clientRequest"));
 
 	// Register ourselves for the close event, becuase we'll need to put ourselves back in the Queue if the socket dies before we are done
 	duk_get_prop_string(ctx, -2, "prependOnceListener");				// [socket][clientRequest][prependOnce]
@@ -4198,6 +4200,40 @@ duk_ret_t ILibDuktape_httpStream_webSocket_exportKeys(duk_context *ctx)
 	return(ILibDuktape_Error(ctx, "Error exporting keys"));
 }
 #endif
+void ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx(duk_context *ctx, void ** args, int argsLen)
+{
+	ILibDuktape_WebSocket_State *ws = (ILibDuktape_WebSocket_State*)args[0];
+	char *str = (char*)args[1];
+
+	if(ws->encodedStream->writableStream->pipedReadable != NULL)
+	{
+		duk_push_heapptr(ctx, ws->encodedStream->writableStream->pipedReadable);	// [WebSocket_Decoded][WebSocket][Readable]
+		char * tmp = (char*)duk_push_sprintf(ctx, "%s, %s", ILibChain_Link_GetMetadata(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChainLinkPtr)), str);
+		char *tmp2 = ILibMemory_SmartAllocate(duk_get_length(ctx, -1) + 1); // [WebSocket_Decoded][WebSocket][Readable][str]
+		memcpy_s(tmp2, ILibMemory_Size(tmp2), tmp, ILibMemory_Size(tmp2) - 1);
+		ILibChain_Link_SetMetadata(Duktape_GetPointerProperty(ctx, -2, ILibDuktape_ChainLinkPtr), tmp2);
+	}
+}
+
+duk_ret_t ILibDuktape_httpStream_webSocketStream_descriptorMetadata(duk_context *ctx)
+{
+	ILibDuktape_WebSocket_State *ws = NULL;
+	duk_push_this(ctx);									// [WebSocket_Decoded]
+	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);	// [WebSocket_Decoded][WebSocket]
+	ws = (ILibDuktape_WritableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
+	if (ws != NULL)
+	{
+		if (ws->encodedStream->writableStream->pipedReadable == NULL)
+		{
+			ILibDuktape_Immediate(ctx, (void *[]) { ws, duk_require_string(ctx, 0) }, 2, ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx);
+		}
+		else
+		{
+			ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx(ctx, (void *[]) { ws, duk_require_string(ctx, 0) }, 2);
+		}
+	}
+	return(0);
+}
 duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 {
 	ILibDuktape_WebSocket_State *state;
@@ -4233,9 +4269,9 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "_exportKeys", ILibDuktape_httpStream_webSocket_exportKeys, 0);
 #endif
 
+	ILibDuktape_CreateEventWithSetterEx(ctx, "descriptorMetadata", ILibDuktape_httpStream_webSocketStream_descriptorMetadata);
 	ILibDuktape_CreateReadonlyProperty(ctx, "decoded");							// [WebSocket]
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_httpStream_webSocketStream_finalizer);
-
 	return(1);
 }
 

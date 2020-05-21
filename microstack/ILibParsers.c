@@ -1796,6 +1796,7 @@ void ILibChain_SafeRemoveEx(void *chain, void *object)
 	if (link != NULL)
 	{
 		if (link->DestroyHandler != NULL) { link->DestroyHandler(link); }
+		ILibMemory_Free(link->MetaData);
 		ILibChain_FreeLink(link);
 		ILibLinkedList_Remove(node);
 	}
@@ -1910,7 +1911,12 @@ void* ILibGetBaseTimer(void *chain)
 	//return ILibCreateLifeTime(chain);
 	return (chain == NULL ? NULL : ((struct ILibBaseChain*)chain)->Timer);
 }
-
+ILibChain_Link* ILibChain_GetCurrentLink(void *chain)
+{
+	if (chain == NULL) { return(NULL); }
+	if (((ILibBaseChain*)chain)->node == NULL) { return(NULL); }
+	return((ILibChain_Link*)ILibLinkedList_GetDataFromNode(((ILibBaseChain*)chain)->node));
+}
 #ifdef WIN32
 void __stdcall ILibForceUnBlockChain_APC(ULONG_PTR obj)
 {
@@ -1959,6 +1965,7 @@ void ILibChain_DestroyEx(void *subChain)
 	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
+		ILibMemory_Free(module->MetaData);
 		ILibChain_FreeLink(module);
 		node = ILibLinkedList_GetNextNode(node);
 	}
@@ -2303,6 +2310,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 			if (module != NULL)
 			{
 				if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
+				ILibMemory_Free(module->MetaData);
 				ILibChain_FreeLink(module);
 			}
 		}
@@ -3563,6 +3571,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 			if (module != NULL)
 			{
 				if (module->DestroyHandler != NULL) { module->DestroyHandler((void*)module); }
+				ILibMemory_Free(module->MetaData);
 				ILibChain_FreeLink(module);
 			}
 		}
@@ -3703,6 +3712,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		// If this module has a destroy method, call it.
 		//
 		if (module->DestroyHandler != NULL) module->DestroyHandler((void*)module);
+		ILibMemory_Free(module->MetaData);
 		//
 		// After calling the Destroy, we free the module and move to the next
 		//
@@ -3730,6 +3740,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	if (chain->node!=NULL && (module=(ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node))!=NULL)
 	{
 		module->DestroyHandler((void*)module);
+		ILibMemory_Free(module->MetaData);
 		ILibChain_FreeLink(module);
 		((ILibBaseChain*)Chain)->Timer = NULL;
 	}
@@ -3740,6 +3751,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	while(chain->node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node)) != NULL)
 	{
 		if(module->DestroyHandler != NULL) {module->DestroyHandler((void*)module);}
+		ILibMemory_Free(module->MetaData);
 		ILibChain_FreeLink(module);
 		chain->node = ILibLinkedList_GetNextNode(chain->node);
 	}

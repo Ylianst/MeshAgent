@@ -35,6 +35,7 @@ typedef void(*ILibDuktape_HelperEvent)(duk_context *ctx, void *user);
 #define ILibDuktape_CR2HTTP									"\xFF_CR2HTTP"
 #define ILibDuktape_CR2Options								"\xFF_CR2Options"
 #define ILibDuktape_TLS_util_cert							"\xFF_TLS_util_cert"
+#define ILibDuktape_ChainLinkPtr							"\xFF_Duktape_ChainLink"
 
 typedef enum ILibDuktape_LogTypes
 {
