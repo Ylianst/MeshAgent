@@ -412,46 +412,55 @@ if (process.platform == 'win32')
 {
     function win_update()
     {
-        var fini = setTimeout(function ()
-        {
-            // If this hits, it's becuase something went wrong... So just abort
-            process._exit();
-        }, 20000);
-
+        console.setDestination(console.Destinations.LOGFILE);
         var updateLocation = process.argv[1].substring(8);
         var service = null;
         var serviceLocation = "";
 
-        service = require('service-manager').manager.getService('Mesh Agent');
-        serviceLocation = service.appLocation();
-
-        var t = setTimeout(function ()
+        if(!global._interval)
         {
-            service.stop().finally(function ()
+            global._interval = setInterval(win_update, 60000);
+        }
+
+        try
+        {
+            service = require('service-manager').manager.getService('Mesh Agent');
+            serviceLocation = service.appLocation();
+        }
+        catch(e)
+        {
+            console.log('Service Manager Error: ' + e);
+            console.log('Trying again in one minute...');
+            return;
+        }
+
+        service.stop().finally(function ()
+        {
+            require('process-manager').enumerateProcesses().then(function (proc)
             {
-                require('process-manager').enumerateProcesses().then(function (proc)
+                for (var p in proc)
                 {
-                    for (var p in proc)
+                    if (proc[p].path == serviceLocation)
                     {
-                        if (proc[p].path == serviceLocation)
-                        {
-                            process.kill(proc[p].pid);
-                        }
+                        process.kill(proc[p].pid);
                     }
+                }
 
-                    try
-                    {
-                        require('fs').copyFileSync(process.execPath, updateLocation);
-                    }
-                    catch (ce)
-                    {
-                    }
+                try
+                {
+                    require('fs').copyFileSync(process.execPath, updateLocation);
+                }
+                catch (ce)
+                {
+                    console.log('Could not copy file.. Trying again in 60 seconds');
+                    service.close();
+                    return;
+                }
 
-                    service.start();
-                    process._exit();
-                });
+                service.start();
+                process._exit();
             });
-        }, 3000);
+        });
     }
     module.exports.update = win_update;
 }
