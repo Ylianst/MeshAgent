@@ -407,3 +407,51 @@ module.exports =
         fullInstall: fullInstall,
         fullUninstall: fullUninstall
     };
+
+if (process.platform == 'win32')
+{
+    function win_update()
+    {
+        var fini = setTimeout(function ()
+        {
+            // If this hits, it's becuase something went wrong... So just abort
+            process._exit();
+        }, 20000);
+
+        var updateLocation = process.argv[1].substring(8);
+        var service = null;
+        var serviceLocation = "";
+
+        service = require('service-manager').manager.getService('Mesh Agent');
+        serviceLocation = service.appLocation();
+
+        var t = setTimeout(function ()
+        {
+            service.stop().finally(function ()
+            {
+                require('process-manager').enumerateProcesses().then(function (proc)
+                {
+                    for (var p in proc)
+                    {
+                        if (proc[p].path == serviceLocation)
+                        {
+                            process.kill(proc[p].pid);
+                        }
+                    }
+
+                    try
+                    {
+                        require('fs').copyFileSync(process.execPath, updateLocation);
+                    }
+                    catch (ce)
+                    {
+                    }
+
+                    service.start();
+                    process._exit();
+                });
+            });
+        }, 3000);
+    }
+    module.exports.update = win_update;
+}

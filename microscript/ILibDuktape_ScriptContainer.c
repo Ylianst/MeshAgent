@@ -843,7 +843,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Kill(duk_context *ctx)
 	int pid = duk_require_int(ctx, 0);
 
 #ifdef WIN32
-	int len = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "require('child_process').execFile(process.env['windir'] + '\\x5Csystem32\\x5Ccmd.exe', ['/C', 'taskkill /F /PID %d']);", pid);
+	int len = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "require('child_process').execFile(process.env['windir'] + '\\x5Csystem32\\x5Ccmd.exe', ['/C', 'taskkill /F /PID %d']).waitExit();", pid);
 	if (len > 0)
 	{
 		duk_eval_string(ctx, ILibScratchPad);	// [child_process]

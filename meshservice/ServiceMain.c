@@ -862,12 +862,31 @@ int wmain(int argc, char* wargv[])
 #endif
 #ifndef _MINCORE
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
-	{
-		// Attempt to copy our own exe over the original exe
-		while (util_CopyFile(argv[0], argv[1] + 8, FALSE) == FALSE) Sleep(5000);
+	{		
+		char *update = ILibMemory_Allocate(512, 0, NULL, NULL);
+		int updateLen = sprintf_s(update, 512, "require('agent-installer').update();");
+		__try
+		{
+			agent = MeshAgent_Create(0);
+			agent->meshCoreCtx_embeddedScript = update;
+			agent->meshCoreCtx_embeddedScriptLen = updateLen;
+			MeshAgent_Start(agent, argc, argv);
+			retCode = agent->exitCode;
+			MeshAgent_Destroy(agent);
+			agent = NULL;
+		}
+		__except (ILib_WindowsExceptionFilterEx(GetExceptionCode(), GetExceptionInformation(), &winException))
+		{
+			ILib_WindowsExceptionDebugEx(&winException);
+		}
+		wmain_free(argv);
+		return(retCode);
 
-		// Attempt to start the updated service up again
-		LaunchService(serviceFile);
+		//// Attempt to copy our own exe over the original exe
+		//while (util_CopyFile(argv[0], argv[1] + 8, FALSE) == FALSE) Sleep(5000);
+
+		//// Attempt to start the updated service up again
+		//LaunchService(serviceFile);
 	}
 	else if (argc > 1 && (strcasecmp(argv[1], "-netinfo") == 0))
 	{
