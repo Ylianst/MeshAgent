@@ -16,6 +16,11 @@ limitations under the License.
 
 
 var GM = require('_GenericMarshal');
+var TH32CS_SNAPPROCESS = 0x02;
+var TH32CS_SNAPMODULE32 = 0x10;
+var TH32CS_SNAPMODULE = 0x08;
+var PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
 
 // Used on Windows and Linux to get information about running processes
 function processManager() {
@@ -26,10 +31,15 @@ function processManager() {
     {
         case 'win32':
             this._kernel32 = GM.CreateNativeProxy('kernel32.dll');
+            this._kernel32.CreateMethod('CloseHandle');
             this._kernel32.CreateMethod('GetLastError');
             this._kernel32.CreateMethod('CreateToolhelp32Snapshot');
+            this._kernel32.CreateMethod('Module32FirstW');
+            this._kernel32.CreateMethod('Module32NextW');
+            this._kernel32.CreateMethod('OpenProcess');
             this._kernel32.CreateMethod('Process32FirstW');
             this._kernel32.CreateMethod('Process32NextW');
+            this._kernel32.CreateMethod('QueryFullProcessImageNameW');
             break;
 	case 'freebsd':
         case 'linux':
@@ -63,14 +73,29 @@ function processManager() {
             case 'win32': // Windows processes
                 var pid;
                 var retVal = {};
-                var h = this._kernel32.CreateToolhelp32Snapshot(2, 0);
-                var info = GM.CreateVariable(GM.PointerSize==8 ? 568 : 556);
+                var h = this._kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                var info = GM.CreateVariable(GM.PointerSize == 8 ? 568 : 556);
+                var fullpath = GM.CreateVariable(2048);
+                var pathSize = GM.CreateVariable(4);
+                var ph;
+
                 info.toBuffer().writeUInt32LE(info._size, 0);
                 var nextProcess = this._kernel32.Process32FirstW(h, info);
                 while (nextProcess.Val) 
                 {
                     pid = info.Deref(8, 4).toBuffer().readUInt32LE(0);
                     retVal[pid] = { pid: pid, cmd: info.Deref(GM.PointerSize == 4 ? 36 : 44, 260).Wide2UTF8 };
+
+                    if ((ph = this._kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)).Val != -1)
+                    {
+                        pathSize.toBuffer().writeUInt32LE(fullpath._size);
+                        if (this._kernel32.QueryFullProcessImageNameW(ph, 0, fullpath, pathSize).Val != 0)
+                        {
+                            retVal[pid].path = fullpath.Wide2UTF8;
+                        }
+                        this._kernel32.CloseHandle(ph);
+                    }
+                 
                     try
                     {
                         retVal[pid].user = require('user-sessions').getProcessOwnerName(pid).name;
@@ -81,6 +106,7 @@ function processManager() {
                     
                     nextProcess = this._kernel32.Process32NextW(h, info);
                 }
+                this._kernel32.CloseHandle(h);
                 if (callback) { callback.apply(this, [retVal]); }
                 break;
             case 'linux': // Linux processes
