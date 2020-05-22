@@ -74,6 +74,7 @@ function messageBox()
         ret._ipc.master = ret;
         ret._ipc.on('ready', function ()
         {
+            this.descriptorMetadata = 'message-box';
             if (this.master.timeout != null) { this.master._timeout = setTimeout(function (mstr) { mstr._ipc.exit(); }, this.master.timeout * 1000, this.master); }
             if (this.master.layout == null)
             {

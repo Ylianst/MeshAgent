@@ -52,7 +52,12 @@ function childContainer()
                 this._client.write(h);
                 this._client.write(d);
             });
-
+        Object.defineProperty(ret, "descriptorMetadata", {
+            set: function (v)
+            {
+                if (this._client) { this._client.descriptorMetadata = v; }
+            }
+        });
         ret._ipc = require('net').createServer(); ret._ipc.parent = ret;       
         ret._ipc.on('close', function () { console.log('Child Container Process Closed'); });
 
@@ -83,6 +88,7 @@ function childContainer()
         var script = Buffer.from("console.log('CHILD/START');require('child-container').connect('" + ipcInteger + "');").toString('base64');
         ret._ipc.once('connection', function onConnect(s)
         {
+            s.descriptorMetadata = 'child-container';
             this.parent._client = s;
             this.parent._client._parent = this;
             var data;
@@ -94,11 +100,6 @@ function childContainer()
             
             data = { command: 'launch', value: { module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } };
             this.parent.send(data);
-            s.once('close', function ()
-            {
-                console.log('close emitted');
-                require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: 'close emitted'});
-            });
             s.on('data', function (c)
             {
                 var cLen;

@@ -927,8 +927,8 @@ typedef struct ILibChain_WaitHandleInfo
 	void *node;
 	ILibChain_WaitHandleHandler handler;
 	void *user;
-	char *metadata;
 	struct timeval expiration;
+	char metaData[];
 }ILibChain_WaitHandleInfo;
 #endif
 
@@ -2046,7 +2046,6 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 						// FALSE means to remove tha HANDLE
 						if (((ILibBaseChain*)chain)->currentHandle != NULL && ILibMemory_CanaryOK(info))
 						{
-							ILibMemory_Free(info->metadata);
 							ILibLinkedList_Remove(info->node);
 						}
 					}
@@ -3029,18 +3028,18 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 #ifdef WIN32
 				SOCKET slist[FD_SETSIZE];
 				int scount = 0;
-				for (f = 0; f < readset.fd_count; ++f)
+				for (f = 0; f < (int)readset.fd_count; ++f)
 				{
 					slist[scount++] = readset.fd_array[f];
 				}
-				for (f = 0; f < writeset.fd_count; ++f)
+				for (f = 0; f < (int)writeset.fd_count; ++f)
 				{
 					if (FD_ISSET(writeset.fd_array[f], &readset) == 0)
 					{
 						slist[scount++] = writeset.fd_array[f];
 					}
 				}
-				for (f = 0; f < errorset.fd_count; ++f)
+				for (f = 0; f < (int)errorset.fd_count; ++f)
 				{
 					if (FD_ISSET(errorset.fd_array[f], &readset) == 0 && FD_ISSET(errorset.fd_array[f], &writeset) == 0)
 					{
@@ -3071,7 +3070,7 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 	{
 		if (bchain->WaitHandles[f] != NULL && bchain->WaitHandles[ILibChain_HandleInfoIndex(f)] != NULL)
 		{
-			len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " H[%p] (Signaled: %d) => %s\n", bchain->WaitHandles[f], WaitForSingleObjectEx(bchain->WaitHandles[f], 0, FALSE) == 0, ((ILibChain_WaitHandleInfo*)bchain->WaitHandles[ILibChain_HandleInfoIndex(f)])->metadata);
+			len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " H[%p] (Signaled: %d) => %s\n", bchain->WaitHandles[f], WaitForSingleObjectEx(bchain->WaitHandles[f], 0, FALSE) == 0, ((ILibChain_WaitHandleInfo*)bchain->WaitHandles[ILibChain_HandleInfoIndex(f)])->metaData);
 		}
 	}
 #endif
@@ -3192,6 +3191,12 @@ BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus sta
 	DWORD bytesRead = 0;
 	DWORD err;
 
+	if (status == ILibWaitHandle_ErrorStatus_REMOVED)
+	{
+		ILibMemory_Free(data);
+		return(FALSE);
+	}
+
 	if (GetOverlappedResult(data->fileHandle, data->p, &bytesRead, FALSE) && bytesRead > 0)
 	{
 		if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->buffer, bytesRead, data->user); }
@@ -3260,7 +3265,10 @@ void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int b
 			state->handler = handler;
 			state->fileHandle = h;
 			state->user = user;
-			ILibChain_AddWaitHandleEx(chain, p->hEvent, -1, ILibChain_ReadEx_Sink, state, metadata);
+			char *m = ILibMemory_SmartAllocate(10 + strnlen_s(metadata, 1024));
+			sprintf_s(m, ILibMemory_Size(m), "%s [READ]", metadata == NULL ? "" : metadata);
+			ILibChain_AddWaitHandleEx(chain, p->hEvent, -1, ILibChain_ReadEx_Sink, state, m);
+			ILibMemory_Free(m);
 		}
 		else
 		{
@@ -3285,13 +3293,22 @@ BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h)
 {
 	return(ILibLinkedList_GetNode_Search(((ILibBaseChain*)chain)->auxSelectHandles, NULL, h) != NULL);
 }
+void ILibChain_WaitHandle_DestroySavedState(void *chain, void *state)
+{
+	if (state != NULL)
+	{
+		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)state;
+		info->handler(chain, info->node, ILibWaitHandle_ErrorStatus_REMOVED, info->user);
+		ILibMemory_Free(info);
+	}
+}
 void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h)
 {
 	ILibChain_WaitHandleInfo *ret = NULL;
 	void *node = ILibLinkedList_GetNode_Search(((ILibBaseChain*)chain)->auxSelectHandles, NULL, h);
 	if (node != NULL)
 	{
-		ret = (ILibChain_WaitHandleInfo*)ILibMemory_SmartAllocate(sizeof(ILibChain_WaitHandleInfo));
+		ret = (ILibChain_WaitHandleInfo*)ILibMemory_SmartAllocate(ILibMemory_ExtraSize(node));
 		memcpy_s(ret, ILibMemory_Size(ret), ILibMemory_Extra(node), ILibMemory_Size(ret));
 		ret->node = h;
 		ILibLinkedList_Remove(node);
@@ -3327,7 +3344,7 @@ void ILibChain_WaitHandle_RestoreState(void *chain, void *state)
 		}
 	}	
 
-	ILibChain_AddWaitHandleEx(chain, info->node, msTIMEOUT, info->handler, info->user, info->metadata);
+	ILibChain_AddWaitHandleEx(chain, info->node, msTIMEOUT, info->handler, info->user, info->metaData);
 	ILibMemory_Free(info);
 }
 void __stdcall ILibChain_AddWaitHandle_apc(ULONG_PTR u)
@@ -3362,17 +3379,16 @@ void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_W
 
 	if (((ILibBaseChain*)chain)->currentHandle != h)
 	{
-		void *node = ILibLinkedList_AddTail(((ILibBaseChain*)chain)->auxSelectHandles, h);
+		void *node = ILibLinkedList_AddTailEx(((ILibBaseChain*)chain)->auxSelectHandles, h, metadata==NULL?1:1+strnlen_s(metadata, 1024));
 		info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
 		info->node = node;
-		info->metadata = metadata;
+		memcpy_s(info->metaData, ILibMemory_ExtraSize(node) - sizeof(ILibChain_WaitHandleInfo), metadata == NULL ? "" : metadata, ILibMemory_ExtraSize(node) - sizeof(ILibChain_WaitHandleInfo));
 		ILibForceUnBlockChain(chain);
 	}
 	else
 	{
 		((ILibBaseChain*)chain)->currentHandle = NULL;
 		info = ((ILibBaseChain*)chain)->currentInfo;
-		info->metadata = metadata;
 	}
 	if (info != NULL)
 	{
@@ -3403,10 +3419,6 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 			chain->currentHandle = NULL; chain->currentInfo = NULL; 
 		}
 		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
-		if (info != NULL)
-		{
-			ILibMemory_Free(info->metadata);
-		}
 		ILibLinkedList_Remove(node);
 		chain->UnblockFlag = 1;
 	}
@@ -7456,11 +7468,12 @@ void* ILibLinkedList_GetTag(ILibLinkedList list)
 	return(((struct ILibLinkedListNode_Root*)list)->Tag);
 }
 
-void* ILibLinkedList_AllocateNode(void *LinkedList)
+void* ILibLinkedList_AllocateNodeEx(void *LinkedList, size_t extraSize)
 {
-	void* newNode = ILibMemory_SmartAllocateEx(sizeof(ILibLinkedListNode), ILibMemory_GetExtraMemorySize(((ILibLinkedListNode_Root*)LinkedList)->ExtraMemory));
+	void* newNode = ILibMemory_SmartAllocateEx(sizeof(ILibLinkedListNode), extraSize + ILibMemory_GetExtraMemorySize(((ILibLinkedListNode_Root*)LinkedList)->ExtraMemory));
 	return(newNode);
 }
+#define ILibLinkedList_AllocateNode(linkedList) ILibLinkedList_AllocateNodeEx(linkedList, 0)
 
 void* ILibLinkedList_GetExtendedMemory(void* LinkedList_Node)
 {
@@ -7707,12 +7720,12 @@ void* ILibLinkedList_AddHead(void *LinkedList, void *data)
 \param LinkedList The linked list
 \param data The data pointer to reference
 */
-void* ILibLinkedList_AddTail(void *LinkedList, void *data)
+void* ILibLinkedList_AddTailEx(void *LinkedList, void *data, size_t additionalSize)
 {
 	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
 	struct ILibLinkedListNode *newNode;
 
-	newNode = ILibLinkedList_AllocateNode(r);
+	newNode = ILibLinkedList_AllocateNodeEx(r, additionalSize);
 	newNode->Data = data;
 	newNode->Root = r;
 	newNode->Next = NULL;

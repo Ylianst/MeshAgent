@@ -1003,6 +1003,7 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h);
 	void ILibChain_WaitHandle_RestoreState(void *chain, void *state);
+	void ILibChain_WaitHandle_DestroySavedState(void *chain, void *state);
 	BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h);
 	void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata);
 	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
@@ -1228,7 +1229,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibLinkedList_Remove(void *LinkedList_Node);
 	int ILibLinkedList_Remove_ByData(void *LinkedList, void *data);
 	void* ILibLinkedList_AddHead(void *LinkedList, void *data);
-	void* ILibLinkedList_AddTail(void *LinkedList, void *data);
+	void* ILibLinkedList_AddTailEx(void *LinkedList, void *data, size_t additionalSize);
+	#define ILibLinkedList_AddTail(LinkedList, data) ILibLinkedList_AddTailEx(LinkedList, data, 0)
+
 	#define ILibLinkedList_Clear(LinkedList) while(ILibLinkedList_GetNode_Head(LinkedList)!=NULL){ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));}
 
 	void ILibLinkedList_Lock(void *LinkedList);

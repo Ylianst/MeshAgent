@@ -4220,16 +4220,16 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_descriptorMetadata(duk_context 
 	ILibDuktape_WebSocket_State *ws = NULL;
 	duk_push_this(ctx);									// [WebSocket_Decoded]
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);	// [WebSocket_Decoded][WebSocket]
-	ws = (ILibDuktape_WritableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
+	ws = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
 	if (ws != NULL)
 	{
 		if (ws->encodedStream->writableStream->pipedReadable == NULL)
 		{
-			ILibDuktape_Immediate(ctx, (void *[]) { ws, duk_require_string(ctx, 0) }, 2, ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx);
+			ILibDuktape_Immediate(ctx, (void *[]) { ws, (void*)duk_require_string(ctx, 0) }, 2, ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx);
 		}
 		else
 		{
-			ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx(ctx, (void *[]) { ws, duk_require_string(ctx, 0) }, 2);
+			ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx(ctx, (void *[]) { ws, (void*)duk_require_string(ctx, 0) }, 2);
 		}
 	}
 	return(0);

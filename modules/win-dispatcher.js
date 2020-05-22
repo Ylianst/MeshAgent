@@ -64,6 +64,7 @@ function dispatch(options)
         this.parent._client._parent = this;
         this.close();
         var d, h = Buffer.alloc(4);
+        s.descriptorMetadata = 'win-dispatcher';
 
         for (var m in this.parent.options.modules)
         {
