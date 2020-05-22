@@ -1031,7 +1031,6 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t newExtraSize)
 {
 	if (ILibMemory_ExtraSize(ptr) == 0 || newExtraSize == 0) { return(NULL); }
-	size_t rawSize = ILibMemory_RawSize(ptr);
 	size_t size = ILibMemory_Size(ptr);
 	size_t extraSize = ILibMemory_ExtraSize(ptr);
 
@@ -3017,7 +3016,9 @@ char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *i
 }
 char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set *inw, fd_set *ine)
 {
+#ifdef WIN32
 	ILibBaseChain *bchain = (ILibBaseChain*)chain;
+#endif
 	char *retStr = (char*)ILibMemory_SmartAllocate(65535);
 	int len = 0;
 	void *node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);

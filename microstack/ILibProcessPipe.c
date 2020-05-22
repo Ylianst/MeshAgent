@@ -1211,7 +1211,9 @@ void ILibProcessPipe_Pipe_ResetMetadata(ILibProcessPipe_Pipe p, char *metadata)
 	pipeObject->metadata = (char*)ILibMemory_SmartAllocate(strnlen_s(metadata, 1024) + 1);
 	memcpy_s(pipeObject->metadata, ILibMemory_Size(pipeObject->metadata), metadata, ILibMemory_Size(pipeObject->metadata) - 1);
 
+#ifdef WIN32
 	ILibChain_WaitHandle_UpdateMetadata(pipeObject->mProcess->chain, pipeObject->mOverlapped->hEvent, pipeObject->metadata);
+#endif
 }
 void ILibProcessPipe_Process_ResetMetadata(ILibProcessPipe_Process p, char *metadata)
 {
@@ -1228,7 +1230,9 @@ void ILibProcessPipe_Process_ResetMetadata(ILibProcessPipe_Process p, char *meta
 	j->metadata = (char*)ILibMemory_SmartAllocate(8 + strnlen_s(metadata, 1024));
 	sprintf_s(j->metadata, ILibMemory_Size(j->metadata), "%s [EXIT]", metadata);
 
+#ifdef WIN32
 	ILibChain_WaitHandle_UpdateMetadata(j->chain, j->hProcess, j->metadata);
+#endif
 }
 char *ILibProcessPipe_Process_GetMetadata(ILibProcessPipe_Process p)
 {
