@@ -542,6 +542,7 @@ duk_ret_t ILibDuktape_EventEmitter_EmbeddedFinalizer(duk_context *ctx)
 
 	ILibDuktape_EventEmitter *data = ILibDuktape_EventEmitter_GetEmitter(ctx, 0);
 	if (data == NULL) { return(ILibDuktape_Error(ctx, "Internal Error")); }			// This is deadcode, will never occur, but is here because Klockwork thinks this could happen
+	if (!ILibMemory_CanaryOK(data) || !duk_ctx_is_alive(data->ctx)) { return(0); }
 
 	// We need to clear the Native Dispatcher, while destroying the Hashtable
 	ILibHashtable_DestroyEx(data->eventTable, ILibDuktape_EventEmitter_FinalizerEx, data);
