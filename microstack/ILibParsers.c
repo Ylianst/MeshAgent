@@ -3029,6 +3029,8 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 	fd_set emptyset; FD_ZERO(&emptyset);
 	int selectTimeout = UPNP_MAX_WAIT * 1000;
 	int f;
+	size_t tmp;
+
 	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		if (module->PreSelectHandler != NULL)
@@ -3064,7 +3066,7 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 				}
 				for (f = 0; f < scount; ++f)
 				{
-					len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->MetaData);
+					len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData);
 				}
 				
 #else
@@ -3072,7 +3074,7 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 				{
 					if (FD_ISSET(f, &readset) || FD_ISSET(f, &writeset) || FD_ISSET(f, &errorset))
 					{
-						len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->MetaData);
+						len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
 					}
 				}
 #endif

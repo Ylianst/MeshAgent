@@ -40,6 +40,7 @@ function windows_notifybar_system(title, tsid)
         .addMethod('close', function close() { this.child.kill(); });
 
     ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-b64exec', script], { type: 1, uid: tsid });
+    ret.child.descriptorMetadata = 'notifybar-desktop';
     ret.child.parent = ret;
     ret.child.stdout.on('data', function (c) { });
     ret.child.stderr.on('data', function (c) { });
@@ -198,6 +199,7 @@ function x_notifybar_check(title)
                     };
                     var xinfo = require('monitor-info').getXInfo(uid);
                     that.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: xinfo.exportEnv() });
+                    that.child.descriptorMetadata = 'notifybar-desktop';
                     that.child.parent = that;
                     that.child.stdout.on('data', function (c) { });
                     that.child.stderr.on('data', function (c) { });
@@ -224,6 +226,7 @@ function x_notifybar_check(title)
             .addMethod('close', function close() { this.child.kill(); });
 
         ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: xinfo.exportEnv() });
+        ret.child.descriptorMetadata = 'notifybar-desktop';
         ret.child.parent = ret;
         ret.child.stdout.on('data', function (c) { });
         ret.child.stderr.on('data', function (c) { });

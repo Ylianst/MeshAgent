@@ -172,6 +172,30 @@ ILibProcessPipe_Pipe ILibProcessPipe_Process_GetStdOut(ILibProcessPipe_Process p
 BOOL ILibProcessPipe_Process_OnExit(void *chain, HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user);
 #else
 void ILibProcessPipe_Process_ReadHandler(void* user);
+int ILibProcessPipe_Manager_OnQuery_comparer(void *j1, void *j2)
+{
+	ILibProcessPipe_PipeObject *pj = (ILibProcessPipe_PipeObject*)j1;
+	int fd = (int)(uintptr_t)j2;
+
+	if (pj->mPipe_ReadEnd == fd) { return(0); }
+	return(1);
+}
+char * ILibProcessPipe_Manager_OnQuery(void *chain, void *object, int fd, size_t *dataLen)
+{
+	ILibProcessPipe_Manager_Object *man = (ILibProcessPipe_Manager_Object*)object;
+	char *ret = ((ILibChain_Link*)object)->MetaData;
+	int i;
+	*dataLen = strnlen_s(((ILibChain_Link*)object)->MetaData, 1024);
+
+	void  *node = ILibLinkedList_GetNode_Search(man->ActivePipes, ILibProcessPipe_Manager_OnQuery_comparer, (void*)(uintptr_t)fd);
+	if (node != NULL)
+	{
+		ILibProcessPipe_PipeObject *pj = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node);
+		*dataLen = strnlen_s(pj->metadata, 1024);
+		ret = pj->metadata;
+	}
+	return(ret);
+}
 void ILibProcessPipe_Manager_OnPreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	ILibProcessPipe_Manager_Object *man = (ILibProcessPipe_Manager_Object*)object;
@@ -241,6 +265,7 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 #ifndef WIN32
 	retVal->ChainLink.PreSelectHandler = &ILibProcessPipe_Manager_OnPreSelect;
 	retVal->ChainLink.PostSelectHandler = &ILibProcessPipe_Manager_OnPostSelect;
+	retVal->ChainLink.QueryHandler = ILibProcessPipe_Manager_OnQuery;
 #endif
 	retVal->ChainLink.DestroyHandler = &ILibProcessPipe_Manager_OnDestroy;
 

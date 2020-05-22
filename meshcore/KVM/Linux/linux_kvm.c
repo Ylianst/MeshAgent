@@ -1338,10 +1338,13 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		close(slave2master[1]);
 		close(master2slave[0]);
 		logFile = fopen("/tmp/master", "w");
+		char tmp[255];
+		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid=%d)", g_slavekvm);
 
 		// We will asyncronously read from the pipe, so we can just return
 		ILibProcessPipe_Pipe_AddPipeReadHandler(slave_out, 65535, kvm_relay_readSink);
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(slave_out, kvm_relay_brokenPipeSink);
+		ILibProcessPipe_Pipe_ResetMetadata(slave_out, tmp);
 		return(slave_out);
 	}
 }

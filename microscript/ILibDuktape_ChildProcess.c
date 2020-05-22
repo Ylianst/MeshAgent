@@ -295,8 +295,9 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 #endif
 
 		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
-		
-		ILibProcessPipe_Process_ResetMetadata(mProcess, "childProcess");
+		char tmp[255];
+		sprintf_s(tmp, sizeof(tmp), "childProcess (pid=%d)", ILibProcessPipe_Process_GetPID(mProcess));
+		ILibProcessPipe_Process_ResetMetadata(mProcess, tmp);
 		ILibProcessPipe_Process_AddHandlers(mProcess, 4096, ILibDuktape_ChildProcess_SubProcess_ExitHandler,
 			ILibDuktape_ChildProcess_SubProcess_StdOutHandler,
 			ILibDuktape_ChildProcess_SubProcess_StdErrHandler,

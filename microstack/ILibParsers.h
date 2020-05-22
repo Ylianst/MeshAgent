@@ -342,6 +342,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	typedef	void(*ILibChain_PreSelect)(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime);
 	typedef	void(*ILibChain_PostSelect)(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset);
 	typedef	void(*ILibChain_Destroy)(void* object);
+	typedef	char*(*ILibChain_QueryData)(void* chain, void *object, int fd, size_t *dataLen);
+
 	typedef void(*ILibChain_DestroyEvent)(void *chain, void *user);
 	typedef void(*ILibChain_StartEvent)(void *chain, void *user);
 	typedef void*(*ILibChain_Link_GetUserMemory)(void *ChainLinkObject, int *len);
@@ -365,6 +367,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibChain_PreSelect PreSelectHandler;
 		ILibChain_PostSelect PostSelectHandler;
 		ILibChain_Destroy DestroyHandler;
+		ILibChain_QueryData QueryHandler;
 		void* ParentChain;
 		void* ExtraMemoryPtr;
 		char* MetaData;
