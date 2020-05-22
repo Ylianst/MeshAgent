@@ -3372,7 +3372,7 @@ void ILibChain_WaitHandle_UpdateMetadata(void *chain, HANDLE h, char *metadata)
 	if (node != NULL)
 	{
 		void *newNode = ILibLinkedList_Node_ResizeAdditional(node, metadataLen + 1);
-		ILibChain_WaitHandleInfo *info = ILibMemory_Extra(newNode);
+		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(newNode);
 		info->node = newNode;
 		memcpy_s(info->metaData, metadataLen + 1, metadata, metadataLen);
 	}
