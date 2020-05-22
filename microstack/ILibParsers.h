@@ -411,6 +411,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_SmartAllocate(len) ILibMemory_Init(malloc(len+sizeof(ILibMemory_Header)), (int)len, 0, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_Init(malloc(primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0)), (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
+	void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t extraSize);
 
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
@@ -1005,6 +1006,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_WaitHandle_RestoreState(void *chain, void *state);
 	void ILibChain_WaitHandle_DestroySavedState(void *chain, void *state);
 	BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h);
+
+	void ILibChain_WaitHandle_UpdateMetadata(void *chain, HANDLE h, char *metadata);
 	void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata);
 	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);
@@ -1231,6 +1234,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibLinkedList_AddHead(void *LinkedList, void *data);
 	void* ILibLinkedList_AddTailEx(void *LinkedList, void *data, size_t additionalSize);
 	#define ILibLinkedList_AddTail(LinkedList, data) ILibLinkedList_AddTailEx(LinkedList, data, 0)
+	void* ILibLinkedList_Node_ResizeAdditional(void *node, size_t additionalSize);
 
 	#define ILibLinkedList_Clear(LinkedList) while(ILibLinkedList_GetNode_Head(LinkedList)!=NULL){ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));}
 

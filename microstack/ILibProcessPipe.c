@@ -121,6 +121,8 @@ typedef struct ILibProcessPipe_Process_Object
 	ILibProcessPipe_PipeObject *stdOut;
 	ILibProcessPipe_PipeObject *stdErr;
 	ILibProcessPipe_Process_ExitHandler exitHandler;
+	char *metadata;
+
 #ifdef WIN32
 	HANDLE hProcess;
 	int hProcess_needAdd;
@@ -256,6 +258,7 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 void ILibProcessPipe_FreePipe(ILibProcessPipe_PipeObject *pipeObject)
 {
 	if (!ILibMemory_CanaryOK(pipeObject)) { return; }
+	ILibMemory_Free(pipeObject->metadata);
 #ifdef WIN32
 	if (pipeObject->mPipe_ReadEnd != NULL) 
 	{
@@ -409,6 +412,7 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 	if (p->stdIn != NULL) { ILibProcessPipe_FreePipe(p->stdIn); }
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
+	if (p->metadata != NULL) { ILibMemory_Free(p->metadata); }
 	ILibMemory_Free(p);
 }
 #ifndef WIN32
@@ -1200,6 +1204,36 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 	}
 }
 #endif
+void ILibProcessPipe_Pipe_ResetMetadata(ILibProcessPipe_Pipe p, char *metadata)
+{
+	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)p;
+	ILibMemory_Free(pipeObject->metadata);
+	pipeObject->metadata = (char*)ILibMemory_SmartAllocate(strnlen_s(metadata, 1024) + 1);
+	memcpy_s(pipeObject->metadata, ILibMemory_Size(pipeObject->metadata), metadata, ILibMemory_Size(pipeObject->metadata) - 1);
+
+	ILibChain_WaitHandle_UpdateMetadata(pipeObject->mProcess->chain, pipeObject->mOverlapped->hEvent, pipeObject->metadata);
+}
+void ILibProcessPipe_Process_ResetMetadata(ILibProcessPipe_Process p, char *metadata)
+{
+	char tmp[1024];
+	ILibProcessPipe_Process_Object *j = (ILibProcessPipe_Process_Object*)p;
+
+	sprintf_s(tmp, sizeof(tmp), "(stdout) %s", metadata);
+	ILibProcessPipe_Pipe_ResetMetadata(j->stdOut, tmp);
+
+	sprintf_s(tmp, sizeof(tmp), "(stderr) %s", metadata);
+	ILibProcessPipe_Pipe_ResetMetadata(j->stdErr, tmp);
+
+	ILibMemory_Free(j->metadata);
+	j->metadata = (char*)ILibMemory_SmartAllocate(8 + strnlen_s(metadata, 1024));
+	sprintf_s(j->metadata, ILibMemory_Size(j->metadata), "%s [EXIT]", metadata);
+
+	ILibChain_WaitHandle_UpdateMetadata(j->chain, j->hProcess, j->metadata);
+}
+char *ILibProcessPipe_Process_GetMetadata(ILibProcessPipe_Process p)
+{
+	return(((ILibProcessPipe_Process_Object*)p)->metadata);
+}
 void ILibProcessPipe_Process_StartPipeReaderEx(ILibProcessPipe_PipeObject *pipeObject, int bufferSize, ILibProcessPipe_GenericReadHandler handler, void* user1, void* user2, char *metadata)
 {
 	if ((pipeObject->buffer = (char*)malloc(bufferSize)) == NULL) { ILIBCRITICALEXIT(254); }
@@ -1207,13 +1241,13 @@ void ILibProcessPipe_Process_StartPipeReaderEx(ILibProcessPipe_PipeObject *pipeO
 	pipeObject->handler = (void*)handler;
 	pipeObject->user1 = user1;
 	pipeObject->user2 = user2;
-	pipeObject->metadata = metadata;
+	if (metadata != NULL) { pipeObject->metadata = metadata; }
 
 #ifdef WIN32
 	if (pipeObject->mOverlapped != NULL)
 	{
 		// This PIPE supports Overlapped I/O
-		ILibChain_ReadEx2(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, metadata);
+		ILibChain_ReadEx2(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
 	}
 	else
 	{
@@ -1312,12 +1346,15 @@ void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int buf
 		j->userObject = user;
 		j->exitHandler = exitHandler;
 
-		ILibProcessPipe_Process_StartPipeReaderEx(j->stdOut, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdOut, "process_handle_stdout");
-		ILibProcessPipe_Process_StartPipeReaderEx(j->stdErr, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdErr, "process_handle_stderr");
-		ILibProcessPipe_Process_SetWriteHandler(j->stdIn, &ILibProcessPipe_Process_PipeHandler_StdIn, j, sendOk);
+		if (j->stdOut->metadata == NULL) { j->stdOut->metadata = "process_handle_stdout"; }
+		if (j->stdErr->metadata == NULL) { j->stdOut->metadata = "process_handle_stderr"; }
+		if (j->metadata == NULL) { j->metadata = "process_handle_exit"; }
 
+		ILibProcessPipe_Process_StartPipeReaderEx(j->stdOut, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdOut, NULL);
+		ILibProcessPipe_Process_StartPipeReaderEx(j->stdErr, bufferSize, &ILibProcessPipe_Process_PipeHandler_StdOut, j, stdErr, NULL);
+		ILibProcessPipe_Process_SetWriteHandler(j->stdIn, &ILibProcessPipe_Process_PipeHandler_StdIn, j, sendOk);
 #ifdef WIN32
-		ILibChain_AddWaitHandleEx(j->parent->ChainLink.ParentChain, j->hProcess, -1, ILibProcessPipe_Process_OnExit, j, "process_handle_exit");
+		ILibChain_AddWaitHandleEx(j->parent->ChainLink.ParentChain, j->hProcess, -1, ILibProcessPipe_Process_OnExit, j, j->metadata);
 #endif
 	}
 }

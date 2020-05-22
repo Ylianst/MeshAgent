@@ -221,6 +221,23 @@ duk_ret_t ILibDuktape_ChildProcess_tcsetsize(duk_context *ctx)
 }
 #endif
 
+duk_ret_t ILibDuktape_SpawnedProcess_descriptorSetter(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibDuktape_ChildProcess_SubProcess *retVal = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
+	duk_push_string(ctx, ILibProcessPipe_Process_GetMetadata(retVal->childProcess));		// [string]
+	duk_get_prop_string(ctx, -1, "split");													// [string][split]
+	duk_swap_top(ctx, -2);																	// [split][this]
+	duk_push_string(ctx, " [EXIT]");														// [split][this][delim]
+	duk_call_method(ctx, 1);																// [array]
+	duk_get_prop_string(ctx, -1, "shift");													// [array][shift]
+	duk_swap_top(ctx, -2);																	// [shift][this]
+	duk_call_method(ctx, 0);																// [string]
+	duk_push_sprintf(ctx, "%s, %s", duk_get_string(ctx, -1), duk_require_string(ctx, 0));	// [string][newVal]
+
+	ILibProcessPipe_Process_ResetMetadata(retVal->childProcess, (char*)duk_get_string(ctx, -1));
+	return(0);
+}
 ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUSH(duk_context *ctx, ILibProcessPipe_Process mProcess, void *callback)
 {
 	duk_push_object(ctx);														// [ChildProcess]
@@ -278,7 +295,8 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 #endif
 
 		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
-
+		
+		ILibProcessPipe_Process_ResetMetadata(mProcess, "childProcess");
 		ILibProcessPipe_Process_AddHandlers(mProcess, 4096, ILibDuktape_ChildProcess_SubProcess_ExitHandler,
 			ILibDuktape_ChildProcess_SubProcess_StdOutHandler,
 			ILibDuktape_ChildProcess_SubProcess_StdErrHandler,
@@ -288,6 +306,8 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 	{
 		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
 	}
+
+	ILibDuktape_CreateEventWithSetterEx(ctx, "descriptorMetadata", ILibDuktape_SpawnedProcess_descriptorSetter);
 	return(retVal);
 }
 

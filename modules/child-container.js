@@ -56,6 +56,7 @@ function childContainer()
             set: function (v)
             {
                 if (this._client) { this._client.descriptorMetadata = v; }
+                if (this._proc) { this._proc.descriptorMetadata = v; }
             }
         });
         ret._ipc = require('net').createServer(); ret._ipc.parent = ret;       
@@ -164,6 +165,7 @@ function childContainer()
                 }
             }
             ret._proc = require('child_process').execFile(process.execPath, [process.execPath.split(process.platform == 'win32' ? '\\' : '/').pop(), '-b64exec', script], child_options);
+            ret._proc.descriptorMetadata = "child-container";
             ret._proc.parent = ret;
             ret._proc.stdout.on('data', function (c) { });
             ret._proc.stderr.on('data', function (c) { });

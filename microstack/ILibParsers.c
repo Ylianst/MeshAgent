@@ -1028,6 +1028,21 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 		return(NULL);
 	}
 }
+void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t newExtraSize)
+{
+	if (ILibMemory_ExtraSize(ptr) == 0 || newExtraSize == 0) { return(NULL); }
+	size_t rawSize = ILibMemory_RawSize(ptr);
+	size_t size = ILibMemory_Size(ptr);
+	size_t extraSize = ILibMemory_ExtraSize(ptr);
+
+	void *newPtr = ILibMemory_SmartReAllocate(ptr, newExtraSize > extraSize ? size + (newExtraSize - extraSize) : size - (extraSize - newExtraSize));
+	void *rawExtra = (char*)ILibMemory_Extra(newPtr) - sizeof(ILibMemory_Header);
+	memmove_s((char*)newPtr + size, extraSize + sizeof(ILibMemory_Header), rawExtra, extraSize + sizeof(ILibMemory_Header));
+	ILibMemory_Size(newPtr) = size;
+	ILibMemory_ExtraSize(newPtr) = newExtraSize;
+	ILibMemory_Size(ILibMemory_Extra(newPtr)) = newExtraSize;
+	return(newPtr);
+}
 void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType)
 {
 	if (ptr == NULL) { ILIBCRITICALEXIT(254); }
@@ -3347,6 +3362,19 @@ void ILibChain_WaitHandle_RestoreState(void *chain, void *state)
 	ILibChain_AddWaitHandleEx(chain, info->node, msTIMEOUT, info->handler, info->user, info->metaData);
 	ILibMemory_Free(info);
 }
+void ILibChain_WaitHandle_UpdateMetadata(void *chain, HANDLE h, char *metadata)
+{
+	size_t metadataLen = strnlen_s(metadata, 1024);
+	void *node = ILibLinkedList_GetNode_Search(((ILibBaseChain*)chain)->auxSelectHandles, NULL, h);
+	if (node != NULL)
+	{
+		void *newNode = ILibLinkedList_Node_ResizeAdditional(node, metadataLen + 1);
+		ILibChain_WaitHandleInfo *info = ILibMemory_Extra(newNode);
+		info->node = newNode;
+		memcpy_s(info->metaData, metadataLen + 1, metadata, metadataLen);
+	}
+}
+
 void __stdcall ILibChain_AddWaitHandle_apc(ULONG_PTR u)
 {
 	void *chain = ((void**)u)[0];
@@ -7737,6 +7765,32 @@ void* ILibLinkedList_AddTailEx(void *LinkedList, void *data, size_t additionalSi
 	++r->count;
 	return(newNode);
 }
+void* ILibLinkedList_Node_ResizeAdditional(void *node, size_t additionalSize)
+{
+	size_t baseSize = ILibMemory_GetExtraMemorySize(((ILibLinkedListNode*)node)->Root->ExtraMemory);
+	ILibLinkedListNode* newNode = ILibMemory_SmartAllocateEx_ResizeExtra(node, baseSize + additionalSize);
+	if (newNode != node)
+	{
+		if (newNode->Previous == NULL)
+		{
+			newNode->Root->Head = newNode;
+		}
+		else
+		{
+			newNode->Previous->Next = newNode;
+		}
+		if (newNode->Next == NULL)
+		{
+			newNode->Root->Tail = newNode;
+		}
+		else
+		{
+			newNode->Next->Previous = newNode;
+		}
+	}
+	return(newNode);
+}
+
 
 /*! \fn ILibLinkedList_Lock(void *LinkedList)
 \brief Locks the linked list with a non-recursive lock
