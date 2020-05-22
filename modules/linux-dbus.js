@@ -29,6 +29,8 @@ function dbus(address, uid, env)
         .createEvent('signal');
     Object.defineProperty(this, "uid", { value: uid });
     this._child = require('child_process').execFile("/bin/sh", ["sh"], options);
+    this._child.descriptorMetadata = 'linux-dbus {uid: ' + uid + ', address: ' + address + '}';
+
     if (uid != null)
     {
         this._child.stdin.write('dbus-monitor --session "type=\'signal\', interface=\'' + address + '\'" | ( while read X; do echo "$X"; done )\n');

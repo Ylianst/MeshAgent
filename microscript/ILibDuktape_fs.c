@@ -65,6 +65,7 @@ limitations under the License.
 #define FS_PIPEMANAGER_PTR			"\xFF_FSWatcher_PipeMgrPtr"
 #define FS_NOTIFY_DISPATCH_PTR		"\xFF_FSWatcher_NotifyDispatchPtr"
 #define FS_CHAIN_PTR				"\xFF_FSWatcher_ChainPtr"
+#define FS_WATCH_PATH				"\xFF_FSWatcher_Path"
 
 #if defined(_POSIX) && !defined(__APPLE__)
 typedef struct ILibDuktape_fs_linuxWatcher
@@ -72,6 +73,7 @@ typedef struct ILibDuktape_fs_linuxWatcher
 	ILibChain_Link chainLink;
 	ILibHashtable watchTable;
 	int fd;
+	void *ctx;
 }ILibDuktape_fs_linuxWatcher;
 #endif
 
@@ -1056,7 +1058,35 @@ duk_ret_t ILibDuktape_fs_watcher_finalizer(duk_context *ctx)
 	return 0;
 }
 
+void ILibDuktape_fs_notifyDispatcher_QueryEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+{
+	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)Data;
+	int fd = (int)(uintptr_t)Key1;
+	duk_push_heapptr(data->ctx, user);					// [array]
+	duk_push_heapptr(data->ctx, data->object);			// [array][watcher]
+	duk_get_prop_string(data->ctx, -1, FS_WATCH_PATH);	// [array][watcher][path]
+	duk_remove(data->ctx, -2);							// [array][path]
+	duk_array_push(data->ctx, -2);						// [array];
+	duk_pop(data->ctx);									// ...
+}
+
 #if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+char* ILibDuktape_fs_notifyDispatcher_Query(void* chain, void *object, int fd, size_t *dataLen)
+{
+	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
+	if (data->fd != fd) { return(((ILibChain_Link*)object)->MetaData); }
+	int top = duk_get_top(data->ctx);
+	duk_push_array(data->ctx);																				// [array]
+	ILibHashtable_Enumerate(data->watchTable, ILibDuktape_fs_notifyDispatcher_QueryEx, duk_get_heapptr(data->ctx, -1));
+	duk_array_join(data->ctx, -1, ", ");																	// [array][str]
+
+	duk_size_t tmpLen;
+	char *tmp = (char*)duk_get_lstring(data->ctx, -1, &tmpLen);
+	char *tmp2 = ILibMemory_AllocateTemp(chain, tmpLen + 12);
+	*dataLen = sprintf_s(tmp2, tmpLen + 12, "fs.watch(%s)", tmp);
+	duk_set_top(data->ctx, top);
+	return tmp2;
+}
 void ILibDuktape_fs_notifyDispatcher_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
@@ -1323,8 +1353,10 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		notifyDispatcher->chainLink.PreSelectHandler = ILibDuktape_fs_notifyDispatcher_PreSelect;
 		notifyDispatcher->chainLink.PostSelectHandler = ILibDuktape_fs_notifyDispatcher_PostSelect;
 		notifyDispatcher->chainLink.DestroyHandler = ILibDuktape_fs_notifyDispatcher_Destroy;
+		notifyDispatcher->chainLink.QueryHandler = ILibDuktape_fs_notifyDispatcher_Query;
 		notifyDispatcher->watchTable = ILibHashtable_Create();
 		notifyDispatcher->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+		notifyDispatcher->ctx = ctx;
 		ILibAddToChain(chain, notifyDispatcher);
 		duk_push_pointer(ctx, notifyDispatcher);							// [fs][ptr]
 		duk_put_prop_string(ctx, -2, FS_NOTIFY_DISPATCH_PTR);				// [fs]
@@ -1365,7 +1397,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	data = (ILibDuktape_fs_watcherData*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_fs_watcherData));
 	duk_put_prop_string(ctx, -2, FS_WATCHER_DATA_PTR);						// [FSWatcher]
 	duk_push_this(ctx); duk_put_prop_string(ctx, -2, FS_WATCHER_2_FS);
-
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, FS_WATCH_PATH);
 	data->emitter = ILibDuktape_EventEmitter_Create(ctx);
 	data->ctx = ctx;
 	data->object = duk_get_heapptr(ctx, -1);
