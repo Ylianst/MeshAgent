@@ -99,6 +99,12 @@ char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *l
 #define duk_array_push(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "push");duk_swap_top(ctx, -2);duk_dup(ctx,-3);duk_pcall_method(ctx, 1);duk_pop_2(ctx);
 #define duk_array_join(ctx, i, str) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "join");duk_swap_top(ctx, -2);duk_push_string(ctx, str);duk_pcall_method(ctx, 1);
 
+#define duk_queue_create(ctx) duk_push_array(ctx)
+#define duk_queue_enQueue(ctx, i) duk_array_push(ctx, i)
+#define duk_queue_deQueue(ctx, i) duk_array_shift(ctx, i)
+#define duk_queue_peek(ctx, i) duk_get_prop_index(ctx, i, 0)
+#define duk_queue_isEmpty(ctx, i) (duk_get_length(ctx, i)==0)
+
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);
 struct sockaddr_in6* Duktape_IPAddress6_FromString(char* address, unsigned short port);
