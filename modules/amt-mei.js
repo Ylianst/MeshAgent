@@ -27,6 +27,7 @@ function amt_heci() {
     this._setupPTHI = function _setupPTHI()
     {
         this._amt = heci.create();
+        this._amt.descriptorMetadata = "amt-pthi";
         this._amt.BiosVersionLen = 65;
         this._amt.UnicodeStringLen = 20;
 

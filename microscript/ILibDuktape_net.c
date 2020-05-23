@@ -122,6 +122,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 #define ILibDuktape_SERVER2LISTENOPTIONS		"\xFF_ServerToListenOptions"
 #define ILibDuktape_TLSSocket2SecureContext		"\xFF_TLSSocket2SecureContext"
 #define ILibDuktape_IPAddress_SockAddr			"\xFF_IPAddress_SockAddr"
+#define ILibDuktape_net_server_metadata			"\xFF_net_server_metadata"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
@@ -1326,7 +1327,21 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 #endif
 
 	duk_push_this(ctx);
-	if (server->server != NULL) { ILibChain_Link_SetMetadata(server->server, Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "net.Server")); }
+	if (server->server != NULL)
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_OBJID);					// [server][str]
+		if (duk_has_prop_string(ctx, -2, ILibDuktape_net_server_metadata))
+		{
+			duk_push_string(ctx, ", ");										// [server][str][newVal]
+			duk_string_concat(ctx, -2);	duk_remove(ctx, -2);				// [server][str]
+			duk_get_prop_string(ctx, -2, ILibDuktape_net_server_metadata);	// [server][str][metadata]
+			duk_string_concat(ctx, -2); duk_remove(ctx, -2);				// [server][metadata]
+			duk_dup(ctx, -1);												// [server][metadata][clone]
+			duk_put_prop_string(ctx, -3, ILibDuktape_net_server_metadata);	// [server][metadata]
+		}
+		ILibChain_Link_SetMetadata(server->server, (char*)duk_get_string(ctx, -1));
+		duk_pop(ctx);
+	}
 
 	return 1;
 }
@@ -1465,6 +1480,11 @@ duk_ret_t ILibDuktape_net_createServer_metadata(duk_context *ctx)
 		char *tmp2 = (char*)ILibMemory_SmartAllocate(duk_get_length(ctx, -1) + 1);
 		memcpy_s(tmp2, ILibMemory_Size(tmp2), tmp, ILibMemory_Size(tmp2) - 1);
 		ILibChain_Link_SetMetadata(server->server, tmp2);
+	}
+	else
+	{
+		duk_dup(ctx, 0);												// [server][string]
+		duk_put_prop_string(ctx, -2, ILibDuktape_net_server_metadata);
 	}
 
 	return(0);

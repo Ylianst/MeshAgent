@@ -2079,9 +2079,16 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 						// TIMEOUT occured
 						if (((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler != NULL)
 						{
-							((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler(chain, waitList[i], ILibWaitHandle_ErrorStatus_TIMEOUT, ((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->user);
+							if (((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->handler(chain, waitList[i], ILibWaitHandle_ErrorStatus_TIMEOUT, ((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->user) == FALSE)
+							{
+								ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->node);
+							}
 						}
-						ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->node);
+						else
+						{
+							ILibLinkedList_Remove(((ILibChain_WaitHandleInfo*)waitList[ILibChain_HandleInfoIndex(i)])->node);
+						}
+						
 						waitList[i] = NULL;
 						waitList[ILibChain_HandleInfoIndex(i)] = NULL;
 					}
@@ -3432,6 +3439,7 @@ void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_W
 			info->expiration.tv_usec += ((msTIMEOUT % 1000) * 1000);
 		}
 	}
+	ILibMemory_Free(metadata);
 }
 void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 {

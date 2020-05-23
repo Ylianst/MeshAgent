@@ -57,13 +57,16 @@ struct HECI_CONNECT_client_data
 #define ILibDuktape_HECI_Descriptor			"\xFF_HECI_Descriptor"
 #define ILibDuktape_HECI_ChildProcess		"\xFF_HECI_ChildProcess"
 #define ILibDuktape_HECI_Q					"\xFF_HECI_Q"
-#define ILibDuktape_HECI_IoctlWaitHandle	"\xFF_HECI_IoctlWaitHandle"
+#define ILibDuktape_HECI_CTX_PTRS			"\xFF_HECI_CTX_PTRS"
+//#define ILibDuktape_HECI_IoctlWaitHandle	"\xFF_HECI_IoctlWaitHandle"
+#define ILibDuktape_HECI_OVERLAPPED			"\xFF_HECI_OVERLAPPED"
 #define ILibDuktape_HECI_Child				"\xFF_HECI_Child"
 #define ILibDuktape_HECI_Parent				"\xFF_HECI_Parent"
 #define ILibDuktape_HECI_Root				"\xFF_HECI_Root"
 #define ILibDuktape_HECI_MaxBufferSize		"\xFF_HECI_MaxBufSize"
 #define ILibDuktape_HECI_SessionMemPtr		"\xFF_HECI_SessionMemPtr"
 #define ILibDuktape_HECI_Session_NoPipeline	"\xFF_HECI_Session_NoPipeline"
+#define ILibDuktape_HECI_Session_Metadata	"\xFF_HECI_Session_Metadata"
 
 #ifdef __DOXY__
 /*!
@@ -148,7 +151,6 @@ typedef struct HECI_chainLink
 {
 	ILibChain_Link link;
 	duk_context *ctx;
-	void *Q;
 	ILibDuktape_HECI_Session *session;
 	void *heciObject;
 	int descriptor;
@@ -597,9 +599,10 @@ void __stdcall ILibDuktape_HECI_Session_Start(ULONG_PTR obj)
 	DWORD bytesRead;
 	if (ILibDuktape_HECI_Debug) { printf("ILibDuktape_HECI_Session_Start()\n"); }
 	BOOL result = ReadFile(session->descriptor, session->buffer, (DWORD)session->bufferSize, &bytesRead, &(session->v));
-	//if (ILibDuktape_HECI_Debug) { printf("...[WaitHandle Added]\n"); }
 
-	ILibChain_AddWaitHandle(session->chain, session->v.hEvent, -1, ILibDuktape_HECI_Session_ReceiveSink, session);
+	duk_push_heapptr(session->stream->readableStream->ctx, session->stream->ParentObject);	// [session]
+	ILibChain_AddWaitHandleEx(session->chain, session->v.hEvent, -1, ILibDuktape_HECI_Session_ReceiveSink, session, (char*)Duktape_GetStringPropertyValue(session->stream->readableStream->ctx, -1, ILibDuktape_HECI_Session_Metadata, "heci.session"));
+	duk_pop(session->stream->readableStream->ctx);											// ...
 }
 #endif
 
@@ -607,16 +610,16 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 {
 	int statusCode = duk_require_int(ctx, 0);
 	ILibDuktape_HECI_Session *session = NULL;
-	duk_dup(ctx, 2);															// [Session]
+	duk_dup(ctx, 2);																				// [Session]
 	if (statusCode != 0) 
 	{ 
-		duk_get_prop_string(ctx, -1, "emit");									// [session][emit]
-		duk_swap_top(ctx, -2);													// [emit][this]
-		duk_push_string(ctx, "error");											// [emit][this][error]
+		duk_get_prop_string(ctx, -1, "emit");														// [session][emit]
+		duk_swap_top(ctx, -2);																		// [emit][this]
+		duk_push_string(ctx, "error");																// [emit][this][error]
 		duk_push_error_object(ctx, DUK_ERR_ERROR, "HECI Connection Error [%d]", statusCode);		// [emit][this][error][err]
 		duk_push_int(ctx, statusCode); duk_put_prop_string(ctx, -2, "errno");
 		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "HECI.session.onError(): "); }
-		duk_pop(ctx);															// ...
+		duk_pop(ctx);																				// ...
 	}	
 	else
 	{
@@ -695,6 +698,8 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_HECI_Session_connect(duk_context *ctx)
 {
+	if (ILibDuktape_HECI_Debug) { printf("connect()\n"); }
+
 	int i;
 	int nargs = duk_get_top(ctx);
 	duk_push_this(ctx);																// [Session]
@@ -708,6 +713,8 @@ duk_ret_t ILibDuktape_HECI_Session_connect(duk_context *ctx)
 	duk_remove(ctx, -2);															// [doIoctl][this][CLIENT_CONNECT]
 	duk_dup(ctx, 0);																// [doIoctl][this][CLIENT_CONNECT][guid]
 	duk_push_fixed_buffer(ctx, 16);													// [doIoctl][this][CLIENT_CONNECT][guid][outBuffer]
+	duk_push_buffer_object(ctx, -1, 0, 16, DUK_BUFOBJ_NODEJS_BUFFER);				// [doIoctl][this][CLIENT_CONNECT][guid][outBuffer][buf]
+	duk_remove(ctx, -2);
 	duk_push_c_function(ctx, ILibDuktape_HECI_create_OnClientConnect, DUK_VARARGS);	// [doIoctl][this][CLIENT_CONNECT][guid][outBuffer][callback]
 	duk_push_int(ctx, 0);
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Session_NoPipeline);
@@ -736,7 +743,8 @@ void __stdcall ILibDuktape_HECI_Session_CloseSink2(ULONG_PTR obj)
 #endif
 duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
 {
-	duk_push_this(ctx);										// [session]
+	if (ILibDuktape_HECI_Debug) { printf("heci.disconnect()\n\n"); }
+	duk_push_this(ctx);											// [session]
 
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_HECI_Child))
 	{
@@ -758,6 +766,8 @@ duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
 		ILibChain_RemoveWaitHandle(session->chain, session->wv.hEvent);
 		session->stream = NULL;
 		CloseHandle(session->descriptor);
+		CloseHandle(session->v.hEvent); session->v.hEvent = NULL;
+		CloseHandle(session->wv.hEvent); session->wv.hEvent = NULL;
 	}
 #else
 	int d = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_HECI_Descriptor, -1);
@@ -777,8 +787,27 @@ duk_ret_t ILibDuktape_HECI_Session_close(duk_context *ctx)
 
 	return(0);
 }
+duk_ret_t ILibDuktape_HECI_session_descriptorMetadata(duk_context *ctx)
+{
+	duk_push_this(ctx);													// [session]
+	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Session_Metadata);	// [session][oldVal]
+	duk_push_string(ctx, ", ");											// [session][oldVal][newVal]
+	duk_string_concat(ctx, -2);	duk_remove(ctx, -2);					// [session][val]
+	duk_dup(ctx, 0);													// [session][val][newVal]
+	duk_string_concat(ctx, -2); duk_remove(ctx, -2);					// [session][newVal]
+	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Session_Metadata);	// [session]
+
+	ILibDuktape_HECI_Session *session = (ILibDuktape_HECI_Session*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_HECI_SessionMemPtr);
+	if (session != NULL)
+	{
+		ILibChain_WaitHandle_UpdateMetadata(duk_ctx_chain(ctx), session->v.hEvent, (char*)Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_HECI_Session_Metadata, "heci.session"));
+	}
+	return(0);
+}
 duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
 {
+	if (ILibDuktape_HECI_Debug) { printf("\n\nILibDuktape_HECI_create()\n"); }
+
 	duk_push_object(ctx);															// [Session]
 	ILibDuktape_WriteID(ctx, "heci.session");
 	ILibDuktape_HECI_Push(ctx, NULL);												// [Session][HECI]
@@ -787,6 +816,8 @@ duk_ret_t ILibDuktape_HECI_create(duk_context *ctx)
 	duk_push_this(ctx);																// [session][HECI][root]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Root);							// [session][HECI]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Child);							// [Session]
+	duk_push_string(ctx, "heci.session"); duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Session_Metadata);
+	ILibDuktape_CreateEventWithSetterEx(ctx, "descriptorMetadata", ILibDuktape_HECI_session_descriptorMetadata);
 
 	duk_push_this(ctx);																// [Session][root]
 	ILibDuktape_Push_ObjectStash(ctx);												// [Session][root][stash]
@@ -844,86 +875,70 @@ void ILibDuktape_HECI_IoctlHandler_Dispatch(void *chain, void *user)
 	ILibDuktape_Push_ObjectStash(data->ctx);												// [heci][stash]
 	duk_del_prop_string(data->ctx, -1, Duktape_GetStashKey(data->data));					// (This will dereference args passed to doIoctl)
 	duk_pop_2(ctx);																			// ...
-	if (ILibDuktape_HECI_Debug) { printf("** Release HECI Ioctl Data [%p]\n", (void*)data); }
+	if (ILibDuktape_HECI_Debug) { printf("doIoctl() [COMPLETE]  -> ** Release HECI Ioctl Data [%p]\n", (void*)data); }
 	ILibMemory_Free(data);
 }
 #ifdef WIN32
-void ILibDuktape_HECI_NextIoctl(ILibQueue q);
+//void ILibDuktape_HECI_NextIoctl(ILibQueue q);
+void ILibDuktape_HECI_NextIoctl(duk_context *ctx, void *heci);
 BOOL ILibDuktape_HECI_IoctlHandler(void * chain, HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
-	if (errors == ILibWaitHandle_ErrorStatus_INVALID_HANDLE || errors == ILibWaitHandle_ErrorStatus_REMOVED) { return(FALSE); }
 	if (!ILibMemory_CanaryOK(user)) { return(FALSE); }
 
-	ILibDuktape_HECI_ioctl_data *data = (ILibDuktape_HECI_ioctl_data*)user;
-	ILibQueue Q = data->Q;
+	duk_context *ctx = (duk_context*)((void**)user)[0];
+	int top = duk_get_top(ctx);
+
+	duk_push_heapptr(ctx, ((void**)user)[1]);									// [HECI]
+	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);							// [HECI][QUEUE]
+	HANDLE descriptor = Duktape_GetPointerProperty(ctx, -2, ILibDuktape_HECI_Descriptor);
+	OVERLAPPED *p = (OVERLAPPED*)Duktape_GetBufferProperty(ctx, -2, ILibDuktape_HECI_OVERLAPPED);
+	DWORD bytesReceived = 0;
 
 	if (errors == ILibWaitHandle_ErrorStatus_NONE)
 	{
-		BOOL result = GetOverlappedResult(data->device, &(data->v), &(data->bytesReceived), FALSE);
-		data->code = result == TRUE ? 0 : (int)GetLastError();
+		if (GetOverlappedResult(descriptor, p, &bytesReceived, FALSE) == FALSE) { return(TRUE); }
+		duk_queue_deQueue(ctx, -1);													// [HECI][QUEUE][OBJ]
+		duk_get_prop_string(ctx, -1, "callback");									// [HECI][QUEUE][OBJ][callback]
+		duk_get_prop_string(ctx, -1, "apply");										// [HECI][QUEUE][OBJ][callback][apply]
+		duk_swap_top(ctx, -2);														// [HECI][QUEUE][OBJ][apply][func]
+		duk_dup(ctx, -5);															// [HECI][QUEUE][OBJ][apply][func][this]
+		duk_get_prop_string(ctx, -4, "args");										// [HECI][QUEUE][OBJ][apply][func][this][args]
+		duk_get_prop_string(ctx, -5, "outbuffer");									// [HECI][QUEUE][OBJ][apply][func][this][args][outbuffer]
+		if (!duk_is_null(ctx, -1)) { duk_buffer_slice(ctx, -1, 0, bytesReceived); }	// [HECI][QUEUE][OBJ][apply][func][this][args][outbuffer]
+		duk_array_unshift(ctx, -2);													// [HECI][QUEUE][OBJ][apply][func][this][args]
+		duk_push_int(ctx, 0); duk_array_unshift(ctx, -2);							// [HECI][QUEUE][OBJ][apply][func][this][args]
+		duk_pcall_method(ctx, 2); duk_pop_2(ctx);									// [HECI][QUEUE]
+		if (!duk_queue_isEmpty(ctx, -1))
+		{
+			ILibDuktape_HECI_NextIoctl(ctx, ((void**)user)[1]);
+			duk_set_top(ctx, top);
+			return(TRUE);
+		}
 	}
 	else
 	{
-		data->code = -1;
+		DebugBreak();
 	}
-
-	ILibQueue_DeQueue(data->Q);
-	ILibChain_RemoveWaitHandle(data->chain, h);
-
-	if (data->abort != 0 || !ILibMemory_CanaryOK(data->reserved))
-	{
-		// ABORT
-		ILibQueue Q = (ILibQueue)data->Q;
-		void *node = ILibLinkedList_GetNode_Head(data->Q);
-		while (node != NULL)
-		{
-			if (ILibDuktape_HECI_Debug) { printf("** ABORT HECI Ioctl Data [%p]\n", ILibLinkedList_GetDataFromNode(node)); }
-			ILibMemory_Free(ILibLinkedList_GetDataFromNode(node));
-			node = ILibLinkedList_GetNextNode(node);
-		}
-		if (ILibDuktape_HECI_Debug) { printf("<== Queue: %p Destroyed in IOCTL Handler ==>\n", (void*)Q); }
-		ILibQueue_Destroy(Q);
-		return(FALSE);
-	}
-
-	ILibDuktape_HECI_IoctlHandler_Dispatch(data->chain, data);
-
-	if (ILibQueue_GetCount(Q) > 0)
-	{
-		ILibDuktape_HECI_NextIoctl(Q);
-	}
-	return(TRUE);
+	duk_set_top(ctx, top);
+	return(FALSE);
 }
-void ILibDuktape_HECI_NextIoctl(ILibQueue q)
+void ILibDuktape_HECI_NextIoctl(duk_context *ctx, void *heci)
 {
-	ILibDuktape_HECI_ioctl_data *data = (ILibDuktape_HECI_ioctl_data*)ILibQueue_PeekQueue(q);
-	int res;
-	if (data == NULL) { return; } // This line is unnecessary, because this method is only called on a non-empty Queue, but to satisfy Klockwork...
+	duk_push_heapptr(ctx, heci);																	// [HECI]
+	HANDLE descriptor = (HANDLE)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_Descriptor);
+	OVERLAPPED *p = (OVERLAPPED*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_HECI_OVERLAPPED);
+	void **ptrs = (void**)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_HECI_CTX_PTRS);
+	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);												// [HECI][QUEUE]
 
-	data->bytesReceived = 0;
+	duk_queue_peek(ctx, -1);																		// [HECI][QUEUE][OBJ]
+	duk_size_t bufferLen = 0;
+	duk_size_t outBufferLen = 0;
+	char *buffer = Duktape_GetBufferPropertyEx(ctx, -1, "buffer", &bufferLen);
+	char *outBuffer = Duktape_GetBufferPropertyEx(ctx, -1, "outbuffer", &outBufferLen);
+	DWORD dwIoControlCode = (DWORD)Duktape_GetIntPropertyValue(ctx, -1, "code", 0);
 
-	ResetEvent(data->v.hEvent);
-	res = DeviceIoControl(data->device, (DWORD)data->code, data->buffer, (DWORD)data->bufferLen, data->outBuffer, (DWORD)data->outBufferLen, &(data->bytesReceived), &(data->v));
-	ILibChain_AddWaitHandle(data->chain, data->v.hEvent, 2000, ILibDuktape_HECI_IoctlHandler, data);
-}
-void __stdcall ILibDuktape_HECI_apc_AddIoctl(ULONG_PTR obj)
-{
-	ILibDuktape_HECI_ioctl_data *data = (ILibDuktape_HECI_ioctl_data*)obj;
-	ILibQueue_EnQueue(data->Q, data);
-	if (ILibQueue_GetCount(data->Q) == 1)
-	{
-		ILibDuktape_HECI_NextIoctl(data->Q);
-	}
-}
-#endif
-#ifdef _POSIX
-void ILibDuktape_HECI_AddIoctl(ILibDuktape_HECI_ioctl_data *data)
-{
-	ILibQueue_EnQueue(data->Q, data);
-	if (ILibQueue_GetCount(data->Q) == 1)
-	{
-		ILibForceUnBlockChain(data->chain);
-	}
+	DeviceIoControl(descriptor, dwIoControlCode, buffer, (DWORD)bufferLen, outBuffer, (DWORD)outBufferLen, NULL, p);
+	ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), p->hEvent, 5000, ILibDuktape_HECI_IoctlHandler, ptrs, "heci.doIoctl()");
 }
 #endif
 
@@ -934,7 +949,6 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	char *buffer = duk_is_null(ctx, 1) ? NULL : (char*)Duktape_GetBuffer(ctx, 1, &bufferLen);
 	int nargs = duk_get_top(ctx);
 	int i;
-	ILibQueue Q;
 	duk_size_t outBufferLen;
 	char *outBuffer;
 	int cbx;
@@ -964,77 +978,110 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	}
 #endif
 
-	duk_require_function(ctx, cbx);
-	duk_push_this(ctx);																// [heci]
-	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);								// [heci][q]
-	Q = (ILibQueue)duk_get_pointer(ctx, -1);
-	duk_pop(ctx);																	// [heci]
+	duk_require_function(ctx, cbx);	// Make sure a callback function was specified
 
-	ILibDuktape_Push_ObjectStash(ctx);												// [heci][stash]
-	duk_push_array(ctx);															// [heci][stash][array]
-	ILibDuktape_HECI_ioctl_data *data;
-	data = (ILibDuktape_HECI_ioctl_data*)ILibMemory_SmartAllocate(bufferLen + sizeof(ILibDuktape_HECI_ioctl_data));
-	data->ctxnonce = duk_ctx_nonce(ctx);
-	if (ILibDuktape_HECI_Debug) { printf("-> Allocate HECI Ioctl Data [%p]\n", (void*)data); }
-	data->reserved = Duktape_PushBuffer(ctx, sizeof(void*));						// [heci][stash][array][ptr]
-	duk_put_prop_index(ctx, -2, 0);													// [heci][stash][array]
-	if (outBufferLen > 0)
-	{																				// [heci][stash][array][buffer]
-		duk_dup(ctx, 2);
-	}
-	else
-	{
-		duk_push_null(ctx);															// [heci][stash][array][buffer]
-	}
-																	
-	duk_put_prop_index(ctx, -2, 1);													// [heci][stash][array]
-	data->ctx = ctx;
+	duk_push_this(ctx);																// [HECI]
+	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);								// [HECI][QUEUE]
+	duk_push_object(ctx);															// [HECI][QUEUE][OBJ]
 
-	duk_dup(ctx, cbx);																// [heci][stash][array][callback]
-	duk_put_prop_index(ctx, -2, 2);													// [heci][stash][array]
+	duk_dup(ctx, cbx); duk_put_prop_string(ctx, -2, "callback");	
+	duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, "buffer");
+	if (outBufferLen > 0) { duk_dup(ctx, 2); } else { duk_push_null(ctx); }
+	duk_put_prop_string(ctx, -2, "outbuffer");
+	duk_push_int(ctx, code); duk_put_prop_string(ctx, -2, "code");
+	void **ptrs = Duktape_PushBuffer(ctx, 2 * sizeof(void*)); duk_put_prop_string(ctx, -2, ILibDuktape_HECI_CTX_PTRS);
+	ptrs[0] = ctx;
+	ptrs[1] = duk_get_heapptr(ctx, -3);
 
-#ifdef WIN32
-	duk_get_prop_string(ctx, -3, ILibDuktape_HECI_IoctlWaitHandle);					// [heci][stash][array][handle]
-	data->v.hEvent = (HANDLE)duk_get_pointer(ctx, -1);
-	duk_pop(ctx);																	// [heci][stash][array]
-#endif
-
-	duk_get_prop_string(ctx, -3, ILibDuktape_HECI_Descriptor);						// [heci][stash][array][descriptor]
-#ifdef WIN32
-	data->device = (HANDLE)duk_get_pointer(ctx, -1);
-#elif defined(_POSIX)
-	data->device = duk_get_int(ctx, -1);
-#endif
-	duk_pop(ctx);																	// [heci][stash][array]
-	data->chain = Duktape_GetChain(ctx);
-	data->Q = Q;
-	data->code = code;
-	data->outBuffer = outBuffer;
-	data->outBufferLen = outBufferLen;
-	data->heciObject = duk_get_heapptr(ctx, -3);
-	data->bufferLen = bufferLen;													
-	data->data = duk_get_heapptr(ctx, -1);
-	memcpy_s(data->buffer, bufferLen, buffer, bufferLen);
-
+	duk_push_array(ctx);															// [HECI][QUEUE][OBJ][ARGS]
 	for (i = cbx + 1; i < nargs; ++i)
-	{																				
-		duk_dup(ctx, i);															// [heci][stash][array][object]
-		duk_put_prop_index(ctx, -2, i-1);											// [heci][stash][array]
-	}		
-	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));	// [heci][stash]
-														
-
+	{
+		duk_dup(ctx, i);															// [HECI][QUEUE][OBJ][ARGS][arg]
+		duk_array_push(ctx, -2);													// [HECI][QUEUE][OBJ][ARGS]
+	}
+	duk_put_prop_string(ctx, -2, "args");											// [HECI][QUEUE][OBJ]
+	duk_queue_enQueue(ctx, -2);														// [HECI][QUEUE]
+	if (duk_get_length(ctx, -1) == 1)
+	{
 #ifdef WIN32
-	duk_get_prop_string(ctx, -2, ILibDuktape_HECI_ChildProcess);					// [heci][stash][childProcess]
-	duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);					// [heci][stash][childProcess][manager]
-	data->pipeManager = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);
-
-	ILibDuktape_HECI_apc_AddIoctl((ULONG_PTR)data);
-#elif defined(_POSIX)
-	ILibDuktape_HECI_AddIoctl(data);
+		ILibDuktape_HECI_NextIoctl(ctx, duk_get_heapptr(ctx, -2));
+#else
+		ILibForceUnBlockChain(duk_ctx_chain(ctx));
 #endif
-
+	}
 	return(0);
+//
+//	duk_require_function(ctx, cbx);
+//	duk_push_this(ctx);																// [heci]
+//	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);								// [heci][q]
+//	qptr = duk_get_heapptr(ctx, -1);
+//	duk_pop(ctx);																	// [heci]
+//
+//	ILibDuktape_Push_ObjectStash(ctx);												// [heci][stash]
+//	duk_push_array(ctx);															// [heci][stash][array]
+//	ILibDuktape_HECI_ioctl_data *data;
+//	data = (ILibDuktape_HECI_ioctl_data*)ILibMemory_SmartAllocate(bufferLen + sizeof(ILibDuktape_HECI_ioctl_data));
+//	data->ctxnonce = duk_ctx_nonce(ctx);
+//	if (ILibDuktape_HECI_Debug) { printf("doIoctl() -> Allocate HECI Ioctl Data [%p]\n", (void*)data); }
+//	data->reserved = Duktape_PushBuffer(ctx, sizeof(void*));						// [heci][stash][array][ptr]
+//	duk_put_prop_index(ctx, -2, 0);													// [heci][stash][array]
+//	if (outBufferLen > 0)
+//	{																				// [heci][stash][array][buffer]
+//		duk_dup(ctx, 2);
+//	}
+//	else
+//	{
+//		duk_push_null(ctx);															// [heci][stash][array][buffer]
+//	}
+//																	
+//	duk_put_prop_index(ctx, -2, 1);													// [heci][stash][array]
+//	data->ctx = ctx;
+//
+//	duk_dup(ctx, cbx);																// [heci][stash][array][callback]
+//	duk_put_prop_index(ctx, -2, 2);													// [heci][stash][array]
+//
+//#ifdef WIN32
+//	duk_get_prop_string(ctx, -3, ILibDuktape_HECI_IoctlWaitHandle);					// [heci][stash][array][handle]
+//	data->v.hEvent = (HANDLE)duk_get_pointer(ctx, -1);
+//	duk_pop(ctx);																	// [heci][stash][array]
+//#endif
+//
+//	duk_get_prop_string(ctx, -3, ILibDuktape_HECI_Descriptor);						// [heci][stash][array][descriptor]
+//#ifdef WIN32
+//	data->device = (HANDLE)duk_get_pointer(ctx, -1);
+//#elif defined(_POSIX)
+//	data->device = duk_get_int(ctx, -1);
+//#endif
+//	duk_pop(ctx);																	// [heci][stash][array]
+//	data->chain = Duktape_GetChain(ctx);
+//	data->Q = Q;
+//	data->code = code;
+//	data->outBuffer = outBuffer;
+//	data->outBufferLen = outBufferLen;
+//	data->heciObject = duk_get_heapptr(ctx, -3);
+//	data->bufferLen = bufferLen;													
+//	data->data = duk_get_heapptr(ctx, -1);
+//	memcpy_s(data->buffer, bufferLen, buffer, bufferLen);
+//
+//	for (i = cbx + 1; i < nargs; ++i)
+//	{																				
+//		duk_dup(ctx, i);															// [heci][stash][array][object]
+//		duk_put_prop_index(ctx, -2, i-1);											// [heci][stash][array]
+//	}		
+//	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));	// [heci][stash]
+//														
+//
+//#ifdef WIN32
+//	duk_get_prop_string(ctx, -2, ILibDuktape_HECI_ChildProcess);					// [heci][stash][childProcess]
+//	duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);					// [heci][stash][childProcess][manager]
+//	data->pipeManager = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);
+//
+//	ILibDuktape_HECI_apc_AddIoctl((ULONG_PTR)data);
+//#elif defined(_POSIX)
+//	ILibDuktape_HECI_AddIoctl(data);
+//#endif
+//
+//	return(0);
 }
 
 #ifdef WIN32
@@ -1067,18 +1114,6 @@ duk_ret_t ILibDuktape_HECI_Finalizer(duk_context *ctx)
 	if (h != NULL) { CloseHandle(h); }
 #endif
 
-	if (duk_has_prop_string(ctx, 0, ILibDuktape_HECI_Q))
-	{
-#ifdef WIN32
-		ILibQueue Q = (ILibQueue)Duktape_GetPointerProperty(ctx, 0, ILibDuktape_HECI_Q);
-		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_ChildProcess);
-		ILibProcessPipe_Manager mgr = (ILibProcessPipe_Manager)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager);
-		ILibDuktape_HECI_Finalizer2((ULONG_PTR)Q);
-#else
-		duk_get_prop_string(ctx, 0, ILibDuktape_HECI_Q);
-		ILibQueue_Destroy((ILibQueue)duk_get_pointer(ctx, -1));
-#endif
-	}
 
 #ifdef _POSIX
 	if (duk_has_prop_string(ctx, 0, ILibDuktape_HECI_ChainLink))
@@ -1175,6 +1210,8 @@ duk_ret_t ILibDuktape_HECI_reset(duk_context *ctx)
 {
 	duk_push_this(ctx);
 #ifdef WIN32
+	if (ILibDuktape_HECI_Debug) { printf("ILibDuktape_HECI_reset()\n"); }
+
 	HANDLE h = (HANDLE)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_Descriptor);
 	CloseHandle(h);
 	h = ILibDuktape_HECI_windowsInit();
@@ -1203,8 +1240,13 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 	}
 
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_ChildProcess);							// [HECI]
-	duk_push_pointer(ctx, CreateEvent(NULL, TRUE, FALSE, NULL));
-	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_IoctlWaitHandle);							// [HECI]
+	OVERLAPPED *v = Duktape_PushBuffer(ctx, sizeof(OVERLAPPED));							// [HECI][OVERLAPPED]
+	v->hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_OVERLAPPED);								// [HECI]
+	void **ptrs = (void**)Duktape_PushBuffer(ctx, 2*sizeof(void*)); duk_put_prop_string(ctx, -2, ILibDuktape_HECI_CTX_PTRS);
+	ptrs[0] = ctx;
+	ptrs[1] = duk_get_heapptr(ctx, -1);
+
 #elif defined(_POSIX) && !defined(__APPLE__)
 	int h = ILibDuktape_HECI_linuxInit();
 	if (h < 0) { ILibDuktape_Error(ctx, "error initializing HECI"); return; }
@@ -1218,7 +1260,6 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 	hlink->link.PreSelectHandler = ILibDuktape_HECI_PreSelect;
 	hlink->link.PostSelectHandler = ILibDuktape_HECI_PostSelect;
 	hlink->link.DestroyHandler = ILibDuktape_HECI_Destroy;
-	hlink->Q = ILibQueue_Create();
 	duk_push_pointer(ctx, hlink);															// [HECI][link]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_ChainLink);								// [HECI]
 
@@ -1228,11 +1269,8 @@ void ILibDuktape_HECI_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "doIoctl", ILibDuktape_HECI_doIoctl, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "disconnect", ILibDuktape_HECI_Session_close, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "reset", ILibDuktape_HECI_reset, 0);
-#if defined(_POSIX) && !defined(__APPLE__)
-	duk_push_pointer(ctx, hlink->Q);														// [HECI][Q]
-#else
-	duk_push_pointer(ctx, ILibQueue_Create());												// [HECI][Q]
-#endif
+
+	duk_queue_create(ctx);
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Q);										// [HECI]
 	duk_push_object(ctx);
 #ifdef WIN32
