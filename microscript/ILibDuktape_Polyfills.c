@@ -1813,6 +1813,18 @@ duk_ret_t ILibDuktape_Polyfills_Array_peek(duk_context *ctx)
 	duk_get_prop_index(ctx, -1, (duk_uarridx_t)duk_get_length(ctx, -1) - 1);
 	return(1);
 }
+duk_ret_t ILibDuktape_Polyfills_Object_keys(duk_context *ctx)
+{
+	duk_push_this(ctx);														// [obj]
+	duk_push_array(ctx);													// [obj][keys]
+	duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);						// [obj][keys][enum]
+	while (duk_next(ctx, -1, 0))											// [obj][keys][enum][key]
+	{
+		duk_array_push(ctx, -3);											// [obj][keys][enum]
+	}
+	duk_pop(ctx);															// [obj][keys]
+	return(1);
+}
 void ILibDuktape_Polyfills_object(duk_context *ctx)
 {
 	// Polyfill Object._hashCode() 
@@ -1820,6 +1832,8 @@ void ILibDuktape_Polyfills_object(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "prototype");										// [g][Object][prototype]
 	duk_push_c_function(ctx, ILibDuktape_Polyfills_Object_hashCode, 0);				// [g][Object][prototype][func]
 	ILibDuktape_CreateReadonlyProperty(ctx, "_hashCode");							// [g][Object][prototype]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_Object_keys, 0);					// [g][Object][prototype][func]
+	ILibDuktape_CreateReadonlyProperty(ctx, "keys");								// [g][Object][prototype]
 	duk_pop_2(ctx);																	// [g]
 
 	duk_get_prop_string(ctx, -1, "Array");											// [g][Array]

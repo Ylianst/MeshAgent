@@ -675,6 +675,7 @@ duk_ret_t ILibDuktape_HECI_create_OnClientConnect(duk_context *ctx)
 #ifdef WIN32
 		duk_push_this(ctx);													// [HECI]
 		session->descriptor = (HANDLE)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_Descriptor);
+		duk_del_prop_string(ctx, -1, ILibDuktape_HECI_Descriptor);
 		duk_get_prop_string(ctx, -1, ILibDuktape_HECI_ChildProcess);		// [HECI][childProcess]
 		duk_get_prop_string(ctx, -1, ILibDuktape_ChildProcess_Manager);		// [HECI][childProcess][manager]
 		session->mgr = (ILibProcessPipe_Manager)duk_get_pointer(ctx, -1);	
@@ -928,6 +929,7 @@ void ILibDuktape_HECI_NextIoctl(duk_context *ctx, void *heci)
 	HANDLE descriptor = (HANDLE)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_Descriptor);
 	OVERLAPPED *p = (OVERLAPPED*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_HECI_OVERLAPPED);
 	void **ptrs = (void**)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_HECI_CTX_PTRS);
+
 	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);												// [HECI][QUEUE]
 
 	duk_queue_peek(ctx, -1);																		// [HECI][QUEUE][OBJ]
@@ -981,6 +983,9 @@ duk_ret_t ILibDuktape_HECI_doIoctl(duk_context *ctx)
 	duk_require_function(ctx, cbx);	// Make sure a callback function was specified
 
 	duk_push_this(ctx);																// [HECI]
+#ifdef WIN32
+	if (!duk_has_prop_string(ctx, -1, ILibDuktape_HECI_Descriptor)) { return(ILibDuktape_Error(ctx, "Invalid Operation. Call Reset()")); }
+#endif
 	duk_get_prop_string(ctx, -1, ILibDuktape_HECI_Q);								// [HECI][QUEUE]
 	duk_push_object(ctx);															// [HECI][QUEUE][OBJ]
 
@@ -1110,8 +1115,14 @@ duk_ret_t ILibDuktape_HECI_Finalizer(duk_context *ctx)
 {
 	if (ILibDuktape_HECI_Debug) { printf("ILibDuktape_HECI_Finalizer()\n"); }
 #ifdef WIN32
-	HANDLE h = Duktape_GetPointerProperty(ctx, 0, ILibDuktape_HECI_IoctlWaitHandle);
+	HANDLE h = Duktape_GetPointerProperty(ctx, 0, ILibDuktape_HECI_Descriptor);
 	if (h != NULL) { CloseHandle(h); }
+	OVERLAPPED *p = (OVERLAPPED*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_HECI_OVERLAPPED);
+	if (p->hEvent != NULL) 
+	{
+		ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), p->hEvent);
+		CloseHandle(p->hEvent); 
+	}
 #endif
 
 
@@ -1213,7 +1224,10 @@ duk_ret_t ILibDuktape_HECI_reset(duk_context *ctx)
 	if (ILibDuktape_HECI_Debug) { printf("ILibDuktape_HECI_reset()\n"); }
 
 	HANDLE h = (HANDLE)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_HECI_Descriptor);
-	CloseHandle(h);
+	if (h != NULL)
+	{
+		CloseHandle(h);
+	}
 	h = ILibDuktape_HECI_windowsInit();
 	duk_push_pointer(ctx, h);
 	duk_put_prop_string(ctx, -2, ILibDuktape_HECI_Descriptor);

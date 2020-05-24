@@ -106,6 +106,13 @@ char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *l
 #define duk_queue_peek(ctx, i) duk_get_prop_index(ctx, i, 0)
 #define duk_queue_isEmpty(ctx, i) (duk_get_length(ctx, i)==0)
 
+#define duk_table_put(ctx, i, key) duk_put_prop_string(ctx, i, key)
+#define duk_table_get(ctx, i, key) duk_get_prop_string(ctx, i, key)
+#define duk_table_get_buffer(ctx, i, key) Duktape_GetBufferProperty(ctx, i, key)
+#define duk_table_keys(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "keys");duk_swap_top(ctx, -2);if(duk_pcall_method(ctx, 0)!=0){duk_pop(ctx);duk_push_null(ctx);}
+#define duk_table_hasKey(ctx, i, key) duk_has_prop_string(ctx, i, key)
+#define duk_table_delKey(ctx, i, key) duk_del_prop_string(ctx, i, key)
+
 #define duk_buffer_slice(ctx, i, start, len) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "slice");duk_swap_top(ctx, -2);duk_push_int(ctx, start);duk_push_int(ctx, len);duk_pcall_method(ctx, 2);duk_remove(ctx, -2);
 #define duk_string_concat(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "concat");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_pcall_method(ctx, 1);duk_remove(ctx, -2);
 
