@@ -39,6 +39,7 @@ limitations under the License.
 
 #define ILibDuktape_DescriptorEvents_ChainLink	"\xFF_DescriptorEvents_ChainLink"
 #define ILibDuktape_DescriptorEvents_Table		"\xFF_DescriptorEvents_Table"
+#define ILibDuktape_DescriptorEvents_HTable		"\xFF_DescriptorEvents_HTable"
 #define ILibDuktape_DescriptorEvents_FD			"\xFF_DescriptorEvents_FD"
 #define ILibDuktape_DescriptorEvents_Options	"\xFF_DescriptorEvents_Options"
 #define ILibDuktape_DescriptorEvents_WaitHandle "\xFF_DescriptorEvents_WindowsWaitHandle"
@@ -2492,47 +2493,76 @@ duk_ret_t ILibDuktape_DescriptorEvents_Remove(duk_context *ctx)
 	return(0);
 }
 #ifdef WIN32
-void ILibDuktape_DescriptorEvents_WaitHandle_EventThread(void *chain, void *user)
+char *DescriptorEvents_Status[] = { "NONE", "INVALID_HANDLE", "TIMEOUT", "REMOVED", "EXITING", "ERROR" }; 
+BOOL ILibDuktape_DescriptorEvents_WaitHandleSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void* user)
 {
-	if (!ILibMemory_CanaryOK((void*)user)) { return; }
-	ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user;
+	BOOL ret = FALSE;
+	duk_context *ctx = (duk_context*)((void**)user)[0];
+	
+	int top = duk_get_top(ctx);
+	duk_push_heapptr(ctx, ((void**)user)[1]);								// [events]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_HTable);		// [events][table]
+	duk_push_sprintf(ctx, "%p", h);											// [events][table][key]
+	duk_get_prop(ctx, -2);													// [events][table][val]
+	if (!duk_is_null_or_undefined(ctx, -1))
+	{
+		void *hptr = duk_get_heapptr(ctx, -1);
+		ILibDuktape_EventEmitter_SetupEmit(ctx, hptr, "signaled");			// [events][table][val][emit][this][signaled]
+		duk_push_string(ctx, DescriptorEvents_Status[(int)status]);			// [events][table][val][emit][this][signaled][status]
+		if (duk_pcall_method(ctx, 2) == 0)									// [events][table][val][undef]
+		{
+			ILibDuktape_EventEmitter_GetEmitReturn(ctx, hptr, "signaled");	// [events][table][val][undef][ret]
+			if (duk_is_boolean(ctx, -1) && duk_get_boolean(ctx, -1) != 0)
+			{
+				ret = TRUE;
+			}
+		}
+	}
+	duk_set_top(ctx, top);
 
-	UnregisterWait(v->waitHandle); v->waitHandle = NULL;
-	ILibDuktape_EventEmitter_SetupEmit(v->ctx, v->object, "signaled");		// [emit][this][signaled]
-	if (duk_pcall_method(v->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(v->ctx, "WaitHandleAPC Error "); }
-	duk_pop(v->ctx);
-}
-void __stdcall ILibDuktape_DescriptorEvents_WaitHandleSignaled(void *user, BOOLEAN TimerOrWaitFired)
-{
-	if (!ILibMemory_CanaryOK(user)) { return; }
-	ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)user;
-	Duktape_RunOnEventLoop(v->chain, duk_ctx_nonce(v->ctx), v->ctx, ILibDuktape_DescriptorEvents_WaitHandle_EventThread, NULL, user);
+	return(ret);
 }
 #endif
 duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
 {
+	ILibDuktape_EventEmitter *e;
 #ifdef WIN32
 	if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "_ptr"))
 	{
+		// Adding a Windows Wait Handle
 		HANDLE h = (HANDLE)Duktape_GetPointerProperty(ctx, 0, "_ptr");
 		if (h != NULL)
 		{
-			duk_push_object(ctx);												// [value]
-			ILibDuktape_DescriptorEvents_WindowsWaitHandle *v = (ILibDuktape_DescriptorEvents_WindowsWaitHandle*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_DescriptorEvents_WindowsWaitHandle));
-			duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_WaitHandle);
-
-			ILibDuktape_EventEmitter *e = ILibDuktape_EventEmitter_Create(ctx);
-			ILibDuktape_EventEmitter_CreateEventEx(e, "signaled");
-			v->ctx = ctx;
-			v->object = duk_get_heapptr(ctx, -1);
-			v->chain = Duktape_GetChain(ctx);
-			v->eventThread = ILibChain_GetMicrostackThreadHandle(v->chain);
-			if (RegisterWaitForSingleObject(&(v->waitHandle), h, ILibDuktape_DescriptorEvents_WaitHandleSignaled, (void*)v, INFINITE, WT_EXECUTEINPERSISTENTTHREAD | WT_EXECUTEONLYONCE) == 0)
+			// Normal Add Wait Handle
+			char *metadata = "DescriptorEvents";
+			int timeout = -1;
+			duk_push_this(ctx);														// [events]
+			ILibChain_Link *link = (ILibChain_Link*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_DescriptorEvents_ChainLink);
+			duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_HTable);		// [events][table]
+			duk_push_object(ctx);													// [events][table][value]
+			duk_push_sprintf(ctx, "%p", h);											// [events][table][value][key]
+			duk_dup(ctx, -2);														// [events][table][value][key][value]
+			duk_dup(ctx, 0);
+			duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_WaitHandle);	// [events][table][value][key][value]
+			if (duk_is_object(ctx, 1)) { duk_dup(ctx, 1); }
+			else { duk_push_object(ctx); }											// [events][table][value][key][value][options]
+			if (duk_has_prop_string(ctx, -1, "metadata"))
 			{
-				return(ILibDuktape_Error(ctx, "Error(%d) Calling RegisterWaitForSingleObject() ", GetLastError()));
+				duk_push_string(ctx, metadata);										// [events][table][value][key][value][options][str1]
+				duk_get_prop_string(ctx, -2, "DescriptorEvents, ");					// [events][table][value][key][value][options][str1][str2]
+				duk_string_concat(ctx, -2);											// [events][table][value][key][value][options][str]
+				metadata = (char*)duk_get_string(ctx, -1);
+				duk_put_prop_string(ctx, -2, "metadata");							// [events][table][value][key][value][options]
 			}
+			timeout = Duktape_GetIntPropertyValue(ctx, -1, "timeout", -1);
+			duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Options);		// [events][table][value][key][value]
+			duk_put_prop(ctx, -4);													// [events][table][value]
+			e = ILibDuktape_EventEmitter_Create(ctx);
+			ILibDuktape_EventEmitter_CreateEventEx(e, "signaled");
+			ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), h, timeout, ILibDuktape_DescriptorEvents_WaitHandleSink, link->ExtraMemoryPtr, metadata);
 			return(1);
 		}
+		return(ILibDuktape_Error(ctx, "Invalid Parameter"));
 	}
 #endif
 
@@ -2544,14 +2574,22 @@ duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
 	duk_push_object(ctx);												// [obj][table][value]
 	duk_dup(ctx, 0);													// [obj][table][value][key]
 	duk_dup(ctx, -2);													// [obj][table][value][key][value]
-	ILibDuktape_EventEmitter *e = ILibDuktape_EventEmitter_Create(ctx);	
+	e = ILibDuktape_EventEmitter_Create(ctx);	
 	ILibDuktape_EventEmitter_CreateEventEx(e, "readset");
 	ILibDuktape_EventEmitter_CreateEventEx(e, "writeset");
 	ILibDuktape_EventEmitter_CreateEventEx(e, "errorset");
 	duk_dup(ctx, 0);													// [obj][table][value][key][value][FD]
 	duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_FD);		// [obj][table][value][key][value]
-	duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Options);
-
+	duk_dup(ctx, 1);													// [obj][table][value][key][value][options]
+	duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Options);	// [obj][table][value][key][value]
+	char* metadata = Duktape_GetStringPropertyValue(ctx, -1, "metadata", NULL);
+	if (metadata != NULL)
+	{
+		duk_push_string(ctx, "DescriptorEvents, ");						// [obj][table][value][key][value][str1]
+		duk_push_string(ctx, metadata);									// [obj][table][value][key][value][str1][str2]
+		duk_string_concat(ctx, -2);										// [obj][table][value][key][value][newStr]
+		duk_put_prop_string(ctx, -2, "metadata");						// [obj][table][value][key][value]
+	}
 	duk_put_prop(ctx, -4);												// [obj][table][value]
 
 	return(1);
@@ -2618,16 +2656,45 @@ duk_ret_t ILibDuktape_DescriptorEvents_GetCount(duk_context *ctx)
 #endif
 	return(1);
 }
+char* ILibDuktape_DescriptorEvents_Query(void* chain, void *object, int fd, size_t *dataLen)
+{
+	char *retVal = ((ILibChain_Link*)object)->MetaData;
+	*dataLen = strnlen_s(retVal, 1024);
+
+	duk_context *ctx = (duk_context*)((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[0];
+	void *h = ((void**)((ILibChain_Link*)object)->ExtraMemoryPtr)[1];
+	if (h == NULL || ctx == NULL || !duk_ctx_is_alive(ctx)) { return(retVal); }
+	int top = duk_get_top(ctx);
+
+	duk_push_heapptr(ctx, h);												// [events]
+	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);		// [events][table]
+	duk_push_int(ctx, fd);													// [events][table][key]
+	if (duk_has_prop(ctx, -2) != 0)											// [events][table]
+	{
+		duk_push_int(ctx, fd); duk_get_prop(ctx, -2);						// [events][table][val]
+		duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Options);	// [events][table][val][options]
+		if (!duk_is_null_or_undefined(ctx, -1))
+		{
+			retVal = Duktape_GetStringPropertyValueEx(ctx, -1, "metadata", retVal, dataLen);
+		}
+	}
+
+	duk_set_top(ctx, top);
+	return(retVal);
+}
 void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 {
 	ILibChain_Link *link = (ILibChain_Link*)ILibChain_Link_Allocate(sizeof(ILibChain_Link), 2 * sizeof(void*));
-	link->MetaData = "ILibDuktape_DescriptorEvents";
+	link->MetaData = "DescriptorEvents";
 	link->PreSelectHandler = ILibDuktape_DescriptorEvents_PreSelect;
 	link->PostSelectHandler = ILibDuktape_DescriptorEvents_PostSelect;
+	link->QueryHandler = ILibDuktape_DescriptorEvents_Query;
 
 	duk_push_object(ctx);
 	duk_push_pointer(ctx, link); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_ChainLink);
 	duk_push_object(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_Table);
+	duk_push_object(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_DescriptorEvents_HTable);
+	
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_DescriptorEvents_Finalizer);
 
 	((void**)link->ExtraMemoryPtr)[0] = ctx;

@@ -62,6 +62,7 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 #define ILibDuktape_EventEmitter_SetupEmit(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "emit");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
 #define ILibDuktape_EventEmitter_SetupOn(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "on");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
 #define ILibDuktape_EventEmitter_SetupPrependOnce(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "prependOnceListener");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
+#define ILibDuktape_EventEmitter_GetEmitReturn(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "emit_returnValue");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName);if(duk_pcall_method(ctx, 1)!=0){duk_push_null(ctx);}
 
 int ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);								// Add native event handler
 int ILibDuktape_EventEmitter_AddOnEx(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func);
