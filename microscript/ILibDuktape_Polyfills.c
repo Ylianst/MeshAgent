@@ -1502,16 +1502,15 @@ ILibTransport_DoneState ILibDuktape_Stream_Writable_WriteSink(struct ILibDuktape
 {
 	void *h;
 	ILibTransport_DoneState retVal = ILibTransport_DoneState_INCOMPLETE;
-
 	duk_push_this(stream->ctx);																		// [writable]
 	duk_get_prop_string(stream->ctx, -1, "_write");													// [writable][_write]
 	duk_swap_top(stream->ctx, -2);																	// [_write][this]
 	if (stream->Reserved == 0)
 	{
 		duk_push_external_buffer(stream->ctx);														// [_write][this][extBuffer]
-		duk_insert(stream->ctx, -3);																// [extBuffer][_write][this]
-		duk_config_buffer(stream->ctx, -3, buffer, (duk_size_t)bufferLen);
-		duk_push_buffer_object(stream->ctx, -3, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [extBuffer][_write][this][buffer]
+		duk_config_buffer(stream->ctx, -1, buffer, (duk_size_t)bufferLen);
+		duk_push_buffer_object(stream->ctx, -1, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [_write][this][extBuffer][buffer]
+		duk_remove(stream->ctx, -2);																// [_write][this][buffer]
 	}
 	else
 	{
@@ -1544,7 +1543,6 @@ ILibTransport_DoneState ILibDuktape_Stream_Writable_WriteSink(struct ILibDuktape
 	duk_push_heap_stash(stream->ctx);
 	duk_del_prop_string(stream->ctx, -1, Duktape_GetStashKey(h));
 	duk_pop(stream->ctx);
-
 	return(retVal);
 }
 duk_ret_t ILibDuktape_Stream_Writable_EndSink_finish(duk_context *ctx)
