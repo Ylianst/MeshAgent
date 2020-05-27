@@ -21,6 +21,7 @@ limitations under the License.
 #include <ws2tcpip.h>
 #include <direct.h>
 #include <wchar.h>
+#include <io.h>
 #endif
 
 #include "microstack/ILibParsers.h"
@@ -66,6 +67,9 @@ limitations under the License.
 #define FS_NOTIFY_DISPATCH_PTR		"\xFF_FSWatcher_NotifyDispatchPtr"
 #define FS_CHAIN_PTR				"\xFF_FSWatcher_ChainPtr"
 #define FS_WATCH_PATH				"\xFF_FSWatcher_Path"
+#define FS_EVENT_R_DESCRIPTORS		"\xFF_FSEventReadDescriptors"
+#define FS_EVENT_W_DESCRIPTORS		"\xFF_FSEventWriteDescriptors"
+#define FS_EVENT_DESCRIPTORS_IO		"\xFF_FSEventDescriptors_IO"
 
 #if defined(_POSIX) && !defined(__APPLE__)
 typedef struct ILibDuktape_fs_linuxWatcher
@@ -197,6 +201,17 @@ FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 {
 	int fd = duk_require_int(ctx, 0);
+
+	if (fd < 65535)
+	{
+#ifdef WIN32
+		_close(fd);
+#else
+		close(fd);
+#endif
+		return(0);
+	}
+
 	FILE *f;
 	char *key = ILibScratchPad;
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", fd);
@@ -263,21 +278,36 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 #endif
-	char *flags = (char*)duk_require_string(ctx, 1);
-	int retVal = -1;
-
-	if (nargs < 2) { return(ILibDuktape_Error(ctx, "Too few arguments")); }
-
-	retVal = ILibDuktape_fs_openSyncEx(ctx, path, flags, NULL);
-	if (retVal > 0)
+	if (duk_is_string(ctx, 1))
 	{
-		duk_push_int(ctx, retVal);
-		return 1;
+		char *flags = (char*)duk_require_string(ctx, 1);
+		int retVal = -1;
+
+		if (nargs < 2) { return(ILibDuktape_Error(ctx, "Too few arguments")); }
+
+		retVal = ILibDuktape_fs_openSyncEx(ctx, path, flags, NULL);
+		if (retVal > 0)
+		{
+			duk_push_int(ctx, retVal);
+			return 1;
+		}
+		else
+		{
+			return(ILibDuktape_Error(ctx, "fs.openSync(): Error opening '%s'", path));
+		}
 	}
-	else
+	int flags = (int)duk_require_int(ctx, 1);
+#ifdef WIN32
+	int fd = -1; 
+	if (_wsopen_s(&fd, (wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), flags, 0, 0) != 0)
 	{
-		return(ILibDuktape_Error(ctx, "fs.openSync(): Error opening '%s'", path));
+		return(ILibDuktape_Error(ctx, "openSync() Error: %d ", errno));
 	}
+	duk_push_int(ctx, fd);
+#else
+	duk_push_int(ctx, open(path, flags));
+#endif
+	return(1);
 }
 duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 {
@@ -302,6 +332,146 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 	}
 
 	return(ILibDuktape_Error(ctx, "FS I/O Error"));
+}
+duk_ret_t ILibDuktape_fs_read_readsetSink(duk_context *ctx)
+{
+	int fd = duk_require_int(ctx, 0);
+	duk_push_this(ctx);										// [DescriptorEvents]
+	duk_get_prop_string(ctx, -1, FS_EVENT_DESCRIPTORS_IO);	// [DescriptorEvents][pending]
+	duk_array_pop(ctx, -1);									// [DescriptorEvents][pending][options]
+	
+	duk_size_t bufferLen;
+	char *buffer = Duktape_GetBufferProperty(ctx, -1, "buffer");
+	duk_size_t offset = (duk_size_t)Duktape_GetIntPropertyValue(ctx, -1, "offset", 0);
+	duk_size_t length = (duk_size_t)Duktape_GetIntPropertyValue(ctx, -1, "length", (int)bufferLen);
+	int bytesRead = read(fd, buffer + offset, length);
+	int status = bytesRead < 0 ? errno : 0;
+
+	duk_get_prop_string(ctx, -1, "callback");				// [DescriptorEvents][pending][options][callback]
+	duk_get_prop_string(ctx, -1, "call"); duk_swap_top(ctx, -2);// ..............[pending][options][call][this]
+	duk_eval_string(ctx, "require('fs');");						// ..............[pending][options][call][fn/this][this]
+	duk_push_int(ctx, status);									// ..............[pending][options][call][fn/this][this][err/status]
+	duk_push_int(ctx, bytesRead);								// ..............[pending][options][call][fn/this][this][err/status][bytesRead]
+	duk_get_prop_string(ctx, -6, "buffer");						// ..............[pending][options][call][fn/this][this][err/status][bytesRead][buffer]
+	if (duk_pcall_method(ctx, 4) != 0)						// [DescriptorEvents][pending][options][val]
+	{
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.read() Callback Error: %s ", duk_safe_to_string(ctx, -1));
+	}
+	duk_pop_2(ctx);											// [DescriptorEvents][pending]
+	if (duk_get_length(ctx, -1) == 0)
+	{
+		// No more pending I/O operations, so we can cleanup the DescriptorEvents
+		duk_eval_string(ctx, "require('DescriptorEvents');");	// .....[DescriptorEvents]
+		duk_get_prop_string(ctx, -1, "removeDescriptor");		// .....[DescriptorEvents][removeDescriptor]
+		duk_swap_top(ctx, -2);									// .....[removeDescriptor][this]
+		duk_push_int(ctx, fd);									// .....[removeDescriptor][this][fd]
+		duk_pcall_method(ctx, 1); duk_pop(ctx);				// [DescriptorEvents][pending]
+
+		duk_eval_string(ctx, "require('fs');");				// [DescriptorEvents][pending][FS]
+		duk_get_prop_string(ctx, -1,FS_EVENT_R_DESCRIPTORS);// [DescriptorEvents][pending][FS][table]
+		duk_del_prop_index(ctx, -1, fd);
+	}
+	return(0);
+}
+duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
+{
+	int top = duk_get_top(ctx);
+	if (top > 2)
+	{
+		// Simplify flow, by converting to an options object
+		duk_push_this(ctx);										// [fs]
+		duk_get_prop_string(ctx, -1, "read");					// [fs][read]
+		duk_swap_top(ctx, -2);									// [read][this]
+		duk_dup(ctx, 0);										// [read][this][fd]
+		duk_push_object(ctx);									// [read][this][fd][options]
+		duk_dup(ctx, 1); duk_put_prop_string(ctx, -2, "buffer");
+		duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "offset");
+		duk_dup(ctx, 3); duk_put_prop_string(ctx, -2, "length");
+		duk_dup(ctx, 4); duk_put_prop_string(ctx, -2, "position");
+		duk_dup(ctx, 5);										// [read][this][fd][options][callback]
+		duk_call_method(ctx, 3);
+		return(1);
+	}
+	if (top == 2 && duk_is_function(ctx, 1))
+	{
+		// Simplify flow, by converting to a default options object
+		duk_push_this(ctx);										// [fs]
+		duk_get_prop_string(ctx, -1, "read");					// [fs][read]
+		duk_swap_top(ctx, -2);									// [read][this]
+		duk_dup(ctx, 0);										// [read][this][fd]
+		duk_push_object(ctx);									// [read][this][fd][options]
+		duk_push_fixed_buffer(ctx, 16384);						// [read][this][fd][options][buffer]
+		duk_push_buffer_object(ctx, -1, 0, 16384, DUK_BUFOBJ_NODEJS_BUFFER); 
+		duk_remove(ctx, -2);									// [read][this][fd][options][buffer]
+		duk_put_prop_string(ctx, -2, "buffer");					// [read][this][fd][options]
+		duk_push_int(ctx, 0); duk_put_prop_string(ctx, -2, "offset");
+		duk_push_int(ctx, 16384); duk_put_prop_string(ctx, -2, "length");
+		duk_push_null(ctx); duk_put_prop_string(ctx, -2, "position");
+		duk_dup(ctx, 1);										// [read][this][fd][options][callback]
+		duk_call_method(ctx, 3);
+		return(1);
+	}
+	if (!(duk_is_number(ctx, 0) && duk_is_object(ctx, 1) && duk_is_function(ctx, 2))) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
+	int fd = (int)duk_require_int(ctx, 0);
+
+	// First, we'll attempt to read, and see if it completes or is pending
+	duk_size_t bufferLen;
+	char *buffer = Duktape_GetBufferProperty(ctx, 1, "buffer");
+	duk_size_t offset = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "offset", 0);
+	duk_size_t length = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "length", (int)bufferLen);
+	int bytesRead = read(fd, buffer + offset, length);
+	if (bytesRead >= 0 || (errno != E_AGAIN && errno != E_WOULDBLOCK))
+	{
+		// Completed
+		int errStatus = bytesRead >= 0 ? 0 : errno;
+		duk_dup(ctx, 2);										// [func]
+		duk_get_prop_string(ctx, -1, "call");					// [func][call]
+		duk_swap_top(ctx, -2);									// [call][this]
+		duk_push_this(ctx);										// [call][this][this/fs]
+		duk_push_int(ctx, errStatus);							// [call][this][this/fs][err/status]
+		duk_push_int(ctx, bytesRead);							// [call][this][this/fs][err/status][bytesRead]
+		duk_get_prop_string(ctx, 1, "buffer");					// [call][this][this/fs][err/status][bytesRead][buffer]
+		duk_call_method(ctx, 4);
+		return(0);
+	}
+
+	//
+	// Setup the EventDescriptor listener, because the read did not complete
+	//
+	duk_push_this(ctx);											// [fs]
+	duk_get_prop_string(ctx, -1, FS_EVENT_R_DESCRIPTORS);		// [fs][table]
+	if (!duk_has_prop_index(ctx, -1, fd))
+	{
+		duk_eval_string(ctx, "require('DescriptorEvents');");	// [fs][table][DE]
+		duk_get_prop_string(ctx, -1, "addDescriptor");			// [fs][table][DE][addDescriptor]
+		duk_swap_top(ctx, -2);									// [fs][table][addDescriptor][this]
+		duk_push_int(ctx, fd);									// [fs][table][addDescriptor][this][fd]
+		duk_push_object(ctx);									// [fs][table][addDescriptor][this][fd][options]
+		duk_push_true(ctx); duk_put_prop_string(ctx, -2, "readset");
+		if (duk_has_prop_string(ctx, 1, "metadata"))
+		{
+			duk_push_string(ctx, "fs.read(), ");				// [fs][table][addDescriptor][this][fd][options][str]
+			duk_get_prop_string(ctx, 1, "metadata");			// [fs][table][addDescriptor][this][fd][options][str][str2]
+			duk_string_concat(ctx, -2); duk_remove(ctx, -2);	// [fs][table][addDescriptor][this][fd][options][metadata]
+			duk_put_prop_string(ctx, -2, "metadata");			// [fs][table][addDescriptor][this][fd][options]
+		}
+		else
+		{
+			duk_push_string(ctx, "fs.read()"); duk_put_prop_string(ctx, -2, "metadata");
+		}
+		duk_call_method(ctx, 2);								// [fs][table][descriptorEvent]
+		ILibDuktape_EventEmitter_SetupOn(ctx, duk_get_heapptr(ctx, -1), "readset");	// ........[on][this][readset]
+		duk_push_c_function(ctx, ILibDuktape_fs_read_readsetSink, DUK_VARARGS);		// ........[on][this][readset][func]
+		duk_call_method(ctx, 2); duk_pop(ctx);					// [fs][table][descriptorEvent]
+		duk_push_array(ctx); duk_put_prop_string(ctx, -1, FS_EVENT_DESCRIPTORS_IO);
+		duk_put_prop_index(ctx, -2, fd);						// [fs][table]
+	}
+	duk_get_prop_index(ctx, -1, fd);							// [fs][table][desriptorEvent]
+	duk_get_prop_string(ctx, -1, FS_EVENT_DESCRIPTORS_IO);		// [fs][table][desriptorEvent][pending]
+	duk_dup(ctx, 1);											// [fs][table][desriptorEvent][pending][options]
+	duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "callback");	// [fs][table][desriptorEvent][pending][options]
+	duk_array_unshift(ctx, -2);									// [fs][table][desriptorEvent][pending]
+	return(0);
 }
 duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 {
@@ -1644,16 +1814,22 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	duk_push_pointer(ctx, chain);				// [fs][chain]
 	duk_put_prop_string(ctx, -2, FS_CHAIN_PTR);	// [fs]
 
-	duk_push_int(ctx, 0);						// [fs][nextFD]
+	duk_push_int(ctx, 65535);					// [fs][nextFD]
 	duk_put_prop_string(ctx, -2, FS_NextFD);	// [fs]
 
 	duk_push_object(ctx);						// [fs][descriptors]
 	duk_put_prop_string(ctx, -2, FS_FDS);		// [fs]
 
+	duk_push_object(ctx);
+	duk_put_prop_string(ctx, -2, FS_EVENT_R_DESCRIPTORS);
+	duk_push_object(ctx);
+	duk_put_prop_string(ctx, -2, FS_EVENT_W_DESCRIPTORS);
+
 	ILibDuktape_CreateInstanceMethod(ctx, "closeSync", ILibDuktape_fs_closeSync, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "openSync", ILibDuktape_fs_openSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "readSync", ILibDuktape_fs_readSync, 5);
 	ILibDuktape_CreateInstanceMethod(ctx, "writeSync", ILibDuktape_fs_writeSync, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "read", ILibDuktape_fs_read, DUK_VARARGS);
 #ifdef WIN32
 	ILibDuktape_CreateInstanceMethod(ctx, "_readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "_statSync", ILibDuktape_fs_statSync, 1);
@@ -1701,6 +1877,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 							}\
 							ds.on('close', function onCopyFileDone(){delete this.ss.fs._copyStreams[this.ss.id];});\
 						};\
+						exports.constants = {O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 4, O_NONBLOCK: 2048};\
 						exports.copyFileSync = function copyFileSync(src, dest)\
 						{\
 							var buffer = this.readFileSync(src, {flags: 'rb'});\

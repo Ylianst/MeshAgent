@@ -2782,6 +2782,23 @@ duk_ret_t ILibDuktape_Polyfills_isBuffer(duk_context *ctx)
 	duk_push_boolean(ctx, duk_is_buffer_data(ctx, 0));
 	return(1);
 }
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+duk_ret_t ILibDuktape_ioctl_func(duk_context *ctx)
+{
+	int fd = (int)duk_require_int(ctx, 0);
+	int code = (int)duk_require_int(ctx, 1);
+	duk_size_t outBufferLen = 0;
+	char *outBuffer = Duktape_GetBuffer(ctx, 2, &outBufferLen);
+
+	duk_push_int(ctx, ioctl(fd, _IOC(_IOC_READ | _IOC_WRITE, 'H', code, outBufferLen), outBuffer) ? errno : 0);
+	return(1);
+}
+void ILibDuktape_ioctl_Push(duk_context *ctx, void *chain)
+{
+	duk_push_c_function(ctx, ILibDuktape_ioctl_func, DUK_VARARGS);
+	ILibDuktape_WriteID(ctx, "ioctl");
+}
+#endif
 void ILibDuktape_uuidv4_Push(duk_context *ctx, void *chain)
 {	
 	duk_push_object(ctx);
@@ -2819,6 +2836,9 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_ModSearch_AddHandler(ctx, "ChainViewer", ILibDuktape_ChainViewer_Push);
 	ILibDuktape_ModSearch_AddHandler(ctx, "DescriptorEvents", ILibDuktape_DescriptorEvents_Push);
 	ILibDuktape_ModSearch_AddHandler(ctx, "uuid/v4", ILibDuktape_uuidv4_Push);
+#if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+	ILibDuktape_ModSearch_AddHandler(ctx, "ioctl", ILibDuktape_ioctl_Push);
+#endif
 
 
 	// Global Polyfills
