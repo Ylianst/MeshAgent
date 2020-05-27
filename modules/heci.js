@@ -60,16 +60,24 @@ function heci_create()
         'write': function (chunk, flush)
         {
             console.log('write:' + chunk.length + ' on ' + this._hashCode());
-            if (this._writeoverlapped == null) { throw ('Not Connected'); }
             if (chunk.length > this.MaxBufferSize) { throw ('Buffer too large'); }
+
+            if (process.platform == 'win32')
+            {
+                if (this._writeoverlapped == null) { throw ('Not Connected'); }
+            }
             this._pendingWrites.unshift({ buffer: chunk, flush: flush });
+
             if (this._pendingWrites.length == 1)
             {
                 // Kickstart the write
                 this._processWrite();
             }
 
-            return (false);
+            if (process.platform == 'win32')
+            {
+                return (false);
+            }
         },
         'final': function (flush)
         {
@@ -78,7 +86,16 @@ function heci_create()
         'read': function(size)
         {
             console.log('read: (' + size + ') on ' + this._hashCode());
-            if (!this._readbuffer) { this._readbuffer = GM.CreateVariable(this.MaxBufferSize); }
+            if (!this._readbuffer)
+            {
+                this._readbuffer = process.platform == 'win32' ? GM.CreateVariable(this.MaxBufferSize) : Buffer.alloc(this.MaxBufferSize);
+            }
+
+            if (process.platform == 'linux')
+            {
+                this._processRead();
+                return;
+            }
 
             var result = kernel32.ReadFile(this._descriptor, this._readbuffer, this._readbuffer._size, 0, this._readoverlapped);
             if(result.Val != 0 || result._LastError == ERROR_IO_PENDING)
@@ -194,7 +211,13 @@ function heci_create()
         })
         .addMethod('descriptorPath', function _descriptorPath()
         {
-            console.log(' heci.createDescriptor()');
+            if (process.platform == 'linux')
+            {
+                if (require('fs').existsSync('/dev/mei')) { return ('/dev/mei'); }
+                if (require('fs').existsSync('/dev/mei0')) { return ('/dev/mei0'); }
+                throw ('HECI not supported');
+            }
+            if (process.platform != 'win32') { throw ('HECI not supported'); }
 
             var result;
             var ii;
@@ -248,6 +271,12 @@ function heci_create()
         })
         .addMethod('createDescriptor', function _createDescriptor(path)
         {
+            if (process.platform == 'linux')
+            {
+                return (require('fs').openSync(path, require('fs').constants.O_RDWR | require('fs').constants.O_NONBLOCK));
+            }
+            if (process.platform != 'win32') { throw ('HECI not supported'); }
+
             var devPath = GM.CreateVariable(path);
             var ret = kernel32.CreateFileA(devPath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
             if (ret.Val == -1)
@@ -327,12 +356,27 @@ function heci_create()
     ret.doIoctl = function doIoctl(code, inputBuffer, outputBuffer, callback)
     {
         console.log('doIoctl()');
-        if(typeof(callback)!='function') { throw('Callback not specified');}
+        if (typeof (callback) != 'function') { throw ('Callback not specified'); }
+
         var i;
         var parms = [];
         for (i = 4; i < arguments.length; ++i)
         {
             parms.push(arguments[i]);
+        }
+
+
+        if (process.platform == 'linux')
+        {
+            if (outputBuffer.length < inputBuffer.length) { throw ('output buffer is too small'); }
+            outputBuffer.fill(0);
+            inputBuffer.copy(outputBuffer);
+            if (this._descriptor == null) { this._descriptor = this.createDescriptor(this.descriptorPath()); }
+            var ret = require('ioctl')(this._descriptor, code, outputBuffer);
+            parms.unshift(outputBuffer);
+            parms.unshift(ret);
+            callback.apply(this, parms);
+            return;
         }
 
         this._ioctls.unshift({ code: code, input: inputBuffer, output: outputBuffer, callback: callback, parms: parms });
@@ -342,6 +386,7 @@ function heci_create()
             this._send(this._ioctls.peek());
         }
     };
+
     ret._send = function _send(options)
     {
         if(this._descriptor == null) 
@@ -406,24 +451,46 @@ function heci_create()
     {
         var chunk = this._pendingWrites.peek();
         console.log('_WRITING: ' + chunk.buffer.length + ' bytes' + ' on ' + this._hashCode());
-        if (chunk.buffer.length == 23)
+
+        if (process.platform == 'win32')
         {
-            console.log(chunk.buffer.toString('hex'));
-            GM.CreateVariable(chunk.buffer)._debug();
-        }
-        var result = kernel32.WriteFile(this._descriptor, GM.CreateVariable(chunk.buffer), chunk.buffer.length, 0, this._writeoverlapped);
-        if(result.Val != 0 || result._LastError == ERROR_IO_PENDING)
-        {
-            if(!this._wDescriptorEvent)
+            var result = kernel32.WriteFile(this._descriptor, GM.CreateVariable(chunk.buffer), chunk.buffer.length, 0, this._writeoverlapped);
+            if (result.Val != 0 || result._LastError == ERROR_IO_PENDING)
             {
-                this._wDescriptorEvent = require('DescriptorEvents').addDescriptor(this._writeoverlapped.hEvent, { metadata: 'heci.session [write]' });
-                this._wDescriptorEvent.session = this;
-                this._wDescriptorEvent.on('signaled', this._processWrite_signaled);
+                if (!this._wDescriptorEvent)
+                {
+                    this._wDescriptorEvent = require('DescriptorEvents').addDescriptor(this._writeoverlapped.hEvent, { metadata: 'heci.session [write]' });
+                    this._wDescriptorEvent.session = this;
+                    this._wDescriptorEvent.on('signaled', this._processWrite_signaled);
+                }
+            }
+            else
+            {
+                console.log('Write Error: ' + result._LastError);
             }
         }
-        else
+
+        require('fs').write(this._descriptor, chunk.buffer, ret._processWrite_linux_signaled, { metadata: 'heci.session', session: this });
+    };
+    ret._processWrite_linux_signaled = function _processWrite_linux_signaled(status, bytesWritten, buffer, options)
+    {
+        if(status == 0)
         {
-            console.log('Write Error: ' + result._LastError);
+            console.log(bytesWritten + ' bytes written');
+            console.log('noPipeline = ' + options.session._options.noPipeline, options.session._pendingWrites.length);
+            if (options.session._options.noPipeline == null || options.session._options.noPipeline == false)
+            {
+                var item = options.session._pendingWrites.pop();
+                if (options.session._pendingWrites.length > 0)
+                {
+                    options.session._processWrite();
+                }
+                else
+                {
+                    console.log('Write/Flush');
+                    item.flush();
+                }
+            }
         }
     };
     ret._processWrite_signaled = function _processWrite_signaled(status)
@@ -455,12 +522,67 @@ function heci_create()
             }
         }
     };
+    ret._processRead_readSet_sink = function _processRead_readSet_sink(status, bytesRead, buffer, options)
+    {
+        if (status != 0) { options.session.push(null); return; }
+        console.log(bytesRead + ' bytes read');
+
+        buffer = buffer.slice(0, bytesRead);
+        var pushResult = options.session.push(buffer);
+        if (options.session._options.noPipeline != 0 && options.session._pendingWrites.length > 0)
+        {
+            // Unlock a write
+            console.log('pendingWriteCount: ' + options.session._pendingWrites.length);
+            var item = options.session._pendingWrites.pop();
+
+            if (options.session._pendingWrites.length > 0)
+            {
+                options.session._processWrite();
+            }
+            else
+            {
+                console.log('Write/Flush');
+                item.flush();
+            }
+        }
+
+        if (pushResult)
+        {
+            // We can read more, because data is still flowing
+            console.log('READING MORE on ' + options.session._hashCode());
+            var result = kernel32.ReadFile(this.session._descriptor, this.session._readbuffer, this.session._readbuffer._size, 0, this.session._readoverlapped);
+            if (result.Val != 0 || result._LastError == ERROR_IO_PENDING)
+            {
+                options.session._processRead();
+                return (true);
+            }
+            else
+            {
+                console.log('Sometype of error: ' + result._LastError);
+                this.session.push(null);
+            }
+        }
+
+    };
+    ret._processRead = function _processRead()
+    {
+        require('fs').read(this._descriptor, { metadata: 'heci.session', buffer: this._readbuffer, session: this }, _processRead_readSet_sink);
+    };
     return (ret);
 }
 
 var ioctl = {};
-Object.defineProperty(ioctl, 'HECI_VERSION', { value: 0x8000E000 });
-Object.defineProperty(ioctl, 'CLIENT_CONNECT', { value: 0x8000E004 });
+if(process.platform == 'win32')
+{
+    Object.defineProperty(ioctl, 'HECI_VERSION', { value: 0x8000E000 });
+    Object.defineProperty(ioctl, 'CLIENT_CONNECT', { value: 0x8000E004 });
+}
+if(process.platform == 'linux')
+{
+    Object.defineProperty(ioctl, 'HECI_VERSION', { value: 0x00 });
+    Object.defineProperty(ioctl, 'CLIENT_CONNECT', { value: 0x01 });
+}
+
 var guids = {};
 Object.defineProperty(guids, 'AMT', { value: Buffer.from('2800F812B7B42D4BACA846E0FF65814C', 'hex') });
 Object.defineProperty(guids, 'LME', { value: Buffer.from('DBA4336776047B4EB3AFBCFC29BEE7A7', 'hex') });

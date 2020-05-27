@@ -341,18 +341,22 @@ duk_ret_t ILibDuktape_fs_read_readsetSink(duk_context *ctx)
 	duk_array_pop(ctx, -1);									// [DescriptorEvents][pending][options]
 	
 	duk_size_t bufferLen;
-	char *buffer = Duktape_GetBufferProperty(ctx, -1, "buffer");
+	char *buffer = Duktape_GetBufferPropertyEx(ctx, -1, "buffer", &bufferLen);
 	duk_size_t offset = (duk_size_t)Duktape_GetIntPropertyValue(ctx, -1, "offset", 0);
 	duk_size_t length = (duk_size_t)Duktape_GetIntPropertyValue(ctx, -1, "length", (int)bufferLen);
+#ifdef WIN32
+	int bytesRead = _read(fd, buffer + offset, (unsigned int)length);
+#else
 	int bytesRead = read(fd, buffer + offset, length);
+#endif
 	int status = bytesRead < 0 ? errno : 0;
 
 	duk_get_prop_string(ctx, -1, "callback");				// [DescriptorEvents][pending][options][callback]
-	duk_get_prop_string(ctx, -1, "call"); duk_swap_top(ctx, -2);// ..............[pending][options][call][this]
-	duk_eval_string(ctx, "require('fs');");						// ..............[pending][options][call][fn/this][this]
-	duk_push_int(ctx, status);									// ..............[pending][options][call][fn/this][this][err/status]
-	duk_push_int(ctx, bytesRead);								// ..............[pending][options][call][fn/this][this][err/status][bytesRead]
-	duk_get_prop_string(ctx, -6, "buffer");						// ..............[pending][options][call][fn/this][this][err/status][bytesRead][buffer]
+	duk_eval_string(ctx, "require('fs');");						// ..............[pending][options][callback][this]
+	duk_push_int(ctx, status);									// ..............[pending][options][callback][this][err/status]
+	duk_push_int(ctx, bytesRead);								// ..............[pending][options][callback][this][err/status][bytesRead]
+	duk_get_prop_string(ctx, -5, "buffer");						// ..............[pending][options][callback][this][err/status][bytesRead][buffer]
+	duk_dup(ctx, -6);											// ..............[pending][options][callback][this][err/status][bytesRead][buffer][options]
 	if (duk_pcall_method(ctx, 4) != 0)						// [DescriptorEvents][pending][options][val]
 	{
 		ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.read() Callback Error: %s ", duk_safe_to_string(ctx, -1));
@@ -371,6 +375,172 @@ duk_ret_t ILibDuktape_fs_read_readsetSink(duk_context *ctx)
 		duk_get_prop_string(ctx, -1,FS_EVENT_R_DESCRIPTORS);// [DescriptorEvents][pending][FS][table]
 		duk_del_prop_index(ctx, -1, fd);
 	}
+	return(0);
+}
+duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
+{
+	int fd = (int)duk_require_int(ctx, 0);
+	duk_push_this(ctx);											// [events]
+	duk_get_prop_string(ctx, -1, FS_EVENT_DESCRIPTORS_IO);		// [events][pending]
+	duk_size_t bufferLen;
+	char *buffer = Duktape_GetBufferPropertyEx(ctx, -1, "buffer", &bufferLen);
+	int performCleanup = 0;
+#ifdef WIN32
+	int bytesWritten = _write(fd, buffer, (unsigned int)bufferLen);
+#else
+	int bytesWritten = write(fd, buffer, bufferLen);
+#endif
+	if (bytesWritten == bufferLen)
+	{
+		// Complete
+		duk_del_prop_string(ctx, -2, FS_EVENT_DESCRIPTORS_IO);
+		duk_get_prop_string(ctx, -1, "callback");				// [events][pending][callback]
+		duk_eval_string(ctx, "require('fs');");					// [events][pending][callback][this]
+		duk_push_int(ctx, 0);									// [events][pending][callback][this][status]
+		duk_get_prop_string(ctx, -5, "original");				// [events][pending][callback][this][status][buffer]
+		duk_get_length(ctx, -1);								// [events][pending][callback][this][status][buffer][length]
+		duk_swap_top(ctx, -2);									// [events][pending][callback][this][status][bytesWritten][buffer]
+		duk_get_prop_string(ctx, -6, "opt");					// [events][pending][callback][this][status][bytesWritten][buffer][options]
+		if (duk_pcall_method(ctx, 4) != 0)						// [events][pending][ret]
+		{
+			ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.write() Callback Error: %s ", duk_safe_to_string(ctx, -1));
+		}
+		duk_pop_2(ctx);											// [events]
+		if (!duk_has_prop_string(ctx, -1, FS_EVENT_DESCRIPTORS_IO))
+		{
+			performCleanup = 1;
+		}
+	}
+	else
+	{
+		if (bytesWritten > 0)										// [events][pending]
+		{
+			duk_get_prop_string(ctx, -1, "buffer");					// [events][pending][buffer]
+			duk_buffer_slice(ctx, -1, bytesWritten, (int)bufferLen - bytesWritten);	// ....][buffer][sliced]
+			duk_put_prop_string(ctx, -3, "buffer");					// [events][pending][oldBuffer]
+		}
+		else
+		{
+			int e = errno;
+			if (e != EAGAIN && e != EWOULDBLOCK && e != EINTR)		// [events][pending]
+			{
+				// Error occured
+				duk_del_prop_string(ctx, -2, FS_EVENT_DESCRIPTORS_IO);
+				performCleanup = 1;
+
+				duk_get_prop_string(ctx, -1, "callback");			// [events][pending][callback]
+				duk_eval_string(ctx, "require('fs');");				// [events][pending][callback][this]
+				duk_push_int(ctx, e);								// [events][pending][callback][this][status]
+				duk_get_prop_string(ctx, -5, "original");			// [events][pending][callback][this][status][buffer]
+				duk_push_int(ctx, 0);								// [events][pending][callback][this][status][buffer][written]
+				duk_swap_top(ctx, -2);								// [events][pending][callback][this][status][bytesWritten][buffer]
+				duk_get_prop_string(ctx, -6, "opt");				// [events][pending][callback][this][status][bytesWritten][buffer][options]
+				if (duk_pcall_method(ctx, 4) != 0)					// [events][pending][ret]
+				{
+					ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.write() Callback Error: %s ", duk_safe_to_string(ctx, -1));
+				}
+			}
+		}
+	}
+	if (performCleanup != 0)
+	{
+		// No more pending writes, so we can do some cleanup
+		duk_eval_string(ctx, "require('fs');");					// ... [fs]
+		duk_get_prop_string(ctx, -1, FS_EVENT_W_DESCRIPTORS);	// ... [fs][table]
+		duk_del_prop_index(ctx, -1, fd);						// ... [fs][table]
+
+																// And we can also unhook ourselves
+		duk_eval_string(ctx, "require('EventDescriptors');");	// ... [eventdescriptors]
+		duk_get_prop_string(ctx, -1, "removeDescriptor");		// ... [eventdescriptors][remove]
+		duk_swap_top(ctx, -2);									// ... [remove][this]
+		duk_push_int(ctx, fd);									// ... [remove][this][fd]
+		duk_call_method(ctx, 1);								// ... [ret]
+	}
+	return(0);
+}
+duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
+{
+	int top = duk_get_top(ctx);
+	int fd = (int)duk_require_int(ctx, 0);
+	duk_size_t bufferLen;
+	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferLen);
+	int cbx = 2;
+	int offset = 0, length = (int)bufferLen, e;
+	int position = -1;
+	if (duk_is_number(ctx, 2)) { offset = (int)duk_require_int(ctx, 2); cbx++; }
+	if (duk_is_number(ctx, 3)) { length = (int)duk_require_int(ctx, 3); cbx++; }
+	if (duk_is_number(ctx, 4)) { position = (int)duk_require_int(ctx, 4); cbx++; }
+	if (!duk_is_function(ctx, cbx)) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
+
+#ifdef WIN32
+	int bytesWritten = _write(fd, buffer + offset, length);
+#else
+	int bytesWritten = write(fd, buffer + offset, length);
+#endif
+	if (bytesWritten == length)
+	{
+		// Completed
+		duk_require_function(ctx, cbx);							// [func]
+		duk_push_this(ctx);										// [func][this]
+		duk_push_int(ctx, 0);									// [func][this][ERR]
+		duk_push_int(ctx, bytesWritten);						// [func][this][ERR][bytesWritten]
+		duk_dup(ctx, 1);										// [func][this][ERR][bytesWritten][buffer]
+		duk_dup(ctx, cbx + 1);									// [func][this][ERR][bytesWritten][buffer][options]
+		duk_call_method(ctx, 4);
+		return(0);
+	}
+	if (bytesWritten > 0 || (e = errno) == EAGAIN || e == EWOULDBLOCK || e == EINTR)
+	{
+		// Partial Write
+		duk_push_this(ctx);											// [fs]
+		duk_get_prop_string(ctx, -1, FS_EVENT_W_DESCRIPTORS);		// [fs][table]
+		if (!duk_has_prop_index(ctx, -1, fd))
+		{
+			duk_eval_string(ctx, "require('DescriptorEvents');");	// [fs][table][DescriptorEvents]
+			duk_get_prop_string(ctx, -1, "addDescriptor");			// [fs][table][DescriptorEvents][add]
+			duk_swap_top(ctx, -2);									// [fs][table][add][this]
+			duk_push_int(ctx, fd);									// [fs][table][add][this][fd]
+			duk_push_object(ctx);									// [fs][table][add][this][fd][options]
+			duk_push_true(ctx); duk_put_prop_string(ctx, -2, "writeset");	// ...[add][this][fd][options]
+			if (duk_is_object(ctx, cbx + 1) && duk_has_prop_string(ctx, cbx + 1, "metadata"))
+			{
+				duk_push_string(ctx, "fs.write(), ");				// [fs][table][add][this][fd][options][str1]
+				duk_get_prop_string(ctx, cbx + 1, "metadata");		// [fs][table][add][this][fd][options][str1][str2]
+				duk_string_concat(ctx, -2); duk_remove(ctx, -2);	// [fs][table][add][this][fd][options][metadata]
+			}
+			else
+			{
+				duk_push_string(ctx, "fs.write()");					// [fs][table][add][this][fd][options][metadata]
+			}
+			duk_put_prop_string(ctx, -2, "metadata");				// [fs][table][add][this][fd][options]
+			duk_call_method(ctx, 2);								// [fs][table][events]
+			ILibDuktape_EventEmitter_SetupOn(ctx, duk_get_heapptr(ctx, -1), "writeset");	// [on][this][writeset]
+			duk_push_c_function(ctx, ILibDuktape_fs_write_writeset_sink, DUK_VARARGS);		// [on][this][writeset][func]
+			duk_call_method(ctx, 2); duk_pop(ctx);					// [fs][table][events]  .............................
+			duk_put_prop_index(ctx, -2, fd);						// [fs][table]
+		}
+		duk_get_prop_index(ctx, -1, fd);							// [fs][table][events]
+		duk_push_object(ctx);										// [fs][table][events][pending]
+		if (duk_is_object(ctx, cbx + 1)) { duk_dup(ctx, cbx + 1); duk_put_prop_string(ctx, -2, "opt"); }
+		duk_dup(ctx, 1);											// [fs][table][events][pending][buffer]
+		duk_buffer_slice(ctx, -1, offset + length, length - offset);// [fs][table][events][pending][buffer][sliced]
+		duk_dup(ctx, -1);											// [fs][table][events][pending][buffer][sliced][dup]
+		duk_put_prop_string(ctx, -4, "buffer");						// [fs][table][events][pending][buffer][sliced]
+		duk_put_prop_string(ctx, -3, "original");					// [fs][table][events][pending][buffer]
+		duk_pop(ctx);												// [fs][table][events][pending]
+		duk_dup(ctx, cbx); duk_put_prop_string(ctx, -2, "callback");// [fs][table][events][pending]
+		duk_put_prop_string(ctx, -2, FS_EVENT_DESCRIPTORS_IO);		// [fs][table][events]
+		return(0);
+	}
+
+	// ERROR
+	duk_require_function(ctx, cbx);							// [func]
+	duk_push_this(ctx);										// [func][this]
+	duk_push_int(ctx, e);									// [func][this][ERR]
+	duk_push_int(ctx, bytesWritten);						// [func][this][ERR][bytesWritten]
+	duk_dup(ctx, 1);										// [func][this][ERR][bytesWritten][buffer]
+	duk_dup(ctx, cbx + 1);									// [func][this][ERR][bytesWritten][buffer][options]
+	duk_call_method(ctx, 4);
 	return(0);
 }
 duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
@@ -416,21 +586,24 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 
 	// First, we'll attempt to read, and see if it completes or is pending
 	duk_size_t bufferLen;
-	char *buffer = Duktape_GetBufferProperty(ctx, 1, "buffer");
+	char *buffer = Duktape_GetBufferPropertyEx(ctx, 1, "buffer", &bufferLen);
 	duk_size_t offset = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "offset", 0);
 	duk_size_t length = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "length", (int)bufferLen);
+#ifdef WIN32
+	int bytesRead = _read(fd, buffer + offset, (unsigned int)length);
+#else
 	int bytesRead = read(fd, buffer + offset, length);
-	if (bytesRead >= 0 || (errno != E_AGAIN && errno != E_WOULDBLOCK))
+#endif
+	if (bytesRead >= 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR))
 	{
 		// Completed
 		int errStatus = bytesRead >= 0 ? 0 : errno;
 		duk_dup(ctx, 2);										// [func]
-		duk_get_prop_string(ctx, -1, "call");					// [func][call]
-		duk_swap_top(ctx, -2);									// [call][this]
-		duk_push_this(ctx);										// [call][this][this/fs]
-		duk_push_int(ctx, errStatus);							// [call][this][this/fs][err/status]
-		duk_push_int(ctx, bytesRead);							// [call][this][this/fs][err/status][bytesRead]
-		duk_get_prop_string(ctx, 1, "buffer");					// [call][this][this/fs][err/status][bytesRead][buffer]
+		duk_push_this(ctx);										// [func][this]
+		duk_push_int(ctx, errStatus);							// [func][this][err/status]
+		duk_push_int(ctx, bytesRead);							// [func][this][err/status][bytesRead]
+		duk_get_prop_string(ctx, 1, "buffer");					// [func][this][err/status][bytesRead][buffer]
+		duk_dup(ctx, 3);										// [func][this][err/status][bytesRead][buffer][options]
 		duk_call_method(ctx, 4);
 		return(0);
 	}
@@ -1830,6 +2003,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "readSync", ILibDuktape_fs_readSync, 5);
 	ILibDuktape_CreateInstanceMethod(ctx, "writeSync", ILibDuktape_fs_writeSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "read", ILibDuktape_fs_read, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "write", ILibDuktape_fs_write, DUK_VARARGS);
 #ifdef WIN32
 	ILibDuktape_CreateInstanceMethod(ctx, "_readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "_statSync", ILibDuktape_fs_statSync, 1);
