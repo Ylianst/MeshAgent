@@ -1503,14 +1503,25 @@ ILibTransport_DoneState ILibDuktape_Stream_Writable_WriteSink(struct ILibDuktape
 	void *h;
 	ILibTransport_DoneState retVal = ILibTransport_DoneState_INCOMPLETE;
 	duk_push_this(stream->ctx);																		// [writable]
+	int bufmode = Duktape_GetIntPropertyValue(stream->ctx, -1, "bufferMode", 0);
 	duk_get_prop_string(stream->ctx, -1, "_write");													// [writable][_write]
 	duk_swap_top(stream->ctx, -2);																	// [_write][this]
 	if (stream->Reserved == 0)
 	{
-		duk_push_external_buffer(stream->ctx);														// [_write][this][extBuffer]
-		duk_config_buffer(stream->ctx, -1, buffer, (duk_size_t)bufferLen);
+		if (bufmode == 0)
+		{
+			// Legacy Mode. We use an external buffer, so a memcpy does not occur. JS must copy memory if it needs to save it
+			duk_push_external_buffer(stream->ctx);													// [_write][this][extBuffer]
+			duk_config_buffer(stream->ctx, -1, buffer, (duk_size_t)bufferLen);
+		}
+		else
+		{
+			// Compliant Mode. We copy the buffer into a buffer that will be wholly owned by the recipient
+			char *cb = (char*)duk_push_fixed_buffer(stream->ctx, (duk_size_t)bufferLen);			// [_write][this][extBuffer]
+			memcpy_s(cb, (size_t)bufferLen, buffer, (size_t)bufferLen);
+		}
 		duk_push_buffer_object(stream->ctx, -1, 0, (duk_size_t)bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [_write][this][extBuffer][buffer]
-		duk_remove(stream->ctx, -2);																// [_write][this][buffer]
+		duk_remove(stream->ctx, -2);																// [_write][this][buffer]	
 	}
 	else
 	{
