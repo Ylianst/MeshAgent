@@ -562,7 +562,7 @@ function serviceManager()
                 // 64 bit Windows
                 if (this.GM.PointerSize == 4)
                 {
-                    return process.env['ProgramFiles(x86)'];    // 32 Bit App
+                    return (process.env['ProgramFiles(x86)'] ? process.env['ProgramFiles(x86)'] : process.env['ProgramFiles']);
                 } 
                 return process.env['ProgramFiles'];             // 64 bit App
             }
