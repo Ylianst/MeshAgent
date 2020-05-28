@@ -1013,6 +1013,12 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 		ILibChain_WaitHandle_DestroySavedState(winIPC->mChain, winIPC->reservedState);
 		winIPC->reservedState = NULL;
 	}
+	else
+	{
+		// We probably aren't paused, so we need to remove our wait handles
+		if (winIPC->read_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandle(winIPC->mChain, winIPC->read_overlapped.hEvent); }
+		if (winIPC->write_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandle(winIPC->mChain, winIPC->write_overlapped.hEvent); }
+	}
 	if (winIPC->mPipeHandle != NULL) 
 	{
 		if (winIPC->mServer != NULL) { DisconnectNamedPipe(winIPC->mPipeHandle); }
@@ -1264,8 +1270,10 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			return(ILibDuktape_Error(ctx, "Error Creating Named Pipe: %s", ipc));
 		}
 		//printf("ConnectNamedPipe(%s)\n", ipc);
+		duk_push_sprintf(ctx, "net.ipcServer [listen: %s]", ipc);
 		ConnectNamedPipe(winIPC->mPipeHandle, &winIPC->overlapped);
-		ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC, "net.ipcServer [listen]");
+		ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC, (char*)duk_get_string(ctx, -1));
+		duk_pop(ctx);
 
 		if (pIPC_SA != NULL) { LocalFree(IPC_ACL); }
 		return(1);
