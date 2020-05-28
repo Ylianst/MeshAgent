@@ -568,7 +568,7 @@ function heci_create()
     };
     ret._processRead = function _processRead()
     {
-        require('fs').read(this._descriptor, { metadata: 'heci.session', buffer: this._readbuffer, session: this }, _processRead_readSet_sink);
+        require('fs').read(this._descriptor, { metadata: 'heci.session', buffer: this._readbuffer, session: this }, this._processRead_readSet_sink);
     };
     return (ret);
 }
