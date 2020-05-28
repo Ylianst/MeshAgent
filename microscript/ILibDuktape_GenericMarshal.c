@@ -33,11 +33,7 @@ limitations under the License.
 #include <pthread.h>
 #endif
 
-#if defined(_WIN64) || defined(__LP64__)
-	typedef uint_fast64_t PTRSIZE;
-#else
-	typedef uint_fast32_t PTRSIZE;
-#endif
+typedef uintptr_t PTRSIZE;
 
 #ifdef WIN32
 #define APICALLTYPE __stdcall
@@ -1209,7 +1205,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync(duk_context *ctx)
 		}
 		else if (duk_is_number(ctx, i))
 		{
-			data->vars[i] = (PTRSIZE)duk_require_int(ctx, i);
+			data->vars[i] = (uintptr_t)(duk_require_uint(ctx, i) == 0 ? duk_require_int(ctx, i) : duk_require_uint(ctx, i));
 		}
 		else if (duk_is_pointer(ctx, i))
 		{
@@ -1320,7 +1316,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 		}
 		else if (duk_is_number(ctx, i))
 		{
-			vars[i] = (PTRSIZE)duk_require_int(ctx, i);
+			vars[i] = (uintptr_t)(duk_require_uint(ctx, i) == 0 ? duk_require_int(ctx, i) : duk_require_uint(ctx, i));
 		}
 		else if (duk_is_pointer(ctx, i))
 		{

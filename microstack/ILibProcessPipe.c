@@ -184,7 +184,6 @@ char * ILibProcessPipe_Manager_OnQuery(void *chain, void *object, int fd, size_t
 {
 	ILibProcessPipe_Manager_Object *man = (ILibProcessPipe_Manager_Object*)object;
 	char *ret = ((ILibChain_Link*)object)->MetaData;
-	int i;
 	*dataLen = strnlen_s(((ILibChain_Link*)object)->MetaData, 1024);
 
 	void  *node = ILibLinkedList_GetNode_Search(man->ActivePipes, ILibProcessPipe_Manager_OnQuery_comparer, (void*)(uintptr_t)fd);

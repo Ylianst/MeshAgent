@@ -122,6 +122,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 #define ILibDuktape_SERVER2LISTENOPTIONS		"\xFF_ServerToListenOptions"
 #define ILibDuktape_TLSSocket2SecureContext		"\xFF_TLSSocket2SecureContext"
 #define ILibDuktape_IPAddress_SockAddr			"\xFF_IPAddress_SockAddr"
+#define ILibDuktape_net_server_metadata			"\xFF_net_server_metadata"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
@@ -1012,6 +1013,12 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 		ILibChain_WaitHandle_DestroySavedState(winIPC->mChain, winIPC->reservedState);
 		winIPC->reservedState = NULL;
 	}
+	else
+	{
+		// We probably aren't paused, so we need to remove our wait handles
+		if (winIPC->read_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandle(winIPC->mChain, winIPC->read_overlapped.hEvent); }
+		if (winIPC->write_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandle(winIPC->mChain, winIPC->write_overlapped.hEvent); }
+	}
 	if (winIPC->mPipeHandle != NULL) 
 	{
 		if (winIPC->mServer != NULL) { DisconnectNamedPipe(winIPC->mPipeHandle); }
@@ -1263,8 +1270,10 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			return(ILibDuktape_Error(ctx, "Error Creating Named Pipe: %s", ipc));
 		}
 		//printf("ConnectNamedPipe(%s)\n", ipc);
+		duk_push_sprintf(ctx, "net.ipcServer [listen: %s]", ipc);
 		ConnectNamedPipe(winIPC->mPipeHandle, &winIPC->overlapped);
-		ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC, "net.ipcServer [listen]");
+		ILibChain_AddWaitHandleEx(duk_ctx_chain(ctx), winIPC->overlapped.hEvent, -1, ILibDuktape_net_server_IPC_ConnectSink, winIPC, (char*)duk_get_string(ctx, -1));
+		duk_pop(ctx);
 
 		if (pIPC_SA != NULL) { LocalFree(IPC_ACL); }
 		return(1);
@@ -1326,7 +1335,21 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 #endif
 
 	duk_push_this(ctx);
-	if (server->server != NULL) { ILibChain_Link_SetMetadata(server->server, Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "net.Server")); }
+	if (server->server != NULL)
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_OBJID);					// [server][str]
+		if (duk_has_prop_string(ctx, -2, ILibDuktape_net_server_metadata))
+		{
+			duk_push_string(ctx, ", ");										// [server][str][newVal]
+			duk_string_concat(ctx, -2);	duk_remove(ctx, -2);				// [server][str]
+			duk_get_prop_string(ctx, -2, ILibDuktape_net_server_metadata);	// [server][str][metadata]
+			duk_string_concat(ctx, -2); duk_remove(ctx, -2);				// [server][metadata]
+			duk_dup(ctx, -1);												// [server][metadata][clone]
+			duk_put_prop_string(ctx, -3, ILibDuktape_net_server_metadata);	// [server][metadata]
+		}
+		ILibChain_Link_SetMetadata(server->server, (char*)duk_get_string(ctx, -1));
+		duk_pop(ctx);
+	}
 
 	return 1;
 }
@@ -1465,6 +1488,11 @@ duk_ret_t ILibDuktape_net_createServer_metadata(duk_context *ctx)
 		char *tmp2 = (char*)ILibMemory_SmartAllocate(duk_get_length(ctx, -1) + 1);
 		memcpy_s(tmp2, ILibMemory_Size(tmp2), tmp, ILibMemory_Size(tmp2) - 1);
 		ILibChain_Link_SetMetadata(server->server, tmp2);
+	}
+	else
+	{
+		duk_dup(ctx, 0);												// [server][string]
+		duk_put_prop_string(ctx, -2, ILibDuktape_net_server_metadata);
 	}
 
 	return(0);

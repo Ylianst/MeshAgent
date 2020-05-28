@@ -170,7 +170,8 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	}
 
 	duk_push_this(ctx);									// [spawnedProcess]
-	char *_target = Duktape_GetStringPropertyValue(ctx, -1, "_target", NULL);
+	//char *_target = Duktape_GetStringPropertyValue(ctx, -1, "_target", NULL);
+
 	if (!ILibChain_IsLinkAlive(Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager)))
 	{
 		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));

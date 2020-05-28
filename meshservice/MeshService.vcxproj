@@ -573,7 +573,6 @@
     <ClCompile Include="..\microscript\ILibduktape_EventEmitter.c" />
     <ClCompile Include="..\microscript\ILibDuktape_fs.c" />
     <ClCompile Include="..\microscript\ILibDuktape_GenericMarshal.c" />
-    <ClCompile Include="..\microscript\ILibDuktape_HECI.c" />
     <ClCompile Include="..\microscript\ILibDuktape_Helpers.c" />
     <ClCompile Include="..\microscript\ILibDuktape_HttpStream.c" />
     <ClCompile Include="..\microscript\ILibDuktape_MemoryStream.c" />
@@ -625,7 +624,6 @@
     <ClInclude Include="..\microscript\ILibDuktape_EventEmitter.h" />
     <ClInclude Include="..\microscript\ILibDuktape_fs.h" />
     <ClInclude Include="..\microscript\ILibDuktape_GenericMarshal.h" />
-    <ClInclude Include="..\microscript\ILibDuktape_HECI.h" />
     <ClInclude Include="..\microscript\ILibDuktape_Helpers.h" />
     <ClInclude Include="..\microscript\ILibDuktape_net.h" />
     <ClInclude Include="..\microscript\ILibDuktape_NetworkMonitor.h" />
