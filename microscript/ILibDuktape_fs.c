@@ -478,10 +478,15 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferLen);
 	int cbx = 2;
 	int offset = 0, length = (int)bufferLen, e;
-	int position = -1;
+	//int position = -1;
+	
 	if (duk_is_number(ctx, 2)) { offset = (int)duk_require_int(ctx, 2); cbx++; }
 	if (duk_is_number(ctx, 3)) { length = (int)duk_require_int(ctx, 3); cbx++; }
-	if (duk_is_number(ctx, 4)) { position = (int)duk_require_int(ctx, 4); cbx++; }
+	if (duk_is_number(ctx, 4)) 
+	{
+		//position = (int)duk_require_int(ctx, 4);
+		cbx++;
+	}
 	if (!duk_is_function(ctx, cbx)) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
 
 #ifdef WIN32
