@@ -197,13 +197,16 @@ function heci_create()
                 }
                 Object.defineProperty(this, "MaxBufferSize", { value: buffer.readUInt32LE() });
                 this._options = opt;
-                this._readoverlapped = GM.CreateVariable(GM.PointerSize == 8 ? 32 : 20);
-                this._writeoverlapped = GM.CreateVariable(GM.PointerSize == 8 ? 32 : 20);
-                this._readoverlapped.hEvent = kernel32.CreateEventA(0, 1, 0, 0);
-                this._writeoverlapped.hEvent = kernel32.CreateEventA(0, 1, 0, 0);
-                this._readoverlapped.hEvent.pointerBuffer().copy(this._readoverlapped.Deref(GM.PointerSize == 8 ? 24 : 16, GM.PointerSize).toBuffer());
-                this._writeoverlapped.hEvent.pointerBuffer().copy(this._writeoverlapped.Deref(GM.PointerSize == 8 ? 24 : 16, GM.PointerSize).toBuffer());
-                
+
+                if (process.platform == 'win32')
+                {
+                    this._readoverlapped = GM.CreateVariable(GM.PointerSize == 8 ? 32 : 20);
+                    this._writeoverlapped = GM.CreateVariable(GM.PointerSize == 8 ? 32 : 20);
+                    this._readoverlapped.hEvent = kernel32.CreateEventA(0, 1, 0, 0);
+                    this._writeoverlapped.hEvent = kernel32.CreateEventA(0, 1, 0, 0);
+                    this._readoverlapped.hEvent.pointerBuffer().copy(this._readoverlapped.Deref(GM.PointerSize == 8 ? 24 : 16, GM.PointerSize).toBuffer());
+                    this._writeoverlapped.hEvent.pointerBuffer().copy(this._writeoverlapped.Deref(GM.PointerSize == 8 ? 24 : 16, GM.PointerSize).toBuffer());
+                }
                 console.log('Connected, buffer size: ' + this.MaxBufferSize);
                 this._read(this.MaxBufferSize);
                 this.emit('connect');
