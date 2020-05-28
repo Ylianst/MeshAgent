@@ -488,7 +488,8 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	if (bytesWritten == length)
 	{
 		// Completed
-		duk_require_function(ctx, cbx);							// [func]
+		duk_require_function(ctx, cbx);							
+		duk_dup(ctx, cbx);										// [func]
 		duk_push_this(ctx);										// [func][this]
 		duk_push_int(ctx, 0);									// [func][this][ERR]
 		duk_push_int(ctx, bytesWritten);						// [func][this][ERR][bytesWritten]
@@ -542,7 +543,8 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	}
 
 	// ERROR
-	duk_require_function(ctx, cbx);							// [func]
+	duk_require_function(ctx, cbx);							
+	duk_dup(ctx, cbx);										// [func]
 	duk_push_this(ctx);										// [func][this]
 	duk_push_int(ctx, e);									// [func][this][ERR]
 	duk_push_int(ctx, bytesWritten);						// [func][this][ERR][bytesWritten]
@@ -554,7 +556,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 {
 	int top = duk_get_top(ctx);
-	if (top > 2)
+	if (top > 2 && (!duk_is_function(ctx, 2)))
 	{
 		// Simplify flow, by converting to an options object
 		duk_push_this(ctx);										// [fs]
@@ -644,7 +646,7 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		ILibDuktape_EventEmitter_SetupOn(ctx, duk_get_heapptr(ctx, -1), "readset");	// ........[on][this][readset]
 		duk_push_c_function(ctx, ILibDuktape_fs_read_readsetSink, DUK_VARARGS);		// ........[on][this][readset][func]
 		duk_call_method(ctx, 2); duk_pop(ctx);					// [fs][table][descriptorEvent]
-		duk_push_array(ctx); duk_put_prop_string(ctx, -1, FS_EVENT_DESCRIPTORS_IO);
+		duk_push_array(ctx); duk_put_prop_string(ctx, -2, FS_EVENT_DESCRIPTORS_IO);
 		duk_put_prop_index(ctx, -2, fd);						// [fs][table]
 	}
 	duk_get_prop_index(ctx, -1, fd);							// [fs][table][desriptorEvent]
