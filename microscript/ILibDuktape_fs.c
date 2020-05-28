@@ -298,14 +298,22 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	}
 	int flags = (int)duk_require_int(ctx, 1);
 #ifdef WIN32
-	int fd = -1; 
+	int fd = -1;
 	if (_wsopen_s(&fd, (wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), flags, 0, 0) != 0)
 	{
 		return(ILibDuktape_Error(ctx, "openSync() Error: %d ", errno));
 	}
 	duk_push_int(ctx, fd);
 #else
-	duk_push_int(ctx, open(path, flags));
+	int fd = open(path, flags);
+	duk_push_int(ctx, fd);
+#ifdef _POSIX
+	if (fd >= 0 && (flags & O_NONBLOCK) == O_NONBLOCK)
+	{
+		flags = fcntl(fd, F_GETFL, 0);
+		fcntl(fd, F_SETFL, O_NONBLOCK | flags);
+	}
+#endif
 #endif
 	return(1);
 }
