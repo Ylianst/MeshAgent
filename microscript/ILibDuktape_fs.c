@@ -22,6 +22,7 @@ limitations under the License.
 #include <direct.h>
 #include <wchar.h>
 #include <io.h>
+#include <fcntl.h>
 #endif
 
 #include "microstack/ILibParsers.h"
@@ -2038,6 +2039,18 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "mkdirSync", ILibDuktape_fs_mkdirSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "rmdirSync", ILibDuktape_fs_rmdirSync, 1);
 
+	duk_push_object(ctx);
+#ifdef WIN32
+	duk_push_int(ctx, _O_RDONLY); duk_put_prop_string(ctx, -2, "O_RDONLY");
+	duk_push_int(ctx, _O_WRONLY); duk_put_prop_string(ctx, -2, "O_WRONLY");
+	duk_push_int(ctx, _O_RDWR); duk_put_prop_string(ctx, -2, "O_RDWR");
+#else
+	duk_push_int(ctx, O_RDONLY); duk_put_prop_string(ctx, -2, "O_RDONLY");
+	duk_push_int(ctx, O_WRONLY); duk_put_prop_string(ctx, -2, "O_WRONLY");
+	duk_push_int(ctx, O_RDWR); duk_put_prop_string(ctx, -2, "O_RDWR");
+	duk_push_int(ctx, O_NONBLOCK); duk_put_prop_string(ctx, -2, "O_NONBLOCK");
+#endif
+	duk_put_prop_string(ctx, -2, "constants");
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_Finalizer);
 
@@ -2061,7 +2074,6 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 							}\
 							ds.on('close', function onCopyFileDone(){delete this.ss.fs._copyStreams[this.ss.id];});\
 						};\
-						exports.constants = {O_RDONLY: 0, O_WRONLY: 1, O_RDWR: 4, O_NONBLOCK: 2048};\
 						exports.copyFileSync = function copyFileSync(src, dest)\
 						{\
 							var buffer = this.readFileSync(src, {flags: 'rb'});\
