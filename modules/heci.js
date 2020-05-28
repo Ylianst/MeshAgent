@@ -299,59 +299,69 @@ function heci_create()
     {
         // Clean up all Handles and Descriptors
         console.log('DISCONNECT on ' + this._hashCode());
-
-
-        //
-        // doIoctl() 
-        //
-        if (this._descriptorEvent)
+        if (process.platform == 'linux')
         {
-            if (this._overlapped) { require('DescriptorEvents').removeDescriptor(this._overlapped.hEvent); }
-            this._descriptorEvent = null;
-        }
-        if (this._overlapped)
-        {
-            kernel32.CloseHandle(this._overlapped.hEvent);
-            this._overlapped = null;
+            if(this._descriptor != null)
+            {
+                require('DescriptorEvents').removeDescriptor(this._descriptor);
+                require('fs').closeSync(this._descriptor);
+                this._descriptor = null;
+            }
         }
 
-        //
-        // Read
-        //
-        if (this._rDescriptorEvent)
+        if (process.platform == 'win32')
         {
-            if (this._readoverlapped) { require('DescriptorEvents').removeDescriptor(this._readoverlapped.hEvent); }
-            this._rDescriptorEvent = null;
-        }
-        if (this._readoverlapped)
-        {
-            kernel32.CloseHandle(this._readoverlapped.hEvent);
-            this._readoverlapped = null;
-        }
+            //
+            // doIoctl() 
+            //
+            if (this._descriptorEvent)
+            {
+                if (this._overlapped) { require('DescriptorEvents').removeDescriptor(this._overlapped.hEvent); }
+                this._descriptorEvent = null;
+            }
+            if (this._overlapped)
+            {
+                kernel32.CloseHandle(this._overlapped.hEvent);
+                this._overlapped = null;
+            }
 
-        //
-        // Write
-        //
-        if (this._wDescriptorEvent)
-        {
-            if (this._writeoverlapped) { require('DescriptorEvents').removeDescriptor(this._writeoverlapped.hEvent); }
-            this._wDescriptorEvent = null;
-        }
-        if (this._writeoverlapped)
-        {
-            kernel32.CloseHandle(this._writeoverlapped.hEvent);
-            this._writeoverlapped = null;
-        }
+            //
+            // Read
+            //
+            if (this._rDescriptorEvent)
+            {
+                if (this._readoverlapped) { require('DescriptorEvents').removeDescriptor(this._readoverlapped.hEvent); }
+                this._rDescriptorEvent = null;
+            }
+            if (this._readoverlapped)
+            {
+                kernel32.CloseHandle(this._readoverlapped.hEvent);
+                this._readoverlapped = null;
+            }
 
-        //
-        // HECI
-        //
-        if (this._descriptor)
-        {
-            kernel32.CloseHandle(this._descriptor);
-            this._descriptor = null;
-        }
+            //
+            // Write
+            //
+            if (this._wDescriptorEvent)
+            {
+                if (this._writeoverlapped) { require('DescriptorEvents').removeDescriptor(this._writeoverlapped.hEvent); }
+                this._wDescriptorEvent = null;
+            }
+            if (this._writeoverlapped)
+            {
+                kernel32.CloseHandle(this._writeoverlapped.hEvent);
+                this._writeoverlapped = null;
+            }
 
+            //
+            // HECI
+            //
+            if (this._descriptor)
+            {
+                kernel32.CloseHandle(this._descriptor);
+                this._descriptor = null;
+            }
+        }
     };
     ret.doIoctl = function doIoctl(code, inputBuffer, outputBuffer, callback)
     {
@@ -470,7 +480,7 @@ function heci_create()
             }
         }
 
-        require('fs').write(this._descriptor, chunk.buffer, ret._processWrite_linux_signaled, { metadata: 'heci.session', session: this });
+        require('fs').write(this._descriptor, chunk.buffer, this._processWrite_linux_signaled, { metadata: 'heci.session', session: this });
     };
     ret._processWrite_linux_signaled = function _processWrite_linux_signaled(status, bytesWritten, buffer, options)
     {
@@ -550,19 +560,8 @@ function heci_create()
         {
             // We can read more, because data is still flowing
             console.log('READING MORE on ' + options.session._hashCode());
-            var result = kernel32.ReadFile(this.session._descriptor, this.session._readbuffer, this.session._readbuffer._size, 0, this.session._readoverlapped);
-            if (result.Val != 0 || result._LastError == ERROR_IO_PENDING)
-            {
-                options.session._processRead();
-                return (true);
-            }
-            else
-            {
-                console.log('Sometype of error: ' + result._LastError);
-                this.session.push(null);
-            }
+            options.session._processRead();
         }
-
     };
     ret._processRead = function _processRead()
     {

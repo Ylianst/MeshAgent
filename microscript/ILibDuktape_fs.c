@@ -373,12 +373,14 @@ duk_ret_t ILibDuktape_fs_read_readsetSink(duk_context *ctx)
 	duk_pop_2(ctx);											// [DescriptorEvents][pending]
 	if (duk_get_length(ctx, -1) == 0)
 	{
-		// No more pending I/O operations, so we can cleanup the DescriptorEvents
+		// No more pending read I/O operations, so we can cleanup the DescriptorEvents
 		duk_eval_string(ctx, "require('DescriptorEvents');");	// .....[DescriptorEvents]
 		duk_get_prop_string(ctx, -1, "removeDescriptor");		// .....[DescriptorEvents][removeDescriptor]
 		duk_swap_top(ctx, -2);									// .....[removeDescriptor][this]
 		duk_push_int(ctx, fd);									// .....[removeDescriptor][this][fd]
-		duk_pcall_method(ctx, 1); duk_pop(ctx);				// [DescriptorEvents][pending]
+		duk_push_object(ctx);									// .....[removeDescriptor][this][fd][options]
+		duk_push_true(ctx); duk_put_prop_string(ctx, -2, "readset");//..[removeDescriptor][this][fd][options]
+		duk_pcall_method(ctx, 2); duk_pop(ctx);				// [DescriptorEvents][pending]
 
 		duk_eval_string(ctx, "require('fs');");				// [DescriptorEvents][pending][FS]
 		duk_get_prop_string(ctx, -1,FS_EVENT_R_DESCRIPTORS);// [DescriptorEvents][pending][FS][table]
@@ -463,7 +465,9 @@ duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, "removeDescriptor");		// ... [eventdescriptors][remove]
 		duk_swap_top(ctx, -2);									// ... [remove][this]
 		duk_push_int(ctx, fd);									// ... [remove][this][fd]
-		duk_call_method(ctx, 1);								// ... [ret]
+		duk_push_object(ctx);									// ... [remove][this][fd][options]
+		duk_push_true(ctx); duk_put_prop_string(ctx, -2, "writeset");//[remove][this][fd][options]
+		duk_call_method(ctx, 2);								// ... [ret]
 	}
 	return(0);
 }

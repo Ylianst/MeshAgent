@@ -2515,7 +2515,29 @@ duk_ret_t ILibDuktape_DescriptorEvents_Remove(duk_context *ctx)
 	duk_push_this(ctx);													// [obj]
 	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);	// [obj][table]
 	duk_dup(ctx, 0);													// [obj][table][key]
-	duk_del_prop(ctx, -2);												// [obj][table]
+	if (!duk_is_null_or_undefined(ctx, 1) && duk_is_object(ctx, 1))
+	{
+		duk_get_prop(ctx, -2);											// [obj][table][value]
+		if (duk_is_null_or_undefined(ctx, -1)) { return(0); }
+		duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Options);	//..[table][value][options]
+		if (duk_has_prop_string(ctx, 1, "readset")) { duk_push_false(ctx); duk_put_prop_string(ctx, -2, "readset"); }
+		if (duk_has_prop_string(ctx, 1, "writeset")) { duk_push_false(ctx); duk_put_prop_string(ctx, -2, "writeset"); }
+		if (duk_has_prop_string(ctx, 1, "errorset")) { duk_push_false(ctx); duk_put_prop_string(ctx, -2, "errorset"); }
+		if(	Duktape_GetBooleanProperty(ctx, -1, "readset", 0)	== 0 && 
+			Duktape_GetBooleanProperty(ctx, -1, "writeset", 0)	== 0 &&
+			Duktape_GetBooleanProperty(ctx, -1, "errorset", 0)	== 0)
+		{
+			// No FD_SET watchers, so we can remove the entire object
+			duk_pop_2(ctx);												// [obj][table]
+			duk_dup(ctx, 0);											// [obj][table][key]
+			duk_del_prop(ctx, -2);										// [obj][table]
+		}
+	}
+	else
+	{
+		// Remove All FD_SET watchers for this FD
+		duk_del_prop(ctx, -2);											// [obj][table]
+	}
 	return(0);
 }
 #ifdef WIN32
@@ -2616,6 +2638,20 @@ duk_ret_t ILibDuktape_DescriptorEvents_Add(duk_context *ctx)
 
 	duk_push_this(ctx);													// [obj]
 	duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Table);	// [obj][table]
+	duk_dup(ctx, 0);													// [obj][table][key]
+	if (duk_has_prop(ctx, -2))											// [obj][table]
+	{
+		// There's already a watcher, so let's just merge the FD_SETS
+		duk_dup(ctx, 0);												// [obj][table][key]
+		duk_get_prop(ctx, -2);											// [obj][table][value]
+		duk_get_prop_string(ctx, -1, ILibDuktape_DescriptorEvents_Options);	//..[table][value][options]
+		if (Duktape_GetBooleanProperty(ctx, 1, "readset", 0) != 0) { duk_push_true(ctx); duk_put_prop_string(ctx, -2, "readset"); }
+		if (Duktape_GetBooleanProperty(ctx, 1, "writeset", 0) != 0) { duk_push_true(ctx); duk_put_prop_string(ctx, -2, "writeset"); }
+		if (Duktape_GetBooleanProperty(ctx, 1, "errorset", 0) != 0) { duk_push_true(ctx); duk_put_prop_string(ctx, -2, "errorset"); }
+		duk_pop(ctx);													// [obj][table][value]
+		return(1);
+	}
+
 	duk_push_object(ctx);												// [obj][table][value]
 	duk_dup(ctx, 0);													// [obj][table][value][key]
 	duk_dup(ctx, -2);													// [obj][table][value][key][value]
@@ -2745,7 +2781,7 @@ void ILibDuktape_DescriptorEvents_Push(duk_context *ctx, void *chain)
 	((void**)link->ExtraMemoryPtr)[0] = ctx;
 	((void**)link->ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);
 	ILibDuktape_CreateInstanceMethod(ctx, "addDescriptor", ILibDuktape_DescriptorEvents_Add, 2);
-	ILibDuktape_CreateInstanceMethod(ctx, "removeDescriptor", ILibDuktape_DescriptorEvents_Remove, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "removeDescriptor", ILibDuktape_DescriptorEvents_Remove, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "getDescriptorCount", ILibDuktape_DescriptorEvents_GetCount, 0);
 
 	ILibAddToChain(chain, link);
