@@ -72,7 +72,6 @@ limitations under the License.
 #include "ILibDuktape_SHA256.h"
 #include "ILibDuktape_EncryptionStream.h"
 #include "ILibDuktape_ChildProcess.h"
-#include "ILibDuktape_HECI.h"
 #include "ILibDuktape_Debugger.h"
 #include "ILibDuktape_Commit.h"
 
@@ -2377,9 +2376,6 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	if ((securityFlags & SCRIPT_ENGINE_NO_PROCESS_SPAWNING) == 0) 
 	{ 
 		ILibDuktape_ChildProcess_Init(ctx); 
-#ifndef _NOHECI
-		ILibDuktape_HECI_Init(ctx); 
-#endif
 	}
 	if ((securityFlags & SCRIPT_ENGINE_NO_FILE_SYSTEM_ACCESS) == 0) { ILibDuktape_fs_init(ctx); }
 

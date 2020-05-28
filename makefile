@@ -118,7 +118,7 @@ SOURCES += microscript/ILibDuktape_SimpleDataStore.c microscript/ILibDuktape_Gen
 SOURCES += microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c
 SOURCES += microscript/ILibDuktape_ScriptContainer.c microscript/ILibDuktape_MemoryStream.c microscript/ILibDuktape_NetworkMonitor.c
-SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HECI.c microscript/ILibDuktape_HttpStream.c microscript/ILibDuktape_Debugger.c
+SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HttpStream.c microscript/ILibDuktape_Debugger.c
 SOURCES += $(ADDITIONALSOURCES)
 
 # Mesh Agent core

@@ -563,6 +563,7 @@ function heci_create()
         if (this._descriptor == null) { return; }
         require('fs').read(this._descriptor, { metadata: 'heci.session', buffer: this._readbuffer, session: this }, this._processRead_readSet_sink);
     };
+    ret.once('~', function () { this.disconnect(); });
     return (ret);
 }
 

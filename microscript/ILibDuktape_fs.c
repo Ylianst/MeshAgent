@@ -473,7 +473,6 @@ duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 {
-	int top = duk_get_top(ctx);
 	int fd = (int)duk_require_int(ctx, 0);
 	duk_size_t bufferLen;
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferLen);
@@ -1419,7 +1418,6 @@ duk_ret_t ILibDuktape_fs_watcher_finalizer(duk_context *ctx)
 void ILibDuktape_fs_notifyDispatcher_QueryEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)Data;
-	int fd = (int)(uintptr_t)Key1;
 	duk_push_heapptr(data->ctx, user);					// [array]
 	duk_push_heapptr(data->ctx, data->object);			// [array][watcher]
 	duk_get_prop_string(data->ctx, -1, FS_WATCH_PATH);	// [array][watcher][path]
