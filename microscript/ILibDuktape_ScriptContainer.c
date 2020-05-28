@@ -1501,7 +1501,14 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 			if (result)
 			{
 				// We are 32 bit App running on 64 bit Windows
-				duk_push_string(ctx, "x64");
+				if (isWow)
+				{
+					duk_push_string(ctx, "x64");
+				}
+				else
+				{
+					duk_push_string(ctx, "ia32");
+				}
 			}
 			else
 			{
@@ -1528,7 +1535,19 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 	{
 		if (strcmp(u.machine, "x86_64") == 0)
 		{
+#if !defined(__APPLE__) && !defined(_FREEBSD)
+			duk_eval_string(ctx, "require('os')._longbit");
+			if (duk_get_int(ctx, -1) == 32)
+			{
+				duk_push_string(ctx, "ia32");
+			}
+			else
+			{
+				duk_push_string(ctx, "x64");
+			}
+#else
 			duk_push_string(ctx, "x64");
+#endif
 		}
 		else
 		{
@@ -1907,6 +1926,23 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			return ('');\
 		}\
 	};\
+	if(process.platform == 'linux')\
+	{\
+		Object.defineProperty(exports, '_longbit', {value: (function ()\
+		{\
+			var child = require('child_process').execFile('/bin/sh', ['sh']);\
+			child.stdout.str = ''; child.stdout.on('data', function(c) { this.str += c.toString(); });\
+			child.stderr.str = ''; child.stderr.on('data', function(c) { this.str += c.toString(); });\
+			child.stdin.write('getconf LONG_BIT\\nexit\\n');\
+			child.waitExit();\
+			try\
+			{\
+				return(parseInt(child.stdout.str.trim()));\
+			}\
+			catch(ee)\
+			{return(0);}\
+		})() });\
+	}\
 	exports.getArpCache = function getArpCache()\
 	{\
 		if(process.platform == 'darwin')\
