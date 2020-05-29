@@ -807,6 +807,7 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 {
 	ILibDuktape_net_server *ptr = (ILibDuktape_net_server*)((void**)ILibMemory_GetExtraMemory(AsyncServerSocketModule, ILibMemory_ASYNCSERVERSOCKET_CONTAINERSIZE))[0];
 	ILibDuktape_net_server_session *session;
+	int isIPC = 0;
 #ifndef MICROSTACK_NOTLS
 	int isTLS = ILibAsyncSocket_IsUsingTls(ConnectionToken);
 #else
@@ -815,6 +816,14 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 	if (!ILibMemory_CanaryOK(ptr)) { return; }
 
 	duk_push_heapptr(ptr->ctx, ptr->self);																					// [server]
+	if (strcmp(Duktape_GetStringPropertyValue(ptr->ctx, -1, ILibDuktape_OBJID, ""), "net.ipcServer") == 0)
+	{
+		((ILibChain_Link*)ConnectionToken)->MetaData = "net.ipcServer.ipcSocketConnection";
+	}
+	else
+	{
+		((ILibChain_Link*)ConnectionToken)->MetaData = isTLS == 0 ? "net.serverSocketConnection" : "tls.serverSocketConnection";
+	}
 
 	duk_get_prop_string(ptr->ctx, -1, "emit");																				// [server][emit]
 	duk_swap_top(ptr->ctx, -2);																								// [emit][this]
