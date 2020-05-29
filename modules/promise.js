@@ -92,8 +92,23 @@ function Promise(promiseFunc)
                 args.push(arguments[a]);
             }
         }
-        _resolver._self.emit.apply(_resolver._self, args);
-        _resolver._self.emit('settled');
+        if (args.length == 2 && args[1]._ObjectID == 'promise')
+        {
+            args[1].then(function ()
+            {
+                var parms = ['resolved'];
+                for(var ai in arguments)
+                {
+                    parms.push(arguments[ai]);
+                }
+                this._XSLF.emit.apply(this._XSLF, parms);
+            }).parentPromise._XSLF = _resolver._self;
+        }
+        else
+        {
+            _resolver._self.emit.apply(_resolver._self, args);
+            _resolver._self.emit('settled');
+        }
     };
     this._internal.rejector = function _rejector()
     {
@@ -125,10 +140,6 @@ function Promise(promiseFunc)
         if (rejected)
         {
             this._internal.once('rejected', event_switcher(this, rejected).func);
-        }
-        else
-        {
-            this._internal.once('rejected', function (e) { process.emit('uncaughtException', 'promise.unhandledRejection: ' + e); });
         }
                       
         var retVal = new Promise(function (r, j) { });
