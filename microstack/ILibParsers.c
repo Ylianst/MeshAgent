@@ -3460,7 +3460,6 @@ void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_W
 			info->expiration.tv_usec += ((msTIMEOUT % 1000) * 1000);
 		}
 	}
-	ILibMemory_Free(metadata);
 }
 void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 {
