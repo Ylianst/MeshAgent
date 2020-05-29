@@ -1008,6 +1008,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h);
 	void ILibChain_WaitHandle_RestoreState(void *chain, void *state);
 	void ILibChain_WaitHandle_DestroySavedState(void *chain, void *state);
+	void* ILibChain_ReadAndSaveStateEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
 	BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h);
 
 	void ILibChain_WaitHandle_UpdateMetadata(void *chain, HANDLE h, char *metadata);

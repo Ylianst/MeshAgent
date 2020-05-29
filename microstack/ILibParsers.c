@@ -3346,6 +3346,27 @@ void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h)
 	}
 	return(ret);
 }
+void* ILibChain_ReadAndSaveStateEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
+{
+	int metaDataLen = (int)(metadata == NULL ? 0 : strnlen_s(metadata, 1024));
+	ILibChain_WaitHandleInfo *ret = (ILibChain_WaitHandleInfo*)ILibMemory_SmartAllocate(8 + metaDataLen + sizeof(ILibChain_WaitHandleInfo));
+	ILibChain_ReadEx_data *state = (ILibChain_ReadEx_data*)ILibMemory_SmartAllocate(sizeof(ILibChain_ReadEx_data));
+	BOOL r = ReadFile(h, buffer, bufferLen, NULL, p);
+	int e = GetLastError();
+
+	state->buffer = buffer;
+	state->p = p;
+	state->handler = handler;
+	state->fileHandle = h;
+	state->user = user;
+
+	ret->node = p->hEvent;
+	ret->user = state;
+	ret->handler = ILibChain_ReadEx_Sink;
+	sprintf_s(ret->metaData, metaDataLen + 8, "%s [READ]", metadata == NULL ? "" : metadata);
+	
+	return(ret);
+}
 void ILibChain_WaitHandle_RestoreState(void *chain, void *state)
 {
 	ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)state;

@@ -139,6 +139,7 @@ void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void
 void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, void *user);
 int ILibDuktape_net_server_IPC_unshiftSink(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user);
 duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx);
+BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
 #endif
 
 
@@ -416,6 +417,9 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		winIPC->mSocket = duk_get_heapptr(ctx, -1);
 		winIPC->mChain = duk_ctx_chain(ctx);
 		winIPC->paused = 1;
+		winIPC->metadata = "net.ipcSocket";
+		winIPC->bufferLength = ILibDuktape_net_IPC_BUFFERSIZE;
+		ILibMemory_ReallocateRaw(&(winIPC->buffer), ILibDuktape_net_IPC_BUFFERSIZE);
 
 		if ((winIPC->mPipeHandle = CreateFileA(path, GENERIC_READ | FILE_WRITE_DATA, 0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0)) == INVALID_HANDLE_VALUE)
 		{
@@ -429,6 +433,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 			winIPC->ds->readableStream->paused = 1;
 			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
 			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "end", ILibDuktape_net_socket_ipc_dataHookCallback);
+			winIPC->reservedState = ILibChain_ReadAndSaveStateEx(winIPC->mChain, winIPC->mPipeHandle, &(winIPC->read_overlapped), winIPC->buffer, winIPC->bufferLength, ILibDuktape_server_ipc_ReadSink, winIPC, winIPC->metadata);
 
 			if (onConnectSpecified == 0)
 			{
