@@ -77,6 +77,7 @@ function Toaster()
                     }
 
                     retVal.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], retVal.options);
+                    retVal.child.descriptorMetadata = 'toaster';
                     retVal.child.toast = retVal;
                     retVal.child.stdout.stdin = retVal.child.stdin;
                     retVal.child.stderr.stdin = retVal.child.stdin;
@@ -133,7 +134,7 @@ function Toaster()
                                 retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
                                 retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
                             }
-
+                            retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
                         }                        
                         else if (require('message-box').zenity.version[0] < 3 || (require('message-box').zenity.version[0] == 3 && require('message-box').zenity.version[1] < 10))
                         {
@@ -152,6 +153,7 @@ function Toaster()
                                     // We're a regular user, so we don't need to do anything special
                                     retVal.child = require('child_process').execFile(require('message-box').notifysend.path, ['notify-send', retVal.title, retVal.caption]);
                                 }
+                                retVal.child.descriptorMetadata = 'toaster (notify-send)'
                             }
                             else
                             {
@@ -167,12 +169,14 @@ function Toaster()
                                     retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
                                     retVal.child.timeout = setTimeout(function (c) { c.timeout = null; c.kill(); }, 5000, retVal.child);
                                 }
+                                retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
                             }
                         }
                         else
                         {
                             // Use ZENITY Notification
                             retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });                   
+                            retVal.child.descriptorMetadata = 'toaster (zenity/notification)'
                         }
                         retVal.child.parent = retVal;
                         retVal.child.stderr.str = '';
@@ -198,6 +202,7 @@ function Toaster()
                             }
 		
                             retVal._notify = require('child_process').execFile(util, ['kdialog', '--title', retVal.title, '--passivepopup', retVal.caption, '5'], { uid: retVal.consoleUid, env: { DISPLAY: retVal.xinfo.display, XAUTHORITY: retVal.xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                            retVal._notify.descriptorMetadata = 'toaster (kdialog)'
                             retVal._notify.parent = retVal;
                             retVal._notify.stdout.on('data', function (chunk) { });
                             retVal._notify.stderr.on('data', function (chunk) { });

@@ -320,6 +320,7 @@ function linux_messageBox()
                     c.kill();
                 }, timeout * 1000, ret.child);
             }
+            ret.child.descriptorMetadata = 'zenity, message-box'
             ret.child.promise = ret;
             ret.child.stderr.on('data', function (chunk) { });
             ret.child.stdout.on('data', function (chunk) { });
@@ -354,6 +355,7 @@ function linux_messageBox()
                 ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, layout == null ? '--yesno' : '--msgbox', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                 ret.child.promise = ret;
             }
+            ret.child.descriptorMetadata = 'kdialog, message-box'
             ret.child.timeout = setTimeout(function (c)
             {
                 c.timeout = null;
@@ -391,7 +393,7 @@ function linux_messageBox()
             ret.child = require('child_process').execFile(this.xmessage.path, ['xmessage', '-center', '-buttons', layout == null ? 'No:1,Yes:2' : 'OK:2', '-timeout', timeout.toString(), '-default', layout==null?'No':'OK', '-title', title, caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
             ret.child.stdout.on('data', function (c) {  });
             ret.child.stderr.on('data', function (c) {  });
-
+            ret.child.descriptorMetadata = 'xmessage, message-box'
             ret.child.promise = ret;
             ret.child.on('exit', function (code)
             {
