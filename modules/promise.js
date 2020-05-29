@@ -16,6 +16,25 @@ limitations under the License.
 
 var refTable = {};
 
+function getRootPromise(obj)
+{
+    while(obj.parentPromise)
+    {
+        obj = obj.parentPromise;
+    }
+    return (obj);
+}
+function getDepth(obj)
+{
+    var count = 1;
+    while (obj.parentPromise)
+    {
+        ++count;
+        obj = obj.parentPromise;
+    }
+    return (count);
+}
+
 function event_switcher_helper(desired_callee, target, forward)
 {
     this._ObjectID = 'event_switcher';
@@ -48,7 +67,7 @@ function Promise(promiseFunc)
 {
     this._ObjectID = 'promise';
     this.promise = this;
-    this._internal = { _ObjectID: 'promise.internal', promise: this, func: promiseFunc, completed: false, errors: false, completedArgs: [] };
+    this._internal = { _ObjectID: 'promise.internal', promise: this, func: promiseFunc, completed: false, errors: false, completedArgs: [], rejStarted: false, rejCount: 0, depth: 0 };
     require('events').EventEmitter.call(this._internal);
     this._internal.on('newListener', function (eventName, eventCallback)
     {
@@ -65,6 +84,28 @@ function Promise(promiseFunc)
         }
         if (eventName == 'rejected' && this.errors && this.completed)
         {
+            var rt = getRootPromise(this.promise);
+            var ch = rt;
+            var chx = 1;
+            var ncnt = 1;
+            while(ch)
+            {
+                if (ch._internal.listenerCount('rejected') > 0)
+                {
+                    ncnt += ch._internal.listenerCount('rejected');
+                }
+                chx++;
+                ch = ch.__childPromise;
+            }
+            if (chx > rt._internal.depth) { rt._internal.depth = chx; }
+            if (ncnt > rt._internal.rejCount) { rt._internal.rejCount = ncnt; }
+
+            if (rt._internal._imm && rt._internal.rejCount >= rt._internal.depth)
+            {
+                clearImmediate(rt._internal._imm);
+                rt._internal._imm = null;
+                rt._internal._haltUncaught = true;
+            }
             eventCallback.apply(this, this.completedArgs);
         }
         if (eventName == 'settled' && this.completed)
@@ -94,6 +135,8 @@ function Promise(promiseFunc)
         }
         if (args.length == 2 && args[1]._ObjectID == 'promise')
         {
+            var pr = getRootPromise(_resolver._self.promise);
+            pr._internal._haltUncaught = true;
             args[1].then(function ()
             {
                 var parms = ['resolved'];
@@ -105,8 +148,11 @@ function Promise(promiseFunc)
             },
             function (e)
             {
-                var parms = ['rejected', e];
-                this._XSLF.emit.apply(this._XSLF, parms);
+                this._XSLF.promise.__childPromise.parentPromise = null;
+                this._XSLF.promise.__childPromise._internal._haltUncaught = false;
+                this._XSLF.promise.__childPromise._rej(e);
+                //var parms = ['rejected', e];
+                //this._XSLF.emit.apply(this._XSLF, parms);
             }).parentPromise._XSLF = _resolver._self;
         }
         else
@@ -128,11 +174,40 @@ function Promise(promiseFunc)
             args.push(arguments[a]);
         }
 
+        var r = getRootPromise(_rejector._self.promise);
+        var me = false;
+        if (r._internal.rejStarted == false)
+        {
+            r._internal.rejStarted = true;
+            r._internal.rejCount = 0;
+            r._internal.depth = 0;
+            me = true;
+        }
+
+        var d = getDepth(_rejector._self.promise);
+        if (d > r._internal.depth) { r._internal.depth = d; }
+
+        if (_rejector._self.listenerCount('rejected') > 0)
+        {
+            r._internal.rejCount += _rejector._self.listenerCount('rejected');
+        }
+
         _rejector._self.emit.apply(_rejector._self, args);
+        if (me)
+        {
+            r._internal.rejStarted = false;
+            if(r._internal.rejCount < r._internal.depth && !r._internal._imm && !r._internal._haltUncaught)
+            {
+                r._internal._imm = setImmediate(function (e, i) { i._imm = null; process.emit('uncaughtException', 'promise.uncaughtRejection: ' + e); }, args[1], r._internal);
+            }
+        }
+
         _rejector._self.emit('settled');
     };
     this.catch = function(func)
     {
+        var rt = getRootPromise(this);
+        if (rt._internal._imm) { clearInterval(rt._internal._imm); rt._internal._imm = null; }
         this._internal.once('rejected', event_switcher(this, func).func);
     }
     this.finally = function (func)
@@ -147,10 +222,12 @@ function Promise(promiseFunc)
             this._internal.once('rejected', event_switcher(this, rejected).func);
         }
                       
-        var retVal = new Promise(function (r, j) { });
+        var retVal = new Promise(function (r, j) { this._rej = j; });
+        retVal._internal._haltUncaught = true;
         this._internal.once('resolved', retVal._internal.resolver);
         this._internal.once('rejected', retVal._internal.rejector);
         retVal.parentPromise = this;
+        this.__childPromise = retVal;
         return (retVal);
     };
 
