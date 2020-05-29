@@ -1225,6 +1225,10 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 	gProcessSpawnType = (gProcessSpawnType == ILibProcessPipe_SpawnTypes_SPECIFIED_USER || gProcessSpawnType == ILibProcessPipe_SpawnTypes_USER) ? ILibProcessPipe_SpawnTypes_WINLOGON : (gProcessTSID < 0 ? ILibProcessPipe_SpawnTypes_USER : ILibProcessPipe_SpawnTypes_SPECIFIED_USER);
 
 	g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
+	char tmp[255];
+	sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
+	ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
+
 	ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
 
 	KVMDEBUG("kvm_relay_restart() launched child process", g_slavekvm);
