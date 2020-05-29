@@ -4027,10 +4027,16 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	int ixr = 0;
 	int installFlag = 0;
+	int fetchstate = 0;
+
 	for (ri = 0; ri < paramLen; ++ri)
 	{
 		int len = (int)strnlen_s(param[ri], 4096);
 		int ix;
+		if (strcmp("-state", param[ri]) == 0)
+		{
+			fetchstate = 1;
+		}
 		if (strcmp("-finstall", param[ri]) == 0 || strcmp("-fullinstall", param[ri]) == 0)
 		{
 			installFlag = 1;
@@ -4060,7 +4066,13 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 	paramLen -= ixr;
-	if (installFlag != 0)
+	if (fetchstate != 0)
+	{
+		duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, MeshAgent_AgentInstallerCTX_Finalizer, agentHost->chain);
+		duk_eval_string(ctxx, "require('_agentStatus').start();");
+		return(1);
+	}
+	else if (installFlag != 0)
 	{
 		int bufLen = 0;
 		char *buf;
