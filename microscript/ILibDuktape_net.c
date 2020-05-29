@@ -328,6 +328,25 @@ void ILibDuktape_net_socket_ipc_dataHookCallback(ILibDuktape_EventEmitter *sende
 		duk_set_top(sender->ctx, top);
 	}
 }
+duk_ret_t ILibDuktape_net_ipcSocket_connectHook(duk_context *ctx)
+{
+	char *eventName = (char*)duk_require_string(ctx, 0);
+	if (strcmp(eventName, "connect") == 0)
+	{
+		// Remove ourselves
+		duk_push_this(ctx);									// [socket]
+		duk_get_prop_string(ctx, -1, "removeListener");		// [socket][removeListener]
+		duk_swap_top(ctx, -2);								// [removeListener][this]
+		duk_push_string(ctx, "newListener");				// [removeListener][this][newListener]
+		duk_push_current_function(ctx);						// [removeListener][this][newListener][func]
+		duk_pcall_method(ctx, 2); duk_pop(ctx);				// ...
+
+		duk_dup(ctx, 1);					// [listener]
+		duk_push_this(ctx);					// [listenter][this]
+		duk_call_method(ctx, 0);
+	}
+	return(0);
+}
 #endif
 duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 {
@@ -340,6 +359,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	struct sockaddr_in6 dest;
 	struct sockaddr_in6 proxy;
 	memset(&proxy, 0, sizeof(struct sockaddr_in6));
+	int onConnectSpecified = 0;
 
 	if (nargs == 0) { return(ILibDuktape_Error(ctx, "Too few arguments")); }
 	duk_push_this(ctx);														// [socket]
@@ -369,12 +389,19 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		}
 		if (nargs >= 2 && duk_is_function(ctx, 1))
 		{
+			onConnectSpecified = 1;
 			ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "connect", duk_require_heapptr(ctx, 1));
 		}
 	}
 	if (duk_is_string(ctx, 0) || (pathLen > 0 && port == 0))
 	{
 		// This is a PATH string (Domain Socket on Linux/MacOS, Named Pipe on Windows)
+		if (onConnectSpecified == 0 && duk_is_function(ctx, 1))
+		{
+			onConnectSpecified = 1;
+			ILibDuktape_EventEmitter_AddOn(ptrs->emitter, "connect", duk_require_heapptr(ctx, 1));
+		}
+
 #ifdef WIN32
 		duk_push_this(ctx);
 		duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_net_WindowsIPC_PendingArray);
@@ -403,14 +430,27 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
 			ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "end", ILibDuktape_net_socket_ipc_dataHookCallback);
 
-			ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mSocket, "connect");		//[emit][this][connect]
-			ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -2, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
-
-			if (duk_pcall_method(winIPC->ctx, 1) != 0)
+			if (onConnectSpecified == 0)
 			{
-				ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "Error in net.socket.connect.onConnect(): ");
+				// No connectListener was specified, so we need to hook it, becuase otherwise the caller has no way to receive this event
+				ILibDuktape_EventEmitter_SetupOn(winIPC->ctx, winIPC->mSocket, "newListener");		// [on][this][newListener]
+				ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -2, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
+				duk_push_c_function(winIPC->ctx, ILibDuktape_net_ipcSocket_connectHook, 2);			// [on][this][newListener][func]
+				if (duk_pcall_method(winIPC->ctx, 2) != 0)
+				{
+					ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "Error in net.socket.connect.onConnect(): ");
+				}
 			}
-			duk_pop(winIPC->ctx);
+			else
+			{
+				ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mSocket, "connect");		//[emit][this][connect]
+				ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -2, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
+				if (duk_pcall_method(winIPC->ctx, 1) != 0)
+				{
+					ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "Error in net.socket.connect.onConnect(): ");
+				}
+			}
+			duk_pop(winIPC->ctx);																	// ...
 		}
 	
 		return(1);
