@@ -102,6 +102,11 @@ function Promise(promiseFunc)
                     parms.push(arguments[ai]);
                 }
                 this._XSLF.emit.apply(this._XSLF, parms);
+            },
+            function (e)
+            {
+                var parms = ['rejected', e];
+                this._XSLF.emit.apply(this._XSLF, parms);
             }).parentPromise._XSLF = _resolver._self;
         }
         else
