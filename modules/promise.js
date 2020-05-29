@@ -133,7 +133,7 @@ function Promise(promiseFunc)
                 args.push(arguments[a]);
             }
         }
-        if (args.length == 2 && args[1]._ObjectID == 'promise')
+        if (args.length == 2 && args[1]!=null && typeof(args[1]) == 'object' && args[1]._ObjectID == 'promise')
         {
             var pr = getRootPromise(_resolver._self.promise);
             pr._internal._haltUncaught = true;
