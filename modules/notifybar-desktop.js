@@ -166,8 +166,16 @@ function x_notifybar_check(title)
     var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process.exit();});").toString('base64');
 
     var min = require('user-sessions').minUid();
-    var uid = require('user-sessions').consoleUid();
+    var uid = -1;
     var self = require('user-sessions').Self();
+
+    try
+    {
+        uid = require('user-sessions').consoleUid();
+    }
+    catch(xx)
+    {
+    }
 
     if (self != 0 || uid == 0)
     {
