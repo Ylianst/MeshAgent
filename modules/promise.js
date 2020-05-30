@@ -137,10 +137,11 @@ function Promise(promiseFunc)
         {
             var pr = getRootPromise(_resolver._self.promise);
             pr._internal._haltUncaught = true;
+            args[1]._XSLF = _resolver._self;
             args[1].then(function ()
             {
                 var parms = ['resolved'];
-                for(var ai in arguments)
+                for (var ai in arguments)
                 {
                     parms.push(arguments[ai]);
                 }
@@ -153,7 +154,7 @@ function Promise(promiseFunc)
                 this._XSLF.promise.__childPromise._rej(e);
                 //var parms = ['rejected', e];
                 //this._XSLF.emit.apply(this._XSLF, parms);
-            }).parentPromise._XSLF = _resolver._self;
+            });
         }
         else
         {
