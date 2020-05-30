@@ -296,6 +296,14 @@ module.exports.isBatteryPowered = function isBatteryOperated()
                 }
             }
             break;
+        case 'darwin':
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function(c){ this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function(c){ this.str += c.toString(); });
+            child.stdin.write("pmset -g batt | tr '\\n' '`' | awk -F'`' '{ if(NF>2) { print \"true\"; }}'\nexit\n");
+            child.waitExit();
+            if(child.stdout.str.trim() != '') { ret = true; }
+            break;
     }
     return (ret);
 };
