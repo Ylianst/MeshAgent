@@ -201,10 +201,7 @@ function x_notifybar_check(title)
                 var uid = require('user-sessions').consoleUid();
                 if (uid >= that.min)
                 {
-                    that._close2 = function ()
-                    {
-                        this.child.kill();
-                    };
+                    require('user-sessions').removeListener('changed', _changed);
                     var xinfo = require('monitor-info').getXInfo(uid);
                     that.child = require('child_process').execFile(process.execPath, [process.execPath.split('/').pop(), '-b64exec', script], { uid: uid, env: xinfo.exportEnv() });
                     that.child.descriptorMetadata = 'notifybar-desktop';
@@ -212,6 +209,12 @@ function x_notifybar_check(title)
                     that.child.stdout.on('data', function (c) { });
                     that.child.stderr.on('data', function (c) { });
                     that.child.on('exit', function (code) { this.parent.emit('close', code); });
+                    that._close2 = function _close2()
+                    {
+                        _close2.child.kill();
+                    };
+                    that._close2.child = that.child;
+
                 }
             };
             ret._changed.self = ret;
