@@ -265,6 +265,39 @@ module.exports.isDocker = function isDocker()
     child.waitExit();
     return (child.stdout.str != '');
 };
+module.exports.isBatteryPowered = function isBatteryOperated()
+{
+    var ret = false;
+    switch(process.platform)
+    {
+        default:
+            break;
+        case 'linux':
+            var devices = require('fs').readdirSync('/sys/class/power_supply');
+            for (var i in devices)
+            {
+                if(require('fs').readFileSync('/sys/class/power_supply/' + devices[i] + '/type').toString().trim()=='Battery')
+                {
+                    ret = true;
+                    break;
+                }
+            }
+        case 'win32':
+            var GM = require('_GenericMarshal');
+            var stats = GM.CreateVariable(12);
+            var kernel32 = GM.CreateNativeProxy('Kernel32.dll');
+            kernel32.CreateMethod('GetSystemPowerStatus');
+            if (kernel32.GetSystemPowerStatus(stats).Val != 0)
+            {
+                if(stats.toBuffer()[1] != 128 && stats.toBuffer()[1] != 255)
+                {
+                    ret = true;
+                }
+            }
+            break;
+    }
+    return (ret);
+};
 module.exports.isVM = function isVM()
 {
     var ret = false;

@@ -2591,6 +2591,17 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 			}
 		}
 		duk_pop(agent->meshCoreCtx);
+		if (info->platformType != htonl(MeshCommand_AuthInfo_PlatformType_VIRTUAL))
+		{
+			if (duk_peval_string(agent->meshCoreCtx, "require('identifiers').isBatteryPowered();") == 0)
+			{
+				if (duk_get_boolean(agent->meshCoreCtx, -1))
+				{
+					info->platformType = htonl(MeshCommand_AuthInfo_PlatformType_LAPTOP);
+				}
+			}
+			duk_pop(agent->meshCoreCtx);
+		}
 	}
 
 
