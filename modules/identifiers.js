@@ -276,12 +276,13 @@ module.exports.isBatteryPowered = function isBatteryOperated()
             var devices = require('fs').readdirSync('/sys/class/power_supply');
             for (var i in devices)
             {
-                if(require('fs').readFileSync('/sys/class/power_supply/' + devices[i] + '/type').toString().trim()=='Battery')
+                if (require('fs').readFileSync('/sys/class/power_supply/' + devices[i] + '/type').toString().trim() == 'Battery')
                 {
                     ret = true;
                     break;
                 }
             }
+            break;
         case 'win32':
             var GM = require('_GenericMarshal');
             var stats = GM.CreateVariable(12);
