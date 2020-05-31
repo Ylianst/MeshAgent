@@ -36,8 +36,11 @@ function powerMonitor()
 
     this.on('newListener', function (name, callback)
     {
-        if (name == 'acdc') { callback.call(this, this._ACState == 1 ? 'AC' : 'BATTERY'); }
-        if (name == 'batteryLevel') { callback.call(this, this._BatteryLevel); }
+        if (process.platform != 'win32')
+        {   // Windows will already sends an initial event when you hookup the ACPI event, so this would be redundant
+            if (name == 'acdc') { callback.call(this, this._ACState == 1 ? 'AC' : 'BATTERY'); }
+        }
+        if (name == 'batteryLevel') { if (this._BatteryLevel >= 0) { callback.call(this, this._BatteryLevel); } }
     });
 
     this._i = setImmediate(function (self)
