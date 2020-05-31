@@ -487,67 +487,6 @@ function UserSessions()
                 });
             }
             
-            this._recheckLoggedInUsers = function _recheckLoggedInUsers()
-            {
-                this.enumerateUsers().then(function (u)
-                {
-                    if (u.Active.length > 0)
-                    {
-                        // There is already a user logged in, so we can monitor DBUS for lock/unlock
-                        if (this.parent._linux_lock_watcher != null && this.parent._linux_lock_watcher.uid != u.Active[0].uid)
-                        {
-                            delete this.parent._linux_lock_watcher;
-                        }
-                        var env = this.parent.findEnvEntry({ username: u.Active[0].Username, grep: 'dbus-daemon', values: ['DBUS_SESSION_BUS_ADDRESS', 'XDG_CURRENT_DESKTOP'] });
-                        if (Object.keys(env).length == 0) { env = this.parent.findEnvEntry({ username: u.Active[0].Username, grep: 'X', values: ['DBUS_SESSION_BUS_ADDRESS', 'XDG_CURRENT_DESKTOP'] }); }
-                        if (Object.keys(env).length == 0) { env = this.parent.findEnvEntry({ username: u.Active[0].Username, grep: 'dbus-daemon', values: ['DBUS_SESSION_BUS_ADDRESS'] }); }
-                        var service;
-                        switch(env['XDG_CURRENT_DESKTOP'])
-                        {
-                            case 'Unity':
-                                service = 'com.ubuntu.Upstart0_6';
-                                break;
-                            default:
-                                service = require('linux-dbus').getServices('ScreenSaver', { uid: u.Active[0].uid, env: env });
-                                if (service.includes('org.gnome.ScreenSaver'))
-                                {
-                                    service = 'org.gnome.ScreenSaver';
-                                }
-                                else if (service.includes('org.freedesktop.ScreenSaver'))
-                                {
-                                    service = 'org.freedesktop.ScreenSaver';
-                                }
-                                else
-                                {
-                                    service = null;
-                                }
-                                break;
-                        }
-
-                        if (!service) { return; }
-                        this.parent._linux_lock_watcher = new dbus(service, u.Active[0].uid, env);
-                        this.parent._linux_lock_watcher.user_session = this.parent;
-                        this.parent._linux_lock_watcher.on('signal', function (s)
-                        {
-                            switch (s.value)
-                            {
-                                case true:
-                                case 'desktop-lock':
-                                    this.user_session.emit('locked');
-                                    break;
-                                case false:
-                                case 'desktop-unlock':
-                                    this.user_session.emit('unlocked');
-                                    break;
-                            }
-                        });
-                    }
-                    else if (this.parent._linux_lock_watcher != null) {
-                        delete this.parent._linux_lock_watcher;
-                    }
-                });
-
-            };
             this.getUidConfig = function getUidConfig() {
                 var ret = {};
                 var cfg = require('fs').readFileSync('/etc/login.defs').toString().split('\n');
@@ -560,15 +499,6 @@ function UserSessions()
                 }
                 return (ret);
             };
-            this.on('changed', function ()
-            {
-                // For linux Lock/Unlock monitoring, we need to watch for LogOn/LogOff, and keep track of the UID.
-                this._changedTimeout = setTimeout(function (that)
-                {
-                    // Doing this in a timeout, becuase there is a race between when logon is detected, and when dbus session is spawned
-                    that._recheckLoggedInUsers.call(that);
-                }, 2000, this);
-            });
         }
 
         this.minUid =  function minUid()
@@ -1057,12 +987,6 @@ function UserSessions()
         }
         p.parent = this;
         return (p);
-    }
-
-    if(process.platform == 'linux')
-    {
-        // First step, is to see if there is a user logged in:
-        this._recheckLoggedInUsers();
     }
 }
 function showActiveOnly(source)
