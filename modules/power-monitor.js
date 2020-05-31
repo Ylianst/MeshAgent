@@ -88,6 +88,21 @@ function powerMonitor()
                 return (sum);
             }
             this._BatteryLevel = this._getBatteryLevel();
+
+            // Since Battery Levels are not propagated with ACPI, we need to periodically check the battery level
+            this._BatteryLevelCheck = function _BatteryLevelCheck()
+            {
+                var val = this._getBatteryLevel();
+                if (val != this._BatteryLevel)
+                {
+                    this._BatteryLevel = val;
+                    this.emit('batteryLevel', val);
+                }
+            };
+            this._BattCheckInterval = setInterval(function (self)
+            {
+                self._BatteryLevelCheck.call(self);
+            }, 300000, this);
         }
         this._acpiSink = function _acpiSink(acpiEvent)
         {
@@ -95,6 +110,7 @@ function powerMonitor()
             {
                 _acpiSink.self._ACState = acpiEvent.value;
                 _acpiSink.self.emit('acdc', acpiEvent.value == 1 ? 'AC' : 'BATTERY');
+                _acpiSink.self._BatteryLevelCheck();
             }
         };
         this._acpiSink.self = this;
