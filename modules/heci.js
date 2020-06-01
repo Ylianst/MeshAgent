@@ -474,6 +474,7 @@ function heci_create()
             {
                 console.info1('Write Error: ' + result._LastError);
             }
+            return;
         }
 
         require('fs').write(this._descriptor, chunk.buffer, this._processWrite_linux_signaled, { metadata: 'heci.session', session: this });
