@@ -281,7 +281,7 @@ void KVM_PumpMessage()
 DWORD WINAPI KVM_InitMessagePumpEx(LPVOID parm)
 {
 	ATOM a;
-	printf("MessagePump ThreadID: %u\n", GetCurrentThreadId());
+	//printf("MessagePump ThreadID: %u\n", GetCurrentThreadId());
 	memset(&CUR_WNDCLASS, 0, sizeof(CUR_WNDCLASS));
 	CUR_WNDCLASS.hInstance = GetModuleHandleA(NULL);
 	CUR_WNDCLASS.lpszClassName = "MainWWW2Class";
