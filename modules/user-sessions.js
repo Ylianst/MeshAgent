@@ -557,7 +557,17 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("who | tr '\\n' '\`' | awk '{ print $1 }'\nexit\n");
+            child.stdin.write("who | tr '\\n' '`' | awk -F'`' '{");
+            child.stdin.write("  for(i=1;i<NF;++i) ");
+            child.stdin.write("  { ");
+            child.stdin.write('     split($i,tok," "); x=split(tok[2],itm,"pts"); ');
+            child.stdin.write('     if(x==1) ');
+            child.stdin.write('     { ');
+            child.stdin.write('        print tok[1]; ');
+            child.stdin.write('        break;  ');
+            child.stdin.write('     }');
+            child.stdin.write('   }');
+            child.stdin.write("}'\nexit\n");
             child.waitExit();
 
             if (child.stderr.str != '') { return (0); }
