@@ -465,6 +465,12 @@ duk_ret_t ILibDuktape_EventEmitter_removeListener(duk_context *ctx)
 			ILibLinkedList_Remove(node);
 			emitter->totalListeners[0]--;
 
+			ILibDuktape_EventEmitter_SetupEmit(ctx, emitter->object, "removeListener");	// [emit][this][removeListener]
+			duk_dup(ctx, 0);															// [emit][this][removeListener][name]
+			duk_dup(ctx, 1);															// [emit][this][removeListener][name][callback]
+			if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtException(ctx); }
+			duk_pop(ctx);																// ...
+
 			// Delete reference to saved callback
 			duk_push_heapptr(ctx, emitter->tmpObject);		
 			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(callback));
@@ -485,15 +491,28 @@ duk_ret_t ILibDuktape_EventEmitter_removeAllListeners(duk_context *ctx)
 		eventList = ILibHashtable_Get(emitter->eventTable, NULL, eventName, (int)eventNameLen);
 		if (eventList == NULL) { return(ILibDuktape_Error(ctx, "EventEmitter.removeAllListeners(): Event '%s' not found", eventName)); }
 
-		duk_push_heapptr(ctx, emitter->tmpObject);
+		duk_push_array(ctx);															// [array]
+		duk_push_heapptr(ctx, emitter->tmpObject);										// [array][tmpObject]
 		while ((node=ILibLinkedList_GetNode_Head(eventList)) != NULL) 
-		{
+		{																				// [array][tmpObject][callback]
+			duk_get_prop_string(ctx, -1, Duktape_GetStashKey(ILibLinkedList_GetDataFromNode(node)));
+			duk_array_push(ctx, -3);													// [array][tmpObject]
+
 			// Delete reference to callback function
-			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(((ILibDuktape_EventEmitter_EmitStruct*)ILibLinkedList_GetDataFromNode(node))->func));
+			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(ILibLinkedList_GetDataFromNode(node)));
 			ILibLinkedList_Remove(node);
 		}
-		duk_pop(ctx);
+		duk_pop(ctx);																	// [array]
 		emitter->totalListeners[0] = 0;
+		while (duk_get_length(ctx, -1) > 0)
+		{
+			ILibDuktape_EventEmitter_SetupEmit(ctx, emitter->object, "removeListener");	// [array][emit][this][removeListener]
+			duk_dup(ctx, 0);															// [array][emit][this][removeListener][name]
+			duk_array_pop(ctx, -5);														// [array][emit][this][removeListener][name][callback]
+			if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtException(ctx); }
+			duk_pop(ctx);																// [array]
+		}
+		duk_pop(ctx);																	// ...
 	}
 	return(0);
 }
@@ -645,7 +664,9 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	
 	ILibDuktape_CreateInstanceMethod(ctx, "eventNames", ILibDuktape_EventEmitter_eventNames, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "listenerCount", ILibDuktape_EventEmitter_listenerCount, 1);
-	ILibDuktape_CreateInstanceMethod(ctx, "removeListener", ILibDuktape_EventEmitter_removeListener, 2);
+
+	ILibDuktape_EventEmitter_CreateEventEx(retVal, "removeListener");
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "removeListener", ILibDuktape_EventEmitter_removeListener, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "removeAllListeners", ILibDuktape_EventEmitter_removeAllListeners, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "emit", ILibDuktape_EventEmitter_emit, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "emit_returnValue", ILibDuktape_EventEmitter_emitReturnValue, DUK_VARARGS);
