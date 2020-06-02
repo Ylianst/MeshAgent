@@ -161,4 +161,6 @@ int ILibDuktape_ScriptContainer_CompileJavaScriptEx(duk_context *ctx, char *payl
 #define ILibDuktape_ScriptContainer_CompileJavaScript(ctx, payload, payloadLen) ILibDuktape_ScriptContainer_CompileJavaScriptEx(ctx, payload, payloadLen, NULL, 0)
 int ILibDuktape_ScriptContainer_ExecuteByteCode(duk_context *ctx);
 
+void* ILibDuktape_Process_GetSignalListener(duk_context *ctx);
+
 #endif

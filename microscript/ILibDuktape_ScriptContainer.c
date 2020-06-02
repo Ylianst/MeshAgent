@@ -136,6 +136,41 @@ char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 	};
 #endif
 
+	char *SIGTABLE[] =
+	{
+		"INVALID"   ,
+		"SIGHUP"    ,
+		"SIGINT"    ,
+		"SIGQUIT"   ,
+		"SIGILL"    ,
+		"SIGTRAP"   ,
+		"SIGIOT"    ,
+		"SIGBUS"    ,
+		"SIGFPE"    ,
+		"SIGKILL"   ,
+		"SIGUSR1"   ,
+		"SIGSEGV"   ,
+		"SIGUSR2"   ,
+		"SIGPIPE"   ,
+		"SIGALRM"   ,
+		"SIGTERM"   ,
+		"SIGSTKFLT" ,
+		"SIGCHLD" 	,
+		"SIGCONTv"  ,
+		"SIGSTOP" 	,
+		"SIGTSTP" 	,
+		"SIGTTIN" 	,
+		"SIGTTOU" 	,
+		"SIGURG"    ,
+		"SIGXCPU" 	,
+		"SIGXFSZ" 	,
+		"SIGVTALRM" ,
+		"SIGPROF"   ,
+		"SIGWINCH"  ,
+		"SIGIO"	    ,
+		"SIGPWR"
+	};
+
 extern void ILibDuktape_MemoryStream_Init(duk_context *ctx);
 extern void ILibDuktape_NetworkMonitor_Init(duk_context *ctx);
 extern int GenerateSHA384FileHash(char *filePath, char *fileHash);
@@ -945,6 +980,7 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect(void* object, 
 }
 void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
 {
+	int s;
 	int bytesRead = 0;
 	char sigbuffer[255];
 	ILibChain_Link *link = (ILibChain_Link*)object;
@@ -959,15 +995,20 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 			switch (((int*)sigbuffer)[1])
 			{
 				case SIGTERM:
-					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");
-					if (duk_pcall_method(ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
+					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");	// [emit][this][SIGTERM]
+					duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
+					if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
 					duk_pop(ctx);
 					break;
 				case SIGCHLD:
+					s = 0;
+					waitpid(((pid_t*)sigbuffer)[2], &s, 0);
 					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
-					duk_push_int(ctx, ((pid_t*)sigbuffer)[2]);				// [emit][this][SIGCHLD][pid]
-					duk_push_uint(ctx, ((uid_t*)sigbuffer)[3]);				// [emit][this][SIGCHLD][pid][uid]
-					if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGCHLD: "); }
+					duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
+					duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
+					duk_push_int(ctx, ((pid_t*)sigbuffer)[2]);				// [emit][this][SIGCHLD][name][code][pid]
+					duk_push_uint(ctx, ((uid_t*)sigbuffer)[3]);				// [emit][this][SIGCHLD][name][code][pid][uid]
+					if (duk_pcall_method(ctx, 5) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGCHLD: "); }
 					duk_pop(ctx);
 					break;
 				default:
@@ -1398,7 +1439,15 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 		}
 	}
 #endif
-
+}
+void* ILibDuktape_Process_GetSignalListener(duk_context *ctx)
+{
+	void *ret = NULL;
+	duk_push_global_object(ctx);				// [g]
+	duk_get_prop_string(ctx, -1, "process");	// [g][p]
+	ret = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ScriptContainer_Signal_ListenerPtr);
+	duk_pop_2(ctx);								// ...
+	return(ret);
 }
 void ILibDuktape_ScriptContainer_ExecTimeout_Finalizer(duk_context *ctx, void *timeoutKey)
 {
