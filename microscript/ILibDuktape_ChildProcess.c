@@ -280,6 +280,7 @@ duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 		}
 		else
 		{
+			printf("Not DETACHED\n");
 			// We are not detached, so we need to call the same method that broken pipe would've
 			ILibDuktape_ChildProcess_SubProcess *childprocess = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
 			if (childprocess != NULL)

@@ -1509,12 +1509,23 @@ duk_ret_t ILibDuktape_MeshAgent_NetInfo(duk_context *ctx)
 				gwname = child.stdout.str.trim();\
 				child = require('child_process').execFile('/bin/sh', ['sh']); \
 				child.stdout.str = ''; child.stdout.on('data', function(c) { this.str += c.toString(); }); \
-				child.stdin.write('arp -n ' + gwname + ' | awk \\'{ gsub(/[(]/, \"\", $2); gsub(/[)]/, \"\", $2); printf \"%s,%s,%s\", $6, $4, $2; }\\'\\nexit\\n');\
+				child.stdin.write('arp -n ' + gwname + ' | awk \\'{ split($2,tok1,\")\"); split(tok1[1],tok2,\"(\"); printf \"%s,%s,%s\", $6,$4,tok2[2]; }\\'\\nexit\\n');\
 				child.waitExit();\
 				var tmp = child.stdout.str.trim().split(',');\
 				child = require('child_process').execFile('/bin/sh', ['sh']);\
 				child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
-				child.stdin.write('networksetup -listallhardwareports | tr \\'\\\\n\\' \\'\\@\\' | awk \\'{ gsub(/@@/, \"\\\\n\", $0); gsub(/@Hardware Port/, \"Hardware Port\", $0); print $0; }\\' | awk -F@ \\'{ split($2, dv, \":\"); gsub(/^[ ]/, \"\", dv[2]); if(dv[2]==\"' + tmp[0] + '\") { split($1, hw, \":\"); gsub(/^ /, \"\", hw[2]); print hw[2];  } }\\'\\nexit\\n');\
+				child.stdin.write('networksetup -listallhardwareports | tr \\'\\\\n\\' \\'`\\' | awk -F\\'`\\' \\'');\
+				child.stdin.write('{ ');\
+				child.stdin.write('  for(i=3;i<NF;i+=4) ');\
+				child.stdin.write('  { ');\
+				child.stdin.write('     split($i,dv,\": \"); ');\
+				child.stdin.write('     if(dv[2]==\"' + tmp[0] + '\")');\
+				child.stdin.write('     { ');\
+				child.stdin.write('        split($(i-1), res, \": \");');\
+				child.stdin.write('        print(res[2]); break;');\
+				child.stdin.write('     } ');\
+				child.stdin.write('   } ');\
+				child.stdin.write('}\\'\\nexit\\n');\
 				child.waitExit();\
 				var dvname = child.stdout.str.trim();\
 				var tmp2 = tmp[1].split(':');\

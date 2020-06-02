@@ -970,7 +970,39 @@ duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 	return(1);
 }
 
+
 #ifdef _POSIX
+duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_context *ctx)
+{
+	duk_size_t bufferLen;
+	char *sigbuffer = Duktape_GetBuffer(ctx, 0, &bufferLen);
+	void *h = ILibDuktape_GetProcessObject(ctx);
+	int s = 0;
+
+	switch (((int*)sigbuffer)[1])
+	{
+	case SIGTERM:
+		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");	// [emit][this][SIGTERM]
+		duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
+		duk_pop(ctx);
+		break;
+	case SIGCHLD:
+		s = 0;
+		waitpid(((pid_t*)sigbuffer)[2], &s, 0);
+		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
+		duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
+		duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
+		duk_push_int(ctx, ((pid_t*)sigbuffer)[2]);				// [emit][this][SIGCHLD][name][code][pid]
+		duk_push_uint(ctx, ((uid_t*)sigbuffer)[3]);				// [emit][this][SIGCHLD][name][code][pid][uid]
+		if (duk_pcall_method(ctx, 5) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGCHLD: "); }
+		duk_pop(ctx);
+		break;
+	default:
+		break;
+	}
+	return(0);
+}
 void ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	if (SignalDescriptors[0] != 0)
@@ -986,34 +1018,20 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object,
 	ILibChain_Link *link = (ILibChain_Link*)object;
 	duk_context *ctx = (duk_context*)((void**)link->ExtraMemoryPtr)[0];
 	void *h = ((void**)link->ExtraMemoryPtr)[1];
+	char *tmp;
 
 	if (FD_ISSET(SignalDescriptors[0], readset))
 	{
 		if((bytesRead = read(SignalDescriptors[0], sigbuffer, sizeof(int))) == sizeof(int) && ((int*)sigbuffer)[0] < sizeof(sigbuffer) &&
 			(bytesRead += read(SignalDescriptors[0], sigbuffer + sizeof(int), ((int*)sigbuffer)[0])) == ((int*)sigbuffer)[0])
 		{
-			switch (((int*)sigbuffer)[1])
-			{
-				case SIGTERM:
-					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");	// [emit][this][SIGTERM]
-					duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
-					if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
-					duk_pop(ctx);
-					break;
-				case SIGCHLD:
-					s = 0;
-					waitpid(((pid_t*)sigbuffer)[2], &s, 0);
-					ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGCHLD");	// [emit][this][SIGCHLD]
-					duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
-					duk_push_int(ctx, s);									// [emit][this][SIGCHLD][name][code]
-					duk_push_int(ctx, ((pid_t*)sigbuffer)[2]);				// [emit][this][SIGCHLD][name][code][pid]
-					duk_push_uint(ctx, ((uid_t*)sigbuffer)[3]);				// [emit][this][SIGCHLD][name][code][pid][uid]
-					if (duk_pcall_method(ctx, 5) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGCHLD: "); }
-					duk_pop(ctx);
-					break;
-				default:
-					break;
-			}
+			duk_push_global_object(ctx);											//[g]
+			duk_get_prop_string(ctx, -1, "setImmediate");							//[g][immediate]
+			duk_swap_top(ctx, -2);													//[immediate][this]
+			duk_push_c_function(ctx, ILibDuktape_ScriptContainer_Process_SignalListener_Immediate, DUK_VARARGS);
+			tmp = duk_push_fixed_buffer(ctx, ((int*)sigbuffer)[0]);					//[immediate][this][func][buffer]
+			memcpy_s(tmp, ((int*)sigbuffer)[0], sigbuffer, ((int*)sigbuffer)[0]);
+			duk_pcall_method(ctx, 2); duk_pop(ctx);									// ...
 		}
 		else if(bytesRead == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
 		{
