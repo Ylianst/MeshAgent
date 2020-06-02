@@ -115,7 +115,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	p->childProcess = NULL;
 	duk_push_heapptr(p->ctx, p->subProcess);																// [childProcess]
 
-#ifdef _POSIX
+#if defined(_POSIX)
 	if (duk_has_prop_string(p->ctx, -1, "_sigsink"))
 	{
 		ILibDuktape_EventEmitter_SetupRemoveListener(p->ctx, ILibDuktape_GetProcessObject(p->ctx), "SIGCHLD"); //......][remove][process][SIGCHLD]
@@ -251,7 +251,7 @@ duk_ret_t ILibDuktape_SpawnedProcess_descriptorSetter(duk_context *ctx)
 	return(0);
 }
 
-#ifdef _POSIX
+#if defined(_POSIX) 
 extern void ILibProcessPipe_Process_Destroy(void *p);
 duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 {
@@ -264,17 +264,29 @@ duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 	if (Duktape_GetIntPropertyValue(ctx, -1, "pid", -1) == pid)
 	{
 		// This SIGCHLD is for us. Let's unhook from SIGCHLD
-		ILibDuktape_EventEmitter_SetupRemoveListener(ctx, duk_get_heapptr(ctx, -1), "SIGCHLD");	// [remove][this][SIGCHLD]
-		duk_push_current_function(ctx);															// [remove][this][SIGCHLD][func]
+		duk_del_prop_string(ctx, -1, "_sigsink");
+		ILibDuktape_EventEmitter_SetupRemoveListener(ctx, ILibDuktape_GetProcessObject(ctx), "SIGCHLD");	// [remove][this][SIGCHLD]
+		duk_push_current_function(ctx);																		// [remove][this][SIGCHLD][func]
 		duk_pcall_method(ctx, 2);
-
-		// If we got this far, this means the process died without breaking the pipes.
-		// This will happen if the process was spawned as detached, otherwise this is 
-		// pretty rare, but can happen if you spawn a login shell, then sudo su, then kill the parent.
-		ILibDuktape_EventEmitter_SetupEmit(ctx, child, "exit");	// [child][emit][this][exit]
-		duk_push_int(ctx, statusCode);							// [child][emit][this][exit][code]
-		duk_push_null(ctx);										// [child][emit][this][exit][code][null]
-		duk_call_method(ctx, 3); duk_pop(ctx);					// ...
+		// Let's chec to see if we were detached or not
+		duk_push_heapptr(ctx, child);								// [child]
+		if (!duk_has_prop_string(ctx, -1, "stdout"))
+		{
+			// We are detached, so we can just emit 'exit' and be done
+			ILibDuktape_EventEmitter_SetupEmit(ctx, child, "exit");	// [child][emit][this][exit]
+			duk_push_int(ctx, statusCode);							// [child][emit][this][exit][code]
+			duk_push_null(ctx);										// [child][emit][this][exit][code][null]
+			duk_call_method(ctx, 3); duk_pop(ctx);					// [child]
+		}
+		else
+		{
+			// We are not detached, so we need to call the same method that broken pipe would've
+			ILibDuktape_ChildProcess_SubProcess *childprocess = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
+			if (childprocess != NULL)
+			{
+				ILibDuktape_ChildProcess_SubProcess_ExitHandler(childprocess->childProcess, statusCode, childprocess);
+			}	
+		}
 
 		duk_push_heapptr(ctx, child);							// [child]
 		void *mProcess = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
@@ -359,7 +371,7 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
 	}
 
-#ifdef _POSIX
+#if defined(_POSIX)
 	ILibDuktape_EventEmitter_SetupOn(ctx, ILibDuktape_GetProcessObject(ctx), "SIGCHLD");	// [child][on][process][SIGCHLD]
 	duk_push_c_function(ctx, ILibDuktape_SpawnedProcess_SIGCHLD_sink, DUK_VARARGS);			// [child][on][process][SIGCHLD][func]
 	duk_dup(ctx, -5);																		// [child][on][process][SIGCHLD][func][child]
