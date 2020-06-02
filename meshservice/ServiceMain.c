@@ -527,8 +527,8 @@ int wmain(int argc, char* wargv[])
 
 	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || 
 		strcasecmp(argv[1], "-fulluninstall") == 0 || strcasecmp(argv[1], "-fullinstall") == 0 ||
-		strcasecmp(argv[1], "-install")==0 || strcasecmp(argv[1], "-uninstall") == 0) ||
-		strcasecmp(argv[1], "-state") == 0)
+		strcasecmp(argv[1], "-install")==0 || strcasecmp(argv[1], "-uninstall") == 0 ||
+		strcasecmp(argv[1], "-state") == 0))
 	{
 		argv[argc] = argv[1];
 		argv[1] = (char*)ILibMemory_SmartAllocate(4);
