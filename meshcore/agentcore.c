@@ -4043,6 +4043,17 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 	}
 
+	for (ri = 0; ri < paramLen; ++ri)
+	{
+		if (strcmp("-finstall", param[ri]) == 0 || strcmp("-funinstall", param[ri]) == 0 ||
+			strcmp("-fullinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0 ||
+			strcmp("-install", param[ri]) == 0 || strcmp("-uninstall", param[ri]) == 0)
+		{
+			// Create a readonly DB, because we don't need to persist anything
+			agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly();
+			break;
+		}
+	}
 
 	// We are a Mesh Agent
 	if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db")); }
@@ -4066,13 +4077,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (strcmp("-install", param[ri]) == 0)
 		{
 			installFlag = 5;
-			if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
 			ILibSimpleDataStore_Cached(agentHost->masterDb, "_localService", 13, "1", 1);
 		}
 		if (strcmp("-funinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0)
 		{
 			installFlag = 2;
-			if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
 			ILibSimpleDataStore_Cached(agentHost->masterDb, "_deleteData", 11, "1", 1);
 		}
 		if (strcmp("-uninstall", param[ri]) == 0)
@@ -4080,10 +4089,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			installFlag = 2;
 		}
 
-		if (agentHost->masterDb == NULL && installFlag != 0) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
 		if ((ix = ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2) == 0)
 		{
-			if (agentHost->masterDb != NULL) { ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1)); }
+			if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
 			++ixr;
 		}
 	}

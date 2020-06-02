@@ -54,7 +54,7 @@ function extractFileSource(filePath)
     return (typeof (filePath) == 'string' ? filePath : filePath.source);
 }
 
-function perpareFolders(folderPath)
+function prepareFolders(folderPath)
 {
     var dlmtr = process.platform == 'win32' ? '\\' : '/';
 
@@ -570,7 +570,6 @@ function serviceManager()
             // 32 bit Windows
             return process.env['ProgramFiles'];                 
         };
-        this.getServiceFolder = function getServiceFolder() { return this.getProgramFolder() + '\\mesh'; };
 
         this.enumerateService = function () {
             var machineName = this.GM.CreatePointer();
@@ -1577,9 +1576,25 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires admin'); }
 
             // Before we start, we need to copy the binary to the right place
-            var folder = options.installPath == null ? this.getServiceFolder() : options.installPath;
+            var folder;
+            if(!options.installPath)
+            {
+                options.installPath = this.getProgramFolder();
+                switch(options.companyName)
+                {
+                    case null:
+                        options.installPath += '\\mesh';
+                        break;
+                    case '':
+                        break;
+                    default:
+                        options.installPath += ('\\' + options.companyName);
+                        break;
+                }
+            }
+            folder = options.installPath;
             if (folder.endsWith('\\')) { folder = folder.substring(0, folder.length - 1); }
-            if (!options.installInPlace) { perpareFolders(folder + '\\' + options.name); }
+            if (!options.installInPlace) { prepareFolders(folder + '\\' + options.name); }
             if (options.servicePath == process.execPath) { options._isMeshAgent = true; }
 
             if (!options.installInPlace)

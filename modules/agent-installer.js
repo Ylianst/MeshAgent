@@ -29,6 +29,8 @@ function installService(params)
             startType: 'AUTO_START',
             parameters: params
         };
+    if (process.platform == 'win32') { options.companyName = ''; }
+
     var i;
     if ((i=params.indexOf('--_localService="1"'))>=0)
     {
@@ -46,8 +48,14 @@ function installService(params)
             options.installInPlace = false;
             break;
         }
+        if (options.parameters[i].startsWith('--companyName='))
+        {
+            options.companyName = options.parameters[i].split('=')[1];
+            if (options.companyName.startsWith('"')) { options.companyName = options.companyName.substring(1, options.companyName.length - 1); }
+            options.parameters.splice(i, 1);
+            break;
+        }
     }
-
     try
     {
         require('service-manager').manager.installService(options);
@@ -220,17 +228,27 @@ function uninstallService2(params)
             process.stdout.write('   -> Deleting agent data...');
             if (process.platform != 'win32')
             {
+                var levelUp = dataFolder.split('/');
+                levelUp.pop();
+                levelUp = levelUp.join('/');
+
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.on('data', function (c) { });
                 child.stderr.on('data', function (c) { });
                 child.stdin.write('cd ' + dataFolder + '\n');
-                child.stdin.write('rm ' + appPrefix + '.*\r\n');
+                child.stdin.write('rm ' + appPrefix + '.*\n');
+                child.stdin.write('cd /\n');
+                child.stdin.write('rmdir ' + dataFolder + '\n');
+                child.stdin.write('rmdir ' + levelUp + '\n');
                 child.stdin.write('exit\n');       
-                child.waitExit();
+                child.waitExit();    
             }
             else
             {
-                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C del "' + dataFolder + '\\' + appPrefix + '.*"']);
+                var levelUp = dataFolder.split('\\');
+                levelUp.pop();
+                levelUp = levelUp.join('\\');
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C del "' + dataFolder + '\\' + appPrefix + '.*" && rmdir "' + dataFolder + '" && rmdir "' + levelUp + '"']);
                 child.stdout.on('data', function (c) { });
                 child.stderr.on('data', function (c) { });
                 child.waitExit();
