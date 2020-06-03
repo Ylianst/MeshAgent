@@ -24,6 +24,7 @@ limitations under the License.
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #ifndef NO_IFADDR
 	#include <ifaddrs.h>
 #endif
@@ -1012,12 +1013,10 @@ void ILibDuktape_ScriptContainer_Process_SignalListener_PreSelect(void* object, 
 }
 void ILibDuktape_ScriptContainer_Process_SignalListener_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
 {
-	int s;
 	int bytesRead = 0;
 	char sigbuffer[255];
 	ILibChain_Link *link = (ILibChain_Link*)object;
 	duk_context *ctx = (duk_context*)((void**)link->ExtraMemoryPtr)[0];
-	void *h = ((void**)link->ExtraMemoryPtr)[1];
 	char *tmp;
 
 	if (FD_ISSET(SignalDescriptors[0], readset))
@@ -1210,7 +1209,7 @@ duk_ret_t ILibDuktape_ScriptContainer_removeListenerSink(duk_context *ctx)
 {
 #ifdef _POSIX
 	struct sigaction action;
-	char *name = duk_require_string(ctx, 0);
+	char *name = (char*)duk_require_string(ctx, 0);
 	duk_push_this(ctx);							// [process]
 
 	if (strcmp(name, "SIGCHLD") == 0 && ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "SIGCHLD")==0)

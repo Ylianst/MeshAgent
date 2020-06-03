@@ -74,7 +74,7 @@ function dispatchRead(sid)
         id = sid;
     }
 
-    if(id == 0)
+    if(id == 0 || (process.platform == 'linux' && require('clipboard').xclip))
     {
         return (module.exports.read());
     }
@@ -134,9 +134,9 @@ function dispatchWrite(data, sid)
         id = sid;
     }
 
-    if(id == 0)
+    if (id == 0 || (process.platform == 'linux' && require('clipboard').xclip))
     {
-        module.exports(data);
+        return(module.exports(data));
     }
     else
     {
@@ -174,6 +174,40 @@ function dispatchWrite(data, sid)
     }
 }
 
+function lin_xclip_readtext(ret)
+{
+    var id;
+    try
+    {
+        id = require('user-sessions').consoleUid();
+    }
+    catch (e)
+    {
+        ret._rej(e);
+        return (ret);
+    }
+
+    var xinfo = require('monitor-info').getXInfo(id);
+    ret.child = require('child_process').execFile(require('clipboard').xclip, ['xlclip', '-selection', 'c', '-o'], { uid: id, env: xinfo.exportEnv() });
+    ret.child.promise = ret;
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function ()
+    {
+        if (this.stderr.str != '')
+        {
+            this.promise._rej(this.stderr.str.trim());
+        }
+        else
+        {
+            this.promise._res(this.stdout.str);
+        }
+    });
+
+    return (ret);
+}
+
+
 function lin_readtext()
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -194,9 +228,13 @@ function lin_readtext()
     }
     else
     {
+        if (require('clipboard').xclip)
+        {
+            lin_xclip_readtext(ret);
+            return (ret);
+        }
+
         var GM = require('monitor-info')._gm;
-
-
         ret._getInfoPromise = require('monitor-info').getInfo();
         ret._getInfoPromise._masterPromise = ret;
         ret._getInfoPromise.then(function (mon)
@@ -250,6 +288,35 @@ function lin_readtext()
     }
     return (ret);
 }
+
+function lin_xclip_copy(txt)
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    var id;
+    try
+    {
+        id = require('user-sessions').consoleUid();
+    }
+    catch(e)
+    {
+        ret._rej(e);
+        return (ret);
+    }
+
+    var xinfo = require('monitor-info').getXInfo(id);
+    ret.child = require('child_process').execFile(require('clipboard').xclip, ['xlclip', '-selection', 'c'], { uid: id, env: xinfo.exportEnv() });
+    ret.child.promise = ret;
+    ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
+    ret.child.stdout.on('data', function (c) { console.log(c.toString()); });
+    ret.child.on('exit', function () { this.promise._res(); });
+    ret.child.stdin.write(txt, function ()
+    {
+        this.end();
+    });
+
+    return (ret);
+}
+
 function lin_copytext(txt)
 {
     var X11 = require('monitor-info')._X11;
@@ -259,6 +326,10 @@ function lin_copytext(txt)
     }
     else
     {
+        if (require('clipboard').xclip)
+        {
+            return (lin_xclip_copy(txt));
+        }
         var GM = require('monitor-info')._gm;
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         ret._txt = txt;
@@ -425,6 +496,16 @@ switch(process.platform)
     case 'linux':
         module.exports = lin_copytext;
         module.exports.read = lin_readtext;
+        Object.defineProperty(module.exports, "xclip", {
+            value: (function ()
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write("whereis xclip | awk '{ print $2; }'\nexit\n");
+                child.waitExit();
+                return (child.stdout.str.trim() != "" ? child.stdout.str.trim() : null);
+            })()
+        });
         break;
     case 'darwin':
         break;
