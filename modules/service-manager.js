@@ -124,6 +124,79 @@ function parseServiceStatus(token)
     return (j);
 }
 
+if (process.platform == 'linux')
+{
+    function _upstart_GetServiceTable()
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write("initctl list | tr '\n' '`' | awk -F'`' '");
+        child.stdin.write('{');
+        child.stdin.write('   printf "{"; ');
+        child.stdin.write('   for(i=1;i<NF;++i) ');
+        child.stdin.write('   {');
+        child.stdin.write('      c=split($i,name,","); ');
+        child.stdin.write('      c2=split(name[1],state," "); ');
+        child.stdin.write('      sname=substr(name[1],0,length(name[1])-length(state[c2])-1); ');
+        child.stdin.write('      split(state[c2],rstate,"/"); ');
+        child.stdin.write('      rs = rstate[2]=="running"?"RUNNING":"STOPPED";');
+        child.stdin.write('      spid=""; ');
+        child.stdin.write('      if(c==2) ');
+        child.stdin.write('      { ');
+        child.stdin.write('         split(name[2],pid," "); ');
+        child.stdin.write('         spid=pid[2]; ');
+        child.stdin.write('      } ');
+        child.stdin.write('      printf "%s\\"%s\\": {\\"state\\": \\"%s\\", \\"pid\\":\\"%s\\"}",(i==1?"":","),sname,rs,spid; ');
+        child.stdin.write('   } ');
+        child.stdin.write('   printf "}"; ');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+        var ret = {};
+        try
+        {
+            ret = JSON.parse(child.stdout.str);
+        }
+        catch(e)
+        {
+        }
+        return (ret);
+    }
+    function _systemd_GetServiceTable()
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write("systemctl --type=service --state=running | grep .service | tr '\n' '`' | awk -F'`' '");
+        child.stdin.write('{');
+        child.stdin.write('   printf "{"; ');
+        child.stdin.write('   for(i=1;i<NF;++i) ');
+        child.stdin.write('   {');
+        child.stdin.write('      c=split($i,name," "); ');
+        child.stdin.write('      printf "%s\\"%s\\": \\"%s\\"", (i==1?"":","), name[1], name[4]; ');
+        child.stdin.write('   } ');
+        child.stdin.write('   printf "}"; ');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+
+        var ret = {};
+        try
+        {
+            ret = JSON.parse(child.stdout.str);
+        }
+        catch (e)
+        {
+        }
+        return (ret);
+    }
+}
+
+
+
+
+
+
+
 if (process.platform == 'darwin')
 {
     function getOSVersion()
@@ -1444,6 +1517,7 @@ function serviceManager()
         {
             var results = [];
             var paths = [];
+            var runtable = {};
             switch(process.platform)
             {
                 case 'linux':
@@ -1454,10 +1528,12 @@ function serviceManager()
                             break;
                         case 'upstart':
                             paths.push('/etc/init');
+                            runtable = _upstart_GetServiceTable();
                             break;
                         case 'systemd':
                             paths.push('/lib/systemd/system');
                             paths.push('/usr/lib/systemd/system');
+                            runtable = _systemd_GetServiceTable();
                             break;
                         default:
                             paths.push('/usr/local/mesh_daemons');
@@ -1499,6 +1575,20 @@ function serviceManager()
                                         try
                                         {
                                             results.push(this.getService(files[j].split('.conf')[0], 'upstart'));
+                                            if(runtable[results.peek().name])
+                                            {
+                                                results.peek().state = runtable[results.peek().name].state;
+                                                if(runtable[results.peek().name].pid != '')
+                                                {
+                                                    try
+                                                    {
+                                                        results.peek().pid = parseInt(runtable[results.peek().name].pid);
+                                                    }
+                                                    catch(px)
+                                                    {
+                                                    }
+                                                }
+                                            }
                                         }
                                         catch (e)
                                         {
@@ -1511,6 +1601,7 @@ function serviceManager()
                                         try
                                         {
                                             results.push(this.getService(files[j].split('.service')[0], 'systemd'));
+                                            if (runtable[results.peek().conf.split('/').pop()]) { results.peek().state = 'RUNNING'; }
                                         }
                                         catch(e)
                                         {
