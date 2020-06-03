@@ -130,6 +130,7 @@ function heci_create()
                                 else
                                 {
                                     console.info2('Write/Flush');
+                                    if (this.session._readoverlapped == null) { return; }
                                     item.flush();
                                 }
                             }
@@ -339,13 +340,9 @@ function heci_create()
             //
             // Write
             //
-            if (this._wDescriptorEvent)
-            {
-                if (this._writeoverlapped) { require('DescriptorEvents').removeDescriptor(this._writeoverlapped.hEvent); }
-                this._wDescriptorEvent = null;
-            }
             if (this._writeoverlapped)
             {
+                require('DescriptorEvents').removeDescriptor(this._writeoverlapped.hEvent);
                 kernel32.CloseHandle(this._writeoverlapped.hEvent);
                 this._writeoverlapped = null;
             }
@@ -463,11 +460,11 @@ function heci_create()
             var result = kernel32.WriteFile(this._descriptor, GM.CreateVariable(chunk.buffer), chunk.buffer.length, 0, this._writeoverlapped);
             if (result.Val != 0 || result._LastError == ERROR_IO_PENDING)
             {
-                if (!this._wDescriptorEvent)
+                if (!require('DescriptorEvents').descriptorAdded(this._writeoverlapped.hEvent))
                 {
-                    this._wDescriptorEvent = require('DescriptorEvents').addDescriptor(this._writeoverlapped.hEvent, { metadata: 'heci.session [write]' });
-                    this._wDescriptorEvent.session = this;
-                    this._wDescriptorEvent.on('signaled', this._processWrite_signaled);
+                    var ev = require('DescriptorEvents').addDescriptor(this._writeoverlapped.hEvent, { metadata: 'heci.session [write]' });
+                    ev.session = this;
+                    ev.on('signaled', this._processWrite_signaled);
                 }
             }
             else
@@ -502,7 +499,7 @@ function heci_create()
     };
     ret._processWrite_signaled = function _processWrite_signaled(status)
     {
-        console.info3('Write Signaled: ' + status);
+        console.info3('Write Signaled: ' + status, this.session._writeoverlapped.hEvent.Val, this.session._hashCode());
         if(status == 'NONE')
         {
             // No Errors
@@ -518,13 +515,14 @@ function heci_create()
                     if (this.session._pendingWrites.length > 0)
                     {
                         this.session._processWrite();
+                        return (true);
                     }
                     else
                     {
                         console.info3('Write/Flush');
                         item.flush();
+                        return(this.session._pendingWrites.length>0?true:false);
                     }
-                    return (true);
                 }
             }
         }
