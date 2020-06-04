@@ -194,12 +194,14 @@ function uninstallService3(params)
     }
 }
 
-function uninstallService2(params)
+function uninstallService2(params, msh)
 {
     var secondaryagent = false;
     var i;
     var dataFolder = null;
     var appPrefix = null;
+
+    try { require('fs').unlinkSync(msh); } catch (mshe) { }
 
     if (params && params.includes('--_deleteData="1"'))
     {
@@ -310,6 +312,16 @@ function uninstallService2(params)
 function uninstallService(params)
 {
     var svc = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+    var msh = svc.appLocation();
+    if (process.platform == 'win32')
+    {
+        msh = msh.substring(0, msh.length - 4) + '.msh';
+    }
+    else
+    {
+        msh = msh + '.msh';
+    }
+
     if (svc.isRunning())
     {
         process.stdout.write('   -> Stopping Service...');
@@ -319,12 +331,12 @@ function uninstallService(params)
             {
                 process.stdout.write(' [STOPPED]\n');
                 svc.close();
-                uninstallService2(this._params);
+                uninstallService2(this._params, msh);
             }, function ()
             {
                 process.stdout.write(' [ERROR]\n');
                 svc.close();
-                uninstallService2(this._params);
+                uninstallService2(this._params, ms);
             }).parentPromise._params = params;
         }
         else
@@ -338,13 +350,13 @@ function uninstallService(params)
                 svc.stop();
             }
             process.stdout.write(' [STOPPED]\n');
-            uninstallService2(params);
+            uninstallService2(params, msh);
         }
     }
     else
     {
         if (process.platform == 'win32') { svc.close(); }
-        uninstallService2(params);
+        uninstallService2(params, msh);
     }
 }
 function serviceExists(loc, params)
