@@ -789,6 +789,8 @@ function serviceManager()
                     retVal._stopEx = function(s, p)
                     {
                         var current = s.status.state;
+                        var pid = s.status.pid;
+
                         switch (current)
                         {
                             case 'STOPPED':
@@ -802,11 +804,26 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    p._rej('timeout waiting for service to stop');
+                                    if (pid > 0)
+                                    {
+                                        process.kill(pid);
+                                        p._res('STOPPED/KILLED');
+                                    }
+                                    else
+                                    {
+                                        p._rej('timeout waiting for service to stop');
+                                    }
                                 }
                                 break;
                             default:
-                                p._rej('Unexpected state: ' + current);
+                                if (pid > 0)
+                                {
+
+                                }
+                                else
+                                {
+                                    p._rej('Unexpected state: ' + current);
+                                }
                                 break;
                         }
                     }
@@ -815,6 +832,7 @@ function serviceManager()
                     {
                         var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
                         var status = this.status;
+                        var pid = this.status.pid;
                         if(status.state == 'RUNNING')
                         {
                             // Stop Service
@@ -834,6 +852,11 @@ function serviceManager()
                                 if (ret._waitTime > 5000) { ret._waitTime = 5000; }
                                 ret.timer = setTimeout(this._stopEx, ret._waitTime, this, ret);
                             }
+                        }
+                        else if (status.state == 'STOP_PENDING' && pid > 0)
+                        {
+                            process.kill(pid);
+                            ret._res('STOPPED/KILLED');
                         }
                         else
                         {
