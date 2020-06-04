@@ -561,7 +561,10 @@ function UserSessions()
             child.stdin.write("  for(i=1;i<NF;++i) ");
             child.stdin.write("  { ");
             child.stdin.write('     split($i,tok," "); x=split(tok[2],itm,"pts"); ');
-            child.stdin.write('     if(x==1) ');
+            if (process.platform != 'freebsd')
+            {
+                child.stdin.write(' if(x==1) ');
+            }
             child.stdin.write('     { ');
             child.stdin.write('        print tok[1]; ');
             child.stdin.write('        break;  ');
