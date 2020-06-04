@@ -336,7 +336,8 @@ function lin_xclip_copy(txt)
             ch.stdin.write('   for(i=1;i<NF;++i)');
             ch.stdin.write('   {');
             ch.stdin.write('       split($i,tokens," ");');
-            ch.stdin.write('       name=substr($i, length(tokens[1])+3);');
+            ch.stdin.write('       name=substr($i, length(tokens[1])+2);');
+            ch.stdin.write('       if(substr(name,1,1)==" ") { name=substr($i, length(tokens[1])+3); }');
             ch.stdin.write('       chkname=substr(name,1,6);')
             ch.stdin.write('       if(chkname=="xclip(")');
             ch.stdin.write('       {');
@@ -567,11 +568,11 @@ switch(process.platform)
             });
         break;
     case 'freebsd':
-        if (require('fs').existsSync('usr/local/bin/xclip'))
+        if (require('fs').existsSync('/usr/local/bin/xclip'))
         {
             module.exports = lin_xclip_copy;
             module.exports.read = bsd_xclip_readtext;
-            Object.defineProperty(module.exports, "xclip", { value: 'usr/local/bin/xclip' });
+            Object.defineProperty(module.exports, "xclip", { value: '/usr/local/bin/xclip' });
         }
         else
         {
