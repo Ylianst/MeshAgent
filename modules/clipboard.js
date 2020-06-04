@@ -74,7 +74,7 @@ function dispatchRead(sid)
         id = sid;
     }
 
-    if (id == 0 || process.platform == 'darwin' || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && require('clipboard').xclip))
     {
         return (module.exports.read());
     }
@@ -134,7 +134,7 @@ function dispatchWrite(data, sid)
         id = sid;
     }
 
-    if (id == 0 || process.platform == 'darwin' || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && require('clipboard').xclip))
     {
         return(module.exports(data));
     }
@@ -207,6 +207,12 @@ function lin_xclip_readtext(ret)
     return (ret);
 }
 
+function bsd_xclip_readtext()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    lin_xclip_readtext(ret);
+    return (ret);
+}
 
 function lin_readtext()
 {
@@ -504,16 +510,39 @@ switch(process.platform)
     case 'linux':
         module.exports = lin_copytext;
         module.exports.read = lin_readtext;
-        Object.defineProperty(module.exports, "xclip", {
-            value: (function ()
+        Object.defineProperty(module.exports, "xclip",
             {
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stdin.write("whereis xclip | awk '{ print $2; }'\nexit\n");
-                child.waitExit();
-                return (child.stdout.str.trim() != "" ? child.stdout.str.trim() : null);
-            })()
-        });
+                get: function ()
+                {
+                    if (this._xclip) { return (this._xclip); }
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("whereis xclip | awk '{ print $2; }'\nexit\n");
+                    child.waitExit();
+                    if (child.stdout.str.trim() != "")
+                    {
+                        Object.defineProperty(this, "_xclip", { value: child.stdout.str.trim() });
+                    }
+
+                    return (child.stdout.str.trim() != "" ? child.stdout.str.trim() : null);
+                }
+            });
+        break;
+    case 'freebsd':
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write("whereis xclip | awk '{ print $2; }'\nexit\n");
+        child.waitExit();
+        if (child.stdout.str.trim() != "")
+        {
+            module.exports = lin_xclip_copy;
+            module.exports.read = bsd_xclip_readtext;
+            Object.defineProperty(module.exports, "xclip", { value: child.stdout.str.trim() });
+        }
+        else
+        {
+            throw ('Clipboard Support on BSD requires xclip');
+        }
         break;
     case 'darwin':
         module.exports = macos_copytext;
