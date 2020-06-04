@@ -323,7 +323,15 @@ function lin_xclip_copy(txt)
             var ch = require('child_process').execFile('/bin/sh', ['sh']);
             ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
             ch.stderr.on('data', function (c) { console.log(c.toString()); });
-            ch.stdin.write('ps -e -o pid -o cmd | grep "xclip(' + p._hashCode() + ')" | ' + " tr '\\n' '`' | awk -F'`' '");
+            if (process.platform == 'freebsd')
+            {
+                ch.stdin.write('ps -axo pid -o cmd ')
+            }
+            else
+            {
+                ch.stdin.write('ps -e -o pid -o cmd ')
+            }
+            ch.stdin.write('| grep "xclip(' + p._hashCode() + ')" | ' + " tr '\\n' '`' | awk -F'`' '");
             ch.stdin.write('{');
             ch.stdin.write('   for(i=1;i<NF;++i)');
             ch.stdin.write('   {');
