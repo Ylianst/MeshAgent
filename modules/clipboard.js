@@ -325,7 +325,7 @@ function lin_xclip_copy(txt)
             ch.stderr.on('data', function (c) { console.log(c.toString()); });
             if (process.platform == 'freebsd')
             {
-                ch.stdin.write('ps -axo pid -o cmd ')
+                ch.stdin.write('ps -axo pid -o command ')
             }
             else
             {
