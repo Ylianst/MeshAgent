@@ -74,7 +74,7 @@ function dispatchRead(sid)
         id = sid;
     }
 
-    if(id == 0 || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || (process.platform == 'linux' && require('clipboard').xclip))
     {
         return (module.exports.read());
     }
@@ -134,7 +134,7 @@ function dispatchWrite(data, sid)
         id = sid;
     }
 
-    if (id == 0 || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || (process.platform == 'linux' && require('clipboard').xclip))
     {
         return(module.exports(data));
     }
@@ -486,6 +486,14 @@ function win_copytext(txt)
     user32.SetClipboardData(CF_UNICODETEXT, h);
     user32.CloseClipboard();
 }
+function macos_copytext(clipText)
+{
+    return (require('message-box').setClipboard(clipText));
+}
+function macos_readtext()
+{
+    return (require('message-box').getClipboard());
+}
 
 switch(process.platform)
 {
@@ -508,6 +516,8 @@ switch(process.platform)
         });
         break;
     case 'darwin':
+        module.exports = macos_copytext;
+        module.exports.read = macos_readtext;
         break;
 }
 module.exports.nativeAddModule = nativeAddModule;

@@ -548,6 +548,73 @@ function macos_messageBox()
         };
         return (ret);
     };
+    this.setClipboard = function setClipboard(clipText)
+    {
+        // Start Local Server
+        var ret = this._initIPCBase();
+        ret.server = this.startMessageServer(ret);
+        ret.server.ret = ret;
+        ret.server.clipText = clipText;
+        ret.server.on('connection', function (c)
+        {
+            this._connection = c;
+            c.promise = this.ret;
+            c.on('data', function (buffer)
+            {
+                if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+                switch (p.command)
+                {
+                    case 'writeClip':
+                        if (p.clipError)
+                        {
+                            this.promise._rej(p.clipError);
+                        }
+                        else
+                        {
+                            this.promise._res();
+                        }
+                        break;
+                }
+            });
+            c.write(translateObject({ command: 'writeClip', clipText: this.clipText }));
+        });
+
+        return (ret);
+    };
+    this.getClipboard = function getClipboard()
+    {
+        // Start Local Server
+        var ret = this._initIPCBase();
+        ret.server = this.startMessageServer(ret);
+        ret.server.ret = ret;
+        ret.server.on('connection', function (c)
+        {
+            this._connection = c;
+            c.promise = this.ret;
+            c.on('data', function (buffer)
+            {
+                if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
+                var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
+                switch (p.command)
+                {
+                    case 'readClip':
+                        if (p.clipError)
+                        {
+                            this.promise._rej(p.clipError);
+                        }
+                        else
+                        {
+                            this.promise._res(p.clipValue);
+                        }
+                        break;
+                }
+            });
+            c.write(translateObject({ command: 'readClip' }));
+        });
+
+        return (ret);
+    };
     this.lock = function lock()
     {
         // Start Local Server
@@ -621,6 +688,38 @@ function macos_messageBox()
             var p = JSON.parse(buffer.slice(4, buffer.readUInt32LE(0)).toString());
             switch (p.command)
             {
+                case 'writeClip':
+                    this._shell = require('child_process').execFile('/usr/bin/pbcopy', ['pbcopy']);
+                    this._shell.ipc = this;
+                    this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stdin.write(p.clipText, function () { this.end(); });
+                    this._shell.on('exit', function ()
+                    {
+                        if (this.stderr.str != '')
+                        {
+                            this.ipc.end(translateObject({ command: 'writeClip', clipError: this.stderr.str }));
+                        }
+                        else
+                        {
+                            this.ipc.end(translateObject({ command: 'writeClip' }));
+                        }
+                    });
+                    break;
+                case 'readClip':
+                    this._shell = require('child_process').execFile('/usr/bin/pbpaste', ['pbpaste']);
+                    this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.stderr.str = ''; this._shell.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    this._shell.waitExit();
+                    if (this._shell.stderr.str != '')
+                    {
+                        this.end(translateObject({ command: 'readClip', clipError: this._shell.stderr.str }));
+                    }
+                    else
+                    {
+                        this.end(translateObject({ command: 'readClip', clipValue: this._shell.stdout.str }));
+                    }
+                    break;
                 case 'LOCK':
                     this._shell = require('child_process').execFile('/bin/sh', ['sh']);
                     this._shell.stdout.str = ''; this._shell.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
