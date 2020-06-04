@@ -27,6 +27,8 @@ var XA_PRIMARY = 1;
 var CF_TEXT = 1;
 var CF_UNICODETEXT = 13;
 
+var xclipTable = {};
+
 function nativeAddModule(name)
 {
     var value = getJSModule(name);
@@ -310,11 +312,39 @@ function lin_xclip_copy(txt)
     }
 
     var xinfo = require('monitor-info').getXInfo(id);
-    ret.child = require('child_process').execFile(require('clipboard').xclip, ['xlclip', '-selection', 'c'], { uid: id, env: xinfo.exportEnv() });
+    ret.child = require('child_process').execFile(require('clipboard').xclip, ['xclip(' + ret._hashCode() + ')', '-selection', 'c'], { uid: id, env: xinfo.exportEnv() });
     ret.child.promise = ret;
     ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
     ret.child.stdout.on('data', function (c) { console.log(c.toString()); });
-    ret.child.on('exit', function () { this.promise._res(); });
+    ret.child.on('exit', function ()
+    {
+        xclipTable[this.promise._hashCode()] = setTimeout(function (p)
+        {
+            var ch = require('child_process').execFile('/bin/sh', ['sh']);
+            ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
+            ch.stderr.on('data', function (c) { console.log(c.toString()); });
+            ch.stdin.write('ps -e -o pid -o cmd | grep "xclip(' + p._hashCode() + ')" | ' + " tr '\\n' '`' | awk -F'`' '");
+            ch.stdin.write('{');
+            ch.stdin.write('   for(i=1;i<NF;++i)');
+            ch.stdin.write('   {');
+            ch.stdin.write('       split($i,tokens," ");');
+            ch.stdin.write('       name=substr($i, length(tokens[1])+3);');
+            ch.stdin.write('       chkname=substr(name,1,6);')
+            ch.stdin.write('       if(chkname=="xclip(")');
+            ch.stdin.write('       {');
+            ch.stdin.write('          printf "%s", tokens[1];');
+            ch.stdin.write('       }');
+            ch.stdin.write('   }');
+            ch.stdin.write("}'\nexit\n");
+            ch.waitExit();
+            if(ch.stdout.str != '')
+            {
+                process.kill(parseInt(ch.stdout.str), 'SIGKILL');
+            }
+            delete xclipTable[p._hashCode()];
+        }, 20000, this.promise);
+        this.promise._res();
+    });
     ret.child.stdin.write(txt, function ()
     {
         this.end();
@@ -529,15 +559,11 @@ switch(process.platform)
             });
         break;
     case 'freebsd':
-        var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.stdin.write("whereis xclip | awk '{ print $2; }'\nexit\n");
-        child.waitExit();
-        if (child.stdout.str.trim() != "")
+        if (require('fs').existsSync('usr/local/bin/xclip'))
         {
             module.exports = lin_xclip_copy;
             module.exports.read = bsd_xclip_readtext;
-            Object.defineProperty(module.exports, "xclip", { value: child.stdout.str.trim() });
+            Object.defineProperty(module.exports, "xclip", { value: 'usr/local/bin/xclip' });
         }
         else
         {
