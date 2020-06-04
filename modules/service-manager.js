@@ -1844,9 +1844,10 @@ function serviceManager()
             rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
             rc.write('rcvar=${name}_enable\n');
             rc.write('pidfile="/var/run/' + options.name + '.pid"\n');
+            rc.write(options.name + '_chdir="/usr/local/mesh_services/' + options.name + '"\n');
             rc.write('command="/usr/sbin/daemon"\n');
             rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0)?'-r':'') + ' -f /usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '"\n');
-            rc.write('command_chdir="/usr/local/mesh_services/' + options.name + '"\n\n');
+            rc.write('\n');
             rc.write('load_rc_config $name\n');
             rc.write(': ${' + options.name + '_enable="' + ((options.startType == 'AUTO_START' || options.startType == 'BOOT_START')?'YES':'NO') + '"}\n');
             rc.write('run_rc_command "$1"\n');
