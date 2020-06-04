@@ -487,6 +487,7 @@ function macos_messageBox()
     {
         // Start Local Server
         var ret = this._initIPCBase();
+        ret.metadata = 'message-box/create'
         ret.title = title; ret.caption = caption; ret.timeout = timeout;
         if (layout == null)
         {
@@ -552,6 +553,7 @@ function macos_messageBox()
     {
         // Start Local Server
         var ret = this._initIPCBase();
+        ret.metadata = 'clipboard/set'
         ret.server = this.startMessageServer(ret);
         ret.server.ret = ret;
         ret.server.clipText = clipText;
@@ -559,6 +561,7 @@ function macos_messageBox()
         {
             this._connection = c;
             c.promise = this.ret;
+            c.on('end', function () { this.promise.server.close(); });
             c.on('data', function (buffer)
             {
                 if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
@@ -586,12 +589,14 @@ function macos_messageBox()
     {
         // Start Local Server
         var ret = this._initIPCBase();
+        ret.metadata = 'clipboard/get'
         ret.server = this.startMessageServer(ret);
         ret.server.ret = ret;
         ret.server.on('connection', function (c)
         {
             this._connection = c;
             c.promise = this.ret;
+            c.on('end', function () { this.promise.server.close(); });
             c.on('data', function (buffer)
             {
                 if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
@@ -619,12 +624,14 @@ function macos_messageBox()
     {
         // Start Local Server
         var ret = this._initIPCBase();
+        ret.metadata = 'desktop/lock'
         ret.server = this.startMessageServer(ret);
         ret.server.ret = ret;
         ret.server.on('connection', function (c)
         {
             this._connection = c;
             c.promise = this.ret;
+            c.on('end', function () { this.promise.server.close(); });
             c.on('data', function (buffer)
             {
                 if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
@@ -648,6 +655,7 @@ function macos_messageBox()
     {
         // Start Local Server
         var ret = this._initIPCBase();
+        ret.metadata = 'notify'
         ret.title = title; ret.caption = caption; 
         ret.server = this.startMessageServer(ret);
         ret.server.ret = ret;
@@ -655,6 +663,7 @@ function macos_messageBox()
         {
             this._connection = c;
             c.promise = this.ret;
+            c.on('end', function () { this.promise.server.close(); });
             c.on('data', function (buffer)
             {
                 if (buffer.len < 4 || buffer.readUInt32LE(0) > buffer.len) { this.unshift(buffer); }
@@ -824,6 +833,7 @@ function macos_messageBox()
         options.writableAll = true;
 
         var ret = require('net').createServer();
+        ret.descriptorMetadata = ('[' + options.path + ']' + (options.metadata ? (', ' + options.metadata) : ''));
         ret.uid = require('user-sessions').consoleUid();
         ret.osversion = require('service-manager').getOSVersion();
         ret._options = options;

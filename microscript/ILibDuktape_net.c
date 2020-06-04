@@ -123,6 +123,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 #define ILibDuktape_TLSSocket2SecureContext		"\xFF_TLSSocket2SecureContext"
 #define ILibDuktape_IPAddress_SockAddr			"\xFF_IPAddress_SockAddr"
 #define ILibDuktape_net_server_metadata			"\xFF_net_server_metadata"
+#define ILibDuktape_net_server_IPCPath			"\xFF_net_server_IPCPath"
 
 extern void ILibAsyncServerSocket_RemoveFromChain(ILibAsyncServerSocket_ServerModule serverModule);
 
@@ -1269,6 +1270,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	{
 		duk_push_this(ctx);
 		ILibDuktape_WriteID(ctx, "net.ipcServer");
+		duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, ILibDuktape_net_server_IPCPath);
 		duk_pop(ctx);
 
 #if defined(_POSIX)
@@ -1491,6 +1493,19 @@ duk_ret_t ILibDuktape_net_server_close(duk_context *ctx)
 		{
 			ILibAsyncServerSocket_RemoveFromChain(server->server);
 			server->server = NULL;
+
+#ifdef _POSIX
+			duk_push_this(ctx);													// [server]
+			if(duk_has_prop_string(ctx, -1, ILibDuktape_net_server_IPCPath))
+			{
+				duk_eval_string(ctx, "require('fs');");							// [server][fs]
+				duk_get_prop_string(ctx, -1, "unlinkSync");						// [server][fs][unlinkSync]
+				duk_swap_top(ctx, -2);											// [server][unlinkSync][this]
+				duk_get_prop_string(ctx, -3, ILibDuktape_net_server_IPCPath);	// [server][unlinkSync][this][path]
+				duk_pcall_method(ctx, 1); duk_pop(ctx);							// [server]
+			}
+			duk_pop(ctx);														// [...]
+#endif
 
 			ILibDuktape_EventEmitter_SetupEmit(ctx, server->self, "close");		// [emit][this][close]
 			duk_call_method(ctx, 1);
