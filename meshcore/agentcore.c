@@ -4113,6 +4113,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			printf("   Administrator permissions needed...\n");
 			installFlag = 0;
+			exit(0);
 		}
 
 
