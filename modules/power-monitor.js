@@ -113,6 +113,58 @@ function powerMonitor()
         this._acpiSink.self = this;
         require('linux-acpi').on('acpi', this._acpiSink);
     }
+    if(process.platform == 'darwin')
+    {
+       this._getBatteryLevel = function _getBatteryLevel()
+       {
+          var child = require('child_process').execFile('/bin/sh',['sh']);
+          child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+          child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+          child.stdin.write("pmset -g batt | tr '\\n' '`' | awk -F'`' '");
+          child.stdin.write('{');
+          child.stdin.write('   power=split($1,pwr,"AC")>1?"1":"0";');
+          child.stdin.write('   split($2, batt, " ");');
+          child.stdin.write('   split(batt[2],chg,"%");');
+          child.stdin.write('   printf "{\\"ac\\": %s,\\"level\\": %s}",power, chg[1]; ');
+          child.stdin.write("}'\nexit\n");
+          child.waitExit();
+       
+          try
+	  {
+             var info = JSON.parse(child.stdout.str.trim());  
+	     return(info);
+          }
+          catch(e)
+          {
+             return({ac: 1, level: -1});
+          }
+       };
+       this._batteryLevelCheck = function _batteryLevelCheck()
+       {
+          var newLevel = this._getBatteryLevel();
+          if(newLevel.ac != this._ACState)
+          {
+             this._ACState = newLevel.ac;
+             this.emit('acdc', this._ACState==1?'AC':'BATTERY');
+          }
+          if(newLevel.level != this._BatteryLevel)
+          {
+             this._BatteryLevel = newLevel.level;
+             this.emit('batteryLevel', this._BatteryLevel);
+          }
+       };
+       var tmp = this._getBatteryLevel();
+       this._ACState = tmp.ac;
+       this._BatteryLevel = tmp.level;       
+
+       if(this._BatteryLevel >= 0)
+       {
+          this._BattCheckInterval = setInterval(function (self)
+          {
+             self._batteryLevelCheck.call(self);
+          }, 300000, this);
+       }
+    }
 }
 
 module.exports = new powerMonitor();
