@@ -79,6 +79,8 @@ char *Duktape_GetStashKey(void* value);
 char* Duktape_GetBuffer(duk_context *ctx, duk_idx_t i, duk_size_t *bufLen);
 void Duktape_CreateEnumEx(duk_context *ctx, char** fieldNames, int * fieldValues, int numFields);
 void Duktape_CreateEnum(duk_context *ctx, char* enumName, char **fieldNames, int *fieldValues, int numFields);
+char* Duktape_GetStringPropertyIndexValueEx(duk_context *ctx, duk_idx_t i, duk_uarridx_t x, char* defaultValue, duk_size_t *len);
+#define Duktape_GetStringPropertyIndexValue(ctx, i, ax, defaultValue) Duktape_GetStringPropertyIndexValueEx(ctx, i, ax, defaultValue, NULL)
 char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len);
 #define Duktape_GetStringPropertyValue(ctx, i, propertyName, defaultValue) Duktape_GetStringPropertyValueEx(ctx, i, propertyName, defaultValue, NULL)
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue);
@@ -115,6 +117,7 @@ char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *l
 
 #define duk_buffer_slice(ctx, i, start, len) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "slice");duk_swap_top(ctx, -2);duk_push_int(ctx, start);duk_push_int(ctx, len);duk_pcall_method(ctx, 2);duk_remove(ctx, -2);
 #define duk_string_concat(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "concat");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_pcall_method(ctx, 1);duk_remove(ctx, -2);
+#define duk_string_split(ctx, i, delim) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "split");duk_swap_top(ctx, -2);duk_push_string(ctx, delim);duk_call_method(ctx, 1);
 
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);

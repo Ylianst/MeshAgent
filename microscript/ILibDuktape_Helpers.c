@@ -219,6 +219,21 @@ void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyNa
 	return retVal;
 }
 
+char* Duktape_GetStringPropertyIndexValueEx(duk_context *ctx, duk_idx_t i, duk_uarridx_t x, char* defaultValue, duk_size_t *len)
+{
+	char *retVal = defaultValue;
+	if (ctx != NULL && duk_has_prop_index(ctx, i, x))
+	{
+		duk_get_prop_index(ctx, i, x);
+		retVal = (char*)duk_get_lstring(ctx, -1, len);
+		duk_pop(ctx);
+	}
+	else
+	{
+		if (len != NULL) { *len = (defaultValue == NULL) ? 0 : strnlen_s(defaultValue, sizeof(ILibScratchPad)); }
+	}
+	return retVal;
+}
 char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len)
 {
 	char *retVal = defaultValue;

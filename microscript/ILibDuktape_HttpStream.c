@@ -3605,7 +3605,32 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 	unsigned short port;
 	int protocolIndex;
 
-	uri = (char*)duk_get_lstring(ctx, 0, &uriLen);
+	char *username = NULL;
+	char *password = NULL;
+
+	duk_string_split(ctx, 0, "@");			// [array]
+	if (duk_get_length(ctx, -1) == 2)
+	{
+		duk_array_shift(ctx, -1);							// [array][http://user:pwd]
+		duk_string_split(ctx, -1, "://");					// [array][http://user:pwd][array]
+		duk_array_shift(ctx, -1);							// [array][http://user:pwd][array][http]
+		duk_array_pop(ctx, -2);								// [array][http://user:pwd][array][http][user:pwd]
+		duk_string_split(ctx, -1, ":");						// [array][http://user:pwd][array][http][user:pwd][array]
+		username = (char*)Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL);
+		password = (char*)Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL);
+		duk_string_split(ctx, 0, "@");						// [array][http://user:pwd][array][http][user:pwd][array][array]
+		duk_array_shift(ctx, -1); duk_pop(ctx);				// [array][http://user:pwd][array][http][user:pwd][array][mydomain.com:xx/xx]
+		duk_push_string(ctx, "://");						// [array][http://user:pwd][array][http][user:pwd][array][mydomain.com:xx/xx][://]
+		duk_string_concat(ctx, -5);							// [array][http://user:pwd][array][http][user:pwd][array][mydomain.com:xx/xx][http://]
+		duk_array_unshift(ctx, -2);							// [array][http://user:pwd][array][http][user:pwd][array][http://mydomain.com:xx/xx]
+		duk_array_join(ctx, -1, "");
+		uri = (char*)duk_get_lstring(ctx, -1, &uriLen);
+	}
+	else
+	{
+		uri = (char*)duk_get_lstring(ctx, 0, &uriLen);
+	}
+
 	protocolIndex = 1 + ILibString_IndexOf(uri, (int)uriLen, "://", 3);
 	if (protocolIndex > 0)
 	{
@@ -3622,6 +3647,8 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 		duk_put_prop_string(ctx, -2, "path");			// [options]
 		duk_push_string(ctx, "GET");					// [options][method]
 		duk_put_prop_string(ctx, -2, "method");			// [options]
+		if (username != NULL) { duk_push_string(ctx, username); duk_put_prop_string(ctx, -2, "username"); }
+		if (password != NULL) { duk_push_string(ctx, password); duk_put_prop_string(ctx, -2, "password"); }
 
 		free(path);
 		free(addr);
