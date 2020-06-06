@@ -315,7 +315,14 @@ function monitorinfo()
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);
                 ch.stderr.on('data', function () { });
                 ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
-                ch.stdin.write('ps -e | grep X\nexit\n');
+                if (process.platform == 'freebsd')
+                {
+                    ch.stdin.write('ps -ax | grep X\nexit\n');
+                }
+                else
+                {
+                    ch.stdin.write('ps -e | grep X\nexit\n');
+                }
                 ch.waitExit();
 
                 if (ch.stdout.str.trim() != '')
