@@ -200,9 +200,14 @@ function uninstallService2(params, msh)
     var i;
     var dataFolder = null;
     var appPrefix = null;
+    var uninstallOptions = null;
 
     try { require('fs').unlinkSync(msh); } catch (mshe) { }
-
+    if ((i = params.indexOf('__skipBinaryDelete')) >= 0)
+    {
+        params.splice(i, 1);
+        uninstallOptions = { skipDeleteBinary: true };
+    }
     if (params && params.includes('--_deleteData="1"'))
     {
         for (i = 0; i < params.length; ++i)
@@ -223,7 +228,7 @@ function uninstallService2(params, msh)
     process.stdout.write('   -> Uninstalling previous installation...');
     try
     {
-        require('service-manager').manager.uninstallService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        require('service-manager').manager.uninstallService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent', uninstallOptions);
         process.stdout.write(' [DONE]\n');
         if (dataFolder && appPrefix)
         {
@@ -414,12 +419,12 @@ function fullInstall(jsonString)
 {
     console.setDestination(console.Destinations.DISABLED);
     var parms = JSON.parse(jsonString);
-
+    var loc = null;
     try
     {
         process.stdout.write('...Checking for previous installation');
         var s = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
-        var loc = s.appLocation();
+        loc = s.appLocation();
         s.close();
     }
     catch (e)
@@ -427,6 +432,10 @@ function fullInstall(jsonString)
         process.stdout.write(' [NONE]\n');
         installService(parms);
         return;
+    }
+    if (process.execPath == loc)
+    {
+        parms.push('__skipBinaryDelete');
     }
     serviceExists(loc, parms);
 }

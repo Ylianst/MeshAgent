@@ -1713,7 +1713,10 @@ function serviceManager()
 
             if (!options.installInPlace)
             {
-                require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
+                if (options.servicePath != folder + '\\' + options.name + '\\' + options.target + '.exe')
+                {
+                    require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
+                }
                 options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
                 if (!options.installPath) { options.installPath = folder + '\\' + options.name + '\\'; }
             }
@@ -1852,7 +1855,11 @@ function serviceManager()
             var parameters = options.parameters ? options.parameters.join(' ') : '';
             if (!require('fs').existsSync('/usr/local/mesh_services')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
             if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
-            require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+
+            if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
+            {
+                require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+            }
             var bm = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
             bm |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
             require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, bm);
@@ -1892,7 +1899,10 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
+                    {
+                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    }
                     console.log('copying ' + options.servicePath);
 
                     var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
@@ -1933,7 +1943,10 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
+                    {
+                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    }
                     console.log('copying ' + options.servicePath);
 
                     var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
@@ -1966,8 +1979,11 @@ function serviceManager()
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
 
-                    console.log('copying ' + options.servicePath);
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
+                    {
+                        console.log('copying ' + options.servicePath);
+                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    }
 
                     var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
@@ -2045,8 +2061,11 @@ function serviceManager()
 
                         require('fs').chmodSync('/usr/local/mesh_daemons/daemon', require('fs').statSync('/usr/local/mesh_daemons/daemon').mode | require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP);
                     }
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_daemons/' + options.name + '/' + options.target);
 
+                    if (options.servicePath != '/usr/local/mesh_daemons/' + options.name + '/' + options.target)
+                    {
+                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_daemons/' + options.name + '/' + options.target);
+                    }
                     var m = require('fs').statSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                     require('fs').chmodSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target, m);
@@ -2128,7 +2147,10 @@ function serviceManager()
                 }
                 else
                 {
-                    require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
+                    {
+                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
+                    }
                 }
                 require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
                 var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
@@ -2258,7 +2280,7 @@ function serviceManager()
             }
         };
     }
-    this.uninstallService = function uninstallService(name)
+    this.uninstallService = function uninstallService(name, options)
     {
         if (!this.isAdmin()) { throw ('Uninstalling a service, requires admin'); }
 
@@ -2268,13 +2290,16 @@ function serviceManager()
 
         if (process.platform == 'win32')
         {
-            try
+            if (!options || !options.skipDeleteBinary)
             {
-                require('fs').unlinkSync(servicePath);
-            }
-            catch (e)
-            {
-                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C CHOICE /C Y /N /D Y /T 10 & del "' + servicePath + '"'], { type: 4 });
+                try
+                {
+                    require('fs').unlinkSync(servicePath);
+                }
+                catch (e)
+                {
+                    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['/C CHOICE /C Y /N /D Y /T 10 & del "' + servicePath + '"'], { type: 4 });
+                }
             }
             if (this.proxy.DeleteService(service._service) == 0)
             {
@@ -2308,9 +2333,13 @@ function serviceManager()
                         this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
                         this._update.stdin.write('exit\n');
                         this._update.waitExit();
-                        try {
+                        try
+                        {
                             require('fs').unlinkSync('/etc/init.d/' + name);
-                            require('fs').unlinkSync(servicePath);
+                            if (!options || !options.skipDeleteBinary)
+                            {
+                                require('fs').unlinkSync(servicePath);
+                            }
                             console.log(name + ' uninstalled');
                         }
                         catch (e) {
@@ -2325,9 +2354,13 @@ function serviceManager()
                         this._update.stdin.write('service ' + name + ' stop\n');
                         this._update.stdin.write('exit\n');
                         this._update.waitExit();
-                        try {
+                        try
+                        {
                             require('fs').unlinkSync('/etc/init/' + name + '.conf');
-                            require('fs').unlinkSync(servicePath);
+                            if (!options || !options.skipDeleteBinary)
+                            {
+                                require('fs').unlinkSync(servicePath);
+                            }
                             console.log(name + ' uninstalled');
                         }
                         catch (e) {
@@ -2344,7 +2377,10 @@ function serviceManager()
                     this._update.waitExit();
                     try
                     {
-                        require('fs').unlinkSync(servicePath);
+                        if (!options || !options.skipDeleteBinary)
+                        {
+                            require('fs').unlinkSync(servicePath);
+                        }
                         if (require('fs').existsSync('/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + name + '.service'); }
                         if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + name + '.service'); }
                         console.log(name + ' uninstalled');
@@ -2359,12 +2395,15 @@ function serviceManager()
                     {
                         service.stop();
                     }
-                    try
+                    if (!options || !options.skipDeleteBinary)
                     {
-                        require('fs').unlinkSync(servicePath);
-                    }
-                    catch(x)
-                    {
+                        try
+                        {
+                            require('fs').unlinkSync(servicePath);
+                        }
+                        catch (x)
+                        {
+                        }
                     }
                     try
                     {
@@ -2383,7 +2422,10 @@ function serviceManager()
             try
             {
                 require('fs').unlinkSync(service.plist);
-                require('fs').unlinkSync(servicePath);
+                if (!options || !options.skipDeleteBinary)
+                {
+                    require('fs').unlinkSync(servicePath);
+                }
             }
             catch (e)
             {
@@ -2401,7 +2443,10 @@ function serviceManager()
         else if(process.platform == 'freebsd')
         {
             service.stop();
-            require('fs').unlinkSync(service.appLocation());
+            if (!options || !options.skipDeleteBinary)
+            {
+                require('fs').unlinkSync(service.appLocation());
+            }
             require('fs').unlinkSync(service.rc);
             try
             {
