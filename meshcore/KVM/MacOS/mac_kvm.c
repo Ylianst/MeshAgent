@@ -703,6 +703,11 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		// Spawn child kvm process into a specific user session
 		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
 		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
+		
+		char tmp[255];
+		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
+		ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
+		
 		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
 
 		// Run the relay

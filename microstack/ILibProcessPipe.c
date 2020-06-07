@@ -190,8 +190,16 @@ char * ILibProcessPipe_Manager_OnQuery(void *chain, void *object, int fd, size_t
 	if (node != NULL)
 	{
 		ILibProcessPipe_PipeObject *pj = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node);
-		*dataLen = strnlen_s(pj->metadata, 1024);
-		ret = pj->metadata;
+		if (pj->metadata != NULL)
+		{
+			*dataLen = strnlen_s(pj->metadata, 1024);
+			ret = pj->metadata;
+		}
+		else
+		{
+			*dataLen = 25;
+			ret = "ILibProcessPipe (unknown)";
+		}
 	}
 	return(ret);
 }
