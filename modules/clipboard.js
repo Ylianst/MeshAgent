@@ -316,47 +316,58 @@ function lin_xclip_copy(txt)
     ret.child.promise = ret;
     ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
     ret.child.stdout.on('data', function (c) { console.log(c.toString()); });
+    ret.child._cleanup = function _cleanup(p)
+    {
+        var ch = require('child_process').execFile('/bin/sh', ['sh']);
+        ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
+        ch.stderr.on('data', function (c) { console.log(c.toString()); });
+        if (process.platform == 'freebsd')
+        {
+            ch.stdin.write('ps -axo pid -o command ')
+        }
+        else
+        {
+            ch.stdin.write('ps -e -o pid -o cmd ')
+        }
+        ch.stdin.write('| grep "xclip(' + p._hashCode() + ')" | ' + " tr '\\n' '`' | awk -F'`' '");
+        ch.stdin.write('{');
+        ch.stdin.write('   for(i=1;i<NF;++i)');
+        ch.stdin.write('   {');
+        ch.stdin.write('       split($i,tokens," ");');
+        ch.stdin.write('       name=substr($i, length(tokens[1])+2);');
+        ch.stdin.write('       if(substr(name,1,1)==" ") { name=substr($i, length(tokens[1])+3); }');
+        ch.stdin.write('       chkname=substr(name,1,6);')
+        ch.stdin.write('       if(chkname=="xclip(")');
+        ch.stdin.write('       {');
+        ch.stdin.write('          printf "%s", tokens[1];');
+        ch.stdin.write('       }');
+        ch.stdin.write('   }');
+        ch.stdin.write("}'\nexit\n");
+        ch.waitExit();
+        if (ch.stdout.str != '')
+        {
+            process.kill(parseInt(ch.stdout.str), 'SIGKILL');
+        }
+        delete xclipTable[p._hashCode()];
+    };
     ret.child.on('exit', function ()
     {
         xclipTable[this.promise._hashCode()] = setTimeout(function (p)
         {
-            var ch = require('child_process').execFile('/bin/sh', ['sh']);
-            ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
-            ch.stderr.on('data', function (c) { console.log(c.toString()); });
-            if (process.platform == 'freebsd')
-            {
-                ch.stdin.write('ps -axo pid -o command ')
-            }
-            else
-            {
-                ch.stdin.write('ps -e -o pid -o cmd ')
-            }
-            ch.stdin.write('| grep "xclip(' + p._hashCode() + ')" | ' + " tr '\\n' '`' | awk -F'`' '");
-            ch.stdin.write('{');
-            ch.stdin.write('   for(i=1;i<NF;++i)');
-            ch.stdin.write('   {');
-            ch.stdin.write('       split($i,tokens," ");');
-            ch.stdin.write('       name=substr($i, length(tokens[1])+2);');
-            ch.stdin.write('       if(substr(name,1,1)==" ") { name=substr($i, length(tokens[1])+3); }');
-            ch.stdin.write('       chkname=substr(name,1,6);')
-            ch.stdin.write('       if(chkname=="xclip(")');
-            ch.stdin.write('       {');
-            ch.stdin.write('          printf "%s", tokens[1];');
-            ch.stdin.write('       }');
-            ch.stdin.write('   }');
-            ch.stdin.write("}'\nexit\n");
-            ch.waitExit();
-            if(ch.stdout.str != '')
-            {
-                process.kill(parseInt(ch.stdout.str), 'SIGKILL');
-            }
-            delete xclipTable[p._hashCode()];
+            p.child._cleanup(p);
         }, 20000, this.promise);
         this.promise._res();
     });
     ret.child.stdin.write(txt, function ()
     {
         this.end();
+    });
+    ret.child.on('~', function ()
+    {
+        if (xclipTable[this.promise._hashCode()])
+        {
+            this._cleanup(this.promise);
+        }
     });
 
     return (ret);
