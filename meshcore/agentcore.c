@@ -3186,6 +3186,13 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user1;
 	ILibChain_Link_SetMetadata(ILibChain_GetCurrentLink(agent->chain), "MeshServer_ControlChannel");
 
+	if (agent->controlChannelRequest != NULL)
+	{
+		ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), agent->controlChannelRequest);
+		ILibMemory_Free(agent->controlChannelRequest);
+		agent->controlChannelRequest = NULL;
+	}
+
 	// Look at the various connection states and handle data if needed
 	switch (recvStatus)
 	{
@@ -3353,6 +3360,24 @@ void MeshServer_ConnectEx_Enumerate_Contexts(ILibHashtable sender, void *Key1, c
 	}
 }
 #endif
+
+
+void MeshServer_ConnectEx_NetworkError(void *j)
+{
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)((void**)j)[0];
+	void *request = ((void**)j)[1];
+	ILibMemory_Free(j);
+
+	if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Network Timeout Occurred..."); }
+	printf("Network Timeout occurred...\n");
+
+	ILibWebClient_CancelRequest(request);
+	MeshServer_ConnectEx(agent);
+}
+void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
+{
+	ILibMemory_Free(j);
+}
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 {
 	int len, serverUrlLen;
@@ -3535,7 +3560,12 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(uintptr_t)0x01); }
 
-		reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
+		void **tmp = ILibMemory_SmartAllocate(2 * sizeof(void*));
+		agent->controlChannelRequest = tmp;
+		tmp[0] = agent;	
+		tmp[1] = reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
+		ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), tmp, 20, MeshServer_ConnectEx_NetworkError, MeshServer_ConnectEx_NetworkError_Cleanup);
+
 #ifndef MICROSTACK_NOTLS
 		ILibWebClient_Request_SetHTTPS(reqToken, result == ILibParseUriResult_TLS ? ILibWebClient_RequestToken_USE_HTTPS : ILibWebClient_RequestToken_USE_HTTP);
 		ILibWebClient_Request_SetSNI(reqToken, host, (int)strnlen_s(host, serverUrlLen));
@@ -3543,43 +3573,55 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		if ((ILibSimpleDataStore_GetEx(agent->masterDb, "ignoreProxyFile", 15, ILibScratchPad, sizeof(ILibScratchPad)) == 0) && ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0 || (len = MeshAgent_GetSystemProxy(agent, ILibScratchPad, sizeof(ILibScratchPad))) != 0))
 		{
 #ifdef MICROSTACK_PROXY
-			unsigned short proxyPort = 80;
-			int delimiter = ILibString_LastIndexOf(ILibScratchPad, len, ":", 1);
-			
-			if (agent->triedNoProxy_Index < agent->serverIndex && agent->proxyServer != NULL)
+			duk_eval_string(agent->meshCoreCtx, "require('http')");			// [http]
+			duk_get_prop_string(agent->meshCoreCtx, -1, "parseUri");		// [http][parse]
+			duk_swap_top(agent->meshCoreCtx, -2);							// [parse][this]
+			duk_push_string(agent->meshCoreCtx, ILibScratchPad);			// [parse][this][uri]
+			if (duk_pcall_method(agent->meshCoreCtx, 1) == 0)				// [uri]
 			{
-				printf("Disabling Proxy: %s\n", ILibScratchPad);
-				agent->triedNoProxy_Index++;
-				agent->proxyServer = ILibWebClient_SetProxy(reqToken, NULL, 0, NULL, NULL);;
+				unsigned short proxyPort = (unsigned short)Duktape_GetIntPropertyValue(agent->meshCoreCtx, -1, "port", 80);
+				char *proxyHost = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "host", NULL);
+				char *proxyUsername = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "username", NULL);
+				char *proxyPassword = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "password", NULL);
 
-				if (duk_peval_string(agent->meshCoreCtx, "require('global-tunnel');") == 0)
+
+				if (agent->triedNoProxy_Index < agent->serverIndex && agent->proxyServer != NULL)
 				{
-					duk_get_prop_string(agent->meshCoreCtx, -1, "end");						// [tunnel][end]
-					duk_swap_top(agent->meshCoreCtx, -2);									// [end][this]
-					duk_pcall_method(agent->meshCoreCtx, 0); 								// [undefined]
+					printf("Disabling Proxy: %s:%u\n", proxyHost, proxyPort);
+					agent->triedNoProxy_Index++;
+					agent->proxyServer = ILibWebClient_SetProxy(reqToken, NULL, 0, NULL, NULL);;
+
+					if (duk_peval_string(agent->meshCoreCtx, "require('global-tunnel');") == 0)
+					{
+						duk_get_prop_string(agent->meshCoreCtx, -1, "end");						// [tunnel][end]
+						duk_swap_top(agent->meshCoreCtx, -2);									// [end][this]
+						duk_pcall_method(agent->meshCoreCtx, 0); 								// [undefined]
+					}
+					duk_pop(agent->meshCoreCtx);												// ...
 				}
-				duk_pop(agent->meshCoreCtx);												// ...
+				else
+				{
+					printf("Using proxy: %s:%u\n", proxyHost, proxyPort);
+					if (proxyUsername != NULL)
+					{
+						printf("   => with username: %s\n", proxyUsername);
+					}
+					if (agent->logUpdate != 0)
+					{
+						ILIBLOGMESSAGEX("Using proxy: %s:%u", proxyHost, proxyPort);
+						if (proxyUsername != NULL)
+						{
+							ILIBLOGMESSAGEX("   => with username: %s", proxyUsername);
+						}
+					}
+					agent->proxyServer = ILibWebClient_SetProxy(reqToken, proxyHost, proxyPort, proxyUsername, proxyPassword);
+					if (agent->proxyServer != NULL)
+					{
+						memcpy_s(&(ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx)->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
+					}
+				}
 			}
-			else
-			{
-				printf("Using proxy: %s\n", ILibScratchPad);
-				if(agent->logUpdate != 0)
-				{
-					ILIBLOGMESSAGEX("Using proxy: %s", ILibScratchPad);
-				}
-				if (delimiter > 0)
-				{
-					ILibScratchPad[delimiter] = 0;
-					ILibScratchPad[len] = 0;
-					proxyPort = atoi(ILibScratchPad + delimiter + 1);
-				}
-				agent->proxyServer = ILibWebClient_SetProxy(reqToken, ILibScratchPad, proxyPort, NULL, NULL);
-				if (agent->proxyServer != NULL)
-				{
-					memcpy_s(&(ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx)->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
-				}
-				if (agent->logUpdate != 0) { ILibScratchPad[delimiter] = ':';  ILIBLOGMESSSAGE(ILibScratchPad); }
-			}
+			duk_pop(agent->meshCoreCtx);									// ...
 #else
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore.MeshServer_ConnectEx(): Proxy Specified, but support was not enabled in this build");
 #endif
@@ -3897,7 +3939,7 @@ void MeshAgent_RunScriptOnly_Finalizer(duk_context *ctx, void *user)
 }
 void MeshAgent_CoreModule_UncaughtException(duk_context *ctx, char *msg, void *user)
 {
-	printf("JavaCore UncaughtException: %s\n", msg);
+	printf("UncaughtException: %s\n", msg);
 }
 void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, void *user)
 {
@@ -4260,19 +4302,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 #endif
 #if !defined(MICROSTACK_NOTLS)
-
-#if defined(__APPLE__)
-	if (ILibSimpleDataStore_Get(agentHost->masterDb, "controlChannelDebug", NULL, 0) != 0)
-	{
-		ILIBLOGMESSAGEX("Waiting for network...");
-	}
-	duk_peval_string_noresult(tmpCtx, "process.stdout.write('waiting for network...');var child = require('child_process').execFile('/bin/sh', ['sh']);child.stdin.write('ipconfig waitall\\nexit\\n');child.waitExit();process.stdout.write('[OK]\\n');");
-	if (ILibSimpleDataStore_Get(agentHost->masterDb, "controlChannelDebug", NULL, 0) != 0)
-	{
-		ILIBLOGMESSAGEX("...[OK]\n");
-	}
-#endif
-
 
 	// Check the local MacAddresses, to see if we need to reset our NodeId
 	if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)

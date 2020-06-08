@@ -171,7 +171,8 @@ typedef struct MeshAgentHostContainer
 	ILibSimpleDataStore masterDb;
 	ILibWebClient_StateObject controlChannel;
 	struct sockaddr_in6* proxyServer;
-	
+	void *controlChannelRequest;
+
 #ifdef WIN32
 	void *shCore;
 	DpiAwarenessFunc dpiAwareness;
