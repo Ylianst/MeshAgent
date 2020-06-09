@@ -128,9 +128,10 @@ function messageBox()
                 case 'ALERT':
                     this.GM = require('_GenericMarshal');
                     this.user32 = this.GM.CreateNativeProxy('user32.dll');
-                    this.user32.CreateMethod('MessageBoxA');
+                    this.user32.CreateMethod('MessageBoxW');
+
                     layout = msg.command == 'YESNO' ? (MB_YESNO | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST | MB_SYSTEMMODAL) : (MB_OK | MB_DEFBUTTON2 | MB_ICONEXCLAMATION | MB_TOPMOST | MB_SYSTEMMODAL);
-                    this.user32.MessageBoxA.async(0, this.GM.CreateVariable(msg.caption), this.GM.CreateVariable(msg.title), layout)
+                    this.user32.MessageBoxW.async(0, this.GM.CreateVariable(msg.caption, { wide: true }), this.GM.CreateVariable(msg.title, { wide: true }), layout)
                         .then(function (r)
                         {
                             try
