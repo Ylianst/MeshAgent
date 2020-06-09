@@ -1309,7 +1309,14 @@ duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 		duk_put_prop_string(ctx, -2, "host");
 		duk_push_int(ctx, (int)ntohs(globalTunnel->proxyServer.sin6_port));
 		duk_put_prop_string(ctx, -2, "port");																		// [options][proxy]
+		if (globalTunnel->proxyUser[0] != 0 && globalTunnel->proxyPass[0] != 0)
+		{
+			duk_push_string(ctx, globalTunnel->proxyUser); duk_put_prop_string(ctx, -2, "username");
+			duk_push_string(ctx, globalTunnel->proxyPass); duk_put_prop_string(ctx, -2, "password");
+		}
+		
 		duk_put_prop_string(ctx, -2, "proxy");																		// [options]
+
 		duk_pop(ctx);																								// ...
 	}
 

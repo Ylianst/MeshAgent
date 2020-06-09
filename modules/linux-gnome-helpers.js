@@ -6,20 +6,34 @@ function gnome_getProxySettings(uid)
     child.stderr.str = ''; child.stderr.on('data', function (c) { });
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
 
-    child.stdin.write('gsettings list-recursively org.gnome.system.proxy | tr "\\n" "\\|" | tr "\\\'" "\\`" | awk \'{ count=split($0, res, "|");')
-    child.stdin.write('exc="[]";');
-    child.stdin.write('for(a=0;a<count;++a)');
+    child.stdin.write('gsettings list-recursively org.gnome.system.proxy | tr "\\n" "\\|" | awk \'');
     child.stdin.write('{');
-    child.stdin.write('split(res[a], modecheck, " ");');
-    child.stdin.write('if(modecheck[2] == "mode")');
-    child.stdin.write('{');
-    child.stdin.write('split(modecheck[3], prx, "`"); mode = prx[2];');
-    child.stdin.write('}');
-    child.stdin.write('if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="host") { split(modecheck[3], hst, "`"); host = hst[2]; }');
-    child.stdin.write('if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="port") { port = modecheck[3]; }');
-    child.stdin.write('if(modecheck[1]=="org.gnome.system.proxy" && modecheck[2]=="ignore-hosts") { exc = substr(res[a], 36); gsub("`", "\\"", exc); }');
-    child.stdin.write('}');
-    child.stdin.write('printf "{\\"mode\\": \\"%s\\", \\"host\\": \\"%s\\", \\"port\\": %s, \\"exceptions\\": %s}", mode, host, port, exc; }\'\nexit\n');
+    child.stdin.write('   count=split($0, res, "|");')
+    child.stdin.write('   exc="[]"; auth=""; pwd=""; username=""; enabled="";');
+    child.stdin.write('   for(a=0;a<count;++a)');
+    child.stdin.write('   {');
+    child.stdin.write('      split(res[a], modecheck, " ");');
+    child.stdin.write('      if(modecheck[2] == "mode")');
+    child.stdin.write('      {');
+    child.stdin.write('         split(modecheck[3], prx, "\\047"); mode = prx[2];');
+    child.stdin.write('      }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="host") { split(modecheck[3], hst, "\\047"); host = hst[2]; }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="port") { port = modecheck[3]; }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="use-authentication") { auth=modecheck[3]; }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy" && modecheck[2]=="ignore-hosts") { exc = substr(res[a], 36); gsub("\\047", "\\"", exc); }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="enabled") { enabled = modecheck[3]; }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="authentication-user")');
+    child.stdin.write('      {');
+    child.stdin.write('          split(res[a],dummy,"\\047"); username=dummy[2];');
+    child.stdin.write('      }');
+    child.stdin.write('      if(modecheck[1]=="org.gnome.system.proxy.http" && modecheck[2]=="authentication-password")');
+    child.stdin.write('      {');
+    child.stdin.write('          pwd=substr(res[a],53);');
+    child.stdin.write('      }');
+    child.stdin.write('   }');
+    child.stdin.write('   if(pwd~/^\\047/) { gsub("\\"", "\\\\\\"", pwd); gsub("\\047", "\\"", pwd); }');
+    child.stdin.write('   printf "{\\"mode\\": \\"%s\\", \\"enabled\\": %s, \\"host\\": \\"%s\\", \\"port\\": %s, \\"authEnabled\\": %s, \\"username\\": \\"%s\\", \\"password\\": %s, \\"exceptions\\": %s}", mode, enabled, host, port, auth, username, pwd, exc;');
+    child.stdin.write("}'\nexit\n");
     child.waitExit();
     try
     {

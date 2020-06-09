@@ -382,216 +382,23 @@ void MeshAgent_sendConsoleText(duk_context *ctx, char *format, ...)
 }
 
 
-int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *buffer, size_t bufferSize)
+int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *inBuffer, size_t inBufferLen)
 {
-#ifndef __APPLE__
-	int retVal = 0;
-#endif
-
-#ifdef _POSIX
-	#ifndef __APPLE__
-	// Linux and FreeBSD
-		for (char **env = environ; *env; ++env)
-		{
-			int envLen = (int)strnlen_s(*env, INT_MAX);
-			int i = ILibString_IndexOf(*env, envLen, "=", 1);
-			if (i > 0)
-			{
-				if (i == 11 && (strncmp(*env, "https_proxy", 11) == 0 || strncmp(*env, "HTTPS_PROXY", 11) == 0))
-				{
-					if (ILibString_StartsWith(*env + i + 1, envLen - i - 1, "http://", 7) != 0)
-					{
-						strcpy_s(buffer, bufferSize, *env + i + 8);
-						retVal = envLen - i - 8;
-					}
-					else if(ILibString_StartsWith(*env + i + 1, envLen - i - 1, "https://", 8) != 0)
-					{
-						strcpy_s(buffer, bufferSize, *env + i + 9);
-						retVal = envLen - i - 9;
-					}
-					else
-					{
-						strcpy_s(buffer, bufferSize, *env + i + 1);
-						retVal = envLen - i - 1;
-					}
-					break;
-				}
-			}
-		}
-		if (retVal == 0)
-		{
-			// Check /etc/environment just in case it wasn't exported
-	#ifdef _FREEBSD
-			// FreeBSD Only
-			char getProxy[] = "(function getProxies(){\
-									var child = require('child_process').execFile('/bin/sh', ['sh']);\
-									child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });\
-									child.stdin.write('cat /etc/login.conf | grep :setenv= | awk -F\":setenv=\" \\'{ if(!($1 ~ /^#/)) { print $2  }  }\\' | tr \"\\,\" \"\\n\" | awk -F= \\'{ if($1==\"https_proxy\") { gsub(/\\\\\\\\c/, \":\", $2);  print $2  } }\\'\\n\\exit\\n');\
-									child.waitExit();\
-									return(child.stdout.str.trim().split('\\n')[0].split('//')[1]);\
-								})();";
-	#else
-			// Linux Only
-			char getProxy[] = "require('proxy-helper').getProxy()";
-	#endif
-			// Linux and FreeBSD
-			if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
-			{
-				duk_size_t proxyLen;
-				char *proxy = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &proxyLen);
-				if (proxy != NULL && proxyLen > 0) { strcpy_s(buffer, bufferSize, proxy); }
-				retVal = (int)proxyLen;
-			}
-			duk_pop(agent->meshCoreCtx);
-		}
-		return(retVal);
-#else
-	// MacOS Only
-	char getProxyies[] = "(function getProxies(){\
-		var ret = {};\
-		var child = require('child_process').execFile('/bin/sh', ['sh']);\
-		child.stdout.str = '';\
-		child.stdout.on('data', function(chunk) { this.str += chunk.toString(); });\
-		child.stdin.write('system_profiler SPNetworkDataType | grep \"Proxy\" \\nexit\\n');\
-		child.waitExit();\
-		var lines = child.stdout.str.split('\\n');\
-		for (var i in lines)\
-		{\
-			if (lines[i])\
-			{\
-				var val = lines[i].split(':')[1].trim().toLowerCase();\
-				var tokens = lines[i].split(':')[0].trim().split(' ');\
-				var key = tokens[0].toLowerCase();\
-				var t = tokens[2].toLowerCase();\
-				if (!ret[key]) { ret[key] = {}; }\
-				ret[key][t] = val;\
-			}\
-		}\
-		return(ret);\
-	})();";
-	if (duk_peval_string(agent->meshCoreCtx, getProxyies) == 0)
+	duk_size_t bufferLen = 0;
+	if (duk_peval_string(agent->meshCoreCtx, "require('proxy-helper').getProxy();") == 0)	// [string]
 	{
-		if (duk_has_prop_string(agent->meshCoreCtx, -1, "http"))
+		char *buffer = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &bufferLen);
+		if (bufferLen <= inBufferLen)
 		{
-			duk_get_prop_string(agent->meshCoreCtx, -1, "http");
-		}
-		else if (duk_has_prop_string(agent->meshCoreCtx, -1, "https"))
-		{
-			duk_get_prop_string(agent->meshCoreCtx, -1, "https");
+			memcpy_s(inBuffer, inBufferLen, buffer, bufferLen);
 		}
 		else
 		{
-			duk_pop(agent->meshCoreCtx);
-			return(0); // No Proxies detected
-		}
-
-		if (strcmp(Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "enabled", "no"), "yes") == 0)
-		{
-			char *proxyserver, *proxyport;
-			duk_size_t proxyserverLen, proxyportLen;
-
-			proxyserver = (char*)Duktape_GetStringPropertyValueEx(agent->meshCoreCtx, -1, "server", NULL, &proxyserverLen);
-			proxyport = (char*)Duktape_GetStringPropertyValueEx(agent->meshCoreCtx, -1, "port", "8080", &proxyportLen);
-
-			strncpy_s(buffer, bufferSize, proxyserver, proxyserverLen);
-			strncpy_s(buffer + proxyserverLen, bufferSize - proxyserverLen, ":", 1);
-			strncpy_s(buffer + proxyserverLen + 1, bufferSize - proxyserverLen - 1, proxyport, proxyportLen);
-			duk_pop(agent->meshCoreCtx);
-			return(proxyserverLen + 1 + proxyportLen);
-		}
-		else
-		{
-			// Proxy is disabled
-			duk_pop(agent->meshCoreCtx);
-			return(0);
+			bufferLen = 0;
 		}
 	}
-	else
-	{
-		return(0);
-	}
-	#endif
-#else
-	// Windows Only
-	char getProxy[] = "(function () {\
-		var isroot = false;\
-		var servers = [];\
-		/* First we need to see if we are running as admin */\
-		var GM = require('_GenericMarshal');\
-		var advapi = GM.CreateNativeProxy('Advapi32.dll');\
-		advapi.CreateMethod('AllocateAndInitializeSid');\
-		advapi.CreateMethod('CheckTokenMembership');\
-		advapi.CreateMethod('FreeSid');\
-		var NTAuthority = GM.CreateVariable(6);\
-		NTAuthority.toBuffer().writeInt8(5, 5);\
-		var AdministratorsGroup = GM.CreatePointer();\
-		if (advapi.AllocateAndInitializeSid(NTAuthority, 2, 32, 544, 0, 0, 0, 0, 0, 0, AdministratorsGroup).Val != 0)\
-		{\
-			var member = GM.CreateInteger();\
-			if (advapi.CheckTokenMembership(0, AdministratorsGroup.Deref(), member).Val != 0)\
-			{\
-				if (member.toBuffer().readUInt32LE() != 0) { isroot = true; }\
-			}\
-			advapi.FreeSid(AdministratorsGroup.Deref());\
-		}\
-		var reg = require('win-registry');\
-		if (isroot)\
-		{\
-			/* If running as admin, enumerate the users to find proxy settings */\
-			var users = reg.QueryKey(reg.HKEY.Users);\
-			var keys;\
-			for (var i in users.subkeys)\
-			{\
-				try\
-				{\
-					value = reg.QueryKey(reg.HKEY.Users, users.subkeys[i] + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', 'ProxyEnable');\
-					if (value == 1)\
-					{\
-						value = reg.QueryKey(reg.HKEY.Users, users.subkeys[i] + '\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', 'ProxyServer');\
-						servers.push(value);\
-					}\
-				}\
-				catch (e)\
-				{\
-				}\
-			}\
-			return (servers);\
-		}\
-		else\
-		{\
-			/* We're not admin, so we can only check HKEY_LOCAL_USERS for proxy settings */\
-			try\
-			{\
-				if (reg.QueryKey(reg.HKEY.CurrentUser, 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings', 'ProxyEnable') == 1)\
-				{\
-					servers.push(reg.QueryKey(reg.HKEY.CurrentUser, 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Internet Settings', 'ProxyServer'));\
-				}\
-			}\
-			catch (e)\
-			{\
-			}\
-			return (servers);\
-		}\
-	})();";
-
-	if (duk_peval_string(agent->meshCoreCtx, getProxy) == 0)
-	{
-		if (duk_get_length(agent->meshCoreCtx, -1) > 0)		// [array]
-		{
-			duk_get_prop_index(agent->meshCoreCtx, -1, 0);	// [array][0];
-			char *tmp;
-			duk_size_t tmpLen;
-
-			tmp = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &tmpLen);
-			strncpy_s(buffer, bufferSize, tmp, tmpLen);
-			duk_pop(agent->meshCoreCtx);					// [array]
-			retVal = (int)tmpLen;
-		}
-	}
-	duk_pop(agent->meshCoreCtx);							// ...
-
-	return(retVal);
-#endif
+	duk_pop(agent->meshCoreCtx);															// ...
+	return((int)bufferLen);
 }
 #ifdef _POSIX
 size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
@@ -3617,7 +3424,13 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 					agent->proxyServer = ILibWebClient_SetProxy(reqToken, proxyHost, proxyPort, proxyUsername, proxyPassword);
 					if (agent->proxyServer != NULL)
 					{
-						memcpy_s(&(ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx)->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
+						ILibDuktape_globalTunnel_data *proxy = ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx);
+						memcpy_s(&(proxy->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
+						if (proxyUsername != NULL && proxyPassword != NULL)
+						{
+							memcpy_s(proxy->proxyUser, sizeof(proxy->proxyUser), proxyUsername, strnlen_s(proxyUsername, sizeof(proxy->proxyUser)));
+							memcpy_s(proxy->proxyPass, sizeof(proxy->proxyPass), proxyPassword, strnlen_s(proxyPassword, sizeof(proxy->proxyPass)));
+						}
 					}
 				}
 			}
