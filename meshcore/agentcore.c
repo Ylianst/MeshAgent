@@ -1134,6 +1134,11 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		duk_pop(ctx);
 		return 1;
 	}
+	
+#ifdef __APPLE__
+	duk_peval_string_noresult(ctx, "require('power-monitor').wakeDisplay();");
+#endif
+
 	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
 	agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
 	duk_pop(ctx);
