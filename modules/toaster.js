@@ -53,6 +53,10 @@ function Toaster()
                 {
                     var cid;
                     retVal.options = { env: { _title: title, _caption: caption } };
+                    for (var c1e in process.env)
+                    {
+                        retVal.options.env[c1e] = process.env[c1e];
+                    }
                     try
                     {
                         retVal.options.uid = tsid == null ? require('user-sessions').consoleUid() : tsid;
@@ -88,7 +92,7 @@ function Toaster()
                     retVal.child.stdin.write('$objBalloon.Icon = [System.Drawing.SystemIcons]::Information\r\n');
                     retVal.child.stdin.write('$objBalloon.Visible = $True\r\n');
                     retVal.child.stdin.write('Register-ObjectEvent -InputObject $objBalloon -EventName BalloonTipClosed -Action { $objBalloon.dispose();Write-Host "<`DISMISSED`>" }')
-                    retVal.child.stdin.write('$objBalloon.ShowBalloonTip(10000,"' + title + '", "' + caption + '", 0)\r\n');
+                    retVal.child.stdin.write('$objBalloon.ShowBalloonTip(10000, $env:_title, $env:_caption, 0)\r\n');
                     retVal.child.timeout = setTimeout(function (c)
                     {
                         c.timeout = null;
