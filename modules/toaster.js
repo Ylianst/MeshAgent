@@ -52,7 +52,7 @@ function Toaster()
             case 'win32':
                 {
                     var cid;
-                    retVal.options = { };
+                    retVal.options = { env: { _title: title, _caption: caption } };
                     try
                     {
                         retVal.options.uid = tsid == null ? require('user-sessions').consoleUid() : tsid;

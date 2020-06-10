@@ -489,7 +489,7 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 #endif
 	
 #ifdef WIN32
-	p = ILibProcessPipe_Manager_SpawnProcessEx3(manager, target, args, spawnType, (void*)(ILibPtrCAST)(uint64_t)(uid < 0 ? 0 : uid), 0);
+	p = ILibProcessPipe_Manager_SpawnProcessEx4(manager, target, args, spawnType, (void*)(ILibPtrCAST)(uint64_t)(uid < 0 ? 0 : uid), envargs, 0);
 #else
 	p = ILibProcessPipe_Manager_SpawnProcessEx4(manager, target, args, spawnType, (void*)(ILibPtrCAST)(uint64_t)uid, envargs, 0);
 #endif

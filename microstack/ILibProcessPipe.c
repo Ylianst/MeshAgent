@@ -578,9 +578,36 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		info.dwFlags |= STARTF_USESTDHANDLES;
 	}
 
-	if (((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT || spawnType == ILibProcessPipe_SpawnTypes_DETACHED) && !CreateProcessW(ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, spawnType == ILibProcessPipe_SpawnTypes_DETACHED ? FALSE: TRUE, CREATE_NO_WINDOW | (needSetSid !=0? (DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)) ||
-		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserW(userToken, ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, TRUE, CREATE_NO_WINDOW | (needSetSid != 0 ? (DETACHED_PROCESS| CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)))
+	if (envvars != NULL)
 	{
+		WCHAR *wideEnv;
+		int tmpCnt;
+		int envCount = 0;
+		void *envCurrent = envvars;
+		while (envCurrent != NULL && ((char**)envCurrent)[0] != NULL)
+		{
+			envCount += (ILibUTF8ToWideCount(((char**)envCurrent)[0]) + ILibUTF8ToWideCount(((char**)envCurrent)[1]) + ILibUTF8ToWideCount("="));
+			envCurrent = (void*)((char*)envCurrent + 2 * sizeof(char*));
+		}
+		wideEnv = (WCHAR*)ILibMemory_SmartAllocate(2* envCount);
+		tmpCnt = 0;
+
+		envCurrent = envvars;
+		while (envCurrent != NULL && ((char**)envCurrent)[0] != NULL)
+		{
+			tmpCnt += (ILibUTF8ToWideCountEx(((char**)envCurrent)[0], wideEnv + tmpCnt, (int)ILibMemory_Size(wideEnv) / 2) - 1);
+			tmpCnt += (ILibUTF8ToWideCountEx("=", wideEnv + tmpCnt, ((int)ILibMemory_Size(wideEnv) / 2) - tmpCnt) - 1);
+			tmpCnt += ILibUTF8ToWideCountEx(((char**)envCurrent)[1], wideEnv + tmpCnt, ((int)ILibMemory_Size(wideEnv) / 2) - tmpCnt);
+			envCurrent = (void*)((char*)envCurrent + 2 * sizeof(char*));
+		}
+		envvars = wideEnv;
+	}
+
+
+	if (((spawnType == ILibProcessPipe_SpawnTypes_DEFAULT || spawnType == ILibProcessPipe_SpawnTypes_DETACHED) && !CreateProcessW(ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, spawnType == ILibProcessPipe_SpawnTypes_DETACHED ? FALSE: TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | (needSetSid !=0? (DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)) ||
+		(spawnType != ILibProcessPipe_SpawnTypes_DEFAULT && !CreateProcessAsUserW(userToken, ILibUTF8ToWideEx(target, -1, tmp1, (int)sizeof(tmp1)/2), ILibUTF8ToWideEx(parms, -1, tmp2, (int)sizeof(tmp2)/2), NULL, NULL, TRUE, CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | (needSetSid != 0 ? (DETACHED_PROCESS| CREATE_NEW_PROCESS_GROUP) : 0x00), envvars, NULL, &info, &processInfo)))
+	{
+		int ll = GetLastError();
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 		{
 			ILibProcessPipe_FreePipe(retVal->stdErr);
@@ -591,10 +618,11 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		ILibMemory_Free(retVal);
 		if (token != NULL) { CloseHandle(token); }
 		if (userToken != NULL) { CloseHandle(userToken); }
+		if (envvars != NULL) { ILibMemory_Free(envvars); }
 		return(NULL);
 	}
 
-
+	if (envvars != NULL) { ILibMemory_Free(envvars); }
 	if (allocParms != 0) { free(parms); }
 	if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{

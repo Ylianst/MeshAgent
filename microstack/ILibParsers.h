@@ -173,10 +173,15 @@ static inline void ignore_result(uintptr_t result) { (void)result; }
 #ifdef WIN32
 char *ILibWideToUTF8Ex(WCHAR* wstr, int wstrCharacterLen, char *buffer, int bufferLen);
 #define ILibWideToUTF8(wstr, wstrCharacterLen) ILibWideToUTF8Ex(wstr, wstrCharacterLen, NULL, 0)
-char *ILibWideToUTF8_stupidEx(WCHAR* wstr, int wstrBYTESIZE, char *buffer, int bufferLen);
-#define ILibWideToUTF8_stupid(wstr, wstrBYTESIZE) ILibWideToUTF8_stupidEx(wstr, wstrBYTESIZE, NULL, 0)
 WCHAR* ILibUTF8ToWideEx(char* str, int len, WCHAR* buffer, int bufferCharacterSize);
 #define ILibUTF8ToWide(utf8string, len) ILibUTF8ToWideEx(utf8string, len, NULL, 0)
+#define ILibUTF8ToWideCount(utf8string) MultiByteToWideChar(CP_UTF8, 0, (LPCCH)utf8string, -1, NULL, 0)
+#define ILibUTF8ToWideCountEx(utf8string, outBuffer, outBufferLen) MultiByteToWideChar(CP_UTF8, 0, (LPCCH)utf8string, -1, outBuffer, outBufferLen)
+
+// The following two methods are for the special case, when only the bytes count is known, not the character count.
+char *ILibWideToUTF8_stupidEx(WCHAR* wstr, int wstrBYTESIZE, char *buffer, int bufferLen);
+#define ILibWideToUTF8_stupid(wstr, wstrBYTESIZE) ILibWideToUTF8_stupidEx(wstr, wstrBYTESIZE, NULL, 0)
+
 #else
 #define ILibWideToUTF8(wstr, len) (wstr)
 #define ILibWideToUTF8Ex(wstr, len, buffer, sz) (wstr)
