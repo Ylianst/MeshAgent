@@ -956,9 +956,20 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 	else
 	{
 		// I/O Errors
+
 		if (winIPC->mServer != NULL) { winIPC->clientConnected = 0; }
 		if (winIPC->reservedState != NULL) { ILibChain_WaitHandle_DestroySavedState(chain, winIPC->reservedState); winIPC->reservedState = NULL; }
 		ILibDuktape_DuplexStream_Closed(winIPC->ds);
+
+		duk_push_heapptr(winIPC->ctx, winIPC->mServer);										// [server]
+		if (duk_has_prop_string(winIPC->ctx, -1, ILibDuktape_net_server_closed_needEmit))
+		{
+			ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mServer, "close");		// [server][emit][this][close]
+			if (duk_pcall_method(winIPC->ctx, 1) != 0) { ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "net.ipcServer.onClose() Error: "); }
+			duk_pop(winIPC->ctx);															// [server]
+		}
+		duk_pop(winIPC->ctx);																// ...
+
 		return(FALSE);
 	}
 }

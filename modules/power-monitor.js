@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+var WM_SYSCOMMAND = 0x0112;
+var SC_MONITORPOWER = 0xF170;
+var HWND_BROADCAST = 0xffff;
+var ES_DISPLAY_REQUIRED = 0x00000002;
+
 function powerMonitor()
 {
     this._ObjectID = 'power-monitor';
@@ -115,6 +120,16 @@ function powerMonitor()
     }
     if (process.platform == 'darwin')
     {
+        Object.defineProperty(this, "_caffeinate", {
+            value: (function ()
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write('whereis caffeinate\nexit\n');
+                child.waitExit();
+                return (child.stdout.str.trim());
+            })()
+        });
         this._getBatteryLevel = function _getBatteryLevel()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -165,6 +180,92 @@ function powerMonitor()
             }, 300000, this);
         }
     }
+    this.sleepDisplay = function sleepDispay(force)
+    {
+        var promise = require('promise');
+        p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        if (process.platform != 'win32') { p._rej('Not supported'); return (p); }
+
+        if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
+        {
+            // We are running as LocalSystem, so we have to find a user session for this to work
+            var options = { launch: { module: 'power-monitor', method: 'sleepDisplay', args: [] } };
+            try
+            {
+                options.user = require('user-sessions').getUsername(require('user-sessions').consoleUid());
+            }
+            catch(ee)
+            {
+                p._rej('No users logged in');
+                return (p);
+            }
+            p.child = require('child-container').create(options);
+            p.child.promise = p;
+            p.child.on('exit', function () { this.promise._res(); });
+        }
+        else
+        {
+            if (require('child-container').child) { require('win-console').hide(); }
+            var GM = require('_GenericMarshal');
+            var user32 = GM.CreateNativeProxy('User32.dll');
+            user32.CreateMethod('SendMessageA');
+            user32.SendMessageA(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2);
+            p._res();
+            if (require('child-container').child) { process._exit(); }
+        }
+        return (p);
+    };
+    this.wakeDisplay = function wakeDisplay()
+    {
+        var promise = require('promise');
+        p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        switch(process.platform)
+        {
+            case 'darwin':
+                if (this._caffeinate)
+                {
+                    p.child = require('child_process').execFile(this._caffeinate, ['caffeinate', '-u', '-t 2']);
+                    p.child.stdout.on('data', function () { });
+                    p.child.stderr.on('data', function () { });
+                    p.child.on('exit', function (code) { this.promise._res(); });
+                    p.child.promise = p;
+                }
+                break;
+            case 'win32':
+                if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
+                {
+                    // We are running as LocalSystem, so we have to find a user session for this to work
+                    var options = { launch: { module: 'power-monitor', method: 'wakeDisplay', args: [] } };
+                    try
+                    {
+                        options.user = require('user-sessions').getUsername(require('user-sessions').consoleUid());
+                    }
+                    catch (ee)
+                    {
+                        p._rej('No users logged in');
+                        return (p);
+                    }
+                    p.child = require('child-container').create(options);
+                    p.child.promise = p;
+                    p.child.on('exit', function () { this.promise._res(); });
+                }
+                else
+                {
+                    if (require('child-container').child) { require('win-console').hide(); }
+                    var GM = require('_GenericMarshal');
+                    var kernel32 = GM.CreateNativeProxy('Kernel32.dll');
+                    kernel32.CreateMethod('SetThreadExecutionState');
+                    kernel32.SetThreadExecutionState(ES_DISPLAY_REQUIRED);
+                    p._res();
+                    if (require('child-container').child) { process._exit(); }
+                }
+                break;
+            default:
+                p._res();
+                break;
+        }
+        return (p);
+    };
 }
 
 module.exports = new powerMonitor();

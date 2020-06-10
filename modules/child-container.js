@@ -20,7 +20,7 @@ function childContainer()
     this._ObjectID = 'child-container';
     this.create = function create(options)
     {
-        if (!options || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
+        if (!options || (!options.user && !options.uid) || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
 
         var ipcInteger;
 
@@ -60,7 +60,7 @@ function childContainer()
             }
         });
         ret._ipc = require('net').createServer(); ret._ipc.parent = ret;       
-        ret._ipc.on('close', function () { console.log('Child Container Process Closed'); });
+        ret._ipc.on('close', function () { this.parent.emit('exit'); });
 
         while (true)
         {
@@ -89,6 +89,7 @@ function childContainer()
         var script = Buffer.from("console.log('CHILD/START');require('child-container').connect('" + ipcInteger + "');").toString('base64');
         ret._ipc.once('connection', function onConnect(s)
         {
+            this.close();
             s.descriptorMetadata = 'child-container';
             this.parent._client = s;
             this.parent._client._parent = this;
@@ -179,7 +180,27 @@ function childContainer()
     this.connect = function (ipcNumber)
     {
         var ipcPath = '\\\\.\\pipe\\taskRedirection-' + ipcNumber;
-        this._ipcClient = require('net').createConnection({ path: ipcPath }, function ()
+        this._ipcClient = require('net').createConnection({ path: ipcPath });
+        this._ipcClient._parent = this;
+        require('events').EventEmitter.call(this, true)
+            .createEvent('message')
+            .createEvent('exit')
+            .addMethod('message', function (msg)
+            {
+                this.send({ command: 'message', value: msg });
+            })
+            .addMethod('send', function (data)
+            {
+                if (!this._ipcClient) { throw ('Not Connected'); }
+                var d, h = Buffer.alloc(4);
+
+                d = Buffer.from(JSON.stringify(data));
+                h.writeUInt32LE(d.length + 4);
+                this._ipcClient.write(h);
+                this._ipcClient.write(d);
+            });
+        Object.defineProperty(this, 'child', { value: true });
+        this._ipcClient.on('connect', function ()
         {
             this.on('close', function () { process._exit(0); });
             this.on('data', function (c)
@@ -219,25 +240,6 @@ function childContainer()
                 if (cLen < c.length) { this.unshift(c.slice(cLen)); }
             });
         });
-        this._ipcClient._parent = this;
-
-        require('events').EventEmitter.call(this, true)
-            .createEvent('message')
-            .createEvent('exit')
-            .addMethod('message', function (msg)
-            {
-                this.send({ command: 'message', value: msg });
-            })
-            .addMethod('send', function (data)
-            {
-                if (!this._ipcClient) { throw ('Not Connected'); }
-                var d, h = Buffer.alloc(4);
-
-                d = Buffer.from(JSON.stringify(data));
-                h.writeUInt32LE(d.length + 4);
-                this._ipcClient.write(h);
-                this._ipcClient.write(d);
-            });
     };
 }
 
