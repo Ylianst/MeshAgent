@@ -44,6 +44,12 @@ const WM_CLOSE = 0x0010;
 
 var promise = require('promise');
 
+//function sendConsoleText(msg)
+//{
+//    require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: msg });
+//}
+
+
 function messageBox()
 {
     this._ObjectID = 'message-box';
@@ -324,6 +330,8 @@ function linux_messageBox()
 
         if (this.zenity)
         {
+            ret._options = { title: title.trim(), caption: caption.trim(), timeout: timeout, layout: layout, zenity: this.zenity };
+
             // GNOME/ZENITY
             if (this.zenity.timeout)
             {
@@ -341,7 +349,7 @@ function linux_messageBox()
             }
             ret.child.descriptorMetadata = 'zenity, message-box'
             ret.child.promise = ret;
-            ret.child.stderr.on('data', function (chunk) { });
+            ret.child.stderr.str = ''; ret.child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
             ret.child.stdout.on('data', function (chunk) { });
             ret.child.on('exit', function (code)
             {
@@ -355,7 +363,45 @@ function linux_messageBox()
                         this.promise._rej('denied');
                         break;
                     default:
-                        this.promise._rej('timeout');
+                        if (this.stderr.str.includes('option is not') && this.promise._options.zenity.timeout)
+                        {
+                            var uname = require('user-sessions').getUsername(uid);
+                            this.promise._ch = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
+                            this.promise._ch.promise = this.promise;
+                            this.promise._ch.stderr.str = ''; this.promise._ch.stderr.on('data', function (c) { this.str += c.toString(); });
+                            this.promise._ch.stdout.str = ''; this.promise._ch.stdout.on('data', function (c)
+                            {
+                                this.str += c.toString();
+                                if (this.str.includes('<<<<$_RESULT>>>>')) { this.str = this.str.split('<<<<$_RESULT>>>>')[1]; }
+                                if (this.str.includes('>>>>')) { this.parent.kill(); }
+                            });
+                            this.promise._ch.stdin.write('su - ' + uname + '\n');
+                            this.promise._ch.stdin.write('export DISPLAY=' + xinfo.display + '\n');
+                            this.promise._ch.stdin.write('zenity ' + (this.promise._options.layout == null ? '--question' : '--warning'));
+                            this.promise._ch.stdin.write(' --title=' + this.promise._options.title + ' --text=' + this.promise._options.caption);
+                            this.promise._ch.stdin.write(' --timeout=' + this.promise._options.timeout + '\nexport _RESULT=$?\necho "<<<<$_RESULT>>>>"\nexit');
+                            this.promise._ch.on('exit', function ()
+                            {
+                                var res = this.stdout.str.split('>>>>')[0].split('<<<<')[1];
+                                switch(parseInt(res))
+                                {
+                                    case 0:
+                                        this.promise._res();
+                                        break;
+                                    case 1:
+                                        this.promise._rej('denied');
+                                        break;
+                                    default:
+                                        this.promise._rej(this.stderr.str.toString());
+                                        break;
+                                }
+                            });
+
+                        }
+                        else
+                        {
+                            this.promise._rej(this.stderr.str.trim());
+                        }
                         break;
                 }
             });
