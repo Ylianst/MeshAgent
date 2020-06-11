@@ -126,6 +126,7 @@ function Toaster()
                     {
                         if (process.platform == 'linux' && !require('linux-dbus').hasService('org.freedesktop.Notifications'))
                         {
+
                             // No D-Bus service to handle notifications, so we must fake a notification with ZENITY --info
                             if (require('message-box').zenity.timeout)
                             {
@@ -140,8 +141,9 @@ function Toaster()
                             }
                             retVal.child.descriptorMetadata = 'toaster (zenity/messagebox)'
                         }                        
-                        else if (require('message-box').zenity.version[0] < 3 || (require('message-box').zenity.version[0] == 3 && require('message-box').zenity.version[1] < 10))
+                        else if (require('message-box').zenity.broken || require('message-box').zenity.version[0] < 3 || (require('message-box').zenity.version[0] == 3 && require('message-box').zenity.version[1] < 10))
                         {
+
                             // ZENITY Notification is broken
                             if (require('message-box').notifysend)
                             {
@@ -149,8 +151,9 @@ function Toaster()
                                 if (require('user-sessions').whoami() == 'root')
                                 {
                                     // We're root, so we must run in correct context
+                                    var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                                     retVal.child = require('child_process').execFile('/bin/sh', ['sh']);
-                                    retVal.child.stdin.write('su - ' + retVal.username + ' -c "DISPLAY=\'' + retVal.xinfo.display + '\' notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\nexit\n');
+                                    retVal.child.stdin.write('su - ' + retVal.username + ' -c "export DISPLAY=' + retVal.xinfo.display + '; export XDG_RUNTIME_DIR=' + xdg + '; notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\nexit\n');
                                 }
                                 else
                                 {
@@ -178,6 +181,7 @@ function Toaster()
                         }
                         else
                         {
+
                             // Use ZENITY Notification
                             retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--notification', '--title=' + title, '--text=' + caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });                   
                             retVal.child.descriptorMetadata = 'toaster (zenity/notification)'
@@ -214,7 +218,24 @@ function Toaster()
                         }
                         else
                         {
-                            if (require('message-box').xmessage)
+                            if (require('message-box').notifysend)
+                            {
+                                // Using notify-send
+                                if (require('user-sessions').whoami() == 'root')
+                                {
+                                    // We're root, so we must run in correct context
+                                    var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
+                                    retVal.child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    retVal.child.stdin.write('su - ' + retVal.username + ' -c "export DISPLAY=' + retVal.xinfo.display + '; export XDG_RUNTIME_DIR=' + xdg + '; notify-send \'' + retVal.title + '\' \'' + retVal.caption + '\'"\nexit\n');
+                                }
+                                else
+                                {
+                                    // We're a regular user, so we don't need to do anything special
+                                    retVal.child = require('child_process').execFile(require('message-box').notifysend.path, ['notify-send', retVal.title, retVal.caption]);
+                                }
+                                retVal.child.descriptorMetadata = 'toaster (notify-send)'
+                            }
+                            else if (require('message-box').xmessage)
                             {
                                 retVal._mb = require('message-box').create(title, caption, 5, 'OK');
                                 retVal._mb.ret = retVal;

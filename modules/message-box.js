@@ -184,55 +184,74 @@ function linux_messageBox()
                 Object.defineProperty(ret, "timeout", {
                     get: function ()
                     {
-                        var uid, xinfo;
-                        try
+                        if (this._timeout == null)
                         {
-                            uid = require('user-sessions').consoleUid();
-                            xinfo = require('monitor-info').getXInfo(uid);
+                            var uid, xinfo;
+                            try
+                            {
+                                uid = require('user-sessions').consoleUid();
+                                xinfo = require('monitor-info').getXInfo(uid);
+                            }
+                            catch (e)
+                            {
+                                uid = 0;
+                                xinfo = require('monitor-info').getXInfo(0);
+                            }
+                            if (xinfo == null) { return (false); }
+                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
+                            child.stderr.on('data', function (e) { });
+                            child.waitExit();
+                            Object.defineProperty(this, "_timeout", { value: child.stdout.str.trim() == '' ? false : true });
+                            return (this._timeout);
                         }
-                        catch (e)
+                        else
                         {
-                            uid = 0;
-                            xinfo = require('monitor-info').getXInfo(0);
+                            return (this._timeout);
                         }
-                        if (xinfo == null) { return (false); }
-                        var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
-                        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
-                        child.stderr.on('data', function (e) { });
-                        child.waitExit();
-                        return (child.stdout.str.trim() == '' ? false : true);
                     }
                 });
 
                 Object.defineProperty(ret, "version", {
                     get: function ()
                     {
-                        var uid, xinfo;
-                        try
+                        if (this._version == null)
                         {
-                            uid = require('user-sessions').consoleUid();
-                            xinfo = require('monitor-info').getXInfo(uid);
-                        }
-                        catch (e)
-                        {
-                            uid = 0;
-                            xinfo = require('monitor-info').getXInfo(0);
-                        }
-                        if (xinfo == null) { return (false); }
+                            var uid, xinfo;
+                            try
+                            {
+                                uid = require('user-sessions').consoleUid();
+                                xinfo = require('monitor-info').getXInfo(uid);
+                            }
+                            catch (e)
+                            {
+                                uid = 0;
+                                xinfo = require('monitor-info').getXInfo(0);
+                            }
+                            if (xinfo == null) { return (false); }
 
-                        var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
-                        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                        child.stdin.write(location + ' --version | awk -F. \'{ printf "[%s, %s]\\n", $1, $2; } \'\nexit\n');
-                        child.waitExit();
+                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdin.write(location + ' --version | awk -F. \'{ printf "[%s, %s]\\n", $1, $2; } \'\nexit\n');
+                            child.waitExit();
 
-                        try
-                        {
-                            return (JSON.parse(child.stdout.str.trim()));
+                            try
+                            {
+                                if (child.stderr.str.includes('-CRITICAL **')) { object.defineProperty(this, "broken", { value: true }); }
+                                Object.defineProperty(this, "_version", {value: JSON.parse(child.stdout.str.trim())});
+                                return (this._version);
+                            }
+                            catch (e)
+                            {
+                                Object.defineProperty(this, "_version", { value: [2, 16] });
+                                return (this._version);
+                            }
                         }
-                        catch (e)
+                        else
                         {
-                            return ([2, 16]);
+                            return (this._version);
                         }
                     }
                 });
@@ -264,20 +283,19 @@ function linux_messageBox()
                 })()
             });
     }
-    else
-    {
-        Object.defineProperty(this, 'notifysend',
+
+    Object.defineProperty(this, 'notifysend',
+        {
+            value: (function ()
             {
-                value: (function ()
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("whereis notify-send | awk '{ print $2 }'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim() == '' ? null : { path: child.stdout.str.trim() });
-                })()
-            });
-    }
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("whereis notify-send | awk '{ print $2 }'\nexit\n");
+                child.waitExit();
+                return (child.stdout.str.trim() == '' ? null : { path: child.stdout.str.trim() });
+            })()
+        });
+    
 
     this.create = function create(title, caption, timeout, layout)
     {
