@@ -1279,6 +1279,7 @@ void ILibProcessPipe_Process_ResetMetadata(ILibProcessPipe_Process p, char *meta
 {
 	char tmp[1024];
 	ILibProcessPipe_Process_Object *j = (ILibProcessPipe_Process_Object*)p;
+	if (j == NULL || !ILibMemory_CanaryOK(j)) { return; }
 
 	sprintf_s(tmp, sizeof(tmp), "(stdout) %s", metadata);
 	ILibProcessPipe_Pipe_ResetMetadata(j->stdOut, tmp);
