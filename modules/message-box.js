@@ -587,7 +587,7 @@ function macos_messageBox()
             {
                 var res = this.stdout.str.substring(this.stdout.str.indexOf("}'\x1b"));
                 res = res.substring(1 + res.indexOf('\n'));
-                res = res.substring(0, res.indexOf('\x1b'));
+                res = res.substring(0, res.indexOf('\x1b')).trim();
                 if (res == '_TIMEOUT_')
                 {
                     this.promise._rej('TIMEOUT');
@@ -600,7 +600,7 @@ function macos_messageBox()
                     }
                     else
                     {
-                        this.promise_rej('denied');
+                        this.promise._rej('denied');
                     }
                 }
             });
