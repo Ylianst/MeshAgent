@@ -44,10 +44,10 @@ const WM_CLOSE = 0x0010;
 
 var promise = require('promise');
 
-//function sendConsoleText(msg)
-//{
-//    require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: msg });
-//}
+function sendConsoleText(msg)
+{
+    require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: msg });
+}
 
 
 function messageBox()
@@ -579,6 +579,8 @@ function macos_messageBox()
             buttons += (' default button "' + layout[layout.length - 1] + '"');
             timeout = (' giving up after ' + timeout);
             var icon = 'with icon caution';
+            var str = 'tell current application to display dialog "' + caption + '" with title "' + title + '" ' + icon + ' ' + buttons + timeout;
+            str = Buffer.from("console.log('" + str + "'); process.exit();").toString('base64');
 
             ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
             ret.child.descriptorMetadata = 'message-box';
@@ -586,9 +588,9 @@ function macos_messageBox()
             ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
             ret.child.on('exit', function ()
             {
-                var res = this.stdout.str.substring(this.stdout.str.indexOf("}'\x1b"));
-                res = res.substring(1 + res.indexOf('\n'));
-                res = res.substring(0, res.indexOf('\x1b')).trim();
+                var res = this.stdout.str.split('\x1e');
+                if (!res[1]) { return; }
+                res = res[1].trim();
                 if (res == '_TIMEOUT_')
                 {
                     this.promise._rej('TIMEOUT');
@@ -607,7 +609,7 @@ function macos_messageBox()
                 this.promise.child = null;
             });
             ret.child.stdin.write('su - ' + ret.name + '\n');
-            ret.child.stdin.write('osascript -e \'tell current application to display dialog "' + caption + '" with title "' + title + '" ' + icon + ' ' + buttons + timeout + '\' 2>/dev/null | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\nexit\n');
+            ret.child.stdin.write(process.execPath.split('./').join('') + ' -b64exec ' + str + ' | osascript 2>/dev/null | awk \'{ printf "\\x1e"; c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } printf "\\x1e"; }\'\nexit\nexit\n');
             ret.close = function close()
             {
                 if (this.child) { this.child.kill(); }
@@ -697,12 +699,15 @@ function macos_messageBox()
                 ret._rej('No users logged in');
                 return (ret);
             }
+
+            var agent = process.execPath.split('./').join('');
+            var str = Buffer.from('console.log("' + clipText + '");process.exit();').toString('base64');
             ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
             ret.child.promise = ret;
             ret.child.stdout.on('data', function (c) { });
             ret.child.on('exit', function () { this.promise._res(); });
             ret.child.stdin.write('su - ' + ret.name + '\n');
-            ret.child.stdin.write('echo "' + clipText + '" | LANG=en_US.UTF-8 pbcopy\nexit\nexit\n');
+            ret.child.stdin.write(agent + ' -b64exec ' + str + ' | LANG=en_US.UTF-8 pbcopy\nexit\nexit\n');
             return (ret);
         }
 
@@ -760,14 +765,20 @@ function macos_messageBox()
             ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
             ret.child.on('exit', function ()
             {
-                var i = this.stdout.str.indexOf('pbpaste\x1b');
-                var res = this.stdout.str.substring(i + 8);
-                res = res.substring(1 + res.indexOf('\n'));
-                res = res.substring(0, res.indexOf('\x1b'));
+                var res = this.stdout.str.split('\x1e')[1];
                 this.promise._res(res);
             });
             ret.child.stdin.write('su - ' + ret.name + '\n');
-            ret.child.stdin.write('LANG=en_US.UTF-8 pbpaste\nexit\nexit\n');
+            ret.child.stdin.write("LANG=en_US.UTF-8 pbpaste | tr '\\n' '\\035' | awk -F'\\035' '");
+            ret.child.stdin.write('{');
+            ret.child.stdin.write('   printf "\\036";');
+            ret.child.stdin.write('   for(i=1;i<=NF;++i)');
+            ret.child.stdin.write('   {');
+            ret.child.stdin.write('      printf "%s%s", (i==1?"":"\\n"), $i;')
+            ret.child.stdin.write('   }');
+            ret.child.stdin.write('   printf "\\036";');
+            ret.child.stdin.write("}'");
+            ret.child.stdin.write('\nexit\nexit\n');
             return (ret);
         }
 
@@ -839,18 +850,20 @@ function macos_messageBox()
     {
         if (require('user-sessions').isRoot())
         {
+            var str = 'tell current application to display notification "' + caption + '" with title "' + title + '"';
+            str = Buffer.from("console.log('" + str + "');process.exit();").toString('base64');
+
             var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
             ret.uid = require('user-sessions').consoleUid();
             ret.name = require('user-sessions').getUsername(ret.uid);
             ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
             ret.child.promise = ret;
             ret.child.stderr.on('data', function () { });
-            ret.child.stdout.on('data', function () { });
+            ret.child.stdout.on('data', function (c) { });
             ret.child.on('exit', function (code) { this.promise._res('DISMISSED'); });
 
             ret.child.stdin.write('su - ' + ret.name + '\n');
-            ret.child.stdin.write("osascript -e 'tell current application to display notification ");
-            ret.child.stdin.write('"' + caption + '" with title "' + title + '"\'\nexit\nexit\n');
+            ret.child.stdin.write(process.execPath.split('./').join('') + ' -b64exec ' + str + ' | osascript\nexit\nexit\n');
             return (ret);
         }
 
