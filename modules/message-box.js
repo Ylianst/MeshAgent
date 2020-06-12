@@ -581,6 +581,7 @@ function macos_messageBox()
             var icon = 'with icon caution';
 
             ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
+            ret.child.descriptorMetadata = 'message-box';
             ret.child.promise = ret;
             ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
             ret.child.on('exit', function ()
@@ -603,9 +604,14 @@ function macos_messageBox()
                         this.promise._rej('denied');
                     }
                 }
+                this.promise.child = null;
             });
             ret.child.stdin.write('su - ' + ret.name + '\n');
             ret.child.stdin.write('osascript -e \'tell current application to display dialog "' + caption + '" with title "' + title + '" ' + icon + ' ' + buttons + timeout + '\' 2>/dev/null | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\nexit\n');
+            ret.close = function close()
+            {
+                if (this.child) { this.child.kill(); }
+            };
 
             return (ret);
         }
