@@ -550,6 +550,68 @@ function macos_messageBox()
     
     this.create = function create(title, caption, timeout, layout)
     {
+        if (require('user-sessions').isRoot())
+        {
+            ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            try
+            {
+                ret.uid = require('user-sessions').consoleUid();
+                ret.name = require('user-sessions').getUsername(ret.uid);
+            }
+            catch (ff)
+            {
+                ret._rej('No users logged in');
+                return (ret);
+            }
+            ret.user = (layout != null && typeof (layout) == 'object') ? true : false;
+            if (layout == null)
+            {
+                userLayout = false;
+                layout = ['Yes', 'No'];
+            }
+            else if (typeof (layout) != 'object')
+            {
+                userLayout = false;
+                layout = ['OK'];
+            }
+
+            var buttons = 'buttons ' + JSON.stringify(layout).replace('[', '{').replace(']', '}');
+            buttons += (' default button "' + layout[layout.length - 1] + '"');
+            timeout = (' giving up after ' + timeout);
+            var icon = 'with icon caution';
+
+            ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
+            ret.child.promise = ret;
+            ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+            ret.child.on('exit', function ()
+            {
+                var res = this.stdout.str.substring(this.stdout.str.indexOf("}'\x1b"));
+                res = res.substring(1 + res.indexOf('\n'));
+                res = res.substring(0, res.indexOf('\x1b'));
+                if (res == '_TIMEOUT_')
+                {
+                    this.promise._rej('TIMEOUT');
+                }
+                else
+                {
+                    if(this.promise.user || res == 'Yes' || res == 'OK')
+                    {
+                        this.promise._res(res);
+                    }
+                    else
+                    {
+                        this.promise_rej('denied');
+                    }
+                }
+            });
+            ret.child.stdin.write('su - ' + ret.name + '\n');
+            ret.child.stdin.write('osascript -e \'tell current application to display dialog "' + caption + '" with title "' + title + '" ' + icon + ' ' + buttons + timeout + '\' 2>/dev/null | awk \'{ c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } }\'\nexit\nexit\n');
+
+            return (ret);
+        }
+
+
+
         // Start Local Server
         var ret = this._initIPCBase();
         ret.metadata = 'message-box/create'
@@ -616,6 +678,28 @@ function macos_messageBox()
     };
     this.setClipboard = function setClipboard(clipText)
     {
+        if (require('user-sessions').isRoot())
+        {
+            ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            try
+            {
+                ret.uid = require('user-sessions').consoleUid();
+                ret.name = require('user-sessions').getUsername(ret.uid);
+            }
+            catch(ff)
+            {
+                ret._rej('No users logged in');
+                return (ret);
+            }
+            ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
+            ret.child.promise = ret;
+            ret.child.stdout.on('data', function (c) { });
+            ret.child.on('exit', function () { this.promise._res(); });
+            ret.child.stdin.write('su - ' + ret.name + '\n');
+            ret.child.stdin.write('echo "' + clipText + '" | LANG=en_US.UTF-8 pbcopy\nexit\nexit\n');
+            return (ret);
+        }
+
         // Start Local Server
         var ret = this._initIPCBase();
         ret.metadata = 'clipboard/set'
@@ -652,6 +736,35 @@ function macos_messageBox()
     };
     this.getClipboard = function getClipboard()
     {
+        if (require('user-sessions').isRoot())
+        {
+            ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            try
+            {
+                ret.uid = require('user-sessions').consoleUid();
+                ret.name = require('user-sessions').getUsername(ret.uid);
+            }
+            catch(ff)
+            {
+                ret._rej('No users logged in');
+                return (ret);
+            }
+            ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
+            ret.child.promise = ret;
+            ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+            ret.child.on('exit', function ()
+            {
+                var i = this.stdout.str.indexOf('pbpaste\x1b');
+                var res = this.stdout.str.substring(i + 8);
+                res = res.substring(1 + res.indexOf('\n'));
+                res = res.substring(0, res.indexOf('\x1b'));
+                this.promise._res(res);
+            });
+            ret.child.stdin.write('su - ' + ret.name + '\n');
+            ret.child.stdin.write('LANG=en_US.UTF-8 pbpaste\nexit\nexit\n');
+            return (ret);
+        }
+
         // Start Local Server
         var ret = this._initIPCBase();
         ret.metadata = 'clipboard/get'
@@ -718,6 +831,23 @@ function macos_messageBox()
     };
     this.notify = function notify(title, caption)
     {
+        if (require('user-sessions').isRoot())
+        {
+            var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            ret.uid = require('user-sessions').consoleUid();
+            ret.name = require('user-sessions').getUsername(ret.uid);
+            ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
+            ret.child.promise = ret;
+            ret.child.stderr.on('data', function () { });
+            ret.child.stdout.on('data', function () { });
+            ret.child.on('exit', function (code) { this.promise._res('DISMISSED'); });
+
+            ret.child.stdin.write('su - ' + ret.name + '\n');
+            ret.child.stdin.write("osascript -e 'tell current application to display notification ");
+            ret.child.stdin.write('"' + caption + '" with title "' + title + '"\'\nexit\nexit\n');
+            return (ret);
+        }
+
         // Start Local Server
         var ret = this._initIPCBase();
         ret.metadata = 'notify'
