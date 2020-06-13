@@ -20,7 +20,7 @@ function childContainer()
     this._ObjectID = 'child-container';
     this.create = function create(options)
     {
-        if (!options || (!options.user && !options.uid) || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
+        if (!options || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
 
         var ipcInteger;
 
