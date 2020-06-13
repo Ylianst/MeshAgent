@@ -368,6 +368,7 @@ function linux_messageBox()
                             var uname = require('user-sessions').getUsername(uid);
                             this.promise._ch = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                             this.promise._ch.promise = this.promise;
+                            this.promise.child = this.promise._ch;
                             this.promise._ch.stderr.str = ''; this.promise._ch.stderr.on('data', function (c) { this.str += c.toString(); });
                             this.promise._ch.stdout.str = ''; this.promise._ch.stdout.on('data', function (c)
                             {
