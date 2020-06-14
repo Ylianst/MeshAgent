@@ -13,6 +13,9 @@
     <Filter Include="Meshcore\KVM">
       <UniqueIdentifier>{ab71a2fa-eafc-44d7-9c35-62f7d60fee6a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Meshcore\zlib">
+      <UniqueIdentifier>{1e642fe3-4bfe-4ac1-b302-9cc375eaf471}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
@@ -136,9 +139,6 @@
     <ClInclude Include="..\microscript\ILibDuktape_ChildProcess.h">
       <Filter>Microscript</Filter>
     </ClInclude>
-    <ClInclude Include="..\microscript\ILibDuktape_HECI.h">
-      <Filter>Microscript</Filter>
-    </ClInclude>
     <ClInclude Include="..\microscript\duk_module_duktape.h">
       <Filter>Microscript</Filter>
     </ClInclude>
@@ -149,6 +149,39 @@
       <Filter>Meshcore</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_Commit.h">
+      <Filter>Microscript</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\deflate.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\gzguts.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\inffast.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\inffixed.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\inflate.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\inftrees.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\trees.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\zconf.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\zlib.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\meshcore\zlib\zutil.h">
+      <Filter>Meshcore\zlib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\microscript\ILibDuktape_CompressedStream.h">
       <Filter>Microscript</Filter>
     </ClInclude>
   </ItemGroup>
@@ -271,9 +304,6 @@
     <ClCompile Include="..\microscript\ILibDuktape_ChildProcess.c">
       <Filter>Microscript</Filter>
     </ClCompile>
-    <ClCompile Include="..\microscript\ILibDuktape_HECI.c">
-      <Filter>Microscript</Filter>
-    </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_HttpStream.c">
       <Filter>Microscript</Filter>
     </ClCompile>
@@ -285,6 +315,30 @@
     </ClCompile>
     <ClCompile Include="..\meshcore\wincrypto.cpp">
       <Filter>Meshcore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\adler32.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\deflate.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\inffast.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\inflate.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\inftrees.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\trees.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\meshcore\zlib\zutil.c">
+      <Filter>Meshcore\zlib</Filter>
+    </ClCompile>
+    <ClCompile Include="..\microscript\ILibDuktape_CompressedStream.c">
+      <Filter>Microscript</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

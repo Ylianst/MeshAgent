@@ -69,6 +69,7 @@ limitations under the License.
 #include "ILibDuktape_NetworkMonitor.h"
 #include "ILibDuktape_ReadableStream.h"
 #include "ILibDuktape_WritableStream.h"
+#include "ILibDuktape_CompressedStream.h"
 
 #include "ILibDuktape_SHA256.h"
 #include "ILibDuktape_EncryptionStream.h"
@@ -2574,6 +2575,7 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	ILibDuktape_Polyfills_Init(ctx);				// Various Polyfills
 	ILibDuktape_MemoryStream_Init(ctx);				// Add MemoryStream support
 	ILibDuktape_NetworkMonitor_Init(ctx);
+	ILibDuktape_CompressedStream_init(ctx);
 
 	Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 #ifdef WIN32

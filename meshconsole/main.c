@@ -191,6 +191,28 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n");
 		printf("   THE SOFTWARE.\n");
 		printf("========================================================================================\n");
+		printf("ZLIB Data Compression Library: Copyright (c) 1995-2017 Jean-loup Gailly and Mark Adler\n");
+		printf("                               http://www.zlib.net \n");
+		printf("----------------------------------------------------------------------------------------\n");
+		printf("    This software is provided 'as-is', without any express or implied			 \n");
+		printf("	warranty.In no event will the authors be held liable for any damages		 \n");
+		printf("	arising from the use of this software.										 \n");
+		printf("																				 \n");
+		printf("	Permission is granted to anyone to use this software for any purpose,		 \n");
+		printf("	including commercial applications, and to alter it and redistribute it		 \n");
+		printf("	freely, subject to the following restrictions :								 \n");
+		printf("																				 \n");
+		printf("    1. The origin of this software must not be misrepresented; you must not		 \n");
+		printf("	   claim that you wrote the original software.If you use this software		 \n");
+		printf("	   in a product, an acknowledgment in the product documentation would be	 \n");
+		printf("	   appreciated but is not required.											 \n");
+		printf("	2. Altered source versions must be plainly marked as such, and must not be	 \n");
+		printf("	   misrepresented as being the original software.							 \n");
+		printf("	3. This notice may not be removed or altered from any source distribution.	 \n");
+		printf("																				 \n");
+		printf("	Jean - loup Gailly        Mark Adler										 \n");
+		printf("	jloup@gzip.org            madler@alumni.caltech.edu							 \n");
+
 
 #ifdef WIN32
 		wmain_free(argv);
