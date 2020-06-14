@@ -52,7 +52,7 @@ function nativeAddCompressedModule(name)
     {
         // MS Visual Studio has a maxsize limitation
         var tmp = vstring;
-        ret = 'char *_' + name.split('-').join('') + ' = ILibMemory_Allocate(' + (tmp.length + value.length + 2) + ', 0, NULL, NULL);\n';
+        ret = 'char *_' + name.split('-').join('') + ' = ILibMemory_Allocate(' + (tmp.length + 1) + ', 0, NULL, NULL);\n';
         var i = 0;
         while (i < tmp.length)
         {
