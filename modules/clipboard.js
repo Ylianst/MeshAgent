@@ -29,6 +29,42 @@ var CF_UNICODETEXT = 13;
 
 var xclipTable = {};
 
+function nativeAddCompressedModule(name)
+{
+    var value = getJSModule(name);
+    var zip = require('compressed-stream').createCompressor();
+    zip.buffer = null;
+    zip.on('data', function (c)
+    {
+        if(this.buffer == null)
+        {
+            this.buffer = Buffer.concat([c]);
+        }
+        else
+        {
+            this.buffer = Buffer.concat([this.buffer, c]);
+        }
+    });
+    zip.end(value);
+    var vstring = zip.buffer.toString('base64');
+    var ret = "duk_peval_string_noresult(ctx, \"addCompressedModule('" + name + "', Buffer.from('" + vstring + "', 'base64'));\");";
+    if (ret.length > 16300)
+    {
+        // MS Visual Studio has a maxsize limitation
+        var tmp = vstring;
+        ret = 'char *_' + name.split('-').join('') + ' = ILibMemory_Allocate(' + (tmp.length + value.length + 2) + ', 0, NULL, NULL);\n';
+        var i = 0;
+        while (i < tmp.length)
+        {
+            var chunk = tmp.substring(i, i + 16000);
+            ret += ('memcpy_s(_' + name.split('-').join('') + ' + ' + i + ', ' + (tmp.length - i) + ', "' + chunk + '", ' + chunk.length + ');\n');
+            i += chunk.length;
+        }
+        ret += ('ILibDuktape_AddCompressedModule(ctx, "' + name + '", _' + name.split('-').join('') + ');\n');
+        ret += ('free(_' + name.split('-').join('') + ');\n');
+    }
+    module.exports(ret);
+}
 function nativeAddModule(name)
 {
     var value = getJSModule(name);
@@ -596,5 +632,6 @@ switch(process.platform)
         break;
 }
 module.exports.nativeAddModule = nativeAddModule;
+module.exports.nativeAddCompressedModule = nativeAddCompressedModule;
 module.exports.dispatchWrite = dispatchWrite;
 module.exports.dispatchRead = dispatchRead;
