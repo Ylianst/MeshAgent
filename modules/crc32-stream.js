@@ -23,7 +23,6 @@ function create(useCRC32c)
         {
             write: function (chunk, flush)
             {
-                console.log(chunk.toString());
                 this._current = this._CRC32C ? crc32c(chunk, this._current) : crc32(chunk, this._current);
                 flush();
             },
