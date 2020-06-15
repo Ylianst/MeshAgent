@@ -96,11 +96,17 @@ void *Duktape_Duplicate_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char*
 char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *len);
 #define Duktape_Duplicate_GetString(ctx, i) Duktape_Duplicate_GetStringEx(ctx, i, NULL)
 
+extern duk_ret_t ILibDuktape_EventEmitter_DefaultNewListenerHandler(duk_context *ctx);
+#define duk_prepare_method_call(ctx, i, name) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, name);duk_swap_top(ctx, -2);
 #define duk_array_shift(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "shift");duk_swap_top(ctx, -2);duk_call_method(ctx, 0);
 #define duk_array_pop(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "pop");duk_swap_top(ctx, -2);duk_call_method(ctx, 0);
 #define duk_array_push(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "push");duk_swap_top(ctx, -2);duk_dup(ctx,-3);duk_pcall_method(ctx, 1);duk_pop_2(ctx);
 #define duk_array_join(ctx, i, str) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "join");duk_swap_top(ctx, -2);duk_push_string(ctx, str);duk_pcall_method(ctx, 1);
 #define duk_array_unshift(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "unshift");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_remove(ctx, -4);duk_pcall_method(ctx, 1);duk_pop(ctx);
+
+#define duk_events_setup_on(ctx, i, name, func) duk_prepare_method_call(ctx, i, "on");duk_push_string(ctx, name);duk_push_c_function(ctx, func, DUK_VARARGS);
+#define duk_events_newListener(ctx, i, name, func) duk_events_setup_on(ctx, i, "newListener", ILibDuktape_EventEmitter_DefaultNewListenerHandler);duk_push_string(ctx, name);duk_put_prop_string(ctx, -2, "event_name");duk_push_c_function(ctx, func, DUK_VARARGS);duk_put_prop_string(ctx, -2, "event_callback");if(duk_pcall_method(ctx, 2)!=0){printf("oops\n");ILibDuktape_Process_UncaughtExceptionEx(ctx, "duk_events_newListener (%s,%d)", __FILE__, __LINE__);}duk_pop(ctx);
+#define duk_events_newListener2(ctx, i, name, func) duk_events_setup_on(ctx, i, "newListener2", ILibDuktape_EventEmitter_DefaultNewListenerHandler);duk_push_string(ctx, name);duk_put_prop_string(ctx, -2, "event_name");duk_push_c_function(ctx, func, DUK_VARARGS);duk_put_prop_string(ctx, -2, "event_callback");if(duk_pcall_method(ctx, 2)!=0){printf("oops\n");ILibDuktape_Process_UncaughtExceptionEx(ctx, "duk_events_newListener (%s,%d)", __FILE__, __LINE__);}duk_pop(ctx);
 
 #define duk_queue_create(ctx) duk_push_array(ctx)
 #define duk_queue_enQueue(ctx, i) duk_array_push(ctx, i)
@@ -119,6 +125,7 @@ char *Duktape_Duplicate_GetStringEx(duk_context *ctx, duk_idx_t i, duk_size_t *l
 #define duk_buffer_slice(ctx, i, start, len) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "slice");duk_swap_top(ctx, -2);duk_push_int(ctx, start);duk_push_int(ctx, len);duk_pcall_method(ctx, 2);duk_remove(ctx, -2);
 #define duk_string_concat(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "concat");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_pcall_method(ctx, 1);duk_remove(ctx, -2);
 #define duk_string_split(ctx, i, delim) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "split");duk_swap_top(ctx, -2);duk_push_string(ctx, delim);duk_call_method(ctx, 1);
+
 
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);

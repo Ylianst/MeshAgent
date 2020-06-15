@@ -85,8 +85,7 @@
 #include "inflate.h"
 #include "inffast.h"
 
-extern unsigned int crc32c(unsigned int crci, const unsigned char *buf, unsigned int len);
-#define crc32(i, b, l) crc32c(i, b, l)
+extern unsigned int crc32(unsigned int crci, const unsigned char *buf, unsigned int len);
 
 #ifdef MAKEFIXED
 #  ifndef BUILDFIXED

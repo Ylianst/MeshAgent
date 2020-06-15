@@ -23,6 +23,7 @@ limitations under the License.
 #include <wchar.h>
 #include <io.h>
 #include <fcntl.h>
+#define WIN_FAKE_O_NONBLOCK 128
 #endif
 
 #include "microstack/ILibParsers.h"
@@ -71,6 +72,10 @@ limitations under the License.
 #define FS_EVENT_R_DESCRIPTORS		"\xFF_FSEventReadDescriptors"
 #define FS_EVENT_W_DESCRIPTORS		"\xFF_FSEventWriteDescriptors"
 #define FS_EVENT_DESCRIPTORS_IO		"\xFF_FSEventDescriptors_IO"
+#define FS_WINDOWS_HANDLES			"\xFF_FSWindowsHandles"
+#define FS_WINDOWS_DataPTR			"\xFF_FSWindowHandles_DataPTR"
+#define FS_WINDOWS_ReadCallback		"\xFF_FSWindowsHandles_ReadCallback"
+#define FS_WINDOWS_UserBuffer		"\xFF_FSWindowsHandles_UserBuffer"
 
 #if defined(_POSIX) && !defined(__APPLE__)
 typedef struct ILibDuktape_fs_linuxWatcher
@@ -135,6 +140,17 @@ typedef struct ILibDuktape_fs_readStreamData
 	int unshiftedBytes;
 	char buffer[FS_READSTREAM_BUFFERSIZE];
 }ILibDuktape_fs_readStreamData;
+
+typedef struct ILibDuktape_WindowsHandle_Data
+{
+	duk_context *ctx;
+	void *callback;
+	void *userBuffer;
+	HANDLE *H;
+	OVERLAPPED p;
+	char *buffer;
+	size_t bufferSize;
+}ILibDuktape_WindowsHandle_Data;
 
 #ifndef _NOFSWATCHER
 typedef struct ILibDuktape_fs_watcherData
@@ -299,12 +315,40 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	}
 	int flags = (int)duk_require_int(ctx, 1);
 #ifdef WIN32
-	int fd = -1;
-	if (_wsopen_s(&fd, (wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), flags, 0, 0) != 0)
+	HANDLE fd = NULL;
+	DWORD dwDesiredAccess = 0;
+	DWORD dwCreationMode = 0;
+	ILibDuktape_WindowsHandle_Data *data;
+	if (((flags & _O_RDONLY) == _O_RDONLY) || ((flags & _O_RDWR) == _O_RDWR)) { dwDesiredAccess |= GENERIC_READ; }
+	if (((flags & _O_WRONLY) == _O_WRONLY) || ((flags & _O_RDWR) == _O_RDWR)) { dwDesiredAccess |= GENERIC_WRITE; }
+	if ((dwDesiredAccess & GENERIC_WRITE) == GENERIC_WRITE)
 	{
-		return(ILibDuktape_Error(ctx, "openSync() Error: %d ", errno));
+		dwCreationMode = OPEN_ALWAYS;
 	}
-	duk_push_int(ctx, fd);
+	else
+	{
+		dwCreationMode = OPEN_EXISTING;
+	}
+	fd = CreateFileW((wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), dwDesiredAccess, 0, NULL, dwCreationMode, FILE_FLAG_OVERLAPPED, NULL);
+	if (fd == INVALID_HANDLE_VALUE)
+	{
+		DWORD err = GetLastError();
+		return(ILibDuktape_Error(ctx, "Open Error: %u", err));
+	}
+
+	duk_push_this(ctx);															// [fs]
+	duk_get_prop_string(ctx, -1, FS_WINDOWS_HANDLES);							// [fs][table]
+	duk_push_pointer(ctx, fd);													// [fs][table][HANDLE]
+	duk_push_object(ctx);														// [fs][table][HANDLE][container]
+	data = (ILibDuktape_WindowsHandle_Data*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_WindowsHandle_Data));//..][data]
+	duk_put_prop_string(ctx, -2, FS_WINDOWS_DataPTR);							// [fs][table][HANDLE][container]
+	duk_put_prop(ctx, -3);														// [fs][table]
+	duk_pop_2(ctx);																// ...
+
+	data->ctx = ctx;
+	data->H = fd;
+	data->p.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	duk_push_uint(ctx, (duk_uint_t)(uintptr_t)fd);
 #else
 	int fd = open(path, flags);
 	duk_push_int(ctx, fd);
@@ -562,6 +606,35 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	duk_call_method(ctx, 4);
 	return(0);
 }
+
+#ifdef WIN32
+BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user)
+{
+	ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)user;
+	if (ILibMemory_CanaryOK(data) && duk_ctx_is_alive(data->ctx))
+	{
+		// Advance the position pointer, because Windows won't do it for us
+		LARGE_INTEGER i64;
+		i64.LowPart = data->p.Offset;
+		i64.HighPart = data->p.OffsetHigh;
+		i64.QuadPart += (int64_t)bytesRead;
+		data->p.Offset = i64.LowPart;
+		data->p.OffsetHigh = i64.HighPart;
+
+		duk_context *ctx = data->ctx;
+		duk_push_heapptr(data->ctx, data->callback);		// [callback]
+		duk_eval_string(data->ctx, "require('fs');");		// [callback][this]
+		duk_push_int(data->ctx, status);					// [callback][this][err]
+		duk_push_int(data->ctx, bytesRead);					// [callback][this][err][bytesRead]
+		duk_push_heapptr(data->ctx, data->userBuffer);		// [callback][this][err][bytesRead][buffer]
+		data->callback = NULL;
+		data->userBuffer = NULL;
+		if (duk_pcall_method(data->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "fs.read.onCallack(): "); }
+		duk_pop(ctx);										// ...
+	}
+	return(FALSE);
+}
+#endif
 duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 {
 	int top = duk_get_top(ctx);
@@ -601,18 +674,54 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		return(1);
 	}
 	if (!(duk_is_number(ctx, 0) && duk_is_object(ctx, 1) && duk_is_function(ctx, 2))) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
+#ifdef WIN32
+	HANDLE H = (HANDLE)(uintptr_t)duk_require_uint(ctx, 0);
+	ILibDuktape_WindowsHandle_Data *data = NULL;
+#else
 	int fd = (int)duk_require_int(ctx, 0);
+#endif
+
+#ifdef WIN32
+	duk_push_this(ctx);										// [fs]
+	duk_get_prop_string(ctx, -1, FS_WINDOWS_HANDLES);		// [fs][table]
+	duk_push_pointer(ctx, H);								// [fs][table][key]
+	duk_get_prop(ctx, -2);									// [fs][table][value]
+	if (duk_is_null_or_undefined(ctx, -1)) { return(ILibDuktape_Error(ctx, "Invalid Descriptor")); }
+	data = (ILibDuktape_WindowsHandle_Data*)Duktape_GetBufferProperty(ctx, -1, FS_WINDOWS_DataPTR);
+	if (data->callback != NULL) { return(ILibDuktape_Error(ctx, "Operation Already in progress")); }
+	duk_dup(ctx, 2);										// [fs][table][value][callback]
+	duk_put_prop_string(ctx, -2, FS_WINDOWS_ReadCallback);	// [fs][table][value]
+	duk_get_prop_string(ctx, 1, "buffer");					// [fs][table][value][userbuffer]
+	data->userBuffer = duk_get_heapptr(ctx, -1);
+	duk_put_prop_string(ctx, -2, FS_WINDOWS_UserBuffer);	// [fs][table][value]
+	data->callback = duk_require_heapptr(ctx, 2);
+#endif
 
 	// First, we'll attempt to read, and see if it completes or is pending
 	duk_size_t bufferLen;
 	char *buffer = Duktape_GetBufferPropertyEx(ctx, 1, "buffer", &bufferLen);
 	duk_size_t offset = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "offset", 0);
 	duk_size_t length = (duk_size_t)Duktape_GetIntPropertyValue(ctx, 1, "length", (int)bufferLen);
+	int position = Duktape_GetIntPropertyValue(ctx, 1, "position", -1);
+	if (position >= 0)
+	{
 #ifdef WIN32
-	int bytesRead = _read(fd, buffer + offset, (unsigned int)length);
+		DWORD highorder = 0;
+		DWORD loworder = SetFilePointer(data->H, (LONG)position, (LONG*)&highorder, FILE_BEGIN);
+		if (loworder == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
+		data->p.Offset = loworder;
+		data->p.OffsetHigh = highorder;
+#else
+		if (lseek(fd, (off_t)position, SEEK_SET) < 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
+#endif
+	}
+#ifdef WIN32
+	data->buffer = buffer + offset;
+	data->bufferSize = length;
+	ILibChain_ReadEx2(duk_ctx_chain(ctx), data->H, &(data->p), data->buffer, (int)data->bufferSize, ILibDuktape_fs_read_WindowsSink, data, "fs.read()");
+	return(0);
 #else
 	int bytesRead = read(fd, buffer + offset, length);
-#endif
 	if (bytesRead >= 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR))
 	{
 		// Completed
@@ -664,6 +773,7 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 	duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "callback");	// [fs][table][desriptorEvent][pending][options]
 	duk_array_unshift(ctx, -2);									// [fs][table][desriptorEvent][pending]
 	return(0);
+#endif
 }
 duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 {
@@ -2012,6 +2122,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	duk_put_prop_string(ctx, -2, FS_FDS);		// [fs]
 
 	duk_push_object(ctx);
+	duk_put_prop_string(ctx, -2, FS_WINDOWS_HANDLES);
+
+	duk_push_object(ctx);
 	duk_put_prop_string(ctx, -2, FS_EVENT_R_DESCRIPTORS);
 	duk_push_object(ctx);
 	duk_put_prop_string(ctx, -2, FS_EVENT_W_DESCRIPTORS);
@@ -2051,6 +2164,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 	duk_push_int(ctx, _O_RDONLY); duk_put_prop_string(ctx, -2, "O_RDONLY");
 	duk_push_int(ctx, _O_WRONLY); duk_put_prop_string(ctx, -2, "O_WRONLY");
 	duk_push_int(ctx, _O_RDWR); duk_put_prop_string(ctx, -2, "O_RDWR");
+	duk_push_int(ctx, WIN_FAKE_O_NONBLOCK); duk_put_prop_string(ctx, -2, "O_NONBLOCK");
 #else
 	duk_push_int(ctx, O_RDONLY); duk_put_prop_string(ctx, -2, "O_RDONLY");
 	duk_push_int(ctx, O_WRONLY); duk_put_prop_string(ctx, -2, "O_WRONLY");

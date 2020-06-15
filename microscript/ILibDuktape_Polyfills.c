@@ -1108,6 +1108,7 @@ duk_ret_t ILibDuktape_Polyfills_addCompressedModule(duk_context *ctx)
 	duk_eval_string(ctx, "require('compressed-stream').createDecompressor();");
 	void *decoder = duk_get_heapptr(ctx, -1);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "data", ILibDuktape_Polyfills_addCompressedModule_dataSink);
+
 	duk_dup(ctx, -1);						// [stream]
 	duk_get_prop_string(ctx, -1, "end");	// [stream][end]
 	duk_swap_top(ctx, -2);					// [end][this]
@@ -1598,7 +1599,10 @@ ILibTransport_DoneState ILibDuktape_Stream_Writable_WriteSink(struct ILibDuktape
 	}
 	else
 	{
-		retVal = duk_to_boolean(stream->ctx, -1) ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
+		if (retVal != ILibTransport_DoneState_COMPLETE)
+		{
+			retVal = duk_to_boolean(stream->ctx, -1) ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
+		}
 	}
 	duk_pop(stream->ctx);																			// ...
 
@@ -1859,11 +1863,21 @@ void ILibDuktape_PKCS7_Push(duk_context *ctx, void *chain)
 }
 
 extern uint32_t crc32c(uint32_t crc, const unsigned char* buf, uint32_t len);
+extern uint32_t crc32(uint32_t crc, const unsigned char* buf, uint32_t len);
 duk_ret_t ILibDuktape_Polyfills_crc32c(duk_context *ctx)
 {
 	duk_size_t len;
 	char *buffer = Duktape_GetBuffer(ctx, 0, &len);
-	duk_push_uint(ctx, crc32c(0, (unsigned char*)buffer, (uint32_t)len));
+	uint32_t pre = duk_is_number(ctx, 1) ? duk_require_uint(ctx, 1) : 0;
+	duk_push_uint(ctx, crc32c(pre, (unsigned char*)buffer, (uint32_t)len));
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_crc32(duk_context *ctx)
+{
+	duk_size_t len;
+	char *buffer = Duktape_GetBuffer(ctx, 0, &len);
+	uint32_t pre = duk_is_number(ctx, 1) ? duk_require_uint(ctx, 1) : 0;
+	duk_push_uint(ctx, crc32(pre, (unsigned char*)buffer, (uint32_t)len));
 	return(1);
 }
 #endif
@@ -2140,6 +2154,9 @@ void ILibDuktape_dataGenerator_Push(duk_context *ctx, void *chain)
 void ILibDuktape_Polyfills_JS_Init(duk_context *ctx)
 {
 	// The following can be overriden by calling addModule() or by having a .js file in the module path
+
+	// CRC32-STREAM, refer to /modules/crc32-stream.js for details
+	duk_peval_string_noresult(ctx, "addCompressedModule('crc32-stream', Buffer.from('eJyNVFFv2jAQfo+U/3DihVBlAbE3qmpitNOiVVARuqpPkzGX4C3Yme00RYj/vnMSWtJ10vxi7Pt8933fXRhe+N5MFXstsq2F8Wg8glhazGGmdKE0s0JJ3/O9W8FRGtxAKTeowW4RpgXjtLWREL6jNoSGcTSCwAF6bag3uPS9vSphx/YglYXSIGUQBlKRI+Azx8KCkMDVrsgFkxyhEnZbV2lzRL732GZQa8sIzAhe0Ck9hwGzji3Q2lpbTIbDqqoiVjONlM6GeYMzw9t4djNPbj4QW/fiXuZoDGj8XQpNMtd7YAWR4WxNFHNWgdLAMo0Us8qRrbSwQmYhGJXaimn0vY0wVot1aTs+naiR3nMAOcUk9KYJxEkPPk+TOAl97yFefV3cr+BhulxO56v4JoHFEmaL+XW8ihdzOn2B6fwRvsXz6xCQXKIq+Fxox54oCucgbsiuBLFTPlUNHVMgF6ngJEpmJcsQMvWEWpIWKFDvhHFdNERu43u52AlbD4H5WxEVuRg6856Yhgeyo/bq6mRi0CexyHb9QXQKXjq076Wl5C4ncIpbDGgeZsvZxzEf+N6h6Z5LqdFSNonVS/KgCbp1eP3plusGTuAlc8C3pfwVQpqXZjvoYt88dYuTQJVjlKuseRlZlVCrZBYM3PS+xbvpjX7wUmuUjmRzrkXM4BPp4qTmxKEDHsCkCb8ffadWLSF4GzmG3XMqJMvPDfhP5f/I/no8nmLUjnPJo/PrVvkVvLSSXLC6RFKbstxgC16sfyK30QaJLt5pRQNn9wGlCKH/xPIS+yEcIEN7rmRAVwQptXT/Kx234NjhV0Nod1dHN2k7tSmprfSBKG0N8Tu0MzdpdzgS9A+0jX9v', 'base64'));");
 
 	// http-digest. Refer to /modules/http-digest.js for a human readable version
 	duk_peval_string_noresult(ctx, "addCompressedModule('http-digest', Buffer.from('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', 'base64'));");
@@ -2934,6 +2951,7 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_CreateInstanceMethod(ctx, "crc32c", ILibDuktape_Polyfills_crc32c, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "crc32", ILibDuktape_Polyfills_crc32, DUK_VARARGS);
 #endif
 	ILibDuktape_CreateEventWithGetter(ctx, "global", ILibDuktape_Polyfills_global);
 	duk_pop(ctx);																	// ...

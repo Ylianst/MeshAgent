@@ -148,6 +148,27 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 	}
 	return(retVal);
 }
+
+duk_ret_t ILibDuktape_EventEmitter_DefaultNewListenerHandler(duk_context *ctx)
+{
+	char *currentEventName = (char*)duk_require_string(ctx, 0);
+
+	duk_push_current_function(ctx);
+	char *name = Duktape_GetStringPropertyValue(ctx, -1, "event_name", NULL);
+	void *callback = Duktape_GetPointerProperty(ctx, -1, "event_callback");
+	if (strcmp(name, currentEventName) == 0)
+	{
+		duk_push_heapptr(ctx, callback);		// [callback]
+		duk_push_this(ctx);						// [callback][this]
+		duk_dup(ctx, 0);						// [callback][this][name]
+		duk_dup(ctx, 1);						// [callback][this][name][handler]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "EventEmitter.DefaultNewListenerHandler() "); }
+		duk_pop(ctx);							// ...
+	}
+
+	return(0);
+}
+
 duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 {
 	duk_size_t nameLen;
@@ -409,9 +430,9 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 
 	hookHandler = ILibHashtable_Get(data->eventTable, ILibDuktape_EventEmitter_Hook, propName, (int)propNameLen);
 	if (hookHandler != NULL) { hookHandler(data, propName, callback); }
-	if (!(propNameLen == 11 && strncmp(propName, "newListener", 11) == 0))
+	if (!(propNameLen == 11 && strncmp(propName, "newListener", 11) == 0) && !(propNameLen == 12 && strncmp(propName, "newListener2", 12) == 0))
 	{
-		// Only emit 'newListener' when the event itself isn't 'newListener'
+		// Only emit 'newListener' when the event itself isn't 'newListener' or 'newListener2'
 		ILibDuktape_EventEmitter_SetupEmit(ctx, data->object, "newListener");	// [emit][this][newListener]
 		duk_push_lstring(ctx, propName, propNameLen);							// [emit][this][newListener][propName]
 		duk_push_heapptr(ctx, callback);										// [emit][this][newListener][propName][callback]
@@ -421,6 +442,15 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	node = prepend ? ILibLinkedList_AddHead(eventList, callback) : ILibLinkedList_AddTail(eventList, callback);
 	((int*)ILibLinkedList_GetExtendedMemory(node))[0] = once;
 	data->totalListeners[0]++;
+
+	if (!(propNameLen == 11 && strncmp(propName, "newListener", 11) == 0) && !(propNameLen == 12 && strncmp(propName, "newListener2", 12) == 0))
+	{
+		// Only emit 'newListener2' when the event itself isn't 'newListener' or 'newListener2'
+		ILibDuktape_EventEmitter_SetupEmit(ctx, data->object, "newListener2");	// [emit][this][newListener2]
+		duk_push_lstring(ctx, propName, propNameLen);							// [emit][this][newListener2][propName]
+		duk_push_heapptr(ctx, callback);										// [emit][this][newListener2][propName][callback]
+		duk_call_method(ctx, 3); duk_pop(ctx);									// ...
+	}
 
 	duk_push_this(ctx);
 	return 1;
@@ -692,6 +722,7 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	duk_set_finalizer(ctx, -2);
 
 	ILibDuktape_EventEmitter_CreateEventEx(retVal, "newListener");
+	ILibDuktape_EventEmitter_CreateEventEx(retVal, "newListener2");
 
 	return retVal;
 }

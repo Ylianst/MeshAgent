@@ -50,8 +50,7 @@
 /* @(#) $Id$ */
 
 #include "deflate.h"
-extern unsigned int crc32c(unsigned int crci, const unsigned char *buf, unsigned int len);
-#define crc32(i, b, l) crc32c(i, b, l)
+extern unsigned int crc32(unsigned int crci, const unsigned char *buf, unsigned int len);
 
 const char deflate_copyright[] =
    " deflate 1.2.11 Copyright 1995-2017 Jean-loup Gailly and Mark Adler ";
