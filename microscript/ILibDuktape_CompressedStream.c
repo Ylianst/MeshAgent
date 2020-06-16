@@ -29,6 +29,8 @@ limitations under the License.
 
 #define ILibDuktape_CompressorStream_ptr			"\xFF_Duktape_CompressorStream_ptr"
 #define ILibDuktape_CompressorStream_ResumeBuffer	"\xFF_Duktape_CompressorStream_ResumeBuffer"
+extern uint32_t crc32(uint32_t crc, const unsigned char* buf, uint32_t len);
+
 typedef struct ILibDuktape_CompressorStream
 {
 	duk_context *ctx;
