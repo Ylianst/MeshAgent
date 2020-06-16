@@ -3635,7 +3635,19 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 	}
 	else
 	{
-		uri = (char*)duk_get_lstring(ctx, 0, &uriLen);
+		duk_string_split(ctx, 0, "://");					// [array]
+		if (duk_get_length(ctx, -1) == 1)
+		{
+			// Fix string format
+			duk_push_string(ctx, "http://");				// [array][http://]
+			duk_dup(ctx, 0);								// [array][http://][string]
+			duk_string_concat(ctx, -2);						// [array][uri]
+			uri = (char*)duk_get_lstring(ctx, -1, &uriLen);
+		}
+		else
+		{
+			uri = (char*)duk_get_lstring(ctx, 0, &uriLen);
+		}
 	}
 
 	protocolIndex = 1 + ILibString_IndexOf(uri, (int)uriLen, "://", 3);
