@@ -458,6 +458,7 @@ clean:
 	rm -f microstack/nossl/*.o
 	rm -f microscript/*.o
 	rm -f meshcore/*.o
+	rm -f meshcore/zlib/*.o
 	rm -f meshcore/KVM/Linux/*.o
 	rm -f meshcore/KVM/MacOS/*.o
 	rm -f microlms/lms/*.o
