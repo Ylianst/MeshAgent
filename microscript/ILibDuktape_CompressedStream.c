@@ -35,6 +35,7 @@ typedef struct ILibDuktape_CompressorStream
 	void *object;
 	ILibDuktape_DuplexStream *ds;
 	z_stream Z;
+	uint32_t crc;
 }ILibDuktape_CompressorStream;
 
 
@@ -69,6 +70,7 @@ void ILibDuktape_deCompressor_Resume(ILibDuktape_DuplexStream *sender, void *use
 		avail = sizeof(buffer) - cs->Z.avail_out;
 		if (avail > 0)
 		{
+			cs->crc = crc32(cs->crc, buffer, (unsigned int)avail);
 			res = ILibDuktape_DuplexStream_WriteData(cs->ds, buffer, (int)avail);				// [stream]
 			if (res == 1)
 			{
@@ -113,7 +115,11 @@ void ILibDuktape_Compressor_End(ILibDuktape_DuplexStream *stream, void *user)
 		cs->Z.next_out = (Bytef*)tmp;
 		ignore_result(deflate(&(cs->Z), Z_FINISH));
 		avail = sizeof(tmp) - cs->Z.avail_out;
-		if (avail > 0) { ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail); }
+		if (avail > 0) 
+		{
+			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail); 
+		}
 	} while (cs->Z.avail_out == 0);
 	ILibDuktape_DuplexStream_WriteEnd(cs->ds);
 
@@ -139,6 +145,7 @@ ILibTransport_DoneState ILibDuktape_Compressor_Write(ILibDuktape_DuplexStream *s
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
+			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
 			ret = ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 		}
 	} while (cs->Z.avail_out == 0);
@@ -161,6 +168,13 @@ duk_ret_t ILibDuktape_CompressedStream_resume_newListener(duk_context *ctx)
 	duk_pcall_method(ctx, 0);
 	return(0);
 }
+duk_ret_t ILibDuktape_CompressedStream_crc(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibDuktape_CompressorStream *cs = (ILibDuktape_CompressorStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_CompressorStream_ptr);
+	duk_push_uint(ctx, cs->crc);
+	return(1);
+}
 
 duk_ret_t ILibDuktape_CompressedStream_compressor(duk_context *ctx)
 {
@@ -175,6 +189,8 @@ duk_ret_t ILibDuktape_CompressedStream_compressor(duk_context *ctx)
 	cs->Z.zfree = Z_NULL;
 	cs->Z.opaque = Z_NULL;
 	if (deflateInit(&(cs->Z), Z_DEFAULT_COMPRESSION) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
+
+	ILibDuktape_CreateEventWithGetter(ctx, "crc", ILibDuktape_CompressedStream_crc);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Compressor_Finalizer);
 	cs->ds->readableStream->paused = 1;
 	duk_events_newListener2(ctx, -1, "data", ILibDuktape_CompressedStream_resume_newListener);
@@ -198,6 +214,7 @@ ILibTransport_DoneState ILibDuktape_deCompressor_Write(ILibDuktape_DuplexStream 
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
+			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
 			ret = ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 			if (ret == 1)
 			{
@@ -245,6 +262,7 @@ void ILibDuktape_deCompressor_End(ILibDuktape_DuplexStream *stream, void *user)
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
+			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
 			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail); 
 		}
 	} while (cs->Z.avail_out == 0);
@@ -265,7 +283,6 @@ duk_ret_t ILibDuktape_deCompressor_Finalizer(duk_context *ctx)
 	}
 	return(0);
 }
-
 duk_ret_t ILibDuktape_CompressedStream_decompressor(duk_context *ctx)
 {
 	duk_push_object(ctx);										// [compressed-stream]
@@ -289,6 +306,7 @@ duk_ret_t ILibDuktape_CompressedStream_decompressor(duk_context *ctx)
 		if (inflateInit(&(cs->Z)) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
 	}
 
+	ILibDuktape_CreateEventWithGetter(ctx, "crc", ILibDuktape_CompressedStream_crc);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_deCompressor_Finalizer);
 	cs->ds->readableStream->paused = 1;
 	duk_events_newListener2(ctx, -1, "data", ILibDuktape_CompressedStream_resume_newListener);
