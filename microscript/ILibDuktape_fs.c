@@ -141,6 +141,7 @@ typedef struct ILibDuktape_fs_readStreamData
 	char buffer[FS_READSTREAM_BUFFERSIZE];
 }ILibDuktape_fs_readStreamData;
 
+#ifdef WIN32
 typedef struct ILibDuktape_WindowsHandle_Data
 {
 	duk_context *ctx;
@@ -151,6 +152,7 @@ typedef struct ILibDuktape_WindowsHandle_Data
 	char *buffer;
 	size_t bufferSize;
 }ILibDuktape_WindowsHandle_Data;
+#endif
 
 #ifndef _NOFSWATCHER
 typedef struct ILibDuktape_fs_watcherData

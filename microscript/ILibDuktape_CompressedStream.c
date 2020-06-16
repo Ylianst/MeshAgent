@@ -63,16 +63,16 @@ void ILibDuktape_deCompressor_Resume(ILibDuktape_DuplexStream *sender, void *use
 	size_t avail = 0;
 	int res = 0;
 	cs->Z.avail_in = (uint32_t)ILibMemory_Size(inbuffer);
-	cs->Z.next_in = inbuffer;
+	cs->Z.next_in = (Bytef*)inbuffer;
 	do
 	{
 		cs->Z.avail_out = sizeof(buffer);
-		cs->Z.next_out = buffer;
+		cs->Z.next_out = (Bytef*)buffer;
 		ignore_result(inflate(&(cs->Z), Z_NO_FLUSH));
 		avail = sizeof(buffer) - cs->Z.avail_out;
 		if (avail > 0)
 		{
-			cs->crc = crc32(cs->crc, buffer, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)buffer, (unsigned int)avail);
 			res = ILibDuktape_DuplexStream_WriteData(cs->ds, buffer, (int)avail);				// [stream]
 			if (res == 1)
 			{
@@ -119,7 +119,7 @@ void ILibDuktape_Compressor_End(ILibDuktape_DuplexStream *stream, void *user)
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
-			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
 			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail); 
 		}
 	} while (cs->Z.avail_out == 0);
@@ -147,7 +147,7 @@ ILibTransport_DoneState ILibDuktape_Compressor_Write(ILibDuktape_DuplexStream *s
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
-			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
 			ret = ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 		}
 	} while (cs->Z.avail_out == 0);
@@ -216,7 +216,7 @@ ILibTransport_DoneState ILibDuktape_deCompressor_Write(ILibDuktape_DuplexStream 
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
-			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
 			ret = ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 			if (ret == 1)
 			{
@@ -264,7 +264,7 @@ void ILibDuktape_deCompressor_End(ILibDuktape_DuplexStream *stream, void *user)
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
-			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
 			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail); 
 		}
 	} while (cs->Z.avail_out == 0);
