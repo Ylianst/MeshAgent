@@ -46,6 +46,7 @@ __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, 
 #define ILibSimpleDataStore_Create(filePath) ILibSimpleDataStore_CreateEx2(filePath, 0, 0)
 #define ILibSimpleDataStore_CreateEx(filePath, userExtraMemorySize) ILibSimpleDataStore_CreateEx2(filePath, userExtraMemorySize, 0)
 #define ILibSimpleDataStore_CreateCachedOnly() ILibSimpleDataStore_Create(NULL)
+int ILibSimpleDataStore_IsCacheOnly(ILibSimpleDataStore ds);
 
 // Check if the data store exists
 int ILibSimpleDataStore_Exists(char *filePath);

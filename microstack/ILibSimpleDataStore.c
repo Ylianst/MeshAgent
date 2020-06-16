@@ -615,7 +615,13 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char*
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry;
 	
-	if (root == NULL) return 0;
+	if (root == NULL) { return 0; }
+	if (root->dataFile == NULL)
+	{
+		ILibSimpleDataStore_Cached(dataStore, key, keyLen, value, valueLen);
+		return(0);
+	}
+
 	if (keyLen > 1 && key[keyLen - 1] == 0) { keyLen -= 1; }
 	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 	ILibSimpleDataStore_SHA384(value, valueLen, hash); // Hash the value
@@ -877,4 +883,9 @@ __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 
 	free(tmp); // Free the temporary file name
 	return retVal; // Return 1 if we got an error, 0 if everything finished correctly
+}
+
+int ILibSimpleDataStore_IsCacheOnly(ILibSimpleDataStore ds)
+{
+	return(((ILibSimpleDataStore_Root*)ds)->dataFile == NULL ? 1 : 0);
 }

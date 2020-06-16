@@ -4028,13 +4028,19 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 	else
 	{
-		if (agentHost->masterDb == NULL)
+		if (agentHost->masterDb == NULL || ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb))
 		{
 			void **data = (void**)ILibMemory_SmartAllocate(4 * sizeof(void*));
 			data[0] = agentHost;
 			data[1] = (void*)(uintptr_t)paramLen;
 			data[2] = param;
 			data[3] = (void*)(uintptr_t)parseCommands;
+
+			if (agentHost->masterDb != NULL)
+			{
+				ILibSimpleDataStore_Close(agentHost->masterDb);
+				agentHost->masterDb = NULL;
+			}
 
 			switch (agentHost->dbRetryCount)
 			{
