@@ -190,7 +190,18 @@ duk_ret_t ILibDuktape_CompressedStream_compressor(duk_context *ctx)
 	cs->Z.zalloc = Z_NULL;
 	cs->Z.zfree = Z_NULL;
 	cs->Z.opaque = Z_NULL;
-	if (deflateInit(&(cs->Z), Z_DEFAULT_COMPRESSION) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
+	if (duk_is_number(ctx, 0))
+	{
+		int maxbit = -MAX_WBITS;
+		int strat = Z_DEFAULT_STRATEGY;
+		if (duk_is_number(ctx, 1)) { maxbit = duk_require_int(ctx, 1); }
+		if (duk_is_number(ctx, 2)) { strat = duk_require_int(ctx, 2); }
+		if (deflateInit2(&(cs->Z), duk_require_int(ctx, 0), Z_DEFLATED, maxbit, 8, strat) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
+	}
+	else
+	{
+		if (deflateInit(&(cs->Z), Z_DEFAULT_COMPRESSION) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
+	}
 
 	ILibDuktape_CreateEventWithGetter(ctx, "crc", ILibDuktape_CompressedStream_crc);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Compressor_Finalizer);

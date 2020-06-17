@@ -75,7 +75,9 @@ limitations under the License.
 #define FS_WINDOWS_HANDLES			"\xFF_FSWindowsHandles"
 #define FS_WINDOWS_DataPTR			"\xFF_FSWindowHandles_DataPTR"
 #define FS_WINDOWS_ReadCallback		"\xFF_FSWindowsHandles_ReadCallback"
+#define FS_WINDOWS_WriteCallback	"\xFF_FSWindowsHandles_WriteCallback"
 #define FS_WINDOWS_UserBuffer		"\xFF_FSWindowsHandles_UserBuffer"
+#define FS_WINDOWS_WriteUserBuffer	"\xFF_FSWindowsHandles_WriteUserBuffer"
 
 #if defined(_POSIX) && !defined(__APPLE__)
 typedef struct ILibDuktape_fs_linuxWatcher
@@ -145,12 +147,21 @@ typedef struct ILibDuktape_fs_readStreamData
 typedef struct ILibDuktape_WindowsHandle_Data
 {
 	duk_context *ctx;
+	HANDLE *H;
+
+	// read
 	void *callback;
 	void *userBuffer;
-	HANDLE *H;
 	OVERLAPPED p;
 	char *buffer;
 	size_t bufferSize;
+
+	//write
+	void *write_callback;
+	void *write_userBuffer;
+	OVERLAPPED write_p;
+	char *write_buffer;
+	size_t write_bufferSize;
 }ILibDuktape_WindowsHandle_Data;
 #endif
 
@@ -219,8 +230,30 @@ FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 
 duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 {
-	int fd = duk_require_int(ctx, 0);
+	if (duk_is_number(ctx, 0))
+	{
+		void *tmp = (void*)(uintptr_t)duk_require_uint(ctx, 0);
+		duk_push_this(ctx);									// [fs]
+		duk_get_prop_string(ctx, -1, FS_WINDOWS_HANDLES);	// [fs][table]
+		duk_push_pointer(ctx, tmp);							// [fs][table][H]
+		duk_get_prop(ctx, -2);								// [fs][table][container]
+		if (!duk_is_null_or_undefined(ctx, -1))
+		{
+			ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)Duktape_GetBufferProperty(ctx, -1, FS_WINDOWS_DataPTR);
+			if (data != NULL)
+			{
+				CloseHandle(data->H);
+				CloseHandle(data->p.hEvent);
+				CloseHandle(data->write_p.hEvent);
+			}
+			duk_pop(ctx);									// [fs][table]
+			duk_push_pointer(ctx, tmp);						// [ts][table][H]
+			duk_del_prop(ctx, -2);
+			return(0);
+		}
+	}
 
+	int fd = duk_require_int(ctx, 0);
 	if (fd < 65535)
 	{
 #ifdef WIN32
@@ -350,6 +383,7 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 	data->ctx = ctx;
 	data->H = fd;
 	data->p.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	data->write_p.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	duk_push_uint(ctx, (duk_uint_t)(uintptr_t)fd);
 #else
 	int fd = open(path, flags);
@@ -517,29 +551,91 @@ duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
 	}
 	return(0);
 }
+#ifdef WIN32
+BOOL ILibDuktape_fs_write_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void* user)
+{
+	ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)user;
+	if (ILibMemory_CanaryOK(data) && duk_ctx_is_alive(data->ctx))
+	{
+		// Advance the position pointer, because Windows won't do it for us
+		LARGE_INTEGER i64;
+		i64.LowPart = data->write_p.Offset;
+		i64.HighPart = data->write_p.OffsetHigh;
+		i64.QuadPart += (int64_t)bytesWritten;
+		data->write_p.Offset = i64.LowPart;
+		data->write_p.OffsetHigh = i64.HighPart;
+
+		duk_context *ctx = data->ctx;
+		duk_push_heapptr(data->ctx, data->write_callback);	// [callback]
+		duk_eval_string(data->ctx, "require('fs');");		// [callback][this]
+		duk_push_int(data->ctx, status);					// [callback][this][err]
+		duk_push_int(data->ctx, bytesWritten);				// [callback][this][err][bytesRead]
+		duk_push_heapptr(data->ctx, data->write_userBuffer);// [callback][this][err][bytesRead][buffer]
+		data->write_callback = NULL;
+		data->write_userBuffer = NULL;
+		if (duk_pcall_method(data->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "fs.write.onCallack(): "); }
+		duk_pop(ctx);										// ...
+	}
+	return(FALSE);
+}
+#endif
 duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 {
-	int fd = (int)duk_require_int(ctx, 0);
 	duk_size_t bufferLen;
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferLen);
 	int cbx = 2;
-	int offset = 0, length = (int)bufferLen, e;
-	//int position = -1;
-	
+	int offset = 0, length = (int)bufferLen;
+	int position = -1;
+
 	if (duk_is_number(ctx, 2)) { offset = (int)duk_require_int(ctx, 2); cbx++; }
 	if (duk_is_number(ctx, 3)) { length = (int)duk_require_int(ctx, 3); cbx++; }
-	if (duk_is_number(ctx, 4)) 
+	if (duk_is_number(ctx, 4))
 	{
-		//position = (int)duk_require_int(ctx, 4);
+		position = (int)duk_require_int(ctx, 4);
 		cbx++;
 	}
 	if (!duk_is_function(ctx, cbx)) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
 
 #ifdef WIN32
-	int bytesWritten = _write(fd, buffer + offset, length);
+	HANDLE H = (HANDLE)(uintptr_t)duk_require_uint(ctx, 0);
+	ILibDuktape_WindowsHandle_Data *data = NULL;
+
+	duk_push_this(ctx);											// [fs]
+	duk_get_prop_string(ctx, -1, FS_WINDOWS_HANDLES);			// [fs][table]
+	duk_push_pointer(ctx, H);									// [fs][table][key]
+	duk_get_prop(ctx, -2);										// [fs][table][value]
+	if (duk_is_null_or_undefined(ctx, -1)) { return(ILibDuktape_Error(ctx, "Invalid Descriptor")); }
+	data = (ILibDuktape_WindowsHandle_Data*)Duktape_GetBufferProperty(ctx, -1, FS_WINDOWS_DataPTR);
+	if (data->write_callback != NULL) { return(ILibDuktape_Error(ctx, "Operation Already in progress")); }
+	duk_dup(ctx, cbx);											// [fs][table][value][callback]
+	duk_put_prop_string(ctx, -2, FS_WINDOWS_WriteCallback);		// [fs][table][value]
+	duk_get_prop_string(ctx, 1, "buffer");						// [fs][table][value][userbuffer]
+	data->write_userBuffer = duk_get_heapptr(ctx, -1);
+	duk_put_prop_string(ctx, -2, FS_WINDOWS_WriteUserBuffer);	// [fs][table][value]
+	data->write_callback = duk_require_heapptr(ctx, cbx);
+
+	if (position >= 0)
+	{
+		DWORD highorder = 0;
+		DWORD loworder = SetFilePointer(data->H, (LONG)position, (LONG*)&highorder, FILE_BEGIN);
+		if (loworder == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
+		data->write_p.Offset = loworder;
+		data->write_p.OffsetHigh = highorder;
+	}
+
+	data->write_buffer = buffer + offset;
+	data->write_bufferSize = length;
+	ILibChain_WriteEx2(duk_ctx_chain(ctx), data->H, &(data->write_p), data->write_buffer, (int)data->write_bufferSize, ILibDuktape_fs_write_WindowsSink, data, "fs.write()");
+	return(0);
+
 #else
+	int e;
+	int fd = (int)duk_require_int(ctx, 0);
+	if (position >= 0)
+	{
+		if (lseek(fd, (off_t)position, SEEK_SET) < 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
+	}
 	int bytesWritten = write(fd, buffer + offset, length);
-#endif
 	if (bytesWritten == length)
 	{
 		// Completed
@@ -606,6 +702,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	duk_dup(ctx, 1);										// [func][this][ERR][bytesWritten][buffer]
 	duk_dup(ctx, cbx + 1);									// [func][this][ERR][bytesWritten][buffer][options]
 	duk_call_method(ctx, 4);
+#endif
 	return(0);
 }
 
