@@ -511,8 +511,6 @@ int wmain(int argc, char* wargv[])
 	size_t str2len = 0;// , proxylen = 0, taglen = 0;
 	wchar_t str[_MAX_PATH];
 	char str2[_MAX_PATH];
-	char* proxyarg = NULL;
-	char* tagarg = NULL;
 	ILib_DumpEnabledContext winException;
 	int retCode = 0;
 
@@ -673,31 +671,6 @@ int wmain(int argc, char* wargv[])
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
-	// Process extra switches
-	for (i = 0; i < argc; i++)
-	{
-		str2len = strnlen_s(argv[i], _MAX_PATH - 1);
-		if (str2len > 7 && memcmp(argv[i], "-proxy:", 7) == 0) { proxyarg = argv[i] + 7; } // Set the HTTPS proxy
-		else if (str2len >= 5 && memcmp(argv[i], "-tag:", 5) == 0) { tagarg = argv[i] + 5; } // Set the TAG
-	}
-
-	/*
-	#ifdef _MINCORE
-	if (argc == 2 && ((strcasecmp(argv[1], "-?") == 0) || (strcasecmp(argv[1], "/?") == 0)))
-	{
-		printf("Mesh Agent v%d available switches:\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n\r\n  -resetnodeid      Reset the NodeID next time the service is started.", MESH_AGENT_VERSION);
-		return 0;
-	}
-	#else
-	if (argc == 2 && ((strcasecmp(argv[1], "-?") == 0) || (strcasecmp(argv[1], "/?") == 0)))
-	{
-		//printf("Mesh Agent v%d available switches:\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  -proxy:host:port  Specifiy an HTTPS proxy.\r\n  -leader           Force the agent to always be a leader.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -loadcert:c.pem   Load a pem cert as node certificate.\r\n", MESH_AGENT_VERSION);
-		printf("Mesh Agent v%d available switches:\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n  -resetnodeid      Reset the NodeID next time the service is started.", MESH_AGENT_VERSION);
-		return 0;
-	}
-	#endif
-	*/
-	
 	#if defined(_LINKVM)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{		
@@ -1053,11 +1026,25 @@ int wmain(int argc, char* wargv[])
 			{
 				if (argc != 1)
 				{
-#ifdef _MINCORE
-					printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
-#else
-					printf("Mesh Agent available switches:\r\n  run               Start as a console agent.\r\n  connect           Start as a temporary console agent.\r\n  start             Start the service.\r\n  restart           Restart the service.\r\n  stop              Stop the service.\r\n  state             Display the running state of the service.\r\n  -signcheck        Perform self-check.\r\n  -install          Install the service from this location.\r\n  -uninstall        Remove the service from this location.\r\n  -nodeidhex        Return the current agent identifier.\r\n  -fullinstall      Copy agent into program files, install and launch.\r\n  -fulluninstall    Stop agent and clean up the program files location.\r\n  -proxy:host:port  Specifiy an HTTPS proxy (after -fullinstall only).\r\n  -tag:xxx          Specifiy a agent tag  (after -fullinstall only).\r\n  -resetnodeid      Reset the NodeID next time the service is started.");
-#endif
+					printf("Mesh Agent available switches:\r\n");
+					printf("  run               Start as a console agent.\r\n");
+					printf("  connect           Start as a temporary console agent.\r\n");
+					printf("  start             Start the service.\r\n");
+					printf("  restart           Restart the service.\r\n");
+					printf("  stop              Stop the service.\r\n");
+					printf("  state             Display the running state of the service.\r\n");
+					printf("  -signcheck        Perform self - check.\r\n");
+					printf("  -install          Install the service from this location.\r\n");
+					printf("  -uninstall        Remove the service from this location.\r\n");
+					printf("  -nodeidhex        Return the current agent identifier.\r\n");
+					printf("  -resetnodeid      Reset the NodeID next time the service is started.\r\n");
+					printf("  -fulluninstall    Stop agent and clean up the program files location.\r\n");
+					printf("  -fullinstall      Copy agent into program files, install and launch.\r\n");
+					printf("\r\n");
+					printf("                    The following switches can be specified after -fullinstall:\r\n");
+					printf("\r\n");
+					printf("     --WebProxy=\"http://proxyhost:port\"      Specify an HTTPS proxy.\r\n");
+					printf("     --agentName=\"alternate name\"            Specify an alternate name to be provided by the agent.\r\n");
 				}
 				else
 				{
