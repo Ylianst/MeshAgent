@@ -4609,6 +4609,10 @@ void MeshAgent_ScriptMode_ZipSink_Run(duk_context *ctx, void ** args, int argsLe
 
 duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 {
+	duk_size_t tmpLen;
+	char *tmp;
+
+	duk_idx_t top;
 	if (duk_get_length(ctx, 0) == 1)
 	{
 		// Only one file is in here
@@ -4619,6 +4623,87 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, "name");						// [stash][obj][name]
 		duk_put_prop_string(ctx, -2, "_scriptName");				// [stash][obj]
 		ILibDuktape_Immediate(ctx, NULL, 0, MeshAgent_ScriptMode_ZipSink_Run);
+	}
+	else
+	{
+		char *run = NULL;
+		int runidx = 0;
+		int found = 0;
+		duk_eval_string(ctx, "process.argv");						// [argarray]
+		duk_array_partialIncludes(ctx, -1, "--run=");				// [argarray][int]
+		if (duk_is_number(ctx, -1) && duk_get_int(ctx, -1) >= 0)
+		{
+			runidx = duk_get_int(ctx, -1);
+			duk_get_prop_index(ctx, -2, duk_get_int(ctx, -1));		// [argarray][int][string]
+			duk_string_split(ctx, -1, "=");							// [argarray][int][string][tokens]
+			duk_array_pop(ctx, -1);									// [argarray][int][string][tokens][string]
+			run = (char*)duk_get_string(ctx, -1);
+		}
+		duk_dup(ctx, 0);											// [array]
+		top = duk_get_top(ctx);
+		while (duk_get_length(ctx, -1) > 0)
+		{
+			duk_array_pop(ctx, -1);									// [array][obj]
+			duk_get_prop_string(ctx, -1, "name");					// [array][obj][name]
+#ifdef WIN32
+			duk_string_split(ctx, -1, "\\");						// [array][obj][name][tokens]
+#else
+			duk_string_split(ctx, -1, "/");
+#endif
+			duk_array_pop(ctx, -1);									// [array][obj][name][tokens][filename]
+			duk_string_endsWith(ctx, -1, ".js");					// [array][obj][name][tokens][filename][boolean]
+			if (duk_get_boolean(ctx, -1))
+			{
+				// This is a JS module
+				if (run != NULL && found == 0)
+				{
+					duk_push_string(ctx, run);						// [array][obj][name][tokens][filename][boolean][run]
+					if (duk_equals(ctx, -3, -1) == 1)
+					{
+						// This is the script to run
+						duk_push_heap_stash(ctx);					// [array][obj][name][tokens][filename][boolean][run][stash]
+						duk_get_prop_string(ctx, -7, "buffer");		// [array][obj][name][tokens][filename][boolean][run][stash][buffer]
+						duk_put_prop_string(ctx, -2, "_script");	// [array][obj][name][tokens][filename][boolean][run][stash]
+						duk_swap_top(ctx, -2);						// [array][obj][name][tokens][filename][boolean][stash][run]
+						duk_put_prop_string(ctx, -2, "_scriptName");// [array][obj][name][tokens][filename][boolean][stash]
+						found = 1;
+					}
+				}
+				else
+				{
+					// Load as a module								// [array][obj][name][tokens][filename][boolean]
+					duk_string_split(ctx, -2, "\\");	// [toks]
+					duk_array_pop(ctx, -1);				// [toks][string]
+					duk_remove(ctx, -2);				// [string]
+					duk_string_split(ctx, -1, "/");		// [string][toks]
+					duk_array_pop(ctx, -1);				// [string][toks][string]
+					duk_remove(ctx, -2);				// [toks][string]
+					duk_remove(ctx, -2);				// [string]
+
+					duk_string_split(ctx, -1, ".js");				// [array][obj][name][tokens][filename][boolean][string][tokens]
+					duk_array_shift(ctx, -1);						// [array][obj][name][tokens][filename][boolean][string][tokens][name]
+					duk_get_prop_string(ctx, -8, "buffer");			// [array][obj][name][tokens][filename][boolean][string][tokens][name][buffer]
+					tmp = (char*)duk_to_lstring(ctx, -1, &tmpLen);
+					ILibDuktape_ModSearch_AddModule(ctx, (char*)duk_get_string(ctx, -2), tmp, (int)tmpLen);
+				}
+			}
+			duk_set_top(ctx, top);
+		}
+		if (run != NULL && found != 0)
+		{
+			duk_push_heapptr(ctx, ILibDuktape_GetProcessObject(ctx));
+			duk_get_prop_string(ctx, -1, "\xFF_argArray");	// [process][array]
+			duk_prepare_method_call(ctx, -1, "splice");		// [process][array][splice][this]
+			duk_push_int(ctx, runidx);						// [process][array][splice][this][start]
+			duk_push_int(ctx, 1);							// [process][array][splice][this][start][deleteCount]
+			duk_pcall_method(ctx, 2);
+			ILibDuktape_Immediate(ctx, NULL, 0, MeshAgent_ScriptMode_ZipSink_Run);
+		}
+		else
+		{
+			// Unable to initialize
+			duk_eval_string_noresult(ctx, "console.log('Error Initializing script from Zip file');process._exit();");
+		}
 	}
 	return(0);
 }

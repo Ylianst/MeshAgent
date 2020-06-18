@@ -103,6 +103,7 @@ extern duk_ret_t ILibDuktape_EventEmitter_DefaultNewListenerHandler(duk_context 
 #define duk_array_push(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "push");duk_swap_top(ctx, -2);duk_dup(ctx,-3);duk_pcall_method(ctx, 1);duk_pop_2(ctx);
 #define duk_array_join(ctx, i, str) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "join");duk_swap_top(ctx, -2);duk_push_string(ctx, str);duk_pcall_method(ctx, 1);
 #define duk_array_unshift(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "unshift");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_remove(ctx, -4);duk_pcall_method(ctx, 1);duk_pop(ctx);
+#define duk_array_partialIncludes(ctx, i, str) duk_prepare_method_call(ctx, i, "partialIncludes");duk_push_string(ctx, str);duk_pcall_method(ctx, 1);
 
 #define duk_events_setup_on(ctx, i, name, func) duk_prepare_method_call(ctx, i, "on");duk_push_string(ctx, name);duk_push_c_function(ctx, func, DUK_VARARGS);
 #define duk_events_newListener(ctx, i, name, func) duk_events_setup_on(ctx, i, "newListener", ILibDuktape_EventEmitter_DefaultNewListenerHandler);duk_push_string(ctx, name);duk_put_prop_string(ctx, -2, "event_name");duk_push_c_function(ctx, func, DUK_VARARGS);duk_put_prop_string(ctx, -2, "event_callback");if(duk_pcall_method(ctx, 2)!=0){printf("oops\n");ILibDuktape_Process_UncaughtExceptionEx(ctx, "duk_events_newListener (%s,%d)", __FILE__, __LINE__);}duk_pop(ctx);

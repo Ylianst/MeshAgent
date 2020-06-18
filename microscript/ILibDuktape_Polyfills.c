@@ -461,12 +461,34 @@ duk_ret_t ILibDuktape_Polyfills_Array_includes(duk_context *ctx)
 	duk_push_false(ctx);
 	return(1);
 }
+duk_ret_t ILibDuktape_Polyfills_Array_partialIncludes(duk_context *ctx)
+{
+	duk_size_t inLen;
+	char *inStr = (char*)duk_get_lstring(ctx, 0, &inLen);
+	duk_push_this(ctx);										// [array]
+	uint32_t count = (uint32_t)duk_get_length(ctx, -1);
+	uint32_t i;
+	duk_size_t tmpLen;
+	char *tmp;
+	for (i = 0; i < count; ++i)
+	{
+		tmp = Duktape_GetStringPropertyIndexValueEx(ctx, -1, i, "", &tmpLen);
+		if (inLen > 0 && inLen <= tmpLen && strncmp(inStr, tmp, inLen) == 0)
+		{
+			duk_push_int(ctx, i);
+			return(1);
+		}
+	}
+	duk_push_int(ctx, -1);
+	return(1);
+}
 void ILibDuktape_Polyfills_Array(duk_context *ctx)
 {
 	// Polyfill 'Array.includes'
 	duk_get_prop_string(ctx, -1, "Array");											// [Array]
 	duk_get_prop_string(ctx, -1, "prototype");										// [Array][proto]
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "includes", ILibDuktape_Polyfills_Array_includes, 1);
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "partialIncludes", ILibDuktape_Polyfills_Array_partialIncludes, 1);
 	duk_pop_2(ctx);																	// ...
 }
 void ILibDuktape_Polyfills_String(duk_context *ctx)
