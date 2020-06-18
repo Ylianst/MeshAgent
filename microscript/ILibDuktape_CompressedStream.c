@@ -119,8 +119,8 @@ void ILibDuktape_Compressor_End(ILibDuktape_DuplexStream *stream, void *user)
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
-			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
-			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail); 
+			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 		}
 	} while (cs->Z.avail_out == 0);
 	ILibDuktape_DuplexStream_WriteEnd(cs->ds);
@@ -147,7 +147,7 @@ ILibTransport_DoneState ILibDuktape_Compressor_Write(ILibDuktape_DuplexStream *s
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
-			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
 			ret = ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 		}
 	} while (cs->Z.avail_out == 0);
@@ -190,13 +190,12 @@ duk_ret_t ILibDuktape_CompressedStream_compressor(duk_context *ctx)
 	cs->Z.zalloc = Z_NULL;
 	cs->Z.zfree = Z_NULL;
 	cs->Z.opaque = Z_NULL;
-	if (duk_is_number(ctx, 0))
+	if (!duk_is_null_or_undefined(ctx, 0) && duk_is_object(ctx, 0))
 	{
-		int maxbit = -MAX_WBITS;
-		int strat = Z_DEFAULT_STRATEGY;
-		if (duk_is_number(ctx, 1)) { maxbit = duk_require_int(ctx, 1); }
-		if (duk_is_number(ctx, 2)) { strat = duk_require_int(ctx, 2); }
-		if (deflateInit2(&(cs->Z), duk_require_int(ctx, 0), Z_DEFLATED, maxbit, 8, strat) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
+		int maxbit = Duktape_GetIntPropertyValue(ctx, 0, "WBITS", -MAX_WBITS);
+		int strat = Duktape_GetIntPropertyValue(ctx, 0, "STRATEGY", Z_DEFAULT_STRATEGY);
+		int level = Duktape_GetIntPropertyValue(ctx, 0, "LEVEL", Z_DEFAULT_COMPRESSION);
+		if (deflateInit2(&(cs->Z), level, Z_DEFLATED, maxbit, 8, strat) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
 	}
 	else
 	{

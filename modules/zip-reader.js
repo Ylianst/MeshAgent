@@ -233,7 +233,37 @@ function zippedObject(table)
 
         extractNext(ret);
         return (ret);
-    }
+    };
+    this._readLocalHeaderSink = function _readLocalHeaderSink(err, bytesRead, buffer)
+    {
+        var info = _readLocalHeaderSink.info;
+
+        console.info1('Local File Record -> ');
+        var filenameLength = buffer.readUInt32LE(26);
+        console.info1('   General Purpose Flag: ' + buffer.readUInt16LE(6));
+        console.info1('   CRC-32 of uncompressed data: ' + buffer.readUInt32LE(14));
+        console.info1('   Compression Method: ' + buffer.readUInt16LE(8));
+        console.info1('   Compressed Size: ' + buffer.readUInt32LE(18));
+        console.info1('   Uncompressed Size: ' + buffer.readUInt32LE(22));
+        console.info1('   Last Modification Time: ' + buffer.readUInt16LE(10));
+        console.info1('   Last Modification Date: ' + buffer.readUInt16LE(12));
+        console.info1('   Extra Field Length: ' + buffer.readUInt16LE(28));
+        require('fs').read(info.fd, { buffer: Buffer.alloc(filenameLength) }, function (e, b, f)
+        {
+            console.info1('   File Name: ' + f.toString());
+            require('fs').read(info.fd, { buffer: Buffer.alloc(10) }, function (e2, b2, f2)
+            {
+                console.info1('   Compressed Data Sample: ' + f2.toString('hex'));
+            });
+        });
+    };
+    this._readLocalHeaderSink.self = this;
+    this.readLocalHeader = function readLocalHeader(name)
+    {
+        var info = this._table[name];
+        this._readLocalHeaderSink.info = info;
+        require('fs').read(info.fd, { buffer: Buffer.alloc(30), position: info.offset }, this._readLocalHeaderSink);
+    };
 }
 
 function read(path)
@@ -244,6 +274,19 @@ function read(path)
         ret._rej('File not found');
         return (ret);
     }
+    ret._tmp = {};
+    require('events').EventEmitter.call(ret._tmp);
+    ret._tmp.on('~', function () { if (this._fd) { require('fs').closeSync(this._fd); } });
+    ret.close = function close()
+    {
+        if (this._fd)
+        {
+            require('fs').closeSync(this._fd);
+            this._fd = null;
+        }
+    }
+
+
     ret._len = require('fs').statSync(path).size;
     ret._fd = require('fs').openSync(path, require('fs').constants.O_RDONLY);
     ret._cdr = function _cdr(err, bytesRead, buffer)
@@ -257,7 +300,30 @@ function read(path)
             var comLength = buffer.readUInt16LE(32);
             var name = buffer.slice(46, 46 + nameLength).toString();
 
-            table[name] = { name: name, compressedSize: buffer.readUInt32LE(20), offset: buffer.readUInt32LE(42), fd: _cdr.self._fd, compression: buffer.readUInt16LE(10), crc: buffer.readUInt32LE(16) };
+            console.info1('Central Directory Record:');
+            console.info1('   Version: ' + buffer.readUInt16LE(4));
+            console.info1('   Minimum: ' + buffer.readUInt16LE(6));
+            console.info1('   Name: ' + name);
+            console.info1('   CRC-32 of Uncompressed data: ' + buffer.readUInt32LE(16));
+            console.info1('   Uncompressed Size: ' + buffer.readUInt32LE(24));
+            console.info1('   Compressed Size: ' + buffer.readUInt32LE(20));
+            console.info1('   File Last Modification Time: ' + buffer.readUInt16LE(12));
+            console.info1('   File Last Modification Date: ' + buffer.readUInt16LE(14));
+            console.info1('   Internal Attributes: ' + buffer.readUInt16LE(36));
+            console.info1('   External Attributes: ' + buffer.readUInt32LE(38));
+            console.info1('   Local Header at: ' + buffer.readUInt32LE(42));
+            
+
+            table[name] =
+                {
+                    name: name,
+                    compressedSize: buffer.readUInt32LE(20),
+                    uncompressedSize: buffer.readUInt32LE(24),
+                    offset: buffer.readUInt32LE(42),
+                    fd: _cdr.self._fd,
+                    compression: buffer.readUInt16LE(10),
+                    crc: buffer.readUInt32LE(16)
+                };
             buffer = buffer.slice(46 + nameLength + efLength + comLength);
         }
 
@@ -272,6 +338,14 @@ function read(path)
         {
             if ((record = buffer.slice(buffer.length - i)).readUInt32LE() == EOCDR)
             {
+                console.info1('Found Start of ECD Record ' + i + ' bytes from end of file');
+                console.info1('-------------------------');
+                console.info1('  Disk #: ' + record.readUInt16LE(4));
+                console.info1('  Number of Central Directory Records on this disc: ' + record.readUInt16LE(8));
+                console.info1('  Total number of Central Directory Records: ' + record.readUInt16LE(10));
+                console.info1('  Size of Central Directory: ' + record.readUInt32LE(12) + ' bytes');
+                console.info1('  Central Directory Records should be at offset: ' + record.readUInt32LE(16));
+
                 require('fs').read(_eocdr.self._fd, { buffer: Buffer.alloc(record.readUInt32LE(12)), position: record.readUInt32LE(16) }, _eocdr.self._cdr);
                 break;
             }
