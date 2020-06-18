@@ -245,7 +245,6 @@ function zippedObject(table)
         {
             // finished
             prom._res(prom.results);
-            console.log(this._ObjectID);
             this.close();
             return;
         }
