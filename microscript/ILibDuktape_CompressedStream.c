@@ -180,6 +180,7 @@ duk_ret_t ILibDuktape_CompressedStream_crc(duk_context *ctx)
 
 duk_ret_t ILibDuktape_CompressedStream_compressor(duk_context *ctx)
 {
+	int t = duk_get_top(ctx);
 	duk_push_object(ctx);										// [compressed-stream]
 	ILibDuktape_WriteID(ctx, "compressedStream.compressor");
 	ILibDuktape_CompressorStream *cs = (ILibDuktape_CompressorStream*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_CompressorStream));
@@ -190,7 +191,7 @@ duk_ret_t ILibDuktape_CompressedStream_compressor(duk_context *ctx)
 	cs->Z.zalloc = Z_NULL;
 	cs->Z.zfree = Z_NULL;
 	cs->Z.opaque = Z_NULL;
-	if (!duk_is_null_or_undefined(ctx, 0) && duk_is_object(ctx, 0))
+	if (t>0 && duk_is_object(ctx, 0))
 	{
 		int maxbit = Duktape_GetIntPropertyValue(ctx, 0, "WBITS", -MAX_WBITS);
 		int strat = Duktape_GetIntPropertyValue(ctx, 0, "STRATEGY", Z_DEFAULT_STRATEGY);
