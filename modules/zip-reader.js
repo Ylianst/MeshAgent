@@ -356,17 +356,19 @@ function read(path)
             console.info1('   External Attributes: ' + buffer.readUInt32LE(38));
             console.info1('   Local Header at: ' + buffer.readUInt32LE(42));
             
-
-            table[name] =
-                {
-                    name: name,
-                    compressedSize: buffer.readUInt32LE(20),
-                    uncompressedSize: buffer.readUInt32LE(24),
-                    offset: buffer.readUInt32LE(42),
-                    fd: _cdr.self._fd,
-                    compression: buffer.readUInt16LE(10),
-                    crc: buffer.readUInt32LE(16)
-                };
+            if (buffer.readUInt32LE(16) != 0)
+            {
+                table[name] =
+                    {
+                        name: name,
+                        compressedSize: buffer.readUInt32LE(20),
+                        uncompressedSize: buffer.readUInt32LE(24),
+                        offset: buffer.readUInt32LE(42),
+                        fd: _cdr.self._fd,
+                        compression: buffer.readUInt16LE(10),
+                        crc: buffer.readUInt32LE(16)
+                    };
+            }
             buffer = buffer.slice(46 + nameLength + efLength + comLength);
         }
 
