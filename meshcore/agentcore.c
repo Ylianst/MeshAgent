@@ -4581,15 +4581,80 @@ duk_ret_t MeshAgent_ScriptMode_StartAgent(duk_context *ctx)
 
 	return(0);
 }
+duk_ret_t MeshAgent_ScriptMode_ZipSink2_Error(duk_context *ctx)
+{
+	duk_peval_string(ctx, "console.log('Error Extracting Zip file');process._exit();");
+	return(0);
+}
+void MeshAgent_ScriptMode_ZipSink_Run(duk_context *ctx, void ** args, int argsLen)
+{
+	duk_idx_t top = duk_get_top(ctx);
+
+	duk_push_heap_stash(ctx);
+	duk_size_t bufferLen;
+	char* buffer = Duktape_GetBufferPropertyEx(ctx, -1, "_script", &bufferLen);
+	char* name = Duktape_GetStringPropertyValue(ctx, -1, "_scriptName", "[zipped].js");
+
+	if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(ctx, buffer, (int)bufferLen, name, 0) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(ctx) != 0)
+	{
+		if (strcmp(duk_safe_to_string(ctx, -1), "Process.exit() forced script termination") != 0)
+		{
+			// Error
+			ILibRemoteLogging_printf(ILibChainGetLogger(duk_ctx_chain(ctx)), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(ctx, -1));
+		}
+	}
+
+	duk_set_top(ctx, top);
+}
+
+duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
+{
+	if (duk_get_length(ctx, 0) == 1)
+	{
+		// Only one file is in here
+		duk_push_heap_stash(ctx);									// [stash]
+		duk_array_pop(ctx, 0);										// [stash][obj]
+		duk_get_prop_string(ctx, -1, "buffer");						// [stash][obj][buffer]
+		duk_put_prop_string(ctx, -3, "_script");					// [stash][obj]
+		duk_get_prop_string(ctx, -1, "name");						// [stash][obj][name]
+		duk_put_prop_string(ctx, -2, "_scriptName");				// [stash][obj]
+		ILibDuktape_Immediate(ctx, NULL, 0, MeshAgent_ScriptMode_ZipSink_Run);
+	}
+	return(0);
+}
+duk_ret_t MeshAgent_ScriptMode_ZipSink(duk_context *ctx)
+{
+	duk_prepare_method_call(ctx, 0, "extractAllStreams");					// [extract][this]
+	if (duk_pcall_method(ctx, 0) != 0)										// [promise]
+	{
+		duk_eval_string(ctx, "console.log('Error extracting from zip file');process._exit();");
+		return(0);
+	}
+	duk_prepare_method_call(ctx, -1, "then");								// [promise][then][this]
+	duk_push_c_function(ctx, MeshAgent_ScriptMode_ZipSink2, DUK_VARARGS);	// [promise][then][this][func1]
+	duk_push_c_function(ctx, MeshAgent_ScriptMode_ZipSink2_Error, DUK_VARARGS); //.....][then][this][func1][func2]
+	if (duk_pcall_method(ctx, 2) != 0)
+	{
+		duk_eval_string(ctx, "console.log('Error extracting zip file'); process._exit();");
+	}
+	return(0);
+}
+duk_ret_t MeshAgent_ScriptMode_ZipSinkErr(duk_context *ctx)
+{
+	char *tmp = (char*)duk_require_string(ctx, 0);
+	char *val = (char*)duk_push_sprintf(ctx, "console.log('%s');process._exit();", tmp);
+	duk_peval_string(ctx, val);
+	return(0);
+}
 void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **argv)
 {
-	char *jsFile;
+	char *jsFile = NULL;
 	int jsFileLen;
 	int i;
 	unsigned int execTimeout = 0;
 	unsigned int secFlags = 0;
 	char **scriptArgs = NULL;
-	char *jsPath;
+	char *jsPath = NULL;
 	int sx = 1;
 	int connectAgent = 0;
 	int pathLen = 0;
@@ -4605,10 +4670,12 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 		if (realpath(argv[1], ILibScratchPad2) != NULL) { pathLen = strnlen_s(ILibScratchPad2, PATH_MAX); }
 #endif
 
-		// Try to load the JavaScript file from disk, if fail, return
-		jsFileLen = ILibReadFileFromDiskEx(&jsFile, ILibScratchPad2);
-		if (jsFileLen == 0) { printf("ERROR loading %s\n", ILibScratchPad2); return; }
-
+		if (ILibString_EndsWith(ILibScratchPad2, -1, ".zip", 4) == 0)
+		{
+			// Try to load the JavaScript file from disk, if fail, return
+			jsFileLen = ILibReadFileFromDiskEx(&jsFile, ILibScratchPad2);
+			if (jsFileLen == 0) { printf("ERROR loading %s\n", ILibScratchPad2); return; }
+		}
 		// We need to pass the JavaScript full path to the JavaScript runtime as the first argument. Set the up here.
 		scriptArgs = (char**)ILibMemory_Allocate((1 + argc) * sizeof(char*), 1 + pathLen, NULL, (void**)&jsPath);		// KLOCWORK is being dumb, becuase ILibScratchpad2 is gauranteed to be NULL terminated
 		strncpy_s(jsPath, ILibMemory_GetExtraMemorySize(jsPath), ILibScratchPad2, ILibMemory_GetExtraMemorySize(jsPath));
@@ -4702,19 +4769,54 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	duk_peval_string_noresult(agentHost->meshCoreCtx, "require('linux-pathfix')();");
 #endif
 
-
-	if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, jsFile, jsFileLen, agentHost->meshCoreCtx_embeddedScript == NULL ? scriptArgs[0] : "[embedded].js", 0) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
+	if (jsPath == NULL || ILibString_EndsWith(jsPath, -1, ".zip", 4) == 0)
 	{
-		if (strcmp(duk_safe_to_string(agentHost->meshCoreCtx, -1), "Process.exit() forced script termination") != 0)
+		if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, jsFile, jsFileLen, agentHost->meshCoreCtx_embeddedScript == NULL ? scriptArgs[0] : "[embedded].js", 0) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
 		{
-			// Error
-			ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+			if (strcmp(duk_safe_to_string(agentHost->meshCoreCtx, -1), "Process.exit() forced script termination") != 0)
+			{
+				// Error
+				ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Script Error: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+			}
+			duk_pop(agentHost->meshCoreCtx);
 		}
-		duk_pop(agentHost->meshCoreCtx);
 	}
-
+	else
+	{
+		// Trying to run a zip file
+		duk_push_sprintf(agentHost->meshCoreCtx, "require('zip-reader').read('%s');", jsPath);	// [string]
+#ifdef WIN32					
+		duk_string_split(agentHost->meshCoreCtx, -1, "\\");										// [string][array]
+		duk_array_join(agentHost->meshCoreCtx, -1, "\\\\");										// [string][array][string]
+		duk_remove(agentHost->meshCoreCtx, -2);													// [string][string]
+		duk_remove(agentHost->meshCoreCtx, -2);													// [string]
+#endif
+		
+		if (duk_peval(agentHost->meshCoreCtx) != 0)												// [zip-reader]
+		{
+			duk_peval_string_noresult(agentHost->meshCoreCtx, "console.log('Error decoding zip file');process._exit();");
+			duk_pop(agentHost->meshCoreCtx);											// ...
+		}
+		else
+		{
+			duk_push_heap_stash(agentHost->meshCoreCtx);								// [zip-reader][stash]
+			duk_swap_top(agentHost->meshCoreCtx, -2);									// [stash][zip-reader]
+			duk_dup(agentHost->meshCoreCtx, -1);										// [stash][zip-reader][zip-reader]
+			duk_put_prop_string(agentHost->meshCoreCtx, -3, "zip");						// [stash][zip-reader]
+			duk_remove(agentHost->meshCoreCtx, -2);										// [zip-reader]
+			duk_get_prop_string(agentHost->meshCoreCtx, -1, "then");					// [zip-reader][then]
+			duk_swap_top(agentHost->meshCoreCtx, -2);									// [then][this]
+			duk_push_c_function(agentHost->meshCoreCtx, MeshAgent_ScriptMode_ZipSink, DUK_VARARGS);//.][func1]
+			duk_push_c_function(agentHost->meshCoreCtx, MeshAgent_ScriptMode_ZipSinkErr, DUK_VARARGS);//.....][func2]
+			if (duk_pcall_method(agentHost->meshCoreCtx, 2) != 0)
+			{
+				duk_eval_string_noresult(agentHost->meshCoreCtx, "console.log('error decoding zip file');process._exit();");
+			}
+			duk_pop(agentHost->meshCoreCtx);											// ...
+		}
+	}
 	// JavaScript copies this, we do not need this anymore.
-	free(jsFile);
+	if (jsFile != NULL) { free(jsFile); }
 	free(scriptArgs);
 
 	// If in agent mode, setup the chain to be a mesh agent
@@ -4841,7 +4943,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	void *reserved[] = { agentHost, &paramLen, param };
 
 	// Check to see if we are running as just a JavaScript Engine
-	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0))
+	if (agentHost->meshCoreCtx_embeddedScript != NULL || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".js", 3) != 0) || (paramLen >= 2 && ILibString_EndsWith(param[1], -1, ".zip", 4) != 0))
 	{ 
 		// We are acting as a scripting engine
 		ILibChain_RunOnMicrostackThreadEx(agentHost->chain, MeshAgent_ScriptMode_Dispatched, reserved);

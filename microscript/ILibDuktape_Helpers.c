@@ -937,7 +937,7 @@ void* ILibDuktape_Immediate(duk_context *ctx, void ** args, int argsLen, ILibDuk
 	duk_push_pointer(ctx, callback);									// [setImmediate][this][func][userFunc]
 	duk_push_array(ctx);												// [setImmediate][this][func][userFunc][array]
 
-	while (args[i] != NULL && i < argsLen)
+	while (args != NULL && args[i] != NULL && i < argsLen)
 	{
 		duk_get_prop_string(ctx, -1, "push");							// [setImmediate][this][func][userFunc][array][push]
 		duk_dup(ctx, -2);												// [setImmediate][this][func][userFunc][array][push][this]
