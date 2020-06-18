@@ -219,6 +219,7 @@ function zippedObject(table)
             this._bytesLeft = this._info.compressedSize;
             this._buffer = Buffer.alloc(4096);
             console.info1('Local Header @ ' + this._info.offset);
+            console.info1(' -> Compressed Size = ' + this._bytesLeft);
             require('fs').read(this._info.fd, { buffer: Buffer.alloc(30), position: this._info.offset }, this._localHeaderSink);
         });
         return (ret);
@@ -253,6 +254,7 @@ function zippedObject(table)
         prom.results.peek().stream.ret = prom;
         prom.results.peek().stream.on('data', function (c)
         {
+            console.info2('DATA: ' + c.length);
             if (this._buf == null)
             {
                 this._buf = Buffer.concat([c]);
@@ -264,6 +266,7 @@ function zippedObject(table)
         });
         prom.results.peek().stream.on('end', function ()
         {
+            console.info2('End of current stream');
             this.ret.results.peek().buffer = this._buf;
             this.ret.z._extractAllStreams2(this.ret);
         });
@@ -323,15 +326,23 @@ function zippedObject(table)
 
 function read(path)
 {
-    var ret = new promise(function(res,rej){this._res = res; this._rej = rej;});
-    if (!require('fs').existsSync(path))
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    if (typeof (path) == 'string')
     {
-        ret._rej('File not found');
-        return (ret);
-    }
+        if (!require('fs').existsSync(path))
+        {
+            ret._rej('File not found');
+            return (ret);
+        }
 
-    ret._len = require('fs').statSync(path).size;
-    ret._fd = require('fs').openSync(path, require('fs').constants.O_RDONLY);
+        ret._len = require('fs').statSync(path).size;
+        ret._fd = require('fs').openSync(path, require('fs').constants.O_RDONLY);
+    }
+    else
+    {
+        ret._len = path.length;
+        ret._fd = { _ObjectID: 'fs.bufferDescriptor', buffer: path, position: 0 };
+    }
     ret._cdr = function _cdr(err, bytesRead, buffer)
     {
         var table = {};

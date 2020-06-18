@@ -78,6 +78,7 @@ limitations under the License.
 #define FS_WINDOWS_WriteCallback	"\xFF_FSWindowsHandles_WriteCallback"
 #define FS_WINDOWS_UserBuffer		"\xFF_FSWindowsHandles_UserBuffer"
 #define FS_WINDOWS_WriteUserBuffer	"\xFF_FSWindowsHandles_WriteUserBuffer"
+#define FS_BUFFER_DESCRIPTOR_PENDING "\xFF_FS_BUFFER_DESCRIPTOR_PENDING"
 
 #if defined(_POSIX) && !defined(__APPLE__)
 typedef struct ILibDuktape_fs_linuxWatcher
@@ -230,6 +231,10 @@ FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 
 duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 {
+	if (duk_is_object(ctx, 0) && strcmp(Duktape_GetStringPropertyValue(ctx, 0, "_ObjectID", ""), "fs.bufferDescriptor") == 0)
+	{
+		return(0);
+	}
 	if (duk_is_number(ctx, 0))
 	{
 		void *tmp = (void*)(uintptr_t)duk_require_uint(ctx, 0);
@@ -734,6 +739,30 @@ BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_Error
 	return(FALSE);
 }
 #endif
+void ILibDuktape_fs_buffer_fd_read(duk_context *ctx, void ** args, int argsLen)
+{
+	duk_idx_t top = duk_get_top(ctx);
+
+	duk_eval_string(ctx, "require('fs');");							// [fs]
+	duk_get_prop_string(ctx, -1, FS_BUFFER_DESCRIPTOR_PENDING);		// [fs][array]
+	while (duk_get_length(ctx, -1) > 0)
+	{
+		duk_array_shift(ctx, -1);									// [fs][array][obj]
+
+		duk_get_prop_string(ctx, -1, "func");						// [fs][array][obj][func]
+		duk_eval_string(ctx, "require('fs');");						// [fs][array][obj][func][this]
+		duk_push_int(ctx, 0);										// [fs][array][obj][func][this][err]
+		duk_get_prop_string(ctx, -4, "bytesRead");					// [fs][array][obj][func][this][err][bytesRead]
+		duk_get_prop_string(ctx, -5, "buffer");						// [fs][array][obj][func][this][err][bytesRead][buffer]
+		duk_remove(ctx, -6);										// [fs][array][func][this][err][bytesRead][buffer]
+		if (duk_pcall_method(ctx, 3) != 0)
+		{
+			ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.read.bufferFD.callback() ");
+		}
+		duk_pop(ctx);												// [fs][array][obj]
+	}
+	duk_set_top(ctx, top);
+}
 duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 {
 	int top = duk_get_top(ctx);
@@ -771,6 +800,36 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		duk_dup(ctx, 1);										// [read][this][fd][options][callback]
 		duk_call_method(ctx, 3);
 		return(1);
+	}
+	if (duk_is_object(ctx, 0) && duk_is_object(ctx, 1) && duk_is_function(ctx, 2))
+	{
+		if (strcmp(Duktape_GetStringPropertyValue(ctx, 0, "_ObjectID", ""), "fs.bufferDescriptor") != 0) { return(ILibDuktape_Error(ctx, "Invalid Parameter")); }
+		duk_size_t wrbufLen;
+		char *wrbuf = (char*)Duktape_GetBufferPropertyEx(ctx, 1, "buffer", &wrbufLen);
+		duk_dup(ctx, 0);												// [bufferDescriptor]
+		int dpos = Duktape_GetIntPropertyValue(ctx, -1, "position", 0);
+		dpos = Duktape_GetIntPropertyValue(ctx, 1, "position", dpos);
+		duk_get_prop_string(ctx, -1, "buffer");							// [bufferDescriptor][buffer]
+		int bufferLength = (int)duk_get_length(ctx, -1);
+		int length = Duktape_GetIntPropertyValue(ctx, 1, "length", bufferLength);
+		int offset = Duktape_GetIntPropertyValue(ctx, 1, "offset", 0);
+		int bytesRead = length < (bufferLength - dpos) ? length : (bufferLength - dpos);
+		if (bytesRead > ((int)wrbufLen - offset)) { bytesRead = (int)wrbufLen - offset; }
+		duk_size_t srbufLen;
+		char *srbuf = (char*)Duktape_GetBufferPropertyEx(ctx, 0, "buffer", &srbufLen);
+		memcpy_s(wrbuf + offset, bytesRead, srbuf + dpos, bytesRead);
+
+		duk_push_int(ctx, bytesRead);									// [bufferDescriptor][buffer][position]
+		duk_put_prop_string(ctx, -3, "position");						// [bufferDescriptor][buffer]
+		duk_push_this(ctx);												// [bufferDescriptor][buffer][fs]
+		duk_get_prop_string(ctx, -1, FS_BUFFER_DESCRIPTOR_PENDING);		// [bufferDescriptor][buffer][fs][array]
+		duk_push_object(ctx);											// [bufferDescriptor][buffer][fs][array][object]
+		duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "func");
+		duk_push_int(ctx, bytesRead); duk_put_prop_string(ctx, -2, "bytesRead");
+		duk_get_prop_string(ctx, 1, "buffer"); duk_put_prop_string(ctx, -2, "buffer");
+		duk_array_push(ctx, -2);										// [bufferDescriptor][buffer][fs][array]
+		ILibDuktape_Immediate(ctx, NULL, 0, ILibDuktape_fs_buffer_fd_read);
+		return(0);
 	}
 	if (!(duk_is_number(ctx, 0) && duk_is_object(ctx, 1) && duk_is_function(ctx, 2))) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
 #ifdef WIN32
@@ -2219,6 +2278,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 
 	duk_push_object(ctx);						// [fs][descriptors]
 	duk_put_prop_string(ctx, -2, FS_FDS);		// [fs]
+
+	duk_push_array(ctx);
+	duk_put_prop_string(ctx, -2, FS_BUFFER_DESCRIPTOR_PENDING);
 
 	duk_push_object(ctx);
 	duk_put_prop_string(ctx, -2, FS_WINDOWS_HANDLES);
