@@ -72,6 +72,11 @@ function zippedObject(table)
 {
     this._ObjectID = 'zip-reader.zippedObject';
     this._table = table;
+    for (var jx in table)
+    {
+        this._FD = table[jx].fd;
+        break;
+    }
     Object.defineProperty(this, 'files', {
         get: function ()
         {
@@ -234,6 +239,45 @@ function zippedObject(table)
         extractNext(ret);
         return (ret);
     };
+    this._extractAllStreams2 = function _extractAllStreams2(prom)
+    {
+        if (prom.files.length == 0)
+        {
+            // finished
+            prom._res(prom.results);
+            console.log(this._ObjectID);
+            this.close();
+            return;
+        }
+        prom.results.push({ name: prom.files.pop() });
+        prom.results.peek().stream = this.getStream(prom.results.peek().name);
+        prom.results.peek().stream.ret = prom;
+        prom.results.peek().stream.on('data', function (c)
+        {
+            if (this._buf == null)
+            {
+                this._buf = Buffer.concat([c]);
+            }
+            else
+            {
+                this._buf = Buffer.concat([this._buf, c]);
+            }
+        });
+        prom.results.peek().stream.on('end', function ()
+        {
+            this.ret.results.peek().buffer = this._buf;
+            this.ret.z._extractAllStreams2(this.ret);
+        });
+    };
+    this.extractAllStreams = function extractAllStreams()
+    {
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        ret.files = this.files;
+        ret.results = [];
+        ret.z = this;
+        this._extractAllStreams2(ret);
+        return (ret);
+    };
     this._readLocalHeaderSink = function _readLocalHeaderSink(err, bytesRead, buffer)
     {
         var info = _readLocalHeaderSink.info;
@@ -264,6 +308,18 @@ function zippedObject(table)
         this._readLocalHeaderSink.info = info;
         require('fs').read(info.fd, { buffer: Buffer.alloc(30), position: info.offset }, this._readLocalHeaderSink);
     };
+
+    this.close = function close()
+    {
+        if (this._FD != null)
+        {
+            require('fs').closeSync(this._FD);
+            this._FD = null;
+            this._table = null;
+        }
+    }
+    require('events').EventEmitter.call(this);
+    this.on('~', function () { this.close(); });
 }
 
 function read(path)
@@ -274,18 +330,6 @@ function read(path)
         ret._rej('File not found');
         return (ret);
     }
-    ret._tmp = {};
-    require('events').EventEmitter.call(ret._tmp);
-    ret._tmp.on('~', function () { if (this._fd) { require('fs').closeSync(this._fd); } });
-    ret.close = function close()
-    {
-        if (this._fd)
-        {
-            require('fs').closeSync(this._fd);
-            this._fd = null;
-        }
-    }
-
 
     ret._len = require('fs').statSync(path).size;
     ret._fd = require('fs').openSync(path, require('fs').constants.O_RDONLY);

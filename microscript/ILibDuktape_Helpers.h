@@ -125,7 +125,7 @@ extern duk_ret_t ILibDuktape_EventEmitter_DefaultNewListenerHandler(duk_context 
 #define duk_buffer_slice(ctx, i, start, len) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "slice");duk_swap_top(ctx, -2);duk_push_int(ctx, start);duk_push_int(ctx, len);duk_pcall_method(ctx, 2);duk_remove(ctx, -2);
 #define duk_string_concat(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "concat");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_pcall_method(ctx, 1);duk_remove(ctx, -2);
 #define duk_string_split(ctx, i, delim) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "split");duk_swap_top(ctx, -2);duk_push_string(ctx, delim);duk_call_method(ctx, 1);
-
+#define duk_string_endsWith(ctx, i, val) duk_prepare_method_call(ctx, i, "endsWith");duk_push_string(ctx,val);duk_pcall_method(ctx, 1);
 
 int Duktape_GetBooleanProperty(duk_context *ctx, duk_idx_t i, char *propertyName, int defaultValue);
 struct sockaddr_in6* Duktape_IPAddress4_FromString(char* address, unsigned short port);

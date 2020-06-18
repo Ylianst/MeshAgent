@@ -391,32 +391,24 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 		{
 			if (ILibIsRunningOnChainThread(stream->chain))
 			{
+				ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "data");				// [emit][this][data]
 				if (streamReserved == 0)
 				{
-					duk_push_external_buffer(stream->ctx);												// [extBuffer]
+					duk_push_external_buffer(stream->ctx);												// [emit][this][data][extBuffer]
 					duk_config_buffer(stream->ctx, -1, buffer, bufferLen);
-				}
-				ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "data");				// [extBuffer][emit][this][data]
-				if (streamReserved == 0)
-				{
-					duk_push_buffer_object(stream->ctx, -4, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [extBuffer][emit][this][data][nodeBuffer]
+					duk_push_buffer_object(stream->ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [emit][this][data][extBuffer][nodeBuffer]
+					duk_remove(stream->ctx, -2);														// [emit][this][data][nodeBuffer]
 				}
 				else
 				{
-					duk_push_lstring(stream->ctx, buffer, bufferLen);									// [extBuffer][emit][this][data][string]
+					duk_push_lstring(stream->ctx, buffer, bufferLen);									// [emit][this][data][string]
 				}
 				if (duk_pcall_method(stream->ctx, 2) != 0)												// [retVal]
 				{
 					ILibDuktape_Process_UncaughtException(stream->ctx);
 				}
-				if (streamReserved == 0)
-				{
-					duk_pop_2(stream->ctx);
-				}
-				else
-				{
-					duk_pop(stream->ctx);																// ...
-				}
+
+				duk_pop(stream->ctx);																	// ...
 			}
 			else
 			{
