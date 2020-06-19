@@ -277,6 +277,7 @@ function x_notifybar(title)
 
             this.notifybar._windows.peek().notifybar = require('monitor-info')._X11.XCreateSimpleWindow(m[i].display, this.notifybar._windows.peek().root, start, 0, barWidth, 1, 0, white, white);
             require('monitor-info')._X11.XStoreName(m[i].display, this.notifybar._windows.peek().notifybar, require('_GenericMarshal').CreateVariable(this.notifybar.title));
+            require('monitor-info')._X11.Xutf8SetWMProperties(m[i].display, this.notifybar._windows.peek().notifybar, require('_GenericMarshal').CreateVariable(this.notifybar.title), 0, 0, 0, 0, 0, 0);
 
             require('monitor-info').setWindowSizeHints(m[i].display, this.notifybar._windows.peek().notifybar, start, 0, barWidth, 1, barWidth, 1, barWidth, 1);
             require('monitor-info').hideWindowIcon(m[i].display, this.notifybar._windows.peek().root, this.notifybar._windows.peek().notifybar);

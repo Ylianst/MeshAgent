@@ -310,6 +310,7 @@ function monitorinfo()
                     this._X11.CreateMethod('XSync');
                     this._X11.CreateMethod('XBlackPixel');
                     this._X11.CreateMethod('XWhitePixel');
+                    this._X11.CreateMethod('Xutf8SetWMProperties');
                 }
 
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);

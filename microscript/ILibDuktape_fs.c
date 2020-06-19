@@ -235,6 +235,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 	{
 		return(0);
 	}
+#ifdef WIN32
 	if (duk_is_number(ctx, 0))
 	{
 		void *tmp = (void*)(uintptr_t)duk_require_uint(ctx, 0);
@@ -257,6 +258,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 			return(0);
 		}
 	}
+#endif
 
 	int fd = duk_require_int(ctx, 0);
 	if (fd < 65535)

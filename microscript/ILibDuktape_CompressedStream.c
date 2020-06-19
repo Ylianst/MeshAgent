@@ -119,7 +119,7 @@ void ILibDuktape_Compressor_End(ILibDuktape_DuplexStream *stream, void *user)
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
-			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
 			ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 		}
 	} while (cs->Z.avail_out == 0);
@@ -147,7 +147,7 @@ ILibTransport_DoneState ILibDuktape_Compressor_Write(ILibDuktape_DuplexStream *s
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
-			cs->crc = crc32(cs->crc, tmp, (unsigned int)avail);
+			cs->crc = crc32(cs->crc, (unsigned char*)tmp, (unsigned int)avail);
 			ret = ILibDuktape_DuplexStream_WriteData(cs->ds, tmp, (int)avail);
 		}
 	} while (cs->Z.avail_out == 0);
