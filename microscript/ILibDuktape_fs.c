@@ -819,7 +819,7 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		char *srbuf = (char*)Duktape_GetBufferPropertyEx(ctx, 0, "buffer", &srbufLen);
 		memcpy_s(wrbuf + offset, bytesRead, srbuf + dpos, bytesRead);
 
-		duk_push_int(ctx, bytesRead);									// [bufferDescriptor][buffer][position]
+		duk_push_int(ctx, bytesRead + dpos);							// [bufferDescriptor][buffer][position]
 		duk_put_prop_string(ctx, -3, "position");						// [bufferDescriptor][buffer]
 		duk_push_this(ctx);												// [bufferDescriptor][buffer][fs]
 		duk_get_prop_string(ctx, -1, FS_BUFFER_DESCRIPTOR_PENDING);		// [bufferDescriptor][buffer][fs][array]

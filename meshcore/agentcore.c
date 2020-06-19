@@ -4627,7 +4627,7 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 	else
 	{
 		char *run = NULL;
-		int runidx = 0;
+		int runidx = -1;
 		int found = 0;
 		duk_eval_string(ctx, "process.argv");						// [argarray]
 		duk_array_partialIncludes(ctx, -1, "--run=");				// [argarray][int]
@@ -4639,6 +4639,27 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 			duk_array_pop(ctx, -1);									// [argarray][int][string][tokens][string]
 			run = (char*)duk_get_string(ctx, -1);
 		}
+
+		if (run == NULL)
+		{
+			// --run="" was not specified, so we'll default to the name of the binary
+			duk_eval_string(ctx, "process.argv[0]");				// [path]
+#ifdef WIN32
+			duk_string_split(ctx, -1, "\\");						// [path][array]
+#else
+			duk_string_split(ctx, -1, "/");
+#endif
+			duk_array_pop(ctx, -1);									// [path][array][string]
+#ifdef WIN32
+			int tlen = (int)duk_get_length(ctx, -1);
+			duk_string_substring(ctx, -1, 0, tlen - 4);				// [path][array][string][string]
+#endif
+			duk_push_string(ctx, ".js");							// [path][array][string][string][.js]
+			duk_string_concat(ctx, -2);								// [path][array][string][string][string]
+			run = (char*)duk_to_string(ctx, -1);
+		}
+
+
 		duk_dup(ctx, 0);											// [array]
 		top = duk_get_top(ctx);
 		while (duk_get_length(ctx, -1) > 0)
@@ -4691,12 +4712,15 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 		}
 		if (run != NULL && found != 0)
 		{
-			duk_push_heapptr(ctx, ILibDuktape_GetProcessObject(ctx));
-			duk_get_prop_string(ctx, -1, "\xFF_argArray");	// [process][array]
-			duk_prepare_method_call(ctx, -1, "splice");		// [process][array][splice][this]
-			duk_push_int(ctx, runidx);						// [process][array][splice][this][start]
-			duk_push_int(ctx, 1);							// [process][array][splice][this][start][deleteCount]
-			duk_pcall_method(ctx, 2);
+			if (runidx != -1)
+			{
+				duk_push_heapptr(ctx, ILibDuktape_GetProcessObject(ctx));
+				duk_get_prop_string(ctx, -1, "\xFF_argArray");	// [process][array]
+				duk_prepare_method_call(ctx, -1, "splice");		// [process][array][splice][this]
+				duk_push_int(ctx, runidx);						// [process][array][splice][this][start]
+				duk_push_int(ctx, 1);							// [process][array][splice][this][start][deleteCount]
+				duk_pcall_method(ctx, 2);
+			}
 			ILibDuktape_Immediate(ctx, NULL, 0, MeshAgent_ScriptMode_ZipSink_Run);
 		}
 		else
@@ -4854,7 +4878,13 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	duk_peval_string_noresult(agentHost->meshCoreCtx, "require('linux-pathfix')();");
 #endif
 
-	if (jsPath == NULL || ILibString_EndsWith(jsPath, -1, ".zip", 4) == 0)
+	int embeddedZIP = 0;
+	if (jsFileLen > 30 && jsFile[0] == 0x50 && jsFile[1] == 0x4B && jsFile[2] == 0x03 && jsFile[3] == 0x04)
+	{
+		embeddedZIP = 1;
+	}
+
+	if ((embeddedZIP == 0 && jsPath == NULL) || (embeddedZIP == 0 && jsPath != NULL && ILibString_EndsWith(jsPath, -1, ".zip", 4) == 0))
 	{
 		if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, jsFile, jsFileLen, agentHost->meshCoreCtx_embeddedScript == NULL ? scriptArgs[0] : "[embedded].js", 0) != 0 || ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
 		{
@@ -4868,16 +4898,33 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	}
 	else
 	{
-		// Trying to run a zip file
-		duk_push_sprintf(agentHost->meshCoreCtx, "require('zip-reader').read('%s');", jsPath);	// [string]
+		int r;
+		if (embeddedZIP != 0 && jsFile != NULL)
+		{
+			// Trying to run an embedded zip file
+			duk_eval_string(agentHost->meshCoreCtx, "require('zip-reader')");						// [zip-reader]
+			duk_get_prop_string(agentHost->meshCoreCtx, -1, "read");								// [zip-reader][read]
+			duk_swap_top(agentHost->meshCoreCtx, -2);												// [read][this]
+			char *tmp=(char*)duk_push_fixed_buffer(agentHost->meshCoreCtx, jsFileLen);				// [read][this][buffer]
+			memcpy_s(tmp, jsFileLen, jsFile, jsFileLen);
+			duk_push_buffer_object(agentHost->meshCoreCtx, -1, 0, jsFileLen, DUK_BUFOBJ_NODEJS_BUFFER); //..][this][buffer][njsBuffer]
+			duk_remove(agentHost->meshCoreCtx, -2);													// [read][this][buffer]
+			r = duk_pcall_method(agentHost->meshCoreCtx, 1);										// [promise]
+		}
+		else
+		{
+			// Trying to run a zip file
+			duk_push_sprintf(agentHost->meshCoreCtx, "require('zip-reader').read('%s');", jsPath);	// [string]
 #ifdef WIN32					
-		duk_string_split(agentHost->meshCoreCtx, -1, "\\");										// [string][array]
-		duk_array_join(agentHost->meshCoreCtx, -1, "\\\\");										// [string][array][string]
-		duk_remove(agentHost->meshCoreCtx, -2);													// [string][string]
-		duk_remove(agentHost->meshCoreCtx, -2);													// [string]
+			duk_string_split(agentHost->meshCoreCtx, -1, "\\");										// [string][array]
+			duk_array_join(agentHost->meshCoreCtx, -1, "\\\\");										// [string][array][string]
+			duk_remove(agentHost->meshCoreCtx, -2);													// [string][string]
+			duk_remove(agentHost->meshCoreCtx, -2);													// [string]
 #endif
+			r = duk_peval(agentHost->meshCoreCtx);													// [promise]
+		}
 		
-		if (duk_peval(agentHost->meshCoreCtx) != 0)												// [zip-reader]
+		if (r != 0)																					// [zip-reader]
 		{
 			duk_peval_string_noresult(agentHost->meshCoreCtx, "console.log('Error decoding zip file');process._exit();");
 			duk_pop(agentHost->meshCoreCtx);											// ...

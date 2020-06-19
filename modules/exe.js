@@ -54,7 +54,7 @@ for (i = 1; i < process.argv.length; ++i) {
     if (process.argv[i].startsWith('-o')) { outputFileName = process.argv[i].substring(2); } // Output file
     if (process.argv[i].startsWith('-x')) { execPath = process.argv[i].substring(2); } // Input executable
     if (process.argv[i].startsWith('-d')) { depPath = process.argv[i].substring(2); } // Dependencies path
-    if (!process.argv[i].startsWith('-') && process.argv[i].endsWith('.js')) { sourcejs = process.argv[i]; } // JavaScript
+    if (!process.argv[i].startsWith('-') && (process.argv[i].endsWith('.js') || process.argv[i].endsWith('.zip'))) { sourcejs = process.argv[i]; } // JavaScript
 }
 
 console.log('Output Filename: ' + outputFileName);
