@@ -34,7 +34,7 @@ typedef struct x11tst_struct
 	int(*XFlush)(Display *d);
 	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
 }x11tst_struct;
-x11tst_struct *x11tst_exports;
+extern x11tst_struct *x11tst_exports;
 
 enum MOUSE_EVENTS {
 	MOUSEEVENTF_LEFTDOWN = 		0x0002,
