@@ -4666,25 +4666,23 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 		{
 			duk_array_pop(ctx, -1);									// [array][obj]
 			duk_get_prop_string(ctx, -1, "name");					// [array][obj][name]
-#ifdef WIN32
 			duk_string_split(ctx, -1, "\\");						// [array][obj][name][tokens]
-#else
-			duk_string_split(ctx, -1, "/");
-#endif
 			duk_array_pop(ctx, -1);									// [array][obj][name][tokens][filename]
-			duk_string_endsWith(ctx, -1, ".js");					// [array][obj][name][tokens][filename][boolean]
+			duk_string_split(ctx, -1, "/");							// [array][obj][name][tokens][filename][tokens]
+			duk_array_pop(ctx, -1);									// [array][obj][name][tokens][filename][tokens][filename]
+			duk_string_endsWith(ctx, -1, ".js");					// [array][obj][name][tokens][filename][tokens][filename][boolean]
 			if (duk_get_boolean(ctx, -1))
 			{
 				// This is a JS module
 				if (run != NULL && found == 0)
 				{
-					duk_push_string(ctx, run);						// [array][obj][name][tokens][filename][boolean][run]
+					duk_push_string(ctx, run);						// [array][obj][name][tokens][filename][tokens][filename][boolean][run]
 					if (duk_equals(ctx, -3, -1) == 1)
 					{
 						// This is the script to run
-						duk_push_heap_stash(ctx);					// [array][obj][name][tokens][filename][boolean][run][stash]
-						duk_get_prop_string(ctx, -7, "buffer");		// [array][obj][name][tokens][filename][boolean][run][stash][buffer]
-						duk_put_prop_string(ctx, -2, "_script");	// [array][obj][name][tokens][filename][boolean][run][stash]
+						duk_push_heap_stash(ctx);					// [array][obj][name][tokens][filename][tokens][filename][boolean][run][stash]
+						duk_get_prop_string(ctx, -9, "buffer");		// [array][obj][name][tokens][filename][tokens][filename][boolean][run][stash][buffer]
+						duk_put_prop_string(ctx, -2, "_script");	// [array][obj][name][tokens][filename][tokens][filename][boolean][run][stash]
 						duk_swap_top(ctx, -2);						// [array][obj][name][tokens][filename][boolean][stash][run]
 						duk_put_prop_string(ctx, -2, "_scriptName");// [array][obj][name][tokens][filename][boolean][stash]
 						found = 1;

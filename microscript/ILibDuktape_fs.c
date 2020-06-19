@@ -753,11 +753,12 @@ void ILibDuktape_fs_buffer_fd_read(duk_context *ctx, void ** args, int argsLen)
 
 		duk_get_prop_string(ctx, -1, "func");						// [fs][array][obj][func]
 		duk_eval_string(ctx, "require('fs');");						// [fs][array][obj][func][this]
-		duk_push_int(ctx, 0);										// [fs][array][obj][func][this][err]
+		duk_get_prop_string(ctx, -3, "err");						// [fs][array][obj][func][this][err]
 		duk_get_prop_string(ctx, -4, "bytesRead");					// [fs][array][obj][func][this][err][bytesRead]
 		duk_get_prop_string(ctx, -5, "buffer");						// [fs][array][obj][func][this][err][bytesRead][buffer]
-		duk_remove(ctx, -6);										// [fs][array][func][this][err][bytesRead][buffer]
-		if (duk_pcall_method(ctx, 3) != 0)
+		duk_get_prop_string(ctx, -6, "options");					// [fs][array][obj][func][this][err][bytesRead][buffer][options]
+		duk_remove(ctx, -7);										// [fs][array][func][this][err][bytesRead][buffer][options]
+		if (duk_pcall_method(ctx, 4) != 0)
 		{
 			ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.read.bufferFD.callback() ");
 		}
@@ -829,6 +830,7 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "func");
 		duk_push_int(ctx, bytesRead); duk_put_prop_string(ctx, -2, "bytesRead");
 		duk_get_prop_string(ctx, 1, "buffer"); duk_put_prop_string(ctx, -2, "buffer");
+		duk_push_int(ctx, 0); duk_put_prop_string(ctx, -2, "err");
 		duk_array_push(ctx, -2);										// [bufferDescriptor][buffer][fs][array]
 		ILibDuktape_Immediate(ctx, NULL, 0, ILibDuktape_fs_buffer_fd_read);
 		return(0);
@@ -886,13 +888,17 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 	{
 		// Completed
 		int errStatus = bytesRead >= 0 ? 0 : errno;
-		duk_dup(ctx, 2);										// [func]
-		duk_push_this(ctx);										// [func][this]
-		duk_push_int(ctx, errStatus);							// [func][this][err/status]
-		duk_push_int(ctx, bytesRead);							// [func][this][err/status][bytesRead]
-		duk_get_prop_string(ctx, 1, "buffer");					// [func][this][err/status][bytesRead][buffer]
-		duk_dup(ctx, 3);										// [func][this][err/status][bytesRead][buffer][options]
-		duk_call_method(ctx, 4);
+
+		duk_push_this(ctx);												// [fs]
+		duk_get_prop_string(ctx, -1, FS_BUFFER_DESCRIPTOR_PENDING);		// [fs][array]
+		duk_push_object(ctx);											// [fs][array][object]
+		duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "func");
+		duk_push_int(ctx, bytesRead); duk_put_prop_string(ctx, -2, "bytesRead");
+		duk_get_prop_string(ctx, 1, "buffer"); duk_put_prop_string(ctx, -2, "buffer");
+		duk_push_int(ctx, errStatus); duk_put_prop_string(ctx, -2, "err");
+		duk_dup(ctx, 3); duk_put_prop_string(ctx, -2, "options");
+		duk_array_push(ctx, -2);										// [fs][array]
+		ILibDuktape_Immediate(ctx, NULL, 0, ILibDuktape_fs_buffer_fd_read);
 		return(0);
 	}
 
