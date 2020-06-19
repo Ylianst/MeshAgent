@@ -757,7 +757,7 @@ void ILibDuktape_fs_buffer_fd_read(duk_context *ctx, void ** args, int argsLen)
 		duk_get_prop_string(ctx, -4, "bytesRead");					// [fs][array][obj][func][this][err][bytesRead]
 		duk_get_prop_string(ctx, -5, "buffer");						// [fs][array][obj][func][this][err][bytesRead][buffer]
 		duk_get_prop_string(ctx, -6, "options");					// [fs][array][obj][func][this][err][bytesRead][buffer][options]
-		duk_remove(ctx, -7);										// [fs][array][func][this][err][bytesRead][buffer][options]
+		duk_remove(ctx, -7);										// [fs][array][obj][func][this][err][bytesRead][buffer][options]
 		if (duk_pcall_method(ctx, 4) != 0)
 		{
 			ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.read.bufferFD.callback() ");
