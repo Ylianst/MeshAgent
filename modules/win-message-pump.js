@@ -37,11 +37,11 @@ function WindowsMessagePump(options)
 
     this._user32 = GM.CreateNativeProxy('User32.dll');
     this._user32.mp = this;
-    this._user32.CreateMethod('CreateWindowExA');
-    this._user32.CreateMethod('DefWindowProcA');
+    this._user32.CreateMethod('CreateWindowExW');
+    this._user32.CreateMethod('DefWindowProcW');
     this._user32.CreateMethod('DestroyWindow');
-    this._user32.CreateMethod('DispatchMessageA');
-    this._user32.CreateMethod('GetMessageA');
+    this._user32.CreateMethod('DispatchMessageW');
+    this._user32.CreateMethod('GetMessageW');
     this._user32.CreateMethod('PostMessageA');
     this._user32.CreateMethod('RegisterClassExA');
     this._user32.CreateMethod('SetWindowPos');
@@ -53,6 +53,7 @@ function WindowsMessagePump(options)
     this.wndclass.mp = this;
     this.wndclass.hinstance = this._kernel32.GetModuleHandleA(0);
     this.wndclass.cname = GM.CreateVariable('MainWWWClass');
+    this.wndclass.cnamew = GM.CreateVariable('MainWWWClass', { wide: true });
     this.wndclass.wndproc = GM.GetGenericGlobalCallback(4);
     this.wndclass.wndproc.mp = this;
     this.wndclass.toBuffer().writeUInt32LE(this.wndclass._size);
@@ -73,7 +74,7 @@ function WindowsMessagePump(options)
             if (msgRet == null)
             {
                 // We need to call DefWindowProcA, becuase this message was not handled
-                var p = this.mp._user32.DefWindowProcA.async(d, xhwnd, xmsg, wparam, lparam);
+                var p = this.mp._user32.DefWindowProcW.async(d, xhwnd, xmsg, wparam, lparam);
                 p.dispatcher = this;
                 p.then(function (ret)
                 {
@@ -100,7 +101,7 @@ function WindowsMessagePump(options)
             if (msgRet == null)
 {
                 // We need to call DefWindowProcA, becuase this message was not handled
-                var p = this.mp._user32.DefWindowProcA.async(d, xhwnd, xmsg, wparam, lparam);
+                var p = this.mp._user32.DefWindowProcW.async(d, xhwnd, xmsg, wparam, lparam);
                 p.dispatcher = this;
                 p.then(function (ret)
                 {
@@ -129,8 +130,8 @@ function WindowsMessagePump(options)
         if (this.nativeProxy.mp._options.window.width == null) { this.nativeProxy.mp._options.window.width = 100; }
         if (this.nativeProxy.mp._options.window.height == null) { this.nativeProxy.mp._options.window.height = 100; }
 
-        this.nativeProxy.CreateWindowExA.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._options.window.exstyles, this.nativeProxy.mp.wndclass.cname,
-            this.nativeProxy.mp._options.window.title == null ? 0 : GM.CreateVariable(this.nativeProxy.mp._options.window.title), this.nativeProxy.mp._options.window.winstyles, this.nativeProxy.mp._options.window.x, this.nativeProxy.mp._options.window.y,
+        this.nativeProxy.CreateWindowExW.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._options.window.exstyles, this.nativeProxy.mp.wndclass.cnamew,
+            this.nativeProxy.mp._options.window.title == null ? 0 : GM.CreateVariable(this.nativeProxy.mp._options.window.title, { wide: true }), this.nativeProxy.mp._options.window.winstyles, this.nativeProxy.mp._options.window.x, this.nativeProxy.mp._options.window.y,
             this.nativeProxy.mp._options.window.width, this.nativeProxy.mp._options.window.height, 0, 0, 0, 0)
             .then(function(h)
             {
@@ -149,13 +150,13 @@ function WindowsMessagePump(options)
     });
     this._startPump = function _startPump()
     {
-        this._user32.GetMessageA.async(this._user32.RegisterClassExA.async, this._msg, this._hwnd, 0, 0).then(function (r)
+        this._user32.GetMessageW.async(this._user32.RegisterClassExA.async, this._msg, this._hwnd, 0, 0).then(function (r)
         {
             if(r.Val > 0)
             {
                 this.nativeProxy.TranslateMessage.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._msg).then(function ()
                 {
-                    this.nativeProxy.DispatchMessageA.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._msg).then(function ()
+                    this.nativeProxy.DispatchMessageW.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._msg).then(function ()
                     {
                         this.nativeProxy.mp._startPump();
                     });
