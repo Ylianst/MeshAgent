@@ -4690,19 +4690,11 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 				}
 				else
 				{
-					// Load as a module								// [array][obj][name][tokens][filename][boolean]
-					duk_string_split(ctx, -2, "\\");	// [toks]
-					duk_array_pop(ctx, -1);				// [toks][string]
-					duk_remove(ctx, -2);				// [string]
-					duk_string_split(ctx, -1, "/");		// [string][toks]
-					duk_array_pop(ctx, -1);				// [string][toks][string]
-					duk_remove(ctx, -2);				// [toks][string]
-					duk_remove(ctx, -2);				// [string]
-
-					duk_string_split(ctx, -1, ".js");				// [array][obj][name][tokens][filename][boolean][string][tokens]
-					duk_array_shift(ctx, -1);						// [array][obj][name][tokens][filename][boolean][string][tokens][name]
-					duk_get_prop_string(ctx, -8, "buffer");			// [array][obj][name][tokens][filename][boolean][string][tokens][name][buffer]
-					tmp = (char*)duk_to_lstring(ctx, -1, &tmpLen);
+					// Load as a module								// [array][obj][name][tokens][filename][tokens][filename][boolean]
+					duk_string_split(ctx, -2, ".js");				// [array][obj][name][tokens][filename][tokens][filename][boolean][tokens]
+					duk_array_shift(ctx, -1);						// [array][obj][name][tokens][filename][tokens][filename][boolean][tokens][name]
+					duk_get_prop_string(ctx, -9, "buffer");			// [array][obj][name][tokens][filename][tokens][filename][boolean][tokens][name][buffer]
+					tmp = (char*)Duktape_GetBuffer(ctx, -1, &tmpLen);
 					ILibDuktape_ModSearch_AddModule(ctx, (char*)duk_get_string(ctx, -2), tmp, (int)tmpLen);
 				}
 			}
