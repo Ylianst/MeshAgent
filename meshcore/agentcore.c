@@ -4642,21 +4642,47 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 
 		if (run == NULL)
 		{
-			// --run="" was not specified, so we'll default to the name of the binary
-			duk_eval_string(ctx, "process.argv[0]");				// [path]
+			// --run="" was not specified, so lets first check to see if there is a single root level .js file
+			duk_dup(ctx, 0);										// [array]
+			int tmptop = duk_get_top(ctx);							
+			duk_uarridx_t x;
+			int fx = -1;
+			for (x = 0; x < duk_get_length(ctx, -1); ++x)
+			{
+				duk_get_prop_index(ctx, -1, x);						// [array][obj]
+				duk_get_prop_string(ctx, -1, "name");				// [array][obj][name]
+				duk_string_split(ctx, -1, "\\");					// [array][obj][name][tokens]
+				if (duk_get_length(ctx, -1) == 1)
+				{
+					duk_string_split(ctx, -2, "/");					// [array][obj][name][tokens][tokens]
+					if (duk_get_length(ctx, -1) == 1)
+					{
+						duk_array_pop(ctx, -1);						// [array][obj][name][tokens][tokens][name]
+						run = (char*)duk_get_string(ctx, -1);
+						break;
+					}
+				}
+				duk_set_top(ctx, tmptop);
+			}
+
+			if (run == NULL)
+			{
+				// --run="" was not specified, so we'll default to the name of the binary
+				duk_eval_string(ctx, "process.argv[0]");				// [path]
 #ifdef WIN32
-			duk_string_split(ctx, -1, "\\");						// [path][array]
+				duk_string_split(ctx, -1, "\\");						// [path][array]
 #else
-			duk_string_split(ctx, -1, "/");
+				duk_string_split(ctx, -1, "/");
 #endif
-			duk_array_pop(ctx, -1);									// [path][array][string]
+				duk_array_pop(ctx, -1);									// [path][array][string]
 #ifdef WIN32
-			int tlen = (int)duk_get_length(ctx, -1);
-			duk_string_substring(ctx, -1, 0, tlen - 4);				// [path][array][string][string]
+				int tlen = (int)duk_get_length(ctx, -1);
+				duk_string_substring(ctx, -1, 0, tlen - 4);				// [path][array][string][string]
 #endif
-			duk_push_string(ctx, ".js");							// [path][array][string][string][.js]
-			duk_string_concat(ctx, -2);								// [path][array][string][string][string]
-			run = (char*)duk_to_string(ctx, -1);
+				duk_push_string(ctx, ".js");							// [path][array][string][string][.js]
+				duk_string_concat(ctx, -2);								// [path][array][string][string][string]
+				run = (char*)duk_to_string(ctx, -1);
+			}
 		}
 
 
