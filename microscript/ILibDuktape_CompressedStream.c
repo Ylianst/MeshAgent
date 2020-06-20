@@ -310,9 +310,10 @@ duk_ret_t ILibDuktape_CompressedStream_decompressor(duk_context *ctx)
 	cs->Z.opaque = Z_NULL;
 	cs->Z.avail_in = 0;
 	cs->Z.next_in = Z_NULL;
-	if (duk_is_number(ctx, 0) && duk_require_int(ctx, 0)==1)
+	if (duk_is_object(ctx, 0))
 	{
-		if (inflateInit2(&(cs->Z), -MAX_WBITS) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
+		int wbits = Duktape_GetIntPropertyValue(ctx, 0, "WBITS", -15);
+		if (inflateInit2(&(cs->Z), wbits) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
 	}
 	else
 	{

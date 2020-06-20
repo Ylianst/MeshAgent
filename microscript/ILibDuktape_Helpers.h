@@ -67,6 +67,14 @@ typedef struct ILibDuktape_ContextData
 #define duk_ctx_shutting_down(ctx) ((duk_ctx_context_data(ctx)->flags & duk_destroy_heap_in_progress)==duk_destroy_heap_in_progress)
 #define duk_ctx_chain(ctx) (duk_ctx_is_alive(ctx)?duk_ctx_context_data(ctx)->chain:NULL)
 
+#define duk_stream_flags_string		0x01
+#define duk_stream_flags_buffer		0x00
+#define duk_stream_flags_flush		0x04
+
+#define duk_stream_flags_isString(flags)	(((flags)&duk_stream_flags_string)==duk_stream_flags_string)
+#define duk_stream_flags_isBuffer(flags)	(((flags)&duk_stream_flags_string)==duk_stream_flags_buffer)
+#define duk_stream_flags_isFlush(flags)		(((flags)&duk_stream_flags_flush)==duk_stream_flags_flush)
+
 typedef void(*Duktape_EventLoopDispatch)(void *chain, void *user);
 void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user);
 #define Duktape_RunOnEventLoopEx(chain, nonce, ctx, handler, user, freeOnShutdown) Duktape_RunOnEventLoop(chain, nonce, ctx, handler, (freeOnShutdown==0?NULL:(Duktape_EventLoopDispatch)(uintptr_t)0x01), user)

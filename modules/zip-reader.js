@@ -169,7 +169,7 @@ function zippedObject(table)
         }
         else
         {
-            ret = require('compressed-stream').createDecompressor(1);
+            ret = require('compressed-stream').createDecompressor({ WBITS: -15 });
         }
         ret._info = info;
         ret._readSink = function _readSink(err, bytesRead, buffer)

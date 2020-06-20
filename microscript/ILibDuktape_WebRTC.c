@@ -120,7 +120,7 @@ ILibTransport_DoneState ILibDuktape_WebRTC_DataChannel_Stream_WriteSink(ILibDukt
 	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)user;
 	if (ptrs->dataChannel != NULL)
 	{
-		if (stream->writableStream->Reserved == 0 && ptrs->maxFragmentSize > 0 && bufferLen > ptrs->maxFragmentSize)
+		if (duk_stream_flags_isBuffer(stream->writableStream->Reserved) && ptrs->maxFragmentSize > 0 && bufferLen > ptrs->maxFragmentSize)
 		{
 			// We need to fragment the send
 			ILibTransport_DoneState ret = ILibTransport_DoneState_ERROR;
@@ -135,7 +135,7 @@ ILibTransport_DoneState ILibDuktape_WebRTC_DataChannel_Stream_WriteSink(ILibDukt
 		else
 		{
 			// Normal Send
-			return(ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, bufferLen, stream->writableStream->Reserved == 1 ? 51 : 53));
+			return(ILibWrapper_WebRTC_DataChannel_SendEx(ptrs->dataChannel, buffer, bufferLen, duk_stream_flags_isString(stream->writableStream->Reserved) ? 51 : 53));
 		}
 	}
 	else

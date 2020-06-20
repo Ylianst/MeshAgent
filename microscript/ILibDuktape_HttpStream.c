@@ -2827,27 +2827,12 @@ duk_ret_t ILibDuktape_HttpStream_IncomingMessage_finalizer(duk_context *ctx)
 {
 	return(0);
 }
-void ILibDuktape_HttpStream_IncomingMessage_PUSH(duk_context *ctx, ILibHTTPPacket *header, void *httpstream)
+void ILibDuktape_HttpStream_AddHeaderDef(duk_context *ctx, struct packetheader *header)
 {
-	duk_push_object(ctx);														// [message]
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_HttpStream_IncomingMessage_finalizer);
-	duk_push_heapptr(ctx, httpstream);											// [message][httpStream]
-	duk_dup(ctx, -1);															// [message][httpStream][dup]
-	duk_put_prop_string(ctx, -3, ILibDuktape_IMSG2HttpStream);					// [message][httpStream]
-	duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2HTTP);					// [message][httpStream][http]
-	duk_remove(ctx, -2);														// [message][http]
-	duk_get_prop_string(ctx, -1, ILibDuktape_OBJID);							// [message][http][id]
-	duk_get_prop_string(ctx, -1, "concat");										// [message][http][id][concat]
-	duk_swap_top(ctx, -2);														// [message][http][concat][this]
-	duk_push_string(ctx, ".IncomingMessage");									// [message][http][concat][this][.IncomingMessage]
-	if (duk_pcall_method(ctx, 1) != 0) { duk_pop(ctx); duk_push_string(ctx, "http[s].IncomingMessage"); }
-	duk_remove(ctx, -2);														// [message][http/s.IncomingMessage]
-	duk_put_prop_string(ctx, -2, ILibDuktape_OBJID);							// [message]
-
 	duk_push_object(ctx);														// [message][headers]
 	packetheader_field_node *node = header->FirstField;
 	while (node != NULL)
-	{																			 
+	{
 		duk_push_lstring(ctx, node->Field, node->FieldLength);					// [message][headers][key]
 		duk_push_lstring(ctx, node->FieldData, node->FieldDataLength);			// [message][headers][key][value]
 		duk_put_prop(ctx, -3);													// [message][headers]
@@ -2875,6 +2860,26 @@ void ILibDuktape_HttpStream_IncomingMessage_PUSH(duk_context *ctx, ILibHTTPPacke
 		duk_push_lstring(ctx, header->StatusData, header->StatusDataLength);	// [message][statusMessage]
 		duk_put_prop_string(ctx, -2, "statusMessage");							// [message]
 	}
+}
+void ILibDuktape_HttpStream_IncomingMessage_PUSH(duk_context *ctx, ILibHTTPPacket *header, void *httpstream)
+{
+	duk_push_object(ctx);														// [message]
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_HttpStream_IncomingMessage_finalizer);
+	duk_push_heapptr(ctx, httpstream);											// [message][httpStream]
+	duk_dup(ctx, -1);															// [message][httpStream][dup]
+	duk_put_prop_string(ctx, -3, ILibDuktape_IMSG2HttpStream);					// [message][httpStream]
+	duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2HTTP);					// [message][httpStream][http]
+	duk_remove(ctx, -2);														// [message][http]
+	duk_get_prop_string(ctx, -1, ILibDuktape_OBJID);							// [message][http][id]
+	duk_get_prop_string(ctx, -1, "concat");										// [message][http][id][concat]
+	duk_swap_top(ctx, -2);														// [message][http][concat][this]
+	duk_push_string(ctx, ".IncomingMessage");									// [message][http][concat][this][.IncomingMessage]
+	if (duk_pcall_method(ctx, 1) != 0) { duk_pop(ctx); duk_push_string(ctx, "http[s].IncomingMessage"); }
+	duk_remove(ctx, -2);														// [message][http/s.IncomingMessage]
+	duk_put_prop_string(ctx, -2, ILibDuktape_OBJID);							// [message]
+
+	ILibDuktape_HttpStream_AddHeaderDef(ctx, header);
+
 	ILibDuktape_CreateInstanceMethod(ctx, "Digest_IsAuthenticated", ILibDuktape_HttpStream_IncomingMessage_Digest_IsAuthenticated, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "Digest_GetUsername", ILibDuktape_HttpStream_IncomingMessage_Digest_GetUsername, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "Digest_ValidatePassword", ILibDuktape_HttpStream_IncomingMessage_Digest_ValidatePassword, 1);
@@ -2940,6 +2945,8 @@ duk_ret_t ILibDuktape_HttpStream_OnReceive_bodyStreamFinalized(duk_context *ctx)
 	}
 	return(0);
 }
+
+
 void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, int InterruptFlag, struct packetheader *header, char *bodyBuffer, int *beginPointer, int endPointer, ILibWebClient_ReceiveStatus recvStatus, void *user1, void *user2, int *PAUSE)
 {
 	ILibDuktape_HttpStream_Data *data = (ILibDuktape_HttpStream_Data*)user1;
@@ -3118,6 +3125,21 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 				duk_pop(ctx);																		// [emit][this][response][imsg]
 
 				ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "~", ILibDuktape_HttpStream_OnReceive_bodyStreamFinalized);
+
+				int htmpLen;
+				char *htmp = ILibGetHeaderLineEx(header, "Content-Encoding", 16, &htmpLen);
+				if (htmpLen == 4 && strncmp(htmp, "gzip", 4) == 0)
+				{
+					duk_eval_string(ctx, "require('compressed-stream').createDecompressor({WBITS:31});");	// [emit][this][response][imsg][dec]
+					duk_prepare_method_call(ctx, -2, "pipe");												// [emit][this][response][imsg][dec][pipe][this]
+					duk_dup(ctx, -3);																		// [emit][this][response][imsg][dec][pipe][this][dec]
+					duk_pcall_method(ctx, 1);																// [emit][this][response][imsg][dec][ret]
+					duk_pop(ctx);																			// [emit][this][response][imsg][dec]
+					duk_remove(ctx, -2);																	// [emit][this][response][dec]
+					ILibDuktape_HttpStream_AddHeaderDef(ctx, header);
+				}
+
+
 				if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.httpStream.onReceive->response(): "); }
 				duk_pop(ctx);
 

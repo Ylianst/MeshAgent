@@ -155,14 +155,14 @@ void ILibDuktape_readableStream_WriteData_OnData_ChainThread(void *chain, void *
 	}
 
 	stream->paused = 0;
-	if (data->Reserved == 0)
+	if(duk_stream_flags_isBuffer(data->Reserved))
 	{
 		duk_push_external_buffer(stream->ctx);																// [ext]
 		duk_config_buffer(stream->ctx, -1, data->buffer, data->bufferLen);
 	}
 
 	ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "data");								// [ext][emit][this][data]
-	if (data->Reserved == 0)
+	if (duk_stream_flags_isBuffer(data->Reserved))
 	{
 		duk_push_buffer_object(stream->ctx, -4, 0, data->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);				// [ext][emit][this][data][buffer]
 	}
@@ -174,8 +174,8 @@ void ILibDuktape_readableStream_WriteData_OnData_ChainThread(void *chain, void *
 	{
 		ILibDuktape_Process_UncaughtException(stream->ctx);
 	}
-	if (data->Reserved == 0)
-	{																										
+	if (duk_stream_flags_isBuffer(data->Reserved))
+	{
 		duk_pop_2(stream->ctx);																				// ...
 	}
 	else
