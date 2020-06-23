@@ -588,8 +588,8 @@ duk_ret_t ILibDuktape_Polyfills_Console_log(duk_context *ctx)
 	len += 2; // NULL Terminator and final carriage return
 	strLen = len;
 
-	str = ILibMemory_AllocateA(strLen + ((PREFIX != NULL) ? strnlen_s(PREFIX, 9) : 0));
-	x = (int)(ILibMemory_AllocateA_Size(str) - strLen);
+	str = Duktape_PushBuffer(ctx, strLen + ((PREFIX != NULL) ? strnlen_s(PREFIX, 9) : 0));
+	x = (int)(ILibMemory_Size(str) - strLen);
 	if (x != 0)
 	{
 		strLen += sprintf_s(str, strLen, PREFIX);
