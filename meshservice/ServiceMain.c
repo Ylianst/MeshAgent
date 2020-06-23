@@ -53,7 +53,6 @@ int ClearWindowsFirewall(wchar_t* processname);
 
 TCHAR* serviceFile = TEXT("Mesh Agent");
 TCHAR* serviceName = TEXT("Mesh Agent background service");
-TCHAR* serviceDesc = TEXT("Remote monitoring and management service.");
 
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle = 0;
