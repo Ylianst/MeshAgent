@@ -59,8 +59,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataS
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataStore, uint64_t minimumDirtySize);
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigSizeLimit(ILibSimpleDataStore dataStore, uint64_t sizeLimit, ILibSimpleDataStore_SizeWarningHandler handler, void *user);
 
-__EXPORT_TYPE int ILibSimpleDataStore_PutEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen);
+__EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *hash);
 #define ILibSimpleDataStore_Put(dataStore, key, value) ILibSimpleDataStore_PutEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), value, (int)strnlen_s(value, ILibSimpleDataStore_MaxUnspecifiedValueLen))
+#define ILibSimpleDataStore_PutEx(dataStore, key, keyLen, value, valueLen) ILibSimpleDataStore_PutEx2(dataStore, key, keyLen, value, valueLen, NULL)
+int ILibSimpleDataStore_PutCompressed(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen);
 
 // Get a value from the datastore of given a key.
 __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* buffer, int bufferLen);

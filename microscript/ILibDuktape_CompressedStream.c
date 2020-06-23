@@ -326,15 +326,186 @@ duk_ret_t ILibDuktape_CompressedStream_decompressor(duk_context *ctx)
 	duk_events_newListener2(ctx, -1, "data", ILibDuktape_CompressedStream_resume_newListener);
 	return(1);
 }
+duk_ret_t ILibDuktape_CompressedStream_deflate_dataSink(duk_context *ctx)
+{
+	duk_push_this(ctx);							// [stream]
+	duk_push_array(ctx);						// [stream][array]
+	if (duk_has_prop_string(ctx, -2, "_buf"))
+	{
+		duk_get_prop_string(ctx, -2, "_buf");	// [stream][array][buffer]
+		duk_array_push(ctx, -2);				// [stream][array]
+	}
+	duk_dup(ctx, 0);							// [stream][array][buffer]
+	duk_array_push(ctx, -2);					// [stream][array]
+	duk_buffer_concat(ctx);						// [stream][buffer]
+	duk_put_prop_string(ctx, -2, "_buf");		// [stream]
+	return(0);
+}
+
+duk_ret_t ILibDuktape_CompressedStream_deflate(duk_context *ctx)
+{
+	duk_eval_string(ctx, "require('compressed-stream').createCompressor({WBIT: -15});");// [decompressor]
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "data", ILibDuktape_CompressedStream_deflate_dataSink);
+	duk_prepare_method_call(ctx, -1, "end");											// [decompressor][end][this]
+	duk_dup(ctx, 0);																	// [decompressor][end][this][buffer]
+	duk_pcall_method(ctx, 1);															// [decompressor][val]
+	duk_get_prop_string(ctx, -2, "_buf");												// [decompressor][val][buffer]
+	return(1);
+}
+duk_ret_t ILibDuktape_CompressedStream_inflate(duk_context *ctx)
+{
+	duk_eval_string(ctx, "require('compressed-stream').createDecompressor({WBIT: -15});");// [decompressor]
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "data", ILibDuktape_CompressedStream_deflate_dataSink);
+	duk_prepare_method_call(ctx, -1, "end");											// [decompressor][end][this]
+	duk_dup(ctx, 0);																	// [decompressor][end][this][buffer]
+	duk_pcall_method(ctx, 1);															// [decompressor][val]
+	duk_get_prop_string(ctx, -2, "_buf");												// [decompressor][val][buffer]
+	return(1);
+}
 void ILibDuktape_CompressedStream_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);							// [compressed-stream]
 	ILibDuktape_WriteID(ctx, "compressedStream");
 	ILibDuktape_CreateInstanceMethod(ctx, "createCompressor", ILibDuktape_CompressedStream_compressor, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createDecompressor", ILibDuktape_CompressedStream_decompressor, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "deflate", ILibDuktape_CompressedStream_deflate, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "inflate", ILibDuktape_CompressedStream_inflate, DUK_VARARGS);
 }
 
 void ILibDuktape_CompressedStream_init(duk_context * ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "compressed-stream", ILibDuktape_CompressedStream_PUSH);
+}
+
+int ILibDeflate(char *buffer, size_t bufferLen, char *compressed, size_t *compressedLen, uint32_t *crc)
+{
+	int ret = 0;
+	z_stream Z;
+	char tmp[16384];
+	size_t avail;
+	size_t len = 0;
+	uint32_t rescrc = 0;
+
+	if (compressed != NULL) { len = *compressedLen; *compressedLen = 0; }
+
+	memset(&Z, 0, sizeof(Z));
+	Z.zalloc = Z_NULL;
+	Z.zfree = Z_NULL;
+	Z.opaque = Z_NULL;
+	if (deflateInit2(&Z, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) { return(1); }
+
+	Z.avail_in = (uInt)bufferLen;
+	Z.next_in = (Bytef*)buffer;
+
+	do
+	{
+		Z.avail_out = sizeof(tmp);
+		Z.next_out = (Bytef*)tmp;
+		ignore_result(deflate(&(Z), Z_NO_FLUSH));
+		avail = sizeof(tmp) - Z.avail_out;
+		if (avail > 0)
+		{
+			rescrc = crc32(rescrc, (unsigned char*)tmp, (unsigned int)avail);
+			if (compressed != NULL) 
+			{
+				if ((len - *compressedLen) < avail) { ret = 1; break; }
+				memcpy_s(compressed + *compressedLen, len - *compressedLen, (char*)tmp, avail);
+			}
+			*compressedLen += avail;
+		}
+	} while (Z.avail_out == 0);
+
+	Z.avail_in = 0;
+	Z.next_in = (Bytef*)ILibScratchPad;
+
+	if (ret == 0)
+	{
+		do
+		{
+			Z.avail_out = sizeof(tmp);
+			Z.next_out = (Bytef*)tmp;
+			ignore_result(deflate(&Z, Z_FINISH));
+			avail = sizeof(tmp) - Z.avail_out;
+			if (avail > 0)
+			{
+				rescrc = crc32(rescrc, (unsigned char*)tmp, (unsigned int)avail);
+				if (compressed != NULL) 
+				{
+					if ((len - *compressedLen) < avail) { ret = 1; break; }
+					memcpy_s(compressed + *compressedLen, len - *compressedLen, (char*)tmp, avail);
+				}
+				*compressedLen += avail;
+			}
+		} while (Z.avail_out == 0);
+	}
+	ignore_result(deflateEnd(&Z));
+	if (crc != NULL) { *crc = rescrc; }
+	return(ret);
+}
+
+int ILibInflate(char *buffer, size_t bufferLen, char *decompressed, size_t *decompressedLen, uint32_t crc)
+{
+	int ret = 0;
+	z_stream Z;
+	char tmp[16384];
+	size_t avail;
+	size_t len = 0;
+	uint32_t rescrc = 0;
+
+	if (decompressed != NULL) { len = *decompressedLen; *decompressedLen = 0; }
+
+	memset(&Z, 0, sizeof(Z));
+	Z.zalloc = Z_NULL;
+	Z.zfree = Z_NULL;
+	Z.opaque = Z_NULL;
+	if (inflateInit2(&Z, -MAX_WBITS) != Z_OK) { return(1); }
+
+	Z.avail_in = (uInt)bufferLen;
+	Z.next_in = (Bytef*)buffer;
+
+	do
+	{
+		Z.avail_out = sizeof(tmp);
+		Z.next_out = (Bytef*)tmp;
+		ignore_result(inflate(&Z, Z_NO_FLUSH));
+		avail = sizeof(tmp) - Z.avail_out;
+		if (avail > 0)
+		{
+			rescrc = crc32(rescrc, (unsigned char*)tmp, (unsigned int)avail);
+			if (decompressed != NULL)
+			{
+				if (avail > (len - *decompressedLen)) { ret = 1; break; }
+				memcpy_s(decompressed + *decompressedLen, len - *decompressedLen, tmp, avail);
+			}
+			*decompressedLen += avail;
+		}
+	} while (Z.avail_out == 0);
+
+	if (ret == 0)
+	{
+		Z.avail_in = 0;
+		Z.next_in = (Bytef*)ILibScratchPad;
+
+		do
+		{
+			Z.avail_out = sizeof(tmp);
+			Z.next_out = (Bytef*)tmp;
+			ignore_result(inflate(&Z, Z_FINISH));
+			avail = sizeof(tmp) - Z.avail_out;
+			if (avail > 0)
+			{
+				rescrc = crc32(rescrc, (unsigned char*)tmp, (unsigned int)avail);
+				if (decompressed != NULL)
+				{
+					if (avail > (len - *decompressedLen)) { ret = 1; break; }
+					memcpy_s(decompressed + *decompressedLen, len - *decompressedLen, tmp, avail);
+				}
+				*decompressedLen += avail;
+			}
+		} while (Z.avail_out == 0);
+	}
+	ignore_result(inflateEnd(&Z));
+
+	if (crc != 0 && crc != rescrc) { ret = 2; }
+	return(ret);
 }
