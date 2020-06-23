@@ -298,6 +298,7 @@ duk_ret_t ILibDuktape_deCompressor_Finalizer(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_CompressedStream_decompressor(duk_context *ctx)
 {
+	int t = duk_get_top(ctx);
 	duk_push_object(ctx);										// [compressed-stream]
 	ILibDuktape_WriteID(ctx, "compressedStream.decompressor");
 	ILibDuktape_CompressorStream *cs = (ILibDuktape_CompressorStream*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_CompressorStream));
@@ -310,7 +311,7 @@ duk_ret_t ILibDuktape_CompressedStream_decompressor(duk_context *ctx)
 	cs->Z.opaque = Z_NULL;
 	cs->Z.avail_in = 0;
 	cs->Z.next_in = Z_NULL;
-	if (duk_is_object(ctx, 0))
+	if (t > 0 && duk_is_object(ctx, 0))
 	{
 		int wbits = Duktape_GetIntPropertyValue(ctx, 0, "WBITS", -15);
 		if (inflateInit2(&(cs->Z), wbits) != Z_OK) { return(ILibDuktape_Error(ctx, "zlib error")); }
