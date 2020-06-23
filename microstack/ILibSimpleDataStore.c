@@ -119,17 +119,28 @@ extern uint32_t crc32c(uint32_t crci, const unsigned char *buf, uint32_t len);
 // Perform a SHA384 hash of some data
 void ILibSimpleDataStore_SHA384(char *data, int datalen, char* result) { util_sha384(data, datalen, result); }
 
-void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen)
+void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash)
 {
-	if (valueLen > 2)
+	if (vhash != NULL)
 	{
-		if (value[0] == '"' && value[valueLen - 1] == '"')
+		// This is a compresed entry
+		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
+		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, key, keyLen);
+		key = tmpkey;
+		keyLen = (int)ILibMemory_Size(key);
+	}
+	else
+	{
+		if (valueLen > 2)
 		{
-			value = value + 1;
-			valueLen -= 2;
+			if (value[0] == '"' && value[valueLen - 1] == '"')
+			{
+				value = value + 1;
+				valueLen -= 2;
+			}
 		}
 	}
-
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen, 0, NULL, NULL);
@@ -137,6 +148,7 @@ void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int ke
 	if (valueLen > 0) { memcpy_s(entry->value, valueLen, value, valueLen); }
 	
 	ILibHashtable_Put(root->cacheTable, NULL, key, keyLen, entry);
+	if (vhash != NULL) { ILibMemory_Free(key); }
 }
 
 typedef struct ILibSimpleDateStore_JSONCache
@@ -184,26 +196,76 @@ void ILibSimpleDataStore_Cached_GetJSON_write(ILibHashtable sender, void *Key1, 
 {
 	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
+	char *tmpbuffer = NULL;
+	size_t tmpbufferLen = 0;
+
+	char* value = entry->value;
+	size_t valueLen = entry->valueLength;
+
+	// check if this is a compressed record
+	if (Key2Len > sizeof(uint32_t))
+	{
+		if (((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0] == crc32c(0, Key2, Key2Len - sizeof(uint32_t)))
+		{
+			Key2Len -= sizeof(uint32_t);
+			ILibInflate(entry->value, entry->valueLength, NULL, &tmpbufferLen, 0);
+			if (tmpbufferLen > 0)
+			{
+				tmpbuffer = (char*)ILibMemory_SmartAllocate(tmpbufferLen);
+				ILibInflate(entry->value, entry->valueLength, tmpbuffer, &tmpbufferLen, 0);
+				value = tmpbuffer;
+				valueLen = tmpbufferLen;
+			}
+		}
+	}
+
+
 
 	if (cache->offset != 1) { cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, ","); }
 
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"");
 	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, Key2, Key2Len); cache->offset += Key2Len;
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\":\"");
-	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, entry->value, entry->valueLength); cache->offset += entry->valueLength;
+	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, value, (int)valueLen); cache->offset += (int)valueLen;
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"");
+
+	if (tmpbuffer != NULL) { ILibMemory_Free(tmpbuffer); }
 }
 void ILibSimpleDataStore_Cached_GetJSONEx_write(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
 
+	char *tmpbuffer = NULL;
+	size_t tmpbufferLen = 0;
+
+	char* value = entry->value;
+	size_t valueLen = entry->valueLength;
+
+	// check if this is a compressed record
+	if (Key2Len > sizeof(uint32_t))
+	{
+		if (((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0] == crc32c(0, Key2, Key2Len - sizeof(uint32_t)))
+		{
+			Key2Len -= sizeof(uint32_t);
+			ILibInflate(entry->value, entry->valueLength, NULL, &tmpbufferLen, 0);
+			if (tmpbufferLen > 0)
+			{
+				tmpbuffer = (char*)ILibMemory_SmartAllocate(tmpbufferLen);
+				ILibInflate(entry->value, entry->valueLength, tmpbuffer, &tmpbufferLen, 0);
+				value = tmpbuffer;
+				valueLen = tmpbufferLen;
+			}
+		}
+	}
+
+
 	if (cache->offset != 1) { cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, ","); }
 
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"--");
 	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, Key2, Key2Len); cache->offset += Key2Len;
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "=\\\"");
-	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, entry->value, entry->valueLength); cache->offset += entry->valueLength;
+	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, value, (int)valueLen); cache->offset += (int)valueLen;
 	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\\\"\"");
 }
 
@@ -630,13 +692,22 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	if (root == NULL) { return 0; }
 	if (root->dataFile == NULL)
 	{
-		ILibSimpleDataStore_Cached(dataStore, key, keyLen, value, valueLen);
+		ILibSimpleDataStore_CachedEx(dataStore, key, keyLen, value, valueLen, vhash);
 		return(0);
 	}
 
 	if (keyLen > 1 && key[keyLen - 1] == 0) { keyLen -= 1; }
 	if (vhash != NULL)
 	{
+		// If we're going to save a compressed record, then we should delete the corrosponding
+		// non compressed entry, to avoid confusion/conflicts
+		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, keyLen);
+		if (entry != NULL)
+		{
+			ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, NULL, 0, NULL);
+		}
+
+		// Calculate the key to use for the compressed record entry
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(int));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
 		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, tmpkey, keyLen);
@@ -716,6 +787,25 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 	if (root->cacheTable != NULL)
 	{
 		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, keyLen);
+		if (centry == NULL)
+		{
+			// Let's check if this is a compressed record entry
+			size_t tmplen = 0;
+			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
+			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
+			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, key, keyLen);
+			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
+			if (centry != NULL)
+			{
+				ILibInflate(centry->value, centry->valueLength, NULL, &tmplen, 0);
+				if (buffer != NULL && bufferLen >= tmplen)
+				{
+					ILibInflate(centry->value, centry->valueLength, buffer, &tmplen, 0);
+				}
+			}
+			ILibMemory_Free(tmpkey);
+			if (tmplen > 0) { return((int)tmplen); }
+		}
 		if (centry != NULL)
 		{
 			if ((buffer != NULL) && (bufferLen >= centry->valueLength)) // If the buffer is not null and can hold the value, place the value in the buffer.

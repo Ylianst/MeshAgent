@@ -53,7 +53,8 @@ int ILibSimpleDataStore_Exists(char *filePath);
 
 // Close the data store.
 __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore);
-__EXPORT_TYPE void ILibSimpleDataStore_Cached(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen);
+__EXPORT_TYPE void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash);
+#define ILibSimpleDataStore_Cached(dataStore, key, keyLen, value, valueLen) ILibSimpleDataStore_CachedEx(dataStore, key, keyLen, value, valueLen, NULL)
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSON(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataStore, uint64_t minimumDirtySize);

@@ -2703,7 +2703,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 					// If server sends us the same core, just do nothing.
 					// Server sent us a new core, start by storing it in the data store
-					ILibSimpleDataStore_PutEx(agent->masterDb, "CoreModule", 10, cm->coreModule, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule));	// Store the JavaScript in the data store
+					ILibSimpleDataStore_PutCompressed(agent->masterDb, "CoreModule", 10, cm->coreModule, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule));	// Store the JavaScript in the data store
 					hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");					// Get the reference to the SHA384 hash
 					if (memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
 					{																						// Check the hash for sanity
