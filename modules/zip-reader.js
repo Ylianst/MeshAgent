@@ -37,7 +37,7 @@ function checkFolderPath(dest)
 }
 function extractNext(p)
 {
-    if (p.pending.length == 0) { p._res(); return; }
+    if (p.pending.length == 0) { p.source.close(); p._res(); return; }
     var next = p.pending.pop();
     var dest = p.baseFolder + (process.platform == 'win32' ? '\\' : '/') + next;
     if (process.platform == 'win32') { dest = dest.split('/').join('\\'); }
@@ -48,6 +48,7 @@ function extractNext(p)
     }
     catch(e)
     {
+        p.source.close();
         p._rej(e);
         return;
     }
@@ -226,6 +227,15 @@ function zippedObject(table)
     };
     this.extractAll = function extractAll(destFolder)
     {
+        if (process.platform == 'win32')
+        {
+            if (!destFolder.includes(':\\')) { destFolder = process.cwd() + destFolder; }
+        }
+        else
+        {
+            if (!destFolder.startsWith('/')) { destFolder = process.cwd() + destFolder; }
+        }
+
         var i;
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         if (destFolder.endsWith(process.platform == 'win32' ? '\\' : '/')) { destFolder = destFolder.substring(0, destFolder.length - 1); }
