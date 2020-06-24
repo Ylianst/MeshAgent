@@ -22,7 +22,14 @@ var duplex = require('stream').Duplex;
 
 function checkFolderPath(dest)
 {
-    if (process.platform == 'win32') { dest = dest.split('/').join('\\'); }
+    if (process.platform == 'win32')
+    {
+        dest = dest.split('/').join('\\');
+    }
+    else
+    {
+        dest = dest.split('\\').join('/');
+    }
     var tokens = dest.split(process.platform == 'win32' ? '\\' : '/');
     
     var base = tokens.shift();
@@ -40,7 +47,14 @@ function extractNext(p)
     if (p.pending.length == 0) { p.source.close(); p._res(); return; }
     var next = p.pending.pop();
     var dest = p.baseFolder + (process.platform == 'win32' ? '\\' : '/') + next;
-    if (process.platform == 'win32') { dest = dest.split('/').join('\\'); }
+    if (process.platform == 'win32')
+    {
+        dest = dest.split('/').join('\\');
+    }
+    else
+    {
+        dest = dest.split('\\').join('/');
+    }
     console.info1('Extracting: ' + dest);
     try
     {

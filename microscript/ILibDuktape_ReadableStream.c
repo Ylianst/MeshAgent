@@ -731,7 +731,7 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 		duk_push_heapptr(ctx, imm);					// [immediate]
 		duk_push_heapptr(ctx, args[0]);				// [immediate][this]
 		duk_put_prop_string(ctx, -2, "\xFF_Self");	// [immediate]
-		if (args[1] != NULL) { duk_push_heapptr(ctx, args[1]); duk_put_prop_string(ctx, -2, "\xFF_w"); }
+		if (argsLen > 1 && args[1] != NULL) { duk_push_heapptr(ctx, args[1]); duk_put_prop_string(ctx, -2, "\xFF_w"); }
 		duk_pop(ctx);								// ...
 		sem_post(&(data->pipeLock));
 		return;
