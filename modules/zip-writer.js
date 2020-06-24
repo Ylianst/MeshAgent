@@ -180,9 +180,43 @@ function next(options)
     require('fs').read(this._currentFD, { buffer: this._ubuffer }, this._uncompressedReadSink);
 }
 
+function checkFiles(files)
+{
+    var checked = [];
+    var tmp;
+    var s, j;
+
+    for(var i in files)
+    {
+        s = require('fs').statSync(files[i]);
+        if(s.isFile())
+        {
+            checked.push(files[i]);
+        }
+        else if (s.isDirectory())
+        {
+            tmp = require('fs').readdirSync(files[i]);
+            for (j in tmp)
+            {
+                tmp[j] = files[i] + (process.platform == 'win32' ? '\\' : '/') + tmp[j];
+            }
+            tmp = checkFiles(tmp);
+            for(j in tmp)
+            {
+                checked.push(tmp[j]);
+            }
+        }
+    }
+    return (checked);
+}
+
 function write(options)
 {
     if (!options.files || options.files.length == 0) { throw ('No file specified'); }
+
+    // Check if any folders were specified
+    options.files = checkFiles(options.files);
+
     var ret = new duplex(
         {
             write: function (chunk, flush)
