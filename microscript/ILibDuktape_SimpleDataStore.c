@@ -72,9 +72,18 @@ duk_ret_t ILibDuktape_SimpleDataStore_Put(duk_context *ctx)
 		key = ILibScratchPad2;
 	}
 
-	duk_push_int(ctx, ILibSimpleDataStore_PutEx(dataStore, key, (int)keyLen, value, (int)valueLen));		// [ds][ptr][retVal]
+	duk_push_current_function(ctx);									// [func]
+	if (Duktape_GetBooleanProperty(ctx, -1, "compressed", 0) == 0)
+	{
+		duk_push_int(ctx, ILibSimpleDataStore_PutEx(dataStore, key, (int)keyLen, value, (int)valueLen));		// [ds][ptr][retVal]
+	}
+	else
+	{
+		duk_push_int(ctx, ILibSimpleDataStore_PutCompressed(dataStore, key, (int)keyLen, value, (int)valueLen));
+	}
 	return 1;
 }
+
 duk_ret_t ILibDuktape_SimpleDataStore_GetRaw(duk_context *ctx)
 {
 	char *cguid = NULL;
@@ -231,7 +240,8 @@ duk_ret_t ILibDuktape_SimpleDataStore_Create(duk_context *ctx)
 	if (rdonly == 0)
 	{
 		ILibDuktape_CreateInstanceMethod(ctx, "Delete", ILibDuktape_SimpleDataStore_Delete, 1);
-		ILibDuktape_CreateInstanceMethod(ctx, "Put", ILibDuktape_SimpleDataStore_Put, 2);
+		ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "compressed", 0, "Put", ILibDuktape_SimpleDataStore_Put, 2);
+		ILibDuktape_CreateInstanceMethodWithBooleanProperty(ctx, "compressed", 1, "PutCompressed", ILibDuktape_SimpleDataStore_Put, 2);
 		ILibDuktape_CreateInstanceMethod(ctx, "Compact", ILibDuktape_SimpleDataStore_Compact, 0);
 	}
 	ILibDuktape_CreateInstanceMethod(ctx, "Get", ILibDuktape_SimpleDataStore_Get, DUK_VARARGS);

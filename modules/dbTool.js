@@ -126,7 +126,7 @@ if (process.argv.length > 1)
             {
                 var src = require('fs').readFileSync(process.argv[2] + '.js', 'rb');
                 var src2 = Buffer.concat([Buffer.alloc(4), src]);
-                db.Put('CoreModule', src2);
+                db.PutCompressed('CoreModule', src2);
                 console.log(process.argv[2] + ' imported');
             }
             process.exit();

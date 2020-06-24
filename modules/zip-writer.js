@@ -54,6 +54,7 @@ function getBaseFolder(val)
 
     if (val.length == 1)
     {
+        if (test[0].length == 1) { return (''); }
         test[0].pop();
         return (test.join(D) + D);
     }
