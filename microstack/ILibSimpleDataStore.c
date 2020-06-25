@@ -827,7 +827,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		// Before returning an error, check if this is a compressed record
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, tmpkey, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, keyLen);
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		ILibMemory_Free(tmpkey);
 		if (entry != NULL) { isCompressed = 1; }
@@ -886,7 +886,7 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 		// Before we return an error, let's check if this is a compressed record
 		char* tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, key, (uint32_t)keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen);
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		ILibMemory_Free(tmpkey);
 	}
@@ -912,7 +912,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 		// Check to see if this is a compressed record, before we return an error
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, key, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		if (entry != NULL)
 		{
@@ -1013,7 +1013,7 @@ void ILibSimpleDataStore_EnumerateKeysSink(ILibHashtable sender, void *Key1, cha
 	if (Key2Len > sizeof(uint32_t))
 	{
 		// Check if this is a compressed entry
-		if (crc32c(0, Key2, Key2Len - sizeof(uint32_t)) == ((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0])
+		if (crc32c(0, (unsigned char*)Key2, Key2Len - sizeof(uint32_t)) == ((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0])
 		{
 			Key2Len -= sizeof(uint32_t);
 		}

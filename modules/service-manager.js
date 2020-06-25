@@ -272,7 +272,13 @@ if (process.platform == 'darwin')
                 });
         }
         Object.defineProperty(ret, 'daemon', { value: ret.plist.split('/LaunchDaemons/').length > 1 ? true : false });
-
+        try
+        {
+            Object.defineProperty(ret, 'installedDate', { value: require('fs').statSync(ret.plist).ctime });
+        }
+        catch(xx)
+        {
+        }
         ret.appWorkingDirectory = function appWorkingDirectory()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -728,6 +734,16 @@ function serviceManager()
                             }
                         }
                     });
+                try
+                {
+                    Object.defineProperty(retVal, 'installedDate',
+                        {
+                            value: require('win-registry').QueryKeyLastModified(require('win-registry').HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + name, 'ImagePath')
+                        });
+                }
+                catch(xx)
+                {
+                }
                 if (retVal.status.state != 'UNKNOWN')
                 {
                     require('events').EventEmitter.call(retVal);
@@ -774,7 +790,6 @@ function serviceManager()
                         if (ret.startsWith('"')) { ret = ret.substring(1); }
                         return (ret);
                     };
-
                     retVal.appWorkingDirectory = function ()
                     {
                         var tokens = this.appLocation().split('\\');
@@ -1038,6 +1053,14 @@ function serviceManager()
                     }
                     return (ret);
                 };
+                try
+                {
+                    Object.defineProperty(ret, 'installedDate', { value: require('fs').statSync(ret.rc).ctime });
+                }
+                catch (xx)
+                {
+                }
+
                 ret.appLocation = function appLocation()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -1129,7 +1152,7 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
-                            ret.conf = (platform == 'upstart' ? ('/etc/init' + name + '.conf') : ('/etc/init.d/' + name));
+                            ret.conf = (platform == 'upstart' ? ('/etc/init/' + name + '.conf') : ('/etc/init.d/' + name));
                             ret.serviceType = platform;
                             Object.defineProperty(ret, "startType",
                                 {
@@ -1298,7 +1321,6 @@ function serviceManager()
                                 return (child.stdout._str);
                             };
                             ret.status.platform = platform;
-                            return (ret);
                         }
                         else
                         {
@@ -1418,7 +1440,6 @@ function serviceManager()
                                 child.waitExit();
                                 return (child.stdout._str);
                             };
-                            return (ret);
                         }
                         else
                         {
@@ -1526,7 +1547,6 @@ function serviceManager()
                                     return (false);
                                 }
                             };
-                            return (ret);
                         }
                         else
                         {
@@ -1534,6 +1554,15 @@ function serviceManager()
                         }
                         break;
                 }
+                try
+                {
+                    Object.defineProperty(ret, 'installedDate', { value: require('fs').statSync(ret.conf).ctime });
+                }
+                catch (xx)
+                {
+                    console.log(xx);
+                }
+                return (ret);
             };
         }
         this.enumerateService = function (options)

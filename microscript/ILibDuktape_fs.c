@@ -2274,6 +2274,25 @@ duk_ret_t ILibDuktape_fs_chownSync(duk_context *ctx)
 	}
 }
 #endif
+#ifdef WIN32
+duk_ret_t ILibDuktape_fs_convertFileTime(duk_context *ctx)
+{
+	if (!(duk_is_object(ctx, 0) && duk_has_prop_string(ctx, -1, "_ptr"))) { return(ILibDuktape_Error(ctx, "Invalid Input Parameters")); }
+	FILETIME *ft = (FILETIME*)Duktape_GetPointerProperty(ctx, 0, "_ptr");
+	SYSTEMTIME st;
+	if (ft == NULL) { return(ILibDuktape_Error(ctx, "Invalid Input Parameters")); }
+
+	if (FileTimeToSystemTime(ft, &st) != 0)
+	{
+		duk_push_string(ctx, ILibDuktape_fs_convertTime(&st, ILibScratchPad, sizeof(ILibScratchPad)));
+		return(1);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "Error converting time"));
+	}
+}
+#endif
 void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);						// [fs]
@@ -2307,6 +2326,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 #ifdef WIN32
 	ILibDuktape_CreateInstanceMethod(ctx, "_readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "_statSync", ILibDuktape_fs_statSync, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "convertFileTime", ILibDuktape_fs_convertFileTime, 1);
 #else
 	ILibDuktape_CreateInstanceMethod(ctx, "readdirSync", ILibDuktape_fs_readdirSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "statSync", ILibDuktape_fs_statSync, 1);

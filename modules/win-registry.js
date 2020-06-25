@@ -38,6 +38,8 @@ function windows_registry()
 {
     this._ObjectId = 'win-registry';
     this._marshal = require('_GenericMarshal');
+    this._Kernel32 = this._marshal.CreateNativeProxy('Kernel32.dll');
+    this._Kernel32.CreateMethod('FileTimeToSystemTime');
     this._AdvApi = this._marshal.CreateNativeProxy('Advapi32.dll');
     this._AdvApi.CreateMethod('RegCreateKeyExW');
     this._AdvApi.CreateMethod('RegEnumKeyExW');
@@ -153,6 +155,45 @@ function windows_registry()
 
         this._AdvApi.RegCloseKey(h.Deref());
         return (retVal);
+    };
+    this.QueryKeyLastModified = function QueryKeyLastModified(hkey, path, key)
+    {
+        var v;
+        var err;
+        var h = this._marshal.CreatePointer();
+        var HK = this._marshal.CreatePointer(hkey);
+        var retVal = null;
+        if (key) { key = this._marshal.CreateVariable(key, { wide: true }); }
+        if (!path) { path = ''; }
+
+        if ((err = this._AdvApi.RegOpenKeyExW(HK, this._marshal.CreateVariable(path, { wide: true }), 0, KEY_QUERY_VALUE, h).Val) != 0)
+        {
+            throw ('Opening Registry Key: ' + path + ' => Returned Error: ' + err);
+        }
+
+        var achClass = this._marshal.CreateVariable(1024);
+        var achKey = this._marshal.CreateVariable(1024);
+        var achValue = this._marshal.CreateVariable(32768);
+        var achValueSize = this._marshal.CreateVariable(4);
+        var nameSize = this._marshal.CreateVariable(4);
+        var achClassSize = this._marshal.CreateVariable(4); achClassSize.toBuffer().writeUInt32LE(1024);
+        var numSubKeys = this._marshal.CreateVariable(4);
+        var numValues = this._marshal.CreateVariable(4);
+        var longestSubkeySize = this._marshal.CreateVariable(4);
+        var longestClassString = this._marshal.CreateVariable(4);
+        var longestValueName = this._marshal.CreateVariable(4);
+        var longestValueData = this._marshal.CreateVariable(4);
+        var securityDescriptor = this._marshal.CreateVariable(4);
+        var lastWriteTime = this._marshal.CreateVariable(8);
+
+        v = this._AdvApi.RegQueryInfoKeyW(h.Deref(), achClass, achClassSize, 0,
+            numSubKeys, longestSubkeySize, longestClassString, numValues,
+            longestValueName, longestValueData, securityDescriptor, lastWriteTime);
+        if (v.Val != 0) { throw ('RegQueryInfoKeyW() returned error: ' + v.Val); }
+
+        var systime = this._marshal.CreateVariable(16);
+        if (this._Kernel32.FileTimeToSystemTime(lastWriteTime, systime).Val == 0) { throw ('Error parsing time'); }
+        return (require('fs').convertFileTime(lastWriteTime));
     };
     this.WriteKey = function WriteKey(hkey, path, key, value)
     {
