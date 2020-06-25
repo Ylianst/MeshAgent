@@ -18,7 +18,15 @@ limitations under the License.
 function installService(params)
 {
     process.stdout.write('...Installing service');
-
+    var proxyFile = process.execPath;
+    if (process.platform == 'win32')
+    {
+        proxyFile = proxyFile.split('.exe').join('.proxy');
+    }
+    else
+    {
+        proxyFile += '.proxy';
+    }
 
     var options =
         {
@@ -30,6 +38,7 @@ function installService(params)
             parameters: params
         };
     if (process.platform == 'win32') { options.companyName = ''; }
+    if (require('fs').existsSync(proxyFile)) { options.files = [{ source: proxyFile, newName: process.platform=='win32'?'MeshAgent.proxy':'meshagent.proxy' }]; }
 
     var i;
     if ((i=params.indexOf('--_localService="1"'))>=0)

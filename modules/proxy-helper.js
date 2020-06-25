@@ -58,6 +58,7 @@ function linux_getProxy()
 	    var ids = require('user-sessions').loginUids(); 
 	    for (var i in ids)
 	    {
+	        if (!require('fs').existsSync(require('user-sessions').getHomeFolder(ids[i]))) { continue; }
 		    setting = require('linux-gnome-helpers').getProxySettings(ids[i]);
 		    if (setting.mode == 'manual')
 		    {

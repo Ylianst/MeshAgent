@@ -1747,7 +1747,7 @@ function serviceManager()
                     require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
                 }
                 options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
-                if (!options.installPath) { options.installPath = folder + '\\' + options.name + '\\'; }
+                options.installPath = folder + '\\' + options.name + '\\'; 
             }
             else
             {
@@ -2192,7 +2192,7 @@ function serviceManager()
             }
         }
 
-        if (options.files)
+        if (process.platform != 'win32' && options.files)
         {
             for (var i in options.files)
             {
