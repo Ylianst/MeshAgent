@@ -1693,6 +1693,15 @@ duk_ret_t ILibDuktape_MeshAgent_coreHash(duk_context *ctx)
 	duk_push_string(ctx, ILibScratchPad);
 	return(1);
 }
+#ifdef _LINKVM 
+duk_ret_t ILibDuktape_KVM_Refresh(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBufferProperty(ctx, -1, REMOTE_DESKTOP_ptrs);
+	if (ptrs != NULL) { ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(NULL, NULL, ptrs->stream); }
+	return(0);
+}
+#endif
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1769,7 +1778,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
-
+		ILibDuktape_CreateInstanceMethod(ctx, "kvmRefresh", ILibDuktape_KVM_Refresh, 0);
 		ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "remoteMouseRender", ILibDuktape_MeshAgent_remoteMouseRender_get, ILibDuktape_MeshAgent_remoteMouseRender_set);
 #if defined(WIN32)
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "maxKvmTileSize", 0);
