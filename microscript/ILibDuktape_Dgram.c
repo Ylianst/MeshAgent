@@ -42,9 +42,6 @@ limitations under the License.
 #include "microstack/ILibRemoteLogging.h"
 
 
-
-
-
 #define ILibDuktape_DGRAM_CHAIN						"\xFF_DGRAM_CHAIN"
 #define ILibDuktape_DGRAM_SOCKET_NATIVE				"\xFF_DGRAM_SOCKET_NATIVE"
 #define ILibDuktape_DGRAM_MULTICAST_MEMBERSHIP_TYPE "\xFF_addRemove"
@@ -78,6 +75,9 @@ ILibDuktape_DGRAM_DATA* ILibDuktape_DGram_GetPTR(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_Dgram_Finalizer(duk_context *ctx)
 {
+	duk_push_this(ctx);
+	duk_prepare_method_call(ctx, -1, "close");		// [close][this]
+	duk_pcall_method(ctx, 0);
 	return 0;
 }
 void ILibDuktape_Dgram_Socket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, int bufferLength, struct sockaddr_in6 *remoteInterface, void *user, void *user2, int *PAUSE)
@@ -215,7 +215,7 @@ duk_ret_t ILibDuktape_DGram_Socket_bind(duk_context *ctx)
 		4096, (struct sockaddr*)&local,
 		((config & ILibDuktape_DGRAM_Config_ReuseAddr) == ILibDuktape_DGRAM_Config_ReuseAddr) ? ILibAsyncUDPSocket_Reuse_SHARED : ILibAsyncUDPSocket_Reuse_EXCLUSIVE,
 		ILibDuktape_Dgram_Socket_OnData, ILibDuktape_Dgram_Socket_OnSendOK, ptrs);
-
+	ILibChain_Link_SetMetadata(ptrs->mSocket, "net.dgram");
 	if (ptrs->mSocket == NULL)
 	{
 #ifdef WIN32
@@ -420,10 +420,17 @@ duk_ret_t ILibDuktape_Dgram_socket_close(duk_context *ctx)
 	if (duk_get_top(ctx) > 0 && duk_is_function(ctx, 0)) { ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx), "close", duk_require_heapptr(ctx, 0)); }
 	
 	duk_push_this(ctx);												// [socket]
-	duk_get_prop_string(ctx, -1, ILibDuktape_DGRAM_SOCKET_NATIVE);	// [socket][ptr]
-	ILibDuktape_DGRAM_DATA *data = (ILibDuktape_DGRAM_DATA*)Duktape_GetBuffer(ctx, -1, NULL);
-	ILibAsyncSocket_Disconnect(data->mSocket);
-	
+	ILibDuktape_DGRAM_DATA *data = (ILibDuktape_DGRAM_DATA*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_DGRAM_SOCKET_NATIVE);
+	if (data != NULL)
+	{
+		if (data->mSocket != NULL)
+		{
+			ILibAsyncSocket_Disconnect(data->mSocket);
+			ILibChain_SafeRemove(duk_ctx_chain(ctx), data->mSocket);
+			data->mSocket = NULL;
+		}
+		duk_del_prop_string(ctx, -1, ILibDuktape_DGRAM_SOCKET_NATIVE);
+	}
 	return(0);
 }
 duk_ret_t ILibDuktape_DGram_address(duk_context *ctx)
@@ -434,6 +441,21 @@ duk_ret_t ILibDuktape_DGram_address(duk_context *ctx)
 	ILibAsyncUDPSocket_GetLocalInterface(ptrs->mSocket, (struct sockaddr*)&addr);
 	ILibDuktape_SockAddrToOptions(ctx, &addr);
 	return(1);
+}
+duk_ret_t ILibDuktape_Dgram_setMetadata(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibDuktape_DGRAM_DATA *ptrs = (ILibDuktape_DGRAM_DATA*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_DGRAM_SOCKET_NATIVE);
+	if (ptrs != NULL && ptrs->mSocket != NULL)
+	{
+		duk_push_sprintf(ctx, "%s, %s", ILibChain_Link_GetMetadata(ptrs->mSocket), duk_require_string(ctx, 0));
+		duk_size_t memLen = 0;
+		char *mem = (char*)duk_get_lstring(ctx, -1, &memLen);
+		char *ns = ILibMemory_SmartAllocate(memLen + 1);
+		memcpy_s(ns, ILibMemory_Size(ns), mem, memLen);
+		ILibChain_Link_SetMetadata(ptrs->mSocket, ns);
+	}
+	return(0);
 }
 duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 {
@@ -457,9 +479,8 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	/**************************************************************************************/
 	duk_push_object(ctx);												// [socket]
 	ILibDuktape_WriteID(ctx, "dgram.socket");
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Dgram_Finalizer);		
-	duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_DGRAM_DATA));			// [socket][native]
-	ptrs = (ILibDuktape_DGRAM_DATA*)Duktape_GetBuffer(ctx, -1, NULL);
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Dgram_Finalizer);	
+	ptrs = (ILibDuktape_DGRAM_DATA*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_DGRAM_DATA));
 	duk_put_prop_string(ctx, -2, ILibDuktape_DGRAM_SOCKET_NATIVE);		// [socket]
 	memset(ptrs, 0, sizeof(ILibDuktape_DGRAM_DATA));
 
@@ -489,6 +510,7 @@ duk_ret_t ILibDuktape_DGram_createSocket(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "setMulticastInterface", ILibDuktape_DGram_setMulticastInterface, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setTTL", ILibDuktape_DGram_setTTL, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "address", ILibDuktape_DGram_address, 0);
+	ILibDuktape_CreateEventWithSetterEx(ctx, "descriptorMetadata", ILibDuktape_Dgram_setMetadata);
 
 	return 1;
 }
