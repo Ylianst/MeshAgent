@@ -3307,6 +3307,11 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 				ILibSimpleDataStore_PutEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&meshServer, ILibInet_StructSize(&meshServer));
 			}
 		}
+
+		// Update the DNS entry in the db. (It only updates if it changed)
+		len=sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "DNS[%s]", host);
+		char *tmp = ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer);
+		ILibSimpleDataStore_PutEx(agent->masterDb, ILibScratchPad, len,tmp , (int)strnlen_s(tmp, sizeof(ILibScratchPad)));
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore: Attempting connection to: %s", serverUrl);
