@@ -4646,7 +4646,6 @@ duk_ret_t MeshAgent_ScriptMode_ZipSink2(duk_context *ctx)
 			duk_dup(ctx, 0);										// [array]
 			int tmptop = duk_get_top(ctx);							
 			duk_uarridx_t x;
-			int fx = -1;
 			for (x = 0; x < duk_get_length(ctx, -1); ++x)
 			{
 				duk_get_prop_index(ctx, -1, x);						// [array][obj]
@@ -4774,7 +4773,7 @@ duk_ret_t MeshAgent_ScriptMode_ZipSinkErr(duk_context *ctx)
 void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **argv)
 {
 	char *jsFile = NULL;
-	int jsFileLen;
+	int jsFileLen = 0;
 	int i;
 	unsigned int execTimeout = 0;
 	unsigned int secFlags = 0;
