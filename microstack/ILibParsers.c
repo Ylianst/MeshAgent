@@ -1130,6 +1130,8 @@ void* ILibMemory_AllocateA_Get(void *buffer, size_t sz)
 }
 void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory)
 {
+	if (!((containerSize < (INT32_MAX - extraMemorySize)) && (containerSize + extraMemorySize) < (INT32_MAX - 4))) { ILIBCRITICALEXIT(254); }
+
 	char* retVal = (char*)malloc(containerSize + extraMemorySize + (extraMemorySize > 0 ? 4 : 0));
 	if (retVal == NULL) { ILIBCRITICALEXIT(254); }
 	memset(retVal, 0, containerSize + extraMemorySize + (extraMemorySize > 0 ? 4 : 0));
@@ -10134,6 +10136,7 @@ int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, in
 	{
 		int hostnameLen = (int)strnlen_s(hostname, 4096);
 		char *newHost = _alloca((size_t)hostnameLen);
+		if (hostnameLen < 2) { return(-1); }
 		memcpy_s(newHost, hostnameLen, hostname + 1, hostnameLen - 2);
 		newHost[hostnameLen - 2] = 0;
 		hostname = newHost;

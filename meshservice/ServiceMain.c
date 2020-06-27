@@ -786,7 +786,7 @@ int wmain(int argc, char* wargv[])
 	{
 		char* data;
 		int len = MeshInfo_GetSystemInformation(&data);
-		if (len > 0) { printf(data); }
+		if (len > 0) { printf_s(data); }
 	}
 	else if (argc > 1 && (strcasecmp(argv[1], "-setfirewall") == 0))
 	{
@@ -820,7 +820,7 @@ int wmain(int argc, char* wargv[])
 			}
 			RegCloseKey(hKey);
 		}
-		if (strEx != NULL) printf(strEx); else printf("Not defined, start the mesh service to create a nodeid.");
+		if (strEx != NULL) printf_s(strEx); else printf("Not defined, start the mesh service to create a nodeid.");
 		wmain_free(argv);
 		return 0;
 	}

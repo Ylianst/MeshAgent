@@ -2263,26 +2263,35 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 			// PE Image
 			optHeader = ILibMemory_AllocateA(((unsigned short*)ILibScratchPad)[10]);
 			ignore_result(fread(optHeader, 1, ILibMemory_AllocateA_Size(optHeader), tmpFile));
-			switch (((unsigned short*)optHeader)[0])
+			if (ILibMemory_AllocateA_Size(optHeader) > 4)
 			{
-			case 0x10B:
-				if (((unsigned int*)(optHeader + 128))[0] != 0)
+				switch (((unsigned short*)optHeader)[0])
 				{
-					endIndex = ((unsigned int*)(optHeader + 128))[0];
+				case 0x10B:
+					if (ILibMemory_AllocateA_Size(optHeader) >= 132)
+					{
+						if (((unsigned int*)(optHeader + 128))[0] != 0)
+						{
+							endIndex = ((unsigned int*)(optHeader + 128))[0];
+						}
+						tableIndex = NTHeaderIndex + 24 + 128;
+						retVal = 0;
+					}
+					break;
+				case 0x20B:
+					if (ILibMemory_AllocateA_Size(optHeader) >= 148)
+					{
+						if (((unsigned int*)(optHeader + 144))[0] != 0)
+						{
+							endIndex = ((unsigned int*)(optHeader + 144))[0];
+						}
+						tableIndex = NTHeaderIndex + 24 + 144;
+						retVal = 0;
+					}
+					break;
+				default:
+					break;
 				}
-				tableIndex = NTHeaderIndex + 24 + 128;
-				retVal = 0;
-				break;
-			case 0x20B:
-				if (((unsigned int*)(optHeader + 144))[0] != 0)
-				{
-					endIndex = ((unsigned int*)(optHeader + 144))[0];
-				}
-				tableIndex = NTHeaderIndex + 24 + 144;
-				retVal = 0;
-				break;
-			default:
-				break;
 			}
 		}
 	}

@@ -64,33 +64,6 @@ void BreakSink(int s)
 }
 #endif
 
-#if defined(WIN32) && defined(MeshLibInterface)
-extern void ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(char *exePath, char **script, int *scriptLen);
-typedef void(__stdcall *ExternalDispatch)(void *data);
-__declspec(dllexport)  ExternalDispatch ExternalDispatchSink = NULL;
-__declspec(dllexport) int mainEx(int argc, char **argv, ExternalDispatch ptr)
-{
-	int retCode = 0;
-	char *js = NULL;
-	int jsLen = 0;
-
-	ExternalDispatchSink = ptr;
-	ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(argv[0], &js, &jsLen);
-
-	agentHost = MeshAgent_Create(0);
-	agentHost->exePath = (char*)ILibMemory_AllocateA(strnlen_s(argv[0], _MAX_PATH) + 1);
-	memcpy_s(agentHost->exePath, ILibMemory_AllocateA_Size(agentHost->exePath), argv[0], ILibMemory_AllocateA_Size(agentHost->exePath) - 1);
-	
-	agentHost->meshCoreCtx_embeddedScript = js;
-	agentHost->meshCoreCtx_embeddedScriptLen = jsLen;
-	while (MeshAgent_Start(agentHost, argc, argv) != 0);
-	retCode = agentHost->exitCode;
-	MeshAgent_Destroy(agentHost);
-	agentHost = NULL;
-	return(retCode);
-}
-#endif
-
 #if defined(_LINKVM) && defined(__APPLE__)
 extern void* kvm_server_mainloop(void *parm);
 extern void senddebug(int val);

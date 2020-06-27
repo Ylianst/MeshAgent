@@ -288,79 +288,6 @@ void ILibDuktape_ScriptContainer_Slave_OnBrokenPipe(ILibProcessPipe_Pipe sender)
 	}
 }
 
-
-#if defined(WIN32) && defined(MeshLibInterface)
-void ILibDuktape_ScriptContainer_GetEmbeddedJS_Raw(char *exePath, char **script, int *scriptLen)
-{
-	char *integratedJavaScript = NULL;
-	int integratedJavaScriptLen = 0;
-	FILE* tmpFile = NULL;
-
-	_wfopen_s(&tmpFile, ILibUTF8ToWide(exePath, -1), L"rb");
-	if (tmpFile != NULL)
-	{
-		// Read the PE Headers, to determine where to look for the Embedded JS
-		char *optHeader = NULL;
-		fseek(tmpFile, 0, SEEK_SET);
-		ignore_result(fread(ILibScratchPad, 1, 2, tmpFile));
-		if (ntohs(((unsigned int*)ILibScratchPad)[0]) == 19802) // 5A4D
-		{
-			fseek(tmpFile, 60, SEEK_SET);
-			ignore_result(fread(ILibScratchPad, 1, 4, tmpFile));
-			fseek(tmpFile, ((unsigned *)ILibScratchPad)[0], SEEK_SET);
-			ignore_result(fread(ILibScratchPad, 1, 24, tmpFile));
-			if (((unsigned int*)ILibScratchPad)[0] == 17744)
-			{
-				// PE Image
-				optHeader = ILibMemory_AllocateA(((unsigned short*)ILibScratchPad)[10]);
-				ignore_result(fread(optHeader, 1, ILibMemory_AllocateA_Size(optHeader), tmpFile));
-				switch (((unsigned short*)optHeader)[0])
-				{
-				case 0x10B:
-					if (((unsigned int*)(optHeader + 128))[0] != 0)
-					{
-						fseek(tmpFile, ((unsigned int*)(optHeader + 128))[0] - 16, SEEK_SET);
-					}
-					else
-					{
-						fseek(tmpFile, -16, SEEK_END);
-					}
-					break;
-				case 0x20B:
-					if (((unsigned int*)(optHeader + 144))[0] != 0)
-					{
-						fseek(tmpFile, ((unsigned int*)(optHeader + 144))[0] - 16, SEEK_SET);
-					}
-					else
-					{
-						fseek(tmpFile, -16, SEEK_END);
-					}
-					break;
-				default:
-					fclose(tmpFile);
-					return;
-				}
-				ignore_result(fread(ILibScratchPad, 1, 16, tmpFile));
-				util_hexToBuf(exeJavaScriptGuid, 32, ILibScratchPad2);
-				if (memcmp(ILibScratchPad, ILibScratchPad2, 16) == 0)
-				{
-					// Found an Embedded JS
-					fseek(tmpFile, -20, SEEK_CUR);
-					ignore_result(fread((void*)&integratedJavaScriptLen, 1, 4, tmpFile));
-					integratedJavaScriptLen = (int)ntohl(integratedJavaScriptLen);
-					fseek(tmpFile, -4 - integratedJavaScriptLen, SEEK_CUR);
-					integratedJavaScript = ILibMemory_Allocate(integratedJavaScriptLen + 1, 0, NULL, NULL);
-					ignore_result(fread(integratedJavaScript, 1, integratedJavaScriptLen, tmpFile));
-					integratedJavaScript[integratedJavaScriptLen] = 0;
-				}
-			}
-		}
-		fclose(tmpFile);
-	}
-	*script = integratedJavaScript;
-	*scriptLen = integratedJavaScriptLen;
-}
-#endif
 void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, int *scriptLen)
 {
 	int i;
@@ -433,10 +360,12 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 			{
 				// PE Image
 				optHeader = ILibMemory_AllocateA(((unsigned short*)ILibScratchPad)[10]);
+				if (ILibMemory_AllocateA_Size(optHeader) < 4) { fclose(tmpFile); return; }
 				ignore_result(fread(optHeader, 1, ILibMemory_AllocateA_Size(optHeader), tmpFile));
 				switch (((unsigned short*)optHeader)[0])
 				{
 				case 0x10B:
+					if (ILibMemory_AllocateA_Size(optHeader) < 132) { fclose(tmpFile); return; }
 					if (((unsigned int*)(optHeader + 128))[0] != 0)
 					{
 						fseek(tmpFile, ((unsigned int*)(optHeader + 128))[0] - 16, SEEK_SET);
@@ -447,6 +376,7 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 					}
 					break;
 				case 0x20B:
+					if (ILibMemory_AllocateA_Size(optHeader) < 148) { fclose(tmpFile); return; }
 					if (((unsigned int*)(optHeader + 144))[0] != 0)
 					{
 						fseek(tmpFile, ((unsigned int*)(optHeader + 144))[0] - 16, SEEK_SET);
@@ -3697,10 +3627,6 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 			sessionId = (void*)(ILibPtrCAST)(uint64_t)Duktape_GetIntPropertyValue(ctx, 0, "sessionId", 0);
 		}
 	}
-
-#if defined(MeshLibInterface)
-	if (processIsolation != 0) { return(ILibDuktape_Error(ctx, "Process Isolation is not supported with this runtime")); }
-#endif
 
 	duk_push_heap_stash(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_ExePath);
