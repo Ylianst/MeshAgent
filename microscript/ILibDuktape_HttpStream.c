@@ -2952,6 +2952,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 	ILibDuktape_HttpStream_Data *data = (ILibDuktape_HttpStream_Data*)user1;
 	duk_context *ctx = data->DS->writableStream->ctx;
 	uintptr_t ctxnonce = duk_ctx_nonce(ctx);
+	int top = duk_get_top(ctx);
 
 	if (data->bodyStream != NULL)
 	{
@@ -2983,15 +2984,34 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 		if (header->DirectiveLength == 7 && strncasecmp(header->Directive, "CONNECT", 7) == 0)
 		{
 			// Connect
-			duk_push_string(ctx, "connect");																							// [emit][this][request]
-			ILibDuktape_HttpStream_IncomingMessage_PUSH(ctx, header, data->DS->ParentObject);											// [emit][this][request][imsg]
+			duk_push_string(ctx, "connect");													// [emit][this][connect]															// [emit][this][request]
+			ILibDuktape_HttpStream_IncomingMessage_PUSH(ctx, header, data->DS->ParentObject);	// [emit][this][connect][imsg]										// [emit][this][request][imsg]
 			data->bodyStream = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_HttpStream_IncomingMessage_PauseSink, ILibDuktape_HttpStream_IncomingMessage_ResumeSink, ILibDuktape_HttpStream_IncomingMessage_UnshiftBytes, data);
-			duk_dup(ctx, -3); duk_dup(ctx, -2);																							// [emit][this][request][imsg][httpstream][imsg]
-			duk_put_prop_string(ctx, -2, ILibDuktape_HTTPStream2IMSG); duk_pop(ctx);													// [emit][this][request][imsg]
+			duk_dup(ctx, -3); duk_dup(ctx, -2);													// [emit][this][connect][imsg][this][imsg]										// [emit][this][request][imsg][httpstream][imsg]
+			duk_put_prop_string(ctx, -2, ILibDuktape_HTTPStream2IMSG); duk_pop(ctx);			// [emit][this][connect][imsg]
+			duk_get_prop_string(ctx, -3, ILibDuktape_HTTP2PipedReadable);						// [emit][this][connect][imsg][socket]
+			duk_prepare_method_call(ctx, -1, "unpipe");		// [unpipe][this]
+			duk_pcall_method(ctx, 0); duk_pop(ctx);
 
-			ILibDuktape_HttpStream_ServerResponse_PUSH(ctx, data->DS->writableStream->pipedReadable, header, data->DS->ParentObject);	// [emit][this][request][imsg][rsp]
+			if (duk_pcall_method(ctx, 3) != 0) 
+			{
+				ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.httpStream.onReceive->request(): "); 
+			}
+			else
+			{
+				if (!duk_get_boolean(ctx, -1))
+				{
+					// No upgrade listener... Close connection
+					printf("\n\nNo Connect Listener\n");
+					void *imm = ILibDuktape_Immediate(ctx, (void*[]) { data->DS->writableStream->pipedReadable }, 1, ILibDuktape_HttpStream_ForceDisconnect);
+					duk_push_heapptr(ctx, imm);
+					duk_push_heapptr(ctx, data->DS->writableStream->pipedReadable);
+					duk_put_prop_string(ctx, -2, "r");
+					duk_set_top(ctx, top);
+					return;
+				}
 
-			if (duk_pcall_method(ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.httpStream.onReceive->request(): "); }
+			}
 			duk_pop(ctx);
 
 			if (bodyBuffer != NULL && endPointer > 0)
