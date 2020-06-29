@@ -43,7 +43,7 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('DispatchMessageW');
     this._user32.CreateMethod('GetMessageW');
     this._user32.CreateMethod('PostMessageA');
-    this._user32.CreateMethod('RegisterClassExA');
+    this._user32.CreateMethod('RegisterClassExW');
     this._user32.CreateMethod('SetWindowPos');
     this._user32.CreateMethod('ShowWindow');
     this._user32.CreateMethod('TranslateMessage');
@@ -52,12 +52,12 @@ function WindowsMessagePump(options)
     this.wndclass = GM.CreateVariable(GM.PointerSize == 4 ? 48 : 80);
     this.wndclass.mp = this;
     this.wndclass.hinstance = this._kernel32.GetModuleHandleA(0);
-    this.wndclass.cname = GM.CreateVariable('MainWWWClass');
+    //this.wndclass.cname = GM.CreateVariable('MainWWWClass');
     this.wndclass.cnamew = GM.CreateVariable('MainWWWClass', { wide: true });
     this.wndclass.wndproc = GM.GetGenericGlobalCallback(4);
     this.wndclass.wndproc.mp = this;
     this.wndclass.toBuffer().writeUInt32LE(this.wndclass._size);
-    this.wndclass.cname.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 40 : 64, GM.PointerSize).toBuffer());
+    this.wndclass.cnamew.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 40 : 64, GM.PointerSize).toBuffer());
     this.wndclass.wndproc.pointerBuffer().copy(this.wndclass.Deref(8, GM.PointerSize).toBuffer());
     this.wndclass.hinstance.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 20 : 24, GM.PointerSize).toBuffer());
     this.wndclass.wndproc.on('GlobalCallback', function onWndProc(xhwnd, xmsg, wparam, lparam)
@@ -88,7 +88,7 @@ function WindowsMessagePump(options)
                 this.EndDispatcher(r);
             }
         }
-        else if(this.mp._hwnd == null && this.CallingThread() == this.mp._user32.RegisterClassExA.async.threadId())
+        else if(this.mp._hwnd == null && this.CallingThread() == this.mp._user32.RegisterClassExW.async.threadId())
         {
             // This message was generated from our CreateWindowExA method
             processed = true;
@@ -119,7 +119,7 @@ function WindowsMessagePump(options)
         if (processed) { _debugGC(); }
     });
 
-    this._user32.RegisterClassExA.async(this.wndclass).then(function ()
+    this._user32.RegisterClassExW.async(this.wndclass).then(function ()
     {
         if (!this.nativeProxy.mp._options)  {   this.nativeProxy.mp._options = {};  }
         if (!this.nativeProxy.mp._options.window) { this.nativeProxy.mp._options.window = {}; }
@@ -130,7 +130,7 @@ function WindowsMessagePump(options)
         if (this.nativeProxy.mp._options.window.width == null) { this.nativeProxy.mp._options.window.width = 100; }
         if (this.nativeProxy.mp._options.window.height == null) { this.nativeProxy.mp._options.window.height = 100; }
 
-        this.nativeProxy.CreateWindowExW.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._options.window.exstyles, this.nativeProxy.mp.wndclass.cnamew,
+        this.nativeProxy.CreateWindowExW.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._options.window.exstyles, this.nativeProxy.mp.wndclass.cnamew,
             this.nativeProxy.mp._options.window.title == null ? 0 : GM.CreateVariable(this.nativeProxy.mp._options.window.title, { wide: true }), this.nativeProxy.mp._options.window.winstyles, this.nativeProxy.mp._options.window.x, this.nativeProxy.mp._options.window.y,
             this.nativeProxy.mp._options.window.width, this.nativeProxy.mp._options.window.height, 0, 0, 0, 0)
             .then(function(h)
@@ -150,13 +150,13 @@ function WindowsMessagePump(options)
     });
     this._startPump = function _startPump()
     {
-        this._user32.GetMessageW.async(this._user32.RegisterClassExA.async, this._msg, this._hwnd, 0, 0).then(function (r)
+        this._user32.GetMessageW.async(this._user32.RegisterClassExW.async, this._msg, this._hwnd, 0, 0).then(function (r)
         {
             if(r.Val > 0)
             {
-                this.nativeProxy.TranslateMessage.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._msg).then(function ()
+                this.nativeProxy.TranslateMessage.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._msg).then(function ()
                 {
-                    this.nativeProxy.DispatchMessageW.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._msg).then(function ()
+                    this.nativeProxy.DispatchMessageW.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._msg).then(function ()
                     {
                         this.nativeProxy.mp._startPump();
                     });
@@ -165,9 +165,9 @@ function WindowsMessagePump(options)
             else
             {
                 // We got a 'QUIT' message
-                this.nativeProxy.DestroyWindow.async(this.nativeProxy.RegisterClassExA.async, this.nativeProxy.mp._hwnd).then(function ()
+                this.nativeProxy.DestroyWindow.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._hwnd).then(function ()
                 {
-                    this.nativeProxy.RegisterClassExA.async.abort();
+                    this.nativeProxy.RegisterClassExW.async.abort();
                     delete this.nativeProxy.mp._hwnd;
                     this.nativeProxy.mp.emit('exit', 0);
 
