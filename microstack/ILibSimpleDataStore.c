@@ -797,7 +797,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 			if (centry != NULL)
 			{
 				ILibInflate(centry->value, centry->valueLength, NULL, &tmplen, 0);
-				if (buffer != NULL && bufferLen >= tmplen)
+				if (buffer != NULL && bufferLen >= (int)tmplen)
 				{
 					ILibInflate(centry->value, centry->valueLength, buffer, &tmplen, 0);
 				}
