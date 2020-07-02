@@ -156,8 +156,15 @@ function childContainer()
                 if ((tsid = require('user-sessions').getProcessOwnerName(process.pid).tsid) == 0)
                 {
                     // We are running as LocalSystem
-                    child_options.uid = options.uid;
-                    child_options.type = require('child_process').SpawnTypes.USER;
+                    if (process.platform == 'win32' && options.uid == -1)
+                    {
+                        child_options.type = require('child_process').SpawnTypes.WINLOGON;
+                    }
+                    else
+                    {
+                        child_options.uid = options.uid;
+                        child_options.type = require('child_process').SpawnTypes.USER;
+                    }
                 }
                 else
                 {

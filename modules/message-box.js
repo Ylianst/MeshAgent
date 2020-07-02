@@ -69,11 +69,19 @@ function messageBox()
         {
             ret.options.uid = sid == null ? require('user-sessions').consoleUid() : sid;
             if (ret.options.uid == require('user-sessions').getProcessOwnerName(process.pid).tsid) { delete ret.options.uid; }
+            if (sid == null && require('user-sessions').locked()) { ret.options.uid = -1; }
         }
         catch (ee)
         {
-            ret._rej('No logged on users');
-            return (ret);
+            if (sid == null)
+            {
+                ret.options.uid = -1;
+            }
+            else
+            {
+                ret._rej(ee);
+                return (ret);
+            }
         }
 
         ret._ipc = require('child-container').create(ret.options);

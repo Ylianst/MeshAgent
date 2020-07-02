@@ -65,7 +65,12 @@ function UserSessions()
     require('events').EventEmitter.call(this, true)
         .createEvent('changed')
         .createEvent('locked')
-        .createEvent('unlocked');
+        .createEvent('unlocked')
+        .addMethod('locked', function () { return (this._locked); })
+        .addMethod('unlocked', function () { return (!this._locked); });
+    this._locked = false;
+    this.on('locked', function () { this._locked = true; });
+    this.on('unlocked', function () { this._locked = false; });
 
     if (process.platform == 'win32')
     {
