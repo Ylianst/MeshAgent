@@ -62,7 +62,7 @@ typedef struct ILibDuktape_ContextData
 #define duk_destroy_heap_in_progress	0x01
 #define duk_ctx_context_data(ctx) ((ILibDuktape_ContextData*)(ILibMemory_CanaryOK(ctx)?((void**)ILibMemory_Extra(ctx))[0]:NULL))
 #define duk_ctx_nonce(ctx) (duk_ctx_context_data(ctx)->nonce)
-#define duk_ctx_is_alive(ctx) (ILibMemory_CanaryOK(ctx))
+#define duk_ctx_is_alive(ctx) (ILibMemory_CanaryOK(ctx)&&ILibMemory_ExtraSize(ctx)==sizeof(void*))
 #define duk_ctx_is_valid(nvalue, ctx) (duk_ctx_is_alive(ctx) && duk_ctx_nonce(ctx) == nvalue)
 #define duk_ctx_shutting_down(ctx) ((duk_ctx_context_data(ctx)->flags & duk_destroy_heap_in_progress)==duk_destroy_heap_in_progress)
 #define duk_ctx_chain(ctx) (duk_ctx_is_alive(ctx)?duk_ctx_context_data(ctx)->chain:NULL)
