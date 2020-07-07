@@ -210,7 +210,7 @@ DWORD WINAPI kvm_ctrlaltdel(LPVOID Param)
 		typedef VOID (WINAPI *SendSas)(BOOL asUser);
 		SendSas sas;
 		HMODULE sm = NULL;
-		if ((sm = LoadLibrary("sas.dll")) != NULL)
+		if ((sm = LoadLibraryExA((LPCSTR)"sas.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
 		{
 			sas = (SendSas)GetProcAddress(sm, "SendSAS");
 			kvm_setupSasPermissions();

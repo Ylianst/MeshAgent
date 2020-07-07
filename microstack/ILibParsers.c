@@ -9149,7 +9149,7 @@ long long ILibGetUptime()
 
 	// Windows 7 & Vista
     if (ILibGetUptimeFirst) {
-        HMODULE hlib = LoadLibrary(TEXT("KERNEL32.DLL"));
+        HMODULE hlib = LoadLibraryExA((LPCSTR)"KERNEL32.DLL", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		if (hlib == NULL) return 0;
         pILibGetUptimeGetTickCount64 = (ULONGLONG(*)())GetProcAddress(hlib, "GetTickCount64");
         ILibGetUptimeFirst = 0;

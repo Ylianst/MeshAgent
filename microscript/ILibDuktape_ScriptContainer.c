@@ -1573,7 +1573,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 	}
 	else
 	{
-		HMODULE hm = LoadLibraryA("Kernel32.dll");
+		HMODULE hm = LoadLibraryExA("Kernel32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		void *func = (void*)GetProcAddress(hm, "IsWow64Process");
 		BOOL isWow = FALSE;
 

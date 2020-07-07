@@ -464,7 +464,7 @@ void __fastcall util_openssl_init()
 	// Add more random seeding in Windows (This is probably useful since OpenSSL in Windows has weaker seeding)
 #if defined(WIN32) && !defined(_MINCORE)
 	//RAND_screen(); // On Windows, add more random seeding using a screen dump (this is very expensive).
-	if ((g_hAdvLib = LoadLibrary(TEXT("ADVAPI32.DLL"))) != 0) g_CryptGenRandomPtr = (BOOLEAN(APIENTRY *)(void*, ULONG))GetProcAddress(g_hAdvLib, "SystemFunction036");
+	if ((g_hAdvLib = LoadLibraryExA((LPCSTR)"ADVAPI32.DLL", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != 0) g_CryptGenRandomPtr = (BOOLEAN(APIENTRY *)(void*, ULONG))GetProcAddress(g_hAdvLib, "SystemFunction036");
 	if (g_CryptGenRandomPtr != 0 && g_CryptGenRandomPtr(tbuf, 64) != 0) RAND_add(tbuf, 64, 64); // Use this high quality random as added seeding
 	if (g_hAdvLib != NULL) FreeLibrary(g_hAdvLib);
 #endif

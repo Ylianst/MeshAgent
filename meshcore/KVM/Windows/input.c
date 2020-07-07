@@ -480,7 +480,7 @@ int TouchInit()
 {
 	_InitializeTouchInjection init = NULL;
 	if (g_TouchLoadLibraryState > 0) return g_TouchLoadLibraryState;
-	g_TouchLoadLibrary = LoadLibrary(TEXT("User32.dll"));
+	g_TouchLoadLibrary = LoadLibraryExA((LPCSTR)"User32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 	if (g_TouchLoadLibrary == NULL) { g_TouchLoadLibraryState = 2; return 2; }
 	init = (_InitializeTouchInjection)GetProcAddress(g_TouchLoadLibrary, "InitializeTouchInjection");
 	g_TouchInjectionCall = (_InjectTouchInput)GetProcAddress(g_TouchLoadLibrary, "InjectTouchInput");
