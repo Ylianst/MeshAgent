@@ -2610,7 +2610,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					if (RSA_verify(NID_sha384, (unsigned char*)ILibScratchPad, UTIL_SHA384_HASHSIZE, (unsigned char*)AuthVerify->signature, AuthVerify->signatureLen, rsa_pubkey) == 1)
 					{
 						// Server signature verified, we are good to go.
-						agent->serverAuthState += 1;
+						agent->serverAuthState |= 1;
 
 						// Store the server's TLS cert hash so in the future, we can skip server auth.
 						ILibSimpleDataStore_PutEx(agent->masterDb, "ServerTlsCertHash", 17, ILibScratchPad2, UTIL_SHA384_HASHSIZE);
@@ -2634,16 +2634,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 					// We have to wait for the server to indicate that it authenticated the agent (us) before sending any data to the server.
 					// Node authentication requires the server make database calls, so we need to delay.
-					agent->serverAuthState += 2;
-					if (agent->serverAuthState > 3)
-					{
-						agent->serverAuthState = 0;
-						if (agent->controlChannelDebug != 0)
-						{
-							printf("Invalid Server Response...\n");
-							ILIBLOGMESSAGEX("Invalid Server Response...");
-						}
-					}
+					agent->serverAuthState |= 2;
 					if (agent->serverAuthState == 3) { MeshServer_ServerAuthenticated(WebStateObject, agent); }
 				}
 				break;
