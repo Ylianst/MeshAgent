@@ -2635,6 +2635,15 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					// We have to wait for the server to indicate that it authenticated the agent (us) before sending any data to the server.
 					// Node authentication requires the server make database calls, so we need to delay.
 					agent->serverAuthState += 2;
+					if (agent->serverAuthState > 3)
+					{
+						agent->serverAuthState = 0;
+						if (agent->controlChannelDebug != 0)
+						{
+							printf("Invalid Server Response...\n");
+							ILIBLOGMESSAGEX("Invalid Server Response...");
+						}
+					}
 					if (agent->serverAuthState == 3) { MeshServer_ServerAuthenticated(WebStateObject, agent); }
 				}
 				break;
@@ -3121,7 +3130,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				ILIBLOGMESSAGEX("Control Channel Disconnected...");
 			}
 												   
-			// If the channel had been authenticates, inform JavaScript core module that we are not disconnected
+			// If the channel had been authenticated, inform JavaScript core module that we are not disconnected
 #ifndef MICROSTACK_NOTLS
 			if (agent->serverAuthState == 3)
 #endif
@@ -3137,6 +3146,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 					duk_pop(agent->meshCoreCtx);
 				}
 			}
+			agent->serverAuthState = 0;
 			agent->controlChannel = NULL; // Set the agent MeshCentral server control channel
 			agent->serverConnectionState = 0;
 			break;
