@@ -169,9 +169,8 @@ function Toaster()
                                     // Timeout Supported
                                     retVal._mb = require('message-box').create(retVal.title, retVal.caption, 5, 1);
                                     retVal._mb.toast = retVal;
-                                    retVal._mb.then(function () { this.toast._res('DISMISSED'); }, function (e) { this.toast._rej(e); });
+                                    retVal._mb.then(function () { this.toast._res('DISMISSED'); }, function (e) { this.toast._res('DISMISSED'); });
                                     return (retVal);
-                                    //retVal.child = require('child_process').execFile(require('message-box').zenity.path, ['zenity', '--info', '--title=' + retVal.title, '--text=' + retVal.caption, '--timeout=5'], { uid: retVal.consoleUid, env: { XAUTHORITY: retVal.xinfo.xauthority, DISPLAY: retVal.xinfo.display } });
                                 }
                                 else
                                 {
