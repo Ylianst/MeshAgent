@@ -44,7 +44,7 @@ jobs:
     #    uses a compiled language
 
     - run: |
-        make linux ARCHID=6
+        make linux ARCHID=6 KVM=0
     #   make bootstrap
     #   make release
 
