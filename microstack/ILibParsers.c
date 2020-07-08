@@ -2612,22 +2612,27 @@ void ILib_POSIX_CrashHandler(int code)
 
 		if (pipe(fd) == 0)
 		{
+			sigset_t set;
+			ILibVForkPrepareSignals_Parent_Init(&set);
+
 			pid = vfork();
 			if (pid == 0)
 			{
+				ILibVForkPrepareSignals_Child();
+
 				dup2(fd[1], STDOUT_FILENO);
 				close(fd[1]);
 
 				((char**)ILib_POSIX_CrashParamBuffer)[1] = ptr;
 				execv("/usr/bin/addr2line", (char**)ILib_POSIX_CrashParamBuffer);
 				if (write(STDOUT_FILENO, "??:0", 4)) {}
-				exit(0);
+				_exit(0);
 			}
+			ILibVForkPrepareSignals_Parent_Finished(&set);
 			if (pid > 0)
 			{
 				char tmp[8192];
 				int len;
-
 				len = read(fd[0], tmp, 8192);
 				if (len > 0 && tmp[0] != '?')
 				{
@@ -2728,16 +2733,22 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 
 	if (pipe(fd) == 0)
 	{
+		sigset_t set;
+		ILibVForkPrepareSignals_Parent_Init(&set);
+
 		pid = vfork();
 		if (pid == 0)
 		{
+			ILibVForkPrepareSignals_Child();
+
 			dup2(fd[1], STDOUT_FILENO);
 			close(fd[1]);
 			
 			execv("/usr/bin/addr2line", (char**)ILib_POSIX_CrashParamBuffer);
 			if (write(STDOUT_FILENO, "??:0", 4)) {}
-			exit(0);
+			_exit(0);
 		}
+		ILibVForkPrepareSignals_Parent_Finished(&set);
 		if (pid > 0)
 		{
 			char tmp[8192];

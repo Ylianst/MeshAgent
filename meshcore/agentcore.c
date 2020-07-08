@@ -436,18 +436,24 @@ int MeshAgent_Helper_CommandLine(char **commands, char **result, int *resultLen)
 	ignore_result(pipe(inputPipe));
 	ignore_result(pipe(outputPipe));
 
+	sigset_t set;
+	ILibVForkPrepareSignals_Parent_Init(&set);
 	pid = vfork();
+
 	if (pid < 0)
 	{
 		// error;
 		close(inputPipe[0]); close(inputPipe[1]);
 		close(outputPipe[0]); close(outputPipe[1]);
+		ILibVForkPrepareSignals_Parent_Finished(&set);
 		return(-1);
 	}
 
 	if (pid == 0)
 	{
 		// child
+		ILibVForkPrepareSignals_Child();
+
 		close(inputPipe[1]);	// Close Write End of StdIn
 		close(outputPipe[0]);	// Close Read End of StdOut
 		dup2(inputPipe[0], STDIN_FILENO);
@@ -457,12 +463,13 @@ int MeshAgent_Helper_CommandLine(char **commands, char **result, int *resultLen)
 		close(outputPipe[1]);
 
 		execv("/bin/sh", (char*[]) {"sh", NULL});
-		exit(1);
+		_exit(1);
 	}
 
 	// parent
 	close(inputPipe[0]);	// Close Read End of StdIn
 	close(outputPipe[1]);	// Close Write End of StdOut
+	ILibVForkPrepareSignals_Parent_Finished(&set);
 
 	for (int i = 0; commands[i] != NULL; ++i)
 	{

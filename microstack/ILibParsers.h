@@ -972,6 +972,13 @@ int ILibIsRunningOnChainThread(void* chain);
 	\brief Chaining Methods
 	\{
 	*/
+#ifdef _POSIX
+	#define _ILibVForkPrepareSignals_clear(sact) memset(sact, 0, sizeof(struct sigaction)); sigemptyset(&((sact)->sa_mask)); (sact)->sa_handler = SIG_DFL;
+	#define ILibVForkPrepareSignals_Parent_Init(sigset) sigfillset(sigset);sigprocmask(SIG_BLOCK,sigset,NULL);
+	#define ILibVForkPrepareSignals_Parent_Finished(sigset) sigfillset(sigset);sigprocmask(SIG_UNBLOCK,sigset,NULL);
+	#define ILibVForkPrepareSignals_Child() {struct sigaction act;for(int signum=1;signum<32;++signum){_ILibVForkPrepareSignals_clear(&act);ignore_result(sigaction(signum,&act, NULL));}}
+#endif
+
 	typedef void(*ILibChain_SignalHandler)(void *chain, int signum, void *user);
 	ILibExportMethod void *ILibCreateChain();
 	void *ILibCreateChainEx(int extraMemorySize);

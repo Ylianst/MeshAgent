@@ -638,6 +638,9 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	if (userToken != NULL) { CloseHandle(userToken); userToken = NULL; }
 #else
 	int UID = (int)(uint64_t)(ILibPtrCAST)sid;
+	sigset_t sset;
+	sigset_t *set = NULL;
+
 	if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 	{
 		int pipe;
@@ -713,6 +716,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 #ifdef __APPLE__
 		if (needSetSid == 0)
 		{
+			set = &sset;
+			ILibVForkPrepareSignals_Parent_Init(set);
 			pid = vfork();
 		}
 		else
@@ -720,11 +725,14 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 			pid = fork();
 		}
 #else
+		set = &sset;
+		ILibVForkPrepareSignals_Parent_Init(set);
 		pid = vfork();
 #endif
 	}
 	if (pid < 0)
 	{
+		if (set != NULL) { ILibVForkPrepareSignals_Parent_Finished(set); }
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 		{
 			ILibProcessPipe_FreePipe(retVal->stdErr);
@@ -736,6 +744,10 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	}
 	if (pid == 0)
 	{
+		if (set != NULL)
+		{
+			ILibVForkPrepareSignals_Child();
+		}
 		if (spawnType != ILibProcessPipe_SpawnTypes_DETACHED && spawnType != ILibProcessPipe_SpawnTypes_TERM)
 		{
 			close(retVal->stdErr->mPipe_ReadEnd); //close read end of stderr pipe
@@ -785,7 +797,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		execv(target, parameters);
 		_exit(1);
 	}
-
+	if (set != NULL) { ILibVForkPrepareSignals_Parent_Finished(set); }
 	if (spawnType != ILibProcessPipe_SpawnTypes_TERM && spawnType != ILibProcessPipe_SpawnTypes_DETACHED)
 	{
 		close(retVal->stdIn->mPipe_ReadEnd); retVal->stdIn->mPipe_ReadEnd = -1;
