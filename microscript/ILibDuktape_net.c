@@ -984,7 +984,7 @@ BOOL ILibDuktape_server_ipc_WriteSink(void *chain, HANDLE h, ILibWaitHandle_Erro
 	duk_size_t bufLen;
 	char *buf;
 	ILibTransport_DoneState d = ILibTransport_DoneState_COMPLETE;
-	BOOL ret;
+	BOOL ret = FALSE;
 
 	duk_push_heapptr(winIPC->ctx, winIPC->mSocket);														// [obj]
 	duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_WindowsIPC_PendingArray);						// [obj][array]

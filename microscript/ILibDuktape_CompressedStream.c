@@ -235,8 +235,8 @@ ILibTransport_DoneState ILibDuktape_deCompressor_Write(ILibDuktape_DuplexStream 
 				duk_push_heapptr(cs->ctx, cs->object);											// [stream]
 				if (cs->Z.avail_in > 0)
 				{
-					char *tmp = Duktape_PushBuffer(cs->ctx, cs->Z.avail_in);					// [stream][buffer]
-					memcpy_s(tmp, ILibMemory_Size(tmp), cs->Z.next_in, ILibMemory_Size(tmp));
+					char *tmp2 = Duktape_PushBuffer(cs->ctx, cs->Z.avail_in);					// [stream][buffer]
+					memcpy_s(tmp2, ILibMemory_Size(tmp2), cs->Z.next_in, ILibMemory_Size(tmp2));
 					duk_put_prop_string(cs->ctx, -2, ILibDuktape_CompressorStream_ResumeBuffer);// [stream]
 				}
 				else

@@ -854,7 +854,6 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 			if (buffer == NULL) { return((int)tmplen); }
 
 			// Before we return, we need to check the HASH of the uncompressed data
-			char hash[SHA384HASHSIZE];
 			ILibSimpleDataStore_SHA384(buffer, (int)tmplen, hash);
 			if (memcmp(hash, entry->valueHash, SHA384HASHSIZE) == 0)
 			{

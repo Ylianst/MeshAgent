@@ -1579,7 +1579,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 
 		if (func != NULL)
 		{
-			BOOL isWow = FALSE;
+			isWow = FALSE;
 			BOOL result = ((BOOL(__stdcall *)(HANDLE, BOOL*))func)(GetCurrentProcess(), &isWow);
 			if (result)
 			{
@@ -3518,7 +3518,7 @@ void ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsSlave(void *chain, v
 			ILibDuktape_SetNativeUncaughtExceptionHandler(slave->ctx, ILibDuktape_ScriptContainer_NonIsolatedWorker_ExceptionSink, master);
 			
 			char json[] = "{\"command\": \"1\"}";
-			ILibDuktape_ScriptContainer_NonIsolated_Command* cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(sizeof(json) + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
+			cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(sizeof(json) + sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command), 0, NULL, NULL);
 			cmd->container.master = master;
 			memcpy_s(cmd->json, sizeof(json), json, sizeof(json));
 			Duktape_RunOnEventLoopEx(master->chain, duk_ctx_nonce(master->ctx), master->ctx, ILibDuktape_ScriptContainer_NonIsolatedWorker_ProcessAsMaster, cmd, 1);
