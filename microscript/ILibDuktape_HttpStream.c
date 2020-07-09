@@ -4390,7 +4390,7 @@ duk_ret_t ILibDuktape_http_generateNonce(duk_context *ctx)
 	}
 	else
 	{
-		return(ILibDuktape_Error(ctx, "Specified length is too long. Please Specify a value < %d", sizeof(ILibScratchPad)));
+		return(ILibDuktape_Error(ctx, "Specified length is too long. Please Specify a value < %llu", (uint64_t)sizeof(ILibScratchPad)));
 	}
 }
 

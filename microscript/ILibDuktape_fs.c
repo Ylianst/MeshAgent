@@ -414,7 +414,7 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 	int bytesRead;
 	FILE *f = ILibDuktape_fs_getFilePtr(ctx, duk_require_int(ctx, 0));
 
-	if (length > (int)bufferSize) { return(ILibDuktape_Error(ctx, "fs.readSync(): Buffer of size: %d bytes, but attempting to read %d bytes", bufferSize, length)); }
+	if (length > (int)bufferSize) { return(ILibDuktape_Error(ctx, "fs.readSync(): Buffer of size: %llu bytes, but attempting to read %d bytes", (uint64_t)bufferSize, length)); }
 
 	if (f != NULL)
 	{

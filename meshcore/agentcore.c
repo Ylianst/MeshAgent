@@ -3492,7 +3492,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 void MeshServer_DbWarning(ILibSimpleDataStore db, uint64_t size, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
-	MeshAgent_sendConsoleText(agent->meshCoreCtx, "Database Size Warning: [%u bytes]", size);
+	MeshAgent_sendConsoleText(agent->meshCoreCtx, "Database Size Warning: [%llu bytes]", size);
 }
 void MeshServer_Connect(MeshAgentHostContainer *agent)
 {

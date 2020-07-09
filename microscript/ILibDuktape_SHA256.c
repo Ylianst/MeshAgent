@@ -303,7 +303,7 @@ void ILibDuktape_VERIFIER_EndSink(ILibDuktape_WritableStream *stream, void *user
 			// Error
 			duk_get_prop_string(data->ctx, -1, "_rej");													// [promise][rejector]
 			duk_swap_top(data->ctx, -2);																// [rejector][this]
-			duk_push_sprintf(data->ctx, "EVP_VerifyFinal(): Returned error (%d) ", ERR_get_error());	// [rejector][this][error]
+			duk_push_sprintf(data->ctx, "EVP_VerifyFinal(): Returned error (%llu) ", (uint64_t)ERR_get_error());	// [rejector][this][error]
 			duk_call_method(data->ctx, 1);																// [...]
 			break;
 	}

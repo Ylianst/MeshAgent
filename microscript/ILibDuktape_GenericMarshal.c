@@ -1389,7 +1389,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvokeAsync_thread_id(duk_context *ct
 	if (!ILibMemory_CanaryOK(data)) { return(ILibDuktape_Error(ctx, "FFI Object was already freed")); }
 
 	char tmp[255];
-	sprintf_s(tmp, sizeof(tmp), "%ul", data->workerThreadId);
+	sprintf_s(tmp, sizeof(tmp), "%llu", (uint64_t)data->workerThreadId);
 	duk_push_string(ctx, tmp);
 	return(1);
 	
@@ -1561,7 +1561,7 @@ void ILibDuktape_GlobalGenericCallback_ProcessEx(void *chain, void *user)
 	if (!ILibMemory_CanaryOK(data->emitter)) { return; }
 
 	char tmp[255];
-	sprintf_s(tmp, sizeof(tmp), "%ul", data->callingThread);
+	sprintf_s(tmp, sizeof(tmp), "%llu", (uint64_t)data->callingThread);
 	duk_push_heapptr(data->emitter->ctx, data->emitter->object);										// [obj]
 	duk_push_string(data->emitter->ctx, tmp);														    // [obj][str]
 	duk_put_prop_string(data->emitter->ctx, -2, ILibDuktape_GenericMarshal_GlobalCallback_ThreadID);	// [obj]
@@ -2121,7 +2121,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetCurrentThread(duk_context *ctx)
 #if defined(WIN32)
 	sprintf_s(tmp, sizeof(tmp), "%ul", GetCurrentThreadId());
 #else
-	sprintf_s(tmp, sizeof(tmp), "%ul", pthread_self());
+	sprintf_s(tmp, sizeof(tmp), "%llu", pthread_self());
 #endif
 	duk_push_string(ctx, tmp);
 	return(1);
