@@ -375,7 +375,7 @@ duk_ret_t ILibDuktape_RSA_Sign(duk_context *ctx)
 		unsigned long err = ERR_get_error();
 		char *reason = (char*)ERR_reason_error_string(err);
 		RSA_free(r);
-		return(ILibDuktape_Error(ctx, "RSA_sign() Error: (%d, %s)", err, reason));
+		return(ILibDuktape_Error(ctx, "RSA_sign() Error: (%lu, %s)", err, reason));
 	}
 	RSA_free(r);
 	return(1);
