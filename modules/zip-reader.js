@@ -438,4 +438,19 @@ function read(path)
     return(ret);
 }
 
-module.exports = { read: read };
+function isZip(path)
+{
+    if (require('fs').statSync(path).size < 30) { return (false); }
+    var fd = require('fs').openSync(path, 'rb');
+    var jsFile = Buffer.alloc(4);
+    var bytesRead = require('fs').readSync(fd, jsFile, { position: 0 });
+    require('fs').closeSync(fd);
+
+    if (bytesRead == 4 && jsFile[0] == 0x50 && jsFile[1] == 0x4B && jsFile[2] == 0x03 && jsFile[3] == 0x04)
+    {
+        return (true);
+    }
+    return (false);
+}
+
+module.exports = { read: read, isZip: isZip };

@@ -2470,6 +2470,59 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 	if (agent->serverAuthState == 3) { MeshServer_ServerAuthenticated(WebStateObject, agent); }
 }
 
+void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
+{
+
+#ifdef WIN32
+	agent->performSelfUpdate = 1;
+#else
+	// Set performSelfUpdate to the startupType, on Linux is this important: 1 = systemd, 2 = upstart, 3 = sysv-init
+	int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
+	if (len > 0) { agent->performSelfUpdate = atoi(ILibScratchPad); }
+	if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
+#endif
+
+	if (duk_peval_string_noresult(agent->meshCoreCtx, "require('service-manager').manager.getService('meshagentDiagnostic').start();") == 0)
+	{
+		if (agent->logUpdate != 0)
+		{
+			ILIBLOGMESSSAGE("SelfUpdate -> Starting Secondary Agent, to assist with self update");
+		}
+	}
+	else
+	{
+		if (agent->logUpdate != 0)
+		{
+			ILIBLOGMESSSAGE("SelfUpdate -> Secondary Agent unavailable to assist with self update");
+		}
+	}
+
+	// Everything looks good, lets perform the update
+	if (agent->logUpdate != 0)
+	{
+		char tmp[255];
+		sprintf_s(tmp, sizeof(tmp), "SelfUpdate -> Stopping Chain (%d)", agent->performSelfUpdate);
+		ILIBLOGMESSSAGE(tmp);
+	}
+	ILibStopChain(agent->chain);
+}
+duk_ret_t MeshServer_selfupdate_unzip_complete(duk_context *ctx)
+{
+	duk_eval_string(ctx, "require('MeshAgent')");					// [MeshAgent]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updated successfully unzipped..."); }
+	MeshServer_selfupdate_continue(agent);
+	return(0);
+}
+duk_ret_t MeshServer_selfupdate_unzip_error(duk_context *ctx)
+{
+	duk_eval_string(ctx, "require('MeshAgent')");					// [MeshAgent]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	duk_push_sprintf(ctx, "SelfUpdate -> FAILED to unzip update: %s", (char*)duk_safe_to_string(ctx, 0));
+	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE(duk_safe_to_string(ctx, -1)); }
+	return(0);
+}
+
 // Process MeshCentral server commands. 
 void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAgentHostContainer *agent, char *cmd, int cmdLen)
 {
@@ -2915,54 +2968,64 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				if ((GenerateSHA384FileHash(updateFilePath, updateFileHash) == 0) && (memcmp(updateFileHash, cm->coreModuleHash, sizeof(cm->coreModuleHash)) == 0))
 				{
 					//printf("UPDATE: End OK\r\n");
+					int updateTop = duk_get_top(agent->meshCoreCtx);
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified"); }
 					if (agent->fakeUpdate != 0)
 					{
 						int fsz;
 						char *fsc;
-						fsz = ILibReadFileFromDiskEx(&fsc, agent->exePath);
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s.zip", agent->exePath);
+						fsz = ILibReadFileFromDiskEx(&fsc, ILibScratchPad);
+						if (fsz == 0) 
+						{ 
+							fsz = ILibReadFileFromDiskEx(&fsc, agent->exePath); 
+							if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Overriding update with same version..."); }
+						}
+						else
+						{
+							if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Overriding update with provided zip..."); }
+						}
 						ILibWriteStringToDiskEx(updateFilePath, fsc, fsz);
-						if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Overriding update with same version..."); }
 					}
 					if (agent->fakeUpdate != 0 || agent->forceUpdate != 0)
 					{
 						ILibSimpleDataStore_Put(agent->masterDb, "disableUpdate", "1");
 						if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Disabling future updates..."); }
 					}
-#ifdef WIN32
-					agent->performSelfUpdate = 1;
-#else
-					// Set performSelfUpdate to the startupType, on Linux is this important: 1 = systemd, 2 = upstart, 3 = sysv-init
-					int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
-					if (len > 0) { agent->performSelfUpdate = atoi(ILibScratchPad); }
-					if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
-#endif
 
-					if (duk_peval_string_noresult(agent->meshCoreCtx, "require('service-manager').manager.getService('meshagentDiagnostic').start();") == 0)
+					duk_eval_string(agent->meshCoreCtx, "require('zip-reader')");	// [reader]
+					duk_prepare_method_call(agent->meshCoreCtx, -1, "isZip");		// [reader][isZip][this]
+					duk_push_string(agent->meshCoreCtx, updateFilePath);			// [reader][isZip][this][path]
+					duk_pcall_method(agent->meshCoreCtx, 1);						// [reader][boolean]
+					if (duk_to_boolean(agent->meshCoreCtx, -1))
 					{
-						if (agent->logUpdate != 0)
+						// Update File is zipped
+						if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Unzipping update..."); }
+						duk_eval_string(agent->meshCoreCtx, "require('update-helper')");	// [helper]
+						duk_prepare_method_call(agent->meshCoreCtx, -1, "start");			// [helper][start][this]
+						duk_push_string(agent->meshCoreCtx, updateFilePath);				// [helper][start][this][path]
+						if (duk_pcall_method(agent->meshCoreCtx, 1) == 0)					// [helper][promise]
 						{
-							ILIBLOGMESSSAGE("SelfUpdate -> Starting Secondary Agent, to assist with self update");
+							duk_prepare_method_call(agent->meshCoreCtx, -1, "then");		// [helper][promise][then][this]
+							duk_push_c_function(agent->meshCoreCtx, MeshServer_selfupdate_unzip_complete, DUK_VARARGS);//..][res]
+							duk_push_c_function(agent->meshCoreCtx, MeshServer_selfupdate_unzip_error, DUK_VARARGS);//[this][res][rej]
+							duk_pcall_method(agent->meshCoreCtx, 2);
 						}
-					}
-					else
-					{
-						if (agent->logUpdate != 0)
+						else
 						{
-							ILIBLOGMESSSAGE("SelfUpdate -> Secondary Agent unavailable to assist with self update");
+							if (agent->logUpdate != 0) 
+							{
+								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "SelfUpdate -> Error Unzipping: %s", duk_safe_to_string(agent->meshCoreCtx, -1)); 
+								ILIBLOGMESSSAGE(ILibScratchPad);
+							}
 						}
+						duk_set_top(agent->meshCoreCtx, updateTop);							// ...
+						break; // Break out here, and continue when finished unzipping (or in the case of error, abort)
 					}
-
-
-					// Everything looks good, lets perform the update
-					if (agent->logUpdate != 0) 
-					{
-						char tmp[255];
-						sprintf_s(tmp, sizeof(tmp), "SelfUpdate -> Stopping Chain (%d)", agent->performSelfUpdate);
-						ILIBLOGMESSSAGE(tmp);
-					}
-					ILibStopChain(agent->chain);
-				} else 
+					duk_set_top(agent->meshCoreCtx, updateTop);								// ...
+					MeshServer_selfupdate_continue(agent);
+				} 
+				else 
 				{
 					// Hash check failed, delete the file and do nothing. On next server reconnect, we will try again.
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash FAILED, aborting update..."); }

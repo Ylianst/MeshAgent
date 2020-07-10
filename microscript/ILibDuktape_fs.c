@@ -407,21 +407,33 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 {
+	int narg = (int)duk_get_top(ctx);
+	if (narg > 3)
+	{
+		// Convert to Options Format
+		duk_push_this(ctx);								// [fs]
+		duk_prepare_method_call(ctx, -1, "readSync");	// [fs][readSync][this]
+		duk_dup(ctx, 0); duk_dup(ctx, 1);				// [fs][readSync][this][fd][buffer]
+		duk_push_object(ctx);							// [fs][readSync][this][fd][buffer][options]
+		duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "offset");
+		duk_dup(ctx, 3); duk_put_prop_string(ctx, -2, "length");
+		duk_dup(ctx, 4); duk_put_prop_string(ctx, -2, "position");
+		duk_call_method(ctx, 3);
+		return(1);
+	}
+
 	duk_size_t bufferSize;
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferSize);
-	int offset = duk_require_int(ctx, 2);
-	int length = duk_require_int(ctx, 3);
+	int offset = Duktape_GetIntPropertyValue(ctx, 2, "offset", 0);
+	int length = Duktape_GetIntPropertyValue(ctx, 2, "length", (int)bufferSize);
+	int position = Duktape_GetIntPropertyValue(ctx, 2, "position", -1);
 	int bytesRead;
 	FILE *f = ILibDuktape_fs_getFilePtr(ctx, duk_require_int(ctx, 0));
 
 	if (length > (int)bufferSize) { return(ILibDuktape_Error(ctx, "fs.readSync(): Buffer of size: %llu bytes, but attempting to read %d bytes", (uint64_t)bufferSize, length)); }
-
 	if (f != NULL)
 	{
-		if (duk_is_number(ctx, 4))
-		{
-			fseek(f, duk_require_int(ctx, 4), SEEK_SET);
-		}
+		if (position >= 0) { fseek(f, position, SEEK_SET); }
 		bytesRead = (int)fread(buffer + offset, 1, length, f);
 		duk_push_int(ctx, bytesRead);
 		return 1;
@@ -2319,7 +2331,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateInstanceMethod(ctx, "closeSync", ILibDuktape_fs_closeSync, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "openSync", ILibDuktape_fs_openSync, DUK_VARARGS);
-	ILibDuktape_CreateInstanceMethod(ctx, "readSync", ILibDuktape_fs_readSync, 5);
+	ILibDuktape_CreateInstanceMethod(ctx, "readSync", ILibDuktape_fs_readSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "writeSync", ILibDuktape_fs_writeSync, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "read", ILibDuktape_fs_read, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "write", ILibDuktape_fs_write, DUK_VARARGS);
