@@ -429,6 +429,42 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_pointerpointer(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "_ptrptr");										// [var][var2]
 	return(1);
 }
+#ifndef MICROSTACK_NOTLS
+duk_ret_t ILibDuktape_GenericMarshal_Variable_bignum_GET(duk_context *ctx)
+{
+	int16_t test = 0x0001;
+	int LE = ((char*)&test)[0] ? 1 : 0;
+
+	duk_push_this(ctx);														// [var]
+	void *ptr = Duktape_GetPointerProperty(ctx, -1, "_ptr");
+	uint64_t v = (uint64_t)(uintptr_t)ptr;
+	duk_eval_string(ctx, "require('bignum')");								// [var][bignum]
+	duk_prepare_method_call(ctx, -1, "fromBuffer");							// [var][bignum][fromBuffer][this]
+	duk_push_external_buffer(ctx);											// [var][bignum][fromBuffer][this][buffer]
+	duk_config_buffer(ctx, -1, &v, sizeof(v));
+	duk_push_buffer_object(ctx, -1, 0, sizeof(v), DUK_BUFOBJ_NODEJS_BUFFER);// [var][bignum][fromBuffer][this][buffer][nodebuffer]
+	duk_remove(ctx, -2);													// [var][bignum][fromBuffer][this][nodeBuffer]
+	duk_push_object(ctx);													// [var][bignum][fromBuffer][this][nodeBuffer][options
+	duk_push_string(ctx, LE ? "little" : "big");							// [var][bignum][fromBuffer][this][nodeBuffer][options][endian]
+	duk_put_prop_string(ctx, -2, "endian");
+	duk_call_method(ctx, 2);												// [var][bignum][bignum]
+	return(1);
+}
+duk_ret_t ILibDuktape_GenericMarshal_Variable_bignum_SET(duk_context *ctx)
+{
+	int16_t test = 0x0001;
+	int LE = ((char*)&test)[0] ? 1 : 0;
+
+	duk_prepare_method_call(ctx, 0, "toString");							// [toString][this]
+	duk_call_method(ctx, 0);												// [string]
+	uint64_t val = (uint64_t)strtoull((char*)duk_to_string(ctx, -1), NULL, 10);
+
+	duk_push_this(ctx);														// [var]
+	duk_push_pointer(ctx, (void*)(uintptr_t)val);							// [var][ptr]
+	duk_put_prop_string(ctx, -2, "_ptr");									// [var]
+	return(0);
+}
+#endif
 void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size)
 {
 	duk_push_object(ctx);						// [var]
@@ -441,7 +477,9 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 	duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_VariableType);
 
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "Val", ILibDuktape_GenericMarshal_Variable_Val_GET, ILibDuktape_GenericMarshal_Variable_Val_SET);
-
+#ifndef MICROSTACK_NOTLS
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "bignum", ILibDuktape_GenericMarshal_Variable_bignum_GET, ILibDuktape_GenericMarshal_Variable_bignum_SET);
+#endif
 	ILibDuktape_CreateInstanceMethod(ctx, "Deref", ILibDuktape_GenericMarshal_Variable_Deref, DUK_VARARGS);
 	ILibDuktape_CreateEventWithGetter(ctx, "String", ILibDuktape_GenericMarshal_Variable_Val_STRING);
 	ILibDuktape_CreateEventWithGetter(ctx, "AnsiString", ILibDuktape_GenericMarshal_Variable_Val_ASTRING);

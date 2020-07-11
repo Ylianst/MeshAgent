@@ -1936,6 +1936,12 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_hostname(duk_context *ctx)
 	}
 	return(1);
 }
+duk_ret_t ILibDuktape_ScriptContainer_OS_endianness(duk_context *ctx)
+{
+	int16_t test = 0x0001;
+	duk_push_string(ctx, ((char*)&test)[0] ? "LE" : "BE");
+	return(1);
+}
 duk_ret_t ILibDuktape_tmpdir(duk_context *ctx)
 {
 #ifdef WIN32
@@ -1967,6 +1973,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateInstanceMethod(ctx, "arch", ILibDuktape_ScriptContainer_OS_arch, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "platform", ILibDuktape_ScriptContainer_OS_platform, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "endianness", ILibDuktape_ScriptContainer_OS_endianness, 0);
 #if !defined(__APPLE__) && !defined(_FREEBSD)
 	ILibDuktape_CreateInstanceMethod(ctx, "networkInterfaces", ILibDuktape_ScriptContainer_OS_networkInterfaces, 0);
 #endif
@@ -2426,6 +2433,45 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			child.waitExit();\
 			return(child.stdout.str.trim());\
 		};\
+	}\
+	exports.uptime = function uptime()\
+	{\
+		switch(process.platform)\
+		{\
+			case 'win32':\
+				var GM = require('_GenericMarshal');\
+				var kernel32 = GM.CreateNativeProxy('kernel32.dll');\
+				kernel32.CreateMethod('GetTickCount64');\
+				var v = kernel32.GetTickCount64().bignum.div(require('bignum')('1000')).toString();\
+				return (parseInt(v));\
+				break;\
+			case 'linux':\
+				return (parseInt(require('fs').readFileSync('/proc/uptime').toString().split('.')[0]));\
+				break;\
+			case 'freebsd':\
+			case 'darwin':\
+				var child = require('child_process').execFile('/bin/sh', ['sh']);\
+				child.stdout.str = ''; child.stdout.on('data', function(c) { this.str += c.toString(); });\
+				child.stdin.write(\"sysctl kern.boottime | awk '\");\
+				child.stdin.write('{');\
+				child.stdin.write('   split($0,A,\"{\");');\
+				child.stdin.write('   split(A[2],B,\"}\");');\
+				child.stdin.write('   split(B[1],C,\",\");');\
+				child.stdin.write('   split(C[1],D,\"=\");');\
+				child.stdin.write('   gsub(/^[ ]+/,\"\",D[2]);');\
+				child.stdin.write('   SEC=D[2]+0;');\
+				child.stdin.write('   split(C[2],G,\"=\");');\
+				child.stdin.write('   gsub(/^[ ]+/,\"\",G[2]);');\
+				child.stdin.write('   USEC=G[2]+0;');\
+				child.stdin.write('   if(USEC>1000000) { SEC+=1; }');\
+				child.stdin.write('   print SEC;');\
+				child.stdin.write(\"}'\");\
+				child.stdin.write('\\nexit\\n');\
+				child.waitExit();\
+				var tmp = Math.round((new Date()).getTime()/1000) - parseInt(child.stdout.str);\
+				return(tmp);\
+				break;\
+		}\
 	}";
 
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, jsExtras, sizeof(jsExtras) - 1);
