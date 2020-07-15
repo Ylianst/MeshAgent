@@ -814,7 +814,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 
 				return(centry->valueLength);
 			}
-			else if(buffer == NULL)
+			else if(bufferLen == 0)
 			{
 				return(centry->valueLength);
 			}
@@ -874,7 +874,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		}
 	}
 
-	return(buffer == NULL ? entry->valueLength : 0);
+	return((bufferLen == 0 || bufferLen >= entry->valueLength) ? entry->valueLength : 0);
 }
 
 // Get the reference to the SHA384 hash value from the datastore for a given a key.
