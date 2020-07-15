@@ -1392,8 +1392,8 @@ int ILibIsRunningOnChainThread(void* chain);
 
 
 	/* Base64 handling methods */
-	int ILibBase64EncodeLength(const int inputLen);
-	int ILibBase64DecodeLength(const int inputLen);
+	size_t ILibBase64EncodeLength(size_t inputLen);
+	size_t ILibBase64DecodeLength(size_t inputLen);
 	int ILibBase64Encode(unsigned char* input, const int inputlen, unsigned char** output);
 	int ILibBase64Decode(unsigned char* input, const int inputlen, unsigned char** output);
 	int ILibBase64DecodeEx(unsigned char* input, const int inputlen, unsigned char* output);

@@ -75,6 +75,7 @@ int gRemoteMouseRenderDefault = 0;
 #define EXE_IDENTIFIER (unsigned int)778401893
 #define MSH_IDENTIFIER (unsigned int)778924904
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
+#define SERVER_DISCOVERY_BUFFER_SIZE 1024
 
 #define MESH_AGENT_PORT 16990					 //!< Default Mesh Agent Port
 #define MESH_MCASTv4_GROUP "239.255.255.235"
@@ -586,6 +587,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 {
 	//int isLoopback;
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
+	if (!bufferLength < SERVER_DISCOVERY_BUFFER_SIZE) { return; }
 
 	UNREFERENCED_PARAMETER(socketModule);
 	UNREFERENCED_PARAMETER(user);
@@ -1478,7 +1480,7 @@ void ILibDuktape_MeshAgent_dumpCoreModuleEx(void *chain, void *user)
 	printf("CoreModule was manually dumped %d times, restarting!\n", ++dumpcount);
 
 	int CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
-	if (CoreModuleLen > 0)
+	if (CoreModuleLen > 4)
 	{
 		// There is a core module, launch it now.
 		CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
@@ -2257,7 +2259,7 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 	unsigned int NTHeaderIndex = 0;
 	fseek(tmpFile, 0, SEEK_SET);
 	ignore_result(fread(ILibScratchPad, 1, 2, tmpFile));
-	if (ntohs(((unsigned int*)ILibScratchPad)[0]) == 19802) // 5A4D
+	if (ntohs(((uint16_t*)ILibScratchPad)[0]) == 19802) // 5A4D
 	{
 		fseek(tmpFile, 60, SEEK_SET);
 		ignore_result(fread((void*)&NTHeaderIndex, 1, 4, tmpFile));
@@ -2876,7 +2878,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				agent->coreTimeout = NULL;
 
 				int CoreModuleLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", NULL, 0);
-				if (CoreModuleLen <= 0)
+				if (CoreModuleLen <= 4)
 				{
 					printf(" meshcore not found...\n");
 				}
@@ -3898,7 +3900,7 @@ void MeshAgent_AgentMode_Core_ServerTimeout(duk_context *ctx, void ** args, int 
 	agentHost->coreTimeout = NULL;
 
 	printf("Timeout waiting for Server, launching cached meshcore...\n");
-	if (CoreModuleLen <= 0)
+	if (CoreModuleLen <= 4)
 	{
 		printf("   No meshcore found in db...\n");
 	}
@@ -4501,7 +4503,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			char tmp[16];
 			int tmpLen = ILibSimpleDataStore_Get(agentHost->masterDb, "jsDebugPort", tmp, 16);
-			if (tmpLen > 0)
+			if (tmpLen > 0 && tmpLen < 16)
 			{
 				tmp[tmpLen] = 0;
 				agentHost->jsDebugPort = atoi(tmp);
@@ -4531,7 +4533,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				duk_eval_string_noresult(agentHost->meshCoreCtx, "process.coreDumpLocation = process.platform=='win32'?(process.execPath.replace('.exe', '.dmp')):(process.execPath + '.dmp');");
 			}
 
-			if (CoreModuleLen > 0)
+			if (CoreModuleLen > 4)
 			{
 				if (ILibSimpleDataStore_Get(agentHost->masterDb, "noUpdateCoreModule", NULL, 0) != 0) 
 				{ 
@@ -4609,11 +4611,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			ILibInet_pton(AF_INET, MESH_MCASTv4_GROUP, &(multicastAddr4.sin_addr));
 
 			// Multicast socket on fixed port, will receive multicast from the server.
-			agentHost->multicastDiscovery = ILibMulticastSocket_Create(agentHost->chain, 1024, MESH_AGENT_PORT, &multicastAddr4, &multicastAddr6, UDPSocket_OnData, agentHost, 1);
+			agentHost->multicastDiscovery = ILibMulticastSocket_Create(agentHost->chain, SERVER_DISCOVERY_BUFFER_SIZE, MESH_AGENT_PORT, &multicastAddr4, &multicastAddr6, UDPSocket_OnData, agentHost, 1);
 			if (agentHost->multicastDiscovery == NULL) { ILIBMARKPOSITION(219); return 1; }
 
 			// Multicast socket on a random port, used to multicast to the server and receive server unicast responses.
-			agentHost->multicastDiscovery2 = ILibMulticastSocket_Create(agentHost->chain, 1024, 0, &multicastAddr4, &multicastAddr6, UDPSocket_OnData, agentHost, 1);
+			agentHost->multicastDiscovery2 = ILibMulticastSocket_Create(agentHost->chain, SERVER_DISCOVERY_BUFFER_SIZE, 0, &multicastAddr4, &multicastAddr6, UDPSocket_OnData, agentHost, 1);
 			if (agentHost->multicastDiscovery2 == NULL) { ILIBMARKPOSITION(219); return 1; }
 		}
 

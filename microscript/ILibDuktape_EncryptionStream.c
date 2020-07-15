@@ -143,7 +143,7 @@ duk_ret_t ILibDuktape_EncryptionStream_CreateEncryption(duk_context *ctx)
 		duk_size_t tmpLen;
 		char *tmp = (char*)duk_get_lstring(ctx, -1, &tmpLen);
 		duk_push_object(ctx);											// [key][stream]
-		duk_push_fixed_buffer(ctx, ILibBase64DecodeLength((int)tmpLen));// [key][stream][buffer]
+		duk_push_fixed_buffer(ctx, ILibBase64DecodeLength(tmpLen));// [key][stream][buffer]
 		key = (char*)Duktape_GetBuffer(ctx, -1, NULL);
 		ILibBase64Decode((unsigned char*)tmp, (int)tmpLen, (unsigned char**)&key);
 		duk_put_prop_string(ctx, -2, "\xFF_key");						// [key][stream]
@@ -162,7 +162,7 @@ duk_ret_t ILibDuktape_EncryptionStream_CreateEncryption(duk_context *ctx)
 	{
 		duk_size_t tmpLen;
 		char *tmp = (char*)duk_get_lstring(ctx, -1, &tmpLen);
-		duk_push_fixed_buffer(ctx, ILibBase64DecodeLength((int)tmpLen));	// [stream][iv][buffer]
+		duk_push_fixed_buffer(ctx, ILibBase64DecodeLength(tmpLen));	// [stream][iv][buffer]
 		duk_swap_top(ctx, -2);												// [stream][buffer][iv]
 		iv = (char*)Duktape_GetBuffer(ctx, -2, NULL);
 		ILibBase64Decode((unsigned char*)tmp, (int)tmpLen, (unsigned char**)&iv);

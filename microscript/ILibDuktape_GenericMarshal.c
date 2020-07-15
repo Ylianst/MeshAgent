@@ -160,7 +160,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_HSTRING2(duk_context *ctx)
 {
 	void *ptr;
 	int size;
-	char hexString[255];
+	char hexString[3*255];
 
 	duk_push_this(ctx);							// [var]
 	duk_get_prop_string(ctx, -1, "_ptr");		// [var][ptr]

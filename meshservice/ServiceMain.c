@@ -409,7 +409,6 @@ int wmain(int argc, char* wargv[])
 	int i;
 	size_t str2len = 0;// , proxylen = 0, taglen = 0;
 	wchar_t str[_MAX_PATH];
-	char str2[_MAX_PATH];
 	ILib_DumpEnabledContext winException;
 	int retCode = 0;
 
@@ -646,19 +645,7 @@ int wmain(int argc, char* wargv[])
 		wmain_free(argv);
 		return 0;
 	}
-	#endif
-
-#ifdef _MINCORE
-	if (argc > 1 && strcasecmp(argv[1], "-signcheck") == 0)
-	{
-		// Check the signature of out own executable
-		util_openssl_init();
-		printf("%d", signcheck_verifysign(argv[0], 0));
-		util_openssl_uninit();
-		return 0;
-	}
-#else
-	
+	#endif	
 	if (integratedJavaScript != NULL || (argc > 0 && strcasecmp(argv[0], "--slave") == 0) || (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "connect") == 0) || (strcasecmp(argv[1], "--slave") == 0))))
 	{
 		// Run the mesh agent in console mode, since the agent is compiled for windows service, the KVM will not work right. This is only good for testing.
@@ -706,20 +693,6 @@ int wmain(int argc, char* wargv[])
 		wmain_free(argv);
 		return serviceState;
 	}
-	else if (argc > 1 && strcasecmp(argv[1], "-signcheck") == 0 && GetModuleFileNameA(NULL, str2, _MAX_PATH) > 5)
-	{
-		// Check the signature of out own executable
-#ifndef MICROSTACK_NOTLS
-		util_openssl_init();
-		printf("%d", signcheck_verifysign(str2, 0));
-		util_openssl_uninit();
-#else
-		printf("Cannot verify without OpenSSL support");
-#endif
-		wmain_free(argv);
-		return 0;
-	}
-#endif
 	else if (argc > 1 && (strcasecmp(argv[1], "start") == 0 || strcasecmp(argv[1], "-start") == 0))
 	{
 		// Ask the service manager to launch the service

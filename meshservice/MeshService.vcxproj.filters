@@ -97,9 +97,6 @@
     <ClCompile Include="..\meshcore\agentcore.c">
       <Filter>Meshcore</Filter>
     </ClCompile>
-    <ClCompile Include="..\meshcore\signcheck.c">
-      <Filter>Meshcore</Filter>
-    </ClCompile>
     <ClCompile Include="..\microscript\ILibDuktape_fs.c">
       <Filter>Microscript</Filter>
     </ClCompile>
@@ -259,9 +256,6 @@
       <Filter>Meshcore</Filter>
     </ClInclude>
     <ClInclude Include="..\meshcore\meshdefines.h">
-      <Filter>Meshcore</Filter>
-    </ClInclude>
-    <ClInclude Include="..\meshcore\signcheck.h">
       <Filter>Meshcore</Filter>
     </ClInclude>
     <ClInclude Include="..\microscript\ILibDuktape_fs.h">

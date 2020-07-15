@@ -3156,8 +3156,8 @@ duk_ret_t ILibDuktape_ScriptContainer_ExecuteString(duk_context *ctx)
 		char *payload;
 		duk_size_t payloadLen;
 		payload = (char*)duk_get_lstring(ctx, 0, &payloadLen);
-		int encodedPayloadLen = ILibBase64EncodeLength((int)payloadLen);
-		ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate(sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command) + encodedPayloadLen + sizeof(json), 0, NULL, NULL);
+		size_t encodedPayloadLen = ILibBase64EncodeLength(payloadLen);
+		ILibDuktape_ScriptContainer_NonIsolated_Command *cmd = (ILibDuktape_ScriptContainer_NonIsolated_Command*)ILibMemory_Allocate((int)(sizeof(ILibDuktape_ScriptContainer_NonIsolated_Command) + encodedPayloadLen + sizeof(json)), 0, NULL, NULL);
 
 		cmd->container.slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_GetExtraMemory(master->PeerChain, ILibMemory_CHAIN_CONTAINERSIZE))[1];
 		int i = sprintf_s(cmd->json, sizeof(json) + encodedPayloadLen, json);

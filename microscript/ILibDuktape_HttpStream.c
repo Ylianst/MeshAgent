@@ -2786,7 +2786,7 @@ duk_ret_t ILibDuktape_HttpStream_IncomingMessage_Digest_ValidatePassword(duk_con
 	ILibGetEntryEx(DigestTable, "response", 8, (void**)&response, &responseLen);
 	ILibGetEntryEx(DigestTable, "opaque", 6, (void**)&opaque, &opaqueLen);
 
-	if (username == NULL || uri == NULL || password == NULL || passwordLen == 0 || response == NULL)
+	if (username == NULL || uri == NULL || password == NULL || passwordLen == 0 || response == NULL || opaqueLen != 16)
 	{
 		duk_push_false(ctx);
 		return(1);

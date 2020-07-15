@@ -565,7 +565,7 @@ void ILibDuktape_Debugger_JSAttach_PopulateSource(duk_context *ctx, char *source
 				{
 					int CoreModuleLen = 0;
 					ILibSimpleDataStore *db = (ILibSimpleDataStore*)Duktape_GetPointerProperty(ctx, -1, "\xFF_MasterDB");
-					if (db == NULL || (CoreModuleLen = ILibSimpleDataStore_Get(db, "CoreModule", NULL, 0)) <= 0)
+					if (db == NULL || (CoreModuleLen = ILibSimpleDataStore_Get(db, "CoreModule", NULL, 0)) <= 4)
 					{
 						ILibDuktape_Error(ctx, "Could Not retrive CoreModule from MeshAgent"); return;
 					}

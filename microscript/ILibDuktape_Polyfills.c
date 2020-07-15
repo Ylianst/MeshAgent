@@ -145,7 +145,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_toString(duk_context *ctx)
 		cType = (char*)duk_require_string(ctx, 0);
 		if (strcmp(cType, "base64") == 0)
 		{
-			duk_push_fixed_buffer(ctx, ILibBase64EncodeLength((int)bufferLen));
+			duk_push_fixed_buffer(ctx, ILibBase64EncodeLength(bufferLen));
 			tmpBuffer = Duktape_GetBuffer(ctx, -1, NULL);
 			ILibBase64Encode((unsigned char*)buffer, (int)bufferLen, (unsigned char**)&tmpBuffer);
 			duk_push_string(ctx, tmpBuffer);
@@ -208,7 +208,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	if (strcmp(encoding, "base64") == 0)
 	{
 		// Base64		
-		buffer = duk_push_fixed_buffer(ctx, ILibBase64DecodeLength((int)strlength));
+		buffer = duk_push_fixed_buffer(ctx, ILibBase64DecodeLength(strlength));
 		bufferLen = ILibBase64Decode((unsigned char*)str, (int)strlength, (unsigned char**)&buffer);
 		duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 	}

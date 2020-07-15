@@ -108,6 +108,7 @@ int info_GetLocalInterfaces(char* data, int maxdata)
 	// Get the list of all local interfaces
 	if ((dwRetVal = GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX, NULL, pAdapterAddresses, &ulOutBufLen)) != ERROR_SUCCESS || ulOutBufLen == 0) { free(pAdapterInfo); free(pAdapterAddresses); return 0; }
 
+	int r = 0;
 	j = 0;
 	pAdapter = pAdapterInfo;
 	while (pAdapter)
@@ -117,47 +118,47 @@ int info_GetLocalInterfaces(char* data, int maxdata)
 		while (pAdapterAddr != NULL && pAdapterAddr->IfIndex != pAdapter->Index) { pAdapterAddr = pAdapterAddr->Next; }
 		if (pAdapterAddr == NULL) { free(pAdapterInfo); free(pAdapterAddresses); return 0; }
 
-		if (j > 0) { ptr += snprintf(data + ptr, maxdata - ptr, ","); }
-		ptr += snprintf(data + ptr, maxdata - ptr, "{");
+		if (j > 0) { ptr += (r=sprintf_s(data + ptr, maxdata - ptr, ",")); }
+		ptr += (r = sprintf_s(data + ptr, maxdata - ptr, "{"));
 
 		// Interface type
-		ptr += snprintf(data + ptr, maxdata - ptr, "\"type\":%d", pAdapter->Type);
+		ptr += (r = sprintf_s(data + ptr, maxdata - ptr, "\"type\":%d", pAdapter->Type));
 
 		// Interface name
 		if (wcslen(pAdapterAddr->FriendlyName) > 0) {
 			wcstombs_s(&templen, temp, 1023, pAdapterAddr->FriendlyName, wcslen(pAdapterAddr->FriendlyName));
-			ptr += snprintf(data + ptr, maxdata - ptr, ",\"name\":\"%s\"", temp);
+			ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"name\":\"%s\"", temp));
 		}
 
 		// Interface description
 		if (wcslen(pAdapterAddr->Description) > 0) {
 			wcstombs_s(&templen, temp, 1023, pAdapterAddr->Description, wcslen(pAdapterAddr->Description));
-			ptr += snprintf(data + ptr, maxdata - ptr, ",\"desc\":\"%s\"", temp);
+			ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"desc\":\"%s\"", temp));
 		}
 
 		// Interface MAC address
 		if (pAdapter->AddressLength == 6) {
-			ptr += snprintf(data + ptr, maxdata - ptr, ",\"mac\":\"%02x%02x%02x%02x%02x%02x\"", pAdapter->Address[0], pAdapter->Address[1], pAdapter->Address[2], pAdapter->Address[3], pAdapter->Address[4], pAdapter->Address[5]);
+			ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"mac\":\"%02x%02x%02x%02x%02x%02x\"", pAdapter->Address[0], pAdapter->Address[1], pAdapter->Address[2], pAdapter->Address[3], pAdapter->Address[4], pAdapter->Address[5]));
 		}
 
 		// Interface DNS suffix
 		if (wcslen(pAdapterAddr->DnsSuffix) > 0) {
 			wcstombs_s(&templen, temp, 1023, pAdapterAddr->DnsSuffix, wcslen(pAdapterAddr->DnsSuffix));
-			ptr += snprintf(data + ptr, maxdata - ptr, ",\"dnssuffix\":\"%s\"", temp);
+			ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"dnssuffix\":\"%s\"", temp));
 		}
 
 		// IPv4 address and subnet mask
-		ptr += snprintf(data + ptr, maxdata - ptr, ",\"v4addr\":\"%s\"", pAdapter->IpAddressList.IpAddress.String);
-		ptr += snprintf(data + ptr, maxdata - ptr, ",\"v4mask\":\"%s\"", pAdapter->IpAddressList.IpMask.String);
-		ptr += snprintf(data + ptr, maxdata - ptr, ",\"v4gateway\":\"%s\"", pAdapter->GatewayList.IpAddress.String);
+		ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"v4addr\":\"%s\"", pAdapter->IpAddressList.IpAddress.String));
+		ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"v4mask\":\"%s\"", pAdapter->IpAddressList.IpMask.String));
+		ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"v4gateway\":\"%s\"", pAdapter->GatewayList.IpAddress.String));
 
 		// Get the gateway MAC address
 		ILibInet_pton(AF_INET, pAdapter->IpAddressList.IpAddress.String, &ip1);
 		ILibInet_pton(AF_INET, pAdapter->GatewayList.IpAddress.String, &ip2);
 		SendARP(ip2, ip1, pa, &palen);
-		if (palen == 6) { ptr += snprintf(data + ptr, maxdata - ptr, ",\"gatewaymac\":\"%02x%02x%02x%02x%02x%02x\"", pa[0], pa[1], pa[2], pa[3], pa[4], pa[5]); }
+		if (palen == 6) { ptr += (r = sprintf_s(data + ptr, maxdata - ptr, ",\"gatewaymac\":\"%02x%02x%02x%02x%02x%02x\"", pa[0], pa[1], pa[2], pa[3], pa[4], pa[5])); }
 
-		ptr += snprintf(data + ptr, maxdata - ptr, "}");
+		ptr += (r = sprintf_s(data + ptr, maxdata - ptr, "}"));
 
 		j++;
 		pAdapter = pAdapter->Next;
@@ -167,7 +168,7 @@ int info_GetLocalInterfaces(char* data, int maxdata)
 	free(pAdapterInfo);
 	free(pAdapterAddresses);
 
-	return ptr;
+	return (r < 0 ? 0 : ptr);
 #endif
 }
 #endif
@@ -424,13 +425,22 @@ int MeshInfo_GetSystemInformation(char** data)
 
 	// Setup the response
 	if ((*data = (char*)malloc(65536)) == NULL) { ILIBCRITICALEXIT(254); }
-	ptr += snprintf(*data + ptr, 65536 - ptr, "{\"netif\":[");
+	ptr += sprintf_s(*data + ptr, 65536 - ptr, "{\"netif\":[");
 	ptr += info_GetLocalInterfaces(*data + ptr, 65536 - ptr);
-	ptr += snprintf(*data + ptr, 65536 - ptr, "]}");
-	(*data)[ptr] = 0;
-	if ((*data = realloc(*data, ptr + 1)) == NULL) { ILIBCRITICALEXIT(254); }
+	ptr += sprintf_s(*data + ptr, 65536 - ptr, "]}");
+	if (ptr < 65535)
+	{
+		(*data)[ptr] = 0;
+		if ((*data = realloc(*data, ptr + 1)) == NULL) { ILIBCRITICALEXIT(254); }
 
-	return ptr;
+		return ptr;
+	}
+	else
+	{
+		free(*data);
+		*data = NULL;
+		return(0);
+	}
 }
 
 
@@ -542,6 +552,7 @@ int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 #elif defined(NACL)
 			//do nothing
 #else
+		sync();
 		syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_POWER_OFF, 0);
 #endif
 		return 1;
@@ -551,6 +562,7 @@ int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 #elif defined(NACL)
 			//do nothing
 #else
+		sync();
 		syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART, 0);
 #endif
 		return 1;
@@ -568,6 +580,7 @@ int MeshInfo_PowerState(enum AgentPowerStateActions flg, int force)
 #if defined(_ANDROID) || defined(__APPLE__)
 			// TODO
 #else
+		sync();
 		syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_SW_SUSPEND, 0);
 #endif
 		return 1;

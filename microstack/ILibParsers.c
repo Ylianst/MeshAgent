@@ -6779,13 +6779,13 @@ void ILibencodeblock( unsigned char in[3], unsigned char out[4], int len )
 	out[3] = (unsigned char) (len > 2 ? cb64[ in[2] & 0x3f ] : '=');
 }
 
-/*! \fn int ILibBase64EncodeLength(const int inputLen)
+/*! \fn size_t ILibBase64EncodeLength(size_t inputLen)
 \brief Returns the length the ILibBase64Encode function would use a stream adding padding and line breaks as per spec.
 \par
 \param input The length of the en-encoded data
 \return The length of the encoded stream
 */
-int ILibBase64EncodeLength(const int inputLen)
+size_t ILibBase64EncodeLength(size_t inputLen)
 {
 	return ((inputLen * 4) / 3) + 5;
 }
@@ -6841,15 +6841,15 @@ void ILibdecodeblock( unsigned char in[4], unsigned char out[3] )
 	out[ 2 ] = (unsigned char ) (((in[2] << 6) & 0xc0) | in[3]);
 }
 
-/*! \fn int ILibBase64DecodeLength(const int inputLen)
+/*! \fn size_t ILibBase64DecodeLength(size_t inputLen)
 \brief Returns the length the ILibBase64Decode function would use to store the decoded string value
 \par
 \param input The length of the en-encoded data
 \return The length of the decoded stream
 */
-int ILibBase64DecodeLength(const int inputLen)
+size_t ILibBase64DecodeLength(size_t inputLen)
 {
-	return ((inputLen * 3) / 4) + 4;
+	return(((inputLen * 3) / 4) + 4);
 }
 
 int ILibBase64DecodeEx(unsigned char* input, const int inputlen, unsigned char* output)

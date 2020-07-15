@@ -560,7 +560,6 @@
     <ClCompile Include="..\meshcore\KVM\Windows\kvm.c" />
     <ClCompile Include="..\meshcore\KVM\Windows\tile.cpp" />
     <ClCompile Include="..\meshcore\meshinfo.c" />
-    <ClCompile Include="..\meshcore\signcheck.c" />
     <ClCompile Include="..\meshcore\wincrypto.cpp" />
     <ClCompile Include="..\meshcore\zlib\adler32.c" />
     <ClCompile Include="..\meshcore\zlib\deflate.c" />
@@ -617,7 +616,6 @@
     <ClInclude Include="..\meshcore\KVM\Windows\tile.h" />
     <ClInclude Include="..\meshcore\meshdefines.h" />
     <ClInclude Include="..\meshcore\meshinfo.h" />
-    <ClInclude Include="..\meshcore\signcheck.h" />
     <ClInclude Include="..\meshcore\wincrypto.h" />
     <ClInclude Include="..\meshcore\zlib\deflate.h" />
     <ClInclude Include="..\meshcore\zlib\gzguts.h" />
