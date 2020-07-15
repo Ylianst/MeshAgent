@@ -224,6 +224,7 @@ typedef struct MeshAgentHostContainer
 	void* microLMS;
 	void* multicastDiscovery;
 	void* multicastDiscovery2;
+	void* multicastDiscoveryKey;
 	char* multicastServerUrl;
 	int serverConnectionState;
 	int exitCode;

@@ -586,8 +586,9 @@ This is used only when "MeshServer=local" in .msh policy file
 void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer, int bufferLength, struct sockaddr_in6 *remoteInterface, void *user, void *user2, int *PAUSE)
 {
 	//int isLoopback;
+	char* packet;
+	int packetLen;
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
-	if (!(bufferLength < SERVER_DISCOVERY_BUFFER_SIZE)) { return; }
 
 	UNREFERENCED_PARAMETER(socketModule);
 	UNREFERENCED_PARAMETER(user);
@@ -598,16 +599,39 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 	if (remoteInterface->sin6_family != AF_INET && remoteInterface->sin6_family != AF_INET6) return;
 	//isLoopback = ILibIsLoopback((struct sockaddr*)remoteInterface);
 
+	// If the discovery key is set, use it to decrypt the packet
+	if (agentHost->multicastDiscoveryKey != NULL) {
+		EVP_CIPHER_CTX *dec_ctx;
+		int declength = 0;
+		if (bufferLength < 17) return; // First 16 bytes of the messages are the initialization vector (IV). Message must be 17 bytes in length at a minimum.
+
+		// Decrypt the packet using AES256-CBC
+		dec_ctx = EVP_CIPHER_CTX_new();
+		EVP_DecryptInit(dec_ctx, EVP_aes_256_cbc(), agentHost->multicastDiscoveryKey, buffer);
+		if (!EVP_DecryptUpdate(dec_ctx, ILibScratchPad, &declength, buffer + 16, bufferLength - 16)) { EVP_CIPHER_CTX_cleanup(dec_ctx); return; }
+		packetLen = declength;
+		if (!EVP_DecryptFinal_ex(dec_ctx, ILibScratchPad + packetLen, &declength)) { EVP_CIPHER_CTX_cleanup(dec_ctx); return; }
+		packetLen += declength;
+		packet = ILibScratchPad;
+		EVP_CIPHER_CTX_cleanup(dec_ctx);
+	}
+	else
+	{
+		// Assume UDP Packet is not encrypted
+		packet = buffer;
+		packetLen = bufferLength;
+	}
+
 	// Check if this is a Mesh Server discovery packet and it is for our server
 	// It will have this form: "MeshCentral2|f5a50091028fe2c122434cbcbd2709a7ec10369295e5a0e43db8853a413d89df|wss://~:443/agent.ashx"
-	if ((bufferLength > 78) && (memcmp(buffer, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad, sizeof(ILibScratchPad))) == 97) && (memcmp(ILibScratchPad, buffer + 13, 96) == 0)) 
-	{
+	if ((packetLen > 78) && (memcmp(packet, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2))) == 97) && (memcmp(ILibScratchPad2, packet + 13, 96) == 0)) {
 		// We have a match, set the server URL correctly.
 		if (agentHost->multicastServerUrl != NULL) { free(agentHost->multicastServerUrl); agentHost->multicastServerUrl = NULL; }
+		if ((agentHost->multicastServerUrl = (char*)malloc(packetLen - 78 + 128)) == NULL) { ILIBCRITICALEXIT(254); }
 
-		buffer[bufferLength] = 0;
-		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad));
-		agentHost->multicastServerUrl = ILibString_Replace(buffer + 78 + 32, bufferLength - 78 - 32, "%s", 2, (char*)ILibScratchPad2, (int)strnlen_s((char*)ILibScratchPad2, sizeof(ILibScratchPad2)));
+		packet[packetLen] = 0;
+		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad2));
+		sprintf_s(agentHost->multicastServerUrl, packetLen - 78 + 128, packet + 78 + 32, ILibScratchPad2);
 
 		//printf("FoundServer: %s\r\n", agentHost->multicastServerUrl);
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
@@ -3330,11 +3354,33 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		if (agent->multicastServerUrl != NULL) {
 			serverUrl = agent->multicastServerUrl;
 			serverUrlLen = (int)strlen(serverUrl);
-		} else {
+		}
+		else
+		{
 			// Multicast discovery packet to try to find our server
-			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) 
-			{
-				ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad2, 96, 1); 
+			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) {
+				// If the discovery key is set, use it to encrypt the UDP packet
+				if (agent->multicastDiscoveryKey != NULL) {
+					EVP_CIPHER_CTX *enc_ctx;
+					int enclength = sizeof(ILibScratchPad) - 16, packetLen;
+					util_random(16, ILibScratchPad); // Select a random IV
+					enc_ctx = EVP_CIPHER_CTX_new();
+					EVP_EncryptInit(enc_ctx, EVP_aes_256_cbc(), agent->multicastDiscoveryKey, ILibScratchPad);
+					if (EVP_EncryptUpdate(enc_ctx, ILibScratchPad + 16, &enclength, ILibScratchPad2, 96)) {
+						packetLen = enclength;
+						enclength = sizeof(ILibScratchPad) - 16 - packetLen;
+						if (EVP_EncryptFinal_ex(enc_ctx, ILibScratchPad + 16 + packetLen, &enclength)) {
+							// Send the encrypted packet
+							ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad, 16 + packetLen + enclength, 1);
+						}
+					}
+					EVP_CIPHER_CTX_cleanup(enc_ctx);
+				}
+				else
+				{
+					// No discovery key set, broadcast without encryption
+					ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad2, 96, 1);
+				}
 			}
 			ILibDestructParserResults(rs);
 			MeshServer_Connect(agent);
@@ -4594,6 +4640,17 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			// Mesh agent is in local mode, start the multicast server discovery
 			struct sockaddr_in multicastAddr4;
 			struct sockaddr_in6 multicastAddr6;
+
+			// Read DiscoveryKey if present, perform SHA384 on it and use it as UDP encryption/decryption key.
+			SHA512_CTX c;
+			int i = (ILibSimpleDataStore_Get(agentHost->masterDb, "DiscoveryKey", ILibScratchPad, sizeof(ILibScratchPad)));
+			if (i > 1) {
+				SHA384_Init(&c);
+				SHA384_Update(&c, ILibScratchPad, i - 1); // Hash the discovery key
+				SHA384_Final((unsigned char*)ILibScratchPad, &c);
+				if ((agentHost->multicastDiscoveryKey = (char*)malloc(32)) == NULL) { ILIBCRITICALEXIT(254); }
+				memcpy(agentHost->multicastDiscoveryKey, ILibScratchPad, 32); // Save the first 32 bytes of the hash as key
+			}
 
 			// Cleanup all addresses
 			memset(&multicastAddr4, 0, sizeof(struct sockaddr_in));
