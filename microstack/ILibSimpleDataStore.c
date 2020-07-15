@@ -855,6 +855,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		if (fread(compressed, 1, entry->valueLength, root->dataFile) == 0) return 0; // Read the value into the buffer
 		if (ILibInflate(compressed, entry->valueLength, buffer, &tmplen, 0) == 0)
 		{
+			ILibMemory_Free(compressed);
 			if (buffer == NULL) { return((int)tmplen); }
 
 			// Before we return, we need to check the HASH of the uncompressed data
@@ -870,6 +871,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		}
 		else
 		{
+			ILibMemory_Free(compressed);
 			return(0);
 		}
 	}

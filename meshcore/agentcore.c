@@ -589,6 +589,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 	char* packet;
 	int packetLen;
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
+	if (!(bufferLength < SERVER_DISCOVERY_BUFFER_SIZE)) { return; }
 
 	UNREFERENCED_PARAMETER(socketModule);
 	UNREFERENCED_PARAMETER(user);
@@ -600,26 +601,35 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 	//isLoopback = ILibIsLoopback((struct sockaddr*)remoteInterface);
 
 	// If the discovery key is set, use it to decrypt the packet
-	if (agentHost->multicastDiscoveryKey != NULL) {
+	if (agentHost->multicastDiscoveryKey != NULL)
+	{
 		EVP_CIPHER_CTX *dec_ctx;
 		int declength = 0;
-		if (bufferLength < 17) return; // First 16 bytes of the messages are the initialization vector (IV). Message must be 17 bytes in length at a minimum.
+		
+		//
+		// First 16 bytes of the messages are the initialization vector (IV). 
+		// Message must be 17 bytes in length at a minimum.
+		// There must enough extra room to fit one AES block (16 bytes) worth of padding
+		//
+		if (bufferLength < 17 || bufferLength > (SERVER_DISCOVERY_BUFFER_SIZE - 16)) return; 
 
 		// Decrypt the packet using AES256-CBC
 		dec_ctx = EVP_CIPHER_CTX_new();
 		EVP_DecryptInit(dec_ctx, EVP_aes_256_cbc(), agentHost->multicastDiscoveryKey, buffer);
-		if (!EVP_DecryptUpdate(dec_ctx, ILibScratchPad, &declength, buffer + 16, bufferLength - 16)) { EVP_CIPHER_CTX_cleanup(dec_ctx); return; }
+		if (!EVP_DecryptUpdate(dec_ctx, ILibScratchPad, &declength, buffer + 16, bufferLength - 16)) { EVP_CIPHER_CTX_free(dec_ctx); return; }
 		packetLen = declength;
-		if (!EVP_DecryptFinal_ex(dec_ctx, ILibScratchPad + packetLen, &declength)) { EVP_CIPHER_CTX_cleanup(dec_ctx); return; }
+		if (!EVP_DecryptFinal_ex(dec_ctx, ILibScratchPad + packetLen, &declength)) { EVP_CIPHER_CTX_free(dec_ctx); return; }
 		packetLen += declength;
 		packet = ILibScratchPad;
-		EVP_CIPHER_CTX_cleanup(dec_ctx);
+		EVP_CIPHER_CTX_free(dec_ctx);
+		packet[packetLen] = 0; 
 	}
 	else
 	{
 		// Assume UDP Packet is not encrypted
 		packet = buffer;
 		packetLen = bufferLength;
+		packet[packetLen] = 0;
 	}
 
 	// Check if this is a Mesh Server discovery packet and it is for our server
@@ -627,11 +637,9 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 	if ((packetLen > 78) && (memcmp(packet, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2))) == 97) && (memcmp(ILibScratchPad2, packet + 13, 96) == 0)) {
 		// We have a match, set the server URL correctly.
 		if (agentHost->multicastServerUrl != NULL) { free(agentHost->multicastServerUrl); agentHost->multicastServerUrl = NULL; }
-		if ((agentHost->multicastServerUrl = (char*)malloc(packetLen - 78 + 128)) == NULL) { ILIBCRITICALEXIT(254); }
 
-		packet[packetLen] = 0;
-		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad2));
-		sprintf_s(agentHost->multicastServerUrl, packetLen - 78 + 128, packet + 78 + 32, ILibScratchPad2);
+		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad));
+		agentHost->multicastServerUrl = ILibString_Replace(packet + 78 + 32, packetLen - 78 - 32, "%s", 2, (char*)ILibScratchPad2, (int)strnlen_s((char*)ILibScratchPad2, sizeof(ILibScratchPad2)));
 
 		//printf("FoundServer: %s\r\n", agentHost->multicastServerUrl);
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
@@ -3360,21 +3368,24 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			// Multicast discovery packet to try to find our server
 			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) {
 				// If the discovery key is set, use it to encrypt the UDP packet
-				if (agent->multicastDiscoveryKey != NULL) {
+				if (agent->multicastDiscoveryKey != NULL) 
+				{
 					EVP_CIPHER_CTX *enc_ctx;
 					int enclength = sizeof(ILibScratchPad) - 16, packetLen;
 					util_random(16, ILibScratchPad); // Select a random IV
 					enc_ctx = EVP_CIPHER_CTX_new();
 					EVP_EncryptInit(enc_ctx, EVP_aes_256_cbc(), agent->multicastDiscoveryKey, ILibScratchPad);
-					if (EVP_EncryptUpdate(enc_ctx, ILibScratchPad + 16, &enclength, ILibScratchPad2, 96)) {
+					if (EVP_EncryptUpdate(enc_ctx, ILibScratchPad + 16, &enclength, ILibScratchPad2, 96)) 
+					{
 						packetLen = enclength;
 						enclength = sizeof(ILibScratchPad) - 16 - packetLen;
-						if (EVP_EncryptFinal_ex(enc_ctx, ILibScratchPad + 16 + packetLen, &enclength)) {
+						if (EVP_EncryptFinal_ex(enc_ctx, ILibScratchPad + 16 + packetLen, &enclength)) 
+						{
 							// Send the encrypted packet
 							ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad, 16 + packetLen + enclength, 1);
 						}
 					}
-					EVP_CIPHER_CTX_cleanup(enc_ctx);
+					EVP_CIPHER_CTX_free(enc_ctx);
 				}
 				else
 				{
@@ -4644,7 +4655,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			// Read DiscoveryKey if present, perform SHA384 on it and use it as UDP encryption/decryption key.
 			SHA512_CTX c;
 			int i = (ILibSimpleDataStore_Get(agentHost->masterDb, "DiscoveryKey", ILibScratchPad, sizeof(ILibScratchPad)));
-			if (i > 1) {
+			if (i > 1) 
+			{
 				SHA384_Init(&c);
 				SHA384_Update(&c, ILibScratchPad, i - 1); // Hash the discovery key
 				SHA384_Final((unsigned char*)ILibScratchPad, &c);
@@ -5396,6 +5408,8 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 
 	if (agent->masterDb != NULL) { ILibSimpleDataStore_Close(agent->masterDb); agent->masterDb = NULL; }
 	if (agent->chain != NULL) { ILibChain_DestroyEx(agent->chain); agent->chain = NULL; }
+	if (agent->multicastDiscoveryKey != NULL) { free(agent->multicastDiscoveryKey); agent->multicastDiscoveryKey = NULL; }
+	if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
 #ifdef WIN32
 	if (agent->shCore != NULL)
 	{
