@@ -587,7 +587,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 {
 	//int isLoopback;
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
-	if (!bufferLength < SERVER_DISCOVERY_BUFFER_SIZE) { return; }
+	if (!(bufferLength < SERVER_DISCOVERY_BUFFER_SIZE)) { return; }
 
 	UNREFERENCED_PARAMETER(socketModule);
 	UNREFERENCED_PARAMETER(user);
@@ -600,14 +600,14 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 
 	// Check if this is a Mesh Server discovery packet and it is for our server
 	// It will have this form: "MeshCentral2|f5a50091028fe2c122434cbcbd2709a7ec10369295e5a0e43db8853a413d89df|wss://~:443/agent.ashx"
-	if ((bufferLength > 78) && (memcmp(buffer, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad, sizeof(ILibScratchPad))) == 97) && (memcmp(ILibScratchPad, buffer + 13, 96) == 0)) {
+	if ((bufferLength > 78) && (memcmp(buffer, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad, sizeof(ILibScratchPad))) == 97) && (memcmp(ILibScratchPad, buffer + 13, 96) == 0)) 
+	{
 		// We have a match, set the server URL correctly.
 		if (agentHost->multicastServerUrl != NULL) { free(agentHost->multicastServerUrl); agentHost->multicastServerUrl = NULL; }
-		if ((agentHost->multicastServerUrl = (char*)malloc(bufferLength - 78 + 128)) == NULL) { ILIBCRITICALEXIT(254); }
 
 		buffer[bufferLength] = 0;
 		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad));
-		sprintf_s(agentHost->multicastServerUrl, bufferLength - 78 + 128, buffer + 78 + 32, ILibScratchPad2);
+		agentHost->multicastServerUrl = ILibString_Replace(buffer + 78 + 32, bufferLength - 78 - 32, "%s", 2, (char*)ILibScratchPad2, (int)strnlen_s((char*)ILibScratchPad2, sizeof(ILibScratchPad2)));
 
 		//printf("FoundServer: %s\r\n", agentHost->multicastServerUrl);
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
@@ -3332,7 +3332,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			serverUrlLen = (int)strlen(serverUrl);
 		} else {
 			// Multicast discovery packet to try to find our server
-			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) { ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad2, 96, 1); }
+			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) 
+			{
+				ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad2, 96, 1); 
+			}
 			ILibDestructParserResults(rs);
 			MeshServer_Connect(agent);
 			return;
