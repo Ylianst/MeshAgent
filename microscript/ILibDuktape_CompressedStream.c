@@ -387,7 +387,8 @@ int ILibDeflate(char *buffer, size_t bufferLen, char *compressed, size_t *compre
 	size_t len = 0;
 	uint32_t rescrc = 0;
 
-	if (compressed != NULL) { len = *compressedLen; *compressedLen = 0; }
+	if (compressed != NULL) { len = *compressedLen; }
+	*compressedLen = 0;
 
 	memset(&Z, 0, sizeof(Z));
 	Z.zalloc = Z_NULL;
