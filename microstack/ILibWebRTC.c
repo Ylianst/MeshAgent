@@ -7480,6 +7480,15 @@ int ILibSCTP_Debug_SetDebugCallback(void* dtlsSession, char* debugFieldName, ILi
 	return 0;
 }
 #endif
+#endif
+
+#ifdef MICROSTACK_NOTLS
+#if defined(WINSOCK2)
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+#endif
+	#include "ILibParsers.h"
+#endif
 
 /* zlib.h -- interface of the 'zlib' general purpose compression library
 version 1.2.11, January 15th, 2017
@@ -7689,4 +7698,4 @@ uint32_t crc32(uint32_t crc, const unsigned char* buf, uint32_t len)
 	return crc32_z(crc, buf, len);
 }
 
-#endif
+

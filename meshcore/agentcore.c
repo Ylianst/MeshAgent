@@ -600,6 +600,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 	if (remoteInterface->sin6_family != AF_INET && remoteInterface->sin6_family != AF_INET6) return;
 	//isLoopback = ILibIsLoopback((struct sockaddr*)remoteInterface);
 
+#ifndef MICROSTACK_NOTLS
 	// If the discovery key is set, use it to decrypt the packet
 	if (agentHost->multicastDiscoveryKey != NULL)
 	{
@@ -615,16 +616,17 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 
 		// Decrypt the packet using AES256-CBC
 		dec_ctx = EVP_CIPHER_CTX_new();
-		EVP_DecryptInit(dec_ctx, EVP_aes_256_cbc(), agentHost->multicastDiscoveryKey, buffer);
-		if (!EVP_DecryptUpdate(dec_ctx, ILibScratchPad, &declength, buffer + 16, bufferLength - 16)) { EVP_CIPHER_CTX_free(dec_ctx); return; }
+		EVP_DecryptInit(dec_ctx, EVP_aes_256_cbc(), agentHost->multicastDiscoveryKey, (unsigned char*)buffer);
+		if (!EVP_DecryptUpdate(dec_ctx, (unsigned char*)ILibScratchPad, &declength, (unsigned char*)(buffer + 16), bufferLength - 16)) { EVP_CIPHER_CTX_free(dec_ctx); return; }
 		packetLen = declength;
-		if (!EVP_DecryptFinal_ex(dec_ctx, ILibScratchPad + packetLen, &declength)) { EVP_CIPHER_CTX_free(dec_ctx); return; }
+		if (!EVP_DecryptFinal_ex(dec_ctx, (unsigned char*)(ILibScratchPad + packetLen), &declength)) { EVP_CIPHER_CTX_free(dec_ctx); return; }
 		packetLen += declength;
 		packet = ILibScratchPad;
 		EVP_CIPHER_CTX_free(dec_ctx);
 		packet[packetLen] = 0; 
 	}
 	else
+#endif
 	{
 		// Assume UDP Packet is not encrypted
 		packet = buffer;
@@ -3366,7 +3368,9 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		else
 		{
 			// Multicast discovery packet to try to find our server
-			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) {
+			if ((agent->multicastDiscovery2 != NULL) && (ILibSimpleDataStore_Get(agent->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2)) == 97)) 
+			{
+#ifndef MICROSTACK_NOTLS
 				// If the discovery key is set, use it to encrypt the UDP packet
 				if (agent->multicastDiscoveryKey != NULL) 
 				{
@@ -3374,12 +3378,12 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 					int enclength = sizeof(ILibScratchPad) - 16, packetLen;
 					util_random(16, ILibScratchPad); // Select a random IV
 					enc_ctx = EVP_CIPHER_CTX_new();
-					EVP_EncryptInit(enc_ctx, EVP_aes_256_cbc(), agent->multicastDiscoveryKey, ILibScratchPad);
-					if (EVP_EncryptUpdate(enc_ctx, ILibScratchPad + 16, &enclength, ILibScratchPad2, 96)) 
+					EVP_EncryptInit(enc_ctx, EVP_aes_256_cbc(), agent->multicastDiscoveryKey, (unsigned char*)ILibScratchPad);
+					if (EVP_EncryptUpdate(enc_ctx, (unsigned char*)(ILibScratchPad + 16), &enclength, (unsigned char*)ILibScratchPad2, 96)) 
 					{
 						packetLen = enclength;
 						enclength = sizeof(ILibScratchPad) - 16 - packetLen;
-						if (EVP_EncryptFinal_ex(enc_ctx, ILibScratchPad + 16 + packetLen, &enclength)) 
+						if (EVP_EncryptFinal_ex(enc_ctx, (unsigned char*)(ILibScratchPad + 16 + packetLen), &enclength)) 
 						{
 							// Send the encrypted packet
 							ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad, 16 + packetLen + enclength, 1);
@@ -3388,6 +3392,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 					EVP_CIPHER_CTX_free(enc_ctx);
 				}
 				else
+#endif
 				{
 					// No discovery key set, broadcast without encryption
 					ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad2, 96, 1);
