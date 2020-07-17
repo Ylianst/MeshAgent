@@ -3938,7 +3938,14 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 		}
 	}
 	state->actualSent += ((uint64_t)headerLen + (uint64_t)bufferLen);
-	if (compressedBuffer != NULL) { ILibMemory_Free(compressedBuffer); }
+	if (compressedBuffer != NULL) 
+	{
+		ILibMemory_Free(compressedBuffer); 
+	}
+	else
+	{
+		state->uncompressedSent += ((uint64_t)bufferLen + (uint64_t)headerLen);
+	}
 	return retVal;
 }
 ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink_DispatchUnshift(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen)
