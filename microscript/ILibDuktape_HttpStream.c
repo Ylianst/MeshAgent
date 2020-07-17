@@ -4683,7 +4683,7 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	if (narg > 1 && duk_is_object(ctx, 1))
 	{
 		state->permessageDeflate = Duktape_GetIntPropertyValue(ctx, 1, "perMessageDeflate", 0);
-		state->minimumThreshold = Duktape_GetIntPropertyValue(ctx, 1, "minimumThreshold", 256);
+		state->minimumThreshold = Duktape_GetIntPropertyValue(ctx, 1, "minimumThreshold", 64);
 		state->maxSkipCount = Duktape_GetIntPropertyValue(ctx, 1, "maxSkipCount", 128);
 		state->minSkipCount = Duktape_GetIntPropertyValue(ctx, 1, "minSkipCount", 10);
 		state->skipCount = 0;

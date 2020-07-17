@@ -2338,11 +2338,11 @@ int GenerateSHA384FileHash(char *filePath, char *fileHash)
 				}
 			}
 		}
-	}
-	if (retVal != 0)
-	{
-		fclose(tmpFile);
-		return(1);
+		if (retVal != 0)
+		{
+			fclose(tmpFile);
+			return(1);
+		}
 	}
 #endif
 
