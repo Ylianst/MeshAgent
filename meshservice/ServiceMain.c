@@ -877,7 +877,7 @@ int wmain(int argc, char* wargv[])
 		if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
 		{
 			// Not running as service, so check if we need to run as a script engine
-			if (argc >= 2 && ILibString_EndsWith(argv[1], -1, ".js", 3) != 0)
+			if (argc >= 2 && (ILibString_EndsWith(argv[1], -1, ".js", 3) != 0 || ILibString_EndsWith(argv[1], -1, ".zip", 4) != 0))
 			{
 				SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE); // Set SIGNAL on windows to listen for Ctrl-C
 
