@@ -464,43 +464,47 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	duk_get_prop_string(ctx, 0, "headers");						// [headers]
 	duk_get_prop_string(ctx, -1, "Sec-WebSocket-Accept");		// [headers][key]
 	key = (char*)Duktape_GetBuffer(ctx, -1, &keyLen);
-	duk_get_prop_string(ctx, -2, "Sec-WebSocket-Extensions");	// [headers][key][extensions]
-	duk_string_split(ctx, -1, ";");								// [headers][key][extensions][array]
-	while (duk_get_length(ctx, -1) > 0)
+
+	if (duk_has_prop_string(ctx, -2, "Sec-WebSocket-Extensions"))
 	{
-		duk_array_pop(ctx, -1);									// [headers][key][extensions][array][string]
-		duk_string_split(ctx, -1, "=");							// [headers][key][extensions][array][string][array]
-		duk_array_shift(ctx, -1);								// [headers][key][extensions][array][string][array][val1]
-		if (strcmp("permessage-deflate", duk_to_string(ctx, -1)) == 0) { permessageDeflate = 1; duk_pop_3(ctx); }
-		else if (strcmp("server_max_window_bits", duk_to_string(ctx, -1)) == 0) 
+		duk_get_prop_string(ctx, -2, "Sec-WebSocket-Extensions");	// [headers][key][extensions]
+		duk_string_split(ctx, -1, ";");								// [headers][key][extensions][array]
+		while (duk_get_length(ctx, -1) > 0)
 		{
-			if (duk_get_length(ctx, -2) > 0)
+			duk_array_pop(ctx, -1);									// [headers][key][extensions][array][string]
+			duk_string_split(ctx, -1, "=");							// [headers][key][extensions][array][string][array]
+			duk_array_shift(ctx, -1);								// [headers][key][extensions][array][string][array][val1]
+			if (strcmp("permessage-deflate", duk_to_string(ctx, -1)) == 0) { permessageDeflate = 1; duk_pop_3(ctx); }
+			else if (strcmp("server_max_window_bits", duk_to_string(ctx, -1)) == 0)
 			{
-				duk_array_shift(ctx, -2);						// [headers][key][extensions][array][string][array][val1][val2]
-				smwb = duk_to_int(ctx, -1);
-				duk_pop_n(ctx, 4);								// [headers][key][extensions][array]
+				if (duk_get_length(ctx, -2) > 0)
+				{
+					duk_array_shift(ctx, -2);						// [headers][key][extensions][array][string][array][val1][val2]
+					smwb = duk_to_int(ctx, -1);
+					duk_pop_n(ctx, 4);								// [headers][key][extensions][array]
+				}
+				else
+				{
+					duk_pop_3(ctx);									// [headers][key][extensions][array]
+				}
+			}
+			else if (strcmp("client_max_window_bits", duk_to_string(ctx, -1)) == 0)
+			{
+				if (duk_get_length(ctx, -2) > 0)
+				{
+					duk_array_shift(ctx, -2);						// [headers][key][extensions][array][string][array][val1][val2]
+					cmwb = duk_to_int(ctx, -1);
+					duk_pop_n(ctx, 4);								// [headers][key][extensions][array]
+				}
+				else
+				{
+					duk_pop_3(ctx);									// [headers][key][extensions][array]
+				}
 			}
 			else
 			{
-				duk_pop_3(ctx);									// [headers][key][extensions][array]
+				duk_pop_3(ctx);										// [headers][key][extensions][array]			
 			}
-		}
-		else if (strcmp("client_max_window_bits", duk_to_string(ctx, -1)) == 0) 
-		{
-			if (duk_get_length(ctx, -2) > 0)
-			{
-				duk_array_shift(ctx, -2);						// [headers][key][extensions][array][string][array][val1][val2]
-				cmwb = duk_to_int(ctx, -1);
-				duk_pop_n(ctx, 4);								// [headers][key][extensions][array]
-			}
-			else
-			{
-				duk_pop_3(ctx);									// [headers][key][extensions][array]
-			}
-		}
-		else
-		{
-			duk_pop_3(ctx);										// [headers][key][extensions][array]			
 		}
 	}
 

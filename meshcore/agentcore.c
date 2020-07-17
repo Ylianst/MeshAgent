@@ -108,6 +108,7 @@ int ILibDuktape_HECI_Debug = 0;
 extern int ILibDuktape_ModSearch_ShowNames;
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+extern int ILibInflate(char *buffer, size_t bufferLen, char *decompressed, size_t *decompressedLen, uint32_t crc);
 
 typedef struct RemoteDesktop_Ptrs
 {
@@ -2800,10 +2801,13 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 	// Process Core Module Commands here, but only if we aren't running a local script
 	switch (command)
 	{
+		case MeshCommand_CompressedCoreModule:
 		case MeshCommand_CoreModule:        // New core modules to be used instead of the old one, if empty, remove the core module
 		{
 			char *coreException = NULL;
 			MeshCommand_BinaryPacket_CoreModule *cm = (MeshCommand_BinaryPacket_CoreModule*)cmd;
+			char *coremodule = cm->coreModule;
+			size_t coremoduleLen = (size_t)cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule);
 
 			// If the agent is running with a local core, ignore this command
 			if (agent->localScript != 0) break;
@@ -2814,10 +2818,35 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				if (hashref == NULL || memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
 				{					
 					agent->coreTimeout = NULL; // Setting this to null becuase we're going to stop the core. If we stop the core, this timeout will cleanup by itself.
+					if (command == MeshCommand_CompressedCoreModule)
+					{
+						// meshcore is DEFLATE'ed, so we need to INFLATE it
+						size_t decompressedModuleLen = 0;
+						char *decompressedModule = NULL;
+						if (ILibInflate(coremodule, coremoduleLen, NULL, &decompressedModuleLen, 0) == 0)
+						{
+							decompressedModule = (char*)ILibMemory_AllocateTemp(agent->chain, decompressedModuleLen);
+							if (ILibInflate(coremodule, coremoduleLen, decompressedModule, &decompressedModuleLen, 0) == 0)
+							{
+								coremodule = decompressedModule;
+								coremoduleLen = decompressedModuleLen;
+							}
+							else
+							{
+								decompressedModule = NULL;
+							}
+						}
+						if (decompressedModule == NULL)
+						{
+							ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+								ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: INFLATE error");
+							break;
+						}
+					}
 
 					// If server sends us the same core, just do nothing.
 					// Server sent us a new core, start by storing it in the data store
-					ILibSimpleDataStore_PutCompressed(agent->masterDb, "CoreModule", 10, cm->coreModule, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule));	// Store the JavaScript in the data store
+					ILibSimpleDataStore_PutCompressed(agent->masterDb, "CoreModule", 10, coremodule, (int)coremoduleLen);	// Store the JavaScript in the data store
 					hashref = ILibSimpleDataStore_GetHash(agent->masterDb, "CoreModule");					// Get the reference to the SHA384 hash
 					if (memcmp(hashref, cm->coreModuleHash, sizeof(cm->coreModuleHash)) != 0) 
 					{																						// Check the hash for sanity
@@ -2842,7 +2871,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					//printf("CORE: Restart\r\n");
 					ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
 						ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Restart");
-					if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, cm->coreModule + 4, cmdLen - sizeof(MeshCommand_BinaryPacket_CoreModule) - 4)) != NULL)
+					if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, coremodule + 4, (int)coremoduleLen - 4)) != NULL)
 					{
 						ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
 							ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Error: %s", coreException);
@@ -3826,7 +3855,7 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	retVal->agentID = (AgentIdentifiers)MESH_AGENTID;
 	retVal->chain = ILibCreateChainEx(3 * sizeof(void*));
 	retVal->pipeManager = ILibProcessPipe_Manager_Create(retVal->chain);
-	retVal->capabilities = capabilities | MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT;
+	retVal->capabilities = capabilities | MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT | MeshCommand_AuthInfo_CapabilitiesMask_COMPRESSION;
 	
 #ifdef WIN32
 
