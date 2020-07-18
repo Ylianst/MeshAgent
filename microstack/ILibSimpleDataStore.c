@@ -657,7 +657,24 @@ __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, 
 	if (retVal->dataFile != NULL) { ILibSimpleDataStore_RebuildKeyTable(retVal); }
 	return retVal;
 }
+void ILibSimpleDataStore_ReOpenReadOnly(ILibSimpleDataStore dataStore, char* filePath)
+{
+	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 
+	if (root->dataFile != NULL)
+	{
+#ifdef _POSIX
+		flock(fileno(root->dataFile), LOCK_UN);
+#endif
+		fclose(root->dataFile);
+	}
+	else
+	{
+		root->filePath = ILibString_Copy(filePath, (int)strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
+	}
+	root->dataFile = ILibSimpleDataStore_OpenFileEx2(root->filePath, 0, 1);
+	if (root->dataFile != NULL) { ILibSimpleDataStore_RebuildKeyTable(root); }
+}
 void ILibSimpleDataStore_CacheClear_Sink(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
 	if (Data != NULL) { free(Data); }

@@ -4142,13 +4142,17 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 		if ((ix = ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2) == 0)
 		{
-			if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
-			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
 			if (ix - 2 == 8 && strncmp(param[ri] + 2, "readonly", 8) == 0 && strncmp(param[ri] + ix + 1, "1", 1) == 0)
 			{
 				// Read-only File System specified
 				readonly = 1;
+				if (agentHost->masterDb != NULL)
+				{
+					ILibSimpleDataStore_ReOpenReadOnly(agentHost->masterDb, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
+				}
 			}
+			if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
 			++ixr;
 		}
 	}
