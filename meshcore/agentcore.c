@@ -4111,6 +4111,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	int ixr = 0;
 	int installFlag = 0;
 	int fetchstate = 0;
+	int readonly = 0;
 
 	for (ri = 0; ri < paramLen; ++ri)
 	{
@@ -4143,6 +4144,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
 			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
+			if (ix - 2 == 8 && strncmp(param[ri] + 2, "readonly", 8) == 0 && strncmp(param[ri] + ix + 1, "1", 1) == 0)
+			{
+				// Read-only File System specified
+				readonly = 1;
+			}
 			++ixr;
 		}
 	}
@@ -4218,7 +4224,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 	else
 	{
-		if (agentHost->masterDb == NULL || ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb))
+		if (agentHost->masterDb == NULL || (ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb) && readonly == 0))
 		{
 			void **data = (void**)ILibMemory_SmartAllocate(4 * sizeof(void*));
 			data[0] = agentHost;

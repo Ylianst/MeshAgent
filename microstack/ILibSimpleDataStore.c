@@ -106,6 +106,7 @@ typedef struct ILibSimpleDataStore_TableEntry
 } ILibSimpleDataStore_TableEntry;
 typedef struct ILibSimpleDataStore_CacheEntry
 {
+	char valueHash[SHA384HASHSIZE];
 	int valueLength;
 	char value[];
 }ILibSimpleDataStore_CacheEntry;
@@ -146,6 +147,14 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int 
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen, 0, NULL, NULL);
 	entry->valueLength = valueLen;
 	if (valueLen > 0) { memcpy_s(entry->value, valueLen, value, valueLen); }
+	if (vhash != NULL)
+	{
+		memcpy_s(entry->valueHash, sizeof(entry->valueHash), vhash, SHA384HASHSIZE);
+	}
+	else
+	{
+		ILibSimpleDataStore_SHA384(value, valueLen, entry->valueHash);   
+	}
 	
 	ILibHashtable_Put(root->cacheTable, NULL, key, keyLen, entry);
 	if (vhash != NULL) { ILibMemory_Free(key); }
@@ -883,9 +892,32 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
 {
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	ILibSimpleDataStore_TableEntry *entry;
+	ILibSimpleDataStore_TableEntry *entry = NULL;
 	
 	if (root == NULL) return NULL;
+	if (root->cacheTable != NULL)
+	{
+		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, keyLen);
+		if (centry == NULL)
+		{
+			// Let's check if this is a compressed record entry
+			size_t tmplen = 0;
+			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
+			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
+			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
+			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
+			if (centry != NULL)
+			{
+				ILibMemory_Free(tmpkey);
+				return(centry->valueHash);
+			}
+		}
+		if (centry != NULL)
+		{
+			return(centry->valueHash);
+		}
+	}
+
 	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
 	if (entry == NULL)
 	{
@@ -1062,7 +1094,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 	void* state[2];
 	int retVal = 0;
 
-	if (root == NULL || root->dirtySize < root->minimumDirtySize) return 1; // Error
+	if (root == NULL || root->dirtySize < root->minimumDirtySize || root->filePath == NULL) return 1; // Error
 	tmp = ILibString_Cat(root->filePath, -1, ".tmp", -1); // Create the name of the temporary data store
 
 	// Start by opening a temporary .tmp file. Will be used to write the compacted data store.
