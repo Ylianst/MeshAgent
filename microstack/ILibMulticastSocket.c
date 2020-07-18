@@ -162,6 +162,7 @@ int ILibMulticastSocket_ResetMulticast(struct ILibMulticastSocket_StateModule *m
 				module->UDPServers[i] = ILibAsyncUDPSocket_CreateEx(module->ChainLink.ParentChain, 0, (struct sockaddr*)&(module->AddressListV4[i]), ILibAsyncUDPSocket_Reuse_SHARED, UDPSocket_OnDataV4, NULL, module);
 				if (module->UDPServers[i] != NULL)
 				{
+					ILibChain_Link_SetMetadata(module->UDPServers[i], "ILibMulticastSocket_v4");
 					ILibAsyncUDPSocket_JoinMulticastGroupV4(module->UDPServers[i], &(module->MulticastAddr), (struct sockaddr*)&(module->AddressListV4[i]));
 					ILibAsyncUDPSocket_SetLocalInterface(module->UDPServers[i], (struct sockaddr*)&(module->AddressListV4[i]));
 					socket = ILibAsyncUDPSocket_GetSocket(module->UDPServers[i]);
@@ -314,7 +315,7 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 		// Setup incoming IPv4 socket
 		module->UDPServer = ILibAsyncUDPSocket_CreateEx(Chain, 0, (struct sockaddr*)&addr4, ILibAsyncUDPSocket_Reuse_SHARED, UDPSocket_OnDataV4, NULL, module);
 		if (module->UDPServer == NULL) { free(module); PRINTERROR(); return NULL; }
-
+		ILibChain_Link_SetMetadata(module->UDPServer, "ILibMulticastSocketListener_v4");
 
 #ifndef NACL
 		if (setsockopt(ILibAsyncUDPSocket_GetSocket(module->UDPServer), IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&(module->TTL), sizeof(int)) != 0) {ILIBCRITICALERREXIT(253);}
@@ -333,6 +334,8 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 		module->UDPServer6 = ILibAsyncUDPSocket_CreateEx(Chain, 0, (struct sockaddr*)&addr6, ILibAsyncUDPSocket_Reuse_SHARED, UDPSocket_OnDataV6, NULL, module);
 		if (module->UDPServer6 != NULL)
 		{
+			ILibChain_Link_SetMetadata(module->UDPServer6, "ILibMulticastSocketListener_v6");
+
 			// Setup the IPv6 multicast address
 			memcpy(&(module->MulticastAddr6), MulticastAddr6, sizeof(struct sockaddr_in6));
 			if (module->MulticastAddr6.sin6_port == 0) module->MulticastAddr6.sin6_port = htons(LocalPort);
