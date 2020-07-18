@@ -168,6 +168,7 @@ typedef struct ILibDuktape_WebSocket_State
 	int minSkipCount;
 	int skipCount;
 	int nonCompressibleCount;
+	int sWBITS, cWBITS;
 
 	uint64_t uncompressedSent, uncompressedReceived;
 	uint64_t actualSent, actualReceived;
@@ -458,8 +459,8 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	char *key;
 	duk_size_t keyLen;
 	int permessageDeflate = 0;
-	int smwb = -1;
-	int cmwb = -1;
+	int smwb = 15;
+	int cmwb = 15;
 
 	duk_get_prop_string(ctx, 0, "headers");						// [headers]
 	duk_get_prop_string(ctx, -1, "Sec-WebSocket-Accept");		// [headers][key]
@@ -4686,6 +4687,8 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 		state->minimumThreshold = Duktape_GetIntPropertyValue(ctx, 1, "minimumThreshold", 64);
 		state->maxSkipCount = Duktape_GetIntPropertyValue(ctx, 1, "maxSkipCount", 128);
 		state->minSkipCount = Duktape_GetIntPropertyValue(ctx, 1, "minSkipCount", 10);
+		state->cWBITS = Duktape_GetIntPropertyValue(ctx, 1, "clientMaxWindowBits", 15) * (-1);
+		state->sWBITS = Duktape_GetIntPropertyValue(ctx, 1, "serverMaxWindowBits", 15) * (-1);
 		state->skipCount = 0;
 		state->nonCompressibleCount = 0;
 	}
