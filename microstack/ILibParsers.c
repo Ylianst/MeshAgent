@@ -2131,6 +2131,7 @@ void ILibChain_SetupWindowsWaitObject(HANDLE* waitList, int *waitListCount, stru
 	if (readset->fd_count == 0 && writeset->fd_count == 0 && ILibLinkedList_GetNode_Head(handleList) == NULL)
 	{
 		*waitListCount = 0;
+		*timeout = tv->tv_sec * 1000;
 		return;
 	}
 	int chkIndex;
