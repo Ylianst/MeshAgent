@@ -452,9 +452,6 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_bignum_GET(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_GenericMarshal_Variable_bignum_SET(duk_context *ctx)
 {
-	int16_t test = 0x0001;
-	int LE = ((char*)&test)[0] ? 1 : 0;
-
 	duk_prepare_method_call(ctx, 0, "toString");							// [toString][this]
 	duk_call_method(ctx, 0);												// [string]
 	uint64_t val = (uint64_t)strtoull((char*)duk_to_string(ctx, -1), NULL, 10);
