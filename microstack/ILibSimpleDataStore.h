@@ -40,6 +40,7 @@ const extern int ILibMemory_SimpleDataStore_CONTAINERSIZE;
 
 typedef void(*ILibSimpleDataStore_KeyEnumerationHandler)(ILibSimpleDataStore sender, char* Key, int KeyLen, void *user);
 typedef void(*ILibSimpleDataStore_SizeWarningHandler)(ILibSimpleDataStore sender, uint64_t size, void *user);
+typedef void(*ILibSimpleDataStore_WriteErrorHandler)(ILibSimpleDataStore sender, void *user);
 
 // Create the data store.
 __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, int userExtraMemorySize, int readonly);
@@ -60,6 +61,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSON(ILibSimpleDataStore dataSto
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataStore, uint64_t minimumDirtySize);
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigSizeLimit(ILibSimpleDataStore dataStore, uint64_t sizeLimit, ILibSimpleDataStore_SizeWarningHandler handler, void *user);
+void ILibSimpleDataStore_ConfigWriteErrorHandler(ILibSimpleDataStore dataStore, ILibSimpleDataStore_WriteErrorHandler handler, void *user);
 
 __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *hash);
 #define ILibSimpleDataStore_Put(dataStore, key, value) ILibSimpleDataStore_PutEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), value, (int)strnlen_s(value, ILibSimpleDataStore_MaxUnspecifiedValueLen))

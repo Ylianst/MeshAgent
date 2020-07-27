@@ -637,7 +637,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 
 	// Check if this is a Mesh Server discovery packet and it is for our server
 	// It will have this form: "MeshCentral2|f5a50091028fe2c122434cbcbd2709a7ec10369295e5a0e43db8853a413d89df|wss://~:443/agent.ashx"
-	if ((packetLen > 78) && (memcmp(packet, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2))) == 97) && (memcmp(ILibScratchPad2, packet + 13, 96) == 0)) {
+	if ((packetLen > 109) && (memcmp(packet, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2))) == 97) && (memcmp(ILibScratchPad2, packet + 13, 96) == 0)) {
 		// We have a match, set the server URL correctly.
 		if (agentHost->multicastServerUrl != NULL) { free(agentHost->multicastServerUrl); agentHost->multicastServerUrl = NULL; }
 
@@ -765,7 +765,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertificate(duk_context *ctx)
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Generating JS TLS Certificate");
 #endif
 	SSL_TRACE1("ILibDuktape_MeshAgent_GenerateCertificate()");
-	len = util_mkCert(NULL, &(cert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
+	if (util_mkCert(NULL, &(cert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL) == 0) { return(ILibDuktape_Error(ctx, "Error Generating Certificate")); }
 	len = util_to_p12(cert, passphrase, &data);
 
 	duk_push_fixed_buffer(ctx, len);
@@ -1800,6 +1800,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Connected");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Command");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "DesktopSessionChanged");
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "DBError");
 		ILibDuktape_EventEmitter_AddHook(emitter, "Connected", ILibDuktape_MeshAgent_ConnectedHook);
 
 		ILibDuktape_CreateEventWithGetter(ctx, "ServerInfo", ILibDuktape_MeshAgent_ServerInfo);
@@ -2190,29 +2191,6 @@ int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent)
 	return 0;
 }
 #endif
-
-
-
-void WritePipeResponse(AGENT_RECORD_TYPE recordType, JS_ENGINE_CONTEXT engineContext, char *payload, int payloadLength)
-{
-#ifdef WIN32
-	int tmpLen;
-#endif
-	AGENT_RECORD_HEADER *header = (AGENT_RECORD_HEADER*)ILibScratchPad2;
-	header->RecordType = recordType;
-	header->RecordLength = sizeof(AGENT_RECORD_HEADER) + payloadLength;
-	memcpy_s(header->Context, sizeof(JS_ENGINE_CONTEXT), engineContext, sizeof(JS_ENGINE_CONTEXT));
-	if (payloadLength > 0)
-	{
-		memcpy_s(header->Payload, sizeof(ILibScratchPad2) - sizeof(AGENT_RECORD_HEADER), payload, payloadLength);
-	}
-
-#ifdef WIN32
-	WriteFile(GetStdHandle(STD_ERROR_HANDLE), header, header->RecordLength, &tmpLen, NULL);
-#else
-	ignore_result(write(STDERR_FILENO, header, header->RecordLength));
-#endif
-}
 
 
 duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID)
@@ -3802,7 +3780,7 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 					}
 					else
 					{
-						if (ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER)
+						if (valLen > 2 && ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER)
 						{
 							// HEX value
 							ILibSimpleDataStore_PutEx(agent->masterDb, key, keyLen, ILibScratchPad2, util_hexToBuf(val + 2, valLen - 2, ILibScratchPad2));
@@ -4029,6 +4007,19 @@ BOOL MeshAgent_PidWaiter(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus statu
 	return(FALSE);
 }
 #endif
+
+void MeshAgent_DB_WriteError(ILibSimpleDataStore sender, void *user)
+{
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
+	if (agent->meshCoreCtx != NULL)
+	{
+		ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);			// [mesh]
+		duk_prepare_method_call(agent->meshCoreCtx, -1, "emit");				// [mesh][emit][this]
+		duk_remove(agent->meshCoreCtx, -3);										// [emit][this]
+		duk_push_string(agent->meshCoreCtx, "DBError");							// [emit][this][DBError]
+		duk_pcall_method(agent->meshCoreCtx, 1); duk_pop(agent->meshCoreCtx);	// ...
+	}
+}
 
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
@@ -4259,17 +4250,18 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	agentHost->httpClientManager = ILibCreateWebClient(3, agentHost->chain);
 
 
-#ifdef _REMOTELOGGINGSERVER
 	if (agentHost->masterDb != NULL)
 	{
+		ILibSimpleDataStore_ConfigWriteErrorHandler(agentHost->masterDb, MeshAgent_DB_WriteError, agentHost);
+#ifdef _REMOTELOGGINGSERVER
 		int len;
 		if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "enableILibRemoteLogging", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
 		{
 			ILibScratchPad[len] = 0;
 			ILibStartDefaultLoggerEx(agentHost->chain, (unsigned short)atoi(ILibScratchPad), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
 		}
-	}
 #endif
+	}
 
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: argv[0] = %s", param[0]);
@@ -4558,7 +4550,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (pid < 0) { exit(EXIT_FAILURE); }
 		else if (pid > 0)
 		{
-			len = snprintf(str, 15, "%d\r\n", pid);
+			len = sprintf_s(str, 15, "%d\r\n", pid);
 
 			fd = fopen("/var/run/meshagent.pid", "w");
 			if (fd == NULL) fd = fopen(".meshagent.pid", "w");

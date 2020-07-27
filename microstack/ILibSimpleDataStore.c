@@ -54,6 +54,8 @@ typedef struct ILibSimpleDataStore_Root
 	ILibSimpleDataStore_SizeWarningHandler warningSink;
 	void* warningSinkUser;
 	int error;
+	ILibSimpleDataStore_WriteErrorHandler ErrorHandler;
+	void *ErrorHandlerUser;
 } ILibSimpleDataStore_Root;
 
 /* File Format                 
@@ -343,18 +345,39 @@ uint64_t ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* v
 	char headerBytes[sizeof(ILibSimpleDataStore_RecordHeader_NG)];
 	ILibSimpleDataStore_RecordHeader_NG *header = (ILibSimpleDataStore_RecordHeader_NG*)headerBytes;
 	uint64_t offset;
+	uint64_t curlen;
+	uint64_t written = 0;
 
 	fseek(f, 0, SEEK_END);
+	curlen = ILibSimpleDataStore_GetPosition(f);
+
 	header->nodeSize = htonl(sizeof(ILibSimpleDataStore_RecordHeader_NG) + keyLen + valueLen);
 	header->keyLen = htonl(keyLen);
 	header->valueLength = htonl(valueLen);
 	if (hash != NULL) { memcpy_s(header->hash, sizeof(header->hash), hash, SHA384HASHSIZE); } else { memset(header->hash, 0, SHA384HASHSIZE); }
 
-	if (fwrite(headerBytes, 1, sizeof(ILibSimpleDataStore_RecordHeader_NG), f)) {}
-	if (fwrite(key, 1, keyLen, f)) {}
+	written += (uint64_t)fwrite(headerBytes, 1, sizeof(ILibSimpleDataStore_RecordHeader_NG), f);
+	written += (uint64_t)fwrite(key, 1, keyLen, f);
 	offset = ILibSimpleDataStore_GetPosition(f);
-	if (value != NULL) { if (fwrite(value, 1, valueLen, f)) {} }
+	if (value != NULL) { written += (uint64_t)fwrite(value, 1, valueLen, f); }
 	fflush(f);
+
+	if (written < (sizeof(ILibSimpleDataStore_RecordHeader_NG) + keyLen + (value!=NULL?valueLen:0)))
+	{
+		//
+		// Unable to write all data, probably because insufficient disc space,
+		// so we're going to undo the last write, so we don't corrupt the db,
+		//
+#ifdef WIN32
+		LARGE_INTEGER i;
+		i.QuadPart = curlen;
+		SetFilePointerEx((HANDLE)_get_osfhandle(_fileno(f)), i, NULL, FILE_BEGIN);
+		SetEndOfFile((HANDLE)_get_osfhandle(_fileno(f)));
+#else
+		ftruncate(fileno(f), curlen);
+#endif
+		return(0);
+	}
 	return offset;
 }
 
@@ -710,11 +733,14 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 // Store a key/value pair in the data store
 __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash)
 {
+	int allocated = 0;
 	int ret;
 	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry;
-	
+	char *origkey = key;
+	int origkeylen = keyLen;
+
 	if (root == NULL) { return 0; }
 	if (root->dataFile == NULL)
 	{
@@ -749,6 +775,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	if (entry == NULL) 
 	{
 		entry = (ILibSimpleDataStore_TableEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_TableEntry), 0, NULL, NULL); 
+		allocated = 1;
 	}
 	else 
 	{
@@ -760,6 +787,19 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	entry->valueLength = valueLen;
 	entry->valueOffset = ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, value, valueLen, entry->valueHash); // Write the key and value
 	root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile); // Update the size of the data store;
+
+	if (entry->valueOffset == 0)
+	{
+		//
+		// Write Error, switch to readonly mode,
+		// and re-write this record into the cache
+		//
+		if (allocated) { free(entry); }
+		ILibSimpleDataStore_CachedEx(root, origkey, origkeylen, value, valueLen, vhash);
+		ILibSimpleDataStore_ReOpenReadOnly(root, NULL);
+		if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
+		return(0);
+	}
 
 	// Add the record to the data store
 	ret = ILibHashtable_Put(root->keyTable, NULL, key, keyLen, entry) == NULL ? 0 : 1;
@@ -918,7 +958,6 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 		if (centry == NULL)
 		{
 			// Let's check if this is a compressed record entry
-			size_t tmplen = 0;
 			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
 			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
@@ -971,7 +1010,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		if (entry != NULL)
 		{
-			ILibSimpleDataStore_WriteRecord(root->dataFile, tmpkey, (int)ILibMemory_Size(tmpkey), NULL, 0, NULL);
+			if (ILibSimpleDataStore_WriteRecord(root->dataFile, tmpkey, (int)ILibMemory_Size(tmpkey), NULL, 0, NULL) == 0)
+			{
+				if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
+			}
 			free(entry);
 			ILibMemory_Free(tmpkey);
 			return 1;
@@ -980,7 +1022,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 	}
 	else
 	{
-		ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, NULL, 0, NULL); 
+		if (ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, NULL, 0, NULL) == 0)
+		{
+			if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
+		}
 		free(entry); 
 		return 1;
 	}
@@ -1027,6 +1072,7 @@ void ILibSimpleDataStore_Compact_EnumerateSink(ILibHashtable sender, void *Key1,
 		}
 	}
 	offset = ILibSimpleDataStore_WriteRecord(compacted, Key2, Key2Len, NULL, entry->valueLength, entry->valueHash);
+	if (offset == 0) { root->error = 1; return; }
 	while (bytesLeft > 0)
 	{
 		if (ILibSimpleDataStore_SeekPosition(root->dataFile, entry->valueOffset + totalBytesWritten, SEEK_SET) == 0)
@@ -1089,6 +1135,12 @@ __EXPORT_TYPE void ILibSimpleDataStore_EnumerateKeys(ILibSimpleDataStore dataSto
 	users[2] = (void*)user;
 
 	if (handler != NULL) { ILibHashtable_Enumerate(root->keyTable, ILibSimpleDataStore_EnumerateKeysSink, users); }
+}
+void ILibSimpleDataStore_ConfigWriteErrorHandler(ILibSimpleDataStore dataStore, ILibSimpleDataStore_WriteErrorHandler handler, void *user)
+{
+	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
+	root->ErrorHandler = handler;
+	root->ErrorHandlerUser = user;
 }
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigSizeLimit(ILibSimpleDataStore dataStore, uint64_t sizeLimit, ILibSimpleDataStore_SizeWarningHandler handler, void *user)
 {
