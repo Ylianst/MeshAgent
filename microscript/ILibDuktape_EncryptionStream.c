@@ -78,7 +78,18 @@ void ILibDuktape_EncryptionStream_encrypted_WriteEndSink(ILibDuktape_DuplexStrea
 	char out[5000];
 	int outLen = 0;
 
-	EVP_DecryptFinal(ptrs->decryptedCTX, (unsigned char*)out, &outLen);
+	if (!EVP_DecryptFinal(ptrs->decryptedCTX, (unsigned char*)out, &outLen))
+	{
+		// Decrypt Error
+		ILibDuktape_EventEmitter_SetupEmit(ptrs->clear->readableStream->ctx, ptrs->clear->readableStream->object, "error");	// [emit][this][error]
+		duk_push_string(ptrs->clear->readableStream->ctx, "Decrypt Error");													// [emit][this][error][msg]
+		if (duk_pcall_method(ptrs->clear->readableStream->ctx, 2) != 0)														// [ret]
+		{
+			ILibDuktape_Process_UncaughtException(ptrs->clear->readableStream->ctx);
+		}
+		duk_pop(ptrs->clear->readableStream->ctx);																			// ...
+		outLen = 0;
+	}
 	if (outLen > 0)
 	{
 		ILibDuktape_DuplexStream_WriteData(ptrs->clear, out, outLen);

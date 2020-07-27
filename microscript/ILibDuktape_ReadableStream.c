@@ -977,6 +977,7 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "end");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "data");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "close");
+	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 
 	ILibDuktape_CreateInstanceMethod(ctx, "pause", ILibDuktape_readableStream_pause, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "resume", ILibDuktape_readableStream_resume, 0);
