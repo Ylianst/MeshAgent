@@ -408,6 +408,7 @@ void ILibDuktape_HttpStream_http_ConvertOptionToSend(duk_context *ctx, void *Obj
 		}
 		if (buffer == NULL)
 		{
+			if (bufferLen > 16384) { ILibDuktape_Error(ctx, "option data too large"); return; }
 			buffer = ILibMemory_AllocateA(bufferLen);
 			bufferLen = 0;
 		}
@@ -4639,9 +4640,6 @@ duk_ret_t ILibDuktape_WebSocket_bytesSent_actual(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_WebSocket_bytesSent_ratio(duk_context *ctx)
 {
-	int16_t test = 0x0001;
-	int LE = ((char*)&test)[0] ? 1 : 0;
-
 	ILibDuktape_WebSocket_State *ws = NULL;
 	duk_push_this(ctx);														// [WebSocket_Decoded]
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
@@ -4655,9 +4653,6 @@ duk_ret_t ILibDuktape_WebSocket_bytesSent_ratio(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_WebSocket_bytesReceived_ratio(duk_context *ctx)
 {
-	int16_t test = 0x0001;
-	int LE = ((char*)&test)[0] ? 1 : 0;
-
 	ILibDuktape_WebSocket_State *ws = NULL;
 	duk_push_this(ctx);														// [WebSocket_Decoded]
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
