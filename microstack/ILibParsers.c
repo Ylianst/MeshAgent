@@ -8862,14 +8862,22 @@ int ILibReadFileFromDiskEx(char **Target, char *FileName)
 
 	fseek(SourceFile, 0, SEEK_END);
 	SourceFileLength = (int)ftell(SourceFile);
-	fseek(SourceFile, 0, SEEK_SET);
-	if ((buffer = (char*)malloc(SourceFileLength + 1)) == NULL) ILIBCRITICALEXIT(254);
-	SourceFileLength = (int)fread(buffer, sizeof(char), (size_t)SourceFileLength,SourceFile);
-	buffer[SourceFileLength] = 0; // To be nice, we allocated one more byte and put a zero at the end.
-	fclose(SourceFile);
+	if (SourceFileLength >= 0)
+	{
+		fseek(SourceFile, 0, SEEK_SET);
+		if ((buffer = (char*)malloc(SourceFileLength + 1)) == NULL) ILIBCRITICALEXIT(254);
+		SourceFileLength = (int)fread(buffer, sizeof(char), (size_t)SourceFileLength, SourceFile);
+		buffer[SourceFileLength] = 0; // To be nice, we allocated one more byte and put a zero at the end.
+		fclose(SourceFile);
 
-	*Target = buffer;
-	return SourceFileLength;
+		*Target = buffer;
+		return SourceFileLength;
+	}
+	else
+	{
+		*Target = NULL;
+		return(0);
+	}
 }
 
 
