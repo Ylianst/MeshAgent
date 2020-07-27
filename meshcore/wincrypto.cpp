@@ -340,7 +340,7 @@ Cleanup:
 
 int __fastcall wincrypto_md5(char* data, int datalen, char* result) { return wincrypto_hash(BCRYPT_MD5_ALGORITHM, data, datalen, result, 16); }
 int __fastcall wincrypto_sha256(char* data, int datalen, char* result) { return wincrypto_hash(BCRYPT_SHA256_ALGORITHM, data, datalen, result, 32); }
-int __fastcall wincrypto_sha384(char* data, int datalen, char* result) { return wincrypto_hash(BCRYPT_SHA384_ALGORITHM, data, datalen, result, 32); }
+int __fastcall wincrypto_sha384(char* data, int datalen, char* result) { return wincrypto_hash(BCRYPT_SHA384_ALGORITHM, data, datalen, result, 48); }
 
 // Sign the data with the Mesh Agent certificate and return a PKCS7 result.
 int __fastcall wincrypto_sign(wincrypto_object j, char* data, int len, char** signature)
