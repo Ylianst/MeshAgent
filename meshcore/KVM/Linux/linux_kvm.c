@@ -324,7 +324,7 @@ void* kvm_mainloopinput(void* parm)
 	int ptr = 0;
 	int ptr2 = 0;
 	int len = 0;
-	char* pchRequest2[30000];
+	char pchRequest2[30000];
 	ssize_t cbBytesRead = 0;
 
 	while (!g_shutdown)

@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "linux_compression.h"
+#include "../../../microstack/ILibParsers.h";
 
 #if defined(JPEGMAXBUF)
 	#define MAX_TILE_SIZE JPEGMAXBUF
@@ -40,7 +41,7 @@ void init_destination(j_compress_ptr cinfo)
 {
 	JOCTET * next_output_byte;
 	if (jpeg_buffer != NULL) { free(jpeg_buffer); }
-	jpeg_buffer = malloc(MAX_BUFFER);
+	if ((jpeg_buffer = malloc(MAX_BUFFER)) == NULL) { ILIBCRITICALEXIT(254); }
 	jpeg_buffer_length = 0;
 	next_output_byte = jpeg_buffer;
 	cinfo->dest->next_output_byte = next_output_byte;
@@ -52,7 +53,7 @@ boolean empty_output_buffer(j_compress_ptr cinfo)
 	JOCTET * next_output_byte;
 
 	jpeg_buffer_length += MAX_BUFFER;
-	jpeg_buffer = (unsigned char *) realloc(jpeg_buffer, jpeg_buffer_length + MAX_BUFFER);
+	if ((jpeg_buffer = (unsigned char *)realloc(jpeg_buffer, jpeg_buffer_length + MAX_BUFFER)) == NULL) { ILIBCRITICALEXIT(254); }
 	next_output_byte = jpeg_buffer + jpeg_buffer_length;
 	cinfo->dest->next_output_byte = next_output_byte;
 	cinfo->dest->free_in_buffer = MAX_BUFFER;
@@ -78,7 +79,7 @@ void term_destination (j_compress_ptr cinfo)
 	else 
 #endif
 	{
-		jpeg_buffer = (unsigned char *) realloc(jpeg_buffer, jpeg_buffer_length);
+		if ((jpeg_buffer = (unsigned char *)realloc(jpeg_buffer, jpeg_buffer_length)) == NULL) { ILIBCRITICALEXIT(254); }
 	}
 }
 
