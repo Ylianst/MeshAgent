@@ -189,15 +189,14 @@ int __fastcall utilx_readfile2(char* filename, char** data)
 	{
 		*data = malloc(1024);
 		if (*data == NULL) { fclose(pFile); return 0; }
-		do
+		while((len = fread((*data) + count, 1, 1023, pFile))>0)
 		{
-			len = fread((*data) + count, 1, 1023, pFile);
 			count += len;
 			if (len == 1023)
 			{
 				if ((*data = realloc(*data, count + 1024)) == NULL) { ILIBCRITICALEXIT(254); }
 			}
-		} while (len == 100);
+		} 
 		(*data)[count] = 0;
 		fclose(pFile);
 	}
