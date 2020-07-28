@@ -5556,6 +5556,7 @@ struct parser_result* ILibParseString(char* buffer, int offset, int length, cons
 	int TokenLength = 0;
 	struct parser_result* RetVal;
 	struct parser_result_field *p_resultfield;
+	if (offset > 0) { buffer += offset; offset = 0; }
 
 	if ((RetVal = (struct parser_result*)malloc(sizeof(struct parser_result))) == NULL) ILIBCRITICALEXIT(254);
 	RetVal->FirstResult = NULL;
