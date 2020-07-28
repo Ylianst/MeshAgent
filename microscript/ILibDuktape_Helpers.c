@@ -293,6 +293,28 @@ int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyNam
 	}
 	return retVal;
 }
+void *Duktape_GetHeapptrIndexProperty(duk_context *ctx, duk_idx_t i, duk_uarridx_t x)
+{
+	void *ret = NULL;
+	duk_get_prop_index(ctx, i, x);					// [obj]
+	ret = duk_get_heapptr(ctx, -1);
+	duk_pop(ctx);									// ...
+	return(ret);
+}
+int Duktape_GetIntPropertyValueFromHeapptr(duk_context *ctx, void *h, char *propertyName, int defaultValue)
+{
+	duk_push_heapptr(ctx, h);
+	int ret = Duktape_GetIntPropertyValue(ctx, -1, propertyName, defaultValue);
+	duk_pop(ctx);
+	return(ret);
+}
+void *Duktape_GetHeapptrPropertyValueFromHeapptr(duk_context *ctx, void *h, char *propertyName)
+{
+	duk_push_heapptr(ctx, h);
+	void *ret = Duktape_GetHeapptrProperty(ctx, -1, propertyName);
+	duk_pop(ctx);
+	return(ret);
+}
 void Duktape_CreateEnum(duk_context *ctx, char* enumName, char **fieldNames, int *fieldValues, int numFields)
 {
 	duk_push_global_object(ctx);

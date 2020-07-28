@@ -31,12 +31,14 @@ typedef struct ILibDuktape_EventEmitter
 {
 	duk_context *ctx;
 	void *object;
-	void *tmpObject;
-	void *lastReturnValue;
+	void *table;
 	void *retValTable;
+	void *lastReturnValue;
 	unsigned int *totalListeners;
+	const char *listenerCountTable;
+	size_t listenerCountTableLength;
+	sem_t listenerCountTableLock;
 	ILibDuktape_EventEmitter_Types eventType;
-	ILibHashtable eventTable;
 }ILibDuktape_EventEmitter;
 typedef void(*ILibDuktape_EventEmitter_HookHandler)(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback);
 
@@ -47,7 +49,6 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromThis(duk_conte
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromObject(duk_context *ctx, void *objHeapptr);
 
 void ILibDuktape_EventEmitter_Init(duk_context *ctx);
-int ILibDuktape_EventEmitter_GetEventCount(ILibDuktape_EventEmitter *emitter);
 void ILibDuktape_EventEmitter_RemoveAllListeners(ILibDuktape_EventEmitter *emitter, char *eventName);								// Invokes JavaScript method EventEmitter.removeAllListeners()
 void ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter *emitter, char *eventName);									// Create Event with virtual dispatcher
 int ILibDuktape_EventEmitter_AddOnce(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);							// Add native event handler 'once'
@@ -60,6 +61,7 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 
 #define ILibDuktape_EventEmitter_AddOnceEx2(ctx, idx, eventName, func, argCount) ILibDuktape_EventEmitter_AddOnceEx3(ctx, idx, eventName, func)
 #define ILibDuktape_EventEmitter_SetupEmit(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "emit");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
+#define ILibDuktape_EventEmitter_SetupEmitEx(ctx, idx, eventName) duk_prepare_method_call(ctx, idx, "emit");duk_push_string(ctx, eventName);
 #define ILibDuktape_EventEmitter_SetupOn(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "on");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
 #define ILibDuktape_EventEmitter_SetupPrependOnce(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "prependOnceListener");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)
 #define ILibDuktape_EventEmitter_SetupRemoveListener(ctx, heapptr, eventName) duk_push_heapptr((ctx), heapptr);duk_get_prop_string((ctx), -1, "removeListener");duk_swap_top((ctx), -2);duk_push_string((ctx), eventName)

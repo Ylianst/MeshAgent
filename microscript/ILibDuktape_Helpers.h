@@ -96,6 +96,9 @@ void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyNa
 void *Duktape_GetHeapptrProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
 void *Duktape_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyName, duk_size_t* bufferLen);
 #define Duktape_GetBufferProperty(ctx, i, propertyName) Duktape_GetBufferPropertyEx(ctx, i, propertyName, NULL)
+void *Duktape_GetHeapptrIndexProperty(duk_context *ctx, duk_idx_t i, duk_uarridx_t x);
+int Duktape_GetIntPropertyValueFromHeapptr(duk_context *ctx, void *h, char *propertyName, int defaultValue);
+void *Duktape_GetHeapptrPropertyValueFromHeapptr(duk_context *ctx, void *h, char *propertyName);
 
 char* Duktape_Duplicate_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len);
 #define Duktape_Duplicate_GetStringPropertyValue(ctx, i, propertyName, defaultValue) Duktape_Duplicate_GetStringPropertyValueEx(ctx, i, propertyName, defaultValue, NULL)
@@ -112,6 +115,9 @@ extern duk_ret_t ILibDuktape_EventEmitter_DefaultNewListenerHandler(duk_context 
 #define duk_array_join(ctx, i, str) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "join");duk_swap_top(ctx, -2);duk_push_string(ctx, str);duk_pcall_method(ctx, 1);
 #define duk_array_unshift(ctx, i) duk_dup(ctx, i);duk_get_prop_string(ctx, -1, "unshift");duk_swap_top(ctx, -2);duk_dup(ctx, -3);duk_remove(ctx, -4);duk_pcall_method(ctx, 1);duk_pop(ctx);
 #define duk_array_partialIncludes(ctx, i, str) duk_prepare_method_call(ctx, i, "partialIncludes");duk_push_string(ctx, str);duk_pcall_method(ctx, 1);
+#define duk_array_clone(ctx, i) duk_prepare_method_call(ctx, i, "slice");if(duk_pcall_method(ctx, 0)!=0){duk_pop(ctx);duk_push_array(ctx);}
+#define duk_array_remove(ctx, i, x) duk_prepare_method_call(ctx, i, "splice");duk_push_int(ctx,x);duk_push_int(ctx,1);duk_pcall_method(ctx, 2);duk_pop(ctx);
+#define duk_array_replace(ctx, i, ix, str) duk_prepare_method_call(ctx, i, "splice");duk_push_int(ctx, ix);duk_push_int(ctx, 1);duk_push_string(ctx,str);duk_pcall_method(ctx, 3);duk_pop(ctx);
 
 #define duk_events_setup_on(ctx, i, name, func) duk_prepare_method_call(ctx, i, "on");duk_push_string(ctx, name);duk_push_c_function(ctx, func, DUK_VARARGS);
 #define duk_events_newListener(ctx, i, name, func) duk_events_setup_on(ctx, i, "newListener", ILibDuktape_EventEmitter_DefaultNewListenerHandler);duk_push_string(ctx, name);duk_put_prop_string(ctx, -2, "event_name");duk_push_c_function(ctx, func, DUK_VARARGS);duk_put_prop_string(ctx, -2, "event_callback");if(duk_pcall_method(ctx, 2)!=0){printf("oops\n");ILibDuktape_Process_UncaughtExceptionEx(ctx, "duk_events_newListener (%s,%d)", __FILE__, __LINE__);}duk_pop(ctx);

@@ -2527,7 +2527,6 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	}
 	duk_pop(ctx);																		// ...
 
-	if (exitHandler != NULL) { ILibDuktape_Helper_AddHeapFinalizer(ctx, exitHandler, exitUser); }
 
 	// Setup the permissions on this engine. JavaScript will only be allowed to access the libraries it has access to.
 	if ((securityFlags & SCRIPT_ENGINE_NO_NETWORK_ACCESS) == 0)
@@ -2547,11 +2546,13 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 
 	ILibDuktape_SHA256_Init(ctx);					// SHA256 as node writable stream
 	ILibDuktape_EncryptionStream_init(ctx);
-	ILibDuktape_EventEmitter_Init(ctx);				// event emitter
 	ILibDuktape_Polyfills_Init(ctx);				// Various Polyfills
+	ILibDuktape_EventEmitter_Init(ctx);				// event emitter
 	ILibDuktape_MemoryStream_Init(ctx);				// Add MemoryStream support
 	ILibDuktape_NetworkMonitor_Init(ctx);
 	ILibDuktape_CompressedStream_init(ctx);
+	
+	if (exitHandler != NULL) { ILibDuktape_Helper_AddHeapFinalizer(ctx, exitHandler, exitUser); }
 
 	Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 #ifdef WIN32
