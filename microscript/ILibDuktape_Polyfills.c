@@ -482,13 +482,52 @@ duk_ret_t ILibDuktape_Polyfills_Array_partialIncludes(duk_context *ctx)
 	duk_push_int(ctx, -1);
 	return(1);
 }
+duk_ret_t ILibDuktape_Polyfills_Array_findIndex(duk_context *ctx)
+{
+	duk_idx_t nargs = duk_get_top(ctx);
+	duk_push_this(ctx);								// [array]
+
+	duk_size_t sz = duk_get_length(ctx, -1);
+	duk_uarridx_t i;
+
+	for (i = 0; i < sz; ++i)
+	{
+		duk_dup(ctx, 0);							// [array][func]
+		if (nargs > 1 && duk_is_function(ctx, 1))
+		{
+			duk_dup(ctx, 1);						// [array][func][this]
+		}
+		else
+		{
+			duk_push_this(ctx);						// [array][func][this]
+		}
+		duk_get_prop_index(ctx, -3, i);				// [array][func][this][element]
+		duk_push_uint(ctx, i);						// [array][func][this][element][index]
+		duk_push_this(ctx);							// [array][func][this][element][index][array]
+		duk_call_method(ctx, 3);					// [array][ret]
+		if (!duk_is_undefined(ctx, -1) && duk_is_boolean(ctx, -1) && duk_to_boolean(ctx, -1) != 0)
+		{
+			duk_push_uint(ctx, i);
+			return(1);
+		}
+		duk_pop(ctx);								// [array]
+	}
+	duk_push_int(ctx, -1);
+	return(1);
+}
 void ILibDuktape_Polyfills_Array(duk_context *ctx)
 {
-	// Polyfill 'Array.includes'
 	duk_get_prop_string(ctx, -1, "Array");											// [Array]
 	duk_get_prop_string(ctx, -1, "prototype");										// [Array][proto]
+
+	// Polyfill 'Array.includes'
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "includes", ILibDuktape_Polyfills_Array_includes, 1);
+
+	// Polyfill 'Array.partialIncludes'
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "partialIncludes", ILibDuktape_Polyfills_Array_partialIncludes, 1);
+
+	// Polyfill 'Array.findIndex'
+	ILibDuktape_CreateProperty_InstanceMethod(ctx, "findIndex", ILibDuktape_Polyfills_Array_findIndex, DUK_VARARGS);
 	duk_pop_2(ctx);																	// ...
 }
 void ILibDuktape_Polyfills_String(duk_context *ctx)
