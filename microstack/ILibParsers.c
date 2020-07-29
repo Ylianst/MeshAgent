@@ -3333,7 +3333,7 @@ void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int b
 				state->handler = handler;
 				state->fileHandle = h;
 				state->user = user;
-				state->p = (void*)(uintptr_t)bufferLen;
+				state->p = (void*)(uintptr_t)bytesRead;
 
 				ILibChain_RunOnMicrostackThreadEx2(chain, ILibChain_ReadEx2_UnwindHandler, state, 1);
 			}			
