@@ -3290,6 +3290,13 @@ ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p,
 		return(ILibTransport_DoneState_COMPLETE);
 	}
 }
+
+void ILibChain_ReadEx2_UnwindHandler(void *chain, void *user)
+{
+	ILibChain_ReadEx_data *state = (ILibChain_ReadEx_data*)user;
+	state->handler(chain, state->fileHandle, ILibWaitHandle_ErrorStatus_NONE, state->buffer, (int)(uintptr_t)state->p, state->user);
+	free(state);
+}
 void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
 {
 	DWORD bytesRead = 0;
@@ -3318,7 +3325,18 @@ void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int b
 	{
 		if (bytesRead > 0)
 		{
-			if (handler != NULL) { handler(chain, h, ILibWaitHandle_ErrorStatus_NONE, buffer, bytesRead, user); }
+			if (handler != NULL)
+			{
+				ILibChain_ReadEx_data *state;
+				ILibMemory_AllocateRaw(state, sizeof(ILibChain_ReadEx_data));
+				state->buffer = buffer;
+				state->handler = handler;
+				state->fileHandle = h;
+				state->user = user;
+				state->p = (void*)(uintptr_t)bufferLen;
+
+				ILibChain_RunOnMicrostackThreadEx2(chain, ILibChain_ReadEx2_UnwindHandler, state, 1);
+			}			
 		}
 		else
 		{
