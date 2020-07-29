@@ -929,6 +929,7 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 				ILibDuktape_DuplexStream_WriteData(winIPC->ds, winIPC->buffer + winIPC->bufferOffset, winIPC->totalRead);
 			}
 			if (winIPC->unshiftedBytes > winIPC->totalRead) { winIPC->unshiftedBytes = winIPC->totalRead; }
+			consumed = winIPC->totalRead - winIPC->unshiftedBytes;
 			winIPC->bufferOffset += (winIPC->totalRead - winIPC->unshiftedBytes);
 			winIPC->totalRead -= (winIPC->totalRead - winIPC->unshiftedBytes);
 		} while (winIPC->paused == 0 && consumed != 0 && winIPC->totalRead > 0);
