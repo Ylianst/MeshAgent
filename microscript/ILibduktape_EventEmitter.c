@@ -778,7 +778,7 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(retVal, "newListener");
 	ILibDuktape_EventEmitter_CreateEventEx(retVal, "newListener2");
 
-	duk_events_setup_on(ctx, -1, "newListener", ILibDuktape_EventEmitter_listeners_tableinit);		// [on][this][newListener][func]
+	duk_events_setup_on(ctx, -1, "newListener2", ILibDuktape_EventEmitter_listeners_tableinit);		// [on][this][newListener][func]
 	duk_push_int(ctx, 1); duk_put_prop_string(ctx, -2, "add");
 	duk_pcall_method(ctx, 2); duk_pop(ctx);															// ...
 
