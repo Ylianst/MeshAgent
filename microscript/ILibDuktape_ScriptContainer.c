@@ -599,20 +599,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_env(duk_context *ctx)
 duk_ret_t ILibDuktape_ScriptContainer_Process_Finalizer(duk_context *ctx)
 {
 	// We need to dispatch the 'exit' event
-	int exitCode = 0;
 	duk_push_this(ctx);											// [process]
 	ILibChain_Link *link = (ILibChain_Link*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ScriptContainer_Signal_ListenerPtr);
 
-	if (duk_has_prop_string(ctx, -1, "\xFF_ExitCode"))
-	{
-		duk_get_prop_string(ctx, -1, "\xFF_ExitCode");			// [process][exitCode]
-		exitCode = duk_get_int(ctx, -1);
-		duk_pop(ctx);											// [process]
-	}
-	ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "exit");	// [emit][this]['exit']
-	duk_push_int(ctx, exitCode);												// [emit][this]['exit'][exitCode]
-	duk_call_method(ctx, 2);
-	
 #ifdef _POSIX
 	struct sigaction action;
 
@@ -1165,6 +1154,12 @@ duk_ret_t ILibDuktape_ScriptContainer_removeListenerSink(duk_context *ctx)
 	return(0);
 }
 
+duk_ret_t ILibDuktape_Process_Exitting(duk_context *ctx)
+{
+	duk_push_boolean(ctx, (duk_bool_t)duk_ctx_shutting_down(ctx));
+	return(1);
+}
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -1338,6 +1333,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_EventEmitter_AddHook(emitter, "SIGTERM", ILibDuktape_ScriptContainer_Process_SIGTERM_Hook);
 	ILibDuktape_EventEmitter_AddHook(emitter, "SIGCHLD", ILibDuktape_ScriptContainer_Process_SIGCHLD_Hook);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "removeListener", ILibDuktape_ScriptContainer_removeListenerSink);
+	ILibDuktape_CreateEventWithGetter(ctx, "exitting", ILibDuktape_Process_Exitting);
 
 	ILibDuktape_CreateEventWithGetter(ctx, "argv0", ILibDuktape_ScriptContainer_Process_Argv0);
 	duk_push_int(ctx, 1);

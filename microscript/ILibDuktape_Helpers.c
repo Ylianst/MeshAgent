@@ -709,9 +709,21 @@ ILibDuktape_ContextData* ILibDuktape_GetContextData(duk_context *ctx)
 
 void Duktape_SafeDestroyHeap(duk_context *ctx)
 {
+	void *process = ILibDuktape_GetProcessObject(ctx);
 	ILibDuktape_ContextData *ctxd = duk_ctx_context_data(ctx);
-	
 	ctxd->flags |= duk_destroy_heap_in_progress;
+
+	if (process != NULL)
+	{
+		duk_idx_t top = duk_get_top(ctx);
+		duk_push_heapptr(ctx, process);												// [process]
+		int exitCode = Duktape_GetIntPropertyValue(ctx, -1, ILibDuktape_Process_ExitCode, 0);
+		ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, -1), "exit");	// [emit][this]['exit']
+		duk_push_int(ctx, exitCode);												// [emit][this]['exit'][exitCode]
+		duk_pcall_method(ctx, 2);
+		duk_set_top(ctx, top);
+	}
+
 	duk_destroy_heap(ctx);
 
 	if (ILibLinkedList_GetCount(ctxd->threads) > 0)
