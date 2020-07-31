@@ -226,7 +226,37 @@ function linux_messageBox()
                         }
                     }
                 });
-
+                Object.defineProperty(ret, "extra", {
+                    get: function ()
+                    {
+                        if (this._extra == null)
+                        {
+                            var uid, xinfo;
+                            try
+                            {
+                                uid = require('user-sessions').consoleUid();
+                                xinfo = require('monitor-info').getXInfo(uid);
+                            }
+                            catch (e)
+                            {
+                                uid = 0;
+                                xinfo = require('monitor-info').getXInfo(0);
+                            }
+                            if (xinfo == null) { return (false); }
+                            var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdin.write(location + ' --help-all | grep extra-button\nexit\n');
+                            child.stderr.on('data', function (e) { });
+                            child.waitExit();
+                            Object.defineProperty(this, "_extra", { value: child.stdout.str.trim() == '' ? false : true });
+                            return (this._extra);
+                        }
+                        else
+                        {
+                            return (this._extra);
+                        }
+                    }
+                });
                 Object.defineProperty(ret, "version", {
                     get: function ()
                     {
