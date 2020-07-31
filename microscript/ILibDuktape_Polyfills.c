@@ -2403,9 +2403,16 @@ duk_ret_t ILibDuktape_ChainViewer_getSnapshot(duk_context *ctx)
 	ILibForceUnBlockChain(duk_ctx_chain(ctx));
 	return(1);
 }
+duk_ret_t ILibDutkape_ChainViewer_cleanup(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	void *link = Duktape_GetPointerProperty(ctx, -1, "pointer");
+	ILibChain_SafeRemove(duk_ctx_chain(ctx), link);
+	return(0);
+}
 void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 {
-	duk_push_object(ctx);			// [viewer]
+	duk_push_object(ctx);													// [viewer]
 
 	ILibTransport *t = (ILibTransport*)ILibChain_Link_Allocate(sizeof(ILibTransport), 2*sizeof(void*));
 	t->ChainLink.MetaData = "ILibDuktape_ChainViewer";
@@ -2417,6 +2424,11 @@ void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "getSnapshot", ILibDuktape_ChainViewer_getSnapshot, 0);
 	duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_ChainViewer_PromiseList);
 	ILibPrependToChain(chain, (void*)t);
+
+	duk_push_heapptr(ctx, ILibDuktape_GetProcessObject(ctx));				// [viewer][process]
+	duk_events_setup_on(ctx, -1, "exit", ILibDutkape_ChainViewer_cleanup);	// [viewer][process][on][this][exit][func]
+	duk_push_pointer(ctx, t); duk_put_prop_string(ctx, -2, "pointer");
+	duk_pcall_method(ctx, 2); duk_pop_2(ctx);								// [viewer]
 }
 
 duk_ret_t ILibDuktape_httpHeaders(duk_context *ctx)

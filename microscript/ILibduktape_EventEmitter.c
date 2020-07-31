@@ -217,6 +217,8 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	duk_push_this(ctx);														// [object]
 	
 	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_EventEmitter_Data);
+	if (!ILibMemory_CanaryOK(data)) { return(0); } // This object has been finalized already, so we need to abort
+
 	char *objid = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown");
 	duk_push_heapptr(ctx, data->retValTable);								// [object][retTable]
 	duk_push_heapptr(ctx, data->table);										// [object][retTable][table]
@@ -539,7 +541,8 @@ duk_ret_t ILibDuktape_EventEmitter_EmbeddedFinalizer(duk_context *ctx)
 	sem_destroy(&(data->listenerCountTableLock));
 
 	// We need to clear the Native Dispatcher, while destroying the Hashtable
-	memset(data, 0, sizeof(ILibDuktape_EventEmitter));
+	
+	memset(ILibMemory_RawPtr(data), 0, ILibMemory_RawSize(data));
 	return(0);
 }
 duk_ret_t ILibDuktape_EventEmitter_emitReturnValue(duk_context *ctx)
