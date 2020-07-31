@@ -59,7 +59,11 @@ function localsystem_createTrayIcon(trayOptions)
                 }
             }
         });
-        this.ret._cleanup = function _cleanup() { _cleanup.ret._dispatcher.invoke('remove', [_cleanup.ret.tid]); };
+        this.ret._cleanup = function _cleanup()
+        {
+            _cleanup.ret._dispatcher.invoke('remove', [_cleanup.ret.tid]);
+            _cleanup.ret.connection.end();
+        };
         this.ret._cleanup.ret = this.ret;
         process.on('exit', this.ret._cleanup);
     });
