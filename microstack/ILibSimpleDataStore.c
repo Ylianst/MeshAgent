@@ -733,6 +733,7 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 // Store a key/value pair in the data store
 __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash)
 {
+	int keyAllocated = 0;
 	int allocated = 0;
 	int ret;
 	char hash[SHA384HASHSIZE];
@@ -761,6 +762,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 
 		// Calculate the key to use for the compressed record entry
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(int));
+		keyAllocated = 1;
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
 		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, keyLen);
 		key = tmpkey;
@@ -795,6 +797,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 		// and re-write this record into the cache
 		//
 		if (allocated) { free(entry); }
+		if (keyAllocated) { ILibMemory_Free(key); }
 		ILibSimpleDataStore_CachedEx(root, origkey, origkeylen, value, valueLen, vhash);
 		ILibSimpleDataStore_ReOpenReadOnly(root, NULL);
 		if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
@@ -807,6 +810,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	{
 		root->warningSink(root, root->fileSize, root->warningSinkUser);
 	}
+	if (keyAllocated) { ILibMemory_Free(key); }
 	return(ret);
 }
 
