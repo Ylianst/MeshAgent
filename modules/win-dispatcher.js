@@ -73,7 +73,7 @@ function dispatch(options)
             s.write(h);
             s.write(d);
         }
-        d = Buffer.from(JSON.stringify({ command: 'launch', value: { module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
+        d = Buffer.from(JSON.stringify({ command: 'launch', value: { split: this.parent.options.launch.split?true:false, module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
         h.writeUInt32LE(d.length + 4);
         s.write(h);
         s.write(d);
@@ -156,10 +156,18 @@ function connect(ipc)
                 case 'launch':
                     var obj = require(cmd.value.module);
                     global._proxyStream = obj[cmd.value.method].apply(obj, cmd.value.args);
-                    global._proxyStream.pipe(this, { end: false });
-                    this.pipe(global._proxyStream, { end: false });
-
-                    global._proxyStream.on('end', function () { process.exit(); });
+                    if (cmd.value.split)
+                    {
+                        global._proxyStream.out.pipe(this, { end: false });
+                        this.pipe(global._proxyStream.in, { end: false });
+                        global._proxyStream.out.on('end', function () { process.exit(); });
+                    }
+                    else
+                    {
+                        global._proxyStream.pipe(this, { end: false });
+                        this.pipe(global._proxyStream, { end: false });
+                        global._proxyStream.on('end', function () { process.exit(); });
+                    }
                     this.on('end', function () { process.exit(); });
                     break;
             }

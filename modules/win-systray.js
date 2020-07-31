@@ -21,11 +21,57 @@ var WM_CLOSE = 0x0010;
 
 function postMessage(tid)
 {
-    console.log('Post WM_QUIT to: ' + tid);
     var gm = require('_GenericMarshal');
     var user = gm.CreateNativeProxy('User32.dll');
     user.CreateMethod('PostThreadMessageA');
-    user.PostThreadMessageA(tid, WM_QUIT, 0, 0);
+    user.PostThreadMessageA(tid, WM_QUIT);
+}
+
+function localsystem_createTrayIcon(trayOptions)
+{
+    var retVal = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    if (trayOptions.user == null)
+    {
+        trayOptions.user = require('user-sessions').getUsername(require('user-sessions').consoleUid());
+    }
+    trayOptions.split = true;
+    retVal.trayOptions = trayOptions;
+    retVal._dispatcher = require('win-dispatcher').dispatch({ user: trayOptions.user, modules: [], launch: { module: 'win-systray', method: 'createTrayIcon', args: [trayOptions], split: true } });
+    retVal._dispatcher.ret = retVal;
+    retVal._dispatcher.on('connection', function (connection)
+    {
+        this.ret.connection = connection;
+        this.ret.connection.ret = this.ret;
+        this.ret.connection.on('data', function (c)
+        {
+            var val = c.toString();
+            if (val.includes('<<TID:'))
+            {
+                var t = val.split('<<TID:').pop().split('>>').shift();
+                this.ret.tid = parseInt(t);
+            }
+            else if (val.includes('<<menuitem:'))
+            {
+                var i = parseInt(val.split('<<menuitem:').pop().split('>>').shift());
+                if (this.ret.trayOptions.menuItems[i].func != null)
+                {
+                    this.ret.trayOptions.menuItems[i].func.call(this.ret.trayOptions);
+                }
+            }
+        });
+        this.ret._cleanup = function _cleanup() { _cleanup.ret._dispatcher.invoke('remove', [_cleanup.ret.tid]); };
+        this.ret._cleanup.ret = this.ret;
+        process.on('exit', this.ret._cleanup);
+    });
+    retVal.remove = function ()
+    {
+        if (this._cleanup != null)
+        {
+            this._cleanup();
+            process.removeListener('exit', this._cleanup);
+        }
+    };
+    return (retVal);
 }
 
 function createTrayIcon(trayOptions)
@@ -48,52 +94,65 @@ function createTrayIcon(trayOptions)
     {
         options.env[c1e] = process.env[c1e];
     }
-    try
+
+    if (!trayOptions.split)
     {
-        options.uid = trayOptions.tsid == null ? require('user-sessions').consoleUid() : trayOptions.tsid;
-        if (options.uid == (cid = require('user-sessions').getProcessOwnerName(process.pid).tsid))
+        try
         {
-            delete options.uid;
-        }
-        else
-        {
-            if (trayOptions.tsid != null && cid != 0)
+            options.uid = trayOptions.tsid == null ? require('user-sessions').consoleUid() : trayOptions.tsid;
+            if (options.uid == (cid = require('user-sessions').getProcessOwnerName(process.pid).tsid))
             {
-                retVal._rej('Insufficient permission to set tray icon as uid: ' + trayOptions.tsid);
-                return (retVal);
+                delete options.uid;
             }
-            retVal.options.type = require('child_process').SpawnTypes.USER;
+            else
+            {
+                if (trayOptions.tsid != null && cid != 0)
+                {
+                    retVal._rej('Insufficient permission to set tray icon as uid: ' + trayOptions.tsid);
+                    return (retVal);
+                }
+                retVal.options.type = require('child_process').SpawnTypes.USER;
+            }
         }
-    }
-    catch (ee)
-    {
-        retVal._rej('Cannot set tray icon when a user is not logged in');
-        return (retVal);
+        catch (ee)
+        {
+            retVal._rej('Cannot set tray icon when a user is not logged in');
+            return (retVal);
+        }
     }
 
     retVal.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], retVal.options);
     retVal.child.ret = retVal;
     retVal.child.on('exit', function () { this.ret._res(); });
     retVal.child.descriptorMetadata = 'win-systray';
-    retVal.child.stdout.on('data', function (c) 
-    {
-        var val = c.toString();
-        if(val.includes('<<TID:'))
-        {
-            var t = val.split('<<TID:').pop().split('>>').shift();
-            this.parent.ret.tid = parseInt(t);
-        }
-        else if (val.includes('<<menuitem:'))
-        {
-            var i = parseInt(val.split('<<menuitem:').pop().split('>>').shift());
-            if (this.parent.ret.trayOptions.menuItems[i].func != null)
-            {
-                this.parent.ret.trayOptions.menuItems[i].func.call(this.parent.ret.trayOptions);
-            }
-        }
-    });
-    retVal.child.stderr.on('data', function (c) { });
 
+    if (!trayOptions.split)
+    {
+        retVal.child.stdout.on('data', function (c)
+        {
+            var val = c.toString();
+            if (val.includes('<<TID:'))
+            {
+                var t = val.split('<<TID:').pop().split('>>').shift();
+                this.parent.ret.tid = parseInt(t);
+            }
+            else if (val.includes('<<menuitem:'))
+            {
+                var i = parseInt(val.split('<<menuitem:').pop().split('>>').shift());
+                if (this.parent.ret.trayOptions.menuItems[i].func != null)
+                {
+                    this.parent.ret.trayOptions.menuItems[i].func.call(this.parent.ret.trayOptions);
+                }
+            }
+        });
+    }
+    else
+    {
+        retVal.out = retVal.child.stdout;
+        retVal.in = retVal.child.stdin;
+    }
+
+    retVal.child.stderr.on('data', function (c) { });
     retVal.child.stdin.write('$signature_gctid = $env:_tidsig\r\n');
     retVal.child.stdin.write('Add-Type -MemberDefinition $signature_gctid -Name MyName -Namespace MyNameSpace -PassThru\r\n');
     retVal.child.stdin.write('$tid = [MyNameSpace.MyName]::GetCurrentThreadId();\r\n');
@@ -129,15 +188,34 @@ function createTrayIcon(trayOptions)
     retVal.child.stdin.write('[void][System.Windows.Forms.Application]::Run($appContext)\r\n');
     retVal.child.stdin.write('$Main_Tool_Icon.dispose();\r\n');
     retVal.child.stdin.write('exit\r\n');
-    retVal._cleanup = function _cleanup() { postMessage(_cleanup.self.tid); };
+    retVal._cleanup = function _cleanup(tid)
+    {
+        if (process.exitting)
+        {
+            postMessage(_cleanup.self.tid);
+        }
+        else
+        {
+            postMessage(tid ? tid : _cleanup.self.tid);
+        }
+    };
     retVal._cleanup.self = retVal;
     process.on('exit', retVal._cleanup);
-    retVal.remove = function ()
+    retVal.remove = function (tid)
     {
-        this._cleanup();
+        this._cleanup(tid);
         process.removeListener('exit', this._cleanup);
     };
     return (retVal);
 }
 
-module.exports = { createTrayIcon: process.platform == 'win32' ? createTrayIcon : function () { throw (process.platform + ' not supported') } };
+if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
+{
+    module.exports = { createTrayIcon: process.platform == 'win32' ? localsystem_createTrayIcon : function () { throw (process.platform + ' not supported') } };
+}
+else
+{
+    module.exports = { createTrayIcon: process.platform == 'win32' ? createTrayIcon : function () { throw (process.platform + ' not supported') } };
+}
+
+    
