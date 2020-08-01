@@ -365,19 +365,44 @@ function linux_messageBox()
             ret._rej('This system cannot display a user dialog box when a user is not logged in');
             return (ret);
         }
-
+        if (Array.isArray(layout) && (!this.zenity || !this.zenity.extra))
+        {
+            ret._rej('This system does not support custom button layouts');
+            return (ret);
+        }
         if (this.zenity)
         {
-            ret._options = { title: title.trim(), caption: caption.trim(), timeout: timeout, layout: layout, zenity: this.zenity };
-
             // GNOME/ZENITY
-            if (this.zenity.timeout)
+            ret._options = { title: title.trim(), caption: caption.trim(), timeout: timeout, layout: layout, zenity: this.zenity };
+            var parms = ['zenity'];
+            if (Array.isArray(layout))
             {
-                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', layout==null?'--question':'--warning', '--title=' + title, '--text=' + caption, '--timeout=' + timeout], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                var i;
+                parms.push('--info');
+                for(i=0;i<layout.length;++i)
+                {
+                    if(i==0)
+                    {
+                        parms.push('--ok-label=' + layout[i]);
+                    }
+                    else
+                    {
+                        parms.push('--extra-button=' + layout[i]);
+                    }
+                }
             }
             else
             {
-                ret.child = require('child_process').execFile(this.zenity.path, ['zenity', layout == null ? '--question' : '--warning', '--title=' + title, '--text=' + caption], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+                parms.push(layout == null ? '--question' : '--warning');
+            }
+            parms.push('--title=' + title);
+            parms.push('--text=' + caption);
+            parms.push('--no-wrap');
+            if (this.zenity.timeout) { parms.push('--timeout=' + timeout); }
+
+            ret.child = require('child_process').execFile(this.zenity.path, parms, { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
+            if (this.zenity.timeout)
+            {
                 ret.child.timeout = setTimeout(function (c)
                 {
                     c.timeout = null;
@@ -385,13 +410,34 @@ function linux_messageBox()
                     c.kill();
                 }, timeout * 1000, ret.child);
             }
+
             ret.child.descriptorMetadata = 'zenity, message-box'
             ret.child.promise = ret;
             ret.child.stderr.str = ''; ret.child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            ret.child.stdout.on('data', function (chunk) { });
+            ret.child.stdout.ostr = ''; ret.child.stdout.on('data', function (chunk) { this.ostr += chunk.toString(); });
             ret.child.on('exit', function (code)
             {
                 if (this.timeout) { clearTimeout(this.timeout); }
+                if (Array.isArray(this.promise._options.layout))
+                {
+                    if (code == 0)
+                    {
+                        this.promise._res(this.promise._options.layout[0]);
+                    }
+                    else
+                    {
+                        var val = this.stdout.ostr.trim();
+                        for (var i = 1; i < this.promise._options.layout.length; ++i)
+                        {
+                            if (this.promise._options.layout[i] == val)
+                            {
+                                this.promise._res(val);
+                                return;
+                            }
+                        }
+                        this.promise._rej('timeout');
+                    }
+                }
                 switch (code)
                 {
                     case 0:
