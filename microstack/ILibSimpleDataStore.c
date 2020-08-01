@@ -142,6 +142,13 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int 
 				value = value + 1;
 				valueLen -= 2;
 			}
+			if (valueLen > 2 && strncmp(value, "0x", 2) == 0 && valueLen < 1024)
+			{
+				char *vtmp = ILibMemory_AllocateA((valueLen - 2) / 2);
+				util_hexToBuf(value + 2, valueLen - 2, vtmp);
+				value = vtmp;
+				valueLen = (int)ILibMemory_AllocateA_Size(value);
+			}
 		}
 	}
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;

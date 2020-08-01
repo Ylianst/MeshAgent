@@ -5173,7 +5173,6 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	// If in agent mode, setup the chain to be a mesh agent
 	if (connectAgent != 0) 
 	{
-		printf("MeshCentral2 Agent\r\n"); // MESH_AGENT_VERSION
 		if (MeshAgent_AgentMode(agentHost, argc, argv, 0) == 0) 
 		{
 			ILibStopChain(agentHost->chain); // Agent Error, stop the chain
@@ -5187,7 +5186,6 @@ void MeshAgent_ScriptMode_Dispatched(void *chain, void *user)
 }
 void MeshAgent_AgentMode_Dispatched(void *chain, void *user)
 {
-	printf("MeshCentral2 Agent\r\n"); // MESH_AGENT_VERSION
 	if (MeshAgent_AgentMode((MeshAgentHostContainer*)((void**)user)[0], ((int*)((void**)user)[1])[0], (char**)((void**)user)[2], 1) == 0)
 	{
 		ILibStopChain(((MeshAgentHostContainer*)((void**)user)[0])->chain);

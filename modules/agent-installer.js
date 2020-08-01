@@ -39,8 +39,16 @@ function installService(params)
         };
     if (process.platform == 'win32') { options.companyName = ''; }
     if (require('fs').existsSync(proxyFile)) { options.files = [{ source: proxyFile, newName: process.platform=='win32'?'MeshAgent.proxy':'meshagent.proxy' }]; }
-
+    
     var i;
+    if ((i = params.indexOf('--copy-msh="1"')) >= 0)
+    {
+        var mshFile = process.platform == 'win32' ? (process.execPath.split('.exe').join('.msh')) : (process.execPath + '.msh');
+        if (options.files == null) { options.files = []; }
+        options.files.push({ source: mshFile, newName: process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh' });
+        options.parameters.splice(i, 1);
+    }
+
     if ((i=params.indexOf('--_localService="1"'))>=0)
     {
         // install in place

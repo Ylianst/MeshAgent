@@ -108,6 +108,21 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 
+	if (integratedJavaScriptLen != 0 && integratedJavaScript != NULL && argc > 1)
+	{
+		int i;
+		for (i = 1; i < argc; ++i)
+		{
+			if (strcmp(argv[i], "--no-embedded=1") == 0)
+			{
+				free(integratedJavaScript);
+				integratedJavaScript = NULL;
+				integratedJavaScriptLen = 0;
+				break;
+			}
+		}
+	}
+
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], -1);
