@@ -635,6 +635,9 @@ function macos_messageBox()
     
     this.create = function create(title, caption, timeout, layout)
     {
+        caption = caption.split('\n').join('\\n');
+        if (Array.isArray(layout) && layout.length > 3) { throw ('This system only supports a maximum of 3 buttons'); }
+
         if (require('user-sessions').isRoot())
         {
             ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
