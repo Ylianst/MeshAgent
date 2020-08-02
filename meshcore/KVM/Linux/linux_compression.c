@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 #include "linux_compression.h"
-#include "../../../microstack/ILibParsers.h";
+#include "../../../microstack/ILibParsers.h"
 
 #if defined(JPEGMAXBUF)
 	#define MAX_TILE_SIZE JPEGMAXBUF

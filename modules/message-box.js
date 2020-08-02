@@ -635,12 +635,19 @@ function macos_messageBox()
     
     this.create = function create(title, caption, timeout, layout)
     {
+        var userLayout = Array.isArray(layout);
         caption = caption.split('\n').join('\\n');
-        if (Array.isArray(layout) && layout.length > 3) { throw ('This system only supports a maximum of 3 buttons'); }
+        if (Array.isArray(layout) && layout.length > 3)
+        {
+            ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            ret._rej('This system only supports a maximum of 3 buttons');
+            return (ret);
+        }
 
         if (require('user-sessions').isRoot())
         {
             ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+
             try
             {
                 ret.uid = require('user-sessions').consoleUid();
@@ -651,15 +658,13 @@ function macos_messageBox()
                 ret._rej('No users logged in');
                 return (ret);
             }
-            ret.user = (layout != null && typeof (layout) == 'object') ? true : false;
+            ret.user = userLayout;
             if (layout == null)
             {
-                userLayout = false;
                 layout = ['Yes', 'No'];
             }
             else if (typeof (layout) != 'object')
             {
-                userLayout = false;
                 layout = ['OK'];
             }
 
@@ -674,9 +679,10 @@ function macos_messageBox()
             ret.child.descriptorMetadata = 'message-box';
             ret.child.promise = ret;
             ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
-            ret.child.on('exit', function ()
+            ret.child.on('exit', function (code)
             {
                 var res = this.stdout.str.split('\x1e');
+                if (this.promise.user && !res[1]) { this.promise._res('Cancel'); }
                 if (!res[1]) { return; }
                 res = res[1].trim();
                 if (res == '_TIMEOUT_')
@@ -707,7 +713,6 @@ function macos_messageBox()
         }
 
 
-
         // Start Local Server
         var ret = this._initIPCBase();
         ret.metadata = 'message-box/create'
@@ -716,7 +721,7 @@ function macos_messageBox()
         {
             ret.layout = ['Yes', 'No'];
         }
-        else if(typeof(layout)!='object')
+        else if(!Array.isArray(layout))
         {
             ret.layout = ['OK'];
         }
@@ -1079,7 +1084,14 @@ function macos_messageBox()
                     {
                         if (this.stderr.str != '' && !this.stderr.str.includes('OpenGL'))
                         {
-                            this.that.end(translateObject({ command: 'ERROR', reason: this.stderr.str }));
+                            if (this.stderr.str.includes('(-128)'))
+                            {
+                                this.that.end(translateObject({ command: 'DIALOG', button: 'Cancel' }));
+                            }
+                            else
+                            {
+                                this.that.end(translateObject({ command: 'ERROR', reason: this.stderr.str }));
+                            }
                         }
                         else
                         {

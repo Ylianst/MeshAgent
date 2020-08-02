@@ -113,7 +113,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		int i;
 		for (i = 1; i < argc; ++i)
 		{
-			if (strcmp(argv[i], "--no-embedded=1") == 0)
+			if (strcmp(argv[i], "--no-embedded=1") == 0 || strcmp(argv[i], "--no-embedded=\"1\"") == 0)
 			{
 				free(integratedJavaScript);
 				integratedJavaScript = NULL;
