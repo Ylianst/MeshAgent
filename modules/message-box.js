@@ -420,7 +420,7 @@ function linux_messageBox()
                 if (this.timeout) { clearTimeout(this.timeout); }
                 if (Array.isArray(this.promise._options.layout))
                 {
-                    if (code == 0)
+                    if (code == 0 && ((process.platform == 'freebsd' && this.stdout.ostr.trim() == '') || process.platform != 'freebsd'))
                     {
                         this.promise._res(this.promise._options.layout[0]);
                     }
