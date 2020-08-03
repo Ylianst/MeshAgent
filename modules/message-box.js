@@ -365,13 +365,13 @@ function linux_messageBox()
             ret._rej('This system cannot display a user dialog box when a user is not logged in');
             return (ret);
         }
-        if (Array.isArray(layout) && (!this.zenity || !this.zenity.extra))
-        {
-            ret._rej('This system does not support custom button layouts');
-            return (ret);
-        }
         if (this.zenity)
         {
+            if (!this.zenity.extra && layout.length > 1)
+            {
+                ret._rej('This system does not support custom button layouts');
+                return (ret);
+            }
             // GNOME/ZENITY
             ret._options = { title: title.trim(), caption: caption.trim(), timeout: timeout, layout: layout, zenity: this.zenity };
             var parms = ['zenity'];
@@ -493,16 +493,58 @@ function linux_messageBox()
         }
         else if(this.kdialog)
         {
+            var msgparms = ['kdialog', '--title', title];
+            if (Array.isArray(layout))
+            {
+                if (layout.length > 3) { ret._rej('KDialog only supports up to 3 button layouts'); return (ret); }
+                ret.user = true;
+                switch(layout.length)
+                {
+                    case 0:
+                    case 1:
+                        msgparms.push('--msgbox');
+                        break;
+                    case 2:
+                        msgparms.push('--yesno');
+                        break;
+                    case 3:
+                        msgparms.push('--yesnocancel');
+                        break;
+                }
+                msgparms.push(caption);
+
+                for (var i = 0; i < layout.length; ++i)
+                {
+                    switch(i)
+                    {
+                        case 0:
+                            msgparms.push('--yes-label=' + layout[i]);
+                            break;
+                        case 1:
+                            msgparms.push('--no-label=' + layout[i]);
+                            break;
+                        case 2:
+                            msgparms.push('--cancel-label=' + layout[i]);
+                            break;
+                    }
+                }
+            }
+            else
+            {
+                msgparms.push(layout == null ? '--yesno' : '--msgbox');
+                msgparms.push(caption);
+            }
+
             if (process.platform != 'freebsd' && process.env['DISPLAY'])
             {
-                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, layout==null?'--yesno':'--msgbox', caption]);
+                ret.child = require('child_process').execFile(this.kdialog.path, msgparms);
                 ret.child.promise = ret;
             }
             else
             {
                 var xdg = require('user-sessions').findEnv(uid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                 if (!xinfo || !xinfo.display || !xinfo.xauthority) { ret._rej('Interal Error, could not determine X11/XDG env'); return (ret); }
-                ret.child = require('child_process').execFile(this.kdialog.path, ['kdialog', '--title', title, layout == null ? '--yesno' : '--msgbox', caption], { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
+                ret.child = require('child_process').execFile(this.kdialog.path, msgparms, { uid: uid, env: { DISPLAY: xinfo.display, XAUTHORITY: xinfo.xauthority, XDG_RUNTIME_DIR: xdg } });
                 ret.child.promise = ret;
             }
             ret.child.descriptorMetadata = 'kdialog, message-box'
@@ -513,22 +555,30 @@ function linux_messageBox()
             }, timeout * 1000, ret.child);
             ret.child.stdout.on('data', function (chunk) { });
             ret.child.stderr.on('data', function (chunk) { });
+            ret.child.buttons = layout;
             ret.child.on('exit', function (code)
             {
                 if (this.timeout)
                 {
                     clearTimeout(this.timeout);
-                    switch (code)
+                    if (this.promise.user)
                     {
-                        case 0:
-                            this.promise._res();
-                            break;
-                        case 1:
-                            this.promise._rej('denied');
-                            break;
-                        default:
-                            this.promise._rej('timeout');
-                            break;
+                        this.promise._res(this.buttons[code]);
+                    }
+                    else
+                    {
+                        switch (code)
+                        {
+                            case 0:
+                                this.promise._res();
+                                break;
+                            case 1:
+                                this.promise._rej('denied');
+                                break;
+                            default:
+                                this.promise._rej('timeout');
+                                break;
+                        }
                     }
                 }
                 else

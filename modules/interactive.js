@@ -110,7 +110,7 @@ limitations under the License.
     {
         if (s)
         {
-            if (process.platform == 'darwin')
+            if (process.platform == 'darwin' || require('message-box').kdialog)
             {
                 buttons.unshift('Setup');
             }
@@ -128,7 +128,7 @@ limitations under the License.
 
     if (process.platform != 'darwin')
     {
-        if ((require('message-box').zenity == null) || (!require('message-box').zenity.extra))
+        if (!require('message-box').kdialog && (require('message-box').zenity == null || (!require('message-box').zenity.extra)))
         {
             console.log('\n' + "This installer cannot run on this system.");
             console.log("Try installing/updating Zenity, and run again." + '\n');
@@ -143,6 +143,7 @@ limitations under the License.
     {
         msg = "Agent: " + (s.isRunning() ? "RUNNING" : "NOT RUNNING") + '\n';
     }
+
     msg += ("Device Group: " + msh.MeshName + '\n');
     msg += ("Server URL: " + msh.MeshServer + '\n');
 
@@ -189,7 +190,15 @@ limitations under the License.
                 msg = ("Device Group: " + msh.MeshName + '\n');
                 msg += ("Server URL: " + msh.MeshServer + '\n');
 
-                var d = require('message-box').create("MeshCentral Agent", msg, 99999, ["Disconnect"]);
+                if (process.platform != 'darwin')
+                {
+                    if(!require('message-box').zenity && require('message-box').kdialog)
+                    {
+                        msg += ('\nPress OK to Disconnect');
+                    }
+                }
+
+                var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Disconnect']);
                 d.then(function (v) { process.exit(); }).catch(function (v) { process.exit(); });
                 break;
             case "Uninstall":
