@@ -1331,6 +1331,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
 		kvm_server_mainloop((void*)0);
+		exit(0);
 		return(NULL);
 	}
 	else 
