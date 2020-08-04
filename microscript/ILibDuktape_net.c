@@ -1441,6 +1441,12 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_net_server_Finalizer(duk_context *ctx)
 {
+	duk_push_this(ctx);												// [server]
+	duk_eval_string(ctx, "require('fs');");							// [server][fs]
+	duk_prepare_method_call(ctx, -1, "unlinkSync");					// [server][fs][unlinkSync][this]
+	duk_get_prop_string(ctx, -4, ILibDuktape_net_server_IPCPath);	// [server][fs][unlinkSync][this][path]
+	duk_pcall_method(ctx, 1);										// [server][fs][ret]
+
 	void *chain = Duktape_GetChain(ctx);
 	ILibDuktape_net_server *server;
 	duk_get_prop_string(ctx, 0, ILibDuktape_net_Server_buffer);
