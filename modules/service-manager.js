@@ -1089,13 +1089,24 @@ function serviceManager()
                     child.waitExit();
                     return (child.stdout.str.trim() == 'running');
                 };
-                ret.isMe = function isMe()
+                ret.pid = function ()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onestatus | awk '{ split($6, res, \".\"); print res[1]; }'\nexit\n");
+                    child.stdin.write("service " + this.name + " onestatus | awk '");
+                    child.stdin.write('{ split($6, res, ".");  ');
+                    child.stdin.write('  cm=sprintf("ps -p %s -w", res[1]);');
+                    child.stdin.write('  system(cm); ')
+                    child.stdin.write('}\' | awk \'NR>1\' | awk \'');
+                    child.stdin.write('{');
+                    child.stdin.write('   if($5=="daemon:") { split($0, T, "["); split(T[2], X, "]"); print X[1]; } else { print $1; }');
+                    child.stdin.write('}\'\nexit\n');
                     child.waitExit();
-                    return (parseInt(child.stdout.str.trim()) == process.pid);
+                    return (parseInt(child.stdout.str.trim()));
+                };
+                ret.isMe = function isMe()
+                {
+                    return (this.pid() == process.pid);
                 };
                 ret.stop = function stop()
                 {
