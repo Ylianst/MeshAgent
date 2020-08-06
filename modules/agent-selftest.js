@@ -46,16 +46,43 @@ function start()
 {
     console.log('\nStarting Self Test...');
 
-    testConsoleHelp()
-        .then(function () { return (testAMT()); })
+    coreInfo()
+        .then(function () { return (testConsoleHelp()); })
         .then(function () { return (testCPUInfo()); })
         .then(function () { return (testSMBIOS()); })
+        .then(function () { return (testAMT()); })
         .then(function () { return (testTunnel()); })
         .then(function () { return (testTerminal()); })
         .then(function () { return (testKVM()); })
         .then(function () { return (testFileDownload()); })
         .then(function () { console.log('End of Self Test'); })
         .catch(function (v) { console.log(v); });
+}
+
+function coreInfo()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    console.log('   => Waiting for Agent Info');
+
+    ret.tester = this;
+    ret.handler = function handler(J)
+    {
+        if(J.action == 'coreinfo')
+        {
+            this.removeListener('command', handler);
+            console.log('      -> Agent Info received..............[OK]');
+            console.log('');
+            console.log('         ' + J.osdesc);
+            console.log('         ' + J.value);
+            console.log('');
+            handler.promise._res();
+        }
+    };
+    ret.handler.promise = ret;
+    ret.tester.on('command', ret.handler);
+    require('MeshAgent').emit('Connected', 3);
+
+    return (ret);
 }
 
 function testFileDownload()
@@ -244,7 +271,8 @@ function testAMT()
         {
             try
             {
-                JSON.parse(J.toString());
+                var str = '(function foo(){var x=' + J.toString().split('\n').join('').split('\r').join('') + '; return(x);})();';
+                eval(str);
                 console.log('   => Testing AMT Detection...............[OK]');
             }
             catch(e)

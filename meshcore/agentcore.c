@@ -3660,6 +3660,7 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	else
 	{
 		printf("[OK]\n");
+		agent->serverAuthState = 3;
 		ILibMemory_AllocateRaw(CoreModule, CoreModuleLen);
 		ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
 
