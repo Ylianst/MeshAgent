@@ -3640,6 +3640,19 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	//int CoreModuleTesterLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", NULL, 0);
 	//char *CoreModule, *CoreModuleTester;
 
+	char *argarray;
+	size_t argarrayLen;
+
+	argarrayLen = (size_t)ILibSimpleDataStore_Cached_GetJSONEx(agent->masterDb, NULL, 0);
+	ILibMemory_AllocateRaw(argarray, argarrayLen);
+	ILibSimpleDataStore_Cached_GetJSONEx(agent->masterDb, argarray, (int)argarrayLen);
+
+	duk_push_heapptr(agent->meshCoreCtx, ILibDuktape_GetProcessObject(agent->meshCoreCtx));	// [process]
+	duk_push_string(agent->meshCoreCtx, argarray);											// [process][string]
+	duk_json_decode(agent->meshCoreCtx, -1);												// [process][json]
+	duk_put_prop_string(agent->meshCoreCtx, -2, "\xFF_argArray");							// [process]
+	duk_pop(agent->meshCoreCtx);
+
 	printf("Agent Self Test...\n");
 	if (agent->coreTimeout != 0)
 	{

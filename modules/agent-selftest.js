@@ -75,6 +75,11 @@ function coreInfo()
             console.log('         ' + J.osdesc);
             console.log('         ' + J.value);
             console.log('');
+            if (process.argv.includes('--showCoreInfo="1"'))
+            {
+                console.log('\n' + JSON.stringify(J) + '\n');
+            }
+
             handler.promise._res();
         }
     };
