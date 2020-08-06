@@ -367,7 +367,7 @@ function linux_messageBox()
         }
         if (this.zenity)
         {
-            if (!this.zenity.extra && layout.length > 1)
+            if (!this.zenity.extra && Array.isArray(layout) && layout.length > 1)
             {
                 ret._rej('This system does not support custom button layouts');
                 return (ret);
