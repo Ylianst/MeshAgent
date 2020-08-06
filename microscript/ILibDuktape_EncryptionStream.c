@@ -229,6 +229,7 @@ duk_ret_t ILibDuktape_EncryptionStream_generateRandom(duk_context *ctx)
 	duk_push_fixed_buffer(ctx, duk_require_int(ctx, 0));
 	buffer = Duktape_GetBuffer(ctx, -1, &bufferLen);
 	util_random((int)bufferLen, buffer);
+	duk_push_buffer_object(ctx, -1, 0, bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 	return 1;
 }
 void ILibDuktape_EncryptionStream_PUSH(duk_context *ctx, void *chain)

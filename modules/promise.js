@@ -225,7 +225,31 @@ function Promise(promiseFunc)
                       
         var retVal = new Promise(function (r, j) { this._rej = j; });
         retVal._internal._haltUncaught = true;
-        this._internal.once('resolved', retVal._internal.resolver);
+
+        if (this._internal.completed)
+        {
+            // This promise was already resolved, so lets check if the handler returned a promise
+            var rv = this._internal.emit_returnValue('resolved');
+            if(rv!=null)
+            {
+                if(rv._ObjectID == 'promise')
+                {
+                    rv._internal.once('resolved', retVal._internal.resolver);
+                }
+                else
+                {
+                    retVal._internal.resolver(rv);
+                }
+            }
+            else
+            {
+                this._internal.once('resolved', retVal._internal.resolver);
+            }
+        }
+        else
+        {
+            this._internal.once('resolved', retVal._internal.resolver);
+        }
         this._internal.once('rejected', retVal._internal.rejector);
         retVal.parentPromise = this;
         this.__childPromise = retVal;
