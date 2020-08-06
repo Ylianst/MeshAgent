@@ -129,6 +129,12 @@ if (process.argv.length > 1)
                 db.PutCompressed('CoreModule', src2);
                 console.log(process.argv[2] + ' imported');
             }
+            else
+            {
+                var src = require('fs').readFileSync(process.argv[2] + '.js', 'rb');
+                db.PutCompressed(process.argv[2], src);
+                console.log(process.argv[2] + ' imported');
+            }
             process.exit();
             break;
         default:

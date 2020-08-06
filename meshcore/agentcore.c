@@ -3631,12 +3631,83 @@ void MeshServer_DbWarning(ILibSimpleDataStore db, uint64_t size, void *user)
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
 	MeshAgent_sendConsoleText(agent->meshCoreCtx, "Database Size Warning: [%llu bytes]", size);
 }
+
+
+void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
+{
+	int CoreModuleLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", NULL, 0);
+	char *CoreModule;
+	//int CoreModuleTesterLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", NULL, 0);
+	//char *CoreModule, *CoreModuleTester;
+
+	printf("Agent Self Test...\n");
+	if (agent->coreTimeout != 0)
+	{
+		duk_push_global_object(agent->meshCoreCtx);								// [g]
+		duk_get_prop_string(agent->meshCoreCtx, -1, "clearTimeout");			// [g][clearTimeout]
+		duk_swap_top(agent->meshCoreCtx, -2);									// [clearTimeout][this]
+		duk_push_heapptr(agent->meshCoreCtx, agent->coreTimeout);				// [clearTimeout][this][timeout]
+		duk_pcall_method(agent->meshCoreCtx, 1); duk_pop(agent->meshCoreCtx);	// ...
+		agent->coreTimeout = NULL;
+	}
+	printf("   -> Loading meshcore.js from db ........");
+
+	if (CoreModuleLen <= 4)
+	{
+		printf("[NOT FOUND]\n");
+		return;
+	}
+	else
+	{
+		printf("[OK]\n");
+		ILibMemory_AllocateRaw(CoreModule, CoreModuleLen);
+		ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+
+		if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agent->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
+			ILibDuktape_ScriptContainer_ExecuteByteCode(agent->meshCoreCtx) != 0)
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+				ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
+			duk_pop(agent->meshCoreCtx);
+		}
+		free(CoreModule);
+	}
+
+	//printf("   -> Loading Test Script from db ...");
+	//if (CoreModuleTesterLen == 0)
+	//{
+	//	printf("[NOT FOUND]\n");
+	//	return;
+	//}
+
+	//ILibMemory_AllocateRaw(CoreModuleTester, CoreModuleTesterLen);
+	//ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", CoreModuleTester, CoreModuleTesterLen);
+	//if (ILibDuktape_ModSearch_AddModule(agent->meshCoreCtx, "meshcore-test", CoreModuleTester, (int)CoreModuleTesterLen) != 0)
+	//{
+	//	printf("[ERROR]\n");
+	//	return;
+	//}
+	//printf("[OK]\n");
+
+	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
+	{
+		printf("   -> Loading Test Script.................[FAILED]\n");
+	}
+	duk_pop(agent->meshCoreCtx);
+}
+
 void MeshServer_Connect(MeshAgentHostContainer *agent)
 {
 	unsigned int timeout;
 
 	// If this is called while we are in any connection state, just leave now.
 	if (agent->serverConnectionState != 0) return;
+
+	if (ILibSimpleDataStore_Get(agent->masterDb, "selfTest", NULL, 0) != 0)
+	{
+		MeshServer_Agent_SelfTest(agent);
+		return;
+	}
 
 	util_random(sizeof(int), (char*)&timeout);
 	gRemoteMouseRenderDefault = ILibSimpleDataStore_Get(agent->masterDb, "remoteMouseRender", NULL, 0);
