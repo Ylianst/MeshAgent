@@ -157,6 +157,9 @@ char *ILibDuktape_String_UTF8ToWide(duk_context *ctx, char *str);
 void ILibDuktape_String_UTF8ToWideEx(duk_context *ctx, char *str);
 
 #define Duktape_PushBuffer(ctx, bufSize) ILibMemory_Init(duk_push_fixed_buffer(ctx, (duk_size_t)(bufSize) + sizeof(ILibMemory_Header)), (bufSize), 0, ILibMemory_Types_OTHER)
+#define Duktape_PushDynamicBuffer(ctx, bufSize) ILibMemory_Init(duk_push_dynamic_buffer(ctx, (duk_size_t)(bufSize) + sizeof(ILibMemory_Header)), (bufSize), 0, ILibMemory_Types_OTHER)
+void* Duktape_DynamicBuffer_Resize(duk_context *ctx, duk_idx_t idx, duk_size_t bufSize);
+
 void Duktape_Console_Log(duk_context *ctx, void *chain, ILibDuktape_LogTypes logType, char *msg, duk_size_t msgLen);
 
 typedef void(*ILibDuktape_NativeUncaughtExceptionHandler)(duk_context *ctx, char *msg, void *user);

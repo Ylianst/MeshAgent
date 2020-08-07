@@ -51,6 +51,12 @@ typedef struct Duktape_EventLoopDispatchData
 	void *user;
 }Duktape_EventLoopDispatchData;
 
+void* Duktape_DynamicBuffer_Resize(duk_context *ctx, duk_idx_t idx, duk_size_t bufSize)
+{
+	void *buffer = ILibMemory_FromRaw(duk_resize_buffer(ctx, idx, bufSize + sizeof(ILibMemory_Header)));
+	ILibMemory_Size(buffer) = bufSize;
+	return(buffer);
+}
 void Duktape_RunOnEventLoop_AbortSink(void *chain, void *user)
 {
 	Duktape_EventLoopDispatchData *tmp = (Duktape_EventLoopDispatchData*)user;

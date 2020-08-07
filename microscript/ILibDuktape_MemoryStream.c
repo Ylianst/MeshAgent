@@ -22,6 +22,7 @@ limitations under the License.
 
 
 #define ILibDuktape_MemoryStream_Internal		"\xFF_MemoryStream_Internal"
+#define ILibDuktape_MemoryStream_MemoryBuffer	"\xFF_MemoryStream_MemoryBuffer"
 
 #ifdef __DOXY__
 /*! 
@@ -58,28 +59,28 @@ typedef struct ILibDuktape_MemoryStream
 
 	char *buffer;
 	size_t bufferLen;
-	size_t bufferSize;
 }ILibDuktape_MemoryStream;
 
 ILibTransport_DoneState ILibDuktape_MemoryStream_OnWrite(struct ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_MemoryStream *ms = (ILibDuktape_MemoryStream*)user;
-
-	if (ms->bufferSize - ms->bufferLen < (size_t)bufferLen)
+	
+	if (ILibMemory_Size(ms->buffer) - ms->bufferLen < (size_t)bufferLen)
 	{
-		if ((size_t)bufferLen > ms->bufferSize)
+		duk_push_heapptr(ms->ctx, stream->ParentObject);						// [obj]
+		duk_get_prop_string(ms->ctx, -1, ILibDuktape_MemoryStream_MemoryBuffer);// [obj][buffer]
+		if ((size_t)bufferLen > ILibMemory_Size(ms->buffer))
 		{
-			if ((ms->buffer = (char*)realloc(ms->buffer, ms->bufferSize + bufferLen)) == NULL) { ILIBCRITICALEXITMSG(254, "OUT OF MEMORY"); }
-			ms->bufferSize += bufferLen;
+			ms->buffer = Duktape_DynamicBuffer_Resize(ms->ctx, -1, ILibMemory_Size(ms->buffer) + (duk_size_t)bufferLen);
 		}
 		else
 		{
-			if((ms->buffer = (char*)realloc(ms->buffer, 2*ms->bufferSize)) == NULL) { ILIBCRITICALEXITMSG(254, "OUT OF MEMORY"); }
-			ms->bufferSize = (2 * ms->bufferSize);
+			ms->buffer = Duktape_DynamicBuffer_Resize(ms->ctx, -1, 2 * ILibMemory_Size(ms->buffer));
 		}
+		duk_pop_2(ms->ctx);														// ...
 	}
 
-	memcpy_s(ms->buffer + ms->bufferLen, ms->bufferSize - ms->bufferLen, buffer, bufferLen);
+	memcpy_s(ms->buffer + ms->bufferLen, ILibMemory_Size(ms->buffer) - ms->bufferLen, buffer, bufferLen);
 	ms->bufferLen += bufferLen;
 
 	return(ILibTransport_DoneState_COMPLETE);
@@ -91,23 +92,11 @@ void ILibDuktape_MemoryStream_OnEnd(struct ILibDuktape_DuplexStream *stream, voi
 }
 duk_ret_t ILibDuktape_MemoryStream_buffer(duk_context *ctx)
 {
-	duk_push_this(ctx);
-	duk_get_prop_string(ctx, -1, ILibDuktape_MemoryStream_Internal);
-	ILibDuktape_MemoryStream *ms = (ILibDuktape_MemoryStream*)Duktape_GetBuffer(ctx, -1, NULL);
-
-	duk_push_external_buffer(ctx);
-	duk_config_buffer(ctx, -1, ms->buffer, ms->bufferLen);
-	duk_push_buffer_object(ctx, -1, 0, ms->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
-
+	duk_push_this(ctx);													// [ms]
+	ILibDuktape_MemoryStream *ms = (ILibDuktape_MemoryStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_MemoryStream_Internal);
+	duk_get_prop_string(ctx, -1, ILibDuktape_MemoryStream_MemoryBuffer);// [ms][buffer]
+	duk_push_buffer_object(ctx, -1, sizeof(ILibMemory_Header), ms->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
 	return(1);
-}
-duk_ret_t ILibDuktape_MemoryStream_Finalizer(duk_context *ctx)
-{
-	duk_get_prop_string(ctx, 0, ILibDuktape_MemoryStream_Internal);
-	ILibDuktape_MemoryStream *ms = (ILibDuktape_MemoryStream*)Duktape_GetBuffer(ctx, -1, NULL);
-
-	free(ms->buffer);
-	return(0);
 }
 
 duk_ret_t ILibDuktape_MemoryStream_writeBE(duk_context *ctx)
@@ -156,13 +145,12 @@ duk_ret_t ILibDuktape_MemoryStream_new(duk_context *ctx)
 	ILibDuktape_WriteID(ctx, "memoryStream");
 	ms = (ILibDuktape_MemoryStream*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_MemoryStream));
 	duk_put_prop_string(ctx, -2, ILibDuktape_MemoryStream_Internal);	// [ms]
-	ms->buffer = (char*)ILibMemory_Allocate(initial, 0, NULL, NULL);
-	ms->bufferSize = (size_t)initial;
+	ms->buffer = Duktape_PushDynamicBuffer(ctx, (duk_size_t)initial);
+	duk_put_prop_string(ctx, -2, ILibDuktape_MemoryStream_MemoryBuffer);
 	ms->ctx = ctx;
 
 	ms->s = ILibDuktape_DuplexStream_Init(ctx, ILibDuktape_MemoryStream_OnWrite, ILibDuktape_MemoryStream_OnEnd, NULL, NULL, ms);
 	ILibDuktape_CreateEventWithGetter(ctx, "buffer", ILibDuktape_MemoryStream_buffer);
-	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MemoryStream_Finalizer);
 
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "size", 4, "writeUInt32BE", ILibDuktape_MemoryStream_writeBE, 1);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "size", 2, "writeUInt16BE", ILibDuktape_MemoryStream_writeBE, 1);
