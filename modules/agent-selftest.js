@@ -49,8 +49,6 @@ function start()
     coreInfo()
         .then(function () { return (testConsoleHelp()); })
         .then(function () { return (testCPUInfo()); })
-        .then(function () { return (testSMBIOS()); })
-        .then(function () { return (testAMT()); })
         .then(function () { return (testTunnel()); })
         .then(function () { return (testTerminal()); })
         .then(function () { return (testKVM()); })
@@ -67,23 +65,53 @@ function coreInfo()
     ret.tester = this;
     ret.handler = function handler(J)
     {
-        if(J.action == 'coreinfo')
+        switch(J.action)
+        {
+            case 'coreinfo':
+                handler.coreinfo = true;
+                console.log('      -> Core Info received..............[OK]');
+                console.log('');
+                console.log('         ' + J.osdesc);
+                console.log('         ' + J.value);
+                console.log('');
+                if (process.argv.includes('--showCoreInfo="1"'))
+                {
+                    console.log('\n' + JSON.stringify(J) + '\n');
+                }
+
+                break;
+            case 'smbios':
+                handler.rcount++;
+                console.log('      -> SMBIOS Info received.............[OK]');
+                var tables = null;
+                try
+                {
+                    tables = require('smbios').parse(J.value);
+                    console.log('         -> AMT Support...................[' + ((tables.amtInfo && tables.amtInfo.AMT == true) ? 'YES' : 'NO') + ']');
+                }
+                catch(e)
+                {
+                    console.log('         -> (Parse Error).................[FAILED]');
+                }
+
+                if (process.argv.includes('--smbios="1"'))
+                {
+                    console.log(JSON.stringify(tables));
+                    //console.log('\n' + JSON.stringify(J) + '\n');
+                }
+
+                break;
+        }
+
+        if(handler.rcount>0 && handler.coreinfo)
         {
             this.removeListener('command', handler);
-            console.log('      -> Agent Info received..............[OK]');
-            console.log('');
-            console.log('         ' + J.osdesc);
-            console.log('         ' + J.value);
-            console.log('');
-            if (process.argv.includes('--showCoreInfo="1"'))
-            {
-                console.log('\n' + JSON.stringify(J) + '\n');
-            }
-
             handler.promise._res();
         }
     };
     ret.handler.promise = ret;
+    ret.handler.coreinfo = false;
+    ret.handler.rcount = 0;
     ret.tester.on('command', ret.handler);
     require('MeshAgent').emit('Connected', 3);
 
@@ -212,30 +240,6 @@ function testFileDownload()
     return (ret);
 }
 
-function testSMBIOS()
-{
-    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-    ret.consoleTest = this.consoleCommand('smbios');
-    ret.consoleTest.parent = ret;
-    ret.consoleTest.then(function (J)
-    {
-        if (J.length < 30)
-        {  
-            this.parent._rej('   => Testing SMBIOS......................[EMPTY]');
-            return;
-        }
-        else
-        {
-            console.log('   => Testing SMBIOS......................[OK]');
-        }
-        this.parent._res();
-    }).catch(function (e)
-    {  
-        this.parent._rej('   => Testing SMBIOS......................[FAILED]');
-    });
-    return (ret);
-}
-
 function testCPUInfo()
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -257,39 +261,6 @@ function testCPUInfo()
     }).catch(function (e)
     {  
         this.parent._rej('   => Testing CPU Info....................[FAILED]');
-    });
-    return (ret);
-}
-
-function testAMT()
-{
-    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-    ret.consoleTest = this.consoleCommand('amt');
-    ret.consoleTest.parent = ret;
-    ret.consoleTest.then(function (J)
-    {
-        if (J.toString().includes('not detected'))
-        {
-            console.log('   => Testing AMT.........................[NOT DETECTED]');
-        }
-        else
-        {
-            try
-            {
-                var str = '(function foo(){var x=' + J.toString().split('\n').join('').split('\r').join('') + '; return(x);})();';
-                eval(str);
-                console.log('   => Testing AMT Detection...............[OK]');
-            }
-            catch(e)
-            {
-                this.parent._rej('   => Testing AMT Detection...............[ERROR]');
-                return;
-            }
-        }
-        this.parent._res();
-    }).catch(function (e)
-    {
-        this.parent._rej('   => Testing AMT.........................[FAILED]');
     });
     return (ret);
 }
