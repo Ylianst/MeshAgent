@@ -68,12 +68,26 @@ function coreInfo()
         switch(J.action)
         {
             case 'coreinfo':
-                handler.coreinfo = true;
-                console.log('      -> Core Info received..............[OK]');
-                console.log('');
-                console.log('         ' + J.osdesc);
-                console.log('         ' + J.value);
-                console.log('');
+                if (!handler.coreinfo)
+                {
+                    handler.coreinfo = true;
+                    console.log('      -> Core Info received..............[OK]');
+                    console.log('');
+                    console.log('         ' + J.osdesc);
+                    console.log('         ' + J.value);
+                    console.log('');
+                }
+                if (J.intelamt && J.intelamt.microlms == 'CONNECTED')
+                {
+                    if (!handler.microlms)
+                    {
+                        handler.microlms = true;
+                        console.log('         -> Micro LMS.....................[CONNECTED]');
+
+                        this.removeListener('command', handler);
+                        handler.promise._res();
+                    }
+                }
                 if (process.argv.includes('--showCoreInfo="1"'))
                 {
                     console.log('\n' + JSON.stringify(J) + '\n');
@@ -81,38 +95,68 @@ function coreInfo()
 
                 break;
             case 'smbios':
-                handler.rcount++;
-                console.log('      -> SMBIOS Info received.............[OK]');
-                var tables = null;
-                try
+                if (!handler.smbios)
                 {
-                    tables = require('smbios').parse(J.value);
-                    console.log('         -> AMT Support...................[' + ((tables.amtInfo && tables.amtInfo.AMT == true) ? 'YES' : 'NO') + ']');
+                    handler.smbios = true;
+                    console.log('      -> SMBIOS Info received.............[OK]');
+                    var tables = null;
+                    try
+                    {
+                        tables = require('smbios').parse(J.value);
+                        handler.amt = tables.amtInfo && tables.amtInfo.AMT;
+                        console.log('         -> AMT Support...................[' + ((tables.amtInfo && tables.amtInfo.AMT == true) ? 'YES' : 'NO') + ']');
+                    }
+                    catch (e)
+                    {
+                        handler.promise._rej('         -> (Parse Error).................[FAILED]');
+                        return;
+                    }
+                    if (!handler.amt) { handler.promise._res(); }
                 }
-                catch(e)
-                {
-                    console.log('         -> (Parse Error).................[FAILED]');
-                }
-
                 if (process.argv.includes('--smbios="1"'))
                 {
                     console.log(JSON.stringify(tables));
-                    //console.log('\n' + JSON.stringify(J) + '\n');
                 }
 
                 break;
         }
-
-        if(handler.rcount>0 && handler.coreinfo)
-        {
-            this.removeListener('command', handler);
-            handler.promise._res();
-        }
     };
     ret.handler.promise = ret;
     ret.handler.coreinfo = false;
-    ret.handler.rcount = 0;
+    ret.handler.smbios = false;
+    ret.handler.microlms = false;
+    ret.handler.amt = false;
     ret.tester.on('command', ret.handler);
+
+    ret.handler.timeout = setTimeout(function (r)
+    {
+        if(!r.handler.coreinfo)
+        {
+            // Core Info was never recevied
+            r._rej('      -> Core Info received..............[FAILED]')
+        }
+        else if(r.handler.amt)
+        {
+            // AMT support, so check Micro LMS
+            if(r.handler.microlms)
+            {
+                r._res();
+            }
+            else
+            {
+                // No MicroLMS, so let's check to make sure there is an LMS service running
+                console.log('         -> Micro LMS.....................[NO]');
+
+
+            }
+        }
+        else
+        {
+            // No AMT Support
+            r._res();
+        }
+    }, 5000, ret);
+
     require('MeshAgent').emit('Connected', 3);
 
     return (ret);
