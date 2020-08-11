@@ -2037,6 +2037,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 	struct timeval currentTime;
 	struct timeval tv;
 
+	if (((ILibBaseChain*)chain)->TerminateFlag != 0) { waitTimeout = 0; }
 	if (waitListCount == 0)
 	{
 		SleepEx(waitTimeout, TRUE);
