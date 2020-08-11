@@ -47,6 +47,7 @@ function start()
     console.log('\nStarting Self Test...');
 
     coreInfo()
+        .then(function () { return (testLMS()); })
         .then(function () { return (testConsoleHelp()); })
         .then(function () { return (testCPUInfo()); })
         .then(function () { return (testTunnel()); })
@@ -55,6 +56,57 @@ function start()
         .then(function () { return (testFileDownload()); })
         .then(function () { console.log('End of Self Test'); })
         .catch(function (v) { console.log(v); });
+}
+
+function testLMS()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+
+    if (!this.amtsupport)
+    {
+        console.log('         -> Testing LMS...................[N/A]');
+        ret._res();
+    }
+    else
+    {
+        // AMT is supported, so we need to test to see if LMS is responding
+        ret.req = require('https').request(
+        {
+            protocol: 'https:',
+            host: '127.0.0.1',
+            port: 16992,
+            method: 'GET',
+            path: '/',
+            rejectUnauthorized: false,
+        });
+        ret.req.on('response', function (imsg)
+        {
+            if (this.tester.microlms)
+            {
+                console.log('         -> Testing MicroLMS..............[OK]');
+            }
+            else
+            {
+                console.log('         -> Testing External LMS..........[OK]');
+            }
+            this.p._res();
+        })
+        ret.req.on('error', function (err)
+        {
+            if (this.tester.microlms)
+            {
+                this.p._rej('         -> Testing MicroLMS..............[FAILED]');
+            }
+            else
+            {
+                this.p._rej('         -> Testing External LMS..........[FAILED]');
+            }
+        });
+        ret.req.tester = this;
+        ret.req.p = ret;
+        ret.req.end();
+    }
+    return (ret);
 }
 
 function coreInfo()
@@ -79,9 +131,9 @@ function coreInfo()
                 }
                 if (J.intelamt && J.intelamt.microlms == 'CONNECTED')
                 {
-                    if (!handler.microlms)
+                    if (!handler.tester.microlms)
                     {
-                        handler.microlms = true;
+                        handler.tester.microlms = true;
                         console.log('         -> Micro LMS.....................[CONNECTED]');
 
                         this.removeListener('command', handler);
@@ -103,15 +155,20 @@ function coreInfo()
                     try
                     {
                         tables = require('smbios').parse(J.value);
-                        handler.amt = tables.amtInfo && tables.amtInfo.AMT;
+                        handler.tester.amtsupport = tables.amtInfo && tables.amtInfo.AMT;
                         console.log('         -> AMT Support...................[' + ((tables.amtInfo && tables.amtInfo.AMT == true) ? 'YES' : 'NO') + ']');
                     }
                     catch (e)
                     {
+                        clearTimeout(handler.timeout);
                         handler.promise._rej('         -> (Parse Error).................[FAILED]');
                         return;
                     }
-                    if (!handler.amt) { handler.promise._res(); }
+                    if (!handler.tester.amtsupport)
+                    {
+                        clearTimeout(handler.timeout);
+                        handler.promise._res();
+                    }
                 }
                 if (process.argv.includes('--smbios="1"'))
                 {
@@ -121,11 +178,12 @@ function coreInfo()
                 break;
         }
     };
+    ret.handler.tester = ret.tester;
     ret.handler.promise = ret;
     ret.handler.coreinfo = false;
     ret.handler.smbios = false;
-    ret.handler.microlms = false;
-    ret.handler.amt = false;
+    ret.tester.amtsupport = false;
+    ret.tester.microlms = false;
     ret.tester.on('command', ret.handler);
 
     ret.handler.timeout = setTimeout(function (r)
@@ -146,8 +204,6 @@ function coreInfo()
             {
                 // No MicroLMS, so let's check to make sure there is an LMS service running
                 console.log('         -> Micro LMS.....................[NO]');
-
-
             }
         }
         else
@@ -337,6 +393,7 @@ function testKVM()
     console.log('   => KVM Test');
     ret.tunnel = this.createTunnel(0x1FF, 0xFF);
     ret.tunnel.ret = ret;
+    console.log('then=>');
     ret.tunnel.then(function (c)
     {
         this.connection = c;
@@ -386,6 +443,7 @@ function testKVM()
         this.parent._rej('      -> Tunnel...........................[FAILED]');
     });
 
+    console.log('returned');
     return (ret);
 }
 
