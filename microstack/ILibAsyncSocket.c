@@ -698,6 +698,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 			else
 			{
 				module->PendingSend_Tail->Next = data;
+				module->PendingSend_Tail = data;
 			}
 		}
 		else if (module->PendingSend_Tail == NULL && module->FinConnect != 0)
