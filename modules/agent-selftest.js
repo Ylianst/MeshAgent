@@ -44,8 +44,23 @@ var promise = require('promise');
 
 function start()
 {
-    console.log('\nStarting Self Test...');
+    var isservice = false;
+    var service = null;
+    try
+    {
+        service = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        isservice = service.isMe();
+    }
+    catch(e)
+    {
+    }
 
+    if (isservice)
+    {
+        console.setDestination(console.Destinations.LOGFILE);
+    }
+
+    console.log('Starting Self Test...');
     coreInfo()
         .then(function () { return (testLMS()); })
         .then(function () { return (testConsoleHelp()); })
@@ -54,8 +69,30 @@ function start()
         .then(function () { return (testTerminal()); })
         .then(function () { return (testKVM()); })
         .then(function () { return (testFileDownload()); })
-        .then(function () { console.log('End of Self Test'); })
-        .catch(function (v) { console.log(v); });
+        .then(function ()
+        {
+            console.log('End of Self Test');
+            if (isservice)
+            {
+                service.stop();
+            }
+            else
+            {
+                process._exit();
+            }
+        })
+        .catch(function (v)
+        {
+            console.log(v);
+            if (isservice)
+            {
+                service.stop();
+            }
+            else
+            {
+                process._exit();
+            }
+        });
 }
 
 function getFDSnapshot()

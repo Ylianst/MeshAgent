@@ -3687,22 +3687,6 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 		free(CoreModule);
 	}
 
-	//printf("   -> Loading Test Script from db ...");
-	//if (CoreModuleTesterLen == 0)
-	//{
-	//	printf("[NOT FOUND]\n");
-	//	return;
-	//}
-
-	//ILibMemory_AllocateRaw(CoreModuleTester, CoreModuleTesterLen);
-	//ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", CoreModuleTester, CoreModuleTesterLen);
-	//if (ILibDuktape_ModSearch_AddModule(agent->meshCoreCtx, "meshcore-test", CoreModuleTester, (int)CoreModuleTesterLen) != 0)
-	//{
-	//	printf("[ERROR]\n");
-	//	return;
-	//}
-	//printf("[OK]\n");
-
 	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
 	{
 		printf("   -> Loading Test Script.................[FAILED]\n");
