@@ -3912,7 +3912,9 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 		if (bufferLen > 0) 
 		{
 			int x;
-			for (x = 0; x < (bufferLen >> 2); ++x) { ((int*)(dataFrame+headerLen+4))[x] = ((int*)buffer)[x] ^ (int)maskKeyInt; } // Mask 4 bytes at a time
+			// Note that the line below will cause a SegFault on Linux when compiled with GCC -O3, the fault happens at the XOR (^) operation.
+			// Compiling with -O2 works also, doing the masking operating byte-by-byte also works with -O3.
+			for (x = 0; x < (bufferLen >> 2); ++x) { ((int*)(dataFrame+headerLen+4))[x] = ((int*)buffer)[x] ^ (int)maskKeyInt; } // Mask 4 bytes at a time (SegFaults with -O3).
 			for (x = (x << 2); x < bufferLen; ++x) { dataFrame[x + headerLen + 4] = buffer[x] ^ maskKey[x % 4]; } // Mask the reminder
 		}
 		retVal = ILibDuktape_DuplexStream_WriteData(state->encodedStream, dataFrame, headerLen + 4 + bufferLen) == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
