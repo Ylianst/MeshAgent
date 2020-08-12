@@ -58,28 +58,41 @@ function start()
         .catch(function (v) { console.log(v); });
 }
 
+function getFDSnapshot()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    ret.tester = this;
+    ret.tester.consoletext = '';
+    ret.consoleTest = this.consoleCommand('fdsnapshot');
+    ret.consoleTest.parent = ret;
+    ret.consoleTest.then(function (J)
+    {
+        console.log('   => FDSNAPSHOT');
+        console.log(this.tester.consoletext);
+        this.parent._res();
+    }).catch(function (e)
+    {
+        this.parent._rej('   => FDSNAPSHOT..........................[FAILED]');
+    });
+    return (ret);
+}
+
 function testLMS()
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-
-    if (!this.amtsupport)
-    {
-        console.log('         -> Testing LMS...................[N/A]');
-        ret._res();
-    }
-    else
+    ret.tester = this;
+    ret._test = function ()
     {
         // AMT is supported, so we need to test to see if LMS is responding
-        ret.req = require('https').request(
+        this.req = require('http').request(
         {
-            protocol: 'https:',
+            protocol: 'http:',
             host: '127.0.0.1',
             port: 16992,
             method: 'GET',
-            path: '/',
-            rejectUnauthorized: false,
+            path: '/'
         });
-        ret.req.on('response', function (imsg)
+        this.req.on('response', function (imsg)
         {
             if (this.tester.microlms)
             {
@@ -91,7 +104,7 @@ function testLMS()
             }
             this.p._res();
         })
-        ret.req.on('error', function (err)
+        this.req.on('error', function (err)
         {
             if (this.tester.microlms)
             {
@@ -102,9 +115,38 @@ function testLMS()
                 this.p._rej('         -> Testing External LMS..........[FAILED]');
             }
         });
-        ret.req.tester = this;
-        ret.req.p = ret;
-        ret.req.end();
+        this.req.tester = this.tester;
+        this.req.p = this;
+        this.req.end();
+    };
+
+
+    if (!this.amtsupport)
+    {
+        console.log('         -> Testing LMS...................[N/A]');
+        ret._res();
+    }
+    else
+    {
+        if (this.microlms)
+        {
+            this.on('command', function _lmsinfoHandler(v)
+            {
+                if (v.action == 'lmsinfo')
+                {
+                    if (v.value.ports.includes('16992'))
+                    {
+                        this.removeListener('command', _lmsinfoHandler);
+                        console.log('         -> Micro LMS bound to 16992......[OK]');
+                        ret._test();
+                    }
+                }
+            });
+        }
+        else
+        {
+            ret._test();
+        }
     }
     return (ret);
 }
@@ -393,7 +435,7 @@ function testKVM()
     console.log('   => KVM Test');
     ret.tunnel = this.createTunnel(0x1FF, 0xFF);
     ret.tunnel.ret = ret;
-    console.log('then=>');
+
     ret.tunnel.then(function (c)
     {
         this.connection = c;
@@ -443,7 +485,6 @@ function testKVM()
         this.parent._rej('      -> Tunnel...........................[FAILED]');
     });
 
-    console.log('returned');
     return (ret);
 }
 
@@ -472,7 +513,7 @@ function testTerminal(terminalMode)
             r._rej('      -> Result...........................[TIMEOUT]');
         }, 7000, c.ret);
         c.tester = this.parent.parent; c.tester.logs = '';
-        c.on('data', function (c)
+        c.on('data', function _terminalDataHandler(c)
         {
             try
             {
@@ -481,7 +522,15 @@ function testTerminal(terminalMode)
             catch(e)
             {
                 console.log('      -> Result...........................[OK]');
-                this.end();
+                this.removeListener('data', _terminalDataHandler);
+                if (process.platform == 'win32')
+                {
+                    this.end('exit\r\n');
+                }
+                else
+                {
+                    this.end('exit\n');
+                }
                 this.ret._res();
                 clearTimeout(this.ret.timeout);
             }
@@ -490,7 +539,6 @@ function testTerminal(terminalMode)
         {
             this.ret._rej('      -> (Unexpectedly closed)............[FAILED]');
         });
-        //          '   => Testing AMT Detection...............[OK]'
 
         console.log('      -> Tunnel...........................[CONNECTED]');
         console.log('      -> Triggering User Consent');
