@@ -32,8 +32,8 @@
 # Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2
 #  64 bit JPEG8  -> ./configure --with-jpeg8 
 #  64 bit JPEG62 -> ./configure
-#  32 bit JPEG8  -> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
-#  32 bit JPEG62 -> ./configure --host i686-pc-linux-gnu CFLAGS='-O3 -m32' LDFLAGS=-m32
+#  32 bit JPEG8  -> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O2 -m32' LDFLAGS=-m32
+#  32 bit JPEG62 -> ./configure --host i686-pc-linux-gnu CFLAGS='-O2 -m32' LDFLAGS=-m32
 
 #	NOTE: If you installed jpeg8 headers on your machine, you must specify --with-jpeg8 when building turbo jpeg, otherwise omit --with-jpeg8
 #
@@ -383,7 +383,7 @@ CFLAGS += -g -D_DEBUG
 STRIP = $(NOECHO) $(NOOP)
 SYMBOLCP = $(NOECHO) $(NOOP)
 else
-CFLAGS += -O3
+CFLAGS += -O2
 STRIP += ./$(EXENAME)_$(ARCHNAME)$(EXENAME2)
 SYMBOLCP = cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./DEBUG_$(EXENAME)_$(ARCHNAME)$(EXENAME2)
 endif
