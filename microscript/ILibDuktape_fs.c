@@ -747,7 +747,7 @@ BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_Error
 		duk_push_heapptr(data->ctx, data->userBuffer);		// [callback][this][err][bytesRead][buffer]
 		data->callback = NULL;
 		data->userBuffer = NULL;
-		if (duk_pcall_method(data->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "fs.read.onCallack(): "); }
+		if (duk_pcall_method(data->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "fs.read.onCallack(): "); }
 		duk_pop(ctx);										// ...
 	}
 	return(FALSE);

@@ -49,7 +49,14 @@ function getBaseFolder(val)
 
     for (i = 0; i < val.length; ++i)
     {
-        test.push(val[i].split(D));
+        if (process.platform == 'win32')
+        {
+            test.push(val[i].split('/').join('\\').split(D));
+        }
+        else
+        {
+            test.push(val[i].split(D));
+        }
     }
 
     if (val.length == 1)
@@ -271,6 +278,13 @@ function write(options)
                 }
             }
         });
+    require('events').EventEmitter.call(ret, true)
+        .createEvent('cancel')
+        .addMethod('cancel', function(callback)
+        {
+            this._cancel = true;
+            if(callback!=null) { this.once('cancel', callback); }
+        });
     ret._currentPosition = 0;
     ret._ObjectID = 'zip-writer.duplexStream';
     ret.bufferMode = 1;
@@ -282,11 +296,30 @@ function write(options)
     ret.pause();
 
     options._localFileTable = {};
-    options._baseFolder = getBaseFolder(options.files);
-
+    options._baseFolder = (options.basePath == null ? getBaseFolder(options.files) : options.basePath);
+    if (options._baseFolder != '')
+    {
+        if (!options._baseFolder.endsWith(process.platform == 'win32' ? '\\' : '/')) { options._baseFolder += (process.platform == 'win32' ? '\\' : '/'); }
+    }
     ret._uncompressedReadSink = function _uncompressedReadSink(err, bytesRead, buffer)
     {
         var self = _uncompressedReadSink.self;
+        if(self._cancel)
+        {
+            self._compressor.end();
+            self._compressor.unpipe();
+            try
+            {
+                require('fs').closeSync(self._currentFD);
+            }
+            catch(e)
+            {}
+
+            self.options.files.length = 0;
+            self.emit('cancel');
+            self.end();
+            return;
+        }
         if(bytesRead == 0)
         {
             // DONE
