@@ -160,6 +160,7 @@ function next(options)
     this._currentFD = require('fs').openSync(this._currentFile, require('fs').constants.O_RDONLY);
     this._currentName = this._currentFile.substring(options._baseFolder.length);
     this._currentFileLength = fstat.size;
+    this._currentFileReadBytes = 0;
     this._currentCRC = 0;
     this._compressedBytes = 0;
     this._timestamp = convertToMSDOSTime(fstat.mtime);
@@ -279,6 +280,7 @@ function write(options)
             }
         });
     require('events').EventEmitter.call(ret, true)
+        .createEvent('progress')
         .createEvent('cancel')
         .addMethod('cancel', function(callback)
         {
@@ -334,6 +336,12 @@ function write(options)
             self.write(self._header.slice(14, 26), next);
             return;
         }
+
+        self._currentFileReadBytes += bytesRead;
+        var ratio = self._currentFileReadBytes / self._currentFileLength;
+        ratio = Math.floor(ratio * 100);
+        self.emit('progress', self._currentFile, ratio);
+
         buffer = buffer.slice(0, bytesRead);
         self._currentCRC = crc32(buffer, self._currentCRC); // Update CRC
         self._compressor.write(buffer, function ()

@@ -1011,11 +1011,73 @@ duk_ret_t ILibDuktape_EventEmitter_EventEmitter(duk_context *ctx)
 
 	return(retVal);
 }
+duk_ret_t ILibDuktape_EventEmitter_moderated_impl(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx);
+	if(nargs == 0) { return(0); } // NOP if evented value is undefined
+	int ok = 0, i;
+
+	duk_push_current_function(ctx);							// [function]
+	uint32_t mval = (uint32_t)Duktape_GetIntPropertyValue(ctx, -1, "interval", 0);
+
+	if (mval != 0 && duk_has_prop_string(ctx, -1, "time"))
+	{
+		if ((uint32_t)Duktape_GetIntPropertyValue(ctx, -1, "time", 0) - ILibGetTimeStamp() < mval) { return(0); }
+	}
+
+	duk_get_prop_string(ctx, -1, "last");					// [function][array]
+	if (duk_get_length(ctx, -1) == nargs)
+	{
+		for (i = 0; i < nargs; ++i)
+		{
+			duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);	// [function][array][last]
+			duk_dup(ctx, (duk_idx_t)i);						// [function][array][last][current]
+			ok = duk_strict_equals(ctx, -2, -1);
+			duk_pop_2(ctx);									// [function][array]
+			if (ok == 0) { break; }
+		}
+	}
+
+	if (ok == 0)
+	{
+		// Update the Last Values with new Values
+		duk_push_current_function(ctx);						// [function]
+		duk_push_uint(ctx, (duk_uint_t)ILibGetTimeStamp()); duk_put_prop_string(ctx, -2, "time");
+		duk_push_array(ctx);								// [function][array]
+		for (i = 0; i < nargs; ++i)
+		{
+			duk_dup(ctx, i);								// [function][array][val]
+			duk_put_prop_index(ctx, -2, (duk_uarridx_t)i);	// [function][array]
+		}
+
+		// emit the event
+		duk_put_prop_string(ctx, -2, "last");				// [function]
+		duk_get_prop_string(ctx, -1, "func");				// [function][func]
+		duk_push_this(ctx);									// [function][func][this]
+		for (i = 0; i < nargs; ++i)
+		{
+			duk_dup(ctx, i);								// [function][func][this][...]
+		}
+		duk_call_method(ctx, nargs);
+	}
+	return(0);
+}
+duk_ret_t ILibDuktape_EventEmitter_moderated(duk_context *ctx)
+{
+	if (!duk_is_function(ctx, 0)) { return(ILibDuktape_Error(ctx, "Argument Error")); }
+	duk_push_c_function(ctx, ILibDuktape_EventEmitter_moderated_impl, DUK_VARARGS);	// [func]
+	duk_push_array(ctx); duk_put_prop_string(ctx, -2, "last");						// [func]
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "func");							// [func]
+	duk_push_int(ctx, duk_is_number(ctx, 1) ? duk_require_int(ctx, 1) : 0);			// [func][val]
+	duk_put_prop_string(ctx, -2, "interval");										// [func]
+	return(1);
+}
 void ILibDuktape_EventEmitter_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);			// [emitter]
 	ILibDuktape_CreateInstanceMethod(ctx, "inherits", ILibDuktape_EventEmitter_Inherits, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "EventEmitter", ILibDuktape_EventEmitter_EventEmitter, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "moderated", ILibDuktape_EventEmitter_moderated, DUK_VARARGS);
 }
 void ILibDuktape_EventEmitter_Init(duk_context *ctx)
 {
