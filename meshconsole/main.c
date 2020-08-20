@@ -139,6 +139,11 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && strcmp(argv[1], "-daemon") == 0 && integratedJavaScriptLen == 0)
+	{
+		integratedJavaScript = ILibString_Copy("require('daemon').agent();", -1);
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+	}
 	if (argc > 1 && strcasecmp(argv[1], "-licenses") == 0)
 	{
 		printf("========================================================================================\n");

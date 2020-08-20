@@ -539,7 +539,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_Argv(duk_context *ctx)
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_ArgArray))
 	{
 		duk_get_prop_string(ctx, -1, ILibDuktape_ScriptContainer_Process_ArgArray);		// [process][array]
-		if (readOnly != 0) { duk_dup(ctx, -1); }										// [process][array][array]
+		if (readOnly != 0) { duk_array_clone(ctx, -1); }								// [process][array][array]
 	}
 	else
 	{
