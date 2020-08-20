@@ -69,7 +69,7 @@
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPS
-#	make linux ARCHID=8						# Linux MIPS24KC (OpenWRT)
+#	make linux ARCHID=28					# Linux MIPS24KC (OpenWRT)
 #   make linux ARCHID=9						# Linux ARM 32 bit
 #   make linux ARCHID=13					# Linux ARM 32 bit PogoPlug
 #   make linux ARCHID=15					# Linux x86 32 bit POKY
@@ -160,7 +160,7 @@ SKIPFLAGS = 0
 ifeq ($(AID), 7)
 SKIPFLAGS = 1
 endif
-ifeq ($(AID), 8)
+ifeq ($(AID), 28)
 SKIPFLAGS = 1
 endif
 ifeq ($(AID), 9)
