@@ -51,29 +51,6 @@ function linux_getProxy()
 	    return (child.stdout.str.trim().split('\n')[0]);
     }
 
-    // Check gsettings
-    if (require('fs').existsSync('/usr/bin/gsettings'))
-    {
-	    var setting;
-	    var ids = require('user-sessions').loginUids(); 
-	    for (var i in ids)
-	    {
-	        if (!require('fs').existsSync(require('user-sessions').getHomeFolder(ids[i]))) { continue; }
-		    setting = require('linux-gnome-helpers').getProxySettings(ids[i]);
-		    if (setting.mode == 'manual')
-		    {
-		        if (setting.authEnabled)
-		        {
-		            return ('http://' + setting.username + ':' + setting.password + '@' + setting.host + ':' + setting.port);
-		        }
-		        else
-		        {
-		            return ('http://' + setting.host + ':' + setting.port);
-		        }
-		    }
-	    }
-    }
-
     // check apt proxy setting fro /etc/apt/apt.conf.d/proxy.conf
     if (require('fs').existsSync('/etc/apt/apt.conf.d/proxy.conf'))
     {
@@ -304,6 +281,70 @@ function linux_getProxy()
         }
     }
 
+    // Check gsettings
+    if (require('fs').existsSync('/usr/bin/gsettings'))
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write("mount  | tr '\\n' '`' | awk '");
+        child.stdin.write('{');
+        child.stdin.write('   printf "{";');
+        child.stdin.write('   n=split($0,lines,"`");');
+        child.stdin.write('   for(i=1;i<n;++i)');
+        child.stdin.write('   {');
+        child.stdin.write('      x=split(lines[i], tokens, " ");');
+        child.stdin.write('      j=sprintf(" type %s", tokens[x-1]);');
+        child.stdin.write('      e=index(lines[i], j);');
+        child.stdin.write('      s=index(lines[i], " on ");');
+        child.stdin.write('      point=substr(lines[i], s+4, e-s-4);');
+        child.stdin.write('      printf "%s\\"%s\\":\\"%s\\"",(i!=1?",":""), point, tokens[x-1];');
+        child.stdin.write('   }');
+        child.stdin.write('   printf "}";');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+
+        var table = {};
+        try
+        {
+            table = JSON.parse(child.stdout.str);
+        }
+        catch (exc)
+        {
+        }
+
+        var tokens, t, autofs, homeFolder;
+        var setting;
+        var ids = require('user-sessions').loginUids();
+        for (var i in ids)
+        {
+            autofs = false;
+            homeFolder = require('user-sessions').getHomeFolder(ids[i]);
+            tokens = homeFolder.split('/');
+            for (t = 1; t < tokens.length; ++t)
+            {
+                if (table[tokens.slice(0, t + 1).join('/')] == 'autofs')
+                {
+                    autofs = true;
+                    break;
+                }
+            }
+
+            if (autofs && table[homeFolder] == null) { continue; } // Check if autofs is mounted for this user
+
+            setting = require('linux-gnome-helpers').getProxySettings(ids[i]);
+            if (setting.mode == 'manual')
+            {
+                if (setting.authEnabled)
+                {
+                    return ('http://' + setting.username + ':' + setting.password + '@' + setting.host + ':' + setting.port);
+                }
+                else
+                {
+                    return ('http://' + setting.host + ':' + setting.port);
+                }
+            }
+        }
+    }
 
     throw ('No proxies');
 }
