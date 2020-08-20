@@ -69,6 +69,7 @@
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPS
+#	make linux ARCHID=8						# Linux MIPS24KC (OpenWRT)
 #   make linux ARCHID=9						# Linux ARM 32 bit
 #   make linux ARCHID=13					# Linux ARM 32 bit PogoPlug
 #   make linux ARCHID=15					# Linux x86 32 bit POKY
@@ -131,6 +132,7 @@ EXENAME = meshagent
 
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
+PATH_MIPS24KC = ../ToolChains/toolchain-mips_24kc_gcc-7.3.0_musl/
 PATH_ARM5 = ../ToolChains/LinuxArm/bin/
 PATH_POGO = ../ToolChains/pogoplug-gcc/bin/
 PATH_LINARO = ../ToolChains/linaro-arm/bin/
@@ -156,6 +158,9 @@ WatchDog = 6000000
 KVMMaxTile = 0
 SKIPFLAGS = 0
 ifeq ($(AID), 7)
+SKIPFLAGS = 1
+endif
+ifeq ($(AID), 8)
 SKIPFLAGS = 1
 endif
 ifeq ($(AID), 9)
@@ -199,6 +204,23 @@ CC = $(PATH_MIPS)mipsel-linux-gcc
 STRIP = $(PATH_MIPS)mipsel-linux-strip
 CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 CFLAGS += -DBADMATH 
+IPADDR_MONITOR_DISABLE = 1
+IFADDR_DISABLE = 1
+KVM = 0
+LMS = 0
+endif
+
+# Official Linux MIPS24KC (OpenWRT)
+ifeq ($(ARCHID),28)
+ARCHNAME = mips24kc
+export PATH := $(PATH_MIPS24KC)bin:$(PATH_MIPS24KC)libexec/gcc/mips-openwrt-linux-musl/7.3.0:$(PATH_MIPS24KC)mips-openwrt-linux-musl/bin:$(PATH)
+export STAGING_DIR := $(PATH_MIPS24KC)
+CC = $(PATH_MIPS24KC)bin/mips-openwrt-linux-musl-gcc --sysroot=$(PATH_MIPS24KC)
+STRIP = $(PATH_MIPS24KC)bin/mips-openwrt-linux-musl-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CFLAGS += -DBADMATH 
+INCDIRS += -I$(PATH_MIPS24KC)include
+
 IPADDR_MONITOR_DISABLE = 1
 IFADDR_DISABLE = 1
 KVM = 0

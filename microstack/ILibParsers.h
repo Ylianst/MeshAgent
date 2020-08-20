@@ -1346,6 +1346,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILibString_Cat(const char *inString1, int inString1Len, const char *inString2, int inString2Len);
 	char* ILibString_Cat_s(char *destination, size_t destinationSize, char *source);
 	char *ILibString_Copy(const char *inString, int length);
+	char* ILibString_CopyEx(const char *inString, size_t length);
 	int ILibString_Copy_s(char *destination, size_t destinationSize, char *source);
 	int ILibString_n_Copy_s(char *destination, size_t destinationSize, char *source, size_t count);
 	int ILibString_EndsWith(const char *inString, int inStringLength, const char *endWithString, int endWithStringLength);

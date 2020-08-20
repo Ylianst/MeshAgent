@@ -232,6 +232,11 @@ void ILibProcessPipe_Manager_OnPostSelect(void* object, int slct, fd_set *readse
 	void *node, *nextNode;
 	ILibProcessPipe_PipeObject *j;
 
+	//if (ILibMemory_CanaryOK(((ILibChain_Link*)object)->MetaData))
+	//{
+	//	printf("ILibProcessPipe_Manager_PostSelect(%s)\n", ((ILibChain_Link*)object)->MetaData);
+	//}
+
 	node = ILibLinkedList_GetNode_Head(man->ActivePipes);
 	while(node != NULL && (j = (ILibProcessPipe_PipeObject*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
@@ -265,7 +270,8 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 
 	if ((retVal = (ILibProcessPipe_Manager_Object*)malloc(sizeof(ILibProcessPipe_Manager_Object))) == NULL) { ILIBCRITICALEXIT(254); }
 	memset(retVal, 0, sizeof(ILibProcessPipe_Manager_Object));
-	retVal->ChainLink.MetaData = "ILibProcessPipe_Manager";
+	//retVal->ChainLink.MetaData = "ILibProcessPipe_Manager";
+	retVal->ChainLink.MetaData = ILibString_CopyEx("ILibProcessPipe_Manager", 0);
 	retVal->ChainLink.ParentChain = chain;
 	retVal->ActivePipes = ILibLinkedList_CreateEx(sizeof(int));
 

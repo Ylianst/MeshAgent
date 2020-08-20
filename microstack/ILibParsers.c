@@ -8827,6 +8827,13 @@ char* ILibString_Copy(const char *inString, int length)
 	RetVal[length] = 0;
 	return RetVal;
 }
+char* ILibString_CopyEx(const char *inString, size_t length)
+{
+	if (length == 0) { length = strnlen_s(inString, sizeof(ILibScratchPad)); }
+	char *retVal = ILibMemory_SmartAllocate(length + 1);
+	memcpy_s(retVal, length + 1, inString, length);
+	return(retVal);
+}
 /*! \fn ILibString_ToUpper(const char *inString, int length)
 \brief Coverts the given string to upper case
 \par
