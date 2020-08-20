@@ -40,6 +40,9 @@ function start(path, parameters, options)
     var ret = { options: options, path: path, parameters: parameters };
     require('events').EventEmitter.call(ret, true)
         .createEvent('done');
+    ret.sighandler = function sighandler() { process.exit(); };
+    ret.sighandler.self = ret;
+    if (process.platform != 'win32') { process.on('SIGTERM', ret.sighandler); }
     ret.child = require('child_process').execFile(path, parameters, ret.options);
     ret.child.parent = ret;
     ret.child.stdout.on('data', stdoutHandler);
