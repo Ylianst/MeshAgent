@@ -1156,6 +1156,56 @@ function serviceManager()
                 var ret = { name: name, close: function () { }, serviceType: platform};
                 switch(platform)
                 {
+                    case 'procd':
+                        if (!require('fs').existsSync('/etc/init.d/' + name)) { throw (platform + ' Service (' + name + ') NOT FOUND'); }
+                        ret.conf = '/etc/init.d/' + name;
+                        ret.appLocation = function appLocation()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stderr.on('data', function (c) { });
+                            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                            child.stdin.write('cat ' + ret.conf + ' | grep "procd_set_param command" | tr ' + "'\\n' '`' | awk -F'`' '");
+                            child.stdin.write('{');
+                            child.stdin.write('   gsub(/^[ \\t]+/, "", $1);');
+                            child.stdin.write('   cmd=substr($1, 25);')
+                            child.stdin.write('   if(substr(cmd,0,8)=="/bin/sh ")');
+                            child.stdin.write('   {');
+                            child.stdin.write('      cmd=substr(cmd,8);');
+                            child.stdin.write('      x=split(cmd,tok,"\\"");');
+                            child.stdin.write('      cmd = (x==1?cmd:tok[2]);');
+                            child.stdin.write('   }');
+                            child.stdin.write('   print cmd;');
+                            child.stdin.write("}'");
+                            child.stdin.write('\nexit\n');
+                            child.waitExit();
+                            return (child.stdout.str.trim());
+                        };
+                        ret.start = function start()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stderr.on('data', function (c) { });
+                            child.stdout.on('data', function (c) { });
+                            child.stdin.write('/etc/init.d/' + this.name + ' start\nexit\n');
+                            child.waitExit();
+                        };
+                        ret.stop = function stop()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stderr.on('data', function (c) { });
+                            child.stdout.on('data', function (c) { });
+                            child.stdin.write('/etc/init.d/' + this.name + ' stop\nexit\n');
+                            child.waitExit();
+                        };
+                        ret.restart = function restart()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stderr.on('data', function (c) { });
+                            child.stdout.on('data', function (c) { });
+                            child.stdin.write('/etc/init.d/' + this.name + ' restart\nexit\n');
+                            child.waitExit();
+                        };
+                        ret.isMe = function isMe() { return (true); } 
+                        break;
                     case 'init':
                     case 'upstart':
                         if (require('fs').existsSync('/etc/init.d/' + name)) { platform = 'init'; }
@@ -2533,6 +2583,7 @@ function serviceManager()
                     case 'init':
                     case 'upstart':
                     case 'systemd':
+                    case 'procd':
                         break;
                     default:
                         platform = 'unknown';
