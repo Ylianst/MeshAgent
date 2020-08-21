@@ -1159,6 +1159,36 @@ function serviceManager()
                     case 'procd':
                         if (!require('fs').existsSync('/etc/init.d/' + name)) { throw (platform + ' Service (' + name + ') NOT FOUND'); }
                         ret.conf = '/etc/init.d/' + name;
+                        ret.appWorkingDirectory = function appWorkingDirectory()
+                        {
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stderr.on('data', function (c) { });
+                            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                            child.stdin.write('cat ' + ret.conf + ' | grep "procd_set_param command /bin/sh " | tr ' + "'\\n' '`' | awk -F'`' '");
+                            child.stdin.write('{');
+                            child.stdin.write('   for(n=1;n<NF;++n)');
+                            child.stdin.write('   {');
+                            child.stdin.write('      if($n~/^#/) { continue; }');
+                            child.stdin.write('      v=split($n,tokens,"\\"");');
+                            child.stdin.write('      if(v==1) { continue; }');
+                            child.stdin.write('      sh=sprintf("cat %s", tokens[2]);');
+                            child.stdin.write('      shval=system(sh);');
+                            child.stdin.write('   }');
+                            child.stdin.write("}'");
+                            child.stdin.write(' | grep "cd /" | tr ' + "'\\n' '`' | awk -F'`' '");
+                            child.stdin.write('{');
+                            child.stdin.write('   for(n=1;n<NF;++n)');
+                            child.stdin.write('   {');
+                            child.stdin.write('      if(substr($n,1,3)=="cd ")');
+                            child.stdin.write('      {');
+                            child.stdin.write('         print substr($n,4); break;');
+                            child.stdin.write('      }');
+                            child.stdin.write('   }');
+                            child.stdin.write("}'");
+                            child.stdin.write('\nexit\n');
+                            child.waitExit();
+                            return (child.stdout.str.trim() == '' ? '/' : child.stdout.str.trim());
+                        };
                         ret.appLocation = function appLocation()
                         {
                             var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -1770,9 +1800,36 @@ function serviceManager()
     {
         if (!options.target) { options.target = options.name; }
         if (!options.displayName) { options.displayName = options.name; }
-        if (options.installPath) { if (!options.installPath.endsWith(process.platform == 'win32' ? '\\' : '/')) { options.installPath += (process.platform == 'win32' ? '\\' : '/'); } }
         if (options.installPath && options.installInPlace) { throw ('Cannot specify both installPath and installInPlace'); }
-        if (process.platform != 'win32' && (options.installInPlace || options.installPath)) { throw ('Installation into non standard location is not supported on this platform'); }
+        if (process.platform != 'win32')
+        {
+            if (!options.servicePlatform) { options.servicePlatform = this.getServiceType(); }
+            if (options.installInPlace)
+            {
+                options.installPath = options.servicePath.split('/');
+                if(options.installPath.length>1)
+                {
+                    options.installPath.pop();
+                    options.installPath = options.installPath.join('/');
+                }
+                else
+                {
+                    options.installPath = '/';
+                }
+            }
+            if (options.installPath == null)
+            {
+                if (options.servicePlatform == 'unknown')
+                {
+                    options.installPath = '/usr/local/mesh_daemons/' + options.name;
+                }
+                else
+                {
+                    options.installPath = '/usr/local/mesh_services/' + options.name;
+                }
+            }
+        }
+        if (options.installPath) { if (!options.installPath.endsWith(process.platform == 'win32' ? '\\' : '/')) { options.installPath += (process.platform == 'win32' ? '\\' : '/'); } }
 
         if (process.platform == 'win32')
         {
@@ -1876,23 +1933,6 @@ function serviceManager()
             this.proxy.CloseServiceHandle(h);
             this.proxy.CloseServiceHandle(handle);
 
-            if (options.files)
-            {
-                for(var i in options.files)
-                {
-                    if (options.files[i]._buffer)
-                    {
-                        console.log('writing ' + extractFileName(options.files[i]));
-                        require('fs').writeFileSync(options.installPath + extractFileName(options.files[i]), options.files[i]._buffer);
-                    }
-                    else
-                    {
-                        console.log('copying ' + extractFileSource(options.files[i]));
-                        require('fs').copyFileSync(extractFileSource(options.files[i]), options.installPath + extractFileName(options.files[i]));
-                    }
-                }
-            }
-
             if (options.parameters)
             {
                 var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
@@ -1981,10 +2021,67 @@ function serviceManager()
             if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
             var parameters = options.parameters ? options.parameters.join(' ') : '';
             var conf;
-            if (!options.servicePlatform) { options.servicePlatform = this.getServiceType(); }
            
             switch (options.servicePlatform)
             {
+                case 'procd':
+                    if (options.installPath == null) { options.installPath = '/usr/local/mesh_services/' + options.name + '/'; }
+                    prepareFolders(options.installPath);
+                    if (options.servicePath != (options.installPath + options.target))
+                    {
+                        require('fs').copyFileSync(options.servicePath, options.installPath + options.target);
+                    }
+
+                    var m = require('fs').statSync(options.installPath + options.target).mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+                    require('fs').chmodSync(options.installPath + options.target, m);
+
+                    var conf = require('fs').createWriteStream('/etc/init.d/' + options.name, { flags: 'wb' });    
+                    conf.write('#!/bin/sh /etc/rc.common\n');
+                    conf.write('USE_PROCD=1\n');
+                    conf.write('START=95\n');
+                    conf.write('STOP=01\n');
+                    conf.write('start_service()\n');
+                    conf.write('{\n');
+                    conf.write('    procd_open_instance\n');
+                    conf.write('    procd_set_param command /bin/sh "' + options.installPath + options.target + '.sh"\n');
+                    if (options.failureRestart == null || options.failureRestart > 0)
+                    {
+                        conf.write('    procd_set_param respawn ${threshold:-10} ${timeout:-' + (options.failureRestart == null ? 2 : (options.failureRestart / 1000)) + '} ${retry:-0}\n');
+                    }
+                    conf.write('    procd_close_instance\n');
+                    conf.write('}\n');
+                    conf.end();
+
+                    conf = require('fs').createWriteStream(options.installPath + options.target + '.sh', { flags: 'wb' });
+                    conf.write('#!/bin/sh\n');
+                    conf.write('cd ' + options.installPath + '\n');
+                    conf.write('exec ./' + options.target + ' ' + options.parameters.join(' ') + '\n');
+                    conf.end();
+
+                    m = require('fs').statSync('/etc/init.d/' + options.name).mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+                    require('fs').chmodSync('/etc/init.d/' + options.name, m);
+
+                    m = require('fs').statSync(options.installPath + options.target + '.sh').mode;
+                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+                    require('fs').chmodSync(options.installPath + options.target + '.sh', m);
+
+                    switch (options.startType)
+                    {
+                        case 'BOOT_START':
+                        case 'SYSTEM_START':
+                        case 'AUTO_START':
+                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.on('data', function (chunk) { });
+                            child.stdin.write('/etc/init.d/' + options.name + ' enable\nexit\n');
+                            child.waitExit();
+                            break;
+                        default:
+                            break;
+                    }
+
+                    break;
                 case 'init':
                     if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
                     if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
@@ -2253,36 +2350,23 @@ function serviceManager()
             }
         }
 
-        if (process.platform != 'win32' && options.files)
+        if (options.files)
         {
             for (var i in options.files)
             {
                 if (options.files[i]._buffer)
                 {
                     console.log('writing ' + extractFileName(options.files[i]));
-                    if (options.servicePlatform == 'unknown')
-                    {
-                        require('fs').writeFileSync('/usr/local/mesh_daemons/' + options.name + '/' + extractFileName(options.files[i]), options.files[i]._buffer);
-                    }
-                    else
-                    {
-                        require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]), options.files[i]._buffer);
-                    }
+                    require('fs').writeFileSync(options.installPath + extractFileName(options.files[i]), options.files[i]._buffer);
                 }
                 else
                 {
                     console.log('copying ' + extractFileSource(options.files[i]));
-                    if (options.servicePlatform == 'unknown')
-                    {
-                        require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_daemons/' + options.name + '/' + extractFileName(options.files[i]));
-                    }
-                    else
-                    {
-                        require('fs').copyFileSync(extractFileSource(options.files[i]), '/usr/local/mesh_services/' + options.name + '/' + extractFileName(options.files[i]));
-                    }
+                    require('fs').copyFileSync(extractFileSource(options.files[i]), options.installPath + extractFileName(options.files[i]));
                 }
             }
         }
+
     }
     if (process.platform == 'darwin')
     {
@@ -2412,6 +2496,32 @@ function serviceManager()
         {
             switch (this.getServiceType())
             {
+                case 'procd':
+                    this._update = require('child_process').execFile('/bin/sh', ['sh']);
+                    this._update.stdout.on('data', function (chunk) { });
+                    this._update.stdin.write('/etc/init.d/' + name + ' stop\n');
+                    this._update.stdin.write('/etc/init.d/' + name + ' disable\n');
+                    this._update.stdin.write('exit\n');
+                    this._update.waitExit();
+                    try
+                    {
+                        require('fs').unlinkSync(service.conf);
+                        if (!options || !options.skipDeleteBinary)
+                        {
+                            require('fs').unlinkSync(servicePath);
+                            if(servicePath.endsWith('.sh'))
+                            {
+                                require('fs').unlinkSync(servicePath.substring(0, servicePath.length - 3));
+                            }
+                        }
+                        console.log(name + ' uninstalled');
+                    }
+                    catch (e)
+                    {
+                        console.log(name + ' could not be uninstalled', e)
+                    }
+                    
+                    break;
                 case 'init':
                 case 'upstart':
                     if (require('fs').existsSync('/etc/init.d/' + name))

@@ -344,7 +344,7 @@ function uninstallService(params)
         msh = msh + '.msh';
     }
 
-    if (svc.isRunning())
+    if (svc.isRunning == null || svc.isRunning())
     {
         process.stdout.write('   -> Stopping Service...');
         if(process.platform=='win32')
