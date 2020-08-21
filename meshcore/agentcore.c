@@ -109,6 +109,8 @@ extern int ILibDuktape_ModSearch_ShowNames;
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 extern int ILibInflate(char *buffer, size_t bufferLen, char *decompressed, size_t *decompressedLen, uint32_t crc);
+#define Agent2PingData(ptr) ((void*)((char*)(ptr)+1))
+#define PingData2Agent(data) ((MeshAgentHostContainer*)((char*)(data)-1))
 
 typedef struct RemoteDesktop_Ptrs
 {
@@ -649,73 +651,6 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 	}
 }
 
-/*
-// Called with a 5 second lag time when an interface changes
-void IPAddressMonitorUpdate(void *data)
-{
-	UNREFERENCED_PARAMETER(data);
-
-	// Setup the multicast timer
-	//MSG("IPAddressMonitorUpdate.\r\n");
-
-
-#ifdef WIN32
-	// In Windows, just reset the broadcast timer to 15 seconds
-	ILibLifeTime_Remove(Mesh.Timer, (void*)2);
-	ILibLifeTime_Add(Mesh.Timer, (void*)2, 15, &TimerTriggered, &TimerDestroyed);
-#else
-	// In Linux, we need to check to see if the push block has changed
-	ctrl_GetCurrentSignedNodeInfoBlock(NULL);
-	if (Mesh.LastMulticastPushSerial != g_serial)
-	{
-		Mesh.LastMulticastPushSerial = g_serial;
-		ILibLifeTime_Remove(Mesh.Timer, (void*)2);
-		ILibLifeTime_Add(Mesh.Timer, (void*)2, 30, &TimerTriggered, &TimerDestroyed);
-	}
-#endif
-
-	// If the service is not connected, reduce the time to the next attempt to 5 seconds
-	if (g_ServiceConnected == 0) {
-		ILibLifeTime_Remove(Mesh.Timer, (void*)4);
-		ILibLifeTime_Add(Mesh.Timer, (void*)4, 5, &TimerTriggered, &TimerDestroyed);
-	}
-}
-
-// Method gets periodically executed on the microstack thread to update the list of known IP addresses.
-#ifdef WINSOCK2
-void CALLBACK IPAddressMonitor
-(
-	IN DWORD dwError,
-	IN DWORD cbTransferred,
-	IN LPWSAOVERLAPPED lpOverlapped,
-	IN DWORD dwFlags
-)
-#else
-void IPAddressMonitor(void *data)
-#endif
-{
-#ifdef WINSOCK2
-	UNREFERENCED_PARAMETER(dwError);
-	UNREFERENCED_PARAMETER(cbTransferred);
-	UNREFERENCED_PARAMETER(lpOverlapped);
-	UNREFERENCED_PARAMETER(dwFlags);
-#endif
-
-	// We are in the process of cleaning up, lets exit now
-	if (Mesh.MulticastSocket == NULL) return;
-
-#ifdef WINSOCK2
-	// Call the interface update with a lag timer. The short lag allows interfaces to stabilize.
-	ILibLifeTime_Remove(Mesh.Timer, ILibScratchPad);									// Here we use "ILibScratchPad" as a dummy global identifier, memory not actualy used
-	ILibLifeTime_Add(Mesh.Timer, ILibScratchPad, 6, &IPAddressMonitorUpdate, NULL);		// Here we use "ILibScratchPad" as a dummy global identifier, memory not actualy used
-	WSAIoctl(NetworkMonitorSocket, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &UpnpMonitorSocketReserved, &UpnpMonitorSocketStateObject, &IPAddressMonitor);
-#else
-	// Call the interface update directly. TODO: This is very innefficient, we need to fix this.
-	IPAddressMonitorUpdate(NULL);
-	ILibLifeTime_Add(Mesh.Timer, NULL, 20, &IPAddressMonitor, NULL);
-#endif
-}
-*/
 
 /* ------------------------------
 Begin Mesh Agent Duktape Abstraction
@@ -3106,9 +3041,31 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 	}
 }
+
+void MeshServer_ControlChannel_IdleTimeout_PongTimeout(void *object)
+{
+	// We didn't receive a timely PONG response, so we must disconnect the control channel, and reconnect
+	MeshAgentHostContainer *agent = PingData2Agent(object);
+
+	if (agent->controlChannelDebug != 0)
+	{
+		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
+	}
+	ILibWebClient_Disconnect(agent->controlChannel);
+	agent->controlChannel = NULL;
+}
 void MeshServer_ControlChannel_IdleTimeout(ILibWebClient_StateObject WebStateObject, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
+
+	if (agent->controlChannelDebug != 0)
+	{
+		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
+	}
+
+	ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), Agent2PingData(agent), 5, MeshServer_ControlChannel_IdleTimeout_PongTimeout, NULL);
 	ILibWebClient_WebSocket_Ping(WebStateObject);
 	ILibWebClient_SetTimeout(WebStateObject, agent->controlChannel_idleTimeout_seconds, MeshServer_ControlChannel_IdleTimeout, user);
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost , ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping");
@@ -3119,8 +3076,15 @@ ILibWebClient_WebSocket_PingResponse MeshServer_ControlChannel_PingSink(ILibWebC
 }
 void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject, void *user)
 {
-#ifdef _REMOTELOGGING
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
+	ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), Agent2PingData(agent));
+	if (agent->controlChannelDebug != 0)
+	{
+		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received\n");
+	}
+
+#ifdef _REMOTELOGGING
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost , ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
 #endif
 }
@@ -3999,6 +3963,12 @@ void MeshAgent_CoreModule_UncaughtException(duk_context *ctx, char *msg, void *u
 void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, void *user)
 {
 	MeshAgentHostContainer *agentHost = (MeshAgentHostContainer*)user;
+
+	if (agentHost->controlChannelDebug != 0)
+	{
+		printf("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
+		ILIBLOGMESSAGEX("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
+	}
 
 	if (agentHost->serverConnectionState == 0)
 	{
