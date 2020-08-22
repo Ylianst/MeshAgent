@@ -2177,7 +2177,15 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				tokens = lines[i].split('\\t');\
 				if (tokens[headers['Mask']] == '00000000')\
 				{\
-					var gw = Buffer.from(tokens[headers['Gateway']], 'hex').readUInt32LE();\
+					var gw;\
+					if(require('os').endianness()=='LE')\
+					{\
+						gw = Buffer.from(tokens[headers['Gateway']], 'hex').readUInt32LE();\
+					}\
+					else\
+					{\
+						gw = Buffer.from(tokens[headers['Gateway']], 'hex').readUInt32BE();\
+					}\
 					var gwAddr = ((gw >> 24) & 255) + '.' + ((gw >> 16) & 255) + '.' + ((gw >> 8) & 255) + '.' + (gw & 255);\
 					defaultGateways[tokens[headers['Iface']]] = gwAddr;\
 				}\

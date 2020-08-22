@@ -298,6 +298,7 @@ int info_GetDefaultGateway(char* ifname, char** gateway)
 	struct parser_result_field* p;
 	struct parser_result* parse2;
 	struct parser_result_field* p2;
+	int16_t test = 0x0001;
 
 	*gateway = NULL;
 	len = utilx_readfile2("/proc/net/route", &route);
@@ -320,6 +321,13 @@ int info_GetDefaultGateway(char* ifname, char** gateway)
 				temp = p2->NextResult->NextResult->data;
 				for (i = 0; i < r; i++) { (*gateway)[r - (i + 1)] = util_hexToint(temp + (i * 2), 2); }
 				ILibDestructParserResults(parse2);
+				if (r == 4 && ((char*)&test)[0] == 0)
+				{
+					// Swap Byte Order
+					int j = ((int*)*gateway)[0];
+					j =  (j & 0x000000FFU) << 24 | (j & 0x0000FF00U) << 8 | (j & 0x00FF0000U) >> 8 | (j & 0xFF000000U) >> 24;
+					((int*)*gateway)[0] = j;
+				}
 				break;
 			}
 		}
