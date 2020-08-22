@@ -4347,7 +4347,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	agentHost->platformType = MeshAgent_Posix_PlatformTypes_UNKNOWN;
 	agentHost->JSRunningAsService = 0;
 
-	if (duk_peval_string(tmpCtx, "(function foo() { var f = require('service-manager').manager.getServiceType(); switch(f){case 'windows': return(10); case 'launchd': return(3); case 'freebsd': return(5); case 'systemd': return(1); case 'init': return(2); case 'upstart': return(4); default: return(0);}})()") == 0)
+	if (duk_peval_string(tmpCtx, "(function foo() { var f = require('service-manager').manager.getServiceType(); switch(f){case 'procd': return(7); case 'windows': return(10); case 'launchd': return(3); case 'freebsd': return(5); case 'systemd': return(1); case 'init': return(2); case 'upstart': return(4); default: return(0);}})()") == 0)
 	{
 		agentHost->platformType = (MeshAgent_Posix_PlatformTypes)duk_get_int(tmpCtx, -1);
 	}
@@ -5427,6 +5427,10 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 							break;
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
+							exit(1);
+							break;
+						case MeshAgent_Posix_PlatformTypes_PROCD:
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [PROCD should auto-restart]"); }
 							exit(1);
 							break;
 						case MeshAgent_Posix_PlatformTypes_INITD:

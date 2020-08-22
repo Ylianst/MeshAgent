@@ -55,7 +55,8 @@ typedef enum MeshAgent_Posix_PlatformTypes
 	MeshAgent_Posix_PlatformTypes_INIT_UPSTART = 4,
 	MeshAgent_Posix_PlatformTypes_LAUNCHD = 3,
 	MeshAgent_Posix_PlatformTypes_BSD = 5,
-	MeshAgent_Posix_PlatformTypes_WINDOWS = 10
+	MeshAgent_Posix_PlatformTypes_WINDOWS = 10,
+	MeshAgent_Posix_PlatformTypes_PROCD = 7
 }MeshAgent_Posix_PlatformTypes;
 
 typedef enum MeshCommand_AuthInfo_CapabilitiesMask
