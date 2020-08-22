@@ -969,6 +969,17 @@ function UserSessions()
 
     if(process.platform != 'win32') // Linux, MacOS, FreeBSD
     {
+        this.tty = function tty()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("tty | awk -F/ '{ printf \"\\x1e%s\\x1e\",$2; }'\nexit\n");
+            child.stdin.write("tty\nexit\n");
+            child.waitExit();
+
+            var val = child.stdout.str.split('\x1e');
+            return (val.length > 1 ? val[1] : 'root');
+        }
         this.Self = function Self()
         {
             var child = require('child_process').execFile('/usr/bin/id', ['id', '-u']);

@@ -22,9 +22,20 @@ function installService(params)
     if (process.platform == 'win32')
     {
         proxyFile = proxyFile.split('.exe').join('.proxy');
+        params.push('--installedByUser="' + require('win-registry').usernameToUserKey(require('user-sessions').getProcessOwnerName(process.pid).name) + '"');
     }
     else
     {
+        var u = require('user-sessions').tty();
+        var uid = 0;
+        try
+        {
+            uid = require('user-sessions').getUid(u);
+        }
+        catch(e)
+        {
+        }
+        params.push('--installedByUser=' + uid);
         proxyFile += '.proxy';
     }
 
