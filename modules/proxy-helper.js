@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Intel Corporation
+Copyright 2019 - 2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +17,12 @@ limitations under the License.
 
 function linux_getProxy()
 {
+    console.info1('Checking Proxies [LINUX]');
+
     // Check Environment Variabels
     if(require('fs').existsSync('/etc/environment'))
     {
+        console.info1('Checking global environment settings');
 	    var child = require('child_process').execFile('/bin/sh', ['sh']);
 	    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
 	    child.stdin.write('cat /etc/environment | grep = | ' + "tr '\\n' '`' | awk -F'`' '");
@@ -38,22 +41,29 @@ function linux_getProxy()
 	    child.stdin.write('   }');
 	    child.stdin.write("}'\nexit\n");
 	    child.waitExit();
-	    if (child.stdout.str.trim() != '') { return (child.stdout.str.trim()); }
+	    if (child.stdout.str.trim() != '')
+	    {
+	        console.info1(' => FOUND: ' + child.stdout.str.trim());
+	        return (child.stdout.str.trim());
+	    }
     }
 
     // Check profile.d
     if(require('fs').existsSync('/etc/profile.d/proxy_setup'))
     {
+        console.info1('Checking profile.d');
 	    var child = require('child_process').execFile('/bin/sh', ['sh']);
 	    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
 	    child.stdin.write("cat /etc/profile.d/proxy_setup | awk '" + '{ split($2, tok, "="); if(tok[1]=="http_proxy") { print tok[2]; }}\'\nexit\n');
 	    child.waitExit();
+	    console.info1(' => FOUND: ' + child.stdout.str.trim().split('\n')[0]);
 	    return (child.stdout.str.trim().split('\n')[0]);
     }
 
     // check apt proxy setting fro /etc/apt/apt.conf.d/proxy.conf
     if (require('fs').existsSync('/etc/apt/apt.conf.d/proxy.conf'))
     {
+        console.info1('Checking apt package manager settings [proxy.conf]');
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stderr.on('data', function (c) { console.log(c.toString()); });
@@ -71,12 +81,17 @@ function linux_getProxy()
         child.stdin.write('   }');
         child.stdin.write("}'\nexit\n");
         child.waitExit();
-        if (child.stdout.str.trim() != "") { return (child.stdout.str.trim()); }
+        if (child.stdout.str.trim() != "")
+        {
+            console.info1(' => FOUND: ' + child.stdout.str.trim());
+            return (child.stdout.str.trim());
+        }
     }
 
-    // check apt proxy setting fro /etc/apt/apt/apt.conf
+    // check apt proxy setting from /etc/apt/apt/apt.conf
     if (require('fs').existsSync('/etc/apt/apt.conf'))
     {
+        console.info1('Checking apt package manager settings [apt.conf]');
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stderr.on('data', function (c) { console.log(c.toString()); });
@@ -94,13 +109,18 @@ function linux_getProxy()
         child.stdin.write('   }');
         child.stdin.write("}'\nexit\n");
         child.waitExit();
-        if (child.stdout.str.trim() != "") { return (child.stdout.str.trim()); }
+        if (child.stdout.str.trim() != "")
+        {
+            console.info1(' => FOUND: ' + child.stdout.str.trim());
+            return (child.stdout.str.trim());
+        }
     }
 
 
     // check yum proxy setting
     if (require('fs').existsSync('/etc/yum.conf'))
     {
+        console.info1('Checking yum package manager settings');
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stderr.on('data', function (c) { console.log(c.toString()); });
@@ -134,12 +154,17 @@ function linux_getProxy()
         child.stdin.write('   }');
         child.stdin.write("}'\nexit\n");
         child.waitExit();
-        if (child.stdout.str.trim() != "") { return (child.stdout.str.trim()); }
+        if (child.stdout.str.trim() != "")
+        {
+            console.info1(' => FOUND: ' + child.stdout.str.trim());
+            return (child.stdout.str.trim());
+        }
     }
 
     // openSUSE proxy setting
     if (require('fs').existsSync('/etc/sysconfig/proxy'))
     {
+        console.info1('Checking sysconfig settings');
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stderr.on('data', function (c) { });
@@ -184,11 +209,16 @@ function linux_getProxy()
         child.stdin.write("}'\nexit\n");
         child.waitExit();
 
-        if (child.stdout.str.trim() != '') { return (child.stdout.str.trim()); }
+        if (child.stdout.str.trim() != '')
+        {
+            console.info1(' => FOUND: ' + child.stdout.str.trim());
+            return (child.stdout.str.trim());
+        }
     }
 
     if(require('fs').existsSync('/etc/login.conf'))
     {
+        console.info1('Checking login.conf settings');
         var child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stdin.write("cat /etc/login.conf | tr '\\n' '`' | awk -F'`' '");
@@ -258,6 +288,7 @@ function linux_getProxy()
                         tokens = items[i].split('=');
                         if(tokens[0] == 'https_proxy' || tokens[0] == 'http_proxy')
                         {
+                            console.info1(' => FOUND: ' + tokens[1].trim());
                             return (tokens[1].trim());
                         }
                     }
@@ -273,6 +304,7 @@ function linux_getProxy()
                         tokens = items[i].split('=');
                         if (tokens[0] == 'https_proxy' || tokens[0] == 'http_proxy')
                         {
+                            console.info1(' => FOUND: ' + tokens[1].trim());
                             return (tokens[1].trim());
                         }
                     }
@@ -284,68 +316,58 @@ function linux_getProxy()
     // Check gsettings
     if (require('fs').existsSync('/usr/bin/gsettings'))
     {
-        var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.stdin.write("mount  | tr '\\n' '`' | awk '");
-        child.stdin.write('{');
-        child.stdin.write('   printf "{";');
-        child.stdin.write('   n=split($0,lines,"`");');
-        child.stdin.write('   for(i=1;i<n;++i)');
-        child.stdin.write('   {');
-        child.stdin.write('      x=split(lines[i], tokens, " ");');
-        child.stdin.write('      j=sprintf(" type %s", tokens[x-1]);');
-        child.stdin.write('      e=index(lines[i], j);');
-        child.stdin.write('      s=index(lines[i], " on ");');
-        child.stdin.write('      point=substr(lines[i], s+4, e-s-4);');
-        child.stdin.write('      printf "%s\\"%s\\":\\"%s\\"",(i!=1?",":""), point, tokens[x-1];');
-        child.stdin.write('   }');
-        child.stdin.write('   printf "}";');
-        child.stdin.write("}'\nexit\n");
-        child.waitExit();
+        // Start by seeing if we are running as user
+        var checkId = require('user-sessions').Self();
+        if (checkId == 0)
+        {
+            var checkLoggedInUser = true;
 
-        var table = {};
-        try
-        {
-            table = JSON.parse(child.stdout.str);
-        }
-        catch (exc)
-        {
-        }
-
-        var tokens, t, autofs, homeFolder;
-        var setting;
-        var ids = require('user-sessions').loginUids();
-        for (var i in ids)
-        {
-            autofs = false;
-            homeFolder = require('user-sessions').getHomeFolder(ids[i]);
-            tokens = homeFolder.split('/');
-            for (t = 1; t < tokens.length; ++t)
+            // Running as root, so check which user installed us
+            try
             {
-                if (table[tokens.slice(0, t + 1).join('/')] == 'autofs')
+                if ((require('MeshAgent').getStartupOptions().installedByUser) != null)
                 {
-                    autofs = true;
-                    break;
+                    checkId = require('MeshAgent').getStartupOptions().installedByUser;
+                    checkLoggedInUser = false;
                 }
             }
-
-            if (autofs && table[homeFolder] == null) { continue; } // Check if autofs is mounted for this user
-
-            setting = require('linux-gnome-helpers').getProxySettings(ids[i]);
-            if (setting.mode == 'manual')
+            catch (e)
             {
-                if (setting.authEnabled)
+            }
+
+            if (checkLoggedInUser)
+            {
+                try
                 {
-                    return ('http://' + setting.username + ':' + setting.password + '@' + setting.host + ':' + setting.port);
+                    // Don't know who installed us, so see if anyone is logged in
+                    checkId = require('user-sessions').consoleUid();
                 }
-                else
+                catch (e)
                 {
-                    return ('http://' + setting.host + ':' + setting.port);
+                    // Unable to determine which user to probe
+                    checkId = 0;
                 }
+            }
+        }
+
+        console.info1('Checking gsettings with UID: ' + checkId);
+        var setting = require('linux-gnome-helpers').getProxySettings(checkId);
+        if (setting.mode == 'manual')
+        {
+            if (setting.authEnabled)
+            {
+                console.info1(' => FOUND: http://' + setting.username + ':' + setting.password + '@' + setting.host + ':' + setting.port);
+
+                return ('http://' + setting.username + ':' + setting.password + '@' + setting.host + ':' + setting.port);
+            }
+            else
+            {
+                console.info1(' => FOUND: http://' + setting.host + ':' + setting.port);
+                return ('http://' + setting.host + ':' + setting.port);
             }
         }
     }
-
+    console.info1('NO PROXIES settings detected');
     throw ('No proxies');
 }
 function posix_proxyCheck(uid, checkAddr)
