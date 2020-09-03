@@ -44,8 +44,10 @@ typedef struct ILibDuktape_CompressorStream
 void ILibDuktape_Compressor_Resume(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_CompressorStream *cs = (ILibDuktape_CompressorStream*)user;
-
-	ILibDuktape_DuplexStream_Ready(cs->ds);
+	if (ILibMemory_CanaryOK(cs) && ILibMemory_CanaryOK(cs->ds))
+	{
+		ILibDuktape_DuplexStream_Ready(cs->ds);
+	}
 }
 void ILibDuktape_Compressor_Pause(ILibDuktape_DuplexStream *sender, void *user)
 {

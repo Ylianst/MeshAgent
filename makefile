@@ -303,7 +303,6 @@ ARCHNAME = armhf
 #STRIP = arm-linux-gnueabihf-strip
 KVM = 1
 LMS = 0
-CFLAGS += -D_NOFSWATCHER 
 CEXTRA = -fno-strict-aliasing 
 endif
 
@@ -314,7 +313,6 @@ ARCHNAME = arm64
 #STRIP = arm-linux-gnueabihf-strip
 KVM = 1
 LMS = 0
-CFLAGS += -D_NOFSWATCHER 
 CEXTRA = -fno-strict-aliasing 
 endif
 
