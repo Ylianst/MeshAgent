@@ -1019,10 +1019,9 @@ duk_ret_t ILibDuktape_EventEmitter_moderated_impl(duk_context *ctx)
 
 	duk_push_current_function(ctx);							// [function]
 	uint32_t mval = (uint32_t)Duktape_GetIntPropertyValue(ctx, -1, "interval", 0);
-
 	if (mval != 0 && duk_has_prop_string(ctx, -1, "time"))
 	{
-		if ((uint32_t)Duktape_GetIntPropertyValue(ctx, -1, "time", 0) - ILibGetTimeStamp() < mval) { return(0); }
+		if (((uint32_t)ILibGetTimeStamp() - (uint32_t)Duktape_GetIntPropertyValue(ctx, -1, "time", 0)) < mval) { return(0); }
 	}
 
 	duk_get_prop_string(ctx, -1, "last");					// [function][array]
