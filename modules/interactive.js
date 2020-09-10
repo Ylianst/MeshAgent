@@ -64,7 +64,7 @@ limitations under the License.
 
 /*****/
 
-    function _install()
+    function _install(parms)
     {
         var mstr = require('fs').createWriteStream(process.execPath + '.msh', { flags: 'wb' });
         mstr.write('MeshName=' + msh.MeshName + '\n');
@@ -74,9 +74,13 @@ limitations under the License.
         mstr.write('MeshServer=' + msh.MeshServer + '\n');
         mstr.end();
 
-        global._child = require('child_process').execFile(process.execPath,
-            [process.execPath.split('/').pop(), '-fullinstall', '--no-embedded=1', '--copy-msh=1']);
+        if (parms == null) { parms = []; }
+        parms.unshift('--copy-msh=1');
+        parms.unshift('--no-embedded=1');
+        parms.unshift('-fullinstall');
+        parms.unshift(process.execPath.split('/').pop());
 
+        global._child = require('child_process').execFile(process.execPath, parms);
         global._child.stdout.on('data', function (c) { process.stdout.write(c.toString()); });
         global._child.stderr.on('data', function (c) { process.stdout.write(c.toString()); });
         global._child.waitExit();
@@ -94,6 +98,7 @@ limitations under the License.
     var s = null;
     try { s = require('service-manager').manager.getService('meshagent'); } catch (e) { }
     var buttons = ['Cancel'];
+    var skip = false;
     
     if (msh.InstallFlags == null)
     {
@@ -136,56 +141,26 @@ limitations under the License.
     {
         if (!require('message-box').kdialog && (require('message-box').zenity == null || (!require('message-box').zenity.extra)))
         {
-            console.log('\n' + "This installer cannot run on this system.");
-            console.log("Try installing/updating Zenity, and run again." + '\n');
-            process.exit();
-        }
-    }
-    else
-    {
-        if (!require('user-sessions').isRoot()) { console.log('\n' + "This utility requires elevated permissions. Please try again with sudo."); process.exit(); }
-    }
-
-
-    if (!s)
-    {
-        msg = "Agent: " + "NOT INSTALLED" + '\n';
-    } else
-    {
-        msg = "Agent: " + (s.isRunning() ? "RUNNING" : "NOT RUNNING") + '\n';
-    }
-
-    msg += ("Device Group: " + msh.MeshName + '\n');
-    msg += ("Server URL: " + msh.MeshServer + '\n');
-
-    var p = require('message-box').create("MeshCentral Agent Setup", msg, 99999, buttons);
-    p.then(function (v)
-    {
-        switch (v)
-        {
-            case "Cancel":
-                process.exit();
-                break;
-            case 'Setup':
-                var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Update', 'Uninstall', 'Cancel']);
-                d.then(function (v)
+            if (process.argv.includes('-install') || process.argv.includes('-update'))
+            {
+                var p = [];
+                for (var i = 0; i < process.argv.length; ++i)
                 {
-                    switch(v)
+                    if(process.argv[i].startsWith('--installPath='))
                     {
-                        case 'Update':
-                        case 'Install':
-                            _install();
-                            break;
-                        case 'Uninstall':
-                            _uninstall();
-                            break;
-                        default:
-                            break;
+                        p.push('--installPath="' + process.argv[i].split('=').pop() + '"');
                     }
-                    process.exit();
-                }).catch(function (v) { process.exit(); });
-                break;
-            case "Connect":
+                }
+                _install(p);
+                process.exit();
+            }
+            else if(process.argv.includes('-uninstall'))
+            {
+                _uninstall();
+                process.exit();
+            }
+            else if(process.argv.includes('-connect'))
+            {
                 global._child = require('child_process').execFile(process.execPath,
                     [process.execPath.split('/').pop(), '--no-embedded=1', '--disableUpdate=1',
                         '--MeshName="' + msh.MeshName + '"', '--MeshType="' + msh.MeshType + '"',
@@ -198,36 +173,128 @@ limitations under the License.
                 global._child.stderr.on('data', function (c) { });
                 global._child.on('exit', function (code) { process.exit(code); });
 
-                msg = ("Device Group: " + msh.MeshName + '\n');
-                msg += ("Server URL: " + msh.MeshServer + '\n');
-
-                if (process.platform != 'darwin')
+                console.log("\nConnecting to: " + msh.MeshServer);
+                console.log("Device Group: " + msh.MeshName);
+                console.log('\nPress Ctrl-c to exit\n');
+                skip = true;
+            }
+            else
+            {
+                console.log('\n' + "The graphical version of this installer cannot run on this system.");
+                console.log("Try installing/updating Zenity, and run again." + '\n');
+                console.log("You can also run the text version from the command line with the following command(s): ");
+                if ((msh.InstallFlags & 1) == 1)
                 {
-                    if(!require('message-box').zenity && require('message-box').kdialog)
+                    console.log('./' + process.execPath.split('/').pop() + ' -connect');
+                }
+                if ((msh.InstallFlags & 2) == 2)
+                {
+                    if (s)
                     {
-                        msg += ('\nPress OK to Disconnect');
+                        console.log('./' + process.execPath.split('/').pop() + ' -update');
+                        console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
+                    }
+                    else
+                    {
+                        console.log('./' + process.execPath.split('/').pop() + ' -install');
+                        console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
                     }
                 }
-
-                var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Disconnect']);
-                d.then(function (v) { process.exit(); }).catch(function (v) { process.exit(); });
-                break;
-            case "Uninstall":
-                _uninstall();
+                console.log('');
                 process.exit();
-                break;
-            case "Install":
-            case "Update":
-                _install();
-                process.exit();
-                break;
-            default:
-                console.log(v);
-                process.exit();
-                break;
+            }
         }
-    }).catch(function (e)
+    }
+    else
     {
-        console.log(e);
-        process.exit();
-    });
+        if (!require('user-sessions').isRoot()) { console.log('\n' + "This utility requires elevated permissions. Please try again with sudo."); process.exit(); }
+    }
+
+
+    if (!skip)
+    {
+        if (!s)
+        {
+            msg = "Agent: " + "NOT INSTALLED" + '\n';
+        } else
+        {
+            msg = "Agent: " + (s.isRunning() ? "RUNNING" : "NOT RUNNING") + '\n';
+        }
+
+        msg += ("Device Group: " + msh.MeshName + '\n');
+        msg += ("Server URL: " + msh.MeshServer + '\n');
+
+        var p = require('message-box').create("MeshCentral Agent Setup", msg, 99999, buttons);
+        p.then(function (v)
+        {
+            switch (v)
+            {
+                case "Cancel":
+                    process.exit();
+                    break;
+                case 'Setup':
+                    var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Update', 'Uninstall', 'Cancel']);
+                    d.then(function (v)
+                    {
+                        switch (v)
+                        {
+                            case 'Update':
+                            case 'Install':
+                                _install();
+                                break;
+                            case 'Uninstall':
+                                _uninstall();
+                                break;
+                            default:
+                                break;
+                        }
+                        process.exit();
+                    }).catch(function (v) { process.exit(); });
+                    break;
+                case "Connect":
+                    global._child = require('child_process').execFile(process.execPath,
+                        [process.execPath.split('/').pop(), '--no-embedded=1', '--disableUpdate=1',
+                            '--MeshName="' + msh.MeshName + '"', '--MeshType="' + msh.MeshType + '"',
+                            '--MeshID="' + msh.MeshID + '"',
+                            '--ServerID="' + msh.ServerID + '"',
+                            '--MeshServer="' + msh.MeshServer + '"',
+                            '--AgentCapabilities="0x00000020"']);
+
+                    global._child.stdout.on('data', function (c) { });
+                    global._child.stderr.on('data', function (c) { });
+                    global._child.on('exit', function (code) { process.exit(code); });
+
+                    msg = ("Device Group: " + msh.MeshName + '\n');
+                    msg += ("Server URL: " + msh.MeshServer + '\n');
+
+                    if (process.platform != 'darwin')
+                    {
+                        if (!require('message-box').zenity && require('message-box').kdialog)
+                        {
+                            msg += ('\nPress OK to Disconnect');
+                        }
+                    }
+
+                    var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Disconnect']);
+                    d.then(function (v) { process.exit(); }).catch(function (v) { process.exit(); });
+                    break;
+                case "Uninstall":
+                    _uninstall();
+                    process.exit();
+                    break;
+                case "Install":
+                case "Update":
+                    _install();
+                    process.exit();
+                    break;
+                default:
+                    console.log(v);
+                    process.exit();
+                    break;
+            }
+        }).catch(function (e)
+        {
+            console.log(e);
+            process.exit();
+        });
+    }

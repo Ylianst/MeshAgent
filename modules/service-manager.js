@@ -1979,20 +1979,31 @@ function serviceManager()
                 }
             }
         }
+        else
+        {
+            if (options.installPath == null) { options.installPath = '/usr/local/mesh_services/' + options.name + '/'; }
+            prepareFolders(options.installPath);
+
+            if (options.binary)
+            {
+                require('fs').writeFileSync(options.installPath + options.target, options.binary);
+            }
+            else
+            {
+                if (options.servicePath != (options.installPath + options.target))
+                {
+                    require('fs').copyFileSync(options.servicePath, options.installPath + options.target);
+                }
+            }
+
+            var m = require('fs').statSync(options.installPath + options.target).mode;
+            m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+            require('fs').chmodSync(options.installPath + options.target, m);
+        }
         if (process.platform == 'freebsd')
         {
             if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
             var parameters = options.parameters ? options.parameters.join(' ') : '';
-            if (!require('fs').existsSync('/usr/local/mesh_services')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
-            if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
-
-            if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
-            {
-                require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
-            }
-            var bm = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-            bm |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-            require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, bm);
 
             var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
             rc.write('#!/bin/sh\n');
@@ -2004,9 +2015,11 @@ function serviceManager()
             rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
             rc.write('rcvar=${name}_enable\n');
             rc.write('pidfile="/var/run/' + options.name + '.pid"\n');
-            rc.write(options.name + '_chdir="/usr/local/mesh_services/' + options.name + '"\n');
+            rc.write(options.name + '_chdir="' + options.installPath + '"\n');
+
             rc.write('command="/usr/sbin/daemon"\n');
-            rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0)?'-r':'') + ' -f /usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '"\n');
+            rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0) ? '-r' : '') + ' -f ' + options.installPath + options.target + ' ' + parameters + '"\n');
+
             rc.write('\n');
             rc.write('load_rc_config $name\n');
             rc.write(': ${' + options.name + '_enable="' + ((options.startType == 'AUTO_START' || options.startType == 'BOOT_START')?'YES':'NO') + '"}\n');
@@ -2025,17 +2038,6 @@ function serviceManager()
             switch (options.servicePlatform)
             {
                 case 'procd':
-                    if (options.installPath == null) { options.installPath = '/usr/local/mesh_services/' + options.name + '/'; }
-                    prepareFolders(options.installPath);
-                    if (options.servicePath != (options.installPath + options.target))
-                    {
-                        require('fs').copyFileSync(options.servicePath, options.installPath + options.target);
-                    }
-
-                    var m = require('fs').statSync(options.installPath + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-                    require('fs').chmodSync(options.installPath + options.target, m);
-
                     var conf = require('fs').createWriteStream('/etc/init.d/' + options.name, { flags: 'wb' });    
                     conf.write('#!/bin/sh /etc/rc.common\n');
                     conf.write('USE_PROCD=1\n');
@@ -2083,20 +2085,6 @@ function serviceManager()
 
                     break;
                 case 'init':
-                    if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
-                    if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
-
-                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
-                    {
-                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
-                    }
-                    console.log('copying ' + options.servicePath);
-
-                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-
-                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
-
                     if (options.failureRestart == null || options.failureRestart > 0)
                     {
                         // Crash Restart is enabled, but it isn't inherently supported by INIT, so we must fake it with JS
@@ -2128,19 +2116,6 @@ function serviceManager()
                     }
                     break;
                 case 'upstart':
-                    if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
-                    if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
-
-                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
-                    {
-                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
-                    }
-                    console.log('copying ' + options.servicePath);
-
-                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
-
                     conf = require('fs').createWriteStream('/etc/init/' + options.name + '.conf', { flags: 'wb' });
                     switch (options.startType)
                     {
@@ -2157,26 +2132,12 @@ function serviceManager()
                     {
                         conf.write('respawn\n\n');
                     }
-                    conf.write('chdir /usr/local/mesh_services/' + options.name + '\n');
-                    conf.write('exec /usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '\n\n');
+                    conf.write('chdir ' + options.installPath + '\n');
+                    conf.write('exec ' + options.installPath + options.target + ' ' + parameters + '\n\n');
                     conf.end();
                     break;
                 case 'systemd':
                     var serviceDescription = options.description ? options.description : 'MeshCentral Agent';
-
-                    if (!require('fs').existsSync('/usr/local/mesh_services/')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
-                    if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
-
-                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
-                    {
-                        console.log('copying ' + options.servicePath);
-                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
-                    }
-
-                    var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                    m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-                    require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
-
                     if (require('fs').existsSync('/lib/systemd/system'))
                     {
                         conf = require('fs').createWriteStream('/lib/systemd/system/' + options.name + '.service', { flags: 'wb' });
@@ -2192,8 +2153,8 @@ function serviceManager()
 
                     conf.write('[Unit]\nDescription=' + serviceDescription + '\n');
                     conf.write('[Service]\n');
-                    conf.write('WorkingDirectory=/usr/local/mesh_services/' + options.name + '\n');
-                    conf.write('ExecStart=/usr/local/mesh_services/' + options.name + '/' + options.target + ' ' + parameters + '\n');
+                    conf.write('WorkingDirectory=' + options.installPath + '\n');
+                    conf.write('ExecStart=' + options.installPath + options.target + ' ' + parameters + '\n');
                     conf.write('StandardOutput=null\n');
                     if (options.failureRestart == null || options.failureRestart > 0)
                     {
@@ -2282,7 +2243,7 @@ function serviceManager()
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
-            params += ('         <string>/usr/local/mesh_services/' + options.name + '/' + options.target + '</string>\n');
+            params += ('         <string>' + options.installPath + options.target + '</string>\n');
             if(options.parameters)
             {
                 for(var itm in options.parameters)
@@ -2300,7 +2261,7 @@ function serviceManager()
             plist += ('     <string>' + options.name + '</string>\n');
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
-            plist += ('     <string>/usr/local/mesh_services/' + options.name + '</string>\n');
+            plist += ('     <string>' + options.installPath + '</string>\n');
             plist += (stdoutpath + '\n');
             plist += '      <key>RunAtLoad</key>\n';
             plist += (autoStart + '\n');
@@ -2324,31 +2285,6 @@ function serviceManager()
 
             plist += '  </dict>\n';
             plist += '</plist>';
-
-            if (!require('fs').existsSync('/usr/local/mesh_services')) { require('fs').mkdirSync('/usr/local/mesh_services'); }
-            if (!require('fs').existsSync('/Library/LaunchDaemons/' + options.name + '.plist'))
-            {
-                if (!require('fs').existsSync('/usr/local/mesh_services/' + options.name)) { require('fs').mkdirSync('/usr/local/mesh_services/' + options.name); }
-                if (options.binary)
-                {
-                    require('fs').writeFileSync('/usr/local/mesh_services/' + options.name + '/' + options.target, options.binary);
-                }
-                else
-                {
-                    if (options.servicePath != '/usr/local/mesh_services/' + options.name + '/' + options.target)
-                    {
-                        require('fs').copyFileSync(options.servicePath, '/usr/local/mesh_services/' + options.name + '/' + options.target);
-                    }
-                }
-                require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
-                var m = require('fs').statSync('/usr/local/mesh_services/' + options.name + '/' + options.target).mode;
-                m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-                require('fs').chmodSync('/usr/local/mesh_services/' + options.name + '/' + options.target, m);
-            }
-            else
-            {
-                throw ('Service: ' + options.name + ' already exists');
-            }
         }
 
         if (options.files)
@@ -2462,6 +2398,7 @@ function serviceManager()
         if (typeof (name) == 'object') { name = name.name; }
         var service = this.getService(name);
         var servicePath = service.appLocation();
+        var workingPath = service.appWorkingDirectory();
 
         if (process.platform == 'win32')
         {
@@ -2635,7 +2572,7 @@ function serviceManager()
 
             try
             {
-                require('fs').rmdirSync('/usr/local/mesh_services/' + name);
+                require('fs').rmdirSync(workingPath);
             }
             catch (e)
             {
@@ -2651,7 +2588,7 @@ function serviceManager()
             require('fs').unlinkSync(service.rc);
             try
             {
-                require('fs').rmdirSync('/usr/local/mesh_services/' + name);
+                require('fs').rmdirSync(workingPath);
             }
             catch (e)
             { }

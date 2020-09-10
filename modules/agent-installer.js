@@ -72,6 +72,23 @@ function installService(params)
         options.parameters.splice(i, 1);
         options.installInPlace = true;
     }
+
+    if (global._workingpath != null && global._workingpath != '' && global._workingpath != '/')
+    {
+        for (i = 0; i < options.parameters.length; ++i)
+        {
+            if (options.parameters[i].startsWith('--installPath='))
+            {
+                global._workingpath = null;
+                break;
+            }
+        }
+        if(global._workingpath != null)
+        {
+            options.parameters.push('--installPath="' + global._workingpath + '"');
+        }
+    }
+
     for (i = 0; i < options.parameters.length; ++i)
     {
         if(options.parameters[i].startsWith('--installPath='))
@@ -454,11 +471,14 @@ function fullInstall(jsonString)
     console.setDestination(console.Destinations.DISABLED);
     var parms = JSON.parse(jsonString);
     var loc = null;
+
     try
     {
         process.stdout.write('...Checking for previous installation');
         var s = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
         loc = s.appLocation();
+
+        global._workingpath = s.appWorkingDirectory();
         s.close();
     }
     catch (e)
