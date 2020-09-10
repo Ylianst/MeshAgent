@@ -1327,7 +1327,22 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    child.stdin.write("service " + this.name + " status | awk '{print $NF}'\nexit\n");
+                                    child.stdin.write("service " + this.name + " status | awk '");
+                                    child.stdin.write('{');
+                                    child.stdin.write('   sh=sprintf("ps -e -o pid -o ppid | grep %s", $NF);');
+                                    child.stdin.write('   shval=system(sh);');
+                                    child.stdin.write("}'");
+                                    child.stdin.write(' | tr ' + "'\\n' '`' | awk -F'`' '");
+                                    child.stdin.write('{');
+                                    child.stdin.write('   root="";');
+                                    child.stdin.write('   pid="";');
+                                    child.stdin.write('   for(n=1;n<NF;++n)');
+                                    child.stdin.write('   {');
+                                    child.stdin.write('      split($n, i, " ");');
+                                    child.stdin.write('      if(i[2]=="1") { root=i[1]; } else { pid=i[1]; }');
+                                    child.stdin.write('   }');
+                                    child.stdin.write('   printf("%s", pid==""?root:pid);');
+                                    child.stdin.write("}'\nexit\n");
                                 }
                                 child.waitExit();
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
