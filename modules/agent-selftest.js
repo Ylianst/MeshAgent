@@ -334,6 +334,7 @@ function testFileDownload()
                 case 'uploaddone':
                     console.log('      -> File Transfer (Upload)...........[OK]');
                     this.uploadsuccess = true;
+                    this.end();
                     break;
             }
         });
