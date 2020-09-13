@@ -240,13 +240,66 @@ function macos_identifiers()
     return (ret);
 }
 
+function win_chassisType()
+{
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'SystemEnclosure', 'get', 'ChassisTypes']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+
+    try
+    {
+        var tok = child.stdout.str.split('{')[1].split('}')[0];
+        var val = tok.split(',')[0];
+        return (parseInt(val));
+    }
+    catch (e)
+    {
+        return (2); // unknown
+    }
+}
+
+function win_systemType()
+{
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'ComputerSystem', 'get', 'PCSystemType', '/FORMAT:CSV']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+
+    return (parseInt(child.stdout.str.trim().split(',').pop()));
+}
+
+function win_formFactor(chassistype)
+{
+    var ret = 'DESKTOP';
+    switch (chassistype)
+    {
+        case 11:    // Handheld
+        case 30:    // Tablet
+        case 31:    // Convertible
+        case 32:    // Detachable
+            ret = 'TABLET';
+            break;
+        case 9:     // Laptop
+        case 10:    // Notebook
+        case 14:    // Sub Notebook
+            ret = 'LAPTOP';
+            break;
+        default:
+            ret = win_systemType() == 2 ? 'MOBILE' : 'DESKTOP';
+            break;
+    }
+
+    return (ret);
+}
+
 switch(process.platform)
 {
     case 'linux':
         module.exports = { _ObjectID: 'identifiers', get: linux_identifiers };
         break;
     case 'win32':
-        module.exports = { _ObjectID: 'identifiers', get: windows_identifiers };
+        module.exports = { _ObjectID: 'identifiers', get: windows_identifiers, chassisType: win_chassisType, formFactor: win_formFactor, systemType: win_systemType };
         break;
     case 'darwin':
         module.exports = { _ObjectID: 'identifiers', get: macos_identifiers };
@@ -293,6 +346,12 @@ module.exports.isBatteryPowered = function isBatteryOperated()
                 if(stats.toBuffer()[1] != 128 && stats.toBuffer()[1] != 255)
                 {
                     ret = true;
+                }
+                else
+                {
+                    // No Battery detected, so lets check if there is supposed to be one
+                    var formFactor = win_formFactor(win_chassisType());
+                    return (formFactor == 'LAPTOP' || formFactor == 'TABLET' || formFactor == 'MOBILE');
                 }
             }
             break;
