@@ -309,7 +309,7 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 	if (MulticastAddr != NULL)
 	{
 		// Setup the IPv4 multicast address
-		memcpy(&(module->MulticastAddr), MulticastAddr, sizeof(struct sockaddr_in));
+		memcpy_s(&(module->MulticastAddr), sizeof(struct sockaddr_in), MulticastAddr, sizeof(struct sockaddr_in));
 		if (module->MulticastAddr.sin_port == 0) module->MulticastAddr.sin_port = htons(LocalPort);
 
 		// Setup incoming IPv4 socket
@@ -337,7 +337,7 @@ struct ILibMulticastSocket_StateModule *ILibMulticastSocket_Create(void *Chain, 
 			ILibChain_Link_SetMetadata(module->UDPServer6, "ILibMulticastSocketListener_v6");
 
 			// Setup the IPv6 multicast address
-			memcpy(&(module->MulticastAddr6), MulticastAddr6, sizeof(struct sockaddr_in6));
+			memcpy_s(&(module->MulticastAddr6), sizeof(struct sockaddr_in6), MulticastAddr6, sizeof(struct sockaddr_in6));
 			if (module->MulticastAddr6.sin6_port == 0) module->MulticastAddr6.sin6_port = htons(LocalPort);
 
 			// Set TTL, IPv6, Loop and Reuse flags assumed to already be set
@@ -385,7 +385,7 @@ void ILibMulticastSocket_WakeOnLan(void *module, char* mac)
 
 	// Create the magic packet
 	memset(ILibScratchPad, 0xFF, 6);
-	for (i = 1; i < 17; i++) memcpy(ILibScratchPad + (6 * i), mac, 6);
+	for (i = 1; i < 17; i++) memcpy_s(ILibScratchPad + (6 * i), sizeof(ILibScratchPad) - (6*i), mac, 6);
 
 	// Send it
 	for (i = 0; i < 2; i++)

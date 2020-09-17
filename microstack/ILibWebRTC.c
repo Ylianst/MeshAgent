@@ -1141,7 +1141,7 @@ void ILibStun_OnDestroy(void *object)
 
 	ILibLinkedList_Destroy(obj->StunUsers);
 	if (obj->turnUsername != NULL) { free(obj->turnUsername); obj->turnUsername = NULL; }
-	if (obj->turnPassword != NULL) { free(obj->turnPassword); obj->turnPassword = NULL; }
+	if (obj->turnPassword != NULL) { memset(obj->turnPassword, 0, obj->turnPasswordLength); free(obj->turnPassword); obj->turnPassword = NULL; }
 
 	ILibLifeTime_Remove(obj->Timer, ILibWebRTC_STUN_TO_PERIODIC_CHECK_TIMER(obj));
 	if (extraClean == 0) return;
@@ -3005,6 +3005,7 @@ void ILibORTC_SetRemoteParameters(void* stunModule, char *username, int username
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_STUN_ICE, ILibRemoteLogging_Flags_VerbosityLevel_1, "ILibORTC_SetRemoteParameters -> ILibStun_SetIceOffer2");
 	ILibStun_SetIceOffer2(stunModule, offer, offerLen, localUserName, localUserNameLen, localPassword, localPasswordLen, &answer);
 	free(answer);
+	localPassword = NULL;
 }
 
 void ILibORTC_AddRemoteCandidate(void *stunModule, char* localUsername, struct sockaddr_in6 *candidate)
@@ -6277,7 +6278,7 @@ void ILibWebRTC_SetTurnServer(void* stunModule, struct sockaddr_in6* turnServer,
 	}
 	if (stun->turnPassword != NULL)
 	{
-		free(stun->turnPassword);
+		memset(stun->turnPassword, 0, stun->turnPasswordLength); free(stun->turnPassword);
 		stun->turnPassword = NULL;
 	}
 	if (passwordLength > 0 && password != NULL)

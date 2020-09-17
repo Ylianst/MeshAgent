@@ -526,7 +526,7 @@ int kvm_init(int displayNo)
 	}
 
 
-	sprintf(displayString, ":%d", (int)displayNo);
+	sprintf_s(displayString, sizeof(displayString), ":%d", (int)displayNo);
 
 	if (count == 10) { return -1; }
 	count = 0;
@@ -549,7 +549,7 @@ int kvm_init(int displayNo)
 	while (eventdisplay == NULL && count++ < 100) 
 	{
 		if (getNextDisplay() == -1) { return -1; }
-		sprintf(displayString, ":%d", (int)current_display);
+		sprintf_s(displayString, sizeof(displayString), ":%d", (int)current_display);
 		eventdisplay = x11_exports->XOpenDisplay(displayString);
 	}
 
@@ -945,7 +945,7 @@ void* kvm_server_mainloop(void* parm)
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
 
-		sprintf(displayString, ":%d", (int)current_display);
+		sprintf_s(displayString, sizeof(displayString), ":%d", (int)current_display);
 		imagedisplay = x11_exports->XOpenDisplay(displayString);
 
 		count = 0;

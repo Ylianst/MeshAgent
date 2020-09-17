@@ -264,6 +264,7 @@ void ILibDuktape_SHA256_SIGNER_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_SHA256_Signer_Data* data;
 	duk_push_object(ctx);													// [signer]
 	data = (ILibDuktape_SHA256_Signer_Data*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_SHA256_Signer_Data));
+	duk_buffer_enable_autoclear(ctx);
 	duk_put_prop_string(ctx, -2, ILibDuktape_SHA256_SIGNER_PTR);			// [signer]
 	data->obj = duk_get_heapptr(ctx, -1);
 	data->ctx = ctx;

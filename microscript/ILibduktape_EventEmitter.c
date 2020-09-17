@@ -435,7 +435,9 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter_fromThis(duk_conte
 }
 ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_GetEmitter(duk_context *ctx, duk_idx_t i)
 {
+	if (!duk_ctx_is_alive(ctx)) { return(NULL); }
 	ILibDuktape_EventEmitter *retVal = (ILibDuktape_EventEmitter*)Duktape_GetBufferProperty(ctx, i, ILibDuktape_EventEmitter_Data);
+	if (!duk_ctx_is_alive(retVal->object)) { retVal = NULL; }
 	return retVal;
 }
 duk_ret_t ILibDuktape_EventEmitter_removeListener(duk_context *ctx)
@@ -495,8 +497,12 @@ duk_ret_t ILibDuktape_EventEmitter_removeAllListeners(duk_context *ctx)
 
 duk_ret_t ILibDuktape_EventEmitter_EmbeddedFinalizer(duk_context *ctx)
 {
+	ILibDuktape_EventEmitter *data = ILibDuktape_EventEmitter_GetEmitter(ctx, 0);
+	if (!ILibMemory_CanaryOK(data) || !duk_ctx_is_alive(data->ctx)) { return(0); }
+
 	ILibDuktape_EventEmitter_SetupEmit(ctx, duk_get_heapptr(ctx, 0), "~");	// [emit][this][~]
 	duk_dup(ctx, 0);														// [emit][this][~][self]
+	char *meta = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN");
 	if (g_displayFinalizerMessages)
 	{
 		printf("+-+- Finalizer Event for: %s [%p] -+-+\n", Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN"), duk_get_heapptr(ctx, -1));
@@ -532,17 +538,10 @@ duk_ret_t ILibDuktape_EventEmitter_EmbeddedFinalizer(duk_context *ctx)
 	}
 	if (duk_pcall_method(ctx, 2) != 0)
 	{
-		ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error in Finalizer: [Invalid C function means you forgot to return 0] ");
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error in Finalizer (%s): [Invalid C function means you forgot to return 0] ", meta);
 	}
 
-	ILibDuktape_EventEmitter *data = ILibDuktape_EventEmitter_GetEmitter(ctx, 0);
-	if (data == NULL) { return(ILibDuktape_Error(ctx, "Internal Error")); }			// This is deadcode, will never occur, but is here because Klockwork thinks this could happen
-	if (!ILibMemory_CanaryOK(data) || !duk_ctx_is_alive(data->ctx)) { return(0); }
 	sem_destroy(&(data->listenerCountTableLock));
-
-	// We need to clear the Native Dispatcher, while destroying the Hashtable
-	
-	memset(ILibMemory_RawPtr(data), 0, ILibMemory_RawSize(data));
 	return(0);
 }
 duk_ret_t ILibDuktape_EventEmitter_emitReturnValue(duk_context *ctx)

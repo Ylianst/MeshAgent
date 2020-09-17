@@ -309,6 +309,7 @@ char* ILibWrapper_SdpToBlock(char* sdp, int sdpLen, int *isActive, char **userna
 	ILibDestructParserResults(pr);
 	free(lines);
 	if(dtlshash!=NULL) {free(dtlshash);}
+	password = NULL;
 	return(retVal);
 }
 
@@ -417,6 +418,7 @@ int ILibWrapper_BlockToSDPEx(char* block, int blockLen, char** username, char** 
 			x += sprintf_s(*sdp+x, sdpLen-x, sdpTemplateRelay, i, c, 2128609535-i, relayAddressString, relayAddressPort,  (unsigned char)candidates[0], (unsigned char)candidates[1], (unsigned char)candidates[2], (unsigned char)candidates[3]);
 		}
 	}
+	password = NULL;
 	return(x);
 }
 

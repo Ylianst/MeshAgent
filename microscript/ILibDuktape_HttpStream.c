@@ -466,6 +466,7 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	duk_get_prop_string(ctx, 0, "headers");						// [headers]
 	duk_get_prop_string(ctx, -1, "Sec-WebSocket-Accept");		// [headers][key]
 	key = (char*)Duktape_GetBuffer(ctx, -1, &keyLen);
+	if (keyLen > 255) { keyLen = 255; }
 
 	if (duk_has_prop_string(ctx, -2, "Sec-WebSocket-Extensions"))
 	{
@@ -2891,6 +2892,7 @@ duk_ret_t ILibDuktape_HttpStream_IncomingMessage_Digest_ValidatePassword(duk_con
 
 	retVal = (responseLen == 32 && strncmp(result3, response, 32)) == 0 ? 1 : 0;
 	duk_push_int(ctx, retVal);
+	password = NULL;
 	return(1);
 }
 duk_ret_t ILibDuktape_HttpStream_IncomingMessage_finalizer(duk_context *ctx)
@@ -3803,6 +3805,7 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 	{
 		duk_push_null(ctx);
 	}
+	password = NULL;
 	return 1;
 }
 

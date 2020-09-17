@@ -51,6 +51,32 @@ typedef struct Duktape_EventLoopDispatchData
 	void *user;
 }Duktape_EventLoopDispatchData;
 
+
+duk_ret_t duk_fixed_buffer_finalizer(duk_context *ctx)
+{
+	duk_size_t bufLen;
+	char *buf = (char*)Duktape_GetBuffer(ctx, 0, &bufLen);
+	memset(buf, 0, bufLen);
+	return(0);
+}
+void duk_buffer_enable_autoclear(duk_context *ctx)
+{
+	duk_size_t len;
+
+	duk_push_buffer_object(ctx, -1, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);	// [buffer][obj]
+	duk_remove(ctx, -2);												// [bufobj]
+	duk_push_c_function(ctx, duk_fixed_buffer_finalizer, DUK_VARARGS);	// [bufobj][func]
+	duk_set_finalizer(ctx, -2);											// [bufobj]
+}
+void* duk_push_fixed_buffer_autoclear(duk_context *ctx, duk_size_t size)
+{
+	void *ret = duk_push_fixed_buffer(ctx, size);						// [buffer]
+	duk_push_buffer_object(ctx, -1, 0, size, DUK_BUFOBJ_NODEJS_BUFFER);	// [buffer][obj]
+	duk_remove(ctx, -2);												// [obj]
+	duk_push_c_function(ctx, duk_fixed_buffer_finalizer, DUK_VARARGS);
+	duk_set_finalizer(ctx, -2);
+	return(ret);
+}
 void* Duktape_DynamicBuffer_Resize(duk_context *ctx, duk_idx_t idx, duk_size_t bufSize)
 {
 	void *buffer = ILibMemory_FromRaw(duk_resize_buffer(ctx, idx, bufSize + sizeof(ILibMemory_Header)));
@@ -152,7 +178,10 @@ duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...)
 	va_list argptr;
 
 	va_start(argptr, format);
-	len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+	if ((size_t)len < sizeof(dest))
+	{
+		len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+	}
 	va_end(argptr);
 
 	duk_push_string(ctx, dest);
@@ -651,7 +680,7 @@ duk_ret_t ILibDuktape_Process_UncaughtExceptionExGetter(duk_context *ctx)
 }
 void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...)
 {
-	if (ctx == NULL) { return; }
+	if (ctx == NULL || !duk_ctx_is_alive(ctx)) { return; }
 	char dest[4096];
 	int len = 0;
 	va_list argptr;
@@ -667,7 +696,10 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 	duk_pop(ctx);																		// ...
 
 	va_start(argptr, format);
-	len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+	if (len < sizeof(dest))
+	{
+		len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+	}
 	va_end(argptr);
 
 	if (errmsgLen + len < sizeof(dest))
@@ -743,7 +775,7 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 			threadList[i++] = ILibLinkedList_GetDataFromNode(node);
 			ILibLinkedList_Remove(node);
 		}
-		while (WaitForMultipleObjectsEx(i, threadList, TRUE, 5000, TRUE) == WAIT_IO_COMPLETION);
+		while (WaitForMultipleObjectsEx(i, threadList, TRUE, 1000, TRUE) == WAIT_IO_COMPLETION);
 		ILibMemory_Free(threadList);
 #else
 		int rv;

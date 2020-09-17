@@ -2324,6 +2324,7 @@ duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)
 	ILibDuktape_WriteID(ctx, "tls.pfxCertificate");
 	util_free(data);
 	util_freecert(&cert);
+	passphrase = NULL;
 	return 1;
 }
 duk_ret_t ILibDuktape_TLS_loadpkcs7b(duk_context *ctx)
@@ -2473,7 +2474,7 @@ void ILibDuktape_ipaddress_PUSH(duk_context *ctx, struct sockaddr_in6* addr)
 	ILibDuktape_CreateInstanceMethod(ctx, "toString", ILibDuktape_ipaddress_toString, 1);
 	struct sockaddr_in6* _addr = (struct sockaddr_in6*)Duktape_PushBuffer(ctx, sizeof(struct sockaddr_in6));// [Address4][addr]
 	duk_put_prop_string(ctx, -2, ILibDuktape_IPAddress_SockAddr);											// [Address4]
-	memcpy(_addr, addr, sizeof(struct sockaddr_in6));
+	memcpy_s(_addr, sizeof(struct sockaddr_in6), addr, sizeof(struct sockaddr_in6));
 }
 
 duk_ret_t ILibDuktape_ipaddress_address4_constructor(duk_context *ctx)

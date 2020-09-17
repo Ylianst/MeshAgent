@@ -10,6 +10,7 @@
 #include "mac_tile.h"
 #include "../../meshinfo.h"
 #include "../../meshdefines.h"
+#include "../../../microstack/ILibParsers.h"
 
 extern CGDirectDisplayID SCREEN_NUM;
 extern int SCREEN_WIDTH;
@@ -47,7 +48,7 @@ int get_tile_buffer(int x, int y, void **buffer, long long bufferSize, void *des
 	int height = 0;
 	
 	for (height = y; height < y + tileheight; height++) {
-		memcpy(target, (const void *)(((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x))), (size_t)(tilewidth * 3));
+		memcpy_s(target, (size_t)bufferSize - (target - (char*)*buffer), (void *)(((char *)desktop) + (3 * ((height * adjust_screen_size(SCREEN_WIDTH)) + x))), (size_t)(tilewidth * 3));
 		target = (char *) (target + (3 * tilewidth));
 	}
 	
@@ -375,7 +376,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 			((unsigned short*)*buffer)[5] = 0;														// RESERVED
 			((unsigned short*)*buffer)[6] = (unsigned short)htons((unsigned short)x);				// X position
 			((unsigned short*)*buffer)[7] = (unsigned short)htons((unsigned short)y);				// Y position
-			memcpy((char *)(*buffer) + 16, jpeg_buffer, jpeg_buffer_length);
+			memcpy_s((char *)(*buffer) + 16, (*bufferSize - 16), jpeg_buffer, jpeg_buffer_length);
 		}
 		else
 		{
@@ -383,7 +384,7 @@ int getTileAt(int x, int y, void** buffer, long long *bufferSize, void *desktop,
 			((unsigned short*)*buffer)[1] = (unsigned short)htons((unsigned short)*bufferSize);		// Write the size
 			((unsigned short*)*buffer)[2] = (unsigned short)htons((unsigned short)x);				// X position
 			((unsigned short*)*buffer)[3] = (unsigned short)htons((unsigned short)y);				// Y position
-			memcpy((char *)(*buffer) + 8, jpeg_buffer, jpeg_buffer_length);
+			memcpy_s((char *)(*buffer) + 8, (*bufferSize - 8), jpeg_buffer, jpeg_buffer_length);
 		}
 		free(jpeg_buffer);
 		jpeg_buffer = NULL;

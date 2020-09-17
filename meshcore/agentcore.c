@@ -709,6 +709,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertificate(duk_context *ctx)
 	util_free(data);
 	util_freecert(&cert);
 	SSL_TRACE2("ILibDuktape_MeshAgent_GenerateCertificate()");
+	passphrase = NULL;
 	return 1;
 #endif
 }
@@ -3334,7 +3335,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		if (agent->multicastServerUrl != NULL) {
 			serverUrl = agent->multicastServerUrl;
-			serverUrlLen = (int)strlen(serverUrl);
+			serverUrlLen = (int)strnlen_s(serverUrl, sizeof(ILibScratchPad));
 		}
 		else
 		{
@@ -4716,6 +4717,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			duk_peval_string_noresult(agentHost->meshCoreCtx, "require('win-console').hide()");
 		}
 #endif
+
 		ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);	
 		MeshServer_Connect(agentHost);
 

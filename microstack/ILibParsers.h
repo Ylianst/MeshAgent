@@ -264,7 +264,7 @@ long ILibGetTimeStamp();
 // Polyfills
 #ifndef memcpy_s
 	int ILibMemory_Copy_s(void *destination, size_t destinationSize, void *source, size_t sourceLength);
-	#define memcpy_s(dest, destSize, source, sourceLen) ILibMemory_Copy_s(dest, destSize, source, sourceLen)
+	#define memcpy_s(dest, destSize, source, sourceLen) ILibMemory_Copy_s(dest, destSize, (void*)source, sourceLen)
 #endif
 
 #ifndef memmove_s
