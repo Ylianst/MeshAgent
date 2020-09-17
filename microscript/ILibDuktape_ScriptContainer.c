@@ -449,10 +449,10 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	int x = readlink("/proc/curproc/file", exePath, sizeof(exePath));
 	if (x < 0 || x >= sizeof(exePath))
 	{
-		write(STDOUT_FILENO, "You'll need to mount procfs, which isn't mounted by default on FreeBSD. Add the following line to /etc/fstab\n");
-		write(STDOUT_FILENO, "   proc	/proc	procfs	rw	0	0\n\n");
-		write(STDOUT_FILENO, "If you don't reboot after, then you can manually mount with the command:\n");
-		write(STDOUT_FILENO, "   mount - t procfs proc / proc\n\n");
+		printf("You'll need to mount procfs, which isn't mounted by default on FreeBSD. Add the following line to /etc/fstab\n");
+		printf("   proc	/proc	procfs	rw	0	0\n\n");
+		printf("If you don't reboot after, then you can manually mount with the command:\n");
+		printf("   mount - t procfs proc / proc\n\n");
 		ILIBCRITICALEXIT(246);
 	}
 	exePath[x] = 0;
