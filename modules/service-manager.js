@@ -2306,6 +2306,14 @@ function serviceManager()
 
             plist += '  </dict>\n';
             plist += '</plist>';
+            if (!require('fs').existsSync('/Library/LaunchDaemons/' + options.name + '.plist'))
+            {
+                require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
+            }
+            else
+            {
+                throw ('Service: ' + options.name + ' already exists');
+            }
         }
 
         if (options.files)
