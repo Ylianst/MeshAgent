@@ -15,9 +15,26 @@ limitations under the License.
 */
 
 
+function getParameter(name, parms)
+{
+    var tokens;
+    for(var i=0;i<parms.length;++i)
+    {
+        tokens = parms[i].split('=');
+        if(tokens[0]==name)
+        {
+            if (tokens[1].startsWith('"')) { return (tokens[1].substring(1, tokens[1].length - 1)); }
+            return (tokens[1]);
+        }
+    }
+    return (null);
+}
+
 function installService(params)
 {
     process.stdout.write('...Installing service');
+    console.info1('');
+
     var proxyFile = process.execPath;
     if (process.platform == 'win32')
     {
@@ -468,9 +485,17 @@ function fullUninstall(jsonString)
 
 function fullInstall(jsonString)
 {
-    console.setDestination(console.Destinations.DISABLED);
     var parms = JSON.parse(jsonString);
     var loc = null;
+
+    if (!(getParameter('--verbose', parms) != null && parseInt(getParameter('--verbose', parms)) > 0))
+    {
+        console.setDestination(console.Destinations.DISABLED);
+    }
+    else
+    {
+        console.setInfoLevel(1); 
+    }
 
     try
     {
@@ -479,6 +504,8 @@ function fullInstall(jsonString)
         loc = s.appLocation();
 
         global._workingpath = s.appWorkingDirectory();
+        console.info1('');
+        console.info1('Previous Working Path: ' + global._workingpath);
         s.close();
     }
     catch (e)

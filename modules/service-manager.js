@@ -1852,35 +1852,32 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires admin'); }
 
             // Before we start, we need to copy the binary to the right place
-            var folder;
             if(!options.installPath)
             {
                 options.installPath = this.getProgramFolder();
                 switch(options.companyName)
                 {
                     case null:
-                        options.installPath += '\\mesh';
+                        options.installPath += ('\\mesh\\' + options.name + '\\');
                         break;
                     case '':
+                        options.installPath += ('\\' + options.name + '\\');
                         break;
                     default:
-                        options.installPath += ('\\' + options.companyName);
+                        options.installPath += ('\\' + options.companyName + '\\' + options.name + '\\');
                         break;
                 }
             }
-            folder = options.installPath;
-            if (folder.endsWith('\\')) { folder = folder.substring(0, folder.length - 1); }
-            if (!options.installInPlace) { prepareFolders(folder + '\\' + options.name); }
+            if (!options.installInPlace) { prepareFolders(options.installPath); }
             if (options.servicePath == process.execPath) { options._isMeshAgent = true; }
 
             if (!options.installInPlace)
             {
-                if (options.servicePath != folder + '\\' + options.name + '\\' + options.target + '.exe')
+                if (options.servicePath != (options.installPath + options.target + '.exe'))
                 {
-                    require('fs').copyFileSync(options.servicePath, folder + '\\' + options.name + '\\' + options.target + '.exe');
+                    require('fs').copyFileSync(options.servicePath, options.installPath + options.target + '.exe');
                 }
-                options.servicePath = folder + '\\' + options.name + '\\' + options.target + '.exe';
-                options.installPath = folder + '\\' + options.name + '\\'; 
+                options.servicePath = options.installPath + options.target + '.exe';
             }
             else
             {
@@ -1890,9 +1887,12 @@ function serviceManager()
                 options.installPath = options.installPath.join('\\') + '\\';
             }
 
+            console.info1('   Install Path = ' + options.installPath);
+            console.info1('   OpenSCManagerA()');
             var servicePath = this.GM.CreateVariable('"' + options.servicePath + '"', { wide: true });
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0002);
             if (handle.Val == 0) { throw ('error opening SCManager'); }
+            console.info1('      => SUCCESS');
             var serviceName = this.GM.CreateVariable(options.name, { wide: true });
             var displayName = this.GM.CreateVariable(options.displayName, { wide: true});
             var allAccess = 0x000F01FF;
@@ -1902,18 +1902,24 @@ function serviceManager()
             switch (options.startType) {
                 case 'AUTO_START':
                     serviceType = 0x02; // Automatic
+                    console.info1('   startType = automatic');
                     break;
                 case 'DEMAND_START':
                 default:
                     serviceType = 0x03; // Manual
+                    console.info1('   startType = manual');
                     break;
                 case 'DISABLED':
                     serviceType = 0x04; // Disabled
+                    console.info1('   startType = disabled');
                     break;
             }
 
+            console.info1('   CreateServiceW()');
             var h = this.proxy.CreateServiceW(handle, serviceName, displayName, allAccess, 0x10 | 0x100, serviceType, 0, servicePath, 0, 0, 0, 0, 0);
             if (h.Val == 0) { this.proxy.CloseServiceHandle(handle); throw ('Error Creating Service: ' + this.proxy2.GetLastError().Val); }
+            console.info1('      => SUCCESS');
+
             if (options.description)
             {
                 var dsc = this.GM.CreateVariable(options.description, { wide: true });
@@ -1950,9 +1956,16 @@ function serviceManager()
 
             if (options.parameters)
             {
-                var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
-                imagePath += (' ' + options.parameters.join(' '));
-                reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
+                try
+                {
+                    var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
+                    imagePath += (' ' + options.parameters.join(' '));
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
+                }
+                catch(xxx)
+                {
+                    console.info1(xxx);
+                }
             }
 
             try
