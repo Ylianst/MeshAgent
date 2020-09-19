@@ -173,6 +173,7 @@ typedef struct MeshAgentHostContainer
 	char* exePath;
 	ILibWebClient_RequestManager httpClientManager;
 	ILibSimpleDataStore masterDb;
+	int configPathUsesCWD;
 	ILibWebClient_StateObject controlChannel;
 	struct sockaddr_in6* proxyServer;
 	void *controlChannelRequest;

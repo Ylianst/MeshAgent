@@ -1838,6 +1838,17 @@ End Mesh Agent Duktape Abstraction
 // !!!WARNING!!!: The result of this method is stored in ILibScratchPad2
 char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 {
+	duk_context *ctx = NULL;
+	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
+	if (agent != NULL && agent->configPathUsesCWD != 0)
+	{
+		ctx = agent->meshCoreCtx != NULL ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agent->chain, NULL, NULL, agent->exePath, NULL, NULL, agent->chain);
+		if (duk_peval_string(ctx, "(function (){ return(process.cwd() + process.execPath.split(process.platform=='win32'?'\\\\':'/').pop()); })();") == 0)
+		{
+			basePath = (char*)duk_get_string(ctx, -1);
+		}
+	}
+
 	size_t localPathLen = strnlen_s(localPath, sizeof(ILibScratchPad2));
 	size_t basePathLen = strnlen_s(basePath, sizeof(ILibScratchPad2));
 	int i, sz;
@@ -1870,6 +1881,11 @@ char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 		memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), basePath, i);
 		memcpy_s(ILibScratchPad2 + i, sizeof(ILibScratchPad2) - i, localPath, localPathLen);
 		ILibScratchPad2[sz] = 0;
+	}
+	if (ctx != NULL)
+	{
+		duk_pop(ctx);
+		if (agent->meshCoreCtx == NULL) { Duktape_SafeDestroyHeap(ctx); }
 	}
 	return ILibScratchPad2;
 }
@@ -5258,7 +5274,10 @@ int MeshAgent_System(char *cmd)
 
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
-	char exePath[1024];
+	char _exedata[ILibMemory_Init_Size(1024, sizeof(void*))];
+	char *exePath = ILibMemory_Init(_exedata, 1024, sizeof(void*), ILibMemory_Types_STACK);
+	((void**)ILibMemory_Extra(exePath))[0] = agentHost;
+
 #ifdef WIN32
 	int x;
 #elif defined(__APPLE__)
@@ -5293,7 +5312,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #ifdef WIN32
 		WCHAR tmpExePath[2048];
 		GetModuleFileNameW(NULL, tmpExePath, sizeof(tmpExePath)/2);
-		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, (LPSTR)exePath, (int)sizeof(exePath), NULL, NULL);
+		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, (LPSTR)exePath, (int)ILibMemory_Size(exePath), NULL, NULL);
 #elif defined(__APPLE__)
 		if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
 		exePath[(int)len] = 0;
@@ -5312,6 +5331,21 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 
 	// Perform a self SHA384 Hash
 	GenerateSHA384FileHash(agentHost->exePath, agentHost->agentHash);
+
+	int _pX, _piX;
+	for (_pX = 1; _pX < paramLen; ++_pX)
+	{
+		if ((_piX = ILibString_IndexOf(param[_pX], (int)strnlen_s(param[_pX], sizeof(ILibScratchPad)), "=", 1)) > 2 && strncmp(param[_pX], "--", 2) == 0)
+		{
+			if (_piX - 2 == 13 && strncmp(param[_pX] + 2, "configUsesCWD", 13) == 0 && strncmp(param[_pX] + _piX + 1, "1", 1) == 0)
+			{
+				// Config files use working path, instead of binary path
+				agentHost->configPathUsesCWD = 1;
+				break;
+			}
+		}
+	}
+
 
 	ILibCriticalLogFilename = ILibString_Copy(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".log"), -1);
 #ifndef MICROSTACK_NOTLS
