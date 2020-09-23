@@ -2445,7 +2445,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 #else
 	// Set performSelfUpdate to the startupType, on Linux is this important: 1 = systemd, 2 = upstart, 3 = sysv-init
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
-	if (len > 0) { agent->performSelfUpdate = atoi(ILibScratchPad); }
+	if (len > 0 && len < sizeof(ILibScratchPad)) { agent->performSelfUpdate = atoi(ILibScratchPad); }
 	if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
 #endif
 
@@ -3144,7 +3144,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				else
 				{
 					char idleBuffer[16];
-					idleBuffer[ILibSimpleDataStore_Get(agent->masterDb, "controlChannelIdleTimeout", idleBuffer, sizeof(idleBuffer))] = 0;
+					idleBuffer[ILibSimpleDataStore_Get(agent->masterDb, "controlChannelIdleTimeout", idleBuffer, sizeof(idleBuffer)-1)] = 0;
 					agent->controlChannel_idleTimeout_seconds = atoi(idleBuffer);
 				}
 			}
@@ -4436,7 +4436,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	// Read the .tag file if present and push it into the database
 	{
 		char* str = NULL;
-		int len = (int)util_readfile(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".tag"), &str, 1024);
+		int len = (int)util_readfile(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".tag"), &str, 4096);
 		if (str != NULL) { ILibSimpleDataStore_PutEx(agentHost->masterDb, "Tag", 3, str, len); free(str); } else { ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "Tag", 3); }
 	}
 
