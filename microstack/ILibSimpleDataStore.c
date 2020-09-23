@@ -845,7 +845,7 @@ int ILibSimpleDataStore_PutCompressed(ILibSimpleDataStore dataStore, char* key, 
 __EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char* key, int defaultValue)
 {
 	int bufLen = ILibSimpleDataStore_Get(dataStore, key, ILibScratchPad, sizeof(ILibScratchPad));
-	if (bufLen == 0 || bufLen > sizeof(ILibScratchPad)) { return(defaultValue); }
+	if (bufLen == 0 || bufLen >= sizeof(ILibScratchPad)) { return(defaultValue); }
 	return(atoi(ILibScratchPad));
 }
 
