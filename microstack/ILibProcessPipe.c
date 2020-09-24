@@ -666,31 +666,31 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		{
 			if (strcasecmp("LINES", options[0]) == 0)
 			{
-				w.ws_row = atoi(options[1]);
+				w.ws_row = ILib_atoi2_uint16(options[1], 0);
 			}
 			else if (strcasecmp("COLUMNS", options[0]) == 0)
 			{
-				w.ws_col = atoi(options[1]);
+				w.ws_col = ILib_atoi2_uint16(options[1], 0);
 			}	
 			else if (strcasecmp("c_iflag", options[0]) == 0)
 			{
 				flags = 1;
-				tios.c_iflag = (tcflag_t)atoi(options[1]);
+				tios.c_iflag = (tcflag_t)ILib_atoi2_uint32(options[1], 0);
 			}
 			else if (strcasecmp("c_oflag", options[0]) == 0)
 			{
 				flags = 1;
-				tios.c_oflag = (tcflag_t)atoi(options[1]);
+				tios.c_oflag = (tcflag_t)ILib_atoi2_uint32(options[1], 0);
 			}
 			else if (strcasecmp("c_cflag", options[0]) == 0)
 			{
 				flags = 1;
-				tios.c_cflag = (tcflag_t)atoi(options[1]);
+				tios.c_cflag = (tcflag_t)ILib_atoi2_uint32(options[1], 0);
 			}
 			else if (strcasecmp("c_lflag", options[0]) == 0)
 			{
 				flags = 1;
-				tios.c_lflag = (tcflag_t)atoi(options[1]);
+				tios.c_lflag = (tcflag_t)ILib_atoi2_uint32(options[1], 0);
 			}
 
 			options += 2;

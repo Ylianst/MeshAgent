@@ -1638,10 +1638,10 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 		}
 		else
 		{
-			int mlen = strlen(u.machine);
+			int mlen = strlen(u.machine); // size is not specified, but is gauranteed to be NULL terminated
 			if (mlen > 4 && strncmp(u.machine, "armv", 4) == 0)
 			{
-				if (atoi(u.machine + 4) > 7)
+				if (ILib_atoi2_int32(u.machine + 4, mlen) > 7)
 				{
 					duk_push_string(ctx, "arm64");
 				}

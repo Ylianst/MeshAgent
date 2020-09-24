@@ -156,7 +156,7 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 								{
 									memcpy_s(numtmp, sizeof(numtmp), pr2->LastResult->data, pr2->LastResult->datalength);
 									numtmp[pr2->LastResult->datalength] = 0;
-									retVal = atoi(numtmp);
+									retVal = ILib_atoi2_int32(numtmp, sizeof(numtmp));
 									ILibDestructParserResults(pr2);
 									break;
 								}

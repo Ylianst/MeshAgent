@@ -2134,7 +2134,7 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		if (pct > 0)
 		{
 			hostCopy[pct] = 0;
-			pct = atoi(hostCopy + pct + 1);
+			pct = ILib_atoi2_int32(hostCopy + pct + 1, sizeof(hostCopy));
 		}
 		else
 		{

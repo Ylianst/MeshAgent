@@ -846,7 +846,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char
 {
 	int bufLen = ILibSimpleDataStore_Get(dataStore, key, ILibScratchPad, sizeof(ILibScratchPad));
 	if (bufLen == 0 || bufLen >= sizeof(ILibScratchPad)) { return(defaultValue); }
-	return(atoi(ILibScratchPad));
+	return(ILib_atoi2_int32(ILibScratchPad, sizeof(ILibScratchPad)));
 }
 
 // Get a value from the data store given a key

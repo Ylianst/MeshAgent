@@ -170,6 +170,24 @@ static inline void ignore_result(uintptr_t result) { (void)result; }
 #define PRINTERROR()
 #endif
 
+
+int ILib_atoi_uint64_ex(uint64_t *val, const char *instr, size_t instrLen, uint64_t MAX);
+int ILib_atoi_uint32_ex(uint32_t *val, const char *instr, size_t instrLen, uint64_t MAX);
+int ILib_atoi_uint16_ex(uint16_t *val, const char *instr, size_t instrLen, uint64_t MAX);
+uint64_t ILib_atoi2_uint64(const char *instr, size_t instrLen);
+uint32_t ILib_atoi2_uint32(const char *instr, size_t instrLen);
+uint16_t ILib_atoi2_uint16(const char *instr, size_t instrLen);
+#define ILib_atoi2_int64(instr, instrLen) (ILib_atoi2_uint64(instr, instrLen)<=INT64_MAX?ILib_atoi2_uint64(instr, instrLen):0)
+#define ILib_atoi2_int32(instr, instrLen) (ILib_atoi2_uint64(instr, instrLen)<=INT32_MAX?ILib_atoi2_uint32(instr, instrLen):0)
+#define ILib_atoi2_int16(instr, instrLen) (ILib_atoi2_uint64(instr, instrLen)<=INT16_MAX?ILib_atoi2_uint16(instr, instrLen):0)
+
+#define ILib_atoi_uint64(pval, instr, instrLen) ILib_atoi_uint64_ex(pval, instr, instrLen, UINT64_MAX)
+#define ILib_atoi_int64(pval, instr, instrLen) ILib_atoi_uint64_ex(pval, instr, instrLen, INT64_MAX)
+#define ILib_atoi_uint32(pval, instr, instrLen) ILib_atoi_uint32_ex(pval, instr, instrLen, UINT32_MAX)
+#define ILib_atoi_int32(pval, instr, instrLen) ILib_atoi_uint32_ex(pval, instr, instrLen, INT32_MAX)
+#define ILib_atoi_uint16(pval, instr, instrLen) ILib_atoi_uint16_ex(pval, instr, instrLen, UINT16_MAX)
+#define ILib_atoi_int16(pval, instr, instrLen) ILib_atoi_uint16_ex(pval, instr, instrLen, INT16_MAX)
+
 #ifdef WIN32
 char *ILibWideToUTF8Ex(WCHAR* wstr, int wstrCharacterLen, char *buffer, int bufferLen);
 #define ILibWideToUTF8(wstr, wstrCharacterLen) ILibWideToUTF8Ex(wstr, wstrCharacterLen, NULL, 0)

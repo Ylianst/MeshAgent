@@ -1665,7 +1665,7 @@ ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule sock
 								//
 								wcdo->WaitForClose = 0;
 								phfn->FieldData[phfn->FieldDataLength] = '\0';
-								wcdo->BytesLeft = atoi(phfn->FieldData);
+								wcdo->BytesLeft = ILib_atoi2_int32(phfn->FieldData, phfn->FieldDataLength);
 								if (wcdo->BytesLeft < 0)
 								{
 									wcdo->BytesLeft = 0;
@@ -3370,14 +3370,14 @@ void ILibWebClient_Parse_ContentRange(char *contentRange, int *Start, int *End, 
 				{
 					hasErrors = 1;
 				}
-				*TotalLength = atoi(pr2->LastResult->data);
+				*TotalLength = ILib_atoi2_int32(pr2->LastResult->data, pr2->LastResult->datalength);
 				pr3 = ILibParseString(pr2->FirstResult->data, 0, pr2->FirstResult->datalength, "-", 1);
 				if (pr3->NumResults==2)
 				{
 					pr3->FirstResult->data[pr3->FirstResult->datalength] = 0;
 					pr3->LastResult->data[pr3->LastResult->datalength] = 0;
-					*Start = atoi(pr3->FirstResult->data);
-					*End = atoi(pr3->LastResult->data);
+					*Start = ILib_atoi2_int32(pr3->FirstResult->data, pr3->FirstResult->datalength);
+					*End = ILib_atoi2_int32(pr3->LastResult->data, pr3->LastResult->datalength);
 					if (pr3->FirstResult->datalength == 0 || pr3->LastResult->datalength == 0)
 					{
 						hasErrors = 1;

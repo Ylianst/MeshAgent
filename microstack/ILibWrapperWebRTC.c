@@ -231,20 +231,20 @@ char* ILibWrapper_SdpToBlock(char* sdp, int sdpLen, int *isActive, char **userna
 				unsigned short port;
 
 				tmp[pr2->FirstResult->NextResult->NextResult->NextResult->NextResult->NextResult->datalength] = 0;
-				port = (unsigned short)atoi(tmp);
+				port = ILib_atoi2_uint16(tmp, pr2->FirstResult->NextResult->NextResult->NextResult->NextResult->NextResult->datalength);
 				
 				pr3 = ILibParseString(pr2->FirstResult->NextResult->NextResult->NextResult->NextResult->data, 0, pr2->FirstResult->NextResult->NextResult->NextResult->NextResult->datalength, ".", 1);					
 				if (pr3->NumResults == 4)
 				{
 					candidateData = pr3->FirstResult->data;
 					pr3->FirstResult->data[pr3->FirstResult->datalength] = 0;
-					candidateData[0] = (char)atoi(pr3->FirstResult->data);
+					candidateData[0] = (char)ILib_atoi2_int16(pr3->FirstResult->data, pr3->FirstResult->datalength);
 					pr3->FirstResult->NextResult->data[pr3->FirstResult->NextResult->datalength] = 0;
-					candidateData[1] = (char)atoi(pr3->FirstResult->NextResult->data);
+					candidateData[1] = (char)ILib_atoi2_int16(pr3->FirstResult->NextResult->data, pr3->FirstResult->NextResult->datalength);
 					pr3->FirstResult->NextResult->NextResult->data[pr3->FirstResult->NextResult->NextResult->datalength] = 0;
-					candidateData[2] = (char)atoi(pr3->FirstResult->NextResult->NextResult->data);
+					candidateData[2] = (char)ILib_atoi2_int16(pr3->FirstResult->NextResult->NextResult->data, pr3->FirstResult->NextResult->NextResult->datalength);
 					pr3->FirstResult->NextResult->NextResult->NextResult->data[pr3->FirstResult->NextResult->NextResult->NextResult->datalength] = 0;
-					candidateData[3] = (char)atoi(pr3->FirstResult->NextResult->NextResult->NextResult->data);
+					candidateData[3] = (char)ILib_atoi2_int16(pr3->FirstResult->NextResult->NextResult->NextResult->data, pr3->FirstResult->NextResult->NextResult->NextResult->datalength);
 
 					((unsigned short*)candidateData)[2] = htons(port);
 					candidateData[6] = 0;
@@ -1015,7 +1015,7 @@ int ILibWrapper_WebRTC_PerformStunEx(ILibWrapper_WebRTC_ConnectionStruct *connec
 				memcpy_s(temp, sizeof(temp), connection->stunServerList[i], delimiter);
 				temp[delimiter] = 0;
 				host = temp;
-				port = (unsigned short)atoi(connection->stunServerList[i] + delimiter + 1);
+				port = ILib_atoi2_uint16(connection->stunServerList[i] + delimiter + 1, 255);
 			}
 			else
 			{

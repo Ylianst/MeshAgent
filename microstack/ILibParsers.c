@@ -1077,6 +1077,53 @@ void ILibMemory_Free(void *ptr)
 		free(ILibMemory_RawPtr(ptr)); 
 	}
 }
+int ILib_atoi_uint64_ex(uint64_t *val, const char *instr, size_t instrLen, uint64_t MAX)
+{
+	char* eptr;
+	*val = strtoull(instr, &eptr, 10);
+	int e = errno;
+	if (errno == ERANGE || eptr == instr || *val > MAX)
+	{
+		*val = 0;
+		return(1);
+	}
+	return(0);
+}
+int ILib_atoi_uint32_ex(uint32_t *val, const char *instr, size_t instrLen, uint64_t MAX)
+{
+	uint64_t v64;
+	int ret = ILib_atoi_uint64_ex(&v64, instr, instrLen, MAX);
+	*val = (uint32_t)v64;
+	return(ret);
+}
+int ILib_atoi_uint16_ex(uint16_t *val, const char *instr, size_t instrLen, uint64_t MAX)
+{
+	uint64_t v64;
+	int ret = ILib_atoi_uint64_ex(&v64, instr, instrLen, MAX);
+	*val = (uint16_t)v64;
+	return(ret);
+}
+uint64_t ILib_atoi2_uint64(const char *instr, size_t instrLen)
+{
+	uint64_t val;
+	if (ILib_atoi_uint64(&val, instr, instrLen) != 0) { val = 0; }
+	return(val);
+}
+uint32_t ILib_atoi2_uint32(const char *instr, size_t instrLen)
+{
+	uint32_t val;
+	if (ILib_atoi_uint32(&val, instr, instrLen) != 0) { val = 0; }
+	return(val);
+
+}
+uint16_t ILib_atoi2_uint16(const char *instr, size_t instrLen)
+{
+	uint16_t val;
+	if (ILib_atoi_uint16(&val, instr, instrLen) != 0) { val = 0; }
+	return(val);
+}
+
+
 
 #ifdef WIN32
 int ILibMemory_CanaryOK(void *ptr)
@@ -5917,7 +5964,7 @@ struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
 		// The other tokens contain the Status code and data
 		//
 		tempbuffer[StartLine->FirstResult->NextResult->datalength] = '\0';
-		RetVal->StatusCode = (int)atoi(tempbuffer);
+		RetVal->StatusCode = ILib_atoi2_int32(tempbuffer, 255);
 		free(tempbuffer);
 		RetVal->StatusData = StartLine->FirstResult->NextResult->NextResult != NULL ? StartLine->FirstResult->NextResult->NextResult->data : NULL;
 		RetVal->StatusDataLength = RetVal->StatusData != NULL ? ((int)((f->data + f->datalength) - RetVal->StatusData)) : 0;
@@ -6395,7 +6442,7 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 			if ((TempString2 = (char*)malloc(result3->LastResult->datalength + 1)) == NULL) ILIBCRITICALEXIT(254);
 			memcpy_s(TempString2, result3->LastResult->datalength + 1, result3->LastResult->data, result3->LastResult->datalength);
 			TempString2[result3->LastResult->datalength] = '\0';
-			lport = (unsigned short)atoi(TempString2);
+			lport = ILib_atoi2_uint16(TempString2, result3->LastResult->datalength + 1);
 			free(TempString2);
 		}
 	}
@@ -6442,7 +6489,7 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 			if (pct > 0)
 			{
 				laddr[pct] = 0;
-				pct = atoi(laddr + pct + 1);
+				pct = ILib_atoi2_int32(laddr + pct + 1, laddrLen - 1);
 			}
 			else
 			{
@@ -9525,14 +9572,14 @@ int ILibTime_ValidateTimePortion(char *timeString)
 			if (pr->FirstResult->datalength==2 && pr->FirstResult->NextResult->datalength==2) // Klockwork says this could be NULL, but that is not possible because NumResults is 3 or 4
 			{
 				temp = ILibString_Copy(pr->FirstResult->data,pr->FirstResult->datalength);
-				if (atoi(temp)<24 && atoi(temp)>=0)
+				if (ILib_atoi2_int32(temp, pr->FirstResult->datalength)<24 && ILib_atoi2_int32(temp, pr->FirstResult->datalength) >=0)
 				{
 					//
 					// hh is correct
 					//	
 					free(temp);
 					temp = ILibString_Copy(pr->FirstResult->NextResult->data,pr->FirstResult->NextResult->datalength);
-					if (atoi(temp)>=0 && atoi(temp)<60)
+					if (ILib_atoi2_int32(temp, pr->FirstResult->NextResult->datalength)>=0 && ILib_atoi2_int32(temp, pr->FirstResult->NextResult->datalength)<60)
 					{
 						//
 						// mm is correct
@@ -9542,7 +9589,7 @@ int ILibTime_ValidateTimePortion(char *timeString)
 						switch((int)strnlen_s(temp, length-6))
 						{
 						case 2: // ss
-							if (!(atoi(temp)>=0 && atoi(temp)<60))
+							if (!(ILib_atoi2_int32(temp, length-6)>=0 && ILib_atoi2_int32(temp, length - 6)<60))
 							{
 								RetVal=1;
 							}
@@ -9551,7 +9598,7 @@ int ILibTime_ValidateTimePortion(char *timeString)
 							if (temp[2]=='Z')
 							{
 								temp[2]=0;
-								if (!(atoi(temp)>=0 && atoi(temp)<60))
+								if (!(ILib_atoi2_int32(temp, length - 6) >=0 && ILib_atoi2_int32(temp, length - 6)<60))
 								{
 									RetVal=1;
 								}
@@ -9566,7 +9613,7 @@ int ILibTime_ValidateTimePortion(char *timeString)
 							if (temp[2]=='.')
 							{
 								temp[2]=0;
-								if (!(atoi(temp)>=0 && atoi(temp)<60))
+								if (!(ILib_atoi2_int32(temp, length - 6) >=0 && ILib_atoi2_int32(temp, length - 6)<60))
 								{
 									RetVal = 1;
 								} 
@@ -9584,7 +9631,7 @@ int ILibTime_ValidateTimePortion(char *timeString)
 							if (temp[2]=='-' || temp[2]=='+')
 							{
 								temp[2] = 0;
-								if (!(atoi(temp)>=0 && atoi(temp)<60 && atoi(temp+3)>=0 && atoi(temp+3)<24))
+								if (!(ILib_atoi2_int32(temp, length - 6) >=0 && ILib_atoi2_int32(temp, length-6)<60 && ILib_atoi2_int32(temp+3, length - 6) >=0 && ILib_atoi2_int32(temp+3, length - 6)<24))
 								{
 									RetVal=1;
 								}
@@ -9598,7 +9645,7 @@ int ILibTime_ValidateTimePortion(char *timeString)
 							if (temp[2]=='.' && temp[9]==':' && (temp[6]=='+' || temp[6]=='-'))
 							{
 								temp[2]=0;
-								if (!(atoi(temp)>=0 && atoi(temp)<60))
+								if (!(ILib_atoi2_int32(temp, length - 6) >=0 && ILib_atoi2_int32(temp, length - 6)<60))
 								{
 									RetVal = 1;
 								} 
@@ -9617,7 +9664,7 @@ int ILibTime_ValidateTimePortion(char *timeString)
 							//
 							// Check the last mm component
 							//
-							if (!(atoi(pr->LastResult->data)>=0 && atoi(pr->LastResult->data)<60))
+							if (!(ILib_atoi2_int32(pr->LastResult->data, pr->LastResult->datalength)>=0 && ILib_atoi2_int32(pr->LastResult->data, pr->LastResult->datalength)<60))
 							{
 								RetVal=1;
 							}
@@ -9674,12 +9721,12 @@ char* ILibTime_ValidateDatePortion(char *timeString)
 				{
 					// This means it is in yyyy-xx-zz format
 					startTime = ILibString_Copy(pr->FirstResult->NextResult->data,pr->FirstResult->NextResult->datalength);
-					if (atoi(startTime)<=12 && atoi(startTime)>0)
+					if (ILib_atoi2_int32(startTime, pr->FirstResult->NextResult->datalength)<=12 && ILib_atoi2_int32(startTime, pr->FirstResult->NextResult->datalength)>0)
 					{
 						// This means it is in yyyy-mm-xx format
 						free(startTime);
 						startTime = ILibString_Copy(pr->LastResult->data,pr->LastResult->datalength);
-						if (atoi(startTime)<=31 && atoi(startTime)>0)
+						if (ILib_atoi2_int32(startTime, pr->LastResult->datalength)<=31 && ILib_atoi2_int32(startTime, pr->LastResult->datalength)>0)
 						{
 							// Everything in correct format
 							errCode = 0;
@@ -9794,9 +9841,9 @@ int ILibTime_ParseEx(char *timeString, time_t *val)
 			day = pr2->LastResult->data;
 			day[pr2->LastResult->datalength]=0;
 
-			t.tm_year = atoi(year)-1900;
-			t.tm_mon = atoi(month)-1;
-			t.tm_mday = atoi(day);
+			t.tm_year = ILib_atoi2_int32(year, pr2->FirstResult->datalength)-1900;
+			t.tm_mon = ILib_atoi2_int32(month, pr2->FirstResult->NextResult->datalength)-1;
+			t.tm_mday = ILib_atoi2_int32(day, pr2->LastResult->datalength);
 
 			ILibDestructParserResults(pr2);
 		}
@@ -9826,9 +9873,9 @@ int ILibTime_ParseEx(char *timeString, time_t *val)
 	}
 	if (hour!=NULL && minute!=NULL && second!=NULL)
 	{
-		t.tm_hour = atoi(hour);
-		t.tm_min = atoi(minute);
-		t.tm_sec = atoi(second);
+		t.tm_hour = ILib_atoi2_int32(hour, pr2->FirstResult->datalength);
+		t.tm_min = ILib_atoi2_int32(minute, pr2->FirstResult->NextResult->datalength);
+		t.tm_sec = ILib_atoi2_int32(second, 2);
 
 		RetVal = mktime(&t);
 	}
