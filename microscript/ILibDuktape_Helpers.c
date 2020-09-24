@@ -62,6 +62,7 @@ duk_ret_t duk_fixed_buffer_finalizer(duk_context *ctx)
 void duk_buffer_enable_autoclear(duk_context *ctx)
 {
 	duk_size_t len;
+	Duktape_GetBuffer(ctx, -1, &len);
 
 	duk_push_buffer_object(ctx, -1, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);	// [buffer][obj]
 	duk_remove(ctx, -2);												// [bufobj]
