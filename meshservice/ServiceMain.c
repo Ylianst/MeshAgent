@@ -1115,7 +1115,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				// Set text in the dialog box
 				int installFlagsInt = 0;
 				WINDOWPLACEMENT lpwndpl;
-				if (installFlags != NULL) { installFlagsInt = atoi(installFlags); }
+				if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
 				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
 				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
 				SetWindowTextA(GetDlgItem(hDlg, IDC_POLICYTEXT), (meshid != NULL) ? meshname : "(None)");

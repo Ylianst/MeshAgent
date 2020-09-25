@@ -2439,13 +2439,12 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 
 void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 {
-
 #ifdef WIN32
 	agent->performSelfUpdate = 1;
 #else
 	// Set performSelfUpdate to the startupType, on Linux is this important: 1 = systemd, 2 = upstart, 3 = sysv-init
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
-	if (len > 0 && len < sizeof(ILibScratchPad)) { agent->performSelfUpdate = atoi(ILibScratchPad); }
+	if (len > 0 && len < sizeof(ILibScratchPad)) { ILib_atoi_int32(&(agent->performSelfUpdate), ILibScratchPad, (size_t)len); }
 	if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
 #endif
 
@@ -3145,7 +3144,10 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				{
 					char idleBuffer[16];
 					idleBuffer[ILibSimpleDataStore_Get(agent->masterDb, "controlChannelIdleTimeout", idleBuffer, sizeof(idleBuffer)-1)] = 0;
-					agent->controlChannel_idleTimeout_seconds = atoi(idleBuffer);
+					if (ILib_atoi_int32(&(agent->controlChannel_idleTimeout_seconds), idleBuffer, sizeof(idleBuffer)) == 0)
+					{
+						agent->controlChannel_idleTimeout_seconds = DEFAULT_IDLE_TIMEOUT;
+					}
 				}
 			}
 			else
@@ -4314,7 +4316,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "enableILibRemoteLogging", ILibScratchPad, sizeof(ILibScratchPad))) != 0)
 		{
 			ILibScratchPad[len] = 0;
-			ILibStartDefaultLoggerEx(agentHost->chain, (unsigned short)atoi(ILibScratchPad), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
+			ILibStartDefaultLoggerEx(agentHost->chain, ILib_atoi2_uint16(ILibScratchPad, sizeof(ILibScratchPad)), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
 		}
 #endif
 	}
@@ -4658,7 +4660,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			if (tmpLen > 0 && tmpLen < 16)
 			{
 				tmp[tmpLen] = 0;
-				agentHost->jsDebugPort = atoi(tmp);
+				agentHost->jsDebugPort = ILib_atoi2_int32(tmp, sizeof(tmp));
 			}
 		}
 		agentHost->agentMode = 1;
@@ -4725,7 +4727,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (ILibSimpleDataStore_Get(agentHost->masterDb, "exitPID", NULL, 0) > 0)
 		{
 			int pidLen = ILibSimpleDataStore_Get(agentHost->masterDb, "exitPID", ILibScratchPad, (int)sizeof(ILibScratchPad));
-			HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)atoi(ILibScratchPad));
+			HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)ILib_atoi2_uint32(ILibScratchPad, sizeof(ILibScratchPad)));
 			if (h != NULL) { ILibChain_AddWaitHandle(agentHost->chain, h, -1, MeshAgent_PidWaiter, agentHost); }
 		}
 		if (ILibSimpleDataStore_Get(agentHost->masterDb, "hideConsole", NULL, 0) > 0 && agentHost->meshCoreCtx != NULL)
@@ -5092,7 +5094,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 			else if (strncmp(argv[i], "--script-timeout", 16) == 0 && ((i + 1) < argc))
 			{
 				// Seconds before watchdog termination, 0 for unlimited
-				execTimeout = (unsigned int)atoi(argv[i + 1]);
+				execTimeout = ILib_atoi2_uint32(argv[i + 1], 255);
 				++i;
 			}
 			else if (strncmp(argv[i], "--script-connect", 16) == 0)
