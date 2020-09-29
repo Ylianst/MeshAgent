@@ -1000,6 +1000,40 @@ function serviceManager()
 
         if (process.platform == 'freebsd')
         {
+            Object.defineProperty(this, 'OPNsense',
+                {
+                    get: function()
+                    {
+                        if (this.__opnsense != null) { return (this.__opnsense); }
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stderr.on('data', function (c) { });
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("opnsense-version | awk '{ print $2; }'\nexit\n");
+                        child.waitExit();
+                        this.__opnsense = child.stdout.str.trim() != '' ? true : false;
+                        return (this.__opnsense);
+                    }
+                });
+            Object.defineProperty(this, 'pfSense',
+                {
+                    get: function ()
+                    {
+                        if (this.__ispfsense != null) { return (this.__ispfsense); }
+                        try
+                        {
+                            if (require('fs').existsSync('/etc/psSense-rc') || require('fs').readFileSync('/etc/platform').toString().trim() == 'pfSense')
+                            {
+                                this.__ispfsense = true;
+                                return (true);
+                            }
+                        }
+                        catch (e)
+                        {
+                        }
+                        this.__ispfsense = false;
+                        return (false);
+                    }
+                });
             this.getService = function getService(name)
             {
                 var ret = { name: name, close: function () { } };
@@ -2056,6 +2090,20 @@ function serviceManager()
             var m = require('fs').statSync('/usr/local/etc/rc.d/' + options.name).mode;
             m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
             require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, m);
+
+            if ((this.pfSense || this.OPNsense) && (options.startType == 'AUTO_START' || options.startType == 'BOOT_START'))
+            {
+                if (this.pfSense)
+                {
+                    // pfSense requries scripts in rc.d to end with .sh, unlike other *bsd, for AUTO_START to work
+                    require('fs').copyFileSync('/usr/local/etc/rc.d/' + options.name, '/usr/local/etc/rc.d/' + options.name + '.sh');
+                }
+
+                // pfSense and OPNsense needs to have rc.conf.local override enable, for AUTO_START to work correctly, unlike other *BSD
+                var s = require('fs').createWriteStream('/etc/rc.conf.local', { flags: 'a' });
+                s.write('\n' + options.name + '_enable="YES"\n');
+                s.end();
+            }
         }
         if(process.platform == 'linux')
         {
@@ -2627,7 +2675,44 @@ function serviceManager()
             {
                 require('fs').unlinkSync(service.appLocation());
             }
+            if (this.pfSense)
+            {
+                try
+                {
+                    require('fs').unlinkSync(service.rc + '.sh');
+                }
+                catch (ee)
+                {
+                }
+            }
             require('fs').unlinkSync(service.rc);
+            if ((this.pfSense || this.OPNsense) && require('fs').existsSync('/etc/rc.conf.local'))
+            {
+                var local = null;
+                try
+                {
+                    local = require('fs').readFileSync('/etc/rc.conf.local');
+                }
+                catch(ee)
+                {
+                }
+                if(local!=null)
+                {
+                    var lines = local.toString().split('\n');
+                    var i;
+                    var m = require('fs').createWriteStream('/etc/rc.conf.local', { flags: 'wb' });
+                    for(i=0;i<lines.length;++i)
+                    {
+                        if (lines[i].split('=')[0].trim() != (name + '_enable') && lines[i].trim() != '')
+                        {
+                            m.write(lines[i] + '\n');
+                        }
+                    }
+                    m.end();
+                }
+            }
+
+
             try
             {
                 require('fs').rmdirSync(workingPath);
