@@ -1326,7 +1326,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 			// World Writable, so we need to set the Security Descriptor to reflect that
 			IPC_EA.grfAccessMode = SET_ACCESS;
 			IPC_EA.grfInheritance = NO_INHERITANCE;
-			IPC_EA.grfAccessPermissions = FILE_GENERIC_READ | FILE_WRITE_DATA;
+			IPC_EA.grfAccessPermissions = FILE_GENERIC_READ | FILE_GENERIC_WRITE;
 			IPC_EA.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
 			IPC_EA.Trustee.TrusteeType = TRUSTEE_IS_GROUP;
 			IPC_EA.Trustee.ptstrName = "EVERYONE";
