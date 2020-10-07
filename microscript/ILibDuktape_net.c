@@ -85,9 +85,12 @@ typedef struct ILibDuktape_net_WindowsIPC
 	duk_context *ctx;
 	void *mServer, *mSocket, *mChain;
 	HANDLE mPipeHandle;
+	int backlog;
+	int endCalled;
 	int paused;
 	int totalRead;
 	void *user1;
+	void* ipcreserved;
 
 	OVERLAPPED read_overlapped;
 	OVERLAPPED write_overlapped;
@@ -116,6 +119,8 @@ typedef struct ILibDuktape_net_WindowsIPC
 #define ILibDuktape_net_Server_Session_buffer	"\xFF_SessionFixedBuffer"
 #define ILibDuktape_net_socket_ptr				"\xFF_SocketPtr"
 #define ILibDuktape_net_WindowsIPC_Buffer		"\xFF_WindowsIPC"
+#define ILibDuktape_net_ConcurrencyArray		"\xFF_ConcurrencyArray"
+#define ILibDuktape_net_ConcurrencyMaxSize		"\xFF_ConcurrencyMaxSize"
 #define ILibDuktape_net_WindowsIPC_PendingArray "\xFF_WindowsIPC_PendingArray"
 #define ILibDuktape_SERVER2ContextTable			"\xFF_Server2ContextTable"
 #define ILibDuktape_SERVER2OPTIONS				"\xFF_ServerToOptions"
@@ -960,7 +965,16 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 
 		if (winIPC->mServer != NULL) { winIPC->clientConnected = 0; }
 		if (winIPC->reservedState != NULL) { ILibChain_WaitHandle_DestroySavedState(chain, winIPC->reservedState); winIPC->reservedState = NULL; }
+		
+		winIPC->endCalled = 0; 
 		ILibDuktape_DuplexStream_Closed(winIPC->ds);
+		if (winIPC->endCalled == 0)
+		{
+			duk_push_heapptr(winIPC->ctx, winIPC->ds->readableStream->object);	// [obj]
+			duk_prepare_method_call(winIPC->ctx, -1, "end");					// [obj][end][this]
+			if (duk_pcall_method(winIPC->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "net.ipcServer.end() Error: "); }
+			duk_pop_2(winIPC->ctx);												// ...
+		}
 
 		if (winIPC->mServer != NULL)
 		{
@@ -973,6 +987,36 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 			}
 			duk_pop(winIPC->ctx);																// ...
 		}
+
+		duk_context *_ctx = winIPC->ctx;
+		duk_push_heapptr(winIPC->ctx, winIPC->mServer);							// [server]
+		duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_ConcurrencyArray);	// [server][array]
+		duk_prepare_method_call(winIPC->ctx, -1, "indexOf");					// [server][array][indexOf][this]
+		duk_push_heapptr(winIPC->ctx, winIPC->ipcreserved);						// [server][array][indexOf][this][buffer]
+		if (duk_pcall_method(winIPC->ctx, 1) == 0)
+		{
+			int ix = duk_get_int(winIPC->ctx, -1);								// [server][array][index]
+			int setup = 0;
+			if (ix >= 0)
+			{
+				if (duk_get_length(_ctx, -2) == Duktape_GetIntPropertyValue(_ctx, -3, ILibDuktape_net_ConcurrencyMaxSize, -1))
+				{
+					// We are at the maximum number of concurrent sessions, so after we remove ourselves from the list
+					// we must prepare for another connection
+					setup = 1;
+				}
+				duk_array_remove(winIPC->ctx, -2, ix);
+
+				if (setup != 0)
+				{
+					duk_prepare_method_call(_ctx, -3, "listen");					// [server][array][index][listen][this]
+					duk_get_prop_string(_ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);// [server][array][index][listen][this][options]
+					duk_pcall_method(_ctx, 1); duk_pop(_ctx);						// [server][array][index]
+				}
+			}
+		}
+		duk_pop_3(_ctx);														// ...
+
 
 		return(FALSE);
 	}
@@ -1093,6 +1137,7 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	if (!ILibMemory_CanaryOK(user)) { return; }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	if (winIPC->mServer != NULL && winIPC->mPipeHandle == NULL) { return; } // Already Closed
+	winIPC->endCalled = 1;
 	if (winIPC->reservedState != NULL)
 	{
 		ILibChain_WaitHandle_DestroySavedState(winIPC->mChain, winIPC->reservedState);
@@ -1112,10 +1157,11 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	if (winIPC->read_overlapped.hEvent != NULL) { CloseHandle(winIPC->read_overlapped.hEvent); winIPC->read_overlapped.hEvent = NULL; }
 	if (winIPC->write_overlapped.hEvent != NULL) { CloseHandle(winIPC->write_overlapped.hEvent); winIPC->write_overlapped.hEvent = NULL; }
 
-	if (winIPC->mServer != NULL)
+	if (winIPC->mServer != NULL && winIPC->backlog == 0)
 	{
 		// Server IPC, so we can create a new Instance, and listen for a connection
-		duk_context *ctx = winIPC->ctx;									// We need to dereference this, because winIPC will go out of scope when we call listen
+		// We need to dereference this, because winIPC will go out of scope when we call listen
+		duk_context *ctx = winIPC->ctx;
 		CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
 
 		duk_push_heapptr(ctx, winIPC->mServer);								// [server]
@@ -1174,6 +1220,27 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(void *chain, HANDLE event, ILibWaitH
 	if (ILibMemory_CanaryOK(user) && status == ILibWaitHandle_ErrorStatus_NONE)
 	{
 		ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
+		if (winIPC->mServer != NULL)
+		{
+			duk_push_heapptr(winIPC->ctx, winIPC->mServer);							// [server]
+			duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_ConcurrencyArray);	// [server][array]
+			int maxCount = Duktape_GetIntPropertyValue(winIPC->ctx, -2, ILibDuktape_net_ConcurrencyMaxSize, 0);	
+			int curCount = (int)duk_get_length(winIPC->ctx, -1);
+			duk_pop_2(winIPC->ctx);													// ...
+
+			if (curCount < maxCount)
+			{
+				// We are still within concurrency limits, so lets prepare for another connection
+				duk_push_heapptr(winIPC->ctx, winIPC->mServer);							// [server]
+				duk_prepare_method_call(winIPC->ctx, -1, "listen");						// [server][listen][this]
+				duk_remove(winIPC->ctx, -3);											// [listen][this]
+				duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_SERVER2LISTENOPTIONS);	// [listen][this][options]
+				duk_pcall_method(winIPC->ctx, 1);
+				duk_pop(winIPC->ctx);													// ...
+			}
+		}
+
+
 		winIPC->clientConnected = TRUE;
 		ILibDuktape_EventEmitter_SetupEmit(winIPC->ctx, winIPC->mServer, "connection");	// [emit][this][connection]
 		duk_push_object(winIPC->ctx);													// [emit][this][connection][socket]
@@ -1264,9 +1331,10 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 
 
 	port = (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
-	backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", 64);
 	host = Duktape_GetStringPropertyValue(ctx, 0, "host", NULL);
 	ipc = Duktape_GetStringPropertyValueEx(ctx, 0, "path", NULL, &ipcLen);
+	backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", (ipc != NULL && port == 0) ? 0 : 64);
+
 	if (nargs > 1 && duk_is_function(ctx, 1))
 	{
 		// Callback
@@ -1286,6 +1354,11 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		duk_push_this(ctx);
 		ILibDuktape_WriteID(ctx, "net.ipcServer");
 		duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, ILibDuktape_net_server_IPCPath);
+		if (backlog >= 0 && !duk_has_prop_string(ctx, -1, ILibDuktape_net_ConcurrencyArray))
+		{
+			duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_net_ConcurrencyArray);
+			duk_push_int(ctx, backlog); duk_put_prop_string(ctx, -2, ILibDuktape_net_ConcurrencyMaxSize);
+		}
 		duk_pop(ctx);
 
 #if defined(_POSIX)
@@ -1306,8 +1379,13 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		SECURITY_DESCRIPTOR IPC_SD;
 		EXPLICIT_ACCESS IPC_EA = { 0 };
 				
-		duk_push_this(ctx);
+		duk_push_this(ctx);												// [server]
+		duk_get_prop_string(ctx, -1, ILibDuktape_net_ConcurrencyArray);	// [server][array]
 		ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_net_WindowsIPC));
+		duk_dup(ctx, -1);												// [server][array][buffer][buffer]
+		duk_array_push(ctx, -3);										// [server][array][buffer]
+		duk_remove(ctx, -2);											// [server][buffer]
+		winIPC->ipcreserved = duk_get_heapptr(ctx, -1);
 		duk_put_prop_string(ctx, -2, ILibDuktape_net_WindowsIPC_Buffer);
 		winIPC->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		winIPC->read_overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -1317,6 +1395,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		winIPC->mChain = duk_ctx_chain(ctx);
 		winIPC->clientConnected = FALSE;
 		winIPC->metadata = "net.ipcServer";
+		winIPC->backlog = backlog;
 
 		duk_eval_string(ctx, "require('child_process');");
 		duk_pop(ctx);
@@ -1348,9 +1427,10 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 
 		winIPC->mPipeHandle = CreateNamedPipeA((LPCSTR)ipc, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
 			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
-			1, ILibDuktape_net_IPC_BUFFERSIZE, ILibDuktape_net_IPC_BUFFERSIZE, 0, pIPC_SA);
+			(DWORD)(backlog == 0 ? 1 : backlog), ILibDuktape_net_IPC_BUFFERSIZE, ILibDuktape_net_IPC_BUFFERSIZE, 0, pIPC_SA);
 		if (winIPC->mPipeHandle == INVALID_HANDLE_VALUE)
 		{
+			DWORD err = GetLastError();
 			CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL;
 			duk_del_prop_string(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
 			return(ILibDuktape_Error(ctx, "Error Creating Named Pipe: %s", ipc));
