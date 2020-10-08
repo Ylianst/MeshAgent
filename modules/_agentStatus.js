@@ -34,13 +34,11 @@ function queryAgent(obj, prev)
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     ret._obj = { cmd: 'query', value: obj };
-    console.log(obj, prev);
     if (prev == null)
     {
         ret.client = require('net').createConnection({ path: ipcPath });
         ret.client.on('connect', function ()
         {
-            console.log('ON CONNECT');
             this.on('data', dataHandler);
             this.on('end', function ()
             {
@@ -89,7 +87,7 @@ function start()
         if (res == null) { res = '[NOT CONNECTED]'; }
         console.log('Mesh Agent connected to: ' + res);
         return (queryAgent('descriptors', connection));
-    }).then(console.log).then(function () { process._exit(); }).catch(function () { process._exit(); });
+    }).then(function (v) { console.log(v); }).then(function () { process._exit(); }).catch(function () { process._exit(); });
 }
 
 module.exports = { start: start };
