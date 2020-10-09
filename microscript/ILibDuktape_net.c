@@ -85,7 +85,6 @@ typedef struct ILibDuktape_net_WindowsIPC
 	duk_context *ctx;
 	void *mServer, *mSocket, *mChain;
 	HANDLE mPipeHandle;
-	int backlog;
 	int endCalled;
 	int paused;
 	int totalRead;
@@ -1279,12 +1278,12 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 
 	unsigned short port = 0;
 	int backlog = 0;
+	int maxConnections = 10;
 	struct sockaddr_in6 local;
 #ifdef _POSIX
 	struct sockaddr_un ipcaddr;
 	memset(&ipcaddr, 0, sizeof(struct sockaddr_un));
 #endif
-	int maxConnections = 10;
 	int initalBufferSize = 4096;
 	char *host, *ipc;
 	duk_size_t ipcLen;
@@ -1330,7 +1329,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 	port = (unsigned short)Duktape_GetIntPropertyValue(ctx, 0, "port", 0);
 	host = Duktape_GetStringPropertyValue(ctx, 0, "host", NULL);
 	ipc = Duktape_GetStringPropertyValueEx(ctx, 0, "path", NULL, &ipcLen);
-	backlog = Duktape_GetIntPropertyValue(ctx, 0, "backlog", (ipc != NULL && port == 0) ? 0 : 64);
+	maxConnections = Duktape_GetIntPropertyValue(ctx, 0, "maxConnections", (ipc != NULL && port == 0) ? 1 : 10);
 
 	if (nargs > 1 && duk_is_function(ctx, 1))
 	{
@@ -1351,10 +1350,10 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		duk_push_this(ctx);
 		ILibDuktape_WriteID(ctx, "net.ipcServer");
 		duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, ILibDuktape_net_server_IPCPath);
-		if (backlog >= 0 && !duk_has_prop_string(ctx, -1, ILibDuktape_net_ConcurrencyArray))
+		if (maxConnections >= 0 && !duk_has_prop_string(ctx, -1, ILibDuktape_net_ConcurrencyArray))
 		{
 			duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_net_ConcurrencyArray);
-			duk_push_int(ctx, backlog); duk_put_prop_string(ctx, -2, ILibDuktape_net_ConcurrencyMaxSize);
+			duk_push_int(ctx, maxConnections); duk_put_prop_string(ctx, -2, ILibDuktape_net_ConcurrencyMaxSize);
 		}
 		duk_pop(ctx);
 
@@ -1393,7 +1392,6 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 		winIPC->mChain = duk_ctx_chain(ctx);
 		winIPC->clientConnected = FALSE;
 		winIPC->metadata = "net.ipcServer";
-		winIPC->backlog = backlog;
 
 		duk_eval_string(ctx, "require('child_process');");
 		duk_pop(ctx);
@@ -1425,7 +1423,7 @@ duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 
 		winIPC->mPipeHandle = CreateNamedPipeA((LPCSTR)ipc, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
 			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_REJECT_REMOTE_CLIENTS,
-			(DWORD)(backlog == 0 ? 1 : backlog), ILibDuktape_net_IPC_BUFFERSIZE, ILibDuktape_net_IPC_BUFFERSIZE, 0, pIPC_SA);
+			(DWORD)maxConnections, ILibDuktape_net_IPC_BUFFERSIZE, ILibDuktape_net_IPC_BUFFERSIZE, 0, pIPC_SA);
 		if (winIPC->mPipeHandle == INVALID_HANDLE_VALUE)
 		{
 			DWORD err = GetLastError();
