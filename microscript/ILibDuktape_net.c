@@ -1201,8 +1201,9 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 duk_ret_t ILibDuktape_net_server_IPC_connection_metadata(duk_context *ctx)
 {
 	duk_push_this(ctx);			// [ipcSocket]
-	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
+	char *id = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, NULL);
 
+	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);
 	char *tmp = (char*)duk_push_sprintf(ctx, "%s, %s", winIPC->metadata, (char*)duk_require_string(ctx, 0));
 	char *tmp2 = (char*)ILibMemory_SmartAllocate(1 + duk_get_length(ctx, -1));
 	memcpy_s(tmp2, ILibMemory_Size(tmp2), tmp, ILibMemory_Size(tmp2) - 1);
@@ -1243,9 +1244,7 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(void *chain, HANDLE event, ILibWaitH
 		ILibDuktape_WriteID(winIPC->ctx, "net.ipcSocket");
 		winIPC->metadata = "net.ipcSocket";
 
-		duk_push_heapptr(winIPC->ctx, winIPC->mServer);									// [emit][this][connection][socket][server]
-		duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_WindowsIPC_Buffer);		// [emit][this][connection][socket][server][buffer]
-		duk_remove(winIPC->ctx, -2);													// [emit][this][connection][socket][buffer]
+		duk_push_heapptr(winIPC->ctx, winIPC->ipcreserved);								// [emit][this][connection][socket][buffer]
 		duk_put_prop_string(winIPC->ctx, -2, ILibDuktape_net_WindowsIPC_Buffer);		// [emit][this][connection][socket]
 
 		duk_push_array(winIPC->ctx); duk_put_prop_string(winIPC->ctx, -2, ILibDuktape_net_WindowsIPC_PendingArray);
@@ -1257,9 +1256,7 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(void *chain, HANDLE event, ILibWaitH
 		ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "data", ILibDuktape_net_socket_ipc_dataHookCallback);
 		ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter_GetEmitter(winIPC->ctx, -1), "end", ILibDuktape_net_socket_ipc_dataHookCallback);
 		ILibDuktape_CreateEventWithSetterEx(winIPC->ctx, "descriptorMetadata", ILibDuktape_net_server_IPC_connection_metadata);
-
 		ILibDuktape_EventEmitter_PrependOnce(winIPC->ctx, -1, "~", ILibDuktape_net_server_IPC_ConnectSink_Finalizer);
-
 		if (duk_pcall_method(winIPC->ctx, 2) != 0)
 		{
 			ILibDuktape_Process_UncaughtExceptionEx(winIPC->ctx, "Error emitting net.ipcSocket.connection");
@@ -1269,6 +1266,59 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(void *chain, HANDLE event, ILibWaitH
 	return(FALSE);
 }
 #endif
+
+duk_ret_t ILibDuktape_net_server_connections(duk_context *ctx)
+{
+	duk_push_this(ctx);													// [server]
+	ILibDuktape_net_server *server = (ILibDuktape_net_server*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_net_Server_buffer);
+
+	if (server->server == NULL)
+	{
+#ifdef WIN32
+		// On Windows, IPC uses a ConcurrencyArray
+		ILibDuktape_net_WindowsIPC *winIPC = NULL;
+		duk_uarridx_t i;
+		duk_size_t len;
+
+		duk_get_prop_string(ctx, -1, ILibDuktape_net_ConcurrencyArray);	// [server][array]
+		duk_push_array(ctx);											// [server][array][retArray]
+		len = duk_get_length(ctx, -2);
+		for (i = 0; i < len; ++i)
+		{
+			duk_get_prop_index(ctx, -2, i);								// [server][array][retArray][buffer]
+			winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_GetBuffer(ctx, -1, NULL);
+			if (winIPC->clientConnected == TRUE)
+			{
+				duk_push_heapptr(ctx, winIPC->mSocket);					// [server][array][retArray][buffer][socket]
+				duk_array_push(ctx, -3);								// [server][array][retArray][buffer]
+			}
+			duk_pop(ctx);												// [server][array][retArray]
+		}
+#else
+		duk_push_array(ctx);
+#endif
+	}
+	else
+	{
+		size_t i;
+		size_t s = ILibAsyncServerSocket_GetConnections(server->server, NULL, 0);
+		ILibAsyncServerSocket_ConnectionToken *connections = (ILibAsyncServerSocket_ConnectionToken*)Duktape_PushBuffer(ctx, s * sizeof(ILibAsyncServerSocket_ConnectionToken));
+		ILibDuktape_net_server_session *session;
+
+		duk_push_array(ctx);											// [server][retArray]
+		s = ILibAsyncServerSocket_GetConnections(server->server, connections, s);
+		for (i = 0; i < s; ++i)
+		{
+			session = (ILibDuktape_net_server_session*)ILibAsyncServerSocket_GetUser(connections[i]);
+			if (ILibMemory_CanaryOK(session))
+			{
+				duk_push_heapptr(ctx, session->emitter->object);
+				duk_array_push(ctx, -2);
+			}
+		}
+	}
+	return(1);
+}
 
 duk_ret_t ILibDuktape_net_server_listen(duk_context *ctx)
 {
@@ -1745,6 +1795,7 @@ duk_ret_t ILibDuktape_net_createServer(duk_context *ctx)
 	ILibDuktape_EventEmitter_CreateEventEx(server->emitter, "listening");
 	ILibDuktape_CreateEventWithGetter(ctx, "listening", ILibDuktape_net_server_listening);
 	ILibDuktape_CreateEventWithSetterEx(ctx, "descriptorMetadata", ILibDuktape_net_createServer_metadata);
+	ILibDuktape_CreateEventWithGetter(ctx, "connections", ILibDuktape_net_server_connections);
 
 	ILibDuktape_CreateInstanceMethod(ctx, "listen", ILibDuktape_net_server_listen, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "address", ILibDuktape_net_server_address, 0);

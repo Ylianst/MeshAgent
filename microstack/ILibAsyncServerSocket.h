@@ -117,6 +117,10 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemory(v
 ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryExMOD(void *Chain, int MaxConnections, int initialBufferSize, struct sockaddr* local, ILibAsyncServerSocket_OnConnect OnConnect, ILibAsyncServerSocket_OnDisconnect OnDisconnect, ILibAsyncServerSocket_OnReceive OnReceive, ILibAsyncServerSocket_OnInterrupt OnInterrupt, ILibAsyncServerSocket_OnSendOK OnSendOK, int mod, int ServerUserMappedMemorySize, int SessionUserMappedMemorySize);
 #define ILibCreateAsyncServerSocketModuleWithMemoryEx(Chain, MaxConnections, initialBufferSize, local, OnConnect, OnDisconnect, OnReceive, OnInterrupt, OnSendOK, ServerUserMappedMemorySize, SessionUserMappedMemorySize) ILibCreateAsyncServerSocketModuleWithMemoryExMOD(Chain, MaxConnections, initialBufferSize, local, OnConnect, OnDisconnect, OnReceive, OnInterrupt, OnSendOK, 0, ServerUserMappedMemorySize, SessionUserMappedMemorySize)
 
+
+size_t ILibAsyncServerSocket_GetConnections(ILibAsyncServerSocket_ServerModule server, ILibAsyncServerSocket_ConnectionToken *connections, size_t connectionsSize);
+void *ILibAsyncServerSocket_GetUser(ILibAsyncServerSocket_ConnectionToken *token);
+
 void *ILibAsyncServerSocket_GetTag(ILibAsyncServerSocket_ServerModule ILibAsyncSocketModule);
 void ILibAsyncServerSocket_SetTag(ILibAsyncServerSocket_ServerModule ILibAsyncSocketModule, void *user);
 int ILibAsyncServerSocket_GetTag2(ILibAsyncServerSocket_ServerModule ILibAsyncSocketModule);

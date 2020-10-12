@@ -70,12 +70,12 @@ typedef struct ILibAsyncServerSocketModule
 #endif
 	#endif
 }ILibAsyncServerSocketModule;
-struct ILibAsyncServerSocket_Data
+typedef struct ILibAsyncServerSocket_Data
 {
 	struct ILibAsyncServerSocketModule *module;
 	ILibAsyncServerSocket_BufferReAllocated Callback;
 	void *user;
-};
+}ILibAsyncServerSocket_Data;
 
 const int ILibMemory_ASYNCSERVERSOCKET_CONTAINERSIZE = (const int)sizeof(ILibAsyncServerSocketModule);
 
@@ -749,6 +749,27 @@ void ILibAsyncServerSocket_GetLocal(ILibAsyncServerSocket_ServerModule ServerSoc
 			((struct sockaddr_in6*)addr)->sin6_family = AF_UNSPEC;
 		}
 	}
+}
+
+size_t ILibAsyncServerSocket_GetConnections(ILibAsyncServerSocket_ServerModule server, ILibAsyncServerSocket_ConnectionToken *connections, size_t connectionsSize)
+{
+	ILibAsyncServerSocketModule *mod = (ILibAsyncServerSocketModule*)server;
+	if (connections == NULL || connectionsSize < mod->MaxConnection) { return((size_t)mod->MaxConnection); }
+	int i;
+	size_t x = 0;
+	for (i = 0; i < mod->MaxConnection; ++i)
+	{
+		if (ILibAsyncSocket_IsConnected(mod->AsyncSockets[i]))
+		{
+			ILibAsyncServerSocket_Data *data = (ILibAsyncServerSocket_Data*)ILibAsyncSocket_GetUser(mod->AsyncSockets[i]);
+			connections[x++] = mod->AsyncSockets[i];
+		}
+	}
+	return(x);
+}
+void *ILibAsyncServerSocket_GetUser(ILibAsyncServerSocket_ConnectionToken *token)
+{
+	return(((ILibAsyncServerSocket_Data*)ILibAsyncSocket_GetUser(token))->user);
 }
 /*! \fn ILibAsyncServerSocket_GetPortNumber(ILibAsyncServerSocket_ServerModule ServerSocketModule)
 \brief Returns the port number the server is bound to
