@@ -101,7 +101,11 @@ int info_GetLocalInterfaces(char* data, int maxdata)
 	if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX, NULL, pAdapterAddresses, &ulOutBufLen) != ERROR_SUCCESS)
 	{
 		free(pAdapterAddresses);
-		if (ulOutBufLen == 0) return 0;
+		if (ulOutBufLen == 0)
+		{
+			if (pAdapterInfo != NULL) free(pAdapterInfo);
+			return 0;
+		}
 		pAdapterAddresses = (IP_ADAPTER_ADDRESSES *)malloc(ulOutBufLen);
 	}
 
