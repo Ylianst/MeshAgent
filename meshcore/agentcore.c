@@ -1838,56 +1838,30 @@ End Mesh Agent Duktape Abstraction
 // !!!WARNING!!!: The result of this method is stored in ILibScratchPad2
 char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 {
-	duk_context *ctx = NULL;
 	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
-	if (agent != NULL && agent->configPathUsesCWD != 0)
+	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agent->chain, NULL, NULL, agent->exePath, NULL, NULL, agent->chain);
+
+	if (duk_peval_string(ctx, "require('util-pathHelper');") == 0)		// [helper]
 	{
-		ctx = agent->meshCoreCtx != NULL ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agent->chain, NULL, NULL, agent->exePath, NULL, NULL, agent->chain);
-		if (duk_peval_string(ctx, "(function (){ return(process.cwd() + process.execPath.split(process.platform=='win32'?'\\\\':'/').pop()); })();") == 0)
+		duk_push_string(ctx, basePath);									// [helper][basePath]
+		duk_push_string(ctx, localPath);								// [helper][basePath][localPath]
+		duk_push_boolean(ctx, agent->configPathUsesCWD != 0);			// [helper][basePath][localPath][bool]
+		if (duk_pcall(ctx, 3) == 0)										// [result]
 		{
-			basePath = (char*)duk_get_string(ctx, -1);
+			duk_size_t len;
+			char *buffer = Duktape_GetBuffer(ctx, -1, &len);
+			if (len < sizeof(ILibScratchPad2))
+			{
+				ILibScratchPad2[len] = 0;
+				memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), buffer, len);
+				duk_pop(ctx);											// ...
+				if (agent->meshCoreCtx == NULL) { Duktape_SafeDestroyHeap(ctx); }
+				return(ILibScratchPad2);
+			}
 		}
 	}
 
-	size_t localPathLen = strnlen_s(localPath, sizeof(ILibScratchPad2));
-	size_t basePathLen = strnlen_s(basePath, sizeof(ILibScratchPad2));
-	int i, sz;
-	if (localPath[0] == '.')
-	{
-		// Use Same executable Name, but different extension
-		sz = (int)basePathLen;
-		if (sz>=4 && ntohl(((unsigned int*)(basePath + sz - 4))[0]) == EXE_IDENTIFIER)
-		{
-			// BasePath ends with .exe
-			memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), basePath, sz - 4);
-			memcpy_s(ILibScratchPad2 + sz - 4, sizeof(ILibScratchPad2) - sz - 4, localPath, localPathLen);
-			sz = sz - 4 + (int)localPathLen;
-		}
-		else
-		{
-			// BasePath does not end with .exe
-			memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), basePath, sz);
-			memcpy_s(ILibScratchPad2 + sz, sizeof(ILibScratchPad2) - sz, localPath, localPathLen);
-			sz += (int)localPathLen;
-		}
-		ILibScratchPad2[sz] = 0;
-	}
-	else
-	{
-		if ((i = ILibString_LastIndexOf(basePath, (int)basePathLen, "\\", 1)) < 0) { i = ILibString_LastIndexOf(basePath, (int)basePathLen, "/", 1); }
-		
-		i += 1;
-		sz = i + (int)localPathLen;
-		memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), basePath, i);
-		memcpy_s(ILibScratchPad2 + i, sizeof(ILibScratchPad2) - i, localPath, localPathLen);
-		ILibScratchPad2[sz] = 0;
-	}
-	if (ctx != NULL)
-	{
-		duk_pop(ctx);
-		if (agent->meshCoreCtx == NULL) { Duktape_SafeDestroyHeap(ctx); }
-	}
-	return ILibScratchPad2;
+	ILIBCRITICALEXITMSG(254, "PATH MANIPULATION ERROR");
 }
 
 #ifndef MICROSTACK_NOTLS

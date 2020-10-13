@@ -184,7 +184,7 @@ uint16_t ILib_atoi2_uint16(const char *instr, size_t instrLen);
 #define ILib_atoi_uint64(pval, instr, instrLen) ILib_atoi_uint64_ex(pval, instr, instrLen, UINT64_MAX)
 #define ILib_atoi_int64(pval, instr, instrLen) ILib_atoi_uint64_ex(pval, instr, instrLen, INT64_MAX)
 #define ILib_atoi_uint32(pval, instr, instrLen) ILib_atoi_uint32_ex(pval, instr, instrLen, UINT32_MAX)
-#define ILib_atoi_int32(pval, instr, instrLen) ILib_atoi_uint32_ex(pval, instr, instrLen, INT32_MAX)
+#define ILib_atoi_int32(pval, instr, instrLen) ILib_atoi_uint32_ex((uint32_t*)pval, instr, instrLen, INT32_MAX)
 #define ILib_atoi_uint16(pval, instr, instrLen) ILib_atoi_uint16_ex(pval, instr, instrLen, UINT16_MAX)
 #define ILib_atoi_int16(pval, instr, instrLen) ILib_atoi_uint16_ex(pval, instr, instrLen, INT16_MAX)
 

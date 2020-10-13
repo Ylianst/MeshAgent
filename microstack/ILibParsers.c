@@ -1925,6 +1925,12 @@ void *ILibCreateChainEx(int extraMemorySize)
 
 	RetVal->Timer = ILibCreateLifeTime(RetVal);
 
+#if defined(WIN32)
+	RetVal->ChainThreadID = GetCurrentThreadId();
+#else
+	RetVal->ChainThreadID = pthread_self();
+#endif
+
 	return RetVal;
 }
 
