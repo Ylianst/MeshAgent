@@ -192,8 +192,14 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_ASTRING(duk_context *ctx)
 
 #ifdef WIN32
 	if (size == 0) { size = (int)wcsnlen_s((const wchar_t*)ptr, sizeof(astr) * 2); }
-	wcstombs_s(&s, astr, sizeof(astr), (const wchar_t*)ptr, size);
-	duk_push_string(ctx, (char*)astr);
+	if (wcstombs_s(&s, astr, sizeof(astr), (const wchar_t*)ptr, size) == 0)
+	{
+		duk_push_string(ctx, (char*)astr);
+	}
+	else
+	{
+		return(ILibDuktape_Error(ctx, "String Conversion Error: %d", GetLastError()));
+	}
 #else
 	duk_push_lstring(ctx, (const char*)ptr, size);
 #endif
