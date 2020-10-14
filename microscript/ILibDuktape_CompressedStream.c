@@ -75,7 +75,13 @@ void ILibDuktape_deCompressor_Resume(ILibDuktape_DuplexStream *sender, void *use
 	{
 		cs->Z.avail_out = sizeof(buffer);
 		cs->Z.next_out = (Bytef*)buffer;
-		ignore_result(inflate(&(cs->Z), Z_NO_FLUSH));
+		if ((res = inflate(&(cs->Z), Z_NO_FLUSH)) != Z_OK && res != Z_STREAM_END)
+		{
+			// ERROR
+			ILibDuktape_DuplexStream_WriteEnd(cs->ds);
+			res = 1;
+			break;
+		}
 		avail = sizeof(buffer) - cs->Z.avail_out;
 		if (avail > 0)
 		{
@@ -115,6 +121,7 @@ void ILibDuktape_Compressor_End(ILibDuktape_DuplexStream *stream, void *user)
 	duk_context *ctx = cs->ctx;
 	char tmp[16384];
 	size_t avail;
+	int res;
 	cs->Z.avail_in = 0;
 	cs->Z.next_in = (Bytef*)ILibScratchPad;
 
@@ -122,7 +129,10 @@ void ILibDuktape_Compressor_End(ILibDuktape_DuplexStream *stream, void *user)
 	{
 		cs->Z.avail_out = sizeof(tmp);
 		cs->Z.next_out = (Bytef*)tmp;
-		ignore_result(deflate(&(cs->Z), Z_FINISH));
+		if ((res = deflate(&(cs->Z), Z_FINISH)) != Z_OK && res != Z_STREAM_END)
+		{
+			break;
+		}
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
@@ -150,7 +160,10 @@ ILibTransport_DoneState ILibDuktape_Compressor_Write(ILibDuktape_DuplexStream *s
 	{
 		cs->Z.avail_out = sizeof(tmp);
 		cs->Z.next_out = (Bytef*)tmp;
-		ignore_result(deflate(&(cs->Z), Z_NO_FLUSH));
+		if ((ret = deflate(&(cs->Z), Z_NO_FLUSH)) != Z_OK && ret != Z_STREAM_END)
+		{
+			return(ILibTransport_DoneState_ERROR);
+		}
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
@@ -230,7 +243,10 @@ ILibTransport_DoneState ILibDuktape_deCompressor_Write(ILibDuktape_DuplexStream 
 	{
 		cs->Z.avail_out = sizeof(tmp);
 		cs->Z.next_out = (Bytef*)tmp;
-		ignore_result(inflate(&(cs->Z), Z_NO_FLUSH));
+		if ((ret = inflate(&(cs->Z), Z_NO_FLUSH)) != Z_OK && ret != Z_STREAM_END)
+		{
+			return(ILibTransport_DoneState_ERROR);
+		}
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0)
 		{
@@ -273,12 +289,16 @@ void ILibDuktape_deCompressor_End(ILibDuktape_DuplexStream *stream, void *user)
 	size_t avail;
 	cs->Z.avail_in = 0;
 	cs->Z.next_in = (Bytef*)ILibScratchPad;
+	int res;
 
 	do
 	{
 		cs->Z.avail_out = sizeof(tmp);
 		cs->Z.next_out = (Bytef*)tmp;
-		ignore_result(inflate(&(cs->Z), Z_FINISH));
+		if ((res = inflate(&(cs->Z), Z_FINISH)) != Z_OK && res != Z_STREAM_END)
+		{
+			break;
+		}
 		avail = sizeof(tmp) - cs->Z.avail_out;
 		if (avail > 0) 
 		{
