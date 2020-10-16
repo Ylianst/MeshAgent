@@ -1839,7 +1839,7 @@ End Mesh Agent Duktape Abstraction
 char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 {
 	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
-	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agent->chain, NULL, NULL, agent->exePath, NULL, NULL, agent->chain);
+	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_NONE, 0, agent->chain, NULL, NULL, agent->exePath, NULL, NULL, agent->chain);
 
 	if (duk_peval_string(ctx, "require('util-pathHelper');") == 0)		// [helper]
 	{
