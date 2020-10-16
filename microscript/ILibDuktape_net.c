@@ -87,7 +87,7 @@ typedef struct ILibDuktape_net_WindowsIPC
 	HANDLE mPipeHandle;
 	int endCalled;
 	int paused;
-	int totalRead;
+	DWORD totalRead;
 	void *user1;
 	void* ipcreserved;
 
@@ -101,10 +101,10 @@ typedef struct ILibDuktape_net_WindowsIPC
 	ULONG_PTR _reserved[5];
 
 	char *buffer;
-	int bufferLength;
-	int bufferOffset;
-	int bytesLeft;
-	int unshiftedBytes;
+	DWORD bufferLength;
+	DWORD bufferOffset;
+	DWORD bytesLeft;
+	DWORD unshiftedBytes;
 }ILibDuktape_net_WindowsIPC;
 #endif
 
@@ -144,7 +144,7 @@ void ILibDuktape_net_server_IPC_PauseSink(ILibDuktape_DuplexStream *sender, void
 void ILibDuktape_net_server_IPC_ResumeSink(ILibDuktape_DuplexStream *sender, void *user);
 int ILibDuktape_net_server_IPC_unshiftSink(ILibDuktape_DuplexStream *sender, int unshiftBytes, void *user);
 duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx);
-BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
+BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
 #endif
 
 
@@ -917,7 +917,7 @@ void ILibDuktape_net_server_OnSendOK(ILibAsyncServerSocket_ServerModule AsyncSer
 }
 
 #ifdef WIN32
-BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user)
+BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user)
 {
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	int consumed = 0;
@@ -979,7 +979,7 @@ BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_Error
 		return(FALSE);
 	}
 }
-BOOL ILibDuktape_server_ipc_WriteSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void* user)
+BOOL ILibDuktape_server_ipc_WriteSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, DWORD bytesWritten, void* user)
 {
 	if (!ILibMemory_CanaryOK(user)) { return(FALSE); }
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
@@ -1002,7 +1002,7 @@ BOOL ILibDuktape_server_ipc_WriteSink(void *chain, HANDLE h, ILibWaitHandle_Erro
 		if (duk_get_length(winIPC->ctx, -1) == 0) { break; }
 		duk_get_prop_index(winIPC->ctx, -1, 0);															// [obj][array][buffer]
 		buf = Duktape_GetBuffer(winIPC->ctx, -1, &bufLen);						
-		d = ILibChain_WriteEx2(chain, h, &(winIPC->write_overlapped), buf, (int)bufLen, ILibDuktape_server_ipc_WriteSink, winIPC, "server_ipc_WriteSink()");
+		d = ILibChain_WriteEx2(chain, h, &(winIPC->write_overlapped), buf, (DWORD)bufLen, ILibDuktape_server_ipc_WriteSink, winIPC, "server_ipc_WriteSink()");
 		duk_pop(winIPC->ctx);																			// [obj][array]
 	}
 

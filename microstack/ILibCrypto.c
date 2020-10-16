@@ -68,14 +68,14 @@ char utils_HexTable[16] = { '0','1','2','3','4','5','6','7','8','9','A','B','C',
 char utils_HexTable2[16] = { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
 
 
-void  __fastcall util_md5(char* data, int datalen, char* result)
+void  __fastcall util_md5(char* data, size_t datalen, char* result)
 {
 	MD5_CTX c;
 	MD5_Init(&c);
 	MD5_Update(&c, data, datalen);
 	MD5_Final((unsigned char*)result, &c);
 }
-void  __fastcall util_md5hex(char* data, int datalen, char *out)
+void  __fastcall util_md5hex(char* data, size_t datalen, char *out)
 {
 	int i = 0;
 	unsigned char *temp = (unsigned char*)out;
@@ -94,7 +94,7 @@ void  __fastcall util_md5hex(char* data, int datalen, char *out)
 
 	*temp = '\0';
 }
-void  __fastcall util_sha1(char* data, int datalen, char* result)
+void  __fastcall util_sha1(char* data, size_t datalen, char* result)
 {
 	SHA_CTX c;
 	SHA1_Init(&c);
@@ -102,14 +102,14 @@ void  __fastcall util_sha1(char* data, int datalen, char* result)
 	SHA1_Final((unsigned char*)result, &c);
 	result[20] = 0;
 }
-void  __fastcall util_sha256(char* data, int datalen, char* result)
+void  __fastcall util_sha256(char* data, size_t datalen, char* result)
 {
 	SHA256_CTX c;
 	SHA256_Init(&c);
 	SHA256_Update(&c, data, datalen);
 	SHA256_Final((unsigned char*)result, &c);
 }
-void  __fastcall util_sha384(char* data, int datalen, char* result)
+void  __fastcall util_sha384(char* data, size_t datalen, char* result)
 {
 	SHA512_CTX c;
 	SHA384_Init(&c);
@@ -152,9 +152,9 @@ void __fastcall util_free(char* ptr)
 	free(ptr);
 	//ptr = NULL;
 }
-char* __fastcall util_tohex(char* data, int len, char* out)
+char* __fastcall util_tohex(char* data, size_t len, char* out)
 {
-	int i;
+	size_t i;
 	char *p = out;
 	if (data == NULL || len == 0) { *p = 0; return NULL; }
 	for (i = 0; i < len; i++)
@@ -165,9 +165,9 @@ char* __fastcall util_tohex(char* data, int len, char* out)
 	*p = 0;
 	return out;
 }
-char* __fastcall util_tohex_lower(char* data, int len, char* out)
+char* __fastcall util_tohex_lower(char* data, size_t len, char* out)
 {
-	int i;
+	size_t i;
 	char *p = out;
 	if (data == NULL || len == 0) { *p = 0; return NULL; }
 	for (i = 0; i < len; i++)
@@ -178,9 +178,9 @@ char* __fastcall util_tohex_lower(char* data, int len, char* out)
 	*p = 0;
 	return out;
 }
-char* __fastcall util_tohex2(char* data, int len, char* out)
+char* __fastcall util_tohex2(char* data, size_t len, char* out)
 {
-	int i;
+	size_t i;
 	char *p = out;
 	if (data == NULL || len == 0) { *p = 0; return NULL; }
 	for (i = 0; i < len; i++)
@@ -196,9 +196,10 @@ char* __fastcall util_tohex2(char* data, int len, char* out)
 	return out;
 }
 // Convert hex string to int
-int __fastcall util_hexToint(char *hexString, int hexStringLength)
+int __fastcall util_hexToint(char *hexString, size_t hexStringLength)
 {
-	int i, res = 0;
+	size_t i;
+	int res = 0;
 
 	// Ignore the leading zeroes
 	while (*hexString == '0' && hexStringLength > 0) { hexString++; hexStringLength--; }
@@ -214,9 +215,9 @@ int __fastcall util_hexToint(char *hexString, int hexStringLength)
 }
 
 // Convert hex string to int 
-int __fastcall util_hexToBuf(char *hexString, int hexStringLength, char* output)
+size_t __fastcall util_hexToBuf(char *hexString, size_t hexStringLength, char* output)
 {
-	int i, x = hexStringLength / 2;
+	size_t i, x = hexStringLength / 2;
 	for (i = 0; i < x; i++) { output[i] = (char)util_hexToint(hexString + (i * 2), 2); }
 	return i;
 }

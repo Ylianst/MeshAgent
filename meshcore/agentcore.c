@@ -3143,7 +3143,10 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			MeshCommand_BinaryPacket_ServerId *serveridcmd = (MeshCommand_BinaryPacket_ServerId*)ILibScratchPad2;
 			serveridcmd->command = htons(MeshCommand_ServerId);
 			memcpy_s(serveridcmd->serverId, sizeof(serveridcmd->serverId), agent->serverHash, sizeof(agent->serverHash)); // Place our mesh agent nonce
-			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)serveridcmd, sizeof(MeshCommand_BinaryPacket_ServerId), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+			if ((int)ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)serveridcmd, sizeof(MeshCommand_BinaryPacket_ServerId), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete) < 0)
+			{
+				break;
+			}
 
 			// Check to see if we already have a validated TLS cert hash
 			{
@@ -3281,7 +3284,7 @@ void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
 }
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 {
-	int len, serverUrlLen;
+	size_t len, serverUrlLen;
 	char *path;
 	char *host;
 	char *serverUrl;
@@ -3327,7 +3330,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		if (agent->multicastServerUrl != NULL) {
 			serverUrl = agent->multicastServerUrl;
-			serverUrlLen = (int)strnlen_s(serverUrl, sizeof(ILibScratchPad));
+			serverUrlLen = strnlen_s(serverUrl, sizeof(ILibScratchPad));
 		}
 		else
 		{
@@ -3787,7 +3790,7 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 			if (eq > 0)
 			{
 				char *key, *val;
-				int keyLen, valLen;
+				size_t keyLen, valLen;
 
 				key = f->data;
 				keyLen = eq;
@@ -5323,7 +5326,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	}
 
 
-	ILibCriticalLogFilename = ILibString_Copy(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".log"), -1);
+	ILibCriticalLogFilename = ILibString_Copy(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".log"), 0);
 #ifndef MICROSTACK_NOTLS
 	util_openssl_init();
 #endif

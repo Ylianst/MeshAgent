@@ -137,7 +137,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	if (duk_pcall_method(p->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(p->ctx, "child_process.subProcess.exit(): "); }
 	duk_pop(p->ctx);	
 }
-void ILibDuktape_ChildProcess_SubProcess_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void ILibDuktape_ChildProcess_SubProcess_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
 	if (!ILibMemory_CanaryOK(p)) { return; }
@@ -145,7 +145,7 @@ void ILibDuktape_ChildProcess_SubProcess_StdOutHandler(ILibProcessPipe_Process s
 	ILibDuktape_readableStream_WriteData(p->stdOut, buffer, bufferLen);
 	*bytesConsumed = bufferLen;
 }
-void ILibDuktape_ChildProcess_SubProcess_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void ILibDuktape_ChildProcess_SubProcess_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
 	if (!ILibMemory_CanaryOK(p)) { return; }

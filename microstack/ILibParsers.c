@@ -1081,7 +1081,6 @@ int ILib_atoi_uint64_ex(uint64_t *val, const char *instr, size_t instrLen, uint6
 {
 	char* eptr;
 	*val = strtoull(instr, &eptr, 10);
-	int e = errno;
 	if (errno == ERANGE || eptr == instr || *val > MAX)
 	{
 		*val = 0;
@@ -1175,17 +1174,17 @@ void* ILibMemory_AllocateA_Get(void *buffer, size_t sz)
 
 	return(retVal);
 }
-void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory)
+void* ILibMemory_Allocate(size_t containerSize, size_t extraMemorySize, void** allocatedContainer, void **extraMemory)
 {
-	if (!((containerSize < (INT32_MAX - extraMemorySize)) && (containerSize + extraMemorySize) < (INT32_MAX - 4))) { ILIBCRITICALEXIT(254); }
+	if (!((containerSize < (SIZE_MAX - extraMemorySize)) && (containerSize + extraMemorySize) < (SIZE_MAX - sizeof(size_t)))) { ILIBCRITICALEXIT(254); }
 
-	char* retVal = (char*)malloc(containerSize + extraMemorySize + (extraMemorySize > 0 ? 4 : 0));
+	char* retVal = (char*)malloc(containerSize + extraMemorySize + (extraMemorySize > 0 ? sizeof(size_t) : 0));
 	if (retVal == NULL) { ILIBCRITICALEXIT(254); }
-	memset(retVal, 0, containerSize + extraMemorySize + (extraMemorySize > 0 ? 4 : 0));
+	memset(retVal, 0, containerSize + extraMemorySize + (extraMemorySize > 0 ? sizeof(size_t) : 0));
 	if (extraMemorySize > 0)
 	{
-		((int*)(retVal + containerSize))[0] = extraMemorySize;
-		if (extraMemory != NULL) { *extraMemory = (retVal + containerSize + 4); }
+		((size_t*)(retVal + containerSize))[0] = extraMemorySize;
+		if (extraMemory != NULL) { *extraMemory = (retVal + containerSize + sizeof(size_t)); }
 	}
 	else
 	{
@@ -1194,17 +1193,17 @@ void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocat
 	if (allocatedContainer != NULL) { *allocatedContainer = retVal; }
 	return retVal;
 }
-ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, int containerSize)
+ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, size_t containerSize)
 {
-	return(container == NULL ? NULL : ((char*)container + 4 + containerSize));
+	return(container == NULL ? NULL : ((char*)container + sizeof(size_t) + containerSize));
 }
-int ILibMemory_GetExtraMemorySize(void* extraMemory)
+size_t ILibMemory_GetExtraMemorySize(void* extraMemory)
 {
 	if (extraMemory == NULL) { return 0; }
-	return(((int*)((char*)extraMemory - 4))[0]);
+	return(((size_t*)((char*)extraMemory - sizeof(size_t)))[0]);
 }
 
-ILibChain_Link* ILibChain_Link_Allocate(int structSize, int extraMemorySize)
+ILibChain_Link* ILibChain_Link_Allocate(size_t structSize, size_t extraMemorySize)
 {
 	ILibChain_Link *retVal;
 	void* extraMemory;
@@ -1212,7 +1211,7 @@ ILibChain_Link* ILibChain_Link_Allocate(int structSize, int extraMemorySize)
 	retVal->ExtraMemoryPtr = extraMemory;
 	return retVal;
 }
-int ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link)
+size_t ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link)
 {
 	return(ILibMemory_GetExtraMemorySize(link->ExtraMemoryPtr));
 }
@@ -3211,7 +3210,7 @@ char *ILibChain_MetaData(char *file, int number)
 }
 #ifdef WIN32
 BOOL ILibChain_WriteEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, void *user);
-BOOL ILibChain_WriteEx_Sink2(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void *user)
+BOOL ILibChain_WriteEx_Sink2(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, DWORD bytesWritten, void *user)
 {
 	return(ILibChain_WriteEx_Sink(chain, h, status, user));
 }
@@ -3312,9 +3311,11 @@ BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus sta
 		}
 	}
 }
-ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata)
+ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata)
 {
 	int e = 0;
+	if (bufferLen > UINT32_MAX) { return(ILibTransport_DoneState_ERROR); }
+
 	if (!WriteFile(h, buffer, (DWORD)bufferLen, NULL, p))
 	{
 		if ((e = GetLastError()) == ERROR_IO_PENDING)
@@ -3322,7 +3323,7 @@ ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p,
 			// Completing Asynchronously
 			ILibChain_WriteEx_data *state = (ILibChain_WriteEx_data*)ILibMemory_SmartAllocate(sizeof(ILibChain_WriteEx_data));
 			state->buffer = buffer;
-			state->bytesLeft = bufferLen;
+			state->bytesLeft = (DWORD)bufferLen;
 			state->totalWritten = 0;
 			state->p = p;
 			state->handler = handler;
@@ -3351,7 +3352,7 @@ void ILibChain_ReadEx2_UnwindHandler(void *chain, void *user)
 	state->handler(chain, state->fileHandle, ILibWaitHandle_ErrorStatus_NONE, state->buffer, (int)(uintptr_t)state->p, state->user);
 	free(state);
 }
-void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
+void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
 {
 	DWORD bytesRead = 0;
 	int e = 0;
@@ -3432,7 +3433,7 @@ void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h)
 	}
 	return(ret);
 }
-void* ILibChain_ReadAndSaveStateEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
+void* ILibChain_ReadAndSaveStateEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
 {
 	int metaDataLen = (int)(metadata == NULL ? 0 : strnlen_s(metadata, 1024));
 	ILibChain_WaitHandleInfo *ret = (ILibChain_WaitHandleInfo*)ILibMemory_SmartAllocate(8 + metaDataLen + sizeof(ILibChain_WaitHandleInfo));
@@ -4445,17 +4446,17 @@ The strings are never copied. Everything is referenced via pointers into the ori
 \param length Length of \a buffer
 \return A tree of ILibXMLNodes, representing the XML document
 */
-struct ILibXMLNode *ILibParseXML(char *buffer, int offset, int length)
+struct ILibXMLNode *ILibParseXML(char *buffer, size_t offset, size_t length)
 {
 	struct parser_result *xml;
 	struct parser_result_field *field;
 	struct parser_result *temp2;
 	struct parser_result *temp3;
 	char* TagName;
-	int TagNameLength;
+	size_t TagNameLength;
 	int StartTag;
 	int EmptyTag;
-	int i;
+	size_t i;
 	int wsi;
 
 	struct ILibXMLNode *RetVal = NULL;
@@ -4463,10 +4464,10 @@ struct ILibXMLNode *ILibParseXML(char *buffer, int offset, int length)
 	struct ILibXMLNode *x = NULL;
 
 	char *NSTag;
-	int NSTagLength;
+	size_t NSTagLength;
 
 	char *CommentEnd = 0;
-	int CommentIndex;
+	size_t CommentIndex;
 
 	//
 	// Even though "technically" the first character of an XML document must be <
@@ -4980,7 +4981,7 @@ void ILibHashTree_GetValue(void *tree_enumerator, char **key, int *keyLength, vo
 \param[out] data The data of the current item
 \param[out] dataEx The extended data of the current item
 */
-void ILibHashTree_GetValueEx(void *tree_enumerator, char **key, int *keyLength, void **data, int *dataEx)
+void ILibHashTree_GetValueEx(void *tree_enumerator, char **key, size_t *keyLength, void **data, size_t *dataEx)
 {
 	struct HashNodeEnumerator *en = (struct HashNodeEnumerator*)tree_enumerator;
 
@@ -5042,9 +5043,9 @@ void* ILibInitHashTree_CaseInSensitiveEx(void *ReservedMemory)
 }
 
 
-void ILibToUpper(const char *in, int inLength, char *out)
+void ILibToUpper(const char *in, size_t inLength, char *out)
 {
-	int i;
+	size_t i;
 
 	for(i = 0; i < inLength; ++i)
 	{
@@ -5060,9 +5061,9 @@ void ILibToUpper(const char *in, int inLength, char *out)
 		}
 	}
 }
-void ILibToLower(const char *in, int inLength, char *out)
+void ILibToLower(const char *in, size_t inLength, char *out)
 {
-	int i;
+	size_t i;
 
 	for(i = 0; i < inLength; ++i)
 	{
@@ -5079,7 +5080,7 @@ void ILibToLower(const char *in, int inLength, char *out)
 	}
 }
 
-int ILibGetHashValueEx(char *key, int keylength, int caseInSensitiveText)
+int ILibGetHashValueEx(const char *key, size_t keylength, int caseInSensitiveText)
 {
 	int HashValue=0;
 	char TempValue[4];
@@ -5147,7 +5148,7 @@ int ILibGetHashValueEx(char *key, int keylength, int caseInSensitiveText)
 	return(HashValue);
 }
 
-/*! \fn ILibGetHashValue(char *key, int keylength)
+/*! \fn ILibGetHashValue(char *key, size_t keylength)
 \brief Calculates a numeric Hash from a given string
 \par
 Used by ILibHashTree methods
@@ -5155,7 +5156,7 @@ Used by ILibHashTree methods
 \param keylength The length of the string to hash
 \return A hash value
 */
-int ILibGetHashValue(char *key, int keylength)
+int ILibGetHashValue(const char *key, size_t keylength)
 {
 	return(ILibGetHashValueEx(key,keylength,0));
 }
@@ -5165,14 +5166,14 @@ int ILibGetHashValue(char *key, int keylength)
 //
 // Determines if a key entry exists in a HashTree, and creates it if requested
 //
-struct HashNode* ILibFindEntry(void *hashtree, void *key, int keylength, int create)
+struct HashNode* ILibFindEntry(void *hashtree, const void *key, size_t keylength, int create)
 {
+	if (keylength == 0 || keylength > INT32_MAX) { return(NULL); }
 	struct HashNode_Root *root = (struct HashNode_Root*)hashtree;
 	struct HashNode *current = root->Root;
 	int HashValue = ILibGetHashValueEx(key, keylength, root->CaseInSensitive);
 	int done = 0;
 
-	if (keylength == 0){return(NULL);}
 
 	//
 	// Iterate through our tree to see if we can find this key entry
@@ -5219,7 +5220,7 @@ struct HashNode* ILibFindEntry(void *hashtree, void *key, int keylength, int cre
 			if ((current->Next->KeyValue = (root->Reserved == NULL ? (void*)malloc(keylength + 1) : ILibMemory_AllocateA_Get(root->Reserved, keylength + 1))) == NULL) ILIBCRITICALEXIT(254);
 			memcpy_s(current->Next->KeyValue, keylength + 1, key ,keylength);
 			current->Next->KeyValue[keylength] = 0; 
-			current->Next->KeyLength = keylength;
+			current->Next->KeyLength = (int)keylength; // No dataloss, capped to INT32_MAX
 			return(current->Next);
 		}
 		else
@@ -5237,7 +5238,7 @@ struct HashNode* ILibFindEntry(void *hashtree, void *key, int keylength, int cre
 \param keylength The length of the key
 \return 0 if does not exist, nonzero otherwise
 */
-int ILibHasEntry(void *hashtree, char* key, int keylength)
+int ILibHasEntry(void *hashtree, const char* key, size_t keylength)
 {
 	//
 	// This can be duplicated by calling Find entry, but setting the create flag to false
@@ -5252,7 +5253,7 @@ int ILibHasEntry(void *hashtree, char* key, int keylength)
 \param keylength The length of the key
 \param value The data to add into the HashTree
 */
-void ILibAddEntry(void* hashtree, char* key, int keylength, void *value)
+void ILibAddEntry(void* hashtree, const char* key, size_t keylength, void *value)
 {
 	//
 	// This can be duplicated by calling FindEntry, and setting create to true
@@ -5268,7 +5269,7 @@ void ILibAddEntry(void* hashtree, char* key, int keylength, void *value)
 \param value The data to add into the HashTree
 \param valueEx An optional int value
 */
-void ILibAddEntryEx(void* hashtree, char* key, int keylength, void *value, int valueEx)
+void ILibAddEntryEx(void* hashtree, const char* key, size_t keylength, void *value, int valueEx)
 {
 	//
 	// This can be duplicated by calling FindEntry, and setting create to true
@@ -5289,7 +5290,7 @@ void ILibAddEntryEx(void* hashtree, char* key, int keylength, void *value, int v
 \param keylength The length of the key
 \return The data in the HashTree. NULL if key does not exist
 */
-void* ILibGetEntry(void *hashtree, char* key, int keylength)
+void* ILibGetEntry(void *hashtree, const char* key, size_t keylength)
 {
 	//
 	// This can be duplicated by calling FindEntry and setting create to false.
@@ -5313,7 +5314,7 @@ void* ILibGetEntry(void *hashtree, char* key, int keylength)
 \param[out] value The data in the HashTree. NULL if key does not exist
 \param[out] valueEx The extended data in the HashTree.
 */
-ILibExportMethod void ILibGetEntryEx(void *hashtree, char *key, int keyLength, void **value, int* valueEx)
+ILibExportMethod void ILibGetEntryEx(void *hashtree, const char *key, size_t keyLength, void **value, int* valueEx)
 {
 	//
 	// This can be duplicated by calling FindEntry and setting create to false.
@@ -5436,12 +5437,12 @@ int ILibGetULong(const char *TestValue, const int TestValueLength, unsigned long
 //
 // Determines if a buffer offset is a delimiter
 //
-int ILibIsDelimiter (const char* buffer, int offset, int buffersize, const char* Delimiter, int DelimiterLength)
+int ILibIsDelimiter (const char* buffer, size_t offset, size_t buffersize, const char* Delimiter, size_t DelimiterLength)
 {
 	//
 	// For simplicity sake, we'll assume a match unless proven otherwise
 	//
-	int i=0;
+	size_t i=0;
 	int RetVal = 1;
 	if (DelimiterLength>buffersize)
 	{
@@ -5478,12 +5479,12 @@ quotation marks, whereas \a ILibParseString does not.
 \param DelimiterLength The length of the delimiter
 \return A list of tokens
 */
-struct parser_result* ILibParseStringAdv (char* buffer, int offset, int length, const char* Delimiter, int DelimiterLength)
+struct parser_result* ILibParseStringAdv (const char* buffer, size_t offset, size_t length, const char* Delimiter, size_t DelimiterLength)
 {
 	struct parser_result* RetVal;
-	int i=0;	
-	char* Token = NULL;
-	int TokenLength = 0;
+	size_t i=0;	
+	const char* Token = NULL;
+	size_t TokenLength = 0;
 	struct parser_result_field *p_resultfield;
 	int Ignore = 0;
 	char StringDelimiter=0;
@@ -5540,7 +5541,7 @@ struct parser_result* ILibParseStringAdv (char* buffer, int offset, int length, 
 			// We found a delimiter in the string
 			//
 			if ((p_resultfield = (struct parser_result_field*)malloc(sizeof(struct parser_result_field))) == NULL) ILIBCRITICALEXIT(253);
-			p_resultfield->data = Token;
+			p_resultfield->data = (char*)Token;
 			p_resultfield->datalength = TokenLength;
 			p_resultfield->NextResult = NULL;
 			if (RetVal->FirstResult != NULL)
@@ -5578,7 +5579,7 @@ struct parser_result* ILibParseStringAdv (char* buffer, int offset, int length, 
 	// last delimiter is the token
 	//
 	if ((p_resultfield = (struct parser_result_field*)malloc(sizeof(struct parser_result_field))) == NULL) ILIBCRITICALEXIT(254);
-	p_resultfield->data = Token;
+	p_resultfield->data = (char*)Token;
 	p_resultfield->datalength = TokenLength;
 	p_resultfield->NextResult = NULL;
 	if (RetVal->FirstResult != NULL)
@@ -5602,7 +5603,7 @@ struct parser_result* ILibParseStringAdv (char* buffer, int offset, int length, 
 \param length Length of \a theString
 \return Length of the trimmed string
 */
-int ILibTrimString(char **theString, int length)
+size_t ILibTrimString(char **theString, size_t length)
 {
 	while (length > 0 && ((*theString)[0] == 9 || (*theString)[0] == 32)) { length--; (*theString)++; }					// Remove any blank chars at the start
 	while (length > 0 && ((*theString)[length - 1] == 9 || (*theString)[length - 1] == 32)) { length--; }				// Remove any blank chars at the end
@@ -5621,10 +5622,10 @@ quotation marks, whereas \a ILibParseStringAdv does.
 \param DelimiterLength The length of the delimiter
 \return A list of tokens
 */
-struct parser_result* ILibParseString(char* buffer, int offset, int length, const char* Delimiter, int DelimiterLength)
+struct parser_result* ILibParseString(const char* buffer, size_t offset, size_t length, const char* Delimiter, size_t DelimiterLength)
 {
-	int i = 0;
-	char* Token = NULL;
+	size_t i = 0;
+	const char* Token = NULL;
 	int TokenLength = 0;
 	struct parser_result* RetVal;
 	struct parser_result_field *p_resultfield;
@@ -5650,7 +5651,7 @@ struct parser_result* ILibParseString(char* buffer, int offset, int length, cons
 			// We found a delimiter in the string
 			//
 			if ((p_resultfield = (struct parser_result_field*)malloc(sizeof(struct parser_result_field))) == NULL) ILIBCRITICALEXIT(254);
-			p_resultfield->data = Token;
+			p_resultfield->data = (char*)Token;
 			p_resultfield->datalength = TokenLength;
 			p_resultfield->NextResult = NULL;
 			if (RetVal->FirstResult != NULL)
@@ -5688,7 +5689,7 @@ struct parser_result* ILibParseString(char* buffer, int offset, int length, cons
 	// last delimiter is the token
 	//
 	if ((p_resultfield = (struct parser_result_field*)malloc(sizeof(struct parser_result_field))) == NULL) ILIBCRITICALEXIT(254);
-	p_resultfield->data = Token;
+	p_resultfield->data = (char*)Token;
 	p_resultfield->datalength = TokenLength;
 	p_resultfield->NextResult = NULL;
 	if (RetVal->FirstResult != NULL)
@@ -5915,7 +5916,7 @@ int ILibInPlaceHTTPUnEscapeEx(char* data, int length)
 \param length The length of the buffer to parse
 \return packetheader structure
 */
-struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
+struct packetheader* ILibParsePacketHeader(char* buffer, size_t offset, size_t length)
 {
 	struct packetheader *RetVal;
 	struct parser_result *_packet;
@@ -6110,7 +6111,10 @@ struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
 				RetVal->LastField->NextField = node; // Note: Klocwork says LastField could be NULL/dereferenced, but LastField is never going to be NULL.
 			}
 			RetVal->LastField = node;
-			ILibAddEntryEx(RetVal->HeaderTable,node->Field,node->FieldLength,node->FieldData,node->FieldDataLength);
+			if (node->FieldDataLength <= INT32_MAX)
+			{
+				ILibAddEntryEx(RetVal->HeaderTable, node->Field, node->FieldLength, node->FieldData, (int)node->FieldDataLength); // No data loss, capped at INT32_MAX
+			}
 		}
 		HeaderLine = HeaderLine->NextResult;
 	}
@@ -6128,9 +6132,9 @@ struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length)
 \param tokenLength The maximum size of each fragment or token
 \return The length of the buffer required to call \a ILibFragmentText
 */
-int ILibFragmentTextLength(char *text, int textLength, char *delimiter, int delimiterLength, int tokenLength)
+size_t ILibFragmentTextLength(char *text, size_t textLength, char *delimiter, size_t delimiterLength, size_t tokenLength)
 {
-	int RetVal;
+	size_t RetVal;
 
 	UNREFERENCED_PARAMETER( text );
 	UNREFERENCED_PARAMETER( delimiter );
@@ -6149,12 +6153,12 @@ int ILibFragmentTextLength(char *text, int textLength, char *delimiter, int deli
 \param RetVal The buffer to store the resultant string
 \return The length of the written string
 */
-int ILibFragmentText(char *text, int textLength, char *delimiter, int delimiterLength, int tokenLength, char **RetVal)
+size_t ILibFragmentText(char *text, size_t textLength, char *delimiter, size_t delimiterLength, size_t tokenLength, char **RetVal)
 {
 	char *Buffer;
-	int i=0,i2=0;
-	int BufferSize = 0;
-	int allocSize = ILibFragmentTextLength(text, textLength, delimiter, delimiterLength, tokenLength);
+	size_t i=0,i2=0;
+	size_t BufferSize = 0;
+	size_t allocSize = ILibFragmentTextLength(text, textLength, delimiter, delimiterLength, tokenLength);
 	if ((*RetVal = (char*)malloc(allocSize)) == NULL) ILIBCRITICALEXIT(254);
 
 	Buffer = *RetVal;
@@ -6184,18 +6188,18 @@ int ILibFragmentText(char *text, int textLength, char *delimiter, int delimiterL
 \param[out] RetVal The output char* buffer
 \return The length of the output buffer
 */
-int ILibGetRawPacket(struct packetheader* packet, char **RetVal)
+size_t ILibGetRawPacket(struct packetheader* packet, char **RetVal)
 {
-	int i,i2;
-	int BufferSize = 0;
+	size_t i,i2;
+	size_t BufferSize = 0;
 	char* Buffer, *temp;
 
 	void *en;
 
 	char *Field;
-	int FieldLength;
+	size_t FieldLength;
 	void *FieldData;
-	int FieldDataLength;
+	size_t FieldDataLength;
 
 	if (packet->StatusCode != -1)
 	{
@@ -6221,7 +6225,7 @@ int ILibGetRawPacket(struct packetheader* packet, char **RetVal)
 	while (ILibHashTree_MoveNext(en)==0)
 	{
 		ILibHashTree_GetValueEx(en,&Field,&FieldLength,(void**)&FieldData,&FieldDataLength);
-		if (FieldDataLength < 0) { continue; }
+		if (FieldDataLength == (size_t)(-1)) { continue; }
 		//
 		// A conservative estimate adding the lengths of the header name and value, plus
 		// 4 characters for the ':' and CRLF
@@ -6291,7 +6295,7 @@ int ILibGetRawPacket(struct packetheader* packet, char **RetVal)
 	while (ILibHashTree_MoveNext(en)==0)
 	{
 		ILibHashTree_GetValueEx(en,&Field,&FieldLength,(void**)&FieldData,&FieldDataLength);
-		if (FieldDataLength < 0) { continue; }
+		if (FieldDataLength == (size_t)(-1)) { continue; }
 
 		//
 		// Write each header
@@ -6378,10 +6382,10 @@ ILibParseUriResult ILibParseUriEx (const char* URI, size_t URILen, char** Addr, 
 {
 	struct parser_result *result, *result2, *result3;
 	char *TempString, *TempString2;
-	int TempStringLength, TempStringLength2;
+	size_t TempStringLength, TempStringLength2;
 	unsigned short lport;
 	char* laddr = NULL;
-	int laddrLen = 0;
+	size_t laddrLen = 0;
 
 	ILibParseUriResult retVal = ILibParseUriResult_UNKNOWN_SCHEME;
 
@@ -6611,7 +6615,7 @@ struct packetheader* ILibClonePacket(struct packetheader *packet)
 \param Version The version string to write. eg: 1.1
 \param VersionLength The length of the \a Version
 */
-void ILibSetVersion(struct packetheader *packet, char* Version, int VersionLength)
+void ILibSetVersion(struct packetheader *packet, char* Version, size_t VersionLength)
 {
 	if (packet->UserAllocVersion!=0) {free(packet->Version);}
 	packet->UserAllocVersion = 1;
@@ -6627,7 +6631,7 @@ void ILibSetVersion(struct packetheader *packet, char* Version, int VersionLengt
 \param StatusData The status string, eg: OK
 \param StatusDataLength The length of \a StatusData
 */
-void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *StatusData, int StatusDataLength)
+void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *StatusData, size_t StatusDataLength)
 {
 	if (StatusDataLength < 0) { StatusDataLength = (int)strnlen_s(StatusData, 255); }
 	packet->StatusCode = StatusCode;
@@ -6646,7 +6650,7 @@ void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char *Status
 \param DirectiveObj The path component of the method, eg: \b /index.html
 \param DirectiveObjLength The length of \a DirectiveObj
 */
-void ILibSetDirective(struct packetheader *packet, char* Directive, int DirectiveLength, char* DirectiveObj, int DirectiveObjLength)
+void ILibSetDirective(struct packetheader *packet, char* Directive, size_t DirectiveLength, char* DirectiveObj, size_t DirectiveObjLength)
 {
 	if (DirectiveLength < 0)DirectiveLength = (int)strnlen_s(Directive, 255);
 	if (DirectiveObjLength < 0)DirectiveObjLength = (int)strnlen_s(DirectiveObj, 255);
@@ -6712,11 +6716,11 @@ void ILibDeleteHeaderLine(struct packetheader *packet, char* FieldName, int Fiel
 \param FieldData The header value, eg: \b text/xml
 \param FieldDataLength The length of the \a FieldData
 */
-void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, int FieldNameLength, const char* FieldData, int FieldDataLength)
+void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, size_t FieldNameLength, const char* FieldData, size_t FieldDataLength)
 {
 	struct packetheader_field_node *node;
-	if (FieldNameLength < 0) { FieldNameLength = (int)strnlen_s(FieldName, 255); }
-	if (FieldDataLength < 0) { FieldDataLength = (int)strnlen_s(FieldData, 255); }
+	if (FieldNameLength == 0 || FieldNameLength == (size_t)(-1)) { FieldNameLength = strnlen_s(FieldName, 255); }
+	if (FieldDataLength == 0 || FieldDataLength == (size_t)(-1)) { FieldDataLength = strnlen_s(FieldData, 255); }
 	if (packet->ReservedMemory != NULL)
 	{
 		if (ILibMemory_AllocateA_Size(packet->ReservedMemory) > (sizeof(struct packetheader_field_node) + FieldNameLength + FieldDataLength + 2))
@@ -6750,7 +6754,7 @@ void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, int F
 	node->FieldDataLength = FieldDataLength;
 	node->NextField = NULL;
 
-	if (packet->HeaderTable != NULL) { ILibAddEntryEx(packet->HeaderTable, node->Field, node->FieldLength, node->FieldData, node->FieldDataLength); }
+	if (packet->HeaderTable != NULL) { ILibAddEntryEx(packet->HeaderTable, node->Field, node->FieldLength, node->FieldData,(int) node->FieldDataLength); } // No dataloss, capped to 255
 	
 	//
 	// And attach it to the linked list
@@ -7650,7 +7654,7 @@ void* ILibLinkedList_ShallowCopy(void *LinkedList)
 */
 void* ILibLinkedList_GetNode_Head(void *LinkedList)
 {
-	return(((struct ILibLinkedListNode_Root*)LinkedList)->Head);
+	return(LinkedList != NULL ? ((struct ILibLinkedListNode_Root*)LinkedList)->Head : NULL);
 }
 
 /*! \fn ILibLinkedList_GetNode_Tail(void *LinkedList)
@@ -8581,13 +8585,16 @@ void ILibSparseArray_UnLock(ILibSparseArray sarray)
 	sem_post(&(((ILibSparseArray_Root*)sarray)->LOCK));
 }
 
-int ILibString_IndexOfFirstWhiteSpace(const char *inString, int inStringLength)
+int ILibString_IndexOfFirstWhiteSpace(const char *inString, size_t inStringLength)
 {
 	//CR, LF, space, tab
-	int i = 0;
+	size_t i = 0;
 	for(i = 0;i < inStringLength; ++i)
 	{
-		if (inString[i] == 13 || inString[i] == 10 || inString[i] == 9 || inString[i] == 32) return(i);
+		if (inString[i] == 13 || inString[i] == 10 || inString[i] == 9 || inString[i] == 32)
+		{
+			return(i > INT32_MAX ? -1 : (int)i);
+		}
 	}
 	return(-1);
 }
@@ -8601,11 +8608,11 @@ int ILibString_IndexOfFirstWhiteSpace(const char *inString, int inStringLength)
 \param caseSensitive 0 if the matching is case-insensitive
 \return Non-zero if the string starts with the substring
 */
-int ILibString_EndsWithEx(const char *inString, int inStringLength, const char *endWithString, int endWithStringLength, int caseSensitive)
+int ILibString_EndsWithEx(const char *inString, size_t inStringLength, const char *endWithString, size_t endWithStringLength, int caseSensitive)
 {
 	int RetVal = 0;
-	if (inStringLength < 0) { inStringLength = (int)strnlen_s(inString, sizeof(ILibScratchPad)); }
-	if (endWithStringLength < 0) { endWithStringLength = (int)strnlen_s(endWithString, sizeof(ILibScratchPad)); }
+	if (inStringLength == 0 || inStringLength == (size_t)(-1)) { inStringLength = strnlen_s(inString, sizeof(ILibScratchPad)); }
+	if (endWithStringLength == 0 || endWithStringLength == (size_t)(-1)) { endWithStringLength = strnlen_s(endWithString, sizeof(ILibScratchPad)); }
 
 	if (inStringLength>=endWithStringLength)
 	{
@@ -8622,7 +8629,7 @@ int ILibString_EndsWithEx(const char *inString, int inStringLength, const char *
 \param endWithStringLength The length of \a startsWithString
 \return Non-zero if the string starts with the substring
 */
-int ILibString_EndsWith(const char *inString, int inStringLength, const char *endWithString, int endWithStringLength)
+int ILibString_EndsWith(const char *inString, size_t inStringLength, const char *endWithString, size_t endWithStringLength)
 {
 	return(ILibString_EndsWithEx(inString,inStringLength,endWithString,endWithStringLength,1));
 }
@@ -8635,7 +8642,7 @@ int ILibString_EndsWith(const char *inString, int inStringLength, const char *en
 \param caseSensitive Non-zero if match is to be case sensitive
 \return Non-zero if the string starts with the substring
 */
-int ILibString_StartsWithEx(const char *inString, int inStringLength, const char *startsWithString, int startsWithStringLength, int caseSensitive)
+int ILibString_StartsWithEx(const char *inString, size_t inStringLength, const char *startsWithString, size_t startsWithStringLength, int caseSensitive)
 {
 	int RetVal = 0;
 	if (inStringLength>=startsWithStringLength)
@@ -8653,7 +8660,7 @@ int ILibString_StartsWithEx(const char *inString, int inStringLength, const char
 \param startsWithStringLength The length of \a startsWithString
 \return Non-zero if the string starts with the substring
 */
-int ILibString_StartsWith(const char *inString, int inStringLength, const char *startsWithString, int startsWithStringLength)
+int ILibString_StartsWith(const char *inString, size_t inStringLength, const char *startsWithString, size_t startsWithStringLength)
 {
 	return(ILibString_StartsWithEx(inString,inStringLength,startsWithString,startsWithStringLength,1));
 }
@@ -8666,26 +8673,26 @@ int ILibString_StartsWith(const char *inString, int inStringLength, const char *
 \param caseSensitive Non-zero if the match is case sensitive
 \return Position index of first occurance. -1 if the substring is not found
 */
-int ILibString_IndexOfEx(const char *inString, int inStringLength, const char *indexOf, int indexOfLength,  int caseSensitive)
+int ILibString_IndexOfEx(const char *inString, size_t inStringLength, const char *indexOf, size_t indexOfLength,  int caseSensitive)
 {
-	int RetVal = -1;
-	int index = 0;
+	size_t *RetVal = NULL;
+	size_t index = 0;
 
 	while (inStringLength-index >= indexOfLength)
 	{
 		if (caseSensitive!=0 && memcmp(inString+index,indexOf,indexOfLength)==0)
 		{
-			RetVal = index;
+			RetVal = &index;
 			break;
 		}
 		else if (caseSensitive==0 && strncasecmp(inString+index,indexOf,indexOfLength)==0)
 		{
-			RetVal = index;
+			RetVal = &index;
 			break;
 		}
 		++index;
 	}
-	return RetVal;
+	return((RetVal == NULL || *RetVal > INT32_MAX) ? -1 : (int)*RetVal);
 }
 /*! \fn ILibString_IndexOf(const char *inString, int inStringLength, const char *indexOf, int indexOfLength)
 \brief Returns the position index of the first occurance of a given substring
@@ -8695,7 +8702,7 @@ int ILibString_IndexOfEx(const char *inString, int inStringLength, const char *i
 \param indexOfLength The length of \a lastIndexOf
 \return Position index of first occurance. -1 if the substring is not found
 */
-int ILibString_IndexOf(const char *inString, int inStringLength, const char *indexOf, int indexOfLength)
+int ILibString_IndexOf(const char *inString, size_t inStringLength, const char *indexOf, size_t indexOfLength)
 {
 	return(ILibString_IndexOfEx(inString,inStringLength,indexOf,indexOfLength,1));
 }
@@ -8708,26 +8715,26 @@ int ILibString_IndexOf(const char *inString, int inStringLength, const char *ind
 \param caseSensitive 0 for case insensitive matching, non-zero for case-sensitive matching
 \return Position index of last occurance. -1 if the substring is not found
 */
-int ILibString_LastIndexOfEx(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength, int caseSensitive)
+int ILibString_LastIndexOfEx(const char *inString, size_t inStringLength, const char *lastIndexOf, size_t lastIndexOfLength, int caseSensitive)
 {
-	int RetVal = -1;
-	int index = (inStringLength < 0 ? (int)strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength) - (lastIndexOfLength < 0 ? (int)strnlen_s(lastIndexOf, sizeof(ILibScratchPad)) : lastIndexOfLength);
+	size_t *RetVal = NULL;
+	size_t index = ((inStringLength == 0 || inStringLength == (size_t)(-1))? strnlen_s(inString, sizeof(ILibScratchPad)) : inStringLength) - (lastIndexOfLength < 0 ? strnlen_s(lastIndexOf, sizeof(ILibScratchPad)) : lastIndexOfLength);
 
 	while (index >= 0)
 	{
 		if (caseSensitive!=0 && memcmp(inString+index,lastIndexOf,lastIndexOfLength)==0)
 		{
-			RetVal = index;
+			RetVal = &index;
 			break;
 		}
 		else if (caseSensitive==0 && strncasecmp(inString+index,lastIndexOf,lastIndexOfLength)==0)
 		{
-			RetVal = index;
+			RetVal = &index;
 			break;
 		}
 		--index;
 	}
-	return RetVal;
+	return((RetVal == NULL || *RetVal > INT32_MAX) ? -1 : (int)(*RetVal));
 }
 /*! \fn ILibString_LastIndexOf(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength)
 \brief Returns the position index of the last occurance of a given substring
@@ -8737,7 +8744,7 @@ int ILibString_LastIndexOfEx(const char *inString, int inStringLength, const cha
 \param lastIndexOfLength The length of \a lastIndexOf
 \return Position index of last occurance. -1 if the substring is not found
 */
-int ILibString_LastIndexOf(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength)
+int ILibString_LastIndexOf(const char *inString, size_t inStringLength, const char *lastIndexOf, size_t lastIndexOfLength)
 {
 	return(ILibString_LastIndexOfEx(inString,inStringLength,lastIndexOf,lastIndexOfLength,1));
 }
@@ -8753,13 +8760,13 @@ int ILibString_LastIndexOf(const char *inString, int inStringLength, const char 
 \param replaceWithThisLength The length of \a replaceWithThis
 \return New string with replaced values
 */
-char *ILibString_Replace(const char *inString, int inStringLength, const char *replaceThis, int replaceThisLength, const char *replaceWithThis, int replaceWithThisLength)
+char *ILibString_Replace(const char *inString, size_t inStringLength, const char *replaceThis, size_t replaceThisLength, const char *replaceWithThis, size_t replaceWithThisLength)
 {
 	char *RetVal;
-	int RetValLength;
+	size_t RetValLength;
 	struct parser_result *pr;
 	struct parser_result_field *prf;
-	int mallocSize;
+	size_t mallocSize;
 
 	pr = ILibParseString((char*)inString, 0, inStringLength,(char*)replaceThis,replaceThisLength);
 	RetValLength = (pr->NumResults-1) * replaceWithThisLength; // string that will be inserted
@@ -8789,15 +8796,15 @@ char *ILibString_Replace(const char *inString, int inStringLength, const char *r
 char* ILibString_Cat_s(char *destination, size_t destinationSize, char *source)
 {
 	size_t sourceLen = strnlen_s(source, destinationSize);
-	int i;
-	int x = -1;
-	for (i = 0; i < (int)destinationSize - 1; ++i)
+	size_t i;
+	size_t *x = NULL;
+	for (i = 0; i < destinationSize - 1; ++i)
 	{
-		if (destination[i] == 0) { x = i; break; }
+		if (destination[i] == 0) { *x = i; break; }
 	}
-	if (x < 0 || ((x + sourceLen + 1 )> destinationSize)) { ILIBCRITICALEXIT(254); }
-	memcpy_s(destination + x, destinationSize - x, source, sourceLen);
-	destination[x + sourceLen] = 0;
+	if (x == NULL || ((*x + sourceLen + 1 )> destinationSize)) { ILIBCRITICALEXIT(254); }
+	memcpy_s(destination + *x, destinationSize - *x, source, sourceLen);
+	destination[*x + sourceLen] = 0;
 	return(destination);
 }
 #ifndef WIN32
@@ -8841,7 +8848,7 @@ int ILibMemory_Move_s(void *destination, size_t destinationSize, void *source, s
 #endif
 int ILibString_n_Copy_s(char *destination, size_t destinationSize, char *source, size_t maxCount)
 {
-	size_t count = strnlen_s(source, maxCount == (size_t)-1 ? (destinationSize-1) : maxCount);
+	size_t count = strnlen_s(source, (maxCount == (size_t)(-1)) ? (destinationSize-1) : maxCount);
 	if ((count + 1) > destinationSize) 
 	{
 		ILIBCRITICALEXIT(254); 
@@ -8860,21 +8867,21 @@ int ILibString_Copy_s(char *destination, size_t destinationSize, char *source)
 	return 0;
 }
 
-char* ILibString_Cat(const char *inString1, int inString1Len, const char *inString2, int inString2Len)
+char* ILibString_Cat(const char *inString1, size_t inString1Len, const char *inString2, size_t inString2Len)
 {
 	char *RetVal;
-	if (inString1Len < 0) { inString1Len = (int)strnlen_s(inString1, sizeof(ILibScratchPad)); }
-	if (inString2Len < 0) { inString2Len = (int)strnlen_s(inString2, sizeof(ILibScratchPad)); }
+	if (inString1Len == 0 || inString1Len == (size_t)(-1)) { inString1Len = strnlen_s(inString1, sizeof(ILibScratchPad)); }
+	if (inString2Len == 0 || inString2Len == (size_t)(-1)) { inString2Len = strnlen_s(inString2, sizeof(ILibScratchPad)); }
 	if ((RetVal = (char*)malloc(inString1Len + inString2Len+1)) == NULL) ILIBCRITICALEXIT(254);
 	memcpy_s(RetVal, inString1Len + inString2Len + 1, (char*)inString1, inString1Len);
 	memcpy_s(RetVal + inString1Len, inString2Len + 1, (char*)inString2, inString2Len);
 	RetVal[inString1Len + inString2Len]=0;
 	return RetVal;
 }
-char* ILibString_Copy(const char *inString, int length)
+char* ILibString_Copy(const char *inString, size_t length)
 {
 	char *RetVal;
-	if (length<0) length = (int)strnlen_s(inString, sizeof(ILibScratchPad));
+	if (length==0 || length == (size_t)(-1)) length = strnlen_s(inString, sizeof(ILibScratchPad));
 	if ((RetVal = (char*)malloc(length + 1)) == NULL) ILIBCRITICALEXIT(254);
 	memcpy_s(RetVal, length + 1, (char*)inString, length);
 	RetVal[length] = 0;
@@ -8882,7 +8889,7 @@ char* ILibString_Copy(const char *inString, int length)
 }
 char* ILibString_CopyEx(const char *inString, size_t length)
 {
-	if (length == 0) { length = strnlen_s(inString, sizeof(ILibScratchPad)); }
+	if (length == 0 || length == (size_t)(-1)) { length = strnlen_s(inString, sizeof(ILibScratchPad)); }
 	char *retVal = ILibMemory_SmartAllocate(length + 1);
 	memcpy_s(retVal, length + 1, inString, length);
 	return(retVal);
@@ -8895,7 +8902,7 @@ char* ILibString_CopyEx(const char *inString, size_t length)
 \param length The length of \a inString
 \return Converted string
 */
-char *ILibString_ToUpper(const char *inString, int length)
+char *ILibString_ToUpper(const char *inString, size_t length)
 {
 	char *RetVal;
 	if ((RetVal = (char*)malloc(length + 1)) == NULL) ILIBCRITICALEXIT(254);
@@ -8911,7 +8918,7 @@ char *ILibString_ToUpper(const char *inString, int length)
 \param length The length of \a inString
 \return Converted string
 */
-char *ILibString_ToLower(const char *inString, int length)
+char *ILibString_ToLower(const char *inString, size_t length)
 {
 	char *RetVal;
 	if ((RetVal = (char*)malloc(length + 1)) == NULL) ILIBCRITICALEXIT(254);
@@ -10625,7 +10632,7 @@ void ILibLinkedList_FileBacked_CopyPath(ILibLinkedList_FileBacked_Root *root, ch
 {
 	char *extraMemory = (char*)ILibMemory_GetExtraMemory(root, sizeof(ILibLinkedList_FileBacked_Root));
 	int pathLen = (int)strnlen_s(path, _MAX_PATH);
-	int offset = ILibMemory_GetExtraMemorySize(extraMemory) - pathLen - 1;
+	size_t offset = ILibMemory_GetExtraMemorySize(extraMemory) - pathLen - 1;
 
 	memcpy_s(extraMemory + offset, pathLen, path, pathLen);
 	(extraMemory + offset)[pathLen] = 0;

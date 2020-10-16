@@ -761,7 +761,6 @@ size_t ILibAsyncServerSocket_GetConnections(ILibAsyncServerSocket_ServerModule s
 	{
 		if (ILibAsyncSocket_IsConnected(mod->AsyncSockets[i]))
 		{
-			ILibAsyncServerSocket_Data *data = (ILibAsyncServerSocket_Data*)ILibAsyncSocket_GetUser(mod->AsyncSockets[i]);
 			connections[x++] = mod->AsyncSockets[i];
 		}
 	}

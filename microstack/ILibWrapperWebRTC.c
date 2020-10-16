@@ -214,7 +214,7 @@ char* ILibWrapper_SdpToBlock(char* sdp, int sdpLen, int *isActive, char **userna
 		if(f->datalength > 22 && strncmp(f->data, "a=fingerprint:sha-256 ", 22)==0)
 		{
 			char* tmp = ILibString_Replace(f->data + 22, f->datalength - 22, ":", 1, "", 0);
-			dtlsHashLen = util_hexToBuf(tmp, (int)strnlen_s(tmp, f->datalength - 22), tmp);
+			dtlsHashLen = (int)util_hexToBuf(tmp, strnlen_s(tmp, f->datalength - 22), tmp); // No Loss of data, becuase DTLS hash length < INT32_MAX
 			dtlshash = tmp;
 		}
 

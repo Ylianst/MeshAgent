@@ -396,8 +396,8 @@ int ILibIsRunningOnChainThread(void* chain);
 		char* MetaData;
 		int RESERVED;
 	}ILibChain_Link;
-	ILibChain_Link* ILibChain_Link_Allocate(int structSize, int extraMemorySize);
-	int ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link);
+	ILibChain_Link* ILibChain_Link_Allocate(size_t structSize, size_t extraMemorySize);
+	size_t ILibChain_Link_GetExtraMemorySize(ILibChain_Link* link);
 
 	typedef enum ILibMemory_Types
 	{
@@ -460,9 +460,9 @@ int ILibIsRunningOnChainThread(void* chain);
 #define ILibMemory_AllocateRaw(memPtr, memSize) if((memPtr = malloc(memSize)) == NULL) {ILIBCRITICALEXIT(254);}
 #define ILibMemory_ReallocateRaw(ppMemory, memSize) if(((*ppMemory) = realloc(*ppMemory, memSize)) == NULL) {ILIBCRITICALEXIT(254);}
 
-	void* ILibMemory_Allocate(int containerSize, int extraMemorySize, void** allocatedContainer, void **extraMemory);
-	int ILibMemory_GetExtraMemorySize(void* extraMemory);
-	ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, int containerSize);
+	void* ILibMemory_Allocate(size_t containerSize, size_t extraMemorySize, void** allocatedContainer, void **extraMemory);
+	size_t ILibMemory_GetExtraMemorySize(void* extraMemory);
+	ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, size_t containerSize);
 	ILibChain_EventHookToken ILibChain_SetEventHook(void* chainLinkObject, int maxTimeout, ILibChain_EventHookHandler handler);
 	void ILibChain_UpdateEventHook(ILibChain_EventHookToken token, int maxTimeout);
 
@@ -597,7 +597,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var datalength
 		\brief Length of \a data
 		*/
-		int datalength;
+		size_t datalength;
 
 		/*! \var NextResult
 		\brief Pointer to next token
@@ -642,7 +642,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var FieldLength
 		\brief Length of \a Field
 		*/
-		int FieldLength;
+		size_t FieldLength;
 		/*! \var FieldData
 		\brief Header Value
 		*/
@@ -650,7 +650,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var FieldDataLength
 		\brief Length of \a FieldData
 		*/
-		int FieldDataLength;
+		size_t FieldDataLength;
 		/*! \var UserAllocStrings
 		\brief Boolean indicating if the above strings are non-static memory
 		*/
@@ -677,7 +677,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var DirectiveLength
 		\brief Length of \a Directive
 		*/
-		int DirectiveLength;
+		size_t DirectiveLength;
 		/*! \var DirectiveObj
 		\brief HTTP Method Path
 		\par
@@ -691,7 +691,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		void *Reserved;
 		char *ReservedMemory;
 
-		int DirectiveObjLength;
+		size_t DirectiveObjLength;
 		/*! \var StatusCode
 		\brief HTTP Response Code
 		\par
@@ -707,7 +707,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var StatusDataLength
 		\brief Length of \a StatusData
 		*/
-		int StatusDataLength;
+		size_t StatusDataLength;
 		/*! \var Version
 		\brief HTTP Version
 		\par
@@ -717,7 +717,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var VersionLength
 		\brief Length of \a Version
 		*/
-		int VersionLength;
+		size_t VersionLength;
 		/*! \var Body
 		\brief Pointer to HTTP Body
 		*/
@@ -725,7 +725,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var BodyLength
 		\brief Length of \a Body
 		*/
-		int BodyLength;
+		size_t BodyLength;
 		/*! \var UserAllocStrings
 		\brief Boolean indicating if Directive/Obj are non-static
 		\par
@@ -789,7 +789,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var NameLength
 		\brief Length of \a Name
 		*/
-		int NameLength;
+		size_t NameLength;
 
 		/*! \var NSTag
 		\brief Namespace Prefix of the current element
@@ -800,7 +800,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var NSLength
 		\brief Length of \a NSTag
 		*/
-		int NSLength;
+		size_t NSLength;
 
 		/*! \var StartTag
 		\brief boolean indicating if the current element is a start element
@@ -844,7 +844,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var NameLength
 		\brief Length of \a Name
 		*/
-		int NameLength;
+		size_t NameLength;
 
 		/*! \var Prefix
 		\brief Namespace Prefix of this attribute
@@ -855,7 +855,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var PrefixLength
 		\brief Lenth of \a Prefix
 		*/
-		int PrefixLength;
+		size_t PrefixLength;
 
 		/*! \var Parent
 		\brief Pointer to the XML Node that contains this attribute
@@ -869,7 +869,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		/*! \var ValueLength
 		\brief Length of \a Value
 		*/
-		int ValueLength;
+		size_t ValueLength;
 		/*! \var Next
 		\brief Pointer to the next attribute
 		*/
@@ -931,7 +931,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	//
 	// Parses an XML string. Returns a tree of ILibXMLNode elements.
 	//
-	struct ILibXMLNode *ILibParseXML(char *buffer, int offset, int length);
+	struct ILibXMLNode *ILibParseXML(char *buffer, size_t offset, size_t length);
 
 	//
 	// Preprocesses the tree of ILibXMLNode elements returned by ILibParseXML.
@@ -1014,9 +1014,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 	char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 #ifdef WIN32
-	typedef void(*ILib_GenericReadHandler)(char *buffer, int bufferLen, int* bytesConsumed, void* user1, void *user2);
-	typedef BOOL(*ILibChain_ReadEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
-	typedef BOOL(*ILibChain_WriteEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void* user);
+	typedef void(*ILib_GenericReadHandler)(char *buffer, int bufferLen, DWORD* bytesConsumed, void* user1, void *user2);
+	typedef BOOL(*ILibChain_ReadEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
+	typedef BOOL(*ILibChain_WriteEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, DWORD bytesWritten, void* user);
 	typedef struct ILibChain_ReadEx_data
 	{
 		char *buffer;
@@ -1029,8 +1029,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	{
 		ILibChain_WriteEx_Handler handler;
 		char *buffer;
-		int bytesLeft;
-		int totalWritten;
+		DWORD bytesLeft;
+		DWORD totalWritten;
 		HANDLE fileHandle;
 		OVERLAPPED *p;
 		void *user;
@@ -1040,16 +1040,16 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibChain_WaitHandle_RemoveAndSaveState(void *chain, HANDLE h);
 	void ILibChain_WaitHandle_RestoreState(void *chain, void *state);
 	void ILibChain_WaitHandle_DestroySavedState(void *chain, void *state);
-	void* ILibChain_ReadAndSaveStateEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
+	void* ILibChain_ReadAndSaveStateEx(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
 	BOOL ILibChain_WaitHandleAdded(void *chain, HANDLE h);
 
 	void ILibChain_WaitHandle_UpdateMetadata(void *chain, HANDLE h, char *metadata);
 	void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata);
 	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);
-	void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
+	void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
 	#define ILibChain_ReadEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_ReadEx2(chain, h, overlapped, buffer, bufferLen, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
-	ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, int bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata);
+	ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata);
 	#define ILibChain_WriteEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_WriteEx2(chain, h, overlapped, buffer, bufferLen, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 
 #endif
@@ -1294,11 +1294,11 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibInitHashTree_CaseInSensitiveEx(void *ReservedMemory);
 	#define ILibInitHashTree_CaseInSensitive() ILibInitHashTree_CaseInSensitiveEx(NULL)
 	void ILibDestroyHashTree(void *tree);
-	int ILibHasEntry(void *hashtree, char* key, int keylength);
-	void ILibAddEntry(void* hashtree, char* key, int keylength, void *value);
-	void ILibAddEntryEx(void* hashtree, char* key, int keylength, void *value, int valueEx);
-	void* ILibGetEntry(void *hashtree, char* key, int keylength);
-	ILibExportMethod void ILibGetEntryEx(void *hashtree, char* key, int keylength, void **value, int *valueEx);
+	int ILibHasEntry(void *hashtree, const char* key, size_t keylength);
+	void ILibAddEntry(void* hashtree, const char* key, size_t keylength, void *value);
+	void ILibAddEntryEx(void* hashtree, const char* key, size_t keylength, void *value, int valueEx);
+	void* ILibGetEntry(void *hashtree, const char* key, size_t keylength);
+	ILibExportMethod void ILibGetEntryEx(void *hashtree, const char* key, size_t keylength, void **value, int *valueEx);
 	void ILibDeleteEntry(void *hashtree, char* key, int keylength);
 
 	void *ILibHashTree_GetEnumerator(void *tree);
@@ -1306,7 +1306,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	int ILibHashTree_MoveNext(void *tree_enumerator);
 
 	void ILibHashTree_GetValue(void *tree_enumerator, char **key, int *keyLength, void **data);
-	void ILibHashTree_GetValueEx(void *tree_enumerator, char **key, int *keyLength, void **data, int *dataEx);
+	void ILibHashTree_GetValueEx(void *tree_enumerator, char **key, size_t *keyLength, void **data, size_t *dataEx);
 	void ILibHashTree_Lock(void *hashtree);
 	void ILibHashTree_UnLock(void *hashtree);
 
@@ -1359,27 +1359,27 @@ int ILibIsRunningOnChainThread(void* chain);
 	int ILibFindEntryInTable(char *Entry, char **Table);
 
 
-	int ILibTrimString(char **theString, int length);
-	int ILibString_IndexOfFirstWhiteSpace(const char *inString, int inStringLength);
-	char* ILibString_Cat(const char *inString1, int inString1Len, const char *inString2, int inString2Len);
+	size_t ILibTrimString(char **theString, size_t length);
+	int ILibString_IndexOfFirstWhiteSpace(const char *inString, size_t inStringLength);
+	char* ILibString_Cat(const char *inString1, size_t inString1Len, const char *inString2, size_t inString2Len);
 	char* ILibString_Cat_s(char *destination, size_t destinationSize, char *source);
-	char *ILibString_Copy(const char *inString, int length);
+	char* ILibString_Copy(const char *inString, size_t length);
 	char* ILibString_CopyEx(const char *inString, size_t length);
 	int ILibString_Copy_s(char *destination, size_t destinationSize, char *source);
 	int ILibString_n_Copy_s(char *destination, size_t destinationSize, char *source, size_t count);
-	int ILibString_EndsWith(const char *inString, int inStringLength, const char *endWithString, int endWithStringLength);
-	int ILibString_EndsWithEx(const char *inString, int inStringLength, const char *endWithString, int endWithStringLength, int caseSensitive);
-	int ILibString_StartsWith(const char *inString, int inStringLength, const char *startsWithString, int startsWithStringLength);
-	int ILibString_StartsWithEx(const char *inString, int inStringLength, const char *startsWithString, int startsWithStringLength, int caseSensitive);
-	int ILibString_IndexOfEx(const char *inString, int inStringLength, const char *indexOf, int indexOfLength, int caseSensitive);
-	int ILibString_IndexOf(const char *inString, int inStringLength, const char *indexOf, int indexOfLength);
-	int ILibString_LastIndexOf(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength);
-	int ILibString_LastIndexOfEx(const char *inString, int inStringLength, const char *lastIndexOf, int lastIndexOfLength, int caseSensitive);
-	char *ILibString_Replace(const char *inString, int inStringLength, const char *replaceThis, int replaceThisLength, const char *replaceWithThis, int replaceWithThisLength);
-	char *ILibString_ToUpper(const char *inString, int length);
-	char *ILibString_ToLower(const char *inString, int length);
-	void ILibToUpper(const char *in, int inLength, char *out);
-	void ILibToLower(const char *in, int inLength, char *out);
+	int ILibString_EndsWith(const char *inString, size_t inStringLength, const char *endWithString, size_t endWithStringLength);
+	int ILibString_EndsWithEx(const char *inString, size_t inStringLength, const char *endWithString, size_t endWithStringLength, int caseSensitive);
+	int ILibString_StartsWith(const char *inString, size_t inStringLength, const char *startsWithString, size_t startsWithStringLength);
+	int ILibString_StartsWithEx(const char *inString, size_t inStringLength, const char *startsWithString, size_t startsWithStringLength, int caseSensitive);
+	int ILibString_IndexOfEx(const char *inString, size_t inStringLength, const char *indexOf, size_t indexOfLength, int caseSensitive);
+	int ILibString_IndexOf(const char *inString, size_t inStringLength, const char *indexOf, size_t indexOfLength);
+	int ILibString_LastIndexOf(const char *inString, size_t inStringLength, const char *lastIndexOf, size_t lastIndexOfLength);
+	int ILibString_LastIndexOfEx(const char *inString, size_t inStringLength, const char *lastIndexOf, size_t lastIndexOfLength, int caseSensitive);
+	char *ILibString_Replace(const char *inString, size_t inStringLength, const char *replaceThis, size_t replaceThisLength, const char *replaceWithThis, size_t replaceWithThisLength);
+	char *ILibString_ToUpper(const char *inString, size_t length);
+	char *ILibString_ToLower(const char *inString, size_t length);
+	void ILibToUpper(const char *in, size_t inLength, char *out);
+	void ILibToLower(const char *in, size_t inLength, char *out);
 #if !defined(WIN32)
 	#ifndef strcat_s
 		#define strcat_s(destination, destinationSize, source) ILibString_Cat_s(destination, destinationSize, source)
@@ -1389,8 +1389,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	#endif
 #endif
 
-	struct parser_result* ILibParseString (char* buffer, int offset, int length, const char* Delimiter, int DelimiterLength);
-	struct parser_result* ILibParseStringAdv (char* buffer, int offset, int length, const char* Delimiter, int DelimiterLength);
+	struct parser_result* ILibParseString (const char* buffer, size_t offset, size_t length, const char* Delimiter, size_t DelimiterLength);
+	struct parser_result* ILibParseStringAdv (const char* buffer, size_t offset, size_t length, const char* Delimiter, size_t DelimiterLength);
 	parser_result_field* ILibParseString_GetResultIndex(parser_result* r, int index);
 	void ILibDestructParserResults(struct parser_result *result);
 
@@ -1406,8 +1406,8 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	int ILibGetLong(char *TestValue, int TestValueLength, long* NumericValue);
 	int ILibGetULong(const char *TestValue, const int TestValueLength, unsigned long* NumericValue);
-	int ILibFragmentText(char *text, int textLength, char *delimiter, int delimiterLength, int tokenLength, char **RetVal);
-	int ILibFragmentTextLength(char *text, int textLength, char *delimiter, int delimiterLength, int tokenLength);
+	size_t ILibFragmentText(char *text, size_t textLength, char *delimiter, size_t delimiterLength, size_t tokenLength, char **RetVal);
+	size_t ILibFragmentTextLength(char *text, size_t textLength, char *delimiter, size_t delimiterLength, size_t tokenLength);
 
 
 	/* Base64 handling methods */
@@ -1432,7 +1432,7 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	struct packetheader *ILibCreateEmptyPacketEx(void *ReservedMemory);
 	#define ILibCreateEmptyPacket() ILibCreateEmptyPacketEx(NULL)
-	void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, int FieldNameLength, const char* FieldData, int FieldDataLength);
+	void ILibAddHeaderLine(struct packetheader *packet, const char* FieldName, size_t FieldNameLength, const char* FieldData, size_t FieldDataLength);
 	void ILibDeleteHeaderLine(struct packetheader *packet, char* FieldName, int FieldNameLength);
 	void ILibHTTPPacket_Stash_Put(ILibHTTPPacket *packet, char* key, int keyLen, void *data);
 	int ILibHTTPPacket_Stash_HasKey(ILibHTTPPacket *packet, char* key, int keyLen);
@@ -1443,12 +1443,12 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILibGetHeaderLineEx(struct packetheader *packet, char* FieldName, int FieldNameLength, int *len);
 	char* ILibGetHeaderLineSP(struct packetheader *packet, char* FieldName, int FieldNameLength);
 	char* ILibGetHeaderLineSP_Next(char* PreviousValue, char* FieldName, int FieldNameLength);
-	void ILibSetVersion(struct packetheader *packet, char* Version, int VersionLength);
-	void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char* StatusData, int StatusDataLength);
-	void ILibSetDirective(struct packetheader *packet, char* Directive, int DirectiveLength, char* DirectiveObj, int DirectiveObjLength);
+	void ILibSetVersion(struct packetheader *packet, char* Version, size_t VersionLength);
+	void ILibSetStatusCode(struct packetheader *packet, int StatusCode, char* StatusData, size_t StatusDataLength);
+	void ILibSetDirective(struct packetheader *packet, char* Directive, size_t DirectiveLength, char* DirectiveObj, size_t DirectiveObjLength);
 	void ILibDestructPacket(struct packetheader *packet);
-	struct packetheader* ILibParsePacketHeader(char* buffer, int offset, int length);
-	int ILibGetRawPacket(struct packetheader *packet,char **buffer);
+	struct packetheader* ILibParsePacketHeader(char* buffer, size_t offset, size_t length);
+	size_t ILibGetRawPacket(struct packetheader *packet,char **buffer);
 	struct packetheader* ILibClonePacket(struct packetheader *packet);
 
 	int ILibHTTPEscapeEx(char* outdata, const char* indata, size_t indataLen);

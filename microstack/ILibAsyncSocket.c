@@ -544,12 +544,13 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 	enum ILibAsyncSocket_SendStatus retVal = ILibAsyncSocket_ALL_DATA_SENT;
 	unsigned int vi;
 	char *buffer;
-	int bufferLen;
+	size_t bufferLen;
 	ILibAsyncSocket_MemoryOwnership UserFree;
 	int lockOverride = ((count & ILibAsyncSocket_LOCK_OVERRIDE) == ILibAsyncSocket_LOCK_OVERRIDE) ? (count ^= ILibAsyncSocket_LOCK_OVERRIDE, 1) : 0;
 
 	// If the socket is empty, return now.
 	if (socketModule == NULL) return ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
+	int notok = 0;
 
 	va_list vlist;
 	va_start(vlist, count); 
@@ -562,11 +563,18 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 		for (vi = 0; vi < count; ++vi)
 		{
 			buffer = va_arg(vlist, char*);
-			bufferLen = va_arg(vlist, int);
+			bufferLen = va_arg(vlist, size_t);
 			UserFree = va_arg(vlist, ILibAsyncSocket_MemoryOwnership);
 
+			if (bufferLen > INT32_MAX || notok != 0)
+			{
+				if (UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(buffer); }
+				notok = 1;
+				continue;
+			}
+
 			SSL_TRACE1("SSL_write()");
-			SSL_write(module->ssl, buffer, bufferLen);
+			SSL_write(module->ssl, buffer, (int)bufferLen); // No dataloss, becuase we capped at INT32_MAX
 			SSL_TRACE2("SSL_write()");
 			TLSLOG1("SSL_write[%d]: %d bytes...\n", module->internalSocket, bufferLen);
 
@@ -574,71 +582,79 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 		}
 		va_end(vlist); 
 	
-		if (module->PendingSend_Tail == NULL)
+		if (notok == 0)
 		{
-			// No pending data, so we can send now
-			if (module->writeBioBuffer->length > 0)
+			if (module->PendingSend_Tail == NULL)
 			{
-				BIO_clear_retry_flags(module->writeBio); // Klocwork reports this could block, but this is a memory bio, so it will never block.
-				bytesSent = send(module->internalSocket, module->writeBioBuffer->data, (int)(module->writeBioBuffer->length), MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
-				TLSLOG1("--> SOCKET WRITE[%d]: %d bytes...\n", module->internalSocket, bytesSent);
+				// No pending data, so we can send now
+				if (module->writeBioBuffer->length > 0)
+				{
+					BIO_clear_retry_flags(module->writeBio); // Klocwork reports this could block, but this is a memory bio, so it will never block.
+					bytesSent = send(module->internalSocket, module->writeBioBuffer->data, (int)(module->writeBioBuffer->length), MSG_NOSIGNAL); // Klocwork reports that this could block while holding a lock... This socket has been set to O_NONBLOCK, so that will never happen
+					TLSLOG1("--> SOCKET WRITE[%d]: %d bytes...\n", module->internalSocket, bytesSent);
 #ifdef WIN32
-				if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
+					if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
 #else
-				if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && errno == EWOULDBLOCK))
+					if ((bytesSent > 0 && bytesSent < (int)(module->writeBioBuffer->length)) || (bytesSent < 0 && errno == EWOULDBLOCK))
 #endif
-				{
-					// Still Pending Data to be sent
-					data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), bytesSent < 0 ? 0 : (int)(module->writeBioBuffer->length) - bytesSent, NULL, NULL);
-					data->UserFree = ILibAsyncSocket_MemoryOwnership_BIO;
-					data->bytesSent = 0;
-					module->PendingSend_Head = module->PendingSend_Tail = data;
-					if (bytesSent > 0) 
-					{ 
-						// Some data was sent, so we need to pull the data and buffer it
-						module->PendingSend_Head->buffer = ILibMemory_GetExtraMemory(data, sizeof(ILibAsyncSocket_SendData));
-						module->PendingSend_Head->bufferSize = (int)(module->writeBioBuffer->length) - bytesSent;
-						memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer->data + bytesSent, module->PendingSend_Head->bufferSize);
-
-						module->TotalBytesSent += bytesSent;
-						module->PendingBytesToSend = (unsigned int)(module->PendingSend_Head->bufferSize);
-						TLSLOG1("   --> BUFFERING[%d]: %d bytes...\n", module->internalSocket, module->PendingSend_Head->bufferSize);
-
-						ignore_result(BIO_reset(module->writeBio));
-					}
-					else if (bytesSent < 0)
 					{
-						TLSLOG1("   -- > [INCOMPLETE] Accumulated into BIOBUFFER[%d]\n", module->internalSocket);
+						// Still Pending Data to be sent
+						data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), bytesSent < 0 ? 0 : (int)(module->writeBioBuffer->length) - bytesSent, NULL, NULL);
+						data->UserFree = ILibAsyncSocket_MemoryOwnership_BIO;
+						data->bytesSent = 0;
+						module->PendingSend_Head = module->PendingSend_Tail = data;
+						if (bytesSent > 0)
+						{
+							// Some data was sent, so we need to pull the data and buffer it
+							module->PendingSend_Head->buffer = ILibMemory_GetExtraMemory(data, sizeof(ILibAsyncSocket_SendData));
+							module->PendingSend_Head->bufferSize = (int)(module->writeBioBuffer->length) - bytesSent;
+							memcpy_s(module->PendingSend_Head->buffer, module->PendingSend_Head->bufferSize, module->writeBioBuffer->data + bytesSent, module->PendingSend_Head->bufferSize);
+
+							module->TotalBytesSent += bytesSent;
+							module->PendingBytesToSend = (unsigned int)(module->PendingSend_Head->bufferSize);
+							TLSLOG1("   --> BUFFERING[%d]: %d bytes...\n", module->internalSocket, module->PendingSend_Head->bufferSize);
+
+							ignore_result(BIO_reset(module->writeBio));
+						}
+						else if (bytesSent < 0)
+						{
+							TLSLOG1("   -- > [INCOMPLETE] Accumulated into BIOBUFFER[%d]\n", module->internalSocket);
+						}
+						retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 					}
-					retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
-				}
-				else if (bytesSent == module->writeBioBuffer->length)
-				{
-					retVal = ILibAsyncSocket_ALL_DATA_SENT;
-					ignore_result(BIO_reset(module->writeBio));
-					module->TotalBytesSent += bytesSent;
-					module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
-					TLSLOG1("   --> COMPLETE[%d]\n", module->internalSocket);
+					else if (bytesSent == module->writeBioBuffer->length)
+					{
+						retVal = ILibAsyncSocket_ALL_DATA_SENT;
+						ignore_result(BIO_reset(module->writeBio));
+						module->TotalBytesSent += bytesSent;
+						module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
+						TLSLOG1("   --> COMPLETE[%d]\n", module->internalSocket);
+					}
+					else
+					{
+						retVal = ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
+						ILibAsyncSocket_SendError(module);
+					}
 				}
 				else
 				{
+					// Something went wrong
 					retVal = ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
 					ILibAsyncSocket_SendError(module);
 				}
 			}
 			else
 			{
-				// Something went wrong
-				retVal = ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
-				ILibAsyncSocket_SendError(module);
+				// Send will happen in ILibAsyncSocket_PostSelect()
+				retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
+				module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
+				TLSLOG1("   --> [IN PROGRESS] Accumulated into BIOBUFFER[%d]...\n", module->internalSocket);
 			}
 		}
 		else
 		{
-			// Send will happen in ILibAsyncSocket_PostSelect()
-			retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
-			module->PendingBytesToSend = (unsigned int)(module->writeBioBuffer->length);
-			TLSLOG1("   --> [IN PROGRESS] Accumulated into BIOBUFFER[%d]...\n", module->internalSocket);
+			retVal = ILibAsyncSocket_BUFFER_TOO_LARGE;
+			ILibAsyncSocket_SendError(module);
 		}
 
 		if (lockOverride == 0) { sem_post(&(module->SendLock)); }
@@ -667,15 +683,21 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 	for (vi = 0; vi < count; ++vi)
 	{
 		buffer = va_arg(vlist, char*);
-		bufferLen = va_arg(vlist, int);
+		bufferLen = va_arg(vlist, size_t);
 		UserFree =  va_arg(vlist, ILibAsyncSocket_MemoryOwnership);
 
+		if (bufferLen > INT32_MAX || notok != 0)
+		{
+			notok = 1;
+			if (UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(buffer); }
+			continue;
+		}
 		if (module->PendingSend_Tail != NULL || module->FinConnect == 0)
 		{
 			// There are still bytes that are pending to be sent, or pending connection, so we need to queue this up
 			data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), 0, NULL, NULL);
-			data->bufferSize = bufferLen;
-			module->PendingBytesToSend += bufferLen;
+			data->bufferSize = (int)bufferLen; // No dataloss, capped to INT32_MAX
+			module->PendingBytesToSend += (int)bufferLen;
 			if (UserFree == ILibAsyncSocket_MemoryOwnership_USER)
 			{
 				if ((data->buffer = (char*)malloc(data->bufferSize)) == NULL) ILIBCRITICALEXIT(254);
@@ -707,16 +729,16 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 			if (remoteAddress == NULL || remoteAddress->sa_family == AF_UNIX)
 			{
 				// Set MSG_NOSIGNAL since we don't want to get Broken Pipe signals in Linux, ignored if Windows.
-				bytesSent = send(module->internalSocket, buffer, bufferLen, MSG_NOSIGNAL);
+				bytesSent = send(module->internalSocket, buffer, (int)bufferLen, MSG_NOSIGNAL);  // No dataloss, capped to INT32_MAX
 			}
 			else
 			{
-				bytesSent = sendto(module->internalSocket, buffer, bufferLen, MSG_NOSIGNAL, (struct sockaddr*)remoteAddress, INET_SOCKADDR_LENGTH(remoteAddress->sa_family));
+				bytesSent = sendto(module->internalSocket, buffer, (int)bufferLen, MSG_NOSIGNAL, (struct sockaddr*)remoteAddress, INET_SOCKADDR_LENGTH(remoteAddress->sa_family)); // No dataloss, capped to INT32_MAX
 			}
 #ifdef WIN32
-			if ((bytesSent > 0 && bytesSent < bufferLen) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
+			if ((bytesSent > 0 && bytesSent < (int)bufferLen) || (bytesSent < 0 && WSAGetLastError() == WSAEWOULDBLOCK))
 #else
-			if ((bytesSent > 0 && bytesSent < bufferLen) || (bytesSent < 0 && errno == EWOULDBLOCK))
+			if ((bytesSent > 0 && bytesSent < (int)bufferLen) || (bytesSent < 0 && errno == EWOULDBLOCK))
 #endif
 			{
 				// Not all data was sent
@@ -724,7 +746,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 				data = (ILibAsyncSocket_SendData*)ILibMemory_Allocate(sizeof(ILibAsyncSocket_SendData), 0, NULL, NULL);
 				if (UserFree == ILibAsyncSocket_MemoryOwnership_USER)
 				{
-					data->bufferSize = bufferLen - bytesSent;
+					data->bufferSize = (int)bufferLen - bytesSent; // No dataloss, capped to INT32_MAX
 					if ((data->buffer = (char*)malloc(data->bufferSize)) == NULL) ILIBCRITICALEXIT(254);
 					memcpy_s(data->buffer, data->bufferSize, buffer + bytesSent, data->bufferSize);
 					data->UserFree = ILibAsyncSocket_MemoryOwnership_CHAIN;
@@ -732,14 +754,14 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 				else
 				{
 					data->buffer = buffer;
-					data->bufferSize = bufferLen;
+					data->bufferSize = (int)bufferLen; // No dataloss, capped to INT32_MAX
 					data->bytesSent = bytesSent;
 					data->UserFree = UserFree;
 				}
 				module->PendingSend_Head = module->PendingSend_Tail = data;
 				retVal = ILibAsyncSocket_NOT_ALL_DATA_SENT_YET;
 			}
-			else if (bytesSent == bufferLen)
+			else if (bytesSent == (int)bufferLen) // No dataloss, capped to INT32_MAX
 			{
 				// All Data was sent
 				retVal = ILibAsyncSocket_ALL_DATA_SENT;
@@ -760,6 +782,11 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 	va_end(vlist); 
 
 	if (lockOverride == 0) { sem_post(&(module->SendLock)); }
+	if (notok != 0)
+	{
+		retVal = ILibAsyncSocket_BUFFER_TOO_LARGE;
+		ILibAsyncSocket_SendError(module);
+	}
 
 	if (retVal != ILibAsyncSocket_ALL_DATA_SENT && !ILibIsRunningOnChainThread(module->Transport.ChainLink.ParentChain)) ILibForceUnBlockChain(module->Transport.ChainLink.ParentChain);
 	return (retVal);

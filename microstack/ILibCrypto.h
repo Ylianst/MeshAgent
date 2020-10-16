@@ -23,17 +23,17 @@ limitations under the License.
 #define __fastcall
 #endif
 
-void  __fastcall util_md5(char* data, int datalen, char* result);
-void  __fastcall util_md5hex(char* data, int datalen, char *out);
-void  __fastcall util_sha1(char* data, int datalen, char* result);
-char* __fastcall util_tohex(char* data, int len, char* out);
-char* __fastcall util_tohex2(char* data, int len, char* out);
-char* __fastcall util_tohex_lower(char* data, int len, char* out);
-int   __fastcall util_hexToint(char *hexString, int hexStringLength);
-int __fastcall util_hexToBuf(char *hexString, int hexStringLength, char* output);
+void  __fastcall util_md5(char* data, size_t datalen, char* result);
+void  __fastcall util_md5hex(char* data, size_t datalen, char *out);
+void  __fastcall util_sha1(char* data, size_t datalen, char* result);
+char* __fastcall util_tohex(char* data, size_t len, char* out);
+char* __fastcall util_tohex2(char* data, size_t len, char* out);
+char* __fastcall util_tohex_lower(char* data, size_t len, char* out);
+int   __fastcall util_hexToint(char *hexString, size_t hexStringLength);
+size_t __fastcall util_hexToBuf(char *hexString, size_t hexStringLength, char* output);
 
-void  __fastcall util_sha256(char* data, int datalen, char* result);
-void  __fastcall util_sha384(char* data, int datalen, char* result);
+void  __fastcall util_sha256(char* data, size_t datalen, char* result);
+void  __fastcall util_sha384(char* data, size_t datalen, char* result);
 int   __fastcall util_sha384file(char* filename, char* result);
 
 // File and data methods

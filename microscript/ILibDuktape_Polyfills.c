@@ -187,7 +187,7 @@ duk_ret_t ILibDuktape_Polyfills_Buffer_from(duk_context *ctx)
 	duk_size_t strlength;
 	char *encoding;
 	char *buffer;
-	int bufferLen;
+	size_t bufferLen;
 
 	if (nargs == 1)
 	{

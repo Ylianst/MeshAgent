@@ -25,12 +25,12 @@ limitations under the License.
 
 typedef void* ILibProcessPipe_Manager;
 typedef void* ILibProcessPipe_Process;
-typedef void(*ILibProcessPipe_Process_OutputHandler)(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user);
+typedef void(*ILibProcessPipe_Process_OutputHandler)(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user);
 typedef void(*ILibProcessPipe_Process_SendOKHandler)(ILibProcessPipe_Process sender, void* user);
 typedef void(*ILibProcessPipe_Process_ExitHandler)(ILibProcessPipe_Process sender, int exitCode, void* user);
 
 typedef void* ILibProcessPipe_Pipe;
-typedef void(*ILibProcessPipe_Pipe_ReadHandler)(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen, int* bytesConsumed);
+typedef void(*ILibProcessPipe_Pipe_ReadHandler)(ILibProcessPipe_Pipe sender, char *buffer, size_t bufferLen, size_t* bytesConsumed);
 typedef void(*ILibProcessPipe_Pipe_BrokenPipeHandler)(ILibProcessPipe_Pipe sender);
 
 typedef enum ILibProcessPipe_SpawnTypes
@@ -98,7 +98,6 @@ void ILibProcessPipe_Pipe_ResetMetadata(ILibProcessPipe_Pipe p, char *metadata);
 void ILibProcessPipe_Pipe_Close(ILibProcessPipe_Pipe po);
 void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject);
 void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject);
-void ILibProcessPipe_Pipe_SwapBuffers(ILibProcessPipe_Pipe pipeObject, char* newBuffer, int newBufferLen, int newBufferReadOffset, int newBufferTotalBytesRead, char **oldBuffer, int *oldBufferLen, int *oldBufferReadOffset, int *oldBufferTotalBytesRead);
 ILibProcessPipe_Pipe ILibProcessPipe_Process_GetStdErr(ILibProcessPipe_Process p);
 ILibProcessPipe_Pipe ILibProcessPipe_Process_GetStdOut(ILibProcessPipe_Process p);
 #ifdef WIN32

@@ -1144,7 +1144,7 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 	}
 }
 
-void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	unsigned short size = 0;
 	UNREFERENCED_PARAMETER(sender);
@@ -1160,7 +1160,7 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
 				{
 					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
-					writeHandler(buffer, *bytesConsumed, reserved);
+					writeHandler(buffer, (int)*bytesConsumed, reserved);
 					return;
 				}
 			}
@@ -1178,7 +1178,7 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 	}
 	*bytesConsumed = 0;
 }
-void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	KVMDebugLog *log = (KVMDebugLog*)buffer;
 
@@ -1299,5 +1299,201 @@ void kvm_cleanup()
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM.c/kvm_cleanup: gChildProcess = NULL");
 	}
 }
+
+
+////
+//// Desktop Duplication API KVM
+////
+//#include <d3d11.h>
+//#include <dxgi1_2.h>
+//
+//typedef struct D3D11_Functions
+//{
+//	HRESULT(*D3D11CreateDevice)(
+//		IDXGIAdapter            *pAdapter,
+//		D3D_DRIVER_TYPE         DriverType,
+//		HMODULE                 Software,
+//		UINT                    Flags,
+//		const D3D_FEATURE_LEVEL *pFeatureLevels,
+//		UINT                    FeatureLevels,
+//		UINT                    SDKVersion,
+//		ID3D11Device            **ppDevice,
+//		D3D_FEATURE_LEVEL       *pFeatureLevel,
+//		ID3D11DeviceContext     **ppImmediateContext
+//		);
+//}D3D11_Functions;
+
+
+//void DD_Init()
+//{
+	//int i;
+	//HRESULT hr;
+	//ID3D11Device* m_Device;
+	//ID3D11DeviceContext* m_DeviceContext;
+	//IDXGIFactory2* m_Factory;
+	//DWORD m_OcclusionCookie;
+	//DXGI_OUTDUPL_DESC lOutputDuplDesc;
+	//ID3D11Texture2D *lGDIImage;
+	//ID3D11Texture2D *desktopImage;
+	//ID3D11Texture2D *destinationImage;
+
+	//DXGI_OUTDUPL_FRAME_INFO lFrameInfo;
+	//IDXGIResource *lDesktopResource;
+
+	//D3D11_Functions funcs;
+
+	//HMODULE _D3D = NULL;
+	//if ((_D3D = LoadLibraryExA((LPCSTR)"D3D11.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
+	//{
+	//	(FARPROC)funcs.D3D11CreateDevice = GetProcAddress(_D3D, "D3D11CreateDevice");
+	//}
+
+	//D3D_DRIVER_TYPE DriverTypes[] =
+	//{
+	//	D3D_DRIVER_TYPE_HARDWARE,
+	//	D3D_DRIVER_TYPE_WARP,
+	//	D3D_DRIVER_TYPE_REFERENCE,
+	//};
+	//UINT NumDriverTypes = ARRAYSIZE(DriverTypes);
+
+	//// Feature levels supported
+	//D3D_FEATURE_LEVEL FeatureLevels[] =
+	//{
+	//	D3D_FEATURE_LEVEL_11_0,
+	//	D3D_FEATURE_LEVEL_10_1,
+	//	D3D_FEATURE_LEVEL_10_0,
+	//	D3D_FEATURE_LEVEL_9_1
+	//};
+	//UINT NumFeatureLevels = ARRAYSIZE(FeatureLevels);
+	//D3D_FEATURE_LEVEL FeatureLevel;
+
+	//// Create device
+	//for (UINT DriverTypeIndex = 0; DriverTypeIndex < NumDriverTypes; ++DriverTypeIndex)
+	//{
+	//	hr = funcs.D3D11CreateDevice(NULL, DriverTypes[DriverTypeIndex], NULL, 0, FeatureLevels, NumFeatureLevels, D3D11_SDK_VERSION, &m_Device, &FeatureLevel, &m_DeviceContext);
+	//	if (SUCCEEDED(hr))
+	//	{
+	//		// Device creation succeeded, no need to loop anymore
+	//		break;
+	//	}
+	//}
+	//if (FAILED(hr))
+	//{
+	//	DebugBreak();
+	//}
+
+	//// Get DXGI factory
+	//IDXGIDevice* DxgiDevice = NULL;
+	//hr = m_Device->lpVtbl->QueryInterface(m_Device, &IID_IDXGIDevice, (void**)&DxgiDevice);
+	//if (FAILED(hr))
+	//{
+	//	DebugBreak();
+	//}
+
+	//IDXGIAdapter* DxgiAdapter = NULL;
+	//hr = DxgiDevice->lpVtbl->GetParent(DxgiDevice, &IID_IDXGIAdapter, (void**)&DxgiAdapter);
+	//DxgiDevice->lpVtbl->Release(DxgiDevice);
+	//DxgiDevice = NULL;
+	//if (FAILED(hr))
+	//{
+	//	DebugBreak();
+	//}
+
+	//hr = DxgiAdapter->lpVtbl->GetParent(DxgiAdapter, &IID_IDXGIFactory2, (void**)&m_Factory);
+	//DxgiAdapter->lpVtbl->Release(DxgiAdapter);
+	//DxgiAdapter = NULL;
+	//if (FAILED(hr))
+	//{
+	//	DebugBreak();
+	//	//return ProcessFailure(m_Device, L"Failed to get parent DXGI Factory", L"Error", hr, SystemTransitionsExpectedErrors);
+	//}
+
+	//IDXGIOutput1 *DxgiOutput1;
+	//hr = m_Device->lpVtbl->QueryInterface(m_Device, &IID_IDXGIOutput, (void**)&DxgiOutput1);
+	//if (FAILED(hr))
+	//{
+	//	DebugBreak();
+	//}
+
+	//IDXGIOutputDuplication *dupl = NULL;
+	//DxgiOutput1->lpVtbl->DuplicateOutput(DxgiOutput1, m_Device, &dupl);
+
+	//// Create GUI drawing texture
+	//dupl->lpVtbl->GetDesc(dupl, &lOutputDuplDesc);
+
+	//D3D11_TEXTURE2D_DESC desc;
+	//desc.Width = lOutputDuplDesc.ModeDesc.Width;
+	//desc.Height = lOutputDuplDesc.ModeDesc.Height;
+	//desc.Format = lOutputDuplDesc.ModeDesc.Format;
+	//desc.ArraySize = 1;
+	//desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+	//desc.MiscFlags = D3D11_RESOURCE_MISC_GDI_COMPATIBLE;
+	//desc.SampleDesc.Count = 1;
+	//desc.SampleDesc.Quality = 0;
+	//desc.MipLevels = 1;
+	//desc.CPUAccessFlags = 0;
+	//desc.Usage = D3D11_USAGE_DEFAULT;
+
+	//hr = m_Device->lpVtbl->CreateTexture2D(m_Device, &desc, NULL, &lGDIImage);
+	//hr = m_Device->lpVtbl->CreateTexture2D(m_Device, &desc, NULL, &destinationImage);
+
+	//if (FAILED(hr))
+	//{
+	//	DebugBreak();
+	//}
+
+	//// Get new frame
+	//for (i = 0; i < 5; ++i)
+	//{
+	//	hr = dupl->lpVtbl->AcquireNextFrame(dupl, 250, &lFrameInfo, &lDesktopResource);
+	//	if (hr != DXGI_ERROR_WAIT_TIMEOUT) { break; }
+	//	Sleep(100);
+	//}
+	//
+	//hr = lDesktopResource->lpVtbl->QueryInterface(lDesktopResource, &IID_ID3D11Texture2D, &desktopImage);
+
+	//// Copy image into GDI drawing texture
+	//m_DeviceContext->lpVtbl->CopyResource(m_DeviceContext, lGDIImage, desktopImage);
+
+	//// Draw cursor image into GDI drawing texture
+	//IDXGISurface1 *surface;
+	//hr = lGDIImage->lpVtbl->QueryInterface(lGDIImage, &IID_IDXGISurface1, &surface);
+
+
+	//// Copy from CPU access texture to bitmap buffer
+
+	//D3D11_MAPPED_SUBRESOURCE resource;
+	//UINT subresource = D3D11CalcSubresource(0, 0, 0);
+	//m_DeviceContext->lpVtbl->Map(m_DeviceContext, destinationImage, subresource, D3D11_MAP_READ_WRITE, 0, &resource);
+
+	//BITMAPINFO	lBmpInfo;
+
+	//// BMP 32 bpp
+
+	//ZeroMemory(&lBmpInfo, sizeof(BITMAPINFO));
+	//lBmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	//lBmpInfo.bmiHeader.biBitCount = 32;
+	//lBmpInfo.bmiHeader.biCompression = BI_RGB;
+	//lBmpInfo.bmiHeader.biWidth = lOutputDuplDesc.ModeDesc.Width;
+	//lBmpInfo.bmiHeader.biHeight = lOutputDuplDesc.ModeDesc.Height;
+	//lBmpInfo.bmiHeader.biPlanes = 1;
+	//lBmpInfo.bmiHeader.biSizeImage = lOutputDuplDesc.ModeDesc.Width * lOutputDuplDesc.ModeDesc.Height * 4;
+
+
+	//BYTE* pBuf = (BYTE*)ILibMemory_SmartAllocate(lBmpInfo.bmiHeader.biSizeImage);
+	//UINT lBmpRowPitch = lOutputDuplDesc.ModeDesc.Width * 4;
+	//BYTE* sptr = (BYTE*)resource.pData;
+	//BYTE* dptr = pBuf + lBmpInfo.bmiHeader.biSizeImage - lBmpRowPitch;
+	//UINT lRowPitch = min(lBmpRowPitch, resource.RowPitch);
+	//size_t h;
+
+	//for (h = 0; h < lOutputDuplDesc.ModeDesc.Height; ++h)
+	//{
+	//	memcpy_s(dptr, lBmpRowPitch, sptr, lRowPitch);
+	//	sptr += resource.RowPitch;
+	//	dptr -= lBmpRowPitch;
+	//}
+//}
+
 
 #endif

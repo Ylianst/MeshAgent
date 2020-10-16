@@ -87,7 +87,6 @@ int main(int argc, char **argv)
 	int retCode = 0;
 	int capabilities = 0;
 
-
 #ifdef WIN32
 	int argvi, argvsz;
 	char **argv = (char**)ILibMemory_SmartAllocate(argc * sizeof(void*));
@@ -125,7 +124,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
-		integratedJavaScript = ILibString_Copy(argv[2], -1);
+		integratedJavaScript = ILibString_Copy(argv[2], 0);
 		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	} 
 	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0)
@@ -136,12 +135,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0 && integratedJavaScriptLen == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId')());process.exit();";
-		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && strcmp(argv[1], "-daemon") == 0 && integratedJavaScriptLen == 0)
 	{
-		integratedJavaScript = ILibString_Copy("require('daemon').agent();", -1);
+		integratedJavaScript = ILibString_Copy("require('daemon').agent();", 0);
 		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 	if (argc > 1 && strcasecmp(argv[1], "-licenses") == 0)

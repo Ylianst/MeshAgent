@@ -2969,7 +2969,7 @@ void ILibDuktape_ScriptContainer_Slave_OnReadStdInEx(void *chain, void *data)
 	ILibProcessPipe_Pipe_Resume((ILibProcessPipe_Pipe)data);
 }
 #endif
-void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen, int* bytesConsumed)
+void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, char *buffer, size_t bufferLen, size_t* bytesConsumed)
 {
 	if (!ILibMemory_CanaryOK(sender)) { return; }
 
@@ -3243,7 +3243,7 @@ void ILibDuktape_ScriptContainer_StdOutSink_Chain(void *chain, void *user)
 	}
 	ILibMemory_Free(user);
 }
-void ILibDuktape_ScriptContainer_StdOutSink(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void ILibDuktape_ScriptContainer_StdOutSink(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	buffer[bufferLen] = 0;
 
@@ -3358,7 +3358,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 	}
 #endif
 }
-void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	ILibDuktape_ScriptContainer_Master* master = (ILibDuktape_ScriptContainer_Master*)user;
 	

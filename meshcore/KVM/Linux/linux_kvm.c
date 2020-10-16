@@ -1219,7 +1219,7 @@ void* kvm_server_mainloop(void* parm)
 	return (void*)0;
 }
 
-void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, int bufferLen, int* bytesConsumed)
+void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t bufferLen, size_t* bytesConsumed)
 {
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
 	void *reserved = ((void**)ILibMemory_Extra(sender))[1];

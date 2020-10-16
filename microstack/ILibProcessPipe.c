@@ -66,7 +66,7 @@ typedef struct ILibProcessPipe_Manager_Object
 }ILibProcessPipe_Manager_Object;
 struct ILibProcessPipe_PipeObject;
 
-typedef void(*ILibProcessPipe_GenericReadHandler)(char *buffer, int bufferLen, int* bytesConsumed, void* user1, void* user2);
+typedef void(*ILibProcessPipe_GenericReadHandler)(char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user1, void* user2);
 typedef void(*ILibProcessPipe_GenericSendOKHandler)(void* user1, void* user2);
 typedef void(*ILibProcessPipe_GenericBrokenPipeHandler)(struct ILibProcessPipe_PipeObject* sender);
 struct ILibProcessPipe_Process_Object; // Forward Prototype
@@ -74,11 +74,11 @@ struct ILibProcessPipe_Process_Object; // Forward Prototype
 typedef struct ILibProcessPipe_PipeObject
 {
 	char* buffer;
-	int bufferSize;
+	size_t bufferSize;
 	ILibTransport_MemoryOwnership bufferOwner;
 
-	int readOffset, readNewOffset;
-	int totalRead;
+	size_t readOffset, readNewOffset;
+	size_t totalRead;
 	int processingLoop;
 
 	ILibProcessPipe_Manager_Object *manager;
@@ -821,20 +821,6 @@ int ILibProcessPipe_Process_IsDetached(ILibProcessPipe_Process p)
 {
 	return(((ILibProcessPipe_Process_Object*)p)->stdErr == NULL && ((ILibProcessPipe_Process_Object*)p)->stdIn == NULL && ((ILibProcessPipe_Process_Object*)p)->stdOut == NULL);
 }
-void ILibProcessPipe_Pipe_SwapBuffers(ILibProcessPipe_Pipe obj, char* newBuffer, int newBufferLen, int newBufferReadOffset, int newBufferTotalBytesRead, char **oldBuffer, int *oldBufferLen, int *oldBufferReadOffset, int *oldBufferTotalBytesRead)
-{
-	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)obj;
-
-	*oldBuffer = pipeObject->buffer;
-	if (oldBufferLen != NULL) { *oldBufferLen = pipeObject->bufferSize; }
-	if (oldBufferReadOffset != NULL) { *oldBufferReadOffset = pipeObject->readOffset; }
-	if (oldBufferTotalBytesRead != NULL) { *oldBufferTotalBytesRead = pipeObject->totalRead; }
-
-	pipeObject->buffer = newBuffer;
-	pipeObject->bufferSize = newBufferLen;
-	pipeObject->readOffset = newBufferReadOffset;
-	pipeObject->totalRead = newBufferTotalBytesRead;
-}
 
 #ifdef WIN32
 BOOL ILibProcessPipe_Process_ReadHandler(void *chain, HANDLE event, ILibWaitHandle_ErrorStatus errors, void* user)
@@ -846,7 +832,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 	if (errors != ILibWaitHandle_ErrorStatus_NONE) { return(FALSE); }
 #endif
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
-	int consumed;
+	size_t consumed;
 	int err=0;
 	
 #ifdef WIN32
@@ -948,7 +934,7 @@ void ILibProcessPipe_Process_ReadHandler(void* user)
 		if (pipeObject->PAUSED == 0)
 		{
 			pipeObject->inProgress = 1;
-			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, &bytesRead, pipeObject->mOverlapped) != TRUE)
+			if (ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, (DWORD)(pipeObject->bufferSize - pipeObject->totalRead), &bytesRead, pipeObject->mOverlapped) != TRUE)
 			{
 				if (GetLastError() == ERROR_IO_PENDING) { return(TRUE); }
 				break;
@@ -1094,7 +1080,7 @@ void ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Pipe pipeObject)
 
 void ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(ILibProcessPipe_PipeObject *p)
 {
-	int consumed;
+	size_t consumed;
 	p->PAUSED = 0;
 	p->processingLoop = 1;
 	while (p->PAUSED == 0 && p->totalRead > 0)
@@ -1156,7 +1142,7 @@ void ILibProcessPipe_Pipe_ResumeEx(ILibProcessPipe_PipeObject* p)
 	}
 }
 #ifdef WIN32
-BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user);
+BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
 #endif
 void ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Pipe pipeObject)
 {
@@ -1188,7 +1174,7 @@ DWORD ILibProcessPipe_Pipe_BackgroundReader(void *arg)
 {
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)arg;
 	DWORD bytesRead = 0;
-	int consumed = 0;
+	size_t consumed = 0;
 
 	while (pipeObject->PAUSED == 0 || WaitForSingleObject(pipeObject->mPipe_Reader_ResumeEvent, INFINITE) == WAIT_OBJECT_0)
 	{
@@ -1221,7 +1207,7 @@ DWORD ILibProcessPipe_Pipe_BackgroundReader(void *arg)
 		}
 
 		if (pipeObject->PAUSED == 1) { continue; }
-		if (!ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->readNewOffset, pipeObject->bufferSize - pipeObject->readOffset - pipeObject->readNewOffset, &bytesRead, NULL)) { break; }
+		if (!ReadFile(pipeObject->mPipe_ReadEnd, pipeObject->buffer + pipeObject->readOffset + pipeObject->readNewOffset, (DWORD)(pipeObject->bufferSize - pipeObject->readOffset - pipeObject->readNewOffset), &bytesRead, NULL)) { break; }
 
 		consumed = 0;
 		pipeObject->totalRead += bytesRead;
@@ -1240,11 +1226,11 @@ DWORD ILibProcessPipe_Pipe_BackgroundReader(void *arg)
 }
 #endif
 #ifdef WIN32
-BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user)
+BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user)
 {
 	ILibProcessPipe_PipeObject *pipeObject = (ILibProcessPipe_PipeObject*)user;
 	ILibProcessPipe_GenericReadHandler handler = (ILibProcessPipe_GenericReadHandler)pipeObject->handler;
-	int consumed = 0;
+	size_t consumed = 0;
 	if (status == ILibWaitHandle_ErrorStatus_NONE)
 	{
 		pipeObject->totalRead += bytesRead;
@@ -1267,7 +1253,7 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 				ILibMemory_ReallocateRaw(&(pipeObject->buffer), pipeObject->bufferSize * 2);
 				pipeObject->bufferSize = pipeObject->bufferSize * 2;
 			}
-			ILibChain_ReadEx2(chain, h, pipeObject->mOverlapped, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
+			ILibChain_ReadEx2(chain, h, pipeObject->mOverlapped, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, (DWORD)(pipeObject->bufferSize - pipeObject->totalRead), ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
 			return(TRUE);
 		}
 		else
@@ -1330,7 +1316,7 @@ void ILibProcessPipe_Process_StartPipeReaderEx(ILibProcessPipe_PipeObject *pipeO
 	if (pipeObject->mOverlapped != NULL)
 	{
 		// This PIPE supports Overlapped I/O
-		ILibChain_ReadEx2(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
+		ILibChain_ReadEx2(pipeObject->manager->ChainLink.ParentChain, pipeObject->mPipe_ReadEnd, pipeObject->mOverlapped, pipeObject->buffer, (DWORD)pipeObject->bufferSize, ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
 	}
 	else
 	{
@@ -1342,7 +1328,7 @@ void ILibProcessPipe_Process_StartPipeReaderEx(ILibProcessPipe_PipeObject *pipeO
 	ILibLifeTime_Add(ILibGetBaseTimer(pipeObject->manager->ChainLink.ParentChain), pipeObject, 0, &ILibProcessPipe_Process_StartPipeReaderWriterEx, NULL); // Need to context switch to Chain Thread
 #endif
 }
-void ILibProcessPipe_Process_PipeHandler_StdOut(char *buffer, int bufferLen, int* bytesConsumed, void* user1, void *user2)
+void ILibProcessPipe_Process_PipeHandler_StdOut(char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user1, void *user2)
 {
 	ILibProcessPipe_Process_Object *j = (ILibProcessPipe_Process_Object*)user1;
 	if (user2 != NULL)
@@ -1562,7 +1548,7 @@ ILibTransport_DoneState ILibProcessPipe_Process_WriteStdIn(ILibProcessPipe_Proce
 	}
 }
 
-void ILibProcessPipe_Pipe_ReadSink(char *buffer, int bufferLen, int* bytesConsumed, void* user1, void* user2)
+void ILibProcessPipe_Pipe_ReadSink(char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user1, void* user2)
 {
 	ILibProcessPipe_Pipe target = (ILibProcessPipe_Pipe)user1;
 

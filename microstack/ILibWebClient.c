@@ -277,7 +277,7 @@ typedef struct ILibWebRequest_buffer
 typedef struct ILibWebRequest
 {
 	char **Buffer;
-	int *BufferLength;
+	size_t *BufferLength;
 	int *UserFree;
 	int NumberOfBuffers;
 
@@ -1298,10 +1298,10 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 				for (x = (x << 2); x < bufferLen; ++x) { dataFrame[x] = buffer[x] ^ maskKey[x % 4]; } // Mask the reminder
 				//for (x = 0; x < bufferLen; ++x) { dataFrame[x] = buffer[x] ^ maskKey[x % 4]; } // This is the slower version
 			}
-			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 3 | ILibAsyncSocket_LOCK_OVERRIDE, header, headerLen, ILibAsyncSocket_MemoryOwnership_USER, maskKey, 4, ILibAsyncSocket_MemoryOwnership_USER, dataFrame, bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
+			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 3 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, maskKey, 4, ILibAsyncSocket_MemoryOwnership_USER, dataFrame, bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
 		} else {
 			// Send payload without masking
-			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 2 | ILibAsyncSocket_LOCK_OVERRIDE, header, headerLen, ILibAsyncSocket_MemoryOwnership_USER, buffer, bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
+			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 2 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, buffer, (size_t)bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
 		}
 	}
 	sem_post(ILibAsyncSocket_GetSendLock(wcdo->SOCK));
@@ -2560,7 +2560,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequest(
 								void *user1,
 								void *user2)
 {
-	int bufferLength;
+	size_t bufferLength;
 	char *buffer;
 	ILibWebClient_RequestToken retVal;
 	char *webSocketKey;
@@ -2630,10 +2630,10 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx2(
 	ILibWebClient_RequestManager WebClient, 
 	struct sockaddr *RemoteEndpoint, 
 	char *headerBuffer,
-	int headerBufferLength,
+	size_t headerBufferLength,
 	int headerBuffer_FREE,
 	char *bodyBuffer,
-	int bodyBufferLength,
+	size_t bodyBufferLength,
 	int bodyBuffer_FREE,
 	ILibWebClient_OnResponse OnResponse,
 	struct ILibWebClient_StreamedRequestState *state,
@@ -2657,7 +2657,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx2(
 
 	request->NumberOfBuffers = bodyBuffer != NULL?2:1;
 	if ((request->Buffer = (char**)malloc(request->NumberOfBuffers * sizeof(char*))) == NULL) ILIBCRITICALEXIT(254);
-	if ((request->BufferLength = (int*)malloc(request->NumberOfBuffers * sizeof(int))) == NULL)  ILIBCRITICALEXIT(254);
+	if ((request->BufferLength = (size_t*)malloc(request->NumberOfBuffers * sizeof(size_t))) == NULL)  ILIBCRITICALEXIT(254);
 	if ((request->UserFree = (int*)malloc(request->NumberOfBuffers * sizeof(int))) == NULL) ILIBCRITICALEXIT(254);
 
 	request->Buffer[0] = headerBuffer;
@@ -2867,10 +2867,10 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx(
 	ILibWebClient_RequestManager WebClient, 
 	struct sockaddr *RemoteEndpoint, 
 	char *headerBuffer,
-	int headerBufferLength,
+	size_t headerBufferLength,
 	int headerBuffer_FREE,
 	char *bodyBuffer,
-	int bodyBufferLength,
+	size_t bodyBufferLength,
 	int bodyBuffer_FREE,
 	ILibWebClient_OnResponse OnResponse,
 	void *user1,
@@ -2887,7 +2887,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequest2(
 								void *user1,
 								void *user2)
 {
-	int bufferLength;
+	size_t bufferLength;
 	char *buffer;
 
 	bufferLength = ILibGetRawPacket(packet, &buffer);

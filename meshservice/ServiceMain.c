@@ -553,7 +553,7 @@ int wmain(int argc, char* wargv[])
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integragedJavaScriptLen == 0)
 	{
-		integratedJavaScript = ILibString_Copy(argv[2], -1);
+		integratedJavaScript = ILibString_Copy(argv[2], 0);
 		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integragedJavaScriptLen == 0)
@@ -563,7 +563,7 @@ int wmain(int argc, char* wargv[])
 	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId')());process.exit();";
-		integratedJavaScript = ILibString_Copy(script, (int)sizeof(script) - 1);
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 
@@ -1000,7 +1000,7 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 			eq = ILibString_IndexOf(f->data, f->datalength, "=", 1);
 			if (eq > 0) {
 				char *key, *val;
-				int keyLen, valLen;
+				size_t keyLen, valLen;
 
 				key = f->data;
 				keyLen = eq;

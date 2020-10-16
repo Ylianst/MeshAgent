@@ -120,16 +120,18 @@ extern int ILibDeflate(char *buffer, size_t bufferLen, char *compressed, size_t 
 extern uint32_t crc32c(uint32_t crci, const unsigned char *buf, uint32_t len);
 
 // Perform a SHA384 hash of some data
-void ILibSimpleDataStore_SHA384(char *data, int datalen, char* result) { util_sha384(data, datalen, result); }
+void ILibSimpleDataStore_SHA384(char *data, size_t datalen, char* result) { util_sha384(data, datalen, result); }
 
-void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash)
+void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* value, size_t valueLen, char *vhash)
 {
+	if (keyLen > INT32_MAX || valueLen > INT32_MAX) { return; }
+
 	if (vhash != NULL)
 	{
 		// This is a compresed entry
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen);
 		key = tmpkey;
 		keyLen = (int)ILibMemory_Size(key);
 	}
@@ -153,8 +155,8 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int 
 	}
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	if (root->cacheTable == NULL) { root->cacheTable = ILibHashtable_Create(); }
-	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen, 0, NULL, NULL);
-	entry->valueLength = valueLen;
+	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)ILibMemory_Allocate((int)(sizeof(ILibSimpleDataStore_CacheEntry) + valueLen), 0, NULL, NULL);
+	entry->valueLength = (int)valueLen; // No loss of data, becuase it's capped to INT32_MAX
 	if (valueLen > 0) { memcpy_s(entry->value, valueLen, value, valueLen); }
 	if (vhash != NULL)
 	{
@@ -165,7 +167,7 @@ void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int 
 		ILibSimpleDataStore_SHA384(value, valueLen, entry->valueHash);   
 	}
 	
-	ILibHashtable_Put(root->cacheTable, NULL, key, keyLen, entry);
+	ILibHashtable_Put(root->cacheTable, NULL, key, (int)keyLen, entry); // No loss of data, becuase capped at INT32_MAX
 	if (vhash != NULL) { ILibMemory_Free(key); }
 }
 
@@ -672,7 +674,7 @@ __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, 
 	
 	if (filePath != NULL)
 	{
-		retVal->filePath = ILibString_Copy(filePath, (int)strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
+		retVal->filePath = ILibString_Copy(filePath, strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
 		retVal->dataFile = ILibSimpleDataStore_OpenFileEx2(retVal->filePath, 0, readonly);
 
 		if (retVal->dataFile == NULL)
@@ -700,7 +702,7 @@ void ILibSimpleDataStore_ReOpenReadOnly(ILibSimpleDataStore dataStore, char* fil
 	}
 	else
 	{
-		root->filePath = ILibString_Copy(filePath, (int)strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
+		root->filePath = ILibString_Copy(filePath, strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
 	}
 	root->dataFile = ILibSimpleDataStore_OpenFileEx2(root->filePath, 0, 1);
 	if (root->dataFile != NULL) { ILibSimpleDataStore_RebuildKeyTable(root); }
@@ -738,16 +740,16 @@ __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore)
 }
 
 // Store a key/value pair in the data store
-__EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash)
+__EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* value, size_t valueLen, char *vhash)
 {
+	if (valueLen > INT32_MAX || valueLen > INT32_MAX || keyLen > INT32_MAX) { return(1); }
 	int keyAllocated = 0;
 	int allocated = 0;
-	int ret;
 	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry;
 	char *origkey = key;
-	int origkeylen = keyLen;
+	int origkeylen = (int)keyLen;
 
 	if (root == NULL) { return 0; }
 	if (root->dataFile == NULL)
@@ -761,23 +763,23 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	{
 		// If we're going to save a compressed record, then we should delete the corrosponding
 		// non compressed entry, to avoid confusion/conflicts
-		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, keyLen);
+		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, (int)keyLen); // No loss of data, capped to INT32_MAX
 		if (entry != NULL)
 		{
-			ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, NULL, 0, NULL);
+			ILibSimpleDataStore_WriteRecord(root->dataFile, key, (int)keyLen, NULL, 0, NULL); // No dataloss, capped to INT32_MAX
 		}
 
 		// Calculate the key to use for the compressed record entry
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(int));
 		keyAllocated = 1;
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, (uint32_t)keyLen); // No dataloss, capped to INT32_MAX
 		key = tmpkey;
 		keyLen = (int)ILibMemory_Size(key);
 		memcpy_s(hash, sizeof(hash), vhash, SHA384HASHSIZE);
 	}
 
-	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, (int)keyLen); // No dataloss, capped to INT32_MAX
 	if (vhash == NULL) { ILibSimpleDataStore_SHA384(value, valueLen, hash); }  // Hash the value
 
 	// Create a new record for the key and value
@@ -793,8 +795,8 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	}
 
 	memcpy_s(entry->valueHash, sizeof(entry->valueHash), hash, SHA384HASHSIZE);
-	entry->valueLength = valueLen;
-	entry->valueOffset = ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, value, valueLen, entry->valueHash); // Write the key and value
+	entry->valueLength = (int)valueLen; // No dataloss, capped to INT32_MAX
+	entry->valueOffset = ILibSimpleDataStore_WriteRecord(root->dataFile, key, (int)keyLen, value, (int)valueLen, entry->valueHash); // Write the key and value, no dataloss, capped to INT32_MAX
 	root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile); // Update the size of the data store;
 
 	if (entry->valueOffset == 0)
@@ -812,18 +814,20 @@ __EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char
 	}
 
 	// Add the record to the data store
-	ret = ILibHashtable_Put(root->keyTable, NULL, key, keyLen, entry) == NULL ? 0 : 1;
+	ILibHashtable_Put(root->keyTable, NULL, key, (int)keyLen, entry); // No dataloss, capped to INT32_MAX
 	if (root->warningSize > 0 && root->fileSize > root->warningSize && root->warningSink != NULL)
 	{
 		root->warningSink(root, root->fileSize, root->warningSinkUser);
 	}
 	if (keyAllocated) { ILibMemory_Free(key); }
-	return(ret);
+	return(0);
 }
 
-int ILibSimpleDataStore_PutCompressed(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen)
+int ILibSimpleDataStore_PutCompressed(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* value, size_t valueLen)
 {
 	int ret = 1;
+	if (keyLen > INT32_MAX || valueLen > INT32_MAX) { return(ret); }
+
 	char hash[SHA384HASHSIZE];
 	char *tmp = NULL;
 	size_t tmpLen = 0;
@@ -850,8 +854,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char
 }
 
 // Get a value from the data store given a key
-__EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char *buffer, int bufferLen)
+__EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char *buffer, size_t bufferLen)
 {
+	if (keyLen > INT32_MAX || bufferLen > INT32_MAX) { return(0); }
+
 	int isCompressed = 0;
 	char hash[SHA384HASHSIZE];
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
@@ -862,14 +868,14 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 
 	if (root->cacheTable != NULL)
 	{
-		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, keyLen);
+		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, (int)keyLen); // No dataloss, capped to INT32_MAX
 		if (centry == NULL)
 		{
 			// Let's check if this is a compressed record entry
 			size_t tmplen = 0;
 			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
+			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // No dataloss, capped to INT32_MAX
 			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 			if (centry != NULL)
 			{
@@ -902,13 +908,13 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		}
 	}
 
-	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, (int)keyLen); // No dataloss, capped to INT32_MAX
 	if (entry == NULL)
 	{
 		// Before returning an error, check if this is a compressed record
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)tmpkey, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		ILibMemory_Free(tmpkey);
 		if (entry != NULL) { isCompressed = 1; }
@@ -957,21 +963,22 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 }
 
 // Get the reference to the SHA384 hash value from the datastore for a given a key.
-__EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
+__EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen)
 {
+	if (keyLen > INT32_MAX) { return(NULL); }
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry = NULL;
 	
 	if (root == NULL) return NULL;
 	if (root->cacheTable != NULL)
 	{
-		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, keyLen);
+		ILibSimpleDataStore_CacheEntry *centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, key, (int)keyLen); // no dataloss, capped to INT32_MAX
 		if (centry == NULL)
 		{
 			// Let's check if this is a compressed record entry
 			char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
+			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
 			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 			if (centry != NULL)
 			{
@@ -985,7 +992,7 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 		}
 	}
 
-	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, keyLen);
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Get(root->keyTable, NULL, key, (int)keyLen); // no dataloss, capped to INT32_MAX
 	if (entry == NULL)
 	{
 		// Before we return an error, let's check if this is a compressed record
@@ -1005,19 +1012,20 @@ int ILibSimpleDataStore_GetHashSize()
 	return((int)sizeof(e.valueHash));
 }
 // Delete a key and value from the data store
-__EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, int keyLen)
+__EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen)
 {
+	if (keyLen > INT32_MAX) { return(0); }
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
 	ILibSimpleDataStore_TableEntry *entry;
 	
 	if (root == NULL) return 0;
-	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, keyLen);
+	entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, key, (int)keyLen); // no dataloss, capped to INT32_MAX
 	if (entry == NULL)
 	{
 		// Check to see if this is a compressed record, before we return an error
 		char *tmpkey = (char*)ILibMemory_SmartAllocate(keyLen + sizeof(uint32_t));
 		memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
-		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, keyLen);
+		((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
 		entry = (ILibSimpleDataStore_TableEntry*)ILibHashtable_Remove(root->keyTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
 		if (entry != NULL)
 		{
@@ -1033,7 +1041,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, ch
 	}
 	else
 	{
-		if (ILibSimpleDataStore_WriteRecord(root->dataFile, key, keyLen, NULL, 0, NULL) == 0)
+		if (ILibSimpleDataStore_WriteRecord(root->dataFile, key, (int)keyLen, NULL, 0, NULL) == 0) // no dataloss, capped to INT32_MAX
 		{
 			if (root->ErrorHandler != NULL) { root->ErrorHandler(root, root->ErrorHandlerUser); }
 		}

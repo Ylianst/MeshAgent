@@ -635,7 +635,7 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 	UNREFERENCED_PARAMETER(exitCode);
 	UNREFERENCED_PARAMETER(user);
 }
-void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	unsigned short size = 0;
 	UNREFERENCED_PARAMETER(sender);
@@ -673,7 +673,7 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, int b
 	}
 	*bytesConsumed = 0;
 }
-void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, int bufferLen, int* bytesConsumed, void* user)
+void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	//KVMDebugLog *log = (KVMDebugLog*)buffer;
 

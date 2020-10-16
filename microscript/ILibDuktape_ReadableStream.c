@@ -293,18 +293,18 @@ void __stdcall ILibDuktape_readableStream_WriteData_OnData_ChainThread_APC(ULONG
 }
 #endif
 
-int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, int streamReserved, char* buffer, int bufferLen)
+int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, int streamReserved, char* buffer, size_t bufferLen)
 {
 	ILibDuktape_readableStream_nextWriteablePipe *w;
 	int dispatchedNonNative = 0;
 	int dispatched = 0;
 	int needPause = 0;
 
-	if (stream == NULL || !ILibMemory_CanaryOK(stream)) { return(1); }
+	if (stream == NULL || !ILibMemory_CanaryOK(stream) || bufferLen > INT32_MAX) { return(1); } // ToDo: Add support for larger data sets
 
 	if (stream->paused != 0)
 	{
-		ILibDuktape_readableStream_WriteData_buffer(stream, streamReserved, buffer, bufferLen);
+		ILibDuktape_readableStream_WriteData_buffer(stream, streamReserved, buffer, (int)bufferLen);
 		if (stream->paused == 0 && stream->PauseHandler != NULL) { stream->paused = 1; stream->PauseHandler(stream, stream->user); }
 		return(stream->paused);
 	}
@@ -331,7 +331,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 				ILibDuktape_WritableStream *ws = (ILibDuktape_WritableStream*)w->nativeWritable;
 				ws->Reserved = streamReserved;
 				ws->endBytes = -1;
-				switch (ws->WriteSink(ws, buffer, bufferLen, ws->WriteSink_User))
+				switch (ws->WriteSink(ws, buffer, (int)bufferLen, ws->WriteSink_User))
 				{
 					case ILibTransport_DoneState_INCOMPLETE:
 						ws->OnWriteFlushEx = ILibDuktape_readableStream_WriteData_Flush;
@@ -356,7 +356,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 					tmp->ctx = stream->ctx;
 					tmp->Next = (ILibDuktape_readableStream_bufferedData*)stream;
 					tmp->Reserved = streamReserved;
-					tmp->bufferLen = bufferLen;
+					tmp->bufferLen = (int)bufferLen;
 					memcpy_s(tmp->buffer, bufferLen, buffer, bufferLen);
 					dispatchedNonNative = 1;
 					needPause = 1;
@@ -365,7 +365,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 				else
 				{
 					// We're running on the Chain Thread, so we can directly dispatch into JS
-					switch (ILibDuktape_readableStream_WriteDataEx_Chain_Dispatch(stream, w->writableStream, buffer, bufferLen))
+					switch (ILibDuktape_readableStream_WriteDataEx_Chain_Dispatch(stream, w->writableStream, buffer, (int)bufferLen))
 					{
 						case 0: // Need to Pause
 							needPause = 1;
@@ -419,7 +419,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 				ILibDuktape_readableStream_bufferedData *tmp = (ILibDuktape_readableStream_bufferedData*)ILibMemory_Allocate(sizeof(ILibDuktape_readableStream_bufferedData) + bufferLen, 0, NULL, NULL);
 #endif
 				tmp->ctx = stream->ctx;
-				tmp->bufferLen = bufferLen;
+				tmp->bufferLen = (int)bufferLen;
 				tmp->Reserved = streamReserved;
 				tmp->Next = (ILibDuktape_readableStream_bufferedData*)stream;
 				memcpy_s(tmp->buffer, bufferLen, buffer, bufferLen);
@@ -440,7 +440,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 			// If we get here, it means we are writing data, but nobody is going to be receiving it...
 			// So we need to buffer the data, so when we are resumed later, we can retry
 			needPause = 1;
-			ILibDuktape_readableStream_WriteData_buffer(stream, streamReserved, buffer, bufferLen);
+			ILibDuktape_readableStream_WriteData_buffer(stream, streamReserved, buffer, (int)bufferLen);
 		}
 		else if (ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") != 0)
 		{

@@ -55,7 +55,7 @@ int ILibSimpleDataStore_Exists(char *filePath);
 
 // Close the data store.
 __EXPORT_TYPE void ILibSimpleDataStore_Close(ILibSimpleDataStore dataStore);
-__EXPORT_TYPE void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *vhash);
+__EXPORT_TYPE void ILibSimpleDataStore_CachedEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* value, size_t valueLen, char *vhash);
 #define ILibSimpleDataStore_Cached(dataStore, key, keyLen, value, valueLen) ILibSimpleDataStore_CachedEx(dataStore, key, keyLen, value, valueLen, NULL)
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSON(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
 __EXPORT_TYPE int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen);
@@ -63,24 +63,24 @@ __EXPORT_TYPE void ILibSimpleDataStore_ConfigCompact(ILibSimpleDataStore dataSto
 __EXPORT_TYPE void ILibSimpleDataStore_ConfigSizeLimit(ILibSimpleDataStore dataStore, uint64_t sizeLimit, ILibSimpleDataStore_SizeWarningHandler handler, void *user);
 void ILibSimpleDataStore_ConfigWriteErrorHandler(ILibSimpleDataStore dataStore, ILibSimpleDataStore_WriteErrorHandler handler, void *user);
 
-__EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen, char *hash);
-#define ILibSimpleDataStore_Put(dataStore, key, value) ILibSimpleDataStore_PutEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), value, (int)strnlen_s(value, ILibSimpleDataStore_MaxUnspecifiedValueLen))
+__EXPORT_TYPE int ILibSimpleDataStore_PutEx2(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* value, size_t valueLen, char *hash);
+#define ILibSimpleDataStore_Put(dataStore, key, value) ILibSimpleDataStore_PutEx(dataStore, key, strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), value, strnlen_s(value, ILibSimpleDataStore_MaxUnspecifiedValueLen))
 #define ILibSimpleDataStore_PutEx(dataStore, key, keyLen, value, valueLen) ILibSimpleDataStore_PutEx2(dataStore, key, keyLen, value, valueLen, NULL)
-int ILibSimpleDataStore_PutCompressed(ILibSimpleDataStore dataStore, char* key, int keyLen, char* value, int valueLen);
+int ILibSimpleDataStore_PutCompressed(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* value, size_t valueLen);
 
 // Get a value from the datastore of given a key.
-__EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, int keyLen, char* buffer, int bufferLen);
-#define ILibSimpleDataStore_Get(dataStore, key, buffer, bufferLen) ILibSimpleDataStore_GetEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), buffer, bufferLen)
+__EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen, char* buffer, size_t bufferLen);
+#define ILibSimpleDataStore_Get(dataStore, key, buffer, bufferLen) ILibSimpleDataStore_GetEx(dataStore, key, strnlen_s(key, ILibSimpleDataStore_MaxKeyLength), buffer, bufferLen)
 __EXPORT_TYPE int ILibSimpleDataStore_GetInt(ILibSimpleDataStore dataStore, char* key, int defaultValue);
 
 // Get the SHA384 hash value from the datastore for a given a key.
-__EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, int keyLen);
-#define ILibSimpleDataStore_GetHash(dataStore, key) ILibSimpleDataStore_GetHashEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength))
+__EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen);
+#define ILibSimpleDataStore_GetHash(dataStore, key) ILibSimpleDataStore_GetHashEx(dataStore, key, strnlen_s(key, ILibSimpleDataStore_MaxKeyLength))
 int ILibSimpleDataStore_GetHashSize();
 
 // Delete a key from the data store
-__EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, int keyLen);
-#define ILibSimpleDataStore_Delete(dataStore, key) ILibSimpleDataStore_DeleteEx(dataStore, key, (int)strnlen_s(key, ILibSimpleDataStore_MaxKeyLength))
+__EXPORT_TYPE int ILibSimpleDataStore_DeleteEx(ILibSimpleDataStore dataStore, char* key, size_t keyLen);
+#define ILibSimpleDataStore_Delete(dataStore, key) ILibSimpleDataStore_DeleteEx(dataStore, key, strnlen_s(key, ILibSimpleDataStore_MaxKeyLength))
 
 // Enumerate all keys from the data store
 __EXPORT_TYPE void ILibSimpleDataStore_EnumerateKeys(ILibSimpleDataStore dataStore, ILibSimpleDataStore_KeyEnumerationHandler handler, void *user);

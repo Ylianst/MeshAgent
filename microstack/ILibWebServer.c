@@ -242,7 +242,7 @@ struct packetheader *header,
 	struct ILibWebServer_StateModule *wsm = (struct ILibWebServer_StateModule*)ws->Parent;
 
 	char *tmp;
-	int tmpLength;
+	size_t tmpLength;
 	struct parser_result *pr;
 	int PreSlash = 0;
 
@@ -1167,15 +1167,15 @@ ILibExportMethod void ILibWebServer_Digest_SendUnauthorized(struct ILibWebServer
 
 int ILibWebServer_Digest_ParseAuthenticationHeader2(char* value, int valueLen, char **token, int *tokenLen, char **tokenValue, int *tokenValueLen)
 {
-	int len;
+	size_t len;
 	int i = ILibString_IndexOf(value, valueLen, "=", 1);
 	if (i < 0) { return 1; }
 
 	*token = value;
 
 	len = ILibTrimString(token, i);
-	//(*token)[len] = 0;
-	*tokenLen = len;
+	if (len > INT32_MAX) { return(1); }
+	*tokenLen = (int)len;
 
 	*tokenValue = value + i + 1;
 	len = valueLen - (i + 1);
@@ -1190,8 +1190,8 @@ int ILibWebServer_Digest_ParseAuthenticationHeader2(char* value, int valueLen, c
 	{
 		len -= 1;
 	}
-	//(*tokenValue)[len] = 0;
-	*tokenValueLen = len;
+	if (len > INT32_MAX) { return(1); }
+	*tokenValueLen = (int)len;
 	return 0;
 }
 void ILibWebServer_Digest_ParseAuthenticationHeader(void* table, char* value, int valueLen)
@@ -1204,9 +1204,12 @@ void ILibWebServer_Digest_ParseAuthenticationHeader(void* table, char* value, in
 		char *token;
 		char* tokenValue;
 		int tokenLen, tokenValueLen;
-		if (ILibWebServer_Digest_ParseAuthenticationHeader2(f->data, f->datalength, &token, &tokenLen, &tokenValue, &tokenValueLen) == 0)
+		if (f->datalength < INT32_MAX)
 		{
-			ILibAddEntryEx(table, token, tokenLen, tokenValue, tokenValueLen);
+			if (ILibWebServer_Digest_ParseAuthenticationHeader2(f->data, (int)f->datalength, &token, &tokenLen, &tokenValue, &tokenValueLen) == 0)
+			{
+				ILibAddEntryEx(table, token, tokenLen, tokenValue, tokenValueLen);
+			}
 		}
 		f = f->NextResult;
 	}
@@ -1434,7 +1437,7 @@ ILibExportMethod int ILibWebServer_UpgradeWebSocket(struct ILibWebServer_Session
 ILibExportMethod enum ILibWebServer_Status ILibWebServer_Send(struct ILibWebServer_Session *session, struct packetheader *packet)
 {
 	char *buffer;
-	int bufferSize;
+	size_t bufferSize;
 	enum ILibWebServer_Status RetVal = ILibWebServer_ALL_DATA_SENT;
 
 	if (session == NULL || session->SessionInterrupted != 0 || ILibWebServer_Session_GetSystemData(session)->WebSocket_Request != NULL)
@@ -1555,10 +1558,10 @@ ILibExportMethod enum ILibWebServer_Status ILibWebServer_WebSocket_Send(struct I
 \param done Flag indicating if this is everything
 \returns Send Status
 */
-ILibExportMethod enum ILibWebServer_Status ILibWebServer_Send_Raw(struct ILibWebServer_Session *session, char *buffer, int bufferSize, enum ILibAsyncSocket_MemoryOwnership userFree, ILibWebServer_DoneFlag done)
+ILibExportMethod enum ILibWebServer_Status ILibWebServer_Send_Raw(struct ILibWebServer_Session *session, char *buffer, size_t bufferSize, enum ILibAsyncSocket_MemoryOwnership userFree, ILibWebServer_DoneFlag done)
 {
 	enum ILibWebServer_Status RetVal = ILibWebServer_ALL_DATA_SENT;
-	if (bufferSize < 0) { bufferSize = (int)strnlen_s(buffer, ILibWebServer_StreamHeader_Raw_MaxHeaderLength); }
+	if (bufferSize == 0 || bufferSize == (size_t)(-1)) { bufferSize = strnlen_s(buffer, ILibWebServer_StreamHeader_Raw_MaxHeaderLength); }
 
 	if (session == NULL || (session != NULL && session->SessionInterrupted != 0))
 	{
@@ -1592,7 +1595,7 @@ enum ILibWebServer_Status ILibWebServer_StreamHeader_Raw(struct ILibWebServer_Se
 {
 	int len;
 	char *temp;
-	int tempLength;
+	size_t tempLength;
 	char *buffer;
 	int bufferLength;
 	struct packetheader *hdr;
@@ -1735,7 +1738,7 @@ enum ILibWebServer_Status ILibWebServer_StreamHeader_Raw(struct ILibWebServer_Se
 enum ILibWebServer_Status ILibWebServer_StreamHeader(struct ILibWebServer_Session *session, struct packetheader *header)
 {
 	struct packetheader *hdr;
-	int bufferLength;
+	size_t bufferLength;
 	char *buffer;
 	enum ILibWebServer_Status RetVal = ILibWebServer_INVALID_SESSION;
 

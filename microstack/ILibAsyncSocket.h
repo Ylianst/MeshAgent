@@ -60,7 +60,8 @@ typedef enum ILibAsyncSocket_SendStatus
 {
 	ILibAsyncSocket_ALL_DATA_SENT = 1, /*!< All of the data has already been sent */
 	ILibAsyncSocket_NOT_ALL_DATA_SENT_YET = 0, /*!< Not all of the data could be sent, but is queued to be sent as soon as possible */
-	ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR	= -4 /*!< A send operation was attmepted on a closed socket */
+	ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR	= -4, /*!< A send operation was attmepted on a closed socket */
+	ILibAsyncSocket_BUFFER_TOO_LARGE = -5
 }ILibAsyncSocket_SendStatus;
 
 /*! \enum ILibAsyncSocket_MemoryOwnership
@@ -188,8 +189,8 @@ enum ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocke
 \param UserFree The \a ILibAsyncSocket_MemoryOwnership enumeration, that identifies how the memory pointer to by \a buffer is to be handled
 \returns \a ILibAsyncSocket_SendStatus indicating the send status
 */
-#define ILibAsyncSocket_Send(socketModule, buffer, length, UserFree) ILibAsyncSocket_SendTo_MultiWrite(socketModule, NULL, 1, buffer, length, UserFree)
-#define ILibAsyncSocket_SendTo(socketModule, buffer, length, remoteAddress, UserFree) ILibAsyncSocket_SendTo_MultiWrite(socketModule, remoteAddress, 1, buffer, length, UserFree)
+#define ILibAsyncSocket_Send(socketModule, buffer, length, UserFree) ILibAsyncSocket_SendTo_MultiWrite(socketModule, NULL, 1, buffer, (size_t)length, UserFree)
+#define ILibAsyncSocket_SendTo(socketModule, buffer, length, remoteAddress, UserFree) ILibAsyncSocket_SendTo_MultiWrite(socketModule, remoteAddress, 1, buffer, (size_t)length, UserFree)
 
 void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule);
 void ILibAsyncSocket_GetBuffer(ILibAsyncSocket_SocketModule socketModule, char **buffer, int *BeginPointer, int *EndPointer);

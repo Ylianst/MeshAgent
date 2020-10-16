@@ -225,7 +225,7 @@ ILibExportMethod void ILibWebServer_WebSocket_Close(struct ILibWebServer_Session
 ILibExportMethod ILibWebServer_WebSocket_DataTypes ILibWebServer_WebSocket_GetDataType(ILibWebServer_Session *session);
 
 ILibExportMethod enum ILibWebServer_Status ILibWebServer_Send(struct ILibWebServer_Session *session, struct packetheader *packet);
-ILibExportMethod enum ILibWebServer_Status ILibWebServer_Send_Raw(struct ILibWebServer_Session *session, char *buffer, int bufferSize, enum ILibAsyncSocket_MemoryOwnership userFree, ILibWebServer_DoneFlag done);
+ILibExportMethod enum ILibWebServer_Status ILibWebServer_Send_Raw(struct ILibWebServer_Session *session, char *buffer, size_t bufferSize, enum ILibAsyncSocket_MemoryOwnership userFree, ILibWebServer_DoneFlag done);
 
 /*! \def ILibWebServer_Session_GetPendingBytesToSend
 	\brief Returns the number of outstanding bytes to be sent

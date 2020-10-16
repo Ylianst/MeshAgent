@@ -571,7 +571,7 @@ duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
 	return(0);
 }
 #ifdef WIN32
-BOOL ILibDuktape_fs_write_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, int bytesWritten, void* user)
+BOOL ILibDuktape_fs_write_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, DWORD bytesWritten, void* user)
 {
 	ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)user;
 	if (ILibMemory_CanaryOK(data) && duk_ctx_is_alive(data->ctx))
@@ -588,7 +588,7 @@ BOOL ILibDuktape_fs_write_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_Erro
 		duk_push_heapptr(data->ctx, data->write_callback);	// [callback]
 		duk_eval_string(data->ctx, "require('fs');");		// [callback][this]
 		duk_push_int(data->ctx, status);					// [callback][this][err]
-		duk_push_int(data->ctx, bytesWritten);				// [callback][this][err][bytesRead]
+		duk_push_uint(data->ctx, bytesWritten);				// [callback][this][err][bytesRead]
 		duk_push_heapptr(data->ctx, data->write_userBuffer);// [callback][this][err][bytesRead][buffer]
 		data->write_callback = NULL;
 		data->write_userBuffer = NULL;
@@ -644,7 +644,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 
 	data->write_buffer = buffer + offset;
 	data->write_bufferSize = length;
-	ILibChain_WriteEx2(duk_ctx_chain(ctx), data->H, &(data->write_p), data->write_buffer, (int)data->write_bufferSize, ILibDuktape_fs_write_WindowsSink, data, "fs.write()");
+	ILibChain_WriteEx2(duk_ctx_chain(ctx), data->H, &(data->write_p), data->write_buffer, (DWORD)data->write_bufferSize, ILibDuktape_fs_write_WindowsSink, data, "fs.write()");
 	return(0);
 
 #else
@@ -726,7 +726,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 }
 
 #ifdef WIN32
-BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, int bytesRead, void* user)
+BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user)
 {
 	ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)user;
 	if (ILibMemory_CanaryOK(data) && duk_ctx_is_alive(data->ctx))
@@ -743,7 +743,7 @@ BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_Error
 		duk_push_heapptr(data->ctx, data->callback);		// [callback]
 		duk_eval_string(data->ctx, "require('fs');");		// [callback][this]
 		duk_push_int(data->ctx, status);					// [callback][this][err]
-		duk_push_int(data->ctx, bytesRead);					// [callback][this][err][bytesRead]
+		duk_push_uint(data->ctx, bytesRead);				// [callback][this][err][bytesRead]
 		duk_push_heapptr(data->ctx, data->userBuffer);		// [callback][this][err][bytesRead][buffer]
 		data->callback = NULL;
 		data->userBuffer = NULL;
@@ -892,7 +892,7 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 #ifdef WIN32
 	data->buffer = buffer + offset;
 	data->bufferSize = length;
-	ILibChain_ReadEx2(duk_ctx_chain(ctx), data->H, &(data->p), data->buffer, (int)data->bufferSize, ILibDuktape_fs_read_WindowsSink, data, "fs.read()");
+	ILibChain_ReadEx2(duk_ctx_chain(ctx), data->H, &(data->p), data->buffer, (DWORD)data->bufferSize, ILibDuktape_fs_read_WindowsSink, data, "fs.read()");
 	return(0);
 #else
 	int bytesRead = read(fd, buffer + offset, length);
