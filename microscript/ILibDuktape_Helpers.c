@@ -765,6 +765,12 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 
 	duk_destroy_heap(ctx);
 
+	if (ctxd->fakechain != 0 && ctxd->chain != NULL)
+	{
+		ILibChain_DestroyEx(ctxd->chain);
+		ctxd->chain = NULL;
+	}
+
 	if (ILibLinkedList_GetCount(ctxd->threads) > 0)
 	{
 #ifdef WIN32
@@ -797,6 +803,7 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 #endif
 	}
 	ILibLinkedList_Destroy(ctxd->threads);	
+
 	ILibMemory_Free(ctxd);
 }
 void *Duktape_GetChain(duk_context *ctx)

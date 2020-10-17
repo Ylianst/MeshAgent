@@ -2514,6 +2514,11 @@ int ILibDuktape_ScriptContainer_DebuggingOK(duk_context *ctx)
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_context *ctx, SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
 {
 	void **timeoutKey = executionTimeout > 0 ? (void**)ILibMemory_Allocate(sizeof(void*), 0, NULL, NULL) : NULL;
+	if (chain == NULL)
+	{
+		duk_ctx_context_data(ctx)->fakechain = 1;
+		chain = ILibCreateChain();
+	}
 	duk_ctx_context_data(ctx)->chain = chain;
 
 	duk_push_heap_stash(ctx);															// [s]

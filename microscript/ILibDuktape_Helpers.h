@@ -55,6 +55,7 @@ typedef struct ILibDuktape_ContextData
 	uint32_t apc_flags;
 #endif
 	void *threads;
+	int fakechain;
 	void *chain;
 	void *user;
 }ILibDuktape_ContextData;
