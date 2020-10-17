@@ -15,6 +15,12 @@ limitations under the License.
 */
 #define _GNU_SOURCE 
 
+#if !defined(WIN32)
+#include <strings.h>
+#if !defined(MICROSTACK_NOTLS)
+#include <openssl/crypto.h>
+#endif
+#endif
 #if defined (__APPLE__)
 	#include <sys/uio.h>
 	#include <sys/mount.h>
@@ -1065,15 +1071,37 @@ void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemor
 
 	return(primary);
 }
+void ILibMemory_SecureZero(void *ptr, size_t len)
+{
+#if !defined(MICROSTACK_NOTLS)
+	OPENSSL_cleanse(ptr, len);
+#else
+	#if defined(WIN32)
+		SecureZeroMemory(ptr, len);
+	#else
+		#ifdef __GLIBC__
+			#if (__GLIBC__ > 2) || ((__GLIBC__ == 2) && (__GLIBC_MINOR__ >= 24))
+				explicit_bzero(ptr, len);
+			#else
+				memset(ptr, 0, len);
+				__asm__ __volatile__("": : : "memory");
+			#endif
+		#else
+			memset(ptr, 0, len);
+			__asm__ __volatile__("": : : "memory");
+		#endif
+	#endif
+#endif
+}
 void ILibMemory_Free(void *ptr)
 {
 	if (ILibMemory_CanaryOK(ptr) && ILibMemory_MemType(ptr) == ILibMemory_Types_HEAP) 
 	{ 
 		if (ILibMemory_ExtraSize(ptr) > 0)
 		{
-			memset(ILibMemory_RawPtr(ILibMemory_Extra(ptr)), 0, sizeof(ILibMemory_Header));
+			ILibMemory_SecureZero(ILibMemory_RawPtr(ILibMemory_Extra(ptr)), sizeof(ILibMemory_Header));
 		}
-		memset(ILibMemory_RawPtr(ptr), 0, sizeof(ILibMemory_Header)); 
+		ILibMemory_SecureZero(ILibMemory_RawPtr(ptr), sizeof(ILibMemory_Header));
 		free(ILibMemory_RawPtr(ptr)); 
 	}
 }

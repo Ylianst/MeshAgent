@@ -1559,7 +1559,7 @@ void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
 	if (ptr != NULL) 
 	{
 		ILibDuktape_ScriptContainer_TotalAllocations -= ILibMemory_Size(ptr);
-		memset(ptr, 0xDEADBEEF, sz);
+		ILibMemory_SecureZero(ptr, sz);
 		ILibMemory_Free(ptr); 
 	}
 }

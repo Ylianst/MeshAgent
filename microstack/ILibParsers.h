@@ -440,6 +440,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
 	void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t extraSize);
 
+	void ILibMemory_SecureZero(void *ptr, size_t len);
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
 

@@ -1141,7 +1141,7 @@ void ILibStun_OnDestroy(void *object)
 
 	ILibLinkedList_Destroy(obj->StunUsers);
 	if (obj->turnUsername != NULL) { free(obj->turnUsername); obj->turnUsername = NULL; }
-	if (obj->turnPassword != NULL) { memset(obj->turnPassword, 0, obj->turnPasswordLength); free(obj->turnPassword); obj->turnPassword = NULL; }
+	if (obj->turnPassword != NULL) { ILibMemory_SecureZero(obj->turnPassword, obj->turnPasswordLength); free(obj->turnPassword); obj->turnPassword = NULL; }
 
 	ILibLifeTime_Remove(obj->Timer, ILibWebRTC_STUN_TO_PERIODIC_CHECK_TIMER(obj));
 	if (extraClean == 0) return;

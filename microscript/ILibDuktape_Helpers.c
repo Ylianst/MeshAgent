@@ -56,7 +56,7 @@ duk_ret_t duk_fixed_buffer_finalizer(duk_context *ctx)
 {
 	duk_size_t bufLen;
 	char *buf = (char*)Duktape_GetBuffer(ctx, 0, &bufLen);
-	memset(buf, 0, bufLen);
+	ILibMemory_SecureZero(buf, bufLen);
 	return(0);
 }
 void duk_buffer_enable_autoclear(duk_context *ctx)
