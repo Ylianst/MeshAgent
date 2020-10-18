@@ -236,6 +236,7 @@ typedef struct MeshAgentHostContainer
 	int dbRetryCount;
 	MeshAgent_Posix_PlatformTypes platformType;
 	int JSRunningAsService;
+	int JSRunningWithAdmin;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

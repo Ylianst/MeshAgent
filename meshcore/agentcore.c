@@ -3671,7 +3671,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	gRemoteMouseRenderDefault = ILibSimpleDataStore_Get(agent->masterDb, "remoteMouseRender", NULL, 0);
 	ILibSimpleDataStore_ConfigCompact(agent->masterDb, ILibSimpleDataStore_GetInt(agent->masterDb, "compactDirtyMinimum", 0));
 	ILibSimpleDataStore_ConfigSizeLimit(agent->masterDb, ILibSimpleDataStore_GetInt(agent->masterDb, "dbWarningSizeThreshold", 0), MeshServer_DbWarning, agent);
-	agent->disableUpdate = ILibSimpleDataStore_Get(agent->masterDb, "disableUpdate", NULL, 0);
+	agent->disableUpdate = (agent->JSRunningAsService != 0 && agent->JSRunningWithAdmin == 0) | ILibSimpleDataStore_Get(agent->masterDb, "disableUpdate", NULL, 0) | (agent->JSRunningAsService == 0 && ((agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY) == MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY));
 	agent->forceUpdate = ILibSimpleDataStore_Get(agent->masterDb, "forceUpdate", NULL, 0);
 	agent->logUpdate = ILibSimpleDataStore_Get(agent->masterDb, "logUpdate", NULL, 0);
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
@@ -4342,6 +4342,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	agentHost->platformType = MeshAgent_Posix_PlatformTypes_UNKNOWN;
 	agentHost->JSRunningAsService = 0;
+	agentHost->JSRunningWithAdmin = 0;
 
 	if (duk_peval_string(tmpCtx, "(function foo() { var f = require('service-manager').manager.getServiceType(); switch(f){case 'procd': return(7); case 'windows': return(10); case 'launchd': return(3); case 'freebsd': return(5); case 'systemd': return(1); case 'init': return(2); case 'upstart': return(4); default: return(0);}})()") == 0)
 	{
@@ -4350,6 +4351,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	if (duk_peval_string(tmpCtx, "require('service-manager').manager.getService(process.platform=='win32'?'Mesh Agent':'meshagent').isMe();") == 0)
 	{
 		agentHost->JSRunningAsService = duk_get_boolean(tmpCtx, -1);
+	}
+	if (duk_peval_string(tmpCtx, "require('user-sessions').isRoot();") == 0)
+	{
+		agentHost->JSRunningWithAdmin = duk_get_boolean(tmpCtx, -1);
 	}
 #endif
 #if !defined(MICROSTACK_NOTLS)
