@@ -1405,6 +1405,14 @@ duk_ret_t ILibDuktape_MeshAgent_ServerUrl(duk_context *ctx)
 	duk_push_string(ctx, agent->serveruri);						// [MeshAgent][ptr][uri]
 	return(1);
 }
+duk_ret_t ILibDuktape_MeshAgent_updatesEnabled(duk_context *ctx)
+{
+	duk_push_this(ctx);											// [MeshAgent]
+	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);				// [MeshAgent][ptr]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
+	duk_push_boolean(ctx, agent->disableUpdate == 0);
+	return(1);
+}
 duk_ret_t ILibDuktape_MeshAgent_ServerIP(duk_context *ctx)
 {
 	duk_push_this(ctx);											// [MeshAgent]
@@ -1756,6 +1764,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "restartCore", ILibDuktape_MeshAgent_dumpCoreModule, 0);
 		ILibDuktape_CreateInstanceMethod(ctx, "getStartupOptions", ILibDuktape_MeshAgent_getStartupOptions, 0);
 		ILibDuktape_CreateEventWithGetter(ctx, "coreHash", ILibDuktape_MeshAgent_coreHash);
+		ILibDuktape_CreateEventWithGetter(ctx, "updatesEnabled", ILibDuktape_MeshAgent_updatesEnabled);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
