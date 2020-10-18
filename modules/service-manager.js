@@ -686,12 +686,14 @@ function serviceManager()
         }
         this.getService = function getService(name)
         {
+            var isroot = this.isAdmin();
+
             var serviceName = this.GM.CreateVariable(name, { wide: true });
             var ptr = this.GM.CreatePointer();
             var bytesNeeded = this.GM.CreateVariable(ptr._size);
-            var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0001 | 0x0004 | 0x0020 | 0x0010);
+            var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0001 | 0x0004 | 0x0010 | (isroot ? 0x0020 : 0x00));
             if (handle.Val == 0) { throw ('could not open ServiceManager'); }
-            var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0002 | 0x0004 | 0x0020 | 0x0010 | 0x00010000);
+            var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0004 | (isroot ? (0x0002 | 0x0020 | 0x0010 | 0x00010000): 0x00));
             if (h.Val != 0)
             {
                 var retVal = { _ObjectID: 'service-manager.service' }
