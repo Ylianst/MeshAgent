@@ -14,22 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-
-function getParameter(name, parms)
-{
-    var tokens;
-    for(var i=0;i<parms.length;++i)
+Object.defineProperty(Array.prototype, 'getParameter',
     {
-        tokens = parms[i].split('=');
-        if(tokens[0]==name)
+        value: function (name, defaultValue)
         {
-            if (tokens[1].startsWith('"')) { return (tokens[1].substring(1, tokens[1].length - 1)); }
-            return (tokens[1]);
+            var i, ret;
+            for (i = 0; i < this.length; ++i)
+            {
+                if (this[i].startsWith('--' + name + '='))
+                {
+                    ret = this[i].substring(name.length + 3);
+                    if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                    return (ret);
+                }
+            }
+            return (defaultValue);
         }
-    }
-    return (null);
-}
+    });
 
+function checkParameters(parms)
+{
+    var msh = _MSH();
+
+    if (parms.getParameter('meshServiceName', null) == null && msh.meshServiceName != null) { parms.push('--meshServiceName="' + msh.meshServiceName + '"'); }
+    if (parms.getParameter('companyName', null) == null && msh.companyName != null) { parms.push('--companyName="' + msh.companyName + '"'); }
+}
 function installService(params)
 {
     process.stdout.write('...Installing service');
@@ -64,25 +73,26 @@ function installService(params)
 
     var options =
         {
-            name: process.platform == 'win32' ? 'Mesh Agent' : 'meshagent',
+            name: params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'),
             target: process.platform == 'win32' ? 'MeshAgent' : 'meshagent',
-            displayName: 'Mesh Agent background service',
             servicePath: process.execPath,
             startType: 'AUTO_START',
-            parameters: params
+            parameters: params,
+            _installer: true
         };
+    options.displayName = options.name + ' background service';
+
     if (process.platform == 'win32') { options.companyName = ''; }
-    if (require('fs').existsSync(proxyFile)) { options.files = [{ source: proxyFile, newName: process.platform=='win32'?'MeshAgent.proxy':'meshagent.proxy' }]; }
+    if (require('fs').existsSync(proxyFile)) { options.files = [{ source: proxyFile, newName: options.target + '.proxy' }]; }
     
     var i;
     if ((i = params.indexOf('--copy-msh="1"')) >= 0)
     {
         var mshFile = process.platform == 'win32' ? (process.execPath.split('.exe').join('.msh')) : (process.execPath + '.msh');
         if (options.files == null) { options.files = []; }
-        options.files.push({ source: mshFile, newName: process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh' });
+        options.files.push({ source: mshFile, newName: options.target + '.msh' });
         options.parameters.splice(i, 1);
     }
-
     if ((i=params.indexOf('--_localService="1"'))>=0)
     {
         // install in place
@@ -123,6 +133,10 @@ function installService(params)
             options.parameters.splice(i, 1);
             break;
         }
+        if(options.parameters[i].startsWith('--meshServiceName='))
+        {
+
+        }
     }
     try
     {
@@ -134,7 +148,7 @@ function installService(params)
         process.stdout.write(' [ERROR] ' + sie);
         process.exit();
     }
-    var svc = require('service-manager').manager.getService(process.platform=='win32'?'Mesh Agent':'meshagent');
+    var svc = require('service-manager').manager.getService(options.name);
     if (process.platform == 'darwin')
     {
         svc.load();
@@ -143,7 +157,7 @@ function installService(params)
         {
             require('service-manager').manager.installLaunchAgent(
                 {
-                    name: 'meshagent',
+                    name: options.name,
                     servicePath: svc.appLocation(),
                     startType: 'AUTO_START',
                     sessionTypes: ['LoginWindow'],
@@ -161,11 +175,11 @@ function installService(params)
     if(process.platform == 'win32')
     {
         var loc = svc.appLocation();
-        process.stdout.write('   -> Writing firewall rules for Mesh Agent Service...');
+        process.stdout.write('   -> Writing firewall rules for ' + options.name + ' Service...');
 
         var rule = 
             {
-                DisplayName: 'Mesh Agent Management Traffic (TCP-1)',
+                DisplayName: options.name + ' Management Traffic (TCP-1)',
                 direction: 'inbound',
                 Program: loc,
                 Protocol: 'TCP',
@@ -179,7 +193,7 @@ function installService(params)
 
         rule = 
             {
-                DisplayName: 'Mesh Agent Management Traffic (TCP-2)',
+                DisplayName: options.name + ' Management Traffic (TCP-2)',
                 direction: 'inbound',
                 Program: loc,
                 Protocol: 'TCP',
@@ -193,7 +207,7 @@ function installService(params)
 
         rule =
         {
-            DisplayName: 'Mesh Agent Peer-to-Peer Traffic (UDP-1)',
+            DisplayName: options.name + ' Peer-to-Peer Traffic (UDP-1)',
             direction: 'inbound',
             Program: loc,
             Protocol: 'UDP',
@@ -207,7 +221,7 @@ function installService(params)
 
         rule =
             {
-                DisplayName: 'Mesh Agent Peer-to-Peer Traffic (UDP-2)',
+                DisplayName: options.name + ' Peer-to-Peer Traffic (UDP-2)',
                 direction: 'inbound',
                 Program: loc,
                 Protocol: 'UDP',
@@ -242,7 +256,7 @@ function uninstallService3(params)
         process.stdout.write('   -> Uninstalling launch agent...');
         try
         {
-            var launchagent = require('service-manager').manager.getLaunchAgent('meshagent');
+            var launchagent = require('service-manager').manager.getLaunchAgent(params.getParameter('meshServiceName', 'meshagent'));
             launchagent.unload();
             require('fs').unlinkSync(launchagent.plist);
             process.stdout.write(' [DONE]\n');
@@ -269,6 +283,7 @@ function uninstallService2(params, msh)
     var dataFolder = null;
     var appPrefix = null;
     var uninstallOptions = null;
+    var serviceName = params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
 
     try { require('fs').unlinkSync(msh); } catch (mshe) { }
     if ((i = params.indexOf('__skipBinaryDelete')) >= 0)
@@ -296,7 +311,7 @@ function uninstallService2(params, msh)
     process.stdout.write('   -> Uninstalling previous installation...');
     try
     {
-        require('service-manager').manager.uninstallService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent', uninstallOptions);
+        require('service-manager').manager.uninstallService(serviceName, uninstallOptions);
         process.stdout.write(' [DONE]\n');
         if (dataFolder && appPrefix)
         {
@@ -341,7 +356,7 @@ function uninstallService2(params, msh)
     try
     {
         process.stdout.write('   -> Checking for secondary agent...');
-        var s = require('service-manager').manager.getService('meshagentDiagnostic');
+        var s = require('service-manager').manager.getService(serviceName + 'Diagnostic');
         var loc = s.appLocation();
         s.close();
         process.stdout.write(' [FOUND]\n');
@@ -349,7 +364,7 @@ function uninstallService2(params, msh)
         secondaryagent = true;
         try
         {
-            require('service-manager').manager.uninstallService('meshagentDiagnostic');
+            require('service-manager').manager.uninstallService(serviceName + 'Diagnostic');
             process.stdout.write(' [DONE]\n');
         }
         catch (e)
@@ -365,7 +380,7 @@ function uninstallService2(params, msh)
     if(secondaryagent)
     {
         process.stdout.write('      -> removing secondary agent from task scheduler...');
-        var p = require('task-scheduler').delete('meshagentDiagnostic/periodicStart');
+        var p = require('task-scheduler').delete(serviceName + 'Diagnostic/periodicStart');
         p._params = params;
         p.then(function ()
         {
@@ -384,7 +399,7 @@ function uninstallService2(params, msh)
 }
 function uninstallService(params)
 {
-    var svc = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+    var svc = require('service-manager').manager.getService(params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'));
     var msh = svc.appLocation();
     if (process.platform == 'win32')
     {
@@ -462,10 +477,14 @@ function fullUninstall(jsonString)
     var parms = JSON.parse(jsonString);
     parms.push('_stop');
 
+    checkParameters(parms);
+
+    var name = parms.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+
     try
     {
-        process.stdout.write('...Checking for previous installation');
-        var s = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        process.stdout.write('...Checking for previous installation of "' + name + '"');
+        var s = require('service-manager').manager.getService(name);
         var loc = s.appLocation();
         var appPrefix = loc.split(process.platform == 'win32' ? '\\' : '/').pop();
         if (process.platform == 'win32') { appPrefix = appPrefix.substring(0, appPrefix.length - 4); }
@@ -486,9 +505,13 @@ function fullUninstall(jsonString)
 function fullInstall(jsonString)
 {
     var parms = JSON.parse(jsonString);
-    var loc = null;
+    checkParameters(parms);
 
-    if (!(getParameter('--verbose', parms) != null && parseInt(getParameter('--verbose', parms)) > 0))
+    var loc = null;
+    var i;
+    var name = parms.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+
+    if (parseInt(parms.getParameter('verbose', 0)) == 0)
     {
         console.setDestination(console.Destinations.DISABLED);
     }
@@ -499,8 +522,8 @@ function fullInstall(jsonString)
 
     try
     {
-        process.stdout.write('...Checking for previous installation');
-        var s = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        process.stdout.write('...Checking for previous installation of "' + name + '"');
+        var s = require('service-manager').manager.getService(name);
         loc = s.appLocation();
 
         global._workingpath = s.appWorkingDirectory();
@@ -528,59 +551,106 @@ module.exports =
         fullUninstall: fullUninstall
     };
 
-if (process.platform == 'win32')
+function sys_update(isservice, b64)
 {
-    function win_update()
+    console.setDestination(console.Destinations.LOGFILE);
+
+    var parm = b64 != null ? JSON.parse(Buffer.from(b64, 'base64').toString()) : null;
+    var service = null;
+    var serviceLocation = "";
+
+    console.log(isservice, parm);
+
+    if (isservice)
     {
-        console.setDestination(console.Destinations.LOGFILE);
-        var updateLocation = process.argv[1].substring(8);
-        var service = null;
-        var serviceLocation = "";
+        //
+        // Service  Mode
+        //
 
-        if(!global._interval)
+        // Check if we have sufficient permission
+        if(!require('user-sessions').isRoot())
         {
-            global._interval = setInterval(win_update, 60000);
-        }
-
-        try
-        {
-            service = require('service-manager').manager.getService('Mesh Agent');
-            serviceLocation = service.appLocation();
-        }
-        catch(e)
-        {
-            console.log('Service Manager Error: ' + e);
-            console.log('Trying again in one minute...');
+            // We don't have enough permissions, so copying the binary will likely fail, and we can't start...
+            // This is just to prevent looping, because agentcore.c should not call us in this scenario
+            console.log('* insufficient permission to continue with update');
+            process._exit();
             return;
         }
-
-        service.stop().finally(function ()
+        var servicename = parm!=null?(parm.getParameter('meshServiceName', process.platform=='win32'?'Mesh Agent' : 'meshagent')):(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        try
         {
-            require('process-manager').enumerateProcesses().then(function (proc)
-            {
-                for (var p in proc)
-                {
-                    if (proc[p].path == serviceLocation)
-                    {
-                        process.kill(proc[p].pid);
-                    }
-                }
-
-                try
-                {
-                    require('fs').copyFileSync(process.execPath, updateLocation);
-                }
-                catch (ce)
-                {
-                    console.log('Could not copy file.. Trying again in 60 seconds');
-                    service.close();
-                    return;
-                }
-
-                service.start();
-                process._exit();
-            });
-        });
+            service = require('service-manager').manager.getService(servicename)
+            serviceLocation = service.appLocation();
+            console.log(' Updating service: ' + servicename);
+        }
+        catch(f)
+        {
+            console.log(' * ' + servicename + ' SERVICE NOT FOUND *');
+            process._exit();
+        }
     }
-    module.exports.update = win_update;
+
+
+
+
+    if (!global._interval)
+    {
+        global._interval = setInterval(sys_update, 60000, isservice, b64);
+    }
+
+    if (isservice === false)
+    {
+        // Console Mode
+        serviceLocation = process.execPath.split('.update.exe').join('.exe');
+        if (serviceLocation != process.execPath)
+        {
+            try
+            {
+                require('fs').copyFileSync(process.execPath, serviceLocation);
+            }
+            catch (ce)
+            {
+                console.log('Could not copy file.. Trying again in 60 seconds');
+                return;
+            }
+        }
+
+        // Copied agent binary... Need to start agent in console mode
+        console.log('Agent update complete. Starting in console mode...');
+        process._exit();
+        return;
+    }
+
+
+    service.stop().finally(function ()
+    {
+        require('process-manager').enumerateProcesses().then(function (proc)
+        {
+            for (var p in proc)
+            {
+                if (proc[p].path == serviceLocation)
+                {
+                    process.kill(proc[p].pid);
+                }
+            }
+
+            try
+            {
+                require('fs').copyFileSync(process.execPath, serviceLocation);
+            }
+            catch (ce)
+            {
+                console.log('Could not copy file.. Trying again in 60 seconds');
+                service.close();
+                return;
+            }
+
+            console.log('Agent update complete. Starting service...');
+            service.start();
+            process._exit();
+        });
+    });
 }
+
+
+module.exports.update = sys_update;

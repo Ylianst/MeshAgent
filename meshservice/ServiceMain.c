@@ -109,27 +109,6 @@ BOOL RunAsAdmin(char* args, int isAdmin)
 	return FALSE;
 }
 
-void UpdateOwnerData()
-{
-	WCHAR str[_MAX_PATH];
-	DWORD strLen;
-	strLen = GetModuleFileNameW(NULL, str, _MAX_PATH);
-
-	int exePathLen = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)str, -1, NULL, 0, NULL, NULL);
-	char *exePath = (char*)ILibMemory_SmartAllocate(exePathLen);
-	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)str, -1, exePath, exePathLen, NULL, NULL);
-
-	void *chain = ILibCreateChain();
-	duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, chain, NULL, NULL, exePath, NULL, NULL, NULL);
-
-	duk_peval_string_noresult(ctx, "global._noMessagePump=true;var key=require('win-registry').usernameToUserKey(require('user-sessions').getProcessOwnerName(process.pid).name);var reg=require('win-registry');reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\\\CurrentControlSet\\\\Services\\\\Mesh Agent', '_InstalledBy', key);");
-
-	Duktape_SafeDestroyHeap(ctx);
-	ILibChain_DestroyEx(chain);
-	ILibMemory_Free(exePath);
-}
-
-
 DWORD WINAPI ServiceControlHandler( DWORD controlCode, DWORD eventType, void *eventData, void* eventContext )
 {
 	switch (controlCode)
@@ -566,6 +545,13 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && strcasecmp(argv[1], "-name") == 0)
+	{
+		char script[] = "console.log(require('_agentNodeId').serviceName());process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -717,21 +703,31 @@ int wmain(int argc, char* wargv[])
 			else if (r == 2) { printf("Mesh agent failed to stop"); }
 		}
 	}
-#ifdef _MINCORE
-	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
-	{
-		// Attempt to copy our own exe over the original exe
-		while (util_CopyFile(argv[0], argv[1] + 8, FALSE) == FALSE) { Sleep(5000); }
-
-		// Attempt to start the updated service up again
-		LaunchService();
-	}
-#endif
-#ifndef _MINCORE
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
 	{		
-		char *update = ILibMemory_Allocate(512, 0, NULL, NULL);
-		int updateLen = sprintf_s(update, 512, "require('agent-installer').update();");
+		char *update = ILibMemory_Allocate(1024, 0, NULL, NULL);
+		int updateLen;
+
+		if (argv[1][8] == '*')
+		{
+			// New Style
+			updateLen = sprintf_s(update, 1024, "require('agent-installer').update(%s, '%s');", argv[1][9] == 'S' ? "true" : "false", argc > 1 ? argv[2] : "null");
+		}
+		else
+		{
+			// Legacy
+			if (argc > 1 && (strcmp(argv[2], "run") == 0 || strcmp(argv[2], "connect") == 0))
+			{
+				// Console Mode
+				updateLen = sprintf_s(update, 1024, "require('agent-installer').update(false, ['%s']);", argv[2]);
+			}
+			else
+			{
+				// Service
+				updateLen = sprintf_s(update, 1024, "require('agent-installer').update(true);");
+			}
+		}
+
 		__try
 		{
 			agent = MeshAgent_Create(0);
@@ -748,13 +744,8 @@ int wmain(int argc, char* wargv[])
 		}
 		wmain_free(argv);
 		return(retCode);
-
-		//// Attempt to copy our own exe over the original exe
-		//while (util_CopyFile(argv[0], argv[1] + 8, FALSE) == FALSE) Sleep(5000);
-
-		//// Attempt to start the updated service up again
-		//LaunchService(serviceFile);
 	}
+#ifndef _MINCORE
 	else if (argc > 1 && (strcasecmp(argv[1], "-netinfo") == 0))
 	{
 		char* data;

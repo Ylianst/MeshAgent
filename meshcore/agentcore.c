@@ -1796,6 +1796,12 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 	
+		if (agent->JSRunningAsService)
+		{
+			duk_push_string(ctx, agent->meshServiceName);
+			ILibDuktape_CreateReadonlyProperty(ctx, "serviceName");
+		}
+
 #ifdef WIN32
 	#ifdef _WINSERVICE
 		duk_push_boolean(ctx, agent->runningAsConsole == 0);
@@ -1893,8 +1899,16 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 	if (certfile == NULL)
 	{
 #if defined(WIN32)
-		char *rootSubject = (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "CN=MeshNodeDiagnosticCertificate" : "CN=MeshNodeCertificate";
-		
+		char rootSubject[255];
+		if (agent->noCertStore == 0 && agent->meshServiceName != NULL && strcmp(agent->meshServiceName, "Mesh Agent") == 0)
+		{
+			sprintf_s(rootSubject, sizeof(rootSubject), "CN=MeshNode%s", (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "DiagnosticCertificate" : "Certificate");
+		}
+		else
+		{
+			sprintf_s(rootSubject, sizeof(rootSubject), "CN=%s_Node%s", agent->meshServiceName, (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "DiagnosticCertificate" : "Certificate");
+		}
+
 		if (agent->noCertStore == 0 && (agent->certObject = wincrypto_open(TRUE, rootSubject)) != NULL) // Force certificate re-generation
 		{
 			int l;
@@ -2003,7 +2017,15 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 	if (len == 0 || util_from_p12(ILibScratchPad2, len, "hidden", &(agent->selfcert)) == 0)
 	{
 #if defined(WIN32)
-		char *rootSubject = (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "CN=MeshNodeDiagnosticCertificate" : "CN=MeshNodeCertificate";
+		char rootSubject[255];
+		if (agent->noCertStore == 0 && agent->meshServiceName != NULL && strcmp(agent->meshServiceName, "Mesh Agent") == 0)
+		{
+			sprintf_s(rootSubject, sizeof(rootSubject), "CN=MeshNode%s", (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "DiagnosticCertificate" : "Certificate");
+		}
+		else
+		{
+			sprintf_s(rootSubject, sizeof(rootSubject), "CN=%s_Node%s", agent->meshServiceName, (agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY ? "DiagnosticCertificate" : "Certificate");
+		}
 
 		// No cert in this .db file. Try to load or generate a root certificate from a Windows crypto provider. This can be TPM backed which is great.
 		// However, if we don't have the second cert created, we need to regen the root...
@@ -3687,6 +3709,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
 	ILibDuktape_HECI_Debug = (ILibSimpleDataStore_Get(agent->masterDb, "heciDebug", NULL, 0) != 0);
 
+
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
 #endif
@@ -3733,11 +3756,14 @@ int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STAC
 }
 #endif
 
-
-void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
+#define checkForEmbeddedMSH(agent) checkForEmbeddedMSH_ex(agent, NULL)
+void checkForEmbeddedMSH_ex(MeshAgentHostContainer *agent, char **eMSH)
 {
 	FILE *tmpFile = NULL;
 	int mshLen;
+	char *data = NULL;
+
+	if (eMSH != NULL) { *eMSH = NULL; }
 
 #ifdef WIN32
 	_wfopen_s(&tmpFile, ILibUTF8ToWide(agent->exePath, -1), L"rb");
@@ -3756,26 +3782,39 @@ void checkForEmbeddedMSH(MeshAgentHostContainer *agent)
 		{
 			mshLen = ntohl(mshLen);
 			fseek(tmpFile, -4 - mshLen, SEEK_CUR);
-			char *eMSH = ILibMemory_AllocateA(mshLen);
-			if (fread(eMSH, 1, mshLen, tmpFile) == mshLen)
+			
+			data = (char*)ILibMemory_SmartAllocate(mshLen);
+			if (eMSH != NULL) { *eMSH = data; }
+			if (fread(data, 1, mshLen, tmpFile) == mshLen)
 			{
-				FILE *msh = NULL;
-#ifdef WIN32
-				_wfopen_s(&msh, ILibUTF8ToWide(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), -1), L"wb");
-#else
-				msh = fopen(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
-#endif
-				if (msh != NULL)
+				if (eMSH == NULL)
 				{
-					ignore_result(fwrite(eMSH, 1, mshLen, msh));
-					fclose(msh);
+					FILE *msh = NULL;
+#ifdef WIN32
+					_wfopen_s(&msh, ILibUTF8ToWide(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), -1), L"wb");
+#else
+					msh = fopen(MeshAgent_MakeAbsolutePath(agent->exePath, ".msh"), "wb");
+#endif
+					if (msh != NULL)
+					{
+						ignore_result(fwrite(data, 1, mshLen, msh));
+						fclose(msh);
+					}
+					ILibMemory_Free(data);
 				}
 			}
-			
 		}
 	}
 	fclose(tmpFile);
 }
+void checkForEmbeddedMSH_ex2(char *binPath, char **eMSH)
+{
+	MeshAgentHostContainer tmp;
+	memset(&tmp, 0, sizeof(tmp));
+	tmp.exePath = binPath;
+	checkForEmbeddedMSH_ex(&tmp, eMSH);
+}
+
 int importSettings(MeshAgentHostContainer *agent, char* fileName)
 {
 	int eq;
@@ -4348,16 +4387,35 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #if !defined(MICROSTACK_NOTLS) || defined(_POSIX)
 	duk_context *tmpCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, NULL, NULL);
 	duk_peval_string_noresult(tmpCtx, "require('linux-pathfix')();");
+	int msnlen;
+	char *tmpString;
 
 	agentHost->platformType = MeshAgent_Posix_PlatformTypes_UNKNOWN;
 	agentHost->JSRunningAsService = 0;
 	agentHost->JSRunningWithAdmin = 0;
 
+	if ((msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "meshServiceName", NULL, 0)) != 0)
+	{
+		agentHost->meshServiceName = (char*)ILibMemory_SmartAllocate(msnlen+1);
+		ILibSimpleDataStore_Get(agentHost->masterDb, "meshServiceName", agentHost->meshServiceName, msnlen);
+	}
+	else
+	{
+#ifdef WIN32
+		agentHost->meshServiceName = "Mesh Agent";
+#else
+		agentHost->meshServiceName = "meshagent";
+#endif
+	}
+
+	duk_push_sprintf(tmpCtx, "require('service-manager').manager.getService('%s').isMe();", agentHost->meshServiceName);
+	tmpString = (char*)duk_get_string(tmpCtx, -1);
+
 	if (duk_peval_string(tmpCtx, "(function foo() { var f = require('service-manager').manager.getServiceType(); switch(f){case 'procd': return(7); case 'windows': return(10); case 'launchd': return(3); case 'freebsd': return(5); case 'systemd': return(1); case 'init': return(2); case 'upstart': return(4); default: return(0);}})()") == 0)
 	{
 		agentHost->platformType = (MeshAgent_Posix_PlatformTypes)duk_get_int(tmpCtx, -1);
 	}
-	if (duk_peval_string(tmpCtx, "require('service-manager').manager.getService(process.platform=='win32'?'Mesh Agent':'meshagent').isMe();") == 0)
+	if (duk_peval_string(tmpCtx, tmpString) == 0)
 	{
 		agentHost->JSRunningAsService = duk_get_boolean(tmpCtx, -1);
 	}
@@ -4484,88 +4542,104 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #ifdef WIN32
 	// If running as a Windows service, set basic values to the registry, this allows other applications to know what the mesh agent is doing.
 	HKEY hKey;
+	size_t rlen = snprintf(NULL, 0, "Software\\Open Source\\%s", agentHost->meshServiceName);
+	char *tmp1 = (char*)ILibMemory_SmartAllocate(rlen + 1);
+	snprintf(tmp1, ILibMemory_Size(tmp1), "Software\\Open Source\\%s", agentHost->meshServiceName);
+	size_t wlen = ILibUTF8ToWideCount(tmp1) + 1;
+	WCHAR* wstr = (WCHAR*)ILibMemory_SmartAllocate(wlen * sizeof(WCHAR));
+
+	if (wlen < INT32_MAX && rlen <= INT32_MAX)
+	{
+		ILibUTF8ToWideEx(tmp1, (int)rlen, wstr, (int)wlen + 1);
 
 #if defined(_WINSERVICE)
-	// If running as a Windows Service, save the key in LOCAL_MACHINE
-	if (RegCreateKey(agentHost->runningAsConsole == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
+		// If running as a Windows Service, save the key in LOCAL_MACHINE
+		if (RegCreateKeyW(agentHost->runningAsConsole == 0 ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER, wstr, &hKey) == ERROR_SUCCESS)
 #else
-	// If running in Console mode, save the key in CURRENT_USER
-	if (RegCreateKey(HKEY_CURRENT_USER, TEXT("Software\\Open Source\\MeshAgent2"), &hKey) == ERROR_SUCCESS)
+		// If running in Console mode, save the key in CURRENT_USER
+		if (RegCreateKeyW(HKEY_CURRENT_USER, wstr, &hKey) == ERROR_SUCCESS)
 #endif
-	{
-		int i, len;
-		char* tmp = NULL;
-
-
-
-		if ((agentHost->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == 0)
 		{
-			// Save the NodeId
-			len = ILibBase64Encode(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, &tmp);
-			if ((len > 0) && (tmp != NULL)) 
+			int i, len;
+			char* tmp = NULL;
+
+			if ((agentHost->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == 0)
 			{
-				for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
-				RegSetValueExA(hKey, "NodeId", 0, REG_SZ, tmp, len);
-				free(tmp);
-				tmp = NULL;
-			}
-			else { RegDeleteKeyA(hKey, "NodeId"); }
-		
+				// Save the NodeId
+				len = ILibBase64Encode(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, &tmp);
+				if ((len > 0) && (tmp != NULL))
+				{
+					for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
+					RegSetValueExA(hKey, "NodeId", 0, REG_SZ, tmp, len);
+					free(tmp);
+					tmp = NULL;
+				}
+				else { RegDeleteKeyA(hKey, "NodeId"); }
 
-			// Save the AgentHash
-			util_tohex(agentHost->agentHash, UTIL_SHA384_HASHSIZE, ILibScratchPad);
-			RegSetValueExA(hKey, "AgentHash", 0, REG_SZ, ILibScratchPad, (int)strlen(ILibScratchPad));
 
-			// Save the MeshId
-			if (ILibSimpleDataStore_Get(agentHost->masterDb, "MeshID", NULL, 0) == 0) { RegDeleteKeyA(hKey, "MeshId"); } else {
-				len = ILibSimpleDataStore_Get(agentHost->masterDb, "MeshID", ILibScratchPad2, (int)sizeof(ILibScratchPad2));
-				if (len > 0) {
-					len = ILibBase64Encode(ILibScratchPad2, len, &tmp);
-					if ((len > 0) && (tmp != NULL)) {
-						for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
-						RegSetValueExA(hKey, "MeshId", 0, REG_SZ, tmp, len);
-						free(tmp);
-						tmp = NULL;
+				// Save the AgentHash
+				util_tohex(agentHost->agentHash, UTIL_SHA384_HASHSIZE, ILibScratchPad);
+				RegSetValueExA(hKey, "AgentHash", 0, REG_SZ, ILibScratchPad, (int)strlen(ILibScratchPad));
+
+				// Save the MeshId
+				if (ILibSimpleDataStore_Get(agentHost->masterDb, "MeshID", NULL, 0) == 0) { RegDeleteKeyA(hKey, "MeshId"); }
+				else {
+					len = ILibSimpleDataStore_Get(agentHost->masterDb, "MeshID", ILibScratchPad2, (int)sizeof(ILibScratchPad2));
+					if (len > 0) {
+						len = ILibBase64Encode(ILibScratchPad2, len, &tmp);
+						if ((len > 0) && (tmp != NULL)) {
+							for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
+							RegSetValueExA(hKey, "MeshId", 0, REG_SZ, tmp, len);
+							free(tmp);
+							tmp = NULL;
+						}
+						else { RegDeleteKeyA(hKey, "MeshId"); }
 					}
 					else { RegDeleteKeyA(hKey, "MeshId"); }
 				}
-				else { RegDeleteKeyA(hKey, "MeshId"); }
-			}
 
-			// Save a bunch of values in the registry
-			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "MeshServer", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "MeshServerUrl"); } else { RegSetValueExA(hKey, "MeshServerUrl", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the mesh server URL
-			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "MeshServerId"); } else { RegSetValueExA(hKey, "MeshServerId", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the mesh server id
-			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "WebProxy", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Proxy"); }  else { RegSetValueExA(hKey, "Proxy", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the proxy
-			if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "Tag", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Tag"); } else { RegSetValueExA(hKey, "Tag", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the tag	
-		}
-		else
-		{
-			// We're a Diagnostic Agent, so we only save a subset
-			// Save the NodeId
-			len = ILibBase64Encode(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, &tmp);
-			if ((len > 0) && (tmp != NULL))
+				// Save a bunch of values in the registry
+				if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "MeshServer", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "MeshServerUrl"); }
+				else { RegSetValueExA(hKey, "MeshServerUrl", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the mesh server URL
+				if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "MeshServerId"); }
+				else { RegSetValueExA(hKey, "MeshServerId", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the mesh server id
+				if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "WebProxy", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Proxy"); }
+				else { RegSetValueExA(hKey, "Proxy", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the proxy
+				if ((pLen = ILibSimpleDataStore_Get(agentHost->masterDb, "Tag", ILibScratchPad2, (int)sizeof(ILibScratchPad2))) == 0) { RegDeleteKeyA(hKey, "Tag"); }
+				else { RegSetValueExA(hKey, "Tag", 0, REG_SZ, (BYTE*)ILibScratchPad2, (int)strlen(ILibScratchPad2)); } // Save the tag	
+			}
+			else
 			{
-				for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
-				RegSetValueExA(hKey, "DiagnosticAgentNodeId", 0, REG_SZ, tmp, len);
-				free(tmp);
-				tmp = NULL;
+				// We're a Diagnostic Agent, so we only save a subset
+				// Save the NodeId
+				len = ILibBase64Encode(agentHost->g_selfid, UTIL_SHA384_HASHSIZE, &tmp);
+				if ((len > 0) && (tmp != NULL))
+				{
+					for (i = 0; i < len; i++) { if (tmp[i] == '+') { tmp[i] = '@'; } else if (tmp[i] == '/') { tmp[i] = '$'; } } // Replace + --> @ and / --> $
+					RegSetValueExA(hKey, "DiagnosticAgentNodeId", 0, REG_SZ, tmp, len);
+					free(tmp);
+					tmp = NULL;
+				}
+				else { RegDeleteKeyA(hKey, "DiagnosticAgentNodeId"); }
 			}
-			else { RegDeleteKeyA(hKey, "DiagnosticAgentNodeId"); }
-		}
 
-		if (ILibSimpleDataStore_Get(agentHost->masterDb, "SelfNodeCert", NULL, 0) == 0)
-		{
-			int NodeIDLen = 0;
-			if ((NodeIDLen = ILibSimpleDataStore_Get(agentHost->masterDb, "NodeID", ILibScratchPad, (int)sizeof(ILibScratchPad))) == 0 || !(NodeIDLen == (int)sizeof(agentHost->g_selfid) && memcmp(agentHost->g_selfid, ILibScratchPad, NodeIDLen) == 0))
+			if (ILibSimpleDataStore_Get(agentHost->masterDb, "SelfNodeCert", NULL, 0) == 0)
 			{
-				// NodeID isn't saved to db, so let's put it there
-				ILibSimpleDataStore_PutEx(agentHost->masterDb, "NodeID", 6, agentHost->g_selfid, (int)sizeof(agentHost->g_selfid));
+				int NodeIDLen = 0;
+				if ((NodeIDLen = ILibSimpleDataStore_Get(agentHost->masterDb, "NodeID", ILibScratchPad, (int)sizeof(ILibScratchPad))) == 0 || !(NodeIDLen == (int)sizeof(agentHost->g_selfid) && memcmp(agentHost->g_selfid, ILibScratchPad, NodeIDLen) == 0))
+				{
+					// NodeID isn't saved to db, so let's put it there
+					ILibSimpleDataStore_PutEx(agentHost->masterDb, "NodeID", 6, agentHost->g_selfid, (int)sizeof(agentHost->g_selfid));
+				}
 			}
-		}
 
-		// Close the registry key
-		RegCloseKey(hKey);
+			// Close the registry key
+			RegCloseKey(hKey);
+		}
 	}
+
+	ILibMemory_Free(tmp1);
+	ILibMemory_Free(wstr);
 #endif
 
 #ifndef MICROSTACK_NOTLS
@@ -5123,6 +5197,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 
 	agentHost->meshCoreCtx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(secFlags, execTimeout, agentHost->chain, scriptArgs, connectAgent != 0 ? agentHost->masterDb : NULL, agentHost->exePath, agentHost->pipeManager, connectAgent == 0 ? MeshAgent_RunScriptOnly_Finalizer : NULL, agentHost);
 	ILibDuktape_SetNativeUncaughtExceptionHandler(agentHost->meshCoreCtx, MeshAgent_ScriptMode_UncaughtExceptionSink, agentHost);
+		
 	if (connectAgent != 0) 
 	{ 
 		ILibDuktape_MeshAgent_Init(agentHost->meshCoreCtx, agentHost->chain, agentHost); 
@@ -5267,6 +5342,7 @@ int MeshAgent_System(char *cmd)
 
 int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **param)
 {
+	char *startParms = NULL;
 	char _exedata[ILibMemory_Init_Size(1024, sizeof(void*))];
 	char *exePath = ILibMemory_Init(_exedata, 1024, sizeof(void*), ILibMemory_Types_STACK);
 	((void**)ILibMemory_Extra(exePath))[0] = agentHost;
@@ -5375,7 +5451,40 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		agentHost->chain = NULL; // Mesh agent has exited, set the chain to NULL
 
 		// Close the database
-		if (agentHost->masterDb != NULL) {
+		if (agentHost->masterDb != NULL) 
+		{
+			if (agentHost->performSelfUpdate != 0)
+			{
+				if (agentHost->JSRunningAsService == 0)
+				{
+					int jsonlen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
+					if (jsonlen > 0)
+					{
+						startParms = (char*)ILibMemory_SmartAllocateEx(jsonlen, ILibBase64EncodeLength(jsonlen));
+						unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
+						ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, startParms, jsonlen);
+						ILibBase64Encode((unsigned char*)startParms, jsonlen, &tmp);
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => %s", startParms); }
+					}
+					else
+					{
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => NONE"); }
+					}
+				}
+				else
+				{
+#ifdef WIN32
+					if(strcmp(agentHost->meshServiceName, "Mesh Agent") !=0)
+#else
+					if (strcmp(agentHost->meshServiceName, "Mesh Agent") != 0)
+#endif
+					{
+						startParms = ILibMemory_SmartAllocateEx(ILibMemory_Size(agentHost->meshServiceName) + 30, ILibBase64EncodeLength(ILibMemory_Size(agentHost->meshServiceName) + 30));
+						unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
+						ILibBase64Encode((unsigned char*)startParms, sprintf_s(startParms, ILibMemory_Size(startParms), "[\"--meshServiceName=\\\"%s\\\"\"]", agentHost->meshServiceName), &tmp);
+					}
+				}
+			}
 			ILibSimpleDataStore_Close(agentHost->masterDb);
 			agentHost->masterDb = NULL;
 		}
@@ -5383,7 +5492,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		// Check if we need to perform self-update (performSelfUpdate should indicate startup type on Liunx: 1 = systemd, 2 = upstart, 3 = sysv-init)
 		if (agentHost->performSelfUpdate != 0)
 		{
-			int i, ptr = 0;
 #ifdef WIN32
 			STARTUPINFOW info = { sizeof(info) };
 			PROCESS_INFORMATION processInfo;
@@ -5394,20 +5502,13 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #else
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update"); // uses ILibScratchPad2
 #endif
-			char str[4096];				
-
 			if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updating..."); }
-
-			// Build the argument list
-			str[0] = 0;
-			for (i = 1; i < paramLen && ptr >= 0; i++) ptr += sprintf_s(str + ptr, 4096 - ptr, " %s", param[i]);
-
 #ifdef WIN32
 			// Windows version
-			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:\"%s\"%s", updateFilePath, agentHost->exePath, str);
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService!=0?"S":"C", startParms==NULL?"":(char*)ILibMemory_Extra(startParms));
 			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
-				// We tried to execute a bad executable... not good. Lets try to recover.
+				// We triedI  to execute a bad executable... not good. Lets try to recover.
 				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> FAILED..."); }
 				if (updateFilePath != NULL && agentHost->exePath != NULL)
 				{
@@ -5489,13 +5590,14 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				struct stat results;
 				stat(agentHost->exePath, &results); // This the mode of the current executable
 				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "\"%s\" -update:\"%s\"%s &", updateFilePath, agentHost->exePath, str); // Launch the new executable for update.
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "\"%s\" -update:* %s &", updateFilePath, startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
 				if (system(ILibScratchPad)) {}
 			}
 #endif
 		}
 	}
 
+	if (startParms != NULL) { ILibMemory_Free(startParms); }
 	
 #ifndef MICROSTACK_NOTLS
 	util_openssl_uninit();
@@ -5516,6 +5618,7 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 	if (agent->chain != NULL) { ILibChain_DestroyEx(agent->chain); agent->chain = NULL; }
 	if (agent->multicastDiscoveryKey != NULL) { free(agent->multicastDiscoveryKey); agent->multicastDiscoveryKey = NULL; }
 	if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
+	if (agent->meshServiceName != NULL) { ILibMemory_Free(agent->meshServiceName); agent->meshServiceName = NULL; }
 #ifdef WIN32
 	if (agent->shCore != NULL)
 	{

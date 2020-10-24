@@ -62,5 +62,57 @@ function _meshNodeId()
     return (ret);
 }
 
+function _meshName()
+{
+    var name = _MSH().meshServiceName;
+    if(name==null)
+    {
+        switch(process.platform)
+        {
+            case 'win32':
+                // Enumerate the registry to see if the we can find our NodeID           
+                var reg = require('win-registry');
+                var nid = _meshNodeId();
+                var key;
+                var source = [reg.HKEY.LocalMachine, reg.HKEY.CurrentUser];
+                var val;
+
+                while (name == null && source.length > 0)
+                {
+                    val = reg.QueryKey(source.shift(), 'Software\\Open Source');
+                    for (key = 0; key < val.subkeys.length;++key)
+                    {
+                        try
+                        {
+                            if (nid == Buffer.from(reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\' + val.subkeys[key], 'NodeId'), 'base64').toString('hex'))
+                            {
+                                name = val.subkeys[key];
+                                break;
+                            }
+                        }
+                        catch (ex)
+                        {
+                        }
+                    }
+                }
+                break;
+            default:
+                var service = require('service-manager').manager.enumerateService();
+                name = 'meshagent';
+                for (var i = 0; i < service.length; ++i)
+                {
+                    if(service[i].appLocation()==process.execPath)
+                    {
+                        name = service[i].name;
+                        break;
+                    }
+                }
+                break;
+        }
+    }
+    return (name);
+}
+
 module.exports = _meshNodeId;
+module.exports.serviceName = _meshName;
 

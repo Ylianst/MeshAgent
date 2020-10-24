@@ -237,6 +237,7 @@ typedef struct MeshAgentHostContainer
 	MeshAgent_Posix_PlatformTypes platformType;
 	int JSRunningAsService;
 	int JSRunningWithAdmin;
+	char *meshServiceName;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

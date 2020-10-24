@@ -17,6 +17,26 @@ limitations under the License.
 const exeJavaScriptGuid = 'B996015880544A19B7F7E9BE44914C18';
 const exeMeshPolicyGuid = 'B996015880544A19B7F7E9BE44914C19';
 
+
+
+function mshLength()
+{
+    var exesize = require('fs').statSync(process.execPath).size;
+    var fd = require('fs').openSync(process.execPath, "rb");
+    var buffer = Buffer.alloc(20);
+    require('fs').readSync(fd, buffer, 0, buffer.length, exesize - 20);
+
+    if(buffer.slice(4).toString('hex') == exeMeshPolicyGuid)
+    {
+        return (buffer.readUInt32BE(0));
+    }
+    else
+    {
+        return (0);
+    }
+}
+
+
 // Changes a Windows Executable to add the MSH inside of it.
 // This method will write to destination stream and close it.
 /*
@@ -152,6 +172,7 @@ function addMsh(options)
 try
 {
     module.exports = addMsh;
+    module.exports.len = mshLength;
 }
 catch(e)
 {
@@ -170,6 +191,10 @@ catch(e)
                 break;
             case '-i':
                 inputFile = process.argv[i + 1];
+                break;
+            case '-mshlen':
+                console.log('Integrated MSH Length: ' + mshLength());
+                process.exit();
                 break;
             default:
                 console.log('unrecognized parameter: ' + process.argv[i]);
