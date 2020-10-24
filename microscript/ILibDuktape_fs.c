@@ -1283,6 +1283,10 @@ duk_ret_t ILibDuktape_fs_Finalizer(duk_context *ctx)
 	if (duk_has_prop_string(ctx, 0, FS_NOTIFY_DISPATCH_PTR))
 	{
 #ifdef _POSIX
+#if !defined(__APPLE__) && !defined(_FREEBSD)
+		void *ptr = Duktape_GetPointerProperty(ctx, 0, FS_NOTIFY_DISPATCH_PTR);
+		ILibChain_SafeRemove(duk_ctx_chain(ctx), ptr);
+#endif
 #ifdef __APPLE__
 		duk_get_prop_string(ctx, 0, FS_NOTIFY_DISPATCH_PTR);
 		ILibDuktape_fs_appleWatcher *watcher = (ILibDuktape_fs_appleWatcher*)Duktape_GetBuffer(ctx, -1, NULL);
@@ -1723,6 +1727,12 @@ void ILibDuktape_fs_notifyDispatcher_QueryEx(ILibHashtable sender, void *Key1, c
 char* ILibDuktape_fs_notifyDispatcher_Query(void* chain, void *object, int fd, size_t *dataLen)
 {
 	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
+
+	if (duk_ctx_is_alive(data->ctx) == 0) 
+	{
+		return(" (ILibDuktape_fs_linuxWatcher)"); 
+	}
+
 	if (data->fd != fd) { return(((ILibChain_Link*)object)->MetaData); }
 	int top = duk_get_top(data->ctx);
 	duk_push_array(data->ctx);																				// [array]
