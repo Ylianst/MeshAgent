@@ -36,8 +36,23 @@ function checkParameters(parms)
 {
     var msh = _MSH();
 
-    if (parms.getParameter('meshServiceName', null) == null && msh.meshServiceName != null) { parms.push('--meshServiceName="' + msh.meshServiceName + '"'); }
     if (parms.getParameter('companyName', null) == null && msh.companyName != null) { parms.push('--companyName="' + msh.companyName + '"'); }
+    if (parms.getParameter('meshServiceName', null) == null)
+    {
+        if(msh.meshServiceName != null)
+        {
+            parms.push('--meshServiceName="' + msh.meshServiceName + '"');
+        }
+        else
+        {
+            // Still no meshServiceName specified... Let's also check installed services...
+            var tmp = require('_agentNodeId').serviceName();
+            if(tmp != (process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'))
+            {
+                parms.push('--meshServiceName="' + tmp + '"');
+            }
+        }
+    }
 }
 function installService(params)
 {
