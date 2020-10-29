@@ -225,6 +225,7 @@ void ILibDuktape_Digest_CalculateNonce(duk_context *ctx, void *heapptr, long lon
 	char temp[33];
 	if (expiration == 0)
 	{
+		if (opaqueLen != 16) { ILibDuktape_Error(ctx, "Invalid opaque specified"); return; }
 		char tmp[8];
 		util_hexToBuf(opaque, opaqueLen, tmp);
 		expiration = ((long long*)tmp)[0];

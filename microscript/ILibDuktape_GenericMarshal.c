@@ -174,38 +174,6 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_HSTRING2(duk_context *ctx)
 	return 1;
 }
 
-duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_ASTRING(duk_context *ctx)
-{
-	void *ptr;
-	int size;
-
-#ifdef WIN32
-	char astr[65535];
-	size_t s;
-#endif
-
-	duk_push_this(ctx);							// [var]
-	duk_get_prop_string(ctx, -1, "_ptr");		// [var][ptr]
-	ptr = duk_to_pointer(ctx, -1);
-	duk_get_prop_string(ctx, -2, "_size");		// [var][ptr][size]
-	size = duk_to_int(ctx, -1);
-
-#ifdef WIN32
-	if (size == 0) { size = (int)wcsnlen_s((const wchar_t*)ptr, sizeof(astr) * 2); }
-	if (wcstombs_s(&s, astr, sizeof(astr), (const wchar_t*)ptr, size) == 0)
-	{
-		duk_push_string(ctx, (char*)astr);
-	}
-	else
-	{
-		return(ILibDuktape_Error(ctx, "String Conversion Error: %d", GetLastError()));
-	}
-#else
-	duk_push_lstring(ctx, (const char*)ptr, size);
-#endif
-	return 1;
-}
-
 duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_UTFSTRING(duk_context *ctx)
 {
 	void *ptr;
@@ -485,7 +453,7 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 #endif
 	ILibDuktape_CreateInstanceMethod(ctx, "Deref", ILibDuktape_GenericMarshal_Variable_Deref, DUK_VARARGS);
 	ILibDuktape_CreateEventWithGetter(ctx, "String", ILibDuktape_GenericMarshal_Variable_Val_STRING);
-	ILibDuktape_CreateEventWithGetter(ctx, "AnsiString", ILibDuktape_GenericMarshal_Variable_Val_ASTRING);
+	ILibDuktape_CreateEventWithGetter(ctx, "AnsiString", ILibDuktape_GenericMarshal_Variable_Val_UTFSTRING);
 	ILibDuktape_CreateEventWithGetter(ctx, "Wide2UTF8", ILibDuktape_GenericMarshal_Variable_Val_UTFSTRING);
 
 	ILibDuktape_CreateEventWithGetter(ctx, "HexString", ILibDuktape_GenericMarshal_Variable_Val_HSTRING);
