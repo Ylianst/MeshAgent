@@ -784,7 +784,7 @@ int wmain(int argc, char* wargv[])
 			}
 			RegCloseKey(hKey);
 		}
-		if (strEx != NULL) printf_s(strEx); else printf("Not defined, start the mesh service to create a nodeid.");
+		if (strEx != NULL) printf_s("%s", strEx); else printf("Not defined, start the mesh service to create a nodeid.");
 		wmain_free(argv);
 		return 0;
 	}
