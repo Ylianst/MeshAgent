@@ -8965,7 +8965,7 @@ char *ILibString_ToLower(const char *inString, size_t length)
 int ILibReadFileFromDiskEx(char **Target, char *FileName)
 {
 	char *buffer;
-	int SourceFileLength;
+	int SourceFileLength = 0;
 	FILE *SourceFile = NULL;
 
 #ifdef WIN32
@@ -8976,12 +8976,15 @@ int ILibReadFileFromDiskEx(char **Target, char *FileName)
 	if (SourceFile == NULL) { *Target = NULL; return 0; }
 
 	fseek(SourceFile, 0, SEEK_END);
-	SourceFileLength = (int)ftell(SourceFile);
+	if (ftell(SourceFile) < INT32_MAX) { SourceFileLength = (int)ftell(SourceFile); }
 	if (SourceFileLength >= 0)
 	{
 		fseek(SourceFile, 0, SEEK_SET);
 		if ((buffer = (char*)malloc(SourceFileLength + 1)) == NULL) ILIBCRITICALEXIT(254);
-		SourceFileLength = (int)fread(buffer, sizeof(char), (size_t)SourceFileLength, SourceFile);
+		if (SourceFileLength > 0)
+		{
+			SourceFileLength = (int)fread(buffer, sizeof(char), (size_t)SourceFileLength, SourceFile);
+		}
 		buffer[SourceFileLength] = 0; // To be nice, we allocated one more byte and put a zero at the end.
 		fclose(SourceFile);
 
