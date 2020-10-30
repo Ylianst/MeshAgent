@@ -21,6 +21,7 @@ limitations under the License.
 #include <WinBase.h>
 #include "wincrypto.h"
 #include <shellscalingapi.h>
+#include <process.h>
 #endif
 
 #include "agentcore.h"
@@ -2467,6 +2468,71 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 			ILIBLOGMESSSAGE("SelfUpdate -> Secondary Agent unavailable to assist with self update");
 		}
 	}
+
+#ifdef WIN32
+	if (agent->JSRunningAsService == 0)
+	{
+		// Windows Console Mode updater
+		if (duk_peval_string(agent->meshCoreCtx, "require('agent-installer').consoleUpdate();") != 0)
+		{
+			printf("%s", duk_safe_to_string(agent->meshCoreCtx, -1));
+		}
+	}
+#endif
+
+
+	//// Check updater version
+	//if (agent->JSRunningAsService == 0)
+	//{
+	//	char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe"); // uses ILibScratchPad2
+	//	duk_push_sprintf(agent->meshCoreCtx, "require('agent-installer').updaterVersion('%s');", updateFilePath);	// [code]
+	//	if (duk_peval(agent->meshCoreCtx) == 0) { agent->updaterVersion = duk_get_int(agent->meshCoreCtx, -1); }	// [version]
+	//	duk_pop(agent->meshCoreCtx);																				// ...
+	//}
+
+#ifndef WIN32
+	if (duk_peval_string(agent->meshCoreCtx, "require('MeshAgent').getStartupOptions();") == 0)	// [obj]
+	{
+		char *pth = "";
+		size_t i = 0;
+		size_t lines = 2;
+		size_t len = 0;
+		duk_del_prop_string(agent->meshCoreCtx, -1, "fakeUpdate");
+
+		if (duk_peval_string(agent->meshCoreCtx, "process.execPath.split('/').pop();") == 0)
+		{
+			pth = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &len);
+			len += 1;
+		}
+		duk_swap_top(agent->meshCoreCtx, -2);													// [path][obj]
+		duk_enum(agent->meshCoreCtx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);							// [path][obj][enum]
+		while (duk_next(agent->meshCoreCtx, -1, 1))												// [path][obj][enum][key][value]
+		{
+			++lines;
+			len += snprintf(NULL, 0, "--%s=\"%s\" ", duk_get_string(agent->meshCoreCtx, -2), duk_get_string(agent->meshCoreCtx, -1));
+			duk_pop_2(agent->meshCoreCtx);														// [path][obj][enum]
+		}
+		duk_pop(agent->meshCoreCtx);															// [path][obj]
+		agent->execparams = (char**)ILibMemory_SmartAllocateEx(lines * sizeof(char*), len);
+
+		i += (1 + sprintf_s(ILibMemory_Extra(agent->execparams), ILibMemory_ExtraSize(agent->execparams), "%s", pth));
+		lines = 1;
+		agent->execparams[0] = ILibMemory_Extra(agent->execparams);
+
+		duk_enum(agent->meshCoreCtx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);							// [path][obj][enum]
+		while (duk_next(agent->meshCoreCtx, -1, 1))												// [path][obj][enum][key][value]
+		{
+			len = sprintf_s(ILibMemory_Extra(agent->execparams) + i, ILibMemory_ExtraSize(agent->execparams) - i, "--%s=\"%s\"", duk_get_string(agent->meshCoreCtx, -2), duk_get_string(agent->meshCoreCtx, -1));
+			agent->execparams[lines] = ILibMemory_Extra(agent->execparams) + i;
+			i += (len + 1);
+			duk_pop_2(agent->meshCoreCtx);														// [path][obj][enum]
+			++lines;
+		}
+		agent->execparams[lines] = NULL;
+		duk_pop(agent->meshCoreCtx);															// [path][obj]
+	}
+	duk_pop_2(agent->meshCoreCtx);																// ...
+#endif
 
 	// Everything looks good, lets perform the update
 	if (agent->logUpdate != 0)
@@ -5476,7 +5542,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #ifdef WIN32
 					if(strcmp(agentHost->meshServiceName, "Mesh Agent") !=0)
 #else
-					if (strcmp(agentHost->meshServiceName, "Mesh Agent") != 0)
+					if (strcmp(agentHost->meshServiceName, "meshagent") != 0)
 #endif
 					{
 						startParms = ILibMemory_SmartAllocateEx(ILibMemory_Size(agentHost->meshServiceName) + 30, ILibBase64EncodeLength(ILibMemory_Size(agentHost->meshServiceName) + 30));
@@ -5504,8 +5570,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #endif
 			if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updating..."); }
 #ifdef WIN32
-			// Windows version
-			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService!=0?"S":"C", startParms==NULL?"":(char*)ILibMemory_Extra(startParms));
+			// Windows Service Updater
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
 			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We triedI  to execute a bad executable... not good. Lets try to recover.
@@ -5524,7 +5590,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			{
 				CloseHandle(processInfo.hProcess);
 				CloseHandle(processInfo.hThread);
-			}
+			}		
 #else
 			if (agentHost->JSRunningAsService != 0)
 			{
@@ -5541,7 +5607,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				{
 					// FreeBSD doesn't support hot-swapping the binary
 					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Handing off to child to complete"); }
-					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"var s=require('service-manager').manager.getService('meshagent');s.stop();require('fs').copyFileSync('%s', '%s');s.start();process.exit();\"", updateFilePath, updateFilePath, agentHost->exePath);
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"var s=require('service-manager').manager.getService('%s');s.stop();require('fs').copyFileSync('%s', '%s');s.start();process.exit();\"", updateFilePath, agentHost->meshServiceName, updateFilePath, agentHost->exePath);
 					ignore_result(MeshAgent_System(ILibScratchPad));
 				}
 				else
@@ -5552,7 +5618,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 					{
 						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/meshagent");	// Restart the service
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/%s", agentHost->meshServiceName);	// Restart the service
 							ignore_result(system(ILibScratchPad));
 							break;
 						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
@@ -5565,12 +5631,12 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 							break;
 						case MeshAgent_Posix_PlatformTypes_INITD:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service meshagent restart");	// Restart the service
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s restart", agentHost->meshServiceName);	// Restart the service
 							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
 							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling initctl restart (UPSTART)"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart meshagent");	// Restart the service
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart %s", agentHost->meshServiceName);	// Restart the service
 							ignore_result(MeshAgent_System(ILibScratchPad));
 							break;
 						default:
@@ -5590,8 +5656,13 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				struct stat results;
 				stat(agentHost->exePath, &results); // This the mode of the current executable
 				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "\"%s\" -update:* %s &", updateFilePath, startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
+
+				remove(agentHost->exePath);
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "cp %s %s", updateFilePath, agentHost->exePath);
 				if (system(ILibScratchPad)) {}
+
+				execv(agentHost->exePath, agentHost->execparams);
+				_exit(1);
 			}
 #endif
 		}
@@ -5619,6 +5690,7 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 	if (agent->multicastDiscoveryKey != NULL) { free(agent->multicastDiscoveryKey); agent->multicastDiscoveryKey = NULL; }
 	if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
 	if (agent->meshServiceName != NULL) { ILibMemory_Free(agent->meshServiceName); agent->meshServiceName = NULL; }
+	if (agent->execparams != NULL) { ILibMemory_Free(agent->execparams); agent->execparams = NULL; }
 #ifdef WIN32
 	if (agent->shCore != NULL)
 	{

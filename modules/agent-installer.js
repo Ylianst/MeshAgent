@@ -31,6 +31,21 @@ Object.defineProperty(Array.prototype, 'getParameter',
             return (defaultValue);
         }
     });
+Object.defineProperty(Array.prototype, 'getParameterIndex',
+    {
+        value: function (name)
+        {
+            var i;
+            for (i = 0; i < this.length; ++i)
+            {
+                if (this[i].startsWith('--' + name + '='))
+                {
+                    return (i);
+                }
+            }
+            return (-1);
+        }
+    });
 
 function checkParameters(parms)
 {
@@ -568,13 +583,20 @@ module.exports =
 
 function sys_update(isservice, b64)
 {
-    console.setDestination(console.Destinations.LOGFILE);
-
+    // This is run on the 'updated' agent. 
+    
     var parm = b64 != null ? JSON.parse(Buffer.from(b64, 'base64').toString()) : null;
     var service = null;
     var serviceLocation = "";
+    var px;
 
-    console.log(isservice, parm);
+    console.setInfoLevel(1);
+    console.info1('sys_update(' + isservice + ', ' + JSON.stringify(parm) + ')');
+    if ((px = parm.getParameterIndex('fakeUpdate')) >= 0)
+    {
+        console.info1('Removing "fakeUpdate" parameter');
+        parm.splice(px, 1);
+    }
 
     if (isservice)
     {
@@ -605,9 +627,6 @@ function sys_update(isservice, b64)
         }
     }
 
-
-
-
     if (!global._interval)
     {
         global._interval = setInterval(sys_update, 60000, isservice, b64);
@@ -615,8 +634,18 @@ function sys_update(isservice, b64)
 
     if (isservice === false)
     {
-        // Console Mode
-        serviceLocation = process.execPath.split('.update.exe').join('.exe');
+        //
+        // Console Mode (LEGACY)
+        //
+        if (process.platform == 'win32')
+        {
+            serviceLocation = process.execPath.split('.update.exe').join('.exe');
+        }
+        else
+        {
+            serviceLocation = process.execPath.substring(0, process.execPath.length - 7);
+        }
+
         if (serviceLocation != process.execPath)
         {
             try
@@ -625,15 +654,14 @@ function sys_update(isservice, b64)
             }
             catch (ce)
             {
-                console.log('Could not copy file.. Trying again in 60 seconds');
-                return;
+                console.log('\nAn error occured while updating agent.');
+                process.exit();
             }
         }
 
         // Copied agent binary... Need to start agent in console mode
-        console.log('Agent update complete. Starting in console mode...');
-        process._exit();
-        return;
+        console.log('\nAgent update complete... Please re-start agent.');
+        process.exit();
     }
 
 
@@ -667,5 +695,41 @@ function sys_update(isservice, b64)
     });
 }
 
+function agent_updaterVersion(updatePath)
+{
+    if (updatePath == null) { updatePath = process.execPath; }
+    var child = require('child_process').execFile(updatePath, [updatePath.split(process.platform == 'win32' ? '\\' : '/').pop(), '-updaterversion']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+    if(child.stdout.str.trim() == '')
+    {
+        return (0);
+    }
+    else
+    {
+        return (parseInt(child.stdout.str));
+    }
+}
+
+function win_consoleUpdate()
+{
+    // This is run from the 'old' agent, to copy the 'updated' agent.
+    var copy = [];
+    copy.push("try { require('fs').copyFileSync(process.execPath, process.execPath.split('.update.exe').join('.exe')); }");
+    copy.push("catch (x) { console.log('\\nError updating Mesh Agent.'); process.exit(); }");
+    copy.push("if(require('child_process')._execve==null) { console.log('\\nMesh Agent was updated... Please re-run from the command line.'); process.exit(); }");
+    copy.push("require('child_process')._execve(process.execPath.split('.update.exe').join('.exe'), [process.execPath.split('.update.exe').join('.exe'), 'run']);");
+    var args = [];
+    args.push(process.execPath.split('.exe').join('.update.exe'));
+    args.push('-b64exec');
+    args.push(Buffer.from(copy.join('\r\n')).toString('base64'));
+    console.info1('_execve("' + process.execPath.split('.exe').join('.update.exe') + '", ' + JSON.stringify(args) + ');');
+    require('child_process')._execve(process.execPath.split('.exe').join('.update.exe'), args);
+}
 
 module.exports.update = sys_update;
+module.exports.updaterVersion = agent_updaterVersion;
+if (process.platform == 'win32')
+{
+    module.exports.consoleUpdate = win_consoleUpdate;
+}

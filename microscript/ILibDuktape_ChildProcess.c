@@ -26,6 +26,10 @@ limitations under the License.
 #include "ILibDuktape_EventEmitter.h"
 #include "ILibDuktape_ScriptContainer.h"
 
+#ifdef WIN32
+#include <process.h>
+#endif
+
 #define ILibDuktape_ChildProcess_Process	"\xFF_ChildProcess_Process"
 #define ILibDuktape_ChildProcess_MemBuf		"\xFF_ChildProcess_MemBuf"
 
@@ -502,6 +506,62 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	duk_push_pointer(ctx, manager); duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Manager);
 	return(1);
 }
+
+duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx);
+	char **args;
+	char **env;
+	int i;
+	char *path = (char*)duk_require_string(ctx, 0);
+
+	args = (char**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, -1)));
+	for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
+	{
+		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][arg]
+		args[i] = duk_get_string(ctx, -1);
+		duk_pop(ctx);										// [array]
+	}
+
+	if (nargs > 2 && duk_is_object(ctx, 2) && duk_has_prop_string(ctx, 2, "env"))
+	{
+		duk_get_prop_string(ctx, 2, "env");							// [obj]
+	}
+	else
+	{
+		duk_eval_string(ctx, "process.env");						// [obj]
+	}
+	duk_push_array(ctx);											// [obj][array]
+	duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);				// [obj][array][enum]
+	while (duk_next(ctx, -1, 1))									// [obj][array][enum][key][value]
+	{
+		duk_push_sprintf(ctx, "%s=%s", duk_get_string(ctx, -2), duk_get_string(ctx, -1));	//[value][string]
+		duk_array_push(ctx, -5);									// [obj][array][enum][key][value]
+		duk_pop_2(ctx);												// [obj][array][enum]
+	}
+	duk_pop(ctx);													// [obj][array]
+
+	env = (char**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, -1)));
+	for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
+	{
+		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][arg]
+		env[i] = duk_get_string(ctx, -1);
+		duk_pop(ctx);										// [array]
+	}
+#ifndef WIN32
+	execve(path, args, env);
+	return(ILibDuktape_Error(ctx, "_execve() returned error: %d ", errno));
+#else
+	if (_execve(path, args, env) < 0)
+	{
+		return(ILibDuktape_Error(ctx, "_execve() failed"));
+	}
+	else
+	{
+		_exit(0);
+	}
+#endif
+}
 void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);
@@ -511,6 +571,8 @@ void ILibDuktape_ChildProcess_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_ChildProcess_Manager_Finalizer);
 
 	ILibDuktape_CreateInstanceMethod(ctx, "execFile", ILibDuktape_ChildProcess_execFile, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "_execve", ILibDuktape_ChildProcess_execve, DUK_VARARGS);
+
 	duk_push_object(ctx);
 	duk_push_int(ctx, 0);
 	duk_put_prop_string(ctx, -2, "DEFAULT");

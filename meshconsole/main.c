@@ -234,7 +234,19 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 		return(0);
 	}
-
+	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
+	{
+#ifdef WIN32
+		DWORD dummy;
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "1\n", 2, &dummy, NULL);
+#else
+		ignore_result(write(STDOUT_FILENO, "1\n", 2));
+#endif
+#ifdef WIN32
+		wmain_free(argv);
+#endif
+		return(0);
+	}
 #if defined(_LINKVM) && defined(__APPLE__)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
@@ -291,12 +303,17 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	{
 		if (argc >= 2 && strnlen_s(argv[1], 9) >= 8 && strncmp(argv[1], "-update:", 8) == 0)
 		{
-			// -update:"C:\Users\Public\Downloads\MeshManageability\Debug\MeshConsol2.exe"
-			MeshAgent_PerformSelfUpdate(argv[0], argv[1] + 8, argc, argv);
-#ifdef WIN32
-			wmain_free(argv);
-#endif
-			return 0;
+			ILibMemory_AllocateRaw(integratedJavaScript, 1024);
+			if (argv[1][8] == '*')
+			{
+				// New Style
+				integratedJavaScriptLen = sprintf_s(integratedJavaScript, 1024, "require('agent-installer').update(false, '%s');", argc > 1 ? argv[2] : "null");
+			}
+			else
+			{
+				// Legacy
+				integratedJavaScriptLen = sprintf_s(integratedJavaScript, 1024, "require('agent-installer').update(false, ['%s']);", argv[2]);
+			}
 		}
 	}
 #ifdef WIN32
