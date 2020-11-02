@@ -585,27 +585,28 @@ function sys_update(isservice, b64)
 {
     // This is run on the 'updated' agent. 
     
-    var parm = b64 != null ? JSON.parse(Buffer.from(b64, 'base64').toString()) : null;
     var service = null;
     var serviceLocation = "";
     var px;
 
-    console.setInfoLevel(1);
-    console.info1('sys_update(' + isservice + ', ' + JSON.stringify(parm) + ')');
-    if ((px = parm.getParameterIndex('fakeUpdate')) >= 0)
-    {
-        console.info1('Removing "fakeUpdate" parameter');
-        parm.splice(px, 1);
-    }
-
     if (isservice)
     {
+        var parm = b64 != null ? JSON.parse(Buffer.from(b64, 'base64').toString()) : null;
+
+        console.info1('sys_update(' + isservice + ', ' + JSON.stringify(parm) + ')');
+        if ((px = parm.getParameterIndex('fakeUpdate')) >= 0)
+        {
+            console.info1('Removing "fakeUpdate" parameter');
+            parm.splice(px, 1);
+        }
+
+
         //
         // Service  Mode
         //
 
         // Check if we have sufficient permission
-        if(!require('user-sessions').isRoot())
+        if (!require('user-sessions').isRoot())
         {
             // We don't have enough permissions, so copying the binary will likely fail, and we can't start...
             // This is just to prevent looping, because agentcore.c should not call us in this scenario
@@ -613,14 +614,14 @@ function sys_update(isservice, b64)
             process._exit();
             return;
         }
-        var servicename = parm!=null?(parm.getParameter('meshServiceName', process.platform=='win32'?'Mesh Agent' : 'meshagent')):(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+        var servicename = parm != null ? (parm.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent')) : (process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
         try
         {
             service = require('service-manager').manager.getService(servicename)
             serviceLocation = service.appLocation();
             console.log(' Updating service: ' + servicename);
         }
-        catch(f)
+        catch (f)
         {
             console.log(' * ' + servicename + ' SERVICE NOT FOUND *');
             process._exit();

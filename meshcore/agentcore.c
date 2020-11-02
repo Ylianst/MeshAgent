@@ -5651,6 +5651,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 					ILIBLOGMESSSAGE("SelfUpdate -> Service Check... [NO]");
 					ILIBLOGMESSSAGE("SelfUpdate -> Manual Mode (COMPLETE)");
 				}
+				ignore_result(write(STDOUT_FILENO, "SelfUpdate -> Updating Agent...\n", 32));
 
 				// Generic update process, call our own update with arguments.
 				struct stat results;
@@ -5660,6 +5661,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				remove(agentHost->exePath);
 				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "cp %s %s", updateFilePath, agentHost->exePath);
 				if (system(ILibScratchPad)) {}
+				ignore_result(write(STDOUT_FILENO, "SelfUpdate -> Restarting Agent...\n", 34));
 
 				execv(agentHost->exePath, agentHost->execparams);
 				_exit(1);
