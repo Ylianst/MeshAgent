@@ -5602,46 +5602,40 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				stat(agentHost->exePath, &results); // This the mode of the current executable
 				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
 
-
-				if (agentHost->platformType == MeshAgent_Posix_PlatformTypes_BSD)
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
+				if (system(ILibScratchPad)) {}
+				switch (agentHost->platformType)
 				{
-					// FreeBSD doesn't support hot-swapping the binary
-					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Handing off to child to complete"); }
-					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -exec \"var s=require('service-manager').manager.getService('%s');s.stop();require('fs').copyFileSync('%s', '%s');s.start();process.exit();\"", updateFilePath, agentHost->meshServiceName, updateFilePath, agentHost->exePath);
-					ignore_result(MeshAgent_System(ILibScratchPad));
-				}
-				else
-				{
-					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "mv \"%s\" \"%s\"", updateFilePath, agentHost->exePath); // Move the update over our own executable
-					if (system(ILibScratchPad)) {}
-					switch (agentHost->platformType)
-					{
-						case MeshAgent_Posix_PlatformTypes_LAUNCHD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/%s", agentHost->meshServiceName);	// Restart the service
-							ignore_result(system(ILibScratchPad));
-							break;
-						case MeshAgent_Posix_PlatformTypes_SYSTEMD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
-							exit(1);
-							break;
-						case MeshAgent_Posix_PlatformTypes_PROCD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [PROCD should auto-restart]"); }
-							exit(1);
-							break;
-						case MeshAgent_Posix_PlatformTypes_INITD:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s restart", agentHost->meshServiceName);	// Restart the service
-							ignore_result(MeshAgent_System(ILibScratchPad));
-							break;
-						case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling initctl restart (UPSTART)"); }
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart %s", agentHost->meshServiceName);	// Restart the service
-							ignore_result(MeshAgent_System(ILibScratchPad));
-							break;
-						default:
-							break;
-					}
+					case MeshAgent_Posix_PlatformTypes_BSD:
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [restarting service]"); }
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s onerestart", agentHost->meshServiceName);	// Restart the service
+						ignore_result(system(ILibScratchPad));
+						break;
+					case MeshAgent_Posix_PlatformTypes_LAUNCHD:
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/%s", agentHost->meshServiceName);	// Restart the service
+						ignore_result(system(ILibScratchPad));
+						break;
+					case MeshAgent_Posix_PlatformTypes_SYSTEMD:
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
+						exit(1);
+						break;
+					case MeshAgent_Posix_PlatformTypes_PROCD:
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [PROCD should auto-restart]"); }
+						exit(1);
+						break;
+					case MeshAgent_Posix_PlatformTypes_INITD:
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s restart", agentHost->meshServiceName);	// Restart the service
+						ignore_result(MeshAgent_System(ILibScratchPad));
+						break;
+					case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling initctl restart (UPSTART)"); }
+						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart %s", agentHost->meshServiceName);	// Restart the service
+						ignore_result(MeshAgent_System(ILibScratchPad));
+						break;
+					default:
+						break;
 				}
 			}
 			else
