@@ -519,7 +519,7 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 	for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
 	{
 		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][arg]
-		args[i] = duk_get_string(ctx, -1);
+		args[i] = (char*)duk_get_string(ctx, -1);
 		duk_pop(ctx);										// [array]
 	}
 
@@ -545,7 +545,7 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 	for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
 	{
 		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][arg]
-		env[i] = duk_get_string(ctx, -1);
+		env[i] = (char*)duk_get_string(ctx, -1);
 		duk_pop(ctx);										// [array]
 	}
 #ifndef WIN32
