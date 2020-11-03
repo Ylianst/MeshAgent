@@ -1855,14 +1855,14 @@ End Mesh Agent Duktape Abstraction
 char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 {
 	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
-	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_NONE, 0, agent->chain, NULL, NULL, agent->exePath, NULL, NULL, agent->chain);
+	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_NONE, 0, agent!=NULL?agent->chain:NULL, NULL, NULL, agent!=NULL?agent->exePath: basePath, NULL, NULL, agent!=NULL?agent->chain:NULL);
 
-	if (duk_peval_string(ctx, "require('util-pathHelper');") == 0)		// [helper]
+	if (duk_peval_string(ctx, "require('util-pathHelper');") == 0)				// [helper]
 	{
-		duk_push_string(ctx, basePath);									// [helper][basePath]
-		duk_push_string(ctx, localPath);								// [helper][basePath][localPath]
-		duk_push_boolean(ctx, agent->configPathUsesCWD != 0);			// [helper][basePath][localPath][bool]
-		if (duk_pcall(ctx, 3) == 0)										// [result]
+		duk_push_string(ctx, basePath);											// [helper][basePath]
+		duk_push_string(ctx, localPath);										// [helper][basePath][localPath]
+		duk_push_boolean(ctx, agent!=NULL?(agent->configPathUsesCWD != 0):0);	// [helper][basePath][localPath][bool]
+		if (duk_pcall(ctx, 3) == 0)												// [result]
 		{
 			duk_size_t len;
 			char *buffer = Duktape_GetBuffer(ctx, -1, &len);
@@ -1871,7 +1871,7 @@ char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 				ILibScratchPad2[len] = 0;
 				memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), buffer, len);
 				duk_pop(ctx);											// ...
-				if (agent->meshCoreCtx == NULL) { Duktape_SafeDestroyHeap(ctx); }
+				if (agent == NULL || agent->meshCoreCtx == NULL) { Duktape_SafeDestroyHeap(ctx); }
 				return(ILibScratchPad2);
 			}
 		}
