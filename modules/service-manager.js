@@ -1554,12 +1554,17 @@ function serviceManager()
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                                 if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service'))
                                 {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '{ split($2, a, \" \"); print a[1] }'\n\exit\n");
+                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '");
                                 }
                                 else
                                 {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '{ split($2, a, \" \"); print a[1] }'\n\exit\n");
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '");
                                 }
+                                child.stdin.write('{');
+                                child.stdin.write('   split($2, a, " ");');
+                                child.stdin.write('   sh=sprintf("systemd-escape -u \\"%s\\"",a[1]);');
+                                child.stdin.write('   system(sh);')
+                                child.stdin.write("}'\nexit\n");
                                 child.waitExit();
                                 return (child.stdout.str.trim());
                             };
@@ -2263,7 +2268,7 @@ function serviceManager()
                     conf.write('[Unit]\nDescription=' + serviceDescription + '\n');
                     conf.write('[Service]\n');
                     conf.write('WorkingDirectory=' + options.installPath + '\n');
-                    conf.write('ExecStart=' + options.installPath + options.target + ' ' + parameters + '\n');
+                    conf.write('ExecStart=' + options.installPath.split(' ').join('\\x20') + options.target.split(' ').join('\\x20') + ' ' + parameters + '\n');
                     conf.write('StandardOutput=null\n');
                     if (options.failureRestart == null || options.failureRestart > 0)
                     {
