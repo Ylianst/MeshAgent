@@ -1200,26 +1200,24 @@ function serviceManager()
                             var child = require('child_process').execFile('/bin/sh', ['sh']);
                             child.stderr.on('data', function (c) { });
                             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                            child.stdin.write('cat ' + ret.conf + ' | grep "procd_set_param command /bin/sh " | tr ' + "'\\n' '`' | awk -F'`' '");
+                            child.stdin.write('cat ' + this.conf + ' | grep "procd_set_param command /bin/sh " | tr ' + "'\\n' '`' | awk -F'`' '");
                             child.stdin.write('{');
                             child.stdin.write('   for(n=1;n<NF;++n)');
                             child.stdin.write('   {');
                             child.stdin.write('      if($n~/^#/) { continue; }');
                             child.stdin.write('      v=split($n,tokens,"\\"");');
                             child.stdin.write('      if(v==1) { continue; }');
-                            child.stdin.write('      sh=sprintf("cat %s", tokens[2]);');
+                            child.stdin.write('      sh=sprintf("cat \\"%s\\"", tokens[2]);');
                             child.stdin.write('      shval=system(sh);');
                             child.stdin.write('   }');
                             child.stdin.write("}'");
-                            child.stdin.write(' | grep "cd /" | tr ' + "'\\n' '`' | awk -F'`' '");
+                            child.stdin.write(' | grep "cd " | awk ' + "NR==1'");
                             child.stdin.write('{');
-                            child.stdin.write('   for(n=1;n<NF;++n)');
-                            child.stdin.write('   {');
-                            child.stdin.write('      if(substr($n,1,3)=="cd ")');
-                            child.stdin.write('      {');
-                            child.stdin.write('         print substr($n,4); break;');
-                            child.stdin.write('      }');
-                            child.stdin.write('   }');
+                            child.stdin.write('   gsub(/^[ \\t]+/, "", $0);');
+                            child.stdin.write('   p=substr($0,4);');
+                            child.stdin.write('   gsub(/"/,"",p);');
+                            child.stdin.write('   gsub("/$","",p);');
+                            child.stdin.write('   print p;');
                             child.stdin.write("}'");
                             child.stdin.write('\nexit\n');
                             child.waitExit();
@@ -1230,10 +1228,10 @@ function serviceManager()
                             var child = require('child_process').execFile('/bin/sh', ['sh']);
                             child.stderr.on('data', function (c) { });
                             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                            child.stdin.write('cat ' + ret.conf + ' | grep "procd_set_param command" | tr ' + "'\\n' '`' | awk -F'`' '");
+                            child.stdin.write('cat ' + this.conf + ' | grep "procd_set_param command"' + " | awk NR==1'");
                             child.stdin.write('{');
-                            child.stdin.write('   gsub(/^[ \\t]+/, "", $1);');
-                            child.stdin.write('   cmd=substr($1, 25);')
+                            child.stdin.write('   gsub(/^[ \\t]+/, "", $0);');
+                            child.stdin.write('   cmd=substr($0, 25);')
                             child.stdin.write('   if(substr(cmd,0,8)=="/bin/sh ")');
                             child.stdin.write('   {');
                             child.stdin.write('      cmd=substr(cmd,8);');
@@ -1244,7 +1242,39 @@ function serviceManager()
                             child.stdin.write("}'");
                             child.stdin.write('\nexit\n');
                             child.waitExit();
-                            return (child.stdout.str.trim());
+
+                            var ret = child.stdout.str.trim();
+                            if (ret.endsWith('.sh'))
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stderr.on('data', function (c) { });
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stdin.write('cat "' +ret + '" | grep "exec "' + " | awk NR==1'");
+                                child.stdin.write('{');
+                                child.stdin.write('   gsub(/^[ \\t]+/, "", $0);');
+                                child.stdin.write('   if($0 ~ "^exec \\"")');
+                                child.stdin.write('   {');
+                                child.stdin.write('      split($0,V,"\\"");');
+                                child.stdin.write('      val=V[2];');
+                                child.stdin.write('   }');
+                                child.stdin.write('   else');
+                                child.stdin.write('   {');
+                                child.stdin.write('      split($0,V," ");');
+                                child.stdin.write('      val=V[2];');
+                                child.stdin.write('   }');
+                                child.stdin.write('   gsub("^./","",val);');
+                                child.stdin.write('   print val;');
+                                child.stdin.write("}'");
+                                child.stdin.write('\nexit\n');
+                                child.waitExit();
+
+                                ret = child.stdout.str.trim();
+                                if(!ret.startsWith('/'))
+                                {
+                                    ret = (this.appWorkingDirectory() + '/' + ret);
+                                }
+                            }
+                            return (ret);
                         };
                         ret.start = function start()
                         {
@@ -2154,7 +2184,7 @@ function serviceManager()
                     conf.write('start_service()\n');
                     conf.write('{\n');
                     conf.write('    procd_open_instance\n');
-                    conf.write('    procd_set_param command /bin/sh "' + options.installPath + options.target + '.sh"\n');
+                    conf.write('    procd_set_param command /bin/sh "' + options.installPath + options.name + '.sh"\n');
                     if (options.failureRestart == null || options.failureRestart > 0)
                     {
                         conf.write('    procd_set_param respawn ${threshold:-10} ${timeout:-' + (options.failureRestart == null ? 2 : (options.failureRestart / 1000)) + '} ${retry:-0}\n');
@@ -2163,19 +2193,19 @@ function serviceManager()
                     conf.write('}\n');
                     conf.end();
 
-                    conf = require('fs').createWriteStream(options.installPath + options.target + '.sh', { flags: 'wb' });
+                    conf = require('fs').createWriteStream(options.installPath + options.name + '.sh', { flags: 'wb' });
                     conf.write('#!/bin/sh\n');
-                    conf.write('cd ' + options.installPath + '\n');
-                    conf.write('exec ./' + options.target + ' ' + options.parameters.join(' ') + '\n');
+                    conf.write('cd "' + options.installPath + '"\n');
+                    conf.write('exec "./' + options.target + '" ' + options.parameters.join(' ') + '\n');
                     conf.end();
 
                     m = require('fs').statSync('/etc/init.d/' + options.name).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
                     require('fs').chmodSync('/etc/init.d/' + options.name, m);
 
-                    m = require('fs').statSync(options.installPath + options.target + '.sh').mode;
+                    m = require('fs').statSync(options.installPath + options.name + '.sh').mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-                    require('fs').chmodSync(options.installPath + options.target + '.sh', m);
+                    require('fs').chmodSync(options.installPath + options.name + '.sh', m);
 
                     switch (options.startType)
                     {
@@ -2569,10 +2599,7 @@ function serviceManager()
                         if (!options || !options.skipDeleteBinary)
                         {
                             require('fs').unlinkSync(servicePath);
-                            if(servicePath.endsWith('.sh'))
-                            {
-                                require('fs').unlinkSync(servicePath.substring(0, servicePath.length - 3));
-                            }
+                            require('fs').unlinkSync(workingPath + '/' + name + '.sh');
                         }
                         console.log(name + ' uninstalled');
                     }
