@@ -2354,7 +2354,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		if (maxTimeout > 0)
 		{
 			gettimeofday(&tv, NULL);
-			if (tv.tv_sec < (startTime.tv_sec + maxTimeout / 1000))
+			if (tv.tv_sec > (startTime.tv_sec + maxTimeout / 1000))
 			{
 				root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 				break;
