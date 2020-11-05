@@ -1329,7 +1329,21 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep 'chdir ' | awk '{print $2}'\nexit\n");
+                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep 'chdir ' | awk '");
+                                    child.stdin.write('{');
+                                    child.stdin.write('   if(split($0,v,"\\\"")>1)');
+                                    child.stdin.write('   {');
+                                    child.stdin.write('      gsub(/\\/$/,"",v[2]);');
+                                    child.stdin.write('      print v[2];');
+                                    child.stdin.write('   }');
+                                    child.stdin.write('   else');
+                                    child.stdin.write('   {');
+                                    child.stdin.write('      gsub(/\\/$/,"",$2);');
+                                    child.stdin.write('      print $2;');
+                                    child.stdin.write('   }');
+                                    child.stdin.write("}'");
+                                    child.stdin.write('\nexit\n');
+
                                 }
                                 child.waitExit();
                                 return (child.stdout.str.trim());
@@ -1346,7 +1360,18 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep 'exec ' | awk '{print $2}'\nexit\n");
+                                    child.stdin.write("cat /etc/init/" + this.name + ".conf | grep 'exec ' | awk '");
+                                    child.stdin.write('{');
+                                    child.stdin.write('   if(split($0,v,"\\\"")>1)');
+                                    child.stdin.write('   {');
+                                    child.stdin.write('      print v[2];');
+                                    child.stdin.write('   }');
+                                    child.stdin.write('   else');
+                                    child.stdin.write('   {');
+                                    child.stdin.write('      print $2;');
+                                    child.stdin.write('   }');
+                                    child.stdin.write("}'");
+                                    child.stdin.write('\nexit\n');
                                 }
                                 child.waitExit();
                                 return (child.stdout.str.trim());
@@ -1872,11 +1897,11 @@ function serviceManager()
             {
                 if (options.servicePlatform == 'unknown')
                 {
-                    options.installPath = '/usr/local/mesh_daemons/' + options.name;
+                    options.installPath = '/usr/local/mesh_daemons/' + (options.companyName!=null?(options.companyName + '/'):('')) + options.name;
                 }
                 else
                 {
-                    options.installPath = '/usr/local/mesh_services/' + options.name;
+                    options.installPath = '/usr/local/mesh_services/' + (options.companyName != null ? (options.companyName + '/') : ('')) + options.name;
                 }
             }
         }
@@ -2216,8 +2241,8 @@ function serviceManager()
                     {
                         conf.write('respawn\n\n');
                     }
-                    conf.write('chdir ' + options.installPath + '\n');
-                    conf.write('exec ' + options.installPath + options.target + ' ' + parameters + '\n\n');
+                    conf.write('chdir "' + options.installPath + '"\n');
+                    conf.write('exec "' + options.installPath + options.target + '" ' + parameters + '\n\n');
                     conf.end();
                     break;
                 case 'systemd':

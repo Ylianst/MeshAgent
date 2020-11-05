@@ -14,21 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-Object.defineProperty(Array.prototype, 'getParameter',
+
+Object.defineProperty(Array.prototype, 'getParameterEx',
     {
         value: function (name, defaultValue)
         {
             var i, ret;
             for (i = 0; i < this.length; ++i)
             {
-                if (this[i].startsWith('--' + name + '='))
+                if (this[i].startsWith(name + '='))
                 {
-                    ret = this[i].substring(name.length + 3);
+                    ret = this[i].substring(name.length + 1);
                     if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
                     return (ret);
                 }
             }
             return (defaultValue);
+        }
+    });
+Object.defineProperty(Array.prototype, 'getParameter',
+    {
+        value: function (name, defaultValue)
+        {
+            return (this.getParameterEx('--' + name, defaultValue));
         }
     });
 Object.defineProperty(Array.prototype, 'getParameterIndex',
@@ -46,11 +54,24 @@ Object.defineProperty(Array.prototype, 'getParameterIndex',
             return (-1);
         }
     });
+Object.defineProperty(Array.prototype, 'deleteParameter',
+    {
+        value: function (name)
+        {
+            var i = this.getParameterIndex(name);
+            if(i>=0)
+            {
+                this.splice(i, 1);
+            }
+        }
+    });
 
 function checkParameters(parms)
 {
     var msh = _MSH();
 
+    if (parms.getParameter('description', null) == null && msh.description != null) { parms.push('--description="' + msh.description + '"'); }
+    if (parms.getParameter('displayName', null) == null && msh.displayName != null) { parms.push('--displayName="' + msh.displayName + '"'); }
     if (parms.getParameter('companyName', null) == null && msh.companyName != null) { parms.push('--companyName="' + msh.companyName + '"'); }
     if (parms.getParameter('meshServiceName', null) == null)
     {
@@ -110,7 +131,8 @@ function installService(params)
             parameters: params,
             _installer: true
         };
-    options.displayName = options.name + ' background service';
+    options.displayName = params.getParameter('displayName', options.name); params.deleteParameter('displayName');
+    options.description = params.getParameter('description', options.name + ' background service'); params.deleteParameter('description');
 
     if (process.platform == 'win32') { options.companyName = ''; }
     if (require('fs').existsSync(proxyFile)) { options.files = [{ source: proxyFile, newName: options.target + '.proxy' }]; }
@@ -163,11 +185,8 @@ function installService(params)
             options.parameters.splice(i, 1);
             break;
         }
-        if(options.parameters[i].startsWith('--meshServiceName='))
-        {
-
-        }
     }
+
     try
     {
         require('service-manager').manager.installService(options);
@@ -323,19 +342,8 @@ function uninstallService2(params, msh)
     }
     if (params && params.includes('--_deleteData="1"'))
     {
-        for (i = 0; i < params.length; ++i)
-        {
-            if (params[i].startsWith('_workingDir='))
-            {
-                dataFolder = params[i].split('=')[1];
-                if (dataFolder.startsWith('"')) { dataFolder = dataFolder.substring(1, dataFolder.length - 1); }
-            }
-            if (params[i].startsWith('_appPrefix='))
-            {
-                appPrefix = params[i].split('=')[1];
-                if (appPrefix.startsWith('"')) { appPrefix = appPrefix.substring(1, appPrefix.length - 1); }
-            }
-        }
+        dataFolder = params.getParameterEx('_workingDir', null);
+        appPrefix = params.getParameterEx('_appPrefix', null);
     }
 
     process.stdout.write('   -> Uninstalling previous installation...');
@@ -352,14 +360,32 @@ function uninstallService2(params, msh)
                 levelUp.pop();
                 levelUp = levelUp.join('/');
 
+                console.info1('   Cleaning operation =>');
+                console.info1('      cd "' + dataFolder + '"');
+                console.info1('      rm "' + appPrefix + '.*"');
+                console.info1('      rm DAIPC');
+                console.info1('      cd /');
+                console.info1('      rmdir "' + dataFolder + '"');
+                console.info1('      rmdir "' + levelUp + '"');
+
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.on('data', function (c) { });
-                child.stderr.on('data', function (c) { });
-                child.stdin.write('cd ' + dataFolder + '\n');
-                child.stdin.write('rm ' + appPrefix + '.*\n');
+                child.stdout.on('data', function (c) { console.info1(c.toString()); });
+                child.stderr.on('data', function (c) { console.info1(c.toString()); });
+                child.stdin.write('cd "' + dataFolder + '"\n');
+                child.stdin.write('rm DAIPC\n');
+
+                child.stdin.write("ls | awk '");
+                child.stdin.write('{');
+                child.stdin.write('   if($0 ~ /^' + appPrefix + '\\./)');
+                child.stdin.write('   {');
+                child.stdin.write('      sh=sprintf("rm \\"%s\\"", $0);');
+                child.stdin.write('      system(sh);');
+                child.stdin.write('   }');
+                child.stdin.write("}'\n");
+
                 child.stdin.write('cd /\n');
-                child.stdin.write('rmdir ' + dataFolder + '\n');
-                child.stdin.write('rmdir ' + levelUp + '\n');
+                child.stdin.write('rmdir "' + dataFolder + '"\n');
+                child.stdin.write('rmdir "' + levelUp + '"\n');
                 child.stdin.write('exit\n');       
                 child.waitExit();    
             }
@@ -503,8 +529,15 @@ function serviceExists(loc, params)
 
 function fullUninstall(jsonString)
 {
-    console.setDestination(console.Destinations.DISABLED);
     var parms = JSON.parse(jsonString);
+    if (parseInt(parms.getParameter('verbose', 0)) == 0)
+    {
+        console.setDestination(console.Destinations.DISABLED);
+    }
+    else
+    {
+        console.setInfoLevel(1);
+    }
     parms.push('_stop');
 
     checkParameters(parms);
