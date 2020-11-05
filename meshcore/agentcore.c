@@ -5653,7 +5653,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				chmod(updateFilePath, results.st_mode); // Set the new executable to the same mode as the current one.
 
 				remove(agentHost->exePath);
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "cp %s %s", updateFilePath, agentHost->exePath);
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "cp \"%s\" \"%s\"", updateFilePath, agentHost->exePath);
 				if (system(ILibScratchPad)) {}
 				ignore_result(write(STDOUT_FILENO, "SelfUpdate -> Restarting Agent...\n", 34));
 
