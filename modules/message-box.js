@@ -55,6 +55,7 @@ function messageBox()
     this._ObjectID = 'message-box';
     this.create = function create(title, caption, timeout, layout, sid)
     {
+        if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         ret.options = { launch: { module: 'message-box', method: 'slave', args: [] } };
         ret.title = title;
@@ -344,6 +345,7 @@ function linux_messageBox()
     this.create = function create(title, caption, timeout, layout)
     {
         if (timeout == null) { timeout = 10; }
+        if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         var uid;    
         var xinfo;
@@ -685,6 +687,7 @@ function macos_messageBox()
     
     this.create = function create(title, caption, timeout, layout)
     {
+        if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
         var userLayout = Array.isArray(layout);
         caption = caption.split('\n').join('\\n');
         if (Array.isArray(layout) && layout.length > 3)
@@ -991,6 +994,7 @@ function macos_messageBox()
     };
     this.notify = function notify(title, caption)
     {
+        if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
         if (require('user-sessions').isRoot())
         {
             var str = 'tell current application to display notification "' + caption + '" with title "' + title + '"';

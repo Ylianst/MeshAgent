@@ -64,6 +64,24 @@ limitations under the License.
 
 /*****/
 
+    // The folloing line just below with 'msh=' needs to stay exactly like this since MeshCentral will replace it with the correct settings.
+    //var msh = {};
+    var displayName = msh.displayName ? msh.displayName : 'MeshCentral Agent';
+    var s = null, buttons = ['Cancel'], skip = false;
+    var serviceName = msh.meshServiceName ? msh.meshServiceName : 'meshagent';
+
+    try { s = require('service-manager').manager.getService(serviceName); } catch (e) { }
+
+    var connectArgs = [process.execPath.split('/').pop(), '--no-embedded=1', '--disableUpdate=1'];
+    connectArgs.push('--MeshName="' + msh.MeshName + '"');
+    connectArgs.push('--MeshType="' + msh.MeshType + '"');
+    connectArgs.push('--MeshID="' + msh.MeshID + '"');
+    connectArgs.push('--ServerID="' + msh.ServerID + '"');
+    connectArgs.push('--MeshServer="' + msh.MeshServer + '"');
+    connectArgs.push('--AgentCapabilities="0x00000020"');
+    if (msh.displayName) { connectArgs.push('--displayName="' + msh.displayName + '"'); }
+    if (msh.agentName) { connectArgs.push('--agentName="' + msh.agentName + '"'); }
+
     function _install(parms)
     {
         var mstr = require('fs').createWriteStream(process.execPath + '.msh', { flags: 'wb' });
@@ -72,9 +90,14 @@ limitations under the License.
         mstr.write('MeshID=' + msh.MeshID + '\n');
         mstr.write('ServerID=' + msh.ServerID + '\n');
         mstr.write('MeshServer=' + msh.MeshServer + '\n');
+        if (msh.agentName) { mstr.write('agentName=' + msh.agentName + '\n'); }
+        if (msh.meshServiceName) { mstr.write('meshServiceName=' + msh.meshServiceName + '\n'); }
         mstr.end();
 
         if (parms == null) { parms = []; }
+        if (msh.companyName) { parms.unshift('--companyName="' + msh.companyName + '"'); }
+        if (msh.displayName) { parms.unshift('--displayName="' + msh.displayName + '"'); }
+        if (msh.meshServiceName) { parms.unshift('--meshServiceName="' + msh.meshServiceName + '"'); }
         parms.unshift('--copy-msh=1');
         parms.unshift('--no-embedded=1');
         parms.unshift('-fullinstall');
@@ -85,33 +108,49 @@ limitations under the License.
         global._child.stderr.on('data', function (c) { process.stdout.write(c.toString()); });
         global._child.waitExit();
     }
+
     function _uninstall()
     {
         global._child = require('child_process').execFile(process.execPath,
-            [process.execPath.split('/').pop(), '-fulluninstall', '--no-embedded=1']);
+                [process.execPath.split('/').pop(), '-fulluninstall', '--no-embedded=1', '--meshServiceName="' + serviceName + '"']);
 
         global._child.stdout.on('data', function (c) { process.stdout.write(c.toString()); });
         global._child.stderr.on('data', function (c) { process.stdout.write(c.toString()); });
         global._child.waitExit();
     }
 
-    var s = null;
-    try { s = require('service-manager').manager.getService('meshagent'); } catch (e) { }
-    var buttons = ['Cancel'];
-    var skip = false;
-    
     if (msh.InstallFlags == null)
     {
         msh.InstallFlags = 3;
-    }
-    else
+    } else
     {
         msh.InstallFlags = parseInt(msh.InstallFlags.toString());
     }
 
+    if (process.argv.includes('-mesh'))
+    {
+        console.log(JSON.stringify(msh, null, 2));
+        process.exit();
+    }
 
-    if ((msh.InstallFlags & 1) == 1) { buttons.unshift('Connect'); }
-    if ((msh.InstallFlags & 2) == 2)
+    if ((msh.InstallFlags & 1) == 1)
+    {
+        buttons.unshift('Connect');
+        if (process.argv.includes('-connect'))
+        {
+            global._child = require('child_process').execFile(process.execPath, connectArgs);
+            global._child.stdout.on('data', function (c) { });
+            global._child.stderr.on('data', function (c) { });
+            global._child.on('exit', function (code) { process.exit(code); });
+
+            console.log("\nConnecting to: " + msh.MeshServer);
+            console.log("Device Group: " + msh.MeshName);
+            console.log('\nPress Ctrl-C to exit\n');
+            skip = true;
+        }
+    }
+
+    if ((!skip) && ((msh.InstallFlags & 2) == 2))
     {
         if (!require('user-sessions').isRoot())
         {
@@ -121,32 +160,30 @@ limitations under the License.
         }
         if (s)
         {
-            if (process.platform == 'darwin' || require('message-box').kdialog)
+            if ((process.platform == 'darwin') || require('message-box').kdialog)
             {
                 buttons.unshift("Setup");
-            }
-            else
+            } else
             {
                 buttons.unshift("Uninstall");
                 buttons.unshift("Update");
             }
-        }
-        else
+        } else
         {
             buttons.unshift("Install");
         }
     }
 
-    if (process.platform != 'darwin')
+    if (!skip)
     {
-        if (!require('message-box').kdialog && (require('message-box').zenity == null || (!require('message-box').zenity.extra)))
+        if (process.platform != 'darwin')
         {
             if (process.argv.includes('-install') || process.argv.includes('-update'))
             {
                 var p = [];
                 for (var i = 0; i < process.argv.length; ++i)
                 {
-                    if(process.argv[i].startsWith('--installPath='))
+                    if (process.argv[i].startsWith('--installPath='))
                     {
                         p.push('--installPath="' + process.argv[i].split('=').pop() + '"');
                     }
@@ -154,60 +191,44 @@ limitations under the License.
                 _install(p);
                 process.exit();
             }
-            else if(process.argv.includes('-uninstall'))
+            else if (process.argv.includes('-uninstall'))
             {
                 _uninstall();
                 process.exit();
             }
-            else if(process.argv.includes('-connect'))
-            {
-                global._child = require('child_process').execFile(process.execPath,
-                    [process.execPath.split('/').pop(), '--no-embedded=1', '--disableUpdate=1',
-                        '--MeshName="' + msh.MeshName + '"', '--MeshType="' + msh.MeshType + '"',
-                        '--MeshID="' + msh.MeshID + '"',
-                        '--ServerID="' + msh.ServerID + '"',
-                        '--MeshServer="' + msh.MeshServer + '"',
-                        '--AgentCapabilities="0x00000020"']);
-
-                global._child.stdout.on('data', function (c) { });
-                global._child.stderr.on('data', function (c) { });
-                global._child.on('exit', function (code) { process.exit(code); });
-
-                console.log("\nConnecting to: " + msh.MeshServer);
-                console.log("Device Group: " + msh.MeshName);
-                console.log('\nPress Ctrl-c to exit\n');
-                skip = true;
-            }
             else
             {
-                console.log('\n' + "The graphical version of this installer cannot run on this system.");
-                console.log("Try installing/updating Zenity, and run again." + '\n');
-                console.log("You can also run the text version from the command line with the following command(s): ");
-                if ((msh.InstallFlags & 1) == 1)
+                if (!require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
                 {
-                    console.log('./' + process.execPath.split('/').pop() + ' -connect');
-                }
-                if ((msh.InstallFlags & 2) == 2)
-                {
-                    if (s)
+                    console.log('\n' + "The graphical version of this installer cannot run on this system.");
+                    console.log("Try installing/updating Zenity, and run again." + '\n');
+                    console.log("You can also run the text version from the command line with the following command(s): ");
+                    if ((msh.InstallFlags & 1) == 1)
                     {
-                        console.log('./' + process.execPath.split('/').pop() + ' -update');
-                        console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
+                        console.log('./' + process.execPath.split('/').pop() + ' -connect');
                     }
-                    else
+                    if ((msh.InstallFlags & 2) == 2)
                     {
-                        console.log('./' + process.execPath.split('/').pop() + ' -install');
-                        console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
+                        if (s)
+                        {
+                            console.log('./' + process.execPath.split('/').pop() + ' -update');
+                            console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
+                        }
+                        else
+                        {
+                            console.log('./' + process.execPath.split('/').pop() + ' -install');
+                            console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
+                        }
                     }
+                    console.log('');
+                    process.exit();
                 }
-                console.log('');
-                process.exit();
             }
         }
-    }
-    else
-    {
-        if (!require('user-sessions').isRoot()) { console.log('\n' + "This utility requires elevated permissions. Please try again with sudo."); process.exit(); }
+        else
+        {
+            if (!require('user-sessions').isRoot()) { console.log('\n' + "This utility requires elevated permissions. Please try again with sudo."); process.exit(); }
+        }
     }
 
 
@@ -224,7 +245,7 @@ limitations under the License.
         msg += ("Device Group: " + msh.MeshName + '\n');
         msg += ("Server URL: " + msh.MeshServer + '\n');
 
-        var p = require('message-box').create("MeshCentral Agent Setup", msg, 99999, buttons);
+        var p = require('message-box').create(displayName + " Setup", msg, 99999, buttons);
         p.then(function (v)
         {
             switch (v)
@@ -233,7 +254,7 @@ limitations under the License.
                     process.exit();
                     break;
                 case 'Setup':
-                    var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Update', 'Uninstall', 'Cancel']);
+                    var d = require('message-box').create(displayName, msg, 99999, ['Update', 'Uninstall', 'Cancel']);
                     d.then(function (v)
                     {
                         switch (v)
@@ -252,14 +273,7 @@ limitations under the License.
                     }).catch(function (v) { process.exit(); });
                     break;
                 case "Connect":
-                    global._child = require('child_process').execFile(process.execPath,
-                        [process.execPath.split('/').pop(), '--no-embedded=1', '--disableUpdate=1',
-                            '--MeshName="' + msh.MeshName + '"', '--MeshType="' + msh.MeshType + '"',
-                            '--MeshID="' + msh.MeshID + '"',
-                            '--ServerID="' + msh.ServerID + '"',
-                            '--MeshServer="' + msh.MeshServer + '"',
-                            '--AgentCapabilities="0x00000020"']);
-
+                    global._child = require('child_process').execFile(process.execPath, connectArgs);
                     global._child.stdout.on('data', function (c) { });
                     global._child.stderr.on('data', function (c) { });
                     global._child.on('exit', function (code) { process.exit(code); });
@@ -275,7 +289,7 @@ limitations under the License.
                         }
                     }
 
-                    var d = require('message-box').create("MeshCentral Agent", msg, 99999, ['Disconnect']);
+                    var d = require('message-box').create(displayName, msg, 99999, ['Disconnect']);
                     d.then(function (v) { process.exit(); }).catch(function (v) { process.exit(); });
                     break;
                 case "Uninstall":

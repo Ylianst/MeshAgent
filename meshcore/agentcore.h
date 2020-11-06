@@ -240,6 +240,7 @@ typedef struct MeshAgentHostContainer
 	int updaterVersion;
 	char **execparams;
 	char *meshServiceName;
+	char *displayName;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

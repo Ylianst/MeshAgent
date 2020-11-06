@@ -1796,12 +1796,14 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_MeshAgent_hostname, 0);
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
-	
+		duk_push_string(ctx, agent->displayName); ILibDuktape_CreateReadonlyProperty(ctx, "displayName");
+
 		if (agent->JSRunningAsService)
 		{
 			duk_push_string(ctx, agent->meshServiceName);
 			ILibDuktape_CreateReadonlyProperty(ctx, "serviceName");
 		}
+		
 
 #ifdef WIN32
 	#ifdef _WINSERVICE
@@ -4474,6 +4476,16 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 	}
 
+	if ((msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "displayName", NULL, 0)) != 0)
+	{
+		agentHost->displayName = (char*)ILibMemory_SmartAllocate(msnlen + 1);
+		ILibSimpleDataStore_Get(agentHost->masterDb, "displayName", agentHost->displayName, msnlen);
+	}
+	else
+	{
+		agentHost->displayName = "MeshCentral";
+	}
+
 	duk_push_sprintf(tmpCtx, "require('service-manager').manager.getService('%s').isMe();", agentHost->meshServiceName);
 	tmpString = (char*)duk_get_string(tmpCtx, -1);
 
@@ -5686,6 +5698,7 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 	if (agent->multicastDiscoveryKey != NULL) { free(agent->multicastDiscoveryKey); agent->multicastDiscoveryKey = NULL; }
 	if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
 	if (agent->meshServiceName != NULL) { ILibMemory_Free(agent->meshServiceName); agent->meshServiceName = NULL; }
+	if (agent->displayName != NULL) { ILibMemory_Free(agent->displayName); agent->displayName = NULL; }
 	if (agent->execparams != NULL) { ILibMemory_Free(agent->execparams); agent->execparams = NULL; }
 #ifdef WIN32
 	if (agent->shCore != NULL)
