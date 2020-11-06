@@ -1074,20 +1074,18 @@ function serviceManager()
                 };
                 ret.appWorkingDirectory = function appWorkingDirectory()
                 {
-                    var ret;
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("cat " + this.rc + " | grep " + this.name + "_chdir= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\nexit\n");
+                    child.stdin.write("cat " + this.rc + " | grep " + this.name + "_chdir= | awk -F= '");
+                    child.stdin.write('{');
+                    child.stdin.write('   gsub(/"/,"",$2);');
+                    child.stdin.write('   gsub("/$","",$2);');
+                    child.stdin.write('   gsub(/\\\\ /," ",$2);');
+                    child.stdin.write('   print $2;');
+                    child.stdin.write("}'");
+                    child.stdin.write('\nexit\n');
                     child.waitExit();
-
-                    ret = child.stdout.str.trim();
-                    if(ret == '')
-                    {
-                        ret = this.rc.split('/');
-                        ret.pop();
-                        ret = ret.join('/');
-                    }
-                    return (ret);
+                    return (child.stdout.str.trim());
                 };
                 try
                 {
@@ -1108,7 +1106,22 @@ function serviceManager()
                     {
                         child = require('child_process').execFile('/bin/sh', ['sh']);
                         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                        child.stdin.write('cat ' + this.rc + ' | grep command_args= | awk -F"-f " \'{ $1=""; split($0, res, "\\""); split(res[1], t, " "); print t[1]; }\'\nexit\n');
+                        child.stdin.write("cat " + this.rc + " | grep command_args= | awk NR==1'");
+                        child.stdin.write('{');
+                        child.stdin.write('   split($0,V,"-f ");');
+                        child.stdin.write('   if(V[2] ~ /^\\\\"/)');
+                        child.stdin.write('   {');
+                        child.stdin.write('      split(V[2],RET,"\\"");');
+                        child.stdin.write('      gsub(/\\\\$/,"",RET[2]);');
+                        child.stdin.write('      print RET[2];');
+                        child.stdin.write('   }');
+                        child.stdin.write('   else');
+                        child.stdin.write('   {');
+                        child.stdin.write('      split(V[2],RET," ");');
+                        child.stdin.write('      print RET[1];');
+                        child.stdin.write('   }');
+                        child.stdin.write("}'");
+                        child.stdin.write('\nexit\n');
                         child.waitExit();
                         return(child.stdout.str.trim());
                     }
@@ -2139,10 +2152,10 @@ function serviceManager()
             rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
             rc.write('rcvar=${name}_enable\n');
             rc.write('pidfile="/var/run/' + options.name + '.pid"\n');
-            rc.write(options.name + '_chdir="' + options.installPath + '"\n');
+            rc.write(options.name + '_chdir="' + options.installPath.split(' ').join('\\ ') + '"\n');
 
             rc.write('command="/usr/sbin/daemon"\n');
-            rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0) ? '-r' : '') + ' -f ' + options.installPath + options.target + ' ' + parameters + '"\n');
+            rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0) ? '-r' : '') + ' -f \\"' + options.installPath + options.target + '\\" ' + parameters.split('"').join('\\"') + '"\n');
 
             rc.write('\n');
             rc.write('load_rc_config $name\n');

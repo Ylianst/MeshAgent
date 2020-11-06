@@ -573,6 +573,7 @@ function fullInstall(jsonString)
     var loc = null;
     var i;
     var name = parms.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
+    if (process.platform != 'win32') { name = name.split(' ').join('_'); }
 
     if (parseInt(parms.getParameter('verbose', 0)) == 0)
     {
