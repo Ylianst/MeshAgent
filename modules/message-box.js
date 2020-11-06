@@ -753,7 +753,7 @@ function macos_messageBox()
                 this.promise.child = null;
             });
             ret.child.stdin.write('su - ' + ret.name + '\n');
-            ret.child.stdin.write(process.execPath.split('./').join('') + ' -b64exec ' + str + ' | osascript 2>/dev/null | awk \'{ printf "\\x1e"; c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } printf "\\x1e"; }\'\nexit\nexit\n');
+            ret.child.stdin.write(process.execPath.split('./').join('').split(' ').join('\\ ') + ' -b64exec ' + str + ' | osascript 2>/dev/null | awk \'{ printf "\\x1e"; c=split($0, tokens, ","); split(tokens[1], val, ":"); if(c==1) { print val[2] } else { split(tokens[2], gu, ":"); if(gu[2]=="true") { print "_TIMEOUT_" } else { print val[2]  }  } printf "\\x1e"; }\'\nexit\nexit\n');
             ret.close = function close()
             {
                 if (this.child) { this.child.kill(); }
@@ -843,7 +843,7 @@ function macos_messageBox()
                 return (ret);
             }
 
-            var agent = process.execPath.split('./').join('');
+            var agent = process.execPath.split('./').join('').split(' ').join('\\ ');
             var str = Buffer.from('console.log("' + clipText + '");process.exit();').toString('base64');
             ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
             ret.child.promise = ret;
@@ -1006,7 +1006,7 @@ function macos_messageBox()
             ret.child.on('exit', function (code) { this.promise._res('DISMISSED'); });
 
             ret.child.stdin.write('su - ' + ret.name + '\n');
-            ret.child.stdin.write(process.execPath.split('./').join('') + ' -b64exec ' + str + ' | osascript\nexit\nexit\n');
+            ret.child.stdin.write(process.execPath.split('./').join('').split(' ').join('\\ ') + ' -b64exec ' + str + ' | osascript\nexit\nexit\n');
             return (ret);
         }
 
