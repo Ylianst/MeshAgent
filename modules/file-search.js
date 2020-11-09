@@ -46,6 +46,7 @@ function filesearch()
                         console.info1('Powershell Search Client disconnected');
                         this.end(); 
                         this.parent._connection = null;
+                        this.parent.close();
                         this.parent.promise.emit('end');
                         this.parent.promise._res();
                     });
