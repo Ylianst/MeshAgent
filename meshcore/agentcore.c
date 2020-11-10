@@ -112,7 +112,9 @@ JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0
 extern int ILibInflate(char *buffer, size_t bufferLen, char *decompressed, size_t *decompressedLen, uint32_t crc);
 #define Agent2PingData(ptr) ((void*)((char*)(ptr)+1))
 #define PingData2Agent(data) ((MeshAgentHostContainer*)((char*)(data)-1))
-
+#ifndef MICROSTACK_NOTLS
+extern void ILibDuktape_TLS_X509_PUSH(duk_context *ctx, X509* cert);
+#endif
 typedef struct RemoteDesktop_Ptrs
 {
 	duk_context *ctx;
@@ -1515,6 +1517,19 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 	duk_push_string(ctx, agent->serveruri); duk_put_prop_string(ctx, -2, "ServerUri");
 	duk_push_string(ctx, agent->serverip); duk_put_prop_string(ctx, -2, "ServerIP");
 
+#ifndef MICROSTACK_NOTLS
+	if (agent->controlChannel != NULL)
+	{
+		ILibDuktape_TLS_X509_PUSH(ctx, ILibWebClient_SslGetCert(agent->controlChannel));
+	}
+	else
+	{
+		duk_push_null(ctx);
+	}
+#else
+	duk_push_null(ctx);
+#endif
+	duk_put_prop_string(ctx, -2, "ControlChannelCertificate");
 	return(1);
 }
 #ifndef MICROSTACK_NOTLS
