@@ -1298,7 +1298,7 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 				for (x = (x << 2); x < bufferLen; ++x) { dataFrame[x] = buffer[x] ^ maskKey[x % 4]; } // Mask the reminder
 				//for (x = 0; x < bufferLen; ++x) { dataFrame[x] = buffer[x] ^ maskKey[x % 4]; } // This is the slower version
 			}
-			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 3 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, maskKey, 4, ILibAsyncSocket_MemoryOwnership_USER, dataFrame, bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
+			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 3 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, maskKey, (size_t)4, ILibAsyncSocket_MemoryOwnership_USER, dataFrame, (size_t)bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
 		} else {
 			// Send payload without masking
 			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 2 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, buffer, (size_t)bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
