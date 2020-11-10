@@ -2480,17 +2480,16 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 			printf("%s", duk_safe_to_string(agent->meshCoreCtx, -1));
 		}
 	}
+
+	// Check updater version
+	if (agent->JSRunningAsService == 0)
+	{
+		char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe"); // uses ILibScratchPad2
+		duk_push_sprintf(agent->meshCoreCtx, "require('agent-installer').updaterVersion('%s');", updateFilePath);	// [code]
+		if (duk_peval(agent->meshCoreCtx) == 0) { agent->updaterVersion = duk_get_int(agent->meshCoreCtx, -1); }	// [version]
+		duk_pop(agent->meshCoreCtx);																				// ...
+	}
 #endif
-
-
-	//// Check updater version
-	//if (agent->JSRunningAsService == 0)
-	//{
-	//	char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe"); // uses ILibScratchPad2
-	//	duk_push_sprintf(agent->meshCoreCtx, "require('agent-installer').updaterVersion('%s');", updateFilePath);	// [code]
-	//	if (duk_peval(agent->meshCoreCtx) == 0) { agent->updaterVersion = duk_get_int(agent->meshCoreCtx, -1); }	// [version]
-	//	duk_pop(agent->meshCoreCtx);																				// ...
-	//}
 
 #ifndef WIN32
 	if (duk_peval_string(agent->meshCoreCtx, "require('MeshAgent').getStartupOptions();") == 0)	// [obj]
@@ -5583,7 +5582,14 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updating..."); }
 #ifdef WIN32
 			// Windows Service Updater
-			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
+			if (agentHost->updaterVersion == 0)
+			{
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:\"%s\"", updateFilePath, agentHost->exePath);
+			}
+			else
+			{
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
+			}
 			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We triedI  to execute a bad executable... not good. Lets try to recover.

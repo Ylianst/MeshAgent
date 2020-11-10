@@ -554,7 +554,13 @@ int wmain(int argc, char* wargv[])
 
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-
+	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
+	{
+		DWORD dummy;
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "1\n", 2, &dummy, NULL);
+		wmain_free(argv);
+		return(0);
+	}
 	#if defined(_LINKVM)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{		
