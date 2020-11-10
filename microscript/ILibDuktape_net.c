@@ -2017,6 +2017,11 @@ void ILibDuktape_TLS_X509_PUSH(duk_context *ctx, X509* cert)
 	duk_push_object(ctx);							// [cert]
 	duk_push_string(ctx, fingerprint);				// [cert][fingerprint]
 	duk_put_prop_string(ctx, -2, "fingerprint");	// [cert]
+
+	util_certhash2(cert, hash);
+	util_tohex2(hash, UTIL_SHA384_HASHSIZE, fingerprint);
+	duk_push_string(ctx, fingerprint);				// [cert][digest]
+	duk_put_prop_string(ctx, -2, "digest");			// [cert]
 }
 int ILibDuktape_TLS_verify(int preverify_ok, X509_STORE_CTX *storectx)
 {
