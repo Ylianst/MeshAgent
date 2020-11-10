@@ -1157,7 +1157,7 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_
 		{
 			if (bufferLen > 8)
 			{
-				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
+				if (bufferLen >= (size_t)(8 + (int)ntohl(((unsigned int*)(buffer))[1])))
 				{
 					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
 					writeHandler(buffer, (int)*bytesConsumed, reserved);

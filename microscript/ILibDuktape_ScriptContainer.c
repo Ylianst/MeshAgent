@@ -2979,7 +2979,7 @@ void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, 
 	if (!ILibMemory_CanaryOK(sender)) { return; }
 
 	ILibDuktape_ScriptContainer_Slave *slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_Extra(sender))[0];
-	if (bufferLen < 4 || bufferLen < ((int*)buffer)[0]) { return; }
+	if (bufferLen < 4 || bufferLen < (size_t)((int*)buffer)[0]) { return; }
 	ILibRemoteLogging_printf(ILibChainGetLogger(slave->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "Slave read: %d bytes", bufferLen);
 
 #ifdef WIN32
@@ -3367,7 +3367,7 @@ void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char
 {
 	ILibDuktape_ScriptContainer_Master* master = (ILibDuktape_ScriptContainer_Master*)user;
 	
-	if (bufferLen < 4 || bufferLen < ((int*)buffer)[0]) { return; }
+	if (bufferLen < 4 || bufferLen < (size_t)((int*)buffer)[0]) { return; }
 	
 	*bytesConsumed = ((int*)buffer)[0];
 #ifdef WIN32

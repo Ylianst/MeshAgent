@@ -890,10 +890,10 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		}
 		if (centry != NULL)
 		{
-			if ((buffer != NULL) && (bufferLen >= centry->valueLength)) // If the buffer is not null and can hold the value, place the value in the buffer.
+			if ((buffer != NULL) && (bufferLen >= (size_t)centry->valueLength)) // If the buffer is not null and can hold the value, place the value in the buffer.
 			{
 				memcpy_s(buffer, bufferLen, centry->value, centry->valueLength);
-				if (bufferLen > centry->valueLength) { buffer[centry->valueLength] = 0; } // Add a zero at the end to be nice, if the buffer can take it.
+				if (bufferLen > (size_t)centry->valueLength) { buffer[centry->valueLength] = 0; } // Add a zero at the end to be nice, if the buffer can take it.
 
 				return(centry->valueLength);
 			}
@@ -921,13 +921,13 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 	}
 
 	if (entry == NULL) return 0; // If there is no in-memory entry for this key, return zero now.
-	if ((buffer != NULL) && (bufferLen >= entry->valueLength) && isCompressed == 0) // If the buffer is not null and can hold the value, place the value in the buffer.
+	if ((buffer != NULL) && (bufferLen >= (size_t)entry->valueLength) && isCompressed == 0) // If the buffer is not null and can hold the value, place the value in the buffer.
 	{
 		if (ILibSimpleDataStore_SeekPosition(root->dataFile, entry->valueOffset, SEEK_SET) != 0) return 0; // Seek to the position of the value in the data store
 		if (fread(buffer, 1, entry->valueLength, root->dataFile) == 0) return 0; // Read the value into the buffer
 		util_sha384(buffer, entry->valueLength, hash); // Compute the hash of the read value
 		if (memcmp(hash, entry->valueHash, SHA384HASHSIZE) != 0) return 0; // Check the hash, return 0 if not valid
-		if (bufferLen > entry->valueLength) { buffer[entry->valueLength] = 0; } // Add a zero at the end to be nice, if the buffer can take it.
+		if (bufferLen > (size_t)entry->valueLength) { buffer[entry->valueLength] = 0; } // Add a zero at the end to be nice, if the buffer can take it.
 	}
 	else if (isCompressed != 0)
 	{
@@ -959,7 +959,7 @@ __EXPORT_TYPE int ILibSimpleDataStore_GetEx(ILibSimpleDataStore dataStore, char*
 		}
 	}
 
-	return((bufferLen == 0 || bufferLen >= entry->valueLength) ? entry->valueLength : 0);
+	return((bufferLen == 0 || bufferLen >= (size_t)entry->valueLength) ? entry->valueLength : 0);
 }
 
 // Get the reference to the SHA384 hash value from the datastore for a given a key.

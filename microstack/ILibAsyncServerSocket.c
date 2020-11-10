@@ -754,7 +754,7 @@ void ILibAsyncServerSocket_GetLocal(ILibAsyncServerSocket_ServerModule ServerSoc
 size_t ILibAsyncServerSocket_GetConnections(ILibAsyncServerSocket_ServerModule server, ILibAsyncServerSocket_ConnectionToken *connections, size_t connectionsSize)
 {
 	ILibAsyncServerSocketModule *mod = (ILibAsyncServerSocketModule*)server;
-	if (connections == NULL || connectionsSize < mod->MaxConnection) { return((size_t)mod->MaxConnection); }
+	if (connections == NULL || connectionsSize < (size_t)mod->MaxConnection) { return((size_t)mod->MaxConnection); }
 	int i;
 	size_t x = 0;
 	for (i = 0; i < mod->MaxConnection; ++i)
