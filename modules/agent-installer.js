@@ -82,7 +82,14 @@ function checkParameters(parms)
         else
         {
             // Still no meshServiceName specified... Let's also check installed services...
-            var tmp = require('_agentNodeId').serviceName();
+            var tmp = process.platform == 'win32' ? 'Mesh Agent' : 'meshagent';
+            try
+            {
+                tmp = require('_agentNodeId').serviceName();
+            }
+            catch(xx)
+            {
+            }
             if(tmp != (process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'))
             {
                 parms.push('--meshServiceName="' + tmp + '"');
