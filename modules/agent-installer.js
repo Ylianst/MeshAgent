@@ -626,14 +626,15 @@ function sys_update(isservice, b64)
     if (isservice)
     {
         var parm = b64 != null ? JSON.parse(Buffer.from(b64, 'base64').toString()) : null;
-
-        console.info1('sys_update(' + isservice + ', ' + JSON.stringify(parm) + ')');
-        if ((px = parm.getParameterIndex('fakeUpdate')) >= 0)
+        if (parm != null)
         {
-            console.info1('Removing "fakeUpdate" parameter');
-            parm.splice(px, 1);
+            console.info1('sys_update(' + isservice + ', ' + JSON.stringify(parm) + ')');
+            if ((px = parm.getParameterIndex('fakeUpdate')) >= 0)
+            {
+                console.info1('Removing "fakeUpdate" parameter');
+                parm.splice(px, 1);
+            }
         }
-
 
         //
         // Service  Mode
