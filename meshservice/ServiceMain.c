@@ -574,6 +574,7 @@ int wmain(int argc, char* wargv[])
 			gRemoteMouseRenderDefault = 1;
 		}
 
+		// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
 		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
 		if (shCORE != NULL)
@@ -611,6 +612,7 @@ int wmain(int argc, char* wargv[])
 			gRemoteMouseRenderDefault = 1;
 		}
 
+		// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
 		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
 		if (shCORE != NULL)
@@ -917,6 +919,7 @@ int wmain(int argc, char* wargv[])
 				}
 				else
 				{
+					// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
 					FreeConsole();
 					HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 					DpiAwarenessFunc dpiAwareness = NULL;

@@ -1577,8 +1577,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 	}
 	else
 	{
-		HMODULE hm = LoadLibraryExA("Kernel32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-		void *func = (void*)GetProcAddress(hm, "IsWow64Process");
+		void *func = (void*)GetProcAddress(GetModuleHandleA("kernel32"), "IsWow64Process");
 		BOOL isWow = FALSE;
 
 		if (func != NULL)
@@ -1608,7 +1607,6 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 			// We are 32 bit App running on 32 bit Windows
 			duk_push_string(ctx, "ia32");
 		}
-		FreeLibrary(hm);
 	}
 	return(1);
 #else

@@ -29,6 +29,7 @@ limitations under the License.
 #include "microstack/ILibAsyncSocket.h"
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibRemoteLogging.h"
+#include <sas.h>
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
@@ -155,69 +156,12 @@ void kvm_setupSasPermissions()
 // Emulate the CTRL-ALT-DEL (Should work on WinXP, not on Vista & Win7)
 DWORD WINAPI kvm_ctrlaltdel(LPVOID Param)
 {
-	OSVERSIONINFO osv;
-
 	UNREFERENCED_PARAMETER( Param );
-
 	KVMDEBUG("kvm_ctrlaltdel", (int)Param);
-
-	osv.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-	if (!GetVersionEx(&osv)) return 0;
-
-	if (osv.dwMajorVersion < 6)
-	{
-		// Perform old method (WinXP)
-		HWND hwnd = NULL;
-		HWINSTA ws;
-		HDESK hdesk = NULL;
-
-		ws = OpenWindowStation("winsta0", FALSE,
-						WINSTA_ACCESSCLIPBOARD   |
-						WINSTA_ACCESSGLOBALATOMS |
-						WINSTA_CREATEDESKTOP     |
-						WINSTA_ENUMDESKTOPS      |
-						WINSTA_ENUMERATE         |
-						WINSTA_EXITWINDOWS       |
-						WINSTA_READATTRIBUTES    |
-						WINSTA_READSCREEN        |
-						WINSTA_WRITEATTRIBUTES);
-		if (ws != NULL)
-		{
-			SetProcessWindowStation(ws);
-			CloseWindowStation(ws);
-		}
-
-		hdesk = OpenDesktop("Winlogon", 0, FALSE,
-						DESKTOP_CREATEMENU       |
-						DESKTOP_CREATEWINDOW     |
-						DESKTOP_ENUMERATE        |
-						DESKTOP_HOOKCONTROL      |
-						DESKTOP_JOURNALPLAYBACK  |
-						DESKTOP_JOURNALRECORD    |
-						DESKTOP_READOBJECTS      |
-						DESKTOP_SWITCHDESKTOP    |
-						DESKTOP_WRITEOBJECTS);
-		if (hdesk != NULL && SetThreadDesktop(hdesk) == TRUE)
-
-		hwnd = FindWindow("SAS window class", "SAS window");
-		if (hwnd == NULL) hwnd = HWND_BROADCAST;
-		SendMessage(hwnd, WM_HOTKEY, 0, MAKELONG(MOD_ALT | MOD_CONTROL, VK_DELETE));
-		if (hdesk != NULL) CloseDesktop(hdesk);
-	}
-	else
-	{
-		// Perform new method (Vista & Win7)
-		typedef VOID (WINAPI *SendSas)(BOOL asUser);
-		SendSas sas;
-		HMODULE sm = NULL;
-		if ((sm = LoadLibraryExA((LPCSTR)"sas.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
-		{
-			sas = (SendSas)GetProcAddress(sm, "SendSAS");
-			kvm_setupSasPermissions();
-			if (sas != NULL) sas(FALSE);
-			FreeLibrary(sm);
-		}
-	}
+	
+	// Perform new method (Vista & Win7)
+	kvm_setupSasPermissions();
+	SendSAS(FALSE);
 	return 0;
 }
 

@@ -478,9 +478,10 @@ int g_TouchLoadLibraryState = 0;
 
 int TouchInit()
 {
+	// These functions only exist on Windows 8 and above, so it's ok that the SYSTEM32 flag requires Win 7 SP2
 	_InitializeTouchInjection init = NULL;
 	if (g_TouchLoadLibraryState > 0) return g_TouchLoadLibraryState;
-	g_TouchLoadLibrary = LoadLibraryExA((LPCSTR)"User32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	g_TouchLoadLibrary = LoadLibraryExA((LPCSTR)"User32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32); 
 	if (g_TouchLoadLibrary == NULL) { g_TouchLoadLibraryState = 2; return 2; }
 	init = (_InitializeTouchInjection)GetProcAddress(g_TouchLoadLibrary, "InitializeTouchInjection");
 	g_TouchInjectionCall = (_InjectTouchInput)GetProcAddress(g_TouchLoadLibrary, "InjectTouchInput");

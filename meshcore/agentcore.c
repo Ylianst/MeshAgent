@@ -3979,6 +3979,7 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 #ifdef WIN32
 	SYSTEM_POWER_STATUS stats;
 
+	// This is only supported on Windows 8.1 / Windows Server 2012 R2 and above
 	if ((retVal->shCore = (void*)LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
 	{
 		if ((retVal->dpiAwareness = (void*)GetProcAddress((HMODULE)retVal->shCore, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
@@ -3995,7 +3996,7 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	retVal->capabilities = capabilities | MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT | MeshCommand_AuthInfo_CapabilitiesMask_COMPRESSION;
 	
 #ifdef WIN32
-
+	// This is only supported on Windows 8 and above
 	HMODULE wsCORE = LoadLibraryExA((LPCSTR)"Ws2_32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 	GetHostNameWFunc ghnw = NULL;
 	if (wsCORE != NULL)
