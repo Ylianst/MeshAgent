@@ -722,7 +722,7 @@ int wmain(int argc, char* wargv[])
 		else
 		{
 			// Legacy
-			if (argc > 1 && (strcmp(argv[2], "run") == 0 || strcmp(argv[2], "connect") == 0))
+			if (argc > 2 && (strcmp(argv[2], "run") == 0 || strcmp(argv[2], "connect") == 0))
 			{
 				// Console Mode
 				updateLen = sprintf_s(update, 1024, "require('agent-installer').update(false, ['%s']);", argv[2]);

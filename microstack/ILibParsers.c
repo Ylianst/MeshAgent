@@ -9283,24 +9283,7 @@ static long long ILibGetUptimeUpperEmulation1;
 static long long ILibGetUptimeUpperEmulation2;
 long long ILibGetUptime()
 {
-	long long r;
-
-	// Windows 7 & Vista
-    if (ILibGetUptimeFirst) {
-        HMODULE hlib = LoadLibraryExA((LPCSTR)"KERNEL32.DLL", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-		if (hlib == NULL) return 0;
-        pILibGetUptimeGetTickCount64 = (ULONGLONG(*)())GetProcAddress(hlib, "GetTickCount64");
-        ILibGetUptimeFirst = 0;
-		FreeLibrary(hlib);
-    }
-    if (pILibGetUptimeGetTickCount64 != NULL) return pILibGetUptimeGetTickCount64(); 
-
-	// Windows XP with rollover prevention
-	r = (long long)GetTickCount();  // Static Analyser reports this could roll over, but that's why this block is doing rollover prevention
-	if (r < ILibGetUptimeUpperEmulation1) ILibGetUptimeUpperEmulation2 += ((long long)1) << 32;
-	ILibGetUptimeUpperEmulation1 = r;
-	r += ILibGetUptimeUpperEmulation2;
-	return r;
+	return(GetTickCount64());
 }
 #elif __APPLE__
 long long ILibGetUptime()
