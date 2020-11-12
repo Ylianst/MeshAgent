@@ -65,7 +65,8 @@
 #   ARCHID=2                                # Windows Console x86 64 bit
 #   ARCHID=3                                # Windows Service x86 32 bit
 #   ARCHID=4                                # Windows Service x86 64 bit
-#   make macos ARCHID=16					# Mac OS x86 64 bit
+#   make macos ARCHID=16					# macOS x86 64 bit
+#	make macos ARCHID=29					# macOS ARM 64 bit
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPS
@@ -190,12 +191,24 @@ KVM = 1
 LMS = 1
 endif
 
-# Official MacOS x86 64bit
+# Official macOS x86 64bit
 ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
 KVM = 1
 LMS = 0
+MACOSARCH = -mmacosx-version-min=10.5
+CC = gcc -arch x86_64
 endif
+
+# Official macOS ARM 64bit
+ifeq ($(ARCHID),29)
+ARCHNAME = osx-arm-64
+KVM = 1
+LMS = 0
+MACOSARCH = -target arm64-apple-macos11
+CC = gcc -arch arm64
+endif
+
 
 # Official Linux MIPS
 ifeq ($(ARCHID),7)
@@ -533,7 +546,7 @@ linux:
 	$(STRIP)
 
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="-arch x86_64 -mmacosx-version-min=10.5 -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
+	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
 
