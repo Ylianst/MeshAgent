@@ -29,12 +29,17 @@
 #   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
 #   make linux ARCHID=6 DEBUG=1             # Linux x86 64 bit, with debug symbols and automated crash handling
 #
-# Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2
-#  64 bit JPEG8  -> ./configure --with-jpeg8 
-#  64 bit JPEG62 -> ./configure
-#  32 bit JPEG8  -> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O2 -m32' LDFLAGS=-m32
-#  32 bit JPEG62 -> ./configure --host i686-pc-linux-gnu CFLAGS='-O2 -m32' LDFLAGS=-m32
-
+# Compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2 on linux
+#   64 bit JPEG8  -> ./configure --with-jpeg8 
+#   64 bit JPEG62 -> ./configure
+#   32 bit JPEG8  -> ./configure --with-jpeg8 --host i686-pc-linux-gnu CFLAGS='-O2 -m32' LDFLAGS=-m32
+#   32 bit JPEG62 -> ./configure --host i686-pc-linux-gnu CFLAGS='-O2 -m32' LDFLAGS=-m32
+#
+# Cross compiling lib-turbojpeg from source, using libjpeg-turbo 1.4.2 on macOS
+#   Intel Silicon macOS	->	./configure --host=x86_64-apple-darwin20.0.0 CFLAGS='-arch x86_64'
+#   Apple Silicon macOS	->	./configure --host=aarch64-apple-darwin20.0.0 CFLAGS='-arch arm64'
+#
+#
 #	NOTE: If you installed jpeg8 headers on your machine, you must specify --with-jpeg8 when building turbo jpeg, otherwise omit --with-jpeg8
 #
 #
