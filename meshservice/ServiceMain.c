@@ -1067,9 +1067,23 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 							hotfix = (pFileInfo->dwFileVersionLS >> 16) & 0xffff;
 							other = (pFileInfo->dwFileVersionLS) & 0xffff;
 #ifdef _WIN64
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
+							if (SOURCE_COMMIT_DATE != NULL)
+							{
+								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s, 64bit", SOURCE_COMMIT_DATE);
+							}
+							else
+							{
+								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
+							}
 #else
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
+							if (SOURCE_COMMIT_DATE != NULL)
+							{
+								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", SOURCE_COMMIT_DATE);
+							}
+							else
+							{
+								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
+							}
 #endif
 							SetWindowTextA(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibScratchPad);
 						}
