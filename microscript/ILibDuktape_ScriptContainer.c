@@ -1651,7 +1651,18 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 			}
 			else
 			{
-				return(ILibDuktape_Error(ctx, "Could not determine architecture"));
+				if (strcmp(u.machine, "mips") == 0)
+				{
+					duk_push_string(ctx, "mips");
+				}
+				else if (strcmp(u.machine, "mipsel") == 0)
+				{
+					duk_push_string(ctx, "mipsel");
+				}
+				else
+				{
+					return(ILibDuktape_Error(ctx, "Could not determine architecture"));
+				}
 			}
 		}
 	}
