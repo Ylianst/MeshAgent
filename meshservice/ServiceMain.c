@@ -953,7 +953,7 @@ int wmain(int argc, char* wargv[])
 	return 0;
 }
 
-char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** meshid, char** serverid, char** serverurl, char** installFlags)
+char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** meshid, char** serverid, char** serverurl, char** installFlags, char **displayName, char **meshServiceName)
 {
 	char* importFile;
 	int eq, importFileLen;
@@ -962,6 +962,7 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 
 	*meshname = *meshid = *serverid = *serverurl = *installFlags = NULL;
 	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
+	size_t offset = 0;
 	if (importFile == NULL) {
 		// Could not find the .msh file, see if there is one inside our own executable.
 		FILE *tmpFile = NULL;
@@ -991,8 +992,8 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 		}
 		fclose(tmpFile);
 	}
-
-	pr = ILibParseString(importFile, 0, importFileLen, "\n", 1);
+	if (importFileLen > 3 && memcmp(importFile, (char[]) { 0xEF, 0xBB, 0xBF }, 3) == 0) { offset = 3; }
+	pr = ILibParseString(importFile, offset, importFileLen-offset, "\n", 1);
 	f = pr->FirstResult;
 	while (f != NULL) {
 		f->datalength = ILibTrimString(&(f->data), f->datalength);
@@ -1016,6 +1017,8 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 				if (keyLen == 8 && memcmp("ServerID", key, keyLen) == 0) { *serverid = val; }
 				if (keyLen == 10 && memcmp("MeshServer", key, keyLen) == 0) { *serverurl = val; }
 				if (keyLen == 12 && memcmp("InstallFlags", key, keyLen) == 0) { *installFlags = val; }
+				if (keyLen == 11 && memcmp("displayName", key, keyLen) == 0) { *displayName = val; }
+				if (keyLen == 15 && memcmp("meshServiceName", key, keyLen) == 0) { *meshServiceName = val; }
 			}
 		}
 		f = f->NextResult;
@@ -1031,48 +1034,13 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL;
-
+	char *displayName = NULL, *meshServiceName = NULL;
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
 	case WM_INITDIALOG:
 		{
-			// Get the current service running state
-			int r = GetServiceState(serviceFile);
-			char* txt = "";
 			char selfexe[_MAX_PATH];
-
-			switch (r)
-			{
-			case 0:
-				txt = "Error";
-				break;
-			case SERVICE_STOPPED: 
-				txt = "Stopped";
-				break;
-			case SERVICE_START_PENDING: 
-				txt = "Start Pending";
-				break;
-			case SERVICE_STOP_PENDING: 
-				txt = "Stop Pending";
-				break;
-			case SERVICE_RUNNING: 
-				txt = "Running";
-				break;
-			case SERVICE_CONTINUE_PENDING: 
-				txt = "Continue Pending";
-				break;
-			case SERVICE_PAUSE_PENDING: 
-				txt = "Pause Pending";
-				break;
-			case SERVICE_PAUSED: 
-				txt = "Paused";
-				break;
-			case 100: 
-				txt = "Not Installed";
-				break;
-			}
-			SetWindowTextA( GetDlgItem( hDlg, IDC_STATUSTEXT ), txt);
 
 			// Get current executable path
 			WCHAR wselfexe[MAX_PATH];
@@ -1110,7 +1078,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				}
 			}
 
-			if ((mshfile = getMshSettings(fileName, selfexe, &meshname, &meshid, &serverid, &serverurl, &installFlags)) != NULL)
+			if ((mshfile = getMshSettings(fileName, selfexe, &meshname, &meshid, &serverid, &serverurl, &installFlags, &displayName, &meshServiceName)) != NULL)
 			{
 				// Set text in the dialog box
 				int installFlagsInt = 0;
@@ -1118,11 +1086,11 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
 				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
 				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
-				SetWindowTextA(GetDlgItem(hDlg, IDC_POLICYTEXT), (meshid != NULL) ? meshname : "(None)");
+				if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
+				SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshid != NULL) ? meshname : "(None)", -1));
 				SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
-				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERLOCATION), (serverurl != NULL) ? serverurl : "(None)");
+				SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
-				free(mshfile);
 				if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
 				if ((installFlagsInt & 3) == 1) {
 					// Temporary Agent Only
@@ -1145,6 +1113,47 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			{
 				EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
 			}
+
+
+			// Get the current service running state
+			int r = GetServiceState(meshServiceName != NULL ? meshServiceName : serviceFile);
+			char* txt = "";
+			SetWindowTextA(GetDlgItem(hDlg, IDC_INSTALLBUTTON), "Update");
+
+			switch (r)
+			{
+			case 0:
+				txt = "Error";
+				break;
+			case SERVICE_STOPPED:
+				txt = "Stopped";
+				break;
+			case SERVICE_START_PENDING:
+				txt = "Start Pending";
+				break;
+			case SERVICE_STOP_PENDING:
+				txt = "Stop Pending";
+				break;
+			case SERVICE_RUNNING:
+				txt = "Running";
+				break;
+			case SERVICE_CONTINUE_PENDING:
+				txt = "Continue Pending";
+				break;
+			case SERVICE_PAUSE_PENDING:
+				txt = "Pause Pending";
+				break;
+			case SERVICE_PAUSED:
+				txt = "Paused";
+				break;
+			case 100:
+				txt = "Not Installed";
+				ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
+				SetWindowTextA(GetDlgItem(hDlg, IDC_INSTALLBUTTON), "Install");
+				break;
+			}
+			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), txt);
+			if (mshfile != NULL) { free(mshfile); }
 
 			return (INT_PTR)TRUE;
 		}
