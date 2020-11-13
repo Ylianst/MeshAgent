@@ -412,10 +412,13 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	int uid = -1;
 	char **envargs = NULL;
 
+	if (nargs > 32) { return(ILibDuktape_Error(ctx, "Too many parameters")); }
+
 	for (i = 0; i < nargs; ++i)
 	{
 		if (duk_is_array(ctx, i) != 0)
 		{
+			if (duk_get_length(ctx, i) > 255) { return(ILibDuktape_Error(ctx, "Array too big")); }
 			int arrLen = (int)duk_get_length(ctx, i);
 #ifdef WIN32
 			args = (char**)_alloca((arrLen + 1) * sizeof(char*));
