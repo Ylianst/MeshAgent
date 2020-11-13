@@ -72,6 +72,10 @@ function filesearch()
                 ret.child.stdin.write(' ForEach-Object -Process { $sw.WriteLine($_.FullName); $sw.Flush(); }\r\n');
                 ret.child.stdin.write('exit\r\n');
 
+                ret.cancel = function cancel()
+                {
+                    this.child.kill();
+                }
                 return (ret);
             };
             break;
@@ -131,6 +135,10 @@ function filesearch()
                     this.stdout.p.emit('end');
                     this.stdout.p._res();
                 });
+                ret.cancel = function cancel()
+                {
+                    this.child.kill();
+                }
                 return (ret);
             };
             break;
