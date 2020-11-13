@@ -252,7 +252,8 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent);
 int MeshAgent_Start(MeshAgentHostContainer *agent, int argc, char **argv);
 void MeshAgent_Stop(MeshAgentHostContainer *agent);
 void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv);
-char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath);
+char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBackSlash);
+#define MeshAgent_MakeAbsolutePath(basePath, localPath) MeshAgent_MakeAbsolutePathEx(basePath, localPath, 0)
 
 
 

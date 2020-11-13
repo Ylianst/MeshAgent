@@ -665,8 +665,32 @@ function sys_update(isservice, b64)
         }
         catch (f)
         {
-            console.log(' * ' + servicename + ' SERVICE NOT FOUND *');
-            process._exit();
+            // Check to see if we can figure out the service name before we fail
+            var old = process.execPath.split('.update.exe').join('.exe');
+            var child = require('child_process').execFile(old, [old.split('\\').pop(), '-name']);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.waitExit();
+              
+            if (child.stdout.str.trim() != '')
+            {
+                try
+                {
+                    service = require('service-manager').manager.getService(child.stdout.str.trim())
+                    serviceLocation = service.appLocation();
+                    console.log(' Updating service: ' + child.stdout.str.trim());
+                }
+                catch (ff)
+                {
+                    console.log(' * ' + servicename + ' SERVICE NOT FOUND *');
+                    console.log(' * ' + child.stdout.st.trim() + ' SERVICE NOT FOUND *');
+                    process._exit();
+                }
+            }
+            else
+            {
+                console.log(' * ' + servicename + ' SERVICE NOT FOUND *');
+                process._exit();
+            }
         }
     }
 

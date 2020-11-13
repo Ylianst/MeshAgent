@@ -1869,7 +1869,7 @@ End Mesh Agent Duktape Abstraction
 --------------------------------*/
 
 // !!!WARNING!!!: The result of this method is stored in ILibScratchPad2
-char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
+char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBackSlash)
 {
 	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
 	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_NONE, 0, agent!=NULL?agent->chain:NULL, NULL, NULL, agent!=NULL?agent->exePath: basePath, NULL, NULL, agent!=NULL?agent->chain:NULL);
@@ -1881,6 +1881,13 @@ char* MeshAgent_MakeAbsolutePath(char *basePath, char *localPath)
 		duk_push_boolean(ctx, agent!=NULL?(agent->configPathUsesCWD != 0):0);	// [helper][basePath][localPath][bool]
 		if (duk_pcall(ctx, 3) == 0)												// [result]
 		{
+			if (escapeBackSlash != 0)
+			{
+				duk_string_split(ctx, -1, "\\");								// [result][array]
+				duk_array_join(ctx, -1, "\\\\");								// [result][array][string]
+				duk_remove(ctx, -2);											// [result][string]
+				duk_remove(ctx, -2);											// [string]
+			}
 			duk_size_t len;
 			char *buffer = Duktape_GetBuffer(ctx, -1, &len);
 			if (len < sizeof(ILibScratchPad2))
@@ -2497,13 +2504,19 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 	}
 
 	// Check updater version
-	if (agent->JSRunningAsService == 0)
+	char* updateFilePath = MeshAgent_MakeAbsolutePathEx(agent->exePath, ".update.exe", 1); // uses ILibScratchPad2
+	ILIBLOGMESSAGEX("SelfUpdate -> Checking Updater Version on: %s , %s", updateFilePath, agent->exePath);
+	duk_push_sprintf(agent->meshCoreCtx, "require('agent-installer').updaterVersion('%s');", updateFilePath);	// [code]
+	if (duk_peval(agent->meshCoreCtx) == 0)																		// [version]
 	{
-		char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe"); // uses ILibScratchPad2
-		duk_push_sprintf(agent->meshCoreCtx, "require('agent-installer').updaterVersion('%s');", updateFilePath);	// [code]
-		if (duk_peval(agent->meshCoreCtx) == 0) { agent->updaterVersion = duk_get_int(agent->meshCoreCtx, -1); }	// [version]
-		duk_pop(agent->meshCoreCtx);																				// ...
+		agent->updaterVersion = duk_get_int(agent->meshCoreCtx, -1); 
+		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion: %d", agent->updaterVersion);
+	}	
+	else
+	{
+		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion_ERROR: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
 	}
+	duk_pop(agent->meshCoreCtx);																				// ...
 #endif
 
 #ifndef WIN32
@@ -5606,6 +5619,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			{
 				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
 			}
+			if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX("SelfUpdate[%d] -> CreateProcessW() with parameters: %s", agentHost->updaterVersion, ILibScratchPad); }
 			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We triedI  to execute a bad executable... not good. Lets try to recover.
