@@ -158,10 +158,26 @@ DWORD WINAPI kvm_ctrlaltdel(LPVOID Param)
 {
 	UNREFERENCED_PARAMETER( Param );
 	KVMDEBUG("kvm_ctrlaltdel", (int)Param);
-	
+	typedef VOID(WINAPI *SendSas)(BOOL asUser);
+	SendSas sas;
+
 	// Perform new method (Vista & Win7)
-	kvm_setupSasPermissions();
-	SendSAS(FALSE);
+	HMODULE m = LoadLibraryExA("sas.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+
+	// We need to dynamically load this, becuase it doesn't exist on Windows Core.
+	// However, LOAD_LIBRARY_SEARCH_SYSTEM32 does not exist on Windows 7 SP1 / Windows Server 2008 R2 without a MSFT Patch,
+	// but this patch is no longer available from MSFT, so this fallback case will only affect insecure versions of Windows 7 SP1 / Server 2008 R2
+	if (m == NULL && GetLastError() == ERROR_INVALID_PARAMETER) { m = LoadLibraryA("sas.dll"); }	
+	if (m != NULL)
+	{
+		sas = (SendSas)GetProcAddress(m, "SendSAS");
+		if (sas != NULL)
+		{
+			kvm_setupSasPermissions();
+			sas(FALSE);
+		}
+		FreeLibrary(m);
+	}
 	return 0;
 }
 
