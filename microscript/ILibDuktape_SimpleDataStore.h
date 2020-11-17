@@ -22,6 +22,7 @@ limitations under the License.
 #include "microstack/ILibSimpleDataStore.h"
 
 void ILibDuktape_SimpleDataStore_init(duk_context *ctx, ILibSimpleDataStore sharedDb);
-
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(duk_context *ctx, ILibSimpleDataStore dataStore);
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object(duk_context *ctx, ILibSimpleDataStore dataStore);
 
 #endif

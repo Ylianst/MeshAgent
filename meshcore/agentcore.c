@@ -1667,11 +1667,7 @@ duk_ret_t ILibDuktape_MeshAgent_getStartupOptions(duk_context *ctx)
 	duk_push_this(ctx);																		// [MeshAgent]
 	agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
 
-	int varLen = ILibSimpleDataStore_Cached_GetJSON(agent->masterDb, NULL, 0);
-	char *buffer = duk_push_fixed_buffer(ctx, varLen);
-	ILibSimpleDataStore_Cached_GetJSON(agent->masterDb, buffer, varLen);
-	duk_push_string(ctx, buffer);
-	duk_json_decode(ctx, -1);
+	ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object(ctx, agent->masterDb);
 	return(1);
 }
 
@@ -3726,17 +3722,9 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	//int CoreModuleTesterLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", NULL, 0);
 	//char *CoreModule, *CoreModuleTester;
 
-	char *argarray;
-	size_t argarrayLen;
-
-	argarrayLen = (size_t)ILibSimpleDataStore_Cached_GetJSONEx(agent->masterDb, NULL, 0);
-	ILibMemory_AllocateRaw(argarray, argarrayLen);
-	ILibSimpleDataStore_Cached_GetJSONEx(agent->masterDb, argarray, (int)argarrayLen);
-
-	duk_push_heapptr(agent->meshCoreCtx, ILibDuktape_GetProcessObject(agent->meshCoreCtx));	// [process]
-	duk_push_string(agent->meshCoreCtx, argarray);											// [process][string]
-	duk_json_decode(agent->meshCoreCtx, -1);												// [process][json]
-	duk_put_prop_string(agent->meshCoreCtx, -2, "\xFF_argArray");							// [process]
+	duk_push_heapptr(agent->meshCoreCtx, ILibDuktape_GetProcessObject(agent->meshCoreCtx));		// [process]
+	ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(agent->meshCoreCtx, agent->masterDb);	// [process][array]
+	duk_put_prop_string(agent->meshCoreCtx, -2, "\xFF_argArray");								// [process]
 	duk_pop(agent->meshCoreCtx);
 
 	printf("Agent Self Test...\n");
@@ -4335,8 +4323,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 	else if (installFlag != 0)
 	{
-		int bufLen = 0;
-		char *buf;
 		duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, MeshAgent_AgentInstallerCTX_Finalizer, agentHost->chain);
 		duk_eval_string(ctxx, "require('user-sessions').isRoot();");
 		if (!duk_get_boolean(ctxx, -1))
@@ -4346,19 +4332,15 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			exit(0);
 		}
 
-
 		switch (installFlag)
 		{
 			case 1:
 			case 5:
-				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
-				buf = (char*)ILibMemory_SmartAllocate(bufLen);
-				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
-
 				duk_eval_string(ctxx, "require('agent-installer');");
 				duk_get_prop_string(ctxx, -1, "fullInstall");
-				duk_swap_top(ctxx, -2);
-				duk_push_string(ctxx, buf);
+				duk_swap_top(ctxx, -2);																// [func][this]
+				ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);	// [func][this][array]
+				duk_json_encode(ctxx, -1);															// [func][this][json]
 				if (duk_pcall_method(ctxx, 1) != 0)
 				{
 					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
@@ -4367,18 +4349,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					}
 				}
 				duk_pop(ctxx);
-				ILibMemory_Free(buf);
 				return(1);
 				break;
 			case 2:
-				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
-				buf = (char*)ILibMemory_SmartAllocate(bufLen);
-				bufLen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, buf, bufLen);
-
 				duk_eval_string(ctxx, "require('agent-installer');");
-				duk_get_prop_string(ctxx, -1, "fullUninstall");
-				duk_swap_top(ctxx, -2);
-				duk_push_string(ctxx, buf);
+				duk_get_prop_string(ctxx, -1, "fullUninstall");			
+				duk_swap_top(ctxx, -2);																// [func][this]
+				ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);	// [func][this][array]
+				duk_json_encode(ctxx, -1);															// [func][this][json]
 				if (duk_pcall_method(ctxx, 1) != 0)
 				{
 					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
@@ -4387,7 +4365,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					}
 				}
 				duk_pop(ctxx);
-				ILibMemory_Free(buf);
 				return(1);
 				break;
 			default:
@@ -5563,19 +5540,37 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			{
 				if (agentHost->JSRunningAsService == 0)
 				{
-					int jsonlen = ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, NULL, 0);
-					if (jsonlen > 0)
-					{
-						startParms = (char*)ILibMemory_SmartAllocateEx(jsonlen, ILibBase64EncodeLength(jsonlen));
-						unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
-						ILibSimpleDataStore_Cached_GetJSONEx(agentHost->masterDb, startParms, jsonlen);
-						ILibBase64Encode((unsigned char*)startParms, jsonlen, &tmp);
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => %s", startParms); }
-					}
-					else
-					{
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => NONE"); }
-					}
+						duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal();
+						duk_size_t jsonLen;
+						char *json = NULL;
+
+						ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);			// [array]
+						if (duk_get_length(ctxx, -1) > 0)
+						{
+							duk_json_encode(ctxx, -1);																	// [json]
+							json = (char*)duk_get_lstring(ctxx, -1, &jsonLen);
+
+							startParms = (char*)ILibMemory_SmartAllocateEx(jsonLen + 1, ILibBase64EncodeLength(jsonLen + 1));
+							unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
+							memcpy_s(startParms, jsonLen + 1, json, jsonLen);
+							Duktape_SafeDestroyHeap(ctxx);
+
+							if (jsonLen > INT32_MAX)
+							{
+								ILibMemory_Free(startParms);
+								startParms = NULL;
+								if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => ERROR"); }
+							}
+							else
+							{
+								ILibBase64Encode((unsigned char*)startParms, (int)jsonLen, &tmp);
+								if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => %s", startParms); }
+							}
+						}
+						else
+						{
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => NONE"); }
+						}
 				}
 				else
 				{

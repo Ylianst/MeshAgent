@@ -178,49 +178,15 @@ typedef struct ILibSimpleDateStore_JSONCache
 	int bufferLen;
 }ILibSimpleDateStore_JSONCache;
 
-void ILibSimpleDataStore_Cached_GetJSON_count(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+void ILibSimpleDataStore_Cached_GetValues_sink(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
-	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
 	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
+	ILibSimpleDataStore dataStore = (ILibSimpleDataStore)((void**)user)[0];
+	ILibSimpleDataStore_GetValuesHandler handler = (ILibSimpleDataStore_GetValuesHandler)((void**)user)[1];
+	void *userObject = ((void**)user)[2];
 	
-	if (cache->bufferLen == 0) 
-	{
-		cache->bufferLen = 3; 
-	}
-	else
-	{
-		++cache->bufferLen;
-	}
-
-	cache->bufferLen += (Key2Len + 3);
-	cache->bufferLen += (entry->valueLength + 2);
-}
-void ILibSimpleDataStore_Cached_GetJSONEx_count(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
-{
-	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
-	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
-
-	if (cache->bufferLen == 0)
-	{
-		cache->bufferLen = 3;
-	}
-	else
-	{
-		++cache->bufferLen;
-	}
-
-	cache->bufferLen += (Key2Len + 5);
-	cache->bufferLen += (entry->valueLength + 4);
-}
-void ILibSimpleDataStore_Cached_GetJSON_write(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
-{
-	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
-	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
 	char *tmpbuffer = NULL;
 	size_t tmpbufferLen = 0;
-
-	char* value = entry->value;
-	size_t valueLen = entry->valueLength;
 
 	// check if this is a compressed record
 	if (Key2Len > sizeof(uint32_t))
@@ -233,119 +199,27 @@ void ILibSimpleDataStore_Cached_GetJSON_write(ILibHashtable sender, void *Key1, 
 			{
 				tmpbuffer = (char*)ILibMemory_SmartAllocate(tmpbufferLen);
 				ILibInflate(entry->value, entry->valueLength, tmpbuffer, &tmpbufferLen, 0);
-				value = tmpbuffer;
-				valueLen = tmpbufferLen;
+
+				// Uncompressed Record
+				handler(dataStore, Key2, (size_t)Key2Len, tmpbuffer, tmpbufferLen, userObject);
+				ILibMemory_Free(tmpbuffer);
+				return;
 			}
 		}
 	}
 
-
-
-	if (cache->offset != 1) { cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, ","); }
-
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"");
-	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, Key2, Key2Len); cache->offset += Key2Len;
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\":\"");
-	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, value, (int)valueLen); cache->offset += (int)valueLen;
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"");
-
-	if (tmpbuffer != NULL) { ILibMemory_Free(tmpbuffer); }
+	// Not a compressed record
+	handler(dataStore, Key2, (size_t)Key2Len, entry->value, entry->valueLength, userObject);
 }
-void ILibSimpleDataStore_Cached_GetJSONEx_write(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
+int ILibSimpleDataStore_Cached_GetValues(ILibSimpleDataStore dataStore, ILibSimpleDataStore_GetValuesHandler handler, void *user)
 {
-	ILibSimpleDateStore_JSONCache *cache = (ILibSimpleDateStore_JSONCache*)user;
-	ILibSimpleDataStore_CacheEntry *entry = (ILibSimpleDataStore_CacheEntry*)Data;
-
-	char *tmpbuffer = NULL;
-	size_t tmpbufferLen = 0;
-
-	char* value = entry->value;
-	size_t valueLen = entry->valueLength;
-
-	// check if this is a compressed record
-	if (Key2Len > sizeof(uint32_t))
-	{
-		if (((uint32_t*)(Key2 + Key2Len - sizeof(uint32_t)))[0] == crc32c(0, (unsigned char*)Key2, Key2Len - sizeof(uint32_t)))
-		{
-			Key2Len -= sizeof(uint32_t);
-			ILibInflate(entry->value, entry->valueLength, NULL, &tmpbufferLen, 0);
-			if (tmpbufferLen > 0)
-			{
-				tmpbuffer = (char*)ILibMemory_SmartAllocate(tmpbufferLen);
-				ILibInflate(entry->value, entry->valueLength, tmpbuffer, &tmpbufferLen, 0);
-				value = tmpbuffer;
-				valueLen = tmpbufferLen;
-			}
-		}
-	}
-
-
-	if (cache->offset != 1) { cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, ","); }
-
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\"--");
-	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, Key2, Key2Len); cache->offset += Key2Len;
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "=\\\"");
-	memcpy_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, value, (int)valueLen); cache->offset += (int)valueLen;
-	cache->offset += sprintf_s(cache->buffer + cache->offset, cache->bufferLen - cache->offset, "\\\"\"");
-}
-
-int ILibSimpleDataStore_Cached_GetJSONEx(ILibSimpleDataStore dataStore, char *buffer, int bufferLen)
-{
+	void *callback[] = { dataStore, handler, user };
 	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	if (root->cacheTable == NULL)
+	if (root->cacheTable != NULL && handler != NULL)
 	{
-		if (bufferLen < 3)
-		{
-			return(3);
-		}
-		else
-		{
-			return(sprintf_s(buffer, (size_t)bufferLen, "[]"));
-		}
+		ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetValues_sink, callback);
 	}
-	ILibSimpleDateStore_JSONCache cache;
-	cache.buffer = NULL;
-	cache.offset = 0;
-	cache.bufferLen = 0;
-	ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetJSONEx_count, &cache);
-
-	if (buffer == NULL || bufferLen < cache.bufferLen) { return(cache.bufferLen); }
-	cache.buffer = buffer;
-	cache.offset = sprintf_s(buffer, bufferLen, "[");
-	cache.bufferLen = bufferLen;
-
-	ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetJSONEx_write, &cache);
-	cache.offset += sprintf_s(cache.buffer + cache.offset, cache.bufferLen - cache.offset, "]");
-	return(cache.offset);
-}
-int ILibSimpleDataStore_Cached_GetJSON(ILibSimpleDataStore dataStore, char *buffer, int bufferLen)
-{
-	ILibSimpleDataStore_Root *root = (ILibSimpleDataStore_Root*)dataStore;
-	if (root->cacheTable == NULL)
-	{
-		if (bufferLen < 3)
-		{
-			return(3);
-		}
-		else
-		{
-			return(sprintf_s(buffer, (size_t)bufferLen, "{}"));
-		}
-	}
-	ILibSimpleDateStore_JSONCache cache;
-	cache.buffer = NULL;
-	cache.offset = 0;
-	cache.bufferLen = 0;
-	ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetJSON_count, &cache);
-
-	if (buffer == NULL || bufferLen < cache.bufferLen) { return(cache.bufferLen); }
-	cache.buffer = buffer;
-	cache.offset = sprintf_s(buffer, bufferLen, "{");
-	cache.bufferLen = bufferLen;
-
-	ILibHashtable_Enumerate(root->cacheTable, ILibSimpleDataStore_Cached_GetJSON_write, &cache);
-	cache.offset += sprintf_s(cache.buffer + cache.offset, cache.bufferLen - cache.offset, "}");
-	return(cache.offset);
+	return(0);
 }
 
 // Write a key/value pair to file, the hash is already calculated

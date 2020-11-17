@@ -44,9 +44,9 @@ function Toaster()
     this.Toast = function Toast(title, caption, tsid)
     {
         var retVal = new promise(function (res, rej) { this._res = res; this._rej = rej; });
-        retVal.title = title;
-        if (title == 'MeshCentral') { try { retVal.title = require('MeshAgent').displayName; } catch (x) { } }
+        if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
 
+        retVal.title = title;
         retVal.caption = caption;
 
         switch (process.platform)

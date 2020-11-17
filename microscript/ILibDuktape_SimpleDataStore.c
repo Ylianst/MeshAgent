@@ -270,6 +270,48 @@ void ILibDuktape_SimpleDataStore_init(duk_context * ctx, ILibSimpleDataStore sha
 	}
 }
 
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object_sink(ILibSimpleDataStore sender, char* Key, size_t KeyLen, char* Value, size_t ValueLen, void *user)
+{
+	duk_context *ctx = (duk_context*)user;
+	duk_push_lstring(ctx, Key, KeyLen);				// [obj][key]
+	duk_push_lstring(ctx, Value, ValueLen);			// [obj][key][value]
+	duk_put_prop(ctx, -3);							// [obj]
+}
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array_sink(ILibSimpleDataStore sender, char* Key, size_t KeyLen, char* Value, size_t ValueLen, void *user)
+{
+	duk_context *ctx = (duk_context*)user;
+	duk_idx_t top = duk_get_top(ctx);						// [array]
+	duk_push_lstring(ctx, Key, KeyLen);						// [array][key]
+	char *k2 = (char*)duk_get_string(ctx, -1);
+
+	duk_push_object(ctx);									// [array][key][object]
+	duk_dup(ctx, -2);										// [array][key][obj][key]
+	duk_push_lstring(ctx, Value, ValueLen);					// [array][key][obj][key][value]
+	duk_put_prop(ctx, -3);									// [array][key][obj]
+	duk_json_encode(ctx, -1);								// [array][key][json]
+	duk_size_t len;
+	char *json = (char*)duk_get_lstring(ctx, -1, &len);
+	int colon = ILibString_IndexOf(json, len, ":", 1);
+
+	duk_string_substring(ctx, -1, colon+1, (int)len - 1);	// [array][key][json][val]
+	char *val = (char*)duk_get_lstring(ctx, -1, &len);
+
+	duk_push_sprintf(ctx, "--%s=%s", k2, val);				// [array][key][json][val][string]
+	duk_array_push(ctx, -5);								// [array][key][json][val]
+																	  
+	duk_pop_3(ctx);											// [array]
+}
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(duk_context *ctx, ILibSimpleDataStore dataStore)
+{
+	duk_push_array(ctx);
+	ILibSimpleDataStore_Cached_GetValues(dataStore, ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array_sink, ctx);
+}
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object(duk_context *ctx, ILibSimpleDataStore dataStore)
+{
+	duk_push_object(ctx);
+	ILibSimpleDataStore_Cached_GetValues(dataStore, ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object_sink, ctx);
+}
+
 #ifdef __DOXY__
 /*!
 \brief Provides a compact Key/Value datastore. <b>Note:</b> To use, must <b>require('SimpleDataStore').Create() or require('SimpleDataStore').Shared()</b>
