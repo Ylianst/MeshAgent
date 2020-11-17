@@ -364,6 +364,48 @@ void MouseAction(double absX, double absY, int button, short wheel)
 // MSDN References:
 // Keyboard input structure: http://msdn.microsoft.com/en-us/library/ms646271%28v=VS.85%29.aspx
 // Virtual key-codes: http://msdn.microsoft.com/en-us/library/dd375731%28v=VS.85%29.aspx
+BYTE kstate[255] = { 0 };
+void KeyActionEx(unsigned char keycode, int up, HKL layout)
+{
+	WCHAR buf[16];
+	HWND windowHandle = GetForegroundWindow();
+	INPUT key;
+	if (windowHandle == NULL) return;
+	SetForegroundWindow(windowHandle);
+
+	if (keycode == VK_CAPITAL)
+	{
+		if (up == 0)
+		{
+			kstate[VK_CAPITAL] = (kstate[VK_CAPITAL] == 0xFF ? 0x00 : 0xFF);
+		}
+	}
+	else
+	{
+		if (up == 1)
+		{
+			kstate[keycode] = 0;
+		}
+		else
+		{
+			kstate[keycode] = 0xFF;
+		}
+	}
+
+	ToUnicodeEx(keycode, MapVirtualKeyEx(keycode, MAPVK_VK_TO_VSC, layout), kstate, buf, 16, 0, layout);
+	uint32_t vc = ((uint32_t*)buf)[0];
+
+	key.type = INPUT_KEYBOARD;
+	key.ki.wVk = 0;
+	key.ki.dwFlags = KEYEVENTF_UNICODE;
+	if (up == 1) key.ki.dwFlags |= KEYEVENTF_KEYUP;									// 1 = UP
+																					//else if (up == 3) key.ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;		// 3 = EXUP
+																					//else if (up == 4) key.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;						// 4 = EXDOWN
+	key.ki.time = 0;
+	key.ki.wScan = (WORD)vc;
+	key.ki.dwExtraInfo = 0;
+	SendInput(1, &key, sizeof(INPUT));
+}
 
 void KeyAction(unsigned char keycode, int up)
 {

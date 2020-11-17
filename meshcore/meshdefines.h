@@ -25,6 +25,7 @@ typedef enum RemoteManagementCommands
 {
 	MNG_KVM_NOP = 0,
 	MNG_KVM_KEY = 1,
+	MNG_KVM_KEY_WITHLAYOUT = 85,
 	MNG_KVM_MOUSE = 2,
 	MNG_KVM_MOUSE_CURSOR = 88,
 	MNG_KVM_MOUSE_MOVE = 89,
