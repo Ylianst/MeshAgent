@@ -41,7 +41,7 @@ void KVM_InitMouseCursors(void* pendingPackets);
 void KVM_UnInitMouseCursors();
 void MouseAction(double absX, double absY, int button, short wheel);
 void KeyAction(unsigned char keycode, int up);
-void KeyActionEx(unsigned char keycode, int up, HKL layout);
+void KeyActionUnicode(WORD unicode, int up);
 int TouchInit();
 void TouchUnInit();
 int TouchAction1(unsigned char id, unsigned int flags, unsigned short x, unsigned short y);
