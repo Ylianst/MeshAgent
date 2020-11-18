@@ -381,9 +381,7 @@ void KeyActionUnicode(WORD unicode, int up)
 	key.type = INPUT_KEYBOARD;
 	key.ki.wVk = 0;
 	key.ki.dwFlags = KEYEVENTF_UNICODE;
-	if (up == 1) key.ki.dwFlags = KEYEVENTF_KEYUP;									// 1 = UP
-	else if (up == 3) key.ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;		// 3 = EXUP
-	else if (up == 4) key.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;						// 4 = EXDOWN
+	if (up == 1) key.ki.dwFlags |= KEYEVENTF_KEYUP;	 // 1 = UP
 	key.ki.time = 0;
 	key.ki.wScan = unicode;
 	key.ki.dwExtraInfo = GetMessageExtraInfo();

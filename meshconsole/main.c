@@ -307,12 +307,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 			if (argv[1][8] == '*')
 			{
 				// New Style
-				integratedJavaScriptLen = sprintf_s(integratedJavaScript, 1024, "require('agent-installer').update(false, '%s');", argc > 1 ? argv[2] : "null");
+				integratedJavaScriptLen = sprintf_s(integratedJavaScript, 1024, "require('agent-installer').update(false, '%s');", argc > 2 ? argv[2] : "null");
 			}
 			else
 			{
 				// Legacy
-				integratedJavaScriptLen = sprintf_s(integratedJavaScript, 1024, "require('agent-installer').update(false, ['%s']);", argv[2]);
+				integratedJavaScriptLen = sprintf_s(integratedJavaScript, 1024, "require('agent-installer').update(false, ['%s']);", argc > 2 ? argv[2] : "");
 			}
 		}
 	}

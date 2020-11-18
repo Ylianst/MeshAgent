@@ -719,7 +719,7 @@ int wmain(int argc, char* wargv[])
 		if (argv[1][8] == '*')
 		{
 			// New Style
-			updateLen = sprintf_s(update, 1024, "require('agent-installer').update(%s, '%s');", argv[1][9] == 'S' ? "true" : "false", argc > 1 ? argv[2] : "null");
+			updateLen = sprintf_s(update, 1024, "require('agent-installer').update(%s, '%s');", argv[1][9] == 'S' ? "true" : "false", argc > 2 ? argv[2] : "null");
 		}
 		else
 		{

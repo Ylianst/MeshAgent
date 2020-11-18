@@ -5612,7 +5612,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			}
 			else
 			{
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "" : (char*)ILibMemory_Extra(startParms));
+				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "W10=" : (char*)ILibMemory_Extra(startParms));
 			}
 			if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX("SelfUpdate[%d] -> CreateProcessW() with parameters: %s", agentHost->updaterVersion, ILibScratchPad); }
 			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
