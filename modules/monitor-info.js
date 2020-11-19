@@ -311,6 +311,11 @@ function monitorinfo()
                     this._X11.CreateMethod('XBlackPixel');
                     this._X11.CreateMethod('XWhitePixel');
                     this._X11.CreateMethod('Xutf8SetWMProperties');
+
+                    this._X11.CreateMethod('XDisplayKeycodes');
+                    this._X11.CreateMethod('XGetKeyboardMapping');
+                    this._X11.CreateMethod('XStringToKeysym');
+                    this._X11.CreateMethod('XChangeKeyboardMapping');
                 }
 
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);

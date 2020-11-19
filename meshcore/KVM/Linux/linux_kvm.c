@@ -133,6 +133,10 @@ typedef struct x11_struct
 	int(*XGetWindowAttributes)(Display *d, Window w, XWindowAttributes *a);
 	void(*XChangeWindowAttributes)(Display *d, Window w, unsigned long valuemask, XSetWindowAttributes *a);
 	int(*XQueryPointer)(Display *d, Window w, Window *rr, Window *cr, int *rx, int *ry, int *wx, int *wy, unsigned int *mr);
+	int(*XDisplayKeycodes)(Display *display, int *min_keycodes_return, int *max_keycodes_return);
+	KeySym(*XGetKeyboardMapping)(Display *display, KeyCode first_keycode, int keycode_count, int *keysyms_per_keycode_return);
+	KeySym(*XStringToKeysym)(char *string);
+	int(*XChangeKeyboardMapping)(Display *display, int first_keycode, int keysyms_per_keycode, KeySym *keysyms, int num_codes);
 }x11_struct;
 x11_struct *x11_exports = NULL;
 
@@ -146,6 +150,50 @@ typedef struct xfixes_struct
 }xfixes_struct;
 xfixes_struct *xfixes_exports = NULL;
 
+void kvm_keyboard_unmap_unicode_key(Display *display, int keycode)
+{
+	// Delete a keymapping that we created previously
+	KeySym keysym_list[] = { 0 };
+	x11_exports->XChangeKeyboardMapping(display, keycode, 1, keysym_list, 1);
+	x11_exports->XFlush(display);
+}
+int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode)
+{
+	KeySym *keysyms = NULL;
+	int keysyms_per_keycode = 0;
+	int keycode_low, keycode_high;
+	int empty_keycode = 0;
+	int i, j, keycodeIndex;
+	char unicodestring[6];
+
+	// Convert the unicode character to something xorg will understand
+	if (sprintf_s(unicodestring, sizeof(unicodestring), "U%04X", unicode) < 0) { return(-1); }	
+
+	// Get the keycode range that is supported on this platform
+	x11_exports->XDisplayKeycodes(display, &keycode_low, &keycode_high);						
+	keysyms = x11_exports->XGetKeyboardMapping(display, keycode_low, keycode_high - keycode_low, &keysyms_per_keycode);
+
+	// Find an unmapped key
+	for (i = keycode_low; i <= keycode_high; ++i)
+	{
+		int empty = 1;
+		for (j = 0; j < keysyms_per_keycode; ++j)
+		{
+			keycodeIndex = (i - keycode_low) * keysyms_per_keycode + j;
+			if (keysyms[keycodeIndex] != 0) { empty = 0; } else { break; }
+		}
+		if (empty) { empty_keycode = i; break; } // Found it!
+	}
+	x11_exports->XFree(keysyms);
+	x11_exports->XFlush(display);
+
+	// Map the unicode character to one of the unused keys above
+	KeySym sym = x11_exports->XStringToKeysym(unicodestring);
+	KeySym keysym_list[] = { sym };
+	x11_exports->XChangeKeyboardMapping(display, empty_keycode, 1, keysym_list, 1);
+	x11_exports->XFlush(display);
+	return(empty_keycode);
+}
 
 void kvm_send_error(char *msg)
 {
@@ -507,6 +555,11 @@ int kvm_init(int displayNo)
 			((void**)x11_exports)[14] = (void*)dlsym(x11_exports->x11_lib, "XGetWindowAttributes");
 			((void**)x11_exports)[15] = (void*)dlsym(x11_exports->x11_lib, "XChangeWindowAttributes");
 			((void**)x11_exports)[16] = (void*)dlsym(x11_exports->x11_lib, "XQueryPointer");
+			((void**)x11_exports)[17] = (void*)dlsym(x11_exports->x11_lib, "XDisplayKeycodes");
+			((void**)x11_exports)[18] = (void*)dlsym(x11_exports->x11_lib, "XGetKeyboardMapping");
+			((void**)x11_exports)[19] = (void*)dlsym(x11_exports->x11_lib, "XStringToKeysym");
+			((void**)x11_exports)[20] = (void*)dlsym(x11_exports->x11_lib, "XChangeKeyboardMapping");
+
 
 			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
 			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
@@ -609,6 +662,10 @@ int kvm_server_inputdata(char* block, int blocklen)
 
 	switch (type)
 	{
+	case MNG_KVM_KEY_UNICODE: // Unicode Key
+		if (size != 7) break;
+		if (g_enableEvents) KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4], eventdisplay);
+		break;
 	case MNG_KVM_KEY: // Key
 		{
 			if (size != 6) break;

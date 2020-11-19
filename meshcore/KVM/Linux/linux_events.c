@@ -15,10 +15,14 @@ limitations under the License.
 */
 
 #include "linux_events.h"
+#include "microstack/ILibParsers.h"
+
 
 static const int g_keymapLen = 96; // Modify this when you change anything in g_keymap.
 extern int change_display;
 x11tst_struct *x11tst_exports = NULL;
+extern void kvm_keyboard_unmap_unicode_key(Display *display, int keycode);
+extern int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode);
 
 static struct keymap_t g_keymap[] = {
 	{ XK_BackSpace,        VK_BACK },
@@ -180,31 +184,59 @@ void MouseAction(double absX, double absY, int button, short wheel, Display *dis
 	x11tst_exports->XFlush(display);
 }
 
-void KeyAction(unsigned char vk, int up, Display *display) {
+
+void KeyAction(unsigned char vk, int up, Display *display) 
+{
 	int i = 0;
 	unsigned int keysym = 0;
 	unsigned int keycode = 0;
 
-	if (change_display) {
+	if (change_display)
+	{
 		return;
 	}
 
-	for (i = 0; i < g_keymapLen; i++) {
-		if (g_keymap[i].vk == vk) {
+	for (i = 0; i < g_keymapLen; i++) 
+	{
+		if (g_keymap[i].vk == vk) 
+		{
 			keysym = g_keymap[i].keysym;
 			break;
 		}
 	}
-	if (keysym == 0) {
+	if (keysym == 0) 
+	{
 		keycode = x11tst_exports->XKeysymToKeycode(display, vk);
 	}
-	else {
+	else 
+	{
 		keycode = x11tst_exports->XKeysymToKeycode(display, keysym);
 	}
 
 	//printf("%x %x %d %d\n", keysym, vk, keycode, up);
-	if (keycode != 0) {
+	if (keycode != 0) 
+	{
 		if (!x11tst_exports->XTestFakeKeyEvent(display, keycode, !up, 0)) { return; }
 		x11tst_exports->XFlush(display);
+	}
+}
+void KeyActionUnicode(uint16_t unicode, int up, Display *display)
+{
+	if (change_display) { return; }
+	int i;
+
+	if (up == 0)
+	{
+		int keycode = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
+		if (keycode > 0)
+		{
+			x11tst_exports->XTestFakeKeyEvent(display, keycode, 1, 0);
+			x11tst_exports->XFlush(display);
+
+			usleep(10000);	// We need a short sleep between KeyDown and KeyUp, to register correctly. 
+			x11tst_exports->XTestFakeKeyEvent(display, keycode, 0, 0);
+			x11tst_exports->XFlush(display);
+			kvm_keyboard_unmap_unicode_key(display, keycode);			// Delete the key mapping we created above
+		}
 	}
 }
