@@ -131,6 +131,7 @@ void kvm_send_resolution()
 
 int kvm_init()
 {
+	ILibCriticalLogFilename = "KVMSlave.log";
 	int old_height_count = TILE_HEIGHT_COUNT;
 	
 	SCREEN_NUM = CGMainDisplayID();
@@ -180,6 +181,10 @@ int kvm_server_inputdata(char* block, int blocklen)
 
 	switch (type)
 	{
+		case MNG_KVM_KEY_UNICODE: // Unicode Key
+			if (size != 7) break;
+			KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4]);
+			break;
 		case MNG_KVM_KEY: // Key
 		{
 			if (size != 6 || KVM_AGENT_FD != -1) { break; }

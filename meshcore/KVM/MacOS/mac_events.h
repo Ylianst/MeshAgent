@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include "microstack/ILibParsers.h"
 
 enum MOUSE_EVENTS {
 	MOUSEEVENTF_LEFTDOWN = 		0x0002,
@@ -376,5 +377,6 @@ struct keymap_t {
 
 extern void MouseAction(double absX, double absY, int button, short wheel);
 extern void KeyAction(unsigned char vk, int up);
+extern void KeyActionUnicode(uint16_t unicode, int up);
 
 #endif /* LINUX_EVENTS_H_ */

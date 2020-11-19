@@ -236,7 +236,10 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	if (source != NULL) CFRelease(source);
 }
 
-void KeyAction(unsigned char vk, int up) {
+void KeyAction(unsigned char vk, int up) 
+{
+	//ILIBLOGMESSAGEX("NORMAL: %u [%d]", vk, up);
+
 	int i;
 	CGKeyCode keycode;
 	CGEventSourceRef source;
@@ -252,20 +255,21 @@ void KeyAction(unsigned char vk, int up) {
 	if (i == g_keymapLen) { return; }
 	if (vk == VK_CAPITAL && up) { g_capsLock = g_capsLock ? 0 : 1; }
 
-	/*
-	if (!strcmp(getCurrentSession(), "<none>")) {
-		// This call is deprecated in OSX 10.6
-		CGPostKeyboardEvent(0, keycode, !up);
-	}
-	else
+	CGEventRef key = CGEventCreateKeyboardEvent(source, keycode, !up);
+	if (g_capsLock) { CGEventSetFlags(key, kCGEventFlagMaskAlphaShift); }
+	CGEventPost(kCGHIDEventTap, key);
+	CFRelease(key);
+
+	if (source != NULL) CFRelease(source);
+}
+void KeyActionUnicode(uint16_t unicode, int up)
+{
+	if (up == 0)
 	{
-	*/
-		CGEventRef key = CGEventCreateKeyboardEvent(source, keycode, !up);
-		if (g_capsLock) { CGEventSetFlags(key, kCGEventFlagMaskAlphaShift); }
+		//ILIBLOGMESSAGEX("UNICODE: %u [%d]", unicode, up);
+		CGEventRef key = CGEventCreateKeyboardEvent(NULL, 0, true);
+		CGEventKeyboardSetUnicodeString(key, 1, (UniChar*)&unicode);
 		CGEventPost(kCGHIDEventTap, key);
 		CFRelease(key);
-	/*
 	}
-	*/
-	if (source != NULL) CFRelease(source);
 }
