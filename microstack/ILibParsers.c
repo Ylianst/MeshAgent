@@ -4703,6 +4703,57 @@ struct ILibXMLNode *ILibParseXML(char *buffer, size_t offset, size_t length)
 	return RetVal;
 }
 
+typedef struct ILibCircularQueue_Record
+{
+	void *next;
+	char data[];
+}ILibCircularQueue_Record;
+ILibQueue ILibCircularQueue_Create(size_t entrySize, size_t totalEntries)
+{
+	totalEntries++;
+	size_t index;
+	void *ret = ILibMemory_SmartAllocateEx(2 * sizeof(void*), (sizeof(ILibCircularQueue_Record) + entrySize)*totalEntries);
+	((void**)ret)[0] = ((void**)ret)[1] = ILibMemory_Extra(ret);
+
+	char *data = (char*)ILibMemory_Extra(ret);
+	for (index = 0; index < totalEntries; ++index)
+	{
+		((ILibCircularQueue_Record*)data)->next = (index == totalEntries - 1) ? ILibMemory_Extra(ret) : (data + sizeof(ILibCircularQueue_Record) + entrySize);		
+		data = ((ILibCircularQueue_Record*)data)->next;
+	}
+	return(ret);
+}
+void* ILibCircularQueue_EnQueue(ILibQueue circularQueue)
+{
+	ILibCircularQueue_Record *head = (ILibCircularQueue_Record*)((void**)circularQueue)[0];
+	ILibCircularQueue_Record *tail = (ILibCircularQueue_Record*)((void**)circularQueue)[1];
+	ILibCircularQueue_Record *next = (ILibCircularQueue_Record*)tail->next;
+
+	if (next == head) { return(NULL); } // No Space
+	((void**)circularQueue)[1] = next;
+	return(tail->data);
+}
+void* ILibCircularQueue_DeQueue(ILibQueue circularQueue)
+{
+	ILibCircularQueue_Record *head = (ILibCircularQueue_Record*)((void**)circularQueue)[0];
+	ILibCircularQueue_Record *tail = (ILibCircularQueue_Record*)((void**)circularQueue)[1];
+	if (head == tail) { return(NULL); } // Empty
+
+	((void**)circularQueue)[0] = head->next;
+	return(head->data);
+}
+void* ILibCircularQueue_Peek(ILibQueue circularQueue)
+{
+	ILibCircularQueue_Record *head = (ILibCircularQueue_Record*)((void**)circularQueue)[0];
+	ILibCircularQueue_Record *tail = (ILibCircularQueue_Record*)((void**)circularQueue)[1];
+	if (head == tail) { return(NULL); } // Empty
+	return(head->data);
+}
+int ILibCircularQueue_IsEmpty(ILibQueue circularQueue)
+{
+	return(((void**)circularQueue)[0] == ((void**)circularQueue)[1]);
+}
+
 /*! \fn ILibQueue_Create()
 \brief Create an empty Queue
 \return An empty queue

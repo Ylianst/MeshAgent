@@ -23,6 +23,11 @@ extern int change_display;
 x11tst_struct *x11tst_exports = NULL;
 extern void kvm_keyboard_unmap_unicode_key(Display *display, int keycode);
 extern int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode);
+extern int kvm_keyboard_update_map_unicode_key(Display *display, uint16_t unicode, int keycode);
+
+#define g_keyboardMapCount 8
+int g_keyboardMap[g_keyboardMapCount] = { 0 };
+int g_keyboardMapIndex = 0;
 
 static struct keymap_t g_keymap[] = {
 	{ XK_BackSpace,        VK_BACK },
@@ -216,9 +221,24 @@ void KeyAction(unsigned char vk, int up, Display *display)
 	//printf("%x %x %d %d\n", keysym, vk, keycode, up);
 	if (keycode != 0) 
 	{
+		//ILIBLOGMESSAGEX("VK: %u [%d]", vk, up);
+
 		if (!x11tst_exports->XTestFakeKeyEvent(display, keycode, !up, 0)) { return; }
 		x11tst_exports->XFlush(display);
 	}
+}
+void KeyActionUnicode_UNMAP_ALL(Display *display)
+{
+	int i;
+	for (i = 0; i < g_keyboardMapCount; ++i)
+	{
+		if (g_keyboardMap[i] != 0) 
+		{
+			kvm_keyboard_unmap_unicode_key(display, g_keyboardMap[i]);
+			g_keyboardMap[i] = 0; 
+		}
+	}
+	g_keyboardMapIndex = 0;
 }
 void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 {
@@ -227,16 +247,64 @@ void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 
 	if (up == 0)
 	{
-		int keycode = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
-		if (keycode > 0)
-		{
-			x11tst_exports->XTestFakeKeyEvent(display, keycode, 1, 0);
-			x11tst_exports->XFlush(display);
+		//ILIBLOGMESSAGEX("UNICODE: %u [%d] <<%ull>>", unicode, up, CurrentTime);
+		//if (g_keyboardMap[g_keyboardMapIndex] != 0) { kvm_keyboard_unmap_unicode_key(display, g_keyboardMap[g_keyboardMapIndex]); g_keyboardMap[g_keyboardMapIndex] = 0; }
+		//g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
+		//if (g_keyboardMap[g_keyboardMapIndex] > 0)
+		//{
+		//	//ILIBLOGMESSAGEX("<<%d>>", g_keyboardMap[g_keyboardMapIndex]);
+		//	x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 1, 0);
+		//	x11tst_exports->XFlush(display);
 
-			usleep(10000);	// We need a short sleep between KeyDown and KeyUp, to register correctly. 
-			x11tst_exports->XTestFakeKeyEvent(display, keycode, 0, 0);
-			x11tst_exports->XFlush(display);
-			kvm_keyboard_unmap_unicode_key(display, keycode);			// Delete the key mapping we created above
+		//	x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 0, 0);
+		//	x11tst_exports->XFlush(display);
+		//	
+		//	if (++g_keyboardMapIndex >= g_keyboardMapCount)
+		//	{
+		//		g_keyboardMapIndex = 0;
+		//	}
+		//}
+
+		if (g_keyboardMap[g_keyboardMapIndex] != 0) 
+		{
+			g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_update_map_unicode_key(display, unicode, g_keyboardMap[g_keyboardMapIndex]);	// Create a key mapping on an unmapped key
 		}
+		else
+		{
+			g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
+		}
+		if (g_keyboardMap[g_keyboardMapIndex] > 0)
+		{
+			//ILIBLOGMESSAGEX("<<%d>>", g_keyboardMap[g_keyboardMapIndex]);
+			x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 1, 0);
+			x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 0, 15);
+			x11tst_exports->XFlush(display);
+			
+			if (++g_keyboardMapIndex >= g_keyboardMapCount)
+			{
+				g_keyboardMapIndex = 0;
+			}
+		}
+
+
+			//x11tst_exports->XTestFakeKeyEvent(display, x11tst_exports->XKeysymToKeycode(display, 65), 1, 0);
+			//x11tst_exports->XFlush(display);
+			//x11tst_exports->XTestFakeKeyEvent(display, x11tst_exports->XKeysymToKeycode(display, 65), 0, 0);
+			//x11tst_exports->XFlush(display);
+
+
+
+		//int keycode = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
+		//if (keycode > 0)
+		//{
+
+		//	x11tst_exports->XTestFakeKeyEvent(display, keycode, 1, 0);
+		//	x11tst_exports->XFlush(display);
+
+		//	//usleep(1000 * 15);	// We need a short sleep between KeyDown and KeyUp, to register correctly. 
+		//	x11tst_exports->XTestFakeKeyEvent(display, keycode, 0, 0);
+		//	x11tst_exports->XFlush(display);
+		//	kvm_keyboard_unmap_unicode_key(display, keycode);			// Delete the key mapping we created above
+		//}
 	}
 }

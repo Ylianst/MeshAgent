@@ -22,6 +22,7 @@ limitations under the License.
 #include "microstack/ILibProcessPipe.h"
 #include <sys/wait.h>
 #include <limits.h>
+#include <time.h>
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -41,6 +42,15 @@ limitations under the License.
 #define EXIT_FAILURE 1
 extern uint32_t crc32c(uint32_t crc, const unsigned char* buf, uint32_t len);
 extern char* g_ILibCrashDump_path;
+
+ILibQueue keyqueue = NULL;
+
+typedef struct kvm_keydata
+{
+	int delay;
+	uint8_t up;
+	uint16_t data;
+}kvm_keydata;
 
 typedef enum KVM_MouseCursors
 {
@@ -91,6 +101,7 @@ unsigned short current_display = 0;
 pid_t g_slavekvm = 0;
 int master2slave[2];
 int slave2master[2];
+
 FILE *logFile = NULL;
 int g_enableEvents = 0;
 extern int gRemoteMouseRenderDefault;
@@ -101,6 +112,8 @@ ILibQueue g_messageQ;
 
 extern void* tilebuffer;
 extern char **environ;
+struct timespec inputtime;
+uint32_t inputcounter = 0;
 
 typedef struct x11ext_struct
 {
@@ -155,7 +168,21 @@ void kvm_keyboard_unmap_unicode_key(Display *display, int keycode)
 	// Delete a keymapping that we created previously
 	KeySym keysym_list[] = { 0 };
 	x11_exports->XChangeKeyboardMapping(display, keycode, 1, keysym_list, 1);
-	x11_exports->XFlush(display);
+	x11_exports->XSync(display, 0);
+}
+int kvm_keyboard_update_map_unicode_key(Display *display, uint16_t unicode, int keycode)
+{
+	char unicodestring[6];
+
+	// Convert the unicode character to something xorg will understand
+	if (sprintf_s(unicodestring, sizeof(unicodestring), "U%04X", unicode) < 0) { return(keycode); }
+
+	// Map the unicode character to one of the unused keys above
+	KeySym sym = x11_exports->XStringToKeysym(unicodestring);
+	KeySym keysym_list[] = { sym, sym };
+	x11_exports->XChangeKeyboardMapping(display, keycode, 2, keysym_list, 1);
+	x11_exports->XSync(display, 0);
+	return(keycode);
 }
 int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode)
 {
@@ -185,13 +212,12 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode)
 		if (empty) { empty_keycode = i; break; } // Found it!
 	}
 	x11_exports->XFree(keysyms);
-	x11_exports->XFlush(display);
 
 	// Map the unicode character to one of the unused keys above
 	KeySym sym = x11_exports->XStringToKeysym(unicodestring);
-	KeySym keysym_list[] = { sym };
-	x11_exports->XChangeKeyboardMapping(display, empty_keycode, 1, keysym_list, 1);
-	x11_exports->XFlush(display);
+	KeySym keysym_list[] = { sym, sym };
+	x11_exports->XChangeKeyboardMapping(display, empty_keycode, 2, keysym_list, 1);
+	x11_exports->XSync(display, 0);
 	return(empty_keycode);
 }
 
@@ -367,30 +393,6 @@ void kvm_send_display()
 #define BUFSIZE 65535
 
 int kvm_server_inputdata(char* block, int blocklen);
-void* kvm_mainloopinput(void* parm)
-{
-	int ptr = 0;
-	int ptr2 = 0;
-	int len = 0;
-	char pchRequest2[30000];
-	ssize_t cbBytesRead = 0;
-
-	while (!g_shutdown)
-	{
-		//fprintf(logFile, "Reading from master in kvm_mainloopinput\n");
-		cbBytesRead = read(master2slave[0], pchRequest2 + len, 30000 - len);
-		//fprintf(logFile, "Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
-		if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown) { /*ILIBMESSAGE("KVMBREAK-K1\r\n");*/ g_shutdown = 1; break; }
-		len += cbBytesRead;
-		ptr2 = 0;
-		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
-		if (ptr == len) { len = 0; ptr = 0; }
-		// TODO: else move the reminder.
-	}
-
-	return 0;
-}
-
 
 int lockfileCheckFn(const struct dirent *ent) {
 	if (ent == NULL) {
@@ -509,6 +511,8 @@ int kvm_init(int displayNo)
 	int dummy1, dummy2, dummy3;
 	char displayString[256] = "";
 
+	if (clock_gettime(CLOCK_MONOTONIC, &inputtime) != 0) { memset(&inputtime, 0, sizeof(inputtime)); }
+
 	if (x11ext_exports == NULL)
 	{
 		x11ext_exports = ILibMemory_SmartAllocate(sizeof(x11ext_struct));
@@ -559,8 +563,7 @@ int kvm_init(int displayNo)
 			((void**)x11_exports)[18] = (void*)dlsym(x11_exports->x11_lib, "XGetKeyboardMapping");
 			((void**)x11_exports)[19] = (void*)dlsym(x11_exports->x11_lib, "XStringToKeysym");
 			((void**)x11_exports)[20] = (void*)dlsym(x11_exports->x11_lib, "XChangeKeyboardMapping");
-
-
+	
 			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
 			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
 		}
@@ -664,12 +667,68 @@ int kvm_server_inputdata(char* block, int blocklen)
 	{
 	case MNG_KVM_KEY_UNICODE: // Unicode Key
 		if (size != 7) break;
-		if (g_enableEvents) KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4], eventdisplay);
+		if (g_enableEvents && block[4] == 0)
+		{
+			kvm_keydata *data;
+			struct timespec curtime; memset(&curtime, 0, sizeof(curtime));
+
+			while ((data = (kvm_keydata*)ILibCircularQueue_EnQueue(keyqueue)) == NULL)
+			{
+				data = (kvm_keydata*)ILibCircularQueue_DeQueue(keyqueue);
+				if (data->delay < 0)
+				{
+					KeyAction((unsigned char)data->data, data->up, eventdisplay);
+				}
+				else
+				{
+					KeyActionUnicode(data->data, data->up, eventdisplay);
+				}
+			}
+			data->data = ((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])); // Unicode
+			data->up = block[4];
+			if (clock_gettime(CLOCK_MONOTONIC, &curtime) != 0 || ILibTime_timespec_subtract(&curtime, &inputtime) < 1000000000)
+			{
+				++inputcounter;
+			}
+			else
+			{
+				inputcounter = 0;
+			}
+			memcpy_s(&inputtime, sizeof(inputtime), &curtime, sizeof(curtime));
+
+			if (inputcounter > 8)
+			{
+				data->delay = (1000 * 1000);
+				inputcounter = 0;
+			}
+			else
+			{
+				data->delay = 0;
+			}		
+		}
 		break;
 	case MNG_KVM_KEY: // Key
 		{
 			if (size != 6) break;
-			if (g_enableEvents) KeyAction(block[5], block[4], eventdisplay);
+			if (g_enableEvents)
+			{
+				kvm_keydata *data;
+				while ((data = (kvm_keydata*)ILibCircularQueue_EnQueue(keyqueue)) == NULL)
+				{
+					data = (kvm_keydata*)ILibCircularQueue_DeQueue(keyqueue);
+					if (data->delay == 0)
+					{
+						KeyAction((unsigned char)data->data, data->up, eventdisplay);
+					}
+					else
+					{
+						KeyActionUnicode(data->data, data->up, eventdisplay);
+					}
+				}
+				data->data = block[5]; // Unicode
+				data->up = block[4];
+				data->delay = -1;
+			}
 			break;
 		}
 	case MNG_KVM_MOUSE: // Mouse
@@ -916,8 +975,13 @@ void bitblt(char *sourcebitmap, int source_width, int source_height, int sx, int
 	ILibMemory_Free(drect);
 }
 
+void kvm_server_sighandler(int signum, siginfo_t *info, void *context)
+{
+	g_shutdown = 1;
+}
 void* kvm_server_mainloop(void* parm)
 {
+	int maxsleep;
 	Window rr, cr;
 	int rx, ry, wx, wy, rs;
 	unsigned int mr;
@@ -970,8 +1034,24 @@ void* kvm_server_mainloop(void* parm)
 	//fprintf(logFile, "After kvm_init.\n"); fflush(logFile);
 
 	g_shutdown = 0;
-	pthread_create(&kvmthread, NULL, kvm_mainloopinput, parm);
+
+	struct sigaction action;
+	memset(&action, 0, sizeof(action));
+	action.sa_sigaction = kvm_server_sighandler;
+	sigemptyset(&action.sa_mask);
+	action.sa_flags = SA_SIGINFO;
+	ignore_result(sigaction(SIGTERM, &action, NULL));
+
+	//pthread_create(&kvmthread, NULL, kvm_mainloopinput, parm);
 	//fprintf(logFile, "Created the kvmthread.\n"); fflush(logFile);
+
+	int ptr = 0;
+	int ptr2 = 0;
+	int len = 0;
+	char pchRequest2[30000];
+	ssize_t cbBytesRead = 0;
+	keyqueue = ILibCircularQueue_Create(sizeof(kvm_keydata), 1024);
+	kvm_keydata *keydata;
 
 	while (!g_shutdown) 
 	{
@@ -1020,6 +1100,29 @@ void* kvm_server_mainloop(void* parm)
 		}
 
 		if (count == 100 && imagedisplay == NULL) { g_shutdown = 1; break; }
+		FD_ZERO(&readset);
+		FD_ZERO(&errorset);
+		FD_ZERO(&writeset);
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+		FD_SET(master2slave[0], &readset);
+		if (select(FD_SETSIZE, &readset, &writeset, &errorset, &tv) > 0 && FD_ISSET(master2slave[0], &readset))
+		{
+
+			//fprintf(logFile, "Reading from master in kvm_mainloopinput\n");
+			cbBytesRead = read(master2slave[0], pchRequest2 + len, 30000 - len);
+			//fprintf(logFile, "Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
+			if (cbBytesRead == -1 || cbBytesRead == 0 || g_shutdown)
+			{
+				g_shutdown = 1;
+				break;
+			}
+			len += cbBytesRead;
+			ptr2 = 0;
+			while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
+			if (ptr == len) { len = 0; ptr = 0; }
+		}
+
 		if (cursordisplay == NULL)
 		{
 			if ((cursordisplay = x11_exports->XOpenDisplay(displayString)))
@@ -1246,14 +1349,62 @@ void* kvm_server_mainloop(void* parm)
 
 		// We can't go full speed here, we need to slow this down.
 		height = FRAME_RATE_TIMER;
-		while (!g_shutdown && height > 0) { if (height > 50) { height -= 50; usleep(50000); } else { usleep(height * 1000); height = 0; } }
+		while (!g_shutdown && height > 0)
+		{
+			if (height > 50)
+			{
+				height -= 50;
+				maxsleep = 50000;
+			}
+			else 
+			{
+				maxsleep = height * 1000;
+				height = 0;
+			}
+
+			while ((keydata = (kvm_keydata*)ILibCircularQueue_Peek(keyqueue)) != NULL)
+			{
+				if (keydata->delay > 0)
+				{
+					// Need to sleep, calculate how much
+					if (keydata->delay > maxsleep)
+					{
+						// Frame Rate Timer is smaller
+						keydata->delay -= maxsleep;
+						break;
+					}
+					else
+					{
+						// Frame Rate timer is larger
+						maxsleep -= keydata->delay;
+						usleep(keydata->delay);
+						keydata->delay = 0;
+						continue;
+					}
+				}
+				keydata = (kvm_keydata*)ILibCircularQueue_DeQueue(keyqueue);
+				if (keydata->delay == 0)
+				{
+					KeyActionUnicode(keydata->data, keydata->up, eventdisplay);
+				}
+				else
+				{
+					KeyAction((unsigned char)keydata->data, keydata->up, eventdisplay);
+				}
+			}
+
+			usleep(maxsleep);
+		}
 	}
+
+	ILibCircularQueue_Destroy(keyqueue);
 
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
 	master2slave[0] = 0;
 
+	KeyActionUnicode_UNMAP_ALL(eventdisplay);
 	x11_exports->XCloseDisplay(eventdisplay);
 	eventdisplay  = NULL;
 
@@ -1263,8 +1414,6 @@ void* kvm_server_mainloop(void* parm)
 		cursordisplay = NULL;
 	}
 
-	pthread_join(kvmthread, NULL);
-	kvmthread = (pthread_t)NULL;
 	if (g_tileInfo != NULL)
 	{
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) { free(g_tileInfo[r]); }
@@ -1433,7 +1582,7 @@ void kvm_cleanup()
 
 	if (master2slave[1] != 0 && g_slavekvm != 0) 
 	{ 
-		kill(g_slavekvm, SIGKILL); 
+		kill(g_slavekvm, SIGTERM); 
 		waitpid(g_slavekvm, &code, 0);
 		g_slavekvm = 0; 
 	}

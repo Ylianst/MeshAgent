@@ -402,5 +402,7 @@ struct keymap_t {
 extern void MouseAction(double absX, double absY, int button, short wheel, Display *display);
 extern void KeyAction(unsigned char vk, int up, Display *display);
 extern void KeyActionUnicode(uint16_t unicode, int up, Display *display);
+extern void KeyActionUnicode_UNMAP_ALL(Display *display);
+
 
 #endif /* LINUX_EVENTS_H_ */

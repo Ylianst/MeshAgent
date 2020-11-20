@@ -515,6 +515,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	time_t ILibTime_Parse(char *timeString);
 	char* ILibTime_Serialize(time_t timeVal);
 	long long ILibGetUptime();
+	#define ILibTime_timespec_subtract(bigger, smaller) ((uint64_t)(((bigger)->tv_sec - (smaller)->tv_sec) * 1000000000) + (uint64_t)((bigger)->tv_nsec - (smaller)->tv_nsec))
 
 	uint64_t ILibHTONLL(uint64_t v);
 	uint64_t ILibNTOHLL(uint64_t v);
@@ -904,6 +905,13 @@ int ILibIsRunningOnChainThread(void* chain);
 	\{
 	*/
 	typedef void* ILibQueue;
+	ILibQueue ILibCircularQueue_Create(size_t entrySize, size_t totalEntries);
+	void* ILibCircularQueue_EnQueue(ILibQueue circularQueue);
+	void* ILibCircularQueue_DeQueue(ILibQueue circularQueue);
+	void* ILibCircularQueue_Peek(ILibQueue circularQueue);
+	int ILibCircularQueue_IsEmpty(ILibQueue circularQueue);
+	#define ILibCircularQueue_Destroy(circularQueue) ILibMemory_Free(circularQueue)
+
 	ILibQueue ILibQueue_Create();
 	void ILibQueue_Destroy(ILibQueue q);
 	int ILibQueue_IsEmpty(ILibQueue q);
