@@ -184,7 +184,7 @@ int kvm_keyboard_update_map_unicode_key(Display *display, uint16_t unicode, int 
 	x11_exports->XSync(display, 0);
 	return(keycode);
 }
-int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode)
+int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alreadyExists)
 {
 	KeySym *keysyms = NULL;
 	int keysyms_per_keycode = 0;
@@ -192,32 +192,64 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode)
 	int empty_keycode = 0;
 	int i, j, keycodeIndex;
 	char unicodestring[6];
+	if (alreadyExists != NULL) { *alreadyExists = 0; }
 
 	// Convert the unicode character to something xorg will understand
 	if (sprintf_s(unicodestring, sizeof(unicodestring), "U%04X", unicode) < 0) { return(-1); }	
+	KeySym sym = x11_exports->XStringToKeysym(unicodestring);
+	ILIBLOGMESSAGEX("UNICODE SYM: %X", sym);
 
 	// Get the keycode range that is supported on this platform
 	x11_exports->XDisplayKeycodes(display, &keycode_low, &keycode_high);						
 	keysyms = x11_exports->XGetKeyboardMapping(display, keycode_low, keycode_high - keycode_low, &keysyms_per_keycode);
 
-	// Find an unmapped key
-	for (i = keycode_low; i <= keycode_high; ++i)
+	if (alreadyExists != NULL)
 	{
-		int empty = 1;
-		for (j = 0; j < keysyms_per_keycode; ++j)
+		int foundCode = x11_exports->XKeysymToKeycode(display, sym);
+		if (foundCode != 0)
 		{
-			keycodeIndex = (i - keycode_low) * keysyms_per_keycode + j;
-			if (keysyms[keycodeIndex] != 0) { empty = 0; } else { break; }
+			// Check to see if this mapping is the primary mapping
+			keycodeIndex = (foundCode - keycode_low) * keysyms_per_keycode;
+			if (keysyms[keycodeIndex] == sym)
+			{
+				// We have a match!
+				ILIBLOGMESSAGEX("   Already mapped at: %d", foundCode);
+				empty_keycode = foundCode;
+				*alreadyExists = 1;
+			}
+			else
+			{
+				// No match!
+				ILIBLOGMESSAGEX("   Already mapped at: %d, but is not PRIMARY", foundCode);
+			}
 		}
-		if (empty) { empty_keycode = i; break; } // Found it!
 	}
-	x11_exports->XFree(keysyms);
 
-	// Map the unicode character to one of the unused keys above
-	KeySym sym = x11_exports->XStringToKeysym(unicodestring);
-	KeySym keysym_list[] = { sym, sym };
-	x11_exports->XChangeKeyboardMapping(display, empty_keycode, 2, keysym_list, 1);
-	x11_exports->XSync(display, 0);
+
+	if (empty_keycode == 0)
+	{
+		// Find an unmapped key
+		for (i = keycode_low; i <= keycode_high; ++i)
+		{
+			int empty = 1;
+			for (j = 0; j < keysyms_per_keycode; ++j)
+			{
+				keycodeIndex = (i - keycode_low) * keysyms_per_keycode + j;
+				if (keysyms[keycodeIndex] != 0) { empty = 0; }
+				else { break; }
+			}
+			if (empty) { empty_keycode = i; break; } // Found it!
+		}
+
+
+		// Map the unicode character to one of the unused keys above
+		KeySym keysym_list[] = { sym, sym };
+		x11_exports->XChangeKeyboardMapping(display, empty_keycode, 2, keysym_list, 1);
+		x11_exports->XSync(display, 0);
+
+	}
+
+	x11_exports->XFree(keysyms);
 	return(empty_keycode);
 }
 
@@ -563,7 +595,7 @@ int kvm_init(int displayNo)
 			((void**)x11_exports)[18] = (void*)dlsym(x11_exports->x11_lib, "XGetKeyboardMapping");
 			((void**)x11_exports)[19] = (void*)dlsym(x11_exports->x11_lib, "XStringToKeysym");
 			((void**)x11_exports)[20] = (void*)dlsym(x11_exports->x11_lib, "XChangeKeyboardMapping");
-	
+			
 			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
 			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
 		}
@@ -669,42 +701,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 		if (size != 7) break;
 		if (g_enableEvents && block[4] == 0)
 		{
-			kvm_keydata *data;
-			struct timespec curtime; memset(&curtime, 0, sizeof(curtime));
-
-			while ((data = (kvm_keydata*)ILibCircularQueue_EnQueue(keyqueue)) == NULL)
-			{
-				data = (kvm_keydata*)ILibCircularQueue_DeQueue(keyqueue);
-				if (data->delay < 0)
-				{
-					KeyAction((unsigned char)data->data, data->up, eventdisplay);
-				}
-				else
-				{
-					KeyActionUnicode(data->data, data->up, eventdisplay);
-				}
-			}
-			data->data = ((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])); // Unicode
-			data->up = block[4];
-			if (clock_gettime(CLOCK_MONOTONIC, &curtime) != 0 || ILibTime_timespec_subtract(&curtime, &inputtime) < 1000000000)
-			{
-				++inputcounter;
-			}
-			else
-			{
-				inputcounter = 0;
-			}
-			memcpy_s(&inputtime, sizeof(inputtime), &curtime, sizeof(curtime));
-
-			if (inputcounter > 8)
-			{
-				data->delay = (1000 * 1000);
-				inputcounter = 0;
-			}
-			else
-			{
-				data->delay = 0;
-			}		
+			KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4], eventdisplay);
 		}
 		break;
 	case MNG_KVM_KEY: // Key
@@ -712,22 +709,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size != 6) break;
 			if (g_enableEvents)
 			{
-				kvm_keydata *data;
-				while ((data = (kvm_keydata*)ILibCircularQueue_EnQueue(keyqueue)) == NULL)
-				{
-					data = (kvm_keydata*)ILibCircularQueue_DeQueue(keyqueue);
-					if (data->delay == 0)
-					{
-						KeyAction((unsigned char)data->data, data->up, eventdisplay);
-					}
-					else
-					{
-						KeyActionUnicode(data->data, data->up, eventdisplay);
-					}
-				}
-				data->data = block[5]; // Unicode
-				data->up = block[4];
-				data->delay = -1;
+				KeyAction(block[5], block[4], eventdisplay);
 			}
 			break;
 		}

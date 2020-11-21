@@ -22,7 +22,7 @@ static const int g_keymapLen = 96; // Modify this when you change anything in g_
 extern int change_display;
 x11tst_struct *x11tst_exports = NULL;
 extern void kvm_keyboard_unmap_unicode_key(Display *display, int keycode);
-extern int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode);
+extern int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alreadyExists);
 extern int kvm_keyboard_update_map_unicode_key(Display *display, uint16_t unicode, int keycode);
 
 #define g_keyboardMapCount 8
@@ -247,64 +247,38 @@ void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 
 	if (up == 0)
 	{
-		//ILIBLOGMESSAGEX("UNICODE: %u [%d] <<%ull>>", unicode, up, CurrentTime);
-		//if (g_keyboardMap[g_keyboardMapIndex] != 0) { kvm_keyboard_unmap_unicode_key(display, g_keyboardMap[g_keyboardMapIndex]); g_keyboardMap[g_keyboardMapIndex] = 0; }
-		//g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
-		//if (g_keyboardMap[g_keyboardMapIndex] > 0)
-		//{
-		//	//ILIBLOGMESSAGEX("<<%d>>", g_keyboardMap[g_keyboardMapIndex]);
-		//	x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 1, 0);
-		//	x11tst_exports->XFlush(display);
+		int exists = 0;
+		int mapping = 0;
 
-		//	x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 0, 0);
-		//	x11tst_exports->XFlush(display);
-		//	
-		//	if (++g_keyboardMapIndex >= g_keyboardMapCount)
-		//	{
-		//		g_keyboardMapIndex = 0;
-		//	}
-		//}
+		// Check if a primary mapping already exists
+		mapping = kvm_keyboard_map_unicode_key(display, unicode, &exists);
+		if (mapping == 0)
+		{
+			ILIBLOGMESSAGEX("UNICODE: %u  => DOES NOT EXIST", unicode);
 
-		if (g_keyboardMap[g_keyboardMapIndex] != 0) 
-		{
-			g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_update_map_unicode_key(display, unicode, g_keyboardMap[g_keyboardMapIndex]);	// Create a key mapping on an unmapped key
-		}
-		else
-		{
-			g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
-		}
-		if (g_keyboardMap[g_keyboardMapIndex] > 0)
-		{
-			//ILIBLOGMESSAGEX("<<%d>>", g_keyboardMap[g_keyboardMapIndex]);
-			x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 1, 0);
-			x11tst_exports->XTestFakeKeyEvent(display, g_keyboardMap[g_keyboardMapIndex], 0, 15);
-			x11tst_exports->XFlush(display);
-			
-			if (++g_keyboardMapIndex >= g_keyboardMapCount)
+			if (g_keyboardMap[g_keyboardMapIndex] != 0)
 			{
-				g_keyboardMapIndex = 0;
+				mapping = g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_update_map_unicode_key(display, unicode, g_keyboardMap[g_keyboardMapIndex]);	// Create a key mapping on an unmapped key
+			}
+			else
+			{
+				mapping = g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_map_unicode_key(display, unicode, NULL);	// Create a key mapping on an unmapped key
 			}
 		}
-
-
-			//x11tst_exports->XTestFakeKeyEvent(display, x11tst_exports->XKeysymToKeycode(display, 65), 1, 0);
-			//x11tst_exports->XFlush(display);
-			//x11tst_exports->XTestFakeKeyEvent(display, x11tst_exports->XKeysymToKeycode(display, 65), 0, 0);
-			//x11tst_exports->XFlush(display);
-
-
-
-		//int keycode = kvm_keyboard_map_unicode_key(display, unicode);	// Create a key mapping on an unmapped key
-		//if (keycode > 0)
-		//{
-
-		//	x11tst_exports->XTestFakeKeyEvent(display, keycode, 1, 0);
-		//	x11tst_exports->XFlush(display);
-
-		//	//usleep(1000 * 15);	// We need a short sleep between KeyDown and KeyUp, to register correctly. 
-		//	x11tst_exports->XTestFakeKeyEvent(display, keycode, 0, 0);
-		//	x11tst_exports->XFlush(display);
-		//	kvm_keyboard_unmap_unicode_key(display, keycode);			// Delete the key mapping we created above
-		//}
+		if (mapping > 0)
+		{
+			ILIBLOGMESSAGEX("<<%d, EXISTS: %d>>", mapping, exists);
+			x11tst_exports->XTestFakeKeyEvent(display, mapping, 1, 0);
+			x11tst_exports->XTestFakeKeyEvent(display, mapping, 0, 15);
+			x11tst_exports->XFlush(display);
+			
+			if (exists == 0)
+			{
+				if (++g_keyboardMapIndex >= g_keyboardMapCount)
+				{
+					g_keyboardMapIndex = 0;
+				}
+			}
+		}
 	}
 }
