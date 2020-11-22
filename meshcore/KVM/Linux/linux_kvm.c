@@ -43,8 +43,6 @@ limitations under the License.
 extern uint32_t crc32c(uint32_t crc, const unsigned char* buf, uint32_t len);
 extern char* g_ILibCrashDump_path;
 
-ILibQueue keyqueue = NULL;
-
 typedef struct kvm_keydata
 {
 	int delay;
@@ -107,8 +105,6 @@ int g_enableEvents = 0;
 extern int gRemoteMouseRenderDefault;
 
 int remoteMouseX = 0, remoteMouseY = 0;
-
-ILibQueue g_messageQ;
 
 extern void* tilebuffer;
 extern char **environ;
@@ -197,7 +193,7 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alread
 	// Convert the unicode character to something xorg will understand
 	if (sprintf_s(unicodestring, sizeof(unicodestring), "U%04X", unicode) < 0) { return(-1); }	
 	KeySym sym = x11_exports->XStringToKeysym(unicodestring);
-	ILIBLOGMESSAGEX("UNICODE SYM: %X", sym);
+	//ILIBLOGMESSAGEX("UNICODE SYM: %X", sym);
 
 	// Get the keycode range that is supported on this platform
 	x11_exports->XDisplayKeycodes(display, &keycode_low, &keycode_high);						
@@ -213,14 +209,14 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alread
 			if (keysyms[keycodeIndex] == sym)
 			{
 				// We have a match!
-				ILIBLOGMESSAGEX("   Already mapped at: %d", foundCode);
+				//ILIBLOGMESSAGEX("   Already mapped at: %d", foundCode);
 				empty_keycode = foundCode;
 				*alreadyExists = 1;
 			}
 			else
 			{
 				// No match!
-				ILIBLOGMESSAGEX("   Already mapped at: %d, but is not PRIMARY", foundCode);
+				//ILIBLOGMESSAGEX("   Already mapped at: %d, but is not PRIMARY", foundCode);
 			}
 		}
 	}
@@ -256,15 +252,12 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alread
 void kvm_send_error(char *msg)
 {
 	int msgLen = strnlen_s(msg, 255);
-	char *buffer = (char*)ILibMemory_SmartAllocate(msgLen + 4);
+	char buffer[512];
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
-
-	ILibQueue_Lock(g_messageQ);
-	ILibQueue_EnQueue(g_messageQ, buffer);
-	ILibQueue_UnLock(g_messageQ);
+	ignore_result(write(slave2master[1], buffer, msgLen + 2));
 }
 
 KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
@@ -397,29 +390,23 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 }
 void kvm_send_resolution()
 {
-	char *buffer = (char*)ILibMemory_SmartAllocate(8);
-
+	char buffer[8];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
 
-	ILibQueue_Lock(g_messageQ);
-	ILibQueue_EnQueue(g_messageQ, buffer);
-	ILibQueue_UnLock(g_messageQ);
+	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
 }
 
 void kvm_send_display()
 {
-	char* buffer = (char*)ILibMemory_SmartAllocate(5);
-
+	char buffer[5];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SET_DISPLAY);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
 	buffer[4] = current_display;																// Display number
 
-	ILibQueue_Lock(g_messageQ);
-	ILibQueue_EnQueue(g_messageQ, buffer);
-	ILibQueue_UnLock(g_messageQ);
+	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
 }
 
 #define BUFSIZE 65535
@@ -518,9 +505,7 @@ void kvm_send_display_list()
 	}
 	((unsigned short*)buffer)[i + 3] = (unsigned short)htons((unsigned short)current_display);	// Current display
 
-	ILibQueue_Lock(g_messageQ);
-	ILibQueue_EnQueue(g_messageQ, buffer);
-	ILibQueue_UnLock(g_messageQ);
+	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
 }
 
 char Location_X11LIB[NAME_MAX];
@@ -822,9 +807,7 @@ void kvm_server_jpegerror(char *msg)
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
 
-	ILibQueue_Lock(g_messageQ);
-	ILibQueue_EnQueue(g_messageQ, buffer);
-	ILibQueue_UnLock(g_messageQ);
+	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
 }
 
 #pragma pack(push, 1)
@@ -1007,7 +990,6 @@ void* kvm_server_mainloop(void* parm)
 			}
 		}
 	}
-	g_messageQ = ILibQueue_Create();
 
 	// Init the kvm
 	//fprintf(logFile, "Before kvm_init.\n"); fflush(logFile);
@@ -1032,24 +1014,10 @@ void* kvm_server_mainloop(void* parm)
 	int len = 0;
 	char pchRequest2[30000];
 	ssize_t cbBytesRead = 0;
-	keyqueue = ILibCircularQueue_Create(sizeof(kvm_keydata), 1024);
 	kvm_keydata *keydata;
 
 	while (!g_shutdown) 
 	{
-		// Check if there are pending messages to be sent
-		ILibQueue_Lock(g_messageQ);
-		while (ILibQueue_IsEmpty(g_messageQ) == 0)
-		{
-			if ((buf = (char*)ILibQueue_DeQueue(g_messageQ)) != NULL)
-			{
-				written = write(slave2master[1], buf, ILibMemory_Size(buf));
-				fsync(slave2master[1]);
-				ILibMemory_Free(buf);
-			}
-		}
-		ILibQueue_UnLock(g_messageQ);
-
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
 		{
 			for (c = 0; c < TILE_WIDTH_COUNT; c++) 
@@ -1344,42 +1312,9 @@ void* kvm_server_mainloop(void* parm)
 				height = 0;
 			}
 
-			while ((keydata = (kvm_keydata*)ILibCircularQueue_Peek(keyqueue)) != NULL)
-			{
-				if (keydata->delay > 0)
-				{
-					// Need to sleep, calculate how much
-					if (keydata->delay > maxsleep)
-					{
-						// Frame Rate Timer is smaller
-						keydata->delay -= maxsleep;
-						break;
-					}
-					else
-					{
-						// Frame Rate timer is larger
-						maxsleep -= keydata->delay;
-						usleep(keydata->delay);
-						keydata->delay = 0;
-						continue;
-					}
-				}
-				keydata = (kvm_keydata*)ILibCircularQueue_DeQueue(keyqueue);
-				if (keydata->delay == 0)
-				{
-					KeyActionUnicode(keydata->data, keydata->up, eventdisplay);
-				}
-				else
-				{
-					KeyAction((unsigned char)keydata->data, keydata->up, eventdisplay);
-				}
-			}
-
 			usleep(maxsleep);
 		}
 	}
-
-	ILibCircularQueue_Destroy(keyqueue);
 
 	close(slave2master[1]);
 	close(master2slave[0]);
@@ -1403,7 +1338,6 @@ void* kvm_server_mainloop(void* parm)
 		g_tileInfo = NULL;
 	}
 	if(tilebuffer != NULL) { free(tilebuffer); tilebuffer = NULL; }
-	ILibQueue_Destroy(g_messageQ);
 	return (void*)0;
 }
 

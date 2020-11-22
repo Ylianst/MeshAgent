@@ -254,8 +254,6 @@ void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 		mapping = kvm_keyboard_map_unicode_key(display, unicode, &exists);
 		if (mapping == 0)
 		{
-			ILIBLOGMESSAGEX("UNICODE: %u  => DOES NOT EXIST", unicode);
-
 			if (g_keyboardMap[g_keyboardMapIndex] != 0)
 			{
 				mapping = g_keyboardMap[g_keyboardMapIndex] = kvm_keyboard_update_map_unicode_key(display, unicode, g_keyboardMap[g_keyboardMapIndex]);	// Create a key mapping on an unmapped key
@@ -267,7 +265,6 @@ void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 		}
 		if (mapping > 0)
 		{
-			ILIBLOGMESSAGEX("<<%d, EXISTS: %d>>", mapping, exists);
 			x11tst_exports->XTestFakeKeyEvent(display, mapping, 1, 0);
 			x11tst_exports->XTestFakeKeyEvent(display, mapping, 0, 15);
 			x11tst_exports->XFlush(display);
