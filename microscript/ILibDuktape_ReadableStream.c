@@ -825,6 +825,7 @@ duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 	int nargs = duk_get_top(ctx);
 	int onlyItem = 0;
 	ILibDuktape_readableStream *data;
+	if (duk_ctx_shutting_down(ctx)) { return(0); }
 
 	duk_push_this(ctx);														// [readable]
 	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_RSPTRS);		// [readable][ptrs]
@@ -851,24 +852,26 @@ duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 		duk_pop_2(ctx);															// [readable]
 	}
 	sem_post(&(data->pipeLock));
-	
-	if (nargs == 0 || onlyItem != 0)
-	{
-		// We need to pause first
-		duk_push_this(ctx);						// [readable]
-		duk_get_prop_string(ctx, -1, "pause");	// [readable][pause]
-		duk_dup(ctx, -2);						// [readable][pause][this]
-		duk_call_method(ctx, 0); duk_pop(ctx);	// [readable]
-	}
-	
-	// We must yield, and do this on the next event loop, because we can't unpipe if we're called from a pipe'ed call
-	void *imm = ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, -1), nargs == 1 ? duk_get_heapptr(ctx, 0) : NULL }, nargs + 1, ILibDuktape_readableStream_unpipe_later);
-	duk_push_heapptr(ctx, imm);					// [immediate]
-	duk_push_this(ctx);							// [immediate][this]
-	duk_put_prop_string(ctx, -2, "\xFF_Self");	// [immediate]
-	if (nargs == 1) { duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "\xFF_w"); }
-	duk_pop(ctx);								// ...
 
+	if (duk_ctx_shutting_down(ctx) == 0)
+	{
+		if (nargs == 0 || onlyItem != 0)
+		{
+			// We need to pause first
+			duk_push_this(ctx);						// [readable]
+			duk_get_prop_string(ctx, -1, "pause");	// [readable][pause]
+			duk_dup(ctx, -2);						// [readable][pause][this]
+			duk_call_method(ctx, 0); duk_pop(ctx);	// [readable]
+		}
+
+		// We must yield, and do this on the next event loop, because we can't unpipe if we're called from a pipe'ed call
+		void *imm = ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, -1), nargs == 1 ? duk_get_heapptr(ctx, 0) : NULL }, nargs + 1, ILibDuktape_readableStream_unpipe_later);
+		duk_push_heapptr(ctx, imm);					// [immediate]
+		duk_push_this(ctx);							// [immediate][this]
+		duk_put_prop_string(ctx, -2, "\xFF_Self");	// [immediate]
+		if (nargs == 1) { duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, "\xFF_w"); }
+		duk_pop(ctx);								// ...
+	}
 	return 0;
 }
 duk_ret_t ILibDuktape_readableStream_isPaused(duk_context *ctx)

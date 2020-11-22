@@ -4259,6 +4259,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 void ILibDuktape_httpStream_webSocket_EncodedEndSink(ILibDuktape_DuplexStream *stream, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
+	if (duk_ctx_shutting_down(state->ctx)) { return; }
 	if (!state->closed) { ILibDuktape_DuplexStream_WriteEnd(state->decodedStream); }
 }
 void ILibDuktape_httpStream_webSocket_EncodedPauseSink_Chain(void *chain, void *user)
@@ -4373,6 +4374,8 @@ void ILibDuktape_httpStream_webSocket_DecodedPauseSink_Chain(void *chain, void *
 void ILibDuktape_httpStream_webSocket_DecodedPauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
+	if (state == NULL || state->encodedStream == NULL || state->encodedStream->writableStream == NULL) { return; } // ERROR
+
 	if (state->encodedStream->writableStream->pipedReadable_native != NULL && state->encodedStream->writableStream->pipedReadable_native->PauseHandler != NULL)
 	{
 		state->encodedStream->writableStream->pipedReadable_native->paused = 1;
