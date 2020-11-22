@@ -110,6 +110,7 @@ extern void* tilebuffer;
 extern char **environ;
 struct timespec inputtime;
 uint32_t inputcounter = 0;
+int SHIFT_STATE = 0;
 
 typedef struct x11ext_struct
 {
@@ -206,7 +207,7 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alread
 		{
 			// Check to see if this mapping is the primary mapping
 			keycodeIndex = (foundCode - keycode_low) * keysyms_per_keycode;
-			if (keysyms[keycodeIndex] == sym)
+			if (keysyms[keycodeIndex] == sym && SHIFT_STATE == 0)
 			{
 				// We have a match!
 				//ILIBLOGMESSAGEX("   Already mapped at: %d", foundCode);
@@ -217,8 +218,10 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alread
 			{
 				// No match!
 				//ILIBLOGMESSAGEX("   Already mapped at: %d, but is not PRIMARY", foundCode);
+				//ILIBLOGMESSAGEX("   keycode_low: %d , keycode_high: %d , per: %d", keycode_low, keycode_high, keysyms_per_keycode);
 			}
 		}
+		return(empty_keycode);
 	}
 
 
@@ -231,14 +234,23 @@ int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alread
 			for (j = 0; j < keysyms_per_keycode; ++j)
 			{
 				keycodeIndex = (i - keycode_low) * keysyms_per_keycode + j;
-				if (keysyms[keycodeIndex] != 0) { empty = 0; }
-				else { break; }
+				if (keysyms[keycodeIndex] != 0) 
+				{
+					empty = 0; 
+					break;
+				}
 			}
-			if (empty) { empty_keycode = i; break; } // Found it!
+			if (empty) 
+			{
+				empty_keycode = i; 
+				break; 
+			} // Found it!
 		}
 
 
 		// Map the unicode character to one of the unused keys above
+		//ILIBLOGMESSAGEX("   MAPPING SYM: %x on: %d", sym, empty_keycode);
+
 		KeySym keysym_list[] = { sym, sym };
 		x11_exports->XChangeKeyboardMapping(display, empty_keycode, 2, keysym_list, 1);
 		x11_exports->XSync(display, 0);
@@ -1320,6 +1332,8 @@ void* kvm_server_mainloop(void* parm)
 	close(master2slave[0]);
 	slave2master[1] = 0;
 	master2slave[0] = 0;
+
+	//ILIBLOGMESSAGEX("UNMAPPING ALL");
 
 	KeyActionUnicode_UNMAP_ALL(eventdisplay);
 	x11_exports->XCloseDisplay(eventdisplay);

@@ -24,6 +24,7 @@ x11tst_struct *x11tst_exports = NULL;
 extern void kvm_keyboard_unmap_unicode_key(Display *display, int keycode);
 extern int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alreadyExists);
 extern int kvm_keyboard_update_map_unicode_key(Display *display, uint16_t unicode, int keycode);
+extern int SHIFT_STATE;
 
 #define g_keyboardMapCount 8
 int g_keyboardMap[g_keyboardMapCount] = { 0 };
@@ -225,6 +226,7 @@ void KeyAction(unsigned char vk, int up, Display *display)
 
 		if (!x11tst_exports->XTestFakeKeyEvent(display, keycode, !up, 0)) { return; }
 		x11tst_exports->XFlush(display);
+		if (vk == VK_SHIFT) { SHIFT_STATE = !up; }
 	}
 }
 void KeyActionUnicode_UNMAP_ALL(Display *display)
@@ -252,7 +254,7 @@ void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 
 		// Check if a primary mapping already exists
 		mapping = kvm_keyboard_map_unicode_key(display, unicode, &exists);
-		if (mapping == 0)
+		if (exists == 0)
 		{
 			if (g_keyboardMap[g_keyboardMapIndex] != 0)
 			{
