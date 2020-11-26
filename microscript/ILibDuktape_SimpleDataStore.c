@@ -280,7 +280,6 @@ void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object_sink(ILibSimpleDataS
 void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array_sink(ILibSimpleDataStore sender, char* Key, size_t KeyLen, char* Value, size_t ValueLen, void *user)
 {
 	duk_context *ctx = (duk_context*)user;
-	duk_idx_t top = duk_get_top(ctx);						// [array]
 	duk_push_lstring(ctx, Key, KeyLen);						// [array][key]
 	char *k2 = (char*)duk_get_string(ctx, -1);
 

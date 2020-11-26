@@ -245,7 +245,6 @@ void KeyActionUnicode_UNMAP_ALL(Display *display)
 void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 {
 	if (change_display) { return; }
-	int i;
 
 	if (up == 0)
 	{

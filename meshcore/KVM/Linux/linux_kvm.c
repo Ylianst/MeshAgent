@@ -144,7 +144,7 @@ typedef struct x11_struct
 	void(*XChangeWindowAttributes)(Display *d, Window w, unsigned long valuemask, XSetWindowAttributes *a);
 	int(*XQueryPointer)(Display *d, Window w, Window *rr, Window *cr, int *rx, int *ry, int *wx, int *wy, unsigned int *mr);
 	int(*XDisplayKeycodes)(Display *display, int *min_keycodes_return, int *max_keycodes_return);
-	KeySym(*XGetKeyboardMapping)(Display *display, KeyCode first_keycode, int keycode_count, int *keysyms_per_keycode_return);
+	KeySym*(*XGetKeyboardMapping)(Display *display, KeyCode first_keycode, int keycode_count, int *keysyms_per_keycode_return);
 	KeySym(*XStringToKeysym)(char *string);
 	int(*XChangeKeyboardMapping)(Display *display, int first_keycode, int keysyms_per_keycode, KeySym *keysyms, int num_codes);
 }x11_struct;
@@ -1026,7 +1026,6 @@ void* kvm_server_mainloop(void* parm)
 	int len = 0;
 	char pchRequest2[30000];
 	ssize_t cbBytesRead = 0;
-	kvm_keydata *keydata;
 
 	while (!g_shutdown) 
 	{
