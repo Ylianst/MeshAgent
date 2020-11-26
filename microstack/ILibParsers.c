@@ -131,6 +131,9 @@ char ILibScratchPad[4096];   // General buffer
 char ILibScratchPad2[65536]; // Often used for UDP packet processing
 void* gILibChain = NULL;	 // Global Chain Instance used for Remote Logging when a chain instance isn't otherwise exposed
 
+ILibSemaphoreTrack_Handler ILibSemaphoreTrack_func = NULL;
+void* ILibSemaphoreTrack_user = NULL;
+
 #define ILibChain_SIGMAX 32
 ILibLinkedList g_signalHandlers[ILibChain_SIGMAX] = { NULL };
 typedef struct ILibChain_SignalHandlerData

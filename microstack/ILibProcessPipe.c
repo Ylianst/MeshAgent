@@ -451,6 +451,9 @@ void ILibProcessPipe_Process_Destroy(ILibProcessPipe_Process_Object *p)
 	if (p->stdOut != NULL) { ILibProcessPipe_FreePipe(p->stdOut); }
 	if (p->stdErr != NULL) { ILibProcessPipe_FreePipe(p->stdErr); }
 	if (p->metadata != NULL) { ILibMemory_Free(p->metadata); }
+#ifdef WIN32
+	if (p->hProcess != NULL) { CloseHandle(p->hProcess); }
+#endif
 	ILibMemory_Free(p);
 }
 #ifndef WIN32

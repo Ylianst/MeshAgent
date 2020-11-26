@@ -1167,7 +1167,48 @@ duk_ret_t ILibDuktape_Process_Exitting(duk_context *ctx)
 	duk_push_boolean(ctx, (duk_bool_t)duk_ctx_shutting_down(ctx));
 	return(1);
 }
+void ILibDuktape_Process_SemaphoreTracking_sink(char *source, void *user, int init)
+{
+	duk_context *ctx = user;
+	if (ctx != NULL && duk_ctx_is_alive(ctx) != 0 && duk_ctx_shutting_down(ctx) == 0)
+	{
+		duk_push_heap_stash(ctx);																	// [stash]
+		int v = Duktape_GetIntPropertyValue(ctx, -1, "_SemTrack", 0);
+		duk_push_int(ctx, init ? (++v) : (--v));													// [stash][int]
+		duk_put_prop_string(ctx, -2, "_SemTrack");													// [stash]
+		duk_pop(ctx);																				// ...
 
+		duk_push_global_object(ctx);																// [g]
+		duk_get_prop_string(ctx, -1, "console");													// [g][console]
+		duk_prepare_method_call(ctx, -1, "log");													// [g][console][log][this]
+		duk_push_sprintf(ctx, "[%d] Semaphore <<%s>> (%s)", v, source, init ? "INIT" : "DESTROY");	// [g][console][log][this][string]
+		duk_pcall_method(ctx, 1);																	// [g][console][val]
+		duk_pop_3(ctx);																				// ...
+	}
+	else
+	{
+		ILibSemaphoreTrack_user = NULL;
+		ILibSemaphoreTrack_func = NULL;
+	}
+}
+duk_ret_t ILibDuktape_Process_SemaphoreTracking(duk_context *ctx)
+{
+	if (duk_require_boolean(ctx, 0) != 0)
+	{
+		duk_push_heap_stash(ctx);					// [stash]
+		duk_push_int(ctx, 0);						// [stash][int]
+		duk_put_prop_string(ctx, -2, "_SemTrack");	// [stash]
+		duk_pop(ctx);								// ...
+		ILibSemaphoreTrack_user = ctx;
+		ILibSemaphoreTrack_func = ILibDuktape_Process_SemaphoreTracking_sink;
+	}
+	else
+	{
+		ILibSemaphoreTrack_user = NULL;
+		ILibSemaphoreTrack_func = NULL;
+	}
+	return(0);
+}
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -1183,6 +1224,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
 	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "setenv", ILibDuktape_Process_setenv, 2);
+	ILibDuktape_CreateEventWithSetterEx(ctx, "_SemaphoreTracking", ILibDuktape_Process_SemaphoreTracking);
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "coreDumpLocation", ILibDuktape_ScriptContainer_Process_coreDumpLocation_getter, ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter);
 #ifndef WIN32
 	ILibDuktape_CreateEventWithGetter(ctx, "rlimit", ILibDuktape_ScriptContainer_Process_rlimit_getter);

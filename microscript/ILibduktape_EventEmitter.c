@@ -133,7 +133,7 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 	int retVal = defaultValue;
 	if (emitter != NULL && ILibMemory_CanaryOK(emitter) && duk_ctx_is_alive(emitter->ctx))
 	{
-		sem_wait(&(emitter->listenerCountTableLock));
+		ILibSpinLock_Lock(&(emitter->listenerCountTableLock));
 		if (emitter->listenerCountTableLength > 2 && emitter->listenerCountTableLength < INT32_MAX)
 		{
 			size_t eventNameLen = strnlen_s(eventName, ILibDuktape_EventEmitter_MaxEventNameLen);
@@ -169,7 +169,7 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 			}
 			ILibDestructParserResults(pr);
 		}
-		sem_post(&(emitter->listenerCountTableLock));
+		ILibSpinLock_UnLock(&(emitter->listenerCountTableLock));
 	}
 	return(retVal);
 }
@@ -541,7 +541,6 @@ duk_ret_t ILibDuktape_EventEmitter_EmbeddedFinalizer(duk_context *ctx)
 		ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error in Finalizer (%s): [Invalid C function means you forgot to return 0] ", meta);
 	}
 
-	sem_destroy(&(data->listenerCountTableLock));
 	return(0);
 }
 duk_ret_t ILibDuktape_EventEmitter_emitReturnValue(duk_context *ctx)
@@ -653,7 +652,7 @@ duk_ret_t ILibDuktape_EventEmitter_listeners_tableinit(duk_context *ctx)
 	duk_push_this(ctx);													
 	ILibDuktape_EventEmitter *emitter = (ILibDuktape_EventEmitter*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_EventEmitter_Data);
 
-	sem_wait(&(emitter->listenerCountTableLock));
+	ILibSpinLock_Lock(&(emitter->listenerCountTableLock));
 	duk_push_global_object(ctx);											// [g]
 	duk_get_prop_string(ctx, -1, "JSON");									// [g][JSON]
 	duk_prepare_method_call(ctx, -1, "parse");								// [g][JSON][parse][this]
@@ -712,7 +711,7 @@ duk_ret_t ILibDuktape_EventEmitter_listeners_tableinit(duk_context *ctx)
 			}
 		}
 	}
-	sem_post(&(emitter->listenerCountTableLock));
+	ILibSpinLock_UnLock(&(emitter->listenerCountTableLock));
 	return(0);
 }
 
@@ -738,7 +737,7 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	duk_push_object(ctx);
 	retVal->retValTable = duk_get_heapptr(ctx, -1);
 	duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_LastRetValueTable);
-	sem_init(&(retVal->listenerCountTableLock), 0, 1);
+	ILibSpinLock_Init(&(retVal->listenerCountTableLock));
 	retVal->listenerCountTable = (char*)"[]";
 	retVal->listenerCountTableLength = 2;
 

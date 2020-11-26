@@ -112,6 +112,32 @@ struct sockaddr_in6;
 #include <winbase.h>
 #endif
 
+#ifndef WIN32
+#include <sched.h>
+#endif
+
+#ifdef WIN32
+	typedef volatile long ILibSpinLock;
+#else
+	typedef volatile int ILibSpinLock;
+#endif
+static inline void ILibSpinLock_Init(ILibSpinLock *lock) { *lock = 0; }
+static inline void ILibSpinLock_UnLock(ILibSpinLock *lock) { *lock = 0; }
+static inline void ILibSpinLock_Lock(ILibSpinLock *lock)
+{
+#ifdef WIN32
+	while (!InterlockedCompareExchange(lock, 1, 0))
+	{
+		YieldProcessor();
+	}
+#else
+	while (!__sync_bool_compare_and_swap(lock, 0, 1))
+	{
+		sched_yield();
+	}
+#endif
+}
+
 #ifdef WIN32
 #define ILIB_CURRENT_THREAD (unsigned int)GetCurrentThreadId()
 #else
@@ -170,6 +196,9 @@ static inline void ignore_result(uintptr_t result) { (void)result; }
 #define PRINTERROR()
 #endif
 
+typedef void(*ILibSemaphoreTrack_Handler)(char *source, void *user, int init);	
+extern ILibSemaphoreTrack_Handler ILibSemaphoreTrack_func;
+extern void* ILibSemaphoreTrack_user;
 
 int ILib_atoi_uint64_ex(uint64_t *val, const char *instr, size_t instrLen, uint64_t MAX);
 int ILib_atoi_uint32_ex(uint32_t *val, const char *instr, size_t instrLen, uint64_t MAX);
@@ -238,20 +267,11 @@ long ILibGetTimeStamp();
 
 // Implemented in Windows using events.
 #define sem_t HANDLE
-#define sem_init(x,pShared,InitValue) *x=CreateSemaphore(NULL,InitValue,SEM_MAX_COUNT,NULL)
-#define sem_destroy(x) (CloseHandle(*x)==0?1:0)
+#define sem_init(x,pShared,InitValue) *x=CreateSemaphore(NULL,InitValue,SEM_MAX_COUNT,NULL);if(ILibSemaphoreTrack_func!=NULL){char tmp[512];sprintf_s(tmp, sizeof(tmp), "(%p) %s:%d",(void*)(x),__FILE__,__LINE__);ILibSemaphoreTrack_func(tmp,ILibSemaphoreTrack_user,1);}
+#define sem_destroy(x) (CloseHandle(*x)==0?1:0);if(ILibSemaphoreTrack_func!=NULL){char tmp[512];sprintf_s(tmp, sizeof(tmp), "(%p) %s:%d",(void*)(x),__FILE__,__LINE__);ILibSemaphoreTrack_func(tmp,ILibSemaphoreTrack_user,0);}
 #define sem_wait(x) WaitForSingleObject(*x,INFINITE)
 #define sem_trywait(x) ((WaitForSingleObject(*x,0)==WAIT_OBJECT_0)?0:1)
 #define sem_post(x) ReleaseSemaphore(*x,1,NULL)
-
-
-//// Implemented in Windows using critical section.
-//#define sem_t CRITICAL_SECTION
-//#define sem_init(x,pShared,InitValue) InitializeCriticalSection(x);
-//#define sem_destroy(x) (DeleteCriticalSection(x))
-//#define sem_wait(x) EnterCriticalSection(x)
-//#define sem_trywait(x) TryEnterCriticalSection(x)
-//#define sem_post(x) LeaveCriticalSection(x)
 
 #define strncasecmp(x,y,z) _strnicmp(x,y,z)
 #define strcasecmp(x,y) _stricmp(x,y)

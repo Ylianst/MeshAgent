@@ -37,7 +37,7 @@ typedef struct ILibDuktape_EventEmitter
 	unsigned int *totalListeners;
 	const char *listenerCountTable;
 	size_t listenerCountTableLength;
-	sem_t listenerCountTableLock;
+	ILibSpinLock listenerCountTableLock;
 	ILibDuktape_EventEmitter_Types eventType;
 }ILibDuktape_EventEmitter;
 typedef void(*ILibDuktape_EventEmitter_HookHandler)(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback);
