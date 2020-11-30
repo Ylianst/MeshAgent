@@ -44,7 +44,7 @@ typedef struct ILibDuktape_readableStream
 	void *user;
 	void *pipeArray;
 	ILibDuktape_readableStream_nextWriteablePipe *nextWriteable;
-	sem_t pipeLock;
+	ILibSpinLock pipeLock;
 #if defined(WIN32)
 	volatile LONG pipe_pendingCount;	// Use Windows Built-in Atomic Intrinsics
 #elif defined(__ATOMIC_SEQ_CST)

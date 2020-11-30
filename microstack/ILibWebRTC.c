@@ -2301,6 +2301,7 @@ int ILibStun_ProcessStunPacket(void *j, char* buffer, int bufferLength, struct s
 
 		processed = 1;
 		// We got a response, so we can reset the timer for Freshness
+		obj->dTlsSessions[SessionSlot]->freshnessTimestampStart = 0;
 		ILibLifeTime_Remove(obj->Timer, ILibWebRTC_DTLS_TO_CONSENT_FRESHNESS_TIMER_OBJECT(obj->dTlsSessions[SessionSlot]));
 		ILibLifeTime_Add(obj->Timer, ILibWebRTC_DTLS_TO_CONSENT_FRESHNESS_TIMER_OBJECT(obj->dTlsSessions[SessionSlot]), ILibStun_MaxConsentFreshnessTimeoutSeconds, ILibStun_WebRTC_ConsentFreshness_Start, NULL);
 	}
@@ -4253,6 +4254,18 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 	crc = ((unsigned int*)buffer)[2];
 	((unsigned int*)buffer)[2] = 0;
 	if (crc != crc32c(0, (unsigned char*)buffer, (uint32_t)bufferLength)) return;
+
+	if (o->freshnessTimestampStart != 0)
+	{
+		// Technically speaking, consent freshness is supposed to be independent of SCTP/DTLS, but Chromium and Firefox no longer
+		// respond to a freshness probe, so I have to work-around this issue
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_DTLS, ILibRemoteLogging_Flags_VerbosityLevel_2, "Consent Freshness Updated (via dTLS) on IceSlot: %d", session);
+
+		o->freshnessTimestampStart = 0;
+		ILibLifeTime_Remove(obj->Timer, ILibWebRTC_DTLS_TO_CONSENT_FRESHNESS_TIMER_OBJECT(o));
+		ILibLifeTime_Add(obj->Timer, ILibWebRTC_DTLS_TO_CONSENT_FRESHNESS_TIMER_OBJECT(o), ILibStun_MaxConsentFreshnessTimeoutSeconds, ILibStun_WebRTC_ConsentFreshness_Start, NULL);
+	}
+
 	sem_wait(&(o->Lock));
 
 	// Decode the rest of the header
@@ -5819,6 +5832,7 @@ void ILibStun_DTLS_Success(struct ILibStun_Module *obj, int session, struct sock
 		if (obj->consentFreshnessDisabled == 0) // TODO: Bryan: We should really put this after SCTP has been established...
 		{
 			// Start Consent Freshness Algorithm. Wait for the Timeout, then send first packet
+			obj->dTlsSessions[session]->freshnessTimestampStart = 0;
 			ILibLifeTime_Add(obj->Timer, ILibWebRTC_DTLS_TO_CONSENT_FRESHNESS_TIMER_OBJECT(obj->dTlsSessions[session]), ILibStun_MaxConsentFreshnessTimeoutSeconds, ILibStun_WebRTC_ConsentFreshness_Start, NULL);
 		}
 	}

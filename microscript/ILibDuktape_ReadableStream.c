@@ -189,24 +189,24 @@ int ILibDuktape_readableStream_WriteData_Flush(struct ILibDuktape_WritableStream
 {
 	ILibDuktape_readableStream *stream = (ILibDuktape_readableStream*)user;
 	int unpipeInProgress = 0;
-
+	
 #ifdef WIN32
 	if(InterlockedDecrement(&(stream->pipe_pendingCount)) == 0)
 #elif defined(__ATOMIC_SEQ_CST)
 	if (__atomic_sub_fetch(&(stream->pipe_pendingCount), 1, __ATOMIC_SEQ_CST) == 0)
 #else
-	sem_wait(&(stream->pipeLock));
+	ILibSpinLock_Lock(&(stream->pipeLock));
 	--stream->pipe_pendingCount;
-	sem_post(&(stream->pipeLock));
+	ILibSpinLock_UnLock(&(stream->pipeLock));
 	if(stream->pipe_pendingCount == 0)
 #endif
 	{
 		if (stream->emitter->ctx == NULL) { return(1); }
 
-		sem_wait(&(stream->pipeLock));
+		ILibSpinLock_Lock(&(stream->pipeLock));
 		stream->pipeInProgress = 0;
 		unpipeInProgress = stream->unpipeInProgress;
-		sem_post(&(stream->pipeLock));
+		ILibSpinLock_UnLock(&(stream->pipeLock));
 
 		if (stream->paused != 0 && stream->paused_data != NULL)
 		{
@@ -311,9 +311,9 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 
 	if (stream->bypassValue == 0 || stream->bypassValue != streamReserved)
 	{
-		sem_wait(&(stream->pipeLock));
+		ILibSpinLock_Lock(&(stream->pipeLock));
 		stream->pipeInProgress = 1;
-		sem_post(&(stream->pipeLock));
+		ILibSpinLock_UnLock(&(stream->pipeLock));
 
 		w = stream->nextWriteable;
 		stream->pipe_pendingCount = 0;
@@ -383,9 +383,9 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 	
 	if (dispatched == 0)
 	{
-		sem_wait(&(stream->pipeLock));
+		ILibSpinLock_Lock(&(stream->pipeLock));
 		stream->pipeInProgress = 0;
-		sem_post(&(stream->pipeLock));
+		ILibSpinLock_UnLock(&(stream->pipeLock));
 
 		if(ILibDuktape_EventEmitter_HasListeners(stream->emitter, "data"))
 		{
@@ -622,7 +622,7 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	rstream = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_pop_2(ctx);																			// ...
 	
-	sem_wait(&(rstream->pipeLock));
+	ILibSpinLock_Lock(&(rstream->pipeLock));
 	if (rstream->pipeInProgress != 0)
 	{
 		// We must YIELD and try again later, becuase there is an active dispatch going on
@@ -636,7 +636,7 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 			duk_put_prop_string(ctx, -2, "opt");
 		}
 		duk_dup(ctx, 0);
-		sem_post(&(rstream->pipeLock));
+		ILibSpinLock_UnLock(&(rstream->pipeLock));
 		return(1);
 	}
 	else
@@ -682,7 +682,7 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 		rstream->bypassValue = Duktape_GetIntPropertyValue(ctx, 1, "dataTypeSkip", 0);
 		rstream->noPropagateEnd = Duktape_GetBooleanProperty(ctx, 1, "end", 1) == 0 ? 1 : 0;
 	}
-	sem_post(&(rstream->pipeLock));
+	ILibSpinLock_UnLock(&(rstream->pipeLock));
 
 	// Now we need to emit a 'pipe' event on the writable that we just attached
 	duk_push_heapptr(ctx, w->writableStream);			// [dest]
@@ -723,7 +723,7 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 	duk_pop_2(ctx);															// ...
 
 	if (data->emitter->ctx == NULL) { return; }
-	sem_wait(&(data->pipeLock));
+	ILibSpinLock_Lock(&(data->pipeLock));
 	if (data->pipeInProgress != 0)
 	{
 		// We must yield, and try again, because there's an active dispatch going on
@@ -733,7 +733,7 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 		duk_put_prop_string(ctx, -2, "\xFF_Self");	// [immediate]
 		if (argsLen > 1 && args[1] != NULL) { duk_push_heapptr(ctx, args[1]); duk_put_prop_string(ctx, -2, "\xFF_w"); }
 		duk_pop(ctx);								// ...
-		sem_post(&(data->pipeLock));
+		ILibSpinLock_UnLock(&(data->pipeLock));
 		return;
 	}
 	else
@@ -818,7 +818,7 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 		}
 	}
 	data->unpipeInProgress = 0;
-	sem_post(&(data->pipeLock));
+	ILibSpinLock_UnLock(&(data->pipeLock));
 }
 duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 {
@@ -834,7 +834,7 @@ duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 
 	if (data->emitter->ctx == NULL) { return(0); }
 
-	sem_wait(&(data->pipeLock));
+	ILibSpinLock_Lock(&(data->pipeLock));
 	data->unpipeInProgress = 1;
 	if (nargs == 1 && duk_is_object(ctx, 0))
 	{
@@ -851,7 +851,7 @@ duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 		if (onlyItem && wcount > 1) { onlyItem = 0; }
 		duk_pop_2(ctx);															// [readable]
 	}
-	sem_post(&(data->pipeLock));
+	ILibSpinLock_UnLock(&(data->pipeLock));
 
 	if (duk_ctx_shutting_down(ctx) == 0)
 	{
@@ -921,7 +921,6 @@ duk_ret_t ILibDuktape_ReadableStream_PipeLockFinalizer(duk_context *ctx)
 		ptrs->paused_data = tmp;
 	}
 
-	sem_destroy(&(ptrs->pipeLock));
 	duk_pop_2(ctx);
 	return(0);
 }
@@ -973,7 +972,7 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	retVal->PauseHandler = OnPause;
 	retVal->ResumeHandler = OnResume;
 	retVal->UnshiftHandler = OnUnshift;
-	sem_init(&(retVal->pipeLock), 0, 1);
+	ILibSpinLock_Init(&(retVal->pipeLock));
 	ILibDuktape_CreateFinalizerEx(ctx, ILibDuktape_ReadableStream_PipeLockFinalizer, 1);
 
 	retVal->emitter = emitter = ILibDuktape_EventEmitter_Create(ctx);
