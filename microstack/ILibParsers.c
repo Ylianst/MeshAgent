@@ -230,7 +230,7 @@ typedef struct ILibSparseArray_Root
 	ILibSparseArray_Node* bucket;
 	int bucketSize;
 	ILibSparseArray_Bucketizer bucketizer;
-	sem_t LOCK;
+	ILibSpinLock LOCK;
 	int userMemorySize;
 }ILibSparseArray_Root;
 const int ILibMemory_SparseArray_CONTAINERSIZE = sizeof(ILibSparseArray_Root);
@@ -268,14 +268,14 @@ struct ILibQueueNode
 {
 	struct ILibStackNode *Head;
 	struct ILibStackNode *Tail;
-	sem_t LOCK;
+	ILibSpinLock LOCK;
 };
 struct HashNode_Root
 {
 	struct HashNode *Root;
 	int CaseInSensitive;
 	void *Reserved;
-	sem_t LOCK;
+	ILibSpinLock LOCK;
 };
 struct HashNode
 {
@@ -300,7 +300,7 @@ typedef struct ILibLinkedListNode
 }ILibLinkedListNode;
 typedef struct ILibLinkedListNode_Root
 {
-	sem_t LOCK;
+	ILibSpinLock LOCK;
 	long count;
 	void* Tag;
 	struct ILibLinkedListNode *Head;
@@ -4943,7 +4943,7 @@ void ILibClearStack(void **TheStack)
 void ILibHashTree_Lock(void *hashtree)
 {
 	struct HashNode_Root *r = (struct HashNode_Root*)hashtree;
-	sem_wait(&(r->LOCK));
+	ILibSpinLock_Lock(&(r->LOCK));
 }
 
 /*! \fn ILibHashTree_UnLock(void *hashtree)
@@ -4953,7 +4953,7 @@ void ILibHashTree_Lock(void *hashtree)
 void ILibHashTree_UnLock(void *hashtree)
 {
 	struct HashNode_Root *r = (struct HashNode_Root*)hashtree;
-	sem_post(&(r->LOCK));
+	ILibSpinLock_UnLock(&(r->LOCK));
 }
 
 /*! \fn ILibDestroyHashTree(void *tree)
@@ -4966,7 +4966,6 @@ void ILibDestroyHashTree(void *tree)
 	struct HashNode *c = r->Root;
 	struct HashNode *n;
 
-	sem_destroy(&(r->LOCK));
 	while (c != NULL)
 	{
 		//
@@ -5110,7 +5109,7 @@ void* ILibInitHashTreeEx(void *ReservedMemory)
 	}
 
 	Root->Root = RetVal;
-	if (ReservedMemory == NULL) { sem_init(&(Root->LOCK), 0, 1); }
+	if (ReservedMemory == NULL) { ILibSpinLock_Init(&(Root->LOCK)); }
 	return(Root);
 }
 /*! \fn void* ILibInitHashTree_CaseInSensitive()
@@ -7671,8 +7670,7 @@ void* ILibLinkedList_CreateEx(int userMemorySize)
 
 	ILibMemory_Allocate(sizeof(ILibLinkedListNode_Root), userMemorySize, (void**)&root, &mem);
 	root->ExtraMemory = mem;
-	
-	sem_init(&(root->LOCK), 0, 1);
+	ILibSpinLock_Init(&(root->LOCK));
 	return root;
 }
 
@@ -8003,7 +8001,7 @@ void* ILibLinkedList_Node_ResizeAdditional(void *node, size_t additionalSize)
 void ILibLinkedList_Lock(void *LinkedList)
 {
 	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
-	sem_wait(&(r->LOCK));
+	ILibSpinLock_Lock(&(r->LOCK));
 }
 
 /*! \fn void ILibLinkedList_UnLock(void *LinkedList)
@@ -8013,7 +8011,7 @@ void ILibLinkedList_Lock(void *LinkedList)
 void ILibLinkedList_UnLock(void *LinkedList)
 {
 	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
-	sem_post(&(r->LOCK));
+	ILibSpinLock_UnLock(&(r->LOCK));
 }
 
 
@@ -8027,7 +8025,6 @@ void ILibLinkedList_Destroy(void *LinkedList)
 {
 	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
 	while (r->Head != NULL) ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));
-	sem_destroy(&(r->LOCK));
 	free(r);
 }
 
@@ -8417,7 +8414,7 @@ ILibSparseArray ILibSparseArray_CreateWithUserMemory(int numberOfBuckets, ILibSp
 {
 	ILibSparseArray_Root *retVal = (ILibSparseArray_Root*)ILibMemory_Allocate(sizeof(ILibSparseArray_Root), userMemorySize, NULL, NULL);
 
-	sem_init(&(retVal->LOCK), 0, 1);
+	ILibSpinLock_Init(&(retVal->LOCK));
 	retVal->bucketSize = numberOfBuckets;
 	retVal->bucketizer = bucketizer;
 	retVal->bucket = (ILibSparseArray_Node*)malloc(numberOfBuckets * sizeof(ILibSparseArray_Node));
@@ -8638,7 +8635,6 @@ void ILibSparseArray_ClearEx2(ILibSparseArray sarray, ILibSparseArray_OnValue on
 void ILibSparseArray_DestroyEx(ILibSparseArray sarray, ILibSparseArray_OnValue onDestroy, void *user)
 {
 	ILibSparseArray_ClearEx(sarray, onDestroy, user);
-	sem_destroy(&((ILibSparseArray_Root*)sarray)->LOCK);
 	free(((ILibSparseArray_Root*)sarray)->bucket);
 	free(sarray);
 }
@@ -8656,7 +8652,7 @@ void ILibSparseArray_Destroy(ILibSparseArray sarray)
 */
 void ILibSparseArray_Lock(ILibSparseArray sarray)
 {
-	sem_wait(&(((ILibSparseArray_Root*)sarray)->LOCK));
+	ILibSpinLock_Lock(&(((ILibSparseArray_Root*)sarray)));
 }
 //! Use the Sparse Array as a synchronization lock, and release it
 /*!
@@ -8664,7 +8660,7 @@ void ILibSparseArray_Lock(ILibSparseArray sarray)
 */
 void ILibSparseArray_UnLock(ILibSparseArray sarray)
 {
-	sem_post(&(((ILibSparseArray_Root*)sarray)->LOCK));
+	ILibSpinLock_UnLock(&(((ILibSparseArray_Root*)sarray)->LOCK));
 }
 
 int ILibString_IndexOfFirstWhiteSpace(const char *inString, size_t inStringLength)
@@ -10540,6 +10536,7 @@ void ILibThread_Join(void *thr)
 {
 #ifdef WIN32
 	WaitForSingleObject((HANDLE)thr, INFINITE);
+	CloseHandle((HANDLE)thr);
 #else
 	#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
 		if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable!=0)

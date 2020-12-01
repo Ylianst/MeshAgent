@@ -102,7 +102,7 @@ typedef struct ILibWebServer_Session_SystemData
 	int   CloseOverrideFlag;		// Close Override Flag
 	void *DisconnectFlagPointer;	// DisconnectFlagPointer
 
-	sem_t SessionLock;				// Session Lock
+	ILibSpinLock SessionLock;				// Session Lock
 	int   ReferenceCounter;			// Reference Counter;
 	int   OverrideVirDirStruct;		// Override VirDir Struct
 	
@@ -467,7 +467,7 @@ void ILibWebServer_OnConnect(void *AsyncServerSocketModule, void *ConnectionToke
 	ws->Reserved_Transport.PendingBytesPtr = (ILibTransport_PendingBytesToSendPtr)&ILibWebServer_Session_GetPendingBytesToSend;
 	ws->ParentExtraMemory = wsm->ChainLink.ExtraMemoryPtr;
 
-	sem_init(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock), 0, 1);		// Initialize the SessionLock
+	ILibSpinLock_Init(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));		// Initialize the SessionLock
 	ILibWebServer_Session_GetSystemData(ws)->ReferenceCounter = 1;					// Reference Counter, Initial count should be 1
 	ILibWebServer_Session_GetSystemData(ws)->AsyncServerSocket = AsyncServerSocketModule;
 	ILibWebServer_Session_GetSystemData(ws)->ConnectionToken = ConnectionToken;
@@ -475,7 +475,7 @@ void ILibWebServer_OnConnect(void *AsyncServerSocketModule, void *ConnectionToke
 
 	//printf("#### ALLOCATED (%d) ####\r\n", ConnectionToken);
 
-	sem_init(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock), 0, 1); // Initialize the SessionLock
+	ILibSpinLock_Init(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));		// Initialize the SessionLock
 	ws->Parent = wsm;
 	ws->User = wsm->User;
 	*user = ws;
@@ -691,9 +691,9 @@ int ILibWebServer_ProcessWebSocketData(struct ILibWebServer_Session *ws, char* b
 		{
 			int sendResponse = 0;
 			// CONNECTION-CLOSE
-			sem_wait(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
+			ILibSpinLock_Lock(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
 			if (ILibWebServer_Session_GetSystemData(ws)->WebSocketCloseFrameSent == 0)	{ ILibWebServer_Session_GetSystemData(ws)->WebSocketCloseFrameSent = 1; sendResponse = 1; }
-			sem_post(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
+			ILibSpinLock_UnLock(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
 
 			if (sendResponse != 0)
 			{
@@ -725,9 +725,9 @@ ILibExportMethod void ILibWebServer_WebSocket_Close(struct ILibWebServer_Session
 	int sent = 0;
 	unsigned short code = htons(1000); // Normal Closure
 
-	sem_wait(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
+	ILibSpinLock_Lock(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
 	if (ILibWebServer_Session_GetSystemData(ws)->WebSocketCloseFrameSent == 0)	{ ILibWebServer_Session_GetSystemData(ws)->WebSocketCloseFrameSent = 1; sent = 1; }
-	sem_post(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
+	ILibSpinLock_UnLock(&(ILibWebServer_Session_GetSystemData(ws)->SessionLock));
 
 	if (sent != 0)
 	{
@@ -1539,13 +1539,13 @@ ILibExportMethod enum ILibWebServer_Status ILibWebServer_WebSocket_Send(struct I
 		}
 	}
 
-	sem_wait(&(ILibWebServer_Session_GetSystemData(session)->SessionLock)); // We need to do this, because we need to be able to correctly interleave sends
+	ILibSpinLock_Lock(&(ILibWebServer_Session_GetSystemData(session)->SessionLock)); // We need to do this, because we need to be able to correctly interleave sends
 	RetVal = (enum ILibWebServer_Status)ILibAsyncServerSocket_Send(ILibWebServer_Session_GetSystemData(session)->AsyncServerSocket, ILibWebServer_Session_GetSystemData(session)->ConnectionToken, header, headerLen, ILibAsyncSocket_MemoryOwnership_USER);
 	if (bufferLen > 0)
 	{
 		RetVal = (enum ILibWebServer_Status)ILibAsyncServerSocket_Send(ILibWebServer_Session_GetSystemData(session)->AsyncServerSocket, ILibWebServer_Session_GetSystemData(session)->ConnectionToken, buffer, bufferLen, userFree);
 	}
-	sem_post(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
+	ILibSpinLock_UnLock(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
 	return RetVal;
 }
 
@@ -2018,9 +2018,9 @@ void ILibWebServer_AddRef(struct ILibWebServer_Session *session)
 {
 	SESSION_TRACK(session, "AddRef");
 
-	sem_wait(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
+	ILibSpinLock_Lock(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
 	++ILibWebServer_Session_GetSystemData(session)->ReferenceCounter;
-	sem_post(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
+	ILibSpinLock_UnLock(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
 }
 
 /*! \fn ILibWebServer_Release(struct ILibWebServer_Session *session)
@@ -2034,7 +2034,7 @@ void ILibWebServer_Release(struct ILibWebServer_Session *session)
 	int OkToFree = 0;
 
 	SESSION_TRACK(session, "Release");
-	sem_wait(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
+	ILibSpinLock_Lock(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
 	if (--ILibWebServer_Session_GetSystemData(session)->ReferenceCounter == 0)
 	{
 		//
@@ -2043,7 +2043,7 @@ void ILibWebServer_Release(struct ILibWebServer_Session *session)
 		//
 		OkToFree = 1;
 	}
-	sem_post(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
+	ILibSpinLock_UnLock(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
 	if (session->SessionInterrupted == 0)
 	{
 		ILibLifeTime_Remove(((struct ILibWebServer_StateModule*)session->Parent)->LifeTime, session);
@@ -2056,7 +2056,6 @@ void ILibWebServer_Release(struct ILibWebServer_Session *session)
 			ILibWebClient_DestroyWebClientDataObject(ILibWebServer_Session_GetSystemData(session)->WebClientDataObject);
 		}
 		SESSION_TRACK(session, "** Destroyed **");
-		sem_destroy(&(ILibWebServer_Session_GetSystemData(session)->SessionLock));
 		if (ILibWebServer_Session_GetSystemData(session)->DigestTable != NULL) { ILibDestroyHashTree(ILibWebServer_Session_GetSystemData(session)->DigestTable); }
 		if (ILibWebServer_Session_GetSystemData(session)->WebSocketFragmentBuffer != NULL)	{ free(ILibWebServer_Session_GetSystemData(session)->WebSocketFragmentBuffer); }
 		if (ILibWebServer_Session_GetSystemData(session)->WebSocket_Request != NULL) { ILibDestructPacket((struct packetheader*)ILibWebServer_Session_GetSystemData(session)->WebSocket_Request); }

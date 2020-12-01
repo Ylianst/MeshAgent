@@ -413,7 +413,6 @@ void ILibAsyncSocket_Destroy(void *socketModule)
 	#ifndef MICROSTACK_NOTLS
 	module->SSLConnect = 0;
 	#endif
-	sem_destroy(&(module->SendLock));
 }
 /*! \fn ILibAsyncSocket_SetReAllocateNotificationCallback(ILibAsyncSocket_SocketModule AsyncSocketToken, ILibAsyncSocket_OnBufferReAllocated Callback)
 \brief Set the callback handler for when the internal data buffer has been resized
@@ -476,7 +475,7 @@ ILibAsyncSocket_SocketModule ILibCreateAsyncSocketModuleWithMemory(void *Chain, 
 	RetVal->MallocSize = initialBufferSize;
 	RetVal->LifeTime = ILibGetBaseTimer(Chain); //ILibCreateLifeTime(Chain);
 
-	sem_init(&(RetVal->SendLock), 0, 1);
+	ILibSpinLock_Init(&(RetVal->SendLock));
 
 	ILibAddToChain(Chain, RetVal);
 
@@ -513,17 +512,15 @@ void ILibAsyncSocket_SendError(ILibAsyncSocket_SocketModule socketModule)
 	module->PAUSE = 1;
 	ILibAsyncSocket_ClearPendingSend(module); // This causes a segfault
 	
-	SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_SendError", 1, module);)
-	sem_post(&(module->SendLock));
+	ILibSpinLock_UnLock(&(module->SendLock));
 
 	// Ensure Calling On_Disconnect with MicroStackThread
 	ILibLifeTime_Add(module->LifeTime, socketModule, 0, &ILibAsyncSocket_Disconnect, NULL);
 
-	SEM_TRACK(AsyncSocket_TrackLock("ILibAsyncSocket_SendError", 1, module);)
-	sem_wait(&(module->SendLock));
+	ILibSpinLock_Lock(&(module->SendLock));
 }
 
-sem_t *ILibAsyncSocket_GetSendLock(ILibAsyncSocket_SocketModule socketModule)
+ILibSpinLock *ILibAsyncSocket_GetSpinLock(ILibAsyncSocket_SocketModule socketModule)
 {
 	return(&((struct ILibAsyncSocketModule*)socketModule)->SendLock);
 }
@@ -558,7 +555,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 #ifndef MICROSTACK_NOTLS
 	if (module->ssl != NULL)
 	{
-		if (lockOverride == 0) { sem_wait(&(module->SendLock)); }
+		if (lockOverride == 0) { ILibSpinLock_Lock(&(module->SendLock)); }
 		
 		for (vi = 0; vi < count; ++vi)
 		{
@@ -657,14 +654,14 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 			ILibAsyncSocket_SendError(module);
 		}
 
-		if (lockOverride == 0) { sem_post(&(module->SendLock)); }
+		if (lockOverride == 0) { ILibSpinLock_UnLock(&(module->SendLock)); }
 		if (retVal != ILibAsyncSocket_ALL_DATA_SENT && !ILibIsRunningOnChainThread(module->Transport.ChainLink.ParentChain)) ILibForceUnBlockChain(module->Transport.ChainLink.ParentChain);
 		return retVal;
 	}
 #endif
 
 	// If we got here, we aren't doing TLS
-	if (lockOverride == 0) { sem_wait(&(module->SendLock)); }
+	if (lockOverride == 0) { ILibSpinLock_Lock(&(module->SendLock)); }
 	if (module->internalSocket == ~0)
 	{
 		// Too Bad, the socket closed
@@ -675,7 +672,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 			UserFree = va_arg(vlist, ILibAsyncSocket_MemoryOwnership);
 			if (UserFree == ILibAsyncSocket_MemoryOwnership_CHAIN) { free(buffer); }
 		}
-		if (lockOverride == 0) { sem_post(&(module->SendLock)); }
+		if (lockOverride == 0) { ILibSpinLock_UnLock(&(module->SendLock)); }
 		va_end(vlist);
 		return ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
 	}
@@ -781,7 +778,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_Soc
 	}
 	va_end(vlist); 
 
-	if (lockOverride == 0) { sem_post(&(module->SendLock)); }
+	if (lockOverride == 0) { ILibSpinLock_UnLock(&(module->SendLock)); }
 	if (notok != 0)
 	{
 		retVal = ILibAsyncSocket_BUFFER_TOO_LARGE;
@@ -812,8 +809,7 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(module->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_1, "AsyncSocket[%p] << DISCONNECT", (void*)module);
 
-	SEM_TRACK(AsyncSocket_TrackLock("ILibAsyncSocket_Disconnect", 1, module);)
-	sem_wait(&(module->SendLock));
+	ILibSpinLock_Lock(&(module->SendLock));
 	module->timeout_handler = NULL;
 	module->timeout_milliSeconds = 0;
 
@@ -823,9 +819,9 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 	{
 		SSL_TRACE1("ILibAsyncSocket_Disconnect()");
 		SSL_shutdown(module->ssl);
-		sem_post(&(module->SendLock));
+		ILibSpinLock_UnLock(&(module->SendLock));
 		SSL_free(module->ssl); // Frees SSL session and both BIO buffers at the same time
-		sem_wait(&(module->SendLock));
+		ILibSpinLock_Lock(&(module->SendLock));
 		module->ssl = NULL;
 		SSL_TRACE2("ILibAsyncSocket_Disconnect()");
 	}
@@ -852,8 +848,7 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 
 		// Since the socket is closing, we need to clear the data that is pending to be sent
 		ILibAsyncSocket_ClearPendingSend(socketModule);
-		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_Disconnect", 2, module);)
-		sem_post(&(module->SendLock));
+		ILibSpinLock_UnLock(&(module->SendLock));
 
 		#ifndef MICROSTACK_NOTLS
 		if (wasssl == NULL)
@@ -879,8 +874,7 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 	}
 	else
 	{
-		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_Disconnect", 3, module);)
-		sem_post(&(module->SendLock));
+		ILibSpinLock_UnLock(&(module->SendLock));
 	}
 }
 
@@ -1089,7 +1083,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 	ILibAsyncSocket_SendData *data;
 	ILibAsyncSocket_SendStatus retVal = ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR;
 
-	sem_wait(&(Reader->SendLock));
+	ILibSpinLock_Lock(&(Reader->SendLock));
 	if (Reader->writeBioBuffer->length > 0)
 	{
 		if (Reader->PendingSend_Tail == NULL)
@@ -1136,7 +1130,7 @@ ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocke
 			// Don't need to do anything, becuase it'll get picked up in the PostSelect
 		}
 	}
-	sem_post(&(Reader->SendLock));
+	ILibSpinLock_UnLock(&(Reader->SendLock));
 	return retVal;
 }
 #endif
@@ -1388,9 +1382,9 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 		if (Reader->ssl != NULL)
 		{
 			SSL_free(Reader->ssl); // Frees SSL session and BIO buffer at the same time
-			sem_wait(&(Reader->SendLock));
+			ILibSpinLock_Lock(&(Reader->SendLock));
 			Reader->ssl = NULL;
-			sem_post(&(Reader->SendLock));
+			ILibSpinLock_UnLock(&(Reader->SendLock));
 		}
 #endif
 		
@@ -1532,8 +1526,7 @@ void ILibAsyncSocket_PreSelect(void* socketModule,fd_set *readset, fd_set *write
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(module->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_5, "AsyncSocket[%p] entered PreSelect", (void*)module);
 
-	SEM_TRACK(AsyncSocket_TrackLock("ILibAsyncSocket_PreSelect", 1, module);)
-	sem_wait(&(module->SendLock));
+	ILibSpinLock_Lock(&(module->SendLock));
 
 	if (module->internalSocket != -1)
 	{
@@ -1556,9 +1549,9 @@ void ILibAsyncSocket_PreSelect(void* socketModule,fd_set *readset, fd_set *write
 					module->timeout_handler = NULL;
 					if (h != NULL)
 					{
-						sem_post(&(module->SendLock));
+						ILibSpinLock_UnLock(&(module->SendLock));
 						h(module, module->user);
-						sem_wait(&(module->SendLock));
+						ILibSpinLock_Lock(&(module->SendLock));
 						if (module->timeout_milliSeconds != 0) 
 						{ 
 							*blocktime = module->timeout_milliSeconds; 
@@ -1616,8 +1609,7 @@ void ILibAsyncSocket_PreSelect(void* socketModule,fd_set *readset, fd_set *write
 		}
 	}
 
-	SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PreSelect", 2, module);)
-	sem_post(&(module->SendLock));
+	ILibSpinLock_UnLock(&(module->SendLock));
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(module->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_5, "...AsyncSocket[%p] exited PreSelect", (void*)module);
 }
@@ -1706,8 +1698,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 	
 	UNREFERENCED_PARAMETER( slct );
 
-	SEM_TRACK(AsyncSocket_TrackLock("ILibAsyncSocket_PostSelect", 1, module);)
-	sem_wait(&(module->SendLock)); // Lock!
+	ILibSpinLock_Lock(&(module->SendLock)); // Lock!
 	
 	//if (fd_error != 0) printf("ILibAsyncSocket_PostSelect-ERROR\r\n");
 	//if (fd_read != 0) printf("ILibAsyncSocket_PostSelect-READ\r\n");
@@ -1760,8 +1751,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 	if (serr != 0)
 	{
 		// Unlock before fireing the event
-		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 4, module);)
-		sem_post(&(module->SendLock));
+		ILibSpinLock_UnLock(&(module->SendLock));
 		ILibAsyncSocket_PrivateShutdown(module);
 	}
 	else
@@ -1820,8 +1810,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 					// TODO: Set timeout. If the proxy does not respond, we need to close this connection.
 					// On the other hand... This is not generally a problem, proxies will disconnect after a timeout anyway.
 					
-					SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 4, module);)
-					sem_post(&(module->SendLock));
+					ILibSpinLock_UnLock(&(module->SendLock));
 					return;
 				}
 				if (module->ProxyState == 2) module->ProxyState = 3;
@@ -1832,8 +1821,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 			}
 
 			// Unlock before fireing the event
-			SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 4, module);)
-			sem_post(&(module->SendLock));
+			ILibSpinLock_UnLock(&(module->SendLock));
 
 			// If we did connect, we got more things to do
 			if (triggerWriteSet != 0)
@@ -1871,17 +1859,14 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 			}
 
 			// Unlock before fireing the event
-			SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 4, module);)
-			sem_post(&(module->SendLock));
+			ILibSpinLock_UnLock(&(module->SendLock));
 
 			if (triggerReadSet != 0 || triggerResume != 0) ILibProcessAsyncSocket(module, triggerReadSet);
 		}
 	}
-	SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 4, module);)
 
 
-	SEM_TRACK(AsyncSocket_TrackLock("ILibAsyncSocket_PostSelect", 1, module);)
-	sem_wait(&(module->SendLock));
+	ILibSpinLock_Lock(&(module->SendLock));
 	// Write Handling
 	if (module->FinConnect > 0 && module->internalSocket != ~0 && fd_write != 0 && module->PendingSend_Head != NULL && (module->ProxyState != 1))
 	{
@@ -2087,8 +2072,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 
 		// This triggers OnSendOK, if all the pending data has been sent.
 		if (module->PendingSend_Head == NULL && bytesSent != -1) { TriggerSendOK = 1; }
-		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 2, module);)
-		sem_post(&(module->SendLock));
+		ILibSpinLock_UnLock(&(module->SendLock));
 #ifndef MICROSTACK_NOTLS
 		if (TriggerSendOK != 0 && (module->ssl == NULL || module->SSLConnect != 0))
 #else
@@ -2106,8 +2090,7 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 	}
 	else
 	{
-		SEM_TRACK(AsyncSocket_TrackUnLock("ILibAsyncSocket_PostSelect", 2, module);)
-		sem_post(&(module->SendLock));
+		ILibSpinLock_UnLock(&(module->SendLock));
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(module->Transport.ChainLink.ParentChain), ILibRemoteLogging_Modules_Microstack_AsyncSocket, ILibRemoteLogging_Flags_VerbosityLevel_5, "...AsyncSocket[%p] exited PostSelect", (void*)module);

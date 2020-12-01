@@ -78,7 +78,7 @@ void WebClient_TrackUnLock(const char* MethodName, int Occurance, void *data)
 #include "ILibRemoteLogging.h"
 #include "ILibCrypto.h"
 
-extern sem_t *ILibAsyncSocket_GetSendLock(ILibAsyncSocket_SocketModule socketModule);
+extern ILibSpinLock *ILibAsyncSocket_GetSpinLock(ILibAsyncSocket_SocketModule socketModule);
 
 #ifndef MICROSTACK_NOTLS
 int ILibWebClientDataObjectIndex = -1;
@@ -169,7 +169,7 @@ struct ILibWebClientManager
 	void *timer;
 	int idleCount;
 
-	sem_t QLock;
+	ILibSpinLock QLock;
 
 	void *user;
 
@@ -523,7 +523,6 @@ void ILibDestroyWebClient(void *object)
 	ILibQueue_Destroy(manager->backlogQueue);
 	ILibDestroyHashTree(manager->idleTable);
 	ILibDestroyHashTree(manager->DataTable);
-	sem_destroy(&(manager->QLock));
 	free(manager->socks);
 	
 	#ifndef MICROSTACK_NOTLS
@@ -605,8 +604,7 @@ void ILibWebClient_TimerSink(void *object)
 	void *data;
 
 	void *DisconnectSocket = NULL;
-	SEM_TRACK(WebClient_TrackLock("ILibWebClient_TimerSink", 1, wcdo->Parent);)
-	sem_wait(&(wcdo->Parent->QLock));
+	ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 	if (ILibQueue_IsEmpty(wcdo->RequestQueue)!=0)
 	{
 		//
@@ -634,8 +632,7 @@ void ILibWebClient_TimerSink(void *object)
 			wcdo2 = (struct ILibWebClientDataObject*)ILibGetEntry(wcdo->Parent->DataTable, key, keyLength);
 			ILibDeleteEntry(wcdo->Parent->DataTable, key, keyLength);
 			ILibDeleteEntry(wcdo->Parent->idleTable, key, keyLength);
-			SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_TimerSink",2,wcdo->Parent);)
-			sem_post(&(wcdo->Parent->QLock));
+			ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 			ILibWebClient_DestroyWebClientDataObject(wcdo2);
 			return;
 		}
@@ -652,8 +649,7 @@ void ILibWebClient_TimerSink(void *object)
 			wcdo->DisconnectSent=0;
 		}
 	}
-	SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_TimerSink", 3, wcdo->Parent);)
-	sem_post(&(wcdo->Parent->QLock));
+	ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 	//
 	// Let the user know, the socket has been disconnected
 	//
@@ -761,21 +757,18 @@ void ILibWebClient_FinishedResponse(ILibAsyncSocket_SocketModule socketModule, s
 	// so this finished response isn't valid anymore
 	if (wcdo->SOCK == NULL || ILibAsyncSocket_IsFree(wcdo->SOCK))
 	{
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_FinishedResponse", 1, wcdo->Parent);)
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 		wr = (struct ILibWebRequest*)ILibQueue_DeQueue(wcdo->RequestQueue);
 		if (wr != NULL)
 		{
 			wr->connectionCloseWasSpecified = 2;
 			ILibWebClient_DestroyWebRequest(wr);
 		}
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_FinishedResponse", 2, wcdo->Parent);)
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 		return;
 	}
 
-	SEM_TRACK(WebClient_TrackLock("ILibWebClient_FinishedResponse", 1, wcdo->Parent);)
-	sem_wait(&(wcdo->Parent->QLock));
+	ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 	wr = (struct ILibWebRequest*)ILibQueue_DeQueue(wcdo->RequestQueue);
 	if (wr != NULL)
 	{
@@ -798,8 +791,7 @@ void ILibWebClient_FinishedResponse(ILibAsyncSocket_SocketModule socketModule, s
 			}
 		}
 	}
-	SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_FinishedResponse", 2 ,wcdo->Parent);)
-	sem_post(&(wcdo->Parent->QLock));
+	ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 
 //{{{ REMOVE_THIS_FOR_HTTP/1.0_ONLY_SUPPORT--> }}}
 	if (wr != NULL)
@@ -898,14 +890,12 @@ void ILibWebClient_ProcessChunk(ILibAsyncSocket_SocketModule socketModule, struc
 	//
 	if (wcdo->Parent!=NULL) 
 	{
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_ProcessChunk",1,wcdo->Parent);)
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 	}
 	wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
 	if (wcdo->Parent!=NULL) 
 	{
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_ProcessChunk",2,wcdo->Parent);)
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 	}
 
 	if (wcdo->chunk==NULL)
@@ -1250,7 +1240,7 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 #endif
 #endif
 
-	sem_wait(ILibAsyncSocket_GetSendLock(wcdo->SOCK));
+	ILibSpinLock_Lock(ILibAsyncSocket_GetSpinLock(wcdo->SOCK));
 	while (i < _bufferLen)
 	{
 		if (i < 0) { i = 0; }
@@ -1304,7 +1294,7 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 2 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, buffer, (size_t)bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
 		}
 	}
-	sem_post(ILibAsyncSocket_GetSendLock(wcdo->SOCK));
+	ILibSpinLock_UnLock(ILibAsyncSocket_GetSpinLock(wcdo->SOCK));
 	return RetVal;
 }
 void ILibWebClient_WebSocket_SetPingPongHandler(ILibWebClient_StateObject obj, ILibWebClient_WebSocket_PingHandler pingHandler, ILibWebClient_WebSocket_PongHandler pongHandler, void *user)
@@ -1514,14 +1504,12 @@ ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule sock
 
 	if (wcdo->Server == 0)
 	{
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnData", 1, wcdo->Parent);)
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 	}
 	wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
 	if (wcdo->Server == 0)
 	{
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnData", 2, wcdo->Parent);)
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 	}
 	if (wr == NULL)
 	{
@@ -2083,11 +2071,9 @@ void ILibWebClient_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Conn
 		// Success: Send First Request
 		ILibAsyncSocket_GetLocalInterface(socketModule, (struct sockaddr*)&(wcdo->LocalIP));
 		
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnConnect", 1, wcdo->Parent);)
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 		r = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnConnect", 2, wcdo->Parent);)
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 		if (r != NULL)
 		{
 			if (r->ConnectSink != NULL) { r->ConnectSink(r->requestToken); }
@@ -2128,16 +2114,14 @@ void ILibWebClient_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Conn
 		//
 		// Retried enough times, give up
 		//
-	    SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnConnect", 3, wcdo->Parent);)
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 
 		keyLength = ILibCreateTokenStr((struct sockaddr*)&(wcdo->remote), wcdo->IndexNumber, key);
 
 		ILibDeleteEntry(wcdo->Parent->DataTable, key, keyLength);
 		ILibDeleteEntry(wcdo->Parent->idleTable, key, keyLength);
 		
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnConnect", 4, wcdo->Parent);)
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 
 		ILibWebClient_DestroyWebClientDataObject(wcdo);
 	}
@@ -2197,11 +2181,9 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 		//
 		ILibAsyncSocket_GetBuffer(socketModule,&buffer,&BeginPointer,&EndPointer);
 		
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnDisconnect", 1, wcdo->Parent);)
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 		wr = (struct ILibWebRequest*)ILibQueue_DeQueue(wcdo->RequestQueue);
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnDisconnect", 2, wcdo->Parent);)
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 		wcdo->InitialRequestAnswered = 1;
 		//{{{ REMOVE_THIS_FOR_HTTP/1.0_ONLY_SUPPORT--> }}}
 		//wcdo->PipelineFlag = PIPELINE_NO;
@@ -2232,11 +2214,9 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 	
 	if (wcdo->Closing != 0) { return; }
 
-	SEM_TRACK(WebClient_TrackLock("ILibWebClient_OnDisconnect", 3, wcdo->Parent);)
-	sem_wait(&(wcdo->Parent->QLock));
+	ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 	wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
-	SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_OnDisconnect", 4, wcdo->Parent);)
-	sem_post(&(wcdo->Parent->QLock));
+	ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 
 	if (wr != NULL)
 	{
@@ -2306,8 +2286,7 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 	// Try and satisfy as many things as we can. If we have resources
 	// grab a socket and go
 	//
-	SEM_TRACK(WebClient_TrackLock("ILibWebClient_PreProcess",1,wcm);)
-	sem_wait(&(wcm->QLock));
+	ILibSpinLock_Lock(&(wcm->QLock));
 	while (xOK == 0 && ILibQueue_IsEmpty(wcm->backlogQueue) == 0)
 	{
 		xOK = 1;
@@ -2376,8 +2355,7 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 			if (ILibQueue_IsEmpty(wcm->backlogQueue) != 0) break;
 		}
 	}
-	SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_PreProcess", 2, wcm);)
-	sem_post(&(wcm->QLock));
+	ILibSpinLock_UnLock(&(wcm->QLock));
 }
 
 //
@@ -2503,7 +2481,7 @@ ILibWebClient_RequestManager ILibCreateWebClient(int PoolSize, void *Chain)
 	RetVal->socksLength = PoolSize;
 	RetVal->socks = (void**)malloc(PoolSize * sizeof(void*));
 	if (RetVal->socks == NULL) ILIBCRITICALEXIT(254);
-	sem_init(&(RetVal->QLock), 0, 1);
+	ILibSpinLock_Init(&(RetVal->QLock));
 	RetVal->ChainLink.ParentChain = Chain;
 
 	RetVal->backlogQueue = ILibQueue_Create();
@@ -2708,8 +2686,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx2(
 	//
 	// Does the client already have a connection to the server?
 	//
-	SEM_TRACK(WebClient_TrackLock("ILibWebClient_PipelineRequestEx", 1, wcm);)
-	sem_wait(&(wcm->QLock));
+	ILibSpinLock_Lock(&(wcm->QLock));
 
 	if (wcm->MaxConnectionsToSameServer > 1)
 	{
@@ -2827,8 +2804,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx2(
 		}
 	}
 
-	SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_PipelineRequestEx", 2, wcm);)
-	sem_post(&(wcm->QLock));
+	ILibSpinLock_UnLock(&(wcm->QLock));
 	if (ForceUnBlock != 0) ILibForceUnBlockChain(wcm->ChainLink.ParentChain);
 	SESSION_TRACK(request->requestToken, NULL, "PipelinedRequestEx");
 	return(request->requestToken);
@@ -2932,8 +2908,7 @@ void ILibWebClient_DeleteRequests(ILibWebClient_RequestManager WebClientToken, s
 		//
 		// Are there any pending requests to this IP/Port combo?
 		//
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_DeleteRequests", 1, wcm);)
-		sem_wait(&(wcm->QLock));
+		ILibSpinLock_Lock(&(wcm->QLock));
 		if (ILibHasEntry(wcm->DataTable, RequestToken, RequestTokenLength) != 0)
 		{
 			//
@@ -2958,8 +2933,7 @@ void ILibWebClient_DeleteRequests(ILibWebClient_RequestManager WebClientToken, s
 				ILibLifeTime_Remove(wcdo->Parent->timer, wcdo);
 			}
 		}
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_DeleteRequests",2,wcm);)
-		sem_post(&(wcm->QLock));
+		ILibSpinLock_UnLock(&(wcm->QLock));
 	}
 
 
@@ -3065,8 +3039,7 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 	{
 		PendingRequestQ = ILibQueue_Create();
 
-		SEM_TRACK(WebClient_TrackLock("ILibWebClient_CancelRequest",1,_wcdo->Parent);)
-		sem_wait(&(_wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(_wcdo->Parent->QLock));
 
 		head = node = ILibLinkedList_GetNode_Head(_wcdo->RequestQueue);
 		while (node != NULL)
@@ -3107,13 +3080,11 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 			_wcdo->Closing = 2;
 			_wcdo->CancelRequest = 1;
 
-			SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_CancelRequest", 2, _wcdo->Parent);)
-			sem_post(&(_wcdo->Parent->QLock));
+			ILibSpinLock_UnLock(&(_wcdo->Parent->QLock));
 
 			ILibWebClient_Disconnect(_wcdo);
 
-			SEM_TRACK(WebClient_TrackLock("ILibWebClient_CancelRequest", 3, _wcdo->Parent);)
-			sem_wait(&(_wcdo->Parent->QLock));
+			ILibSpinLock_Lock(&(_wcdo->Parent->QLock));
 
 			_wcdo->Closing = 0;
 			_wcdo->CancelRequest = 0;
@@ -3131,8 +3102,7 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 			}
 		}
 		
-		SEM_TRACK(WebClient_TrackUnLock("ILibWebClient_CancelRequest", 2, _wcdo->Parent);)
-		sem_post(&(_wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(_wcdo->Parent->QLock));
 
 		wr = (struct ILibWebRequest*)ILibQueue_DeQueue(PendingRequestQ);
 		while (wr != NULL)
@@ -3803,14 +3773,14 @@ void ILibWebClient_RequestToken_ConnectionHandler_Set(ILibWebClient_RequestToken
 
 	if (wcdo != NULL)
 	{
-		sem_wait(&(wcdo->Parent->QLock));
+		ILibSpinLock_Lock(&(wcdo->Parent->QLock));
 		wr = (struct ILibWebRequest*)ILibQueue_PeekTail(wcdo->RequestQueue);
 		if (wr != NULL)
 		{
 			wr->ConnectSink = OnConnect;
 			wr->DisconnectSink = OnDisconnect;
 		}
-		sem_post(&(wcdo->Parent->QLock));
+		ILibSpinLock_UnLock(&(wcdo->Parent->QLock));
 	}
 }
 #ifdef MICROSTACK_PROXY

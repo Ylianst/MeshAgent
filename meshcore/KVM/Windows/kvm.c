@@ -559,23 +559,7 @@ typedef struct kvm_data_handler
 	char buffer[];
 }kvm_data_handler;
 
-//void __stdcall kvm_relay_feeddata_ex_APC(ULONG_PTR data)
-//{
-//	kvm_data_handler *k = (kvm_data_handler*)data;
-//
-//	k->handler(k->buffer, k->len, k->reserved);
-//	free((void*)data);
-//}
-//ILibTransport_DoneState kvm_relay_feeddata_ex(char *buf, int len, void *reserved)
-//{
-//	kvm_data_handler *data = (kvm_data_handler*)ILibMemory_Allocate(sizeof(kvm_data_handler) + len, 0, NULL, NULL);
-//	data->handler = (ILibKVM_WriteHandler)((void**)reserved)[0];
-//	data->reserved = ((void**)reserved)[1];
-//	data->len = len;
-//	memcpy_s(data->buffer, len, buf, len);
-//
-//	QueueUserAPC((PAPCFUNC)kvm_relay_feeddata_ex_APC, kvmthread, (ULONG_PTR)data);
-//}
+
 
 // Feed network data into the KVM. Return the number of bytes consumed.
 // This method consumes as many input commands as it can.
@@ -798,6 +782,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	{
 		g_shutdown = 0;
 		kvmthread = CreateThread(NULL, 0, kvm_mainloopinput, parm, 0, 0);
+		CloseHandle(kvmthread);
 	}
 #endif
 
@@ -979,7 +964,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	KVMDEBUG("kvm_server_mainloop / end3", (int)GetCurrentThreadId());
 	KVMDEBUG("kvm_server_mainloop / end2", (int)GetCurrentThreadId());
 
-	// if (kvmthread != NULL) { CloseHandle(kvmthread); kvmthread = NULL; }
 	if (tileInfo != NULL) {
 		for (row = 0; row < TILE_HEIGHT_COUNT; row++) free(tileInfo[row]);
 		free(tileInfo);
@@ -1187,6 +1171,7 @@ int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler wr
 
 		if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); free(parms); return 0; }
 		kvmthread = CreateThread(NULL, 0, kvm_server_mainloop, (void*)parms, 0, 0);
+		CloseHandle(kvmthread);
 		return 1;
 	}
 }

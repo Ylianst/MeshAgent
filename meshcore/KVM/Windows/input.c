@@ -239,7 +239,8 @@ void KVM_StopMessagePump()
 	if (CUR_HWND != NULL) 
 	{
 		PostMessageA(CUR_HWND, WM_QUIT, 0, 0);
-		WaitForSingleObject(CUR_WORKTHREAD, 5000);
+		if (WaitForSingleObject(CUR_WORKTHREAD, 5000) == 0) { CloseHandle(CUR_WORKTHREAD); CUR_WORKTHREAD = NULL; }
+		if (CUR_APCTHREAD != NULL) { CloseHandle(CUR_APCTHREAD); CUR_APCTHREAD = NULL; }
 	}
 }
 
