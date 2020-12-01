@@ -17,6 +17,32 @@ limitations under the License.
 var table = require('fs').readFileSync(process.argv[0].split('\\win-kblayout.js').join('\\win-kblayout_table.txt'));
 var lines = table.toString().split('\r\n');
 
+var str = 'function toLang(val)\r\n';
+str += '{\r\n';
+str += '   var ret;\r\n';
+str += '   switch(val)\r\n';
+str += '   {\r\n';
+for (var i = 0; i < lines.length; ++i)
+{
+    var code = lines[i].split(' ')[0];
+    var text = lines[i].substring(lines[i].indexOf(' ')).split(',')[0].trim();
+    str += ("      case '" + Buffer.from(code,'hex').readUInt32BE() + "':\r\n");
+    str += ("         ret = '" + text + "';\r\n");
+    str += ("         break\r\n");
+}
+str += ("      default:\r\n");
+str += ("            ret = null;\r\n");
+str += ("      break\r\n");
+str += '   }\r\n';
+str += '   return(ret);\r\n';
+str += '}';
+
+console.log('Value saved to clipboard...');
+require('clipboard')(str);
+process.exit();
+
+
+
 var check = {};
 var buffer = Buffer.alloc(8);
 
