@@ -1494,7 +1494,19 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateNativeProxy(duk_context *ctx)
 #ifdef WIN32
 	if (libName != NULL)
 	{
-		module = (void*)LoadLibraryA((LPCSTR)libName);
+		DWORD flags = 0;
+		if (duk_is_object(ctx, 1) && (flags=(DWORD)Duktape_GetIntPropertyValue(ctx, 1, "flags", 0)) != 0)
+		{
+			module = (void*)LoadLibraryExA((LPCSTR)libName, NULL, flags);
+			if (module == NULL && GetLastError() == ERROR_INVALID_PARAMETER)
+			{
+				return(ILibDuktape_Error(ctx, "Unsupported Flag value"));
+			}
+		}
+		else
+		{
+			module = (void*)LoadLibraryA((LPCSTR)libName);
+		}
 	}
 	else
 	{
@@ -2153,6 +2165,12 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "UnstashObject", ILibDuktape_GenericMarshal_UnstashObject, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "ObjectToPtr", ILibDuktape_GenericMarshal_ObjectToPtr, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "GetCurrentThread", ILibDuktape_GenericMarshal_GetCurrentThread, 0);
+
+#ifdef WIN32
+	duk_push_object(ctx);
+	duk_push_uint(ctx, LOAD_LIBRARY_SEARCH_SYSTEM32); duk_put_prop_string(ctx, -2, "SYSTEM32");
+	ILibDuktape_CreateReadonlyProperty(ctx, "FLAGS");
+#endif
 
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_VarSize", 4, "CreateInteger", ILibDuktape_GenericMarshal_CreateVariableEx, 0);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "_VarSize", ((int)sizeof(void*)), "CreatePointer", ILibDuktape_GenericMarshal_CreateVariableEx, DUK_VARARGS);
