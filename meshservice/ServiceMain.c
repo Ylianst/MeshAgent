@@ -1041,6 +1041,11 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 	case WM_INITDIALOG:
 		{
 			char selfexe[_MAX_PATH];
+			char *lang = NULL;
+			void *chain = ILibCreateChain();
+			ILibChain_PartialStart(chain);
+			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, chain, NULL, NULL, "", NULL, NULL, chain);
+			if (duk_peval_string(ctx, "require('util-language').current;") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
 
 			// Get current executable path
 			WCHAR wselfexe[MAX_PATH];
@@ -1168,7 +1173,9 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			}
 			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), txt);
 			if (mshfile != NULL) { free(mshfile); }
-
+			Duktape_SafeDestroyHeap(ctx);
+			ILibStopChain(chain);
+			ILibStartChain(chain);
 			return (INT_PTR)TRUE;
 		}
 	case WM_COMMAND:

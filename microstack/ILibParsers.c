@@ -990,6 +990,7 @@ typedef struct ILibBaseChain
 #else
 	int WatchDogTerminator[2];
 #endif
+	int preInitialized;
 	int selectTimeout;
 	void *node;
 	int lastDescriptorCount;
@@ -3623,34 +3624,16 @@ void ILibChain_RemoveWaitHandle(void *chain, HANDLE h)
 }
 #endif
 
-/*! \fn ILibStartChain(void *Chain)
-\brief Starts a Chain
-\par
-This method will use the current thread. This thread will be refered to as the
-microstack thread. All events and processing will be done on this thread. This method
-will not return until ILibStopChain is called.
-\param Chain The chain to start
-*/
-ILibExportMethod void ILibStartChain(void *Chain)
+void ILibChain_PartialStart(void *Chain)
 {
+	if (Chain == NULL) { return; }
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
 	ILibChain_Link *module;
 	ILibChain_Link_Hook *nodeHook;
 
-	fd_set readset;
-	fd_set errorset;
-	fd_set writeset;
-
 #ifdef WIN32
-	HANDLE selectHandles[FD_SETSIZE];
-	memset(selectHandles, 0, sizeof(selectHandles));
 	memset(chain->WaitHandles, 0, sizeof(chain->WaitHandles));
 #endif
-  	struct timeval tv;
-	int slct;
-	int vX;
-
-	if (Chain == NULL) { return; }
 	chain->PreSelectCount = chain->PostSelectCount = 0;
 
 #if defined(WIN32)
@@ -3662,7 +3645,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	chain->ChainThreadID = pthread_self();
 #endif
 
-	if (gILibChain == NULL) {gILibChain = Chain;} // Set the global instance if it's not already set
+	if (gILibChain == NULL) { gILibChain = Chain; } // Set the global instance if it's not already set
 #if defined(ILibChain_WATCHDOG_TIMEOUT)
 #ifdef WIN32
 	chain->WatchDogTerminator = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -3685,10 +3668,6 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	//
 	// Use this thread as if it's our own. Keep looping until we are signaled to stop
 	//
-	FD_ZERO(&readset);
-	FD_ZERO(&errorset);
-	FD_ZERO(&writeset);
-
 #if defined(_POSIX)
 	// 
 	// For posix, we need to use a pipe to force unblock the select loop
@@ -3702,6 +3681,42 @@ ILibExportMethod void ILibStartChain(void *Chain)
 #endif
 
 	chain->RunningFlag = 1;
+	chain->preInitialized = 1;
+}
+
+
+/*! \fn ILibStartChain(void *Chain)
+\brief Starts a Chain
+\par
+This method will use the current thread. This thread will be refered to as the
+microstack thread. All events and processing will be done on this thread. This method
+will not return until ILibStopChain is called.
+\param Chain The chain to start
+*/
+ILibExportMethod void ILibStartChain(void *Chain)
+{
+	ILibBaseChain *chain = (ILibBaseChain*)Chain;
+	if (Chain == NULL) { return; }
+	if (chain->preInitialized == 0) { ILibChain_PartialStart(Chain); }
+
+	ILibChain_Link *module;
+	ILibChain_Link_Hook *nodeHook;
+
+	fd_set readset;
+	fd_set errorset;
+	fd_set writeset;
+
+  	struct timeval tv;
+	int slct;
+	int vX;
+
+	//
+	// Use this thread as if it's our own. Keep looping until we are signaled to stop
+	//
+	FD_ZERO(&readset);
+	FD_ZERO(&errorset);
+	FD_ZERO(&writeset);
+
 	while (chain->TerminateFlag == 0)
 	{
 		slct = 0;

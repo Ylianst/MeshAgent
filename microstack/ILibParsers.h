@@ -1091,6 +1091,7 @@ int ILibIsRunningOnChainThread(void* chain);
 
 	void ILibChain_InitDescriptorCount(void *chain);
 	int ILibChain_GetDescriptorCount(void *chain);
+	void ILibChain_PartialStart(void *chain);
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 #ifdef WIN32
