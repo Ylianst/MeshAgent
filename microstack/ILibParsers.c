@@ -8652,7 +8652,7 @@ void ILibSparseArray_Destroy(ILibSparseArray sarray)
 */
 void ILibSparseArray_Lock(ILibSparseArray sarray)
 {
-	ILibSpinLock_Lock(&(((ILibSparseArray_Root*)sarray)));
+	ILibSpinLock_Lock(&(((ILibSparseArray_Root*)sarray)->LOCK));
 }
 //! Use the Sparse Array as a synchronization lock, and release it
 /*!
