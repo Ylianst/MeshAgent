@@ -467,24 +467,24 @@ int info_GetLocalInterfaces(char* data, int maxdata)
 int MeshInfo_GetSystemInformation(char** data)
 {
 	int ptr = 0;
+	int r;
 
 	// Setup the response
 	if ((*data = (char*)malloc(65536)) == NULL) { ILIBCRITICALEXIT(254); }
 	ptr += sprintf_s(*data + ptr, 65536 - ptr, "{\"netif\":[");
-	ptr += info_GetLocalInterfaces(*data + ptr, 65536 - ptr);
-	ptr += sprintf_s(*data + ptr, 65536 - ptr, "]}");
-	if (ptr < 65535)
+	ptr += (r = info_GetLocalInterfaces(*data + ptr, 65536 - ptr));
+	if ((ptr += sprintf_s(*data + ptr, 65536 - ptr, "]}")) < 0 || r == 0)
+	{
+		free(*data);
+		*data = NULL;
+		return(0);
+	}
+	else
 	{
 		(*data)[ptr] = 0;
 		if ((*data = realloc(*data, ptr + 1)) == NULL) { ILIBCRITICALEXIT(254); }
 
 		return ptr;
-	}
-	else
-	{
-		free(*data);
-		*data = NULL;
-		return(0);
 	}
 }
 

@@ -182,7 +182,7 @@ typedef struct ILibAsyncSocketModule
 
 	struct ILibAsyncSocket_SendData *PendingSend_Head;
 	struct ILibAsyncSocket_SendData *PendingSend_Tail;
-	sem_t SendLock;
+	ILibSpinLock SendLock;
 
 	int MaxBufferSize;
 	int MaxBufferSizeExceeded;

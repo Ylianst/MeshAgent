@@ -3628,8 +3628,6 @@ void ILibChain_PartialStart(void *Chain)
 {
 	if (Chain == NULL) { return; }
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
-	ILibChain_Link *module;
-	ILibChain_Link_Hook *nodeHook;
 
 #ifdef WIN32
 	memset(chain->WaitHandles, 0, sizeof(chain->WaitHandles));
