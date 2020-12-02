@@ -65,6 +65,15 @@ Object.defineProperty(Array.prototype, 'deleteParameter',
             }
         }
     });
+Object.defineProperty(Array.prototype, 'getParameterValue',
+    {
+        value: function (i)
+        {
+            var ret = this[i].substring(this[i].indexOf('=')+1);
+            if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+            return (ret);
+        }
+    });
 
 function checkParameters(parms)
 {
@@ -175,23 +184,16 @@ function installService(params)
         }
     }
 
-    for (i = 0; i < options.parameters.length; ++i)
+    if ((i = options.parameters.getParameterIndex('installPath')) >= 0)
     {
-        if(options.parameters[i].startsWith('--installPath='))
-        {
-            options.installPath = options.parameters[i].split('=')[1];
-            if (options.installPath.startsWith('"')) { options.installPath = options.installPath.substring(1, options.installPath.length - 1); }
-            options.parameters.splice(i, 1);
-            options.installInPlace = false;
-            break;
-        }
-        if (options.parameters[i].startsWith('--companyName='))
-        {
-            options.companyName = options.parameters[i].split('=')[1];
-            if (options.companyName.startsWith('"')) { options.companyName = options.companyName.substring(1, options.companyName.length - 1); }
-            options.parameters.splice(i, 1);
-            break;
-        }
+        options.installPath = options.parameters.getParameterValue(i);
+        options.installInPlace = false;
+        options.parameters.splice(i, 1);
+    }
+    if ((i = options.parameters.getParameterIndex('companyName')) >= 0)
+    {
+        options.companyName = options.parameters.getParameterValue(i);
+        options.parameters.splice(i, 1);
     }
 
     try

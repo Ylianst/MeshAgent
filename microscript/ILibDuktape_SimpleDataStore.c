@@ -287,28 +287,29 @@ void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array_sink(ILibSimpleDataSt
 	duk_dup(ctx, -2);										// [array][key][obj][key]
 	duk_push_lstring(ctx, Value, ValueLen);					// [array][key][obj][key][value]
 	duk_put_prop(ctx, -3);									// [array][key][obj]
-	duk_json_encode(ctx, -1);								// [array][key][json]
-	duk_size_t len;
-	char *json = (char*)duk_get_lstring(ctx, -1, &len);
-	int colon = ILibString_IndexOf(json, len, ":", 1);
+	duk_json_encode(ctx, -1);								// [array][key][json]   {"foo": "bar"}
+	duk_size_t len = duk_get_length(ctx, -1);
+	duk_prepare_method_call(ctx, -1, "indexOf");			// [array][key][json][indexOf][this]
+	duk_push_string(ctx, ":");								// [array][key][json][indexOf][this][:]
+	duk_call_method(ctx, 1);								// [array][key][json][x]
+	duk_prepare_method_call(ctx, -2, "substring");			// [array][key][json][x][substring][this]
+	duk_push_int(ctx, duk_get_int(ctx, -3) + 1);			// [array][key][json][x][substring][this][start]
+	duk_push_uint(ctx, (duk_uint_t)len - 1);				// [array][key][json][x][substring][this][start][length]
+	duk_call_method(ctx, 2);								// [array][key][json][x][value]
+	duk_push_sprintf(ctx, "--%s=%s", duk_get_string(ctx, -4), duk_get_string(ctx, -1)); //][string]
+	duk_array_push(ctx, -6);								// [array][key][json][x][value]
+	duk_pop_n(ctx, 4);										// [array]
+}
 
-	duk_string_substring(ctx, -1, colon+1, (int)len - 1);	// [array][key][json][val]
-	char *val = (char*)duk_get_lstring(ctx, -1, &len);
-
-	duk_push_sprintf(ctx, "--%s=%s", k2, val);				// [array][key][json][val][string]
-	duk_array_push(ctx, -5);								// [array][key][json][val]
-																	  
-	duk_pop_3(ctx);											// [array]
+void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object(duk_context *ctx, ILibSimpleDataStore dataStore)
+{
+	duk_push_object(ctx);
+	ILibSimpleDataStore_Cached_GetValues(dataStore, ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object_sink, ctx);
 }
 void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(duk_context *ctx, ILibSimpleDataStore dataStore)
 {
 	duk_push_array(ctx);
 	ILibSimpleDataStore_Cached_GetValues(dataStore, ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array_sink, ctx);
-}
-void ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object(duk_context *ctx, ILibSimpleDataStore dataStore)
-{
-	duk_push_object(ctx);
-	ILibSimpleDataStore_Cached_GetValues(dataStore, ILibDuktape_SimpleDataStore_raw_GetCachedValues_Object_sink, ctx);
 }
 
 #ifdef __DOXY__
