@@ -379,52 +379,86 @@ int info_GetLocalInterfaces(char* data, int maxdata)
 		if (memcmp(ifr->ifr_name, "lo", 3) == 0) continue; // Loopback
 
 		if (adapterCount > 0) { ptr += sprintf_s(data + ptr, maxdata - ptr, ","); }
-		ptr += sprintf_s(data + ptr, maxdata - ptr, "{");
+		if ((ptr += sprintf_s(data + ptr, maxdata - ptr, "{")) < 0) { break; }
 
 		// Get the name of the interface
-		ptr += sprintf_s(data + ptr, maxdata - ptr, "\"name\":\"%s\"", ifr->ifr_name);
+		if ((ptr += sprintf_s(data + ptr, maxdata - ptr, "\"name\":\"%s\"", ifr->ifr_name)) < 0) { break; }
 
 		// Get the FQDN (DNS Suffix)
 		j = info_GetDefaultFqdn(ifr->ifr_name, &gateway);
-		if (j > 0) { ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"dnssuffix\":\"%s\"", gateway); }
+		if (j > 0) 
+		{
+			if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"dnssuffix\":\"%s\"", gateway)) < 0)
+			{
+				free(gateway);
+				gateway = NULL;
+				break; 
+			} 
+		}
 		if (gateway != NULL) { free(gateway); gateway = NULL; }
 
 		// Get the Default Gateway IP address
 		j = info_GetDefaultGateway(ifr->ifr_name, &gateway);
-		if (j == 4) { ILibInet_ntop(AF_INET, gateway, temp, 1024); ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"v4gateway\":\"%s\"", temp); }
+		if (j == 4) 
+		{
+			ILibInet_ntop(AF_INET, gateway, temp, 1024);
+			if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"v4gateway\":\"%s\"", temp)) < 0)
+			{
+				if (gateway != NULL) { free(gateway); gateway = NULL; }
+				break;
+			}
+		}
 		if (gateway != NULL) { free(gateway); gateway = NULL; }
 
 		// Get the Default Gateway MAC address
 		j = info_GetHwAddress(temp, strlen(temp), &gateway);
-		if (j == 6) { ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"gatewaymac\":\"%02x%02x%02x%02x%02x%02x\"", (unsigned char)gateway[0], (unsigned char)gateway[1], (unsigned char)gateway[2], (unsigned char)gateway[3], (unsigned char)gateway[4], (unsigned char)gateway[5]); }
+		if (j == 6) 
+		{
+			if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"gatewaymac\":\"%02x%02x%02x%02x%02x%02x\"", (unsigned char)gateway[0], (unsigned char)gateway[1], (unsigned char)gateway[2], (unsigned char)gateway[3], (unsigned char)gateway[4], (unsigned char)gateway[5])) < 0)
+			{
+				if (gateway != NULL) free(gateway);
+				break;
+			}
+		}
 		if (gateway != NULL) free(gateway);
 
 		// Attempt to figure out the interface type
 		j = 0;
 		if (strlen(ifr->ifr_name) > 3 && memcmp(ifr->ifr_name, "eth", 3) == 0) { j = 6; }
 		//if (strlen(ifr->ifr_name) > 2 && memcmp(ifr->ifr_name, "wl", 2) == 0) { j = 6; } // TODO: Wireless
-		if (j > 0) { ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"type\":\"%d\"", j); }
+		if (j > 0) 
+		{
+			if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"type\":\"%d\"", j)) < 0) { break; }
+		}
 
 		// Get the hardware MAC address
-		if (ioctl(sockfd, SIOCGIFHWADDR, ifr) == 0) {
-			if (ifr->ifr_hwaddr.sa_family == 1) {
-				ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"mac\":\"%02x%02x%02x%02x%02x%02x\"", (unsigned char)ifr->ifr_hwaddr.sa_data[0], (unsigned char)ifr->ifr_hwaddr.sa_data[1], (unsigned char)ifr->ifr_hwaddr.sa_data[2], (unsigned char)ifr->ifr_hwaddr.sa_data[3], (unsigned char)ifr->ifr_hwaddr.sa_data[4], (unsigned char)ifr->ifr_hwaddr.sa_data[5]);
+		if (ioctl(sockfd, SIOCGIFHWADDR, ifr) == 0) 
+		{
+			if (ifr->ifr_hwaddr.sa_family == 1) 
+			{
+				if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"mac\":\"%02x%02x%02x%02x%02x%02x\"", (unsigned char)ifr->ifr_hwaddr.sa_data[0], (unsigned char)ifr->ifr_hwaddr.sa_data[1], (unsigned char)ifr->ifr_hwaddr.sa_data[2], (unsigned char)ifr->ifr_hwaddr.sa_data[3], (unsigned char)ifr->ifr_hwaddr.sa_data[4], (unsigned char)ifr->ifr_hwaddr.sa_data[5])) < 0) { break; }
 			}
 		}
 
 		// Get the IP address
-		if (ioctl(sockfd, SIOCGIFADDR, ifr) == 0) { ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"v4addr\":\"%s\"", inet_ntoa(((struct sockaddr_in*)(&(ifr->ifr_addr)))->sin_addr)); }
+		if (ioctl(sockfd, SIOCGIFADDR, ifr) == 0)
+		{
+			if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"v4addr\":\"%s\"", inet_ntoa(((struct sockaddr_in*)(&(ifr->ifr_addr)))->sin_addr))) < 0) { break; }
+		}
 
 		// Get the subnet mask
-		if (ioctl(sockfd, SIOCGIFNETMASK, ifr) == 0) { ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"v4mask\":\"%s\"", inet_ntoa(((struct sockaddr_in*)(&(ifr->ifr_addr)))->sin_addr)); }
+		if (ioctl(sockfd, SIOCGIFNETMASK, ifr) == 0) 
+		{
+			if ((ptr += sprintf_s(data + ptr, maxdata - ptr, ",\"v4mask\":\"%s\"", inet_ntoa(((struct sockaddr_in*)(&(ifr->ifr_addr)))->sin_addr))) < 0) { break; }
+		}
 
-		ptr += sprintf_s(data + ptr, maxdata - ptr, "}");
+		if ((ptr += sprintf_s(data + ptr, maxdata - ptr, "}")) < 0) { break; }
 		adapterCount++;
 	}
 
 	free(ifc.ifc_req);
 	close(sockfd);
-	return ptr;
+	return(ptr < 0 ? 0 : ptr);
 #endif
 }
 #endif
