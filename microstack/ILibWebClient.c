@@ -1319,6 +1319,8 @@ int ILibWebClient_ProcessWebSocketData(char* buffer, int offset, int length, ILi
 	int FIN;
 	unsigned char OPCODE;
 	int tempBegin = 0;
+
+	if (wcdo == NULL) { return(length); }
 	ILibWebRequest *wr = (ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
 	ILibWebClient_WebSocketState *state;
 
