@@ -857,7 +857,6 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		duk_pop(ptrs->ctx);											// ...
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
-		printf("Just destroyed kvmPipe\n");
 #endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
