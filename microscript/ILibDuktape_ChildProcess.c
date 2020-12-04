@@ -171,7 +171,6 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 
 	if (p != NULL) 
 	{
-		//printf("CTX shutting down: %d [%p]\n", duk_ctx_shutting_down(ctx), p->childProcess);
 		if (p->childProcess != NULL)
 		{
 			if (duk_ctx_shutting_down(ctx) == 0)
@@ -188,7 +187,6 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
-	printf("==> WaitExit() [ENTER]\n");
 	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
