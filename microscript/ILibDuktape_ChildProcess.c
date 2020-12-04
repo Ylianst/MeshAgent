@@ -174,6 +174,7 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
+	printf("==> WaitExit() [ENTER]\n");
 	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
@@ -201,7 +202,10 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 #else
 	ILibChain_Continue(chain, (ILibChain_Link**)mods, 3, timeout);
 #endif
-
+	if (ILibIsChainBeingDestroyed(chain) != 0)
+	{
+		return(ILibDuktape_Error(ctx, "waitExit() aborted because thread is exiting"));
+	}
 	return(0);
 }
 duk_ret_t ILibDuktape_ChildProcess_SpawnedProcess_Finalizer(duk_context *ctx)

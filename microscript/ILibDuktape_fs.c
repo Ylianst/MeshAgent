@@ -1812,6 +1812,7 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 }
 void ILibDuktape_fs_notifyDispatcher_Destroy(void *object)
 {
+	ILibHashtable_Destroy(((ILibDuktape_fs_linuxWatcher*)object)->watchTable);
 }
 #endif
 

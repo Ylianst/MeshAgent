@@ -854,9 +854,9 @@ __EXPORT_TYPE char* ILibSimpleDataStore_GetHashEx(ILibSimpleDataStore dataStore,
 			memcpy_s(tmpkey, ILibMemory_Size(tmpkey), key, keyLen);
 			((uint32_t*)(tmpkey + keyLen))[0] = crc32c(0, (unsigned char*)key, (uint32_t)keyLen); // no dataloss, capped to INT32_MAX
 			centry = (ILibSimpleDataStore_CacheEntry*)ILibHashtable_Get(root->cacheTable, NULL, tmpkey, (int)ILibMemory_Size(tmpkey));
+			ILibMemory_Free(tmpkey);
 			if (centry != NULL)
 			{
-				ILibMemory_Free(tmpkey);
 				return(centry->valueHash);
 			}
 		}
