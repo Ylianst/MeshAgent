@@ -79,6 +79,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 #define ILibProcessPipe_Manager_SpawnProcessEx3(pipeManager, target, parameters, spawnType, sessionId, extraMemorySize) ILibProcessPipe_Manager_SpawnProcessEx4(pipeManager, target, parameters, spawnType, sessionId, NULL, extraMemorySize)
 #define ILibProcessPipe_Manager_SpawnProcessWithExtraPipeMemory(pipeManager, target, parameters, memorySize) ILibProcessPipe_Manager_SpawnProcessEx2(pipeManager, target, parameters, ILibProcessPipe_SpawnTypes_DEFAULT, memorySize)
 void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p);
+void ILibProcessPipe_Process_HardKill(ILibProcessPipe_Process p);
 void ILibProcessPipe_Process_AddHandlers(ILibProcessPipe_Process module, int bufferSize, ILibProcessPipe_Process_ExitHandler exitHandler, ILibProcessPipe_Process_OutputHandler stdOut, ILibProcessPipe_Process_OutputHandler stdErr, ILibProcessPipe_Process_SendOKHandler sendOk, void *user);
 #ifdef WIN32
 void ILibProcessPipe_Process_RemoveHandlers(ILibProcessPipe_Process module);

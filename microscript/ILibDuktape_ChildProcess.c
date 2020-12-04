@@ -169,7 +169,21 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 	duk_push_this(ctx);
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_ChildProcess_MemBuf);
 
-	if (p != NULL) { ILibProcessPipe_Process_SoftKill(p->childProcess); }
+	if (p != NULL) 
+	{
+		//printf("CTX shutting down: %d [%p]\n", duk_ctx_shutting_down(ctx), p->childProcess);
+		if (p->childProcess != NULL)
+		{
+			if (duk_ctx_shutting_down(ctx) == 0)
+			{
+				ILibProcessPipe_Process_SoftKill(p->childProcess);
+			}
+			else
+			{
+				ILibProcessPipe_Process_HardKill(p->childProcess);
+			}
+		}
+	}
 	return(0);
 }
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)

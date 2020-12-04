@@ -495,6 +495,16 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 #endif
 }
 
+void ILibProcessPipe_Process_HardKill(ILibProcessPipe_Process p)
+{
+	if (!ILibMemory_CanaryOK(p)) { return; }
+
+	ILibProcessPipe_Process_SoftKill(p);
+	ILibProcessPipe_Process_Destroy(p);
+}
+
+
+
 ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_Manager pipeManager, char* target, char* const* parameters, ILibProcessPipe_SpawnTypes spawnType, void *sid, void *envvars, int extraMemorySize)
 {
 	ILibProcessPipe_Process_Object* retVal = NULL;
