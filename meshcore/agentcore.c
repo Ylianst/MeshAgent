@@ -362,6 +362,10 @@ char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 
+#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
+extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
+#endif
+
 void MeshAgent_sendConsoleText(duk_context *ctx, char *format, ...)
 {
 	char dest[4096];
@@ -851,6 +855,10 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
+#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
+		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		printf("Just destroyed kvmPipe\n");
+#endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
 	kvm_cleanup();
@@ -4188,6 +4196,13 @@ void MeshAgent_DB_WriteError(ILibSimpleDataStore sender, void *user)
 	}
 }
 
+int MeshAgent_Agent_SemaphoreTrack_Counter = 0;
+void MeshAgent_Agent_SemaphoreTrack_Sink(char *source, void *user, int init)
+{
+	UNREFERENCED_PARAMETER(user);
+	printf("[%d] SEM_%s: %s\n", init == 0 ? (--MeshAgent_Agent_SemaphoreTrack_Counter) : (++MeshAgent_Agent_SemaphoreTrack_Counter), init == 0 ? "DESTROY" : "INIT", source);
+}
+
 int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **param, int parseCommands)
 {
 	int resetNodeId = 0;
@@ -4417,6 +4432,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			ILibStartDefaultLoggerEx(agentHost->chain, ILib_atoi2_uint16(ILibScratchPad, sizeof(ILibScratchPad)), MeshAgent_MakeAbsolutePath(agentHost->exePath, ".wlg"));
 		}
 #endif
+
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "semaphoreTrack", NULL, 0) != 0) { MeshAgent_Agent_SemaphoreTrack_Counter = 0; ILibSemaphoreTrack_func = MeshAgent_Agent_SemaphoreTrack_Sink; }
 	}
 
 
