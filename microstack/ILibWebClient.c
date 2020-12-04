@@ -329,6 +329,7 @@ void ILibWebClient_Timeout_Sink(ILibAsyncSocket_SocketModule module, void *user)
 }
 void ILibWebClient_SetTimeout(ILibWebClient_StateObject state, int timeoutSeconds, ILibWebClient_TimeoutHandler handler, void *user)
 {
+	if (!ILibMemory_CanaryOK(state)) { return; }
 	ILibWebClientDataObject *wcdo = (ILibWebClientDataObject*)state;
 	wcdo->timeoutHandler = handler;
 	wcdo->timeoutUser = user;
@@ -415,7 +416,7 @@ void ILibWebClient_DestroyWebClientDataObject(ILibWebClient_StateObject token)
 	struct ILibWebRequest *wr;
 	int zero = 0;
 
-	if (wcdo == NULL) return;
+	if (wcdo == NULL || !ILibMemory_CanaryOK(wcdo)) { return; }
 
 	if (wcdo->Closing < 0) 
 	{
@@ -488,7 +489,7 @@ void ILibWebClient_DestroyWebClientDataObject(ILibWebClient_StateObject token)
 #ifndef MICROSTACK_NOTLS
 	if (wcdo->sniHost != NULL) { free(wcdo->sniHost); }
 #endif
-	free(wcdo);
+	ILibMemory_Free(wcdo);
 }
 
 //
@@ -548,7 +549,7 @@ int ILibWebClient_IsFinHeader(ILibWebClient_StateObject wcdo)
 void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo)
 {
 	ILibWebClient_RequestToken rt = NULL;
-	if (wcdo == NULL) return;
+	if (wcdo == NULL || !ILibMemory_CanaryOK(wcdo)) { return; }
 	rt = ILibWebClient_GetRequestToken_FromStateObject(wcdo);	
 	if (rt != NULL)
 	{
@@ -663,7 +664,7 @@ void ILibWebClient_FinishedResponse_Server(ILibWebClient_StateObject _wcdo)
 {
 	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)_wcdo;
 
-	if (wcdo == NULL) return;
+	if (wcdo == NULL || !ILibMemory_CanaryOK(wcdo)) { return; }
 	if (wcdo->Chunked != 0)
 	{
 		if (wcdo->chunk == NULL || wcdo->chunk->complete == 0)
@@ -853,10 +854,10 @@ void ILibWebClient_ResetUserObjects(ILibWebClient_StateObject webstate, void *us
 	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)webstate;
 	struct ILibWebRequest *wr = NULL;
 
-	if (wcdo!=NULL)
+	if (wcdo != NULL && ILibMemory_CanaryOK(wcdo))
 	{
 		wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
-		if (wr!=NULL)
+		if (wr != NULL)
 		{
 			wr->user1 = user1;
 			wr->user2 = user2;
@@ -1214,6 +1215,7 @@ ILibWebClient_WebSocketState* ILibWebClient_WebSocket_GetState(ILibWebRequest *w
 
 ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObject obj, ILibWebClient_WebSocket_DataTypes bufferType, char* _buffer, int _bufferLen, ILibAsyncSocket_MemoryOwnership _userFree, ILibWebClient_WebSocket_FragmentFlags _bufferFragment)
 {
+	if (!ILibMemory_CanaryOK(obj)) { return(ILibAsyncSocket_SEND_ON_CLOSED_SOCKET_ERROR); }
 	ILibWebClientDataObject *wcdo = (ILibWebClientDataObject*)obj;
 	char dataFrame[WEBSOCKET_MAX_OUTPUT_FRAMESIZE];
 	char header[10];
@@ -1299,6 +1301,7 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 }
 void ILibWebClient_WebSocket_SetPingPongHandler(ILibWebClient_StateObject obj, ILibWebClient_WebSocket_PingHandler pingHandler, ILibWebClient_WebSocket_PongHandler pongHandler, void *user)
 {
+	if (!ILibMemory_CanaryOK(obj)) { return; }
 	ILibWebRequest *wr = (ILibWebRequest*)ILibQueue_PeekQueue(((ILibWebClientDataObject*)obj)->RequestQueue);
 	ILibWebClient_WebSocketState *state = wr != NULL ? ILibWebClient_WebSocket_GetState(wr) : NULL;
 
@@ -2442,8 +2445,7 @@ ILibWebClient_StateObject ILibCreateWebClientEx(ILibWebClient_OnResponse OnRespo
 	struct ILibWebClientDataObject *wcdo;
 	struct ILibWebRequest *wr;
 
-	if ((wcdo = (struct ILibWebClientDataObject*)malloc(sizeof(struct ILibWebClientDataObject))) == NULL) ILIBCRITICALEXIT(254);
-	memset(wcdo, 0 , sizeof(struct ILibWebClientDataObject));
+	wcdo = (ILibWebClientDataObject*)ILibMemory_SmartAllocate(sizeof(ILibWebClientDataObject));
 	wcdo->Parent = NULL;
 	wcdo->RequestQueue = ILibQueue_Create();
 	wcdo->Server = 1;
@@ -2784,9 +2786,8 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx2(
 	else
 	{
 		// There is no previous connection, so we need to set it up
-		if ((wcdo = (struct ILibWebClientDataObject*)malloc(sizeof(struct ILibWebClientDataObject))) == NULL) ILIBCRITICALEXIT(254);
+		wcdo = (ILibWebClientDataObject*)ILibMemory_SmartAllocate(sizeof(ILibWebClientDataObject));
 		request->requestToken->wcdo = wcdo;
-		memset(wcdo, 0, sizeof(struct ILibWebClientDataObject));
 		wcdo->Parent = wcm;
 		wcdo->PendingConnectionIndex = -1;
 		wcdo->RequestQueue = ILibQueue_Create();
@@ -2880,7 +2881,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequest2(
 // <returns>The headers</returns>
 struct packetheader *ILibWebClient_GetHeaderFromDataObject(ILibWebClient_StateObject token)
 {
-	return(token == NULL?NULL:((struct ILibWebClientDataObject*)token)->header);
+	return((token == NULL || !ILibMemory_CanaryOK(token)) ? NULL : ((struct ILibWebClientDataObject*)token)->header);
 }
 
 /*! \fn ILibWebClient_DeleteRequests(ILibWebClient_RequestManager WebClientToken,char *IP,int Port)
@@ -2991,7 +2992,7 @@ void ILibWebClient_Resume(ILibWebClient_StateObject wcdo)
 {
 	struct ILibWebClientDataObject *d = (struct ILibWebClientDataObject*)wcdo;
 	
-	if (d!=NULL)
+	if (d != NULL && ILibMemory_CanaryOK(d))
 	{
 		d->PAUSE = 0;
 		ILibAsyncSocket_Resume(d->SOCK);
@@ -3000,7 +3001,7 @@ void ILibWebClient_Resume(ILibWebClient_StateObject wcdo)
 void ILibWebClient_Pause(ILibWebClient_StateObject wcdo)
 {
 	struct ILibWebClientDataObject *d = (struct ILibWebClientDataObject*)wcdo;
-	if (d!=NULL)
+	if (d != NULL && ILibMemory_CanaryOK(d))
 	{
 		d->PAUSE = 1;
 	}
@@ -3020,7 +3021,7 @@ void ILibWebClient_Pause(ILibWebClient_StateObject wcdo)
 void ILibWebClient_Disconnect(ILibWebClient_StateObject wcdo)
 {
 	struct ILibWebClientDataObject *d = (struct ILibWebClientDataObject*)wcdo;
-	if (d!=NULL && d->SOCK != NULL)
+	if (d != NULL && ILibMemory_CanaryOK(d) && d->SOCK != NULL)
 	{
 		ILibAsyncSocket_Disconnect(d->SOCK);
 	}
@@ -3028,16 +3029,16 @@ void ILibWebClient_Disconnect(ILibWebClient_StateObject wcdo)
 
 void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRequest)
 {
-	void *node,*nextnode;
+	void *node, *nextnode;
 	struct ILibWebRequest *wr;
 	struct ILibWebClientDataObject *_wcdo = (struct ILibWebClientDataObject*)wcdo;
 	int HeadDeleted = 0;
 	void *head;
-	int BeginPointer=0;
-	int EndPointer=0;
+	int BeginPointer = 0;
+	int EndPointer = 0;
 	void *PendingRequestQ = NULL;
 
-	if (wcdo != NULL)
+	if (wcdo != NULL && ILibMemory_CanaryOK(wcdo))
 	{
 		PendingRequestQ = ILibQueue_Create();
 
@@ -3060,7 +3061,7 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 				{
 					SESSION_TRACK(wr->requestToken, NULL, "Cancelling Request");
 				}
-				
+
 				ILibQueue_EnQueue(PendingRequestQ, wr);
 				ILibLinkedList_Remove(node);
 			}
@@ -3100,15 +3101,15 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 				//
 				// Queue the session to be reconnected
 				//
-				ILibQueue_EnQueue(_wcdo->Parent->backlogQueue, _wcdo);				
+				ILibQueue_EnQueue(_wcdo->Parent->backlogQueue, _wcdo);
 			}
 		}
-		
+
 		ILibSpinLock_UnLock(&(_wcdo->Parent->QLock));
 
 		wr = (struct ILibWebRequest*)ILibQueue_DeQueue(PendingRequestQ);
 		while (wr != NULL)
-		{			
+		{
 			if (wr->OnResponse != NULL)
 			{
 				wr->OnResponse(
@@ -3157,7 +3158,7 @@ ILibWebClient_RequestToken ILibWebClient_GetRequestToken_FromStateObject(ILibWeb
 	struct ILibWebClientDataObject *wcdo = (struct ILibWebClientDataObject*)WebStateObject;
 	struct ILibWebRequest *wr;
 
-	if (wcdo == NULL) return(NULL);
+	if (wcdo == NULL || !ILibMemory_CanaryOK(wcdo)) { return(NULL); }
 	wr = (struct ILibWebRequest*)ILibQueue_PeekQueue(wcdo->RequestQueue);
 	if (wr != NULL) { return(wr->requestToken); } else { return(NULL); }
 }
@@ -3488,7 +3489,7 @@ void* ILibWebClient_GetChain(ILibWebClient_RequestManager manager)
 }
 void* ILibWebClient_GetChainFromWebStateObject(ILibWebClient_StateObject wcdo)
 {
-	if (((ILibWebClientDataObject*)wcdo)->Closing == 0)
+	if (ILibMemory_CanaryOK(wcdo) && ((ILibWebClientDataObject*)wcdo)->Closing == 0)
 	{
 		return ((ILibWebClientDataObject*)wcdo)->Parent->ChainLink.ParentChain;
 	}
@@ -3665,6 +3666,7 @@ int ILibWebClient_GetActiveClientCount(ILibWebClient_RequestManager WebClient)
 extern void ILibWebServer_Digest_ParseAuthenticationHeader(void* table, char* value, int valueLen);
 int ILibWebClient_Digest_NeedAuthenticate(ILibWebClient_StateObject state)
 {
+	if (!ILibMemory_CanaryOK(state)) { return(0); }
 	ILibWebClientDataObject *wcdo = (ILibWebClientDataObject*)state;
 	char* authenticate = ILibGetHeaderLine(wcdo->header, "WWW-Authenticate", 16);
 	return(wcdo->header->StatusCode == 401 && authenticate != NULL);
@@ -3672,6 +3674,7 @@ int ILibWebClient_Digest_NeedAuthenticate(ILibWebClient_StateObject state)
 void* ILibWebClient_Digest_GenerateTableEx(ILibWebClient_StateObject state, void *ReservedMemory)
 {
 	ILibWebClientDataObject *wcdo = (ILibWebClientDataObject*)state;
+	if (!ILibMemory_CanaryOK(wcdo)) { return(NULL); }
 	char* authenticate = ILibGetHeaderLineSP(((ILibWebClientDataObject*)state)->header, "WWW-Authenticate", 16);
 
 	if (wcdo->DigestData == NULL) { wcdo->DigestData = ILibMemory_SmartAllocate(1024); }
@@ -3692,6 +3695,7 @@ void* ILibWebClient_Digest_GenerateTableEx(ILibWebClient_StateObject state, void
 #define ILibWebClient_Digest_GenerateTable(state) ILibWebClient_Digest_GenerateTableEx(state, NULL)
 char* ILibWebClient_Digest_GetRealm(ILibWebClient_StateObject state)
 {
+	if (!ILibMemory_CanaryOK(state)) { return(NULL); }
 	void* table = ILibWebClient_Digest_GenerateTable(state);
 	char* retVal = (char*)ILibGetEntry(table, "realm", 5);
 	ILibDestroyHashTree(table);
@@ -3707,6 +3711,7 @@ void ILibWebClient_GenerateAuthenticationHeader(ILibWebClient_StateObject state,
 	char result2[33];
 	char result3[33];
 
+	if (!ILibMemory_CanaryOK(wcdo)) { return; }
 	void *ReservedMemory = packet->ReservedMemory == NULL ? ILibMemory_AllocateA(8000) : packet->ReservedMemory;
 	void* table = ILibWebClient_Digest_GenerateTableEx(state, ReservedMemory);
 	char* realm = (char*)ILibGetEntry(table, "realm", 5);
