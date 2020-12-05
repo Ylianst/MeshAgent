@@ -917,6 +917,9 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 #ifdef _LINKVM
+#if defined(_POSIX) && !defined(__APPLE__)
+		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+#endif
 		kvm_cleanup();
 #endif
 	}
