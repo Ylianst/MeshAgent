@@ -220,7 +220,7 @@ ifeq ($(ARCHID),7)
 ARCHNAME = mips
 CC = $(PATH_MIPS)mipsel-linux-gcc
 STRIP = $(PATH_MIPS)mipsel-linux-strip
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
 CFLAGS += -DBADMATH 
 IPADDR_MONITOR_DISABLE = 1
 IFADDR_DISABLE = 1
@@ -251,6 +251,7 @@ STRIP = $(PATH_ARM5)arm-none-linux-gnueabi-strip
 KVM = 0
 LMS = 0
 CFLAGS += -D_NOFSWATCHER 
+CFLAGS += -DILIBCHAIN_GLOBAL_LOCK
 CEXTRA = -fno-strict-aliasing
 endif
 
@@ -261,7 +262,7 @@ CC = $(PATH_POGO)arm-none-linux-gnueabi-gcc
 STRIP = $(PATH_POGO)arm-none-linux-gnueabi-strip
 KVM = 0
 LMS = 0
-CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
 endif
 
 # Official Linux POKY

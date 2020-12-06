@@ -116,27 +116,6 @@ struct sockaddr_in6;
 #include <sched.h>
 #endif
 
-#ifdef WIN32
-	typedef volatile long ILibSpinLock;
-#else
-	typedef volatile int ILibSpinLock;
-#endif
-static inline void ILibSpinLock_Init(ILibSpinLock *lock) { *lock = 0; }
-static inline void ILibSpinLock_UnLock(ILibSpinLock *lock) { *lock = 0; }
-static inline void ILibSpinLock_Lock(ILibSpinLock *lock)
-{
-#ifdef WIN32
-	while (!InterlockedCompareExchange(lock, 1, 0))
-	{
-		YieldProcessor();
-	}
-#else
-	while (!__sync_bool_compare_and_swap(lock, 0, 1))
-	{
-		sched_yield();
-	}
-#endif
-}
 
 #ifdef WIN32
 #define ILIB_CURRENT_THREAD (unsigned int)GetCurrentThreadId()
@@ -237,11 +216,6 @@ char *ILibWideToUTF8_stupidEx(WCHAR* wstr, int wstrBYTESIZE, char *buffer, int b
 #endif
 
 
-
-
-
-
-
 int ILibGetLocalTime(char *dest, int destLen);
 long ILibGetTimeStamp();
 
@@ -329,6 +303,40 @@ long ILibGetTimeStamp();
 #endif
 
 #endif
+
+
+#if defined(ILIBCHAIN_GLOBAL_LOCK)
+	typedef sem_t* ILibSpinLock;
+	void ILibSpinLock_Init(ILibSpinLock *lock);
+	void ILibSpinLock_UnLock(ILibSpinLock *lock);
+	void ILibSpinLock_Lock(ILibSpinLock *lock);
+#else
+#ifdef WIN32
+	typedef volatile long ILibSpinLock;
+#else
+	typedef volatile int ILibSpinLock;
+#endif
+	static inline void ILibSpinLock_Init(ILibSpinLock *lock) { *lock = 0; }
+	static inline void ILibSpinLock_UnLock(ILibSpinLock *lock) { *lock = 0; }
+	static inline void ILibSpinLock_Lock(ILibSpinLock *lock)
+	{
+#ifdef WIN32
+		while (!InterlockedCompareExchange(lock, 1, 0))
+		{
+			YieldProcessor();
+		}
+#else
+		while (!__sync_bool_compare_and_swap(lock, 0, 1))
+		{
+			sched_yield();
+		}
+#endif
+	}
+#endif
+
+
+
+
 
 
 

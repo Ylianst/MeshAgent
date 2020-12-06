@@ -1928,11 +1928,16 @@ void *ILibCreateChainEx(int extraMemorySize)
 {
 	struct ILibBaseChain *RetVal;
 
+	if (ILibChainLock_RefCounter == 0)
+	{
+		sem_init(&ILibChainLock, 0, 1);
+	}
+	ILibChainLock_RefCounter++;
+
 #if defined(WIN32) || defined(_WIN32_WCE)
 	WORD wVersionRequested;
 	WSADATA wsaData;
 	wVersionRequested = MAKEWORD(2, 0);
-
 
 	if (WSAStartup(wVersionRequested, &wsaData) != 0) { ILIBCRITICALEXIT(1); }
 #endif
@@ -1948,12 +1953,6 @@ void *ILibCreateChainEx(int extraMemorySize)
 #endif
 
 	RetVal->TerminateFlag = 0;
-	if (ILibChainLock_RefCounter == 0)
-	{
-		sem_init(&ILibChainLock, 0, 1);
-	}
-	ILibChainLock_RefCounter++;
-
 	RetVal->Timer = ILibCreateLifeTime(RetVal);
 
 #if defined(WIN32)
@@ -2408,7 +2407,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		//
 		FD_SET(root->TerminatePipe[0], &readset);
 #endif
-		sem_wait(&ILibChainLock);
+
 		while (ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
 		{
 			chain->node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)Chain)->LinksPendingDelete);
@@ -2422,7 +2421,6 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 				ILibChain_FreeLink(module);
 			}
 		}
-		sem_post(&ILibChainLock);
 
 		//
 		// The actual Select Statement
@@ -3763,7 +3761,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		//
 		FD_SET(chain->TerminatePipe[0], &readset);
 #endif
-		sem_wait(&ILibChainLock);
+
 		while (ILibLinkedList_GetCount(((ILibBaseChain*)Chain)->LinksPendingDelete) > 0)
 		{
 			chain->node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)Chain)->LinksPendingDelete);
@@ -3777,7 +3775,6 @@ ILibExportMethod void ILibStartChain(void *Chain)
 				ILibChain_FreeLink(module);
 			}
 		}
-		sem_post(&ILibChainLock);
 
 		//
 		// The actual Select Statement
@@ -10842,3 +10839,64 @@ int ILibLinkedList_FileBacked_AddTail(ILibLinkedList_FileBacked_Root* root, char
 	fflush(source);
 	return 0;
 }
+
+#if defined(ILIBCHAIN_GLOBAL_LOCK)
+int g_ILibSpinLock_acquired = 0;
+#ifdef WIN32
+DWORD g_ILibSpinLock_acquired_threadid;
+#else
+pthread_t g_ILibSpinLock_acquired_threadid;
+#endif
+
+void ILibSpinLock_Init(ILibSpinLock *lock)
+{
+	if (ILibChainLock_RefCounter == 0)
+	{
+		++ILibChainLock_RefCounter;
+		sem_init(&ILibChainLock, 0, 1);
+	}
+	*lock = &ILibChainLock;
+}
+void ILibSpinLock_UnLock(ILibSpinLock *lock)
+{
+	sem_wait(*lock);
+	g_ILibSpinLock_acquired = 0;
+	sem_post(*lock);
+}
+void ILibSpinLock_Lock(ILibSpinLock *lock)
+{
+	int i = 1;
+	while (i != 0)
+	{
+		sem_wait(*lock);
+		if (g_ILibSpinLock_acquired == 0)
+		{
+			g_ILibSpinLock_acquired = 1;
+#ifdef WIN32
+			g_ILibSpinLock_acquired_threadid = GetCurrentThreadId();
+#else
+			g_ILibSpinLock_acquired_threadid = pthread_self();
+#endif
+			i = 0;
+		}
+		else
+		{
+#ifdef WIN32
+			if (g_ILibSpinLock_acquired_threadid == GetCurrentThreadId()) { i = 0; }
+#else
+			if (pthread_equal(g_ILibSpinLock_acquired_threadid, pthread_self())) { i = 0; }
+#endif
+		}
+		sem_post(*lock);
+		if (i != 0)
+		{
+#ifdef WIN32
+			YieldProcessor();
+#else
+			sched_yield();
+#endif
+		}
+	}
+}
+#endif
+
