@@ -1677,6 +1677,10 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 			duk_push_string(ctx, "x64");
 #endif
 		}
+		if (strcmp(u.machine, "arm64") == 0)
+		{
+			duk_push_string(ctx, "arm64");
+		}
 		else
 		{
 			int mlen = strlen(u.machine); // size is not specified, but is gauranteed to be NULL terminated
