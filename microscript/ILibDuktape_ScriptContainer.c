@@ -433,7 +433,7 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 #ifndef __APPLE__
 	char exePath[_MAX_PATH*2];
 #else
-	char exePath[PATH_MAX+1];
+	char exePath[PATH_MAX+1] = {0};
 #endif
 
 #ifdef WIN32
@@ -443,7 +443,7 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 #elif defined(__APPLE__)
 	uint32_t len = sizeof(exePath);
 	if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
-	exePath[len] = 0;
+	
 #elif defined(NACL)
 #elif defined(_FREEBSD)
 	int x = readlink("/proc/curproc/file", exePath, sizeof(exePath));

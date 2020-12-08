@@ -5486,7 +5486,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, (LPSTR)exePath, (int)ILibMemory_Size(exePath), NULL, NULL);
 #elif defined(__APPLE__)
 		if (_NSGetExecutablePath(exePath, &len) != 0) ILIBCRITICALEXIT(247);
-		exePath[(int)len] = 0;
+	
 		agentHost->exePath = exePath;
 #elif defined(NACL)
 #else
