@@ -1036,3 +1036,38 @@ Object.defineProperty(obj, 'current', {
     }
 });
 module.exports = obj;
+
+if (process.platform == 'win32')
+{
+    Object.defineProperty(module.exports, 'wmicXslPath',
+        {
+            get: function ()
+            {
+                if (this._wmicpath == null)
+                {
+                    var tmp = process.env['windir'] + '\\system32\\wbem\\' + this.current + '\\';
+                    if (require('fs').existsSync(tmp + 'csv.xsl'))
+                    {
+                        this._wmicpath = tmp;
+                    }
+                }
+                if(this._wmicpath == null)
+                {
+                    var f = require('fs').readdirSync(process.env['windir'] + '\\system32\\wbem');
+                    for(var i in f)
+                    {
+                        var path = process.env['windir'] + '\\system32\\wbem\\' + f[i];
+                        if(require('fs').statSync(path).isDirectory())
+                        {
+                            if (require('fs').existsSync(path + '\\csv.xsl'))
+                            {
+                                this._wmicpath = path + '\\';
+                                break;
+                            }
+                        }
+                    }
+                }
+                return (this._wmicpath);
+            }
+        });
+}
