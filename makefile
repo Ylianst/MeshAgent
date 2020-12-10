@@ -97,6 +97,7 @@
 # 
 # 
 # Optional build switches:
+#	BIGCHAINLOCK							1 = No Compiler/Atomics support		=> Default is Compiler support present
 #	DEBUG									0 = Release, 1 = DEBUG				=> Default is Release
 #	FSWATCH_DISABLE							1 = Remove fswatchter support		=> Default is fswatcher supported
 #	IPADDR_MONITOR_DISABLE					1 = No IPAddress Monitoring			=> Default is IPAddress Monitoring Enabled
@@ -460,6 +461,11 @@ endif
 ifeq ($(KVM_ALL_TILES),1)
 CFLAGS += -DKVM_ALL_TILES
 endif
+
+ifeq ($(BIGCHAINLOCK),1)
+CFLAGS += -DILIBCHAIN_GLOBAL_LOCK
+endif
+
 
 
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
