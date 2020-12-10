@@ -305,11 +305,7 @@ typedef struct ILibLinkedListNode_Root
 	void* Tag;
 	struct ILibLinkedListNode *Head;
 	struct ILibLinkedListNode *Tail;
-	void *ExtraMemory;
 }ILibLinkedListNode_Root;
-
-const int ILibLinkedListNode_SIZE = sizeof(ILibLinkedListNode);
-const int ILibLinkedListNodeRoot_Size = sizeof(ILibLinkedListNode_Root);
 
 struct ILibReaderWriterLock_Data
 {
@@ -7489,7 +7485,6 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	int removed;
 	void *EventQueue;
 	long long CurrentTick;
-	struct ILibLinkedListNode_Root root;
 	struct LifeTimeMonitorData *EVT, *Temp = NULL;
 	struct ILibLifeTime *LifeTimeMonitor = (struct ILibLifeTime*)LifeTimeMonitorObject;
 
@@ -7514,9 +7509,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	LifeTimeMonitor->NextTriggerTick = -1;
 
 	// This is an optimization. We are going to create the root of this linked list on the stack instead of the heap.
-	// This also fixes a crash with malloc returns NULL if this is created in the heap - No idea why this occurs.
-	memset(&root, 0, sizeof(struct ILibLinkedListNode_Root));
-	EventQueue = (void*)&root;
+	EventQueue = ILibMemory_AllocateA(sizeof(ILibLinkedListNode_Root));
 
 	ILibLinkedList_Lock(LifeTimeMonitor->Reserved);
 	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
@@ -7827,10 +7820,8 @@ void* ILibLinkedList_GetNode_Search(void* LinkedList, ILibLinkedList_Comparer co
 void* ILibLinkedList_CreateEx(int userMemorySize)
 {
 	struct ILibLinkedListNode_Root *root;
-	void *mem;
 
-	ILibMemory_Allocate(sizeof(ILibLinkedListNode_Root), userMemorySize, (void**)&root, &mem);
-	root->ExtraMemory = mem;
+	root = ILibMemory_SmartAllocateEx(sizeof(ILibLinkedListNode_Root), userMemorySize);
 	ILibSpinLock_Init(&(root->LOCK));
 	return root;
 }
@@ -7861,7 +7852,7 @@ void* ILibLinkedList_GetTag(ILibLinkedList list)
 
 void* ILibLinkedList_AllocateNodeEx(void *LinkedList, size_t extraSize)
 {
-	void* newNode = ILibMemory_SmartAllocateEx(sizeof(ILibLinkedListNode), extraSize + ILibMemory_GetExtraMemorySize(((ILibLinkedListNode_Root*)LinkedList)->ExtraMemory));
+	void* newNode = ILibMemory_SmartAllocateEx(sizeof(ILibLinkedListNode), extraSize + ILibMemory_ExtraSize((ILibLinkedListNode_Root*)LinkedList));
 	return(newNode);
 }
 #define ILibLinkedList_AllocateNode(linkedList) ILibLinkedList_AllocateNodeEx(linkedList, 0)
@@ -7895,7 +7886,7 @@ void* ILibLinkedList_ShallowCopy(void *LinkedList)
 */
 void* ILibLinkedList_GetNode_Head(void *LinkedList)
 {
-	return(LinkedList != NULL ? ((struct ILibLinkedListNode_Root*)LinkedList)->Head : NULL);
+	return(ILibMemory_CanaryOK(LinkedList) ? ((struct ILibLinkedListNode_Root*)LinkedList)->Head : NULL);
 }
 
 /*! \fn ILibLinkedList_GetNode_Tail(void *LinkedList)
@@ -7905,7 +7896,7 @@ void* ILibLinkedList_GetNode_Head(void *LinkedList)
 */
 void* ILibLinkedList_GetNode_Tail(void *LinkedList)
 {
-	return(((struct ILibLinkedListNode_Root*)LinkedList)->Tail);
+	return(ILibMemory_CanaryOK(LinkedList) ? ((struct ILibLinkedListNode_Root*)LinkedList)->Tail : NULL);
 }
 
 /*! \fn ILibLinkedList_GetNextNode(void *LinkedList_Node)
@@ -7915,7 +7906,7 @@ void* ILibLinkedList_GetNode_Tail(void *LinkedList)
 */
 void* ILibLinkedList_GetNextNode(void *LinkedList_Node)
 {
-	return(((struct ILibLinkedListNode*)LinkedList_Node)->Next);
+	return(ILibMemory_CanaryOK(LinkedList_Node) ? ((struct ILibLinkedListNode*)LinkedList_Node)->Next : NULL);
 }
 
 /*! \fn ILibLinkedList_GetPreviousNode(void *LinkedList_Node)
@@ -7925,7 +7916,7 @@ void* ILibLinkedList_GetNextNode(void *LinkedList_Node)
 */
 void* ILibLinkedList_GetPreviousNode(void *LinkedList_Node)
 {
-	return(((struct ILibLinkedListNode*)LinkedList_Node)->Previous);
+	return(ILibMemory_CanaryOK(LinkedList_Node) ? ((struct ILibLinkedListNode*)LinkedList_Node)->Previous : NULL);
 }
 
 /*! \fn ILibLinkedList_GetDataFromNode(void *LinkedList_Node)
@@ -7935,7 +7926,7 @@ void* ILibLinkedList_GetPreviousNode(void *LinkedList_Node)
 */
 void *ILibLinkedList_GetDataFromNode(void *LinkedList_Node)
 {
-	return(LinkedList_Node != NULL ? (((struct ILibLinkedListNode*)LinkedList_Node)->Data) : NULL);
+	return(ILibMemory_CanaryOK(LinkedList_Node) ? (((struct ILibLinkedListNode*)LinkedList_Node)->Data) : NULL);
 }
 
 /*! \fn ILibLinkedList_InsertBefore(void *LinkedList_Node, void *data)
@@ -7946,6 +7937,7 @@ void *ILibLinkedList_GetDataFromNode(void *LinkedList_Node)
 */
 void* ILibLinkedList_InsertBefore(void *LinkedList_Node, void *data)
 {
+	if (!ILibMemory_CanaryOK(LinkedList_Node)) { return(NULL); }
 	struct ILibLinkedListNode_Root *r = ((struct ILibLinkedListNode*)LinkedList_Node)->Root;
 	struct ILibLinkedListNode *n = (struct ILibLinkedListNode*) LinkedList_Node;
 	struct ILibLinkedListNode *newNode;
@@ -7983,6 +7975,7 @@ void* ILibLinkedList_InsertBefore(void *LinkedList_Node, void *data)
 */
 void* ILibLinkedList_InsertAfter(void *LinkedList_Node, void *data)
 {
+	if (!ILibMemory_CanaryOK(LinkedList_Node)) { return(NULL); }
 	struct ILibLinkedListNode_Root *r = ((struct ILibLinkedListNode*)LinkedList_Node)->Root;
 	struct ILibLinkedListNode *n = (struct ILibLinkedListNode*) LinkedList_Node;
 	struct ILibLinkedListNode *newNode;
@@ -8090,6 +8083,7 @@ int ILibLinkedList_Remove_ByData(void *LinkedList, void *data)
 */
 void* ILibLinkedList_AddHead(void *LinkedList, void *data)
 {
+	if (!ILibMemory_CanaryOK(LinkedList)) { return(NULL); }
 	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
 	struct ILibLinkedListNode *newNode;
 
@@ -8113,6 +8107,7 @@ void* ILibLinkedList_AddHead(void *LinkedList, void *data)
 */
 void* ILibLinkedList_AddTailEx(void *LinkedList, void *data, size_t additionalSize)
 {
+	if (!ILibMemory_CanaryOK(LinkedList)) { return(NULL); }
 	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
 	struct ILibLinkedListNode *newNode;
 
@@ -8130,7 +8125,8 @@ void* ILibLinkedList_AddTailEx(void *LinkedList, void *data, size_t additionalSi
 }
 void* ILibLinkedList_Node_ResizeAdditional(void *node, size_t additionalSize)
 {
-	size_t baseSize = ILibMemory_GetExtraMemorySize(((ILibLinkedListNode*)node)->Root->ExtraMemory);
+	if (!ILibMemory_CanaryOK(node)) { return(NULL); }
+	size_t baseSize = ILibMemory_ExtraSize(((ILibLinkedListNode*)node)->Root);
 	ILibLinkedListNode* newNode = ILibMemory_SmartAllocateEx_ResizeExtra(node, baseSize + additionalSize);
 	if (newNode != node)
 	{
@@ -8184,9 +8180,12 @@ void ILibLinkedList_UnLock(void *LinkedList)
 */
 void ILibLinkedList_Destroy(void *LinkedList)
 {
-	struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
-	while (r->Head != NULL) ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));
-	free(r);
+	if (ILibMemory_CanaryOK(LinkedList))
+	{
+		struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
+		while (r->Head != NULL) ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));
+		ILibMemory_Free(r);
+	}
 }
 
 
@@ -8197,7 +8196,7 @@ void ILibLinkedList_Destroy(void *LinkedList)
 */
 long ILibLinkedList_GetCount(void *LinkedList)
 {
-	return(((struct ILibLinkedListNode_Root*)LinkedList)->count);
+	return(ILibMemory_CanaryOK(LinkedList) ? ((struct ILibLinkedListNode_Root*)LinkedList)->count : 0);
 }
 
 int ILibLinkedList_GetIndex(void *node)

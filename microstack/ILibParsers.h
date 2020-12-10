@@ -1146,7 +1146,6 @@ int ILibIsRunningOnChainThread(void* chain);
 		\param user Custom user state object
 	*/
 	typedef void(*ILibSparseArray_OnValue)(ILibSparseArray sender, int index, void *value, void *user);
-	extern const int ILibMemory_SparseArray_CONTAINERSIZE;
 	ILibSparseArray ILibSparseArray_CreateWithUserMemory(int numberOfBuckets, ILibSparseArray_Bucketizer bucketizer, int userMemorySize);
 	#define ILibSparseArray_Create(numberOfBuckets, bucketizer) ILibSparseArray_CreateWithUserMemory(numberOfBuckets, bucketizer, 0)
 	ILibSparseArray ILibSparseArray_CreateEx(ILibSparseArray source);
@@ -1267,9 +1266,6 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibLinkedList_SetTag(ILibLinkedList list, void *tag);
 	void* ILibLinkedList_GetTag(ILibLinkedList list);
 	int ILibLinkedList_GetIndex(void *node);
-	extern const int ILibLinkedListNode_SIZE;
-	extern const int ILibLinkedListNodeRoot_Size;
-
 
 	//! Comparer delegate is called to compare two values. Mimics behavior of .NET IComparer..
 	//! obj2 == obj1	: 0
