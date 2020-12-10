@@ -3264,26 +3264,44 @@ char *ILibChain_GetMetadataForTimers(void *chain)
 		while (node != NULL)
 		{
 			Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
+			double ex = (double)(Temp->ExpirationTick - current);
+			char *units = "milliseconds";
+
+			if (ex > 1000)
+			{
+				ex = ex / 1000;
+				units = "seconds";
+				if (ex > 60)
+				{
+					ex = ex / 60;
+					units = "minutes";
+					if (ex > 60)
+					{
+						ex = ex / 60;
+						units = "hours";
+					}
+				}
+			}
 			if (ret == NULL)
 			{
 				if (Temp->metadata == NULL)
 				{
-					retlen += snprintf(NULL, 0, " Expiration: %llu ms  (%p) [%s:%u]\n", Temp->ExpirationTick - current, Temp->data, Temp->file, Temp->line);
+					retlen += snprintf(NULL, 0, " Timer: %.1f %s  (%p) [%s:%u]\n", ex, units, Temp->data, Temp->file, Temp->line);
 				}
 				else
 				{
-					retlen += snprintf(NULL, 0, " Expiration: %llu ms  (%p) [%s]\n", Temp->ExpirationTick - current, Temp->data, Temp->metadata);
+					retlen += snprintf(NULL, 0, " Timer: %.1f %s  (%p) [%s]\n", ex, units, Temp->data, Temp->metadata);
 				}
 			}
 			else
 			{
 				if (Temp->metadata == NULL)
 				{
-					i = sprintf_s(ret + retlen, ILibMemory_Size(ret) - retlen, " Expiration: %llu ms  (%p) [%s:%u]\n", Temp->ExpirationTick - current, Temp->data, Temp->file, Temp->line);
+					i = sprintf_s(ret + retlen, ILibMemory_Size(ret) - retlen, " Timer: %.1f %s  (%p) [%s:%u]\n", ex, units,Temp->data, Temp->file, Temp->line);
 				}
 				else
 				{
-					i = sprintf_s(ret + retlen, ILibMemory_Size(ret) - retlen, " Expiration: %llu ms  (%p) [%s]\n", Temp->ExpirationTick - current, Temp->data, Temp->metadata != NULL ? Temp->metadata : "?");
+					i = sprintf_s(ret + retlen, ILibMemory_Size(ret) - retlen, " Timer: %.1f %s  (%p) [%s]\n", ex, units, Temp->data, Temp->metadata != NULL ? Temp->metadata : "?");
 				}
 				if (i > 0) { retlen += i; }
 			}

@@ -144,7 +144,18 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
-
+	if (argc > 1 && strcasecmp(argv[1], "-agentHash") == 0 && integratedJavaScriptLen == 0)
+	{
+		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex').substring(0,16));process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && strcasecmp(argv[1], "-agentFullHash") == 0 && integratedJavaScriptLen == 0)
+	{
+		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex'));process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 	if (argc > 1 && strcmp(argv[1], "-daemon") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy("require('daemon').agent();", 0);

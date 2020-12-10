@@ -551,6 +551,18 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && strcasecmp(argv[1], "-agentHash") == 0 && integragedJavaScriptLen == 0)
+	{
+		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex').substring(0,16));process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && strcasecmp(argv[1], "-agentFullHash") == 0 && integragedJavaScriptLen == 0)
+	{
+		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex'));process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 
 
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -773,81 +785,6 @@ int wmain(int argc, char* wargv[])
 		if (IsAdmin() == FALSE) { printf("Must run as administrator"); } else { ClearWindowsFirewall(str); printf("Done"); }
 	}
 #endif
-	else if (argc == 2 && (strcasecmp(argv[1], "-nodeidhex") == 0))
-	{
-		// Get the NodeID from the registry
-		HKEY hKey;
-		DWORD len = 0;
-		char* strEx = NULL;
-#ifndef _WIN64
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_QUERY_VALUE | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS )
-#else
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS )
-#endif
-		{
-			if (RegQueryValueExA(hKey, "NodeId", NULL, NULL, NULL, &len ) == ERROR_SUCCESS && len > 0)
-			{
-				if ((strEx = (char*)malloc(len)) == NULL) ILIBCRITICALEXIT(254);
-				if (RegQueryValueExA(hKey, "NodeId", NULL, NULL, (LPBYTE)strEx, &len ) != ERROR_SUCCESS || len == 0) { free(strEx); strEx = NULL; len = 0;}
-			}
-			RegCloseKey(hKey);
-		}
-		if (strEx != NULL) printf_s("%s", strEx); else printf("Not defined, start the mesh service to create a nodeid.");
-		wmain_free(argv);
-		return 0;
-	}
-	else if (argc == 2 && (strcasecmp(argv[1], "-info") == 0))
-	{
-		// Display agent information from the registry
-		HKEY hKey;
-		DWORD len = 0;
-		char* strEx = NULL;
-#ifndef _WIN64
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_QUERY_VALUE | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS)
-#else
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS)
-#endif
-		{
-			// Display NodeId
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "NodeId", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len == 0) printf("NodeId:    (none)"); else printf("NodeId:    %s", ILibScratchPad2);
-
-			// Display MeshId
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "MeshId", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len > 0) printf("\r\nMeshId:    %s", ILibScratchPad2);
-
-			// Display AgentHash
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "AgentHash", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len > 0) printf("\r\nAgentHash: %s", ILibScratchPad2);
-
-			// Display MeshServerId
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "MeshServerId", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len > 0) printf("\r\nServerId:  %s", ILibScratchPad2);
-
-			// Display MeshServerUrl
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "MeshServerUrl", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len > 0) printf("\r\nServerUrl: %s", ILibScratchPad2);
-
-			// Display Proxy
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "Proxy", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len > 0) printf("\r\nProxy:     %s", ILibScratchPad2);
-
-			// Display Tag
-			len = sizeof(ILibScratchPad2);
-			if (RegQueryValueExA(hKey, "Tag", NULL, NULL, (LPBYTE)ILibScratchPad2, &len) != ERROR_SUCCESS) { len = 0; }
-			if (len > 0) printf("\r\nTag:       %s", ILibScratchPad2);
-
-			RegCloseKey(hKey);
-		}
-		wmain_free(argv);
-		return 0;
-	}
 	else if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
 	{
 		// Set "resetnodeid" in registry
@@ -907,7 +844,7 @@ int wmain(int argc, char* wargv[])
 					printf("  -signcheck        Perform self - check.\r\n");
 					printf("  -install          Install the service from this location.\r\n");
 					printf("  -uninstall        Remove the service from this location.\r\n");
-					printf("  -nodeidhex        Return the current agent identifier.\r\n");
+					printf("  -nodeid			Return the current agent identifier.\r\n");
 					printf("  -resetnodeid      Reset the NodeID next time the service is started.\r\n");
 					printf("  -fulluninstall    Stop agent and clean up the program files location.\r\n");
 					printf("  -fullinstall      Copy agent into program files, install and launch.\r\n");
