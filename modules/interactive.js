@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright 2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -64,10 +64,102 @@ limitations under the License.
 
 /*****/
 
+    Object.defineProperty(Array.prototype, 'getParameterEx',
+        {
+            value: function (name, defaultValue)
+            {
+                var i, ret;
+                for (i = 0; i < this.length; ++i)
+                {
+                    if (this[i] == name) { return (null); }
+                    if (this[i].startsWith(name + '='))
+                    {
+                        ret = this[i].substring(name.length + 1);
+                        if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                        return (ret);
+                    }
+                }
+                return (defaultValue);
+            }
+        });
+    Object.defineProperty(Array.prototype, 'getParameter',
+        {
+            value: function (name, defaultValue)
+            {
+                return (this.getParameterEx('-' + name, defaultValue));
+            }
+        });
+
+    // The folloing line just below needs to stay exactly like this since MeshCentral will replace it with the correct settings
+    var translation =
+        {
+            EN_US:
+                {
+                    agent: 'Agent',
+                    group: 'Device Group',
+                    url: 'Server URL',
+                    setup: 'Setup',
+                    update: 'Update',
+                    install: 'Install',
+                    uninstall: 'Uninstall',
+                    connect: 'Connect',
+                    disconnect: 'Disconnect',
+                    cancel: 'Cancel',
+                    pressok: 'Press OK to disconnect',
+                    elevation: 'Elevated permissions is required to install/uninstall the agent.',
+                    sudo: 'Please try again with sudo.',
+                    ctrlc: 'Press Ctrl-C to exit.',
+                    commands: 'You can run the text version from the command line with the following command(s)',
+                    graphicalerror: 'The graphical version of this installer canot run on this system',
+                    zenity: 'Try installing/updating Zenity, and run again',
+                    status: ['NOT INSTALLED', 'RUNNING', 'NOT RUNNING']
+                },
+            KO_KR:
+                {
+                    agent: '에이전트',
+                    group: '장치 그룹',
+                    url: '서버 위치',
+                    setup: '설정하다',
+                    update: '개조하다',
+                    install: '설치하려면',
+                    uninstall: '제거하다',
+                    connect: '연결하려면',
+                    disconnect: '연결 해제',
+                    cancel: '취소하다',
+                    pressok: '연결을 끊으려면 "OK"를 누르십시오',
+                    elevation: '관리자 권한은 에이전트 제거 / 설치하는 데 필요',
+                    sudo: '"sudo"로 다시 시도하십시오',
+                    ctrlc: '종료하려면 "Ctrl-C"를 누르십시오.',
+                    commands: '다음 명령을 사용하여 콘솔에서 텍스트 버전을 실행할 수 있습니다',
+                    graphicalerror: '이 프로그램의 그래픽 버전이 시스템에서 실행할 수 없습니다',
+                    zenity: '"Zenity"를 설치 또는 업데이트하고 다시 시도하십시오',
+                    status: ['없다', '운영', '중지됨']
+                }
+        };
+
+
+
     // The folloing line just below with 'msh=' needs to stay exactly like this since MeshCentral will replace it with the correct settings.
     //var msh = {};
+    var lang = require('util-language').current;
+    if (lang == null || translation[lang] == null) { lang = 'EN_US'; }
+    if (process.argv.getParameter('lang', lang) == null)
+    {
+        console.log('\nCurrent Language: ' + lang + '\n');
+        process.exit();
+    }
+    else
+    {
+        lang = process.argv.getParameter('lang', lang).toUpperCase();
+        if(translation[lang] == null)
+        {
+            console.log('Language: ' + lang + ' is not translated.');
+            process.exit();
+        }
+    }
+
     var displayName = msh.displayName ? msh.displayName : 'MeshCentral Agent';
-    var s = null, buttons = ['Cancel'], skip = false;
+    var s = null, buttons = [translation[lang].cancel], skip = false;
     var serviceName = msh.meshServiceName ? msh.meshServiceName : 'meshagent';
 
     try { s = require('service-manager').manager.getService(serviceName); } catch (e) { }
@@ -135,7 +227,7 @@ limitations under the License.
 
     if (process.argv.includes('-help'))
     {
-        console.log("\nYou can run the text version from the command line with the following command(s): ");
+        console.log("\n" + translation[lang].commands + ": ");
         if ((msh.InstallFlags & 1) == 1)
         {
             console.log('./' + process.execPath.split('/').pop() + ' -connect');
@@ -159,7 +251,7 @@ limitations under the License.
 
     if ((msh.InstallFlags & 1) == 1)
     {
-        buttons.unshift('Connect');
+        buttons.unshift(translation[lang].connect);
         if (process.argv.includes('-connect'))
         {
             global._child = require('child_process').execFile(process.execPath, connectArgs);
@@ -167,9 +259,9 @@ limitations under the License.
             global._child.stderr.on('data', function (c) { });
             global._child.on('exit', function (code) { process.exit(code); });
 
-            console.log("\nConnecting to: " + msh.MeshServer);
-            console.log("Device Group: " + msh.MeshName);
-            console.log('\nPress Ctrl-C to exit\n');
+            console.log("\n" + translation[lang].url + ": " + msh.MeshServer);
+            console.log(translation[lang].group + ": " + msh.MeshName);
+            console.log('\n' + translation[lang].ctrlc + '\n');
             skip = true;
         }
     }
@@ -178,23 +270,23 @@ limitations under the License.
     {
         if (!require('user-sessions').isRoot())
         {
-            console.log('\n' + "Elevated permissions is required to install/uninstall the agent.");
-            console.log("Please try again with sudo.");
+            console.log('\n' + translation[lang].elevation);
+            console.log(translation[lang].sudo);
             process.exit();
         }
         if (s)
         {
             if ((process.platform == 'darwin') || require('message-box').kdialog)
             {
-                buttons.unshift("Setup");
+                buttons.unshift(translation[lang].setup);
             } else
             {
-                buttons.unshift("Uninstall");
-                buttons.unshift("Update");
+                buttons.unshift(translation[lang].uninstall);
+                buttons.unshift(translation[lang].update);
             }
         } else
         {
-            buttons.unshift("Install");
+            buttons.unshift(translation[lang].install);
         }
     }
 
@@ -224,9 +316,9 @@ limitations under the License.
             {
                 if (!require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
                 {
-                    console.log('\n' + "The graphical version of this installer cannot run on this system.");
-                    console.log("Try installing/updating Zenity, and run again." + '\n');
-                    console.log("You can also run the text version from the command line with the following command(s): ");
+                    console.log('\n' + translation[lang].graphicalerror + '.');
+                    console.log(translation[lang].zenity + ".\n");
+                    console.log(translation[lang].commands + ": ");
                     if ((msh.InstallFlags & 1) == 1)
                     {
                         console.log('./' + process.execPath.split('/').pop() + ' -connect');
@@ -251,7 +343,7 @@ limitations under the License.
         }
         else
         {
-            if (!require('user-sessions').isRoot()) { console.log('\n' + "This utility requires elevated permissions. Please try again with sudo."); process.exit(); }
+            if (!require('user-sessions').isRoot()) { console.log('\n' + translation[lang].elevation); process.exit(); }
         }
     }
 
@@ -259,35 +351,35 @@ limitations under the License.
     if (!skip)
     {
         if (!s)
-        {
-            msg = "Agent: " + "NOT INSTALLED" + '\n';
+        {    
+            msg = translation[lang].agent + ": " + translation[lang].status[0] + '\n';
         } else
         {
-            msg = "Agent: " + (s.isRunning() ? "RUNNING" : "NOT RUNNING") + '\n';
+            msg = translation[lang].agent + ": " + (s.isRunning() ? translation[lang].status[1] : translation[lang].status[2]) + '\n';
         }
 
-        msg += ("Device Group: " + msh.MeshName + '\n');
-        msg += ("Server URL: " + msh.MeshServer + '\n');
+        msg += (translation[lang].group + ": " + msh.MeshName + '\n');
+        msg += (translation[lang].url + ": " + msh.MeshServer + '\n');
 
-        var p = require('message-box').create(displayName + " Setup", msg, 99999, buttons);
+        var p = require('message-box').create(displayName + " " + translation[lang].setup, msg, 99999, buttons);
         p.then(function (v)
         {
             switch (v)
             {
-                case "Cancel":
+                case translation[lang].cancel:
                     process.exit();
                     break;
-                case 'Setup':
-                    var d = require('message-box').create(displayName, msg, 99999, ['Update', 'Uninstall', 'Cancel']);
+                case translation[lang].setup:
+                    var d = require('message-box').create(displayName, msg, 99999, [translation[lang].update, translation[lang].uninstall, translation[lang].cancel]);
                     d.then(function (v)
                     {
                         switch (v)
                         {
-                            case 'Update':
-                            case 'Install':
+                            case translation[lang].update:
+                            case translation[lang].install:
                                 _install();
                                 break;
-                            case 'Uninstall':
+                            case translation[lang].uninstall:
                                 _uninstall();
                                 break;
                             default:
@@ -296,32 +388,32 @@ limitations under the License.
                         process.exit();
                     }).catch(function (v) { process.exit(); });
                     break;
-                case "Connect":
+                case translation[lang].connect:
                     global._child = require('child_process').execFile(process.execPath, connectArgs);
                     global._child.stdout.on('data', function (c) { });
                     global._child.stderr.on('data', function (c) { });
                     global._child.on('exit', function (code) { process.exit(code); });
 
-                    msg = ("Device Group: " + msh.MeshName + '\n');
-                    msg += ("Server URL: " + msh.MeshServer + '\n');
+                    msg = (translation[lang].group + ": " + msh.MeshName + '\n');
+                    msg += (translation[lang].url + ": " + msh.MeshServer + '\n');
 
                     if (process.platform != 'darwin')
                     {
                         if (!require('message-box').zenity && require('message-box').kdialog)
                         {
-                            msg += ('\nPress OK to Disconnect');
+                            msg += ('\n' + translation[lang].pressok);
                         }
                     }
 
-                    var d = require('message-box').create(displayName, msg, 99999, ['Disconnect']);
+                    var d = require('message-box').create(displayName, msg, 99999, [translation[lang].disconnect]);
                     d.then(function (v) { process.exit(); }).catch(function (v) { process.exit(); });
                     break;
-                case "Uninstall":
+                case translation[lang].uninstall:
                     _uninstall();
                     process.exit();
                     break;
-                case "Install":
-                case "Update":
+                case translation[lang].install:
+                case translation[lang].update:
                     _install();
                     process.exit();
                     break;
