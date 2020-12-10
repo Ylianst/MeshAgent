@@ -984,7 +984,8 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 
 	if (ptrs->timerType == ILibDuktape_Timer_Type_INTERVAL)
 	{
-		ILibLifeTime_AddEx(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL);
+		char *metadata = ILibLifeTime_GetCurrentTriggeredMetadata(ILibGetBaseTimer(duk_ctx_chain(ctx)));
+		ILibLifeTime_AddEx3(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL, metadata);
 	}
 	else
 	{

@@ -1373,6 +1373,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibLifeTime_Add(LifetimeMonitorObject, data, seconds, Callback, Destroy) ILibLifeTime_AddEx(LifetimeMonitorObject, data, seconds * 1000, Callback, Destroy)
 	#define ILibLifeTime_AddEx(LifetimeMonitorObject, data, milliseconds, Callback, Destroy) ILibLifeTime_AddEx2(LifetimeMonitorObject, data, milliseconds, Callback, Destroy, __FILE__, __LINE__)
 	void ILibLifeTime_SetMetadata(ILibLifeTime_Token obj, char *metadata, size_t metadataLen);
+	char *ILibLifeTime_GetCurrentTriggeredMetadata(void* LifeTimeMonitorObject);
 
 	//
 	// Removes all event triggers that contain the specified data object.

@@ -917,6 +917,7 @@ struct ILibLifeTime
 	long long NextTriggerTick;
 
 	void *Reserved;
+	char *CurrentTriggeredMetaData;
 
 	void *ObjectList;
 	int ObjectCount;
@@ -7456,7 +7457,10 @@ void ILibLifeTime_SetMetadata(ILibLifeTime_Token obj, char *metadata, size_t met
 	sprintf_s(val + oldLen, ILibMemory_Size(val) - oldLen, "%s%s", oldLen>0?", ":"", metadata);
 	data->metadata = val;
 }
-
+char *ILibLifeTime_GetCurrentTriggeredMetadata(void* LifeTimeMonitorObject)
+{
+	return(((struct ILibLifeTime*)LifeTimeMonitorObject)->CurrentTriggeredMetaData);
+}
 
 //
 // An internal method used by the ILibLifeTime methods
@@ -7538,7 +7542,9 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 		if (removed == 0)
 		{
 			// Trigger the callback
+			LifeTimeMonitor->CurrentTriggeredMetaData = EVT->metadata;
 			EVT->CallbackPtr(EVT->data);
+			LifeTimeMonitor->CurrentTriggeredMetaData = NULL;
 		}
 		else
 		{
