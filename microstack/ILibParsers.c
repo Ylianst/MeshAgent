@@ -969,6 +969,7 @@ typedef struct ILibBaseChain
 	HANDLE WaitHandles[FD_SETSIZE * 2];
 	HANDLE currentHandle;
 	ILibChain_WaitHandleInfo *currentInfo;
+	DWORD currentWaitTimeout;
 #else
 	pthread_t ChainThreadID;
 	int TerminatePipe[2];
@@ -2428,10 +2429,10 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		chain->PreSelectCount++;
 #ifdef WIN32
 		int x = 0;
-		DWORD waitTimeout = 0;
+		chain->currentWaitTimeout = 0;
 
-		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
-		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
+		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
+		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, chain->currentWaitTimeout);
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
 #endif
@@ -3083,7 +3084,6 @@ char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *i
 	struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 0;
 	int len = 0;
 
-
 	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 	{
 		if (module->PreSelectHandler != NULL)
@@ -3123,79 +3123,121 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 #ifdef WIN32
 	ILibBaseChain *bchain = (ILibBaseChain*)chain;
 #endif
-	char *retStr = (char*)ILibMemory_SmartAllocate(65535);
+	char *retStr = NULL;
 	int len = 0;
-	void *node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+	void *node;
 	ILibChain_Link *module;
 	fd_set readset;
 	fd_set errorset;
 	fd_set writeset;
 	fd_set emptyset; FD_ZERO(&emptyset);
 	int selectTimeout = UPNP_MAX_WAIT * 1000;
-	int f;
+	int f, r;
 	size_t tmp;
+	size_t buflen = 0;
 
-	while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+	while(1)
 	{
-		if (module->PreSelectHandler != NULL)
+		node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+		while (node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 		{
-			FD_ZERO(&readset);
-			FD_ZERO(&errorset);
-			FD_ZERO(&writeset);
-
-			module->PreSelectHandler(module, &readset, &writeset, &errorset, &selectTimeout);
-			if (memcmp(&readset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&writeset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&errorset, &emptyset, sizeof(fd_set)) != 0)
+			if (module->PreSelectHandler != NULL)
 			{
-				// Descriptors were added
+				FD_ZERO(&readset);
+				FD_ZERO(&errorset);
+				FD_ZERO(&writeset);
+
+				module->PreSelectHandler(module, &readset, &writeset, &errorset, &selectTimeout);
+				if (memcmp(&readset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&writeset, &emptyset, sizeof(fd_set)) != 0 || memcmp(&errorset, &emptyset, sizeof(fd_set)) != 0)
+				{
+					// Descriptors were added
 #ifdef WIN32
-				SOCKET slist[FD_SETSIZE];
-				int scount = 0;
-				for (f = 0; f < (int)readset.fd_count; ++f)
-				{
-					slist[scount++] = readset.fd_array[f];
-				}
-				for (f = 0; f < (int)writeset.fd_count; ++f)
-				{
-					if (FD_ISSET(writeset.fd_array[f], &readset) == 0)
+					SOCKET slist[FD_SETSIZE];
+					int scount = 0;
+					for (f = 0; f < (int)readset.fd_count; ++f)
 					{
-						slist[scount++] = writeset.fd_array[f];
+						slist[scount++] = readset.fd_array[f];
 					}
-				}
-				for (f = 0; f < (int)errorset.fd_count; ++f)
-				{
-					if (FD_ISSET(errorset.fd_array[f], &readset) == 0 && FD_ISSET(errorset.fd_array[f], &writeset) == 0)
+					for (f = 0; f < (int)writeset.fd_count; ++f)
 					{
-						slist[scount++] = errorset.fd_array[f];
+						if (FD_ISSET(writeset.fd_array[f], &readset) == 0)
+						{
+							slist[scount++] = writeset.fd_array[f];
+						}
 					}
-				}
-				for (f = 0; f < scount; ++f)
-				{
-					len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData);
-				}
-				
+					for (f = 0; f < (int)errorset.fd_count; ++f)
+					{
+						if (FD_ISSET(errorset.fd_array[f], &readset) == 0 && FD_ISSET(errorset.fd_array[f], &writeset) == 0)
+						{
+							slist[scount++] = errorset.fd_array[f];
+						}
+					}
+					for (f = 0; f < scount; ++f)
+					{
+						if (retStr == NULL)
+						{
+							buflen += snprintf(NULL, 0, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData);
+						}
+						else
+						{
+							(r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData));
+							if (r > 0) { len += r; }
+						}
+					}
+
 #else
-				for (f = 0; f < FD_SETSIZE; ++f)
-				{
-					if (FD_ISSET(f, &readset) || FD_ISSET(f, &writeset) || FD_ISSET(f, &errorset))
+					for (f = 0; f < FD_SETSIZE; ++f)
 					{
-						len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
+						if (FD_ISSET(f, &readset) || FD_ISSET(f, &writeset) || FD_ISSET(f, &errorset))
+						{
+							if (retStr == NULL)
+							{
+								buflen += snprintf(NULL, 0, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
+							}
+							else
+							{
+								r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
+								if (r > 0) { len += r; }
+							}
+						}
 					}
-				}
 #endif
+				}
+			}
+			node = ILibLinkedList_GetNextNode(node);
+		}
+
+#ifdef WIN32
+		for (f = 0; f < FD_SETSIZE && f < bchain->lastDescriptorCount; ++f)
+		{
+			if (bchain->WaitHandles[f] != NULL && bchain->WaitHandles[ILibChain_HandleInfoIndex(f)] != NULL)
+			{
+				if (retStr == NULL)
+				{
+					buflen += snprintf(NULL, 0, " H[%p] (Signaled: %d) => %s\n", bchain->WaitHandles[f], WaitForSingleObjectEx(bchain->WaitHandles[f], 0, FALSE) == 0, ((ILibChain_WaitHandleInfo*)bchain->WaitHandles[ILibChain_HandleInfoIndex(f)])->metaData);
+				}
+				else
+				{
+					r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " H[%p] (Signaled: %d) => %s\n", bchain->WaitHandles[f], WaitForSingleObjectEx(bchain->WaitHandles[f], 0, FALSE) == 0, ((ILibChain_WaitHandleInfo*)bchain->WaitHandles[ILibChain_HandleInfoIndex(f)])->metaData);
+					if (r > 0) { len += r; }
+				}
 			}
 		}
-		node = ILibLinkedList_GetNextNode(node);
-	}
-
-#ifdef WIN32
-	for (f = 0; f < FD_SETSIZE && f < bchain->lastDescriptorCount; ++f)
-	{
-		if (bchain->WaitHandles[f] != NULL && bchain->WaitHandles[ILibChain_HandleInfoIndex(f)] != NULL)
+#endif
+		if (retStr == NULL)
 		{
-			len += sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " H[%p] (Signaled: %d) => %s\n", bchain->WaitHandles[f], WaitForSingleObjectEx(bchain->WaitHandles[f], 0, FALSE) == 0, ((ILibChain_WaitHandleInfo*)bchain->WaitHandles[ILibChain_HandleInfoIndex(f)])->metaData);
+			retStr = ILibMemory_SmartAllocate(buflen + 1024);
+#ifdef WIN32
+			len += sprintf_s(retStr, ILibMemory_Size(retStr), " Chain Timeout: %u milliseconds\n", bchain->currentWaitTimeout);
+#else
+			len += sprintf_s(retStr, ILibMemory_Size(retStr), " Chain Timeout: %u milliseconds\n", selectTimeout);
+#endif
+		}
+		else
+		{
+			break;
 		}
 	}
-#endif
 
 	retStr[len] = 0;
 	return(retStr);
@@ -3782,11 +3824,11 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		chain->PreSelectCount++;
 #ifdef WIN32
 		int x = 0;
-		DWORD waitTimeout = 0;
+		chain->currentWaitTimeout = 0;
 
-		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &waitTimeout, &readset, &writeset, &errorset, chain->auxSelectHandles, NULL);
+		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, NULL);
 		chain->lastDescriptorCount = x;
-		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, waitTimeout);
+		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, chain->currentWaitTimeout);
 #else
 		if (chain->lastDescriptorCount < 0)
 		{

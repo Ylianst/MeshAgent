@@ -2403,7 +2403,7 @@ duk_ret_t ILibDuktape_ChainViewer_getSnapshot(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_ChainViewer_getSnapshot_promise, 2);	// [viewer][list][promise][func]
 	duk_new(ctx, 1);															// [viewer][list][promise]
 	duk_dup(ctx, -1);															// [viewer][list][promise][promise]
-	duk_put_prop_index(ctx, -3, (duk_uarridx_t)duk_get_length(ctx, -3));						// [viewer][list][promise]
+	duk_put_prop_index(ctx, -3, (duk_uarridx_t)duk_get_length(ctx, -3));		// [viewer][list][promise]
 	ILibForceUnBlockChain(duk_ctx_chain(ctx));
 	return(1);
 }
