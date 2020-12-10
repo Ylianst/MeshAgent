@@ -87,6 +87,11 @@ function start()
         if (res == null) { res = '[NOT CONNECTED]'; }
         console.log('Mesh Agent connected to: ' + res);
         return (queryAgent('descriptors', connection));
+    }).then(function (v, connection)
+    {
+        console.log(v);
+        console.log('');
+        return (queryAgent('timerinfo', connection));
     }).then(function (v) { console.log(v); }).then(function () { process._exit(); }).catch(function () { process._exit(); });
 }
 
