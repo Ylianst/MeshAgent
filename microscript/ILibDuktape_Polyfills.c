@@ -1010,8 +1010,21 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 	if (duk_pcall_method(ctx, argCount) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "timers.onElapsed() callback handler on '%s()' ", funcName); }
 	duk_pop(ctx);										// ...
 }
+duk_ret_t ILibDuktape_Polyfills_Timer_Metadata(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	ILibLifeTime_Token token = (ILibLifeTime_Token)Duktape_GetPointerProperty(ctx, -1, "\xFF_token");
+	if (token != NULL)
+	{
+		duk_size_t metadataLen;
+		char *metadata = (char*)duk_require_lstring(ctx, 0, &metadataLen);
+		ILibLifeTime_SetMetadata(token, metadata, metadataLen);
+	}
+	return(0);
+}
 duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 {
+	char *metadata = NULL;
 	int nargs = duk_get_top(ctx);
 	ILibDuktape_Timer *ptrs;
 	ILibDuktape_Timer_Type timerType;
@@ -1026,7 +1039,8 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 	switch (timerType)
 	{
 	case ILibDuktape_Timer_Type_IMMEDIATE:
-		ILibDuktape_WriteID(ctx, "Timers.immediate");										
+		ILibDuktape_WriteID(ctx, "Timers.immediate");	
+		metadata = "setImmediate()";
 		// We're only saving a reference for immediates
 		duk_push_heap_stash(ctx);															//[retVal][stash]
 		duk_dup(ctx, -2);																	//[retVal][stash][immediate]
@@ -1035,9 +1049,11 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 		break;
 	case ILibDuktape_Timer_Type_INTERVAL:
 		ILibDuktape_WriteID(ctx, "Timers.interval");
+		metadata = "setInterval()";
 		break;
 	case ILibDuktape_Timer_Type_TIMEOUT:
 		ILibDuktape_WriteID(ctx, "Timers.timeout");
+		metadata = "setTimeout()";
 		break;
 	}
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Polyfills_timer_finalizer);
@@ -1063,7 +1079,11 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 	duk_dup(ctx, 0);																				//[retVal][callback]
 	duk_put_prop_string(ctx, -2, "\xFF_callback");													//[retVal]
 
-	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL);
+	duk_push_pointer(
+		ctx,
+		ILibLifeTime_AddEx3(ILibGetBaseTimer(chain), ptrs, ptrs->timeout, ILibDuktape_Polyfills_timer_elapsed, NULL, metadata));
+	duk_put_prop_string(ctx, -2, "\xFF_token");
+	ILibDuktape_CreateEventWithSetterEx(ctx, "metadata", ILibDuktape_Polyfills_Timer_Metadata);
 	return 1;
 }
 duk_ret_t ILibDuktape_Polyfills_timer_clear(duk_context *ctx)
@@ -2414,6 +2434,13 @@ duk_ret_t ILibDutkape_ChainViewer_cleanup(duk_context *ctx)
 	ILibChain_SafeRemove(duk_ctx_chain(ctx), link);
 	return(0);
 }
+duk_ret_t ILibDuktape_ChainViewer_getTimerInfo(duk_context *ctx)
+{
+	char *v = ILibChain_GetMetadataForTimers(duk_ctx_chain(ctx));
+	duk_push_string(ctx, v);
+	ILibMemory_Free(v);
+	return(1);
+}
 void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);													// [viewer]
@@ -2426,6 +2453,7 @@ void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_Create(ctx);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "PostSelect");
 	ILibDuktape_CreateInstanceMethod(ctx, "getSnapshot", ILibDuktape_ChainViewer_getSnapshot, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "getTimerInfo", ILibDuktape_ChainViewer_getTimerInfo, 0);
 	duk_push_array(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_ChainViewer_PromiseList);
 	ILibPrependToChain(chain, (void*)t);
 

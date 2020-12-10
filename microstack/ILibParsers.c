@@ -906,6 +906,9 @@ typedef struct LifeTimeMonitorData
 	void *data;
 	ILibLifeTime_OnCallback CallbackPtr;
 	ILibLifeTime_OnCallback DestroyPtr;
+	char *file;
+	uint32_t line;
+	char *metadata;
 }LifeTimeMonitorData;
 struct ILibLifeTime
 {
@@ -3241,6 +3244,64 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 
 	retStr[len] = 0;
 	return(retStr);
+}
+
+char *ILibChain_GetMetadataForTimers(void *chain)
+{
+	void *node;
+	struct LifeTimeMonitorData *Temp = NULL;
+	struct ILibLifeTime *LifeTimeMonitor = (struct ILibLifeTime*)ILibGetBaseTimer(chain);
+	size_t retlen = 0;
+	char *ret = NULL;
+	int i;
+	int64_t current = ILibGetUptime();
+
+	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
+	while (1)
+	{
+		node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
+		while (node != NULL)
+		{
+			Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
+			if (ret == NULL)
+			{
+				if (Temp->metadata == NULL)
+				{
+					retlen += snprintf(NULL, 0, " Expiration: %llu ms  (%p) [%s:%u]\n", Temp->ExpirationTick - current, Temp->data, Temp->file, Temp->line);
+				}
+				else
+				{
+					retlen += snprintf(NULL, 0, " Expiration: %llu ms  (%p) [%s]\n", Temp->ExpirationTick - current, Temp->data, Temp->metadata);
+				}
+			}
+			else
+			{
+				if (Temp->metadata == NULL)
+				{
+					i = sprintf_s(ret + retlen, ILibMemory_Size(ret) - retlen, " Expiration: %llu ms  (%p) [%s:%u]\n", Temp->ExpirationTick - current, Temp->data, Temp->file, Temp->line);
+				}
+				else
+				{
+					i = sprintf_s(ret + retlen, ILibMemory_Size(ret) - retlen, " Expiration: %llu ms  (%p) [%s]\n", Temp->ExpirationTick - current, Temp->data, Temp->metadata != NULL ? Temp->metadata : "?");
+				}
+				if (i > 0) { retlen += i; }
+			}
+			node = ILibLinkedList_GetNextNode(node);
+		}
+
+		if (ret == NULL)
+		{
+			ret = ILibMemory_SmartAllocate(retlen + 1);
+			retlen = 0;
+		}
+		else
+		{
+			break;
+		}
+	}
+	ILibLinkedList_UnLock(LifeTimeMonitor->ObjectList);
+
+	return(ret);
 }
 
 void *ILibChain_GetObjectForDescriptor(void *chain, int fd)
@@ -7302,15 +7363,18 @@ long long ILibLifeTime_GetExpiration(void *LifetimeMonitorObject, void *data)
 	return -1;
 }
 
-/*! \fn ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, void* Callback, void* Destroy)
+/*! \fn ILibLifeTime_AddEx4(void *LifetimeMonitorObject,void *data, int ms, void* Callback, void* Destroy)
 \brief Registers a timed callback with millisecond granularity
 \param LifetimeMonitorObject The \a ILibLifeTime object to add the timed callback to
 \param data The data object to associate with the timed callback
 \param ms The number of milliseconds for the timed callback
 \param Callback The callback function pointer to trigger when the specified time elapses
 \param Destroy The abort function pointer, which triggers all non-triggered timed callbacks, upon shutdown
+\param file (Autofilled)
+\param line (Autofilled)
+\param metadata Metadata to be associated with this timer
 */
-void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, ILibLifeTime_OnCallback Callback, ILibLifeTime_OnCallback Destroy)
+ILibLifeTime_Token ILibLifeTime_AddEx4(void *LifetimeMonitorObject, void *data, int ms, ILibLifeTime_OnCallback Callback, ILibLifeTime_OnCallback Destroy, char *file, uint32_t line, char *metadata)
 {
 	struct LifeTimeMonitorData *temp;
 	struct LifeTimeMonitorData *ltms;
@@ -7320,7 +7384,7 @@ void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, ILibLife
 	if (LifetimeMonitorObject == NULL)
 	{
 		if (Destroy != NULL) { Destroy(data); }
-		return;
+		return(NULL);
 	}
 	if ((ltms = (struct LifeTimeMonitorData*)malloc(sizeof(struct LifeTimeMonitorData))) == NULL) ILIBCRITICALEXIT(254);
 	memset(ltms,0,sizeof(struct LifeTimeMonitorData));
@@ -7336,6 +7400,14 @@ void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, ILibLife
 	//
 	ltms->CallbackPtr = Callback;
 	ltms->DestroyPtr = Destroy;
+
+	ltms->file = file;
+	ltms->line = line;
+	if (metadata != NULL)
+	{
+		ltms->metadata = ILibMemory_SmartAllocate(1+ strnlen_s(metadata, 512));
+		strcpy_s(ltms->metadata, ILibMemory_Size(ltms->metadata), metadata);
+	}
 
 	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
 
@@ -7372,7 +7444,19 @@ void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int ms, ILibLife
 	if (LifeTimeMonitor->NextTriggerTick > ltms->ExpirationTick || LifeTimeMonitor->NextTriggerTick == -1) LifeTimeMonitor->NextTriggerTick = ltms->ExpirationTick;
 
 	ILibLinkedList_UnLock(LifeTimeMonitor->ObjectList);
+	return((void*)ltms);
 }
+
+void ILibLifeTime_SetMetadata(ILibLifeTime_Token obj, char *metadata, size_t metadataLen)
+{
+	LifeTimeMonitorData *data = (LifeTimeMonitorData*)obj;
+	if (metadataLen == 0) { metadataLen = strnlen_s(metadata, 512); }
+	size_t oldLen = data->metadata != NULL ? (ILibMemory_Size(data->metadata)-1) : 0;
+	char *val = (char*)ILibMemory_SmartReAllocate(data->metadata, oldLen + metadataLen + 3);
+	sprintf_s(val + oldLen, ILibMemory_Size(val) - oldLen, "%s%s", oldLen>0?", ":"", metadata);
+	data->metadata = val;
+}
+
 
 //
 // An internal method used by the ILibLifeTime methods
@@ -7464,7 +7548,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 			//
 			if (EVT->DestroyPtr != NULL) { EVT->DestroyPtr(EVT->data); }
 		}
-
+		ILibMemory_Free(EVT->metadata);
 		free(EVT);
 		node = ILibQueue_DeQueue(EventQueue);
 	}
@@ -7530,6 +7614,7 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 	while (evt != NULL)
 	{
 		if (evt->DestroyPtr != NULL) {evt->DestroyPtr(evt->data);}
+		ILibMemory_Free(evt->metadata);
 		free(evt);
 		evt = (struct LifeTimeMonitorData*)ILibQueue_DeQueue(EventQueue);
 	}

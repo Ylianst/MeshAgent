@@ -1050,6 +1050,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void *ILibChain_GetObjectForDescriptor(void *chain, int fd);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 	char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
+	char *ILibChain_GetMetadataForTimers(void *chain);
 #ifdef WIN32
 	typedef void(*ILib_GenericReadHandler)(char *buffer, int bufferLen, DWORD* bytesConsumed, void* user1, void *user2);
 	typedef BOOL(*ILibChain_ReadEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
@@ -1361,13 +1362,17 @@ int ILibIsRunningOnChainThread(void* chain);
 	*/
 
 	typedef void(*ILibLifeTime_OnCallback)(void *obj);
-
+	typedef void* ILibLifeTime_Token;
 	//
 	// Adds an event trigger to be called after the specified time elapses, with the
 	// specified data object
 	//
-#define ILibLifeTime_Add(LifetimeMonitorObject, data, seconds, Callback, Destroy) ILibLifeTime_AddEx(LifetimeMonitorObject, data, seconds * 1000, Callback, Destroy)
-	void ILibLifeTime_AddEx(void *LifetimeMonitorObject,void *data, int milliseconds, ILibLifeTime_OnCallback Callback, ILibLifeTime_OnCallback Destroy);
+	ILibLifeTime_Token ILibLifeTime_AddEx4(void *LifetimeMonitorObject, void *data, int milliseconds, ILibLifeTime_OnCallback Callback, ILibLifeTime_OnCallback Destroy, char *file, uint32_t line, char *metadata);
+	#define ILibLifeTime_AddEx3(LifetimeMonitorObject, data, milliseconds, Callback, Destroy, metadata) ILibLifeTime_AddEx4(LifetimeMonitorObject, data, milliseconds, Callback, Destroy, __FILE__, __LINE__, metadata)
+	#define ILibLifeTime_AddEx2(LifetimeMonitorObject, data, milliseconds, Callback, Destroy, file, line) ILibLifeTime_AddEx4(LifetimeMonitorObject, data, milliseconds, Callback, Destroy, file, line, NULL)
+	#define ILibLifeTime_Add(LifetimeMonitorObject, data, seconds, Callback, Destroy) ILibLifeTime_AddEx(LifetimeMonitorObject, data, seconds * 1000, Callback, Destroy)
+	#define ILibLifeTime_AddEx(LifetimeMonitorObject, data, milliseconds, Callback, Destroy) ILibLifeTime_AddEx2(LifetimeMonitorObject, data, milliseconds, Callback, Destroy, __FILE__, __LINE__)
+	void ILibLifeTime_SetMetadata(ILibLifeTime_Token obj, char *metadata, size_t metadataLen);
 
 	//
 	// Removes all event triggers that contain the specified data object.
