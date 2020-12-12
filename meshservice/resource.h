@@ -15,9 +15,16 @@
 #define IDC_POLICYTEXT                  1008
 #define IDC_UNINSTALLBUTTON2            1009
 #define IDC_CONNECTBUTTON               1009
+#define IDC_AGENTSTATUS_TEXT            1010
 #define IDC_HASHTEXT3                   1011
 #define IDC_SERVERID                    1011
 #define IDC_SERVERLOCATION              1012
+#define IDC_AGENT_VERSION               1013
+#define IDC_SERVER_LOCATION             1014
+#define IDC_MESH_NAME                   1015
+#define IDC_MESH_IDENTIFIER             1016
+#define IDC_SERVER_IDENTIFIER           1017
+#define IDC_DESCRIPTION                 1018
 
 // Next default values for new objects
 // 
@@ -25,7 +32,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        106
 #define _APS_NEXT_COMMAND_VALUE         40001
-#define _APS_NEXT_CONTROL_VALUE         1006
+#define _APS_NEXT_CONTROL_VALUE         1019
 #define _APS_NEXT_SYMED_VALUE           101
 #endif
 #endif

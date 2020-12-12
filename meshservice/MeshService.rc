@@ -104,22 +104,22 @@ CAPTION "Mesh Agent v2"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     PUSHBUTTON      "Close",IDCANCEL,260,127,50,14
-    LTEXT           "Click the buttons below to install or uninstall the mesh agent. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.",IDC_STATIC,7,7,275,28
+    LTEXT           "Click the buttons below to install or uninstall the mesh agent. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.",IDC_DESCRIPTION,7,7,275,28
     GROUPBOX        "Installation Information",IDC_STATIC,7,38,303,87
     PUSHBUTTON      "Install / Update",IDC_INSTALLBUTTON,7,127,65,14
     PUSHBUTTON      "Uninstall",IDC_UNINSTALLBUTTON,75,127,65,14
     ICON            IDI_ICON1,IDC_STATIC,288,7,20,20
-    LTEXT           "Current Agent Status",IDC_STATIC,14,51,70,8
+    LTEXT           "Current Agent Status",IDC_AGENTSTATUS_TEXT,14,51,70,8
     LTEXT           "Unknown",IDC_STATUSTEXT,127,51,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Agent Version",IDC_STATIC,14,63,62,8
+    LTEXT           "New Agent Version",IDC_AGENT_VERSION,14,63,62,8
     LTEXT           "Unknown",IDC_VERSIONTEXT,127,63,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Mesh Identifier",IDC_STATIC,14,99,65,8
+    LTEXT           "New Mesh Identifier",IDC_MESH_IDENTIFIER,14,99,65,8
     LTEXT           "Unknown",IDC_HASHTEXT,127,99,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Mesh Name",IDC_STATIC,14,87,54,8
+    LTEXT           "New Mesh Name",IDC_MESH_NAME,14,87,54,8
     LTEXT           "Unknown",IDC_POLICYTEXT,127,87,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Server Identifier",IDC_STATIC,14,111,70,8
+    LTEXT           "New Server Identifier",IDC_SERVER_IDENTIFIER,14,111,70,8
     LTEXT           "Unknown",IDC_SERVERID,127,111,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Server Location",IDC_STATIC,14,75,67,8
+    LTEXT           "New Server Location",IDC_SERVER_LOCATION,14,75,67,8
     LTEXT           "Unknown",IDC_SERVERLOCATION,127,75,175,8,0,WS_EX_RIGHT
     PUSHBUTTON      "Connect",IDC_CONNECTBUTTON,143,127,65,14
 END

@@ -96,8 +96,12 @@ limitations under the License.
             EN_US:
                 {
                     agent: 'Agent',
+                    agentVersion: 'New Agent Version',
                     group: 'Device Group',
                     url: 'Server URL',
+                    meshName: 'Mesh Name',
+                    meshId: 'Mesh Identifier',
+                    serverId: 'Server Identifier',
                     setup: 'Setup',
                     update: 'Update',
                     install: 'Install',
@@ -112,13 +116,19 @@ limitations under the License.
                     commands: 'You can run the text version from the command line with the following command(s)',
                     graphicalerror: 'The graphical version of this installer canot run on this system',
                     zenity: 'Try installing/updating Zenity, and run again',
-                    status: ['NOT INSTALLED', 'RUNNING', 'NOT RUNNING']
+                    status: ['NOT INSTALLED', 'RUNNING', 'NOT RUNNING'],
+                    statusDescription: 'Current Agent Status',
+                    description: 'Click the buttons below to install or uninstall the mesh agent. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.'
                 },
             KO_KR:
                 {
                     agent: '에이전트',
+                    agentVersion: '새에이전트 버전',
                     group: '장치 그룹',
-                    url: '서버 위치',
+                    url: '서버의 위치',
+                    meshName: '메시의 이름',
+                    meshId: '메시의 식별자',
+                    serverId: '서버의 식별자',
                     setup: '설정하다',
                     update: '개조하다',
                     install: '설치하려면',
@@ -133,7 +143,9 @@ limitations under the License.
                     commands: '다음 명령을 사용하여 콘솔에서 텍스트 버전을 실행할 수 있습니다',
                     graphicalerror: '이 프로그램의 그래픽 버전이 시스템에서 실행할 수 없습니다',
                     zenity: '"Zenity"를 설치 또는 업데이트하고 다시 시도하십시오',
-                    status: ['없다', '운영', '중지됨']
+                    status: ['없다', '운영', '중지됨'],
+                    statusDescription: '에이전트 상태',
+                    description: '메시 에이전트를 설치 또는 제거하려면 아래 버튼을 클릭하십시오. 이 프로그램은 설치하면 백그라운드에서 실행되므로 원격 관리자가이 컴퓨터를 관리하고 제어 할 수 있습니다.'
                 }
         };
 
@@ -224,7 +236,11 @@ limitations under the License.
         console.log(JSON.stringify(msh, null, 2));
         process.exit();
     }
-
+    if (process.argv.includes('-translations'))
+    {
+        console.log(JSON.stringify(translation));
+        process.exit();
+    }
     if (process.argv.includes('-help'))
     {
         console.log("\n" + translation[lang].commands + ": ");

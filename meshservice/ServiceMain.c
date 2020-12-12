@@ -62,7 +62,7 @@ MeshAgentHostContainer *agent = NULL;
 DWORD g_serviceArgc;
 char **g_serviceArgv;
 extern int gRemoteMouseRenderDefault;
-
+char *DIALOG_LANG = NULL;
 
 /*
 extern int g_TrustedHashSet;
@@ -809,6 +809,8 @@ int wmain(int argc, char* wargv[])
 	}
 	else
 	{
+		int skip = 0;
+
 		// See if we are running as a service
 		if (RunService(argc, argv) == 0 && GetLastError() == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT)
 		{
@@ -832,6 +834,36 @@ int wmain(int argc, char* wargv[])
 			}
 			else
 			{
+				if (argc == 2 && strcmp(argv[1], "-lang") == 0)
+				{
+					char *lang = NULL;
+					char selfexe[_MAX_PATH];
+					WCHAR wselfexe[MAX_PATH];
+					GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
+					ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
+
+
+					void *dialogchain = ILibCreateChain();
+					ILibChain_PartialStart(dialogchain);
+					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
+					if (duk_peval_string(ctx, "require('util-language').current.toUpperCase().split('-').join('_');") == 0) 
+					{
+						lang = (char*)duk_safe_to_string(ctx, -1);
+						printf("Current Language: %s\n", lang);
+					}
+
+					Duktape_SafeDestroyHeap(ctx);
+					ILibStopChain(dialogchain);
+					ILibStartChain(dialogchain);
+					argc = 1;
+					skip = 1;
+				}
+				if (argc == 2 && strlen(argv[1]) > 6 && strncmp(argv[1], "-lang=", 6) == 0)
+				{
+					DIALOG_LANG = argv[1] + 1 + ILibString_IndexOf(argv[1], strlen(argv[1]), "=", 1);
+					argc = 1;
+				}
+
 				if (argc != 1)
 				{
 					printf("Mesh Agent available switches:\r\n");
@@ -854,7 +886,7 @@ int wmain(int argc, char* wargv[])
 					printf("     --WebProxy=\"http://proxyhost:port\"      Specify an HTTPS proxy.\r\n");
 					printf("     --agentName=\"alternate name\"            Specify an alternate name to be provided by the agent.\r\n");
 				}
-				else
+				else if(skip==0)
 				{
 					// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
 					FreeConsole();
@@ -879,7 +911,7 @@ int wmain(int argc, char* wargv[])
 						SetProcessDPIAware();
 					}
 
-					DialogBox(NULL, MAKEINTRESOURCE(IDD_INSTALLDIALOG), NULL, DialogHandler);
+					DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
 				}
 			}
 		}
@@ -967,6 +999,35 @@ char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** mesh
 
 #ifndef _MINCORE
 
+WCHAR *Dialog_GetTranslationEx(void *ctx, char *utf8)
+{
+	WCHAR *ret = NULL;
+	if (utf8 != NULL)
+	{
+		int wlen = ILibUTF8ToWideCount(utf8);
+		ret = (WCHAR*)Duktape_PushBuffer(ctx, sizeof(WCHAR)*wlen + 1);
+		duk_swap_top(ctx, -2);
+		ILibUTF8ToWideEx(utf8, -1, ret, wlen);
+	}
+	return(ret);
+}
+WCHAR *Dialog_GetTranslation(void *ctx, char *property)
+{
+	WCHAR *ret = NULL;
+	char *utf8 = Duktape_GetStringPropertyValue(ctx, -1, property, NULL);
+	if (utf8 != NULL)
+	{
+		int wlen = ILibUTF8ToWideCount(utf8);
+		ret = (WCHAR*)Duktape_PushBuffer(ctx, sizeof(WCHAR)*wlen + 1);
+		duk_swap_top(ctx, -2);
+		ILibUTF8ToWideEx(utf8, -1, ret, wlen);
+	}
+	return(ret);
+}
+
+WCHAR closeButtonText[255] = { 0 };
+int closeButtonTextSet = 0;
+
 // Message handler for dialog box.
 INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -979,15 +1040,84 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		{
 			char selfexe[_MAX_PATH];
 			char *lang = NULL;
-			void *chain = ILibCreateChain();
-			ILibChain_PartialStart(chain);
-			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, chain, NULL, NULL, "", NULL, NULL, chain);
-			if (duk_peval_string(ctx, "require('util-language').current;") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+
+			WCHAR *agentstatus = NULL;
+			WCHAR *agentversion = NULL;
+			WCHAR *serverlocation = NULL;
+			WCHAR *meshname = NULL;
+			WCHAR *meshidentitifer = NULL;
+			WCHAR *serveridentifier = NULL;
+			WCHAR *dialogdescription = NULL;
+			WCHAR *install_buttontext = NULL;
+			WCHAR *update_buttontext = NULL;
+			WCHAR *uninstall_buttontext = NULL;
+			WCHAR *connect_buttontext = NULL;
+			WCHAR *cancel_buttontext = NULL;
+			WCHAR *disconnect_buttontext = NULL;
+			WCHAR *state_notinstalled = NULL;
+			WCHAR *state_running = NULL;
+			WCHAR *state_notrunning = NULL;
 
 			// Get current executable path
 			WCHAR wselfexe[MAX_PATH];
 			GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
 			ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
+
+			void *dialogchain = ILibCreateChain();
+			ILibChain_PartialStart(dialogchain);
+			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
+			if (duk_peval_string(ctx, "require('util-language').current.toUpperCase().split('-').join('_');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") == 0)
+			{
+				if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
+				if (duk_has_prop_string(ctx, -1, lang))
+				{
+					duk_get_prop_string(ctx, -1, lang);
+
+					agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
+					if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
+
+					agentversion = Dialog_GetTranslation(ctx, "agentVersion");
+					if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
+
+					serverlocation = Dialog_GetTranslation(ctx, "url");
+					if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
+
+					meshname = Dialog_GetTranslation(ctx, "meshName");
+					if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
+
+					meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
+					if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
+
+					serveridentifier = Dialog_GetTranslation(ctx, "serverId");
+					if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
+
+					dialogdescription = Dialog_GetTranslation(ctx, "description");
+					if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_DESCRIPTION), dialogdescription); }
+
+					install_buttontext = Dialog_GetTranslation(ctx, "install");
+					update_buttontext = Dialog_GetTranslation(ctx, "update");
+					uninstall_buttontext = Dialog_GetTranslation(ctx, "uninstall");
+					cancel_buttontext = Dialog_GetTranslation(ctx, "cancel");
+					disconnect_buttontext = Dialog_GetTranslation(ctx, "disconnect");
+					if (disconnect_buttontext != NULL)
+					{
+						wcscpy_s(closeButtonText, sizeof(closeButtonText) / 2, disconnect_buttontext);
+						closeButtonTextSet = 1;
+					}
+
+					if (uninstall_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext); }
+					connect_buttontext = Dialog_GetTranslation(ctx, "connect");
+					if (connect_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext); }
+					if (cancel_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCANCEL), cancel_buttontext); }
+
+					duk_get_prop_string(ctx, -1, "status");	// [Array]
+					state_notinstalled = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL));
+					state_running = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL));
+					state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
+				}
+			}
+
 			fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
 			{
 				DWORD               dwSize = 0;
@@ -1073,46 +1203,29 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			// Get the current service running state
 			int r = GetServiceState(meshServiceName != NULL ? meshServiceName : serviceFile);
-			char* txt = "";
-			SetWindowTextA(GetDlgItem(hDlg, IDC_INSTALLBUTTON), "Update");
+			SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), update_buttontext);
 
 			switch (r)
 			{
-			case 0:
-				txt = "Error";
-				break;
-			case SERVICE_STOPPED:
-				txt = "Stopped";
-				break;
-			case SERVICE_START_PENDING:
-				txt = "Start Pending";
-				break;
-			case SERVICE_STOP_PENDING:
-				txt = "Stop Pending";
-				break;
-			case SERVICE_RUNNING:
-				txt = "Running";
-				break;
-			case SERVICE_CONTINUE_PENDING:
-				txt = "Continue Pending";
-				break;
-			case SERVICE_PAUSE_PENDING:
-				txt = "Pause Pending";
-				break;
-			case SERVICE_PAUSED:
-				txt = "Paused";
-				break;
-			case 100:
-				txt = "Not Installed";
-				ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
-				SetWindowTextA(GetDlgItem(hDlg, IDC_INSTALLBUTTON), "Install");
-				break;
+				case SERVICE_RUNNING:
+					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_running);
+					break;
+				case 0:
+				case 100: // Not installed
+					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notinstalled);
+					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
+					SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), install_buttontext);
+					break;
+				default: // Not running
+					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notrunning);
+					break;
 			}
-			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), txt);
+
+
 			if (mshfile != NULL) { free(mshfile); }
 			Duktape_SafeDestroyHeap(ctx);
-			ILibStopChain(chain);
-			ILibStartChain(chain);
+			ILibStopChain(dialogchain);
+			ILibStartChain(dialogchain);
 			return (INT_PTR)TRUE;
 		}
 	case WM_COMMAND:
@@ -1175,6 +1288,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			DWORD pid = GetCurrentProcessId();
 			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u", pid);
 			if (RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE) == 0) { RunAsAdmin(ILibScratchPad, 1); }
+
+			if (closeButtonTextSet != 0) { SetWindowTextW(GetDlgItem(hDlg, IDCANCEL), closeButtonText); }
 			return (INT_PTR)TRUE;
 		}
 		break;
