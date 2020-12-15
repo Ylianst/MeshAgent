@@ -241,6 +241,7 @@ typedef struct MeshAgentHostContainer
 	char **execparams;
 	char *meshServiceName;
 	char *displayName;
+	int serviceReserved;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

@@ -220,6 +220,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		__try
 		{
 			agent = MeshAgent_Create(0);
+			agent->serviceReserved = 1;
 			MeshAgent_Start(agent, g_serviceArgc, g_serviceArgv);
 			agent = NULL;
 		}
@@ -1164,7 +1165,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				}
 			}
 
-			if ((mshfile = getMshSettings(fileName, selfexe, &meshname, &meshid, &serverid, &serverurl, &installFlags, &displayName, &meshServiceName)) != NULL)
+			char *meshnameA;
+			if ((mshfile = getMshSettings(fileName, selfexe, &meshnameA, &meshid, &serverid, &serverurl, &installFlags, &displayName, &meshServiceName)) != NULL)
 			{
 				// Set text in the dialog box
 				int installFlagsInt = 0;
@@ -1173,7 +1175,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
 				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
 				if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
-				SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshid != NULL) ? meshname : "(None)", -1));
+				SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshid != NULL) ? meshnameA : "(None)", -1));
 				SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
 				SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");

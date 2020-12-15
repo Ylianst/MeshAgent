@@ -1740,6 +1740,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 	duk_put_prop_string(ctx, -2, MESH_AGENT_SINGLETON);			// [MeshAgent][stash]
 	duk_pop(ctx);												// [MeshAgent]
 
+	ILibDuktape_CreateReadonlyProperty_int(ctx, "serviceReserved", agent->serviceReserved);
+
 	emitter = ILibDuktape_EventEmitter_Create(ctx);
 	duk_push_boolean(ctx, agent->agentMode);
 	ILibDuktape_CreateReadonlyProperty(ctx, "agentMode");
@@ -4524,6 +4526,29 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	if (duk_peval_string(tmpCtx, "require('user-sessions').isRoot();") == 0)
 	{
 		agentHost->JSRunningWithAdmin = duk_get_boolean(tmpCtx, -1);
+	}
+
+	if (agentHost->JSRunningAsService == 0 && agentHost->serviceReserved != 0)
+	{
+		// We are definitely running as a service, but the check failed. We must be configured with the wrong service name
+
+#ifdef WIN32
+		// First, let's enumerate 'LocalMachine/SOFTWARE/Open Source' to see if we can find the correct service name
+		if (duk_peval_string(tmpCtx, "require('util-service-check')()") == 0)
+		{
+			if (!duk_is_null_or_undefined(tmpCtx, -1))
+			{
+				duk_size_t actualnameLen;
+				char *actualname = (char*)duk_safe_to_lstring(tmpCtx, -1, &actualnameLen);
+				ILIBLOGMESSAGEX("Service Name Conflict: Configured [%s] but is actually [%s]", agentHost->meshServiceName, actualname);
+
+				ILibMemory_Free(agentHost->meshServiceName);
+				agentHost->meshServiceName = ILibMemory_SmartAllocate(actualnameLen + 1);
+				memcpy_s(agentHost->meshServiceName, ILibMemory_Size(agentHost->meshServiceName), actualname, actualnameLen);
+				agentHost->JSRunningAsService = 1;
+			}
+		}
+#endif
 	}
 #endif
 #if !defined(MICROSTACK_NOTLS)
