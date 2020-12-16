@@ -424,9 +424,9 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 
 	duk_size_t bufferSize;
 	char *buffer = Duktape_GetBuffer(ctx, 1, &bufferSize);
-	int offset = Duktape_GetIntPropertyValue(ctx, 2, "offset", 0);
-	int length = Duktape_GetIntPropertyValue(ctx, 2, "length", (int)bufferSize);
-	int position = Duktape_GetIntPropertyValue(ctx, 2, "position", -1);
+	int offset = narg > 2 ? Duktape_GetIntPropertyValue(ctx, 2, "offset", 0) : 0;
+	int length = narg > 2 ? Duktape_GetIntPropertyValue(ctx, 2, "length", (int)bufferSize) : (int)bufferSize;
+	int position = narg > 2 ? Duktape_GetIntPropertyValue(ctx, 2, "position", -1) : -1;
 	int bytesRead;
 	FILE *f = ILibDuktape_fs_getFilePtr(ctx, duk_require_int(ctx, 0));
 
