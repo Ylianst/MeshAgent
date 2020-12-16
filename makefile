@@ -415,6 +415,12 @@ CFLAGS += -DMICROSTACK_TLS_DETECT
 LDEXTRA += -lssl -lcrypto
 endif
 
+ifeq ($(DYNAMICTLS),1)
+LINUXSSL = 
+MACSSL = 
+BSDSSL = 
+endif
+
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
 CFLAGS += -g -D_DEBUG 
