@@ -54,6 +54,11 @@ typedef struct ILibDuktape_readableStream
 #endif
 	int endRelayed;
 	int pipeInProgress;
+#ifdef WIN32
+	DWORD pipedThreadID;
+#else
+	pthread_t pipedThreadID;
+#endif
 	int unpipeInProgress;
 	int bypassValue;
 	int noPropagateEnd;
