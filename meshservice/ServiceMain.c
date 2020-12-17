@@ -1067,7 +1067,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			void *dialogchain = ILibCreateChain();
 			ILibChain_PartialStart(dialogchain);
 			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
-			if (duk_peval_string(ctx, "require('util-language').current.toUpperCase().split('-').join('_');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+			if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
 			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") == 0)
 			{
 				if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
