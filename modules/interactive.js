@@ -29,6 +29,67 @@ limitations under the License.
             msh[tokens[0]] = tokens[1];
         }
     }
+    if (msh.translation == null)
+    {
+        msh.translation = JSON.stringify(
+            {
+                en:
+                    {
+                        agent: 'Agent',
+                        agentVersion: 'New Agent Version',
+                        group: 'Device Group',
+                        url: 'Server URL',
+                        meshName: 'Mesh Name',
+                        meshId: 'Mesh Identifier',
+                        serverId: 'Server Identifier',
+                        setup: 'Setup',
+                        update: 'Update',
+                        install: 'Install',
+                        uninstall: 'Uninstall',
+                        connect: 'Connect',
+                        disconnect: 'Disconnect',
+                        cancel: 'Cancel',
+                        pressok: 'Press OK to disconnect',
+                        elevation: 'Elevated permissions is required to install/uninstall the agent.',
+                        sudo: 'Please try again with sudo.',
+                        ctrlc: 'Press Ctrl-C to exit.',
+                        commands: 'You can run the text version from the command line with the following command(s)',
+                        graphicalerror: 'The graphical version of this installer canot run on this system',
+                        zenity: 'Try installing/updating Zenity, and run again',
+                        status: ['NOT INSTALLED', 'RUNNING', 'NOT RUNNING'],
+                        statusDescription: 'Current Agent Status',
+                        description: 'Click the buttons below to install or uninstall the mesh agent. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.'
+                    },
+                ko:
+                    {
+                        agent: '에이전트',
+                        agentVersion: '새에이전트 버전',
+                        group: '장치 그룹',
+                        url: '서버의 위치',
+                        meshName: '메시의 이름',
+                        meshId: '메시의 식별자',
+                        serverId: '서버의 식별자',
+                        setup: '설정하다',
+                        update: '개조하다',
+                        install: '설치하려면',
+                        uninstall: '제거하다',
+                        connect: '연결하려면',
+                        disconnect: '연결 해제',
+                        cancel: '취소하다',
+                        pressok: '연결을 끊으려면 "OK"를 누르십시오',
+                        elevation: '관리자 권한은 에이전트 제거 / 설치하는 데 필요',
+                        sudo: '"sudo"로 다시 시도하십시오',
+                        ctrlc: '종료하려면 "Ctrl-C"를 누르십시오.',
+                        commands: '다음 명령을 사용하여 콘솔에서 텍스트 버전을 실행할 수 있습니다',
+                        graphicalerror: '이 프로그램의 그래픽 버전이 시스템에서 실행할 수 없습니다',
+                        zenity: '"Zenity"를 설치 또는 업데이트하고 다시 시도하십시오',
+                        status: ['없다', '운영', '중지됨'],
+                        statusDescription: '에이전트 상태',
+                        description: '메시 에이전트를 설치 또는 제거하려면 아래 버튼을 클릭하십시오. 이 프로그램은 설치하면 백그라운드에서 실행되므로 원격 관리자가이 컴퓨터를 관리하고 제어 할 수 있습니다.'
+                    }
+            });
+    }
+
 
     var js = require('fs').readFileSync('modules/interactive.js').toString().split('/*****/');
     js.splice(1, 2, 'var msh = ' + JSON.stringify(msh, null, 1) + ';');
@@ -90,71 +151,12 @@ limitations under the License.
             }
         });
 
-    // The folloing line just below needs to stay exactly like this since MeshCentral will replace it with the correct settings
-    var translation =
-        {
-            EN_US:
-                {
-                    agent: 'Agent',
-                    agentVersion: 'New Agent Version',
-                    group: 'Device Group',
-                    url: 'Server URL',
-                    meshName: 'Mesh Name',
-                    meshId: 'Mesh Identifier',
-                    serverId: 'Server Identifier',
-                    setup: 'Setup',
-                    update: 'Update',
-                    install: 'Install',
-                    uninstall: 'Uninstall',
-                    connect: 'Connect',
-                    disconnect: 'Disconnect',
-                    cancel: 'Cancel',
-                    pressok: 'Press OK to disconnect',
-                    elevation: 'Elevated permissions is required to install/uninstall the agent.',
-                    sudo: 'Please try again with sudo.',
-                    ctrlc: 'Press Ctrl-C to exit.',
-                    commands: 'You can run the text version from the command line with the following command(s)',
-                    graphicalerror: 'The graphical version of this installer canot run on this system',
-                    zenity: 'Try installing/updating Zenity, and run again',
-                    status: ['NOT INSTALLED', 'RUNNING', 'NOT RUNNING'],
-                    statusDescription: 'Current Agent Status',
-                    description: 'Click the buttons below to install or uninstall the mesh agent. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.'
-                },
-            KO_KR:
-                {
-                    agent: '에이전트',
-                    agentVersion: '새에이전트 버전',
-                    group: '장치 그룹',
-                    url: '서버의 위치',
-                    meshName: '메시의 이름',
-                    meshId: '메시의 식별자',
-                    serverId: '서버의 식별자',
-                    setup: '설정하다',
-                    update: '개조하다',
-                    install: '설치하려면',
-                    uninstall: '제거하다',
-                    connect: '연결하려면',
-                    disconnect: '연결 해제',
-                    cancel: '취소하다',
-                    pressok: '연결을 끊으려면 "OK"를 누르십시오',
-                    elevation: '관리자 권한은 에이전트 제거 / 설치하는 데 필요',
-                    sudo: '"sudo"로 다시 시도하십시오',
-                    ctrlc: '종료하려면 "Ctrl-C"를 누르십시오.',
-                    commands: '다음 명령을 사용하여 콘솔에서 텍스트 버전을 실행할 수 있습니다',
-                    graphicalerror: '이 프로그램의 그래픽 버전이 시스템에서 실행할 수 없습니다',
-                    zenity: '"Zenity"를 설치 또는 업데이트하고 다시 시도하십시오',
-                    status: ['없다', '운영', '중지됨'],
-                    statusDescription: '에이전트 상태',
-                    description: '메시 에이전트를 설치 또는 제거하려면 아래 버튼을 클릭하십시오. 이 프로그램은 설치하면 백그라운드에서 실행되므로 원격 관리자가이 컴퓨터를 관리하고 제어 할 수 있습니다.'
-                }
-        };
-
-
-
     // The folloing line just below with 'msh=' needs to stay exactly like this since MeshCentral will replace it with the correct settings.
     //var msh = {};
+    var translation = JSON.parse(msh.translation);
+
     var lang = require('util-language').current;
-    if (lang == null || translation[lang] == null) { lang = 'EN_US'; }
+    if (lang == null) { lang = 'en'; }
     if (process.argv.getParameter('lang', lang) == null)
     {
         console.log('\nCurrent Language: ' + lang + '\n');
@@ -162,13 +164,31 @@ limitations under the License.
     }
     else
     {
-        lang = process.argv.getParameter('lang', lang).toUpperCase();
-        if(translation[lang] == null)
+        lang = process.argv.getParameter('lang', lang).toLowerCase();
+        lang = lang.split('_').join('-');
+        if (translation[lang] == null)
         {
-            console.log('Language: ' + lang + ' is not translated.');
-            process.exit();
+            if (translation[lang.split('-')[0]] == null)
+            {
+                console.log('Language: ' + lang + ' is not translated.');
+                process.exit();
+            }
+            else
+            {
+                lang = lang.split('-')[0];
+            }
         }
     }
+
+    if (lang != 'en')
+    {
+        for (var i in translation['en'])
+        {
+            // If translated entries are missing, substitute the english translation
+            if (translation[lang][i] == null) { translation[lang][i] = translation['en'][i]; }
+        }
+    }
+
 
     var displayName = msh.displayName ? msh.displayName : 'MeshCentral Agent';
     var s = null, buttons = [translation[lang].cancel], skip = false;
@@ -367,7 +387,7 @@ limitations under the License.
     if (!skip)
     {
         if (!s)
-        {    
+        {
             msg = translation[lang].agent + ": " + translation[lang].status[0] + '\n';
         } else
         {
