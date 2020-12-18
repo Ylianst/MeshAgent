@@ -1881,7 +1881,6 @@ char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBa
 {
 	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
 	size_t basePathLen = strnlen_s(basePath, sizeof(ILibScratchPad2) - 4);
-	size_t localPathLen = strnlen_s(localPath, sizeof(ILibScratchPad2) - 4);
 	size_t len;
 
 	if (agent != NULL && agent->configPathUsesCWD != 0)
