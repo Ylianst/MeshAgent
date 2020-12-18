@@ -1094,6 +1094,10 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				lang = (char*)duk_safe_to_string(ctx, -1);
 				duk_dup(ctx, -4);							// [obj][string][array][string][obj]
 			}
+			if (!duk_has_prop_string(ctx, -1, lang))
+			{
+				lang = "en";
+			}
 
 			if (duk_has_prop_string(ctx, -1, lang))
 			{
