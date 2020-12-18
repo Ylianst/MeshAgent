@@ -1880,36 +1880,50 @@ End Mesh Agent Duktape Abstraction
 char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBackSlash)
 {
 	MeshAgentHostContainer *agent = ILibMemory_CanaryOK(basePath) ? ((MeshAgentHostContainer**)ILibMemory_Extra(basePath))[0] : NULL;
-	duk_context *ctx = (agent != NULL && agent->meshCoreCtx != NULL) ? agent->meshCoreCtx : ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(SCRIPT_ENGINE_NONE, 0, agent!=NULL?agent->chain:NULL, NULL, NULL, agent!=NULL?agent->exePath: basePath, NULL, NULL, agent!=NULL?agent->chain:NULL);
+	size_t basePathLen = strnlen_s(basePath, sizeof(ILibScratchPad2) - 4);
+	size_t localPathLen = strnlen_s(localPath, sizeof(ILibScratchPad2) - 4);
+	size_t len;
+	char *wd;
 
-	if (duk_peval_string(ctx, "require('util-pathHelper');") == 0)				// [helper]
+	if (agent != NULL && agent->configPathUsesCWD != 0)
 	{
-		duk_push_string(ctx, basePath);											// [helper][basePath]
-		duk_push_string(ctx, localPath);										// [helper][basePath][localPath]
-		duk_push_boolean(ctx, agent!=NULL?(agent->configPathUsesCWD != 0):0);	// [helper][basePath][localPath][bool]
-		if (duk_pcall(ctx, 3) == 0)												// [result]
-		{
-			if (escapeBackSlash != 0)
-			{
-				duk_string_split(ctx, -1, "\\");								// [result][array]
-				duk_array_join(ctx, -1, "\\\\");								// [result][array][string]
-				duk_remove(ctx, -2);											// [result][string]
-				duk_remove(ctx, -2);											// [string]
-			}
-			duk_size_t len;
-			char *buffer = Duktape_GetBuffer(ctx, -1, &len);
-			if (len < sizeof(ILibScratchPad2))
-			{
-				ILibScratchPad2[len] = 0;
-				memcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), buffer, len);
-				duk_pop(ctx);											// ...
-				if (agent == NULL || agent->meshCoreCtx == NULL) { Duktape_SafeDestroyHeap(ctx); }
-				return(ILibScratchPad2);
-			}
-		}
+#ifdef WIN32
+		int i = ILibString_LastIndexOf(basePath, basePathLen, "\\", 1) + 1;
+		wd = ILibWideToUTF8((LPWSTR)ILibScratchPad2, GetCurrentDirectoryW(sizeof(ILibScratchPad2) / 2, (LPWSTR)ILibScratchPad2));
+		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s\\%s", wd, basePath + i);
+#else
+		int i = ILibString_LastIndexOf(basePath, basePathLen, "/", 1) + 1;
+		getcwd(ILibScratchPad, sizeof(ILibScratchPad));
+		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s/%s", ILibScratchPad, basePath + i);
+#endif
+	}
+	else
+	{
+		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s", basePath);
 	}
 
-	ILIBCRITICALEXITMSG(254, "PATH MANIPULATION ERROR");
+	len = strnlen_s(ILibScratchPad2, sizeof(ILibScratchPad2));
+	if (localPath[0] == '.')
+	{
+#ifndef WIN32
+		sprintf_s(ILibScratchPad2 + len, sizeof(ILibScratchPad2) - len, "%s", localPath);
+#else
+		int i = ILibString_LastIndexOf(ILibScratchPad2, len, ".", 1);
+		sprintf_s(ILibScratchPad2 + i, sizeof(ILibScratchPad2) - i, "%s", localPath);
+#endif
+	}
+	else
+	{
+#ifdef WIN32
+		int i = ILibString_LastIndexOf(ILibScratchPad2, len, "\\", 1) + 1;
+#else
+		int i = ILibString_LastIndexOf(ILibScratchPad2, len, "/", 1) + 1;
+#endif
+		sprintf_s(ILibScratchPad2 + i, sizeof(ILibScratchPad2) - i, "%s", localPath);
+	}
+
+	//printf("MeshAgent_MakeAbsolutePathEx[%s,%s] = %s\n", basePath, localPath, ILibScratchPad2);
+	return(ILibScratchPad2);
 }
 
 #ifndef MICROSTACK_NOTLS

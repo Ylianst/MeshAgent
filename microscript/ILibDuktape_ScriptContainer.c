@@ -2552,7 +2552,13 @@ extern void ILibDuktape_HttpStream_Init(duk_context *ctx);
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal()
 {
 	ILibDuktape_ContextData *ctxd = (ILibDuktape_ContextData*)ILibMemory_SmartAllocate(sizeof(ILibDuktape_ContextData));
+#ifndef MICROSTACK_NOTLS
+	util_openssl_init();
+#endif
 	do { util_random(sizeof(ctxd->nonce), (char*)&(ctxd->nonce)); } while (ctxd->nonce == 0);
+#ifndef MICROSTACK_NOTLS
+	util_openssl_uninit();
+#endif
 	ctxd->threads = ILibLinkedList_Create();
 
 	duk_context *ctx = duk_create_heap(ILibDuktape_ScriptContainer_Engine_malloc, ILibDuktape_ScriptContainer_Engine_realloc, ILibDuktape_ScriptContainer_Engine_free, ctxd, ILibDuktape_ScriptContainer_Engine_fatal);

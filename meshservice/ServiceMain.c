@@ -1068,56 +1068,80 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			ILibChain_PartialStart(dialogchain);
 			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
 			if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
-			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") == 0)
+			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0)
 			{
-				if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
-				if (duk_has_prop_string(ctx, -1, lang))
-				{
-					duk_get_prop_string(ctx, -1, lang);
-
-					agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
-					if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
-
-					agentversion = Dialog_GetTranslation(ctx, "agentVersion");
-					if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
-
-					serverlocation = Dialog_GetTranslation(ctx, "url");
-					if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
-
-					meshname = Dialog_GetTranslation(ctx, "meshName");
-					if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
-
-					meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
-					if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
-
-					serveridentifier = Dialog_GetTranslation(ctx, "serverId");
-					if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
-
-					dialogdescription = Dialog_GetTranslation(ctx, "description");
-					if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_DESCRIPTION), dialogdescription); }
-
-					install_buttontext = Dialog_GetTranslation(ctx, "install");
-					update_buttontext = Dialog_GetTranslation(ctx, "update");
-					uninstall_buttontext = Dialog_GetTranslation(ctx, "uninstall");
-					cancel_buttontext = Dialog_GetTranslation(ctx, "cancel");
-					disconnect_buttontext = Dialog_GetTranslation(ctx, "disconnect");
-					if (disconnect_buttontext != NULL)
-					{
-						wcscpy_s(closeButtonText, sizeof(closeButtonText) / 2, disconnect_buttontext);
-						closeButtonTextSet = 1;
-					}
-
-					if (uninstall_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext); }
-					connect_buttontext = Dialog_GetTranslation(ctx, "connect");
-					if (connect_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext); }
-					if (cancel_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCANCEL), cancel_buttontext); }
-
-					duk_get_prop_string(ctx, -1, "status");	// [Array]
-					state_notinstalled = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL));
-					state_running = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL));
-					state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
-				}
+				duk_push_object(ctx);															// [translation]
+				duk_push_object(ctx);															// [translation][en]
+				duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
+				duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
+				duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
+				duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
+				duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
+				duk_push_array(ctx);
+				duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
+				duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
+				duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
+				duk_put_prop_string(ctx, -2, "status");
+				duk_put_prop_string(ctx, -2, "en");												// [translation]
 			}
+			
+			if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
+			if (!duk_has_prop_string(ctx, -1, lang))
+			{
+				duk_push_string(ctx, lang);					// [obj][string]
+				duk_string_split(ctx, -1, "-");				// [obj][string][array]
+				duk_array_shift(ctx, -1);					// [obj][string][array][string]
+				lang = (char*)duk_safe_to_string(ctx, -1);
+				duk_dup(ctx, -4);							// [obj][string][array][string][obj]
+			}
+
+			if (duk_has_prop_string(ctx, -1, lang))
+			{
+				duk_get_prop_string(ctx, -1, lang);
+
+				agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
+				if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
+
+				agentversion = Dialog_GetTranslation(ctx, "agentVersion");
+				if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
+
+				serverlocation = Dialog_GetTranslation(ctx, "url");
+				if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
+
+				meshname = Dialog_GetTranslation(ctx, "meshName");
+				if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
+
+				meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
+				if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
+
+				serveridentifier = Dialog_GetTranslation(ctx, "serverId");
+				if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
+
+				dialogdescription = Dialog_GetTranslation(ctx, "description");
+				if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_DESCRIPTION), dialogdescription); }
+
+				install_buttontext = Dialog_GetTranslation(ctx, "install");
+				update_buttontext = Dialog_GetTranslation(ctx, "update");
+				uninstall_buttontext = Dialog_GetTranslation(ctx, "uninstall");
+				cancel_buttontext = Dialog_GetTranslation(ctx, "cancel");
+				disconnect_buttontext = Dialog_GetTranslation(ctx, "disconnect");
+				if (disconnect_buttontext != NULL)
+				{
+					wcscpy_s(closeButtonText, sizeof(closeButtonText) / 2, disconnect_buttontext);
+					closeButtonTextSet = 1;
+				}
+
+				if (uninstall_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext); }
+				connect_buttontext = Dialog_GetTranslation(ctx, "connect");
+				if (connect_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext); }
+				if (cancel_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCANCEL), cancel_buttontext); }
+
+				duk_get_prop_string(ctx, -1, "status");	// [Array]
+				state_notinstalled = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL));
+				state_running = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL));
+				state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
+			}
+			
 
 			fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
 			{

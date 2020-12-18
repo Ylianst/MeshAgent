@@ -3773,10 +3773,6 @@ void ILibChain_PartialStart(void *Chain)
 #endif
 	}
 #endif
-	if (chain->nowatchdog == 0)
-	{
-		chain->WatchDogThread = ILibSpawnNormalThread(ILibChain_WatchDogStart, chain);
-	}
 #endif
 
 	//
@@ -3830,6 +3826,13 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	FD_ZERO(&readset);
 	FD_ZERO(&errorset);
 	FD_ZERO(&writeset);
+
+#if defined(ILibChain_WATCHDOG_TIMEOUT)
+	if (chain->TerminateFlag == 0 && chain->nowatchdog == 0)
+	{
+		chain->WatchDogThread = ILibSpawnNormalThread(ILibChain_WatchDogStart, chain);
+	}
+#endif
 
 	while (chain->TerminateFlag == 0)
 	{
