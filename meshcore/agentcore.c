@@ -1883,13 +1883,12 @@ char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBa
 	size_t basePathLen = strnlen_s(basePath, sizeof(ILibScratchPad2) - 4);
 	size_t localPathLen = strnlen_s(localPath, sizeof(ILibScratchPad2) - 4);
 	size_t len;
-	char *wd;
 
 	if (agent != NULL && agent->configPathUsesCWD != 0)
 	{
 #ifdef WIN32
 		int i = ILibString_LastIndexOf(basePath, basePathLen, "\\", 1) + 1;
-		wd = ILibWideToUTF8((LPWSTR)ILibScratchPad2, GetCurrentDirectoryW(sizeof(ILibScratchPad2) / 2, (LPWSTR)ILibScratchPad2));
+		char *wd = ILibWideToUTF8((LPWSTR)ILibScratchPad2, GetCurrentDirectoryW(sizeof(ILibScratchPad2) / 2, (LPWSTR)ILibScratchPad2));
 		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s\\%s", wd, basePath + i);
 #else
 		int i = ILibString_LastIndexOf(basePath, basePathLen, "/", 1) + 1;
