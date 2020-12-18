@@ -1068,9 +1068,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			ILibChain_PartialStart(dialogchain);
 			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
 			if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
-			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0)
+			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
 			{
-				duk_push_object(ctx);															// [translation]
 				duk_push_object(ctx);															// [translation][en]
 				duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
 				duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
@@ -1097,6 +1096,26 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			if (!duk_has_prop_string(ctx, -1, lang))
 			{
 				lang = "en";
+			}
+
+			if (strcmp("en", lang) != 0)
+			{
+				// Not English, so check the minimum set is present
+				duk_get_prop_string(ctx, -1, "en");				// [en]
+				duk_get_prop_string(ctx, -2, lang);				// [en][lang]
+				duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
+				while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
+				{
+					if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
+					{
+						duk_put_prop(ctx, -4);					// [en][lang][enum]
+					}
+					else
+					{
+						duk_pop_2(ctx);							// [en][lang][enum]
+					}
+				}
+				duk_pop_3(ctx);									// ...
 			}
 
 			if (duk_has_prop_string(ctx, -1, lang))
