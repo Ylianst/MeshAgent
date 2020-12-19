@@ -923,80 +923,6 @@ int wmain(int argc, char* wargv[])
 	return 0;
 }
 
-char* getMshSettings(char* fileName, char* selfexe, char** meshname, char** meshid, char** serverid, char** serverurl, char** installFlags, char **displayName, char **meshServiceName)
-{
-	char* importFile;
-	int eq, importFileLen;
-	parser_result *pr;
-	parser_result_field *f;
-
-	*meshname = *meshid = *serverid = *serverurl = *installFlags = NULL;
-	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
-	size_t offset = 0;
-	if (importFile == NULL) {
-		// Could not find the .msh file, see if there is one inside our own executable.
-		FILE *tmpFile = NULL;
-		char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB7, 0xF7, 0xE9, 0xBE, 0x44, 0x91, 0x4C, 0x19 };
-		char tmpHash[16];
-
-		_wfopen_s(&tmpFile, ILibUTF8ToWide(selfexe, -1), L"rb");
-		if (tmpFile == NULL) { return NULL; } // Could not open our own executable
-
-		fseek(tmpFile, -16, SEEK_END);
-		ignore_result(fread(tmpHash, 1, 16, tmpFile)); // Read the GUID
-		if (memcmp(tmpHash, exeMeshPolicyGuid, 16) == 0) { // If this is the Mesh policy file guid, we found a MSH file
-														   // Found embedded MSH File
-			fseek(tmpFile, -20, SEEK_CUR);
-			if (fread((void*)&importFileLen, 1, 4, tmpFile) == 4) { // Read the length of the MSH file
-				importFileLen = ntohl(importFileLen);
-				if ((importFileLen >= 20000) || (importFileLen < 1)) { fclose(tmpFile); return NULL; }
-				fseek(tmpFile, -4 - importFileLen, SEEK_CUR);
-				if ((importFile = malloc(importFileLen + 1)) == NULL) { fclose(tmpFile); return NULL; }
-				if (fread(importFile, 1, importFileLen, tmpFile) != importFileLen) { fclose(tmpFile); free(importFile); return NULL; }
-				importFile[importFileLen] = 0;
-			}
-		}
-		else {
-			fclose(tmpFile);
-			return NULL;
-		}
-		fclose(tmpFile);
-	}
-	if (importFileLen > 3 && memcmp(importFile, (char[]) { 0xEF, 0xBB, 0xBF }, 3) == 0) { offset = 3; }
-	pr = ILibParseString(importFile, offset, importFileLen-offset, "\n", 1);
-	f = pr->FirstResult;
-	while (f != NULL) {
-		f->datalength = ILibTrimString(&(f->data), f->datalength);
-		if (f->data[0] != 35) { // Checking to see if this line is commented out
-			eq = ILibString_IndexOf(f->data, f->datalength, "=", 1);
-			if (eq > 0) {
-				char *key, *val;
-				size_t keyLen, valLen;
-
-				key = f->data;
-				keyLen = eq;
-				key[keyLen] = 0;
-				val = key + keyLen + 1;
-				valLen = f->datalength - keyLen - 1;
-				if (val[valLen - 1] == 13) { --valLen; }
-				valLen = ILibTrimString(&val, valLen);
-				val[valLen] = 0;
-
-				if (keyLen == 8 && memcmp("MeshName", key, keyLen) == 0) { *meshname = val; }
-				if (keyLen == 6 && memcmp("MeshID", key, keyLen) == 0) { *meshid = val; }
-				if (keyLen == 8 && memcmp("ServerID", key, keyLen) == 0) { *serverid = val; }
-				if (keyLen == 10 && memcmp("MeshServer", key, keyLen) == 0) { *serverurl = val; }
-				if (keyLen == 12 && memcmp("InstallFlags", key, keyLen) == 0) { *installFlags = val; }
-				if (keyLen == 11 && memcmp("displayName", key, keyLen) == 0) { *displayName = val; }
-				if (keyLen == 15 && memcmp("meshServiceName", key, keyLen) == 0) { *meshServiceName = val; }
-			}
-		}
-		f = f->NextResult;
-	}
-	ILibDestructParserResults(pr);
-	return importFile;
-}
-
 
 #ifndef _MINCORE
 
@@ -1212,17 +1138,25 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				}
 			}
 
-			char *meshnameA;
-			if ((mshfile = getMshSettings(fileName, selfexe, &meshnameA, &meshid, &serverid, &serverurl, &installFlags, &displayName, &meshServiceName)) != NULL)
+			if (duk_peval_string(ctx, "_MSH();") == 0)
 			{
-				// Set text in the dialog box
 				int installFlagsInt = 0;
 				WINDOWPLACEMENT lpwndpl;
+
+				installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
+				meshname = (WCHAR*)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
+				meshid = Duktape_GetStringPropertyValue(ctx, -1, "MeshID", NULL);
+				serverid = Duktape_GetStringPropertyValue(ctx, -1, "ServerID", NULL);
+				serverurl = Duktape_GetStringPropertyValue(ctx, -1, "MeshServer", NULL);
+				displayName = Duktape_GetStringPropertyValue(ctx, -1, "displayName", NULL);
+				meshServiceName = Duktape_GetStringPropertyValue(ctx, -1, "meshServiceName", NULL);
+
+				// Set text in the dialog box
 				if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
 				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
 				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
 				if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
-				SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshid != NULL) ? meshnameA : "(None)", -1));
+				SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? (char*)meshname : "(None)", -1));
 				SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
 				SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
 				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
