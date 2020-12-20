@@ -1053,6 +1053,22 @@ duk_ret_t ILibDuktape_HttpStream_http_OnConnect(duk_context *ctx)
 		else
 		{
 			duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);	// [socket][agent]
+			duk_get_prop_string(ctx, -1, "http");					// [socket][agent][http]
+			duk_get_prop_string(ctx, -1, "globalAgent");			// [socket][agent][http][globalAgent]
+			if (duk_get_heapptr(ctx, -1) != duk_get_heapptr(ctx, -3))
+			{
+				// This agent is not a global agent, so lets stick the socket in the sockets list
+				char *key = (char*)Duktape_GetStringPropertyValue(ctx, -4, ILibDuktape_Socket2AgentKey, NULL);
+				duk_get_prop_string(ctx, -1, "sockets");			// [socket][agent][http][globalAgent][table]
+				if (!duk_has_prop_string(ctx, -1, key)) { duk_push_array(ctx); duk_put_prop_string(ctx, -2, key); }
+				duk_get_prop_string(ctx, -1, key);					// [socket][agent][http][globalAgent][table][array]
+				duk_dup(ctx, -6);									// [socket][agent][http][globalAgent][table][array][socket]
+				duk_array_push(ctx, -2);							// [socket][agent][http][globalAgent][table][array]
+				duk_pop_2(ctx);										// [socket][agent][http][globalAgent]
+			}
+			duk_pop_2(ctx);											// [socket][agent]
+
+
 			duk_get_prop_string(ctx, -1, "keepSocketAlive");		// [socket][agent][keepSocketAlive]
 			duk_swap_top(ctx, -2);									// [socket][keepSocketAlive][this]
 			duk_dup(ctx, -3);										// [socket][keepSocketAlive][this][socket]
@@ -1327,15 +1343,30 @@ duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 			{
 				if (duk_get_boolean(ctx, -1) == 0)
 				{
-					duk_pop(ctx);										// [clientRequest]
-					duk_eval_string(ctx, "require('http').Agent();");	// [clientRequest][tempAgent]
+					duk_pop(ctx);											// [clientRequest]
+					if (isTLS == 0)
+					{
+						duk_eval_string(ctx, "require('http').Agent();");	// [clientRequest][tempAgent]
+					}
+					else
+					{
+						duk_eval_string(ctx, "require('https').Agent();");	// [clientRequest][tempAgent]
+					}
 					agent = duk_get_heapptr(ctx, -1);
 					duk_put_prop_string(ctx, -2, ILibDuktape_CR2Agent);	// [clientRequest]
 				}
 				else
 				{
 					duk_pop(ctx);										// [clientRequest]
-					duk_push_this(ctx);									// [clientRequest][http]
+
+					if (isTLS == 0)
+					{
+						duk_eval_string(ctx, "require('http')");		// [clientRequest][http]
+					}
+					else
+					{
+						duk_eval_string(ctx, "require('https')");		// [clientRequest][http]
+					}
 					duk_get_prop_string(ctx, -1, "globalAgent");		// [clientRequest][http][agent]
 					agent = duk_get_heapptr(ctx, -1);
 					duk_remove(ctx, -2);								// [clientRequest][agent]
@@ -3453,6 +3484,7 @@ void ILibDuktape_RemoveObjFromTable(duk_context *ctx, duk_idx_t tableIdx, char *
 duk_ret_t ILibDuktape_HttpStream_Agent_socketEndSink(duk_context *ctx)
 {
 	duk_push_this(ctx);												// [socket]
+
 	//printf("socket has closed: %p\n", duk_get_heapptr(ctx, -1));
 	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);			// [socket][agent]
 	duk_get_prop_string(ctx, -2, ILibDuktape_Socket2AgentKey);		// [socket][agent][key]
@@ -3466,6 +3498,14 @@ duk_ret_t ILibDuktape_HttpStream_Agent_socketEndSink(duk_context *ctx)
 
 	// Check to see if this socket was in the sockets table
 	duk_get_prop_string(ctx, -1, "sockets");						// [socket][agent][socketsTable]
+	ILibDuktape_RemoveObjFromTable(ctx, -1, key, duk_get_heapptr(ctx, 0));
+	duk_pop(ctx);													// [socket][agent]
+
+	duk_eval_string(ctx, "require('http').globalAgent.sockets;");	// [socket][agent][table]
+	ILibDuktape_RemoveObjFromTable(ctx, -1, key, duk_get_heapptr(ctx, 0));
+	duk_pop(ctx);													// [socket][agent]
+
+	duk_eval_string(ctx, "require('https').globalAgent.sockets;");	// [socket][agent][table]
 	ILibDuktape_RemoveObjFromTable(ctx, -1, key, duk_get_heapptr(ctx, 0));
 	duk_pop(ctx);													// [socket][agent]
 
@@ -3639,6 +3679,7 @@ duk_ret_t ILibDuktape_HttpStream_Agent_reuseSocket(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_HttpStream_Agent_createConnection_eventSink(duk_context *ctx)
 {
+	// Error Sink
 	duk_push_this(ctx);																		// [socket]
 	char *key = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_Socket2AgentKey, "");
 	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);									// [socket][agent]
@@ -3708,6 +3749,8 @@ duk_ret_t ILibDuktape_HttpStream_Agent_new(duk_context *ctx)
 	int maxFreeSockets = Duktape_GetIntPropertyValue(ctx, -1, "maxFreeSockets", 32);
 
 	duk_push_object(ctx);							// [Agent]
+	duk_push_this(ctx);								// [Agent][http]
+	ILibDuktape_CreateReadonlyProperty(ctx, "http");
 	ILibDuktape_WriteID(ctx, "http.Agent");
 	duk_push_boolean(ctx, (duk_bool_t)keepAlive);	// [Agent][keepAlive]
 	duk_put_prop_string(ctx, -2, "keepAlive");		// [Agent]

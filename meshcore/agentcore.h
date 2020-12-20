@@ -225,6 +225,7 @@ typedef struct MeshAgentHostContainer
 	int serverAuthState;
 
 	int controlChannel_idleTimeout_seconds;
+	int controlChannel_idleTimeout_dataMode;
 	char g_selfid[UTIL_SHA384_HASHSIZE];
 	void* microLMS;
 	void* multicastDiscovery;

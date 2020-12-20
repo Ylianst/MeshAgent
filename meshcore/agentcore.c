@@ -95,6 +95,8 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define DEFAULT_IDLE_TIMEOUT	120
 #define MESH_USER_CHANGED_CB	"\xFF_MeshAgent_UserChangedCallback"
 #define REMOTE_DESKTOP_UID		"\xFF_RemoteDesktopUID"
+#define MESHAGENT_DATAPING_ARRAY "\xFF_MeshAgent_DataPingArray"
+#define MESHAGENT_DATAPAING_PROMISE_TIMEOUT	"\xFF_MeshAgent_DataPing_Timeout"
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
 int ILibDuktape_HECI_Debug = 0;
@@ -361,6 +363,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject wcdo, MeshAgentHostCont
 char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
+void MeshServer_SendJSON(MeshAgentHostContainer* agent, ILibWebClient_StateObject WebStateObject, char *JSON, int JSONLength);
 
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
@@ -1670,6 +1673,13 @@ duk_ret_t ILibDuktape_MeshAgent_getIdleTimeout(duk_context *ctx)
 	duk_push_int(ctx, agent->controlChannel_idleTimeout_seconds);
 	return(1);
 }
+duk_ret_t ILibDuktape_MeshAgent_getIdleTimeout_isDataMode(duk_context *ctx)
+{
+	duk_push_this(ctx);																		// [MeshAgent]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	duk_push_boolean(ctx, agent->controlChannel_idleTimeout_dataMode);
+	return(1);
+}
 
 duk_ret_t ILibDuktape_MeshAgent_getStartupOptions(duk_context *ctx)
 {
@@ -1712,6 +1722,60 @@ duk_ret_t ILibDuktape_KVM_Refresh(duk_context *ctx)
 	return(0);
 }
 #endif
+duk_ret_t ILibDuktape_MeshAgent_log(duk_context *ctx)
+{
+	char *msg = (char*)duk_require_string(ctx, 0);
+	ILIBLOGMESSAGEX("meshcore: %s", msg);
+	return(0);
+}
+duk_ret_t ILibDuktape_MeshAgent_controlChannelDebug(duk_context *ctx)
+{
+	duk_push_this(ctx);																		
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	duk_push_boolean(ctx, agent->controlChannelDebug != 0);
+	return(1);
+}
+duk_ret_t ILibDuktape_MeshAgent_DataPing_Timeout(duk_context *ctx)
+{
+	duk_prepare_method_call(ctx, 0, "_rej");	// [_rej][this]
+	duk_call_method(ctx, 0);
+	return(0);
+}
+duk_ret_t ILibDuktape_MeshAgent_DataPing(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx);
+	int timeout = 0;
+	if (nargs > 0) { timeout = duk_require_int(ctx, 0); }
+
+	duk_push_this(ctx);											// [agent]
+	duk_get_prop_string(ctx, -1, MESHAGENT_DATAPING_ARRAY);		// [agent][pingarray]
+
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -2, MESH_AGENT_PTR);
+	duk_eval_string(ctx, "(function foo(){var p=require('promise');return(new p(function(res, rej) { this._res = res; this._rej = rej; }));})()");
+	duk_dup(ctx, -1);											// [agent][pingarray][promise][promise]
+	duk_array_push(ctx, -3);									// [agent][pingarray][promise]
+
+	if (timeout > 0)
+	{
+		duk_push_global_object(ctx);							// [agent][pingarray][promise][g]
+		duk_prepare_method_call(ctx, -1, "setTimeout");			// [agent][pingarray][promise][g][setTimeout][this]
+		duk_push_c_function(ctx, ILibDuktape_MeshAgent_DataPing_Timeout, DUK_VARARGS);//omise][g][setTimeout][this][func]
+		duk_push_int(ctx, timeout);								// [agent][pingarray][promise][g][setTimeout][this][func][timeout]
+		duk_dup(ctx, -6);										// [agent][pingarray][promise][g][setTimeout][this][func][timeout][promise]
+		if (duk_pcall_method(ctx, 3) == 0)						// [agent][pingarray][promise][g][timeout]
+		{
+			duk_put_prop_string(ctx, -3, MESHAGENT_DATAPAING_PROMISE_TIMEOUT);
+		}
+		else
+		{
+			duk_pop(ctx);										// [agent][pingarray][promise][g]
+		}
+		duk_pop(ctx);											// [agent][pingarray][promise]
+	}
+
+	MeshServer_SendJSON(agent, agent->controlChannel, "{\"action\":\"ping\"}", 17);
+	return(1);
+}
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -1763,7 +1827,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		duk_put_prop_string(ctx, -2, ILibDuktape_MeshAgent_Cert_NonLeaf);
 		ILibDuktape_CreateInstanceMethod(ctx, "GenerateAgentCertificate", ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent, 1);
 #endif
-
+		duk_push_array(ctx); duk_put_prop_string(ctx, -2, MESHAGENT_DATAPING_ARRAY);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Ready");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Connected");
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "Command");
@@ -1789,6 +1853,9 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "getStartupOptions", ILibDuktape_MeshAgent_getStartupOptions, 0);
 		ILibDuktape_CreateEventWithGetter(ctx, "coreHash", ILibDuktape_MeshAgent_coreHash);
 		ILibDuktape_CreateEventWithGetter(ctx, "updatesEnabled", ILibDuktape_MeshAgent_updatesEnabled);
+		ILibDuktape_CreateInstanceMethod(ctx, "log", ILibDuktape_MeshAgent_log, 1);
+		ILibDuktape_CreateEventWithGetter(ctx, "controlChannelDebug", ILibDuktape_MeshAgent_controlChannelDebug);
+		ILibDuktape_CreateInstanceMethod(ctx, "DataPing", ILibDuktape_MeshAgent_DataPing, DUK_VARARGS);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
@@ -1813,6 +1880,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 
 		ILibDuktape_CreateEventWithGetter(ctx, "NetInfo", ILibDuktape_MeshAgent_NetInfo);
 		ILibDuktape_CreateEventWithGetter(ctx, "idleTimeout", ILibDuktape_MeshAgent_getIdleTimeout);
+		ILibDuktape_CreateEventWithGetter(ctx, "idleTimeoutDataMode", ILibDuktape_MeshAgent_getIdleTimeout_isDataMode);
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, "idleTimeoutModeChanged");
 		ILibDuktape_CreateInstanceMethod(ctx, "ExecPowerState", ILibDuktape_MeshAgent_ExecPowerState, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "forceExit", ILibDuktape_MeshAgent_forceExit, DUK_VARARGS);
@@ -2819,6 +2888,43 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				duk_pop(agent->meshCoreCtx);													// [emit][this][Command]
 				duk_push_lstring(agent->meshCoreCtx, cmd, cmdLen);								// [emit][this][Command][str]
 			}
+			else
+			{
+				// JSON command... Let's check if it's a PING
+				if (duk_has_prop_string(agent->meshCoreCtx, -1, "action"))
+				{
+					char *action = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "action", "");
+					if (strcmp(action, "ping") == 0) 
+					{
+						if (agent->controlChannel_idleTimeout_dataMode == 0)
+						{
+							ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);							// [agent]
+							ILibDuktape_EventEmitter_SetupEmitEx(agent->meshCoreCtx, -1, "idleTimeoutModeChanged");	// [agent][emit][this][idleTimeoutModeChanged]
+							duk_pcall_method(agent->meshCoreCtx, 1); duk_pop_2(agent->meshCoreCtx);					// ...
+						}
+						agent->controlChannel_idleTimeout_dataMode = 1; 
+					}
+					else if (strcmp(action, "pong") == 0)
+					{
+						ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);								// [agent]
+						duk_get_prop_string(agent->meshCoreCtx, -1, MESHAGENT_DATAPING_ARRAY);						// [agent][pingarray]
+						if (duk_get_length(agent->meshCoreCtx, -1) > 0)
+						{
+							duk_array_shift(agent->meshCoreCtx, -1);												// [agent][pingarray][promise]
+							if (duk_has_prop_string(agent->meshCoreCtx, -1, MESHAGENT_DATAPAING_PROMISE_TIMEOUT))
+							{
+								duk_push_global_object(agent->meshCoreCtx);											// [agent][pingarray][promise][g]
+								duk_prepare_method_call(agent->meshCoreCtx, -1, "clearTimeout");					// [agent][pingarray][promise][g][clearTimeout][this]
+								duk_get_prop_string(agent->meshCoreCtx, -4, MESHAGENT_DATAPAING_PROMISE_TIMEOUT);	// [agent][pingarray][promise][g][clearTimeout][this][timeout]
+								duk_pcall_method(agent->meshCoreCtx, 1); duk_pop_2(agent->meshCoreCtx);				// [agent][pingarray][promise]
+							}
+							duk_prepare_method_call(agent->meshCoreCtx, -1, "_res");								// [agent][pingarray][promise][_res][this]
+							duk_pcall_method(agent->meshCoreCtx, 0); duk_pop_2(agent->meshCoreCtx);					// [agent][pingarray]
+						}
+						duk_pop_2(agent->meshCoreCtx);																// ...
+					}
+				}
+			}
 			popCount = 1;
 		}
 		else
@@ -3354,6 +3460,26 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 					duk_push_int(agent->meshCoreCtx, 0);									// [emit][this][Connected][0] (0 means disconnected)
 					if (duk_pcall_method(agent->meshCoreCtx, 2) != 0) { ILibDuktape_Process_UncaughtException(agent->meshCoreCtx); }
 					duk_pop(agent->meshCoreCtx);
+
+					duk_eval_string(agent->meshCoreCtx, "require('https').globalAgent.sockets;");															// [table]
+					duk_eval_string(agent->meshCoreCtx, "require('http').globalAgent.getName(require('http').parseUri(require('MeshAgent').ServerUrl));");	// [table][key]
+					if (duk_has_prop_string(agent->meshCoreCtx, -2, duk_get_string(agent->meshCoreCtx, -1)) != 0)
+					{
+						duk_get_prop(agent->meshCoreCtx, -2);																								// [table][array]
+						while (duk_get_length(agent->meshCoreCtx, -1) > 0)
+						{
+							duk_array_pop(agent->meshCoreCtx, -1);																							// [table][array][socket]
+							duk_prepare_method_call(agent->meshCoreCtx, -1, "end");																			// [table][array][socket][end][this]
+							duk_pcall_method(agent->meshCoreCtx, 0);																						// [table][array][socket][undef]
+							duk_pop_2(agent->meshCoreCtx);																									// [table][array]
+						}
+						duk_pop(agent->meshCoreCtx);																										// [table]
+					}
+					else
+					{
+						duk_pop(agent->meshCoreCtx);																										// [table]
+					}
+					duk_pop(agent->meshCoreCtx);																											// ...
 				}
 			}
 			agent->serverAuthState = 0;
