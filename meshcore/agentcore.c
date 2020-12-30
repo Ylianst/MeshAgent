@@ -3567,6 +3567,14 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	parser_result *rs;
 	parser_result_field *f;
 
+
+
+	if (agent->timerLogging != 0 && agent->retryTimerSet != 0) 
+	{
+		agent->retryTimerSet = 0;
+		ILIBLOGMESSAGEX("    >> Retry Timer Elapsed [serverConnectionState: %d, chainState: %d]", agent->serverConnectionState, ILibIsChainBeingDestroyed(agent->chain)); 
+	}
+
 	// If this is called while we are in any connection state, just leave now.
 	if (agent->serverConnectionState != 0) return;
 
@@ -3941,7 +3949,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->fakeUpdate = ILibSimpleDataStore_Get(agent->masterDb, "fakeUpdate", NULL, 0);
 	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
 	ILibDuktape_HECI_Debug = (ILibSimpleDataStore_Get(agent->masterDb, "heciDebug", NULL, 0) != 0);
-
+	agent->timerLogging = ILibSimpleDataStore_Get(agent->masterDb, "timerLogging", NULL, 0);
 
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
@@ -3976,6 +3984,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 			delay = agent->retryTime + (timeout % agent->retryTime);		// Random value between current value and double the current value
 		}
 		printf("AutoRetry Connect in %d milliseconds\n", delay);
+		if (agent->timerLogging != 0) { ILIBLOGMESSAGEX(" >> Retry Timer set for %d milliseconds", delay); agent->retryTimerSet = 1; }
 		ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, delay, (ILibLifeTime_OnCallback)MeshServer_ConnectEx, NULL);
 		agent->retryTime = delay;
 	}

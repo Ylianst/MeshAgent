@@ -96,14 +96,40 @@ function dispatch(options)
     }
     parms += ('/TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"');
 
-    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', [parms]);
-    child.stderr.on('data', function (c) { });
-    child.stdout.on('data', function (c) { });
-    child.waitExit();
+    var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: options.user } };
+    for (var c1e in process.env)
+    {
+        taskoptions.env[c1e] = process.env[c1e];
+    }
 
-    var child = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd']);
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
     child.stderr.on('data', function (c) { });
     child.stdout.on('data', function (c) { });
+    child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ');
+    if (options.user)
+    {
+        child.stdin.write('/RU $env:_user ');
+    }
+    else
+    {
+        if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
+        {
+            // LocalSystem
+            child.stdin.write('/RU SYSTEM ');
+        }
+    }
+    child.stdin.write('/TR "$env:_target $env:_args"\r\n');
+    child.stdin.write('$ts = New-Object -ComObject Schedule.service\r\n');
+    child.stdin.write('$ts.connect()\r\n');
+    child.stdin.write('$tsfolder = $ts.getfolder("\\")\r\n');
+    child.stdin.write('$task = $tsfolder.GetTask("MeshUserTask")\r\n');
+    child.stdin.write('$taskdef = $task.Definition\r\n');
+    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');
+    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');
+    child.stdin.write('$taskdef.Actions.Item(1).Path = $env:_target\r\n');
+    child.stdin.write('$taskdef.Actions.Item(1).Arguments = $env:_args\r\n');
+    child.stdin.write('$tsfolder.RegisterTaskDefinition($task.Name, $taskdef, 4, $null, $null, $null)\r\n');
+
     child.stdin.write('SCHTASKS /RUN /TN MeshUserTask\r\n');
     child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\nexit\r\n');
 

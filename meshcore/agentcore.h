@@ -224,6 +224,8 @@ typedef struct MeshAgentHostContainer
 	char agentNonce[UTIL_SHA384_HASHSIZE];
 	int serverAuthState;
 
+	int timerLogging;
+	int retryTimerSet;
 	int controlChannel_idleTimeout_seconds;
 	int controlChannel_idleTimeout_dataMode;
 	char g_selfid[UTIL_SHA384_HASHSIZE];
