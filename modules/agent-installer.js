@@ -82,6 +82,17 @@ function checkParameters(parms)
     if (parms.getParameter('description', null) == null && msh.description != null) { parms.push('--description="' + msh.description + '"'); }
     if (parms.getParameter('displayName', null) == null && msh.displayName != null) { parms.push('--displayName="' + msh.displayName + '"'); }
     if (parms.getParameter('companyName', null) == null && msh.companyName != null) { parms.push('--companyName="' + msh.companyName + '"'); }
+
+    if (msh.fileName != null)
+    {
+        var i = parms.getParameterIndex('fileName');
+        if(i>=0)
+        {
+            parms.splice(i, 1);
+        }
+        parms.push('--target="' + msh.fileName + '"');
+    }
+
     if (parms.getParameter('meshServiceName', null) == null)
     {
         if(msh.meshServiceName != null)
@@ -110,6 +121,15 @@ function installService(params)
 {
     process.stdout.write('...Installing service');
     console.info1('');
+
+    var target = null;
+    var targetx = params.getParameterIndex('target');
+    if (targetx >= 0)
+    {
+        target = params.getParameterValue(targetx);
+        params.splice(targetx, 1);
+        target = target.split(' ').join('');
+    }
 
     var proxyFile = process.execPath;
     if (process.platform == 'win32')
@@ -141,7 +161,7 @@ function installService(params)
     var options =
         {
             name: params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'),
-            target: process.platform == 'win32' ? 'MeshAgent' : 'meshagent',
+            target: target==null?(process.platform == 'win32' ? 'MeshAgent' : 'meshagent'):target,
             servicePath: process.execPath,
             startType: 'AUTO_START',
             parameters: params,

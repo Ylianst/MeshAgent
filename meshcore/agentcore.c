@@ -4490,6 +4490,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	else if (installFlag != 0)
 	{
 		duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, agentHost->chain, NULL, NULL, agentHost->exePath, NULL, MeshAgent_AgentInstallerCTX_Finalizer, agentHost->chain);
+		ILibDuktape_MeshAgent_Init(ctxx, agentHost->chain, agentHost);
+
 		duk_eval_string(ctxx, "require('user-sessions').isRoot();");
 		if (!duk_get_boolean(ctxx, -1))
 		{
