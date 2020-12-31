@@ -343,6 +343,8 @@ void ILibWebClient_SetTimeout(ILibWebClient_StateObject state, int timeoutSecond
 // <param name="wr">The WebRequest to free</param>
 void ILibWebClient_DestroyWebRequest(struct ILibWebRequest *wr)
 {
+	if (!ILibMemory_CanaryOK(wr)) { return; }
+
 	int i;
 	struct ILibWebClient_StreamedRequestBuffer *b;
 
@@ -389,7 +391,7 @@ void ILibWebClient_DestroyWebRequest(struct ILibWebRequest *wr)
 		free(wr->requestToken);
 		wr->requestToken = NULL;
 	}
-	free(wr);
+	ILibMemory_Free(wr);
 	wr = NULL;
 }
 
@@ -2452,8 +2454,7 @@ ILibWebClient_StateObject ILibCreateWebClientEx(ILibWebClient_OnResponse OnRespo
 	wcdo->SOCK = socketModule;
 	wcdo->PendingConnectionIndex = -1;
 
-	if ((wr = (struct ILibWebRequest*)malloc(sizeof(struct ILibWebRequest))) == NULL) ILIBCRITICALEXIT(254);
-	memset(wr, 0, sizeof(struct ILibWebRequest));
+	wr = (struct ILibWebRequest*)ILibMemory_SmartAllocate(sizeof(struct ILibWebRequest));
 	wr->OnResponse = OnResponse;
 	wr->user1 = user1;
 	wr->user2 = user2;
@@ -2633,10 +2634,7 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequestEx2(
 	int indexWithLeast;
 	int numberOfItems;
 
-
-	if ((request = (struct ILibWebRequest*)malloc(sizeof(struct ILibWebRequest))) == NULL) ILIBCRITICALEXIT(254);
-	memset(request, 0, sizeof(struct ILibWebRequest));
-
+	request = (struct ILibWebRequest*)ILibMemory_SmartAllocate(sizeof(struct ILibWebRequest));
 	request->NumberOfBuffers = bodyBuffer != NULL?2:1;
 	if ((request->Buffer = (char**)malloc(request->NumberOfBuffers * sizeof(char*))) == NULL) ILIBCRITICALEXIT(254);
 	if ((request->BufferLength = (size_t*)malloc(request->NumberOfBuffers * sizeof(size_t))) == NULL)  ILIBCRITICALEXIT(254);
@@ -3143,7 +3141,7 @@ void ILibWebClient_CancelRequestEx(void *chain, void *RequestToken)
 */
 void ILibWebClient_CancelRequest(ILibWebClient_RequestToken RequestToken)
 {
-	if (RequestToken != NULL)
+	if (ILibMemory_CanaryOK(RequestToken))
 	{
 		ILibChain_RunOnMicrostackThread(((struct ILibWebClient_PipelineRequestToken*)RequestToken)->wcdo->Parent->ChainLink.ParentChain, ILibWebClient_CancelRequestEx, RequestToken);
 	}
