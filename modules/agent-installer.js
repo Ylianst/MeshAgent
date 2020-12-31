@@ -129,6 +129,7 @@ function installService(params)
         target = params.getParameterValue(targetx);
         params.splice(targetx, 1);
         target = target.split(' ').join('');
+        if (target.length == 0) { target = null; }
     }
 
     var proxyFile = process.execPath;
