@@ -682,6 +682,7 @@ function sys_update(isservice, b64)
         var servicename = parm != null ? (parm.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent')) : (process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
         try
         {
+            if (b64 == null) { throw ('legacy'); }
             service = require('service-manager').manager.getService(servicename)
             serviceLocation = service.appLocation();
             console.log(' Updating service: ' + servicename);
@@ -694,6 +695,7 @@ function sys_update(isservice, b64)
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.waitExit();
               
+            if (child.stdout.str.trim() == '' && b64 == null) { child.stdout.str = 'Mesh Agent'; }
             if (child.stdout.str.trim() != '')
             {
                 try
@@ -705,7 +707,7 @@ function sys_update(isservice, b64)
                 catch (ff)
                 {
                     console.log(' * ' + servicename + ' SERVICE NOT FOUND *');
-                    console.log(' * ' + child.stdout.st.trim() + ' SERVICE NOT FOUND *');
+                    console.log(' * ' + child.stdout.str.trim() + ' SERVICE NOT FOUND *');
                     process._exit();
                 }
             }

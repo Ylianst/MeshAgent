@@ -73,7 +73,7 @@ function _meshName()
                 // Enumerate the registry to see if the we can find our NodeID           
                 var reg = require('win-registry');
                 var nid = _meshNodeId();
-                var key;
+                var key, regval;
                 var source = [reg.HKEY.LocalMachine, reg.HKEY.CurrentUser];
                 var val;
 
@@ -84,7 +84,7 @@ function _meshName()
                     {
                         try
                         {
-                            if (nid == Buffer.from(reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\' + val.subkeys[key], 'NodeId'), 'base64').toString('hex'))
+                            if (nid == Buffer.from(reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\' + val.subkeys[key], 'NodeId').split('@').join('+').split('$').join('/'), 'base64').toString('hex'))
                             {
                                 name = val.subkeys[key];
                                 break;
