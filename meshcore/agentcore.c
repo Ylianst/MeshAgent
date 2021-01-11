@@ -1994,7 +1994,6 @@ char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBa
 	if (escapeBackSlash != 0)
 	{
 		char *tmp = ILibString_Replace(ILibScratchPad2, strnlen_s(ILibScratchPad2, sizeof(ILibScratchPad2)), "\\", 1, "\\\\", 2);
-		size_t tmplen = strnlen_s(tmp, sizeof(ILibScratchPad2));
 		strcpy_s(ILibScratchPad2, sizeof(ILibScratchPad2), tmp);
 		free(tmp);
 	}
