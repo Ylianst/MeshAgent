@@ -2279,7 +2279,14 @@ function serviceManager()
                         case 'BOOT_START':
                         case 'SYSTEM_START':
                         case 'AUTO_START':
-                            conf.write('start on runlevel [2345]\n');
+                            if (require('os').Name.startsWith('CHROMEOS_'))
+                            {
+                                conf.write('start on started system-services\n');
+                            }
+                            else
+                            {
+                                conf.write('start on runlevel [2345]\n');
+                            }
                             break;
                         default:
                             break;
