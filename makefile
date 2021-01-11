@@ -43,6 +43,16 @@
 #	NOTE: If you installed jpeg8 headers on your machine, you must specify --with-jpeg8 when building turbo jpeg, otherwise omit --with-jpeg8
 #
 #
+#
+#	Note: For ChromeOS, you need to disable rootfs verification, in order to install the meshagent service.
+#		  After running the following commands, and rebooting, you should be able to install the meshagent service.
+#
+#			sudo su -
+#			cd /usr/share/vboot/bin/
+#			./make_dev_ssd.sh --remove_rootfs_verification --partitions 4
+#			reboot
+#
+#
 # Special Note about KVM Support on Linux: 
 #    If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, 
 #    or if you get a black screen when connecting to the login screen, you may need to: 
