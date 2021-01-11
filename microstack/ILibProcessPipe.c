@@ -775,7 +775,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		}
 		if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 		{
-			putenv("TERM=xterm");
+			putenv("TERM=xterm-256color");
 			close(retVal->stdErr->mPipe_ReadEnd); //close read end of stderr pipe
 		}
 		else
