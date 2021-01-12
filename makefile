@@ -49,7 +49,13 @@
 #
 #			sudo su -
 #			cd /usr/share/vboot/bin/
-#			./make_dev_ssd.sh --remove_rootfs_verification --partitions 4
+#			./make_dev_ssd.sh --remove_rootfs_verification
+#		
+#		The above line will return a warning, but it will tell you the boot partition number, which you 
+#		will need when specifying the above command again, this time with the --partions options. Specify the number instead of (ID)
+#
+#			./make_dev_ssd.sh --remove_rootfs_verification --partitions ID
+#
 #			reboot
 #
 #
