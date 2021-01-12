@@ -55,8 +55,10 @@
 #		will need when specifying the above command again, this time with the --partions options. Specify the number instead of (ID)
 #
 #			./make_dev_ssd.sh --remove_rootfs_verification --partitions ID
-#
 #			reboot
+#
+#		When you are ready to install the agent, you'll need to copy the binary to a path that is not marked noexec, like /usr/local,
+#		so that you can execute the installer from there.
 #
 #
 # Special Note about KVM Support on Linux: 
