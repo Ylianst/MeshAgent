@@ -187,6 +187,8 @@ duk_ret_t ILibDuktape_ChildProcess_Kill(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 {
+	ILibChain_Continue_Result continueResult;
+	int ret = 0;
 	int timeout = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
 	void *chain = Duktape_GetChain(ctx);
 	if (ILibIsChainBeingDestroyed(chain))
@@ -210,15 +212,26 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 	HANDLE handles[] = { NULL, NULL, NULL, NULL, NULL };
 	ILibProcessPipe_Process p = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
 	ILibProcessPipe_Process_GetWaitHandles(p, &(handles[0]), &(handles[1]), &(handles[2]), &(handles[3]));
-	ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, (HANDLE**)handles);
+	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 2, timeout, (HANDLE**)handles);
 #else
-	ILibChain_Continue(chain, (ILibChain_Link**)mods, 3, timeout);
+	continueResult = ILibChain_Continue(chain, (ILibChain_Link**)mods, 3, timeout);
 #endif
-	if (ILibIsChainBeingDestroyed(chain) != 0)
+	switch (continueResult)
 	{
-		return(ILibDuktape_Error(ctx, "waitExit() aborted because thread is exiting"));
+		case ILibChain_Continue_Result_ERROR_INVALID_STATE:
+			ret = ILibDuktape_Error(ctx, "waitExit() already in progress");
+			break;
+		case ILibChain_Continue_Result_ERROR_CHAIN_EXITING:
+			ret = ILibDuktape_Error(ctx, "waitExit() aborted because thread is exiting");
+			break;
+		case ILibChain_Continue_Result_ERROR_EMPTY_SET:
+			ret = ILibDuktape_Error(ctx, "waitExit() cannot wait on empty set");
+			break;
+		default:
+			ret = 0;
+			break;
 	}
-	return(0);
+	return(ret);
 }
 duk_ret_t ILibDuktape_ChildProcess_SpawnedProcess_Finalizer(duk_context *ctx)
 {

@@ -2574,6 +2574,14 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 	if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
 #endif
 
+
+	if (duk_peval_string(agent->meshCoreCtx, "process.versions.commitHash") == 0)
+	{
+		ILIBLOGMESSAGEX("SelfUpdate -> Current Version: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
+	}
+	duk_pop(agent->meshCoreCtx);																				// ...
+
+
 	if (duk_peval_string_noresult(agent->meshCoreCtx, "require('service-manager').manager.getService('meshagentDiagnostic').start();") == 0)
 	{
 		if (agent->logUpdate != 0)
@@ -2610,7 +2618,15 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 	}	
 	else
 	{
-		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion_ERROR: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
+		char *err = (char*)duk_safe_to_string(agent->meshCoreCtx, -1);
+		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion_ERROR: %s", err);
+		if (duk_ctx_is_alive(agent->meshCoreCtx))
+		{
+			duk_push_sprintf(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { value: 'Self-Update -> ABORT: %s', icon : 3 } } });", err);
+			duk_eval_noresult(agent->meshCoreCtx);
+		}
+		duk_pop(agent->meshCoreCtx);																				// ...
+		return;
 	}
 	duk_pop(agent->meshCoreCtx);																				// ...
 #endif
@@ -2660,12 +2676,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 #endif
 
 	// Everything looks good, lets perform the update
-	if (agent->logUpdate != 0)
-	{
-		char tmp[255];
-		sprintf_s(tmp, sizeof(tmp), "SelfUpdate -> Stopping Chain (%d)", agent->performSelfUpdate);
-		ILIBLOGMESSSAGE(tmp);
-	}
+	ILIBLOGMESSAGEX("SelfUpdate -> Stopping Chain (%d)", agent->performSelfUpdate);
 	ILibStopChain(agent->chain);
 }
 duk_ret_t MeshServer_selfupdate_unzip_complete(duk_context *ctx)
@@ -3265,6 +3276,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AgentUpdateBlock:
 		{
 			// Write the mesh agent block to file
+			int retryCount = 0;
 #ifdef WIN32
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe");
 #else
@@ -3272,7 +3284,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 #endif
 
 			// We have to try to write until it works, fopen sometimes fails
-			while (util_appendfile(updateFilePath, cmd + 4, cmdLen - 4) == 0) 
+			while (util_appendfile(updateFilePath, cmd + 4, cmdLen - 4) == 0 && ++retryCount < 4)
 			{ 
 #ifdef WIN32
 				Sleep(100); 
@@ -3281,11 +3293,21 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 #endif
 			}
 
-			// Confirm we got a mesh agent update block
-			((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AgentUpdateBlock);             // MeshCommand_AgentHash (14), SHA384 hash of the agent executable
-			((unsigned short*)ILibScratchPad2)[1] = htons(requestid);                                // Request id
-			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
-
+			if (retryCount < 4)
+			{
+				// Confirm we got a mesh agent update block
+				((unsigned short*)ILibScratchPad2)[0] = htons(MeshCommand_AgentUpdateBlock);             // MeshCommand_AgentHash (14), SHA384 hash of the agent executable
+				((unsigned short*)ILibScratchPad2)[1] = htons(requestid);                                // Request id
+				ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, ILibScratchPad2, 4, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+			}
+			else
+			{
+				if (duk_ctx_is_alive(agent->meshCoreCtx))
+				{
+					// Update Failed, so update the server with an agent message explaining what happened, then abort the update by not sending an ACK
+					duk_eval_string_noresult(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { value: 'Self-Update FAILED. Write Error while writing update block', icon : 3 } } });");
+				}
+			}
 			break;
 		}
 	}
@@ -3552,6 +3574,8 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 	ILibMemory_Free(j);
 
 	if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Network Timeout Occurred..."); }
+	agent->serverConnectionState = 0; // We are cancelling connection request
+
 	printf("Network Timeout occurred...\n");
 
 	ILibWebClient_CancelRequest(request);
@@ -5734,48 +5758,48 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		agentHost->chain = NULL; // Mesh agent has exited, set the chain to NULL
 
 		// Close the database
-		if (agentHost->masterDb != NULL) 
+		if (agentHost->masterDb != NULL)
 		{
 			if (agentHost->performSelfUpdate != 0)
 			{
 				if (agentHost->JSRunningAsService == 0)
 				{
-						duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal();
-						duk_size_t jsonLen;
-						char *json = NULL;
+					duk_context *ctxx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal();
+					duk_size_t jsonLen;
+					char *json = NULL;
 
-						ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);			// [array]
-						if (duk_get_length(ctxx, -1) > 0)
+					ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);			// [array]
+					if (duk_get_length(ctxx, -1) > 0)
+					{
+						duk_json_encode(ctxx, -1);																	// [json]
+						json = (char*)duk_get_lstring(ctxx, -1, &jsonLen);
+
+						startParms = (char*)ILibMemory_SmartAllocateEx(jsonLen + 1, ILibBase64EncodeLength(jsonLen + 1));
+						unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
+						memcpy_s(startParms, jsonLen + 1, json, jsonLen);
+						Duktape_SafeDestroyHeap(ctxx);
+
+						if (jsonLen > INT32_MAX)
 						{
-							duk_json_encode(ctxx, -1);																	// [json]
-							json = (char*)duk_get_lstring(ctxx, -1, &jsonLen);
-
-							startParms = (char*)ILibMemory_SmartAllocateEx(jsonLen + 1, ILibBase64EncodeLength(jsonLen + 1));
-							unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
-							memcpy_s(startParms, jsonLen + 1, json, jsonLen);
-							Duktape_SafeDestroyHeap(ctxx);
-
-							if (jsonLen > INT32_MAX)
-							{
-								ILibMemory_Free(startParms);
-								startParms = NULL;
-								if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => ERROR"); }
-							}
-							else
-							{
-								ILibBase64Encode((unsigned char*)startParms, (int)jsonLen, &tmp);
-								if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => %s", startParms); }
-							}
+							ILibMemory_Free(startParms);
+							startParms = NULL;
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => ERROR"); }
 						}
 						else
 						{
-							if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => NONE"); }
+							ILibBase64Encode((unsigned char*)startParms, (int)jsonLen, &tmp);
+							if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => %s", startParms); }
 						}
+					}
+					else
+					{
+						if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX(" Service Parameters => NONE"); }
+					}
 				}
 				else
 				{
 #ifdef WIN32
-					if(strcmp(agentHost->meshServiceName, "Mesh Agent") !=0)
+					if (strcmp(agentHost->meshServiceName, "Mesh Agent") != 0)
 #else
 					if (strcmp(agentHost->meshServiceName, "meshagent") != 0)
 #endif
@@ -5818,7 +5842,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
 			{
 				// We triedI  to execute a bad executable... not good. Lets try to recover.
-				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> FAILED..."); }
+				ILIBLOGMESSSAGE("SelfUpdate -> FAILED...");
 				if (updateFilePath != NULL && agentHost->exePath != NULL)
 				{
 					while (util_CopyFile(agentHost->exePath, updateFilePath, FALSE) == FALSE) Sleep(5000);
@@ -5833,7 +5857,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			{
 				CloseHandle(processInfo.hProcess);
 				CloseHandle(processInfo.hThread);
-			}		
+			}
 #else
 			if (agentHost->JSRunningAsService != 0)
 			{
@@ -5849,41 +5873,41 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				if (system(ILibScratchPad)) {}
 				switch (agentHost->platformType)
 				{
-					case MeshAgent_Posix_PlatformTypes_BSD:
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [restarting service]"); }
-						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s onerestart", agentHost->meshServiceName);	// Restart the service
-						ignore_result(system(ILibScratchPad));
-						break;
-					case MeshAgent_Posix_PlatformTypes_LAUNCHD:
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
-						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/%s", agentHost->meshServiceName);	// Restart the service
-						ignore_result(system(ILibScratchPad));
-						break;
-					case MeshAgent_Posix_PlatformTypes_SYSTEMD:
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
-						exit(1);
-						break;
-					case MeshAgent_Posix_PlatformTypes_PROCD:
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [PROCD should auto-restart]"); }
-						exit(1);
-						break;
-					case MeshAgent_Posix_PlatformTypes_INITD:
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
-						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s restart", agentHost->meshServiceName);	// Restart the service
-						ignore_result(MeshAgent_System(ILibScratchPad));
-						break;
-					case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
-						if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling initctl restart (UPSTART)"); }
-						sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart %s", agentHost->meshServiceName);	// Restart the service
-						ignore_result(MeshAgent_System(ILibScratchPad));
-						break;
-					default:
-						break;
+				case MeshAgent_Posix_PlatformTypes_BSD:
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [restarting service]"); }
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s onerestart", agentHost->meshServiceName);	// Restart the service
+					ignore_result(system(ILibScratchPad));
+					break;
+				case MeshAgent_Posix_PlatformTypes_LAUNCHD:
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [kickstarting service]"); }
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "launchctl kickstart -k system/%s", agentHost->meshServiceName);	// Restart the service
+					ignore_result(system(ILibScratchPad));
+					break;
+				case MeshAgent_Posix_PlatformTypes_SYSTEMD:
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [SYSTEMD should auto-restart]"); }
+					exit(1);
+					break;
+				case MeshAgent_Posix_PlatformTypes_PROCD:
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... [PROCD should auto-restart]"); }
+					exit(1);
+					break;
+				case MeshAgent_Posix_PlatformTypes_INITD:
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling Service restart (INITD)"); }
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "service %s restart", agentHost->meshServiceName);	// Restart the service
+					ignore_result(MeshAgent_System(ILibScratchPad));
+					break;
+				case MeshAgent_Posix_PlatformTypes_INIT_UPSTART:
+					if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Complete... Calling initctl restart (UPSTART)"); }
+					sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "initctl restart %s", agentHost->meshServiceName);	// Restart the service
+					ignore_result(MeshAgent_System(ILibScratchPad));
+					break;
+				default:
+					break;
 				}
 			}
 			else
 			{
-				if (agentHost->logUpdate != 0) 
+				if (agentHost->logUpdate != 0)
 				{
 					ILIBLOGMESSSAGE("SelfUpdate -> Service Check... [NO]");
 					ILIBLOGMESSSAGE("SelfUpdate -> Manual Mode (COMPLETE)");
@@ -5908,7 +5932,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	}
 
 	if (startParms != NULL) { ILibMemory_Free(startParms); }
-	
+
 #ifndef MICROSTACK_NOTLS
 	util_openssl_uninit();
 #endif

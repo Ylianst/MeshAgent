@@ -2322,11 +2322,12 @@ ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain)
 	return(((ILibBaseChain*)chain)->continuationState);
 }
 #ifdef WIN32
-ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles)
+ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles)
 #else
-ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
+ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
 #endif
 {
+	ILibChain_Continue_Result ret = ILibChain_Continue_Result_EXIT;
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
 	ILibChain_Link_Hook *nodeHook;
 	ILibBaseChain *root = (ILibBaseChain*)chain;
@@ -2341,7 +2342,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 	ILibLinkedListNode tmpNode;
 	memset(&tmpNode, 0, sizeof(tmpNode));
 
-	if (root->continuationState != ILibChain_ContinuationState_INACTIVE && root->continuationState != ILibChain_ContinuationState_END_CONTINUE) { return; }
+	if (root->continuationState != ILibChain_ContinuationState_INACTIVE && root->continuationState != ILibChain_ContinuationState_END_CONTINUE) { return(ILibChain_Continue_Result_ERROR_INVALID_STATE); }
 	root->continuationState = ILibChain_ContinuationState_CONTINUE;
 	currentNode = root->node;
 
@@ -2361,6 +2362,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 			if (tv.tv_sec > (startTime.tv_sec + maxTimeout / 1000))
 			{
 				root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
+				ret = ILibChain_Continue_Result_TIMEOUT;
 				break;
 			}
 		}
@@ -2368,7 +2370,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
-		tv.tv_sec = maxTimeout < 0 ? UPNP_MAX_WAIT : maxTimeout/1000;
+		tv.tv_sec = maxTimeout < 0 ? UPNP_MAX_WAIT : maxTimeout / 1000;
 		tv.tv_usec = 0;
 
 		//
@@ -2395,9 +2397,9 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 				//_CrtCheckMemory();
 #endif
 #endif
-			}
-			++mX;
 		}
+			++mX;
+	}
 		tv.tv_sec = chain->selectTimeout / 1000;
 		tv.tv_usec = 1000 * (chain->selectTimeout % 1000);
 
@@ -2432,7 +2434,15 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 		chain->currentWaitTimeout = 0;
 
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
-		slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, chain->currentWaitTimeout);
+		if (x == 0)
+		{
+			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
+			slct = -1;
+		}
+		else
+		{
+			slct = ILibChain_WindowsSelect(chain, &readset, &writeset, &errorset, chain->WaitHandles, x, chain->currentWaitTimeout);
+		}
 #else
 		slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv);
 #endif
@@ -2501,6 +2511,7 @@ ILibExportMethod void ILibChain_Continue(void *Chain, ILibChain_Link **modules, 
 	root->currentHandle = currentHandle;
 	root->currentInfo = currentInfo;
 #endif
+	return(root->TerminateFlag != 0 ? ILibChain_Continue_Result_ERROR_CHAIN_EXITING : ret);
 }
 
 ILibExportMethod void ILibChain_EndContinue(void *chain)

@@ -389,6 +389,14 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibChain_ContinuationState_CONTINUE = 1,
 		ILibChain_ContinuationState_END_CONTINUE = 2
 	}ILibChain_ContinuationStates;
+	typedef enum ILibChain_Continue_Result
+	{
+		ILibChain_Continue_Result_EXIT = 0,
+		ILibChain_Continue_Result_TIMEOUT = 1,
+		ILibChain_Continue_Result_ERROR_INVALID_STATE = 10,
+		ILibChain_Continue_Result_ERROR_CHAIN_EXITING = 11,
+		ILibChain_Continue_Result_ERROR_EMPTY_SET = 12,
+	}ILibChain_Continue_Result;
 
 	typedef	void(*ILibChain_PreSelect)(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime);
 	typedef	void(*ILibChain_PostSelect)(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset);
@@ -1104,9 +1112,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	ILibExportMethod void ILibStartChain(void *chain);
 	ILibExportMethod void ILibStopChain(void *chain);
 #ifdef WIN32
-	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles);
+	ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout, HANDLE **handles);
 #else
-	ILibExportMethod void ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
+	ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *chain, ILibChain_Link **modules, int moduleCount, int maxTimeout);
 #endif
 	ILibExportMethod void ILibChain_EndContinue(void *chain);
 	ILibChain_ContinuationStates ILibChain_GetContinuationState(void *chain);

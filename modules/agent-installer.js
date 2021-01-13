@@ -698,6 +698,7 @@ function sys_update(isservice, b64)
             if (child.stdout.str.trim() == '' && b64 == null) { child.stdout.str = 'Mesh Agent'; }
             if (child.stdout.str.trim() != '')
             {
+                if (child.stdout.str.trim().split('\n').length > 1) { child.stdout.str = 'Mesh Agent'; }
                 try
                 {
                     service = require('service-manager').manager.getService(child.stdout.str.trim())
@@ -789,18 +790,31 @@ function sys_update(isservice, b64)
 
 function agent_updaterVersion(updatePath)
 {
+    var ret = 0;
     if (updatePath == null) { updatePath = process.execPath; }
-    var child = require('child_process').execFile(updatePath, [updatePath.split(process.platform == 'win32' ? '\\' : '/').pop(), '-updaterversion']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    if(child.stdout.str.trim() == '')
+    var child;
+
+    try
+    {
+        child = require('child_process').execFile(updatePath, [updatePath.split(process.platform == 'win32' ? '\\' : '/').pop(), '-updaterversion']);
+    }
+    catch(x)
     {
         return (0);
     }
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.waitExit();
+
+    if(child.stdout.str.trim() == '')
+    {
+        ret = 0;
+    }
     else
     {
-        return (parseInt(child.stdout.str));
+        ret = parseInt(child.stdout.str);
+        if (isNaN(ret)) { ret = 0; }
     }
+    return (ret);
 }
 
 function win_consoleUpdate()
