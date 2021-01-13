@@ -6281,7 +6281,7 @@ struct packetheader* ILibParsePacketHeader(char* buffer, size_t offset, size_t l
 			//
 			if ((node = (struct packetheader_field_node*)malloc(sizeof(struct packetheader_field_node))) == NULL) ILIBCRITICALEXIT(254);
 			memset(node, 0, sizeof(struct packetheader_field_node));
-			for(i = 0; i < HeaderLine->datalength; ++i)
+			for(i = 0; (size_t)i < HeaderLine->datalength; ++i)
 			{
 				if (*((HeaderLine->data) + i) == ':')
 				{
