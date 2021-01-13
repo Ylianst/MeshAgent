@@ -2436,6 +2436,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
 		if (x == 0)
 		{
+			root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
 			slct = -1;
 		}
