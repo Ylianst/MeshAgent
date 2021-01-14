@@ -2622,7 +2622,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion_ERROR: %s", err);
 		if (duk_ctx_is_alive(agent->meshCoreCtx))
 		{
-			duk_push_sprintf(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { value: 'Self-Update -> ABORT: %s', icon : 3 } } });", err);
+			duk_push_sprintf(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { msg: 'Self-Update -> ABORT: %s', icon: 3 } } });", err);
 			duk_eval_noresult(agent->meshCoreCtx);
 		}
 		duk_pop(agent->meshCoreCtx);																				// ...
@@ -3305,7 +3305,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				if (duk_ctx_is_alive(agent->meshCoreCtx))
 				{
 					// Update Failed, so update the server with an agent message explaining what happened, then abort the update by not sending an ACK
-					duk_eval_string_noresult(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { value: 'Self-Update FAILED. Write Error while writing update block', icon : 3 } } });");
+					duk_eval_string_noresult(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { msg: 'Self-Update FAILED. Write Error while writing update block', icon: 3 } } });");
 				}
 			}
 			break;
