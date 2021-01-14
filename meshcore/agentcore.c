@@ -1856,6 +1856,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "log", ILibDuktape_MeshAgent_log, 1);
 		ILibDuktape_CreateEventWithGetter(ctx, "controlChannelDebug", ILibDuktape_MeshAgent_controlChannelDebug);
 		ILibDuktape_CreateInstanceMethod(ctx, "DataPing", ILibDuktape_MeshAgent_DataPing, DUK_VARARGS);
+		ILibDuktape_CreateReadonlyProperty_int(ctx, "ARCHID", MESH_AGENTID);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
