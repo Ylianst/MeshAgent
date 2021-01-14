@@ -2566,9 +2566,7 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 
 void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 {
-#ifdef WIN32
-	agent->performSelfUpdate = 1;
-#else
+#ifndef WIN32
 	// Set performSelfUpdate to the startupType, on Linux is this important: 1 = systemd, 2 = upstart, 3 = sysv-init
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
 	if (len > 0 && len < sizeof(ILibScratchPad)) { ILib_atoi_int32(&(agent->performSelfUpdate), ILibScratchPad, (size_t)len); }
@@ -2581,7 +2579,6 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 		ILIBLOGMESSAGEX("SelfUpdate -> Current Version: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
 	}
 	duk_pop(agent->meshCoreCtx);																				// ...
-
 
 	if (duk_peval_string_noresult(agent->meshCoreCtx, "require('service-manager').manager.getService('meshagentDiagnostic').start();") == 0)
 	{
@@ -2607,32 +2604,26 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 			printf("%s", duk_safe_to_string(agent->meshCoreCtx, -1));
 		}
 	}
-
-	// Check updater version
-	char* updateFilePath = MeshAgent_MakeAbsolutePathEx(agent->exePath, ".update.exe", 1); // uses ILibScratchPad2
-	ILIBLOGMESSAGEX("SelfUpdate -> Checking Updater Version on: %s , %s", updateFilePath, agent->exePath);
-	duk_push_sprintf(agent->meshCoreCtx, "require('agent-installer').updaterVersion('%s');", updateFilePath);	// [code]
-	if (duk_peval(agent->meshCoreCtx) == 0)																		// [version]
-	{
-		agent->updaterVersion = duk_get_int(agent->meshCoreCtx, -1); 
-		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion: %d", agent->updaterVersion);
-	}	
 	else
 	{
-		char *err = (char*)duk_safe_to_string(agent->meshCoreCtx, -1);
-		ILIBLOGMESSAGEX("SelfUpdate -> UpdaterVersion_ERROR: %s", err);
-		if (duk_ctx_is_alive(agent->meshCoreCtx))
+		char parms[65535];
+		char *updatefile = MeshAgent_MakeAbsolutePathEx(agent->exePath, ".update.exe", 0);
+		char cmd[MAX_PATH];
+		char env[MAX_PATH];
+		size_t envlen = sizeof(env);
+		if (getenv_s(&envlen, env, sizeof(env), "windir") == 0)
 		{
-			duk_push_sprintf(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { msg: 'Self-Update -> ABORT: %s', icon: 3 } } });", err);
-			duk_eval_noresult(agent->meshCoreCtx);
+			sprintf_s(cmd, sizeof(cmd), "%s\\system32\\cmd.exe", env);
+			sprintf_s(parms, sizeof(parms), "/C wmic service \"%s\" call stopservice && copy \"%s\" \"%s\" && wmic service \"%s\" call startservice && erase \"%s\"",
+				agent->meshServiceName, updatefile, agent->exePath, agent->meshServiceName, updatefile);
+
+			ILIBLOGMESSAGEX("SelfUpdate -> Updating and restarting service...");
+			_execve(cmd, (char*[]) { "cmd", parms, NULL }, NULL);
 		}
-		duk_pop(agent->meshCoreCtx);																				// ...
+		ILIBLOGMESSAGEX("SelfUpdate -> FAILED");
 		return;
 	}
-	duk_pop(agent->meshCoreCtx);																				// ...
-#endif
-
-#ifndef WIN32
+#else
 	if (duk_peval_string(agent->meshCoreCtx, "require('MeshAgent').getStartupOptions();") == 0)	// [obj]
 	{
 		char *pth = "";
@@ -2684,7 +2675,7 @@ duk_ret_t MeshServer_selfupdate_unzip_complete(duk_context *ctx)
 {
 	duk_eval_string(ctx, "require('MeshAgent')");					// [MeshAgent]
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
-	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updated successfully unzipped..."); }
+	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Update successfully unzipped..."); }
 	MeshServer_selfupdate_continue(agent);
 	return(0);
 }
@@ -5799,11 +5790,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				}
 				else
 				{
-#ifdef WIN32
-					if (strcmp(agentHost->meshServiceName, "Mesh Agent") != 0)
-#else
 					if (strcmp(agentHost->meshServiceName, "meshagent") != 0)
-#endif
 					{
 						startParms = ILibMemory_SmartAllocateEx(ILibMemory_Size(agentHost->meshServiceName) + 30, ILibBase64EncodeLength(ILibMemory_Size(agentHost->meshServiceName) + 30));
 						unsigned char* tmp = (unsigned char*)ILibMemory_Extra(startParms);
@@ -5815,56 +5802,17 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 			agentHost->masterDb = NULL;
 		}
 
+#ifndef WIN32
 		// Check if we need to perform self-update (performSelfUpdate should indicate startup type on Liunx: 1 = systemd, 2 = upstart, 3 = sysv-init)
 		if (agentHost->performSelfUpdate != 0)
 		{
-#ifdef WIN32
-			STARTUPINFOW info = { sizeof(info) };
-			PROCESS_INFORMATION processInfo;
-#endif
 			// Get the update executable path
-#ifdef WIN32
-			char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update.exe"); // uses ILibScratchPad2
-#else
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update"); // uses ILibScratchPad2
-#endif
 			if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Updating..."); }
-#ifdef WIN32
-			// Windows Service Updater
-			if (agentHost->updaterVersion == 0)
-			{
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:\"%s\"", updateFilePath, agentHost->exePath);
-			}
-			else
-			{
-				sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s -update:*%s %s", updateFilePath, agentHost->JSRunningAsService != 0 ? "S" : "C", startParms == NULL ? "W10=" : (char*)ILibMemory_Extra(startParms));
-			}
-			if (agentHost->logUpdate != 0) { ILIBLOGMESSAGEX("SelfUpdate[%d] -> CreateProcessW() with parameters: %s", agentHost->updaterVersion, ILibScratchPad); }
-			if (!CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
-			{
-				// We triedI  to execute a bad executable... not good. Lets try to recover.
-				ILIBLOGMESSSAGE("SelfUpdate -> FAILED...");
-				if (updateFilePath != NULL && agentHost->exePath != NULL)
-				{
-					while (util_CopyFile(agentHost->exePath, updateFilePath, FALSE) == FALSE) Sleep(5000);
-					if (CreateProcessW(NULL, ILibUTF8ToWide(ILibScratchPad, -1), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &info, &processInfo))
-					{
-						CloseHandle(processInfo.hProcess);
-						CloseHandle(processInfo.hThread);
-					}
-				}
-			}
-			else
-			{
-				CloseHandle(processInfo.hProcess);
-				CloseHandle(processInfo.hThread);
-			}
-#else
 			if (agentHost->JSRunningAsService != 0)
 			{
 				// We were started as a service
 				if (agentHost->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Service Check... [YES]"); }
-
 
 				struct stat results;
 				stat(agentHost->exePath, &results); // This the mode of the current executable
@@ -5928,8 +5876,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				execv(agentHost->exePath, agentHost->execparams);
 				_exit(1);
 			}
-#endif
 		}
+#endif
 	}
 
 	if (startParms != NULL) { ILibMemory_Free(startParms); }
