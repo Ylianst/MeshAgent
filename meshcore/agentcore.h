@@ -114,6 +114,7 @@ typedef enum MeshCommands_Binary
 	MeshCommand_CoreModule				= 10,	// New core modules to be used instead of the old one, if empty, remove the core module
 	MeshCommand_CompressedCoreModule	= 20,
 	MeshCommand_CoreModuleHash			= 11,	// Request/return the SHA384 hash of the core module
+	MeshCommand_AgentCommitDate			= 30,	// Commit Date that the agent was built with
 	MeshCommand_AgentHash				= 12,	// Request/return the SHA384 hash of the agent executable
 	MeshCommand_AgentUpdate				= 13,   // Indicate the start and end of the mesh agent binary transfer
 	MeshCommand_AgentUpdateBlock		= 14,   // Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server

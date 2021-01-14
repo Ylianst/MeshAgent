@@ -28,6 +28,7 @@ limitations under the License.
 #include "signcheck.h"
 #include "meshdefines.h"
 #include "meshinfo.h"
+#include "microscript/ILibDuktape_Commit.h"
 #include "microscript/ILibDuktape_Polyfills.h"
 #include "microscript/ILibDuktape_Helpers.h"
 #include "microscript/ILibDuktape_SHA256.h"
@@ -198,7 +199,6 @@ typedef struct MeshCommand_BinaryPacket_CoreModule
 	char coreModule[];
 }MeshCommand_BinaryPacket_CoreModule;
 #pragma pack(pop)
-
 
 #define ScriptContainerSettingsKey			"\xFF_ScriptContainerSettings"
 
@@ -3406,6 +3406,12 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Control Channel Idle Timeout = %d seconds", agent->controlChannel_idleTimeout_seconds);
 			ILibWebClient_SetTimeout(WebStateObject, agent->controlChannel_idleTimeout_seconds, MeshServer_ControlChannel_IdleTimeout, agent);
 			ILibWebClient_WebSocket_SetPingPongHandler(WebStateObject, MeshServer_ControlChannel_PingSink, MeshServer_ControlChannel_PongSink, agent);
+
+			// Send Agent Commit Date to server. This is useful in case the server needs to adjust control flow based on agent build
+			char commitPacket[sizeof(uint16_t) + sizeof(SOURCE_COMMIT_DATE)] = { 0 };
+			((uint16_t*)commitPacket)[0] = htons(MeshCommand_AgentCommitDate);
+			strcpy_s(commitPacket + sizeof(uint16_t), sizeof(SOURCE_COMMIT_DATE), SOURCE_COMMIT_DATE);
+			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)commitPacket, sizeof(commitPacket), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 
 #ifndef MICROSTACK_NOTLS
 			X509* peer = ILibWebClient_SslGetCert(WebStateObject);
