@@ -2606,19 +2606,27 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 	}
 	else
 	{
-		char parms[65535];
+		WCHAR w_meshservicename[4096] = { 0 };
+		WCHAR w_updatefile[4096] = { 0 };
+		WCHAR w_exepath[4096] = { 0 };
+
+		WCHAR parms[65535] = { 0 };
 		char *updatefile = MeshAgent_MakeAbsolutePathEx(agent->exePath, ".update.exe", 0);
-		char cmd[MAX_PATH];
-		char env[MAX_PATH];
+		WCHAR cmd[MAX_PATH] = { 0 };
+		WCHAR env[MAX_PATH] = { 0 };
 		size_t envlen = sizeof(env);
-		if (getenv_s(&envlen, env, sizeof(env), "windir") == 0)
+		if (_wgetenv_s(&envlen, env, MAX_PATH, L"windir") == 0)
 		{
-			sprintf_s(cmd, sizeof(cmd), "%s\\system32\\cmd.exe", env);
-			sprintf_s(parms, sizeof(parms), "/C wmic service \"%s\" call stopservice && copy \"%s\" \"%s\" && wmic service \"%s\" call startservice && erase \"%s\"",
-				agent->meshServiceName, updatefile, agent->exePath, agent->meshServiceName, updatefile);
+			ILibUTF8ToWideEx(agent->meshServiceName, (int)strnlen_s(agent->meshServiceName, 255), w_meshservicename, 4096);
+			ILibUTF8ToWideEx(updatefile, (int)strnlen_s(updatefile, 4096), w_updatefile, 4096);
+			ILibUTF8ToWideEx(agent->exePath, (int)strnlen_s(agent->exePath, 4096), w_exepath, 4096);
+
+			swprintf_s(cmd, MAX_PATH, L"%s\\system32\\cmd.exe", env);
+			swprintf_s(parms, 65535, L"/C wmic service \"%s\" call stopservice && copy \"%s\" \"%s\" && wmic service \"%s\" call startservice && erase \"%s\"",
+				w_meshservicename, w_updatefile, w_exepath, w_meshservicename, w_updatefile);
 
 			ILIBLOGMESSAGEX("SelfUpdate -> Updating and restarting service...");
-			_execve(cmd, (char*[]) { "cmd", parms, NULL }, NULL);
+			_wexecve(cmd, (WCHAR*[]) { L"cmd", parms, NULL }, NULL);
 		}
 		ILIBLOGMESSAGEX("SelfUpdate -> FAILED");
 		return;
