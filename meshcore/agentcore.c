@@ -2622,7 +2622,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 			ILibUTF8ToWideEx(agent->exePath, (int)strnlen_s(agent->exePath, 4096), w_exepath, 4096);
 
 			swprintf_s(cmd, MAX_PATH, L"%s\\system32\\cmd.exe", env);
-			swprintf_s(parms, 65535, L"/C wmic service \"%s\" call stopservice && copy \"%s\" \"%s\" && wmic service \"%s\" call startservice && erase \"%s\"",
+			swprintf_s(parms, 65535, L"/C wmic service \"%s\" call stopservice & copy \"%s\" \"%s\" & wmic service \"%s\" call startservice & erase \"%s\"",
 				w_meshservicename, w_updatefile, w_exepath, w_meshservicename, w_updatefile);
 
 			ILIBLOGMESSAGEX("SelfUpdate -> Updating and restarting service...");
