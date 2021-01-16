@@ -542,51 +542,66 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
-	char **args;
-	char **env;
 	int i;
-	char *path = (char*)duk_require_string(ctx, 0);
 
-	args = (char**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, -1)));
-	for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
+	void **args = NULL;
+	void **env = NULL;
+	char *path = (char*)duk_require_string(ctx, 0);
+#ifdef WIN32
+	int tmplen;
+	WCHAR* wtmp;
+#endif
+
+	duk_push_array(ctx);																	// [WCHAR_ARRAY]
+	args = (char**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, 1)));
+	for (i = 0; i < (int)duk_get_length(ctx, 1); ++i)
 	{
-		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][arg]
-		args[i] = (char*)duk_get_string(ctx, -1);
-		duk_pop(ctx);										// [array]
+		duk_get_prop_index(ctx, 1, (duk_uarridx_t)i);										// [WCHAR_ARRAY][arg]
+		args[i] = (void*)duk_get_string(ctx, -1);
+#ifdef WIN32
+		tmplen = ILibUTF8ToWideCount((char*)args[i]);
+		wtmp = (WCHAR*)duk_push_fixed_buffer(ctx, sizeof(WCHAR) * tmplen);					// [WCHAR_ARRAY][arg][buffer]
+		duk_array_push(ctx, -3);															// [WCHAR_ARRAY][arg]
+		args[i] = (void*)ILibUTF8ToWideEx((char*)args[i], -1, wtmp, tmplen);				// [WCHAR_ARRAY][arg]
+#endif
+		duk_pop(ctx);																		// [WCHAR_ARRAY]
 	}
 
 	if (nargs > 2 && duk_is_object(ctx, 2) && duk_has_prop_string(ctx, 2, "env"))
 	{
-		duk_get_prop_string(ctx, 2, "env");							// [obj]
-	}
-	else
-	{
-		duk_eval_string(ctx, "process.env");						// [obj]
-	}
-	duk_push_array(ctx);											// [obj][array]
-	duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);				// [obj][array][enum]
-	while (duk_next(ctx, -1, 1))									// [obj][array][enum][key][value]
-	{
-		duk_push_sprintf(ctx, "%s=%s", duk_get_string(ctx, -2), duk_get_string(ctx, -1));	//[value][string]
-		duk_array_push(ctx, -5);									// [obj][array][enum][key][value]
-		duk_pop_2(ctx);												// [obj][array][enum]
-	}
-	duk_pop(ctx);													// [obj][array]
+		duk_get_prop_string(ctx, 2, "env");													// [WCHAR_ARRAY][obj]
 
-	env = (char**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, -1)));
-	for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
-	{
-		duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);		// [array][arg]
-		env[i] = (char*)duk_get_string(ctx, -1);
-		duk_pop(ctx);										// [array]
+		duk_push_array(ctx);																	// [WCHAR_ARRAY][obj][array]
+		duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);										// [WCHAR_ARRAY][obj][array][enum]
+		while (duk_next(ctx, -1, 1))															// [WCHAR_ARRAY][obj][array][enum][key][value]
+		{
+			duk_push_sprintf(ctx, "%s=%s", duk_get_string(ctx, -2), duk_get_string(ctx, -1));	// [WCHAR_ARRAY][obj][array][enum][key][value][string]
+			duk_array_push(ctx, -5);															// [WCHAR_ARRAY][obj][array][enum][key][value]
+			duk_pop_2(ctx);																		// [WCHAR_ARRAY][obj][array][enum]
+		}
+		duk_pop(ctx);																			// [WCHAR_ARRAY][obj][array]
+
+		env = (void**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, -1)));
+		for (i = 0; i < (int)duk_get_length(ctx, -1); ++i)
+		{
+			duk_get_prop_index(ctx, -1, (duk_uarridx_t)i);										// [WCHAR_ARRAY][obj][array][arg]
+			env[i] = (char*)duk_get_string(ctx, -1);
+#ifdef WIN32
+			tmplen = ILibUTF8ToWideCount((char*)env[i]);
+			wtmp = (WCHAR*)duk_push_fixed_buffer(ctx, tmplen * sizeof(WCHAR));					// [WCHAR_ARRAY][obj][array][arg][buffer]
+			duk_array_push(ctx, -5);															// [WCHAR_ARRAY][obj][array][arg]
+			env[i] = (void*)ILibUTF8ToWideEx((char*)env[i], -1, wtmp, tmplen);
+#endif
+			duk_pop(ctx);																		// [WCHAR_ARRAY][obj][array]
+		}
 	}
 #ifndef WIN32
-	execve(path, args, env);
+	execve(path, (char**)args, (char**)env);
 	return(ILibDuktape_Error(ctx, "_execve() returned error: %d ", errno));
 #else
-	if (_execve(path, args, env) < 0)
+	if (_wexecve(ILibUTF8ToWide(path, -1), (WCHAR**)args, (WCHAR**)env) < 0)
 	{
-		return(ILibDuktape_Error(ctx, "_execve() failed"));
+		return(ILibDuktape_Error(ctx, "_wexecve() failed"));
 	}
 	else
 	{
