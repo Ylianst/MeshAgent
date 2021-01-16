@@ -102,6 +102,7 @@
 #   make linux ARCHID=24 					# Linux ARM 32 bit HardFloat (Linaro)
 #   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
 #   make linux ARCHID=26 					# Linux ARM 64 bit
+#   make linux ARCHID=50 					# Linux ARM 64 bit (glibc/2.24 NOKVM)
 #   make linux ARCHID=27 					# Linux ARM 32 bit HardFloat NOKVM (Old Raspberry Pi on Raspian 7, 2015-02-02 build)
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
@@ -112,7 +113,7 @@
 #
 #	make linux ARCHID=28					# Linux MIPS24KC/MUSL (OpenWRT)
 #	make linux ARCHID=40					# Linux MIPSEL24KC/MUSL (OpenWRT)
-#
+#	make linux ARCHID=41					# Linux ARMADA/CORTEX-A53/MUSL (OpenWRT)
 #
 
 
@@ -209,10 +210,8 @@ endif
 
 
 
-################
-# Toolchain Test
-#
-ifeq ($(ARCHID),99)
+
+ifeq ($(ARCHID),50)
 ARCHNAME = aarch64
 export PATH := $(PATH_AARCH64)bin:$(PATH_AARCH64)libexec/gcc/aarch64-buildroot-linux-gnu/5.4.0:$(PATH_AARCH64)aarch64-buildroot-linux-gnu/bin:$(PATH)
 export STAGING_DIR := $(PATH_AARCH64)
@@ -223,7 +222,8 @@ INCDIRS += -I$(PATH_AARCH64)include
 KVM = 0
 LMS = 0
 endif
-ifeq ($(ARCHID),98)
+
+ifeq ($(ARCHID),41)
 ARCHNAME = aarch64-cortex-a53
 export PATH := $(PATH_AARCH64_CORTEXA53)bin:$(PATH_AARCH64_CORTEXA53)libexec/gcc/aarch64-openwrt-linux-musl/7.5.0:$(PATH_AARCH64_CORTEXA53)aarch64-openwrt-linux-musl/bin:$(PATH)
 export STAGING_DIR := $(PATH_AARCH64_CORTEXA53)
@@ -234,9 +234,6 @@ INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
 KVM = 0
 LMS = 0
 endif
-#################
-
-
 
 # Official Linux x86 32bit
 ifeq ($(ARCHID),5)
