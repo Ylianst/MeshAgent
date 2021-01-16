@@ -82,7 +82,7 @@
 #	5. Also note, that to build on FreeBSD, you must use gmake, not make.
 #
 #
-# Standard builds
+# Standard builds:
 #
 #   ARCHID=1                                # Windows Console x86 32 bit
 #   ARCHID=2                                # Windows Console x86 64 bit
@@ -92,8 +92,7 @@
 #	make macos ARCHID=29					# macOS ARM 64 bit
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
-#   make linux ARCHID=7						# Linux MIPS
-#	make linux ARCHID=28					# Linux MIPS24KC (OpenWRT)
+#   make linux ARCHID=7						# Linux MIPSEL
 #   make linux ARCHID=9						# Linux ARM 32 bit
 #   make linux ARCHID=13					# Linux ARM 32 bit PogoPlug
 #   make linux ARCHID=15					# Linux x86 32 bit POKY
@@ -107,6 +106,14 @@
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 #   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
+#
+#
+# OpenWRT Builds:
+#
+#	make linux ARCHID=28					# Linux MIPS24KC/MUSL (OpenWRT)
+#	make linux ARCHID=40					# Linux MIPSEL24KC/MUSL (OpenWRT)
+#
+#
 
 
 # 
@@ -158,12 +165,14 @@ EXENAME = meshagent
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
 PATH_MIPS24KC = ../ToolChains/toolchain-mips_24kc_gcc-7.3.0_musl/
+PATH_MIPSEL24KC = ../ToolChains/toolchain-mipsel_24kc_gcc-7.3.0_musl/
 PATH_ARM5 = ../ToolChains/LinuxArm/bin/
 PATH_POGO = ../ToolChains/pogoplug-gcc/bin/
 PATH_LINARO = ../ToolChains/linaro-arm/bin/
 PATH_POKY = ../Galileo/arduino-1.5.3/hardware/tools/sysroots/x86_64-pokysdk-linux/usr/bin/i586-poky-linux-uclibc/
 PATH_POKY64 = /opt/poky/1.6.1/sysroots/x86_64-pokysdk-linux/usr/bin/x86_64-poky-linux/
-
+PATH_AARCH64 = ../ToolChains/aarch64--glibc--stable/
+PATH_AARCH64_CORTEXA53 = ../ToolChains/toolchain-aarch64_cortex-a53_gcc-7.5.0_musl/
 OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
 
 # Compiler command name
@@ -197,6 +206,35 @@ endif
 ifeq ($(AID), 25)
 SKIPFLAGS = 1
 endif
+
+
+
+################
+# Toolchain Test
+#
+ifeq ($(ARCHID),99)
+ARCHNAME = aarch64
+export PATH := $(PATH_AARCH64)bin:$(PATH_AARCH64)libexec/gcc/aarch64-buildroot-linux-gnu/5.4.0:$(PATH_AARCH64)aarch64-buildroot-linux-gnu/bin:$(PATH)
+export STAGING_DIR := $(PATH_AARCH64)
+CC = $(PATH_AARCH64)bin/aarch64-linux-gcc 
+STRIP = $(PATH_AARCH64)bin/aarch64-linux-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+INCDIRS += -I$(PATH_AARCH64)include
+KVM = 0
+LMS = 0
+endif
+ifeq ($(ARCHID),98)
+ARCHNAME = aarch64-cortex-a53
+export PATH := $(PATH_AARCH64_CORTEXA53)bin:$(PATH_AARCH64_CORTEXA53)libexec/gcc/aarch64-openwrt-linux-musl/7.5.0:$(PATH_AARCH64_CORTEXA53)aarch64-openwrt-linux-musl/bin:$(PATH)
+export STAGING_DIR := $(PATH_AARCH64_CORTEXA53)
+CC = $(PATH_AARCH64_CORTEXA53)bin/aarch64-openwrt-linux-gcc
+STRIP = $(PATH_AARCH64_CORTEXA53)bin/aarch64-openwrt-linux-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
+KVM = 0
+LMS = 0
+endif
+#################
 
 
 
@@ -234,7 +272,7 @@ CC = gcc -arch arm64
 endif
 
 
-# Official Linux MIPS
+# Official Linux MIPSEL
 ifeq ($(ARCHID),7)
 ARCHNAME = mips
 CC = $(PATH_MIPS)mipsel-linux-gcc
@@ -261,6 +299,22 @@ INCDIRS += -I$(PATH_MIPS24KC)include
 KVM = 0
 LMS = 0
 endif
+
+# Official Linux MIPSEL24KC (OpenWRT)
+ifeq ($(ARCHID),40)
+ARCHNAME = mipsel24kc
+export PATH := $(PATH_MIPSEL24KC)bin:$(PATH_MIPSEL24KC)libexec/gcc/mips-openwrt-linux-musl/7.3.0:$(PATH_MIPSEL24KC)mips-openwrt-linux-musl/bin:$(PATH)
+export STAGING_DIR := $(PATH_MIPSEL24KC)
+CC = $(PATH_MIPSEL24KC)bin/mipsel-openwrt-linux-musl-gcc --sysroot=$(PATH_MIPSEL24KC)
+STRIP = $(PATH_MIPSEL24KC)bin/mipsel-openwrt-linux-musl-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CFLAGS += -DBADMATH 
+INCDIRS += -I$(PATH_MIPSEL24KC)include
+
+KVM = 0
+LMS = 0
+endif
+
 
 # Official Linux ARM
 ifeq ($(ARCHID),9)
