@@ -1961,7 +1961,7 @@ char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBa
 		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s\\%s", wd, basePath + i);
 #else
 		int i = ILibString_LastIndexOf(basePath, basePathLen, "/", 1) + 1;
-		getcwd(ILibScratchPad, sizeof(ILibScratchPad));
+		ignore_result((uintptr_t)getcwd(ILibScratchPad, sizeof(ILibScratchPad)));
 		sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s/%s", ILibScratchPad, basePath + i);
 #endif
 	}

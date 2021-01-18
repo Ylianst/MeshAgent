@@ -553,7 +553,7 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 #endif
 
 	duk_push_array(ctx);																	// [WCHAR_ARRAY]
-	args = (char**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, 1)));
+	args = (void**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, 1)));
 	for (i = 0; i < (int)duk_get_length(ctx, 1); ++i)
 	{
 		duk_get_prop_index(ctx, 1, (duk_uarridx_t)i);										// [WCHAR_ARRAY][arg]
