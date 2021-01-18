@@ -583,6 +583,13 @@ clean:
 	rm -f microlms/heci/*.o
 
 cleanbin:
+	rm -f $(EXENAME)_aarch64
+	rm -f $(EXENAME)_aarch64-cortex-a53
+	rm -f $(EXENAME)_freebsd_x86-64
+	rm -f $(EXENAME)_osx-arm-64
+	rm -f $(EXENAME)_osx-universal-64
+	rm -f $(EXENAME)_mips24kc
+	rm -f $(EXENAME)_mipsel24kc
 	rm -f $(EXENAME)_x86
 	rm -f $(EXENAME)_x86_nokvm
 	rm -f $(EXENAME)_x86-64
