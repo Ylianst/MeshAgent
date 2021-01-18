@@ -1348,11 +1348,11 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 			retVal = ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars);
 #ifdef WIN32
 			DWORD err = GetLastError();
+#else
+			int err = errno;
 #endif
 			ILibDuktape_GenericMarshal_Variable_PUSH(ctx, (void*)(PTRSIZE)retVal, (int)sizeof(void*));
-#ifdef WIN32
 			duk_push_int(ctx, err); duk_put_prop_string(ctx, -2, "_LastError");
-#endif
 		}
 		else
 		{
