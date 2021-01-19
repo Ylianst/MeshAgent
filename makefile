@@ -100,14 +100,16 @@
 #   make linux ARCHID=19					# Linux x86 32 bit NOKVM
 #   make linux ARCHID=20					# Linux x86 64 bit NOKVM
 #   make linux ARCHID=24 					# Linux ARM 32 bit HardFloat (Linaro)
-#   make linux ARCHID=25 					# Linux ARM 32 bit HardFloat (Raspberry Pi, etc)
 #   make linux ARCHID=26 					# Linux ARM 64 bit
 #   make linux ARCHID=32 					# Linux ARM 64 bit (glibc/2.24 NOKVM)
 #   make linux ARCHID=27 					# Linux ARM 32 bit HardFloat NOKVM (Old Raspberry Pi on Raspian 7, 2015-02-02 build)
-#   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 #   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
 #
+# Raspberry Pi Builds:
+#
+#   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
+#	make linux ARCHID=25 CROSS=1			# Linux ARM 32 bit HardFloat, using cross compiler
 #
 # OpenWRT Builds:
 #
