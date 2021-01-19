@@ -174,6 +174,8 @@ PATH_POKY = ../Galileo/arduino-1.5.3/hardware/tools/sysroots/x86_64-pokysdk-linu
 PATH_POKY64 = /opt/poky/1.6.1/sysroots/x86_64-pokysdk-linux/usr/bin/x86_64-poky-linux/
 PATH_AARCH64 = ../ToolChains/aarch64--glibc--stable/
 PATH_AARCH64_CORTEXA53 = ../ToolChains/toolchain-aarch64_cortex-a53_gcc-7.5.0_musl/
+PATH_RPI = ../ToolChains/arm-rpi-4.9.3-linux-gnueabihf/
+
 OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
 
 # Compiler command name
@@ -388,8 +390,10 @@ endif
 # Official Linux ARM 32bit HardFloat
 ifeq ($(ARCHID),25)
 ARCHNAME = armhf
-#CC = arm-linux-gnueabihf-gcc
-#STRIP = arm-linux-gnueabihf-strip
+ifeq ($(CROSS),1)
+	CC = $(PATH_RPI)bin/arm-linux-gnueabihf-gcc --sysroot=$(PATH_RPI)arm-linux-gnueabihf/sysroot
+	STRIP = $(PATH_RPI)bin/arm-linux-gnueabihf-strip
+endif
 KVM = 1
 LMS = 0
 CEXTRA = -fno-strict-aliasing 
