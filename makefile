@@ -223,7 +223,7 @@ CC = $(PATH_AARCH64)bin/aarch64-linux-gcc
 STRIP = $(PATH_AARCH64)bin/aarch64-linux-strip
 CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
 INCDIRS += -I$(PATH_AARCH64)include
-KVM = 0
+KVM = 1
 LMS = 0
 endif
 
