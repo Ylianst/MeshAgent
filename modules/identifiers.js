@@ -106,7 +106,7 @@ function windows_volumes()
 
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stdin.write('Get-Volume | Select-Object -Property DriveLetter,FileSystemLabel,FileSystemType,Size | ConvertTo-Csv -NoTypeInformation\nexit\n');
+    child.stdin.write('Get-Volume | Select-Object -Property DriveLetter,FileSystemLabel,FileSystemType,Size,DriveType | ConvertTo-Csv -NoTypeInformation\nexit\n');
     child.waitExit();
     a = child.stdout.str.trim().split('\r\n');
     for (i = 1; i < a.length; ++i)
@@ -114,7 +114,13 @@ function windows_volumes()
         tokens = a[i].split(',');
         if (tokens[0] != '')
         {
-            ret[tokens[0].split('"')[1]] = { name: tokens[1].split('"')[1], type: tokens[2].split('"')[1], size: tokens[3].split('"')[1] };
+            ret[tokens[0].split('"')[1]] =
+                {
+                    name: tokens[1].split('"')[1],
+                    type: tokens[2].split('"')[1],
+                    size: tokens[3].split('"')[1],
+                    removable: tokens[4].split('"')[1] == 'Removable'
+                };
         }
     }
 
