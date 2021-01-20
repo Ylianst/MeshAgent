@@ -3492,10 +3492,14 @@ duk_ret_t ILibDuktape_ScriptContainer_SendToSlave(duk_context *ctx)
 
 	if (master->child != NULL)
 	{
-		len = sprintf_s(ILibScratchPad2 + 4, sizeof(ILibScratchPad2) - 4, "%s", duk_get_string(ctx, -1));
-		((int*)ILibScratchPad2)[0] = len + 4;
+		duk_size_t jsonlen;
+		char *json = (char*)duk_get_lstring(ctx, -1, &jsonlen);
+		char *payload = duk_push_fixed_buffer(ctx, jsonlen + 5);
 
-		ILibProcessPipe_Process_WriteStdIn(master->child, ILibScratchPad2, len + 4, ILibTransport_MemoryOwnership_USER);
+		len = sprintf_s(payload + 4, jsonlen + 1, "%s", json);
+		((int*)json)[0] = len + 4;
+
+		ILibProcessPipe_Process_WriteStdIn(master->child, json, len + 4, ILibTransport_MemoryOwnership_USER);
 	}
 	else if(master->PeerChain != NULL)
 	{
