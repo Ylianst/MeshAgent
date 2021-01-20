@@ -99,20 +99,39 @@ function windows_wmic_results(str)
     return (result);
 }
 
-function windows_bitlocker()
+function windows_volumes()
 {
+    var a, i, tokens, key;
+    var ret = {};
+
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stdin.write('Get-BitLockerVolume | Select-Object -Property MountPoint,VolumeStatus,ProtectionStatus | ConvertTo-Csv -NoTypeInformation\nexit\n');
+    child.stdin.write('Get-Volume | Select-Object -Property DriveLetter,FileSystemLabel,FileSystemType,Size | ConvertTo-Csv -NoTypeInformation\nexit\n');
     child.waitExit();
-    var a = child.stdout.str.trim().split('\r\n');
-    var i;
-    var tokens;
-    var ret = {};
+    a = child.stdout.str.trim().split('\r\n');
     for (i = 1; i < a.length; ++i)
     {
         tokens = a[i].split(',');
-        ret[tokens[0].split(':').shift().split('"').pop()] = { volumeStatus: tokens[1].split('"')[1], protectionStatus: tokens[2].split('"')[1] };
+        if (tokens[0] != '')
+        {
+            ret[tokens[0].split('"')[1]] = { name: tokens[1].split('"')[1], type: tokens[2].split('"')[1], size: tokens[3].split('"')[1] };
+        }
+    }
+
+    child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('Get-BitLockerVolume | Select-Object -Property MountPoint,VolumeStatus,ProtectionStatus | ConvertTo-Csv -NoTypeInformation\nexit\n');
+    child.waitExit();
+    a = child.stdout.str.trim().split('\r\n');
+    for (i = 1; i < a.length; ++i)
+    {
+        tokens = a[i].split(',');
+        key = tokens[0].split(':').shift().split('"').pop();
+        if (ret[key] != null)
+        {
+            ret[key].volumeStatus = tokens[1].split('"')[1];
+            ret[key].protectionStatus = tokens[2].split('"')[1];
+        }
     }
     return (ret);
 }
@@ -449,7 +468,7 @@ module.exports.isVM = function isVM()
 
 if (process.platform == 'win32')
 {
-    module.exports.bitlockerStatus = windows_bitlocker;
+    module.exports.volumes = windows_volumes;
 }
 
 // bios_date = BIOS->ReleaseDate
