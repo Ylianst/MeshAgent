@@ -99,6 +99,23 @@ function windows_wmic_results(str)
     return (result);
 }
 
+function windows_bitlocker()
+{
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('Get-BitLockerVolume | Select-Object -Property MountPoint,VolumeStatus,ProtectionStatus | ConvertTo-Csv -NoTypeInformation\nexit\n');
+    child.waitExit();
+    var a = child.stdout.str.trim().split('\r\n');
+    var i;
+    var tokens;
+    var ret = {};
+    for (i = 1; i < a.length; ++i)
+    {
+        tokens = a[i].split(',');
+        ret[tokens[0].split(':').shift().split('"').pop()] = { volumeStatus: tokens[1].split('"')[1], protectionStatus: tokens[2].split('"')[1] };
+    }
+    return (ret);
+}
 
 function windows_identifiers()
 {
@@ -430,6 +447,10 @@ module.exports.isVM = function isVM()
     return (ret);
 };
 
+if (process.platform == 'win32')
+{
+    module.exports.bitlockerStatus = windows_bitlocker;
+}
 
 // bios_date = BIOS->ReleaseDate
 // bios_vendor = BIOS->Manufacturer
