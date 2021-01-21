@@ -71,26 +71,31 @@ function getStatus()
     return (ret);
 }
 
-var j = { status: getStatus };
-require('events').EventEmitter.call(j, true)
-    .createEvent('changed');
-j._H = require('_GenericMarshal').CreatePointer();
-j._EV = require('_GenericMarshal').GetGenericGlobalCallback(1);
-j._EV.parent = j;
-j._EV.on('GlobalCallback', function (p)
+if (process.platform == 'win32' && seccenter != null)
 {
-    if (!this.ObjectToPtr_Verify(this.parent, p)) { return; } // This event is not for us
-    this.parent.emit('changed');
-});
-j.on('~', function ()
-{
-    if (seccenter.WscUnRegisterChanges(this._H).Val == 0) {  }
-});
+    var j = { status: getStatus };
+    require('events').EventEmitter.call(j, true)
+        .createEvent('changed');
+    j._H = require('_GenericMarshal').CreatePointer();
+    j._EV = require('_GenericMarshal').GetGenericGlobalCallback(1);
+    j._EV.parent = j;
+    j._EV.on('GlobalCallback', function (p)
+    {
+        if (!this.ObjectToPtr_Verify(this.parent, p)) { return; } // This event is not for us
+        this.parent.emit('changed');
+    });
+    j.on('~', function ()
+    {
+        if (seccenter.WscUnRegisterChanges(this._H).Val == 0) { }
+    });
 
-if(seccenter.WscRegisterForChanges(0, j._H, j._EV, require('_GenericMarshal').ObjectToPtr(j)).Val == 0)
-{
-    j._H = j._H.Deref();
+    if (seccenter.WscRegisterForChanges(0, j._H, j._EV, require('_GenericMarshal').ObjectToPtr(j)).Val == 0)
+    {
+        j._H = j._H.Deref();
+    }
+    module.exports = j;
 }
-
-
-module.exports = j;
+else
+{
+    throw ('win-securitycenter not supported on this platform');
+}
