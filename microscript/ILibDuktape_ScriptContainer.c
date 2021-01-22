@@ -2610,7 +2610,9 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	// Setup the permissions on this engine. JavaScript will only be allowed to access the libraries it has access to.
 	if ((securityFlags & SCRIPT_ENGINE_NO_NETWORK_ACCESS) == 0)
 	{
+#ifndef NO_WEBRTC
 		ILibDuktape_WebRTC_Init(ctx);						// WebRTC library (browser api)
+#endif
 		ILibDuktape_net_init(ctx, chain);					// Network library (node api)
 		ILibDuktape_DGram_Init(ctx);						// Datagram Sockets
 		ILibDuktape_HttpStream_Init(ctx);					// HTTP Library (node api)

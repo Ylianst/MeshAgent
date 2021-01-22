@@ -1189,7 +1189,6 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 		if (Reader->ssl != NULL)
 		{
 			BIO_clear_retry_flags(Reader->readBio);
-#if defined(WINSOCK2)
 			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
 			{
 				bytesReceived = recv(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0);
@@ -1198,16 +1197,6 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 			{
 				bytesReceived = recvfrom(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
 			}
-#else
-			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
-			{
-				bytesReceived = (int)recv(Reader->internalSocket, Reader->readBioBuffer->data + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0);
-			}
-			else
-			{
-				bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->readBioBuffer->data + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (socklen_t*)&len);
-			}
-#endif
 			if (bytesReceived > 0)
 			{
 				Reader->readBioBuffer->length += bytesReceived;
@@ -1225,6 +1214,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 						// TODO: We should probably do something
 						break;
 					case 1:
+						printf("SSL_handshake() SUCCESS\n");
 						Reader->SSLConnect = Reader->TLSHandshakeCompleted = 1;
 						if (Reader->OnConnect != NULL)
 						{

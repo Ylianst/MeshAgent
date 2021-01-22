@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#if !defined(NO_WEBRTC)
 #if !defined(MICROSTACK_NOTLS)
 
 // This is a version of the WebRTC stack with Initiator, TURN and proper retry logic.
@@ -7494,13 +7495,14 @@ int ILibSCTP_Debug_SetDebugCallback(void* dtlsSession, char* debugFieldName, ILi
 }
 #endif
 #endif
+#endif
 
+#include "ILibParsers.h"
 #ifdef MICROSTACK_NOTLS
 #if defined(WINSOCK2)
 	#include <winsock2.h>
 	#include <ws2tcpip.h>
 #endif
-	#include "ILibParsers.h"
 #endif
 
 /* zlib.h -- interface of the 'zlib' general purpose compression library

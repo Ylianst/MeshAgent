@@ -145,17 +145,18 @@
 
 # Microstack & Microscript
 SOURCES = microstack/ILibAsyncServerSocket.c microstack/ILibAsyncSocket.c microstack/ILibAsyncUDPSocket.c microstack/ILibParsers.c microstack/ILibMulticastSocket.c
-SOURCES += microstack/ILibRemoteLogging.c microstack/ILibWebClient.c microstack/ILibWebRTC.c microstack/ILibWebServer.c microstack/ILibCrypto.c
-SOURCES += microstack/ILibWrapperWebRTC.c microstack/ILibSimpleDataStore.c microstack/ILibProcessPipe.c microstack/ILibIPAddressMonitor.c
+SOURCES += microstack/ILibRemoteLogging.c microstack/ILibWebClient.c microstack/ILibWebServer.c microstack/ILibCrypto.c
+SOURCES += microstack/ILibSimpleDataStore.c microstack/ILibProcessPipe.c microstack/ILibIPAddressMonitor.c
 SOURCES += microscript/duktape.c microscript/duk_module_duktape.c microscript/ILibDuktape_DuplexStream.c microscript/ILibDuktape_Helpers.c
 SOURCES += microscript/ILibDuktape_net.c microscript/ILibDuktape_ReadableStream.c microscript/ILibDuktape_WritableStream.c
-SOURCES += microscript/ILibDuktapeModSearch.c microscript/ILibDuktape_WebRTC.c
+SOURCES += microscript/ILibDuktapeModSearch.c 
 SOURCES += microscript/ILibDuktape_SimpleDataStore.c microscript/ILibDuktape_GenericMarshal.c
 SOURCES += microscript/ILibDuktape_fs.c microscript/ILibDuktape_SHA256.c microscript/ILibduktape_EventEmitter.c
 SOURCES += microscript/ILibDuktape_EncryptionStream.c microscript/ILibDuktape_Polyfills.c microscript/ILibDuktape_Dgram.c
 SOURCES += microscript/ILibDuktape_ScriptContainer.c microscript/ILibDuktape_MemoryStream.c microscript/ILibDuktape_NetworkMonitor.c
 SOURCES += microscript/ILibDuktape_ChildProcess.c microscript/ILibDuktape_HttpStream.c microscript/ILibDuktape_Debugger.c
 SOURCES += microscript/ILibDuktape_CompressedStream.c meshcore/zlib/adler32.c meshcore/zlib/deflate.c meshcore/zlib/inffast.c meshcore/zlib/inflate.c meshcore/zlib/inftrees.c meshcore/zlib/trees.c meshcore/zlib/zutil.c
+
 SOURCES += $(ADDITIONALSOURCES)
 
 # Mesh Agent core
@@ -212,8 +213,10 @@ ifeq ($(AID), 25)
 SKIPFLAGS = 1
 endif
 
-
-
+ifeq ($(FIPS),1)
+DYNAMICTLS = 1
+NOWEBRTC = 1
+endif
 
 ifeq ($(ARCHID),32)
 ARCHNAME = aarch64
@@ -494,6 +497,7 @@ ifeq ($(DYNAMICTLS),1)
 LINUXSSL = 
 MACSSL = 
 BSDSSL = 
+INCDIRS = -I. -I/usr/include/openssl -Imicrostack -Imicroscript -Imeshcore -Imeshconsole
 endif
 
 ifeq ($(DEBUG),1)
@@ -547,7 +551,16 @@ ifeq ($(BIGCHAINLOCK),1)
 CFLAGS += -DILIBCHAIN_GLOBAL_LOCK
 endif
 
+ifeq ($(NOWEBRTC),1)
+CFLAGS += -DNO_WEBRTC -DOLDSSL
+SOURCES += microstack/ILibWebRTC.c
+else
+SOURCES += microstack/ILibWebRTC.c microstack/ILibWrapperWebRTC.c microscript/ILibDuktape_WebRTC.c
+endif
 
+ifeq ($(FIPS),1)
+CFLAGS += -DFIPSMODE
+endif
 
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)

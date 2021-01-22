@@ -2146,6 +2146,9 @@ duk_ret_t ILibDuktape_bignum_fromBuffer(duk_context *ctx)
 	}
 	else if (strcmp(endian, "little") == 0)
 	{
+#ifdef OLDSSL
+		return(ILibDuktape_Error(ctx, "Invalid endian specified"));
+#endif
 		b = BN_lebin2bn((unsigned char*)buffer, (int)len, NULL);
 	}
 	else

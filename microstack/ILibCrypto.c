@@ -458,9 +458,19 @@ void __fastcall util_openssl_init()
 	SSL_load_error_strings();
 	ERR_load_crypto_strings(); // ONE LEAK IN LINUX
 
-	OpenSSL_add_all_algorithms(); // OpenSSL 1.1
-	OpenSSL_add_all_ciphers(); // OpenSSL 1.1
-	OpenSSL_add_all_digests(); // OpenSSL 1.1
+	OpenSSL_add_all_algorithms();	// OpenSSL 1.1
+	OpenSSL_add_all_ciphers();		// OpenSSL 1.1
+	OpenSSL_add_all_digests();		// OpenSSL 1.1
+#ifdef FIPSMODE
+	if (FIPS_mode() || FIPS_mode_set(1)) 
+	{
+		printf("ENTERED FIPS mode\n"); 
+	}
+	else
+	{
+		ILIBCRITICALEXITMSG(200, "FAILED to enter FIPS mode");
+	}
+#endif
 
 	// Add more random seeding in Windows (This is probably useful since OpenSSL in Windows has weaker seeding)
 #if defined(WIN32) && !defined(_MINCORE)
@@ -503,7 +513,9 @@ void __fastcall util_openssl_uninit()
 	ERR_free_strings();
 	//ERR_remove_state(0);										// Deprecated in OpenSSL/1.1.x
 
+#ifndef OLDSSL
 	OPENSSL_cleanup();
+#endif
 }
 
 // Add extension using V3 code: we can set the config file as NULL because we wont reference any other sections.

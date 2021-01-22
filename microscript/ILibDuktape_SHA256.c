@@ -336,7 +336,11 @@ duk_ret_t ILibDuktape_VERIFIER_Create(duk_context *ctx)
 
 	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, ILibDuktape_VERIFIER_CERT);
 	data->cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 0, ILibDuktape_TLS_util_cert);
+#ifdef OLDSSL
+	EVP_PKEY *pkey = X509_get_pubkey(data->cert->x509);
+#else
 	EVP_PKEY *pkey = X509_get0_pubkey(data->cert->x509);
+#endif
 
 
 	EVP_DigestVerifyInit(data->mdctx, NULL, mdtype, NULL, pkey);
@@ -388,7 +392,11 @@ duk_ret_t ILibDuktape_RSA_Verify(duk_context *ctx)
 	char *sig = Duktape_GetBuffer(ctx, 3, &sigLen);
 
 	struct util_cert *cert = (struct util_cert*)Duktape_GetBufferProperty(ctx, 1, ILibDuktape_TLS_util_cert);
+#ifdef OLDSSL
+	RSA *r = EVP_PKEY_get1_RSA(X509_get_pubkey(cert->x509));
+#else
 	RSA *r = EVP_PKEY_get1_RSA(X509_get0_pubkey(cert->x509));
+#endif
 	int vstatus = RSA_verify(duk_require_int(ctx, 0), (unsigned char*)buffer, (unsigned int)bufferLen, (unsigned char*)sig, (unsigned int)sigLen, r);
 	duk_push_boolean(ctx, vstatus == 1);
 	RSA_free(r);

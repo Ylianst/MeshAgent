@@ -39,6 +39,10 @@ limitations under the License.
 #include <AclAPI.h>
 #endif
 
+#ifdef OLDSSL
+#define TLS_method SSLv23_method
+#endif
+
 typedef struct ILibDuktape_net_socket
 {
 	duk_context *ctx;
