@@ -450,6 +450,13 @@ int ILibIsRunningOnChainThread(void* chain);
 		ILibMemory_Types memoryType;
 	}ILibMemory_Header;
 
+#if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
+	void* ILibMemory_InitEx(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
+#else
+	#define ILibMemory_InitEx(ptr, primarySize, extraSize, memType) ILibMemory_Init(ptr, primarySize, extraSize, memType)
+#endif
+
+
 	#define ILibChain_Link_SetMetadata(chainLink, value) if((chainLink)!=NULL) { ILibMemory_Free(((ILibChain_Link*)chainLink)->MetaData); ((ILibChain_Link*)chainLink)->MetaData = value; }
 	#define ILibChain_Link_GetMetadata(chainLink) ((chainLink)==NULL?"":(((ILibChain_Link*)chainLink)->MetaData))
 	#define ILibMemory_Canary (((int*)((char*)(const char*)"broe"))[0])
@@ -471,8 +478,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_Size_Validate(primaryLen, extraLen) (((size_t)(primaryLen)<(UINT32_MAX - (size_t)(extraLen)))&&((size_t)(extraLen)<(UINT32_MAX-(size_t)(primaryLen)))&&((size_t)((primaryLen) + (extraLen))<(UINT32_MAX - sizeof(ILibMemory_Header)))&&((extraLen)==0 || ((size_t)((primaryLen)+(extraLen)+sizeof(ILibMemory_Header))<(UINT32_MAX-sizeof(ILibMemory_Header)))))
 	#define ILibMemory_Init_Size(primaryLen, extraLen) (primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header):0))
 	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
-	#define ILibMemory_SmartAllocate(len) ILibMemory_Init(ILibMemory_Size_Validate(len,0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
-	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_Init(ILibMemory_Size_Validate(primaryLen,extraLen)?malloc(ILibMemory_Init_Size(primaryLen, extraLen)):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_Validate(len,0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_InitEx(ILibMemory_Size_Validate(primaryLen,extraLen)?malloc(ILibMemory_Init_Size(primaryLen, extraLen)):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
 	void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t extraSize);
 

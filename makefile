@@ -562,6 +562,10 @@ ifeq ($(FIPS),1)
 CFLAGS += -DFIPSMODE
 endif
 
+ifeq ($(MEMTRACK),1)
+CFLAGS += -DILIBMEMTRACK
+endif
+
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie

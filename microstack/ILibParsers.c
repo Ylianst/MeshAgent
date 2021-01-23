@@ -997,6 +997,18 @@ typedef struct ILibBaseChain
 	int lastDescriptorCount;
 }ILibBaseChain;
 
+#if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
+size_t ILib_NativeAllocSize = 0;
+ILibSpinLock ILib_MemoryTrackLock = 0;
+void* ILibMemory_InitEx(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType)
+{
+	ILibSpinLock_Lock(&ILib_MemoryTrackLock);
+	ILib_NativeAllocSize += (primarySize + extraSize);
+	ILibSpinLock_UnLock(&ILib_MemoryTrackLock);
+
+	return(ILibMemory_Init(ptr, primarySize, extraSize, memType));
+}
+#endif
 
 void* ILibMemory_AllocateA_Init(void *buffer)
 {
@@ -1030,6 +1042,19 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 			size_t offset = len - originalSize;
 			memmove_s(ILibMemory_Extra(ret) - sizeof(ILibMemory_Header) + offset, originalExtraSize + sizeof(ILibMemory_Header), ILibMemory_Extra(ret) - sizeof(ILibMemory_Header), originalExtraSize + sizeof(ILibMemory_Header));
 		}
+
+#if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
+		ILibSpinLock_Lock(&ILib_MemoryTrackLock);
+		if (newRawSize > originalRawSize)
+		{
+			ILib_NativeAllocSize += (newRawSize - originalRawSize);
+		}
+		else
+		{
+			ILib_NativeAllocSize -= (originalRawSize - newRawSize);
+		}
+		ILibSpinLock_UnLock(&ILib_MemoryTrackLock);
+#endif
 
 		ILibMemory_Size(ret) = len;
 		return(ret);
@@ -1076,6 +1101,7 @@ void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemor
 
 	return(primary);
 }
+
 void ILibMemory_SecureZero(void *ptr, size_t len)
 {
 #if !defined(MICROSTACK_NOTLS)
@@ -1102,6 +1128,12 @@ void ILibMemory_Free(void *ptr)
 {
 	if (ILibMemory_CanaryOK(ptr) && ILibMemory_MemType(ptr) == ILibMemory_Types_HEAP) 
 	{ 
+#if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
+		ILibSpinLock_Lock(&ILib_MemoryTrackLock);
+		ILib_NativeAllocSize -= (ILibMemory_Size(ptr) + ILibMemory_ExtraSize(ptr));
+		ILibSpinLock_UnLock(&ILib_MemoryTrackLock);
+#endif
+
 		if (ILibMemory_ExtraSize(ptr) > 0)
 		{
 			ILibMemory_SecureZero(ILibMemory_RawPtr(ILibMemory_Extra(ptr)), sizeof(ILibMemory_Header));

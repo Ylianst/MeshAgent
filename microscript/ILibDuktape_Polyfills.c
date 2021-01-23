@@ -3113,6 +3113,17 @@ duk_ret_t ILibDuktape_Polyfills_MSH(duk_context *ctx)
 	duk_pop(ctx);																		// [msh]
 	return(1);
 }
+#if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
+extern size_t ILib_NativeAllocSize;
+extern ILibSpinLock ILib_MemoryTrackLock;
+duk_ret_t ILibDuktape_Polyfills_NativeAllocSize(duk_context *ctx)
+{
+	ILibSpinLock_Lock(&ILib_MemoryTrackLock);
+	duk_push_uint(ctx, ILib_NativeAllocSize);
+	ILibSpinLock_UnLock(&ILib_MemoryTrackLock);
+	return(1);
+}
+#endif
 
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
@@ -3160,6 +3171,9 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "_ipv4From", ILibDuktape_Polyfills_ipv4From, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "_isBuffer", ILibDuktape_Polyfills_isBuffer, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "_MSH", ILibDuktape_Polyfills_MSH, 0);
+#if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
+	ILibDuktape_CreateInstanceMethod(ctx, "_NativeAllocSize", ILibDuktape_Polyfills_NativeAllocSize, 0);
+#endif
 
 #ifndef MICROSTACK_NOTLS
 	ILibDuktape_CreateInstanceMethod(ctx, "crc32c", ILibDuktape_Polyfills_crc32c, DUK_VARARGS);
