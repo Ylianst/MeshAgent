@@ -1214,7 +1214,6 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 						// TODO: We should probably do something
 						break;
 					case 1:
-						printf("SSL_handshake() SUCCESS\n");
 						Reader->SSLConnect = Reader->TLSHandshakeCompleted = 1;
 						if (Reader->OnConnect != NULL)
 						{
