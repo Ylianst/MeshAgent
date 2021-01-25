@@ -789,10 +789,36 @@ void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventNa
 	duk_pop(sender->ctx);												// ...
 }
 #ifdef _LINKVM
+#ifdef WIN32
+void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *user)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)((void**)ILibMemory_Extra(user))[0];
+	char *buffer = (char*)user;
+	size_t bufferLen = ILibMemory_Size(user);
+
+	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
+	ILibMemory_Free(user);
+}
+#endif
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *buffer, int bufferLen, void *reserved)
 {
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
 	if (!ILibMemory_CanaryOK(ptrs)) { return(ILibTransport_DoneState_ERROR); }
+
+#ifdef WIN32
+	if (duk_ctx_is_alive(ptrs->ctx))
+	{
+		if (!ILibIsRunningOnChainThread(duk_ctx_chain(ptrs->ctx)))
+		{
+			char *bstate = ILibMemory_SmartAllocateEx(bufferLen, sizeof(void*));
+			memcpy_s(bstate, (size_t)bufferLen, buffer, (size_t)bufferLen);
+			((void**)ILibMemory_Extra(bstate))[0] = ptrs;
+			ILibChain_RunOnMicrostackThreadEx3(duk_ctx_chain(ptrs->ctx), ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain, NULL, bstate);
+			return ILibTransport_DoneState_COMPLETE;		// Always returning complete, because we'll let the stream object handle flow control
+		}
+	}
+#endif
+
 
 	if (ptrs->stream != NULL)
 	{
