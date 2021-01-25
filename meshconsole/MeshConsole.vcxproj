@@ -510,7 +510,7 @@
       <ExceptionHandling>Async</ExceptionHandling>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>SetupAPI.lib;Crypt32.lib;Ncrypt.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;..\openssl\libstatic\libcrypto64MTd.lib;..\openssl\libstatic\libssl64MTd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SetupAPI.lib;Crypt32.lib;Ncrypt.lib;DbgHelp.lib;Gdiplus.lib;Iphlpapi.lib;ws2_32.lib;..\openssl\libstatic\libcrypto64MTd.lib;..\openssl\libstatic\libssl64MTd.lib;dxguid.lib;dxgi.lib;D3d11.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalOptions> /ignore:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
