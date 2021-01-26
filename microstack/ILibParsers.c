@@ -1748,7 +1748,10 @@ void ILibChain_SignalSink(int signum)
 		void *node = ILibLinkedList_GetNode_Head(g_signalHandlers[signum]);
 		while (node != NULL)
 		{
-			ignore_result(write(((ILibChain_SignalHandlerData*)ILibLinkedList_GetDataFromNode(node))->ipc[1], " ", 1));
+			if (ILibLinkedList_GetDataFromNode(node) != NULL)
+			{
+				ignore_result(write(((ILibChain_SignalHandlerData*)ILibLinkedList_GetDataFromNode(node))->ipc[1], " ", 1));
+			}
 			node = ILibLinkedList_GetNextNode(node);
 		}
 	}
@@ -1935,6 +1938,7 @@ void ILibChain_SafeRemoveEx(void *chain, void *object)
 */
 void ILibChain_SafeRemove(void *chain, void *object)
 {
+	if (object == NULL) { return; }
 	((ILibChain_Link*)object)->RESERVED = 0xFFFFFFFF;
 	if (ILibIsChainBeingDestroyed(chain) == 0)
 	{
@@ -3303,7 +3307,11 @@ char *ILibChain_GetMetadataForTimers(void *chain)
 		node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 		while (node != NULL)
 		{
-			Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
+			if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+			{
+				node = ILibLinkedList_GetNextNode(node);
+				continue;
+			}
 			double ex = (double)(Temp->ExpirationTick - current);
 			char *units = "milliseconds";
 
@@ -7418,8 +7426,10 @@ long long ILibLifeTime_GetExpiration(void *LifetimeMonitorObject, void *data)
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 	while (node != NULL)
 	{
-		temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
-		if (temp->data == data) return temp->ExpirationTick;
+		if ((temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+		{
+			if (temp->data == data) return temp->ExpirationTick;
+		}
 		node = ILibLinkedList_GetNextNode(node);
 	}
 	return -1;
@@ -7484,11 +7494,13 @@ ILibLifeTime_Token ILibLifeTime_AddEx4(void *LifetimeMonitorObject, void *data, 
 	{
 		while (node != NULL)
 		{
-			temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
-			if (ltms->ExpirationTick < temp->ExpirationTick)
+			if ((temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) != NULL)
 			{
-				ILibLinkedList_InsertBefore(node, ltms);
-				break;
+				if (ltms->ExpirationTick < temp->ExpirationTick)
+				{
+					ILibLinkedList_InsertBefore(node, ltms);
+					break;
+				}
 			}
 			node = ILibLinkedList_GetNextNode(node);
 		}
@@ -7566,7 +7578,11 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 	while (node != NULL)
 	{
-		Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
+		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+		{
+			node = ILibLinkedList_GetNextNode(node);
+			continue;
+		}
 		if (Temp->ExpirationTick == 0 || Temp->ExpirationTick < CurrentTick)
 		{
 			ILibQueue_EnQueue(EventQueue, Temp);
@@ -7648,7 +7664,7 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 		while (node != NULL)
 		{
 			evt = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
-			if (evt->data == data)
+			if (evt!=NULL && evt->data == data)
 			{
 				ILibQueue_EnQueue(EventQueue, evt);
 				node = ILibLinkedList_Remove(node);
@@ -8736,10 +8752,11 @@ void* ILibSparseArray_GetEx(ILibSparseArray sarray, int index, int remove)
 	{
 		// Need to check the Linked List
 		void *listNode = ILibLinkedList_GetNode_Search(root->bucket[i].ptr, &ILibSparseArray_Comparer, (void*)&index);
-		retVal = listNode != NULL ? ((ILibSparseArray_Node*)ILibLinkedList_GetDataFromNode(listNode))->ptr : NULL;
+		retVal = listNode == NULL ? NULL : (ILibLinkedList_GetDataFromNode(listNode) == NULL ? NULL : ((ILibSparseArray_Node*)ILibLinkedList_GetDataFromNode(listNode))->ptr);
+
 		if(remove!=0 && listNode!=NULL)
 		{
-			free(ILibLinkedList_GetDataFromNode(listNode));
+			if (ILibLinkedList_GetDataFromNode(listNode) != NULL) { free(ILibLinkedList_GetDataFromNode(listNode)); }
 			ILibLinkedList_Remove(listNode);			
 			if(ILibLinkedList_GetCount(root->bucket[i].ptr)==0)
 			{
@@ -8811,8 +8828,11 @@ void ILibSparseArray_ClearEx2(ILibSparseArray sarray, ILibSparseArray_OnValue on
 				while(node != NULL)
 				{
 					ILibSparseArray_Node *sn = (ILibSparseArray_Node*)ILibLinkedList_GetDataFromNode(node);
-					if(onClear!=NULL) { onClear(sarray, sn->index, sn->ptr, user);}
-					if (nonZeroWillDelete != 0) { free(sn); }
+					if (sn != NULL)
+					{
+						if (onClear != NULL) { onClear(sarray, sn->index, sn->ptr, user); }
+						if (nonZeroWillDelete != 0) { free(sn); }
+					}
 					node = ILibLinkedList_GetNextNode(node);
 				}
 				if (nonZeroWillDelete != 0) { ILibLinkedList_Destroy(root->bucket[i].ptr); }

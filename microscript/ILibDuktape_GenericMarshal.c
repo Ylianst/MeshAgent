@@ -1630,7 +1630,7 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 	while (node != NULL)
 	{
 		data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
-		refList[count++] = data;
+		if (data != NULL) { refList[count++] = data; }
 		node = ILibLinkedList_GetNextNode(node);
 	}
 	ILibLinkedList_UnLock(GlobalCallbackList);
@@ -2045,7 +2045,7 @@ duk_ret_t ILibDuktape_GenericMarshal_Finalizer(duk_context *ctx)
 		while (node != NULL)
 		{
 			Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)ILibLinkedList_GetDataFromNode(node);
-			if (data->chain == duk_ctx_chain(ctx) && data->ctxnonce == duk_ctx_nonce(ctx))
+			if (data != NULL && data->chain == duk_ctx_chain(ctx) && data->ctxnonce == duk_ctx_nonce(ctx))
 			{
 				ILibMemory_Free(data);
 				void *next = ILibLinkedList_GetNextNode(node);

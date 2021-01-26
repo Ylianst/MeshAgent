@@ -779,7 +779,10 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 		void *node;
 		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
 		{
-			threadList[i++] = ILibLinkedList_GetDataFromNode(node);
+			if (ILibLinkedList_GetDataFromNode(node) != NULL)
+			{
+				threadList[i++] = ILibLinkedList_GetDataFromNode(node);
+			}
 			ILibLinkedList_Remove(node);
 		}
 		while (WaitForMultipleObjectsEx(i, threadList, TRUE, 1000, TRUE) == WAIT_IO_COMPLETION);
@@ -793,10 +796,12 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 		ILibThread_ms2ts(5000, &ts);
 		while ((node = ILibLinkedList_GetNode_Head(ctxd->threads)) != NULL)
 		{
-			thr = ILibLinkedList_GetDataFromNode(node);
-			if ((rv = ILibThread_TimedJoinEx(thr, &ts)) != 0)
+			if ((thr = ILibLinkedList_GetDataFromNode(node)) != NULL)
 			{
-				break;
+				if ((rv = ILibThread_TimedJoinEx(thr, &ts)) != 0)
+				{
+					break;
+				}
 			}
 			ILibLinkedList_Remove(node);
 		}	

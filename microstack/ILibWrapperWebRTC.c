@@ -831,11 +831,12 @@ void ILibWrapper_WebRTC_ConnectionFactory_RemoveFromChainSink(void *chain, void 
 
 	while (node != NULL && finished == 0)
 	{
-		obj = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node);
-
-		if (obj == turnClient) { finished = 1; }
-		if (obj->DestroyHandler != NULL) { obj->DestroyHandler(obj); }
-		ILibChain_FreeLink(obj);
+		if ((obj = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+		{
+			if (obj == turnClient) { finished = 1; }
+			if (obj->DestroyHandler != NULL) { obj->DestroyHandler(obj); }
+			ILibChain_FreeLink(obj);
+		}
 		node = ILibLinkedList_Remove(node);
 	}
 }

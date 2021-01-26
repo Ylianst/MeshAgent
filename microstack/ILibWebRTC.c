@@ -3168,7 +3168,7 @@ int ILibStun_SctpAddSackChunk(struct ILibStun_Module *obj, int session, char* pa
 
 	// Skip all packets with a low TSN. We do ths bacause we have not processed them yet, but will after adding this SACK
 	void *node = ILibLinkedList_GetNode_Head(obj->dTlsSessions[session]->receiveHoldBuffer);
-	while(node!=NULL && ntohl(((ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(node))->TSN) <= obj->dTlsSessions[session]->userTSN)
+	while(node!=NULL && ILibLinkedList_GetDataFromNode(node) != NULL && ntohl(((ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(node))->TSN) <= obj->dTlsSessions[session]->userTSN)
 	{
 		node = ILibLinkedList_GetNextNode(node);
 	}
@@ -3177,9 +3177,9 @@ int ILibStun_SctpAddSackChunk(struct ILibStun_Module *obj, int session, char* pa
 	while (node != NULL)
 	{
 		ILibSCTP_DataPayload *p = (ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(node);
-		unsigned int gstart = ntohl(p->TSN);
+		unsigned int gstart = (p == NULL ? 0 : ntohl(p->TSN));
 		unsigned int gend = gstart;
-		bytecount += ntohs(p->length);
+		bytecount += (p == NULL ? 0 : ntohs(p->length));
 
 		node = ILibLinkedList_GetNextNode(node);
 		while (node != NULL && (p = (ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(node))!=NULL)
@@ -3638,7 +3638,7 @@ void ILibStun_SctpDisconnect_Final(void *obj)
 	node = ILibLinkedList_GetNode_Head(o->receiveHoldBuffer);
 	while(node != NULL)
 	{
-		free(ILibLinkedList_GetDataFromNode(node));
+		if (ILibLinkedList_GetDataFromNode(node) != NULL) { free(ILibLinkedList_GetDataFromNode(node)); }
 		node = ILibLinkedList_GetNextNode(node);
 	}
 	ILibLinkedList_Destroy(o->receiveHoldBuffer);
@@ -5205,7 +5205,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 				rqptr = ILibLinkedList_GetNode_Head(o->receiveHoldBuffer);
 				while (rqptr != NULL)
 				{
-					unsigned int tsnx = ntohl(((ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(rqptr))->TSN);
+					unsigned int tsnx = (ILibLinkedList_GetDataFromNode(rqptr) == NULL ? 0 : ntohl(((ILibSCTP_DataPayload*)ILibLinkedList_GetDataFromNode(rqptr))->TSN));
 					if (tsnx != o->intsn + 1) break;
 					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "TSN Moved Forward to: %u", tsnx);
 					o->intsn = tsnx;

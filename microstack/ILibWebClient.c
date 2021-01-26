@@ -3048,7 +3048,7 @@ void ILibWebClient_CancelRequestEx2(ILibWebClient_StateObject wcdo, void *userRe
 			nextnode = ILibLinkedList_GetNextNode(node);
 
 			wr = (struct ILibWebRequest*)ILibLinkedList_GetDataFromNode(node);
-			if (wr->requestToken == userRequest)
+			if (wr != NULL && wr->requestToken == userRequest)
 			{
 				if (node == head)
 				{
