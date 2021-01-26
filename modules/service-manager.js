@@ -2172,6 +2172,7 @@ function serviceManager()
                 {
                     // pfSense requries scripts in rc.d to end with .sh, unlike other *bsd, for AUTO_START to work
                     require('fs').copyFileSync('/usr/local/etc/rc.d/' + options.name, '/usr/local/etc/rc.d/' + options.name + '.sh');
+                    require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, '/usr/local/etc/rc.d/' + options.name + '.sh', m);
                 }
 
                 // pfSense and OPNsense needs to have rc.conf.local override enable, for AUTO_START to work correctly, unlike other *BSD
