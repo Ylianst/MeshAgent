@@ -1146,7 +1146,11 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 	int j;
 	#endif
 	int bytesReceived = 0;
+#ifdef WIN32
 	int len;
+#else
+	socklen_t len;
+#endif
 	char *temp;
 
 	if (Reader->PAUSE > 0)
@@ -1184,7 +1188,11 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 
 		// Read data off the non-SSL, generic socket.
 		// Set the receive address buffer size and read from the socket.
-		len = sizeof(struct sockaddr_in6);
+#ifdef WIN32
+		len = (int)sizeof(struct sockaddr_in6);
+#else
+		len = (socklen_t)sizeof(struct sockaddr_in6);
+#endif
 #ifndef MICROSTACK_NOTLS
 		if (Reader->ssl != NULL)
 		{
@@ -1195,7 +1203,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 			}
 			else
 			{
-				bytesReceived = recvfrom(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
+				bytesReceived = recvfrom(Reader->internalSocket, Reader->readBioBuffer_mem + Reader->readBioBuffer->length, (int)(Reader->readBioBuffer->max - Reader->readBioBuffer->length), 0, (struct sockaddr*)&(Reader->SourceAddress), &len);
 			}
 			if (bytesReceived > 0)
 			{
@@ -1290,7 +1298,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 			}
 			else
 			{
-				bytesReceived = recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), (int*)&len);
+				bytesReceived = recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), &len);
 			}
 #else
 			if (Reader->RemoteAddress.sin6_family == AF_UNIX)
@@ -1299,7 +1307,7 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 			}
 			else
 			{
-				bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), (socklen_t*)&len);
+				bytesReceived = (int)recvfrom(Reader->internalSocket, Reader->buffer + Reader->EndPointer, Reader->MallocSize - Reader->EndPointer, 0, (struct sockaddr*)&(Reader->SourceAddress), &len);
 			}
 #endif
 			if (Reader->RemoteAddress.sin6_family != AF_UNIX)
@@ -1668,7 +1676,12 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 	int TriggerSendOK = 0;
 	struct ILibAsyncSocket_SendData *temp;
 	int bytesSent = 0;
-	int flags, len;
+	int flags;
+#ifdef WIN32
+	int len;
+#else
+	socklen_t len;
+#endif
 	int TRY_TO_SEND = 1;
 	int triggerReadSet = 0;
 	int triggerResume = 0;
@@ -1756,13 +1769,18 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 #endif
 			{
 				// Connected
-				len = sizeof(struct sockaddr_in6);
+#ifdef WIN32
+				len = (int)sizeof(struct sockaddr_in6);
+#else
+				len = (socklen_t)sizeof(struct sockaddr_in6);
+#endif
+
 				if (module->RemoteAddress.sin6_family != AF_UNIX)
 				{
 #if defined(WINSOCK2)
-					getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), (int*)&len);
+					getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), &len);
 #else
-					getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), (socklen_t*)&len);
+					getsockname(module->internalSocket, (struct sockaddr*)(&module->LocalAddress), &len);
 #endif
 				}
 				module->FinConnect = 1;
