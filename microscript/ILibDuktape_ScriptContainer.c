@@ -2018,6 +2018,7 @@ duk_ret_t ILibDuktape_tmpdir(duk_context *ctx)
 #endif
 	return(1);
 }
+
 void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);							// [os]
@@ -2029,7 +2030,6 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 	duk_push_string(ctx, "\n");
 #endif
 	ILibDuktape_CreateReadonlyProperty(ctx, "EOL");
-
 
 	ILibDuktape_CreateInstanceMethod(ctx, "arch", ILibDuktape_ScriptContainer_OS_arch, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "platform", ILibDuktape_ScriptContainer_OS_platform, 0);
@@ -2540,7 +2540,8 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				return(tmp);\
 				break;\
 		}\
-	}";
+	};\
+	exports.dns = require('util-dns');";
 
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, jsExtras, sizeof(jsExtras) - 1);
 }
