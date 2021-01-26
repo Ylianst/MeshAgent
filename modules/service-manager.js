@@ -2172,7 +2172,17 @@ function serviceManager()
                 {
                     // pfSense requries scripts in rc.d to end with .sh, unlike other *bsd, for AUTO_START to work
                     require('fs').copyFileSync('/usr/local/etc/rc.d/' + options.name, '/usr/local/etc/rc.d/' + options.name + '.sh');
-                    require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, '/usr/local/etc/rc.d/' + options.name + '.sh', m);
+                    require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name + '.sh', m);
+                }
+                if (this.OPNsense)
+                {
+                    // OPNsense requires a syshook start script
+                    var s = require('fs').createWriteStream('/usr/local/etc/rc.syshook.d/start/50-' + options.name.split(' ').join(''), { flags: 'wb' });
+                    s.write('#!/bin/sh\n');
+                    s.write('echo -n "Starting ' + options.name + ': "\n');
+                    s.write('service "' + options.name + '" start\n\n');
+                    s.end();
+                    require('fs').chmodSync('/usr/local/etc/rc.syshook.d/start/50-' + options.name.split(' ').join(''), m);
                 }
 
                 // pfSense and OPNsense needs to have rc.conf.local override enable, for AUTO_START to work correctly, unlike other *BSD
@@ -2763,6 +2773,40 @@ function serviceManager()
                 }
                 catch (ee)
                 {
+                }
+            }
+            if (this.OPNsense)
+            {
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.on('data', function (c) { });
+                child.stdin.write("ls /usr/local/etc/rc.syshook.d/start | tr '\\n' '`' | awk -F'`' '");
+                child.stdin.write('{');
+                child.stdin.write('   DEL="";');
+                child.stdin.write('   printf "[";');
+                child.stdin.write('   for(i=1;i<NF;++i)');
+                child.stdin.write('   {');
+                child.stdin.write('      if($i ~ /^[0-9][0-9]-' + name.split(' ').join('') + '$/)');
+                child.stdin.write('      {');
+                child.stdin.write('         printf "%s\\"%s\\"", DEL, $i;');
+                child.stdin.write('         DEL=",";');
+                child.stdin.write('      }');
+                child.stdin.write('   }');
+                child.stdin.write('   printf "]";');
+                child.stdin.write("}'");
+                child.stdin.write('\nexit\n');
+                child.waitExit();
+
+                var hooks = JSON.parse(child.stdout.str.trim());
+                for (var i in hooks)
+                {
+                    try
+                    {
+                        require('fs').unlinkSync('/usr/local/etc/rc.syshook.d/start/' + hooks[i]);
+                    }
+                    catch (ee)
+                    {
+                    }
                 }
             }
             require('fs').unlinkSync(service.rc);
