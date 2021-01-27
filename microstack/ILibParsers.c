@@ -8246,7 +8246,10 @@ void ILibLinkedList_Destroy(void *LinkedList)
 	if (ILibMemory_CanaryOK(LinkedList))
 	{
 		struct ILibLinkedListNode_Root *r = (struct ILibLinkedListNode_Root*)LinkedList;
-		while (r->Head != NULL) ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));
+		while (r->Head != NULL && ILibLinkedList_GetNode_Head(LinkedList) != NULL)
+		{
+			ILibLinkedList_Remove(ILibLinkedList_GetNode_Head(LinkedList));
+		}
 		ILibMemory_Free(r);
 	}
 }
