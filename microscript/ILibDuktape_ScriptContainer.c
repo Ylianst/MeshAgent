@@ -899,7 +899,6 @@ duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 	return(1);
 }
 
-
 #ifdef _POSIX
 duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_context *ctx)
 {
@@ -910,12 +909,6 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 
 	switch (((int*)sigbuffer)[1])
 	{
-	case SIGTERM:
-		ILibDuktape_EventEmitter_SetupEmit(ctx, h, "SIGTERM");	// [emit][this][SIGTERM]
-		duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM][name]
-		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting SIGTERM: "); }
-		duk_pop(ctx);
-		break;
 	case SIGCHLD:
 		s = 0;
 		waitpid(((pid_t*)sigbuffer)[2], &s, 0);
@@ -928,6 +921,10 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_SignalListener_Immediate(duk_conte
 		duk_pop(ctx);
 		break;
 	default:
+		ILibDuktape_EventEmitter_SetupEmit(ctx, h, SIGTABLE[((int*)sigbuffer)[1]]);	// [emit][this][SIGTERM]
+		duk_push_string(ctx, SIGTABLE[((int*)sigbuffer)[1]]);						// [emit][this][SIGTERM][name]
+		if (duk_pcall_method(ctx, 2) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "Error Emitting %s: ", SIGTABLE[((int*)sigbuffer)[1]]); }
+		duk_pop(ctx);
 		break;
 	}
 	return(0);
@@ -996,44 +993,6 @@ void ILibDuktape_ScriptContainer_Process_SignalListener(int signum, siginfo_t *i
 }
 #endif
 
-void ILibDuktape_ScriptContainer_Process_SIGTERM_Hook(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
-{
-	int listenerCount = ILibDuktape_EventEmitter_HasListeners2(sender, "SIGTERM", 0);
-	if (listenerCount == 0)
-	{
-		// We are the first
-#ifdef _POSIX
-		struct sigaction action;
-		memset(&action, 0, sizeof(action));
-		action.sa_sigaction = ILibDuktape_ScriptContainer_Process_SignalListener;
-		sigemptyset(&action.sa_mask);
-		action.sa_flags = SA_SIGINFO;
-		if (sigaction(SIGTERM, &action, NULL) == 0) {}
-#else
-		UNREFERENCED_PARAMETER(eventName);
-		UNREFERENCED_PARAMETER(hookedCallback);
-#endif
-	}
-}
-void ILibDuktape_ScriptContainer_Process_SIGCHLD_Hook(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
-{
-	int listenerCount = ILibDuktape_EventEmitter_HasListeners2(sender, "SIGCHLD", 0);
-	if (listenerCount == 0)
-	{
-		// We are the first
-#ifdef _POSIX
-		struct sigaction action;
-		memset(&action, 0, sizeof(action));
-		action.sa_sigaction = ILibDuktape_ScriptContainer_Process_SignalListener;
-		sigemptyset(&action.sa_mask);
-		action.sa_flags = SA_SIGINFO;
-		if (sigaction(SIGCHLD, &action, NULL) == 0) {}
-#else
-		UNREFERENCED_PARAMETER(eventName);
-		UNREFERENCED_PARAMETER(hookedCallback);
-#endif
-	}
-}
 duk_ret_t ILibDuktape_Process_setenv(duk_context *ctx)
 {
 	char *name = (char*)duk_require_string(ctx, 0);
@@ -1136,27 +1095,25 @@ duk_ret_t ILibDuktape_ScriptContainer_Process_rlimit_getter(duk_context *ctx)
 duk_ret_t ILibDuktape_ScriptContainer_removeListenerSink(duk_context *ctx)
 {
 #ifdef _POSIX
+	int i;
 	struct sigaction action;
 	char *name = (char*)duk_require_string(ctx, 0);
 	duk_push_this(ctx);							// [process]
 
-	if (strcmp(name, "SIGCHLD") == 0 && ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "SIGCHLD")==0)
+	for (i = 1; i < (sizeof(SIGTABLE) / sizeof(char*)); ++i)
 	{
-		// No more listeners, so we can unhook the sighandler
-		memset(&action, 0, sizeof(action));
-		sigemptyset(&action.sa_mask);
-		action.sa_flags = 0;
-		action.sa_handler = SIG_DFL;
-		if (sigaction(SIGCHLD, &action, NULL) == 0) {}
-	}
-	if (strcmp(name, "SIGTERM") == 0 && ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "SIGTERM") == 0)
-	{
-		// No more listeners, so we can unhook the sighandler
-		memset(&action, 0, sizeof(action));
-		sigemptyset(&action.sa_mask);
-		action.sa_flags = 0;
-		action.sa_handler = SIG_DFL;
-		if (sigaction(SIGTERM, &action, NULL) == 0) {}
+		if (strcmp(name, SIGTABLE[i]) == 0)
+		{
+			if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, SIGTABLE[i]) == 0)
+			{
+				// No more listeners, so we can unhook the sighandler
+				memset(&action, 0, sizeof(action));
+				sigemptyset(&action.sa_mask);
+				action.sa_flags = 0;
+				action.sa_handler = SIG_DFL;
+				if (sigaction(i, &action, NULL) == 0) {}
+			}
+		}
 	}
 #endif
 	return(0);
@@ -1191,6 +1148,7 @@ void ILibDuktape_Process_SemaphoreTracking_sink(char *source, void *user, int in
 		ILibSemaphoreTrack_func = NULL;
 	}
 }
+
 duk_ret_t ILibDuktape_Process_SemaphoreTracking(duk_context *ctx)
 {
 	if (duk_require_boolean(ctx, 0) != 0)
@@ -1209,6 +1167,35 @@ duk_ret_t ILibDuktape_Process_SemaphoreTracking(duk_context *ctx)
 	}
 	return(0);
 }
+
+duk_ret_t ILibDuktape_Process_SignalHooks(duk_context *ctx)
+{
+#ifdef _POSIX
+	int i;
+	char *eventname = (char*)duk_require_string(ctx, 0);
+	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx);
+
+	for (i = 1; i < (sizeof(SIGTABLE) / sizeof(char*)); ++i)
+	{
+		if (strcmp(eventname, SIGTABLE[i]) == 0)
+		{
+			if (ILibDuktape_EventEmitter_HasListeners2(emitter, eventname, 0) == 0)
+			{
+				// We are the first listener, so we need to set the signal handler
+				struct sigaction action;
+				memset(&action, 0, sizeof(action));
+				action.sa_sigaction = ILibDuktape_ScriptContainer_Process_SignalListener;
+				sigemptyset(&action.sa_mask);
+				action.sa_flags = SA_SIGINFO;
+				if (sigaction(i, &action, NULL) == 0) {}
+			}
+			break;
+		}
+	}
+#endif			
+	return(0);
+}
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -1379,10 +1366,12 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "exit", ILibDuktape_ScriptContainer_Process_Exit, DUK_VARARGS);
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "_exit", ILibDuktape_ScriptContainer_Process_ExitEx, DUK_VARARGS);
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "uncaughtException");
-	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGTERM");
-	ILibDuktape_EventEmitter_CreateEventEx(emitter, "SIGCHLD");
-	ILibDuktape_EventEmitter_AddHook(emitter, "SIGTERM", ILibDuktape_ScriptContainer_Process_SIGTERM_Hook);
-	ILibDuktape_EventEmitter_AddHook(emitter, "SIGCHLD", ILibDuktape_ScriptContainer_Process_SIGCHLD_Hook);
+
+	for (i = 1; i < 31; ++i)
+	{
+		ILibDuktape_EventEmitter_CreateEventEx(emitter, SIGTABLE[i]);
+	}
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "newListener", ILibDuktape_Process_SignalHooks);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "removeListener", ILibDuktape_ScriptContainer_removeListenerSink);
 	ILibDuktape_CreateEventWithGetter(ctx, "exitting", ILibDuktape_Process_Exitting);
 
