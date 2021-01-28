@@ -82,6 +82,11 @@
 #	5. Also note, that to build on FreeBSD, you must use gmake, not make.
 #
 #
+# To build on Alpine Linux (MUSL), you'll need to install the following libraries
+#	apk add build-base gcc abuild binutils linux-headers libexecinfo-dev bash binutils-doc gcc-doc
+#
+#
+#
 # Standard builds:
 #
 #   ARCHID=1                                # Windows Console x86 32 bit
