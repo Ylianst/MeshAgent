@@ -2099,7 +2099,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	}
 	ILibChain_AddWaitHandle(data->chain, data->overlapped.hEvent, -1, ILibDuktape_fs_watch_iocompletion, data);
 #elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
-	data->wd.i = inotify_add_watch(data->linuxWatcher->fd, path, IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO);
+	data->wd.i = inotify_add_watch(data->linuxWatcher->fd, path, IN_ATTRIB | IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO);
 	if (data->wd.i < 0)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "fs.watch(): Error setting watch on [%s] errno = %d", path, errno);
