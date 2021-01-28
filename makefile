@@ -106,6 +106,10 @@
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 #   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
 #
+#
+# Alpine Linux (MUSL)
+#	make linux ARCHID=33					# Alpine Linux x86 64 bit (MUSL)
+#
 # Raspberry Pi Builds:
 #
 #   make pi KVM=1 ARCHID=25					# Linux ARM 32 bit HardFloat, compiled on the Pi.
@@ -216,6 +220,12 @@ endif
 ifeq ($(FIPS),1)
 DYNAMICTLS = 1
 NOWEBRTC = 1
+endif
+
+ifeq ($(ARCHID),33)
+ARCHNAME = alpine-x86-64
+KVM=0
+CRASH_HANDLER=0
 endif
 
 ifeq ($(ARCHID),32)
