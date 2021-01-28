@@ -2009,7 +2009,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	else
 	{
 		notifyDispatcher = ILibMemory_Allocate(sizeof(ILibDuktape_fs_linuxWatcher), 0, NULL, NULL);
-		notifyDispatcher->chainLink.MetaData = "ILibDuktape_fs_linuxWatcher";
+		notifyDispatcher->chainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibDuktape_fs_linuxWatcher");
 		notifyDispatcher->chainLink.PreSelectHandler = ILibDuktape_fs_notifyDispatcher_PreSelect;
 		notifyDispatcher->chainLink.PostSelectHandler = ILibDuktape_fs_notifyDispatcher_PostSelect;
 		notifyDispatcher->chainLink.DestroyHandler = ILibDuktape_fs_notifyDispatcher_Destroy;

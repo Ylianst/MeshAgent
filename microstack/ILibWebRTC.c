@@ -6381,7 +6381,7 @@ void* ILibStunClient_Start(void *Chain, unsigned short LocalPort, ILibStunClient
 	memset(obj, 0, sizeof(struct ILibStun_Module));
 	obj->State = STUN_STATUS_NOT_TESTED;
 	obj->StunUsers = ILibLinkedList_Create();
-	obj->ChainLink.MetaData = "ILibWebRTC";
+	obj->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWebRTC");
 	obj->OnResult = OnResult;
 	obj->LocalIf.sin_family = AF_INET;
 	obj->LocalIf.sin_port = htons(LocalPort);
@@ -7058,7 +7058,7 @@ ILibTURN_ClientModule ILibTURN_CreateTurnClient(void* chain, ILibTURN_OnConnectT
 	retVal->OnChannelDataCallback = OnChannelData;
 	retVal->transactionData = ILibInitHashTree();
 	retVal->ChainLink.ParentChain = chain;
-	retVal->ChainLink.MetaData = "ILibWebRTC_TURN_Client";
+	retVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWebRTC_TURN_Client");
 	ILibAddToChain(chain, retVal);
 
 	return retVal;

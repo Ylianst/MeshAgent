@@ -758,7 +758,7 @@ int ILibWrapper_WebRTC_OnDataChannel(void *StunModule, void* WebRTCModule, unsig
 	if((dataChannel = (ILibWrapper_WebRTC_DataChannel*)ILibSparseArray_Get(obj->DataChannels, (int)StreamId))==NULL)
 	{
 		dataChannel = (ILibWrapper_WebRTC_DataChannel*)ILibChain_Link_Allocate(sizeof(ILibWrapper_WebRTC_DataChannel), (int)ILibMemory_ExtraSize(obj));
-		dataChannel->Header.transport.ChainLink.MetaData = "ILibWrapper_WebRTC_DataChannel";
+		dataChannel->Header.transport.ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWrapper_WebRTC_DataChannel");
 		dataChannel->parent = obj;
 		dataChannel->streamId = StreamId;
 		if((dataChannel->channelName = (char*)malloc(ChannelNameLength+1))==NULL){ILIBCRITICALEXIT(254);}
@@ -852,7 +852,7 @@ ILibWrapper_WebRTC_ConnectionFactory ILibWrapper_WebRTC_ConnectionFactory_Create
 	if (retVal == NULL) { ILIBCRITICALEXIT(254); }
 
 	memset(retVal, 0, sizeof(ILibWrapper_WebRTC_ConnectionFactoryStruct));
-	retVal->ChainLink.MetaData = "ILibWrapper_WebRTC_ConnectionFactory";
+	retVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWrapper_WebRTC_ConnectionFactory");
 	retVal->ChainLink.DestroyHandler = &ILibWrapper_WebRTC_ConnectionFactory_OnDestroy;
 	ILibAddToChain(chain, retVal);
 
@@ -1258,7 +1258,7 @@ void ILibWrapper_WebRTC_DataChannel_Close(ILibWrapper_WebRTC_DataChannel* dataCh
 ILibWrapper_WebRTC_DataChannel* ILibWrapper_WebRTC_DataChannel_CreateEx(ILibWrapper_WebRTC_Connection connection, char* channelName, int channelNameLen, unsigned short streamId, ILibWrapper_WebRTC_DataChannel_OnDataChannelAck OnAckHandler)
 {
 	ILibWrapper_WebRTC_DataChannel *retVal = (ILibWrapper_WebRTC_DataChannel*)ILibChain_Link_Allocate(sizeof(ILibWrapper_WebRTC_DataChannel), (int)ILibMemory_ExtraSize(connection));
-	retVal->Header.transport.ChainLink.MetaData = "ILibWrapper_WebRTC_DataChannel";
+	retVal->Header.transport.ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWrapper_WebRTC_DataChannel");
 	retVal->parent = connection;
 	if ((retVal->channelName = (char*)malloc(channelNameLen + 1)) == NULL) { ILIBCRITICALEXIT(254); }
 	memcpy_s(retVal->channelName, channelNameLen + 1, channelName, channelNameLen);

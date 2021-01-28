@@ -480,6 +480,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
 	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_Validate(len,0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_InitEx(ILibMemory_Size_Validate(primaryLen,extraLen)?malloc(ILibMemory_Init_Size(primaryLen, extraLen)):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocate_FromString(str) ILibMemory_SmartAllocate_FromStringEx(str, 0)
+	char* ILibMemory_SmartAllocate_FromStringEx(char *str, size_t strLen);
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
 	void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t extraSize);
 
@@ -1419,7 +1421,6 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILibString_Cat(const char *inString1, size_t inString1Len, const char *inString2, size_t inString2Len);
 	char* ILibString_Cat_s(char *destination, size_t destinationSize, char *source);
 	char* ILibString_Copy(const char *inString, size_t length);
-	char* ILibString_CopyEx(const char *inString, size_t length);
 	int ILibString_Copy_s(char *destination, size_t destinationSize, char *source);
 	int ILibString_n_Copy_s(char *destination, size_t destinationSize, char *source, size_t count);
 	int ILibString_EndsWith(const char *inString, size_t inStringLength, const char *endWithString, size_t endWithStringLength);

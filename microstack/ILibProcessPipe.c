@@ -270,8 +270,7 @@ ILibProcessPipe_Manager ILibProcessPipe_Manager_Create(void *chain)
 
 	if ((retVal = (ILibProcessPipe_Manager_Object*)malloc(sizeof(ILibProcessPipe_Manager_Object))) == NULL) { ILIBCRITICALEXIT(254); }
 	memset(retVal, 0, sizeof(ILibProcessPipe_Manager_Object));
-	//retVal->ChainLink.MetaData = "ILibProcessPipe_Manager";
-	retVal->ChainLink.MetaData = ILibString_CopyEx("ILibProcessPipe_Manager", 0);
+	retVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibProcessPipe_Manager");
 	retVal->ChainLink.ParentChain = chain;
 	retVal->ActivePipes = ILibLinkedList_CreateEx(sizeof(int));
 

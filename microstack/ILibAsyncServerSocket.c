@@ -633,7 +633,7 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 
 	// Instantiate a new AsyncServer module
 	RetVal = (struct ILibAsyncServerSocketModule*)ILibChain_Link_Allocate(sizeof(struct ILibAsyncServerSocketModule), ServerUserMappedMemorySize);
-	RetVal->ChainLink.MetaData = "ILibAsyncServerSocket";
+	RetVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibAsyncServerSocket");
 	RetVal->ChainLink.PreSelectHandler = &ILibAsyncServerSocket_PreSelect;
 	RetVal->ChainLink.PostSelectHandler = &ILibAsyncServerSocket_PostSelect;
 	RetVal->ChainLink.DestroyHandler = &ILibAsyncServerSocket_Destroy;

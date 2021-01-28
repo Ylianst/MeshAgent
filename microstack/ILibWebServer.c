@@ -459,7 +459,7 @@ void ILibWebServer_OnConnect(void *AsyncServerSocketModule, void *ConnectionToke
 
 	wsm = (struct ILibWebServer_StateModule*)ILibAsyncServerSocket_GetTag(AsyncServerSocketModule);
 	ws = (struct ILibWebServer_Session*)ILibChain_Link_Allocate(ILibMemory_WEBSERVERSESSION_CONTAINERSIZE, ILibMemory_GetExtraMemorySize(wsm->ChainLink.ExtraMemoryPtr));
-	ws->Reserved_Transport.ChainLink.MetaData = "ILibWebServer_Session";
+	ws->Reserved_Transport.ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWebServer_Session");
 	ws->Reserved_Transport.ChainLink.ParentChain = wsm->ChainLink.ParentChain;
 	ws->Reserved_Transport.IdentifierFlags = (unsigned int)ILibTransports_WebServer;
 	ws->Reserved_Transport.ClosePtr = (ILibTransport_ClosePtr)&ILibWebServer_DisconnectSession;
@@ -1052,7 +1052,7 @@ void ILibWebServer_SetTLS(ILibWebServer_ServerToken object, void *ssl_ctx)
 ILibExportMethod ILibWebServer_ServerToken ILibWebServer_CreateEx2(void *Chain, int MaxConnections, unsigned short PortNumber, int loopbackFlag, ILibWebServer_Session_OnSession OnSession, int ExtraMemorySize, void *User)
 {
 	struct ILibWebServer_StateModule *RetVal = (struct ILibWebServer_StateModule *)ILibChain_Link_Allocate(sizeof(struct ILibWebServer_StateModule), ExtraMemorySize);
-	RetVal->ChainLink.MetaData = "ILibWebServer";
+	RetVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibWebServer");
 	RetVal->ChainLink.DestroyHandler = &ILibWebServer_Destroy;
 	RetVal->ChainLink.ParentChain = Chain;
 	RetVal->OnSession = OnSession;

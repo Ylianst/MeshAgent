@@ -2455,7 +2455,7 @@ void ILibDuktape_ChainViewer_Push(duk_context *ctx, void *chain)
 	duk_push_object(ctx);													// [viewer]
 
 	ILibTransport *t = (ILibTransport*)ILibChain_Link_Allocate(sizeof(ILibTransport), 2*sizeof(void*));
-	t->ChainLink.MetaData = "ILibDuktape_ChainViewer";
+	t->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibDuktape_ChainViewer");
 	t->ChainLink.PostSelectHandler = ILibDuktape_ChainViewer_PostSelect;
 	((void**)t->ChainLink.ExtraMemoryPtr)[0] = ctx;
 	((void**)t->ChainLink.ExtraMemoryPtr)[1] = duk_get_heapptr(ctx, -1);

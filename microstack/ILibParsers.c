@@ -1009,7 +1009,15 @@ void* ILibMemory_InitEx(void *ptr, size_t primarySize, size_t extraSize, ILibMem
 	return(ILibMemory_Init(ptr, primarySize, extraSize, memType));
 }
 #endif
+char* ILibMemory_SmartAllocate_FromStringEx(char *str, size_t strLen)
+{
+	if (str == NULL) { return(NULL); }
+	if (strLen == 0) { strLen = strnlen_s(str, sizeof(ILibScratchPad)); }
 
+	char *ret = (char*)ILibMemory_SmartAllocate(1+strLen);
+	memcpy_s(ret, strLen + 1, str, strLen);
+	return(ret);
+}
 void* ILibMemory_AllocateA_Init(void *buffer)
 {
 	((void**)buffer)[0] = (char*)buffer + sizeof(void*);
@@ -1867,7 +1875,7 @@ int ILibChain_AddSignalHandler(void *chain, int signum, ILibChain_SignalHandler 
 	{
 		if (g_signalHandlers[signum] == NULL) { g_signalHandlers[signum] = ILibLinkedList_Create(); }
 		data = (ILibChain_SignalHandlerData*)ILibChain_Link_Allocate(sizeof(ILibChain_SignalHandlerData), 0);
-		data->link.MetaData = "ILibChain_SignalHandler";
+		data->link.MetaData = ILibMemory_SmartAllocate_FromString("ILibChain_SignalHandler");
 		data->link.PreSelectHandler = ILibChain_SignalHandler_PreSelect;
 		data->link.PostSelectHandler = ILibChain_SignalHandler_PostSelect;
 		data->link.DestroyHandler = ILibChain_SignalHandler_DestroySelect;
@@ -7748,7 +7756,7 @@ void *ILibCreateLifeTime(void *Chain)
 	if ((RetVal = (struct ILibLifeTime*)malloc(sizeof(struct ILibLifeTime))) == NULL) ILIBCRITICALEXIT(254);
 	memset(RetVal,0,sizeof(struct ILibLifeTime));
 
-	RetVal->ChainLink.MetaData = "ILibLifeTime";
+	RetVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibLifeTime");
 	RetVal->ObjectList = ILibLinkedList_Create();
 	RetVal->ChainLink.PreSelectHandler = &ILibLifeTime_Check;
 	RetVal->ChainLink.DestroyHandler = &ILibLifeTime_Destroy;
@@ -9194,13 +9202,6 @@ char* ILibString_Copy(const char *inString, size_t length)
 	memcpy_s(RetVal, length + 1, (char*)inString, length);
 	RetVal[length] = 0;
 	return RetVal;
-}
-char* ILibString_CopyEx(const char *inString, size_t length)
-{
-	if (length == 0 || length == (size_t)(-1)) { length = strnlen_s(inString, sizeof(ILibScratchPad)); }
-	char *retVal = ILibMemory_SmartAllocate(length + 1);
-	memcpy_s(retVal, length + 1, inString, length);
-	return(retVal);
 }
 /*! \fn ILibString_ToUpper(const char *inString, int length)
 \brief Coverts the given string to upper case
