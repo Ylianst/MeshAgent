@@ -1322,6 +1322,10 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
+                            if (platform == 'init')
+                            {
+                                Object.defineProperty(ret, 'OpenRC', { value: require('fs').existsSync('/sbin/openrc-run') });
+                            }
                             ret.conf = (platform == 'upstart' ? ('/etc/init/' + name + '.conf') : ('/etc/init.d/' + name));
                             ret.serviceType = platform;
                             Object.defineProperty(ret, "startType",
@@ -1331,13 +1335,20 @@ function serviceManager()
                                         var child = require('child_process').execFile('/bin/sh', ['sh']);
                                         child.stderr.on('data', function (c) { });
                                         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                        if (this.serviceType == 'upstart')
+                                        if (this.OpenRC)
                                         {
-                                            child.stdin.write('cat ' + this.conf + ' | grep "start on runlevel"\nexit\n');
+                                            child.stdin.write('rc-status default | grep "^\\s' + this.name + ' *\\["\n\exit\n');
                                         }
                                         else
                                         {
-                                            child.stdin.write('find /etc/rc* -maxdepth 2 -type l -ls | grep " ../init.d/' + this.name + '" | awk -F"-> " \'{ if($2=="../init.d/' + this.name + '") { print "true"; } }\'\nexit\n');
+                                            if (this.serviceType == 'upstart')
+                                            {
+                                                child.stdin.write('cat ' + this.conf + ' | grep "start on runlevel"\nexit\n');
+                                            }
+                                            else
+                                            {
+                                                child.stdin.write('find /etc/rc* -maxdepth 2 -type l -ls | grep " ../init.d/' + this.name + '" | awk -F"-> " \'{ if($2=="../init.d/' + this.name + '") { print "true"; } }\'\nexit\n');
+                                            }
                                         }
                                         child.waitExit();
                                         return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
@@ -1368,7 +1379,21 @@ function serviceManager()
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                                 if (appWorkingDirectory.platform == 'init')
                                 {
-                                    child.stdin.write("cat /etc/init.d/" + this.name + " | grep 'SCRIPT=' | awk -F= '{ len=split($2, a, \"/\"); print substr($2,0,length($2)-length(a[len])); }'\nexit\n");
+                                    if (this.OpenRC)
+                                    {
+                                        if (this.startType == 'AUTO_START')
+                                        {
+                                            child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*supervise_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); print B[2]; }\'\nexit\n');
+                                        }
+                                        else
+                                        {
+                                            child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*start_stop_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); print B[2]; }\'\nexit\n');
+                                        }
+                                    }
+                                    else
+                                    {
+                                        child.stdin.write("cat /etc/init.d/" + this.name + " | grep 'SCRIPT=' | awk -F= '{ len=split($2, a, \"/\"); print substr($2,0,length($2)-length(a[len])); }'\nexit\n");
+                                    }
                                 }
                                 else
                                 {
@@ -1397,9 +1422,16 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                if(appLocation.platform == 'init')
+                                if (appLocation.platform == 'init')
                                 {
-                                    child.stdin.write("cat /etc/init.d/" + this.name + " | grep 'SCRIPT=' | awk -F= '{print $2}'\nexit\n");
+                                    if (this.OpenRC)
+                                    {
+                                        child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "\\s*command=" | awk \'NR==1{ split($0,A,"\\""); print A[2]; }\'\nexit\n');
+                                    }
+                                    else
+                                    {
+                                        child.stdin.write("cat /etc/init.d/" + this.name + " | grep 'SCRIPT=' | awk -F= '{print $2}'\nexit\n");
+                                    }
                                 }
                                 else
                                 {
@@ -1422,6 +1454,10 @@ function serviceManager()
                             ret.appLocation.platform = platform;
                             ret.isMe = function isMe()
                             {
+                                if (this.OpenRC)
+                                {
+                                    return (this.pid() == process.pid);
+                                }
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -1463,15 +1499,29 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
+                                    if (this.OpenRC)
+                                    {
+                                        child.stdin.write('rc-status | grep "\\s*' + this.name + ' "\nexit\n');
+                                    }
+                                    else
+                                    {
+                                        child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
+                                    }
                                 }
                                 child.waitExit();
-                                return (child.stdout.str.trim() == 'start/running');
+                                if (this.OpenRC)
+                                {
+                                    return (child.stdout.str.trim() != '');
+                                }
+                                else
+                                {
+                                    return (child.stdout.str.trim() == 'start/running');
+                                }
                             };
                             ret.isRunning.platform = platform;
                             ret.start = function start()
                             {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                var child = require('child_process').execFile('/bin/sh', ['sh'], this.OpenRC ? { type: require('child_process').SpawnTypes.TERM } : null);
                                 child.stdout.on('data', function (chunk) { });
                                 if (start.platform == 'upstart')
                                 {
@@ -1486,7 +1536,7 @@ function serviceManager()
                             ret.start.platform = platform;
                             ret.stop = function stop()
                             {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                var child = require('child_process').execFile('/bin/sh', ['sh'], this.OpenRC ? { type: require('child_process').SpawnTypes.TERM } : null);
                                 child.stdout.on('data', function (chunk) { });
                                 if (stop.platform == 'upstart')
                                 {
@@ -1501,7 +1551,7 @@ function serviceManager()
                             ret.stop.platform = platform;
                             ret.restart = function restart()
                             {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                var child = require('child_process').execFile('/bin/sh', ['sh'], this.OpenRC ? { type: require('child_process').SpawnTypes.TERM } : null);
                                 child.stdout.on('data', function (chunk) { });
                                 if (restart.platform == 'upstart')
                                 {
@@ -1525,11 +1575,30 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    child.stdin.write('service ' + this.name + ' status\nexit\n');
+                                    if (this.OpenRC)
+                                    {
+                                        child.stdin.write('rc-status | grep "\\s*' + this.name + ' "\nexit\n');
+                                    }
+                                    else
+                                    {
+                                        child.stdin.write('service ' + this.name + ' status\nexit\n');
+                                    }
                                 }
                                 child.waitExit();
                                 return (child.stdout._str);
                             };
+                            if (ret.OpenRC)
+                            {
+                                ret.pid = function ()
+                                {
+                                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                    child.stderr.on('data', function () { });
+                                    child.stdin.write('cat /var/run/' + this.name + ".pid | awk 'NR==1{ sh=sprintf(\"ps -o pid -o ppid | grep %s\",$0); system(sh); }' | awk '{ if($2!=\"1\") { print $1; }}' | awk 'NR==1{ print $0; }'\nexit\n");
+                                    child.waitExit();
+                                    return (parseInt(child.stdout.str.trim()));
+                                }
+                            }
                             ret.status.platform = platform;
                         }
                         else
@@ -2247,24 +2316,45 @@ function serviceManager()
 
                     break;
                 case 'init':
-                    if (options.failureRestart == null || options.failureRestart > 0)
-                    {
-                        // Crash Restart is enabled, but it isn't inherently supported by INIT, so we must fake it with JS
-                        var tmp_parameters = options.parameters ? options.parameters.slice() : [];
-                        tmp_parameters.unshift('{{{}}}');
-                        tmp_parameters = JSON.stringify(tmp_parameters).split('"{{{}}}"').join('process.argv0');
-                        parameters = "var child; process.on('SIGTERM', function () { child.removeAllListeners('exit'); child.kill(); process.exit(); }); function start() { child = require('child_process').execFile(process.execPath, " + tmp_parameters + "); child.stdout.on('data', function (c) { }); child.stderr.on('data', function (c) { }); child.on('exit', function (status) { start(); }); } start();";
-                        parameters = '-b64exec ' + Buffer.from(parameters).toString('base64');
-                    }
-
-                    // The following is the init.d script I wrote. Rather than having to deal with escaping the thing, I just Base64 encoded it to prevent issues.
                     conf = require('fs').createWriteStream('/etc/init.d/' + options.name, { flags: 'wb' });
-                    conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPVpaWlpaWVlZWVkKUlVOQVM9cm9vdAoKUElERklMRT0vdmFyL3J1bi9YWFhYWC5waWQKTE9HRklMRT0vdmFyL2xvZy9YWFhYWC5sb2cKCnN0YXJ0KCkgewogIGlmIFsgLWYgIiRQSURGSUxFIiBdICYmIGtpbGwgLTAgJChjYXQgIiRQSURGSUxFIikgMj4vZGV2L251bGw7IHRoZW4KICAgIGVjaG8gJ1NlcnZpY2UgYWxyZWFkeSBydW5uaW5nJyA+JjIKICAgIHJldHVybiAxCiAgZmkKICBlY2hvICdTdGFydGluZyBzZXJ2aWNl4oCmJyA+JjIKICBsb2NhbCBDTUQ9IiRTQ1JJUFQge3tQQVJNU319ICY+IFwiJExPR0ZJTEVcIiAmIGVjaG8gXCQhIgogIGxvY2FsIENNRFBBVEg9JChlY2hvICRTQ1JJUFQgfCBhd2sgJ3sgbGVuPXNwbGl0KCQwLCBhLCAiLyIpOyBwcmludCBzdWJzdHIoJDAsIDAsIGxlbmd0aCgkMCktbGVuZ3RoKGFbbGVuXSkpOyB9JykKICBjZCAkQ01EUEFUSAogIHN1IC1jICIkQ01EIiAkUlVOQVMgPiAiJFBJREZJTEUiCiAgZWNobyAnU2VydmljZSBzdGFydGVkJyA+JjIKfQoKc3RvcCgpIHsKICBpZiBbICEgLWYgIiRQSURGSUxFIiBdOyB0aGVuCiAgICBlY2hvICdTZXJ2aWNlIG5vdCBydW5uaW5nJyA+JjIKICAgIHJldHVybiAxCiAgZWxzZQoJcGlkPSQoIGNhdCAiJFBJREZJTEUiICkKCWlmIGtpbGwgLTAgJHBpZCAyPi9kZXYvbnVsbDsgdGhlbgogICAgICBlY2hvICdTdG9wcGluZyBzZXJ2aWNl4oCmJyA+JjIKICAgICAga2lsbCAtMTUgJHBpZAogICAgICBlY2hvICdTZXJ2aWNlIHN0b3BwZWQnID4mMgoJZWxzZQoJICBlY2hvICdTZXJ2aWNlIG5vdCBydW5uaW5nJwoJZmkKCXJtIC1mICQiUElERklMRSIKICBmaQp9CnJlc3RhcnQoKXsKCXN0b3AKCXN0YXJ0Cn0Kc3RhdHVzKCl7CglpZiBbIC1mICIkUElERklMRSIgXQoJdGhlbgoJCXBpZD0kKCBjYXQgIiRQSURGSUxFIiApCgkJaWYga2lsbCAtMCAkcGlkIDI+L2Rldi9udWxsOyB0aGVuCgkJCWVjaG8gIlhYWFhYIHN0YXJ0L3J1bm5pbmcsIHByb2Nlc3MgJHBpZCIKCQllbHNlCgkJCWVjaG8gJ1hYWFhYIHN0b3Avd2FpdGluZycKCQlmaQoJZWxzZQoJCWVjaG8gJ1hYWFhYIHN0b3Avd2FpdGluZycKCWZpCgp9CgoKY2FzZSAiJDEiIGluCglzdGFydCkKCQlzdGFydAoJCTs7CglzdG9wKQoJCXN0b3AKCQk7OwoJcmVzdGFydCkKCQlzdG9wCgkJc3RhcnQKCQk7OwoJc3RhdHVzKQoJCXN0YXR1cwoJCTs7CgkqKQoJCWVjaG8gIlVzYWdlOiBzZXJ2aWNlIFhYWFhYIHtzdGFydHxzdG9wfHJlc3RhcnR8c3RhdHVzfSIKCQk7Owplc2FjCmV4aXQgMAoK', 'base64').toString()
-                        .split('ZZZZZ').join(options.installPath)
-                        .split('XXXXX').join(options.name)
-                        .split('YYYYY').join(options.target)
-                        .replace('{{PARMS}}', parameters));
-                    conf.end();
+                    var isOpenRC = false;
+                    if (require('fs').existsSync('/sbin/openrc-run'))
+                    {
+                        // OpenRC
+                        isOpenRC = true;
+                        conf.write('#!/sbin/openrc-run\n\n');
+                        conf.write('name="' + options.name + '"\n');
+                        conf.write('command="' + options.installPath + options.target + '"\n');
+                        conf.write('command_args="' + parameters.split('"').join('\\"') + '"\n');
+                        conf.write('supervisor="supervise-daemon"\n');
+                        conf.write('supervise_daemon_args="--chdir \\"' + options.installPath + '\\""\n\n');
+                        conf.write('depend() {\n');
+                        conf.write(' want net\n');
+                        conf.write('}\n');
+                        conf.end();
+                    }
+                    else
+                    {
+                        // Traditional init.d
+
+                        if (options.failureRestart == null || options.failureRestart > 0)
+                        {
+                            // Crash Restart is enabled, but it isn't inherently supported by INIT, so we must fake it with JS
+                            var tmp_parameters = options.parameters ? options.parameters.slice() : [];
+                            tmp_parameters.unshift('{{{}}}');
+                            tmp_parameters = JSON.stringify(tmp_parameters).split('"{{{}}}"').join('process.argv0');
+                            parameters = "var child; process.on('SIGTERM', function () { child.removeAllListeners('exit'); child.kill(); process.exit(); }); function start() { child = require('child_process').execFile(process.execPath, " + tmp_parameters + "); child.stdout.on('data', function (c) { }); child.stderr.on('data', function (c) { }); child.on('exit', function (status) { start(); }); } start();";
+                            parameters = '-b64exec ' + Buffer.from(parameters).toString('base64');
+                        }
+
+                        // The following is the init.d script I wrote. Rather than having to deal with escaping the thing, I just Base64 encoded it to prevent issues.
+                        conf.write(Buffer.from('IyEvYmluL3NoCgoKU0NSSVBUPVpaWlpaWVlZWVkKUlVOQVM9cm9vdAoKUElERklMRT0vdmFyL3J1bi9YWFhYWC5waWQKTE9HRklMRT0vdmFyL2xvZy9YWFhYWC5sb2cKCnN0YXJ0KCkgewogIGlmIFsgLWYgIiRQSURGSUxFIiBdICYmIGtpbGwgLTAgJChjYXQgIiRQSURGSUxFIikgMj4vZGV2L251bGw7IHRoZW4KICAgIGVjaG8gJ1NlcnZpY2UgYWxyZWFkeSBydW5uaW5nJyA+JjIKICAgIHJldHVybiAxCiAgZmkKICBlY2hvICdTdGFydGluZyBzZXJ2aWNl4oCmJyA+JjIKICBsb2NhbCBDTUQ9IiRTQ1JJUFQge3tQQVJNU319ICY+IFwiJExPR0ZJTEVcIiAmIGVjaG8gXCQhIgogIGxvY2FsIENNRFBBVEg9JChlY2hvICRTQ1JJUFQgfCBhd2sgJ3sgbGVuPXNwbGl0KCQwLCBhLCAiLyIpOyBwcmludCBzdWJzdHIoJDAsIDAsIGxlbmd0aCgkMCktbGVuZ3RoKGFbbGVuXSkpOyB9JykKICBjZCAkQ01EUEFUSAogIHN1IC1jICIkQ01EIiAkUlVOQVMgPiAiJFBJREZJTEUiCiAgZWNobyAnU2VydmljZSBzdGFydGVkJyA+JjIKfQoKc3RvcCgpIHsKICBpZiBbICEgLWYgIiRQSURGSUxFIiBdOyB0aGVuCiAgICBlY2hvICdTZXJ2aWNlIG5vdCBydW5uaW5nJyA+JjIKICAgIHJldHVybiAxCiAgZWxzZQoJcGlkPSQoIGNhdCAiJFBJREZJTEUiICkKCWlmIGtpbGwgLTAgJHBpZCAyPi9kZXYvbnVsbDsgdGhlbgogICAgICBlY2hvICdTdG9wcGluZyBzZXJ2aWNl4oCmJyA+JjIKICAgICAga2lsbCAtMTUgJHBpZAogICAgICBlY2hvICdTZXJ2aWNlIHN0b3BwZWQnID4mMgoJZWxzZQoJICBlY2hvICdTZXJ2aWNlIG5vdCBydW5uaW5nJwoJZmkKCXJtIC1mICQiUElERklMRSIKICBmaQp9CnJlc3RhcnQoKXsKCXN0b3AKCXN0YXJ0Cn0Kc3RhdHVzKCl7CglpZiBbIC1mICIkUElERklMRSIgXQoJdGhlbgoJCXBpZD0kKCBjYXQgIiRQSURGSUxFIiApCgkJaWYga2lsbCAtMCAkcGlkIDI+L2Rldi9udWxsOyB0aGVuCgkJCWVjaG8gIlhYWFhYIHN0YXJ0L3J1bm5pbmcsIHByb2Nlc3MgJHBpZCIKCQllbHNlCgkJCWVjaG8gJ1hYWFhYIHN0b3Avd2FpdGluZycKCQlmaQoJZWxzZQoJCWVjaG8gJ1hYWFhYIHN0b3Avd2FpdGluZycKCWZpCgp9CgoKY2FzZSAiJDEiIGluCglzdGFydCkKCQlzdGFydAoJCTs7CglzdG9wKQoJCXN0b3AKCQk7OwoJcmVzdGFydCkKCQlzdG9wCgkJc3RhcnQKCQk7OwoJc3RhdHVzKQoJCXN0YXR1cwoJCTs7CgkqKQoJCWVjaG8gIlVzYWdlOiBzZXJ2aWNlIFhYWFhYIHtzdGFydHxzdG9wfHJlc3RhcnR8c3RhdHVzfSIKCQk7Owplc2FjCmV4aXQgMAoK', 'base64').toString()
+                            .split('ZZZZZ').join(options.installPath)
+                            .split('XXXXX').join(options.name)
+                            .split('YYYYY').join(options.target)
+                            .replace('{{PARMS}}', parameters));
+                        conf.end();
+                    }
 
                     m = require('fs').statSync('/etc/init.d/' + options.name).mode;
                     m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
@@ -2276,7 +2366,14 @@ function serviceManager()
                         case 'AUTO_START':
                             var child = require('child_process').execFile('/bin/sh', ['sh']);
                             child.stdout.on('data', function (chunk) { });
-                            child.stdin.write('update-rc.d ' + options.name + ' defaults\nexit\n');
+                            if (isOpenRC)
+                            {
+                                child.stdin.write('rc-update add ' + options.name + ' default\nexit\n');
+                            }
+                            else
+                            {
+                                child.stdin.write('update-rc.d ' + options.name + ' defaults\nexit\n');
+                            }
                             child.waitExit();
                             break;
                         default:
@@ -2648,7 +2745,17 @@ function serviceManager()
                         this._update = require('child_process').execFile('/bin/sh', ['sh']);
                         this._update.stdout.on('data', function (chunk) { });
                         this._update.stdin.write('service ' + name + ' stop\n');
-                        this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
+                        if (service.OpenRC)
+                        {
+                            if (service.startType == 'AUTO_START')
+                            {
+                                this._update.stdin.write('rc-update del ' + name + ' default\n');
+                            }
+                        }
+                        else
+                        {
+                            this._update.stdin.write('update-rc.d -f ' + name + ' remove\n');
+                        }
                         this._update.stdin.write('exit\n');
                         this._update.waitExit();
                         try
