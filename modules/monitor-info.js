@@ -44,22 +44,41 @@ function getLibInfo(libname)
     child.stdin.write("whereis ldconfig | awk '{ print $2 }'\nexit\n");
     child.waitExit();
 
-    var ldconfig = child.stdout.str.trim();
-
-    child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stdout.str = '';
-    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-    child.stdin.write(ldconfig + " -p | grep '" + libname + ".so.' | tr '\\n' '^' | awk -F^ '{ printf \"[\"; for(i=1;i<=NF;++i) {" + ' split($i, plat, ")"); split(plat[1], plat2, "("); ifox=split(plat2[2], ifo, ","); libc=""; hwcap="0"; for(ifoi=1;ifoi<=ifox;++ifoi) { if(split(ifo[ifoi], jnk, "libc")==2) { libc=ifo[ifoi]; } if(split(ifo[ifoi], jnk, "hwcap:")==2) { split(ifo[ifoi], jnk, "0x"); hwcap=jnk[2]; }   }      x=split($i, tok, " "); if(tok[1]!="") { printf "%s{\\"lib\\": \\"%s\\", \\"path\\": \\"%s\\", \\"hwcap\\": \\"%s\\", \\"libc\\": \\"%s\\"}", (i!=1?",":""), tok[1], tok[x], hwcap, libc; }} printf "]"; }\'\nexit\n');
-    child.waitExit();
-
-    try
+    if (child.stdout.str.trim() == '')
     {
-        var v = JSON.parse(child.stdout.str.trim());
-        return (v);
+        // No ldconfig
+        child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stderr.on('data', function () { });
+        child.stdin.write('ls /lib/' + libname + '.*' + " | tr '\\n' '`' | awk -F'`' '{" + ' DEL=""; printf "["; for(i=1;i<NF;++i) { if($1~/((.so)(.[0-9])*)$/) { printf "%s{\\"path\\": \\"%s\\"}",DEL,$1; DEL=","; } } printf "]"; }\'\nexit\n');
+        child.waitExit();
+        try
+        {
+            return(JSON.parse(child.stdout.str.trim()));
+        }
+        catch(e)
+        {
+            return ([]);
+        }
     }
-    catch(e)
+    else
     {
-        return ([]);
+        var ldconfig = child.stdout.str.trim();
+        child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = '';
+        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdin.write(ldconfig + " -p | grep '" + libname + ".so.' | tr '\\n' '^' | awk -F^ '{ printf \"[\"; for(i=1;i<=NF;++i) {" + ' split($i, plat, ")"); split(plat[1], plat2, "("); ifox=split(plat2[2], ifo, ","); libc=""; hwcap="0"; for(ifoi=1;ifoi<=ifox;++ifoi) { if(split(ifo[ifoi], jnk, "libc")==2) { libc=ifo[ifoi]; } if(split(ifo[ifoi], jnk, "hwcap:")==2) { split(ifo[ifoi], jnk, "0x"); hwcap=jnk[2]; }   }      x=split($i, tok, " "); if(tok[1]!="") { printf "%s{\\"lib\\": \\"%s\\", \\"path\\": \\"%s\\", \\"hwcap\\": \\"%s\\", \\"libc\\": \\"%s\\"}", (i!=1?",":""), tok[1], tok[x], hwcap, libc; }} printf "]"; }\'\nexit\n');
+        child.waitExit();
+
+        try
+        {
+            var v = JSON.parse(child.stdout.str.trim());
+            return (v);
+        }
+        catch (e)
+        {
+            return ([]);
+        }
     }
 }
 
