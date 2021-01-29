@@ -1505,6 +1505,7 @@ function serviceManager()
                             ret.isMe.platform = platform;
                             ret.isRunning = function isRunning()
                             {
+                                if (this.OpenRC) { return (!isNaN(this.pid())); }
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -1514,24 +1515,10 @@ function serviceManager()
                                 }
                                 else
                                 {
-                                    if (this.OpenRC)
-                                    {
-                                        child.stdin.write('rc-status | grep "\\s*' + this.name + ' "\nexit\n');
-                                    }
-                                    else
-                                    {
-                                        child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
-                                    }
+                                    child.stdin.write("service " + this.name + " status | awk '{print $2}' | awk -F, '{print $1}'\nexit\n");
                                 }
                                 child.waitExit();
-                                if (this.OpenRC)
-                                {
-                                    return (child.stdout.str.trim() != '');
-                                }
-                                else
-                                {
-                                    return (child.stdout.str.trim() == 'start/running');
-                                }
+                                return (child.stdout.str.trim() == 'start/running');
                             };
                             ret.isRunning.platform = platform;
                             ret.start = function start()
