@@ -42,24 +42,7 @@ function getLibInfo(libname)
     child.stdin.write("whereis ldconfig | awk '{ print $2 }'\nexit\n");
     child.waitExit();
 
-    if (child.stdout.str.trim() == '')
-    {
-        // No ldconfig
-        child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.stderr.on('data', function () { });
-        child.stdin.write('ls /lib/' + libname + '.*' + " | tr '\\n' '`' | awk -F'`' '{" + ' DEL=""; printf "["; for(i=1;i<NF;++i) { if($1~/((.so)(.[0-9]+)*)$/) { printf "%s{\\"path\\": \\"%s\\"}",DEL,$i; DEL=","; } } printf "]"; }\'\nexit\n');
-        child.waitExit();
-        try
-        {
-            return(JSON.parse(child.stdout.str.trim()));
-        }
-        catch(e)
-        {
-            return ([]);
-        }
-    }
-    else
+    if (child.stdout.str.trim() != '')
     {
         var ldconfig = child.stdout.str.trim();
         child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -71,12 +54,26 @@ function getLibInfo(libname)
         try
         {
             var v = JSON.parse(child.stdout.str.trim());
-            return (v);
+            if (v.length != 0) { return (v); }
         }
         catch (e)
         {
-            return ([]);
         }
+    }
+
+    // No ldconfig, or no result returned;
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.on('data', function () { });
+    child.stdin.write('ls /lib/' + libname + '.*' + " | tr '\\n' '`' | awk -F'`' '{" + ' DEL=""; printf "["; for(i=1;i<NF;++i) { if($1~/((.so)(.[0-9]+)*)$/) { printf "%s{\\"path\\": \\"%s\\"}",DEL,$i; DEL=","; } } printf "]"; }\'\nexit\n');
+    child.waitExit();
+    try
+    {
+        return (JSON.parse(child.stdout.str.trim()));
+    }
+    catch (e)
+    {
+        return ([]);
     }
 }
 
