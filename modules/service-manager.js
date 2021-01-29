@@ -2360,7 +2360,7 @@ function serviceManager()
                             conf.write('command_background=true\n');
                             conf.write('start_stop_daemon_args="--chdir \\"' + options.installPath + '\\""\n\n');                     
                         }
-                        conf.write('pidfile="/var/run/' + options.name + '.pid\n');
+                        conf.write('pidfile="/var/run/' + options.name + '.pid"\n');
                         conf.write('depend() {\n');
                         conf.write(' want net\n');
                         conf.write('}\n');
