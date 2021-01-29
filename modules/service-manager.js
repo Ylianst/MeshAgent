@@ -1138,7 +1138,7 @@ function serviceManager()
                     child.waitExit();
                     return (child.stdout.str.trim() == 'running');
                 };
-                ret.pid = function ()
+                ret.pid = function pid()
                 {
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
@@ -1322,12 +1322,26 @@ function serviceManager()
                         if ((platform == 'init' && require('fs').existsSync('/etc/init.d/' + name)) ||
                             (platform == 'upstart' && require('fs').existsSync('/etc/init/' + name + '.conf')))
                         {
+                            ret.conf = (platform == 'upstart' ? ('/etc/init/' + name + '.conf') : ('/etc/init.d/' + name));
+                            ret.serviceType = platform;
                             if (platform == 'init')
                             {
                                 Object.defineProperty(ret, 'OpenRC', { value: require('fs').existsSync('/sbin/openrc-run') });
+                                if(ret.OpenRC)
+                                {
+                                    Object.defineProperty(ret, '_autorestart', {
+                                        value: (function ()
+                                        {
+                                            var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                            child.stderr.on('data', function () { });
+                                            child.stdin.write('cat ' + ret.conf + ' | grep "^\\s*supervisor=\\"supervise-daemon\\""\nexit\n');
+                                            child.waitExit();
+                                            return (child.stdout.str.trim() != '');
+                                        })()
+                                    });
+                                }
                             }
-                            ret.conf = (platform == 'upstart' ? ('/etc/init/' + name + '.conf') : ('/etc/init.d/' + name));
-                            ret.serviceType = platform;
                             Object.defineProperty(ret, "startType",
                                 {
                                     get: function ()
@@ -1381,7 +1395,7 @@ function serviceManager()
                                 {
                                     if (this.OpenRC)
                                     {
-                                        if (this.startType == 'AUTO_START')
+                                        if (this._autorestart)
                                         {
                                             child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*supervise_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); print B[2]; }\'\nexit\n');
                                         }
@@ -1414,6 +1428,7 @@ function serviceManager()
 
                                 }
                                 child.waitExit();
+                                if (child.stdout.str.trim() == '') { return ('/'); }
                                 return (child.stdout.str.trim());
                             };
                             ret.appWorkingDirectory.platform = platform;
@@ -1589,12 +1604,19 @@ function serviceManager()
                             };
                             if (ret.OpenRC)
                             {
-                                ret.pid = function ()
+                                ret.pid = function pid()
                                 {
                                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                     child.stderr.on('data', function () { });
-                                    child.stdin.write('cat /var/run/' + this.name + ".pid | awk 'NR==1{ sh=sprintf(\"ps -o pid -o ppid | grep %s\",$0); system(sh); }' | awk '{ if($2!=\"1\") { print $1; }}' | awk 'NR==1{ print $0; }'\nexit\n");
+                                    if (this._autorestart)
+                                    {
+                                        child.stdin.write('cat /var/run/' + this.name + ".pid | awk 'NR==1{ sh=sprintf(\"ps -o pid -o ppid | grep %s\",$0); system(sh); }' | awk '{ if($2!=\"1\") { print $1; }}' | awk 'NR==1{ print $0; }'\nexit\n");
+                                    }
+                                    else
+                                    {
+                                        child.stdin.write('cat /var/run/' + this.name + '.pid\nexit\n');
+                                    }
                                     child.waitExit();
                                     return (parseInt(child.stdout.str.trim()));
                                 }
@@ -2326,8 +2348,18 @@ function serviceManager()
                         conf.write('name="' + options.name + '"\n');
                         conf.write('command="' + options.installPath + options.target + '"\n');
                         conf.write('command_args="' + parameters.split('"').join('\\"') + '"\n');
-                        conf.write('supervisor="supervise-daemon"\n');
-                        conf.write('supervise_daemon_args="--chdir \\"' + options.installPath + '\\""\n\n');
+                        if (options.failureRestart == null || options.failureRestart > 0)
+                        {
+                            // Auto Crash Restart
+                            conf.write('supervisor="supervise-daemon"\n');
+                            conf.write('supervise_daemon_args="--chdir \\"' + options.installPath + '\\""\n\n');
+                        }
+                        else
+                        {
+                            // No Auto Crash Restartclear
+                            conf.write('command_background=true\n');
+                            conf.write('start_stop_daemon_args="--chdir \\"' + options.installPath + '\\""\n\n');                     
+                        }
                         conf.write('depend() {\n');
                         conf.write(' want net\n');
                         conf.write('}\n');
