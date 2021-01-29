@@ -36,8 +36,6 @@ var AnyPropertyType = 0;
 
 function getLibInfo(libname)
 {
-    if (process.platform != 'linux') { throw ('Only supported on linux'); }
-
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = '';
     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -713,7 +711,7 @@ if (process.platform != 'darwin')
     module.exports = new monitorinfo();
 }
 
-if (process.platform == 'linux')
+if (process.platform == 'linux' || process.platform == 'freebsd')
 {
     module.exports.getLibInfo = getLibInfo;
 }
