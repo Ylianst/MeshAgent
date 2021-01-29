@@ -1729,19 +1729,19 @@ function serviceManager()
                                 return (child.stdout.str.trim() == 'active');         
                             };
                             ret.start = function start() {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
                                 child.stdin.write('systemctl start ' + this.name + '\nexit\n');
                                 child.waitExit();
                             };
                             ret.stop = function stop() {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
                                 child.stdin.write('systemctl stop ' + this.name + '\nexit\n');
                                 child.waitExit();
                             };
                             ret.restart = function restart() {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
                                 child.stdin.write('systemctl restart ' + this.name + '\nexit\n');
                                 child.waitExit();
