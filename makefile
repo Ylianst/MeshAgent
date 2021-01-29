@@ -621,6 +621,7 @@ clean:
 	rm -f microlms/heci/*.o
 
 cleanbin:
+	rm -f $(EXENAME)_alpine-x86-64
 	rm -f $(EXENAME)_aarch64
 	rm -f $(EXENAME)_aarch64-cortex-a53
 	rm -f $(EXENAME)_freebsd_x86-64
