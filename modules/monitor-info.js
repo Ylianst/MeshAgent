@@ -59,7 +59,7 @@ function getLibInfo(libname)
     }
     catch(e)
     {
-        return ({});
+        return ([]);
     }
 }
 
