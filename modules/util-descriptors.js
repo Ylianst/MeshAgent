@@ -90,43 +90,71 @@ function getOpenDescriptors()
             return ([]);
     }
 }
-function closeDescriptors(fdArray, libc)
+function closeDescriptors(fdArray)
 {
     var fd = null;
-    if (libc == null)
-    {
-        var libs = require('monitor-info').getLibInfo('libc');
-        while (libs.length > 0)
-        {
-            try
-            {
-                libc = require('_GenericMarshal').CreateNativeProxy(libs.shift().path);
-                libc.CreateMethod('close');
-                break;
-            }
-            catch (e)
-            {
-                libc = null;
-            }
-        }
-        if (libc == null) { throw ('cannot find libc'); }
-    }
+    if (this.libc == null) { throw ('cannot find libc'); }
 
     while (fdArray.length > 0)
     {
         fd = fdArray.pop();
         if (fd > 2)
         {
-            libc.close(fd);
+            this.libc.close(fd);
         }
     }
 }
+function _execv(exePath, argarr)
+{
+    if (this.libc == null)
+    {
+        throw ('cannot find libc');
+    }
 
+    var i;
+    var path = require('_GenericMarshal').CreateVariable(exePath);
+    var args = require('_GenericMarshal').CreateVariable((1 + argarr.length) * require('_GenericMarshal').PointerSize);
+    for (i = 0; i < argarr.length; ++i)
+    {
+        var arg = require('_GenericMarshal').CreateVariable(argarr[i]);
+        arg.pointerBuffer().copy(args.toBuffer(), i * require('_GenericMarshal').PointerSize);
+    }
+
+    var fds = this.getOpenDescriptors();
+    this.closeDescriptors(fds);
+
+    this.libc.execv(path, args);
+    throw('exec error');
+}
+
+function getLibc()
+{
+    var libs = require('monitor-info').getLibInfo('libc');
+    var libc = null;
+
+    while (libs.length > 0)
+    {
+        try
+        {
+            libc = require('_GenericMarshal').CreateNativeProxy(libs.pop().path);
+            libc.CreateMethod('execv');
+            libc.CreateMethod('close');
+            break;
+        }
+        catch (e)
+        {
+            libc = null;
+            continue;
+        }
+    }
+
+    return (libc);
+}
 switch (process.platform)
 {
     case 'linux':
     case 'freebsd':
-        module.exports = { getOpenDescriptors: getOpenDescriptors, closeDescriptors: closeDescriptors };
+        module.exports = { getOpenDescriptors: getOpenDescriptors, closeDescriptors: closeDescriptors, _execv: _execv, libc: getLibc() };
         break;
     default:
         module.exports = { getOpenDescriptors: invalid, closeDescriptors: invalid };

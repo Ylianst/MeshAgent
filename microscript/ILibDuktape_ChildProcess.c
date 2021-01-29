@@ -595,7 +595,19 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 			duk_pop(ctx);																		// [WCHAR_ARRAY][obj][array]
 		}
 	}
+
 #ifndef WIN32
+
+	//
+	// We must close all open descriptors first, since the "new" process will have no idea about any that are still open
+	//
+	duk_eval_string(ctx, "require('util-descriptors').getOpenDescriptors();");	// [array]
+	while (duk_get_length(ctx, -1) > 0)
+	{
+		duk_array_pop(ctx, -1);													// [array][fd]
+		close(duk_get_int(ctx, -1)); duk_pop(ctx);								// [array]
+	}
+
 	execve(path, (char**)args, (char**)env);
 	return(ILibDuktape_Error(ctx, "_execve() returned error: %d ", errno));
 #else

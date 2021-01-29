@@ -1553,17 +1553,27 @@ function serviceManager()
                             ret.stop.platform = platform;
                             ret.restart = function restart()
                             {
-                                var child = require('child_process').execFile('/bin/sh', ['sh'], this.OpenRC ? { type: require('child_process').SpawnTypes.TERM } : null);
-                                child.stdout.on('data', function (chunk) { });
-                                if (restart.platform == 'upstart')
+                                if (this.isMe() && this.OpenRC)
                                 {
-                                    child.stdin.write('initctl restart ' + this.name + '\nexit\n');
+                                    // On OpenRC platforms, we cannot restart our own service using rc-service, so we must use execv
+                                    var args = this.parameters();
+                                    args.unshift(process.execPath);
+                                    require('child_process')._execve(process.execPath, args);
                                 }
                                 else
                                 {
-                                    child.stdin.write('service ' + this.name + ' restart\nexit\n');
+                                    var child = require('child_process').execFile('/bin/sh', ['sh'], this.OpenRC ? { type: require('child_process').SpawnTypes.TERM } : null);
+                                    child.stdout.on('data', function (chunk) { });
+                                    if (restart.platform == 'upstart')
+                                    {
+                                        child.stdin.write('initctl restart ' + this.name + '\nexit\n');
+                                    }
+                                    else
+                                    {
+                                        child.stdin.write('service ' + this.name + ' restart\nexit\n');
+                                    }
+                                    child.waitExit();
                                 }
-                                child.waitExit();
                             };
                             ret.restart.platform = platform;
                             ret.status = function status()
@@ -1606,6 +1616,17 @@ function serviceManager()
                                     }
                                     child.waitExit();
                                     return (parseInt(child.stdout.str.trim()));
+                                }
+                                ret.parameters = function()
+                                {
+                                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                    child.stderr.on('data', function () { });
+                                    child.stdin.write('cat ' + this.conf + ' | grep "^\\s*command_args=" | awk \'NR==1{ gsub(/^\\s*command_args=/,"",$0); print $0; }\'\nexit\n');
+                                    child.waitExit();
+                                    var val = JSON.parse(child.stdout.str.trim());
+                                    val = val.match(/(?:[^\s"]+|"[^"]*")+/g);
+                                    return (val);
                                 }
                             }
                             ret.status.platform = platform;
