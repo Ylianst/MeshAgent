@@ -65,7 +65,7 @@ function getLibInfo(libname)
     child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.on('data', function () { });
-    child.stdin.write('ls /lib/' + libname + '.*' + " | tr '\\n' '`' | awk -F'`' '{" + ' DEL=""; printf "["; for(i=1;i<NF;++i) { if($1~/((.so)(.[0-9]+)*)$/) { printf "%s{\\"path\\": \\"%s\\"}",DEL,$i; DEL=","; } } printf "]"; }\'\nexit\n');
+    child.stdin.write('ls /lib/' + libname + '.*' + " | tr '\\n' '`' | awk -F'`' '{" + ' DEL=""; printf "["; for(i=1;i<NF;++i) { if($1~/((\\.so)(\\.[0-9]+)*)$/) { printf "%s{\\"path\\": \\"%s\\"}",DEL,$i; DEL=","; } } printf "]"; }\'\nexit\n');
     child.waitExit();
     try
     {
