@@ -110,10 +110,25 @@ function processManager() {
                 if (callback) { callback.apply(this, [retVal]); }
                 break;
             case 'linux': // Linux processes
+                var users = require('fs').existsSync('/etc/login.defs') ? 'user:99' : 'user';
                 var p = require('child_process').execFile('/bin/sh', ['sh']);
                 p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
                 p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
-                p.stdin.write('ps -ax -o pid -o user:99 -o command | tr ' + "'\\n' '\\t' | awk -F" + '"\\t" \'{ printf "{"; for(i=2;i<NF;++i) { split($i,tok," "); pid=tok[1]; user=tok[2]; cmd=substr($i,length(tok[1])+102); gsub(/\\\\/,"\\\\\\\\&",cmd); gsub(/"/,"\\\\\\\\&",cmd); gsub(/^[ ]+/,"",cmd); printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i!=2?",":""),pid,pid,user,cmd; } printf "}"; }\'\nexit\n');
+                p.stdin.write('ps -e -o pid -o ' + users + ' -o args | tr ' + "'\\n' '\\t' | awk -F" + '"\\t" \'');
+                p.stdin.write('{');
+                p.stdin.write('   printf "{"; ');
+                p.stdin.write('   for(i=1;i<NF;++i)');
+                p.stdin.write('   { ');
+                p.stdin.write('       split($i,A," "); ');
+
+                p.stdin.write('       gsub(/[ \\t]*[0-9]+[ \\t]*[^ ^\\t]+[ \\t]+/,"",$i);');
+                p.stdin.write('       gsub(/\\\\/,"\\\\\\\\",$i);');
+                p.stdin.write('       gsub(/"/,"\\\\\\"",$i);');
+                p.stdin.write('       printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i==1?"":","),A[1],A[1],A[2],$i;');
+                //                                  PID               PID                 USER               command     
+                p.stdin.write('   }');
+                p.stdin.write('   printf "}";');
+                p.stdin.write("}'\nexit\n");
                 p.waitExit();
 
                 if (callback)
