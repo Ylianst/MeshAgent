@@ -1173,10 +1173,27 @@ function serviceManager()
                 };
                 ret.restart = function restart()
                 {
+                    if (this.isMe())
+                    {
+                        var parameters = this.parameters();
+                        require('child_process')._execve(process.execPath, parameters);
+                        throw ('Error Restarting via execve()');
+                    }
+
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                     child.stdin.write("service " + this.name + " onerestart\nexit\n");
                     child.waitExit();
+                };
+                ret.parameters = function parameters()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("cat " + this.rc + ' | grep "^\\s*command_args=" | awk \'NR==1');
+                    child.stdin.write('{ gsub(/^\\s*command_args=/,"",$0); gsub(/^"([^\\\\^\\/]+)/,"\\"",$0); print $0; }\'\nexit\n');
+                    child.waitExit();
+                    var str = JSON.parse(child.stdout.str.trim());
+                    return (str.match(/(?:[^\s"]+|"[^"]*")+/g));
                 };
                 return (ret);
             };
