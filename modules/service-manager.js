@@ -1630,6 +1630,20 @@ function serviceManager()
                                 }
                             }
                             ret.status.platform = platform;
+                            if(platform == "upstart")
+                            {
+                                ret.parameters = function parameters()
+                                {
+                                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                    child.stdout._str = '';
+                                    child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
+                                    child.stdin.write('cat ' + this.conf + ' | grep "^exec " | awk \'NR==1{ gsub(/^exec /,"",$0); print $0; }\'\nexit\n');
+                                    child.waitExit();
+                                    var str = child.stdout._str.trim();
+                                    return (str.match(/(?:[^\s"]+|"[^"]*")+/g));
+
+                                };
+                            }
                         }
                         else
                         {
@@ -1753,6 +1767,16 @@ function serviceManager()
                                 child.stdin.write('systemctl status ' + this.name + '\nexit\n');
                                 child.waitExit();
                                 return (child.stdout._str);
+                            };
+                            ret.parameters = function parameters()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout._str = '';
+                                child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
+                                child.stdin.write('cat ' + this.conf + ' | grep "^ExecStart=" | awk \'NR==1{ gsub(/^ExecStart=/,"",$0); print $0; }\'\nexit\n');
+                                child.waitExit();
+                                var str = child.stdout._str.trim();
+                                return (str.match(/(?:[^\s"]+|"[^"]*")+/g));
                             };
                         }
                         else
