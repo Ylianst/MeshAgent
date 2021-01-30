@@ -131,6 +131,29 @@ function processManager() {
                 p.stdin.write("}'\nexit\n");
                 p.waitExit();
 
+                if (p.stderr.str.trim() != '')
+                {
+                    var p = require('child_process').execFile('/bin/sh', ['sh']);
+                    p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
+                    p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
+                    p.stdin.write("ps | tr '\\n' '`' | awk -F'`' '");
+                    p.stdin.write('{');
+                    p.stdin.write('   len=split($1,A," "); X=index($1,A[len]);');
+                    p.stdin.write('   printf "{"; ');
+                    p.stdin.write('   for(i=2;i<NF;++i)');
+                    p.stdin.write('   {');
+                    p.stdin.write('      split($i,TOK," ");');
+                    p.stdin.write('      cmd=substr($i,X);');
+                    p.stdin.write('      gsub(/\\\\/,"\\\\\\\\",cmd);');
+                    p.stdin.write('      gsub(/"/,"\\\\\\"",cmd);');
+                    p.stdin.write('      printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i==2?"":","),TOK[1],TOK[1],TOK[2],cmd;');
+                    //                                  PID               PID                 USER               command     
+                    p.stdin.write('   }');
+                    p.stdin.write('   printf "}";');
+                    p.stdin.write("}'\nexit\n");
+                    p.waitExit();
+                }
+
                 if (callback)
                 {
                     p.args = [];
