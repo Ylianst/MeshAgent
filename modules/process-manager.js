@@ -110,6 +110,7 @@ function processManager() {
                 if (callback) { callback.apply(this, [retVal]); }
                 break;
             case 'linux': // Linux processes
+                var fallback = false;
                 var users = require('fs').existsSync('/etc/login.defs') ? 'user:99' : 'user';
                 var p = require('child_process').execFile('/bin/sh', ['sh']);
                 p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
@@ -133,6 +134,7 @@ function processManager() {
 
                 if (p.stderr.str.trim() != '')
                 {
+                    fallback = true;
                     var p = require('child_process').execFile('/bin/sh', ['sh']);
                     p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
                     p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
@@ -154,12 +156,32 @@ function processManager() {
                     p.waitExit();
                 }
 
+                var J = JSON.parse(p.stdout.str);
                 if (callback)
                 {
                     p.args = [];
                     for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
 
-                    p.args.unshift(JSON.parse(p.stdout.str));
+                    if (fallback)
+                    {
+                        for(pid in J)
+                        {
+                            try
+                            {
+                                var c = require('fs').readFileSync('/proc/' + pid + '/cmdline');
+                                for(i in c)
+                                {
+                                    if (c[i] == 0) { c[i] = 32; }
+                                }
+                                if (c.toString().trim() != '' && J[pid].cmd != c.toString()) { J[pid].cmd = c.toString(); }
+                            }
+                            catch(ee)
+                            {
+                            }
+                        }
+                    }
+
+                    p.args.unshift(J);
                     callback.apply(this, p.args);
                 }
 
@@ -174,10 +196,28 @@ function processManager() {
 
                 if (callback)
                 {
+                    var J = JSON.parse(p.stdout.str);
                     p.args = [];
                     for (var i = 1; i < arguments.length; ++i) { p.args.push(arguments[i]); }
-
-                    p.args.unshift(JSON.parse(p.stdout.str));
+                    if (process.platform == 'freebsd')
+                    {
+                        for (pid in J)
+                        {
+                            try
+                            {
+                                var c = require('fs').readFileSync('/proc/' + pid + '/cmdline');
+                                for (i in c)
+                                {
+                                    if (c[i] == 0) { c[i] = 32; }
+                                }
+                                if (c.toString().trim() != '' && J[pid].cmd != c.toString()) { J[pid].cmd = c.toString(); }
+                            }
+                            catch (ee)
+                            {
+                            }
+                        }
+                    }
+                    p.args.unshift(J);
                     callback.apply(this, p.args);
                 }
 
