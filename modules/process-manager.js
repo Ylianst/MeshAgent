@@ -166,14 +166,17 @@ function processManager() {
                     {
                         for(pid in J)
                         {
+                            
                             try
                             {
+                                if (isNaN(parseInt(J[pid].pid))) { delete J[pid]; continue; }
                                 var c = require('fs').readFileSync('/proc/' + pid + '/cmdline');
                                 for(i in c)
                                 {
                                     if (c[i] == 0) { c[i] = 32; }
                                 }
-                                if (c.toString().trim() != '' && J[pid].cmd != c.toString()) { J[pid].cmd = c.toString(); }
+                                c = c.toString().trim();
+                                if (c != '' && J[pid].cmd != c) { J[pid].cmd = c; }
                             }
                             catch(ee)
                             {
