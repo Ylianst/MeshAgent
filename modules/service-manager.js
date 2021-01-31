@@ -585,6 +585,26 @@ if (process.platform == 'darwin')
                 child.waitExit();
             }
         };
+        ret.parameters = function parameters()
+        {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdin.write("cat " + this.plist + " | tr '\\n' '`' | awk '");
+            child.stdin.write('{');
+            child.stdin.write('   a=split($0,A,"<key>ProgramArguments</key>");');
+            child.stdin.write('   split(A[2],B,"<array>");');
+            child.stdin.write('   split(B[2],C,"</array>");');
+            child.stdin.write('   num=split(C[1],tokens,"</string>");');
+            child.stdin.write('   for(i=1;i<num;++i)');
+            child.stdin.write('   {');
+            child.stdin.write('      gsub(/^.+<string>/,"",tokens[i]);');
+            child.stdin.write('      printf "%s%s",(i==1)?"":"\\n", tokens[i];');
+            child.stdin.write('   }');
+            child.stdin.write("}'\nexit\n");
+            child.waitExit();
+            return (child.stdout.str.split('\n'));
+        };
         return (ret);
     };
 }
