@@ -1052,22 +1052,15 @@ duk_ret_t ILibDuktape_HttpStream_http_OnConnect(duk_context *ctx)
 		}
 		else
 		{
+			// Add socket to agent.Sockets
+			char *key = (char*)Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_Socket2AgentKey, NULL);
 			duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);	// [socket][agent]
-			duk_get_prop_string(ctx, -1, "http");					// [socket][agent][http]
-			duk_get_prop_string(ctx, -1, "globalAgent");			// [socket][agent][http][globalAgent]
-			if (duk_get_heapptr(ctx, -1) != duk_get_heapptr(ctx, -3))
-			{
-				// This agent is not a global agent, so lets stick the socket in the sockets list
-				char *key = (char*)Duktape_GetStringPropertyValue(ctx, -4, ILibDuktape_Socket2AgentKey, NULL);
-				duk_get_prop_string(ctx, -1, "sockets");			// [socket][agent][http][globalAgent][table]
-				if (!duk_has_prop_string(ctx, -1, key)) { duk_push_array(ctx); duk_put_prop_string(ctx, -2, key); }
-				duk_get_prop_string(ctx, -1, key);					// [socket][agent][http][globalAgent][table][array]
-				duk_dup(ctx, -6);									// [socket][agent][http][globalAgent][table][array][socket]
-				duk_array_push(ctx, -2);							// [socket][agent][http][globalAgent][table][array]
-				duk_pop_2(ctx);										// [socket][agent][http][globalAgent]
-			}
+			duk_get_prop_string(ctx, -1, "sockets");				// [socket][agent][table]
+			if (!duk_has_prop_string(ctx, -1, key)) { duk_push_array(ctx); duk_put_prop_string(ctx, -2, key); }
+			duk_get_prop_string(ctx, -1, key);						// [socket][agent][table][array]
+			duk_dup(ctx, -4);										// [socket][agent][table][array][socket]
+			duk_array_push(ctx, -2);								// [socket][agent][table][array]
 			duk_pop_2(ctx);											// [socket][agent]
-
 
 			duk_get_prop_string(ctx, -1, "keepSocketAlive");		// [socket][agent][keepSocketAlive]
 			duk_swap_top(ctx, -2);									// [socket][keepSocketAlive][this]
