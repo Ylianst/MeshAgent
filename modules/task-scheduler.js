@@ -28,7 +28,7 @@ function task()
     {
         this.getTaskXml = function getTaskXml(name)
         {
-            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN ' + name, '/XML']);
+            var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN "' + name+'"', '/XML']);
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
             child.waitExit();
@@ -39,7 +39,7 @@ function task()
         {
             if (!xml)
             {
-                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN ' + name, '/XML']);
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN "' + name + '"', '/XML']);
                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                 child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
                 child.waitExit();
@@ -54,7 +54,7 @@ function task()
         {
             if (!xml)
             {
-                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN ' + name, '/XML']);
+                var child = require('child_process').execFile(process.env['windir'] + '\\system32\\schtasks.exe', ['schtasks', '/QUERY', '/TN "' + name + '"', '/XML']);
                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                 child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
                 child.waitExit();

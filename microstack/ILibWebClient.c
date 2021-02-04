@@ -244,6 +244,7 @@ typedef struct ILibWebClientDataObject
 
 	ILibWebClient_TimeoutHandler timeoutHandler;
 	void *timeoutUser;
+	int __tmpDescriptor;
 
 #ifndef MICROSTACK_NOTLS
 	ILibWebClient_RequestToken_HTTPS requestMode;
@@ -314,6 +315,10 @@ typedef struct ILibWebClient_WebSocketState
 	void* pingPongUser;
 }ILibWebClient_WebSocketState;
 
+int ILibWebClient_GetDescriptorValue_FromStateObject(ILibWebClient_StateObject state)
+{
+	return((state != NULL ? ((ILibWebClientDataObject*)state)->__tmpDescriptor : -1));
+}
 int *ILibWebClient_WCDO_ServerFlag(ILibWebClient_StateObject j)
 {
 	return(&(((ILibWebClientDataObject*)j)->Server));
@@ -2069,6 +2074,14 @@ void ILibWebClient_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Conn
 	if (wcdo->Closing != 0) return; // Already closing, exit now
 
 	wcdo->SOCK = socketModule;
+	if (socketModule != NULL)
+	{
+#ifdef WIN32
+		wcdo->__tmpDescriptor = (int)((SOCKET*)ILibAsyncSocket_GetSocket(socketModule))[0];
+#else
+		wcdo->__tmpDescriptor = ((int*)ILibAsyncSocket_GetSocket(socketModule))[0];
+#endif
+	}
 	wcdo->InitialRequestAnswered = 0;
 	wcdo->DisconnectSent = 0;
 	wcdo->PendingConnectionIndex = 0;
@@ -2345,7 +2358,15 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 
 					// We need SOCKET information to timeout connect for Network Discovery purpose.
 					wcdo->SOCK = wcm->socks[i];
-					
+					if (wcm->socks[i] != NULL)
+					{
+#ifdef WIN32
+						wcdo->__tmpDescriptor = (int)((SOCKET*)ILibAsyncSocket_GetSocket(wcm->socks[i]))[0];
+#else
+						wcdo->__tmpDescriptor = ((int*)ILibAsyncSocket_GetSocket(wcm->socks[i]))[0];
+#endif
+					}
+
 					// Addition for TLS purpose
 					#ifndef MICROSTACK_NOTLS
 					if (wcm->ssl_ctx != NULL && wcdo->requestMode == ILibWebClient_RequestToken_USE_HTTPS)
@@ -2453,6 +2474,14 @@ ILibWebClient_StateObject ILibCreateWebClientEx(ILibWebClient_OnResponse OnRespo
 	wcdo->Server = 1;
 	wcdo->SOCK = socketModule;
 	wcdo->PendingConnectionIndex = -1;
+	if (socketModule != NULL)
+	{
+#ifdef WIN32
+		wcdo->__tmpDescriptor = (int)((SOCKET*)ILibAsyncSocket_GetSocket(socketModule))[0];
+#else
+		wcdo->__tmpDescriptor = ((int*)ILibAsyncSocket_GetSocket(socketModule))[0];
+#endif
+	}
 
 	wr = (struct ILibWebRequest*)ILibMemory_SmartAllocate(sizeof(struct ILibWebRequest));
 	wr->OnResponse = OnResponse;
@@ -3141,7 +3170,7 @@ void ILibWebClient_CancelRequestEx(void *chain, void *RequestToken)
 */
 void ILibWebClient_CancelRequest(ILibWebClient_RequestToken RequestToken)
 {
-	if (ILibMemory_CanaryOK(RequestToken))
+	if (ILibMemory_CanaryOK(((ILibWebClient_PipelineRequestToken*)RequestToken)->parent))
 	{
 		ILibChain_RunOnMicrostackThread(((struct ILibWebClient_PipelineRequestToken*)RequestToken)->wcdo->Parent->ChainLink.ParentChain, ILibWebClient_CancelRequestEx, RequestToken);
 	}

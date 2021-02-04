@@ -112,11 +112,13 @@ function _execv(exePath, argarr)
     }
 
     var i;
+    var tmp = [];
     var path = require('_GenericMarshal').CreateVariable(exePath);
     var args = require('_GenericMarshal').CreateVariable((1 + argarr.length) * require('_GenericMarshal').PointerSize);
     for (i = 0; i < argarr.length; ++i)
     {
         var arg = require('_GenericMarshal').CreateVariable(argarr[i]);
+        tmp.push(arg);
         arg.pointerBuffer().copy(args.toBuffer(), i * require('_GenericMarshal').PointerSize);
     }
 

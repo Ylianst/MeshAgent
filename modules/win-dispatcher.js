@@ -80,23 +80,7 @@ function dispatch(options)
         this.parent.emit('connection', s);
     });
 
-    var parms = '/C SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ';
-    if (options.user)
-    {
-        // Specified User
-        parms += ('/RU ' + options.user + ' ');
-    }
-    else
-    {
-        if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
-        {
-            // LocalSystem
-            parms += ('/RU SYSTEM ');
-        }
-    }
-    parms += ('/TR "\\"' + process.execPath + '\\" -b64exec ' + str + '"');
-
-    var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: options.user } };
+    var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: '"' + options.user + '"' } };
     for (var c1e in process.env)
     {
         taskoptions.env[c1e] = process.env[c1e];

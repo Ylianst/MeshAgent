@@ -306,6 +306,8 @@ void ILibWebClient_WebSocket_SetPingPongHandler(ILibWebClient_StateObject state,
 typedef void(*ILibWebClient_TimeoutHandler)(ILibWebClient_StateObject state, void *user);
 void ILibWebClient_SetTimeout(ILibWebClient_StateObject state, int timeoutSeconds, ILibWebClient_TimeoutHandler handler, void *user);
 
+int ILibWebClient_GetDescriptorValue_FromStateObject(ILibWebClient_StateObject state);
+
 // OpenSSL supporting code
 #ifndef MICROSTACK_NOTLS
 X509*			ILibWebClient_SslGetCert(void* socketModule);

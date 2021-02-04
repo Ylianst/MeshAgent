@@ -3389,7 +3389,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user1;
 	ILibChain_Link_SetMetadata(ILibChain_GetCurrentLink(agent->chain), "MeshServer_ControlChannel");
-
+	
 	if (agent->controlChannelRequest != NULL)
 	{
 		ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), agent->controlChannelRequest);
@@ -3408,8 +3408,8 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		{
 			if (agent->controlChannelDebug != 0)
 			{
-				printf("Control Channel Connection Established...\n");
-				ILIBLOGMESSAGEX("Control Channel Connection Established...");
+				printf("Control Channel Connection Established [%d]...\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
+				ILIBLOGMESSAGEX("Control Channel Connection Established [%d]...", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 			}
 #ifndef MICROSTACK_NOTLS
 			int len;
@@ -3471,8 +3471,8 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				{
 					if (agent->controlChannelDebug != 0)
 					{
-						printf("TLS Server Cert matches Mesh Server Cert...\n");
-						ILIBLOGMESSAGEX("TLS Server Cert matches Mesh Server Cert...");
+						printf("TLS Server Cert matches Mesh Server Cert [%d]...\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
+						ILIBLOGMESSAGEX("TLS Server Cert matches Mesh Server Cert [%d]...", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 					}
 					// The TLS certificate of this server is correct, no need to authenticate further.
 					unsigned short response = htons(MeshCommand_AuthConfirm); // Send indication to the server that it's already authenticated
@@ -3503,8 +3503,8 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		case ILibWebClient_ReceiveStatus_Complete: // Disconnection
 			if (agent->controlChannelDebug != 0)
 			{
-				printf("Control Channel Disconnected...\n");
-				ILIBLOGMESSAGEX("Control Channel Disconnected...");
+				printf("Control Channel Disconnected [%d]...\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
+				ILIBLOGMESSAGEX("Control Channel Disconnected [%d]...", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 			}
 												   
 			// If the channel had been authenticated, inform JavaScript core module that we are not disconnected
@@ -3565,11 +3565,11 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 	{
 		if (ILibIsChainBeingDestroyed(agent->chain)) { return; }
 		ILibRemoteLogging_printf(ILibChainGetLogger(ILibWebClient_GetChainFromWebStateObject(WebStateObject)), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent Host Container: Mesh Server Connection Error, trying again later.");
-		printf("Mesh Server Connection Error\n");
+		printf("Mesh Server Connection Error [%d]\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 
 		if (agent->logUpdate != 0) 
 		{
-			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "Connection Error [%p, %d]...\n", WebStateObject, InterruptFlag);
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "Connection Error [%p, %d, [%d]]...\n", WebStateObject, InterruptFlag, ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 			ILIBLOGMESSSAGE(ILibScratchPad); 
 		}
 
