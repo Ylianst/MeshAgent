@@ -2478,7 +2478,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		chain->currentWaitTimeout = 0;
 
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
-		if (x == 0)
+		if (x == 0 && maxTimeout < 0)
 		{
 			root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
@@ -3126,6 +3126,26 @@ void ILibChain_DisableWatchDog(void *chain)
 	((ILibBaseChain*)chain)->nowatchdog = 1;
 }
 
+ILibChain_Link **ILibChain_GetModules(void *chain)
+{
+	ILibChain_Link **ret = NULL;
+	int count = 0;
+	void *node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+	while (node != NULL)
+	{
+		++count;
+		node = ILibLinkedList_GetNextNode(node);
+	}
+	ret = (ILibChain_Link**)ILibMemory_SmartAllocate(count* sizeof(ILibChain_Link*));
+	count = 0;
+	node = ILibLinkedList_GetNode_Head(((ILibBaseChain*)chain)->Links);
+	while (node != NULL)
+	{
+		ret[count++] = ILibLinkedList_GetDataFromNode(node);
+		node = ILibLinkedList_GetNextNode(node);
+	}
+	return(ret);
+}
 char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine)
 {
 	char *ret = NULL;
@@ -3299,6 +3319,29 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 	return(retStr);
 }
 
+int ILibChain_GetMinimumTimer(void *chain)
+{
+	int minimum = -1;
+	void *node;
+	struct LifeTimeMonitorData *Temp = NULL;
+	struct ILibLifeTime *LifeTimeMonitor = (struct ILibLifeTime*)ILibGetBaseTimer(chain);
+	int64_t current = ILibGetUptime();
+
+	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
+	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
+	while (node != NULL)
+	{
+		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+		{
+			node = ILibLinkedList_GetNextNode(node);
+			continue;
+		}
+		minimum = (int)(Temp->ExpirationTick - current);
+		node = NULL;
+	}
+	ILibLinkedList_UnLock(LifeTimeMonitor->ObjectList);
+	return(minimum);
+}
 char *ILibChain_GetMetadataForTimers(void *chain)
 {
 	void *node;

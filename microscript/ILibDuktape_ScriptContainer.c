@@ -2563,6 +2563,83 @@ int ILibDuktape_ScriptContainer_DebuggingOK(duk_context *ctx)
 	duk_pop(ctx);
 	return(retVal);
 }
+
+duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_res(duk_context *ctx)
+{
+	duk_push_current_function(ctx);				// [func]
+	duk_get_prop_string(ctx, -1, "obj");		// [func][obj]
+	duk_dup(ctx, 0);							// [func][obj][resolvedValue]
+	duk_put_prop_string(ctx, -2, "return");		// [func][obj]
+	ILibChain_EndContinue(duk_ctx_chain(ctx));
+	return(0);
+}
+duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_rej(duk_context *ctx)
+{
+	duk_push_current_function(ctx);				// [func]
+	duk_get_prop_string(ctx, -1, "obj");		// [func][obj]
+	duk_dup(ctx, 0);							// [func][obj][rejectedValue]
+	duk_put_prop_string(ctx, -2, "error");		// [func][obj]
+	ILibChain_EndContinue(duk_ctx_chain(ctx));
+	return(0);
+}
+duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
+{
+	ILibChain_Continue_Result continueResult;
+	int timeout = duk_is_number(ctx, 1) ? duk_require_int(ctx, 1) : -1;
+	int timerInfo = ILibChain_GetMinimumTimer(duk_ctx_chain(ctx));
+	int ret;
+	if (timeout < 0 && timerInfo > 0) { timeout = 60000; }
+
+	duk_push_object(ctx);																	// [obj]
+	duk_prepare_method_call(ctx, 0, "then");												// [obj][then][this]
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_promise_wait_impl_res, DUK_VARARGS);		// [obj][then][this][res]
+	duk_dup(ctx, -4); duk_put_prop_string(ctx, -2, "obj");
+	duk_push_c_function(ctx, ILibDuktape_Polyfills_promise_wait_impl_rej, DUK_VARARGS);		// [obj][then][this][res][rej]
+	duk_dup(ctx, -5); duk_put_prop_string(ctx, -2, "obj");
+	duk_call_method(ctx, 2);																// [obj][retpromise]
+
+	ILibChain_Link **modules = ILibChain_GetModules(duk_ctx_chain(ctx));
+	int count = (int)(ILibMemory_Size(modules) / sizeof(ILibChain_Link*));
+	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
+	ILibMemory_Free(modules);
+
+	switch (continueResult)
+	{
+		case ILibChain_Continue_Result_ERROR_INVALID_STATE:
+			ret = ILibDuktape_Error(ctx, "wait() already in progress");
+			break;
+		case ILibChain_Continue_Result_ERROR_CHAIN_EXITING:
+			ret = ILibDuktape_Error(ctx, "wait() aborted because thread is exiting");
+			break;
+		case ILibChain_Continue_Result_ERROR_EMPTY_SET:
+			ret = ILibDuktape_Error(ctx, "wait() cannot wait on empty set");
+			break;
+		case ILibChain_Continue_Result_TIMEOUT:
+			ret = ILibDuktape_Error(ctx, "wait() timeout");
+			break;
+		default:
+			ret = 1;
+			break;
+	}
+
+	if (duk_has_prop_string(ctx, -2, "return"))
+	{
+		duk_get_prop_string(ctx, -2, "return");
+	}
+	else
+	{
+		duk_get_prop_string(ctx, -2, "error");
+		duk_throw(ctx);
+	}
+	return(ret);
+}
+void ILibDuktape_Polyfills_promise_wait(duk_context *ctx)
+{
+	duk_eval_string(ctx, "require('promise');");		// [promise]
+	ILibDuktape_CreateInstanceMethod(ctx, "wait", ILibDuktape_Polyfills_promise_wait_impl, DUK_VARARGS);
+	duk_pop(ctx);										// ...
+}
+
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_context *ctx, SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
 {
 	void **timeoutKey = executionTimeout > 0 ? (void**)ILibMemory_Allocate(sizeof(void*), 0, NULL, NULL) : NULL;
@@ -2661,6 +2738,7 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	}
 
 	ILibDuktape_Polyfills_JS_Init(ctx);
+	ILibDuktape_Polyfills_promise_wait(ctx);
 
 	return ctx;
 }

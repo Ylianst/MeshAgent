@@ -1068,6 +1068,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	char *ILibChain_GetMetaDataFromDescriptorSet(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 	char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set *inw, fd_set *ine);
 	char *ILibChain_GetMetadataForTimers(void *chain);
+	int ILibChain_GetMinimumTimer(void *chain);
+	ILibChain_Link **ILibChain_GetModules(void *chain);
 #ifdef WIN32
 	typedef void(*ILib_GenericReadHandler)(char *buffer, int bufferLen, DWORD* bytesConsumed, void* user1, void *user2);
 	typedef BOOL(*ILibChain_ReadEx_Handler)(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
