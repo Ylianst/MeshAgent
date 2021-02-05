@@ -101,45 +101,70 @@ function windows_wmic_results(str)
 
 function windows_volumes()
 {
-    var a, i, tokens, key;
-    var ret = {};
+    var promise = require('promise');
+    var p1 = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    var p2 = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+
+    p1._p2 = p2;
+    p2._p1 = p1;
 
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
+    p1.child = child;
+    child.promise = p1;
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stdin.write('Get-Volume | Select-Object -Property DriveLetter,FileSystemLabel,FileSystemType,Size,DriveType | ConvertTo-Csv -NoTypeInformation\nexit\n');
-    child.waitExit();
-    a = child.stdout.str.trim().split('\r\n');
-    for (i = 1; i < a.length; ++i)
+    child.on('exit', function (c)
     {
-        tokens = a[i].split(',');
-        if (tokens[0] != '')
-        {
-            ret[tokens[0].split('"')[1]] =
-                {
-                    name: tokens[1].split('"')[1],
-                    type: tokens[2].split('"')[1],
-                    size: tokens[3].split('"')[1],
-                    removable: tokens[4].split('"')[1] == 'Removable'
-                };
-        }
-    }
+        var a, i, tokens, key;
+        var ret = {};
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stdin.write('Get-BitLockerVolume | Select-Object -Property MountPoint,VolumeStatus,ProtectionStatus | ConvertTo-Csv -NoTypeInformation\nexit\n');
-    child.waitExit();
-    a = child.stdout.str.trim().split('\r\n');
-    for (i = 1; i < a.length; ++i)
-    {
-        tokens = a[i].split(',');
-        key = tokens[0].split(':').shift().split('"').pop();
-        if (ret[key] != null)
+        a = this.stdout.str.trim().split('\r\n');
+        for (i = 1; i < a.length; ++i)
         {
-            ret[key].volumeStatus = tokens[1].split('"')[1];
-            ret[key].protectionStatus = tokens[2].split('"')[1];
+            tokens = a[i].split(',');
+            if (tokens[0] != '')
+            {
+                ret[tokens[0].split('"')[1]] =
+                    {
+                        name: tokens[1].split('"')[1],
+                        type: tokens[2].split('"')[1],
+                        size: tokens[3].split('"')[1],
+                        removable: tokens[4].split('"')[1] == 'Removable'
+                    };
+            }
         }
-    }
-    return (ret);
+        this.promise._res({ r: ret, t: tokens });
+    });
+
+    p1.then(function (j)
+    {
+        var ret = j.r;
+        var tokens = j.t;
+
+        var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-']);
+        p2.child = child;
+        child.promise = p2;
+        child.tokens = tokens;
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write('Get-BitLockerVolume | Select-Object -Property MountPoint,VolumeStatus,ProtectionStatus | ConvertTo-Csv -NoTypeInformation\nexit\n');
+        child.on('exit', function ()
+        {
+            var i;
+            var a = this.stdout.str.trim().split('\r\n');
+            for (i = 1; i < a.length; ++i)
+            {
+                tokens = a[i].split(',');
+                key = tokens[0].split(':').shift().split('"').pop();
+                if (ret[key] != null)
+                {
+                    ret[key].volumeStatus = tokens[1].split('"')[1];
+                    ret[key].protectionStatus = tokens[2].split('"')[1];
+                }
+            }
+            this.promise._res(ret);
+        });
+    });
+    return (p2);
 }
 
 function windows_identifiers()
@@ -474,7 +499,7 @@ module.exports.isVM = function isVM()
 
 if (process.platform == 'win32')
 {
-    module.exports.volumes = windows_volumes;
+    module.exports.volumes_promise = windows_volumes;
 }
 
 // bios_date = BIOS->ReleaseDate
