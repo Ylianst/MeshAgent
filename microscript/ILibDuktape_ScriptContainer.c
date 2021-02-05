@@ -2568,6 +2568,8 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_res(duk_context *ctx)
 {
 	duk_push_current_function(ctx);				// [func]
 	duk_get_prop_string(ctx, -1, "obj");		// [func][obj]
+	duk_push_true(ctx); duk_put_prop_string(ctx, -2, "settled");
+
 	duk_dup(ctx, 0);							// [func][obj][resolvedValue]
 	duk_put_prop_string(ctx, -2, "return");		// [func][obj]
 	ILibChain_EndContinue(duk_ctx_chain(ctx));
@@ -2577,6 +2579,8 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl_rej(duk_context *ctx)
 {
 	duk_push_current_function(ctx);				// [func]
 	duk_get_prop_string(ctx, -1, "obj");		// [func][obj]
+	duk_push_true(ctx); duk_put_prop_string(ctx, -2, "settled");
+
 	duk_dup(ctx, 0);							// [func][obj][rejectedValue]
 	duk_put_prop_string(ctx, -2, "error");		// [func][obj]
 	ILibChain_EndContinue(duk_ctx_chain(ctx));
@@ -2587,7 +2591,7 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 	ILibChain_Continue_Result continueResult;
 	int timeout = duk_is_number(ctx, 1) ? duk_require_int(ctx, 1) : -1;
 	int timerInfo = ILibChain_GetMinimumTimer(duk_ctx_chain(ctx));
-	int ret;
+	int ret = 1;
 	if (timeout < 0 && timerInfo > 0) { timeout = 60000; }
 
 	duk_push_object(ctx);																	// [obj]
@@ -2598,17 +2602,19 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 	duk_dup(ctx, -5); duk_put_prop_string(ctx, -2, "obj");
 	duk_call_method(ctx, 2);																// [obj][retpromise]
 
-	ILibChain_Link **modules = ILibChain_GetModules(duk_ctx_chain(ctx));
-	int count = (int)(ILibMemory_Size(modules) / sizeof(ILibChain_Link*));
-#ifdef WIN32
-	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
-#else
-	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout);
-#endif
-	ILibMemory_Free(modules);
-
-	switch (continueResult)
+	if (!duk_has_prop_string(ctx, -2, "settled"))
 	{
+		ILibChain_Link **modules = ILibChain_GetModules(duk_ctx_chain(ctx));
+		int count = (int)(ILibMemory_Size(modules) / sizeof(ILibChain_Link*));
+#ifdef WIN32
+		continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
+#else
+		continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout);
+#endif
+		ILibMemory_Free(modules);
+
+		switch (continueResult)
+		{
 		case ILibChain_Continue_Result_ERROR_INVALID_STATE:
 			ret = ILibDuktape_Error(ctx, "wait() already in progress");
 			break;
@@ -2624,6 +2630,7 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 		default:
 			ret = 1;
 			break;
+		}
 	}
 
 	if (duk_has_prop_string(ctx, -2, "return"))
