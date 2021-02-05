@@ -2214,8 +2214,8 @@ int ILibDuktape_tls_server_alpnSink(SSL *ssl, const unsigned char **out, unsigne
 		duk_get_prop_string(server->ctx, -1, "ALPNProtocols");					// [server][array][options][array]
 		char *a, *b;
 		int i, si;
-		int clientcount = duk_get_length(server->ctx, -3);
-		int servercount = duk_get_length(server->ctx, -1);
+		int clientcount = (int)duk_get_length(server->ctx, -3);
+		int servercount = (int)duk_get_length(server->ctx, -1);
 		for (i = 0; i < clientcount; ++i)
 		{
 			a = Duktape_GetStringPropertyIndexValue(server->ctx, -3, i, "");
