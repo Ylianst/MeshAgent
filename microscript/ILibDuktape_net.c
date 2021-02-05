@@ -873,21 +873,23 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 	session = Duktape_PushBuffer(ptr->ctx, sizeof(ILibDuktape_net_server_session));											// [emit][this][connection][socket][buffer]
 	duk_put_prop_string(ptr->ctx, -2, ILibDuktape_net_Server_Session_buffer);												// [emit][this][connection][socket]
 
-	const unsigned char *alpn = NULL;
-	size_t alpnLen = 0;
-	SSL_SESSION_get0_alpn_selected(SSL_get_session(ILibAsyncServerSocket_GetSSL(ConnectionToken)), &alpn, &alpnLen);
-	if (alpnLen != 0)
+	if (isTLS)
 	{
-		duk_push_lstring(ptr->ctx, alpn, alpnLen);
+		const unsigned char *alpn = NULL;
+		size_t alpnLen = 0;
+		SSL_SESSION_get0_alpn_selected(SSL_get_session(ILibAsyncServerSocket_GetSSL(ConnectionToken)), &alpn, &alpnLen);
+		if (alpnLen != 0)
+		{
+			duk_push_lstring(ptr->ctx, alpn, alpnLen);
+		}
+		else
+		{
+			duk_push_null(ptr->ctx);
+		}
+		duk_put_prop_string(ptr->ctx, -2, "alpnProtocol");
+		duk_push_string(ptr->ctx, SSL_get_servername(ILibAsyncServerSocket_GetSSL(ConnectionToken), TLSEXT_NAMETYPE_host_name));
+		duk_put_prop_string(ptr->ctx, -2, "servername");
 	}
-	else
-	{
-		duk_push_null(ptr->ctx);
-	}
-	duk_put_prop_string(ptr->ctx, -2, "alpnProtocol");
-	duk_push_string(ptr->ctx, SSL_get_servername(ILibAsyncServerSocket_GetSSL(ConnectionToken), TLSEXT_NAMETYPE_host_name));
-	duk_put_prop_string(ptr->ctx, -2, "servername");
-
 
 	struct sockaddr_in6 local;
 	ILibAsyncSocket_GetLocalInterface(ConnectionToken, (struct sockaddr*)&local);
