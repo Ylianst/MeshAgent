@@ -2603,7 +2603,7 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 #ifdef WIN32
 	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
 #else
-	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
+	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout);
 #endif
 	ILibMemory_Free(modules);
 
