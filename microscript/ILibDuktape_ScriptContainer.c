@@ -2600,7 +2600,11 @@ duk_ret_t ILibDuktape_Polyfills_promise_wait_impl(duk_context *ctx)
 
 	ILibChain_Link **modules = ILibChain_GetModules(duk_ctx_chain(ctx));
 	int count = (int)(ILibMemory_Size(modules) / sizeof(ILibChain_Link*));
+#ifdef WIN32
 	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
+#else
+	continueResult = ILibChain_Continue(duk_ctx_chain(ctx), modules, count, timeout, NULL);
+#endif
 	ILibMemory_Free(modules);
 
 	switch (continueResult)
