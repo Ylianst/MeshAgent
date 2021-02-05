@@ -2256,6 +2256,10 @@ SSL_CTX *ILibAsyncSocket_GetSSLContext(ILibAsyncSocket_SocketModule socketModule
 	struct ILibAsyncSocketModule* module = (struct ILibAsyncSocketModule*)socketModule;
 	return module->ssl_ctx;
 }
+SSL* ILibAsyncSocket_GetSSL(ILibAsyncSocket_SocketModule socketModule)
+{
+	return(((ILibAsyncSocketModule*)socketModule)->ssl);
+}
 #endif
 
 

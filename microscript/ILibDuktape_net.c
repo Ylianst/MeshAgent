@@ -151,7 +151,6 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx);
 BOOL ILibDuktape_server_ipc_ReadSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
 #endif
 
-
 void ILibDuktape_net_socket_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncSocket_OnInterrupt* OnInterrupt, void **user, int *PAUSE)
 {
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
@@ -216,6 +215,9 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 				duk_push_null(ptrs->ctx);
 			}
 			duk_put_prop_string(ptrs->ctx, -2, "alpnProtocol");
+			duk_push_string(ptrs->ctx, SSL_get_servername(ptrs->ssl, TLSEXT_NAMETYPE_host_name));
+			duk_put_prop_string(ptrs->ctx, -2, "servername");
+
 			duk_get_prop_string(ptrs->ctx, -1, "emit");									// [socket][emit]
 			duk_swap_top(ptrs->ctx, -2);												// [emit][this]
 			duk_push_string(ptrs->ctx, "secureConnect");								// [emit][this][secureConnect]
@@ -870,6 +872,22 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 	ILibDuktape_CreateFinalizer(ptr->ctx, ILibDuktape_net_server_socket_Finalizer);
 	session = Duktape_PushBuffer(ptr->ctx, sizeof(ILibDuktape_net_server_session));											// [emit][this][connection][socket][buffer]
 	duk_put_prop_string(ptr->ctx, -2, ILibDuktape_net_Server_Session_buffer);												// [emit][this][connection][socket]
+
+	const unsigned char *alpn = NULL;
+	size_t alpnLen = 0;
+	SSL_SESSION_get0_alpn_selected(SSL_get_session(ILibAsyncServerSocket_GetSSL(ConnectionToken)), &alpn, &alpnLen);
+	if (alpnLen != 0)
+	{
+		duk_push_lstring(ptr->ctx, alpn, alpnLen);
+	}
+	else
+	{
+		duk_push_null(ptr->ctx);
+	}
+	duk_put_prop_string(ptr->ctx, -2, "alpnProtocol");
+	duk_push_string(ptr->ctx, SSL_get_servername(ILibAsyncServerSocket_GetSSL(ConnectionToken), TLSEXT_NAMETYPE_host_name));
+	duk_put_prop_string(ptr->ctx, -2, "servername");
+
 
 	struct sockaddr_in6 local;
 	ILibAsyncSocket_GetLocalInterface(ConnectionToken, (struct sockaddr*)&local);
@@ -2130,12 +2148,28 @@ static int ILibDuktape_tls_server_sniCallback(SSL *s, int *ad, void *arg)
 }
 int ILibDuktape_tls_server_alpnSink(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *in, unsigned int inlen, void *arg)
 {
+	int ix = 0;
 	int ret = SSL_TLSEXT_ERR_ALERT_FATAL;
+	unsigned char **ptr = NULL;
+	if (inlen > 255) { return(ret); }
+
+	const unsigned char *in2 = in;
+	unsigned int inlen2 = inlen;
+	while (inlen2 > 0)
+	{
+		ix++;
+		inlen2 -= (1 + in2[0]);
+		in2 += (1 + in2[0]);
+	}
+	ptr = (unsigned char**)ILibMemory_AllocateA(ix * sizeof(unsigned char*));
+	ix = 0;
+
 	ILibDuktape_net_server *server = (ILibDuktape_net_server*)arg;
 	duk_push_heapptr(server->ctx, server->self);								// [server]
 	duk_push_array(server->ctx);												// [server][array]
 	while (inlen > 0)
 	{
+		ptr[ix++] = (unsigned char*)in;
 		duk_push_lstring(server->ctx, (const char*)in + 1, (duk_size_t)in[0]);	// [server][array][string]
 		duk_array_push(server->ctx, -2);										// [server][array]
 		inlen -= (1 + in[0]);
@@ -2149,23 +2183,25 @@ int ILibDuktape_tls_server_alpnSink(SSL *ssl, const unsigned char **out, unsigne
 		duk_dup(server->ctx, -4);												// [server][array][options][callback][this][array]
 		if (duk_pcall_method(server->ctx, 1) == 0)								// [server][array][options][ret]
 		{
-			while (duk_get_length(server->ctx, -3) > 0)
+			if (!duk_is_null_or_undefined(server->ctx, -1))
 			{
-				duk_array_pop(server->ctx, -3);									// [server][array][options][ret][string]
-				const char *str1 = duk_get_string(server->ctx, -2);
-				const char *str2 = duk_get_string(server->ctx, -1);
-				if (strcmp(str1, str2) == 0)
+				ix = -1;
+				while (duk_get_length(server->ctx, -3) > 0)
 				{
-					char *a = (char*)Duktape_PushBuffer(server->ctx, duk_get_length(server->ctx, -1));
-					duk_put_prop_string(server->ctx, -5, "_alpnselect");	
-					memcpy_s(a, ILibMemory_Size(a), str2, ILibMemory_Size(a));
-					*out = a;
-					*outlen = (unsigned char)ILibMemory_Size(a);
-					ret = SSL_TLSEXT_ERR_OK;
+					++ix;
+					duk_array_shift(server->ctx, -3);							// [server][array][options][ret][string]
+					const char *str1 = duk_get_string(server->ctx, -2);
+					const char *str2 = duk_get_string(server->ctx, -1);
+					if (strcmp(str1, str2) == 0)
+					{
+						*out = ptr[ix] + 1;
+						*outlen = ptr[ix][0];
+						ret = SSL_TLSEXT_ERR_OK;
+						duk_pop(server->ctx);											// [server][array][options][ret]
+						break;
+					}
 					duk_pop(server->ctx);										// [server][array][options][ret]
-					break;
 				}
-				duk_pop(server->ctx);											// [server][array][options][ret]
 			}
 		}
 		duk_pop(server->ctx);													// [server][array][options]
@@ -2173,6 +2209,28 @@ int ILibDuktape_tls_server_alpnSink(SSL *ssl, const unsigned char **out, unsigne
 	else
 	{
 		duk_pop(server->ctx);													// [server][array][options]
+		duk_get_prop_string(server->ctx, -1, "ALPNProtocols");					// [server][array][options][array]
+		char *a, *b;
+		int i, si;
+		int clientcount = duk_get_length(server->ctx, -3);
+		int servercount = duk_get_length(server->ctx, -1);
+		for (i = 0; i < clientcount; ++i)
+		{
+			a = Duktape_GetStringPropertyIndexValue(server->ctx, -3, i, "");
+			for (si = 0; si < servercount; ++si)
+			{
+				b = Duktape_GetStringPropertyIndexValue(server->ctx, -1, si, "");
+				if (strcmp(a, b) == 0)
+				{
+					*out = ptr[i] + 1;
+					*outlen = ptr[i][0];
+					ret = SSL_TLSEXT_ERR_OK;
+					break;
+				}
+			}
+			if (ret == SSL_TLSEXT_ERR_OK) { break; }
+		}
+		duk_pop(server->ctx);													// [server][array][options]						
 	}
 	duk_pop_3(server->ctx);														// ...
 	return(ret);
@@ -2201,38 +2259,37 @@ duk_ret_t ILibDuktape_tls_server_addContext(duk_context *ctx)
 
 		if (duk_has_prop_string(ctx, -1, "ALPNProtocols"))
 		{
+			duk_uarridx_t i;
 			int status = 0;
 			duk_size_t protoLen = 0;
 			unsigned char *alpn = NULL;
-			duk_push_this(ctx);															// [options][server]
-			duk_uarridx_t i;
-			duk_get_prop_string(ctx, -2, "ALPNProtocols");								// [options][server][Array]
+			duk_get_prop_string(ctx, -1, "ALPNProtocols");								// [server][table][options][Array]
 			duk_uarridx_t len = (duk_uarridx_t)duk_get_length(ctx, -1);
 			for (i = 0; i < len; ++i)
 			{
-				duk_get_prop_index(ctx, -1, i);											// [options][server][Array][string]
-				protoLen += (1 + duk_get_length(ctx, -1));
-				duk_pop(ctx);															// [options][server][Array]
+				duk_get_prop_index(ctx, -1, i);											// [server][table][options][Array][string]
+				protoLen += (1 + (unsigned int)duk_get_length(ctx, -1));
+				duk_pop(ctx);															// [server][table][options][Array]
 			}
 			if (protoLen > 0)
 			{
 				char *buf; duk_size_t bufLen;
-				alpn = (unsigned char*)Duktape_PushBuffer(ctx, protoLen);				// [options][server][Array][buffer]
-				duk_put_prop_string(ctx, -3, "_ALPN");									// [options][server][Array]
+				alpn = (unsigned char*)Duktape_PushBuffer(ctx, protoLen);				// [server][table][options][buffer]
+				duk_put_prop_string(ctx, -4, "_ALPN");									// [server][table][options][Array]
 				protoLen = 0;
 				for (i = 0; i < len; ++i)
 				{
-					duk_get_prop_index(ctx, -1, i);										// [options][server][Array][buffer]
+					duk_get_prop_index(ctx, -1, i);										// [server][table][options][Array][buffer]
 					buf = (char*)duk_get_lstring(ctx, -1, &bufLen);
 					alpn[protoLen] = (unsigned char)bufLen; ++protoLen;
 					memcpy_s(alpn + protoLen, ILibMemory_Size(alpn) - protoLen, buf, bufLen);
-					protoLen += bufLen;
-					duk_pop(ctx);														// [options][server][Array]
+					protoLen += (unsigned int)bufLen;
+					duk_pop(ctx);														// [server][table][options][Array]
 				}
 				status = SSL_CTX_set_alpn_protos(ssl_ctx, alpn, (unsigned int)protoLen);
-				SSL_CTX_set_alpn_select_cb(ssl_ctx, ILibDuktape_tls_server_alpnSink, Duktape_GetBufferProperty(ctx, -3, ILibDuktape_net_Server_buffer));
+				SSL_CTX_set_alpn_select_cb(ssl_ctx, ILibDuktape_tls_server_alpnSink, Duktape_GetBufferProperty(ctx, -4, ILibDuktape_net_Server_buffer));
 			}
-			duk_pop_2(ctx);																// [options]
+			duk_pop(ctx);																// [server][table][options]
 		}
 
 		duk_get_prop_string(ctx, -3, ILibDuktape_net_Server_buffer);// [server][table][options][buffer]
@@ -2279,10 +2336,6 @@ duk_ret_t ILibDuktape_TLS_exportKeys(duk_context *ctx)
 	return(ILibDuktape_Error(ctx, "Error exporting OpenSSL Keys"));
 }
 #endif
-int ILibDuktape_TLS_ALPNCB(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *in, unsigned int inlen, void *arg)
-{
-	return(SSL_TLSEXT_ERR_OK);
-}
 duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 {
 	int status = 0;
@@ -2361,9 +2414,7 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 	{
 		return(ILibDuktape_Error(ctx, "Invalid SecureContext Object"));
 	}
-	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */																				
-	SSL_CTX_set_next_proto_select_cb(data->ssl_ctx, ILibDuktape_TLS_ALPNCB, data);
-	
+	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */																					
 	if (duk_has_prop_string(ctx, 0, "ALPNProtocols"))
 	{
 		duk_uarridx_t i;
@@ -2494,7 +2545,6 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		}
 		data->ssl = ILibAsyncSocket_SetSSLContextEx(data->socketModule, data->ssl_ctx, ILibAsyncSocket_TLS_Mode_Client, sniname);
 		SSL_set_ex_data(data->ssl, ILibDuktape_TLS_ctx2socket, data);
-		//status = SSL_set_alpn_protos(data->ssl, alpn, protoLen);
 	}
 
 	return(1);

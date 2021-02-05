@@ -443,6 +443,10 @@ void* ILibAsyncServerSocket_GetSSL_CTX(ILibAsyncServerSocket_ServerModule ILibAs
 {
 	return(((struct ILibAsyncServerSocketModule*)ILibAsyncSocketModule)->ssl_ctx);
 }
+void* ILibAsyncServerSocket_GetSSL(ILibAsyncServerSocket_ConnectionToken connectiontoken)
+{
+	return(ILibAsyncSocket_GetSSL(connectiontoken));
+}
 #ifdef MICROSTACK_TLS_DETECT
 void ILibAsyncServerSocket_SetSSL_CTX(ILibAsyncServerSocket_ServerModule ILibAsyncSocketModule, void *ssl_ctx, int enableTLSDetect)
 #else

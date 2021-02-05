@@ -128,6 +128,7 @@ void ILibAsyncServerSocket_SetTag2(ILibAsyncServerSocket_ServerModule ILibAsyncS
 #ifndef MICROSTACK_NOTLS
 	typedef void(*ILibAsyncServerSocket_OnSSL)(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, void* ConnectionToken, SSL* ctx, void **user);
 	void ILibAsyncServerSocket_SSL_SetSink(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_OnSSL handler);
+	void* ILibAsyncServerSocket_GetSSL(ILibAsyncServerSocket_ConnectionToken connectiontoken);
 	void* ILibAsyncServerSocket_GetSSL_CTX(ILibAsyncServerSocket_ServerModule ILibAsyncSocketModule);
 	#ifdef MICROSTACK_TLS_DETECT
 		void ILibAsyncServerSocket_SetSSL_CTX(ILibAsyncServerSocket_ServerModule ILibAsyncSocketModule, void *ssl_ctx, int enableTLSDetect);
