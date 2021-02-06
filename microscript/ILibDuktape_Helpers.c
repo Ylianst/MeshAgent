@@ -497,11 +497,11 @@ void ILibDuktape_CreateEventWithGetterEx(duk_context *ctx, char *propName, void 
 	duk_put_prop_string(ctx, -2, "\xFF_return");													// [obj][prop][func]
 	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);								// [obj]
 }
-void ILibDuktape_CreateEventWithGetter(duk_context *ctx, char *propName, duk_c_function getterMethod)
+void ILibDuktape_CreateEventWithGetter_SetEnumerable(duk_context *ctx, char *propName, duk_c_function getterMethod, int enumerable)
 {
 	duk_push_string(ctx, propName);																	// [obj][prop]
 	duk_push_c_function(ctx, getterMethod, 1);														// [obj][prop][getFunc]
-	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);								// [obj]
+	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER | (enumerable ? DUK_DEFPROP_SET_ENUMERABLE : 0));							// [obj]
 }
 void ILibDuktape_CreateEventWithGetterAndCustomProperty(duk_context *ctx, char *customPropName, char *propName, duk_c_function getterMethod)
 {
@@ -891,14 +891,14 @@ duk_ret_t ILibDuktape_ReadonlyProperty_Get(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "\xFF_PropValue");		// [getFunc][value]
 	return 1;
 }
-void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName)
+void ILibDuktape_CreateReadonlyProperty_SetEnumerable(duk_context *ctx, char *propName, int enumerable)
 {																									// [obj][value]
 	duk_push_string(ctx, propName);																	// [obj][value][prop]
 	duk_swap_top(ctx, -2);																			// [obj][prop][value]
 	duk_push_c_function(ctx, ILibDuktape_ReadonlyProperty_Get, 1);									// [obj][prop][value][getFunc]
 	duk_swap_top(ctx, -2);																			// [obj][prop][getFunc][value]
 	duk_put_prop_string(ctx, -2, "\xFF_PropValue");													// [obj][prop][getFunc]
-	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);								// [obj]
+	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER | (enumerable ? DUK_DEFPROP_SET_ENUMERABLE : 0));								// [obj]
 }
 void *ILibDuktape_Memory_Alloc(duk_context *ctx, duk_size_t size)
 {

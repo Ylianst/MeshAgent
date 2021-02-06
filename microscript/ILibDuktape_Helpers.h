@@ -174,7 +174,8 @@ duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...);
 typedef void(*ILibDuktape_IndependentFinalizerHandler)(duk_context *ctx, void *object);
 int ILibDuktape_Process_GetExitCode(duk_context *ctx);
 
-void ILibDuktape_CreateEventWithGetter(duk_context *ctx, char *propName, duk_c_function getterMethod);
+void ILibDuktape_CreateEventWithGetter_SetEnumerable(duk_context *ctx, char *propName, duk_c_function getterMethod, int enumerable);
+#define ILibDuktape_CreateEventWithGetter(ctx, propName, getterFunc) ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, propName, getterFunc, 0)
 void ILibDuktape_CreateEventWithGetterEx(duk_context *ctx, char *propName, void *heapptr);
 void ILibDuktape_CreateEventWithGetterAndCustomProperty(duk_context *ctx, char *customPropName, char *propName, duk_c_function getterMethod);
 void ILibDuktape_CreateEventWithSetter(duk_context *ctx, char *propName, char *propNamePtr, void **hptr);
@@ -195,8 +196,9 @@ duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val);
 
 void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodName, duk_c_function impl, duk_idx_t argCount);
 void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr);
-void ILibDuktape_CreateReadonlyProperty(duk_context *ctx, char *propName);
-#define ILibDuktape_CreateReadonlyProperty_int(ctx, propName, propValue) duk_push_int(ctx, propValue);ILibDuktape_CreateReadonlyProperty(ctx, propName)
+#define ILibDuktape_CreateReadonlyProperty(ctx, propName) ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, propName, 1)
+void ILibDuktape_CreateReadonlyProperty_SetEnumerable(duk_context *ctx, char *propName, int enumerable);
+#define ILibDuktape_CreateReadonlyProperty_int(ctx, propName, propValue) duk_push_int(ctx, propValue);ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, propName, 1)
 void ILibDuktape_CreateFinalizerEx(duk_context *ctx, duk_c_function func, int singleton);
 #define ILibDuktape_CreateFinalizer(ctx, func) ILibDuktape_CreateFinalizerEx(ctx, func, 0)
 

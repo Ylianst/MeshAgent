@@ -1861,14 +1861,14 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "DBError");
 		ILibDuktape_EventEmitter_AddHook(emitter, "Connected", ILibDuktape_MeshAgent_ConnectedHook);
 
-		ILibDuktape_CreateEventWithGetter(ctx, "ServerInfo", ILibDuktape_MeshAgent_ServerInfo);
+		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "ServerInfo", ILibDuktape_MeshAgent_ServerInfo,1);
 
 
-		ILibDuktape_CreateEventWithGetter(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected);
+		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected,1);
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
-		ILibDuktape_CreateEventWithGetter(ctx, "ConnectedServer", ILibDuktape_MeshAgent_ConnectedServer);
-		ILibDuktape_CreateEventWithGetter(ctx, "ServerUrl", ILibDuktape_MeshAgent_ServerUrl);
-		ILibDuktape_CreateEventWithGetter(ctx, "ServerIP", ILibDuktape_MeshAgent_ServerIP);
+		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "ConnectedServer", ILibDuktape_MeshAgent_ConnectedServer,1);
+		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "ServerUrl", ILibDuktape_MeshAgent_ServerUrl,1);
+		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "ServerIP", ILibDuktape_MeshAgent_ServerIP,1);
 		ILibDuktape_CreateInstanceMethod(ctx, "getRemoteDesktopStream", ILibDuktape_MeshAgent_getRemoteDesktop, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "AddCommandHandler", ILibDuktape_MeshAgent_AddCommandHandler, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "AddConnectHandler", ILibDuktape_MeshAgent_AddConnectHandler, 1);
@@ -1878,7 +1878,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "restartCore", ILibDuktape_MeshAgent_dumpCoreModule, 0);
 		ILibDuktape_CreateInstanceMethod(ctx, "getStartupOptions", ILibDuktape_MeshAgent_getStartupOptions, 0);
 		ILibDuktape_CreateEventWithGetter(ctx, "coreHash", ILibDuktape_MeshAgent_coreHash);
-		ILibDuktape_CreateEventWithGetter(ctx, "updatesEnabled", ILibDuktape_MeshAgent_updatesEnabled);
+		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "updatesEnabled", ILibDuktape_MeshAgent_updatesEnabled, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "log", ILibDuktape_MeshAgent_log, 1);
 		ILibDuktape_CreateEventWithGetter(ctx, "controlChannelDebug", ILibDuktape_MeshAgent_controlChannelDebug);
 		ILibDuktape_CreateInstanceMethod(ctx, "DataPing", ILibDuktape_MeshAgent_DataPing, DUK_VARARGS);
