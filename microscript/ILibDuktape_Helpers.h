@@ -196,7 +196,7 @@ duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val);
 
 void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodName, duk_c_function impl, duk_idx_t argCount);
 void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr);
-#define ILibDuktape_CreateReadonlyProperty(ctx, propName) ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, propName, 1)
+#define ILibDuktape_CreateReadonlyProperty(ctx, propName) ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, propName, 0)
 void ILibDuktape_CreateReadonlyProperty_SetEnumerable(duk_context *ctx, char *propName, int enumerable);
 #define ILibDuktape_CreateReadonlyProperty_int(ctx, propName, propValue) duk_push_int(ctx, propValue);ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, propName, 1)
 void ILibDuktape_CreateFinalizerEx(duk_context *ctx, duk_c_function func, int singleton);
