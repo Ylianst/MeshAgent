@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+const SYNCHRONIZE = 0x00100000;
+
 
 function invalid()
 {
@@ -152,6 +154,25 @@ function getLibc()
 
     return (libc);
 }
+
+function win_getProcessHandle(pid)
+{
+    try
+    {
+        if(!this.kernel32)
+        {
+            this.kernel32 = require('_GenericMarshal').CreateNativeProxy('kernel32.dll');
+            this.kernel32.CreateMethod('OpenProcess');
+        }
+
+        return (this.kernel32.OpenProcess(SYNCHRONIZE, 0, pid));
+    }
+    catch(e)
+    {
+        return (null);
+    }
+}
+
 switch (process.platform)
 {
     case 'linux':
@@ -161,4 +182,9 @@ switch (process.platform)
     default:
         module.exports = { getOpenDescriptors: invalid, closeDescriptors: invalid };
         break;
+}
+
+if (process.platform == 'win32')
+{
+    module.exports.getProcessHandle = win_getProcessHandle;
 }

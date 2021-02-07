@@ -921,7 +921,7 @@ function serviceManager()
                         if (this.isMe())
                         {
                             // In order to restart ourselves on Windows, we must spawn a detached child process, becuase we need to call start, once we are stopped
-                            child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-exec "' + "require('service-manager').manager.getService('" + this.name + "').restart().finally(function(){process.exit();});" + '"'], { type: 4, detached: true });
+                            require('child_process')._execve(process.env['windir'] + '\\system32\\cmd.exe', ['cmd.exe', '/C wmic service "' + this.name + '" call stopservice & wmic service "' + this.name + '" call startservice']);
                         }
                         else
                         {
