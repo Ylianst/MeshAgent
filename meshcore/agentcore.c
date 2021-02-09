@@ -1915,12 +1915,12 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_MeshAgent_hostname, 0);
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
-		duk_push_string(ctx, agent->displayName); ILibDuktape_CreateReadonlyProperty(ctx, "displayName");
+		duk_push_string(ctx, agent->displayName); ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "displayName",1);
 
 		if (agent->JSRunningAsService)
 		{
 			duk_push_string(ctx, agent->meshServiceName);
-			ILibDuktape_CreateReadonlyProperty(ctx, "serviceName");
+			ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "serviceName", 1);
 		}
 		
 
@@ -1930,13 +1930,13 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 	#else
 		duk_push_false(ctx);
 	#endif
-		ILibDuktape_CreateReadonlyProperty(ctx, "isService");
+		ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "isService",1);
 #else
 	#ifndef __APPLE__
 		// Determine if we're running as service on Linux
 		if (duk_peval_string(ctx, "require('service-manager').manager.getService('meshagent').isMe();") == 0)
 		{
-			ILibDuktape_CreateReadonlyProperty(ctx, "isService");
+			ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "isService",1);
 		}
 		else
 		{

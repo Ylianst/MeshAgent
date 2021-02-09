@@ -39,25 +39,157 @@ limitations under the License.
 //      amtPolicy
 //      sysinfo
 
+Object.defineProperty(Array.prototype, 'getParameterEx',
+    {
+        value: function (name, defaultValue)
+        {
+            var i, ret;
+            for (i = 0; i < this.length; ++i)
+            {
+                if (this[i].startsWith(name + '='))
+                {
+                    ret = this[i].substring(name.length + 1);
+                    if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                    return (ret);
+                }
+            }
+            return (defaultValue);
+        }
+    });
+Object.defineProperty(Array.prototype, 'getParameter',
+    {
+        value: function (name, defaultValue)
+        {
+            return (this.getParameterEx('--' + name, defaultValue));
+        }
+    });
+Object.defineProperty(Array.prototype, 'getParameterIndex',
+    {
+        value: function (name)
+        {
+            var i;
+            for (i = 0; i < this.length; ++i)
+            {
+                if (this[i].startsWith('--' + name + '='))
+                {
+                    return (i);
+                }
+            }
+            return (-1);
+        }
+    });
+
 
 var promise = require('promise');
+var localmode = true;
+
+function agentConnect(test, ipcPath)
+{
+    if (global.agentipc_next)
+    {
+        global.agentipc = global.agentipc_next;
+        global.agentipc_next = new promise(function (r, j) { this._res = r; this._rej = j; });
+    }
+    else
+    {
+        global.agentipc = new promise(function (r, j) { this._res = r; this._rej = j; });
+    }
+    global.client = require('net').createConnection({ path: ipcPath });
+    global.client.test = test;
+    global.client.on('error', function () { global.agentipc._rej(); });
+    global.client.on('end', function ()
+    {
+        console.log('      -> Agent connection lost');
+        console.log('      -> Reconnecting...');
+        this.removeAllListeners('data');
+
+        global._timeout = setTimeout(function (a, b) { agentConnect(a, b); }, 8000, test, ipcPath);
+    });
+    global.client.on('data', function (chunk)
+    {
+        //console.log('DATA: ' + chunk.length, chunk.toString());
+        var len;
+        if (chunk.length < 4) { this.unshift(chunk); return; }
+        if ((len = chunk.readUInt32LE(0)) > chunk.length) { this.unshift(chunk); return; }
+
+        var data = chunk.slice(4, len + 4);
+        var payload = null;
+        try
+        {
+            payload = JSON.parse(data.toString());
+        }
+        catch (e)
+        {
+            return;
+        }
+        //console.log('DATA: ' + data.toString());
+        this.test.emit('command', payload);
+        if ((len + 4) < chunk.length)
+        {
+            console.log('UNSHIFT');
+            this.unshift(chunk.slice(4 + len));
+        }
+
+    });
+    global.client.on('connect', function ()
+    {
+        // Register on the IPC for responses
+        try
+        {
+            var cmd = "_sendConsoleText = sendConsoleText; sendConsoleText = function(msg,id){ for(i in obj.DAIPC._daipc) { obj.DAIPC._daipc[i]._send({cmd: 'console', value: msg});}};";
+
+            //var cmd = "for(i in obj.DAIPC._daipc){ if(obj.DAIPC._daipc[i]._registered==null) { obj.DAIPC._daipc[i]._registered='agentSelfTest'; } }";
+            var reg = { cmd: 'console', value: 'eval "' + cmd + '"' };
+            var ocmd = Buffer.from(JSON.stringify(reg));
+            var buf = Buffer.alloc(4 + ocmd.length);
+            buf.writeUInt32LE(ocmd.length + 4, 0);
+            ocmd.copy(buf, 4);
+            this.write(buf);
+            global.agentipc._res();
+        }
+        catch (f)
+        {
+            console.log(f);
+        }
+    });
+}
 
 function start()
 {
     var isservice = false;
-    var service = null;
-    try
-    {
-        service = require('service-manager').manager.getService(process.platform == 'win32' ? 'Mesh Agent' : 'meshagent');
-        isservice = service.isMe();
-    }
-    catch(e)
-    {
-    }
+    var nodeid = process.argv.getParameter('nodeID');
+    var ipcPath = process.platform == 'win32' ? ('\\\\.\\pipe\\' + nodeid + '-DAIPC') : (process.cwd() + '/DAIPC');
 
-    if (isservice)
+    if (nodeid != null)
     {
-        console.setDestination(console.Destinations.LOGFILE);
+        localmode = false;
+        console.log('   -> Connecting to agent...');
+        agentConnect(this, ipcPath);
+
+        try
+        {
+            promise.wait(global.agentipc);
+            console.log('      -> Connected........................[OK]');
+        }
+        catch(e)
+        {
+            console.log('      -> ERROR........................[FAILED]');
+            process._exit();
+        }
+
+        
+        this.toAgent = function remote_toAgent(inner)
+        {
+            inner.sessionid = 'pipe';
+            var icmd = "Buffer.from('" + Buffer.from(JSON.stringify(inner)).toString('base64') + "','base64').toString()";
+            var ocmd = { cmd: 'console', value: 'eval "require(\'MeshAgent\').emit(\'Command\', JSON.parse(' + icmd + '));"'};
+            ocmd = Buffer.from(JSON.stringify(ocmd));
+
+            var buf = Buffer.alloc(4 + ocmd.length);
+            buf.writeUInt32LE(ocmd.length + 4, 0);
+            ocmd.copy(buf, 4);
+            global.client.write(buf);
+        };
     }
 
     console.log('Starting Self Test...');
@@ -69,6 +201,8 @@ function start()
         .then(function () { return (testTerminal()); })
         .then(function () { return (testKVM()); })
         .then(function () { return (testFileDownload()); })
+        .then(function () { return (testCoreDump()); })
+        .then(function () { return (testServiceRestart()); })
         .then(function ()
         {
             console.log('End of Self Test');
@@ -297,6 +431,121 @@ function coreInfo()
     return (ret);
 }
 
+function testServiceRestart()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+
+    if (localmode)
+    {
+        ret._res();
+        return (ret);
+    }
+    console.log('   => Service Restart Test');
+    ret.self = this;
+    //ret._part1 = this.consoleCommand("eval \"var _A=setTimeout(function(){sendConsoleText(require('MeshAgent').serviceName);},1000);\"");
+    ret._part1 = this.agentQueryValue("require('MeshAgent').serviceName");
+    ret._part1.then(function (c)
+    {
+        console.log('      => Service Name = ' + c);
+        ret._servicename = c;
+
+        var nextp = new promise(function (r, j) { this._res = r; this._rej = j; });
+        global.agentipc_next = nextp
+
+        console.log('      -> Restarting Service...');
+        ret.self.consoleCommand("service restart").catch(function (x)
+        {
+            //ret._rej('         -> Restarted.....................[FAILED]');
+        });
+
+        try
+        {
+            promise.wait(nextp);
+            console.log('         -> Restarted.....................[OK]');
+            ret._res();
+        }
+        catch(f)
+        {
+            ret._rej('         -> Restarted.....................[FAILED]');
+        }
+    });
+
+    return (ret);
+}
+
+function testCoreDump()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+
+    if (localmode)
+    {
+        ret._res();
+        return (ret);
+    }
+    console.log('   => Mesh Core Dump Test');
+    ret.self = this;
+    ret.consoleTest = this.consoleCommand('eval process.pid');
+    ret.consoleTest.ret = ret;
+    ret.consoleTest.self = this;
+    ret.consoleTest.then(function (c)
+    {
+        var pid = c;
+        console.log('      -> Agent PID = ' + c);
+        console.log('      -> Initiating KVM for dump test');
+        ret.tunnel = this.self.createTunnel(0x1FF, 0x00);
+        ret.tunnel.then(function (c)
+        {
+            this.connection = c;
+            c.ret = this.ret;
+            c.jumbosize = 0;
+            c.on('data', function (buf)
+            {
+                if (typeof (buf) == 'string') { return; }
+                var type = buf.readUInt16BE(0);
+                var sz = buf.readUInt16BE(2);
+
+                if (type == 3 && sz == buf.length)
+                {
+                    this.removeAllListeners('data');
+                    var nextp = new promise(function (r, j) { this._res = r; this._rej = j; });
+                    global.agentipc_next = nextp
+
+                    console.log('      -> KVM initiated, dumping core');
+                   ret.self.consoleCommand("eval require('MeshAgent').restartCore();");
+                   // ret.self.consoleCommand("eval _debugCrash()");
+
+                    try
+                    {
+                        promise.wait(nextp);
+                        ret.self.agentQueryValue('process.pid').then(function (cc)
+                        {
+                            if(cc==pid)
+                            {
+                                console.log('      -> Core Restarted without crashing..[OK]');
+                                ret._res();
+                            }
+                            else
+                            {
+                                ret._rej('      -> Core Restart resulted in crash...[FAILED]');
+                            }
+                        });
+                    }
+                    catch(z)
+                    {
+                        console.log('      -> ERROR', z);
+                    }
+
+                }
+            });
+
+            c.write('c');
+            c.write('2'); // Request KVM
+        });
+
+    });
+
+    return (ret);
+}
 function testFileDownload()
 {
     console.log('   => File Transfer Test');
@@ -664,6 +913,35 @@ function setup()
 
         return (ret);
     }
+
+    this.agentQueryValue = function agentQueryValue(value)
+    {
+        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        //ret._part1 = this.consoleCommand("eval \"var _A=setTimeout(function(){sendConsoleText(require('MeshAgent').serviceName);},1000);\"");
+
+        var cmd = 'eval "var _A=setTimeout(function(){for(i in obj.DAIPC._daipc){ obj.DAIPC._daipc[i]._send({cmd: \'queryResponse\', value: ' + value + '});}},500);"';
+        ret.parent = this;
+        ret.handler = function handler(j)
+        {
+            //console.log('handler', JSON.stringify(j));
+            if (j.cmd == 'queryResponse')
+            {
+                clearTimeout(handler.promise.timeout);
+                handler.promise.parent.removeListener('command', handler);
+                handler.promise._res(j.value);
+            }
+        };
+        ret.handler.promise = ret;
+        ret.timeout = setTimeout(function (r)
+        {
+            r.parent.removeListener('command', r.handler);
+            r._rej('timeout');
+        }, 5000, ret);
+        this.on('command', ret.handler);
+        this.toAgent({ action: 'msg', type: 'console', value: cmd, sessionid: -1 });
+        return (ret);
+    };
+
     this.consoleCommand = function consoleCommand(cmd)
     {
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -671,7 +949,7 @@ function setup()
         ret.tester = this;
         ret.handler = function handler(j)
         {
-            if(j.action == 'msg' && j.type == 'console')
+            if((j.action == 'msg' && j.type == 'console') || j.cmd=='console')
             {
                 clearTimeout(handler.promise.timeout);
                 handler.promise.tester.removeListener('command', handler);

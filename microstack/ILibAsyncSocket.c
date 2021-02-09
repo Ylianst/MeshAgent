@@ -1336,9 +1336,12 @@ void ILibProcessAsyncSocket(struct ILibAsyncSocketModule *Reader, int pendingRea
 		if (Reader->OnData != NULL)
 		{
 			Reader->OnData(Reader, Reader->buffer + Reader->BeginPointer, &(iPointer), Reader->EndPointer - Reader->BeginPointer, &(Reader->OnInterrupt), &(Reader->user), &(Reader->PAUSE));
-			assert(iPointer <= (Reader->EndPointer - Reader->BeginPointer));
-			if (iPointer == 0) { break; }
-			Reader->BeginPointer += iPointer;
+			if (Reader->buffer != NULL)
+			{
+				assert(iPointer <= (Reader->EndPointer - Reader->BeginPointer));
+				if (iPointer == 0) { break; }
+				Reader->BeginPointer += iPointer;
+			}
 		}
 	}
 	if (Reader->BeginPointer == Reader->EndPointer) { Reader->BeginPointer = Reader->EndPointer = 0; }
