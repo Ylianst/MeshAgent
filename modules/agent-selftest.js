@@ -1027,7 +1027,7 @@ function testTunnel()
         this.parent._res();
     }).catch(function (e)
     {   
-        this.parent._rej('   => Tunnel Test.........................[FAILED] ' + e);
+        ret._rej('   => Tunnel Test.........................[FAILED] ');
     });
 
     return (ret);
@@ -1064,11 +1064,10 @@ function setup()
         var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
         ret.parent = this;
         this._tunnelServer.promises.push(ret);
-        ret.timeout = setTimeout(function (r)
+        ret.timeout = setTimeout(function ()
         {
-            r._tunnelServer.promises.shift();
-            r._rej('timeout');
-        }, 2000, ret);
+            ret._rej('timeout');
+        }, 2000);
         ret.options = { action: 'msg', type: 'tunnel', rights: rights, consent: consent, username: '(test script)', value: 'ws://127.0.0.1:9250/test' };
         this.toAgent(ret.options);
 
