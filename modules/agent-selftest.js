@@ -269,30 +269,30 @@ function start()
         .then(function () { return (testFileDownload()); })
         .then(function () { return (testCoreDump()); })
         .then(function () { return (testServiceRestart()); })
+        .then(function () { return (completed()); })
         .then(function ()
         {
             console.log('End of Self Test');
-            if (isservice)
-            {
-                service.stop();
-            }
-            else
-            {
-                process._exit();
-            }
+            process._exit();
         })
         .catch(function (v)
         {
             console.log(v);
-            if (isservice)
-            {
-                service.stop();
-            }
-            else
-            {
-                process._exit();
-            }
+            process._exit();
         });
+}
+
+function completed()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    ret._res();
+
+    if (!localmode)
+    {
+        // We're restarting the core, to undo the changes that were made to the core, to run the self-test.
+        this.consoleCommand("eval require('MeshAgent').restartCore();");
+    }
+    return (ret);
 }
 
 function getFDSnapshot()
@@ -978,7 +978,7 @@ function setup()
         this._tunnelServer.promises.push(ret);
         ret.timeout = setTimeout(function (r)
         {
-            r._tunnelServer.shift();
+            r._tunnelServer.promises.shift();
             r._rej('timeout');
         }, 2000, ret);
         ret.options = { action: 'msg', type: 'tunnel', rights: rights, consent: consent, username: '(test script)', value: 'ws://127.0.0.1:9250/test' };
