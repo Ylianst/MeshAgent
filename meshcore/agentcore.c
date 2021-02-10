@@ -3987,6 +3987,7 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
 	{
 		printf("   -> Loading Test Script.................[FAILED]\n");
+		exit(1);
 	}
 	duk_pop(agent->meshCoreCtx);
 }

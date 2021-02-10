@@ -82,6 +82,7 @@ Object.defineProperty(Array.prototype, 'getParameterIndex',
 
 var promise = require('promise');
 var localmode = true;
+var debugmode = false;
 
 function agentConnect(test, ipcPath)
 {
@@ -107,12 +108,15 @@ function agentConnect(test, ipcPath)
     });
     global.client.on('data', function (chunk)
     {
-        //console.log('DATA: ' + chunk.length, chunk.toString());
         var len;
         if (chunk.length < 4) { this.unshift(chunk); return; }
-        if ((len = chunk.readUInt32LE(0)) > chunk.length) { this.unshift(chunk); return; }
+        if ((len = chunk.readUInt32LE(0)) > chunk.length)
+        {
+            if (debugmode) { console.log('RECV: ' + chunk.length + 'bytes but expected ' + len + ' bytes'); }
+            this.unshift(chunk); return;
+        }
 
-        var data = chunk.slice(4, len + 4);
+        var data = chunk.slice(4, len);
         var payload = null;
         try
         {
@@ -120,14 +124,22 @@ function agentConnect(test, ipcPath)
         }
         catch (e)
         {
+            if (debugmode) { console.log('JSON ERROR on emit: ' + data.toString()); }
             return;
         }
-        //console.log('DATA: ' + data.toString());
-        this.test.emit('command', payload);
-        if ((len + 4) < chunk.length)
+        if (debugmode) { console.log('\n' + 'EMIT: ' + data.toString()); }
+        if (payload.cmd == 'server')
         {
-            console.log('UNSHIFT');
-            this.unshift(chunk.slice(4 + len));
+            this.test.emit('command', payload.value);
+        }
+        else
+        {
+            this.test.emit('command', payload);
+        }
+        if (len < chunk.length)
+        {
+            if (debugmode) { console.log('UNSHIFT', len, chunk.length); }
+            this.unshift(chunk.slice(len));
         }
 
     });
@@ -137,14 +149,20 @@ function agentConnect(test, ipcPath)
         try
         {
             var cmd = "_sendConsoleText = sendConsoleText; sendConsoleText = function(msg,id){ for(i in obj.DAIPC._daipc) { obj.DAIPC._daipc[i]._send({cmd: 'console', value: msg});}};";
+            cmd += "require('MeshAgent')._SendCommand=require('MeshAgent').SendCommand;require('MeshAgent').SendCommand = function(j){ for(i in obj.DAIPC._daipc) { obj.DAIPC._daipc[i]._send({cmd: 'server', value: j});} };"
 
-            //var cmd = "for(i in obj.DAIPC._daipc){ if(obj.DAIPC._daipc[i]._registered==null) { obj.DAIPC._daipc[i]._registered='agentSelfTest'; } }";
             var reg = { cmd: 'console', value: 'eval "' + cmd + '"' };
+
+            if (debugmode)
+            {
+                console.log(JSON.stringify(reg, null, 1));
+            }
             var ocmd = Buffer.from(JSON.stringify(reg));
             var buf = Buffer.alloc(4 + ocmd.length);
             buf.writeUInt32LE(ocmd.length + 4, 0);
             ocmd.copy(buf, 4);
             this.write(buf);
+
             global.agentipc._res();
         }
         catch (f)
@@ -157,10 +175,55 @@ function agentConnect(test, ipcPath)
 function start()
 {
     var isservice = false;
-    var nodeid = process.argv.getParameter('nodeID');
-    var ipcPath = process.platform == 'win32' ? ('\\\\.\\pipe\\' + nodeid + '-DAIPC') : (process.cwd() + '/DAIPC');
+    var servicename = process.argv.getParameter('serviceName');
+    var ipcPath = null;
+    var svc = null;
+    debugmode = process.argv.getParameter('debugMode', false);
 
-    if (nodeid != null)
+    try
+    {
+        var svc = require('service-manager').manager.getService(servicename);
+        if(!svc.isRunning())
+        {
+            console.log('      -> Agent: ' + servicename + ' is not running');
+            process._exit();
+        }
+
+    }
+    catch(e)
+    {
+        console.log('      -> Agent: ' + servicename + ' not found');
+        process._exit();
+    }
+
+    if (process.platform == 'win32')
+    {
+        // Find the NodeID from the registry
+        var reg = require('win-registry');
+        try
+        {
+            var val = reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\' + servicename, 'NodeId');
+            val = Buffer.from(val.split('@').join('+').split('$').join('/'), 'base64').toString('hex').toUpperCase();
+            ipcPath = '\\\\.\\pipe\\' + val + '-DAIPC';
+        }
+        catch(e)
+        {
+            console.log('      -> Count not determine NodeID for Agent: ' + servicename);
+            process._exit();
+        }
+    }
+    else
+    {
+        ipcPath = svc.appWorkingDirectory() + 'DAIPC';
+    }
+
+    if (debugmode)
+    {
+        console.log('\n' + 'ipcPath = ' + ipcPath + '\n');
+        require('ChainViewer').getSnapshot().then(function (c) { console.log(c); });
+    }
+
+    if (ipcPath != null)
     {
         localmode = false;
         console.log('   -> Connecting to agent...');
@@ -177,7 +240,6 @@ function start()
             process._exit();
         }
 
-        
         this.toAgent = function remote_toAgent(inner)
         {
             inner.sessionid = 'pipe';
@@ -185,11 +247,15 @@ function start()
             var ocmd = { cmd: 'console', value: 'eval "require(\'MeshAgent\').emit(\'Command\', JSON.parse(' + icmd + '));"'};
             ocmd = Buffer.from(JSON.stringify(ocmd));
 
+            if (debugmode) { console.log('\n' + 'To AGENT => ' + JSON.stringify(ocmd) + '\n'); }
+
             var buf = Buffer.alloc(4 + ocmd.length);
             buf.writeUInt32LE(ocmd.length + 4, 0);
             ocmd.copy(buf, 4);
             global.client.write(buf);
         };
+
+        if (debugmode=='2') { console.log('\nDEBUG MODE\n'); return; }
     }
 
     console.log('Starting Self Test...');
@@ -426,7 +492,14 @@ function coreInfo()
         }
     }, 5000, ret);
 
-    require('MeshAgent').emit('Connected', 3);
+    if (localmode)
+    {
+        require('MeshAgent').emit('Connected', 3);
+    }
+    else
+    {
+        ret._info = this.consoleCommand("eval \"require('MeshAgent').emit('Connected', 3);\"");
+    }
 
     return (ret);
 }

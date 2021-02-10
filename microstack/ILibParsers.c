@@ -2371,6 +2371,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibChain_Link **modules, int moduleCount, int maxTimeout)
 #endif
 {
+	int useAllModules = (modules == NULL);
 	ILibChain_Continue_Result ret = ILibChain_Continue_Result_EXIT;
 	ILibBaseChain *chain = (ILibBaseChain*)Chain;
 	ILibChain_Link_Hook *nodeHook;
@@ -2424,8 +2425,26 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		chain->selectTimeout = (int)((tv.tv_sec * 1000) + (tv.tv_usec / 1000));
 		mX = 0;
 
+		if (useAllModules)
+		{
+			if (modules != NULL)
+			{
+				ILibMemory_Free(modules);
+			}
+			modules = ILibChain_GetModules(Chain);
+			moduleCount = (int)(ILibMemory_Size(modules) / sizeof(ILibChain_Link*));
+		}
+
 		while (((modules != NULL && moduleCount > 0 && mX < moduleCount && (module = modules[mX]) != NULL) && (tmpNode.Data = module) != NULL && (chain->node = &tmpNode) != NULL) || (moduleCount == 0 && chain->node != NULL && (module = (ILibChain_Link*)ILibLinkedList_GetDataFromNode(chain->node)) != NULL))
 		{
+			if (useAllModules)
+			{
+				if (ILibLinkedList_GetNode_Search(ILibChain_GetLinks(Chain), NULL, module) == NULL)
+				{
+					++mX;
+					continue;
+				}
+			}
 			if (module->PreSelectHandler != NULL)
 			{
 #ifdef MEMORY_CHECK
@@ -2441,9 +2460,9 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 				//_CrtCheckMemory();
 #endif
 #endif
-		}
+			}
 			++mX;
-	}
+		}
 		tv.tv_sec = chain->selectTimeout / 1000;
 		tv.tv_usec = 1000 * (chain->selectTimeout % 1000);
 
@@ -2548,6 +2567,11 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 			if (nodeHook->Handler != NULL) { nodeHook->Handler(module, chain->node); }
 			chain->node = ILibLinkedList_GetNextNode(chain->node);
 		}
+	}
+
+	if (useAllModules)
+	{
+		if (modules != NULL) { ILibMemory_Free(modules); }
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "ContinueChain...Ending...");
