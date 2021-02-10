@@ -284,11 +284,11 @@ if (process.platform == 'darwin')
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+            child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); gsub(/\\/$/,\"\",c[2]); printf \"%s/\",c[2]; }'\nexit\n");
             child.waitExit();
             child.stdout.str = child.stdout.str.trim();
 
-            return (child.stdout.str.endsWith('/') ? child.stdout.str.substring(0, child.stdout.str.length - 1) : child.stdout.str);
+            return (child.stdout.str);
         };
         ret.appLocation = function appLocation()
         {
