@@ -224,7 +224,6 @@ function start()
     if (debugmode)
     {
         console.log('\n' + 'ipcPath = ' + ipcPath + '\n');
-        require('ChainViewer').getSnapshot().then(function (c) { console.log(c); });
     }
 
     if (ipcPath != null)
@@ -400,8 +399,12 @@ function coreInfo()
     ret.tester = this;
     ret.handler = function handler(J)
     {
+        if (debugmode) { console.log(JSON.stringify(J)); }
         switch(J.action)
         {
+            case 'sessions':
+                ret._sessions = true;
+                break;
             case 'coreinfo':
                 if (!handler.coreinfo)
                 {
@@ -473,8 +476,14 @@ function coreInfo()
     {
         if(!r.handler.coreinfo)
         {
+            if (r._sessions)
+            {
+                console.log('      -> Core Info received...............[OK]')
+                r._res();
+                return;
+            }
             // Core Info was never recevied
-            r._rej('      -> Core Info received..............[FAILED]')
+            r._rej('      -> Core Info received...............[FAILED]')
         }
         else if(r.handler.amt)
         {
