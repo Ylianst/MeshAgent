@@ -180,41 +180,45 @@ function start()
     var svc = null;
     debugmode = process.argv.getParameter('debugMode', false);
 
-    try
+    if (servicename != null)
     {
-        var svc = require('service-manager').manager.getService(servicename);
-        if(!svc.isRunning())
-        {
-            console.log('      -> Agent: ' + servicename + ' is not running');
-            process._exit();
-        }
-
-    }
-    catch(e)
-    {
-        console.log('      -> Agent: ' + servicename + ' not found');
-        process._exit();
-    }
-
-    if (process.platform == 'win32')
-    {
-        // Find the NodeID from the registry
-        var reg = require('win-registry');
         try
         {
-            var val = reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\' + servicename, 'NodeId');
-            val = Buffer.from(val.split('@').join('+').split('$').join('/'), 'base64').toString('hex').toUpperCase();
-            ipcPath = '\\\\.\\pipe\\' + val + '-DAIPC';
+            var svc = require('service-manager').manager.getService(servicename);
+            if (!svc.isRunning())
+            {
+                console.log('      -> Agent: ' + servicename + ' is not running');
+                process._exit();
+            }
+
         }
-        catch(e)
+        catch (e)
         {
-            console.log('      -> Count not determine NodeID for Agent: ' + servicename);
+            console.log('      -> Agent: ' + servicename + ' not found');
             process._exit();
         }
-    }
-    else
-    {
-        ipcPath = svc.appWorkingDirectory() + 'DAIPC';
+
+
+        if (process.platform == 'win32')
+        {
+            // Find the NodeID from the registry
+            var reg = require('win-registry');
+            try
+            {
+                var val = reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Open Source\\' + servicename, 'NodeId');
+                val = Buffer.from(val.split('@').join('+').split('$').join('/'), 'base64').toString('hex').toUpperCase();
+                ipcPath = '\\\\.\\pipe\\' + val + '-DAIPC';
+            }
+            catch (e)
+            {
+                console.log('      -> Count not determine NodeID for Agent: ' + servicename);
+                process._exit();
+            }
+        }
+        else
+        {
+            ipcPath = svc.appWorkingDirectory() + 'DAIPC';
+        }
     }
 
     if (debugmode)
@@ -745,6 +749,13 @@ function testFileDownload()
 function testCPUInfo()
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    if (process.platform == 'freebsd')
+    {
+        console.log('   => Testing CPU Info....................[N/A]');
+        ret._res();
+        return (ret);
+    }
+
     ret.consoleTest = this.consoleCommand('cpuinfo');
     ret.consoleTest.parent = ret;
     ret.consoleTest.then(function (J)
@@ -875,7 +886,16 @@ function testTerminal(terminalMode)
     if (terminalMode == null) { terminalMode = 1; }
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     ret.parent = this;
-    ret.tunnel = this.createTunnel(0x1FF, 0xFF);
+    var consent = 0xFF;
+    if (localmode)
+    {
+        if(process.platform == 'linux' || process.platform =='freebsd')
+        {
+            if (!require('monitor-info').kvm_x11_support) { consent = 0x00; }
+        }
+    }
+
+    ret.tunnel = this.createTunnel(0x1FF, consent);
     ret.mode = terminalMode.toString();
     ret.tunnel.parent = ret;
     ret.tunnel.then(function (c)
@@ -916,7 +936,14 @@ function testTerminal(terminalMode)
         });
 
         console.log('      -> Tunnel...........................[CONNECTED]');
-        console.log('      -> Triggering User Consent');
+        if (consent != 0)
+        {
+            console.log('      -> Triggering User Consent');
+        }
+        else
+        {
+            console.log('      -> Skipping User Consent');
+        }
         c.write('c');
         c.write(c.ret.mode);
     }).catch(function (e)
