@@ -1101,7 +1101,7 @@ function serviceManager()
                     child.stdin.write('   gsub(/"/,"",$2);');
                     child.stdin.write('   gsub("/$","",$2);');
                     child.stdin.write('   gsub(/\\\\ /," ",$2);');
-                    child.stdin.write('   print $2;');
+                    child.stdin.write('   printf "%s/",$2;');
                     child.stdin.write("}'");
                     child.stdin.write('\nexit\n');
                     child.waitExit();
