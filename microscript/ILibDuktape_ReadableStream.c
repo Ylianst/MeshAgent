@@ -400,6 +400,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 		{
 			if (ILibIsRunningOnChainThread(stream->chain))
 			{
+				duk_context *cx = stream->ctx;
 				ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "data");				// [emit][this][data]
 				if (streamReserved == 0)
 				{
@@ -417,7 +418,7 @@ int ILibDuktape_readableStream_WriteDataEx(ILibDuktape_readableStream *stream, i
 					ILibDuktape_Process_UncaughtException(stream->ctx);
 				}
 
-				duk_pop(stream->ctx);																	// ...
+				duk_pop(cx);																			// ...
 			}
 			else
 			{

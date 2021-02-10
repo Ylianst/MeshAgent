@@ -577,6 +577,38 @@ function testCoreDump()
     {
         var pid = c;
         console.log('      -> Agent PID = ' + c);
+
+        var p = ret.self.agentQueryValue("require('monitor-info').kvm_x11_support");
+        if (promise.wait(p).toString() != 'true')
+        {
+            // No KVM Support, so just do a plain dump test
+            var nextp = new promise(function (r, j) { this._res = r; this._rej = j; });
+            global.agentipc_next = nextp
+            console.log('      -> Initiating plain dump test');
+            ret.self.consoleCommand("eval require('MeshAgent').restartCore();");
+            try
+            {
+                promise.wait(nextp);
+                ret.self.agentQueryValue('process.pid').then(function (cc)
+                {
+                    if (cc == pid)
+                    {
+                        console.log('      -> Core Restarted without crashing..[OK]');
+                        ret._res();
+                    }
+                    else
+                    {
+                        ret._rej('      -> Core Restart resulted in crash...[FAILED]');
+                    }
+                });
+            }
+            catch (z)
+            {
+                ret._rej('      -> ERROR', z);
+            }
+            return;
+        }
+
         console.log('      -> Initiating KVM for dump test');
         ret.tunnel = this.self.createTunnel(0x1FF, 0x00);
         ret.tunnel.then(function (c)
@@ -902,6 +934,11 @@ function testTerminal(terminalMode)
         {
             if (!require('monitor-info').kvm_x11_support) { consent = 0x00; }
         }
+    }
+    else
+    {
+        var p = this.agentQueryValue("require('monitor-info').kvm_x11_support");
+        if (promise.wait(p).toString() != 'true') { consent = 0x00; }
     }
 
     ret.tunnel = this.createTunnel(0x1FF, consent);
