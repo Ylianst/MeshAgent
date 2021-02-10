@@ -772,6 +772,21 @@ function testKVM()
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     ret.tester = this;
 
+    if (!localmode)
+    {
+        if(process.platform == 'linux' || process.platform == 'freebsd')
+        {
+            var p = this.agentQueryValue("require('monitor-info').kvm_x11_support");
+            var val = promise.wait(p);
+            if (val == false)
+            {
+                console.log('   => KVM Test............................[X11 NOT DETECTED]');
+                ret._res();
+                return (ret);
+            }
+        }
+    }
+
     if (require('MeshAgent').hasKVM != 0)
     {
         if (process.platform == 'linux' || process.platform == 'freebsd')
