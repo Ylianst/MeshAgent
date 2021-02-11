@@ -1267,7 +1267,7 @@ function serviceManager()
                             child.stdin.write('   p=substr($0,4);');
                             child.stdin.write('   gsub(/"/,"",p);');
                             child.stdin.write('   gsub("/$","",p);');
-                            child.stdin.write('   print p;');
+                            child.stdin.write('   printf "%s/",p;');
                             child.stdin.write("}'");
                             child.stdin.write('\nexit\n');
                             child.waitExit();
@@ -1321,7 +1321,7 @@ function serviceManager()
                                 ret = child.stdout.str.trim();
                                 if(!ret.startsWith('/'))
                                 {
-                                    ret = (this.appWorkingDirectory() + '/' + ret);
+                                    ret = (this.appWorkingDirectory() + ret);
                                 }
                             }
                             return (ret);
@@ -1434,11 +1434,11 @@ function serviceManager()
                                     {
                                         if (this._autorestart)
                                         {
-                                            child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*supervise_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); print B[2]; }\'\nexit\n');
+                                            child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*supervise_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); gsub("/$","",B[2]); printf "%s/",B[2]; }\'\nexit\n');
                                         }
                                         else
                                         {
-                                            child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*start_stop_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); print B[2]; }\'\nexit\n');
+                                            child.stdin.write('cat /etc/init.d/' + this.name + ' | grep "^\\s*start_stop_daemon_args=" | awk \'NR==1{ split($0,A,"--chdir "); split(A[2],B,"\\\\\\\\\\""); gsub("/$","",B[2]); printf "%s/",B[2]; }\'\nexit\n');
                                         }
                                     }
                                     else
@@ -1731,11 +1731,13 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service')) {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{ print $2 }'\n\exit\n");
+                                if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service'))
+                                {
+                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
                                 }
-                                else {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk -F= '{ print $2 }'\n\exit\n");
+                                else
+                                {
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
                                 }
                                 child.waitExit();
                                 return (child.stdout.str.trim());
@@ -1826,20 +1828,38 @@ function serviceManager()
                         if (require('fs').existsSync('/usr/local/mesh_daemons/' + name + '.service'))
                         {
                             ret.conf = '/usr/local/mesh_daemons/' + name + '.service';
+                            ret.parameters = function parameters()
+                            {
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stderr.on('data', function (c) { });
+                                child.stdin.write('cat ' + this.conf + ' | grep "^[ \\t]*parameters=" | awk \'NR==1{ gsub(/^[ \t]*parameters=/,"",$0); print $0; }\'\nexit\n');
+                                child.waitExit();
+                                try
+                                {
+                                    return (JSON.parse(child.stdout.str.trim()));
+                                }
+                                catch(e)
+                                {
+                                    return ([]);
+                                }
+                            };
                             ret.start = function start()
                             {
                                 var child;
                                 child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stderr.on('data', function (c) {  });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; respawn="0"; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=substr($i,12);} if(tok1[1]=="respawn") { respawn="1"; } } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s, \\\"respawn\\\": %s }", wd, parms, respawn }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf + ' | grep "^[ \\t]*respawn$"\nexit\n');
                                 child.waitExit();
 
-                                var info = JSON.parse(child.stdout.str.trim());
-                                info.exePath = info.wd + '/' + info.parms.shift();
+                                var respawn = child.stdout.str.trim() != '';
+                                var wd = this.appWorkingDirectory();
+                                var parameters = this.parameters();
+                                var location = wd + parameters.shift();
 
-                                var options = { pidPath: info.wd + '/pid', logOutputs: false, crashRestart: info.respawn ? true : false };
-                                require('service-manager').manager.daemon(info.exePath, info.parms, options);
+                                var options = { pidPath: wd + 'pid', logOutputs: false, crashRestart: respawn, cwd: wd };
+                                require('service-manager').manager.daemon(location, parameters, options);
                             };
                             ret.stop = function stop()
                             {
@@ -1855,12 +1875,32 @@ function serviceManager()
                                 {
                                 }
                             };
+                            ret.restart = function restart()
+                            {
+                                if(!this.isMe())
+                                {
+                                    this.stop();
+                                    this.start();
+                                    return;
+                                }
+
+                                var p = this.parameters();
+                                require('child_process')._execve(process.execPath, p);
+                            }
                             ret.isMe = function isMe()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
                                 child.waitExit();
+                                var pid = child.stdout.str.trim();
+                                if (pid == '') { return (false); }
+
+                                child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stdin.write('ps -e -o pid -o ppid | grep "[ \\t]*' + pid + '$" | awk \'NR==1{ print $1; }\'\nexit\n');
+                                child.waitExit();
+
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
                             };
                             ret.appWorkingDirectory = function appWorkingDirectory()
@@ -1869,23 +1909,13 @@ function serviceManager()
                                 child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                                 child.stderr.on('data', function (c) { });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=tok1[2];} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf + " | grep 'workingDirectory=' | awk 'NR==1" +  '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\nexit\n');
                                 child.waitExit();
-
-                                var info = JSON.parse(child.stdout.str.trim());
-                                return (info.wd);
+                                return (child.stdout.str.trim());
                             };
                             ret.appLocation = function appLocation()
                             {
-                                var child;
-                                child = require('child_process').execFile('/bin/sh', ['sh']);
-                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                child.stderr.on('data', function (c) { });
-                                child.stdin.write('cat ' + this.conf + " | tr '\n' '~' | awk -F~ '{ wd=" + '""; parms=""; for(i=1;i<=NF;++i) { split($i, tok1, "="); if(tok1[1]=="workingDirectory") { wd=tok1[2];} if(tok1[1]=="parameters") { parms=substr($i,12);} } printf "{ \\\"wd\\\": \\\"%s\\\", \\\"parms\\\": %s }", wd, parms }\'\nexit\n');
-                                child.waitExit();
-
-                                var info = JSON.parse(child.stdout.str.trim());
-                                return (info.wd + '/' + info.parms.shift());
+                                return (this.appWorkingDirectory() + this.parameters().shift());
                             };
                             ret.isRunning = function isRunning()
                             {
@@ -2829,7 +2859,7 @@ function serviceManager()
                         if (!options || !options.skipDeleteBinary)
                         {
                             require('fs').unlinkSync(servicePath);
-                            require('fs').unlinkSync(workingPath + '/' + name + '.sh');
+                            require('fs').unlinkSync(workingPath + name + '.sh');
                         }
                         console.log(name + ' uninstalled');
                     }
@@ -3118,6 +3148,7 @@ function serviceManager()
             {\
               console.setDestination(console.Destinations.DISABLED);\
             }\
+            if(options.cwd) { process.chdir(options.cwd); }\
             function cleanupAndExit()\
             {\
                 if(options.pidPath) { try{require('fs').unlinkSync(options.pidPath);} catch(x){} }\

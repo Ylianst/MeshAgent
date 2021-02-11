@@ -21,6 +21,7 @@ limitations under the License.
 #include <Windows.h>
 #include <WinBase.h>
 #include <signal.h>
+#include <direct.h>
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -890,7 +891,16 @@ duk_ret_t ILibDuktape_Process_cwd(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "concat");		// [string][concat]
 	duk_swap_top(ctx, -2);						// [concat][this]
 #ifdef WIN32
-	duk_push_string(ctx, "\\"); 
+	duk_string_endsWith(ctx, -1, "\\");			// [concat][this][bool]
+	if (!duk_get_boolean(ctx, -1))
+	{
+		duk_push_string(ctx, "\\");				// [concat][this][bool][/]
+	}
+	else
+	{
+		duk_push_string(ctx, "");
+	}
+	duk_remove(ctx, -2);						// [concat][this][/]
 #else
 	duk_push_string(ctx, "/");
 #endif
@@ -1196,6 +1206,17 @@ duk_ret_t ILibDuktape_Process_SignalHooks(duk_context *ctx)
 	return(0);
 }
 
+duk_ret_t ILibDuktape_Process_chdir(duk_context *ctx)
+{
+	char *path = (char*)duk_require_string(ctx, 0);
+#ifdef WIN32
+	if (_wchdir(ILibUTF8ToWide(path, -1)) != 0) { return(ILibDuktape_Error(ctx, "chdir() failed")); }
+#else
+	if (chdir(path) != 0) { return(ILibDuktape_Error(ctx, "chdir() failed")); }
+#endif
+	return(0);
+}
+
 void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 {
 	int i = 0;
@@ -1210,6 +1231,7 @@ void ILibDuktape_ScriptContainer_Process_Init(duk_context *ctx, char **argList)
 	ILibDuktape_WriteID(ctx, "process");
 	ILibDuktape_CreateEventWithGetter(ctx, "env", ILibDuktape_ScriptContainer_Process_env);
 	ILibDuktape_CreateInstanceMethod(ctx, "cwd", ILibDuktape_Process_cwd, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "chdir", ILibDuktape_Process_chdir, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setenv", ILibDuktape_Process_setenv, 2);
 	ILibDuktape_CreateEventWithSetterEx(ctx, "_SemaphoreTracking", ILibDuktape_Process_SemaphoreTracking);
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "coreDumpLocation", ILibDuktape_ScriptContainer_Process_coreDumpLocation_getter, ILibDuktape_ScriptContainer_Process_coreDumpLocation_setter);

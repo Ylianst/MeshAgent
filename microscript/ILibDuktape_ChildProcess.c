@@ -552,6 +552,25 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 	WCHAR* wtmp;
 #endif
 
+	if (nargs < 3 || !(duk_is_object(ctx, 2) && duk_has_prop_string(ctx, 2, "env")))
+	{
+		duk_push_this(ctx);								// [childprocess]
+		duk_prepare_method_call(ctx, -1, "_execve");	// [childprocess][execve][this]
+		duk_dup(ctx, 0); duk_dup(ctx, 1);				// [childprocess][execve][this][path][parms]
+		if (nargs > 2 && duk_is_object(ctx, 2))
+		{
+			duk_dup(ctx, 2);							// [childprocess][execve][this][path][parms][options]
+		}
+		else
+		{
+			duk_push_object(ctx);						// [childprocess][execve][this][path][parms][options]
+		}
+		duk_eval_string(ctx, "process.env");			// [childprocess][execve][this][path][parms][options][env]
+		duk_put_prop_string(ctx, -2, "env");			// [childprocess][execve][this][path][parms][options]
+		duk_call_method(ctx, 3);
+		return(ILibDuktape_Error(ctx, "execve() error"));
+	}
+
 	duk_push_array(ctx);																	// [WCHAR_ARRAY]
 	args = (void**)ILibMemory_SmartAllocate(sizeof(char*) * (1 + duk_get_length(ctx, 1)));
 	for (i = 0; i < (int)duk_get_length(ctx, 1); ++i)
@@ -566,10 +585,9 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 #endif
 		duk_pop(ctx);																		// [WCHAR_ARRAY]
 	}
-
 	if (nargs > 2 && duk_is_object(ctx, 2) && duk_has_prop_string(ctx, 2, "env"))
 	{
-		duk_get_prop_string(ctx, 2, "env");													// [WCHAR_ARRAY][obj]
+		duk_get_prop_string(ctx, 2, "env");														// [WCHAR_ARRAY][obj]
 
 		duk_push_array(ctx);																	// [WCHAR_ARRAY][obj][array]
 		duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);										// [WCHAR_ARRAY][obj][array][enum]
@@ -601,13 +619,17 @@ duk_ret_t ILibDuktape_ChildProcess_execve(duk_context *ctx)
 	//
 	// We must close all open descriptors first, since the "new" process will have no idea about any that are still open
 	//
-	duk_eval_string(ctx, "require('util-descriptors').getOpenDescriptors();");	// [array]
-	while (duk_get_length(ctx, -1) > 0)
+	if (nargs > 2 && duk_is_object(ctx, 2) && Duktape_GetBooleanProperty(ctx, 2, "close", 1) != 0)
 	{
-		duk_array_pop(ctx, -1);													// [array][fd]
-		close(duk_get_int(ctx, -1)); duk_pop(ctx);								// [array]
+		int d;
+		duk_eval_string(ctx, "require('util-descriptors').getOpenDescriptors();");	// [array]
+		while (duk_get_length(ctx, -1) > 0)
+		{
+			duk_array_pop(ctx, -1);													// [array][fd]
+			d = duk_get_int(ctx, -1); duk_pop(ctx);									// [array]
+			if (d > 2) { close(d); }												// [array]
+		}
 	}
-
 	execve(path, (char**)args, (char**)env);
 	return(ILibDuktape_Error(ctx, "_execve() returned error: %d ", errno));
 #else
