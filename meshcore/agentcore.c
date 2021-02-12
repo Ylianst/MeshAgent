@@ -5143,7 +5143,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 #endif
 
-		ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);	
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "selfTest", NULL, 0) == 0)
+		{
+			ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);
+		}
 		MeshServer_Connect(agentHost);
 
 
