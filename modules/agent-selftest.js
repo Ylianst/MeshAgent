@@ -89,22 +89,36 @@ function agentConnect(test, ipcPath)
     if (global.agentipc_next)
     {
         global.agentipc = global.agentipc_next;
-        global.agentipc_next = new promise(function (r, j) { this._res = r; this._rej = j; });
+        global.agentipc.count = 0;
+        global.agentipc_next = null;
     }
     else
     {
-        global.agentipc = new promise(function (r, j) { this._res = r; this._rej = j; });
+        if (global.agentipc == null)
+        {
+            global.agentipc = new promise(function (r, j) { this._res = r; this._rej = j; });
+            global.agentipc.count = 0;
+        }
     }
     global.client = require('net').createConnection({ path: ipcPath });
     global.client.test = test;
-    global.client.on('error', function () { global.agentipc._rej(); });
+    global.client.on('error', function ()
+    {
+        if (global.agentipc.count++ > 100)
+        {
+            global.agentipc._rej('      -> Connection Timeout...');
+        }
+        else
+        {
+            global._rt = setTimeout(function () { agentConnect(test, ipcPath); }, 100);
+        }
+    });
     global.client.on('end', function ()
     {
-        console.log('      -> Agent connection lost');
-        console.log('      -> Reconnecting...');
+        console.log('      -> Connection error, reconnecting...');
         this.removeAllListeners('data');
 
-        global._timeout = setTimeout(function (a, b) { agentConnect(a, b); }, 8000, test, ipcPath);
+        global._timeout = setTimeout(function (a, b) { agentConnect(a, b); }, 100, test, ipcPath);
     });
     global.client.on('data', function (chunk)
     {
@@ -112,7 +126,7 @@ function agentConnect(test, ipcPath)
         if (chunk.length < 4) { this.unshift(chunk); return; }
         if ((len = chunk.readUInt32LE(0)) > chunk.length)
         {
-            if (debugmode) { console.log('RECV: ' + chunk.length + 'bytes but expected ' + len + ' bytes'); }
+            if (debugmode) { console.log('RECV: ' + chunk.length + ' bytes but expected ' + len + ' bytes'); }
             this.unshift(chunk); return;
         }
 
@@ -163,7 +177,7 @@ function agentConnect(test, ipcPath)
             ocmd.copy(buf, 4);
             this.write(buf);
 
-            global.agentipc._res();
+            global._tt = setTimeout(function () { global.agentipc._res(); }, 2000);
         }
         catch (f)
         {
@@ -262,27 +276,117 @@ function start()
     }
 
     console.log('Starting Self Test...');
-    coreInfo()
-        .then(function () { return (testLMS()); })
-        .then(function () { return (testConsoleHelp()); })
-        .then(function () { return (testCPUInfo()); })
-        .then(function () { return (testTunnel()); })
-        .then(function () { return (testTerminal()); })
-        .then(function () { return (testKVM()); })
-        .then(function () { return (testFileDownload()); })
-        .then(function () { return (testCoreDump()); })
-        .then(function () { return (testServiceRestart()); })
-        .then(function () { return (completed()); })
-        .then(function ()
+
+    if (process.argv.getParameter('dumpOnly', false))
+    {
+        var iterations = process.argv.getParameter('cycleCount', 20);
+        console.log('Core Dump Test Mode, ' + iterations + ' cycles');
+
+        DumpOnlyTest(iterations)
+            .then(function () { return (completed()); })
+            .then(function ()
+            {
+                console.log('End of Self Test');
+                process._exit();
+            })
+            .catch(function (v)
+            {
+                console.log(v);
+                process._exit();
+            });
+    }
+    else
+    {
+        coreInfo()
+            .then(function () { return (testLMS()); })
+            .then(function () { return (testConsoleHelp()); })
+            .then(function () { return (testCPUInfo()); })
+            .then(function () { return (testTunnel()); })
+            .then(function () { return (testTerminal()); })
+            .then(function () { return (testKVM()); })
+            .then(function () { return (testFileDownload()); })
+            .then(function () { return (testCoreDump()); })
+            .then(function () { return (testServiceRestart()); })
+            .then(function () { return (completed()); })
+            .then(function ()
+            {
+                console.log('End of Self Test');
+                process._exit();
+            })
+            .catch(function (v)
+            {
+                console.log(v);
+                process._exit();
+            });
+    }
+}
+
+function DumpOnlyTest_cycle(pid, cyclecount, p, self)
+{
+    if(cyclecount==0) { p._res(); return; }
+
+    console.log('   => Starting Cycle: ' + cyclecount + ' Current PID = ' + pid);
+
+    var nextp = new promise(function (r, j) { this._res = r; this._rej = j; });
+    global.agentipc_next = nextp
+
+    self.consoleCommand("eval require('MeshAgent').restartCore();").catch(function () { });
+    try
+    {
+        promise.wait(nextp);
+    }
+    catch(e)
+    {
+        p._rej(e);
+        return;
+    }
+
+    try
+    {
+        var newpid = promise.wait(self.agentQueryValue('process.pid'));
+        if (newpid == pid)
         {
-            console.log('End of Self Test');
-            process._exit();
-        })
-        .catch(function (v)
+            console.log('      => Mesh Core successfully restarted without crashing');
+            var t = getRandom(0, 20000);
+            console.log('      => Waiting ' + t + ' milliseconds before starting next cycle');
+            global._t = setTimeout(function (_pid, _cyclecount, _p, _self)
+            {
+                DumpOnlyTest_cycle(_pid, _cyclecount, _p, _self);
+            }, t, pid, cyclecount-1, p, self);
+        }
+        else
         {
-            console.log(v);
-            process._exit();
-        });
+            p._rej('      => Mesh Core restart resulted in crash. PID = ' + newpid);
+        }
+        return;
+    }
+    catch(e)
+    {
+        p._rej(e);
+        return;
+    }
+}
+
+function DumpOnlyTest(cyclecount)
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    if (localmode)
+    {
+        ret._rej('   => Background Agent connection required...');
+        return (ret);
+    }
+
+    var p = this.agentQueryValue("process.pid");
+    p.self = this;
+    p.then(function (pid)
+    {
+        DumpOnlyTest_cycle(pid, cyclecount, ret, this.self);
+    }).catch(function (v)
+    {
+        ret._rej(v);
+    });
+
+    return (ret);
 }
 
 function completed()
@@ -402,6 +506,7 @@ function coreInfo()
         if (debugmode) { console.log(JSON.stringify(J)); }
         switch(J.action)
         {
+            case 'netinfo':
             case 'sessions':
                 ret._sessions = true;
                 break;
@@ -447,6 +552,7 @@ function coreInfo()
                     catch (e)
                     {
                         clearTimeout(handler.timeout);
+                        console.log(e);
                         handler.promise._rej('         -> (Parse Error).................[FAILED]');
                         return;
                     }
@@ -552,6 +658,7 @@ function testServiceRestart()
         }
         catch(f)
         {
+            console.log(f);
             ret._rej('         -> Restarted.....................[FAILED]');
         }
     });
@@ -573,40 +680,43 @@ function testCoreDump()
     ret.consoleTest = this.consoleCommand('eval process.pid');
     ret.consoleTest.ret = ret;
     ret.consoleTest.self = this;
-    ret.consoleTest.then(function (c)
+    ret.consoleTest.then(function coreDumpTest_1(c)
     {
         var pid = c;
         console.log('      -> Agent PID = ' + c);
 
-        var p = ret.self.agentQueryValue("require('monitor-info').kvm_x11_support");
-        if (promise.wait(p).toString() != 'true')
+        if (process.platform == 'linux' || process.platform == 'freebsd')
         {
-            // No KVM Support, so just do a plain dump test
-            var nextp = new promise(function (r, j) { this._res = r; this._rej = j; });
-            global.agentipc_next = nextp
-            console.log('      -> Initiating plain dump test');
-            ret.self.consoleCommand("eval require('MeshAgent').restartCore();");
-            try
+            var p = ret.self.agentQueryValue("require('monitor-info').kvm_x11_support");
+            if (promise.wait(p).toString() != 'true')
             {
-                promise.wait(nextp);
-                ret.self.agentQueryValue('process.pid').then(function (cc)
+                // No KVM Support, so just do a plain dump test
+                var nextp = new promise(function (r, j) { this._res = r; this._rej = j; });
+                global.agentipc_next = nextp
+                console.log('      -> Initiating plain dump test');
+                ret.self.consoleCommand("eval require('MeshAgent').restartCore();");
+                try
                 {
-                    if (cc == pid)
+                    promise.wait(nextp);
+                    ret.self.agentQueryValue('process.pid').then(function (cc)
                     {
-                        console.log('      -> Core Restarted without crashing..[OK]');
-                        ret._res();
-                    }
-                    else
-                    {
-                        ret._rej('      -> Core Restart resulted in crash...[FAILED]');
-                    }
-                });
+                        if (cc == pid)
+                        {
+                            console.log('      -> Core Restarted without crashing..[OK]');
+                            ret._res();
+                        }
+                        else
+                        {
+                            ret._rej('      -> Core Restart resulted in crash...[FAILED]');
+                        }
+                    });
+                }
+                catch (z)
+                {
+                    ret._rej('      -> ERROR', z);
+                }
+                return;
             }
-            catch (z)
-            {
-                ret._rej('      -> ERROR', z);
-            }
-            return;
         }
 
         console.log('      -> Initiating KVM for dump test');
@@ -928,17 +1038,18 @@ function testTerminal(terminalMode)
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     ret.parent = this;
     var consent = 0xFF;
-    if (localmode)
+
+    if (process.platform == 'linux' || process.platform == 'freebsd')
     {
-        if(process.platform == 'linux' || process.platform =='freebsd')
+        if (localmode)
         {
             if (!require('monitor-info').kvm_x11_support) { consent = 0x00; }
         }
-    }
-    else
-    {
-        var p = this.agentQueryValue("require('monitor-info').kvm_x11_support");
-        if (promise.wait(p).toString() != 'true') { consent = 0x00; }
+        else
+        {
+            var p = this.agentQueryValue("require('monitor-info').kvm_x11_support");
+            if (promise.wait(p).toString() != 'true') { consent = 0x00; }
+        }
     }
 
     ret.tunnel = this.createTunnel(0x1FF, consent);
@@ -1095,8 +1206,8 @@ function setup()
         ret.timeout = setTimeout(function (r)
         {
             r.parent.removeListener('command', r.handler);
-            r._rej('timeout');
-        }, 5000, ret);
+            r._rej('QueryTimeout');
+        }, 8000, ret);
         this.on('command', ret.handler);
         this.toAgent({ action: 'msg', type: 'console', value: cmd, sessionid: -1 });
         return (ret);
@@ -1120,7 +1231,7 @@ function setup()
         ret.timeout = setTimeout(function (r)
         {
             r.tester.removeListener('command', r.handler);
-            r._rej('timeout');
+            r._rej('ConsoleCommandTimeout');
         }, 5000, ret);
         this.on('command', ret.handler);
         this.toAgent({ action: 'msg', type: 'console', value: cmd, sessionid: -1 });
@@ -1149,6 +1260,13 @@ function setup()
     this.start();
 }
 
+function getRandom(min, max)
+{
+    var range = max - min;
+    var val = Math.random() * range;
+    val += min;
+    return (Math.floor(val));
+}
 
 
 module.exports = setup;
