@@ -3962,7 +3962,7 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	}
 	printf("   -> Loading meshcore.js from db ........");
 
-	if (CoreModuleLen <= 4)
+	if (CoreModuleLen <= 4 	&& ILibSimpleDataStore_Get(agent->masterDb, "serviceName", NULL, 0) == 0)
 	{
 		printf("[NOT FOUND]\n");
 		return;
