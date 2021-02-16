@@ -1486,7 +1486,9 @@ duk_ret_t ILibDuktape_MeshAgent_eval(duk_context *ctx)
 	char *evalStr = (char*)duk_get_lstring(ctx, 0, &evalStrLen);
 
 	printf("eval(): %s\n", evalStr);
+	ILibDuktape_ExecutorTimeout_Start(ctx);
 	duk_eval_string(ctx, evalStr);
+	ILibDuktape_ExecutorTimeout_Stop(ctx);
 	return(1);
 }
 duk_context* ScriptEngine_Stop(MeshAgentHostContainer *agent, char *contextGUID);
@@ -1512,8 +1514,8 @@ void ILibDuktape_MeshAgent_dumpCoreModuleEx(void *chain, void *user)
 		{
 			ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
 				ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
-			duk_pop(agentHost->meshCoreCtx);
 		}
+		duk_pop(agentHost->meshCoreCtx);
 		free(CoreModule);
 	}
 }
@@ -3986,7 +3988,7 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 
 	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
 	{
-		printf("   -> Loading Test Script.................[FAILED]\n");
+		printf("   -> Loading Test Script.................[FAILED] %s", duk_safe_to_string(agent->meshCoreCtx, -1));
 		exit(1);
 	}
 	duk_pop(agent->meshCoreCtx);

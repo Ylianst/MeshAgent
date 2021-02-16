@@ -213,7 +213,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 	int j;
 	int emitted = 0;
 
-	duk_require_stack(ctx, 4 + nargs + DUK_API_ENTRY_STACK);				// This will make sure we have enough stack space to get the emitter object
+	duk_require_stack(ctx, 4 + nargs + (2*DUK_API_ENTRY_STACK));				// This will make sure we have enough stack space to get the emitter object
 	duk_push_this(ctx);														// [object]
 	
 	ILibDuktape_EventEmitter *data = (ILibDuktape_EventEmitter*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_EventEmitter_Data);
@@ -272,8 +272,12 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 		{
 			duk_dup(ctx, j);												// [object][retTable][table][array][J][func][this][..args..]
 		}
+
+		ILibDuktape_ExecutorTimeout_Start(ctx);
 		if (duk_pcall_method(ctx, nargs - 1) != 0)							// [object][retTable][table][array][J][ret]
 		{
+			ILibDuktape_ExecutorTimeout_Stop(ctx);
+
 			// Invocation Error
 			if (strcmp(duk_safe_to_string(ctx, -1), "Process.exit() forced script termination") == 0)
 			{
@@ -287,6 +291,7 @@ duk_ret_t ILibDuktape_EventEmitter_emit(duk_context *ctx)
 				return(ILibDuktape_Error(ctx, "EventEmitter.emit(): Event dispatch for '%s' on '%s' threw an exception: %s in method '%s()'", name, objid, duk_safe_to_string(ctx, -2), Duktape_GetStringPropertyValue(ctx, -1, "name", "unknown_method")));
 			}
 		}
+		ILibDuktape_ExecutorTimeout_Stop(ctx);
 		if (!duk_is_undefined(ctx, -1))										// [object][retTable][table][array][J][ret]
 		{
 			duk_dup(ctx, -1);												// [object][retTable][table][array][J][ret][ret]

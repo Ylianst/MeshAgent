@@ -54,12 +54,16 @@ typedef struct ILibDuktape_ContextData
 #ifdef WIN32
 	uint32_t apc_flags;
 #endif
+	uint32_t executionCount;
+	uint64_t executionTime;
+	uint32_t maxExecutionTime;
 	void *threads;
 	int fakechain;
 	void *chain;
 	void *user;
 }ILibDuktape_ContextData;
 
+#define DUKTAPE_DEFAULT_MAX_EXECUTION_TIMEOUT 0
 #define duk_destroy_heap_in_progress	0x01
 #define duk_ctx_context_data(ctx) ((ILibDuktape_ContextData*)(ILibMemory_CanaryOK(ctx)?((void**)ILibMemory_Extra(ctx))[0]:NULL))
 #define duk_ctx_nonce(ctx) (duk_ctx_context_data(ctx)->nonce)
@@ -79,6 +83,9 @@ typedef struct ILibDuktape_ContextData
 typedef void(*Duktape_EventLoopDispatch)(void *chain, void *user);
 void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user);
 #define Duktape_RunOnEventLoopEx(chain, nonce, ctx, handler, user, freeOnShutdown) Duktape_RunOnEventLoop(chain, nonce, ctx, handler, (freeOnShutdown==0?NULL:(Duktape_EventLoopDispatch)(uintptr_t)0x01), user)
+
+void ILibDuktape_ExecutorTimeout_Start(duk_context *ctx);
+void ILibDuktape_ExecutorTimeout_Stop(duk_context *ctx);
 
 void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta);
 char* Duktape_GetContextGuidHex(duk_context *ctx, void *db);

@@ -51,6 +51,29 @@ typedef struct Duktape_EventLoopDispatchData
 	void *user;
 }Duktape_EventLoopDispatchData;
 
+duk_bool_t ILibDuktape_EXEC_TIMEOUT_CHECK(void *udata)
+{
+	ILibDuktape_ContextData *ctxd = (ILibDuktape_ContextData*)udata;
+	if (ctxd->executionTime == 0 || ctxd->maxExecutionTime == 0) { return(0); }
+
+	if ((ILibGetUptime() - ctxd->executionTime) > ctxd->maxExecutionTime)
+	{
+		ctxd->executionTime = 0;
+		ctxd->executionCount = 0;
+		return(1);
+	}
+	return(0);
+}
+void ILibDuktape_ExecutorTimeout_Start(duk_context *ctx)
+{
+	ILibDuktape_ContextData *ctxd = (ILibDuktape_ContextData*)duk_ctx_context_data(ctx);
+	if (ctxd != NULL && ctxd->executionCount++ == 0) { ctxd->executionTime = ILibGetUptime(); }
+}
+void ILibDuktape_ExecutorTimeout_Stop(duk_context *ctx)
+{
+	ILibDuktape_ContextData *ctxd = (ILibDuktape_ContextData*)duk_ctx_context_data(ctx);
+	if (ctxd != NULL && --ctxd->executionCount <= 0) { ctxd->executionTime = 0; ctxd->executionCount = 0; }
+}
 
 duk_ret_t duk_fixed_buffer_finalizer(duk_context *ctx)
 {

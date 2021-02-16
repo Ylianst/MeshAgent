@@ -1584,19 +1584,19 @@ void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_siz
 			difference = size - ILibMemory_Size(ptr);
 			ILibDuktape_ScriptContainer_TotalAllocations += difference;
 		}
-		if (size == 0)
-		{
-			ILibMemory_Free(ptr);
-			ptr = NULL;
-		}
-		else
+		//if (size == 0)
+		//{
+		//	ILibMemory_Free(ptr);
+		//	ptr = NULL;
+		//}
+		//else
 		{
 			ptr = ILibMemory_SmartReAllocate(ptr, size);
 		}
 	}
 	else
 	{
-		if (size > 0)
+		//if (size > 0)
 		{
 			ptr = ILibMemory_SmartAllocateEx(size, sizeof(void*));
 			((void**)ILibMemory_Extra(ptr))[0] = udata;
@@ -1604,6 +1604,10 @@ void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_siz
 		}
 	}
 
+	if (ptr == NULL)
+	{
+		printf("PTR WAS NULL!\n");
+	}
 	return(ptr);
 }
 void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
@@ -2572,6 +2576,13 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal()
 	util_openssl_uninit();
 #endif
 	ctxd->threads = ILibLinkedList_Create();
+
+#ifdef DUKTAPE_EXECUTION_MAXTIMEOUT
+	ctxd->maxExecutionTime = DUKTAPE_EXECUTION_MAXTIMEOUT;
+#else
+	ctxd->maxExecutionTime = DUKTAPE_DEFAULT_MAX_EXECUTION_TIMEOUT;
+#endif
+
 
 	duk_context *ctx = duk_create_heap(ILibDuktape_ScriptContainer_Engine_malloc, ILibDuktape_ScriptContainer_Engine_realloc, ILibDuktape_ScriptContainer_Engine_free, ctxd, ILibDuktape_ScriptContainer_Engine_fatal);
 	if (ctx == NULL) { ILIBCRITICALEXIT(254); }
