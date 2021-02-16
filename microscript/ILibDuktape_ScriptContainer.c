@@ -1610,7 +1610,7 @@ void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)
 {
 	size_t sz = ptr == NULL ? 0 : ILibMemory_Size(ptr);
 
-	if (ptr != NULL) 
+	if (ptr != NULL && ILibMemory_CanaryOK(ptr))
 	{
 		ILibDuktape_ScriptContainer_TotalAllocations -= ILibMemory_Size(ptr);
 		ILibMemory_SecureZero(ptr, sz);

@@ -204,8 +204,11 @@ duk_ret_t ILibDuktape_ChildProcess_waitExit(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "Cannot waitExit() because JS Engine is exiting"));
 	}
 
-	duk_push_int(ctx, 1);								// [spawnedProcess][flag]
-	duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
+	if (ILibChain_GetContinuationState(chain) != ILibChain_ContinuationState_CONTINUE)
+	{
+		duk_push_int(ctx, 1);								// [spawnedProcess][flag]
+		duk_put_prop_string(ctx, -2, "\xFF_WaitExit");		// [spawnedProcess]
+	}
 
 	void *mods[] = { ILibGetBaseTimer(Duktape_GetChain(ctx)), Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Manager), ILibDuktape_Process_GetSignalListener(ctx) };
 #ifdef WIN32
