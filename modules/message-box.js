@@ -1004,10 +1004,11 @@ function macos_messageBox()
             ret.uid = require('user-sessions').consoleUid();
             ret.name = require('user-sessions').getUsername(ret.uid);
             ret.child = require('child_process').execFile('/bin/zsh', ['zsh'], { type: require('child_process').SpawnTypes.TERM });
+            ret.child.descriptorMetadata = "notify/toast";
             ret.child.promise = ret;
             ret.child.stderr.on('data', function () { });
             ret.child.stdout.on('data', function (c) { });
-            ret.child.on('exit', function (code) { this.promise._res('DISMISSED'); });
+            ret.child.on('exit', function (code) { this.promise.child = null; this.promise._res('DISMISSED'); });
 
             ret.child.stdin.write('su - ' + ret.name + '\n');
             ret.child.stdin.write(process.execPath.split('./').join('').split(' ').join('\\ ') + ' -b64exec ' + str + ' | osascript\nexit\nexit\n');

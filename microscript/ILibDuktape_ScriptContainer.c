@@ -2396,6 +2396,7 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				}\
 			}\
 		}\
+		child = null;\
 		return(retval);\
 		};\
 	}\

@@ -790,7 +790,9 @@ function UserSessions()
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write("id " + username + " | awk '{ split($1, token, \"=\"); split(token[2], uid, \"(\"); print uid[1]; }'\nexit\n");
             child.waitExit();
-            return (parseInt(child.stdout.str.trim()));
+            var ret = parseInt(child.stdout.str.trim());
+            child = null;
+            return (ret);
         };
         this.getGroupID = function getGroupID(uid)
         {
@@ -810,9 +812,11 @@ function UserSessions()
             child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stdin.write("dscl . list /Users UniqueID | grep " + uid + " | awk '{ if($2==" + uid + "){ print $1 }}'\nexit\n");
             child.waitExit();
-            if(child.stdout.str.trim() != '')
+            var ret = child.stdout.str.trim();
+            child = null;
+            if(ret != '')
             {
-                return (child.stdout.str.trim());
+                return (ret);
             }
             else
             {
@@ -846,6 +850,7 @@ function UserSessions()
             child.waitExit();
 
             var ret = child.stdout.str.trim();
+            child = null;
             if (ret != '')
             {
                 return (this.getUid(ret));
@@ -917,6 +922,7 @@ function UserSessions()
             child.waitExit();
 
             var lines = child.stdout.str.split('\n')[0].split(' ');
+            child = null;
             for (var i = 0; i < lines.length; ++i) {
                 var types = lines[i].split('=');
                 var tokens = types[1].split(',');
@@ -986,7 +992,9 @@ function UserSessions()
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.waitExit();
-            return (parseInt(child.stdout.str));
+            var ret = parseInt(child.stdout.str);
+            child = null;
+            return (ret);
         }
         this.isRoot = function isRoot()
         {

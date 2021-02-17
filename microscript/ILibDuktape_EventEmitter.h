@@ -20,6 +20,8 @@ limitations under the License.
 #include "duktape.h"
 #include "microstack/ILibParsers.h"
 
+#define ILibDuktape_EventEmitter_FinalizerDebugMessage "\xFF_FinalizerDebugMessage"
+
 typedef enum ILibDuktape_EventEmitter_Types
 {
 	ILibDuktape_EventEmitter_Type_EXPLICIT = 0,

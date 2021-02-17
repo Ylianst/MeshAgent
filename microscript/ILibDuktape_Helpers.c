@@ -704,7 +704,8 @@ duk_ret_t ILibDuktape_Process_UncaughtExceptionExGetter(duk_context *ctx)
 }
 void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...)
 {
-	if (ctx == NULL || !duk_ctx_is_alive(ctx)) { return; }
+	if (ctx == NULL || !duk_ctx_is_alive(ctx) || duk_ctx_shutting_down(ctx)) { return; }
+	
 	char dest[4096];
 	int len = 0;
 	va_list argptr;

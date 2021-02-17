@@ -101,12 +101,12 @@ ILibTransport_DoneState ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler(I
 		if (g_displayFinalizerMessages)
 		{
 			duk_push_this(stream->ctx);
-			if (!duk_has_prop_string(stream->ctx, -1, "\xFF_WroteDebug"))
+			if (!duk_has_prop_string(stream->ctx, -1, ILibDuktape_EventEmitter_FinalizerDebugMessage))
 			{
 				char tmp[100] = { 0 };
 				memcpy_s(tmp, sizeof(tmp), buffer, bufferLen > sizeof(tmp) ? sizeof(tmp) - 1 : bufferLen);
-				duk_push_true(stream->ctx);
-				duk_put_prop_string(stream->ctx, -2, "\xFF_WroteDebug");
+				duk_push_string(stream->ctx, tmp);
+				duk_put_prop_string(stream->ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 				printf("   => [%s]\n", tmp);
 			}
 			duk_pop(stream->ctx);
@@ -313,6 +313,15 @@ duk_ret_t ILibDuktape_SpawnedProcess_descriptorSetter(duk_context *ctx)
 		duk_swap_top(ctx, -2);																	// [shift][this]
 		duk_call_method(ctx, 0);																// [string]
 		duk_push_sprintf(ctx, "%s, %s", duk_get_string(ctx, -1), duk_require_string(ctx, 0));	// [string][newVal]
+
+		if (g_displayFinalizerMessages)
+		{
+			duk_push_this(ctx);																	// [string][newVal][obj]
+			duk_dup(ctx, -2);																	// [string][newVal][obj][val]
+			printf("\nSETTING: %s\n", duk_get_string(ctx, -1));
+			duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);		// [string][newVal][obj]
+			duk_pop(ctx);																		// [string][newVal]
+		}
 
 		ILibProcessPipe_Process_ResetMetadata(retVal->childProcess, (char*)duk_get_string(ctx, -1));
 	}
@@ -579,6 +588,8 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	if (g_displayFinalizerMessages)
 	{
 		printf("++++ childProcess.subProcess (pid: %u, %s) [%p]\n", ILibProcessPipe_Process_GetPID(p), target, duk_get_heapptr(ctx, -1));
+		duk_push_string(ctx, target);
+		duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	}
 	duk_push_string(ctx, target); duk_put_prop_string(ctx, -2, "_target");
 	duk_push_pointer(ctx, manager); duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Manager);

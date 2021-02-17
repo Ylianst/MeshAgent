@@ -306,6 +306,9 @@ function macos_identifiers()
 
 
     trimIdentifiers(ret.identifiers);
+
+
+    child = null;
     return (ret);
 }
 
