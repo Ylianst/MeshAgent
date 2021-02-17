@@ -32,6 +32,7 @@ limitations under the License.
 
 #define ILibDuktape_ChildProcess_Process	"\xFF_ChildProcess_Process"
 #define ILibDuktape_ChildProcess_MemBuf		"\xFF_ChildProcess_MemBuf"
+extern int g_displayFinalizerMessages;
 
 typedef struct ILibDuktape_ChildProcess_SubProcess
 {
@@ -49,6 +50,16 @@ typedef struct ILibDuktape_ChildProcess_SubProcess
 	
 	int exitCode;
 }ILibDuktape_ChildProcess_SubProcess;
+
+void ILibDuktape_ChildProcess_DeleteBackReferences(duk_context *ctx, duk_idx_t i, char *name)
+{
+	if (duk_has_prop_string(ctx, i, name))
+	{
+		duk_get_prop_string(ctx, i, name);			// [sub]
+		duk_del_prop_string(ctx, -1, "parent");
+		duk_pop(ctx);								// ...
+	}
+}
 
 void ILibDuktape_ChildProcess_SubProcess_StdOut_OnPause(ILibDuktape_readableStream *sender, void *user)
 {
@@ -87,6 +98,19 @@ ILibTransport_DoneState ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler(I
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
 	if (ILibMemory_CanaryOK(p->childProcess))
 	{
+		if (g_displayFinalizerMessages)
+		{
+			duk_push_this(stream->ctx);
+			if (!duk_has_prop_string(stream->ctx, -1, "\xFF_WroteDebug"))
+			{
+				char tmp[100] = { 0 };
+				memcpy_s(tmp, sizeof(tmp), buffer, bufferLen > sizeof(tmp) ? sizeof(tmp) - 1 : bufferLen);
+				duk_push_true(stream->ctx);
+				duk_put_prop_string(stream->ctx, -2, "\xFF_WroteDebug");
+				printf("   => [%s]\n", tmp);
+			}
+			duk_pop(stream->ctx);
+		}
 		return(ILibProcessPipe_Process_WriteStdIn(p->childProcess, buffer, bufferLen, ILibTransport_MemoryOwnership_USER));
 	}
 	else
@@ -110,6 +134,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler_sink1(void *chain, void *us
 
 	ILibDuktape_ChildProcess_SubProcess_ExitHandler(NULL, p->exitCode, p);
 }
+
 void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	ILibDuktape_ChildProcess_SubProcess *p = (ILibDuktape_ChildProcess_SubProcess*)user;
@@ -124,6 +149,7 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	{
 		ILibDuktape_EventEmitter_SetupRemoveListener(p->ctx, ILibDuktape_GetProcessObject(p->ctx), "SIGCHLD"); //......][remove][process][SIGCHLD]
 		duk_get_prop_string(p->ctx, -4, "_sigsink");														// [childProcess][remove][process][SIGCHLD][func]
+		duk_del_prop_string(p->ctx, -1, "_child");
 		duk_pcall_method(p->ctx, 2); duk_pop(p->ctx);														// [childProcess]
 	}
 #endif
@@ -139,7 +165,13 @@ void ILibDuktape_ChildProcess_SubProcess_ExitHandler(ILibProcessPipe_Process sen
 	duk_push_int(p->ctx, p->exitCode);				// [emit][this][exit][exitCode]
 	duk_push_null(p->ctx);							// [emit][this][exit][exitCode][sig]
 	if (duk_pcall_method(p->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(p->ctx, "child_process.subProcess.exit(): "); }
-	duk_pop(p->ctx);	
+	duk_pop(p->ctx);
+
+	duk_push_heapptr(p->ctx, p->subProcess);		// [childProcess]
+	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stdin");
+	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stdout");
+	ILibDuktape_ChildProcess_DeleteBackReferences(p->ctx, -1, "stderr");
+	duk_pop(p->ctx);								// ...
 }
 void ILibDuktape_ChildProcess_SubProcess_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
@@ -322,7 +354,16 @@ duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 			{
 				ILibDuktape_ChildProcess_SubProcess_ExitHandler(childprocess->childProcess, statusCode, childprocess);
 			}	
+			duk_push_heapptr(ctx, child);
+			ILibDuktape_ChildProcess_DeleteBackReferences(ctx, -1, "stdin");
+			ILibDuktape_ChildProcess_DeleteBackReferences(ctx, -1, "stdout");
+			ILibDuktape_ChildProcess_DeleteBackReferences(ctx, -1, "stderr");
+			duk_pop(ctx);
 		}
+
+		duk_push_current_function(ctx);							// [func]
+		duk_del_prop_string(ctx, -1, "_child");
+		duk_pop(ctx);											// ...
 
 		duk_push_heapptr(ctx, child);							// [child]
 		void *mProcess = Duktape_GetPointerProperty(ctx, -1, ILibDuktape_ChildProcess_Process);
@@ -366,22 +407,19 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 
 		duk_push_object(ctx);
 		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdout");
-		duk_dup(ctx, -2);
-		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
+		duk_dup(ctx, -2); duk_put_prop_string(ctx, -2, "parent");
 		retVal->stdOut = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdOut_OnPause, ILibDuktape_ChildProcess_SubProcess_StdOut_OnResume, retVal);
 		ILibDuktape_CreateReadonlyProperty(ctx, "stdout");
 
 		duk_push_object(ctx);
 		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stderr");
-		duk_dup(ctx, -2);
-		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
+		duk_dup(ctx, -2); duk_put_prop_string(ctx, -2, "parent");
 		retVal->stdErr = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdErr_OnPause, ILibDuktape_ChildProcess_SubProcess_StdErr_OnResume, retVal);
 		ILibDuktape_CreateReadonlyProperty(ctx, "stderr");
 
 		duk_push_object(ctx);
 		ILibDuktape_WriteID(ctx, "childProcess.subProcess.stdin");
-		duk_dup(ctx, -2);
-		ILibDuktape_CreateReadonlyProperty(ctx, "parent");
+		duk_dup(ctx, -2); duk_put_prop_string(ctx, -2, "parent");
 		retVal->stdIn = ILibDuktape_WritableStream_Init(ctx, ILibDuktape_ChildProcess_SubProcess_StdIn_WriteHandler, ILibDuktape_ChildProcess_SubProcess_StdIn_EndHandler, retVal);
 		ILibDuktape_CreateReadonlyProperty(ctx, "stdin");
 #ifndef WIN32
@@ -406,6 +444,7 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 	{
 		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
 	}
+
 
 #if defined(_POSIX)
 	ILibDuktape_EventEmitter_SetupOn(ctx, ILibDuktape_GetProcessObject(ctx), "SIGCHLD");	// [child][on][process][SIGCHLD]
@@ -537,6 +576,10 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "child_process.execFile(): Could not exec [%s]", target));
 	}
 	ILibDuktape_ChildProcess_SpawnedProcess_PUSH(ctx, p, callback);
+	if (g_displayFinalizerMessages)
+	{
+		printf("++++ childProcess.subProcess (pid: %u, %s) [%p]\n", ILibProcessPipe_Process_GetPID(p), target, duk_get_heapptr(ctx, -1));
+	}
 	duk_push_string(ctx, target); duk_put_prop_string(ctx, -2, "_target");
 	duk_push_pointer(ctx, manager); duk_put_prop_string(ctx, -2, ILibDuktape_ChildProcess_Manager);
 	return(1);

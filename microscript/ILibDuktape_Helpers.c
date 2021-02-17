@@ -260,7 +260,7 @@ void *Duktape_Duplicate_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char*
 	source = Duktape_GetBufferPropertyEx(ctx, i, propertyName, &sourceLen);
 	if (sourceLen > 0)
 	{
-		retVal = ILibMemory_SmartAllocate(sourceLen);
+		retVal = ILibMemory_SmartAllocate(sourceLen+1);
 		memcpy_s(retVal, sourceLen, source, sourceLen);
 		if (bufferLen != NULL) { *bufferLen = sourceLen; }
 	}
@@ -786,6 +786,7 @@ void Duktape_SafeDestroyHeap(duk_context *ctx)
 		duk_set_top(ctx, top);
 	}
 
+	duk_require_stack(ctx, 2 * DUK_API_ENTRY_STACK);				
 	duk_destroy_heap(ctx);
 
 	if (ctxd->fakechain != 0 && ctxd->chain != NULL)

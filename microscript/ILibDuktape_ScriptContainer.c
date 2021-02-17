@@ -1604,10 +1604,6 @@ void *ILibDuktape_ScriptContainer_Engine_realloc(void *udata, void *ptr, duk_siz
 		}
 	}
 
-	if (ptr == NULL)
-	{
-		printf("PTR WAS NULL!\n");
-	}
 	return(ptr);
 }
 void ILibDuktape_ScriptContainer_Engine_free(void *udata, void *ptr)

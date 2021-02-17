@@ -2242,7 +2242,7 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 		char *buffer = (char*)duk_push_dynamic_buffer(ctx, bufferSize);				// [dynamicBuffer]
 		size_t bytesRead = 0;
 		size_t len = 0;
-		while ((bytesRead = fread(buffer + len, 1, 1024, f)) > 0)
+		while ((bytesRead = fread(buffer + len, 1,(bufferSize-len)>1024?1024:(bufferSize-len), f)) > 0)
 		{
 			len += bytesRead;
 			if (bytesRead == 1024)
