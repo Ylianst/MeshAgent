@@ -1528,8 +1528,11 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateNativeProxy(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "%s", dlerror()));
 #endif
 	}
-
 	duk_push_object(ctx);																							// [obj]
+	if (sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "_GenericMarshal.NativeProxy [%s]", libName) > 0)
+	{
+		ILibDuktape_WriteID(ctx, ILibScratchPad);
+	}
 	duk_push_pointer(ctx, module);																					// [obj][module]
 	duk_put_prop_string(ctx, -2, "_moduleAddress");																	// [obj]
 	ILibDuktape_CreateInstanceMethod(ctx, "CreateMethod", ILibDuktape_GenericMarshal_CreateMethod, DUK_VARARGS);	// [obj]
