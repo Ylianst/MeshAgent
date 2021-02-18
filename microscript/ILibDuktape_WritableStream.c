@@ -339,8 +339,7 @@ ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, IL
 
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "write", ILibDuktape_WritableStream_Write, DUK_VARARGS);
 	ILibDuktape_CreateEventWithGetter(ctx, "end", ILibDuktape_WritableStream_End_Getter);
-
-	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "pipe", ILibDuktape_WritableStream_PipeSink);
-	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "unpipe", ILibDuktape_WritableStream_UnPipeSink);
+	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "pipe", ILibDuktape_WritableStream_PipeSink);
+	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "unpipe", ILibDuktape_WritableStream_UnPipeSink);
 	return retVal;
 }

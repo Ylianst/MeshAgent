@@ -907,7 +907,7 @@ void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodNam
 	duk_push_c_function(ctx, ILibDuktape_CreateProperty_InstanceMethod_Sink, 1);			// [obj][prop][getFunc]
 	duk_push_c_function(ctx, impl, argCount);												// [obj][prop][getFunc][func]
 	duk_put_prop_string(ctx, -2, "actualFunc");												// [obj][prop][getFunc]
-	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);						// [obj]
+	duk_def_prop(ctx, -3, DUK_DEFPROP_SET_ENUMERABLE | DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);						// [obj]
 }
 
 duk_ret_t ILibDuktape_ReadonlyProperty_Get(duk_context *ctx)

@@ -21,6 +21,8 @@ limitations under the License.
 #include "microstack/ILibParsers.h"
 
 #define ILibDuktape_EventEmitter_FinalizerDebugMessage "\xFF_FinalizerDebugMessage"
+#define ILibDuktape_EventEmitter_InfrastructureEvent	"\xFF_EventEmitter_InfrastructureEvent"
+
 
 typedef enum ILibDuktape_EventEmitter_Types
 {
@@ -36,7 +38,6 @@ typedef struct ILibDuktape_EventEmitter
 	void *table;
 	void *retValTable;
 	void *lastReturnValue;
-	unsigned int *totalListeners;
 	const char *listenerCountTable;
 	size_t listenerCountTableLength;
 	ILibSpinLock listenerCountTableLock;
@@ -71,6 +72,7 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 
 int ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);								// Add native event handler
 int ILibDuktape_EventEmitter_AddOnEx(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func);
+#define ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, idx, eventName, func) duk_prepare_method_call(ctx, idx, "on");duk_push_string(ctx, eventName);duk_push_c_function(ctx, func, DUK_VARARGS);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_InfrastructureEvent);duk_pcall_method(ctx, 2);duk_pop(ctx);
 
 void ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_HookHandler handler);
 void ILibDuktape_EventEmitter_ClearHook(ILibDuktape_EventEmitter *emitter, char *eventName);

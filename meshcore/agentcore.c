@@ -109,6 +109,7 @@ int ILibDuktape_HECI_Debug = 0;
 #endif
 #endif
 
+extern int gEventEmitterReferenceHold;
 extern int ILibDuktape_ModSearch_ShowNames;
 char* MeshAgentHost_BatteryInfo_STRINGS[] = { "UNKNOWN", "HIGH_CHARGE", "LOW_CHARGE", "NO_BATTERY", "CRITICAL_CHARGE", "", "", "", "CHARGING" };
 JS_ENGINE_CONTEXT MeshAgent_JavaCore_ContextGuid = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
@@ -5095,7 +5096,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			{
 				duk_eval_string_noresult(agentHost->meshCoreCtx, "process.coreDumpLocation = process.platform=='win32'?(process.execPath.replace('.exe', '.dmp')):(process.execPath + '.dmp');");
 			}
-
+			if (ILibSimpleDataStore_Get(agentHost->masterDb, "eventemitter-refhold", ILibScratchPad, sizeof(ILibScratchPad)) != 0)
+			{
+				gEventEmitterReferenceHold = atoi(ILibScratchPad);
+			}
+			if (ILibSimpleDataStore_Get(agentHost->masterDb, "finalizer-messages", ILibScratchPad, sizeof(ILibScratchPad)) != 0)
+			{
+				g_displayFinalizerMessages = atoi(ILibScratchPad);
+			}
 			if (CoreModuleLen > 4)
 			{
 				if (ILibSimpleDataStore_Get(agentHost->masterDb, "noUpdateCoreModule", NULL, 0) != 0) 
@@ -5516,6 +5524,14 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 				if (agentHost->masterDb == NULL)
 				{
 					agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
+				}
+			}
+			else if (strncmp(argv[i], "--eventemitter-refhold=", 23) == 0)
+			{
+				char *tmp = strstr(argv[i], "=");
+				if (tmp != NULL)
+				{
+					gEventEmitterReferenceHold = atoi(tmp + 1);		
 				}
 			}
 			else

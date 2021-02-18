@@ -36,6 +36,13 @@ limitations under the License.
 #define ILibDuktape_EventEmitter_ForwardTable			"\xFF_EventEmitter_ForwardTable"
 #define ILibDuktape_EventEmitter_EventTable				"\xFF_EventEmitter_EventTable"
 #define ILibDuktape_EventEmitter_CountTable				"\xFF_EventEmitter_CountTable"
+#define ILibDuktape_EventEmitter_References				"\xFF_EventReferences"
+
+#ifdef ILIBEVENTEMITTER_REFHOLD
+int gEventEmitterReferenceHold = ILIBEVENTEMITTER_REFHOLD;
+#else
+int gEventEmitterReferenceHold = 0;
+#endif
 
 typedef struct ILibDuktape_EventEmitter_EmitStruct
 {
@@ -418,6 +425,27 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 		duk_array_push(ctx, -2);												// [object][table][array]
 	}
 
+	if (gEventEmitterReferenceHold != 0)
+	{
+		duk_prepare_method_call(ctx, -3, "eventNames");								// [object][table][array][eventNames][this]
+		duk_call_method(ctx, 0);													// [object][table][array][names]
+
+		if (duk_get_length(ctx, -1) > 0)
+		{
+			duk_push_heap_stash(ctx);												// [object][table][array][names][stash]
+			if (!duk_has_prop_string(ctx, -1, ILibDuktape_EventEmitter_References))
+			{
+				duk_push_object(ctx);												// [object][table][array][names][stash][refs]
+				duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_References);	// [object][table][array][names][stash]
+			}
+			duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_References);		// [object][table][array][names][stash][refs]
+			duk_push_this(ctx);														// [object][table][array][names][stash][refs][this]
+			duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1))); //ect][table][array][names][stash][refs]
+			duk_pop_2(ctx);															// [object][table][array][names]
+		}
+		duk_pop(ctx);																// [object][table][array]
+	}
+
 	if (!(propNameLen == 11 && strncmp(propName, "newListener", 11) == 0) && !(propNameLen == 12 && strncmp(propName, "newListener2", 12) == 0))
 	{
 		// Only emit 'newListener2' when the event itself isn't 'newListener' or 'newListener2'
@@ -600,13 +628,38 @@ duk_ret_t ILibDuktape_EventEmitter_listenerCount(duk_context *ctx)
 
 duk_ret_t ILibDuktape_EventEmitter_eventNames(duk_context *ctx)
 {
+	duk_size_t len;
+	duk_uarridx_t i;
+	duk_size_t count;
+
 	ILibDuktape_EventEmitter *emitter = ILibDuktape_EventEmitter_GetEmitter_fromThis(ctx);
 	duk_push_array(ctx);							// [array]
 	duk_push_heapptr(ctx, emitter->table);			// [array][table]
 	duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);// [array][table][enumerator]
-	while (duk_next(ctx, -1, 0))					// [array][table][enumerator][key]
+	while (duk_next(ctx, -1, 1))					// [array][table][enumerator][key][value]
 	{
-		duk_array_push(ctx, -4);					// [array][table][enumerator]
+		count = 0;
+		if (strcmp(duk_get_string(ctx, -2), "~") != 0)
+		{
+			// We will only look at events that aren't the finalizer event
+			len = duk_get_length(ctx, -1);
+			for (i = 0; i < len; ++i)
+			{
+				duk_get_prop_index(ctx, -1, i);			// [array][table][enumerator][key][value][obj]
+				duk_get_prop_string(ctx, -1, "func");	// [array][table][enumerator][key][value][obj][func]
+				if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_EventEmitter_InfrastructureEvent, 0) == 0) { ++count; }
+				duk_pop_2(ctx);							// [array][table][enumerator][key][value]
+			}
+		}
+		duk_pop(ctx);								// [array][table][enumerator][key]
+		if (count > 0)
+		{
+			duk_array_push(ctx, -4);				// [array][table][enumerator]
+		}
+		else
+		{
+			duk_pop(ctx);							// [array][table][enumerator]
+		}
 	}
 	duk_pop_2(ctx);									// [array]
 	return(1);
@@ -657,8 +710,25 @@ duk_ret_t ILibDuktape_EventEmitter_listeners_tableinit(duk_context *ctx)
 	int isAdd = Duktape_GetIntPropertyValue(ctx, -1, "add", 0);
 	const char *eventName = duk_require_string(ctx, 0);
 
-	duk_push_this(ctx);													
+	duk_push_this(ctx);														// [obj]
 	ILibDuktape_EventEmitter *emitter = (ILibDuktape_EventEmitter*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_EventEmitter_Data);
+
+	if (isAdd == 0 && gEventEmitterReferenceHold != 0)
+	{
+		duk_prepare_method_call(ctx, -1, "eventNames");							// [obj][eventNames][this]
+		duk_call_method(ctx, 0);												// [obj][names]
+		if (duk_get_length(ctx, -1) == 0)
+		{
+			duk_push_heap_stash(ctx);											// [obj][names][stash]
+			duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_References);	// [obj][names][stash][refs]
+			if (!duk_is_null_or_undefined(ctx, -1))
+			{
+				duk_del_prop_string(ctx, -1, Duktape_GetStashKey(duk_get_heapptr(ctx, -4)));
+			}
+			duk_pop_2(ctx);														// [obj][names]
+		}
+		duk_pop(ctx);															// [obj]
+	}
 
 	ILibSpinLock_Lock(&(emitter->listenerCountTableLock));
 	duk_push_global_object(ctx);											// [g]
@@ -764,22 +834,6 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "emit", ILibDuktape_EventEmitter_emit, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "emit_returnValue", ILibDuktape_EventEmitter_emitReturnValue, DUK_VARARGS);
 
-	duk_push_heap_stash(ctx);
-	if (duk_has_prop_string(ctx, -1, ILibDuktape_EventEmitter_GlobalListenerCount))
-	{
-		duk_get_prop_string(ctx, -1, ILibDuktape_EventEmitter_GlobalListenerCount);
-		retVal->totalListeners = (unsigned int *)Duktape_GetBuffer(ctx, -1, NULL);
-		duk_pop(ctx);
-	}
-	else
-	{
-		Duktape_PushBuffer(ctx, sizeof(unsigned int));
-		retVal->totalListeners = (unsigned int *)Duktape_GetBuffer(ctx, -1, NULL);
-		duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_GlobalListenerCount);
-		*(retVal->totalListeners) = 0;
-	}
-	duk_pop(ctx);
-
 	ILibDuktape_EventEmitter_CreateEventEx(retVal, "~");
 	duk_push_c_function(ctx, ILibDuktape_EventEmitter_EmbeddedFinalizer, 1);
 	duk_set_finalizer(ctx, -2);
@@ -789,10 +843,12 @@ ILibDuktape_EventEmitter* ILibDuktape_EventEmitter_Create(duk_context *ctx)
 
 	duk_events_setup_on(ctx, -1, "newListener2", ILibDuktape_EventEmitter_listeners_tableinit);		// [on][this][newListener][func]
 	duk_push_int(ctx, 1); duk_put_prop_string(ctx, -2, "add");
+	duk_push_true(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_InfrastructureEvent);
 	duk_pcall_method(ctx, 2); duk_pop(ctx);															// ...
 
 	duk_events_setup_on(ctx, -1, "removeListener", ILibDuktape_EventEmitter_listeners_tableinit);	// [on][this][removeListener][func]
 	duk_push_int(ctx, 0); duk_put_prop_string(ctx, -2, "add");
+	duk_push_true(ctx); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_InfrastructureEvent);
 	duk_pcall_method(ctx, 2); duk_pop(ctx);															// ...
 
 	return retVal;
@@ -936,7 +992,7 @@ void ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter *emitter, c
 		duk_push_string(emitter->ctx, eventName);										// [obj][prop][setFunc][name]
 		duk_put_prop_string(emitter->ctx, -2, "eventName");								// [obj][prop][setFunc]
 
-		duk_def_prop(emitter->ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_SETTER);	// [obj]
+		duk_def_prop(emitter->ctx, -3, DUK_DEFPROP_SET_ENUMERABLE | DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_SETTER);	// [obj]
 		duk_pop(emitter->ctx);															// ...
 	}
 	else
@@ -1077,12 +1133,30 @@ duk_ret_t ILibDuktape_EventEmitter_moderated(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "interval");										// [func]
 	return(1);
 }
+
+duk_ret_t ILibDuktape_EventEmitter_allProperties(duk_context *ctx)
+{
+	const char *tmp;
+	duk_push_array(ctx);				// [arr]
+	duk_dup(ctx, 0);					// [arr][obj]
+	duk_enum(ctx, -1, DUK_ENUM_INCLUDE_NONENUMERABLE | DUK_ENUM_INCLUDE_HIDDEN );
+	while (duk_next(ctx, -1, 0))		// [arr][obj][enum][key]
+	{
+		tmp = duk_get_string(ctx, -1);
+		duk_push_string(ctx, tmp);		// [arr][obj][enum][key][string]
+		duk_array_push(ctx, -5);		// [arr][obj][enum][key]
+		duk_pop(ctx);					// [arr][obj][enum]
+	}
+	duk_pop_2(ctx);				// [arr]
+	return(1);
+}
 void ILibDuktape_EventEmitter_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);			// [emitter]
 	ILibDuktape_CreateInstanceMethod(ctx, "inherits", ILibDuktape_EventEmitter_Inherits, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "EventEmitter", ILibDuktape_EventEmitter_EventEmitter, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "moderated", ILibDuktape_EventEmitter_moderated, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "allProperties", ILibDuktape_EventEmitter_allProperties, 1);
 }
 void ILibDuktape_EventEmitter_Init(duk_context *ctx)
 {
