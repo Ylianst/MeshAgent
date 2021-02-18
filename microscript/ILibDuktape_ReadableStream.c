@@ -504,9 +504,10 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 		
 		if (ILibDuktape_EventEmitter_HasListeners(stream->emitter, "end") != 0)
 		{
+			duk_context *xx = stream->ctx;
 			ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "end");	// [emit][this][end]
 			if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
-			duk_pop(stream->ctx);													// ...
+			duk_pop(xx);													// ...
 			retVal = 0;
 		}
 	}
@@ -522,11 +523,14 @@ void ILibDuktape_readableStream_Closed(ILibDuktape_readableStream *stream)
 		duk_pop(stream->ctx);														// ...
 	}
 	
-	duk_push_heapptr(stream->ctx, stream->object);		// [stream]
-	duk_get_prop_string(stream->ctx, -1, "unpipe");		// [stream][unpipe]
-	duk_swap_top(stream->ctx, -2);						// [unpipe][this]
-	if (duk_pcall_method(stream->ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
-	duk_pop(stream->ctx);								// ...
+	if (ILibMemory_CanaryOK(stream))
+	{
+		duk_push_heapptr(stream->ctx, stream->object);		// [stream]
+		duk_get_prop_string(stream->ctx, -1, "unpipe");		// [stream][unpipe]
+		duk_swap_top(stream->ctx, -2);						// [unpipe][this]
+		if (duk_pcall_method(stream->ctx, 0) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
+		duk_pop(stream->ctx);								// ...
+	}
 }
 
 duk_ret_t ILibDuktape_readableStream_pause(duk_context *ctx)
