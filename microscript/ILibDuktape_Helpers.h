@@ -201,8 +201,10 @@ void ILibDuktape_CreateEventWithGetterAndSetterWithMetaData(duk_context *ctx, ch
 void ILibDuktape_CreateInstanceMethodWithProperties(duk_context *ctx, char *funcName, duk_c_function funcImpl, duk_idx_t numArgs, unsigned int propertyCount, ...);
 duk_idx_t duk_push_int_ex(duk_context *ctx, duk_int_t val);
 
-void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodName, duk_c_function impl, duk_idx_t argCount);
-void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr);
+#define ILibDuktape_CreateProperty_InstanceMethod_SetEnumerable(ctx, methodName, impl, argCount, enumerable) duk_push_c_function(ctx, impl, argCount);ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx,methodName,enumerable)
+#define ILibDuktape_CreateProperty_InstanceMethod(ctx, methodName, impl, argCount) duk_push_c_function(ctx, impl, argCount);ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx,methodName,1)
+#define ILibDuktape_CreateProperty_InstanceMethodEx(ctx, methodName, funcHeapPtr) duk_push_heapptr(ctx, funcHeapPtr);ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx,methodName,0)
+
 #define ILibDuktape_DeleteReadOnlyProperty(ctx, i, propName) duk_dup(ctx,i);duk_push_string(ctx,propName);duk_def_prop(ctx,-2,DUK_DEFPROP_FORCE|DUK_DEFPROP_SET_CONFIGURABLE);duk_pop(ctx);duk_del_prop_string(ctx,i,propName);
 #define ILibDuktape_CreateReadonlyProperty(ctx, propName) ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, propName, 0)
 void ILibDuktape_CreateReadonlyProperty_SetEnumerable(duk_context *ctx, char *propName, int enumerable);

@@ -482,6 +482,16 @@ duk_ret_t ILibDuktape_Polyfills_Array_partialIncludes(duk_context *ctx)
 	duk_push_int(ctx, -1);
 	return(1);
 }
+duk_ret_t ILibDuktape_Polyfills_Array_find(duk_context *ctx)
+{
+	duk_push_this(ctx);								// [array]
+	duk_prepare_method_call(ctx, -1, "findIndex");	// [array][findIndex][this]
+	duk_dup(ctx, 0);								// [array][findIndex][this][func]
+	duk_call_method(ctx, 1);						// [array][result]
+	if (duk_get_int(ctx, -1) == -1) { duk_push_undefined(ctx); return(1); }
+	duk_get_prop(ctx, -2);							// [element]
+	return(1);
+}
 duk_ret_t ILibDuktape_Polyfills_Array_findIndex(duk_context *ctx)
 {
 	duk_idx_t nargs = duk_get_top(ctx);
@@ -521,13 +531,16 @@ void ILibDuktape_Polyfills_Array(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, "prototype");										// [Array][proto]
 
 	// Polyfill 'Array.includes'
-	ILibDuktape_CreateProperty_InstanceMethod(ctx, "includes", ILibDuktape_Polyfills_Array_includes, 1);
+	ILibDuktape_CreateProperty_InstanceMethod_SetEnumerable(ctx, "includes", ILibDuktape_Polyfills_Array_includes, 1, 0);
 
 	// Polyfill 'Array.partialIncludes'
-	ILibDuktape_CreateProperty_InstanceMethod(ctx, "partialIncludes", ILibDuktape_Polyfills_Array_partialIncludes, 1);
+	ILibDuktape_CreateProperty_InstanceMethod_SetEnumerable(ctx, "partialIncludes", ILibDuktape_Polyfills_Array_partialIncludes, 1, 0);
+
+	// Polyfill 'Array.find'
+	ILibDuktape_CreateProperty_InstanceMethod_SetEnumerable(ctx, "find", ILibDuktape_Polyfills_Array_find, 1, 0);
 
 	// Polyfill 'Array.findIndex'
-	ILibDuktape_CreateProperty_InstanceMethod(ctx, "findIndex", ILibDuktape_Polyfills_Array_findIndex, DUK_VARARGS);
+	ILibDuktape_CreateProperty_InstanceMethod_SetEnumerable(ctx, "findIndex", ILibDuktape_Polyfills_Array_findIndex, DUK_VARARGS, 0);
 	duk_pop_2(ctx);																	// ...
 }
 void ILibDuktape_Polyfills_String(duk_context *ctx)

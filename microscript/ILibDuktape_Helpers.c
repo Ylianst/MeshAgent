@@ -887,28 +887,6 @@ void ILibDuktape_CreateFinalizerEx(duk_context *ctx, duk_c_function func, int si
 	if (singleton != 0) { ILibDuktape_EventEmitter_RemoveAllListeners(e, "~"); }
 	ILibDuktape_EventEmitter_PrependOnce(ctx, -1, "~", func);
 }
-duk_ret_t ILibDuktape_CreateProperty_InstanceMethod_Sink(duk_context *ctx)
-{
-	duk_push_current_function(ctx);				// [func]
-	duk_get_prop_string(ctx, -1, "actualFunc");	// [func][actualFunc]
-	return 1;
-}
-void ILibDuktape_CreateProperty_InstanceMethodEx(duk_context *ctx, char *methodName, void *funcHeapPtr)
-{
-	duk_push_string(ctx, methodName);														// [obj][prop]
-	duk_push_c_function(ctx, ILibDuktape_CreateProperty_InstanceMethod_Sink, 1);			// [obj][prop][getFunc]
-	duk_push_heapptr(ctx, funcHeapPtr);														// [obj][prop][getFunc][func]
-	duk_put_prop_string(ctx, -2, "actualFunc");												// [obj][prop][getFunc]
-	duk_def_prop(ctx, -3, DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);						// [obj]
-}
-void ILibDuktape_CreateProperty_InstanceMethod(duk_context *ctx, char *methodName, duk_c_function impl, duk_idx_t argCount)
-{
-	duk_push_string(ctx, methodName);														// [obj][prop]
-	duk_push_c_function(ctx, ILibDuktape_CreateProperty_InstanceMethod_Sink, 1);			// [obj][prop][getFunc]
-	duk_push_c_function(ctx, impl, argCount);												// [obj][prop][getFunc][func]
-	duk_put_prop_string(ctx, -2, "actualFunc");												// [obj][prop][getFunc]
-	duk_def_prop(ctx, -3, DUK_DEFPROP_SET_ENUMERABLE | DUK_DEFPROP_FORCE | DUK_DEFPROP_HAVE_GETTER);						// [obj]
-}
 
 duk_ret_t ILibDuktape_ReadonlyProperty_Get(duk_context *ctx)
 {
