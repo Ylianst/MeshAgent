@@ -5534,6 +5534,14 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 					gEventEmitterReferenceHold = atoi(tmp + 1);		
 				}
 			}
+			else if (strncmp(argv[i], "--finalizer-messages=", 21) == 0)
+			{
+				char *tmp = strstr(argv[i], "=");
+				if (tmp != NULL)
+				{
+					g_displayFinalizerMessages = atoi(tmp + 1);
+				}
+			}
 			else
 			{
 				// Unhandled arguments, passed to JavaScript

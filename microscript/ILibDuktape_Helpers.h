@@ -228,5 +228,6 @@ void* ILibDuktape_Timeout(duk_context *ctx, void **args, int argsLen, int delay,
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i);
 
 #define ILibDuktape_WriteID(ctx, id) duk_push_string(ctx, id);duk_put_prop_string(ctx, -2, ILibDuktape_OBJID)
+void ILibDuktape_DisplayProperties(duk_context *ctx, duk_idx_t idx);
 
 #endif

@@ -72,11 +72,13 @@ int ILibDuktape_EventEmitter_HasListeners2(ILibDuktape_EventEmitter *emitter, ch
 
 int ILibDuktape_EventEmitter_AddOn(ILibDuktape_EventEmitter *emitter, char *eventName, void *heapptr);								// Add native event handler
 int ILibDuktape_EventEmitter_AddOnEx(duk_context *ctx, duk_idx_t idx, char *eventName, duk_c_function func);
-#define ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, idx, eventName, func) duk_prepare_method_call(ctx, idx, "on");duk_push_string(ctx, eventName);duk_push_c_function(ctx, func, DUK_VARARGS);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_InfrastructureEvent);duk_pcall_method(ctx, 2);duk_pop(ctx);
+#define ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, idx, eventName, func) duk_events_setup_on(ctx, idx, eventName, func);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_InfrastructureEvent);duk_pcall_method(ctx, 2);duk_pop(ctx);
+
 
 void ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_HookHandler handler);
 void ILibDuktape_EventEmitter_ClearHook(ILibDuktape_EventEmitter *emitter, char *eventName);
 
+int ILibDuktape_EventEmitter_ForwardEventEx(duk_context *ctx, duk_idx_t sourceIdx, duk_idx_t targetIdx, char *eventName);
 void ILibDuktape_EventEmitter_ForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName, duk_idx_t eventTargetIndex, char *targetEventName);
 void ILibDuktape_EventEmitter_DeleteForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName);
 

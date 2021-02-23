@@ -978,6 +978,14 @@ duk_ret_t ILibDuktape_Polyfills_timer_finalizer(duk_context *ctx)
 
 		ILibLifeTime_Remove(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs);
 	}
+
+	duk_eval_string(ctx, "require('events')");			// [events]
+	duk_prepare_method_call(ctx, -1, "deleteProperty");	// [events][deleteProperty][this]
+	duk_push_this(ctx);									// [events][deleteProperty][this][timer]
+	duk_prepare_method_call(ctx, -4, "hiddenProperties");//[events][deleteProperty][this][timer][hidden][this]
+	duk_push_this(ctx);									// [events][deleteProperty][this][timer][hidden][this][timer]
+	duk_call_method(ctx, 1);							// [events][deleteProperty][this][timer][array]
+	duk_call_method(ctx, 2);							// [events][ret]
 	return 0;
 }
 void ILibDuktape_Polyfills_timer_elapsed(void *obj)
@@ -1191,6 +1199,7 @@ duk_ret_t ILibDuktape_Polyfills_addCompressedModule_dataSink(duk_context *ctx)
 duk_ret_t ILibDuktape_Polyfills_addCompressedModule(duk_context *ctx)
 {
 	duk_eval_string(ctx, "require('compressed-stream').createDecompressor();");
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	void *decoder = duk_get_heapptr(ctx, -1);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "data", ILibDuktape_Polyfills_addCompressedModule_dataSink);
 
@@ -1212,6 +1221,10 @@ duk_ret_t ILibDuktape_Polyfills_addCompressedModule(duk_context *ctx)
 		duk_dup(ctx, -4);							// [stream][decodedString][addModule][this][name][string]
 		duk_pcall_method(ctx, 2);
 	}
+
+	duk_push_heapptr(ctx, decoder);							// [stream]
+	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [stream][remove][this]
+	duk_pcall_method(ctx, 0);
 
 	return(0);
 }
