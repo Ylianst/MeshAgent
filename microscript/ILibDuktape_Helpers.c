@@ -1279,3 +1279,31 @@ void ILibDuktape_Log_Object(duk_context *ctx, duk_idx_t i, char *meta)
 	duk_pop(ctx);
 }
 
+void ILibDuktape_DisplayProperties(duk_context *ctx, duk_idx_t idx)
+{
+	duk_idx_t i = duk_get_top(ctx);
+	duk_dup(ctx, idx);											// [obj]
+	duk_push_global_object(ctx);								// [obj][g]
+	duk_get_prop_string(ctx, -1, "console");					// [obj][g][console]
+	duk_prepare_method_call(ctx, -1, "log");					// [obj][g][console][log][this]
+	duk_get_prop_string(ctx, -5, ILibDuktape_OBJID);			// [obj][g][console][log][this][ID]
+	duk_pcall_method(ctx, 1); duk_pop_3(ctx);					// [obj]
+
+
+	duk_eval_string(ctx, "require('events').allProperties");	// [obj][allProp]
+	duk_swap_top(ctx, -2);										// [allProp][obj]
+	duk_pcall(ctx, 1);											// [array]
+	duk_push_global_object(ctx);								// [array][g]
+	duk_get_prop_string(ctx, -1, "console");					// [array][g][console]
+	duk_prepare_method_call(ctx, -1, "log");					// [array][g][console][log][this]
+
+	duk_get_prop_string(ctx, -4, "JSON");						// [array][g][console][log][this][JSON]
+	duk_prepare_method_call(ctx, -1, "stringify");				// [array][g][console][log][this][JSON][stringify][this]
+	duk_dup(ctx, -8);											// [array][g][console][log][this][JSON][stringify][this][array]
+	duk_push_null(ctx); duk_push_int(ctx, 1);					// [array][g][console][log][this][JSON][stringify][this][array][null][1]
+	duk_pcall_method(ctx, 3);									// [array][g][console][log][this][JSON][string]
+	duk_remove(ctx, -2);										// [array][g][console][log][this][string]
+	duk_pcall_method(ctx, 1);
+	duk_set_top(ctx, i);
+}
+

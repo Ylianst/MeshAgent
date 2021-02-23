@@ -167,6 +167,7 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 	ILibDuktape_net_socket *ptrs = (ILibDuktape_net_socket*)((ILibChain_Link*)socketModule)->ExtraMemoryPtr;
 	struct sockaddr_in6 local;
 	if (ptrs->ctx == NULL) { return; }
+	duk_context *ctx = ptrs->ctx;
 
 	duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
 	duk_push_false(ptrs->ctx);									// [socket][connecting]
@@ -175,7 +176,7 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 
 	if (Connected != 0)
 	{
-		duk_push_heapptr(ptrs->ctx, ptrs->object);																		// [sock]
+		duk_push_heapptr(ptrs->ctx, ptrs->object);																			// [sock]
 		if (ILibAsyncSocket_IsDomainSocket(socketModule) == 0)
 		{
 			ILibAsyncSocket_GetLocalInterface(socketModule, (struct sockaddr*)&local);
@@ -197,7 +198,7 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 			duk_get_prop_string(ptrs->ctx, -1, "remoteHost");																// [sock][remoteHost]
 			duk_put_prop_string(ptrs->ctx, -2, "path");																		// [sock]
 		}
-		duk_pop(ptrs->ctx);																								// ...
+		duk_pop(ptrs->ctx);																									// ...
 
 #ifndef MICROSTACK_NOTLS
 		if (ptrs->ssl != NULL)
@@ -231,7 +232,7 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 		duk_swap_top(ptrs->ctx, -2);								// [emit][this]
 		duk_push_string(ptrs->ctx, "connect");						// [emit][this][connect]
 		if (duk_pcall_method(ptrs->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(ptrs->ctx); }
-		duk_pop(ptrs->ctx);											// ...
+		duk_pop(ctx);												// ...
 	}
 	else 
 	{
@@ -389,8 +390,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	duk_push_this(ctx);														// [socket]
 	duk_get_prop_string(ctx, -1, ILibDuktape_net_socket_ptr);				// [socket][ptrs]
 	ptrs = (ILibDuktape_net_socket*)duk_to_pointer(ctx, -1);
-	duk_pop(ctx);															// [socket]
-	
+	duk_pop_2(ctx);															// ...
 	if (duk_is_object(ctx, 0))
 	{
 		/* This is an OPTIONS object
@@ -595,6 +595,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 		duk_put_prop_string(ptrs->ctx, -2, "connecting");			// [socket]
 		duk_pop(ptrs->ctx);											// ...
 	}
+
 	return 0;
 }
 
@@ -842,6 +843,13 @@ int ILibDuktape_net_server_unshiftSink(ILibDuktape_DuplexStream *sender, int uns
 	session->unshiftBytes = unshiftBytes;
 	return(unshiftBytes);
 }
+duk_ret_t ILibDuktape_net_server_SocketDisconnected(duk_context *ctx)
+{
+	duk_push_this(ctx);										// [socket]
+	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [socket][removeAll][this]
+	duk_call_method(ctx, 0);
+	return(0);
+}
 void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncServerSocketModule, ILibAsyncServerSocket_ConnectionToken ConnectionToken, void **user)
 {
 	ILibDuktape_net_server *ptr = (ILibDuktape_net_server*)((void**)ILibMemory_GetExtraMemory(AsyncServerSocketModule, ILibMemory_ASYNCSERVERSOCKET_CONTAINERSIZE))[0];
@@ -854,13 +862,14 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 	if (!ILibMemory_CanaryOK(ptr)) { return; }
 
 	duk_push_heapptr(ptr->ctx, ptr->self);																					// [server]
+	ILibMemory_Free(((ILibChain_Link*)ConnectionToken)->MetaData);
 	if (strcmp(Duktape_GetStringPropertyValue(ptr->ctx, -1, ILibDuktape_OBJID, ""), "net.ipcServer") == 0)
 	{
-		((ILibChain_Link*)ConnectionToken)->MetaData = "net.ipcServer.ipcSocketConnection";
+		((ILibChain_Link*)ConnectionToken)->MetaData = ILibMemory_SmartAllocate_FromString("net.ipcServer.ipcSocketConnection");
 	}
 	else
 	{
-		((ILibChain_Link*)ConnectionToken)->MetaData = isTLS == 0 ? "net.serverSocketConnection" : "tls.serverSocketConnection";
+		((ILibChain_Link*)ConnectionToken)->MetaData = isTLS == 0 ? ILibMemory_SmartAllocate_FromString("net.serverSocketConnection") : ILibMemory_SmartAllocate_FromString("tls.serverSocketConnection");
 	}
 
 	duk_get_prop_string(ptr->ctx, -1, "emit");																				// [server][emit]
@@ -914,6 +923,10 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 		
 
 	ILibDuktape_EventEmitter_CreateEventEx(session->emitter, "timeout");
+
+	duk_events_setup_on(ptr->ctx, -1, "close", ILibDuktape_net_server_SocketDisconnected);		// [on][this][close][func]
+	duk_push_true(ptr->ctx); duk_put_prop_string(ptr->ctx, -2, ILibDuktape_EventEmitter_InfrastructureEvent);
+	duk_pcall_method(ptr->ctx, 2); duk_pop(ptr->ctx);											// ...
 
 	session->stream = ILibDuktape_DuplexStream_InitEx(ptr->ctx, ILibDuktape_net_server_WriteSink, ILibDuktape_net_server_EndSink,
 		ILibDuktape_net_server_PauseSink, ILibDuktape_net_server_ResumeSink, ILibDuktape_net_server_unshiftSink, session);

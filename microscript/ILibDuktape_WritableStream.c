@@ -284,6 +284,7 @@ duk_ret_t ILibDuktape_WritableStream_UnPipeSink(duk_context *ctx)
 
 	duk_dup(ctx, 0);														// [readable]											
 	duk_push_this(ctx);														// [readable][writable]
+	duk_del_prop_string(ctx, -1, "\xFF_ReadableStream_PTRS");
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_WritableStream_WSPTRS))
 	{
 		duk_get_prop_string(ctx, -1, ILibDuktape_WritableStream_WSPTRS);	// [readable][writable][ptr]

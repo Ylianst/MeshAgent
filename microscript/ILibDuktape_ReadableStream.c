@@ -516,11 +516,12 @@ int ILibDuktape_readableStream_WriteEnd(ILibDuktape_readableStream *stream)
 void ILibDuktape_readableStream_Closed(ILibDuktape_readableStream *stream)
 {
 	ILibDuktape_readableStream_WriteEnd(stream);
-	if(ILibDuktape_EventEmitter_HasListeners(stream->emitter, "close")!=0)
+	if (ILibMemory_CanaryOK(stream) && ILibDuktape_EventEmitter_HasListeners(stream->emitter, "close") != 0)
 	{
+		duk_context *ctx = stream->ctx;
 		ILibDuktape_EventEmitter_SetupEmit(stream->ctx, stream->object, "close");	// [emit][this][close]
 		if (duk_pcall_method(stream->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(stream->ctx); }
-		duk_pop(stream->ctx);														// ...
+		duk_pop(ctx);														// ...
 	}
 	
 	if (ILibMemory_CanaryOK(stream))
@@ -735,7 +736,7 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 	data = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_pop_2(ctx);															// ...
 
-	if (data->emitter->ctx == NULL) { return; }
+	if (data == NULL || data->emitter == NULL || data->emitter->ctx == NULL) { return; }
 	ILibSpinLock_Lock(&(data->pipeLock));
 #ifdef WIN32
 	if (data->pipeInProgress != 0 && data->pipedThreadID != GetCurrentThreadId())
@@ -922,7 +923,7 @@ duk_ret_t ILibDuktape_ReadableStream_PipeLockFinalizer(duk_context *ctx)
 
 	duk_push_this(ctx);														// [stream]
 	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_RSPTRS);		// [stream][buffer]
-	ptrs = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
+	if ((ptrs = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL)) == NULL) { return(0); }
 	if (ptrs->pipeImmediate != NULL)
 	{
 		duk_push_global_object(ctx);						// [g]
