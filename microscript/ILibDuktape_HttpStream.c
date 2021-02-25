@@ -628,6 +628,14 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	
 	return(0);
 }
+duk_ret_t ILibDuktape_findAgentRequestSink(duk_context *ctx)
+{
+	duk_push_current_function(ctx);			// [func]
+	duk_dup(ctx, 0);						// [func][elem]
+	duk_get_prop_string(ctx, -2, "request");// [func][elem][request]
+	duk_push_boolean(ctx, duk_equals(ctx, -2, -1));
+	return(1);
+}
 duk_ret_t ILibDuktape_HttpStream_http_endResponseSink(duk_context *ctx)
 {
 	duk_push_this(ctx);											// [imsg]
@@ -656,20 +664,19 @@ duk_ret_t ILibDuktape_HttpStream_http_endResponseSink(duk_context *ctx)
 	duk_prepare_method_call(ctx, -1, "removeAllListeners");		// [socket][imsg][httpstream][CR][remove][this]
 	duk_pcall_method(ctx, 0); duk_pop(ctx);						// [socket][imsg][httpstream][CR]
 
-	ILibDuktape_DisplayProperties(ctx, -1);
-
 	if (Duktape_GetBooleanProperty(ctx, -2, "connectionCloseSpecified", 0) != 0)
 	{
 		// We cant persist this connection, so close the socket.
 		// Agent is already listening for the 'close' event, so it'll cleanup automatically
+		duk_prepare_method_call(ctx, -2, "unpipe");				// [socket][imsg][httpstream][CR][unpipe][this]
+		duk_pcall_method(ctx, 0); duk_pop(ctx);					// [socket][imsg][httpstream][CR]
+		duk_prepare_method_call(ctx, -4, "unpipe");				// [socket][imsg][httpstream][CR][unpipe][this]
+		duk_pcall_method(ctx, 0); duk_pop(ctx);					// [socket][imsg][httpstream][CR]
+
 		duk_dup(ctx, -4);										// [socket][imsg][httpstream][CR][socket]
-
-		ILibDuktape_DisplayProperties(ctx, -1);
-
 		duk_get_prop_string(ctx, -1, "end");					// [socket][imsg][httpstream][CR][socket][end]
 		duk_swap_top(ctx, -2);									// [socket][imsg][httpstream][CR][end][this]
 		duk_call_method(ctx, 0); duk_pop(ctx);					// [socket][imsg][httpstream][CR]
-
 		return(0);
 	}
 	duk_get_prop_string(ctx, -1, ILibDuktape_CR2Agent);			// [socket][imsg][httpstream][CR][Agent]
@@ -768,15 +775,14 @@ duk_ret_t ILibDuktape_HttpStream_http_SocketResponseReceived(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2CR);			// [httpStream][socket][CR]
 	duk_get_prop_string(ctx, -1, ILibDuktape_CR2Options);			// [httpStream][socket][CR][Options]
 	duk_del_prop_string(ctx, -1, ILibDuktape_Options2ClientRequest);
-
 	duk_pop_2(ctx);													// [httpStream][socket]
 	duk_del_prop_string(ctx, -1, ILibDuktape_Socket2CR);			
 
-	duk_get_prop_string(ctx, -1, "removeListener");					// [httpStream][socket][removeListener]
-	duk_swap_top(ctx, -2);											// [httpStream][removeListener][this]
-	duk_push_string(ctx, "close");									// [httpStream][removeListener][this][close]
-	duk_get_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);	// [httpStream][removeListener][this][close][listener]
-	duk_call_method(ctx, 2);
+	//duk_get_prop_string(ctx, -1, "removeListener");					// [httpStream][socket][removeListener]
+	//duk_swap_top(ctx, -2);											// [httpStream][removeListener][this]
+	//duk_push_string(ctx, "close");									// [httpStream][removeListener][this][close]
+	//duk_get_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);	// [httpStream][removeListener][this][close][listener]
+	//duk_call_method(ctx, 2);
 	return(0);
 }
 duk_ret_t ILibDuktape_HttpStream_http_OnSocketClosed(duk_context *ctx)
@@ -802,7 +808,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_push_c_function(ctx, ILibDuktape_HttpStream_http_SocketDiedPrematurely, DUK_VARARGS);
 	duk_put_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);		// [socket]
 	duk_push_this(ctx);													// [socket][clientRequest]
-
 	if (Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_CR_AbortCalled, 0))
 	{
 		//  We were aborted, so instead of continuing, lets just put the socket back, so someone else can use it
@@ -830,7 +835,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_call_method(ctx, 2); duk_pop(ctx);								// [socket][clientRequest]
 	duk_put_prop_string(ctx, -2, ILibDuktape_Socket2CR);				// [socket]
 	duk_push_this(ctx);													// [socket][clientRequest]
-	
 	if (duk_has_prop_string(ctx, -2, ILibDuktape_Socket2HttpStream))
 	{
 		// HTTP and/or TLS was already setup previously
@@ -916,7 +920,7 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_CR2Options);				// [socket][clientRequest][options]
 	ILibDuktape_HttpStream_http_ConvertOptionToSend(ctx, duk_get_heapptr(ctx, -3), duk_get_heapptr(ctx, -1));
 	duk_pop(ctx);														// [socket][clientRequest]
-	
+
 	// ClientRequest => Socket
 	duk_get_prop_string(ctx, -1, "pipe");								// [socket][clientRequest][pipe]
 	duk_swap_top(ctx, -2);												// [socket][pipe][this]
@@ -931,16 +935,17 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_dup(ctx, -2);													// [socket][httpStream][socket]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HTTPStream2Socket);		// [socket][httpStream]
 	duk_pop(ctx);														// [socket]
-
 	// Socket => HttpStream
 	duk_get_prop_string(ctx, -1, "pipe");								// [socket][pipe]
 	duk_dup(ctx, -2);													// [socket][pipe][this]
 	duk_push_heapptr(ctx, httpStream);									// [socket][pipe][this][http]
 	if (duk_pcall_method(ctx, 1) != 0) { return(ILibDuktape_Error(ctx, "http.onConnect(): Error calling pipe ")); }
 	duk_pop(ctx);														// [socket]
+	char *ttmp = (char*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_readableStream_RSPTRS);
 
 	// HttpStream => Socket
 	duk_push_heapptr(ctx, httpStream);									// [socket][http]
+
 	duk_get_prop_string(ctx, -1, "pipe");								// [socket][http][pipe]
 	duk_swap_top(ctx, -2);												// [socket][pipe][this]
 	duk_dup(ctx, -3);													// [socket][pipe][this][socket]
@@ -1068,7 +1073,6 @@ duk_ret_t ILibDuktape_Agent_connectionEnded(duk_context *ctx)
 	duk_push_this(ctx);										// [socket]
 	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [socket][remove][this]
 	duk_call_method(ctx, 0); duk_pop(ctx);					// [socket]
-	ILibDuktape_GetReferenceCount(ctx, -1);
 
 	char *key = (char*)Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_Socket2AgentKey, NULL);
 	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);	// [socket][agent]
@@ -1089,7 +1093,6 @@ duk_ret_t ILibDuktape_Agent_connectionEnded(duk_context *ctx)
 			duk_dup(ctx, -3);									// [socket][agent][table][array][func][int][splice][this][index]
 			duk_push_int(ctx, 1);								// [socket][agent][table][array][func][int][splice][this][index][i]
 			duk_call_method(ctx, 2); duk_pop(ctx);				// [socket][agent][table][array][func][int]
-			ILibDuktape_GetReferenceCount(ctx, -6);
 		}
 	}
 	return(0);
@@ -1098,7 +1101,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnConnect(duk_context *ctx)
 {
 	duk_ret_t retVal = 0;
 	duk_push_this(ctx);											// [socket]
-
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2CR))
 	{
 		// Socket was created with passed in createConnection
@@ -1117,18 +1119,8 @@ duk_ret_t ILibDuktape_HttpStream_http_OnConnect(duk_context *ctx)
 		}
 		else
 		{
-			// Add socket to agent.Sockets
-			char *key = (char*)Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_Socket2AgentKey, NULL);
 			duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);	// [socket][agent]
-			duk_get_prop_string(ctx, -1, "sockets");				// [socket][agent][table]
-			if (!duk_has_prop_string(ctx, -1, key)) { duk_push_array(ctx); duk_put_prop_string(ctx, -2, key); }
-			duk_get_prop_string(ctx, -1, key);						// [socket][agent][table][array]
-			duk_dup(ctx, -4);										// [socket][agent][table][array][socket]
-			duk_array_push(ctx, -2);								// [socket][agent][table][array]
-			duk_pop_2(ctx);											// [socket][agent]
-
 			ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -2, "end", ILibDuktape_Agent_connectionEnded);
-
 
 			duk_get_prop_string(ctx, -1, "keepSocketAlive");		// [socket][agent][keepSocketAlive]
 			duk_swap_top(ctx, -2);									// [socket][keepSocketAlive][this]
@@ -1345,6 +1337,7 @@ duk_ret_t ILibDuktape_HttpStream_http_request(duk_context *ctx)
 
 	duk_dup(ctx, 0);												// [options]
 	duk_push_object(ctx);											// [options][clientRequest]
+
 	duk_dup(ctx, -1);												// [options][clientRequest][dup]
 	duk_put_prop_string(ctx, -3, ILibDuktape_Options2ClientRequest);// [options][clientRequest]
 	duk_remove(ctx, -2);											// [clientRequest]
@@ -3137,17 +3130,21 @@ duk_ret_t ILibDuktape_HttpStream_OnReceive_bodyStreamFinalized(duk_context *ctx)
 
 void ILibDuktape_HttpStream_IMSG_EndSink2(duk_context *ctx, void ** args, int argsLen)
 {
-	duk_push_heapptr(ctx, args[0]);							// [IMSG]
-	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [IMSG][removeAll][this]
-	duk_pcall_method(ctx, 0);								// [IMSG][ret]
-	duk_pop_2(ctx);											// ...
-	duk_peval_string_noresult(ctx, "require('events').showReferences()");
+	void *tmp = args[1];
+	if (ILibMemory_CanaryOK(tmp))
+	{
+		duk_push_heapptr(ctx, args[0]);							// [IMSG]
+		duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [IMSG][removeAll][this]
+		duk_pcall_method(ctx, 0);								// [IMSG][ret]
+		duk_pop_2(ctx);											// ...
+	}
 }
 duk_ret_t ILibDuktape_HttpStream_IMSG_EndSink(duk_context *ctx)
 {
 	duk_push_this(ctx);
+	void *t = Duktape_PushBuffer(ctx, 1); duk_put_prop_string(ctx, -2, "tmp");
 	void *h = duk_get_heapptr(ctx, -1);
-	ILibDuktape_Immediate(ctx, (void*[]) { h }, 1, ILibDuktape_HttpStream_IMSG_EndSink2);
+	ILibDuktape_Immediate(ctx, (void*[]) { h, t }, 2, ILibDuktape_HttpStream_IMSG_EndSink2);
 	return(0);
 }
 void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, int InterruptFlag, struct packetheader *header, char *bodyBuffer, int *beginPointer, int endPointer, ILibWebClient_ReceiveStatus recvStatus, void *user1, void *user2, int *PAUSE)
@@ -3163,7 +3160,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 		if (recvStatus == ILibWebClient_ReceiveStatus_Complete) 
 		{ 
 			ILibDuktape_readableStream_WriteEnd(data->bodyStream); 
-			data->bodyStream = NULL; 
+			if (ILibMemory_CanaryOK(data)) { data->bodyStream = NULL; }
 		}
 		return;
 	}
@@ -3508,8 +3505,6 @@ duk_ret_t ILibDuktape_HttpStream_unpipeEvent(duk_context *ctx)
 	duk_del_prop_string(ctx, -1, ILibDuktape_HTTP2PipedReadable);
 	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [stream][remove]
 	duk_call_method(ctx, 0);
-
-	duk_eval_string_noresult(ctx, "require('events').showReferences();");
 	return(0);
 }
 duk_ret_t ILibduktape_HttpStream_create(duk_context *ctx)
@@ -3764,9 +3759,7 @@ duk_ret_t ILibDuktape_HttpStream_Agent_keepSocketAlive(duk_context *ctx)
 		duk_get_prop_string(ctx, -7, "keepAliveMsecs");													// [AGent][table][push][this][socket][setTimeout][this][milliseconds]
 		duk_push_c_function(ctx, ILibDuktape_HttpStream_Agent_keepSocketAlive_timeout, DUK_VARARGS);	// [AGent][table][push][this][socket][setTimeout][this][milliseconds][callback]
 		duk_call_method(ctx, 2); duk_pop(ctx);															// [AGent][table][push][this][socket]
-
-		duk_call_method(ctx, 1);						// [Agent][table][retVal]
-		retVal = 1;
+		duk_call_method(ctx, 1);																		// [Agent][table][retVal]
 	}
 	duk_push_int(ctx, retVal);
 	return(1);
