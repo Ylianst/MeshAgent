@@ -38,6 +38,7 @@ struct ILibWebClientDataObject;
 extern int ILibWebServer_WebSocket_CreateHeader(char* header, unsigned short FLAGS, unsigned short OPCODE, int payloadLength);
 extern void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo);
 extern int ILibDeflate(char *buffer, size_t bufferLen, char *compressed, size_t *compressedLen, uint32_t *crc);
+void ILibDuktape_RemoveObjFromTable(duk_context *ctx, duk_idx_t tableIdx, char *key, void *obj);
 
 #define ILibDuktape_Agent_SocketJustCreated "\xFF_Agent_SocketJustCreated"
 #define ILibDuktape_ClientRequest			"\xFF_CR"
@@ -1070,12 +1071,14 @@ duk_ret_t ILibDuktape_Agent_findConnection(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_Agent_connectionEnded(duk_context *ctx)
 {
+	duk_idx_t top;
 	duk_push_this(ctx);										// [socket]
 	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [socket][remove][this]
 	duk_call_method(ctx, 0); duk_pop(ctx);					// [socket]
 
 	char *key = (char*)Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_Socket2AgentKey, NULL);
 	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2Agent);	// [socket][agent]
+	top = duk_get_top(ctx);
 	duk_get_prop_string(ctx, -1, "sockets");				// [socket][agent][table]
 	duk_get_prop_string(ctx, -1, key);						// [socket][agent][table][array]
 	if (duk_is_array(ctx, -1))
@@ -1095,6 +1098,10 @@ duk_ret_t ILibDuktape_Agent_connectionEnded(duk_context *ctx)
 			duk_call_method(ctx, 2); duk_pop(ctx);				// [socket][agent][table][array][func][int]
 		}
 	}
+
+	duk_set_top(ctx, top);									// [socket][agent]
+	duk_get_prop_string(ctx, -1, "freeSockets");			// [socket][agent][table]
+	ILibDuktape_RemoveObjFromTable(ctx, -1, key, duk_get_heapptr(ctx, -3));
 	return(0);
 }
 duk_ret_t ILibDuktape_HttpStream_http_OnConnect(duk_context *ctx)
