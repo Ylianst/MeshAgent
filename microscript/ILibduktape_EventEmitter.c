@@ -1617,6 +1617,8 @@ duk_ret_t ILibDuktape_EventEmitter_ForwardEx_target_removeListenerSink(duk_conte
 	duk_dup(ctx, 0);										// [source][removeListener][this][name]
 	duk_get_prop_string(ctx, 1, "proxyFunc");				// [source][removeListener][this][name][func]
 	duk_call_method(ctx, 2);								// [source][ret]
+
+	duk_del_prop_string(ctx, 1, "proxyFunc");
 	return(0);
 }
 int ILibDuktape_EventEmitter_ForwardEventEx(duk_context *ctx, duk_idx_t sourceIdx, duk_idx_t targetIdx, char *eventName)
