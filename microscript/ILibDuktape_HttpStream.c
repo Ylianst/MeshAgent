@@ -1615,15 +1615,27 @@ duk_ret_t ILibDuktape_HttpStream_http_server_upgradeWebsocket(duk_context *ctx)
 	SHA_CTX c;
 	char shavalue[21];
 
-	duk_push_this(ctx);									// [socket]
+	duk_push_this(ctx);											// [socket]
+	duk_get_prop_string(ctx, -1, "Digest_writeUnauthorized");	// [socket][func]
+	duk_del_prop_string(ctx, -1, "imsg");
+	duk_pop(ctx);												// [socket]
+
 	duk_push_current_function(ctx);						// [socket][func]
 	duk_get_prop_string(ctx, -2, "unpipe");				// [socket][func][unpipe]
 	duk_dup(ctx, -3);									// [socket][func][unpipe][this]
+
+	duk_get_prop_string(ctx, -1, "\xFF_RS_PipeArray");	// [arr]
+	duk_get_prop_index(ctx, -1, 0);						// [arr][obj]
+	char *tt = Duktape_GetStringPropertyValue(ctx, -1, "_ObjectID", NULL);
+	duk_int_t *t = _get_refcount_ptr(ctx, -1);
+	duk_pop_2(ctx);
+
 	duk_call_method(ctx, 0); duk_pop(ctx);				// [socket][func]
 
 	duk_get_prop_string(ctx, -1, "imsg");				// [socket][func][imsg]
 	duk_get_prop_string(ctx, -1, "headers");			// [socket][func][imsg][headers]
 	duk_get_prop_string(ctx, -1, "Sec-WebSocket-Key");	// [socket][func][imsg][headers][key]
+	duk_del_prop_string(ctx, -4, "imsg");
 
 	key = (char*)Duktape_GetBuffer(ctx, -1, &keyLen);
 	keyResult = ILibString_Cat(key, (int)keyLen, wsguid, sizeof(wsguid));
@@ -1803,8 +1815,11 @@ duk_ret_t ILibDuktape_HttpStream_http_server_onConnection(duk_context *ctx)
 	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -2, "parseError", ILibDuktape_HttpStream_http_parseError);
 
 
-	if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "upgrade") > 0) { ILibDuktape_EventEmitter_AddOnceEx3(ctx, -2, "upgrade", ILibDuktape_HttpStream_http_server_onUpgrade); }
-	
+	if (ILibDuktape_EventEmitter_HasListenersEx(ctx, -1, "upgrade") > 0) 
+	{
+		ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -2, "upgrade", ILibDuktape_HttpStream_http_server_onUpgrade);
+	}
+
 	duk_pop(ctx);														// [NS][socket][pipe][this][httpStream]
 	duk_call_method(ctx, 1); duk_pop(ctx);								// [NS][socket]
 
