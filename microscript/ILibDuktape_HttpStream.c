@@ -812,7 +812,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	void *httpStream;
 
 	duk_dup(ctx, 0);													// [socket]
-	duk_int_t *tt = _get_refcount_ptr(ctx, -1);
 	duk_push_string(ctx, "client"); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	duk_push_c_function(ctx, ILibDuktape_HttpStream_http_SocketDiedPrematurely, DUK_VARARGS);
 	duk_put_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);		// [socket]
