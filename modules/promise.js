@@ -243,10 +243,10 @@ function Promise(promiseFunc)
     {
         // Save reference of this object
         refTable[this._internal._hashCode()] = this._internal;
-        this._internal.once('settled', (function ()
+        this._internal.once('settled', function ()
         {
             delete refTable[this._hashCode()];
-        }).internal);
+        });
     }
     Object.defineProperty(this, "completed", {
         get: function ()
