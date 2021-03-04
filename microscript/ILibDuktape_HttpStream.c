@@ -627,6 +627,13 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	duk_push_null(ctx);													// [HTTPStream][websocket][emit][this][upgrade][imsg][WS_DEC][null]
 	duk_call_method(ctx, 4); duk_pop(ctx);								// [HTTPStream][websocket]
 	
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_WS2CR))
+	{
+		duk_get_prop_string(ctx, -1, ILibDuktape_WS2CR);				// [HTTPStream][websocket][request]
+		duk_prepare_method_call(ctx, -1, "removeAllListeners");			// [HTTPStream][websocket][request][removeAll][this]
+		duk_call_method(ctx, 0); duk_pop_2(ctx);						// [HTTPStream][websocket]
+	}
+
 	return(0);
 }
 duk_ret_t ILibDuktape_findAgentRequestSink(duk_context *ctx)
@@ -805,6 +812,7 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	void *httpStream;
 
 	duk_dup(ctx, 0);													// [socket]
+	duk_int_t *tt = _get_refcount_ptr(ctx, -1);
 	duk_push_string(ctx, "client"); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	duk_push_c_function(ctx, ILibDuktape_HttpStream_http_SocketDiedPrematurely, DUK_VARARGS);
 	duk_put_prop_string(ctx, -2, ILibDuktape_Socket2DiedListener);		// [socket]
@@ -911,7 +919,7 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_dup(ctx, -2);													// [socket][clientRequest][httpStream][clientRequest]
 	duk_put_prop_string(ctx, -2, ILibDuktape_HTTP2CR);					// [socket][clientRequest][httpStream]
 	ILibDuktape_EventEmitter_ForwardEventEx(ctx, -1, -2, "response");
-	ILibDuktape_EventEmitter_ForwardEvent(ctx, -1, "continue", -2, "continue");
+	ILibDuktape_EventEmitter_ForwardEventEx(ctx, -1, -2, "continue");
 	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "upgrade", ILibDuktape_HttpStream_http_onUpgrade);
 	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "response", ILibDuktape_HttpStream_http_responseSink);
 	ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "write", ILibDuktape_HttpStream_http_SocketResponseReceived);
@@ -1235,6 +1243,7 @@ duk_ret_t ILibDuktape_ClientRequest_Finalizer(duk_context *ctx)
 			data->buffer = NULL;
 		}
 	}
+
 	return(0);
 }
 
@@ -1623,13 +1632,6 @@ duk_ret_t ILibDuktape_HttpStream_http_server_upgradeWebsocket(duk_context *ctx)
 	duk_push_current_function(ctx);						// [socket][func]
 	duk_get_prop_string(ctx, -2, "unpipe");				// [socket][func][unpipe]
 	duk_dup(ctx, -3);									// [socket][func][unpipe][this]
-
-	duk_get_prop_string(ctx, -1, "\xFF_RS_PipeArray");	// [arr]
-	duk_get_prop_index(ctx, -1, 0);						// [arr][obj]
-	char *tt = Duktape_GetStringPropertyValue(ctx, -1, "_ObjectID", NULL);
-	duk_int_t *t = _get_refcount_ptr(ctx, -1);
-	duk_pop_2(ctx);
-
 	duk_call_method(ctx, 0); duk_pop(ctx);				// [socket][func]
 
 	duk_get_prop_string(ctx, -1, "imsg");				// [socket][func][imsg]
@@ -3814,12 +3816,6 @@ duk_ret_t ILibDuktape_HttpStream_Agent_reuseSocket(duk_context *ctx)
 {
 	// Yield to the next loop, before we emit a 'socket' event, because emitting this event before anyone has the clientRequest object is pointless
 	void *imm = ILibDuktape_Immediate(ctx, (void*[]) { duk_get_heapptr(ctx, 0), duk_get_heapptr(ctx, 1) }, 2, ILibDuktape_HttpStream_Agent_reuseSocketEx);
-	//duk_push_heapptr(ctx, imm);				// [immediate]
-	//duk_dup(ctx, 1);						// [immediate][ClientRequest]
-	//duk_put_prop_string(ctx, -2, "CR");		// [immediate]
-	//duk_dup(ctx, 0);						// [immediate][Socket]
-	//duk_put_prop_string(ctx, -2, "Socket");	// [immediate]
-	//duk_pop(ctx);
 	return(0);
 }
 duk_ret_t ILibDuktape_HttpStream_Agent_createConnection_eventSink(duk_context *ctx)
@@ -4401,11 +4397,12 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 			ILibDuktape_DuplexStream_WriteEnd(state->decodedStream);
 			if (ILibIsRunningOnChainThread(state->chain) != 0 && state->encodedStream->writableStream->pipedReadable != NULL)
 			{
+				duk_context *ctx = state->ctx;
 				duk_push_heapptr(state->ctx, state->encodedStream->writableStream->pipedReadable);	// [stream]
 				duk_get_prop_string(state->ctx, -1, "end");											// [stream][end]
 				duk_swap_top(state->ctx, -2);														// [end][this]
-				if (duk_pcall_method(state->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(state->ctx, "http.webSocketStream.write(): Error Dispatching 'end' "); }
-				duk_pop(state->ctx);																// ...
+				if (duk_pcall_method(state->ctx, 0) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ctx, "http.webSocketStream.write(): Error Dispatching 'end' "); }
+				duk_pop(ctx);																// ...
 			}
 			break;
 		case WEBSOCKET_OPCODE_PING:
@@ -4451,11 +4448,23 @@ void ILibDuktape_httpStream_webSocket_EncodedEndSink(ILibDuktape_DuplexStream *s
 
 	duk_push_heapptr(state->ctx, state->ObjectPtr);					// [websocket]
 	duk_get_prop_string(state->ctx, -1, "decoded");					// [websocket][decoded]
+	duk_del_prop_string(state->ctx, -1, ILibDuktape_WSDEC2WS);
 	duk_prepare_method_call(state->ctx, -1, "unpipe");				// [websocket][decoded][pmc][this]
 	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][decoded]
+	duk_prepare_method_call(state->ctx, -1, "removeAllListeners");	// [websocket][decoded][removeAll][this]
+	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][decoded]
+
 	duk_pop(state->ctx);											// [websocket]
+	duk_get_prop_string(state->ctx, -1, "encoded");					// [websocket][encoded]
+	duk_prepare_method_call(state->ctx, -1, "removeAllListeners");	// [websocket][encoded][removeAll][this]
+	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][encoded]
+
+	duk_del_prop_string(state->ctx, -1, ILibDuktape_WSENC2WS);
+	duk_pop(state->ctx);											// [websocket]
+
+
 	ILibDuktape_DeleteReadOnlyProperty(state->ctx, -1, "decoded");
-	ILibDuktape_DeleteReadOnlyProperty(state->ctx, -1, "decoded");
+	ILibDuktape_DeleteReadOnlyProperty(state->ctx, -1, "encoded");
 	duk_pop(state->ctx);											// ...
 
 	if (!state->closed) { ILibDuktape_DuplexStream_WriteEnd(state->decodedStream); }
@@ -4671,6 +4680,7 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_sendPong(duk_context *ctx)
 	ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, WEBSOCKET_OPCODE_PONG, NULL, 0, ILibWebClient_WebSocket_FragmentFlag_Complete);
 	return(0);
 }
+
 duk_ret_t ILibDuktape_httpStream_webSocketStream_encodedPiped(duk_context *ctx)
 {
 	// Someone Piped to the Encoded Stream
@@ -4691,11 +4701,15 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_encodedPiped(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_httpStream_webSocketStream_encoded_Finalizer(duk_context *ctx)
 {
-	duk_get_prop_string(ctx, 0, ILibDuktape_WSENC2WS);
-	duk_get_prop_string(ctx, -1, ILibDuktape_WebSocket_StatePtr);
-	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)Duktape_GetBuffer(ctx, -1, NULL);
+	if (duk_has_prop_string(ctx, -1, ILibDuktape_WSENC2WS))
+	{
+		duk_get_prop_string(ctx, 0, ILibDuktape_WSENC2WS);
+		duk_get_prop_string(ctx, -1, ILibDuktape_WebSocket_StatePtr);
+		ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)Duktape_GetBuffer(ctx, -1, NULL);
 
-	state->encodedStream = NULL;
+		state->encodedStream = NULL;
+	}
+
 
 	return(0);
 }
@@ -4879,7 +4893,6 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	ILibDuktape_WriteID(ctx, "http.WebSocketStream");
 	state = (ILibDuktape_WebSocket_State*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_WebSocket_State));	// [WebSocket][data]
 	duk_put_prop_string(ctx, -2, ILibDuktape_WebSocket_StatePtr);										// [WebSocket]
-
 	state->ctx = ctx;
 	state->ObjectPtr = duk_get_heapptr(ctx, -1);
 	state->chain = Duktape_GetChain(ctx);
@@ -4898,7 +4911,9 @@ duk_ret_t ILibDuktape_httpStream_webSocketStream_new(duk_context *ctx)
 	duk_push_object(ctx);														// [WebSocket][Encoded]
 	ILibDuktape_WriteID(ctx, "http.WebSocketStream.encoded");
 	state->encodedStream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_httpStream_webSocket_EncodedWriteSink, ILibDuktape_httpStream_webSocket_EncodedEndSink, ILibDuktape_httpStream_webSocket_EncodedPauseSink, ILibDuktape_httpStream_webSocket_EncodedResumeSink, ILibDuktape_httpStream_webSocket_EncodedUnshiftSink, state);
-	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "pipe", ILibDuktape_httpStream_webSocketStream_encodedPiped);
+	
+	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "pipe", ILibDuktape_httpStream_webSocketStream_encodedPiped);
+
 	duk_dup(ctx, -2);															// [WebSocket][Encoded][WebSocket]
 	duk_put_prop_string(ctx, -2, ILibDuktape_WSENC2WS);							// [WebSocket][Encoded]
 	ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "~", ILibDuktape_httpStream_webSocketStream_encoded_Finalizer);

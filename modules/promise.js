@@ -25,32 +25,14 @@ function getRootPromise(obj)
     return (obj);
 }
 
-function event_switcher_helper(desired_callee, target, forward)
-{
-    this._ObjectID = 'event_switcher';
-    this.func = function func()
-    {
-        var args = [];
-        if (func.forward != null) { args.push(func.forward); }
-        for(var i in arguments)
-        {
-            args.push(arguments[i]);
-        }
-        return (func.target.apply(func.desired, args));
-    };
-    this.func.desired = desired_callee;
-    this.func.target = target;
-    this.func.forward = forward;
-    this.func.self = this;
-}
 function event_switcher(desired_callee, target)
 {
-    return (new event_switcher_helper(desired_callee, target));
+    return ({ _ObjectID: 'event_switcher', func: target.bind(desired_callee) });
 }
 
 function event_forwarder(sourceObj, sourceName, targetObj, targetName)
 {
-    sourceObj.on(sourceName,   (new event_switcher_helper(targetObj, targetObj.emit, targetName)).func);      
+    sourceObj.on(sourceName, targetObj.emit.bind(targetObj));
 }
 
 function Promise(promiseFunc)

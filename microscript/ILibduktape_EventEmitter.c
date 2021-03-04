@@ -1335,6 +1335,13 @@ duk_ret_t ILibDuktape_EventEmitter_deleteProperty(duk_context *ctx)
 	}
 	return(0);
 }
+duk_ret_t ILibDuktape_EventEmitter_setFinalizerMetadata(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	duk_dup(ctx, 0);
+	duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
+	return(0);
+}
 void ILibDuktape_EventEmitter_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);			// [emitter]
@@ -1346,6 +1353,7 @@ void ILibDuktape_EventEmitter_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "showReferences", ILibDuktape_EventEmitter_showReferences, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "addHiddenReference", ILibDuktape_EventEmitter_addHidden, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "deleteProperty", ILibDuktape_EventEmitter_deleteProperty, 2);
+	ILibDuktape_CreateInstanceMethod(ctx, "setFinalizerMetadata", ILibDuktape_EventEmitter_setFinalizerMetadata, 1);
 }
 void ILibDuktape_EventEmitter_Init(duk_context *ctx)
 {
