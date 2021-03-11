@@ -387,6 +387,36 @@ duk_ret_t ILibDuktape_SpawnedProcess_SIGCHLD_sink(duk_context *ctx)
 	return(0);
 }
 #endif
+
+void ILibDuktape_SpawnedProcess_exitHandler_immediateSink(duk_context *ctx, void ** args, int argsLen)
+{
+	duk_push_this(ctx);											// [immediate]
+	duk_get_prop_string(ctx, -1, "process");					// [immediate][spawnedProcess]
+	duk_del_prop_string(ctx, -2, "process");
+	if (duk_has_prop_string(ctx, -1, "stdout"))
+	{
+		duk_get_prop_string(ctx, -1, "stdout");					// [immediate][spawnedProcess][stdout]
+		duk_prepare_method_call(ctx, -1, "removeAllListeners"); // [immediate][spawnedProcess][stdout][removeAll][this] 
+		duk_pcall_method(ctx, 0); duk_pop_2(ctx);				// [immediate][spawnedProcess]
+	}
+	if (duk_has_prop_string(ctx, -1, "stderr"))
+	{
+		duk_get_prop_string(ctx, -1, "stderr");					// [immediate][spawnedProcess][stderr]
+		duk_prepare_method_call(ctx, -1, "removeAllListeners"); // [immediate][spawnedProcess][stderr][removeAll][this] 
+		duk_pcall_method(ctx, 0); duk_pop_2(ctx);				// [immediate][spawnedProcess]
+	}
+	duk_prepare_method_call(ctx, -1, "removeAllListeners");		// [immediate][spawnedProcess][removeAll][this]
+	duk_pcall_method(ctx, 0); duk_pop_3(ctx);					// ...
+}
+duk_ret_t ILibDuktape_SpawnedProcess_exitHandler(duk_context *ctx)
+{
+	void *i = ILibDuktape_Immediate(ctx, (void*[]) { ctx }, 1, ILibDuktape_SpawnedProcess_exitHandler_immediateSink);
+	duk_push_heapptr(ctx, i);					// [immediate]
+	duk_push_this(ctx);							// [immediate][spawnedProcess]
+	duk_put_prop_string(ctx, -2, "process");	// [immediate]
+	duk_pop(ctx);								// ...
+	return(0);
+}
 ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUSH(duk_context *ctx, ILibProcessPipe_Process mProcess, void *callback)
 {
 	duk_push_object(ctx);														// [ChildProcess]
@@ -449,11 +479,6 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 			ILibDuktape_ChildProcess_SubProcess_StdErrHandler,
 			ILibDuktape_ChildProcess_SubProcess_SendOK, retVal);
 	}
-	else
-	{
-		if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
-	}
-
 
 #if defined(_POSIX)
 	ILibDuktape_EventEmitter_SetupOn(ctx, ILibDuktape_GetProcessObject(ctx), "SIGCHLD");	// [child][on][process][SIGCHLD]
@@ -466,6 +491,9 @@ ILibDuktape_ChildProcess_SubProcess* ILibDuktape_ChildProcess_SpawnedProcess_PUS
 #endif
 
 	ILibDuktape_CreateEventWithSetterEx(ctx, "descriptorMetadata", ILibDuktape_SpawnedProcess_descriptorSetter);
+	if (callback != NULL) { ILibDuktape_EventEmitter_AddOnce(emitter, "exit", callback); }
+
+	ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "exit", ILibDuktape_SpawnedProcess_exitHandler);
 	return(retVal);
 }
 

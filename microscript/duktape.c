@@ -99915,3 +99915,14 @@ duk_int_t* _get_refcount_ptr(void *thr, duk_idx_t idx)
 	duk_heaphdr *h = (DUK_TVAL_IS_HEAP_ALLOCATED(tv) ? DUK_TVAL_GET_HEAPHDR(tv) : NULL);
 	return(&(DUK_HEAPHDR_GET_REFCOUNT(h)));
 }
+
+void* _duk_get_first_object(void *ctx)
+{
+	duk_hthread *thr = (duk_hthread*)ctx;
+	return(thr->heap->heap_allocated);
+}
+void* _duk_get_next_object(void *ctx, void *heapptr)
+{
+	duk_hthread *thr = (duk_hthread*)ctx;
+	return(DUK_HEAPHDR_GET_NEXT(thr->heap, ((duk_heaphdr*)heapptr)));
+}

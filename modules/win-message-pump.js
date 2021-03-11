@@ -30,10 +30,15 @@ function WindowsMessagePump(options)
     emitterUtils.createEvent('exit');
 
     this._msg = GM.CreateVariable(GM.PointerSize == 4 ? 28 : 48);
+    this._msg.descriptorMetadata = 'MESSAGE';
     this._kernel32 = GM.CreateNativeProxy('Kernel32.dll');
+
     this._kernel32.mp = this;
+
     this._kernel32.CreateMethod('GetLastError');
+
     this._kernel32.CreateMethod('GetModuleHandleA');
+
 
     this._user32 = GM.CreateNativeProxy('User32.dll');
     this._user32.mp = this;
@@ -48,13 +53,14 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('ShowWindow');
     this._user32.CreateMethod('TranslateMessage');
 
-
     this.wndclass = GM.CreateVariable(GM.PointerSize == 4 ? 48 : 80);
+    this.wndclass.descriptorMetadata = 'wndclass';
     this.wndclass.mp = this;
     this.wndclass.hinstance = this._kernel32.GetModuleHandleA(0);
     //this.wndclass.cname = GM.CreateVariable('MainWWWClass');
     this.wndclass.cnamew = GM.CreateVariable('MainWWWClass', { wide: true });
     this.wndclass.wndproc = GM.GetGenericGlobalCallback(4);
+    this.wndclass.wndproc.descriptorMetadata = 'wndproc';
     this.wndclass.wndproc.mp = this;
     this.wndclass.toBuffer().writeUInt32LE(this.wndclass._size);
     this.wndclass.cnamew.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 40 : 64, GM.PointerSize).toBuffer());
@@ -63,6 +69,11 @@ function WindowsMessagePump(options)
     this.wndclass.wndproc.on('GlobalCallback', function onWndProc(xhwnd, xmsg, wparam, lparam)
     {
         var processed = false;
+        xhwnd.descriptorMetadata = 'win-message-pump: xhwnd';
+        xmsg.descriptorMetadata = 'win-message-pump: xmsg';
+        wparam.descriptorMetadata = 'win-message-pump: wparam';
+        lparam.descriptorMetadata = 'win-message-pump: lparam';
+
         if (this.mp._hwnd != null && this.mp._hwnd.Val == xhwnd.Val)
         {
             // This is for us
@@ -75,11 +86,15 @@ function WindowsMessagePump(options)
             {
                 // We need to call DefWindowProcA, becuase this message was not handled
                 var p = this.mp._user32.DefWindowProcW.async(d, xhwnd, xmsg, wparam, lparam);
+                p.descriptorMetadata = 'win-message-pump: DefWindowProcW(1)';
                 p.dispatcher = this;
-                p.then(function (ret)
+                var xk = p.then(function (ret)
                 {
                     this.dispatcher.EndDispatcher(ret);
                 });
+                xk.descriptorMetadata = 'DefWindowProcW_Result'
+                xk = null;
+                p = null;
             }
             else
             {
@@ -92,21 +107,22 @@ function WindowsMessagePump(options)
         {
             // This message was generated from our CreateWindowExA method
             processed = true;
-
             var d = this.StartDispatcher();
 
             this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), hwnd: xhwnd, dispatcher: d });
 
             var msgRet = this.mp.emit_returnValue('message');
             if (msgRet == null)
-{
+            {
                 // We need to call DefWindowProcA, becuase this message was not handled
                 var p = this.mp._user32.DefWindowProcW.async(d, xhwnd, xmsg, wparam, lparam);
+                p.descriptorMetadata = 'win-message-pump: DefWindowProcW(2)';
                 p.dispatcher = this;
                 p.then(function (ret)
                 {
                     this.dispatcher.EndDispatcher(ret);
                 });
+                p = null;
             }
             else
             {
@@ -116,11 +132,15 @@ function WindowsMessagePump(options)
             }
         }
 
-        if (processed) { _debugGC(); }
+        xhwnd = null;
+        xmsg = null;
+        wparam = null;
+        lparam = null;
     });
 
     this._user32.RegisterClassExW.async(this.wndclass).then(function ()
     {
+        this.descriptorMetadata = 'RegisterClassExW';
         if (!this.nativeProxy.mp._options)  {   this.nativeProxy.mp._options = {};  }
         if (!this.nativeProxy.mp._options.window) { this.nativeProxy.mp._options.window = {}; }
         if (this.nativeProxy.mp._options.window.exstyles == null) { this.nativeProxy.mp._options.window.exstyles = 0x00000088; }    // TopMost Tool Window
@@ -133,8 +153,9 @@ function WindowsMessagePump(options)
         this.nativeProxy.CreateWindowExW.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._options.window.exstyles, this.nativeProxy.mp.wndclass.cnamew,
             this.nativeProxy.mp._options.window.title == null ? 0 : GM.CreateVariable(this.nativeProxy.mp._options.window.title, { wide: true }), this.nativeProxy.mp._options.window.winstyles, this.nativeProxy.mp._options.window.x, this.nativeProxy.mp._options.window.y,
             this.nativeProxy.mp._options.window.width, this.nativeProxy.mp._options.window.height, 0, 0, 0, 0)
-            .then(function(h)
+            .then(function (h)
             {
+                this.descriptorMetadata = 'CreateWindowExW';
                 if (h.Val == 0)
                 {
                     // Error creating hidden window
@@ -150,34 +171,43 @@ function WindowsMessagePump(options)
     });
     this._startPump = function _startPump()
     {
-        this._user32.GetMessageW.async(this._user32.RegisterClassExW.async, this._msg, this._hwnd, 0, 0).then(function (r)
-        {
-            if(r.Val > 0)
+        this._user32.GetMessageW.async(this._user32.RegisterClassExW.async, this._msg, this._hwnd, 0, 0)
+            .then(function (r)
             {
-                this.nativeProxy.TranslateMessage.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._msg).then(function ()
+                var val = r.Val;
+                r.descriptorMetadata = 'RegisterClassExW_result';
+                r = null;
+                if (val > 0)
                 {
-                    this.nativeProxy.DispatchMessageW.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._msg).then(function ()
+                    this.nativeProxy.TranslateMessage.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._msg).then(function ()
                     {
-                        this.nativeProxy.mp._startPump();
+                        this.descriptorMetadata = 'TranslateMessage';
+                        this.nativeProxy.DispatchMessageW.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._msg).then(function ()
+                        {
+                            this.descriptorMetadata = 'DispatchMessageW';
+                            this.nativeProxy.mp._startPump();
+                        });
                     });
-                });
-            }
-            else
-            {
-                // We got a 'QUIT' message
-                this.nativeProxy.DestroyWindow.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._hwnd).then(function ()
+                }
+                else
                 {
-                    this.nativeProxy.RegisterClassExW.async.abort();
-                    delete this.nativeProxy.mp._hwnd;
-                    this.nativeProxy.mp.emit('exit', 0);
-
-                    this.nativeProxy.mp.wndclass.wndproc.removeAllListeners('GlobalCallback');
-                    this.nativeProxy.mp.wndclass.wndproc = null;
-                });
-            }
-        }, function (err) { this.nativeProxy.mp.stop(); });
+                    // We got a 'QUIT' message
+                    this.nativeProxy.DestroyWindow.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._hwnd).then(function ()
+                    {
+                        this.descriptorMetadata = 'DestroyWindow';
+                        this.nativeProxy.RegisterClassExW.async.abort();
+                        delete this.nativeProxy.mp._hwnd;
+                        this.nativeProxy.mp.wndclass.wndproc.removeAllListeners('GlobalCallback');
+                        this.nativeProxy.mp.wndclass.wndproc.mp = null;
+                        this.nativeProxy.mp.wndclass.wndproc = null;
+                        this.nativeProxy.mp.emit('exit', 0);
+                    });
+                }
+            }, function (err)
+            {
+                this.nativeProxy.mp.stop();
+            });
     }
-
     this.stop = function stop()
     {
         if (this._hwnd)
@@ -196,9 +226,22 @@ function WindowsMessagePump(options)
     };
     this.once('~', function ()
     {
+        this._msg = null;
         this.stop();
     });
+    this.once('exit', (function ()
+    {
+        setImmediate(function (j)
+        {
+            j._kernel32.mp = null;
+            j._user32.mp = null;
+            if (j.wndclass) { j.wndclass.mp = null; }
+            if (j.wndclass.wndproc) { j.wndclass.wndproc.mp = null; }
+            j.removeAllListeners();
+        }, this);
+    }).internal);
 }
+
 
 module.exports = WindowsMessagePump;
 module.exports.WindowStyles =
@@ -218,3 +261,5 @@ module.exports.WindowStylesEx =
         WS_EX_NOREDIRECTIONBITMAP: 0x00200000, WS_EX_RIGHT: 0x00001000, WS_EX_RIGHTSCROLLBAR: 0x00000000, WS_EX_RTLREADING: 0x00002000,
         WS_EX_STATICEDGE: 0x00020000, WS_EX_TOOLWINDOW: 0x00000080, WS_EX_TOPMOST: 0x00000008, WS_EX_TRANSPARENT: 0x00000020, WS_EX_WINDOWEDGE: 0x00000100
     };
+
+

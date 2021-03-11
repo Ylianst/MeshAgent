@@ -16,6 +16,12 @@ limitations under the License.
 
 var refTable = {};
 
+function promiseInitializer(r,j)
+{
+    this._res = r;
+    this._rej = j;
+}
+
 function getRootPromise(obj)
 {
     while(obj.parentPromise)
@@ -35,6 +41,20 @@ function event_forwarder(sourceObj, sourceName, targetObj, targetName)
     sourceObj.on(sourceName, targetObj.emit.bind(targetObj));
 }
 
+
+function return_resolved()
+{
+    var parms = ['resolved'];
+    for (var ai in arguments)
+    {
+        parms.push(arguments[ai]);
+    }
+    this._XSLF.emit.apply(this._XSLF, parms);
+}
+function return_rejected()
+{
+    this._XSLF.promise.__childPromise._rej(e);
+}
 function Promise(promiseFunc)
 {
     this._ObjectID = 'promise';
@@ -58,7 +78,21 @@ function Promise(promiseFunc)
                 this._up = value;
             }
         });
-
+    Object.defineProperty(this, "descriptorMetadata",
+        {
+            get: function ()
+            {
+                return (require('events').getProperty.call(this._internal, '?_FinalizerDebugMessage'));
+            },
+            set: function (value)
+            {
+                require('events').setProperty.call(this._internal, '?_FinalizerDebugMessage', value);
+            }
+        });
+    this._internal.on('~', function ()
+    {
+        this.completedArgs = [];
+    });
     this._internal.on('newListener', (function (eventName, eventCallback)
     {
         //console.log('newListener', eventName, 'errors/' + this.errors + ' completed/' + this.completed);
@@ -98,7 +132,6 @@ function Promise(promiseFunc)
             eventCallback.apply(this, []);
         }
     }).internal);
-
     this._internal.resolver = (function _resolver()
     {
         if (_resolver._self.completed) { return; }
@@ -123,19 +156,7 @@ function Promise(promiseFunc)
         {
             var pr = getRootPromise(_resolver._self.promise);
             args[1]._XSLF = _resolver._self;
-            args[1].then(function _returnResolved()
-            {
-                var parms = ['resolved'];
-                for (var ai in arguments)
-                {
-                    parms.push(arguments[ai]);
-                }
-                this._XSLF.emit.apply(this._XSLF, parms);
-            },
-            function _returnRejected(e)
-            {
-                this._XSLF.promise.__childPromise._rej(e);
-            });
+            args[1].then(return_resolved, return_rejected);
         }
         else
         {
@@ -181,13 +202,16 @@ function Promise(promiseFunc)
     };
     this.then = function (resolved, rejected)
     {
-        if (resolved) { this._internal.once('resolved', event_switcher(this, resolved).func.internal); }
+        if (resolved)
+        {
+            this._internal.once('resolved', event_switcher(this, resolved).func.internal);
+        }
         if (rejected)
         {
             this._internal.once('rejected', event_switcher(this, rejected).func.internal);
         }
-                      
-        var retVal = new Promise(function (r, j) { this._rej = j; });
+          
+        var retVal = new Promise(promiseInitializer);
         retVal.parentPromise = this;
 
         if (this._internal.completed)
@@ -218,9 +242,9 @@ function Promise(promiseFunc)
             this._internal.once('resolved', retVal._internal.resolver);
             this._internal.once('rejected', retVal._internal.rejector);
         }
-        this.__childPromise = retVal;
 
-        return (retVal);
+        this.__childPromise = retVal;
+        return(retVal);
     };
 
     this._internal.resolver._self = this._internal;
@@ -266,6 +290,8 @@ function Promise(promiseFunc)
         delete this._up;
         delete this.__childPromise;
         delete this.promise;
+        this.removeAllListeners('resolved');
+        this.removeAllListeners('rejected');
     }).internal);
 }
 

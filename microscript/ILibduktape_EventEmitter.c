@@ -38,6 +38,7 @@ limitations under the License.
 #define ILibDuktape_EventEmitter_EventTable				"\xFF_EventEmitter_EventTable"
 #define ILibDuktape_EventEmitter_CountTable				"\xFF_EventEmitter_CountTable"
 #define ILibDuktape_EventEmitter_References				"\xFF_EventReferences"
+extern void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size);
 
 #ifdef ILIBEVENTEMITTER_REFHOLD
 int gEventEmitterReferenceHold = ILIBEVENTEMITTER_REFHOLD;
@@ -1213,7 +1214,7 @@ duk_ret_t ILibDuktape_EventEmitter_allProperties(duk_context *ctx)
 	const char *tmp;
 	duk_push_array(ctx);				// [arr]
 	duk_dup(ctx, 0);					// [arr][obj]
-	duk_enum(ctx, -1, (all == 0 ? 0 : DUK_ENUM_INCLUDE_NONENUMERABLE) | DUK_ENUM_INCLUDE_HIDDEN | DUK_ENUM_INCLUDE_SYMBOLS);;
+	duk_enum(ctx, -1, (all == 0 ? 0 : DUK_ENUM_INCLUDE_NONENUMERABLE) | (all == 2 ? DUK_ENUM_OWN_PROPERTIES_ONLY : 0) | DUK_ENUM_INCLUDE_HIDDEN | DUK_ENUM_INCLUDE_SYMBOLS);;
 	while (duk_next(ctx, -1, 0))		// [arr][obj][enum][key]
 	{
 		tmp = NULL;
@@ -1342,12 +1343,55 @@ duk_ret_t ILibDuktape_EventEmitter_setFinalizerMetadata(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	return(0);
 }
-duk_ret_t ILibDuktape_RefCountPointer(duk_context *ctx)
+duk_ret_t ILibDuktape_RefCountPointer_eval(duk_context *ctx)
 {
 	duk_push_this(ctx);
-	duk_int_t *t = _get_refcount_ptr(ctx, -1);
-	duk_push_pointer(ctx, t);
+	duk_int_t *t = (duk_int_t*)Duktape_GetPointerProperty(ctx, -1, "_ptr");
+	if (t == NULL) { return(ILibDuktape_Error(ctx, "ERROR")); }
+	duk_push_int(ctx, *t);
 	return(1);
+}
+duk_ret_t ILibDuktape_RefCountPointer_set(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	duk_int_t *t = (duk_int_t*)Duktape_GetPointerProperty(ctx, -1, "_ptr");
+	if (t == NULL) { return(ILibDuktape_Error(ctx, "ERROR")); }
+	*t = duk_require_int(ctx, 0);
+	return(0);
+}
+duk_ret_t ILibDuktape_RefCountPointer(duk_context *ctx)
+{
+	int nargs = duk_get_top(ctx);
+	duk_push_this(ctx);
+	char *tmp = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "");
+	if (nargs == 1) { duk_dup(ctx, 0); }
+	duk_int_t *t = _get_refcount_ptr(ctx, -1);
+	if (nargs == 1) { duk_pop(ctx); }
+	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, t, sizeof(void*));
+	duk_push_sprintf(ctx, "_get_refcount_ptr(%s)", tmp); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
+	ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_RefCountPointer_eval, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "set", ILibDuktape_RefCountPointer_set, 1);
+	return(1);
+}
+duk_ret_t ILibDuktape_EventEmitter_getProperty(duk_context *ctx)
+{
+	duk_push_this(ctx);												// [obj]
+	char *tmp = (char*)duk_push_sprintf(ctx, "%s", duk_get_string(ctx, 0));// [obj][string]
+	if (tmp[0] == '?') { tmp[0] = '\xFF'; }
+	duk_get_prop_string(ctx, -2, tmp);
+	tmp = (char*)duk_get_string(ctx, -1);
+	return(1);
+}
+duk_ret_t ILibDuktape_EventEmitter_setProperty(duk_context *ctx)
+{
+	char *s = (char*)duk_get_string(ctx, 0);
+	char *s2 = (char*)duk_get_string(ctx, 1);
+	duk_push_this(ctx);												// [obj]
+	char *tmp = (char*)duk_push_sprintf(ctx, "%s", duk_get_string(ctx, 0));// [obj][string]
+	duk_dup(ctx, 1);												// [obj][string][val]
+	if (tmp[0] == '?') { tmp[0] = '\xFF'; }
+	duk_put_prop_string(ctx, -3, tmp);
+	return(0);
 }
 void ILibDuktape_EventEmitter_PUSH(duk_context *ctx, void *chain)
 {
@@ -1357,11 +1401,14 @@ void ILibDuktape_EventEmitter_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "moderated", ILibDuktape_EventEmitter_moderated, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "all", 1, "allProperties", ILibDuktape_EventEmitter_allProperties, 1);
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "all", 0, "hiddenProperties", ILibDuktape_EventEmitter_allProperties, 1);
+	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "all", 2, "allOwnProperties", ILibDuktape_EventEmitter_allProperties, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "showReferences", ILibDuktape_EventEmitter_showReferences, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "addHiddenReference", ILibDuktape_EventEmitter_addHidden, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "deleteProperty", ILibDuktape_EventEmitter_deleteProperty, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "setFinalizerMetadata", ILibDuktape_EventEmitter_setFinalizerMetadata, 1);
-	ILibDuktape_CreateInstanceMethod(ctx, "_refCountPointer", ILibDuktape_RefCountPointer, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "_refCountPointer", ILibDuktape_RefCountPointer, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "getProperty", ILibDuktape_EventEmitter_getProperty, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "setProperty", ILibDuktape_EventEmitter_setProperty, 2);
 }
 void ILibDuktape_EventEmitter_Init(duk_context *ctx)
 {
