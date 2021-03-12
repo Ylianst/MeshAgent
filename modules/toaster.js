@@ -38,12 +38,25 @@ if (process.platform == 'linux' || process.platform == 'darwin' || process.platf
     }
 }
 
+function stdouthelper(c)
+{
+    if (c.toString().includes('<DISMISSED>')) { this.stdin.write('exit\n'); }
+}
+function exithelper()
+{
+    if (this.timeout != null) { clearTimeout(this.timeout); }
+    this.toast.resolve('DISMISSED');
+    
+    this.toast.child = null;
+    this.toast = null;
+}
 function Toaster()
 {
     this._ObjectID = 'toaster';
     this.Toast = function Toast(title, caption, tsid)
     {
-        var retVal = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        //var retVal = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        var retVal = new promise(promise.defaultInit);
         if (title == 'MeshCentral') { try { title = require('MeshAgent').displayName; } catch (x) { } }
 
         retVal.title = title;
@@ -70,7 +83,7 @@ function Toaster()
                         {
                             if(tsid != null && cid != 0)
                             {
-                                retVal._rej('Insufficient permission to display toast as uid: ' + tsid);
+                                retVal.reject('Insufficient permission to display toast as uid: ' + tsid);
                                 return (retVal);
                             }
                             retVal.options.type = require('child_process').SpawnTypes.USER;
@@ -78,7 +91,7 @@ function Toaster()
                     }
                     catch (ee)
                     {
-                        retVal._rej('Cannot display user notification when a user is not logged in');
+                        retVal.reject('Cannot display user notification when a user is not logged in');
                         return (retVal);
                     }
 
@@ -87,24 +100,26 @@ function Toaster()
                     retVal.child.toast = retVal;
                     retVal.child.stdout.stdin = retVal.child.stdin;
                     retVal.child.stderr.stdin = retVal.child.stdin;
-                    retVal.child.stdout.on('data', function (c) { if (c.toString().includes('<DISMISSED>')) { this.stdin.write('exit\n'); } });
-                    retVal.child.stderr.once('data', function (c) { this.stdin.write('$objBalloon.dispose();exit\n'); });
+                    //retVal.child.stdout.on('data', function (c) { if (c.toString().includes('<DISMISSED>')) { this.stdin.write('exit\n'); } });
+                    //retVal.child.stderr.once('data', function (c) { this.stdin.write('$objBalloon.dispose();exit\n'); });
+                    retVal.child.stdout.on('data', stdouthelper);
                     retVal.child.stdin.write('[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")\r\n');
                     retVal.child.stdin.write('$objBalloon = New-Object System.Windows.Forms.NotifyIcon\r\n');
                     retVal.child.stdin.write('$objBalloon.Icon = [System.Drawing.SystemIcons]::Information\r\n');
                     retVal.child.stdin.write('$objBalloon.Visible = $True\r\n');
                     retVal.child.stdin.write('Register-ObjectEvent -InputObject $objBalloon -EventName BalloonTipClosed -Action { $objBalloon.dispose();Write-Host "<`DISMISSED`>" }')
                     retVal.child.stdin.write('$objBalloon.ShowBalloonTip(10000, $env:_title, $env:_caption, 0)\r\n');
-                    retVal.child.timeout = setTimeout(function (c)
-                    {
-                        c.timeout = null;
-                        c.stdin.write('$objBalloon.dispose();exit\n');
-                    }, 10000, retVal.child);
-                    retVal.child.on('exit', function ()
-                    {
-                        if (this.timeout != null) { clearTimeout(this.timeout); }
-                        this.toast._res('DISMISSED');
-                    });
+                    //retVal.child.timeout = setTimeout(function (c)
+                    //{
+                    //    c.timeout = null;
+                    //    c.stdin.write('$objBalloon.dispose();exit\n');
+                    //}, 10000, retVal.child);
+                    //retVal.child.on('exit', function ()
+                    //{
+                    //    if (this.timeout != null) { clearTimeout(this.timeout); }
+                    //    this.toast._res('DISMISSED');
+                    //});
+                    retVal.child.on('exit', exithelper);
                     
                     return (retVal);
                 }
@@ -120,7 +135,7 @@ function Toaster()
                     }
                     catch (xxe)
                     {
-                        retVal._rej(xxe);
+                        retVal.reject(xxe);
                         return (retVal);
                     }
 
@@ -171,7 +186,7 @@ function Toaster()
                                     // Timeout Supported
                                     retVal._mb = require('message-box').create(retVal.title, retVal.caption, 5, 1);
                                     retVal._mb.toast = retVal;
-                                    retVal._mb.then(function () { this.toast._res('DISMISSED'); }, function (e) { this.toast._res('DISMISSED'); });
+                                    retVal._mb.then(function () { this.toast.resolve('DISMISSED'); }, function (e) { this.toast.resolve('DISMISSED'); });
                                     return (retVal);
                                 }
                                 else
@@ -196,7 +211,7 @@ function Toaster()
                         retVal.child.on('exit', function (code)
                         {
                             if (this.timeout) { clearTimeout(this.timeout); }
-                            this.parent._res('DISMISSED');
+                            this.parent.resolve('DISMISSED');
                         });
                     }
                     else
@@ -208,7 +223,7 @@ function Toaster()
                             var xdg = require('user-sessions').findEnv(retVal.consoleUid, 'XDG_RUNTIME_DIR'); if (xdg == null) { xdg = ''; }
                             if (!retVal.xinfo || !retVal.xinfo.display || !retVal.xinfo.xauthority)
                             {
-                                retVal._rej('Internal Error');
+                                retVal.reject('Internal Error');
                                 return (retVal);
                             }
 		
@@ -217,7 +232,7 @@ function Toaster()
                             retVal._notify.parent = retVal;
                             retVal._notify.stdout.on('data', function (chunk) { });
                             retVal._notify.stderr.on('data', function (chunk) { });
-                            retVal._notify.on('exit', function (code) { this.parent._res('DISMISSED'); });
+                            retVal._notify.on('exit', function (code) { this.parent.resolve('DISMISSED'); });
                         }
                         else
                         {
@@ -242,11 +257,11 @@ function Toaster()
                             {
                                 retVal._mb = require('message-box').create(title, caption, 5, 'OK');
                                 retVal._mb.ret = retVal;
-                                retVal._mb.then(function () { this.ret._res('DISMISSED'); }, function () { this.ret._res('DISMISSED'); });
+                                retVal._mb.then(function () { this.ret.resolve('DISMISSED'); }, function () { this.ret.resolve('DISMISSED'); });
                             }
                             else
                             {
-                                retVal._rej('Zenity/KDialog/xmessage not found');
+                                retVal.reject('Zenity/KDialog/xmessage not found');
                             }
                         }
                     }
@@ -255,7 +270,7 @@ function Toaster()
             case 'darwin':
                 retVal._toast = require('message-box').notify(title, caption);
                 retVal._toast.parent = retVal;
-                retVal._toast.then(function (v) { this.parent._res(v); }, function (e) { this.parent._rej(e); });
+                retVal._toast.then(function (v) { this.parent.resolve(v); }, function (e) { this.parent.reject(e); });
                 break;
         }
 
