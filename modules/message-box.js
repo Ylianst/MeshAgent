@@ -49,6 +49,11 @@ function sendConsoleText(msg)
     require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: msg });
 }
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
 
 function messageBox()
 {
@@ -214,11 +219,12 @@ function linux_messageBox()
                             }
                             if (xinfo == null) { return (false); }
                             var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
-                            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdout.str = ''; child.stdout.on('data', stdparser );
                             child.stdin.write(location + ' --help-all | grep timeout\nexit\n');
                             child.stderr.on('data', function (e) { });
                             child.waitExit();
                             Object.defineProperty(this, "_timeout", { value: child.stdout.str.trim() == '' ? false : true });
+                            child = null;
                             return (this._timeout);
                         }
                         else
@@ -334,7 +340,7 @@ function linux_messageBox()
             value: (function ()
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdout.on('data', stdparser);
                 child.stdin.write("whereis notify-send | awk '{ print $2 }'\nexit\n");
                 child.waitExit();
                 return (child.stdout.str.trim() == '' ? null : { path: child.stdout.str.trim() });

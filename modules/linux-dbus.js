@@ -16,7 +16,11 @@ limitations under the License.
 
 try { Object.defineProperty(Array.prototype, "peek", { value: function () { return (this.length > 0 ? this[this.length - 1] : undefined); } }); } catch (e) { }
 
-
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
 
 function dbus(address, uid, env)
 {
@@ -154,8 +158,8 @@ module.exports = dbus;
 module.exports.hasService = function hasService(name)
 {
     var child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
     child.stdin.write('cat /usr/share/dbus-1/services/*.service | grep "' + name + '" | awk -F= \'{ if( $2=="' + name + '" ) { print $2; } }\'\nexit\n');
     child.waitExit();
     return (child.stdout.str.trim() != '');
