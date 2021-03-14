@@ -58,6 +58,11 @@ function columnParse(data, delimiter)
     return (ret);
 }
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
 
 function UserSessions()
 {
@@ -445,7 +450,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("getent passwd \"" + username + "\" | awk -F: '{print $3}'\nexit\n");
             child.waitExit();
 
@@ -564,8 +569,8 @@ function UserSessions()
         this.consoleUid = function consoleUid()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
             child.stdin.write("who | tr '\\n' '`' | awk -F'`' '{");
             child.stdin.write("  for(i=1;i<NF;++i) ");
             child.stdin.write("  { ");
@@ -620,8 +625,7 @@ function UserSessions()
         this.getUsername = function getUsername(uid)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("getent passwd " + uid + " | awk -F: '{print $1}'\nexit\n");
             child.waitExit();
             if (child.stdout.str.length > 0) { return (child.stdout.str.trim()); }
@@ -1014,6 +1018,7 @@ function UserSessions()
             this.__resolver = res;
             this.__rejector = rej;
         });
+        p.descriptorMetadata = 'user-sessions: enumerateUsers()';
         p.__handler = function __handler(users)
         {
             p.__resolver(users);

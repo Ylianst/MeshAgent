@@ -34,6 +34,12 @@ var PropertyChangeMask = (1 << 22);
 var PropertyNotify = 28;
 var AnyPropertyType = 0;
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
+
 function getLibInfo(libname)
 {
     var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -499,7 +505,7 @@ function monitorinfo()
             if (process.platform != 'linux') { return(info); }
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("ps -e -o uid -o cmd | grep X | grep " + uid + " | tr '\\n' '`' | awk '{ xl=split($2,x,\"/\"); print x[xl]; }'\nexit\n");
             child.waitExit();
             if(child.stdout.str.trim() != '')
@@ -571,11 +577,13 @@ function monitorinfo()
                 // We need to find $DISPLAY by looking at all the processes running on the same tty as the XServer instance for this user session
                 child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdout.on('data', stdparser);
                 child.stdin.write("ps -e -o tty -o pid -o user:9999 | grep " + ret.tty + " | grep " + uname + " | awk '{ print $2 }' \nexit\n");
                 child.waitExit();
 
                 var lines = child.stdout.str.split('\n');
+                child = null;
+
                 var ps, psx, v, vs = 0;
                 for(var x in lines)
                 {
