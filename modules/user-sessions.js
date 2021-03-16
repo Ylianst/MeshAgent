@@ -426,15 +426,15 @@ function UserSessions()
                 var ret = null;
                 var min = this.minUid();
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
+                child.stderr.str = ''; child.stderr.on('data', stdparser);
                 child.stdin.write('getent passwd | grep "Gnome Display Manager" | ' + "tr '\\n' '`' | awk -F: '{ print $3 }'\nexit\n");
                 child.waitExit();
                 if (child.stdout.str.trim() != '' && (ret = parseInt(child.stdout.str.trim())) < min) { return (parseInt(child.stdout.str.trim())); }
 
                 child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (c) { console.log(c.toString()); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
+                child.stderr.str = ''; child.stderr.on('data', stdparser);
                 child.stdin.write('getent passwd | grep gdm | ' + "tr '\\n' '`' | awk -F'`' '" + '{ for(i=1;i<NF;++i) { split($i, f, ":"); if(f[3]+0<' + min + '+0) { print f[3]; break; } } }' + "'\nexit\n");
                 child.waitExit();
                 if (child.stdout.str.trim() != '' && (ret = parseInt(child.stdout.str.trim())) < min) { return (parseInt(child.stdout.str.trim())); }
@@ -451,6 +451,8 @@ function UserSessions()
             child.waitExit();
 
             var ret = parseInt(child.stdout.str);
+            child = null;
+
             if (ret >= 0) { return (ret); }
             throw ('username: ' + username + ' NOT FOUND');
         };
@@ -458,8 +460,8 @@ function UserSessions()
         this.Current = function Current(cb)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
             child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
             child.waitExit();
 
@@ -483,6 +485,7 @@ function UserSessions()
             {
                 cb.call(this, ret);
             }
+            child = null;
         }
 
         if (process.platform == 'linux')
@@ -514,8 +517,8 @@ function UserSessions()
         this.minUid =  function minUid()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
             child.stdin.write("cat /etc/login.defs | grep UID_ | awk '{ if($1==\"UID_MIN\") { print $2; } }'\nexit\n");
             child.waitExit();
             return (parseInt(child.stdout.str.trim()) >= 0 ? parseInt(child.stdout.str.trim()) : 500);
@@ -524,7 +527,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("getent passwd | awk -F: '{ if($3>=0) { printf \"%s:%s\\n\", $1, $3; } }'\nexit\n");
             child.waitExit();
 
@@ -540,7 +543,7 @@ function UserSessions()
         this._uids = function _uids() {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("getent passwd | awk -F: '{ if($3>=0) { printf \"%s:%s\\n\", $1, $3; } }'\nexit\n");
             child.waitExit();
 
@@ -556,8 +559,8 @@ function UserSessions()
         {
             var min = this.minUid();
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
             child.stdin.write('getent passwd | awk -F: \'{ if($3 >= ' + min + ') { a=split($7,b,"/"); if(b[a]!="nologin") { print $3; } }}\' | tr "\\n" "\\," | awk \'{ printf "[%s]", $0; }\'\nexit\n');
             child.waitExit();
             return (JSON.parse(child.stdout.str.trim().replace(',]',']')));
@@ -612,7 +615,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("getent passwd " + id + " | awk -F: '{print $6}'\nexit\n");
             child.waitExit();
             return (child.stdout.str.trim());
@@ -631,7 +634,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("getent group " + gid + " | awk -F: '{print $1}'\nexit\n");
             child.waitExit();
             if (child.stdout.str.length > 0) { return (child.stdout.str.trim()); }
@@ -641,7 +644,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("whoami\nexit\n");
             child.waitExit();
             return (child.stdout.str.trim());
@@ -671,8 +674,8 @@ function UserSessions()
             }
 
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function(c){this.str += c.toString();});
-            child.stderr.str = ''; child.stderr.on('data', function(c){this.str += c.toString();});
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
             child.stdin.write('ps -e -o pid -o user -o cmd ' + grep + ' |' + " tr '\n' '`' | awk -F'`' '{ " + 'printf "["; for(i=1;i<NF;++i) { split($i, tok, " "); printf "%s%s",(i!=1?",":""), tok[1];  } printf "]"; }\'\nexit\n');
             child.waitExit();
 
@@ -727,8 +730,8 @@ function UserSessions()
             if (process.platform == 'linux')
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
+                child.stderr.str = ''; child.stderr.on('data', stdparser);
 
                 child.stdin.write("cat /proc/" + pid + "/environ | tr '\\0' '\\t' |" + ' awk -F"\t" \'{ printf "{"; for(i=1;i<NF;++i) { if(i>1) {printf ",";} x=split($i, tok, "="); printf "\\"%s\\": \\"%s\\"", tok[1], substr($i, 2+length(tok[1])); } printf "}"; }\'');
                 child.stdin.write('\nexit\n');
@@ -746,7 +749,7 @@ function UserSessions()
             else if (process.platform == 'freebsd')
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
                 child.stdin.write("procstat -e " + pid + " | grep " + pid + " | awk '{ $1=\"\"; $2=\"\"; print $0 }' | tr \"\\ \" \"\\n\"\nexit\n"); 
                 child.waitExit();
 		
@@ -765,7 +768,7 @@ function UserSessions()
             var uname = this.getUsername(uid);
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax ":"") + "-e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
             child.waitExit();
 
@@ -791,7 +794,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("id " + username + " | awk '{ split($1, token, \"=\"); split(token[2], uid, \"(\"); print uid[1]; }'\nexit\n");
             child.waitExit();
             var ret = parseInt(child.stdout.str.trim());
@@ -802,7 +805,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("id " + uid + " | awk '{ split($2, gid, \"=\"); if(gid[1]==\"gid\") { split(gid[2], gidnum, \"(\"); print gidnum[1];  } }'\nexit\n");
             child.waitExit();
             return (parseInt(child.stdout.str.trim()));
@@ -812,8 +815,8 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stderr.str = '';
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
+            child.stderr.on('data', stdparser);
             child.stdin.write("dscl . list /Users UniqueID | grep " + uid + " | awk '{ if($2==" + uid + "){ print $1 }}'\nexit\n");
             child.waitExit();
             var ret = child.stdout.str.trim();
@@ -832,8 +835,8 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stderr.str = '';
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
+            child.stderr.on('data', stdparser);
             child.stdin.write("dscl . list /Groups PrimaryGroupID | grep " + gid + " | awk '{ if($2==" + gid + "){ print $1 }}'\nexit\n");
             child.waitExit();
             if(child.stdout.str.trim() != '')
@@ -849,7 +852,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("who | tr '\n' '\.' | awk '{ print $1 }'\nexit\n");
             child.waitExit();
 
@@ -865,7 +868,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("dscl . -read /Users/" + user + " | grep NFSHomeDirectory | awk -F: '{ print $2 }'\nexit\n");
             child.waitExit();
             if (child.stdout.str.trim() != '')
@@ -882,8 +885,8 @@ function UserSessions()
             var child = require('child_process').execFile('/usr/bin/dscl', ['dscl', '.', 'list', '/Users', 'UniqueID']);
             child.stdout.str = '';
             child.stderr.str = '';
-            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.on('data', stdparser);
+            child.stdout.on('data', stdparser);
             child.stdin.write('exit\n');
             child.waitExit();
 
@@ -902,7 +905,7 @@ function UserSessions()
         this._uids = function () {
             var child = require('child_process').execFile('/usr/bin/dscl', ['dscl', '.', 'list', '/Users', 'UniqueID']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write('exit\n');
             child.waitExit();
 
@@ -922,7 +925,7 @@ function UserSessions()
             var table = {};
             var child = require('child_process').execFile('/usr/bin/id', ['id']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.waitExit();
 
             var lines = child.stdout.str.split('\n')[0].split(' ');
@@ -948,7 +951,7 @@ function UserSessions()
             var table = this._idTable();
             var child = require('child_process').execFile('/usr/bin/last', ['last']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.waitExit();
 
             var lines = child.stdout.str.split('\n');
@@ -982,7 +985,7 @@ function UserSessions()
         this.tty = function tty()
         {
             var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
             child.stdin.write("tty | awk -F/ '{ printf \"\\x1e%s\\x1e\",$2; }'\nexit\n");
             child.stdin.write("tty\nexit\n");
             child.waitExit();
@@ -994,7 +997,7 @@ function UserSessions()
         {
             var child = require('child_process').execFile('/usr/bin/id', ['id', '-u']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.waitExit();
             var ret = parseInt(child.stdout.str);
             child = null;

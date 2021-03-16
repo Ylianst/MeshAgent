@@ -14,13 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+function stdparser(c)
+{
+    this.str += c.toString();
+}
 function checkPath()
 {
     if (process.platform == 'linux')
     {
         var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stderr.str = ''; child.stderr.on('data', stdparser);
+        child.stdout.str = ''; child.stdout.on('data', stdparser);
         child.stdin.write('echo $PATH | awk \'{ yes=0; a=split($0, b, ":"); for(x=1;x<=a;++x) { if(b[x]=="/sbin") { yes=1; } } print yes; }\'\nexit\n');
         child.waitExit();
 
@@ -28,6 +33,7 @@ function checkPath()
         {
             process.setenv('PATH', process.env['PATH'] + ':/sbin');
         }
+        child = null;
     }
 }
 

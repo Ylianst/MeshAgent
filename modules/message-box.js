@@ -193,7 +193,7 @@ function linux_messageBox()
             value: (function ()
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
                 child.stdin.write("whereis zenity | awk '{ print $2 }'\nexit\n");
                 child.waitExit();
                 var location = child.stdout.str.trim();
@@ -201,6 +201,7 @@ function linux_messageBox()
                 if (location == '') { return (null); }
 
                 var ret = { path: location, timeout: child.stdout.str.trim() == '' ? false : true };
+                child = null;
                 Object.defineProperty(ret, "timeout", {
                     get: function ()
                     {
