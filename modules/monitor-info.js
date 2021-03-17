@@ -44,7 +44,7 @@ function getLibInfo(libname)
 {
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = '';
-    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+    child.stdout.on('data', stdparser);
     child.stdin.write("whereis ldconfig | awk '{ print $2 }'\nexit\n");
     child.waitExit();
 
@@ -53,7 +53,7 @@ function getLibInfo(libname)
         var ldconfig = child.stdout.str.trim();
         child = require('child_process').execFile('/bin/sh', ['sh']);
         child.stdout.str = '';
-        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdout.on('data', stdparser);
         child.stdin.write(ldconfig + " -p | grep '" + libname + ".so.' | tr '\\n' '^' | awk -F^ '{ printf \"[\"; for(i=1;i<=NF;++i) {" + ' split($i, plat, ")"); split(plat[1], plat2, "("); ifox=split(plat2[2], ifo, ","); libc=""; hwcap="0"; for(ifoi=1;ifoi<=ifox;++ifoi) { if(split(ifo[ifoi], jnk, "libc")==2) { libc=ifo[ifoi]; } if(split(ifo[ifoi], jnk, "hwcap:")==2) { split(ifo[ifoi], jnk, "0x"); hwcap=jnk[2]; }   }      x=split($i, tok, " "); if(tok[1]!="") { printf "%s{\\"lib\\": \\"%s\\", \\"path\\": \\"%s\\", \\"hwcap\\": \\"%s\\", \\"libc\\": \\"%s\\"}", (i!=1?",":""), tok[1], tok[x], hwcap, libc; }} printf "]"; }\'\nexit\n');
         child.waitExit();
 
@@ -69,8 +69,8 @@ function getLibInfo(libname)
 
     // No ldconfig, or no result returned;
     child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.on('data', function () { });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.on('data', stdparser);
     child.stdin.write('ls /lib/' + libname + '.*' + " | tr '\\n' '`' | awk -F'`' '{" + ' DEL=""; printf "["; for(i=1;i<NF;++i) { if($1~/((\\.so)(\\.[0-9]+)*)$/) { printf "%s{\\"path\\": \\"%s\\"}",DEL,$i; DEL=","; } } printf "]"; }\'\nexit\n');
     child.waitExit();
     try
@@ -339,8 +339,8 @@ function monitorinfo()
                 }
 
                 var ch = require('child_process').execFile('/bin/sh', ['sh']);
-                ch.stderr.on('data', function () { });
-                ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
+                ch.stderr.on('data', stdparser);
+                ch.stdout.str = ''; ch.stdout.on('data', stdparser);
                 if (process.platform == 'freebsd')
                 {
                     ch.stdin.write('ps -ax | grep X\nexit\n');
@@ -521,7 +521,7 @@ function monitorinfo()
             var uname = require('user-sessions').getUsername(consoleuid);
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdout.on('data', stdparser);
             child.stdin.write("ps " + (process.platform == 'freebsd'?"-ax ":"") + "-e -o user" + (process.platform=='linux'?":999":"") + " -o tty -o command | grep X | awk '{ split($0, a, \"-auth\"); split(a[2], b, \" \"); if($1==\"" + uname + "\" && b[1]!=\"\") { printf \"%s,%s,%s\",$1,$2,b[1] } }'\nexit\n");
             child.waitExit();
             var tokens = child.stdout.str.trim().split(',');
@@ -536,7 +536,7 @@ function monitorinfo()
                 // So we're going to brute force it, by enumerating all processes owned by this user, and inspect the environment variables
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdout.on('data', stdparser);
                 child.stdin.write("ps " + (process.platform=='freebsd'?"-ax ":"") + "-e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
                 child.waitExit();
 
