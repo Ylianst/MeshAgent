@@ -14,19 +14,63 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function emptyhandler()
+{
+}
+function stdparser(c)
+{
+    this.str += c.toString();
+}
+function ConnectionHandler2(s)
+{
+    if (this.parent.isAlive())
+    {
+        this.parent.object._control = s;
+        this.parent.object._control._parent = this;
+        this.close();
+        this.parent.object.invoke = function (method, args)
+        {
+            var d, h = Buffer.alloc(4);
+            d = Buffer.from(JSON.stringify({ command: 'invoke', value: { method: method, args: args } }));
+            h.writeUInt32LE(d.length + 4);
+            this._control.write(h);
+            this._control.write(d);
+        };
+    }
+}
+function ConnectionHandler1(s)
+{
+    this.parent.object._client = s;
+    this.parent.object._client._parent = this;
+    this.close();
+    var d, h = Buffer.alloc(4);
+    s.descriptorMetadata = 'win-dispatcher, ' + this.parent.object.options.launch.module + '.' + this.parent.object.options.launch.method + '()';
 
+    for (var m in this.parent.object.options.modules)
+    {
+        d = Buffer.from(JSON.stringify({ command: 'addModule', value: { name: this.parent.object.options.modules[m].name, js: this.parent.object.options.modules[m].script } }));
+        h.writeUInt32LE(d.length + 4);
+        s.write(h);
+        s.write(d);
+    }
+    d = Buffer.from(JSON.stringify({ command: 'launch', value: { split: this.parent.object.options.launch.split ? true : false, module: this.parent.object.options.launch.module, method: this.parent.object.options.launch.method, args: this.parent.object.options.launch.args } }));
+    h.writeUInt32LE(d.length + 4);
+    s.write(h);
+    s.write(d);
+    this.parent.object.emit('connection', s);
+}
 function dispatch(options)
 {
     if (!options || !options.modules || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
 
     var ipcInteger
-    var ret = { options: options };
+    var ret = { _ObjectID: 'dispatch', options: options };
     require('events').EventEmitter.call(ret, true).createEvent('connection');
 
-    ret._ipc = require('net').createServer(); ret._ipc.parent = ret;
-    ret._ipc2 = require('net').createServer(); ret._ipc2.parent = ret;
-    ret._ipc.on('close', function () { });
-    ret._ipc2.on('close', function () { });
+    ret._ipc = require('net').createServer(); ret._ipc.parent = WeakReference(ret);
+    ret._ipc2 = require('net').createServer(); ret._ipc2.parent = WeakReference(ret);
+    ret._ipc.on('close', emptyhandler);
+    ret._ipc2.on('close', emptyhandler);
 
     while (true)
     {
@@ -44,41 +88,8 @@ function dispatch(options)
         }
     }
     var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
-    ret._ipc2.once('connection', function onConnect(s)
-    {
-        this.parent._control = s;
-        this.parent._control._parent = this;
-        this.close();
-        this.parent.invoke = function (method, args)
-        {
-            var d, h = Buffer.alloc(4);
-            d = Buffer.from(JSON.stringify({ command: 'invoke', value: { method: method, args: args } }));
-            h.writeUInt32LE(d.length + 4);
-            this._control.write(h);
-            this._control.write(d);
-        };
-    });
-    ret._ipc.once('connection', function onConnect(s)
-    {
-        this.parent._client = s;
-        this.parent._client._parent = this;
-        this.close();
-        var d, h = Buffer.alloc(4);
-        s.descriptorMetadata = 'win-dispatcher, ' + this.parent.options.launch.module + '.' + this.parent.options.launch.method + '()';
-
-        for (var m in this.parent.options.modules)
-        {
-            d = Buffer.from(JSON.stringify({ command: 'addModule', value: { name: this.parent.options.modules[m].name, js: this.parent.options.modules[m].script } }));
-            h.writeUInt32LE(d.length + 4);
-            s.write(h);
-            s.write(d);
-        }
-        d = Buffer.from(JSON.stringify({ command: 'launch', value: { split: this.parent.options.launch.split?true:false, module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
-        h.writeUInt32LE(d.length + 4);
-        s.write(h);
-        s.write(d);
-        this.parent.emit('connection', s);
-    });
+    ret._ipc2.once('connection', ConnectionHandler2);
+    ret._ipc.once('connection', ConnectionHandler1);
 
     var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: '"' + options.user + '"' } };
     for (var c1e in process.env)
@@ -87,8 +98,8 @@ function dispatch(options)
     }
 
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
-    child.stderr.on('data', function (c) { });
-    child.stdout.on('data', function (c) { });
+    child.stderr.on('data', stdparser);
+    child.stdout.on('data', stdparser);
     child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ');
     if (options.user)
     {

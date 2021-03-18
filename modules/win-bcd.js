@@ -14,12 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function stdparser(c)
+{
+    if (this.str = null) { this.str = ''; }
+    this.str += c.toString();
+}
+
 function getKeys()
 {
     var ret = {};
     child = require('child_process').execFile(process.env['windir'] + "\\System32\\bcdedit.exe", ['bcdedit', '/enum', '{current}']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.on('data', function () { });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.on('data', stdparser);
     child.waitExit();
 
     var lines = child.stdout.str.trim().split('\r\n');
@@ -41,15 +47,15 @@ function getKey(key)
 function setKey(key, value)
 {
     var child = require('child_process').execFile(process.env['windir'] + "\\System32\\bcdedit.exe", ['bcdedit', '/set', '{current}', key, value]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.on('data', function () { });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.on('data', stdparser);
     child.waitExit();
 }
 function deleteKey(key)
 {
     var child = require('child_process').execFile(process.env['windir'] + "\\System32\\bcdedit.exe", ['bcdedit', '/deletevalue', '{current}', key]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.on('data', function () { });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.on('data', stdparser);
     child.waitExit();
 }
 
@@ -78,8 +84,8 @@ function disableSafeModeService(serviceName)
 function restart(delay)
 {
     var child = require('child_process').execFile(process.env['windir'] + "\\System32\\shutdown.exe", ['shutdown', '/r', '/t', delay!=null?delay.toString():'0']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.on('data', function (c) { console.log(c.toString());});
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.on('data', stdparser);
     child.waitExit();
 }
 
