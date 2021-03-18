@@ -22,6 +22,12 @@ var TH32CS_SNAPMODULE = 0x08;
 var PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
+
 // Used on Windows and Linux to get information about running processes
 function processManager() {
     this._ObjectID = 'process-manager'; // Used for debugging, allows you to get the object type at runtime.
@@ -113,8 +119,8 @@ function processManager() {
                 var fallback = false;
                 var users = require('fs').existsSync('/etc/login.defs') ? 'user:99' : 'user';
                 var p = require('child_process').execFile('/bin/sh', ['sh']);
-                p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
-                p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
+                p.stdout.str = ''; p.stdout.on('data', stdparser);
+                p.stderr.str = ''; p.stderr.on('data', stdparser);
                 p.stdin.write('ps -e -o pid -o ' + users + ' -o args | tr ' + "'\\n' '\\t' | awk -F" + '"\\t" \'');
                 p.stdin.write('{');
                 p.stdin.write('   printf "{"; ');
@@ -136,8 +142,8 @@ function processManager() {
                 {
                     fallback = true;
                     var p = require('child_process').execFile('/bin/sh', ['sh']);
-                    p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
-                    p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
+                    p.stdout.str = ''; p.stdout.on('data', stdparser);
+                    p.stderr.str = ''; p.stderr.on('data', stdparser);
                     p.stdin.write("ps | tr '\\n' '`' | awk -F'`' '");
                     p.stdin.write('{');
                     p.stdin.write('   len=split($1,A," "); X=index($1,A[len]);');
@@ -192,8 +198,8 @@ function processManager() {
             case 'darwin':
             case 'freebsd':
                 var p = require('child_process').execFile('/bin/sh', ['sh']);
-                p.stdout.str = ''; p.stdout.on('data', function (c) { this.str += c.toString(); });
-                p.stderr.str = ''; p.stderr.on('data', function (c) { this.str += c.toString(); });
+                p.stdout.str = ''; p.stdout.on('data', stdparser);
+                p.stderr.str = ''; p.stderr.on('data', stdparser);
                 p.stdin.write('ps -axo pid -o user -o command | tr ' + "'\\n' '\\t' | awk -F" + '"\\t" \'{ printf "{"; for(i=2;i<NF;++i) { gsub(/^[ ]+/,"",$i); split($i,tok," "); pid=tok[1]; user=tok[2]; cmd=substr($i,length(tok[1])+length(tok[2])+2); gsub(/\\\\/,"\\\\\\\\&",cmd); gsub(/"/,"\\\\\\\\&",cmd); gsub(/^[ ]+/,"",cmd); printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i!=2?",":""),pid,pid,user,cmd; } printf "}"; }\'\nexit\n');
                 p.waitExit();
 
@@ -258,7 +264,7 @@ function processManager() {
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdout.on('data', stdparser);
                 child.stdin.write("whereis pgrep | awk '{ print $2 }'\nexit\n");
                 child.waitExit();
                 return (child.stdout.str.trim());
@@ -270,8 +276,8 @@ function processManager() {
             this.getProcess = function getProcess(cmd)
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
+                child.stderr.str = ''; child.stderr.on('data', stdparser);
                 child.stdin.write("pgrep gnome-session | tr '\\n' '\\t' |" + ' awk -F"\\t" \'{ printf "["; for(i=1;i<NF;++i) { if(i>1) { printf ","; } printf "%d", $i; } printf "]"; }\'');
                 child.stdin.write('\nexit\n');
                 child.waitExit();
@@ -285,8 +291,8 @@ function processManager() {
         this.getProcessEx = function getProcessEx(cmd)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
             child.stdin.write('ps -ax -o pid -o command | grep ' + cmd + " | tr '\\n' '\\t' | awk -F" + '"\\t" \'{ printf "["; for(i=1;i<NF;++i) { split($i,r," "); if(r[2]!="grep") { if(i>1) { printf ","; } printf "%s", r[1]; } } printf "]"; }\'');
             child.stdin.write('\nexit\n');
             child.waitExit();
