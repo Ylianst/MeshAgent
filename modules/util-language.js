@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
 
 function toLang(val)
 {
@@ -964,8 +969,8 @@ function getCurrent()
     if(process.platform == 'win32')
     {
         var child = require('child_process').execFile(process.env['windir'] + '\\system32\\wbem\\wmic.exe', ['wmic', 'os', 'get', 'oslanguage','/FORMAT:LIST']);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+        child.stdout.str = ''; child.stdout.on('data', stdparser);
+        child.stderr.str = ''; child.stderr.on('data', stdparser);
         child.waitExit();
 
         var lines = child.stdout.str.trim().split('\r\n');
@@ -990,8 +995,8 @@ function getCurrent()
         if (process.platform == 'darwin')
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
             child.stdin.write("osascript -e 'user locale of (get system info)'\nexit\n");
             child.waitExit();
             return (child.stdout.str.trim());
@@ -1002,8 +1007,8 @@ function getCurrent()
             {
                 var uid = require('user-sessions').gdmUid;
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdout.str = ''; child.stdout.on('data', stdparser);
+                child.stderr.str = ''; child.stderr.on('data', stdparser);
                 child.stdin.write('ps -e -o pid -o uid | grep ' + uid + ' | awk ' + "'{ print $1; }'\nexit\n");
                 child.waitExit();
                 var pid = parseInt(child.stdout.str.trim());

@@ -16,6 +16,12 @@ limitations under the License.
 
 var cpu_feature = {};
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
+
 /* Intel-defined CPU features, CPUID level 0x00000001 (EDX), word 0 */
 cpu_feature.X86_FEATURE_FPU			= ( 0*32+ 0); /* Onboard FPU */
 cpu_feature.X86_FEATURE_VME			= ( 0*32+ 1); /* Virtual Mode Extensions */
@@ -66,10 +72,10 @@ cpu_feature.X86_FEATURE_LONGRUN		= ( 2*32+ 1); /* Longrun power control */
 cpu_feature.X86_FEATURE_LRTI        = (2 * 32 + 3); /* LongRun table interface */
 
 /* Other features, Linux-defined mapping, word 3 */
-cpu_Feature.X86_FEATURE_CXMMX		= ( 3*32+ 0); /* Cyrix MMX extensions */
-cpu_Feature.X86_FEATURE_K6_MTRR		= ( 3*32+ 1); /* AMD K6 nonstandard MTRRs */
-cpu_Feature.X86_FEATURE_CYRIX_ARR	= ( 3*32+ 2); /* Cyrix ARRs (= MTRRs) */
-cpu_Feature.X86_FEATURE_CENTAUR_MCR = (3 * 32 + 3); /* Centaur MCRs (= MTRRs) */
+cpu_feature.X86_FEATURE_CXMMX = (3 * 32 + 0); /* Cyrix MMX extensions */
+cpu_feature.X86_FEATURE_K6_MTRR = (3 * 32 + 1); /* AMD K6 nonstandard MTRRs */
+cpu_feature.X86_FEATURE_CYRIX_ARR = (3 * 32 + 2); /* Cyrix ARRs (= MTRRs) */
+cpu_feature.X86_FEATURE_CENTAUR_MCR = (3 * 32 + 3); /* Centaur MCRs (= MTRRs) */
 cpu_feature.X86_FEATURE_K8			= ( 3*32+ 4); /* "" Opteron, Athlon64 */
 cpu_feature.X86_FEATURE_K7			= ( 3*32+ 5); /* "" Athlon */
 cpu_feature.X86_FEATURE_P3			= ( 3*32+ 6); /* "" P3 */
@@ -248,9 +254,9 @@ cpu_feature.X86_FEATURE_AVX512BW		= ( 9*32+30); /* AVX-512 BW (Byte/Word granula
 cpu_feature.X86_FEATURE_AVX512VL = (9 * 32 + 31); /* AVX-512 VL (128/256 Vector Length) Extensions */
 
 var child = require('child_process').execFile('/bin/sh', ['sh']);
-child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+child.stdout.str = ''; child.stdout.on('data', stdparser);
 child.stdin.write("cat /proc/cpuinfo | grep flags | tr '\\n' '~' | awk -F~ '{ printf " + '"["; for(i=1;i<=NF-1;++i) { split($i, line, ":"); x=split(line[2], vals, " "); printf "%s{", (i!=1?",":""); for(j=1;j<=x;++j) { printf "%s\\"%s\\": 1", (j!=1?",":""), vals[j];  } printf "}";  } printf "]"; }\'\nexit\n');
-child.stderr.on('data', function (c) { });
+child.stderr.on('data', stdparser);
 child.waitExit();
 
 if (process.platform == 'linux')
@@ -273,3 +279,4 @@ else
     module.exports = null;
 }
 
+child = null;

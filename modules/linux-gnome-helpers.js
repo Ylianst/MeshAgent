@@ -14,11 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function stdparser(c)
+{
+    if (this.str = null) { this.str = ''; }
+    this.str += c.toString();
+}
 
 function linux_getMountPoints()
 {
     var child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
     child.stdin.write("mount  | tr '\\n' '`' | awk '");
     child.stdin.write('{');
     child.stdin.write('   printf "{";');
@@ -49,8 +54,8 @@ function linux_getMountPoints()
 function gnome_getProxySettings(uid)
 {
     var child = require('child_process').execFile('/bin/sh', ['sh'], { env: { HOME: require('user-sessions').getHomeFolder(uid) }});
-    child.stderr.str = ''; child.stderr.on('data', function (c) { });
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
 
     child.stdin.write('gsettings list-recursively org.gnome.system.proxy | tr "\\n" "\\|" | awk \'');
     child.stdin.write('{');
@@ -94,8 +99,8 @@ function gnome_getProxySettings(uid)
 function gnome_getDesktopWallpaper(uid)
 {
     var child = require('child_process').execFile('/bin/sh', ['sh'], { env: { HOME: require('user-sessions').getHomeFolder(uid) } });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { });
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
     child.stdin.write('gsettings get org.gnome.desktop.background picture-uri\nexit\n');
     child.waitExit();
     child.stdout.str = child.stdout.str.trim().split('file://').pop();
@@ -127,8 +132,8 @@ function gnome_setDesktopWallpaper(uid, filePath)
     }
 
     var child = require('child_process').execFile('/bin/sh', ['sh'], { uid: uid, env: v });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
     child.stdin.write('gsettings set org.gnome.desktop.background picture-uri file://' + filePath + '\nexit\n');
     child.waitExit();
 }
@@ -148,7 +153,7 @@ switch(process.platform)
             {
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdout.on('data', stdparser);
                 child.stdin.write("whereis gsettings | awk '{ print $2 }'\nexit\n");
                 child.waitExit();
                 return (child.stdout.str.trim());
@@ -163,8 +168,8 @@ switch(process.platform)
                     if(require('fs').existsSync('/usr/bin/script'))
                     {
                         var child = require('child_process').execFile('/bin/sh', ['sh']);
-                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                        child.stderr.on('data', function () { });
+                        child.stdout.str = ''; child.stdout.on('data', stdparser);
+                        child.stderr.on('data', stdparser);
                         child.stdin.write('script -V | awk \'{ split($NF, T, "."); printf "{\\"major\\":%s, \\"minor\\":%s}",T[1],T[2]; }\'\nexit\n');
                         child.waitExit();
                         try
