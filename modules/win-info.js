@@ -16,11 +16,17 @@ limitations under the License.
 
 var promise = require('promise');
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
+
 function qfe()
 {
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'qfe', 'list', 'full', '/FORMAT:CSV']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
     child.waitExit();
 
     var lines = child.stdout.str.trim().split('\r\n');
@@ -44,8 +50,8 @@ function qfe()
 function av()
 {
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', '/Namespace:\\\\root\\SecurityCenter2', 'Path', 'AntiVirusProduct', 'get', '/FORMAT:CSV']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); })
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.str = ''; child.stderr.on('data', stdparser)
     child.waitExit();
 
     var lines = child.stdout.str.trim().split('\r\n');
@@ -72,7 +78,7 @@ function av()
 }
 function defrag(options)
 {
-    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    var ret = WeakReference(new promise(promise.defaultInit));
     var path = '';
 
     switch(require('os').arch())
@@ -81,8 +87,8 @@ function defrag(options)
             if (require('_GenericMarshal').PointerSize == 4)
             {
                 // 32 Bit App on 64 Bit Windows
-                ret._rej('Cannot defrag volume on 64 bit Windows from 32 bit application');
-                return (ret);
+                ret.object.reject('Cannot defrag volume on 64 bit Windows from 32 bit application');
+                return (ret.object);
             }
             else
             {
@@ -95,17 +101,17 @@ function defrag(options)
             path = process.env['windir'] + '\\System32\\defrag.exe';
             break;
         default:
-            ret._rej(require('os').arch() + ' not supported');
-            return (ret);
+            ret.object.reject(require('os').arch() + ' not supported');
+            return (ret.object);
             break;
     }
 
-    ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\defrag.exe', ['defrag', options.volume + ' /A']);
-    ret.child.promise = ret;
-    ret.child.promise.options = options;
-    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
-    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
-    ret.child.on('exit', function (code)
+    ret.object.child = require('child_process').execFile(process.env['windir'] + '\\System32\\defrag.exe', ['defrag', options.volume + ' /A']);
+    ret.object.child.promise = ret;
+    ret.object.child.promise.options = options;
+    ret.object.child.stdout.str = ''; ret.object.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.object.child.stderr.str = ''; ret.object.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.object.child.on('exit', function (code)
     {
         var lines = this.stdout.str.trim().split('\r\n');
         var obj = { volume: this.promise.options.volume };
@@ -131,9 +137,10 @@ function defrag(options)
                 }               
             }
         }
-        this.promise._res(obj);
+        this.promise.object.child = null;
+        this.promise.object.resolve(obj);
     });
-    return (ret);
+    return (ret.object);
 }
 function regQuery(H, Path, Key)
 {
@@ -173,7 +180,6 @@ function pendingReboot()
 function installedApps()
 {
     var promise = require('promise');
-    var ret = new promise(function (a, r) { this._resolve = a; this._reject = r; });
     
     var code = "\
     var reg = require('win-registry');\
@@ -211,11 +217,16 @@ function installedApps()
     }\
     console.log(JSON.stringify(result,'', 1));process.exit();";
 
-    ret.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop().split('.exe')[0], '-exec "' + code + '"']);
-    ret.child.promise = ret;
-    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
-    ret.child.on('exit', function (c) { this.promise._resolve(JSON.parse(this.stdout.str.trim())); });
-    return (ret);
+    var ret = WeakReference(new promise(promise.defaultInit));
+    ret.object.child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop().split('.exe')[0], '-exec "' + code + '"']);
+    ret.object.child.promise = ret;
+    ret.object.child.stdout.str = ''; ret.object.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.object.child.on('exit', function (c)
+    {
+        this.promise.object.child = null;
+        this.promise.object.resolve(JSON.parse(this.stdout.str.trim()));
+    });
+    return (ret.object);
 }
 
 if (process.platform == 'win32')
