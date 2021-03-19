@@ -19,6 +19,12 @@ var winreg = require('win-registry');
 
 //attachDebugger({ webport: 9995, wait: true }).then(console.log, console.log);
 
+function stdparser(c)
+{
+    if (this.str == null) { this.str = ''; }
+    this.str += c.toString();
+}
+
 function netsecurityExists()
 {
     var child;
@@ -31,14 +37,15 @@ function netsecurityExists()
     {
         child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
     try
     {
         child.waitExit(2000);
     }
     catch(e)
     {
+        child = null;
         return (false);
     }
 
@@ -121,30 +128,30 @@ function fetchPortFilters(rules)
 
 function getFirewallRules(options)
 {
-    var p = new promise(function (a, r) { this._res = a; this._rej = r; });
-    require('events').EventEmitter.call(p, true)
+    var child;
+    var p = WeakReference(new promise(promise.defaultInit));
+    require('events').EventEmitter.call(p.object, true)
         .createEvent('firewallRule');
 
-    var retVal = [], filter = [];
     var command = 'Get-NetFirewallRule';
     if (options.program) { options.Program = options.program; delete options.program; }
     if (options.Program) { command = 'Get-NetFirewallApplicationFilter -Program \\"' + options.Program + '\\" | ' + command; }
 
     if (require('os').arch() == 'x64')
     {
-        p.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        p.object.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
     else
     {
-        p.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        p.object.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
-    p.options = options;
-    p.child.parent = p;
-    p.child.stdout.str = ''; p.child.stdout.on('data', function (c)
+    p.object.options = options;
+    p.object.child.parent = p;
+    p.object.child.stdout.str = ''; p.object.child.stdout.on('data', function (c)
     {
         var command;
         this.str += c.toString();
-        if(this.parent.parent.listenerCount('firewallRule')>0)
+        if(this.parent.parent.object.listenerCount('firewallRule')>0)
         {
             var i;
             if((i=this.str.indexOf('\r\n\r\n'))>=0)
@@ -158,30 +165,36 @@ function getFirewallRules(options)
 
                 for(i=0;i<j.length;++i)
                 {                    
-                    this.parent.parent.emit('firewallRule', j[i]);
+                    this.parent.parent.object.emit('firewallRule', j[i]);
                 }
             }
         }
     });
-    p.child.stderr.str = ''; p.child.stderr.on('data', function (c) { this.str += c.toString(); });
-
-    p.child.on('exit', function ()
+    p.object.child.stderr.str = ''; p.object.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    p.object.child.on('exit', function ()
     {
         var command, i, j, child, filter;
-        if (this.stderr.str.trim() != "") { this.parent._rej(this.stderr.str.trim()); return; }
-
-        if (this.parent.listenerCount('firewallRule') > 0)
+        if (this.stderr.str.trim() != "")
         {
-            this.parent._res();
+            var v = this.stderr.str.trim();
+            this.parent.object.child = null;
+            this.parent.object.reject(v);
+            return;
+        }
+
+        if (this.parent.object.listenerCount('firewallRule') > 0)
+        {
+            this.parent.object.child = null;
+            this.parent.object.resolve();
             return;
         }
 
         var objArr = parseCmdletOutput(this.stdout.str);
         fetchPortFilters(objArr);
-        this.parent._res(objArr);
+        this.parent.object.child = null;
+        this.parent.object.resolve(objArr);
     });
-
-    return (p);
+    return (p.object);
 }
 
 
@@ -216,16 +229,18 @@ function disableFirewallRules(options)
     }
 
     ret.child.ret = ret;
-    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
-    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', stdparser);
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', stdparser);
     ret.child.on('exit', function ()
     {
         if (this.stderr.str != '')
         {
+            this.ret.child = null;
             this.ret._rej(this.stderr.str.trim());
         }
         else
         {
+            this.ret.child = null;
             this.ret._res();
         }
     });
@@ -264,16 +279,18 @@ function enableFirewallRules(options)
     }
 
     ret.child.ret = ret;
-    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
-    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', stdparser);
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', stdparser);
     ret.child.on('exit', function ()
     {
         if(this.stderr.str != '')
         {
+            this.ret.child = null;
             this.ret._rej(this.stderr.str.trim());
         }
         else
         {
+            this.ret.child = null;
             this.ret._res();
         }
     });
@@ -429,7 +446,6 @@ function convertOptions(options)
 function removeFirewallRule(options)
 {
     if (typeof (options) == 'string') { options = { Name: options }; }
-    var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
     if (options.program) { options.Program = options.program; delete options.program; }
 
     var command = 'Remove-NetFirewallRule';
@@ -448,38 +464,32 @@ function removeFirewallRule(options)
         }
     }
 
-    try
+    var ret = WeakReference(new promise(promise.defaultInit));
+    if (require('os').arch() == 'x64')
     {
-        if (require('os').arch() == 'x64')
-        {
-            ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-        }
-        else
-        {
-            ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-        }
+        ret.object.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
-    catch(f)
+    else
     {
-        ret._rej(f.toString());
-        return (ret);
+        ret.object.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
 
-    ret.child.ret = ret;
-    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
-    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
-    ret.child.on('exit', function ()
+    ret.object.child.ret = ret;
+    ret.object.child.stdout.str = ''; ret.object.child.stdout.on('data', stdparser);
+    ret.object.child.stderr.str = ''; ret.object.child.stderr.on('data', stdparser);
+    ret.object.child.on('exit', function ()
     {
+        ret.object.child = null;
         if(this.stderr.str != '')
         {
-            this.ret._rej(this.stderr.str.trim());
+            this.ret.object.reject(this.stderr.str.trim());
         }
         else
         {
-            this.ret._res();
+            this.ret.object.resolve();
         }
     });
-    return (ret);
+    return (ret.object);
 }
 
 function addFirewallRule(options)
@@ -501,25 +511,17 @@ function addFirewallRule(options)
     }
 
     var child;
-    try
+    if (require('os').arch() == 'x64')
     {
-        if (require('os').arch() == 'x64')
-        {
-            child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-        }
-        else
-        {
-            child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
-        }
+        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
-    catch(f)
+    else
     {
-        // Unable to call powershell
-        return (true);
+        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
     }
 
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
     child.waitExit();
 
     if(child.stderr.str.trim() != '')
@@ -553,18 +555,18 @@ function netsh_parseResults(str)
 function netsh_getFirewallRules(options)
 {
     if (options.program) { options.Program = options.program; delete options.program; }
-    var p = new promise(function (a, r) { this._res = a; this._rej = r; });
-    require('events').EventEmitter.call(p, true)
+    var p = WeakReference(new promise(promise.defaultInit));
+    require('events').EventEmitter.call(p.object, true)
         .createEvent('firewallRule');
 
     var command = 'netsh advfirewall firewall show rule name=all verbose';
-    p.options = options;
-    p._results = [];
-    p.child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
-    p.child.ret = p;
-    p.child.stderr.str = ''; p.child.stderr.on('data', function (c) { this.str += c.toString(); });
-    p.child.stdout.str = '';
-    p.child.stdout.on('data', function (b)
+    p.object.options = options;
+    p.object._results = [];
+    p.object.child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
+    p.object.child.ret = p;
+    p.object.child.stderr.str = ''; p.object.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    p.object.child.stdout.str = '';
+    p.object.child.stdout.on('data', function (b)
     {
         var key, ok;
         this.str += b.toString();
@@ -576,9 +578,9 @@ function netsh_getFirewallRules(options)
             for (var i in rules)
             {
                 ok = true;
-                for (key in this.parent.ret.options)
+                for (key in this.parent.ret.object.options)
                 {
-                    if(this.parent.ret.options[key] == null || this.parent.ret.options[key] != rules[i][key])
+                    if(this.parent.ret.object.options[key] == null || this.parent.ret.object.options[key] != rules[i][key])
                     {
                         ok = false;
                         break;
@@ -586,13 +588,13 @@ function netsh_getFirewallRules(options)
                 }
                 if (ok)
                 {
-                    if (this.parent.ret.listenerCount('firewallRule') > 0)
+                    if (this.parent.ret.object.listenerCount('firewallRule') > 0)
                     {
-                        this.parent.ret.emit('firewallRule', rules[i]);
+                        this.parent.ret.object.emit('firewallRule', rules[i]);
                     }
                     else
                     {
-                        this.parent.ret._results.push(rules[i]);
+                        this.parent.ret.object._results.push(rules[i]);
                     }
                 }
             }
@@ -603,27 +605,28 @@ function netsh_getFirewallRules(options)
             }
         }
     });
-    p.child.on('exit', function ()
+    p.object.child.on('exit', function ()
     {
-        if (this.ret.listenerCount('firewallRule') > 0)
+        p.object.child = null;
+        if (this.ret.object.listenerCount('firewallRule') > 0)
         {
-            this.ret._res();
+            this.ret.object.resolve();
         }
         else
         {
-            if(this.ret._results.length>0)
+            if(this.ret.object._results.length>0)
             {
-                this.ret._res(this.ret._results);
+                this.ret.object.resolve(this.ret.object._results);
             }
             else
             {
-                this.ret._rej('No matches');
+                this.ret.object.reject('No matches');
             }
         }
     });
 
 
-    return (p);
+    return (p.object);
 }
 function netsh_disableFirewallRules(options)
 {
@@ -704,13 +707,14 @@ function netsh_addFirewallRule(options)
     }
 
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
-    child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stderr.str = ''; child.stderr.on('data', stdparser);
+    child.stdout.str = ''; child.stdout.on('data', stdparser);
     child.waitExit();
 }
 function netsh_removeFirewallRule(options)
 {
     var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
+    ret._ObjectID = 'netsh_promise';
     ret.options = options;
     ret.getp = netsh_getFirewallRules(options);
     ret.getp.ret = ret;
@@ -719,6 +723,7 @@ function netsh_removeFirewallRule(options)
         var child, command, key, value;
         convertNetSecurityValues(this.ret.options);
 
+        console.log('rules.length=', rules);
         for(var i in rules)
         {
             command = 'netsh advfirewall firewall delete rule name="' + rules[i].Name + '"';
@@ -730,8 +735,8 @@ function netsh_removeFirewallRule(options)
             }
 
             child = require('child_process').execFile(process.env['windir'] + '\\System32\\cmd.exe', ['/C "' + command + '"']);
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', stdparser);
+            child.stdout.str = ''; child.stdout.on('data', stdparser);
             child.waitExit();
         }
         this.ret._res();
