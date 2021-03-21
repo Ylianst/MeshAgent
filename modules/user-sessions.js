@@ -1012,25 +1012,18 @@ function UserSessions()
     this.enumerateUsers = function enumerateUsers()
     {
         var promise = require('promise');
-        var p = new promise(function (res, rej)
-        {
-            this.__resolver = res;
-            this.__rejector = rej;
-        });
+        var p = new promise(promise.defaultInit);
+        p.parent = this;
         p.descriptorMetadata = 'user-sessions: enumerateUsers()';
-        p.__handler = function __handler(users)
-        {
-            p.__resolver(users);
-        };
+
         try
         {
-            this.Current(p.__handler);
+            this.Current(p.resolve);
         }
         catch (e)
         {
-            p.__rejector(e);
+            p.reject(e);
         }
-        p.parent = this;
         return (p);
     }
 }

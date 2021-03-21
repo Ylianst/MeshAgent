@@ -44,7 +44,16 @@ function checkFolderPath(dest)
 }
 function extractNext(p)
 {
-    if (p.pending.length == 0) { p.source.close(); p._res(); return; }
+    if (p._stream) { p._stream.unpipe(); }
+    if (p.pending.length == 0)
+    {
+        p.source.close();
+        p.source = null;
+        p._output = null;
+        p._stream = null;
+        p._res();
+        return;
+    }
     var next = p.pending.pop();
     var dest = p.baseFolder + (process.platform == 'win32' ? '\\' : '/') + next;
     if (process.platform == 'win32')
@@ -67,20 +76,24 @@ function extractNext(p)
         return;
     }
 
-    p._stream = p.source.getStream(next);
-    p._output = require('fs').createWriteStream(dest, { flags: 'wb' });
-    p._output.name = next;
-    p._output.promise = p;
-    p._output.on('close', function ()
+    var wp = WeakReference(p);
+    p = null;
+
+    wp.object._stream = wp.object.source.getStream(next);
+    wp.object._output = require('fs').createWriteStream(dest, { flags: 'wb' });
+    require('events').setFinalizerMetadata.call(wp.object._output, next);
+    wp.object._output.name = next;
+    wp.object._output.promise = wp;
+    wp.object._output.once('close', function ()
     {
-        if (this.promise._stream.crc != this.promise.source.crc(this.name))
+        if (this.promise.object._stream.crc != this.promise.object.source.crc(this.name))
         {
-            this.promise._rej('CRC Check failed');
+            this.promise.object._rej('CRC Check failed');
             return;
         }
-        extractNext(this.promise);
+        extractNext(this.promise.object);
     });
-    p._stream.pipe(p._output);
+    wp.object._stream.pipe(wp.object._output);
 }
 
 function zippedObject(table)
@@ -251,18 +264,22 @@ function zippedObject(table)
         }
 
         var i;
-        var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+        var ret = WeakReference(new promise(promise.defaultInit));
+        ret.object._res = ret.object.resolve;
+        ret.object._rej = ret.object.reject;
+
+        ret.object.descriptorMetadata = 'extractAll.promise';
         if (destFolder.endsWith(process.platform == 'win32' ? '\\' : '/')) { destFolder = destFolder.substring(0, destFolder.length - 1); }
-        ret.source = this;
-        ret.baseFolder = destFolder;
-        ret.pending = [];
+        ret.object.source = this;
+        ret.object.baseFolder = destFolder;
+        ret.object.pending = [];
         for (i in this.files)
         {
-            ret.pending.push(this.files[i]);
+            ret.object.pending.push(this.files[i]);
         }
 
-        extractNext(ret);
-        return (ret);
+        extractNext(ret.object);
+        return (ret.object);
     };
     this._extractAllStreams2 = function _extractAllStreams2(prom)
     {
