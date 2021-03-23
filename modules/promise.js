@@ -93,7 +93,7 @@ function Promise(promiseFunc)
     {
         this.completedArgs = [];
     });
-    this._internal.on('newListener', (function (eventName, eventCallback)
+    this._internal.on('newListener2', (function (eventName, eventCallback)
     {
         //console.log('newListener', eventName, 'errors/' + this.errors + ' completed/' + this.completed);
         var r = null;
@@ -105,6 +105,8 @@ function Promise(promiseFunc)
             {
                 this.emit_returnValue('resolved', r);
             }
+            this.removeAllListeners('resolved');
+            this.removeAllListeners('rejected');
         }
 
         if (eventName == 'rejected' && (eventCallback.internal == null || eventCallback.internal == false))
@@ -126,6 +128,8 @@ function Promise(promiseFunc)
         if (eventName == 'rejected' && this.errors && this.completed)
         {
             eventCallback.apply(this, this.completedArgs);
+            this.removeAllListeners('resolved');
+            this.removeAllListeners('rejected');
         }
         if (eventName == 'settled' && this.completed)
         {
