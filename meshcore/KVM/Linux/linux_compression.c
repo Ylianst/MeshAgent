@@ -98,6 +98,8 @@ int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height
 	cinfo.dest->init_destination = &init_destination;
 	cinfo.dest->empty_output_buffer = &empty_output_buffer;
 	cinfo.dest->term_destination = &term_destination;
+	cinfo.comp_info[0].v_samp_factor = 1;
+	cinfo.comp_info[0].h_samp_factor = 1;
 
 	cinfo.image_width = image_width;
 	cinfo.image_height = image_height;
