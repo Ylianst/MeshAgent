@@ -83,7 +83,7 @@ void term_destination (j_compress_ptr cinfo)
 	}
 }
 
-int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height, int quality)
+int write_JPEG_buffer(JSAMPLE * image_buffer, int image_width, int image_height, int quality)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -94,26 +94,34 @@ int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height
 	if (default_JPEG_error_handler != NULL) { jerr.error_exit = jpeg_error_handler; }
 
 	jpeg_create_compress(&cinfo);
-	cinfo.dest = (struct jpeg_destination_mgr *) malloc (sizeof(struct jpeg_destination_mgr));
+	cinfo.dest = (struct jpeg_destination_mgr *) malloc(sizeof(struct jpeg_destination_mgr));
 	cinfo.dest->init_destination = &init_destination;
 	cinfo.dest->empty_output_buffer = &empty_output_buffer;
 	cinfo.dest->term_destination = &term_destination;
-	cinfo.comp_info[0].v_samp_factor = 1;
-	cinfo.comp_info[0].h_samp_factor = 1;
 
 	cinfo.image_width = image_width;
 	cinfo.image_height = image_height;
 	cinfo.input_components = 3;
 	cinfo.in_color_space = JCS_RGB;
 	jpeg_set_defaults(&cinfo);
+
+	// 4:4:4, 1x1 (no subsampling)
+	// The resolution of chrominance information (Cb & Cr) is preserved at the same rate as the luminance (Y) information
+	cinfo.comp_info[0].v_samp_factor = 1;
+	cinfo.comp_info[0].h_samp_factor = 1;
+	cinfo.comp_info[1].v_samp_factor = 1;
+	cinfo.comp_info[1].h_samp_factor = 1;
+	cinfo.comp_info[2].v_samp_factor = 1;
+	cinfo.comp_info[2].h_samp_factor = 1;
+
 	jpeg_set_quality(&cinfo, quality, TRUE);
 	jpeg_start_compress(&cinfo, TRUE);
 	row_stride = image_width * 3;
 
 	while (cinfo.next_scanline < cinfo.image_height)
 	{
-		row_pointer[0] = & image_buffer[cinfo.next_scanline * row_stride];
-		(void) jpeg_write_scanlines(&cinfo, row_pointer, 1);
+		row_pointer[0] = &image_buffer[cinfo.next_scanline * row_stride];
+		(void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
 	}
 
 	jpeg_finish_compress(&cinfo);
@@ -124,4 +132,3 @@ int write_JPEG_buffer (JSAMPLE * image_buffer, int image_width, int image_height
 
 	return 0;
 }
-
