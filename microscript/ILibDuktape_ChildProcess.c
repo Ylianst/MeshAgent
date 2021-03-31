@@ -616,7 +616,20 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 	if (g_displayFinalizerMessages)
 	{
 		printf("++++ childProcess.subProcess (pid: %u, %s) [%p]\n", ILibProcessPipe_Process_GetPID(p), target, duk_get_heapptr(ctx, -1));
-		duk_push_string(ctx, target);
+		duk_push_sprintf(ctx, "%s ", target);			// [string]
+		if (duk_is_array(ctx, 1))
+		{
+			int z;
+			duk_prepare_method_call(ctx, -1, "concat");		// [string][concat][this]
+			duk_push_global_object(ctx);					// [string][concat][this][g]
+			duk_get_prop_string(ctx, -1, "JSON");			// [string][concat][this][g][JSON]
+			duk_prepare_method_call(ctx, -1, "stringify");	// [string][concat][this][g][JSON][serialize][this]
+			duk_dup(ctx, 1);								// [string][concat][this][g][JSON][serialize][this][array]
+			z=duk_pcall_method(ctx, 1);						// [string][concat][this][g][JSON][string]
+			duk_remove(ctx, -2); duk_remove(ctx, -2);		// [string][concat][this][string]
+			z=duk_pcall_method(ctx, 1);						// [string][string]
+			duk_remove(ctx, -2);							// [string]
+		}
 		duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	}
 	duk_push_string(ctx, target); duk_put_prop_string(ctx, -2, "_target");
