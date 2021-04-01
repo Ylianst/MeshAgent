@@ -448,13 +448,21 @@ function removeFirewallRule(options)
         }
     }
 
-    if (require('os').arch() == 'x64')
+    try
     {
-        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        if (require('os').arch() == 'x64')
+        {
+            ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        }
+        else
+        {
+            ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        }
     }
-    else
+    catch(f)
     {
-        ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        ret._rej(f.toString());
+        return (ret);
     }
 
     ret.child.ret = ret;
@@ -493,13 +501,21 @@ function addFirewallRule(options)
     }
 
     var child;
-    if (require('os').arch() == 'x64')
+    try
     {
-        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        if (require('os').arch() == 'x64')
+        {
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        }
+        else
+        {
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        }
     }
-    else
+    catch(f)
     {
-        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        // Unable to call powershell
+        return (true);
     }
 
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });

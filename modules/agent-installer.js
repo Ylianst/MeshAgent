@@ -543,13 +543,13 @@ function serviceExists(loc, params)
         {
             // SUCCESS
             process.stdout.write(' [DELETED]\n');
-            uninstallService(this._params);
+            uninstallService(params);
         }, function ()
         {
             // FAILED
             process.stdout.write(' [No Rules Found]\n');
-            uninstallService(this._params);
-        }).parentPromise._params = params;
+            uninstallService(params);
+        });
     }
     else
     {
