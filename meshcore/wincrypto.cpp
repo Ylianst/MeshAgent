@@ -181,17 +181,21 @@ wincrypto_object __fastcall wincrypto_open(int newcert, char *rootSubject)
 	ZeroMemory(&exts, sizeof(exts));
 
 	wincrypto_data *ret = (wincrypto_data*)ILibMemory_SmartAllocate(sizeof(wincrypto_data));
-
+	
 	// Open the best CNG possible
-	while (providerName == NULL && wincrypto_CngProviders[r] != NULL) 
+	while (providerName == NULL && wincrypto_CngProviders[r] != NULL)
 	{
 		providerName = wincrypto_CngProviders[r];
 		NCryptOpenStorageProvider(&(ret->hProv), providerName, 0);
 		if (ret->hProv == NULL) providerName = NULL;
 		r++;
 	}
-	if (ret->hProv == NULL) goto error;
-	
+	if (ret->hProv == NULL)
+	{
+		ILIBLOGMESSAGEX("Could not find suitable CngProvider");
+		goto error;
+	}
+
 	// Create cert subject string in format csp understands
 	if (!CertStrToName(X509_ASN_ENCODING, (LPCTSTR)rootSubject, CERT_X500_NAME_STR, NULL, NULL, &subjectEncodedSize, NULL)) goto error;
 	if ((subjectEncoded = (PBYTE)malloc(subjectEncodedSize)) == NULL) ILIBCRITICALEXIT(254);
@@ -199,8 +203,12 @@ wincrypto_object __fastcall wincrypto_open(int newcert, char *rootSubject)
 	sib.cbData = subjectEncodedSize;
 	sib.pbData = subjectEncoded;
 	 
-	ret->hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, ret->hProv, CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_OPEN_EXISTING_FLAG, L"MY"); // CERT_STORE_NO_CRYPT_RELEASE_FLAG
-	if (!ret->hCertStore) goto error;
+	ret->hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, NULL, CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_OPEN_EXISTING_FLAG, L"MY"); // CERT_STORE_NO_CRYPT_RELEASE_FLAG
+	if (!ret->hCertStore)
+	{
+		ILIBLOGMESSAGEX("Failed to open Windows Cert Store");
+		goto error;
+	}
 
 	// Look for cert and if exists, delete it
 	ret->certCtx = CertFindCertificateInStore(ret->hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_NAME, &sib, NULL );
@@ -208,23 +216,52 @@ wincrypto_object __fastcall wincrypto_open(int newcert, char *rootSubject)
 	// Check if we can get the private key
 	if (ret->certCtx != NULL)
 	{
-		if (!CryptAcquireCertificatePrivateKey(ret->certCtx, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG, NULL, &hKeyNode, &hKeyNodeSpec, &hFreeKeyNode)) { newcert = 1; }
-		if (hKeyNodeSpec != CERT_NCRYPT_KEY_SPEC) { newcert = 1; } // If this private key is not CNG, don't use it.
+		if (!CryptAcquireCertificatePrivateKey(ret->certCtx, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG, NULL, &hKeyNode, &hKeyNodeSpec, &hFreeKeyNode)) 
+		{
+			newcert = 1;
+			ILIBLOGMESSAGEX("CryptAcquireCertificatePrivateKey() Failed");
+		}
+		if (hKeyNodeSpec != CERT_NCRYPT_KEY_SPEC) 
+		{
+			newcert = 1; // If this private key is not CNG, don't use it.
+			ILIBLOGMESSAGEX("hKeyNodeSpec != CERT_NCRYPT_KEY_SPEC");
+		} 
 		if (hFreeKeyNode && hKeyNode != NULL) { if (hKeyNodeSpec == CERT_NCRYPT_KEY_SPEC) NCryptFreeObject(hKeyNode); else CryptReleaseContext(hKeyNode, 0); }
 	}
 
 	// Check if have a certificate already, or need to create a new one
 	if (ret->certCtx != NULL && newcert == 0) goto end;
-	if (ret->certCtx) { status = CertDeleteCertificateFromStore(ret->certCtx); if (!status) goto error; ret->certCtx = NULL; }
+	if (ret->certCtx) 
+	{
+		status = CertDeleteCertificateFromStore(ret->certCtx); 
+		if (!status)
+		{
+			ILIBLOGMESSAGEX("CertDeleteCertificateFromStore() Failed");
+			goto error;
+		}
+		ret->certCtx = NULL;
+	}
 
 	// Generate node RSA key-pair
-    if (FAILED(status = NCryptCreatePersistedKey(ret->hProv, &hKeyNode, BCRYPT_RSA_ALGORITHM, (LPCWSTR)wkeycontainer, 0, NCRYPT_OVERWRITE_KEY_FLAG))) goto error;
+	if (FAILED(status = NCryptCreatePersistedKey(ret->hProv, &hKeyNode, BCRYPT_RSA_ALGORITHM, (LPCWSTR)wkeycontainer, 0, NCRYPT_OVERWRITE_KEY_FLAG)))
+	{
+		ILIBLOGMESSAGEX("NCryptCreatePersistedKey(%s) failed", ILibWideToUTF8(providerName, -1));
+		goto error;
+	}
 	if (FAILED(status = NCryptSetProperty(hKeyNode, NCRYPT_LENGTH_PROPERTY, (PBYTE)&KeyLength, 4, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG))) 
 	{
 		KeyLength = 2048; // If 3072 is not supported, go down to 2048.
-		if (FAILED(status = NCryptSetProperty(hKeyNode, NCRYPT_LENGTH_PROPERTY, (PBYTE)&KeyLength, 4, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG))) { goto error; }
+		if (FAILED(status = NCryptSetProperty(hKeyNode, NCRYPT_LENGTH_PROPERTY, (PBYTE)&KeyLength, 4, NCRYPT_PERSIST_FLAG | NCRYPT_SILENT_FLAG))) 
+		{
+			ILIBLOGMESSAGEX("NCryptSetProperty(%u) failed", KeyLength);
+			goto error;
+		}
 	}
-	if (FAILED(status = NCryptFinalizeKey(hKeyNode, NCRYPT_SILENT_FLAG))) { goto error; } // Ask for silent create, this will fail if not admin.
+	if (FAILED(status = NCryptFinalizeKey(hKeyNode, NCRYPT_SILENT_FLAG))) // Ask for silent create, this will fail if not admin.
+	{
+		ILIBLOGMESSAGEX("NCryptFinalizeKey() failed");
+		goto error; 
+	} 
 
 	// Create self signed cert 
 	ZeroMemory(&kpi, sizeof(kpi));
@@ -284,15 +321,22 @@ wincrypto_object __fastcall wincrypto_open(int newcert, char *rootSubject)
 	sa.pszObjId = szOID_RSA_SHA384RSA; // Using SHA384
 
 	ret->certCtx = CertCreateSelfSignCertificate(NULL, &sib, 0, &kpi, &sa, &st1, &st2, &exts);
-	if (!ret->certCtx) { goto error; }
+	if (!ret->certCtx) 
+	{
+		ILIBLOGMESSAGEX("CertCreateSelfSignCertificate() failed");
+		goto error; 
+	}
 
 	// Note this is a different context to certCtx, this ctx is the in-store ctx
 	status = CertAddCertificateContextToStore(ret->hCertStore, ret->certCtx, CERT_STORE_ADD_REPLACE_EXISTING, &ret->certCtx);
-	if (!status || ret->certCtx == NULL) goto error;
+	if (!status || ret->certCtx == NULL)
+	{
+		ILIBLOGMESSAGEX("CertAddCertificateContextToStore() failed");
+		goto error;
+	}
 
 	// Get the selected provider name and save it in the registry
 	if (providerName != NULL) wincrypto_setregistry(L"KeyStore", providerName);
-
 	goto end;
 
 error:

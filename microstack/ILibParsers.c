@@ -70,6 +70,7 @@ limitations under the License.
 	#endif
 
 	#include <Dbghelp.h>
+	#include <fcntl.h>
 #endif
 
 #include <time.h>
@@ -2590,6 +2591,7 @@ ILibExportMethod void ILibChain_EndContinue(void *chain)
 }
 
 char* g_ILibCrashID = NULL;
+char* g_ILibCrashID_HASH = NULL;
 char* g_ILibCrashDump_path = NULL;
 
 #if defined(WIN32)
@@ -2684,7 +2686,7 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 			psym->MaxNameLen = MAX_SYM_NAME;
 			pimg->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION [%s] @ ", (g_ILibCrashID != NULL ? g_ILibCrashID : ""));
+			len = sprintf_s(buffer, sizeof(buffer), "FATAL EXCEPTION @ ");
 #ifdef WIN64
 			len += sprintf_s(buffer + len, sizeof(buffer) - len, "[FuncAddr: 0x%016llx / BaseAddr: 0x%016llx / Delta: %lld]\n", (unsigned __int64)StackFrame.AddrPC.Offset, (unsigned __int64)&ILibCreateChain, (unsigned __int64)&ILibCreateChain - (unsigned __int64)StackFrame.AddrPC.Offset);
 #else
@@ -2731,18 +2733,6 @@ void ILib_POSIX_CrashHandler(int code)
 	{
 		memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "** CRASH **\n", 12);
 		msgLen += 12;
-		if (g_ILibCrashID != NULL)
-		{
-			int idlen = strnlen_s(g_ILibCrashID, 255);
-			memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "[", 1);
-			msgLen += 1;
-
-			memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, g_ILibCrashID, idlen);
-			msgLen += idlen;
-
-			memcpy_s(msgBuffer + msgLen, sizeof(msgBuffer) - msgLen, "]\n", 2);
-			msgLen += 2;
-		}
 	}
 	else if (code == 254)
 	{
@@ -9428,6 +9418,36 @@ void ILibGetDiskFreeSpace(void *i64FreeBytesToCaller, void *i64TotalBytes)
 #endif
 }
 
+
+
+
+int ILibFile_CopyTo(char *source, char *destination)
+{
+#ifdef WIN32
+	WCHAR SourceW[4096];
+	WCHAR DestW[4096];
+
+	ILibUTF8ToWideEx(source, -1, SourceW, (int)sizeof(SourceW) / 2);
+	ILibUTF8ToWideEx(destination, -1, DestW, (int)sizeof(DestW) / 2);
+	return(CopyFileW(SourceW, DestW, FALSE) ? 0 : 1);
+#else
+	FILE *from = fopen(source, "rb");
+	FILE *to = fopen(destination, "wb");
+	size_t bytesRead;
+	int ret = 0;
+	while ((bytesRead = fread(ILibScratchPad, 1, sizeof(ILibScratchPad), from)) > 0)
+	{
+		ret = (fwrite(ILibScratchPad, 1, bytesRead, to) > 0 ? 0 : 1);
+	}
+
+	fclose(to);
+	fclose(from);
+	return(ret);
+#endif
+	
+}
+
+
 int ILibGetMillisecondTimeSpan(struct timeval *tv1, struct timeval *tv2)
 {
 	struct timeval a;
@@ -10692,11 +10712,11 @@ char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, i
 	int len = ILibGetLocalTime((char*)timeStamp, (int)sizeof(timeStamp));
 	if (file != NULL)
 	{
-		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] %s:%d (%d,%d) %s", timeStamp, file, line, user1, user2, msg);
+		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] [%s] %s:%d (%d,%d) %s", timeStamp, g_ILibCrashID_HASH !=NULL? g_ILibCrashID_HASH :"", file, line, user1, user2, msg);
 	}
 	else
 	{
-		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] %s", timeStamp, msg);
+		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] [%s] %s", timeStamp, g_ILibCrashID_HASH != NULL ? g_ILibCrashID_HASH : "", msg);
 	}
 	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx(ILibCriticalLogFilename, ILibCriticalLogBuffer, len);
 	if (file != NULL)

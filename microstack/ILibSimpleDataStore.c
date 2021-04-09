@@ -274,12 +274,13 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 
 	ILibSimpleDataStore_RecordHeader_NG *node;
 	size_t nodeSize;
+	uint64_t currentOffset;
 
 	if (root == NULL) return NULL;
 	node = (ILibSimpleDataStore_RecordHeader_NG*)(root->scratchPad + sizeof(uint64_t));
 
 	// If the current position is the end of the file, exit now.
-	if (ILibSimpleDataStore_GetPosition(root->dataFile) == root->fileSize) return NULL;
+	if ((currentOffset = ILibSimpleDataStore_GetPosition(root->dataFile)) == root->fileSize) return NULL;
 
 	// Read sizeof(ILibSimpleDataStore_RecordNode) bytes to get record Size
 	switch (legacySize)
@@ -296,8 +297,11 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 	}
 
 	i = (int)fread((void*)node, 1, nodeSize, root->dataFile);
-	if (i < (int)nodeSize) return NULL;
-
+	if (i < (int)nodeSize)
+	{
+		ILibSimpleDataStore_SeekPosition(root->dataFile, currentOffset, SEEK_SET);
+		return NULL;
+	}
 
 	// Correct the struct, valueHash stays the same
 	node->nodeSize = (int)ntohl(node->nodeSize);
@@ -308,13 +312,17 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 	if (node->keyLen > (int)((sizeof(ILibScratchPad) - nodeSize - sizeof(uint64_t))))
 	{
 		// Invalid record
+		ILibSimpleDataStore_SeekPosition(root->dataFile, currentOffset, SEEK_SET);
 		return(NULL);
 	}
 
 	// Read the key name
 	i = (int)fread((char*)node + nodeSize, 1, node->keyLen, root->dataFile);
-	if (i != node->keyLen) return NULL; // Reading Key Failed
-
+	if (i != node->keyLen)
+	{
+		ILibSimpleDataStore_SeekPosition(root->dataFile, currentOffset, SEEK_SET);
+		return NULL; // Reading Key Failed
+	}
 	// Validate Data, in 4k chunks at a time
 	bytesLeft = node->valueLength;
 
@@ -342,6 +350,7 @@ ILibSimpleDataStore_RecordHeader_NG* ILibSimpleDataStore_ReadNextRecord(ILibSimp
 			}
 		}
 
+		ILibSimpleDataStore_SeekPosition(root->dataFile, currentOffset, SEEK_SET);
 		return NULL; // Data is corrupt
 	}
 	return node;
@@ -365,12 +374,14 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 	ILibSimpleDataStore_RecordHeader_NG *node = NULL;
 	ILibSimpleDataStore_TableEntry *entry;
 	int count;
+	uint64_t newoffset;
 
 	if (root == NULL) return;
 
 	ILibHashtable_ClearEx(root->keyTable, ILibSimpleDataStore_TableClear_Sink, root); // Wipe the key table, we will rebulit it
+	fseek(root->dataFile, 0, SEEK_END); // See the start of the file
+	root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile);
 	fseek(root->dataFile, 0, SEEK_SET); // See the start of the file
-	root->fileSize = -1; // Indicate we can't write to the data store
 
 
 	// First, try NG Format
@@ -475,7 +486,19 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 	else
 	{
 		// No need to convert db format, because we're already NG format
-		root->fileSize = ILibSimpleDataStore_GetPosition(root->dataFile);
+		if ((newoffset = ILibSimpleDataStore_GetPosition(root->dataFile)) != root->fileSize)
+		{
+			// DB corruption detected
+			ILIBLOGMESSAGEX("DB Corruption Detected");
+			char *dest = ILibString_Replace(root->filePath, strnlen_s(root->filePath, sizeof(ILibScratchPad)), ".db", 3, ".corrupt.db", 11);
+			ILibFile_CopyTo(root->filePath, dest);
+			free(dest);
+#ifdef WIN32
+			_chsize_s(_fileno(root->dataFile), newoffset);
+#else
+			ftruncate(fileno(root->dataFile), newoffset);
+#endif
+		}
 	}
 }
 

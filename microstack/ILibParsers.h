@@ -930,7 +930,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen);
 	void ILibDeleteFileFromDisk(char *FileName);
 	void ILibGetDiskFreeSpace(void *i64FreeBytesToCaller, void *i64TotalBytes);
-
+	int ILibFile_CopyTo(char *source, char *destination);
 
 	/*! \defgroup StackGroup Stack
 	\ingroup DataStructures
@@ -1572,6 +1572,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset);
 	char* ILibChain_Debug(void *chain, char* buffer, int bufferLen);
 	extern char* g_ILibCrashID;
+	extern char* g_ILibCrashID_HASH;
 	extern char* g_ILibCrashDump_path;
 
 #if defined(WIN32)

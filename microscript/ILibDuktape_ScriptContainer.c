@@ -178,6 +178,7 @@ extern void ILibDuktape_MemoryStream_Init(duk_context *ctx);
 extern void ILibDuktape_NetworkMonitor_Init(duk_context *ctx);
 extern int GenerateSHA384FileHash(char *filePath, char *fileHash);
 char g_AgentCrashID[280];
+char g_AgentCrashID_HASH[17] = { 0 };
 
 typedef enum SCRIPT_ENGINE_COMMAND
 {
@@ -345,6 +346,8 @@ void ILibDuktape_ScriptContainer_CheckEmbeddedEx(char *exePath, char **script, i
 	if (tmpFile != NULL)
 	{
 		g_ILibCrashID = g_AgentCrashID;
+		g_ILibCrashID_HASH = g_AgentCrashID_HASH;
+		memcpy_s(g_AgentCrashID_HASH, sizeof(g_AgentCrashID_HASH), g_AgentCrashID + i, sizeof(g_AgentCrashID_HASH) - 1);
 
 #ifdef WIN32
 		// Read the PE Headers, to determine where to look for the Embedded JS
