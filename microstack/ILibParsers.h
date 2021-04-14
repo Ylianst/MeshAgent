@@ -1589,8 +1589,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILib_POSIX_InstallCrashHandler(char *exename);
 #endif
 
-#define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, NULL, 0, 0, 0)); exit(code);}
-#define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, NULL, 0, 0, 0)
+#define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); exit(code);}
+#define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)
 	void ILIBLOGMESSAGEX(char *format, ...);
 
 #if defined(WIN32)
