@@ -940,7 +940,7 @@ function serviceManager()
                                     return;
                                 }
                                 this.startp._a();
-                            }, function (e) { console.rawLog('stop() failed => ' + e.toString());});
+                            }, function (e) { this.startp._r(e); });
                             return (p.startp);
                         }
                     }

@@ -271,6 +271,10 @@ function UserSessions()
         {
             return (this.getSessionAttribute(uid, this.InfoClass.WTSUserName));
         }
+        this.getDomain = function getDomain(uid)
+        {
+            return (this.getSessionAttribute(uid, this.InfoClass.WTSDomainName));
+        }
         this.Current = function Current(cb)
         {
             var retVal = {};

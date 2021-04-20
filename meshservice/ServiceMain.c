@@ -289,64 +289,6 @@ int GetServiceState(LPCSTR servicename)
 }
 
 
-int LaunchService(LPCSTR servicename)
-{
-	int r = 0;
-	SC_HANDLE serviceControlManager = OpenSCManager(0, 0, SERVICE_QUERY_STATUS | SERVICE_START);
-
-	if (serviceControlManager)
-	{
-		SC_HANDLE service = OpenService( serviceControlManager, servicename, SERVICE_QUERY_STATUS | SERVICE_START );
-		if (service)
-		{
-			SERVICE_STATUS serviceStatusEx;
-			if ( QueryServiceStatus( service, &serviceStatusEx) )
-			{
-				if (serviceStatusEx.dwCurrentState == SERVICE_STOPPED ) { if (StartService(service, 0, NULL) == TRUE) { r = 1; } } else { r = 2; }
-			}
-			CloseServiceHandle( service );
-		}
-		CloseServiceHandle( serviceControlManager );
-	}
-	return r;
-}
-
-int StopService(LPCSTR servicename)
-{
-	int r = 0;
-	SC_HANDLE serviceControlManager = OpenSCManager(0, 0, SERVICE_QUERY_STATUS | SERVICE_STOP);
-
-	if (serviceControlManager)
-	{
-		SC_HANDLE service = OpenService( serviceControlManager, servicename, SERVICE_QUERY_STATUS | SERVICE_STOP );
-		if (service)
-		{
-			SERVICE_STATUS serviceStatusEx;
-			if ( QueryServiceStatus( service, &serviceStatusEx) )
-			{
-				if (serviceStatusEx.dwCurrentState != SERVICE_STOPPED )
-				{
-					if (ControlService(service, SERVICE_CONTROL_STOP, &serviceStatusEx) == FALSE)
-					{
-						// TODO: Unable to stop service
-						#ifdef _DEBUG
-						ILIBMESSAGE("Unable to stop service");
-						#endif
-					}
-					else
-					{
-						Sleep(3000);
-						r = 1;
-					}
-				}
-			}
-			CloseServiceHandle( service );
-		}
-		CloseServiceHandle( serviceControlManager );
-	}
-	return r;
-}
-
 /*
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
@@ -552,6 +494,31 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && (strcasecmp(argv[1], "state") == 0))
+	{
+		char script[] = "try{console.log(require('service-manager').manager.getService(require('_agentNodeId').serviceName()).status.state);}catch(z){console.log('NOT INSTALLED');};process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && (strcasecmp(argv[1], "start") == 0 || strcasecmp(argv[1], "-start") == 0))
+	{
+		char script[] = "try{require('service-manager').manager.getService(require('_agentNodeId').serviceName()).start();console.log('Service Started');}catch(z){console.log('Failed to start service');}process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && (strcasecmp(argv[1], "stop") == 0 || strcasecmp(argv[1], "-stop") == 0))
+	{
+		char script[] = "try{require('service-manager').manager.getService(require('_agentNodeId').serviceName()).stop().then(function(m){console.log('Service Stopped');process.exit();}, function(m){console.log(m);process.exit();});}catch(z){console.log('Failed to stop service');process.exit();}";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && (strcasecmp(argv[1], "restart") == 0 || strcasecmp(argv[1], "-restart") == 0))
+	{
+		char script[] = "try{require('service-manager').manager.getService(require('_agentNodeId').serviceName()).restart().then(function(m){console.log('Service Restarted');process.exit();}, function(m){console.log(m);process.exit();});}catch(z){console.log('Failed to restart service');process.exit();}";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+
 	if (argc > 1 && strcasecmp(argv[1], "-agentHash") == 0 && integragedJavaScriptLen == 0)
 	{
 		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex').substring(0,16));process.exit();";
@@ -677,52 +644,6 @@ int wmain(int argc, char* wargv[])
 		}
 		wmain_free(argv);
 		return(retCode);
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "state") == 0))
-	{
-		// SERVICE_STOPPED				  1    The service is not running.
-		// SERVICE_START_PENDING		  2    The service is starting.
-		// SERVICE_STOP_PENDING			  3    The service is stopping.
-		// SERVICE_RUNNING				  4    The service is running.
-		// SERVICE_CONTINUE_PENDING		  5    The service continue is pending.
-		// SERVICE_PAUSE_PENDING		  6    The service pause is pending.
-		// SERVICE_PAUSED				  7    The service is paused.
-		// SERVICE_NOT_INSTALLED		100    The service is not installed.
-		int serviceState = GetServiceState(serviceFile);
-		if (serviceState == 1) { printf("Stopped"); }
-		else if (serviceState == 2) { printf("Start Pending"); }
-		else if (serviceState == 3) { printf("Stop Pending"); }
-		else if (serviceState == 4) { printf("Running"); }
-		else if (serviceState == 5) { printf("Continue Pending"); }
-		else if (serviceState == 6) { printf("Pause Pending"); }
-		else if (serviceState == 7) { printf("Paused"); }
-		else if (serviceState == 100) { printf("Not installed"); }
-		wmain_free(argv);
-		return serviceState;
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "start") == 0 || strcasecmp(argv[1], "-start") == 0))
-	{
-		// Ask the service manager to launch the service
-		int r = LaunchService(serviceFile);
-		if (r == 0) { printf("Failed to start mesh agent"); }
-		else if (r == 1) { printf("Started the mesh agent"); }
-		else if (r == 2) { printf("Mesh agent already running"); }
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "stop") == 0 || strcasecmp(argv[1], "-stop") == 0))
-	{
-		// Ask the service manager to stop the service
-		if (StopService(serviceFile) == 1) { printf("Stopped mesh agent"); } else { printf("Failed to stop mesh agent"); }
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "restart") == 0 || strcasecmp(argv[1], "-restart") == 0))
-	{
-		// Ask the service manager to stop and start the service
-		StopService(serviceFile);
-		{
-			int r = LaunchService(serviceFile);
-			if (r == 0) { printf("Failed to restart mesh agent"); }
-			else if (r == 1) { printf("Restarted the mesh agent"); }
-			else if (r == 2) { printf("Mesh agent failed to stop"); }
-		}
 	}
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
 	{		
