@@ -95,11 +95,6 @@ function parseLine(entry)
     var log = { t: Math.floor(d / 1000), m: msg };
     if (hash != null) { log.h = hash; }
 
-    if (log.t == 1610996025)
-    {
-        log.raw = entry;
-    }
-
     // Check for File/Line in generic log entry
     test = msg.match(/^.+:[0-9]+ \([0-9]+,[0-9]+\)/);
     if (test != null)
