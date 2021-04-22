@@ -95,6 +95,11 @@ function parseLine(entry)
     var log = { t: Math.floor(d / 1000), m: msg };
     if (hash != null) { log.h = hash; }
 
+    if (log.t == 1610996025)
+    {
+        log.raw = entry;
+    }
+
     // Check for File/Line in generic log entry
     test = msg.match(/^.+:[0-9]+ \([0-9]+,[0-9]+\)/);
     if (test != null)
@@ -109,10 +114,24 @@ function parseLine(entry)
 
 function readLog_data(buffer)
 {
-    var lines = buffer.toString().split('\n');
-    while(lines.length > 0)
+    var lines = buffer.toString();
+    if (this.buffered != null) { lines = this.buffered + lines; }
+    lines = lines.split('\n');
+    var i;
+
+    for (i = 0; i < (lines.length - 1) ; ++i)
     {
-        parseLine.call(this, lines.shift());
+        parseLine.call(this, lines[i]);
+    }
+
+    if (lines.length == 1)
+    {
+        parseLine.call(this, lines[0]);
+        this.buffered = null;
+    }
+    else
+    {
+        this.buffered = lines[lines.length - 1];
     }
 }
 
@@ -122,9 +141,11 @@ function readLogEx(path)
     try
     {
         var s = require('fs').createReadStream(path);
+        s.buffered = null;
         s.results = ret;
         s.on('data', readLog_data);
         s.resume();
+        if (s.buffered != null) { readLog_data.call(s, s.buffered); s.buffered = null; }
         s.removeAllListeners('data');
         s = null;
     }
