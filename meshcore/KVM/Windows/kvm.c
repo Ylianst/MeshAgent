@@ -374,6 +374,7 @@ void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *r
 	}
 }
 
+unsigned char g_blockinput = 0;
 
 // Feed network data into the KVM. Return the number of bytes consumed.
 // This method consumes a single command.
@@ -399,6 +400,38 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 
 	switch (type)
 	{
+	case MNG_KVM_INPUT_LOCK:
+		// 0 = unlock
+		// 1 = lock
+		// 2 = query
+		if (size == 5)
+		{
+			switch (block[4])
+			{
+				case 0:
+					g_blockinput = 0;
+					BlockInput(0);
+					break;
+				case 1:
+					g_blockinput = 1;
+					BlockInput(1);
+					break;
+				case 2:
+					break;
+				default:
+					return(size);
+					break;
+			}
+
+			unsigned char buffer[5];
+			((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_INPUT_LOCK);	// Write the type
+			((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+			buffer[4] = g_blockinput;																	// status
+
+			writeHandler((char*)buffer, 5, reserved);
+		}
+		
+		break;
 	case MNG_KVM_KEY: // Key
 		{
 			if (size != 6) break;
