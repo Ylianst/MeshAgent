@@ -83,6 +83,25 @@ function getLibInfo(libname)
     }
 }
 
+function defpromise(res, rej)
+{
+    this._rej = rej;
+    this._res = res;
+}
+function OnMonitorInfo(hmon, hdc, r, user)
+{
+    if (this.ObjectToPtr_Verify(this.parent, user))
+    {
+        var rb = r.Deref(0, 16).toBuffer();
+        this.results.push({ left: rb.readInt32LE(0), top: rb.readInt32LE(4), right: rb.readInt32LE(8), bottom: rb.readInt32LE(12), screenId: this.id++ });
+
+        var r = require('_GenericMarshal').CreateInteger();
+        r.Val = 1;
+        return (r);
+    }
+
+}
+
 function monitorinfo()
 {
     this._ObjectID = 'monitor-info';
@@ -98,32 +117,25 @@ function monitorinfo()
         this.getInfo = function getInfo()
         {
             var info = this;
-            return (new promise(function (resolver, rejector) {
-                this._monitorinfo = { resolver: resolver, rejector: rejector, self: info, callback: info._gm.GetGenericGlobalCallback(4) };
-                this._monitorinfo.callback.info = this._monitorinfo;
-                this._monitorinfo.dwData = info._gm.ObjectToPtr(this._monitorinfo);
+            var ret = new promise(defpromise);
+            ret.callback = info._gm.GetGenericGlobalCallback(4);
+            ret.callback.results = [];
+            ret.callback.id = 0;
+            ret.callback.parent = ret;
+            ret.dwData = info._gm.ObjectToPtr(ret);
+            ret.callback.on('GlobalCallback', OnMonitorInfo);
 
-                this._monitorinfo.callback.results = [];
-                this._monitorinfo.callback.on('GlobalCallback', function OnMonitorInfo(hmon, hdc, r, user) {
-                    if (this.ObjectToPtr_Verify(this.info, user)) {
-                        var rb = r.Deref(0, 16).toBuffer();
-                        this.results.push({ left: rb.readInt32LE(0), top: rb.readInt32LE(4), right: rb.readInt32LE(8), bottom: rb.readInt32LE(12) });
+            if (info._user32.EnumDisplayMonitors(0, 0, ret.callback, ret.dwData).Val == 0)
+            {
+                ret._rej('LastError=' + info._kernel32.GetLastError().Val);
+            }
+            else
+            {
+                ret._res(ret.callback.results);
+            }
+            ret.callback.parent = null;
 
-                        var r = this.info.self._gm.CreateInteger();
-                        r.Val = 1;
-                        return (r);
-                    }
-                });
-
-                if (info._user32.EnumDisplayMonitors(0, 0, this._monitorinfo.callback, this._monitorinfo.dwData).Val == 0) {
-                    rejector('LastError=' + info._kernel32.GetLastError().Val);
-                    return;
-                }
-                else {
-                    resolver(this._monitorinfo.callback.results);
-                }
-
-            }));
+            return (ret);
         }
     }
     else if (process.platform == 'linux')
@@ -132,7 +144,7 @@ function monitorinfo()
         this._check = function _check()
         {
             var ix;
-            if(!this.Location_X11LIB)
+            if (!this.Location_X11LIB)
             {
                 var x11info = getLibInfo('libX11');
                 for (ix in x11info)
@@ -153,11 +165,11 @@ function monitorinfo()
                 {
                     if (process.env['Location_X11LIB']) { Object.defineProperty(this, 'Location_X11LIB', { value: process.env['Location_X11LIB'] }); }
                 }
-                catch(xx)
+                catch (xx)
                 {
                 }
             }
-            if(!this.Location_X11TST)
+            if (!this.Location_X11TST)
             {
                 var xtstinfo = getLibInfo('libXtst');
                 for (ix in xtstinfo)
@@ -183,7 +195,7 @@ function monitorinfo()
                 }
 
             }
-            if(!this.Location_X11EXT)
+            if (!this.Location_X11EXT)
             {
                 var xextinfo = getLibInfo('libXext');
                 for (ix in xextinfo)
@@ -204,12 +216,12 @@ function monitorinfo()
                 {
                     if (process.env['Location_X11EXT']) { Object.defineProperty(this, 'Location_X11EXT', { value: process.env['Location_X11EXT'] }); }
                 }
-                catch(xx)
+                catch (xx)
                 {
                 }
 
             }
-            if(!this.Location_X11FIXES)
+            if (!this.Location_X11FIXES)
             {
                 var xfixesinfo = getLibInfo('libXfixes');
                 for (ix in xfixesinfo)
@@ -230,7 +242,7 @@ function monitorinfo()
                 {
                     if (process.env['Location_X11FIXES']) { Object.defineProperty(this, 'Location_X11FIXES', { value: process.env['Location_X11FIXES'] }); }
                 }
-                catch(xx)
+                catch (xx)
                 {
                 }
 
@@ -467,7 +479,7 @@ function monitorinfo()
         this.getInfo = function getInfo()
         {
             var info = this;
-            var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+            var ret = new promise(defpromise);
             ret.parent = this;
 
             if (!process.env.XAUTHORITY || !process.env.DISPLAY)

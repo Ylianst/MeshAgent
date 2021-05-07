@@ -209,7 +209,7 @@ void ILibDuktape_net_socket_OnConnect(ILibAsyncSocket_SocketModule socketModule,
 			duk_push_heapptr(ptrs->ctx, ptrs->object);									// [socket]
 			if (alpnLen != 0)
 			{
-				duk_push_lstring(ptrs->ctx, alpn, alpnLen);
+				duk_push_lstring(ptrs->ctx, (const char*)alpn, alpnLen);
 			}
 			else
 			{
@@ -889,7 +889,7 @@ void ILibDuktape_net_server_OnConnect(ILibAsyncServerSocket_ServerModule AsyncSe
 		SSL_SESSION_get0_alpn_selected(SSL_get_session(ILibAsyncServerSocket_GetSSL(ConnectionToken)), &alpn, &alpnLen);
 		if (alpnLen != 0)
 		{
-			duk_push_lstring(ptr->ctx, alpn, alpnLen);
+			duk_push_lstring(ptr->ctx, (const char*)alpn, alpnLen);
 		}
 		else
 		{

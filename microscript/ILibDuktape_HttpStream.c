@@ -949,7 +949,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 	duk_push_heapptr(ctx, httpStream);									// [socket][pipe][this][http]
 	if (duk_pcall_method(ctx, 1) != 0) { return(ILibDuktape_Error(ctx, "http.onConnect(): Error calling pipe ")); }
 	duk_pop(ctx);														// [socket]
-	char *ttmp = (char*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_readableStream_RSPTRS);
 
 	// HttpStream => Socket
 	duk_push_heapptr(ctx, httpStream);									// [socket][http]

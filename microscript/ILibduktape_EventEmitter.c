@@ -1384,8 +1384,6 @@ duk_ret_t ILibDuktape_EventEmitter_getProperty(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_EventEmitter_setProperty(duk_context *ctx)
 {
-	char *s = (char*)duk_get_string(ctx, 0);
-	char *s2 = (char*)duk_get_string(ctx, 1);
 	duk_push_this(ctx);												// [obj]
 	char *tmp = (char*)duk_push_sprintf(ctx, "%s", duk_get_string(ctx, 0));// [obj][string]
 	duk_dup(ctx, 1);												// [obj][string][val]
