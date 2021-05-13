@@ -14,6 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 var promise = require('promise');
+if (global._hide == null)
+{
+    Object.defineProperty(global, '_hide',
+        {
+            value: function (j)
+            {
+                if (j == null || typeof (j) == 'boolean')
+                {
+                    var ret = global._J;
+                    if (j) { global._J = null; }
+                    return (ret);
+                }
+                else
+                {
+                    global._J = j;
+                    return (global._J);
+                }
+            }
+        });
+}
+
 
 function failureActionToInteger(action)
 {
@@ -716,15 +737,15 @@ function serviceManager()
             var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0004 | (isroot ? (0x0002 | 0x0020 | 0x0010 | 0x00010000): 0x00));
             if (h.Val != 0)
             {
-                var retVal = { _ObjectID: 'service-manager.service' }
-                retVal._scm = handle;
-                retVal._service = h;
-                retVal._GM = this.GM;
-                retVal._proxy = this.proxy;
-                retVal._proxy2 = this.proxy2;
-                retVal.name = name;
+                _hide({ _ObjectID: 'service-manager.service' });
+                _hide()._scm = handle;
+                _hide()._service = h;
+                _hide()._GM = this.GM;
+                _hide()._proxy = this.proxy;
+                _hide()._proxy2 = this.proxy2;
+                _hide().name = name;
 
-                Object.defineProperty(retVal, 'status', 
+                Object.defineProperty(_hide(), 'status', 
                     { 
                         get: function()
                         {
@@ -741,7 +762,7 @@ function serviceManager()
                             }
                         }
                     });
-                Object.defineProperty(retVal, 'installedBy',
+                Object.defineProperty(_hide(), 'installedBy',
                     {
                         get: function()
                         {
@@ -758,7 +779,7 @@ function serviceManager()
                     });
                 try
                 {
-                    Object.defineProperty(retVal, 'installedDate',
+                    Object.defineProperty(_hide(), 'installedDate',
                         {
                             value: require('win-registry').QueryKeyLastModified(require('win-registry').HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + name, 'ImagePath')
                         });
@@ -766,10 +787,10 @@ function serviceManager()
                 catch(xx)
                 {
                 }
-                if (retVal.status.state != 'UNKNOWN')
+                if (_hide().status.state != 'UNKNOWN')
                 {
-                    require('events').EventEmitter.call(retVal);
-                    retVal.close = function ()
+                    require('events').EventEmitter.call(_hide());
+                    _hide().close = function ()
                     {
                         if(this._service && this._scm)
                         {
@@ -778,12 +799,12 @@ function serviceManager()
                             this._service = this._scm = null;
                         }
                     };
-                    retVal.on('~', retVal.close);
-                    retVal.isMe = function isMe()
+                    _hide().on('~', _hide().close);
+                    _hide().isMe = function isMe()
                     {
                         return (parseInt(this.status.pid) == process.pid);
                     }
-                    retVal.update = function update()
+                    _hide().update = function update()
                     {
                         if (this.failureActions)
                         {
@@ -804,7 +825,7 @@ function serviceManager()
                             }
                         }
                     };
-                    retVal.appLocation = function ()
+                    _hide().appLocation = function ()
                     {
                         var reg = require('win-registry');
                         var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + this.name, 'ImagePath').toString();
@@ -812,18 +833,18 @@ function serviceManager()
                         if (ret.startsWith('"')) { ret = ret.substring(1); }
                         return (ret);
                     };
-                    retVal.appWorkingDirectory = function ()
+                    _hide().appWorkingDirectory = function ()
                     {
                         var tokens = this.appLocation().split('\\');
                         tokens.pop();
                         return (tokens.join('\\'));
                     };
-                    retVal.isRunning = function ()
+                    _hide().isRunning = function ()
                     {
                         return (this.status.state == 'RUNNING');
                     };
 
-                    retVal._stopEx = function(s, p)
+                    _hide()._stopEx = function (s, p)
                     {
                         var current = s.status.state;
                         var pid = s.status.pid;
@@ -865,7 +886,7 @@ function serviceManager()
                         }
                     }
 
-                    retVal.stop = function ()
+                    _hide().stop = function ()
                     {
                         var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
                         var status = this.status;
@@ -901,7 +922,7 @@ function serviceManager()
                         }
                         return (ret);
                     }
-                    retVal.start = function ()
+                    _hide().start = function ()
                     {
                         if (this.status.state == 'STOPPED')
                         {
@@ -916,7 +937,7 @@ function serviceManager()
                             throw ('cannot call ' + this.name + '.start(), when current state is: ' + this.status.state);
                         }
                     }
-                    retVal.restart = function ()
+                    _hide().restart = function ()
                     {
                         if (this.isMe())
                         {
@@ -952,19 +973,19 @@ function serviceManager()
                         if(this.proxy.QueryServiceConfigA(h, query_service_configa, query_service_configa._size, query_service_configa_DWORD).Val != 0)
                         {
                             var val = query_service_configa.Deref(this.GM.PointerSize == 4 ? 28 : 48, this.GM.PointerSize).Deref().String;
-                            Object.defineProperty(retVal, 'user', { value: val });
+                            Object.defineProperty(_hide(), 'user', { value: val });
                             switch(query_service_configa.Deref(4,4).toBuffer().readUInt32LE())
                             {
                                 case 0x00:
                                 case 0x01:
                                 case 0x02:
-                                    retVal.startType = 'AUTO_START';
+                                    _hide().startType = 'AUTO_START';
                                     break;
                                 case 0x03:
-                                    retVal.startType = 'DEMAND_START';
+                                    _hide().startType = 'DEMAND_START';
                                     break;
                                 case 0x04:
-                                    retVal.startType = 'DISABLED';
+                                    _hide().startType = 'DISABLED';
                                     break;
                             }
                         }
@@ -976,31 +997,31 @@ function serviceManager()
                     if (this.proxy.QueryServiceConfig2A(h, 2, failureactions, 8192, bneeded).Val != 0)
                     {
                         var cActions = failureactions.toBuffer().readUInt32LE(this.GM.PointerSize == 8 ? 24 : 12);
-                        retVal.failureActions = {};
-                        retVal.failureActions.resetPeriod = failureactions.Deref(0, 4).toBuffer().readUInt32LE(0);
-                        retVal.failureActions.actions = [];
+                        _hide().failureActions = {};
+                        _hide().failureActions.resetPeriod = failureactions.Deref(0, 4).toBuffer().readUInt32LE(0);
+                        _hide().failureActions.actions = [];
                         for(var act = 0 ; act < cActions; ++act)
                         {
                             var action = failureactions.Deref(this.GM.PointerSize == 8 ? 32 : 16, this.GM.PointerSize).Deref().Deref(act*8,8).toBuffer();
                             switch(action.readUInt32LE())
                             {
                                 case 0:
-                                    retVal.failureActions.actions.push({ type: 'NONE' });
+                                    _hide().failureActions.actions.push({ type: 'NONE' });
                                     break;
                                 case 1:
-                                    retVal.failureActions.actions.push({ type: 'SERVICE_RESTART' });
+                                    _hide().failureActions.actions.push({ type: 'SERVICE_RESTART' });
                                     break;
                                 case 2:
-                                    retVal.failureActions.actions.push({ type: 'REBOOT' });
+                                    _hide().failureActions.actions.push({ type: 'REBOOT' });
                                     break;
                                 default:
-                                    retVal.failureActions.actions.push({ type: 'OTHER' });
+                                    _hide().failureActions.actions.push({ type: 'OTHER' });
                                     break;
                             }
-                            retVal.failureActions.actions.peek().delay = action.readUInt32LE(4);
+                            _hide().failureActions.actions.peek().delay = action.readUInt32LE(4);
                         }
                     }
-                    return (retVal);
+                    return (_hide(true));
                 }
                 else {
 
