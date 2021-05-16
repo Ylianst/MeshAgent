@@ -218,9 +218,45 @@ BOOL CALLBACK DisplayInfoEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
     return TRUE;
 }
 
+BOOL CALLBACK DisplayInfoEnumProc_Info(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+{
+	unsigned short* buffer = (unsigned short*)dwData;
+	MONITORINFOEX mi;
+	UNREFERENCED_PARAMETER(hdcMonitor);
+	UNREFERENCED_PARAMETER(lprcMonitor);
+
+	ZeroMemory(&mi, sizeof(mi));
+	mi.cbSize = sizeof(mi);
+
+	// Get the display information
+	if (!GetMonitorInfo(hMonitor, (LPMONITORINFO)&mi)) return TRUE;
+	int w = abs(mi.rcMonitor.left - mi.rcMonitor.right);
+	int h = abs(mi.rcMonitor.top - mi.rcMonitor.bottom);
+
+	int i = (int)(buffer[0]++);
+	int offset = (5 * i) + 4;
+
+	if ((((i + 1) * 10) + 4) > buffer[1]) { return(FALSE); }
+
+	buffer[offset] = (unsigned short)htons((unsigned short)(i+1));						// ID
+	buffer[offset+1] = (unsigned short)htons((unsigned short)(mi.rcMonitor.left));		// X
+	buffer[offset+2] = (unsigned short)htons((unsigned short)(mi.rcMonitor.top));		// Y
+	buffer[offset+3] = (unsigned short)htons((unsigned short)(w));						// WIDTH
+	buffer[offset+4] = (unsigned short)htons((unsigned short)(h));						// HEIGHT
+	return(TRUE);
+}
 void kvm_send_display_list(ILibKVM_WriteHandler writeHandler, void *reserved)
 {
 	int i;
+	char dwData[4096];
+	((unsigned short*)dwData)[0] = (unsigned short)0;
+	((unsigned short*)dwData)[1] = (unsigned short)sizeof(dwData);
+	((unsigned short*)dwData)[2] = (unsigned short)htons((unsigned short)MNG_KVM_DISPLAY_INFO);			// Write the type
+	if (EnumDisplayMonitors(NULL, NULL, DisplayInfoEnumProc_Info, (LPARAM)dwData))
+	{
+		((unsigned short*)dwData)[3] = (unsigned short)htons((((unsigned short*)dwData)[0]) * 10 + 4);	// Length
+		writeHandler(dwData+4, (((unsigned short*)dwData)[0]) * 10 + 4, reserved);
+	}
 
 	// Not looked at the number of screens yet
 	if (SCREEN_COUNT == -1) return;
@@ -231,9 +267,9 @@ void kvm_send_display_list(ILibKVM_WriteHandler writeHandler, void *reserved)
 	{
 		// Only one display, send empty
 		((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);		// Write the type
-		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(8));					// Write the size
-		((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)(0));							// Screen Count
-		((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)(0));							// Selected Screen
+		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(8));						// Write the size
+		((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)(0));						// Screen Count
+		((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)(0));						// Selected Screen
 
 		writeHandler(buffer, 8, reserved);
 	}
