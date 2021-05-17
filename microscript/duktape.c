@@ -99903,3 +99903,26 @@ DUK_INTERNAL duk_double_t duk_util_tinyrandom_get_double(duk_hthread *thr) {
 #undef DUK__RANDOM_XOROSHIRO128PLUS
 #undef DUK__RND_BIT
 #undef DUK__UPDATE_RND
+
+void *_duk_get_tval(void *thr, duk_idx_t idx)
+{
+	return(duk_get_tval(thr, idx));
+}
+
+duk_int_t* _get_refcount_ptr(void *thr, duk_idx_t idx)
+{
+	duk_tval *tv = duk_get_tval_or_unused(thr, idx);
+	duk_heaphdr *h = (DUK_TVAL_IS_HEAP_ALLOCATED(tv) ? DUK_TVAL_GET_HEAPHDR(tv) : NULL);
+	return(&(DUK_HEAPHDR_GET_REFCOUNT(h)));
+}
+
+void* _duk_get_first_object(void *ctx)
+{
+	duk_hthread *thr = (duk_hthread*)ctx;
+	return(thr->heap->heap_allocated);
+}
+void* _duk_get_next_object(void *ctx, void *heapptr)
+{
+	duk_hthread *thr = (duk_hthread*)ctx;
+	return(DUK_HEAPHDR_GET_NEXT(thr->heap, ((duk_heaphdr*)heapptr)));
+}

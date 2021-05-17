@@ -49,6 +49,8 @@ limitations under the License.
 
 #define ILibDuktape_AddCompressedModule(ctx, name, b64str) duk_push_global_object(ctx);duk_get_prop_string(ctx, -1, "addCompressedModule");duk_swap_top(ctx, -2);duk_push_string(ctx, name);duk_push_global_object(ctx);duk_get_prop_string(ctx, -1, "Buffer"); duk_remove(ctx, -2);duk_get_prop_string(ctx, -1, "from");duk_swap_top(ctx, -2);duk_push_string(ctx, b64str);duk_push_string(ctx, "base64");duk_pcall_method(ctx, 2);duk_pcall_method(ctx, 2);duk_pop(ctx);
 
+extern void* _duk_get_first_object(void *ctx);
+extern void* _duk_get_next_object(void *ctx, void *heapptr);
 
 
 typedef enum ILibDuktape_Console_DestinationFlags
@@ -978,6 +980,14 @@ duk_ret_t ILibDuktape_Polyfills_timer_finalizer(duk_context *ctx)
 
 		ILibLifeTime_Remove(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs);
 	}
+
+	duk_eval_string(ctx, "require('events')");			// [events]
+	duk_prepare_method_call(ctx, -1, "deleteProperty");	// [events][deleteProperty][this]
+	duk_push_this(ctx);									// [events][deleteProperty][this][timer]
+	duk_prepare_method_call(ctx, -4, "hiddenProperties");//[events][deleteProperty][this][timer][hidden][this]
+	duk_push_this(ctx);									// [events][deleteProperty][this][timer][hidden][this][timer]
+	duk_call_method(ctx, 1);							// [events][deleteProperty][this][timer][array]
+	duk_call_method(ctx, 2);							// [events][ret]
 	return 0;
 }
 void ILibDuktape_Polyfills_timer_elapsed(void *obj)
@@ -1122,6 +1132,9 @@ duk_ret_t ILibDuktape_Polyfills_timer_clear(duk_context *ctx)
 		}
 	}
 
+	duk_dup(ctx, 0);
+	duk_del_prop_string(ctx, -1, "\xFF_argArray");
+
 	duk_get_prop_string(ctx, 0, ILibDuktape_Timer_Ptrs);
 	ptrs = (ILibDuktape_Timer*)Duktape_GetBuffer(ctx, -1, NULL);
 
@@ -1191,6 +1204,7 @@ duk_ret_t ILibDuktape_Polyfills_addCompressedModule_dataSink(duk_context *ctx)
 duk_ret_t ILibDuktape_Polyfills_addCompressedModule(duk_context *ctx)
 {
 	duk_eval_string(ctx, "require('compressed-stream').createDecompressor();");
+	duk_dup(ctx, 0); duk_put_prop_string(ctx, -2, ILibDuktape_EventEmitter_FinalizerDebugMessage);
 	void *decoder = duk_get_heapptr(ctx, -1);
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "data", ILibDuktape_Polyfills_addCompressedModule_dataSink);
 
@@ -1212,6 +1226,10 @@ duk_ret_t ILibDuktape_Polyfills_addCompressedModule(duk_context *ctx)
 		duk_dup(ctx, -4);							// [stream][decodedString][addModule][this][name][string]
 		duk_pcall_method(ctx, 2);
 	}
+
+	duk_push_heapptr(ctx, decoder);							// [stream]
+	duk_prepare_method_call(ctx, -1, "removeAllListeners");	// [stream][remove][this]
+	duk_pcall_method(ctx, 0);
 
 	return(0);
 }
@@ -3147,7 +3165,105 @@ duk_ret_t ILibDuktape_Polyfills_NativeAllocSize(duk_context *ctx)
 	return(1);
 }
 #endif
+duk_ret_t ILibDuktape_Polyfills_WeakReference_isAlive(duk_context *ctx)
+{
+	duk_push_this(ctx);								// [weak]
+	void **p = Duktape_GetPointerProperty(ctx, -1, "\xFF_heapptr");
+	duk_push_boolean(ctx, ILibMemory_CanaryOK(p));
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_WeakReference_object(duk_context *ctx)
+{
+	duk_push_this(ctx);								// [weak]
+	void **p = Duktape_GetPointerProperty(ctx, -1, "\xFF_heapptr");
+	if (ILibMemory_CanaryOK(p))
+	{
+		duk_push_heapptr(ctx, p[0]);
+	}
+	else
+	{
+		duk_push_null(ctx);
+	}
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_WeakReference(duk_context *ctx)
+{
+	duk_push_object(ctx);														// [weak]
+	ILibDuktape_WriteID(ctx, "WeakReference");		
+	duk_dup(ctx, 0);															// [weak][obj]
+	void *j = duk_get_heapptr(ctx, -1);
+	void **p = (void**)Duktape_PushBuffer(ctx, sizeof(void*));					// [weak][obj][buffer]
+	p[0] = j;
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));// [weak][obj]
 
+	duk_pop(ctx);																// [weak]
+
+	duk_push_pointer(ctx, p); duk_put_prop_string(ctx, -2, "\xFF_heapptr");		// [weak]
+	ILibDuktape_CreateInstanceMethod(ctx, "isAlive", ILibDuktape_Polyfills_WeakReference_isAlive, 0);
+	ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "object", ILibDuktape_Polyfills_WeakReference_object, 1);
+	return(1);
+}
+
+duk_ret_t ILibDuktape_Polyfills_rootObject(duk_context *ctx)
+{
+	void *h = _duk_get_first_object(ctx);
+	duk_push_heapptr(ctx, h);
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_nextObject(duk_context *ctx)
+{
+	void *h = duk_require_heapptr(ctx, 0);
+	void *next = _duk_get_next_object(ctx, h);
+	if (next != NULL)
+	{
+		duk_push_heapptr(ctx, next);
+	}
+	else
+	{
+		duk_push_null(ctx);
+	}
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_countObject(duk_context *ctx)
+{
+	void *h = _duk_get_first_object(ctx);
+	duk_int_t i = 1;
+
+	while (h != NULL)
+	{
+		if ((h = _duk_get_next_object(ctx, h)) != NULL) { ++i; }
+	}
+	duk_push_int(ctx, i);
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_hide(duk_context *ctx)
+{
+	duk_idx_t top = duk_get_top(ctx);
+	duk_push_heap_stash(ctx);									// [stash]
+
+	if (top == 0)
+	{
+		duk_get_prop_string(ctx, -1, "__STASH__");				// [stash][value]
+	}
+	else
+	{
+		if (duk_is_boolean(ctx, 0))
+		{
+			duk_get_prop_string(ctx, -1, "__STASH__");			// [stash][value]
+			if (duk_require_boolean(ctx, 0))
+			{
+				duk_del_prop_string(ctx, -2, "__STASH__");
+			}
+		}
+		else
+		{
+			duk_dup(ctx, 0);									// [stash][value]
+			duk_dup(ctx, -1);									// [stash][value][value]
+			duk_put_prop_string(ctx, -3, "__STASH__");			// [stash][value]
+		}
+	}
+	return(1);
+}
 void ILibDuktape_Polyfills_Init(duk_context *ctx)
 {
 	ILibDuktape_ModSearch_AddHandler(ctx, "queue", ILibDuktape_Queue_Push);
@@ -3194,6 +3310,12 @@ void ILibDuktape_Polyfills_Init(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "_ipv4From", ILibDuktape_Polyfills_ipv4From, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "_isBuffer", ILibDuktape_Polyfills_isBuffer, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "_MSH", ILibDuktape_Polyfills_MSH, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "WeakReference", ILibDuktape_Polyfills_WeakReference, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "_rootObject", ILibDuktape_Polyfills_rootObject, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "_nextObject", ILibDuktape_Polyfills_nextObject, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "_countObjects", ILibDuktape_Polyfills_countObject, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "_hide", ILibDuktape_Polyfills_hide, DUK_VARARGS);
+
 #if defined(ILIBMEMTRACK) && !defined(ILIBCHAIN_GLOBAL_LOCK)
 	ILibDuktape_CreateInstanceMethod(ctx, "_NativeAllocSize", ILibDuktape_Polyfills_NativeAllocSize, 0);
 #endif

@@ -83,6 +83,8 @@ typedef struct ILibDuktape_ContextData
 typedef void(*Duktape_EventLoopDispatch)(void *chain, void *user);
 void Duktape_RunOnEventLoop(void *chain, uintptr_t nonce, duk_context *ctx, Duktape_EventLoopDispatch handler, Duktape_EventLoopDispatch abortHandler, void *user);
 #define Duktape_RunOnEventLoopEx(chain, nonce, ctx, handler, user, freeOnShutdown) Duktape_RunOnEventLoop(chain, nonce, ctx, handler, (freeOnShutdown==0?NULL:(Duktape_EventLoopDispatch)(uintptr_t)0x01), user)
+extern void *_duk_get_tval(void *thr, duk_idx_t idx);
+extern duk_int_t* _get_refcount_ptr(void *thr, duk_idx_t idx);
 
 void ILibDuktape_ExecutorTimeout_Start(duk_context *ctx);
 void ILibDuktape_ExecutorTimeout_Stop(duk_context *ctx);
@@ -228,5 +230,6 @@ void* ILibDuktape_Timeout(duk_context *ctx, void **args, int argsLen, int delay,
 int ILibDuktape_GetReferenceCount(duk_context *ctx, duk_idx_t i);
 
 #define ILibDuktape_WriteID(ctx, id) duk_push_string(ctx, id);duk_put_prop_string(ctx, -2, ILibDuktape_OBJID)
+void ILibDuktape_DisplayProperties(duk_context *ctx, duk_idx_t idx);
 
 #endif
