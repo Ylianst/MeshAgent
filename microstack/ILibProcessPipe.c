@@ -651,7 +651,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	retVal->hProcess = processInfo.hProcess;
 	if (processInfo.hThread != NULL) CloseHandle(processInfo.hThread);
 	retVal->PID = processInfo.dwProcessId;
-
+	
 	if (token != NULL) { CloseHandle(token); token = NULL; }
 	if (userToken != NULL) { CloseHandle(userToken); userToken = NULL; }
 #else
@@ -807,12 +807,31 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		{
 			ignore_result(setsid());
 		}
-		while (envvars != NULL && ((char**)envvars)[0] != NULL)
+
+		if (envvars != NULL)
 		{
-			setenv(((char**)envvars)[0], ((char**)envvars)[1], 1);
-			envvars = (void*)((char*)envvars + 2 * sizeof(char*));
+			char **vars = NULL;
+			int i, z, vlen = 0;
+			for (i = 0; ((char**)envvars)[i] != NULL; i += 2)
+			{
+				vlen += (strnlen_s(((char**)envvars)[i], sizeof(ILibScratchPad2)) + 2 + strnlen_s(((char**)envvars)[i + 1], sizeof(ILibScratchPad2)));
+			}
+			vars = (char**)ILibMemory_SmartAllocateEx(((i / 2) + 1) * sizeof(char*), vlen + sizeof(int));
+			((int*)ILibMemory_Extra(vars))[0] = sizeof(int);
+			for (i = 0; ((char**)envvars)[i] != NULL; i += 2)
+			{
+				z = ((int*)ILibMemory_Extra(vars))[0];
+				vars[i / 2] = (char*)ILibMemory_Extra(vars) + z;
+				z += sprintf_s((char*)ILibMemory_Extra(vars) + z, ILibMemory_ExtraSize(vars) - z, "%s=%s", ((char**)envvars)[i], ((char**)envvars)[i + 1]);
+				++z;
+				((int*)ILibMemory_Extra(vars))[0] = z;
+			}
+			execve(target, parameters, vars);
 		}
-		execv(target, parameters);
+		else
+		{
+			execv(target, parameters);
+		}
 		_exit(1);
 	}
 	if (set != NULL) { ILibVForkPrepareSignals_Parent_Finished(set); }
