@@ -77,6 +77,7 @@ int ILibDuktape_EventEmitter_AddOnEx(duk_context *ctx, duk_idx_t idx, char *even
 void ILibDuktape_EventEmitter_AddHook(ILibDuktape_EventEmitter *emitter, char *eventName, ILibDuktape_EventEmitter_HookHandler handler);
 void ILibDuktape_EventEmitter_ClearHook(ILibDuktape_EventEmitter *emitter, char *eventName);
 
+int ILibDuktape_EventEmitter_ForwardEventEx(duk_context *ctx, duk_idx_t sourceIdx, duk_idx_t targetIdx, char *eventName);
 void ILibDuktape_EventEmitter_ForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName, duk_idx_t eventTargetIndex, char *targetEventName);
 void ILibDuktape_EventEmitter_DeleteForwardEvent(duk_context *ctx, duk_idx_t eventSourceIndex, char *sourceEventName);
 
