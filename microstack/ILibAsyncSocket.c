@@ -1075,6 +1075,10 @@ void ILibAsyncSocket_ConnectToProxy(void* socketModule, struct sockaddr *localIn
 	if (proxyAddress != NULL) memcpy_s(&(module->ProxyAddress), sizeof(struct sockaddr_in6), proxyAddress, INET_SOCKADDR_LENGTH(proxyAddress->sa_family));
 	ILibAsyncSocket_ConnectTo(socketModule, localInterface, remoteAddress, InterruptPtr, user);
 }
+void ILibAsyncSocket_ConnectToProxyEx(void* socketModule, struct sockaddr *localInterface, char *remoteAddressAndPort, struct sockaddr *proxyAddress, char* proxyUser, char* proxyPass, ILibAsyncSocket_OnInterrupt InterruptPtr, void *user)
+{
+
+}
 #endif
 #ifndef MICROSTACK_NOTLS
 ILibAsyncSocket_SendStatus ILibAsyncSocket_ProcessEncryptedBuffer(ILibAsyncSocketModule *Reader)

@@ -211,7 +211,6 @@ typedef struct ILibWebClientDataObject
 	struct sockaddr_in6 proxy;
 	struct ILibWebClientManager *Parent;
 	char* DigestData;
-	int webSocketMaskOverride;
 
 	int PendingConnectionIndex;
 
@@ -565,7 +564,6 @@ void ILibWebClient_ResetWCDO(struct ILibWebClientDataObject *wcdo)
 		// Check the cancel request in the timer list
 		if ( plrt->timer != NULL ) ILibLifeTime_Remove(plrt->timer, plrt);
 	}
-	wcdo->webSocketMaskOverride = 0;
 	wcdo->PAUSE = 0;
 	wcdo->CancelRequest = 0;
 	wcdo->Chunked = 0;
@@ -1243,12 +1241,6 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 	if (wr == NULL) { return RetVal; }
 	state = ILibWebClient_WebSocket_GetState(wr);
 
-#ifndef MICROSTACK_NOTLS
-#ifdef MICROSTACK_TLS_DETECT
-	if (wcdo->webSocketMaskOverride == 0 && ILibAsyncSocket_IsUsingTls(wcdo->SOCK) == 1) flags = 0; // If we are using TLS, disable websocket masking
-#endif
-#endif
-
 	ILibSpinLock_Lock(ILibAsyncSocket_GetSpinLock(wcdo->SOCK));
 	while (i < _bufferLen)
 	{
@@ -1287,7 +1279,8 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 			}
 		}
 
-		if (flags & WEBSOCKET_MASK) {
+		if (flags & WEBSOCKET_MASK) 
+		{
 			// Mask the payload
 			util_random(4, maskKey);
 			maskKeyInt = ((int*)maskKey)[0];
@@ -1298,7 +1291,9 @@ ILibAsyncSocket_SendStatus ILibWebClient_WebSocket_Send(ILibWebClient_StateObjec
 				//for (x = 0; x < bufferLen; ++x) { dataFrame[x] = buffer[x] ^ maskKey[x % 4]; } // This is the slower version
 			}
 			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 3 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, maskKey, (size_t)4, ILibAsyncSocket_MemoryOwnership_USER, dataFrame, (size_t)bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
-		} else {
+		} 
+		else
+		{
 			// Send payload without masking
 			RetVal = ILibAsyncSocket_SendTo_MultiWrite(wcdo->SOCK, NULL, 2 | ILibAsyncSocket_LOCK_OVERRIDE, header, (size_t)headerLen, ILibAsyncSocket_MemoryOwnership_USER, buffer, (size_t)bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
 		}
@@ -2617,7 +2612,6 @@ ILibWebClient_RequestToken ILibWebClient_PipelineRequest(
 		((ILibWebClient_PipelineRequestToken*)retVal)->WebSocketKey = tokenWebSocketKey;
 		((ILibWebClient_PipelineRequestToken*)retVal)->WebSocketMaxBuffer = u.i;
 		((ILibWebClient_PipelineRequestToken*)retVal)->WebSocketSendOK = ILibHTTPPacket_Stash_Get(packet, "_WebSocketOnSendOK", 18);
-		if (ILibHTTPPacket_Stash_HasKey(packet, "_WebSocketMaskOverride", 22)) { wcdo->webSocketMaskOverride = 1; }
 
 		for (i = 0; i < wcm->MaxConnectionsToSameServer; ++i)
 		{

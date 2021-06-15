@@ -205,9 +205,9 @@ typedef struct MeshAgentHostContainer
 	int fakeUpdate;
 	int controlChannelDebug;
 	void *coreTimeout;
-	int webSocketMaskOverride;
 	int jsDebugPort;
 	int coreDumpEnabled;
+	int localConsentMask;
 
 	char agentHash[UTIL_SHA384_HASHSIZE];
 	char serverHash[UTIL_SHA384_HASHSIZE];
@@ -283,7 +283,6 @@ remoteMouseRender:			If set, will always render the remote mouse cursor for KVM
 showModuleNames:			If set, will display the name of modules when they are loaded for the first time
 slaveKvmLog:				[Linux] If set, will enable logging inside the Child KVM Process.
 WebProxy:					Manually specify proxy configuration
-webSocketMaskOverride:		If set, will disable the optimzation to skip WebSocket Masking for TLS protected Web Sockets
 *
 *
 */

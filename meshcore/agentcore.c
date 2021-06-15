@@ -1961,11 +1961,6 @@ void ILibDuktape_MeshAgent_Init(duk_context* ctx, void *chain, MeshAgentHostCont
 	duk_put_prop_string(ctx, -2, "MeshAgentPtr");	// [stash]
 	duk_pop(ctx);									// ...
 	ILibDuktape_ModSearch_AddHandler(ctx, "MeshAgent", ILibDuktape_MeshAgent_PUSH);
-
-	if (agent->webSocketMaskOverride != 0)
-	{
-		duk_peval_string_noresult(ctx, "Object.defineProperty(require('https'), '_webSocketMaskOverride', { value: true });");
-	}
 }
 
 /* ------------------------------ 
@@ -3228,6 +3223,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_AgentUpdate:
 		{
+			if (agent->disableUpdate != 0) { break; }	 // Ignore if updates are disabled
 #ifdef WIN32
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe");
 #else
@@ -3317,6 +3313,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_AgentUpdateBlock:
 		{
+			if (agent->disableUpdate != 0) { break; }	 // Ignore if updates are disabled
+
 			// Write the mesh agent block to file
 			int retryCount = 0;
 #ifdef WIN32
@@ -3857,7 +3855,6 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s", agent->serveruri); }
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
-		if (agent->webSocketMaskOverride != 0) { ILibHTTPPacket_Stash_Put(req, "_WebSocketMaskOverride", 22, (void*)(uintptr_t)0x01); }
 
 		void **tmp = ILibMemory_SmartAllocate(2 * sizeof(void*));
 		agent->controlChannelRequest = tmp;
@@ -5078,7 +5075,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		// Check if there is a CoreModule in the db
 		char *CoreModule;
 		int CoreModuleLen = agentHost->localScript == 0 ? ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0) : 0;
-		agentHost->webSocketMaskOverride = ILibSimpleDataStore_Get(agentHost->masterDb, "webSocketMaskOverride", NULL, 0);
 		if (ILibSimpleDataStore_Get(agentHost->masterDb, "jsDebugPort", NULL, 0) != 0)
 		{
 			char tmp[16];

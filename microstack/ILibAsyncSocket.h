@@ -177,6 +177,7 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 #ifdef MICROSTACK_PROXY
 void ILibAsyncSocket_ClearProxySettings(void *socketModule);
 void ILibAsyncSocket_ConnectToProxy(void* socketModule, struct sockaddr *localInterface, struct sockaddr *remoteAddress, struct sockaddr *proxyAddress, char* proxyUser, char* proxyPass, ILibAsyncSocket_OnInterrupt InterruptPtr, void *user);
+void ILibAsyncSocket_ConnectToProxyEx(void* socketModule, struct sockaddr *localInterface, char *remoteAddressAndPort, struct sockaddr *proxyAddress, char* proxyUser, char* proxyPass, ILibAsyncSocket_OnInterrupt InterruptPtr, void *user);
 #endif
 
 enum ILibAsyncSocket_SendStatus ILibAsyncSocket_SendTo_MultiWrite(ILibAsyncSocket_SocketModule socketModule, struct sockaddr *remoteAddress, unsigned int count, ...);

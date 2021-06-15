@@ -553,23 +553,6 @@ duk_ret_t ILibDuktape_HttpStream_http_onUpgrade(duk_context *ctx)
 	duk_push_int(ctx, cmwb); duk_put_prop_string(ctx, -2, "clientMaxWindowBits");
 	duk_new(ctx, 2);															// [HTTPStream][readable][ext][websocket]
 	duk_remove(ctx, -2);														// [HTTPStream][readable][websocket]
-	if (strcmp(Duktape_GetStringPropertyValue(ctx, -3, ILibDuktape_OBJID, "http.httpStream"), "https.httpStream") == 0) 
-	{
-		ILibDuktape_WriteID(ctx, "https.WebSocketStream");
-		ILibDuktape_WebSocket_State *state = Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
-		if (state != NULL) 
-		{
-			state->noMasking = 1;
-			if (duk_peval_string(ctx, "(function _getOverride(){return(require('https')._webSocketMaskOverride);})();") == 0)	// [result]
-			{
-				if (duk_to_boolean(ctx, -1))
-				{
-					state->noMasking = 0;
-				}
-			}
-			duk_pop(ctx);																										// ...
-		}
-	}
 	
 	ILibChain_Link_SetMetadata(Duktape_GetPointerProperty(ctx, -2, ILibDuktape_ChainLinkPtr), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "http.webSocketStream"));
 	
