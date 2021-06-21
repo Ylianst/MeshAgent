@@ -544,6 +544,21 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	ILibDuktape_CreateReadonlyProperty(ctx, "remoteHost");	// [socket]
 	duk_pop(ctx);											// ...
 
+
+	if (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy"))
+	{
+		duk_get_prop_string(ctx, 0, "proxy");
+		ILibResolveEx(Duktape_GetStringPropertyValue(ctx, -1, "host", NULL), (unsigned short)Duktape_GetIntPropertyValue(ctx, -1, "port", 0), &proxy);
+		duk_pop(ctx);
+
+		// If we are going to use a proxy, we need to have the proxy resolve the remote host
+		duk_push_sprintf(ctx, "%s:%d", host, port);			// [socket][string]
+		duk_swap_top(ctx, -2);								// [string][socket]
+		ILibAsyncSocket_ConnectToProxyEx(ptrs->socketModule, NULL, (char*)duk_get_string(ctx, -2), (struct sockaddr*)&proxy, Duktape_GetStringPropertyValue(ctx, -1, "username", NULL), Duktape_GetStringPropertyValue(ctx, -1, "password", NULL), NULL, ptrs);
+		return(0);
+	}
+
+
 	ILibResolveEx(host, (unsigned short)port, &dest);
 	if (dest.sin6_family == AF_UNSPEC || (duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy") && proxy.sin6_family == AF_UNSPEC))
 	{
@@ -579,16 +594,7 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 	}
 	else
 	{
-		if(duk_is_object(ctx, 0) && duk_has_prop_string(ctx, 0, "proxy"))
-		{
-			duk_get_prop_string(ctx, 0, "proxy");
-			ILibAsyncSocket_ConnectToProxy(ptrs->socketModule, NULL, (struct sockaddr*)&dest, (struct sockaddr*)&proxy, Duktape_GetStringPropertyValue(ctx, -1, "username", NULL), Duktape_GetStringPropertyValue(ctx, -1, "password", NULL), NULL, ptrs);
-			duk_pop(ctx);
-		}
-		else
-		{
-			ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&dest, NULL, ptrs);
-		}
+		ILibAsyncSocket_ConnectTo(ptrs->socketModule, NULL, (struct sockaddr*)&dest, NULL, ptrs);
 
 		duk_push_heapptr(ptrs->ctx, ptrs->object);					// [sockat]
 		duk_push_true(ptrs->ctx);									// [socket][connecting]
@@ -2473,6 +2479,15 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 		duk_get_prop_string(ctx, 0, "proxy");
 		ILibResolveEx(Duktape_GetStringPropertyValue(ctx, -1, "host", NULL), (unsigned short)Duktape_GetIntPropertyValue(ctx, -1, "port", 0), &proxy);
 		duk_pop(ctx);
+
+		// If we are going to use a proxy, we need to have the proxy resolve the remote host
+		duk_push_sprintf(ctx, "%s:%d", host, port);			// [socket][string]
+		duk_swap_top(ctx, -2);								// [string][socket]
+		ILibAsyncSocket_ConnectToProxyEx(data->socketModule, NULL, (char*)duk_get_string(ctx, -2), (struct sockaddr*)&proxy, Duktape_GetStringPropertyValue(ctx, -1, "username", NULL), Duktape_GetStringPropertyValue(ctx, -1, "password", NULL), NULL, data);
+	
+		data->ssl = ILibAsyncSocket_SetSSLContextEx(data->socketModule, data->ssl_ctx, ILibAsyncSocket_TLS_Mode_Client, sniname);
+		SSL_set_ex_data(data->ssl, ILibDuktape_TLS_ctx2socket, data);
+		return(1);
 	}
 
 	if (hostLen > 0 && hostLen < 1024 && host[0] == '[')

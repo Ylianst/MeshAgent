@@ -154,6 +154,7 @@ typedef struct ILibAsyncSocketModule
 	// The address and port of a HTTPS proxy
 	struct sockaddr_in6 ProxyAddress;
 	char ProxiedHost[255];
+	char ProxiedRemoteHost[255];
 	int ProxyState;
 	char* ProxyUser;
 	char* ProxyPass;
@@ -909,16 +910,19 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 #endif
 
 	// Setup
-	if (remoteInterface->sa_family == AF_UNIX)
+	if (remoteInterface != NULL)
 	{
+		if (remoteInterface->sa_family == AF_UNIX)
+		{
 #ifdef _POSIX
-		memcpy_s(&(module->DomainAddress), sizeof(struct sockaddr_un), remoteInterface, sizeof(struct sockaddr_un));
+			memcpy_s(&(module->DomainAddress), sizeof(struct sockaddr_un), remoteInterface, sizeof(struct sockaddr_un));
 #endif
-		module->RemoteAddress.sin6_family = AF_UNIX;
-	}
-	else
-	{
-		memcpy_s(&(module->RemoteAddress), sizeof(struct sockaddr_in6), remoteInterface, INET_SOCKADDR_LENGTH(remoteInterface->sa_family));
+			module->RemoteAddress.sin6_family = AF_UNIX;
+		}
+		else
+		{
+			memcpy_s(&(module->RemoteAddress), sizeof(struct sockaddr_in6), remoteInterface, INET_SOCKADDR_LENGTH(remoteInterface->sa_family));
+		}
 	}
 	module->PendingBytesToSend = 0;
 	module->TotalBytesSent = 0;
@@ -934,7 +938,14 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	{
 		memset(&any, 0, sizeof(struct sockaddr_in6));
 		#ifdef MICROSTACK_PROXY
-		if (module->ProxyAddress.sin6_family == 0) any.sin6_family = remoteInterface->sa_family; else any.sin6_family = module->ProxyAddress.sin6_family;
+		if (module->ProxyAddress.sin6_family == 0)
+		{
+			any.sin6_family = remoteInterface->sa_family;
+		}
+		else
+		{
+			any.sin6_family = module->ProxyAddress.sin6_family;
+		}
 		#else
 		any.sin6_family = remoteInterface->sa_family;
 		#endif
@@ -1068,6 +1079,7 @@ void ILibAsyncSocket_ConnectToProxy(void* socketModule, struct sockaddr *localIn
 {
 	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
 	memset(&(module->ProxyAddress), 0, sizeof(struct sockaddr_in6));
+	memset(module->ProxiedRemoteHost, 0, sizeof(module->ProxiedRemoteHost));
 	module->ProxyState = 0;
 	module->ProxyUser = proxyUser; // Proxy user & password are kept by reference!!!
 	module->ProxyPass = proxyPass;
@@ -1077,6 +1089,17 @@ void ILibAsyncSocket_ConnectToProxy(void* socketModule, struct sockaddr *localIn
 }
 void ILibAsyncSocket_ConnectToProxyEx(void* socketModule, struct sockaddr *localInterface, char *remoteAddressAndPort, struct sockaddr *proxyAddress, char* proxyUser, char* proxyPass, ILibAsyncSocket_OnInterrupt InterruptPtr, void *user)
 {
+	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
+	memset(&(module->ProxyAddress), 0, sizeof(struct sockaddr_in6));
+	module->ProxyState = 0;
+	module->ProxyUser = proxyUser; // Proxy user & password are kept by reference!!!
+	module->ProxyPass = proxyPass;
+	
+	size_t proxylen = strnlen_s(remoteAddressAndPort, sizeof(module->ProxiedRemoteHost) - 1);
+	memcpy_s(module->ProxiedRemoteHost, sizeof(module->ProxiedRemoteHost), remoteAddressAndPort, proxylen);
+
+	if (proxyAddress != NULL) memcpy_s(&(module->ProxyAddress), sizeof(struct sockaddr_in6), proxyAddress, INET_SOCKADDR_LENGTH(proxyAddress->sa_family));
+	ILibAsyncSocket_ConnectTo(socketModule, localInterface, NULL, InterruptPtr, user);
 
 }
 #endif
@@ -1813,12 +1836,28 @@ void ILibAsyncSocket_PostSelect(void* socketModule, int slct, fd_set *readset, f
 					ILibInet_ntop((int)(module->RemoteAddress.sin6_family), (void*)&(((struct sockaddr_in*)&(module->RemoteAddress))->sin_addr), ILibScratchPad, 4096);
 					if (module->ProxyUser == NULL || module->ProxyPass == NULL)
 					{
-						len2 = sprintf_s(ILibScratchPad2, 4096, "CONNECT %s:%u HTTP/1.1\r\nProxy-Connection: keep-alive\r\nHost: %s\r\n\r\n", ILibScratchPad, ntohs(module->RemoteAddress.sin6_port), ILibScratchPad);
-					} else {
+						if (module->ProxiedRemoteHost[0] != 0)
+						{
+							len2 = sprintf_s(ILibScratchPad2, 4096, "CONNECT %s HTTP/1.1\r\nProxy-Connection: keep-alive\r\nHost: %s\r\n\r\n", module->ProxiedRemoteHost, module->ProxiedRemoteHost);
+						}
+						else
+						{
+							len2 = sprintf_s(ILibScratchPad2, 4096, "CONNECT %s:%u HTTP/1.1\r\nProxy-Connection: keep-alive\r\nHost: %s\r\n\r\n", ILibScratchPad, ntohs(module->RemoteAddress.sin6_port), ILibScratchPad);
+						}
+					}
+					else
+					{
 						char* ProxyAuth = NULL;
 						len2 = sprintf_s(ILibScratchPad2, 4096, "%s:%s", module->ProxyUser, module->ProxyPass);
 						len2 = ILibBase64Encode((unsigned char*)ILibScratchPad2, len2, (unsigned char**)&ProxyAuth);
-						len2 = sprintf_s(ILibScratchPad2, 4096, "CONNECT %s:%u HTTP/1.1\r\nProxy-Connection: keep-alive\r\nHost: %s\r\nProxy-authorization: basic %s\r\n\r\n", ILibScratchPad, ntohs(module->RemoteAddress.sin6_port), ILibScratchPad, ProxyAuth);
+						if (module->ProxiedRemoteHost[0] != 0)
+						{
+							len2 = sprintf_s(ILibScratchPad2, 4096, "CONNECT %s HTTP/1.1\r\nProxy-Connection: keep-alive\r\nHost: %s\r\nProxy-authorization: basic %s\r\n\r\n", module->ProxiedRemoteHost, module->ProxiedRemoteHost, ProxyAuth);
+						}
+						else
+						{
+							len2 = sprintf_s(ILibScratchPad2, 4096, "CONNECT %s:%u HTTP/1.1\r\nProxy-Connection: keep-alive\r\nHost: %s\r\nProxy-authorization: basic %s\r\n\r\n", ILibScratchPad, ntohs(module->RemoteAddress.sin6_port), ILibScratchPad, ProxyAuth);
+						}
 						if (ProxyAuth != NULL) free(ProxyAuth);
 					}
 					module->timeout_lastActivity = ILibGetUptime();
