@@ -153,7 +153,6 @@ typedef struct ILibAsyncSocketModule
 #ifdef MICROSTACK_PROXY
 	// The address and port of a HTTPS proxy
 	struct sockaddr_in6 ProxyAddress;
-	char ProxiedHost[255];
 	char ProxiedRemoteHost[255];
 	int ProxyState;
 	char* ProxyUser;
@@ -1061,6 +1060,7 @@ void ILibAsyncSocket_ClearProxySettings(void *socketModule)
 {
 	struct ILibAsyncSocketModule *module = (struct ILibAsyncSocketModule*)socketModule;
 	memset(&(module->ProxyAddress), 0, sizeof(struct sockaddr_in6));
+	memset(module->ProxiedRemoteHost, 0, sizeof(module->ProxiedRemoteHost));
 	module->ProxyState = 0;
 }
 

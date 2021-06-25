@@ -3643,8 +3643,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	ILibWebClient_RequestToken reqToken;
 	parser_result *rs;
 	parser_result_field *f;
-
-
+	size_t useproxy = 0;
+	char webproxy[1024];
 
 	if (agent->timerLogging != 0 && agent->retryTimerSet != 0) 
 	{
@@ -3750,48 +3750,72 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		serverUrlLen = (int)strnlen_s(serverUrl, serverUrlLen);
 	}
 
+	if ((ILibSimpleDataStore_GetEx(agent->masterDb, "ignoreProxyFile", 15, ILibScratchPad, sizeof(ILibScratchPad)) == 0) && ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", webproxy, sizeof(webproxy))) != 0 || (len = MeshAgent_GetSystemProxy(agent, webproxy, sizeof(webproxy))) != 0))
+	{
+		// Proxy was enabled/configured
+		if (agent->triedNoProxy_Index < agent->serverIndex && agent->proxyServer != NULL)
+		{
+			// First attempt with proxy failed, so lets try again without a proxy
+			agent->triedNoProxy_Index++;
+			agent->proxyServer = NULL;
+
+			if (duk_peval_string(agent->meshCoreCtx, "require('global-tunnel');") == 0)
+			{
+				duk_get_prop_string(agent->meshCoreCtx, -1, "end");						// [tunnel][end]
+				duk_swap_top(agent->meshCoreCtx, -2);									// [end][this]
+				duk_pcall_method(agent->meshCoreCtx, 0); 								// [undefined]
+			}
+			duk_pop(agent->meshCoreCtx);												// ...
+			useproxy = 0;
+		}
+		else
+		{
+			useproxy = len;
+		}
+	}
 #ifndef MICROSTACK_NOTLS
-	ILibParseUriResult result = ILibParseUri(serverUrl, &host, &port, &path, &meshServer);
+	ILibParseUriResult result = ILibParseUri(serverUrl, &host, &port, &path, useproxy ? NULL : &meshServer);
 #else
 	ILibParseUri(serverUrl, &host, &port, &path, &meshServer);
 #endif
 
-
-
-	if (meshServer.sin6_family == AF_UNSPEC)
+	if (useproxy == 0)
 	{
-		// Could not resolve host name
-		if (ILibSimpleDataStore_GetEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&meshServer, sizeof(struct sockaddr_in6)) == 0)
+		if (meshServer.sin6_family == AF_UNSPEC)
 		{
-			meshServer.sin6_family = AF_UNSPEC;
-			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: Could not resolve: %s", ILibScratchPad);
-			printf("agentcore: Could not resolve: %s\n", host);
-		}
-	}
-	else
-	{
-		// Successfully resolved host name
-		struct sockaddr_in6 tempAddr;
-		len = ILibSimpleDataStore_GetEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&tempAddr, sizeof(struct sockaddr_in6));
-		if (len == 0)
-		{
-			// No entry in DB, so update the value
-			ILibSimpleDataStore_PutEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&meshServer, ILibInet_StructSize(&meshServer));
+			// Could not resolve host name
+			if (ILibSimpleDataStore_GetEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&meshServer, sizeof(struct sockaddr_in6)) == 0)
+			{
+				meshServer.sin6_family = AF_UNSPEC;
+				ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: Could not resolve: %s", ILibScratchPad);
+				printf("agentcore: Could not resolve: %s\n", host);
+			}
 		}
 		else
 		{
-			// Entry exists, lets see if we need to update
-			if (tempAddr.sin6_family != meshServer.sin6_family || memcmp(&tempAddr, &meshServer, ILibInet_StructSize(&meshServer)) != 0)
+			// Successfully resolved host name
+			struct sockaddr_in6 tempAddr;
+			len = ILibSimpleDataStore_GetEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&tempAddr, sizeof(struct sockaddr_in6));
+			if (len == 0)
 			{
-				// Entry was different, so we need to update it
+				// No entry in DB, so update the value
 				ILibSimpleDataStore_PutEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&meshServer, ILibInet_StructSize(&meshServer));
 			}
-		}
+			else
+			{
+				// Entry exists, lets see if we need to update
+				if (tempAddr.sin6_family != meshServer.sin6_family || memcmp(&tempAddr, &meshServer, ILibInet_StructSize(&meshServer)) != 0)
+				{
+					// Entry was different, so we need to update it
+					ILibSimpleDataStore_PutEx(agent->masterDb, serverUrl, serverUrlLen, (char*)&meshServer, ILibInet_StructSize(&meshServer));
+				}
+			}
 
-		// Update the DNS entry in the db. (It only updates if it changed)
-		len=sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "DNS[%s]", host);
-		char *tmp = ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer);
-		ILibSimpleDataStore_PutEx(agent->masterDb, ILibScratchPad, len,tmp , (int)strnlen_s(tmp, sizeof(ILibScratchPad)));
+			// Update the DNS entry in the db. (It only updates if it changed)
+			len = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "DNS[%s]", host);
+			char *tmp = ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer);
+			ILibSimpleDataStore_PutEx(agent->masterDb, ILibScratchPad, len, tmp, (int)strnlen_s(tmp, sizeof(ILibScratchPad)));
+		}
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore: Attempting connection to: %s", serverUrl);
@@ -3848,17 +3872,17 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 
 	free(path);
 
-	if (meshServer.sin6_family != AF_UNSPEC)
+	if (useproxy != 0 || meshServer.sin6_family != AF_UNSPEC)
 	{
-		strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer));
-		printf("Connecting to: %s\n", agent->serveruri);
-		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting to: %s", agent->serveruri); }
+		if (useproxy == 0) { strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer)); }
+		printf("Connecting %sto: %s\n", useproxy!=0?"(via proxy) ":"", agent->serveruri);
+		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting %sto: %s", useproxy != 0 ? "(via proxy) " : "", agent->serveruri); }
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 
 		void **tmp = ILibMemory_SmartAllocate(2 * sizeof(void*));
 		agent->controlChannelRequest = tmp;
-		tmp[0] = agent;	
+		tmp[0] = agent;
 		tmp[1] = reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
 		ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), tmp, 20, MeshServer_ConnectEx_NetworkError, MeshServer_ConnectEx_NetworkError_Cleanup);
 
@@ -3866,72 +3890,34 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		ILibWebClient_Request_SetHTTPS(reqToken, result == ILibParseUriResult_TLS ? ILibWebClient_RequestToken_USE_HTTPS : ILibWebClient_RequestToken_USE_HTTP);
 		ILibWebClient_Request_SetSNI(reqToken, host, (int)strnlen_s(host, serverUrlLen));
 #endif
-		if ((ILibSimpleDataStore_GetEx(agent->masterDb, "ignoreProxyFile", 15, ILibScratchPad, sizeof(ILibScratchPad)) == 0) && ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", ILibScratchPad, sizeof(ILibScratchPad))) != 0 || (len = MeshAgent_GetSystemProxy(agent, ILibScratchPad, sizeof(ILibScratchPad))) != 0))
+
+		if (useproxy != 0)
 		{
-#ifdef MICROSTACK_PROXY
+			// Setup Proxy Configuration
 			duk_eval_string(agent->meshCoreCtx, "require('http')");			// [http]
 			duk_get_prop_string(agent->meshCoreCtx, -1, "parseUri");		// [http][parse]
 			duk_swap_top(agent->meshCoreCtx, -2);							// [parse][this]
-			duk_push_string(agent->meshCoreCtx, ILibScratchPad);			// [parse][this][uri]
+			duk_push_string(agent->meshCoreCtx, webproxy);					// [parse][this][uri]
 			if (duk_pcall_method(agent->meshCoreCtx, 1) == 0)				// [uri]
 			{
 				unsigned short proxyPort = (unsigned short)Duktape_GetIntPropertyValue(agent->meshCoreCtx, -1, "port", 80);
 				char *proxyHost = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "host", NULL);
 				char *proxyUsername = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "username", NULL);
 				char *proxyPassword = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "password", NULL);
-
-
-				if (agent->triedNoProxy_Index < agent->serverIndex && agent->proxyServer != NULL)
+				agent->proxyServer = ILibWebClient_SetProxy2(reqToken, proxyHost, proxyPort, proxyUsername, proxyPassword, host, port);
+				
+				if (agent->proxyServer != NULL)
 				{
-					printf("Disabling Proxy: %s:%u\n", proxyHost, proxyPort);
-					agent->triedNoProxy_Index++;
-					agent->proxyServer = ILibWebClient_SetProxy(reqToken, NULL, 0, NULL, NULL);;
-
-					if (duk_peval_string(agent->meshCoreCtx, "require('global-tunnel');") == 0)
+					ILibDuktape_globalTunnel_data *proxy = ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx);
+					memcpy_s(&(proxy->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
+					if (proxyUsername != NULL && proxyPassword != NULL)
 					{
-						duk_get_prop_string(agent->meshCoreCtx, -1, "end");						// [tunnel][end]
-						duk_swap_top(agent->meshCoreCtx, -2);									// [end][this]
-						duk_pcall_method(agent->meshCoreCtx, 0); 								// [undefined]
-					}
-					duk_pop(agent->meshCoreCtx);												// ...
-				}
-				else
-				{
-					printf("Using proxy: %s:%u\n", proxyHost, proxyPort);
-					if (proxyUsername != NULL)
-					{
-						printf("   => with username: %s\n", proxyUsername);
-					}
-					if (agent->logUpdate != 0)
-					{
-						ILIBLOGMESSAGEX("Using proxy: %s:%u", proxyHost, proxyPort);
-						if (proxyUsername != NULL)
-						{
-							ILIBLOGMESSAGEX("   => with username: %s", proxyUsername);
-						}
-					}
-					agent->proxyServer = ILibWebClient_SetProxy(reqToken, proxyHost, proxyPort, proxyUsername, proxyPassword);
-					if (agent->proxyServer != NULL)
-					{
-						ILibDuktape_globalTunnel_data *proxy = ILibDuktape_GetNewGlobalTunnel(agent->meshCoreCtx);
-						memcpy_s(&(proxy->proxyServer), sizeof(struct sockaddr_in6), agent->proxyServer, sizeof(struct sockaddr_in6));
-						if (proxyUsername != NULL && proxyPassword != NULL)
-						{
-							memcpy_s(proxy->proxyUser, sizeof(proxy->proxyUser), proxyUsername, strnlen_s(proxyUsername, sizeof(proxy->proxyUser)));
-							memcpy_s(proxy->proxyPass, sizeof(proxy->proxyPass), proxyPassword, strnlen_s(proxyPassword, sizeof(proxy->proxyPass)));
-						}
+						memcpy_s(proxy->proxyUser, sizeof(proxy->proxyUser), proxyUsername, strnlen_s(proxyUsername, sizeof(proxy->proxyUser)));
+						memcpy_s(proxy->proxyPass, sizeof(proxy->proxyPass), proxyPassword, strnlen_s(proxyPassword, sizeof(proxy->proxyPass)));
 					}
 				}
 			}
-			duk_pop(agent->meshCoreCtx);									// ...
-#else
-			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore.MeshServer_ConnectEx(): Proxy Specified, but support was not enabled in this build");
-#endif
-		}
-		else
-		{
-			// No Proxy was specified
-			agent->triedNoProxy_Index++;
+			duk_pop(agent->meshCoreCtx);
 		}
 		agent->serverConnectionState = 1; // We are trying to connect
 	}

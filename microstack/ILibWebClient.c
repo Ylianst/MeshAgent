@@ -209,6 +209,9 @@ typedef struct ILibWebClientDataObject
 	char CNONCE[17];
 	struct sockaddr_in6 remote;
 	struct sockaddr_in6 proxy;
+	char proxy_username[255];
+	char proxy_password[255];
+	char proxy_remoteHostAndPort[255];
 	struct ILibWebClientManager *Parent;
 	char* DigestData;
 
@@ -2320,13 +2323,13 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 					if (wcdo->proxy.sin6_family != AF_UNSPEC)
 					{
 						// Use Proxy
-						ILibAsyncSocket_ConnectToProxy(
+						ILibAsyncSocket_ConnectToProxyEx(
 							wcm->socks[i],
 							NULL,
-							(struct sockaddr*)&wcdo->remote,
+							wcdo->proxy_remoteHostAndPort,
 							(struct sockaddr*)&wcdo->proxy,
-							NULL,
-							NULL,
+							wcdo->proxy_username[0]==NULL?NULL:wcdo->proxy_username,
+							wcdo->proxy_password[0]==NULL?NULL:wcdo->proxy_password,
 							ILibWebClient_OnInterrupt,
 							wcdo);
 					}
@@ -3816,6 +3819,9 @@ struct sockaddr_in6* ILibWebClient_SetProxy(ILibWebClient_RequestToken token, ch
 {
 	ILibWebClientDataObject *wcdo = ILibWebClient_GetStateObjectFromRequestToken(token);
 	if (wcdo == NULL) { return(NULL); }
+	memset(wcdo->proxy_username, 0, sizeof(wcdo->proxy_username));
+	memset(wcdo->proxy_password, 0, sizeof(wcdo->proxy_password));
+
 	if (proxyHost == NULL)
 	{
 		memset(&(wcdo->proxy), 0, sizeof(struct sockaddr_in6));
@@ -3830,14 +3836,35 @@ struct sockaddr_in6* ILibWebClient_SetProxy(ILibWebClient_RequestToken token, ch
 	}
 	else
 	{
+		if (username != NULL) { strncpy_s(wcdo->proxy_username, sizeof(wcdo->proxy_username), username, strnlen_s(username, sizeof(wcdo->proxy_username))); }
+		if (password != NULL) { strncpy_s(wcdo->proxy_password, sizeof(wcdo->proxy_password), password, strnlen_s(password, sizeof(wcdo->proxy_password))); }
 		return(&(wcdo->proxy));
 	}
+}
+struct sockaddr_in6* ILibWebClient_SetProxy2(ILibWebClient_RequestToken token, char *proxyHost, unsigned short proxyPort, char *username, char *password, char* remoteHost, unsigned short remotePort)
+{
+	ILibWebClientDataObject *wcdo = ILibWebClient_GetStateObjectFromRequestToken(token);
+	struct sockaddr_in6* ret = NULL;
+	if (wcdo != NULL) { memset(wcdo->proxy_remoteHostAndPort, 0, sizeof(wcdo->proxy_remoteHostAndPort)); }
+	if ((ret = ILibWebClient_SetProxy(token, proxyHost, proxyPort, username, password)) != NULL)
+	{
+		if (sprintf_s(wcdo->proxy_remoteHostAndPort, sizeof(wcdo->proxy_remoteHostAndPort), "%s:%u", remoteHost, remotePort) < 0)
+		{
+			ILibWebClient_SetProxy(token, NULL, 0, NULL, NULL);
+			ret = NULL;
+		}
+	}
+	return(ret);
 }
 void ILibWebClient_SetProxyEx(ILibWebClient_RequestToken token, struct sockaddr_in6* proxyServer, char *username, char *password)
 {
 	ILibWebClientDataObject *wcdo = ILibWebClient_GetStateObjectFromRequestToken(token);
 	if (wcdo == NULL) { return; }
+	memset(wcdo->proxy_username, 0, sizeof(wcdo->proxy_username));
+	memset(wcdo->proxy_password, 0, sizeof(wcdo->proxy_password));
 
+	if (username != NULL) { strncpy_s(wcdo->proxy_username, sizeof(wcdo->proxy_username), username, strnlen_s(username, sizeof(wcdo->proxy_username))); }
+	if (password != NULL) { strncpy_s(wcdo->proxy_password, sizeof(wcdo->proxy_password), password, strnlen_s(password, sizeof(wcdo->proxy_password))); }
 	memcpy_s(&(wcdo->proxy), sizeof(struct sockaddr_in6), proxyServer, sizeof(struct sockaddr_in6));
 }
 #endif

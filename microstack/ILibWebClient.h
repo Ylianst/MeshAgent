@@ -285,6 +285,7 @@ int ILibWebClient_Digest_NeedAuthenticate(ILibWebClient_StateObject state);
 char* ILibWebClient_Digest_GetRealm(ILibWebClient_StateObject state);
 void ILibWebClient_GenerateAuthenticationHeader(ILibWebClient_StateObject state, ILibHTTPPacket *packet, char* username, char* password);
 #ifdef MICROSTACK_PROXY
+struct sockaddr_in6* ILibWebClient_SetProxy2(ILibWebClient_RequestToken token, char *proxyHost, unsigned short proxyPort, char *username, char *password, char* remoteHost, unsigned short remotePort);
 struct sockaddr_in6* ILibWebClient_SetProxy(ILibWebClient_RequestToken token, char *proxyHost, unsigned short proxyPort, char *username, char *password);
 void ILibWebClient_SetProxyEx(ILibWebClient_RequestToken token, struct sockaddr_in6* proxyServer, char *username, char *password);
 #endif
