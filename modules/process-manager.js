@@ -22,6 +22,13 @@ var TH32CS_SNAPMODULE = 0x08;
 var PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
 
+var promise = require('promise');
+function defPromiseHandler(res, rej)
+{
+    this._res = res;
+    this._rej = rej;
+}
+
 // Used on Windows and Linux to get information about running processes
 function processManager() {
     this._ObjectID = 'process-manager'; // Used for debugging, allows you to get the object type at runtime.
@@ -247,6 +254,64 @@ function processManager() {
                     info[tokens[0]] = tokens[1];
                 }
                 return (info);
+                break;
+            case 'win32':
+                var ret = new promise(defPromiseHandler);
+                ret.server = require('net').createServer();
+                ret._clientpath = 'mesh-' + require('uuid/v4')();
+                ret._path = '\\\\.\\pipe\\' + ret._clientpath;
+                try { ret.server.listen({ path: ret._path }); } catch (e) { throw ('ProcessManagerError: Cannot create connection'); }
+                ret.server.on('connection', function (c)
+                {
+                    c.str = '';
+                    this._connection = c;
+                    c.on('data', function (chunk)
+                    {
+                        if (chunk.toString() == '{{{X}}}\r\n')
+                        {
+                            if (this.str == '') { ret._rej('ProcessManagerError: PID(' + pid + ') NOT FOUND'); return; }
+                            var rj = {};
+                            var J = this.str.split('\r\n');
+                            var keys = J[0].split(',');
+                            var values = J[1].split(',');
+                            for (var i = 0; i < keys.length; ++i)
+                            {
+                                if (keys[i][0] == '"')
+                                {
+                                    keys[i] = keys[i].substring(1, keys[i].length - 1);
+                                }
+                                if (values[i][0] == '"')
+                                {
+                                    values[i] = values[i].substring(1, values[i].length - 1);
+                                }
+                                if (values[i] != '')
+                                {
+                                    rj[keys[i]] = values[i];
+                                }
+                            }
+                            ret._res(rj);
+                            return;
+                        }
+                        this.str += chunk.toString();
+                    });
+                });
+
+                ret.child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
+                ret.child.descriptorMetadata = 'process-manager';
+                ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+                ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+
+                ret.child.stdin.write('[reflection.Assembly]::LoadWithPartialName("system.core")\r\n');
+                ret.child.stdin.write('$pipe = new-object System.IO.Pipes.NamedPipeClientStream(".", "' + ret._clientpath + '", 3);\r\n');
+                ret.child.stdin.write('$pipe.Connect(); \r\n');
+                ret.child.stdin.write('$sw = new-object System.IO.StreamWriter($pipe);\r\n');
+                ret.child.stdin.write('$X = Get-Process -IncludeUserName -id ' + pid + ' | ConvertTo-CSV -NoTypeInformation\r\n');
+                ret.child.stdin.write('$sw.WriteLine($X[0]); $sw.Flush();\r\n');
+                ret.child.stdin.write('$sw.WriteLine($X[1]); $sw.Flush();\r\n');
+                ret.child.stdin.write('$sw.WriteLine("{{{X}}}"); $sw.Flush();\r\n');
+                ret.child.stdin.write('exit\r\n');
+
+                return (require('promise').wait(ret));
                 break;
         }
     };
