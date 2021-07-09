@@ -881,6 +881,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 {
 	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL;
 	char *displayName = NULL, *meshServiceName = NULL;
+	int hiddenButtons = 0; // Flags: 1 if "Connect" is hidden, 2 if "Uninstall" is hidden, 4 is "Install is hidden"
+
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
@@ -1084,17 +1086,20 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
 				if ((installFlagsInt & 3) == 1) {
 					// Temporary Agent Only
+					hiddenButtons |= 6; // Both install and uninstall buttons are hidden
 					ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
 					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
 					GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
 					SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
 				}  else if ((installFlagsInt & 3) == 2) {
 					// Background Only
+					hiddenButtons |= 1; // Connect button is hidden hidden
 					ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
 				} else if ((installFlagsInt & 3) == 3) {
 					// Uninstall only
 					GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
 					SetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
+					hiddenButtons |= 5; // Both install and connect buttons are hidden
 					ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
 					ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
 				}
@@ -1103,7 +1108,6 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			{
 				EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
 			}
-
 
 			// Get the current service running state
 			int r = GetServiceState(meshServiceName != NULL ? meshServiceName : serviceFile);
@@ -1117,14 +1121,25 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				case 0:
 				case 100: // Not installed
 					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notinstalled);
-					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
 					SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), install_buttontext);
+					hiddenButtons |= 2; // Uninstall buttons is hidden
+					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
 					break;
 				default: // Not running
 					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notrunning);
 					break;
 			}
 
+			// Correct the placement of buttons, push them to the left side if some of them are hidden.
+			if (hiddenButtons == 2) { // Uninstall button is the only one hidden. Place connect button at uninstall position
+				WINDOWPLACEMENT lpwndpl;
+				GetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
+				SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
+			} else if (hiddenButtons == 6) { // Only connect button is showing, place it in the install button location
+				WINDOWPLACEMENT lpwndpl;
+				GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
+				SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
+			}
 
 			if (mshfile != NULL) { free(mshfile); }
 			Duktape_SafeDestroyHeap(ctx);
