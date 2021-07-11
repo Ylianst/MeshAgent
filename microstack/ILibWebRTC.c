@@ -4083,9 +4083,9 @@ void* ILibSCTP_AddPacketToHoldingQueue(struct ILibStun_dTlsSession* o, ILibSCTP_
 {
 	void* retVal = NULL;
 	// Out of sequence packet, find a spot in the receive queue.
-
-	RCTPRCVDEBUG(printf("STORING %u, size = %d\r\n", tsn, chunksize);)
-		if (ReceiveHoldBuffer_Used(o->receiveHoldBuffer) + payload->length > ILibSCTP_MaxReceiverCredits) { *sentsack = ILibSCTP_SackStatus_Skip; return(NULL); }
+	
+	RCTPRCVDEBUG(printf("STORING %u, size = %d\r\n", ntohl(payload->TSN), ntohs(payload->length));)
+	if (ReceiveHoldBuffer_Used(o->receiveHoldBuffer) + payload->length > ILibSCTP_MaxReceiverCredits) { *sentsack = ILibSCTP_SackStatus_Skip; return(NULL); }
 
 	retVal = ILibLinkedList_SortedInsertEx(o->receiveHoldBuffer, &ILibSCTP_AddPacketToHoldingQueue_Comparer, &ILibSCTP_AddPacketToHoldingQueue_Chooser, payload, o->receiveHoldBuffer);
 	
