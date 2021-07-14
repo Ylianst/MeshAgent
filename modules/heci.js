@@ -175,9 +175,10 @@ function heci_create()
         .createEvent('error')
         .addMethod('connect', function _connect(guid, options)
         {
-            console.info1('connect()');
+            console.info1('connect(' + guid + ')');
             this.doIoctl(this.heciParent.IOCTL.CLIENT_CONNECT, guid, Buffer.alloc(16), function _onconnect(status, buffer, opt)
             {
+                console.info1('doIoctl(): onConnect => ' + status);
                 if(status!=0)
                 {
                     console.info1('HECI Connection Error [' + this.LastError + ']');
