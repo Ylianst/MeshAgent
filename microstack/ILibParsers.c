@@ -10925,6 +10925,7 @@ int ILibIsRunningOnChainThread(void* chain)
 {
 	if (chain == NULL) { return(1); }
 	struct ILibBaseChain* c = (struct ILibBaseChain*)chain;
+
 #if defined(WIN32)
 	return(c->ChainThreadID == 0 || c->ChainThreadID == GetCurrentThreadId());
 #else

@@ -3991,6 +3991,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 	size_t compressedLen = 0;
 	char *compressedBuffer = NULL;
 
+	if (!ILibMemory_CanaryOK(state)) { return(ILibTransport_DoneState_ERROR); }
 
 	buffer = _buffer;
 	bufferLen = _bufferLen;
