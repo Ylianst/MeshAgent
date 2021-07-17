@@ -103,8 +103,9 @@ void ILibDuktape_Dgram_Socket_OnData(ILibAsyncUDPSocket_SocketModule socketModul
 		duk_push_int(ptrs->ctx, bufferLength);
 		duk_put_prop_string(ptrs->ctx, -2, "size");
 
+		duk_context *X = ptrs->ctx;
 		if (duk_pcall_method(ptrs->ctx, 3) != 0) { ILibDuktape_Process_UncaughtExceptionEx(ptrs->ctx, "dgram.message() dispatch error"); }
-		duk_pop(ptrs->ctx);																					// ...
+		duk_pop(X);																					// ...
 	}
 }
 void ILibDuktape_Dgram_Socket_OnSendOK(ILibAsyncUDPSocket_SocketModule socketModule, void *user1, void *user2)

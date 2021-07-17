@@ -2328,8 +2328,8 @@ void ILibWebClient_PreProcess(void* WebClientModule, fd_set *readset, fd_set *wr
 							NULL,
 							wcdo->proxy_remoteHostAndPort,
 							(struct sockaddr*)&wcdo->proxy,
-							wcdo->proxy_username[0]==NULL?NULL:wcdo->proxy_username,
-							wcdo->proxy_password[0]==NULL?NULL:wcdo->proxy_password,
+							wcdo->proxy_username[0]==0?NULL:wcdo->proxy_username,
+							wcdo->proxy_password[0]==0?NULL:wcdo->proxy_password,
 							ILibWebClient_OnInterrupt,
 							wcdo);
 					}

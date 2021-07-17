@@ -193,9 +193,7 @@ function createPacket(messageType, data)
 function raw(localAddress, port, buffer, handler)
 {
     var ret = new promise(promise_default);
-    ret.handler = handler;
     ret.socket = require('dgram').createSocket({ type: 'udp4' });
-    ret.socket.promise = ret;
     try
     {
         ret.socket.bind({ address: localAddress, port: (port != null && port != 0) ? port : null });
@@ -205,6 +203,7 @@ function raw(localAddress, port, buffer, handler)
         ret._rej('Unable to bind to ' + localAddress);
         return (ret);
     }
+
     ret.socket.setBroadcast(true);
     ret.socket.setMulticastInterface(localAddress);
     ret.socket.setMulticastTTL(1);
@@ -213,6 +212,7 @@ function raw(localAddress, port, buffer, handler)
     ret.socket.send(buffer, 67, '255.255.255.255');
     return (ret);
 }
+
 function info(interfaceName, port)
 {
     var f = require('os').networkInterfaces();
@@ -226,18 +226,23 @@ function info(interfaceName, port)
                 try
                 {
                     var b = createPacket(8, { ciaddress: f[interfaceName][i].address, chaddress: f[interfaceName][i].mac });
-                    var p = raw(f[interfaceName][i].address, port, b, function infoHandler(msg)
+                    _hide(raw(f[interfaceName][i].address, port, b, function infoHandler(msg)
                     {
                         var res = parseDHCP(msg);
                         if (res.chaddr.toUpperCase() == this.hwaddr.toUpperCase() && res.options != null && res.options.lease != null)
                         {
                             clearTimeout(this.timeout);
+                            setImmediate(function (s) { s.removeAllListeners('message'); }, this.socket); // Works around bug in older dgram.js
                             this._res(res);
                         }
-                    });
-                    p.hwaddr = f[interfaceName][i].mac;
-                    p.timeout = setTimeout(function (x) { x._rej('timeout'); }, 2000, p);
-                    return (p);
+                    }));
+                    _hide().hwaddr = f[interfaceName][i].mac;
+                    _hide().timeout = setTimeout(function (x)
+                    {
+                        x.socket.removeAllListeners('message');
+                        x._rej('timeout');
+                    }, 2000, _hide());
+                    return (_hide(true));
                 }
                 catch(e)
                 {
