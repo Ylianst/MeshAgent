@@ -315,7 +315,21 @@ duk_ret_t ILibDuktape_WritableStream_PipeSink(duk_context *ctx)
 	if (g_displayStreamPipeMessages) { printf("PIPE: [%s] => [%s:%d]\n", Duktape_GetStringPropertyValue(ctx, -2, ILibDuktape_OBJID, "unknown"), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown"), ILibDuktape_GetReferenceCount(ctx, -1)); }
 	return(0);
 }
-
+duk_ret_t ILibDuktape_WritableStream_Ended(duk_context *ctx)
+{
+	duk_push_this(ctx);			// WS
+	ILibDuktape_WritableStream *WS = (ILibDuktape_WritableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WritableStream_WSPTRS);
+	
+	if (WS != NULL)
+	{
+		duk_push_boolean(ctx, WS->endBytes > 0);
+	}
+	else
+	{
+		duk_push_false(ctx);
+	}
+	return(1);
+}
 ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, ILibDuktape_WritableStream_WriteHandler WriteHandler, ILibDuktape_WritableStream_EndHandler EndHandler, void *user)
 {
 	ILibDuktape_WritableStream *retVal;
@@ -337,6 +351,7 @@ ILibDuktape_WritableStream* ILibDuktape_WritableStream_Init(duk_context *ctx, IL
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "finish");
 	ILibDuktape_EventEmitter_CreateEventEx(emitter, "error");
 
+	ILibDuktape_CreateInstanceMethod(ctx, "writeCalledByEnd", ILibDuktape_WritableStream_Ended, 0);
 	ILibDuktape_CreateProperty_InstanceMethod(ctx, "write", ILibDuktape_WritableStream_Write, DUK_VARARGS);
 	ILibDuktape_CreateEventWithGetter(ctx, "end", ILibDuktape_WritableStream_End_Getter);
 	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "pipe", ILibDuktape_WritableStream_PipeSink);

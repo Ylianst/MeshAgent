@@ -159,7 +159,18 @@ function http_digest_instance(options)
                         this._buffered = Buffer.concat([this._buffered, chunk], this._buffered.length + chunk.length);
                     }
 
-                    if (this._request) { this._request.write(chunk); }
+                    if (this._request)
+                    {
+                        console.log('Write Called By End: ' + this.writeCalledByEnd());
+                        if (this.writeCalledByEnd())
+                        {
+                            this._request.end(chunk);
+                        }
+                        else
+                        {
+                            this._request.write(chunk);
+                        }
+                    }
                     if (flush != null) { flush(); }
                     return (true);
                 },
@@ -167,7 +178,7 @@ function http_digest_instance(options)
                 {
                     if (this._ended) { throw ('Stream already ended'); }
                     this._ended = true;
-                    if (this._request) { this._request.end(); }
+                    if (this._request && !this.writeCalledByEnd()) { this._request.end(); }
                     if (flush != null) { flush(); }
                 }
             });
