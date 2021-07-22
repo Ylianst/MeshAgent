@@ -24,9 +24,12 @@ typedef void (*ILibDuktape_ModSearch_PUSH_Object)(duk_context *ctx, void *chain)
 
 int ILibDuktape_ModSearch_AddHandler(duk_context *ctx, char *id, ILibDuktape_ModSearch_PUSH_Object handler);
 void ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(duk_context *ctx, char *js, size_t jsLen);
-int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, int moduleLen);
+int ILibDuktape_ModSearch_AddModuleEx(duk_context *ctx, char *id, char *module, int moduleLen, char *mtime);
+#define ILibDuktape_ModSearch_AddModule(ctx, id, module, moduleLen) ILibDuktape_ModSearch_AddModuleEx(ctx, id, module, moduleLen, NULL) 
 void ILibDuktape_ModSearch_AddModuleObject(duk_context *ctx, char *id, void *heapptr);
 duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id);
+uint32_t ILibDuktape_ModSearch_GetJSModuleDate(duk_context *ctx, char *id);
+int ILibDuktape_ModSearch_IsRequired(duk_context *ctx, char *id, size_t idLen);
 void ILibDuktape_ModSearch_Init(duk_context *ctx, void *chain, ILibSimpleDataStore mDB);
 
 #endif

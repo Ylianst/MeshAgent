@@ -32,6 +32,26 @@ var xclipTable = {};
 function nativeAddCompressedModule(name)
 {
     var value = getJSModule(name);
+    var valuex = '';
+    try
+    {
+        valuex = getJSModuleDate(name);
+        if(valuex>0)
+        {
+            valuex = (new Date(valuex*1000)).toString().split(' ').join('T');
+            valuex = ", '" + valuex + "'";
+
+        }
+        else
+        {
+            valuex = '';
+        }
+    }
+    catch(e)
+    {
+        valuex = '';
+    }
+
     var zip = require('compressed-stream').createCompressor();
     zip.buffer = null;
     zip.on('data', function (c)
@@ -47,7 +67,7 @@ function nativeAddCompressedModule(name)
     });
     zip.end(value);
     var vstring = zip.buffer.toString('base64');
-    var ret = "duk_peval_string_noresult(ctx, \"addCompressedModule('" + name + "', Buffer.from('" + vstring + "', 'base64'));\");";
+    var ret = "duk_peval_string_noresult(ctx, \"addCompressedModule('" + name + "', Buffer.from('" + vstring + "', 'base64')" + valuex + ");\");";
     if (ret.length > 16300)
     {
         // MS Visual Studio has a maxsize limitation
@@ -60,7 +80,7 @@ function nativeAddCompressedModule(name)
             ret += ('memcpy_s(_' + name.split('-').join('') + ' + ' + i + ', ' + (tmp.length - i) + ', "' + chunk + '", ' + chunk.length + ');\n');
             i += chunk.length;
         }
-        ret += ('ILibDuktape_AddCompressedModule(ctx, "' + name + '", _' + name.split('-').join('') + ');\n');
+        ret += ('ILibDuktape_AddCompressedModule(ctx, "' + name + '", _' + name.split('-').join('') + valuex + ');\n');
         ret += ('free(_' + name.split('-').join('') + ');\n');
     }
     module.exports(ret);

@@ -29,13 +29,74 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
-#define ILibDuktape_ModSearch_ModuleFile	(void*)0xFF
-#define ILibDuktape_ModSearch_ModuleObject	(void*)0xFE
-#define ILibDuktape_ModSearch_JSInclude		"\xFF_ModSearch_JSINCLUDE"
-#define ILibDuktape_ModSearch_ModulePath	"\xFF_ModSearch_Path"
+#define ILibDuktape_ModSearch_ModuleFile		(void*)0xFF
+#define ILibDuktape_ModSearch_ModuleFileDate	(void*)0xFC
+#define ILibDuktape_ModSearch_ModuleRequired	(void*)0xFB
+#define ILibDuktape_ModSearch_ModuleObject		(void*)0xFE
+#define ILibDuktape_ModSearch_JSInclude			"\xFF_ModSearch_JSINCLUDE"
+#define ILibDuktape_ModSearch_ModulePath		"\xFF_ModSearch_Path"
 
 int ILibDuktape_ModSearch_ShowNames = 0;
 
+uint32_t ILibDuktape_ModSearch_GetJSModuleDate(duk_context *ctx, char *id)
+{
+	uint32_t retVal;
+	ILibHashtable table = NULL;
+	int idLen = (int)strnlen_s(id, 1024);
+
+	duk_push_heap_stash(ctx);								// [stash]
+	if (duk_has_prop_string(ctx, -1, "ModSearchTable"))
+	{
+		duk_get_prop_string(ctx, -1, "ModSearchTable");		// [stash][ptr]
+		table = (ILibHashtable)duk_to_pointer(ctx, -1);
+		duk_pop(ctx);										// [stash]
+	}
+	else
+	{
+		table = ILibHashtable_Create();
+		duk_push_pointer(ctx, table);						// [stash][ptr]
+		duk_put_prop_string(ctx, -2, "ModSearchTable");		// [stash]
+	}
+	duk_pop(ctx);											// ...
+
+
+	duk_push_heap_stash(ctx);
+	char *mpath;
+	duk_size_t mpathLen;
+	mpath = Duktape_GetStringPropertyValueEx(ctx, -1, ILibDuktape_ModSearch_ModulePath, NULL, &mpathLen);
+	duk_pop(ctx);
+
+	char *fileName = ILibMemory_AllocateA(idLen + 4 + mpathLen + 1);
+	if (mpath == NULL)
+	{
+		sprintf_s(fileName, idLen + 4, "%s.js", id);
+	}
+	else
+	{
+		sprintf_s(fileName, idLen + 5 + mpathLen, "%s/%s.js", mpath, id);
+	}
+
+	duk_push_sprintf(ctx, "(new Date(require('fs').statSync('%s').mtime)).getTime()/1000", fileName);	// [str]
+	if (duk_peval(ctx) == 0)
+	{
+		retVal = duk_get_uint(ctx, -1);
+	}
+	else
+	{
+		retVal = (uint32_t)(UINT_PTR)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFileDate, id, idLen);
+	}
+	duk_pop(ctx);
+	return(retVal);
+}
+int ILibDuktape_ModSearch_IsRequired(duk_context *ctx, char *id, size_t idLen)
+{
+	duk_push_heap_stash(ctx);										// [stash]
+	duk_get_prop_string(ctx, -1, "ModSearchTable");					// [stash][table]
+	ILibHashtable table = (ILibHashtable)duk_to_pointer(ctx, -1);
+	duk_pop_2(ctx);													// ...
+
+	return((int)(UINT_PTR)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleRequired, id, (int)idLen));
+}
 duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id)
 {
 	ILibHashtable table = NULL;
@@ -123,7 +184,7 @@ void ILibDuktape_ModSearch_AddModuleObject(duk_context *ctx, char *id, void *hea
 	}
 	duk_pop(ctx);											// ...
 }
-int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, int moduleLen)
+int ILibDuktape_ModSearch_AddModuleEx(duk_context *ctx, char *id, char *module, int moduleLen, char *mtime)
 {
 	ILibHashtable table = NULL;
 	int idLen = (int)strnlen_s(id, 1024);
@@ -148,6 +209,14 @@ int ILibDuktape_ModSearch_AddModule(duk_context *ctx, char *id, char *module, in
 	newModule[moduleLen] = 0;
 
 	ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleFile, id, idLen, newModule);
+
+	if (mtime != NULL)
+	{
+		duk_push_sprintf(ctx, "(new Date('%s')).getTime()/1000", mtime);	
+		duk_eval(ctx);
+		uint32_t t = duk_get_uint(ctx, -1);
+		ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleFileDate, id, idLen, (void*)(UINT_PTR)t);
+	}
 	return 0;
 }
 int ILibDuktape_ModSearch_AddHandler(duk_context *ctx, char *id, ILibDuktape_ModSearch_PUSH_Object handler)
@@ -264,6 +333,11 @@ duk_ret_t mod_Search(duk_context *ctx)
 		// Next check if a handler was added via ILibDuktape_ModSearch_AddModule()
 		if ((module = (char*)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFile, id, (int)idLen)) != NULL)
 		{
+			//
+			// Let's mark that this was already "require'ed"
+			//
+			ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleRequired, id, (int)idLen, (void*)(UINT_PTR)0x01);
+
 			duk_push_string(ctx, module);
 			return(1);
 		}
