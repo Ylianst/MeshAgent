@@ -109,8 +109,8 @@ function Promise(promiseFunc)
             {
                 this.emit_returnValue('resolved', r);
             }
-            this.removeAllListeners('resolved');
-            this.removeAllListeners('rejected');
+            try { this.removeAllListeners('resolved'); } catch (x) { }
+            try { this.removeAllListeners('rejected'); } catch (x) { }
         }
 
         //if (eventName == 'rejected' && (eventCallback.internal == null || eventCallback.internal == false))
@@ -133,8 +133,8 @@ function Promise(promiseFunc)
         if (eventName == 'rejected' && this.errors && this.completed)
         {
             eventCallback.apply(this, this.completedArgs);
-            this.removeAllListeners('resolved');
-            this.removeAllListeners('rejected');
+            try { this.removeAllListeners('resolved'); } catch (x) { }
+            try { this.removeAllListeners('rejected'); } catch (x) { }
         }
         if (eventName == 'settled' && this.completed)
         {
@@ -300,8 +300,8 @@ function Promise(promiseFunc)
         delete this._up;
         delete this.__childPromise;
         delete this.promise;
-        this.removeAllListeners('resolved');
-        this.removeAllListeners('rejected');
+        try { this.removeAllListeners('resolved'); } catch (x) { }
+        try { this.removeAllListeners('rejected'); } catch (x) { }
     }).internal);
 }
 
