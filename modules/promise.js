@@ -116,17 +116,20 @@ function Promise(promiseFunc)
         //if (eventName == 'rejected' && (eventCallback.internal == null || eventCallback.internal == false))
         if (eventName == 'rejected')
         {
-            var rp = getRootPromise(this.promise);
-            rp._internal.external = true;
             if (this.uncaught != null)
             {
                 clearImmediate(this.uncaught);
                 this.uncaught = null;
             }
-            if (rp._internal.uncaught != null)
+            if (this.promise)
             {
-                clearImmediate(rp._internal.uncaught);
-                rp._internal.uncaught = null;
+                var rp = getRootPromise(this.promise);
+                rp._internal.external = true;
+                if (rp._internal.uncaught != null)
+                {
+                    clearImmediate(rp._internal.uncaught);
+                    rp._internal.uncaught = null;
+                }
             }
         }
 
@@ -293,6 +296,19 @@ function Promise(promiseFunc)
 
     this._internal.once('settled', (function ()
     {
+        if (this.uncaught != null)
+        {
+            clearImmediate(this.uncaught);
+            this.uncaught = null;
+        }
+
+        var rp = getRootPromise(this.promise);
+        if (rp && rp._internal.uncaught)
+        {
+            clearImmediate(rp._internal.uncaught);
+            rp._internal.uncaught = null;
+        }
+
         delete this.promise._up;
         delete this.promise.__childPromise;
         delete this.promise.promise;

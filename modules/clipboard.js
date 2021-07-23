@@ -85,11 +85,11 @@ function nativeAddCompressedModule(name)
     }
     module.exports(ret);
 }
-function nativeAddModule(name)
+function nativeAddModule(name,single)
 {
     var value = getJSModule(name);
     var ret = "duk_peval_string_noresult(ctx, \"addModule('" + name + "', Buffer.from('" + Buffer.from(value).toString('base64') + "', 'base64').toString());\");";
-    if (ret.length > 16300)
+    if (ret.length > 16300 && (single==null || single==false))
     {
         // MS Visual Studio has a maxsize limitation
         var tmp = Buffer.from(value).toString('base64');
