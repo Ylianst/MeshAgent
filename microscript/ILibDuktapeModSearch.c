@@ -83,7 +83,7 @@ uint32_t ILibDuktape_ModSearch_GetJSModuleDate(duk_context *ctx, char *id)
 	}
 	else
 	{
-		retVal = (uint32_t)(UINT_PTR)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFileDate, id, idLen);
+		retVal = (uint32_t)(uintptr_t)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleFileDate, id, idLen);
 	}
 	duk_pop(ctx);
 	return(retVal);
@@ -95,7 +95,7 @@ int ILibDuktape_ModSearch_IsRequired(duk_context *ctx, char *id, size_t idLen)
 	ILibHashtable table = (ILibHashtable)duk_to_pointer(ctx, -1);
 	duk_pop_2(ctx);													// ...
 
-	return((int)(UINT_PTR)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleRequired, id, (int)idLen));
+	return((int)(uintptr_t)ILibHashtable_Get(table, ILibDuktape_ModSearch_ModuleRequired, id, (int)idLen));
 }
 duk_ret_t ILibDuktape_ModSearch_GetJSModule(duk_context *ctx, char *id)
 {
@@ -215,7 +215,7 @@ int ILibDuktape_ModSearch_AddModuleEx(duk_context *ctx, char *id, char *module, 
 		duk_push_sprintf(ctx, "(new Date('%s')).getTime()/1000", mtime);	
 		duk_eval(ctx);
 		uint32_t t = duk_get_uint(ctx, -1);
-		ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleFileDate, id, idLen, (void*)(UINT_PTR)t);
+		ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleFileDate, id, idLen, (void*)(uintptr_t)t);
 	}
 	return 0;
 }
@@ -336,7 +336,7 @@ duk_ret_t mod_Search(duk_context *ctx)
 			//
 			// Let's mark that this was already "require'ed"
 			//
-			ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleRequired, id, (int)idLen, (void*)(UINT_PTR)0x01);
+			ILibHashtable_Put(table, ILibDuktape_ModSearch_ModuleRequired, id, (int)idLen, (void*)(uintptr_t)0x01);
 
 			duk_push_string(ctx, module);
 			return(1);
