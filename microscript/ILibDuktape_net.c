@@ -2074,23 +2074,23 @@ int ILibDuktape_TLS_verify(int preverify_ok, X509_STORE_CTX *storectx)
 	int i;
 	int retVal = 0;
 
-	duk_push_heapptr(data->ctx, data->object);													// [Socket]
-	duk_get_prop_string(data->ctx, -1, ILibDuktape_SOCKET2OPTIONS);								// [Socket][Options]
+	duk_push_heapptr(data->ctx, data->object);												// [Socket]
+	duk_get_prop_string(data->ctx, -1, ILibDuktape_SOCKET2OPTIONS);							// [Socket][Options]
 	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1)) { duk_pop_2(data->ctx); return(preverify_ok); }
 	void *OnVerify = Duktape_GetHeapptrProperty(data->ctx, -1, "checkServerIdentity");
-
 	if (OnVerify == NULL) { duk_pop_2(data->ctx); return(1); }
 
-	duk_push_heapptr(data->ctx, OnVerify);													// [func]
-	duk_push_heapptr(data->ctx, data->object);												// [func][this]
-	duk_push_array(data->ctx);																// [func][this][certs]
+	duk_push_heapptr(data->ctx, OnVerify);													// [Socket][Options][func]
+	duk_push_heapptr(data->ctx, data->object);												// [Socket][Options][func][this]
+	duk_push_array(data->ctx);																// [Socket][Options][func][this][certs]
 	for (i = 0; i < sk_X509_num(certChain); ++i)
 	{
-		ILibDuktape_TLS_X509_PUSH(data->ctx, sk_X509_value(certChain, i));					// [func][this][certs][cert]
-		duk_put_prop_index(data->ctx, -2, i);												// [func][this][certs]
+		ILibDuktape_TLS_X509_PUSH(data->ctx, sk_X509_value(certChain, i));					// [Socket][Options][func][this][certs][cert]
+		duk_put_prop_index(data->ctx, -2, i);												// [Socket][Options][func][this][certs]
 	}
-	retVal = duk_pcall_method(data->ctx, 1) == 0 ? 1 : 0;									// [undefined]
-	duk_pop(data->ctx);																		// ...
+	retVal = duk_pcall_method(data->ctx, 1) == 0 ? 1 : 0;									// [Socket][Options][undefined]
+	duk_pop_3(data->ctx);																	// ...
+
 	return retVal;
 }
 int ILibDuktape_TLS_server_verify(int preverify_ok, X509_STORE_CTX *storectx)
