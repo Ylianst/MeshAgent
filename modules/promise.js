@@ -199,7 +199,29 @@ function Promise(promiseFunc)
         this.emit.apply(this, args);
         this.emit('settled');
     };
-
+    this._internal.resolveInspector = function resolveInspector()
+    {
+        var v = this.emit_returnValue('resolved');
+        if(v!=null && v._ObjectID == 'promise')
+        {
+            // then() returned a promise, so we need to resolve/reject it
+            v._internal.once('resolved', this.promise.__childPromise._internal.resolver.bind(this.promise.__childPromise._internal));
+            v._internal.once('rejected', this.promise.__childPromise._internal.rejector.bind(this.promise.__childPromise._internal));
+        }
+        else
+        {
+            if (v != null)
+            {
+                // then() returned a non-promise object, so we need to resolve the promise with it
+                this.promise.__childPromise._res(v);
+            }
+            else
+            {
+                // then() didn't return anything, so we just propagate the values from the underlying promise
+                this.once('resolved', this.promise.__childPromise._internal.resolver.bind(this.promise.__childPromise._internal));
+            }
+        }
+    };
     this.catch = function(func)
     {
         var rt = getRootPromise(this);
@@ -257,7 +279,7 @@ function Promise(promiseFunc)
         }
         else
         {
-            this._internal.once('resolved', retVal._internal.resolver.bind(retVal._internal).internal);
+            this._internal.once('resolved', this._internal.resolveInspector);
             this._internal.once('rejected', retVal._internal.rejector.bind(retVal._internal).internal);
         }
 
