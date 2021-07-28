@@ -2714,6 +2714,9 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	}
 	duk_pop(ctx);																		// ...
 
+	// Setup Module Search and Database
+	ILibDuktape_ModSearch_Init(ctx, chain, db);
+	ILibDuktape_SimpleDataStore_init(ctx, db);
 
 	// Setup the permissions on this engine. JavaScript will only be allowed to access the libraries it has access to.
 	if ((securityFlags & SCRIPT_ENGINE_NO_NETWORK_ACCESS) == 0)
@@ -2759,11 +2762,6 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 		ILibDuktape_ModSearch_AddHandler(ctx, "ScriptContainer", ILibDuktape_ScriptContainer_PUSH_SLAVE);
 	}
 																															
-
-	// Setup Module Search and Database
-	ILibDuktape_ModSearch_Init(ctx, chain, db);
-	ILibDuktape_SimpleDataStore_init(ctx, db);
-
 	// Polyfill os functions
 	ILibDuktape_ScriptContainer_OS_Init(ctx);
 

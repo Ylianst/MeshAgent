@@ -102,6 +102,7 @@ char* Duktape_GetStringPropertyIndexValueEx(duk_context *ctx, duk_idx_t i, duk_u
 char* Duktape_GetStringPropertyValueEx(duk_context *ctx, duk_idx_t i, char* propertyName, char* defaultValue, duk_size_t *len);
 #define Duktape_GetStringPropertyValue(ctx, i, propertyName, defaultValue) Duktape_GetStringPropertyValueEx(ctx, i, propertyName, defaultValue, NULL)
 int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, int defaultValue);
+uint32_t Duktape_GetUIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, uint32_t defaultValue);
 void *Duktape_GetPointerProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
 void *Duktape_GetHeapptrProperty(duk_context *ctx, duk_idx_t i, char* propertyName);
 void *Duktape_GetBufferPropertyEx(duk_context *ctx, duk_idx_t i, char* propertyName, duk_size_t* bufferLen);

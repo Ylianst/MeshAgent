@@ -177,6 +177,7 @@ typedef struct MeshAgentHostContainer
 	int configPathUsesCWD;
 	ILibWebClient_StateObject controlChannel;
 	struct sockaddr_in6* proxyServer;
+	int proxyFailed;
 	void *controlChannelRequest;
 
 #ifdef WIN32

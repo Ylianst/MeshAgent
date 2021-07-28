@@ -352,6 +352,20 @@ int Duktape_GetIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyNam
 	}
 	return retVal;
 }
+uint32_t Duktape_GetUIntPropertyValue(duk_context *ctx, duk_idx_t i, char* propertyName, uint32_t defaultValue)
+{
+	uint32_t retVal = defaultValue;
+	if (ctx != NULL && duk_has_prop_string(ctx, i, propertyName))
+	{
+		duk_get_prop_string(ctx, i, propertyName);
+		if (!duk_is_null_or_undefined(ctx, -1))
+		{
+			retVal = duk_to_uint(ctx, -1);
+		}
+		duk_pop(ctx);
+	}
+	return retVal;
+}
 void *Duktape_GetHeapptrIndexProperty(duk_context *ctx, duk_idx_t i, duk_uarridx_t x)
 {
 	void *ret = NULL;

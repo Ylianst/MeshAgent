@@ -3646,6 +3646,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	size_t useproxy = 0;
 	char webproxy[1024];
 
+	memset(&meshServer, 0, sizeof(struct sockaddr_in6));
 	if (agent->timerLogging != 0 && agent->retryTimerSet != 0) 
 	{
 		agent->retryTimerSet = 0;
@@ -3753,9 +3754,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if ((ILibSimpleDataStore_GetEx(agent->masterDb, "ignoreProxyFile", 15, ILibScratchPad, sizeof(ILibScratchPad)) == 0) && ((len = ILibSimpleDataStore_Get(agent->masterDb, "WebProxy", webproxy, sizeof(webproxy))) != 0 || (len = MeshAgent_GetSystemProxy(agent, webproxy, sizeof(webproxy))) != 0))
 	{
 		// Proxy was enabled/configured
-		if (agent->triedNoProxy_Index < agent->serverIndex && agent->proxyServer != NULL)
+		if (agent->triedNoProxy_Index < agent->serverIndex && (agent->proxyServer != NULL || agent->proxyFailed != 0))
 		{
 			// First attempt with proxy failed, so lets try again without a proxy
+			agent->proxyFailed = 0;
 			agent->triedNoProxy_Index++;
 			agent->proxyServer = NULL;
 
@@ -3900,6 +3902,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			duk_push_string(agent->meshCoreCtx, webproxy);					// [parse][this][uri]
 			if (duk_pcall_method(agent->meshCoreCtx, 1) == 0)				// [uri]
 			{
+				agent->proxyFailed = 0;
 				unsigned short proxyPort = (unsigned short)Duktape_GetIntPropertyValue(agent->meshCoreCtx, -1, "port", 80);
 				char *proxyHost = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "host", NULL);
 				char *proxyUsername = (char*)Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "username", NULL);
@@ -3915,6 +3918,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 						memcpy_s(proxy->proxyUser, sizeof(proxy->proxyUser), proxyUsername, strnlen_s(proxyUsername, sizeof(proxy->proxyUser)));
 						memcpy_s(proxy->proxyPass, sizeof(proxy->proxyPass), proxyPassword, strnlen_s(proxyPassword, sizeof(proxy->proxyPass)));
 					}
+				}
+				else
+				{
+					agent->proxyFailed = 1;
 				}
 			}
 			duk_pop(agent->meshCoreCtx);
