@@ -4433,17 +4433,6 @@ void ILibDuktape_httpStream_webSocket_EncodedEndSink(ILibDuktape_DuplexStream *s
 	duk_del_prop_string(state->ctx, -1, ILibDuktape_WSDEC2WS);
 	duk_prepare_method_call(state->ctx, -1, "unpipe");				// [websocket][decoded][pmc][this]
 	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][decoded]
-	duk_prepare_method_call(state->ctx, -1, "removeAllListeners");	// [websocket][decoded][removeAll][this]
-	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][decoded]
-
-	duk_pop(state->ctx);											// [websocket]
-	duk_get_prop_string(state->ctx, -1, "encoded");					// [websocket][encoded]
-	duk_prepare_method_call(state->ctx, -1, "removeAllListeners");	// [websocket][encoded][removeAll][this]
-	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][encoded]
-
-	duk_del_prop_string(state->ctx, -1, ILibDuktape_WSENC2WS);
-	duk_pop(state->ctx);											// [websocket]
-
 
 	ILibDuktape_DeleteReadOnlyProperty(state->ctx, -1, "decoded");
 	ILibDuktape_DeleteReadOnlyProperty(state->ctx, -1, "encoded");

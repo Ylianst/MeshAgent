@@ -4552,6 +4552,21 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 	paramLen -= ixr;
 
+	// Check to see if we need to import a settings file
+	if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx")) == 0)
+	{
+		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh")) == 0)
+		{
+			if ((importSettings(agentHost, "mesh_linumshx") == 0) && (importSettings(agentHost, "mesh_limshx") == 0)) // Do this because the old agent would generate this bad file name on linux.
+			{
+				// Let's check to see if an .msh was embedded into our binary
+				checkForEmbeddedMSH(agentHost);
+				importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+			}
+		}
+	}
+
+
 #ifdef WIN32
 	if (agentHost->noCertStore == 0) { agentHost->noCertStore = ILibSimpleDataStore_Get(agentHost->masterDb, "nocertstore", NULL, 0); }
 #endif
@@ -4777,50 +4792,53 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 #if !defined(MICROSTACK_NOTLS)
 
-	// Check the local MacAddresses, to see if we need to reset our NodeId
-	if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
+	if (ILibSimpleDataStore_Get(agentHost->masterDb, "skipmaccheck", NULL, 0) == 0)
 	{
-		int len;
-		duk_size_t macLen;
-		char *mac = (char*)duk_get_lstring(tmpCtx, -1, &macLen);
-
-		if (macLen >= 19) // Only continue if we have at least 1 MAC Address
+		// Check the local MacAddresses, to see if we need to reset our NodeId
+		if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
 		{
-			if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", NULL, 0)) == 0)
+			int len;
+			duk_size_t macLen;
+			char *mac = (char*)duk_get_lstring(tmpCtx, -1, &macLen);
+
+			if (macLen >= 19) // Only continue if we have at least 1 MAC Address
 			{
-				// We didn't have any MAC addresses in the db, so put them there, and return
-				ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen);
-			}
-			else
-			{
-				// We have MAC addresses in the db, so before we compare them, lets check that we have MAC addresses on the
-				// system that aren't just zeros. So lets count how many we have
-				int i = 0;
-				while (i < (int)macLen)
+				if ((len = ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", NULL, 0)) == 0)
 				{
-					if (strncmp(mac + i, "[00:00:00:00:00:00]", 19) != 0) { break; }
-					i += 19;
+					// We didn't have any MAC addresses in the db, so put them there, and return
+					ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen);
 				}
-				if (i < (int)macLen)
+				else
 				{
-					// We have at least one valid MAC address, so we can continue with the checks
-
-					i = 0;
-					char *curr = ILibMemory_AllocateA(len+1);
-					ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", curr, len);
-
-					while (i < len)
+					// We have MAC addresses in the db, so before we compare them, lets check that we have MAC addresses on the
+					// system that aren't just zeros. So lets count how many we have
+					int i = 0;
+					while (i < (int)macLen)
 					{
-						if (strncmp(curr + i, "[00:00:00:00:00:00]", 19) != 0)
-						{
-							if (ILibString_IndexOf(mac, (int)macLen, curr + i, 19) >= 0) { break; }
-						}
+						if (strncmp(mac + i, "[00:00:00:00:00:00]", 19) != 0) { break; }
 						i += 19;
 					}
-					if (i >= len) 
+					if (i < (int)macLen)
 					{
-						ILIBLOGMESSAGEX("NodeID will reset, MAC Address Mismatch: %s <==> %s", mac, curr);
-						resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen); 
+						// We have at least one valid MAC address, so we can continue with the checks
+
+						i = 0;
+						char *curr = ILibMemory_AllocateA(len + 1);
+						ILibSimpleDataStore_Get(agentHost->masterDb, "LocalMacAddresses", curr, len);
+
+						while (i < len)
+						{
+							if (strncmp(curr + i, "[00:00:00:00:00:00]", 19) != 0)
+							{
+								if (ILibString_IndexOf(mac, (int)macLen, curr + i, 19) >= 0) { break; }
+							}
+							i += 19;
+						}
+						if (i >= len)
+						{
+							ILIBLOGMESSAGEX("NodeID will reset, MAC Address Mismatch: %s <==> %s", mac, curr);
+							resetNodeId = 1; ILibSimpleDataStore_PutEx(agentHost->masterDb, "LocalMacAddresses", 17, mac, (int)macLen);
+						}
 					}
 				}
 			}
@@ -4860,20 +4878,6 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					ILibSimpleDataStore_DeleteEx(agentHost->masterDb, "WebProxy", 8);
 				}
 				free(str);
-			}
-		}
-	}
-
-	// Check to see if we need to import a settings file
-	if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx")) == 0) 
-	{
-		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh")) == 0)
-		{
-			if ((importSettings(agentHost, "mesh_linumshx") == 0) && (importSettings(agentHost, "mesh_limshx") == 0)) // Do this because the old agent would generate this bad file name on linux.
-			{
-				// Let's check to see if an .msh was embedded into our binary
-				checkForEmbeddedMSH(agentHost);
-				importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
 			}
 		}
 	}
