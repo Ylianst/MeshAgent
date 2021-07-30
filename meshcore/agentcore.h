@@ -280,8 +280,10 @@ forceUpdate:				If set, will cause the agent to perform a self-update on next st
 ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
 logUpdate:					If set, will cause the agent to log self-update status
 jsDebugPort:				Specify a JS Debugger Port
+nocertstore:				If set on Windows, will force the Agent to use OpenSSL instead of WinCrypto for cert generation/storage.
 remoteMouseRender:			If set, will always render the remote mouse cursor for KVM
 showModuleNames:			If set, will display the name of modules when they are loaded for the first time
+skipmaccheck:				If set, the agent will not change NodeID on local mac address changes.
 slaveKvmLog:				[Linux] If set, will enable logging inside the Child KVM Process.
 WebProxy:					Manually specify proxy configuration
 *

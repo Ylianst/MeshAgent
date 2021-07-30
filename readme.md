@@ -48,14 +48,57 @@ forceUpdate                  If set, will cause the agent to perform a self-upda
 ignoreProxyFile              If set, will cause the agent to ignore any proxy settings
 logUpdate                    If set, will cause the agent to log self-update status
 jsDebugPort                  Specify a JS Debugger Port
+nocertstore                  If set on Windows, will force the Agent to use OpenSSL instead of WinCrypto for cert generation/storage.
 remoteMouseRender            If set, will always render the remote mouse cursor for KVM
+skipmaccheck                 If set, the agent will not change NodeID on local mac address changes.
 showModuleNames              If set, will display the name of modules when they are loaded for the first time
 slaveKvmLog                  [Linux] If set, will enable logging inside the Child KVM Process.
 WebProxy                     Manually specify proxy configuration
-webSocketMaskOverride        If set, will disable the optimzation to skip WebSocket Masking for TLS protected Web Sockets
 ```
 
 Many of these values are used by developers and are not typically used in normal use.
+
+## Special notes for BSD systems
+You'll need to mount procfs, which isn't mounted by default on FreeBSD. Add the following line to /etc/fstab
+```
+proc	/proc	procfs	rw	0	0
+```
+If you don't reboot, then you can manually mount with the command:
+```
+mount -t procfs proc /proc
+```
+In addition, it is recommended to install bash, which you can do with the following command:
+```
+pkg install bash
+```
+
+## Special Note about KVM Support on Linux: 
+If you get an error stating that an Xauthority cannot be found, and asking if your DM is configured to use X, 
+or if you get a black screen when connecting to the login screen, you may need to: 
+* Open /etc/gdm/custom.conf or /etc/gdm3/custom.conf
+* Uncomment: WaylandEnable=false.
+* Add the following line to the [daemon] section:
+```
+DefaultSession=gnome-xorg.desktop
+```
+
+##	Special Note For ChromeOS:
+You need to disable rootfs verification, in order to install the meshagent service.
+After running the following commands, and rebooting, you should be able to install the meshagent service.
+```
+sudo su -
+cd /usr/share/vboot/bin/
+./make_dev_ssd.sh --remove_rootfs_verification
+```
+The above line will return a warning, but it will tell you the boot partition number, which you 
+will need when specifying the above command again, this time with the --partions options. Specify the number instead of (ID)
+```
+./make_dev_ssd.sh --remove_rootfs_verification --partitions ID
+reboot
+```
+When you are ready to install the agent, you'll need to copy the binary to a path that is not marked noexec, like /usr/local,
+so that you can execute the installer from there.
+
 
 ## Feedback
 If you encounter a problem or have a suggestion to improve the product, you may file an [issue report](https://github.com/Ylianst/MeshAgent/issues/)
