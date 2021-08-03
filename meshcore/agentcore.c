@@ -4552,20 +4552,22 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 	paramLen -= ixr;
 
-	// Check to see if we need to import a settings file
-	if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx")) == 0)
+	if (ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb) == 0)
 	{
-		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh")) == 0)
+		// Check to see if we need to import a settings file
+		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx")) == 0)
 		{
-			if ((importSettings(agentHost, "mesh_linumshx") == 0) && (importSettings(agentHost, "mesh_limshx") == 0)) // Do this because the old agent would generate this bad file name on linux.
+			if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh")) == 0)
 			{
-				// Let's check to see if an .msh was embedded into our binary
-				checkForEmbeddedMSH(agentHost);
-				importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+				if ((importSettings(agentHost, "mesh_linumshx") == 0) && (importSettings(agentHost, "mesh_limshx") == 0)) // Do this because the old agent would generate this bad file name on linux.
+				{
+					// Let's check to see if an .msh was embedded into our binary
+					checkForEmbeddedMSH(agentHost);
+					importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
+				}
 			}
 		}
 	}
-
 
 #ifdef WIN32
 	if (agentHost->noCertStore == 0) { agentHost->noCertStore = ILibSimpleDataStore_Get(agentHost->masterDb, "nocertstore", NULL, 0); }
