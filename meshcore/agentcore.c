@@ -4429,6 +4429,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	int resetNodeId = 0;
 #ifdef WIN32
 	int pLen;
+	SetEnvironmentVariableA((LPCSTR)"=c:", (LPCTSTR)"__DUMMY__"); // This is requried to work around a Win32 bug in construct_environment_block()
 #endif
 #ifdef _POSIX
 #ifndef __APPLE__
