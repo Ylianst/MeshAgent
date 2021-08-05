@@ -8861,6 +8861,11 @@ void* ILibSparseArray_Remove(ILibSparseArray sarray, int index)
 {
 	return(ILibSparseArray_GetEx(sarray, index, 1));
 }
+void ILibSparseArray_Move_OnEnumerate(ILibSparseArray sender, int index, void *value, void *user)
+{
+	ILibSparseArray_Add(user, index, value);
+}
+
 //! Clones the contents of the given Sparse Array into a new Sparse Array
 /*!
 	\param sarray The Sparse Array to clone
@@ -8868,9 +8873,8 @@ void* ILibSparseArray_Remove(ILibSparseArray sarray, int index)
 */
 ILibSparseArray ILibSparseArray_Move(ILibSparseArray sarray)
 {
-	ILibSparseArray_Root *root = (ILibSparseArray_Root*)sarray;
 	ILibSparseArray_Root *retVal = (ILibSparseArray_Root*)ILibSparseArray_CreateEx(sarray);
-	memcpy_s(retVal->bucket, root->bucketSize * sizeof(ILibSparseArray_Node), root->bucket, root->bucketSize * sizeof(ILibSparseArray_Node));
+	ILibSparseArray_Enumerate(sarray, ILibSparseArray_Move_OnEnumerate, retVal);
 	return retVal;
 }
 //! Clears the SparseArray, and dispatches an event for each defined index

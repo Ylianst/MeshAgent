@@ -126,7 +126,9 @@
 #	make linux ARCHID=40					# Linux MIPSEL24KC/MUSL (OpenWRT)
 #	make linux ARCHID=41					# Linux ARMADA/CORTEX-A53/MUSL (OpenWRT)
 #
-
+# Synology Builds
+#
+#	make linux ARCHID=35					# Linux ARMADA 370 Hardfloat
 
 # 
 # Required build switches:
@@ -186,6 +188,7 @@ PATH_POKY = ../Galileo/arduino-1.5.3/hardware/tools/sysroots/x86_64-pokysdk-linu
 PATH_POKY64 = /opt/poky/1.6.1/sysroots/x86_64-pokysdk-linux/usr/bin/x86_64-poky-linux/
 PATH_AARCH64 = ../ToolChains/aarch64--glibc--stable/
 PATH_AARCH64_CORTEXA53 = ../ToolChains/toolchain-aarch64_cortex-a53_gcc-7.5.0_musl/
+PATH_ARMADA370_HF = /home/dev/arm-unknown-linux-gnueabi/
 PATH_RPI = ../ToolChains/arm-rpi-4.9.3-linux-gnueabihf/
 
 OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
@@ -256,6 +259,21 @@ INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
 KVM = 0
 LMS = 0
 endif
+
+
+ifeq ($(ARCHID),35)
+ARCHNAME = linux-armada370-hf
+export PATH := $(PATH_ARMADA370_HF)bin:$(PATH_ARMADA370_HF)libexec/gcc/arm-unknown-linux-gnueabi/7.5.0:$(PATH_ARMADA370_HF)arm-unknown-linux-gnueabi/bin:$(PATH)
+export STAGING_DIR := $(PATH_ARMADA370_HF)
+CC = $(PATH_ARMADA370_HF)bin/arm-unknown-linux-gnueabi-gcc
+STRIP = $(PATH_ARMADA370_HF)bin/arm-unknown-linux-gnueabi-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+INCDIRS += -I$(PATH_AARCH64_CORTEXA53)include
+KVM = 0
+LMS = 0
+endif
+
+
 
 # Official Linux x86 32bit
 ifeq ($(ARCHID),5)
@@ -621,28 +639,29 @@ clean:
 	rm -f microlms/heci/*.o
 
 cleanbin:
-	rm -f $(EXENAME)_alpine-x86-64
 	rm -f $(EXENAME)_aarch64
 	rm -f $(EXENAME)_aarch64-cortex-a53
-	rm -f $(EXENAME)_freebsd_x86-64
-	rm -f $(EXENAME)_osx-arm-64
-	rm -f $(EXENAME)_osx-universal-64
-	rm -f $(EXENAME)_mips24kc
-	rm -f $(EXENAME)_mipsel24kc
-	rm -f $(EXENAME)_x86
-	rm -f $(EXENAME)_x86_nokvm
-	rm -f $(EXENAME)_x86-64
-	rm -f $(EXENAME)_x86-64_nokvm
+	rm -f $(EXENAME)_alpine-x86-64
 	rm -f $(EXENAME)_arm
 	rm -f $(EXENAME)_armhf
 	rm -f $(EXENAME)_arm-linaro
+	rm -f $(EXENAME)_freebsd_x86-64
+	rm -f $(EXENAME)_linux-armada370-hf
 	rm -f $(EXENAME)_mips
+	rm -f $(EXENAME)_mips24kc
+	rm -f $(EXENAME)_mipsel24kc
+	rm -f $(EXENAME)_osx-arm-64
 	rm -f $(EXENAME)_osx-x86-64
+	rm -f $(EXENAME)_osx-universal-64
 	rm -f $(EXENAME)_pi
 	rm -f $(EXENAME)_pi2
 	rm -f $(EXENAME)_pogo
 	rm -f $(EXENAME)_poky
 	rm -f $(EXENAME)_poky64
+	rm -f $(EXENAME)_x86
+	rm -f $(EXENAME)_x86_nokvm
+	rm -f $(EXENAME)_x86-64
+	rm -f $(EXENAME)_x86-64_nokvm
 
 
 depend: $(SOURCES)
