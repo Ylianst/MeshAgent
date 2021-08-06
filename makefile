@@ -123,6 +123,7 @@
 # OpenWRT Builds:
 #
 #	make linux ARCHID=28					# Linux MIPS24KC/MUSL (OpenWRT)
+#	make linux ARCHID=36					# Linux x86_64/MUSL (OpenWRT)
 #	make linux ARCHID=40					# Linux MIPSEL24KC/MUSL (OpenWRT)
 #	make linux ARCHID=41					# Linux ARMADA/CORTEX-A53/MUSL (OpenWRT)
 #
@@ -190,6 +191,7 @@ PATH_AARCH64 = ../ToolChains/aarch64--glibc--stable/
 PATH_AARCH64_CORTEXA53 = ../ToolChains/toolchain-aarch64_cortex-a53_gcc-7.5.0_musl/
 PATH_ARMADA370_HF = /home/dev/arm-unknown-linux-gnueabi/
 PATH_RPI = ../ToolChains/arm-rpi-4.9.3-linux-gnueabihf/
+PATH_OPENWRT_X86_64 = /home/dev/openwrt/staging_dir/toolchain-x86_64_gcc-7.3.0_musl/
 
 OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
 
@@ -321,6 +323,22 @@ IFADDR_DISABLE = 1
 KVM = 0
 LMS = 0
 endif
+
+
+# Official OpenWRT X86_64
+ifeq ($(ARCHID),36)
+ARCHNAME = openwrt_x86_64
+export PATH := $(PATH_OPENWRT_X86_64)bin:$(PATH_OPENWRT_X86_64)libexec/gcc/x86_64-openwrt-linux-musl/7.3.0:$(PATH_OPENWRT_X86_64)x86_64-openwrt-linux-musl/bin:$(PATH)
+export STAGING_DIR := $(PATH_OPENWRT_X86_64)
+CC = $(PATH_OPENWRT_X86_64)bin/x86_64-openwrt-linux-musl-gcc --sysroot=$(PATH_OPENWRT_X86_64)
+STRIP = $(PATH_OPENWRT_X86_64)bin/x86_64-openwrt-linux-musl-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CFLAGS += -DBADMATH 
+INCDIRS += -I$(PATH_OPENWRT_X86_64)include
+KVM = 0
+LMS = 0
+endif
+
 
 # Official Linux MIPS24KC (OpenWRT)
 ifeq ($(ARCHID),28)
