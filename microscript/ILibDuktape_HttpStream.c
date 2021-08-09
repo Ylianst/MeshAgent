@@ -3423,6 +3423,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 		{
 			// We're on the Chain Thread, so we can directly emit the 'end' event
 			data->bodyStream = NULL;
+			if (data->DS == NULL) { return; }
 
 			duk_push_heapptr(ctx, data->DS->ParentObject);					// [httpStream]
 			duk_get_prop_string(ctx, -1, "emit");							// [httpStream][emit]
