@@ -161,7 +161,6 @@ function http_digest_instance(options)
 
                     if (this._request)
                     {
-                        console.log('Write Called By End: ' + this.writeCalledByEnd());
                         if (this.writeCalledByEnd())
                         {
                             this._request.end(chunk);
