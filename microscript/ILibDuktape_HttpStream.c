@@ -708,6 +708,8 @@ duk_ret_t ILibDuktape_HttpStream_http_responseSink(duk_context *ctx)
 duk_ret_t ILibDuktape_HttpStream_http_SocketDiedPrematurely(duk_context *ctx)
 {
 	duk_push_this(ctx);											// [socket]
+	if (!duk_has_prop_string(ctx, -1, ILibDuktape_Socket2CR)) { return(0); }
+
 	duk_get_prop_string(ctx, -1, ILibDuktape_Socket2CR);		// [socket][clientRequest]
 	ILibDuktape_Transform *tf = (ILibDuktape_Transform*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_CR2Transform);
 	if (tf->target->resumeImmediate != NULL)
