@@ -529,6 +529,13 @@ duk_ret_t ILibDuktape_ChildProcess_execFile(duk_context *ctx)
 			{
 				int ecount = 0;
 				duk_get_prop_string(ctx, i, "env");												// [env]
+#ifndef WIN32
+				if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
+				{
+					duk_push_string(ctx, "xterm-256color");										// [env][xterm]
+					duk_put_prop_string(ctx, -2, "TERM");										// [env]
+				}
+#endif
 				duk_enum(ctx, -1, DUK_ENUM_OWN_PROPERTIES_ONLY);								// [env][enum]
 				while (duk_next(ctx, -1, 0))
 				{	
