@@ -78,7 +78,6 @@ duk_ret_t ModSearchTable_Put(duk_context *ctx, duk_idx_t table, char *key, char 
 uint32_t ILibDuktape_ModSearch_GetJSModuleDate(duk_context *ctx, char *id)
 {
 	uint32_t retVal;
-	ILibHashtable table = NULL;
 	char *mpath;
 	duk_size_t mpathLen;
 	char *fileName = NULL;

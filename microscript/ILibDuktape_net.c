@@ -2268,7 +2268,6 @@ duk_ret_t ILibDuktape_tls_server_addContext(duk_context *ctx)
 		if (duk_has_prop_string(ctx, -1, "ALPNProtocols"))
 		{
 			duk_uarridx_t i;
-			int status = 0;
 			duk_size_t protoLen = 0;
 			unsigned char *alpn = NULL;
 			duk_get_prop_string(ctx, -1, "ALPNProtocols");								// [server][table][options][Array]
@@ -2294,7 +2293,7 @@ duk_ret_t ILibDuktape_tls_server_addContext(duk_context *ctx)
 					protoLen += (unsigned int)bufLen;
 					duk_pop(ctx);														// [server][table][options][Array]
 				}
-				status = SSL_CTX_set_alpn_protos(ssl_ctx, alpn, (unsigned int)protoLen);
+				SSL_CTX_set_alpn_protos(ssl_ctx, alpn, (unsigned int)protoLen);
 				SSL_CTX_set_alpn_select_cb(ssl_ctx, ILibDuktape_tls_server_alpnSink, Duktape_GetBufferProperty(ctx, -4, ILibDuktape_net_Server_buffer));
 			}
 			duk_pop(ctx);																// [server][table][options]
@@ -2346,7 +2345,6 @@ duk_ret_t ILibDuktape_TLS_exportKeys(duk_context *ctx)
 #endif
 duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 {
-	int status = 0;
 	unsigned char* alpn = NULL;
 	unsigned int protoLen = 0;
 	int nargs = duk_get_top(ctx), i;
@@ -2449,7 +2447,7 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 				protoLen += (unsigned int)bufLen;
 				duk_pop(ctx);														// [socket][options][secureContext][Array]
 			}
-			status = SSL_CTX_set_alpn_protos(data->ssl_ctx, alpn, protoLen);
+			SSL_CTX_set_alpn_protos(data->ssl_ctx, alpn, protoLen);
 		}
 		duk_pop(ctx);																// [socket][options][secureContext]
 	}

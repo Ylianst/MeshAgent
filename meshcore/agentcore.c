@@ -3461,6 +3461,21 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			strcpy_s(commitPacket + sizeof(uint16_t), sizeof(SOURCE_COMMIT_DATE), SOURCE_COMMIT_DATE);
 			ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)commitPacket, sizeof(commitPacket), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
 
+			if (agent->meshCoreCtx != NULL)
+			{
+				if (duk_peval_string(agent->meshCoreCtx, "require('os').Name + ' - ' + require('os').arch()") == 0)
+				{
+					duk_size_t infoLen;
+					char *info = (char*)duk_get_lstring(agent->meshCoreCtx, -1, &infoLen);
+					char *buffer = Duktape_PushBuffer(agent->meshCoreCtx, sizeof(uint16_t) + infoLen);
+					((uint16_t*)buffer)[0] = htons(MeshCommand_HostInfo);
+					memcpy_s(buffer + sizeof(uint16_t), infoLen, info, infoLen);
+					ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, buffer, (int)ILibMemory_Size(buffer), ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
+					duk_pop(agent->meshCoreCtx);
+				}
+				duk_pop(agent->meshCoreCtx);
+			}
+
 #ifndef MICROSTACK_NOTLS
 			X509* peer = ILibWebClient_SslGetCert(WebStateObject);
 			agent->serverAuthState = 0; // We are not authenticated. Bitmask: 1 = Server Auth, 2 = Agent Auth.
