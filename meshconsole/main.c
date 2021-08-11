@@ -235,15 +235,16 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		if (SOURCE_COMMIT_HASH != NULL && SOURCE_COMMIT_DATE != NULL) 
 		{ 
 			printf("   Commit Hash: %s\n", SOURCE_COMMIT_HASH); 
-			printf("   Commit Date: %s\n", SOURCE_COMMIT_DATE);
+			printf("   Commit Date: %s\n", SOURCE_COMMIT_DATE); 
 		}
 #ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
-#ifdef WIN32
-		wmain_free(argv);
-#endif
-		return(0);
+
+		printf("Agent ARCHID: %d\n", MESH_AGENTID);
+		char script[] = "console.log('Detected platform: ' + require('os').Name + ' - ' + require('os').arch());process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
 	{

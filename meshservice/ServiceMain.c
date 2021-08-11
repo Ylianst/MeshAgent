@@ -430,6 +430,9 @@ int wmain(int argc, char* wargv[])
 #endif
 		return(0);
 	}
+	char *integratedJavaScript = NULL;
+	int integragedJavaScriptLen = 0;
+
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
 		printf("Compiled on: %s, %s\n", __TIME__, __DATE__);
@@ -441,8 +444,10 @@ int wmain(int argc, char* wargv[])
 #ifndef MICROSTACK_NOTLS
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
-		wmain_free(argv);
-		return(0);
+		printf("Agent ARCHID: %d\n", MESH_AGENTID);
+		char script[] = "console.log('Detected platform: ' + require('os').Name + ' - ' + require('os').arch());process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
@@ -470,9 +475,11 @@ int wmain(int argc, char* wargv[])
 		return(0);
 	}
 
-	char *integratedJavaScript;
-	int integragedJavaScriptLen;
-	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
+	if (integratedJavaScript == NULL || integragedJavaScriptLen == 0)
+	{
+		ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
+	}
+
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integragedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], 0);
