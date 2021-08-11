@@ -445,7 +445,7 @@ int wmain(int argc, char* wargv[])
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
 		printf("Agent ARCHID: %d\n", MESH_AGENTID);
-		char script[] = "console.log('Detected platform: ' + require('os').Name + ' - ' + require('os').arch());process.exit();";
+		char script[] = "console.log('Detected OS: ' + require('os').Name + ' - ' + require('os').arch());process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
