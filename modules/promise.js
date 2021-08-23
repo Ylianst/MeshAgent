@@ -38,7 +38,7 @@ function event_switcher(desired_callee, target)
 
 function event_forwarder(sourceObj, sourceName, targetObj, targetName)
 {
-    sourceObj.on(sourceName, targetObj.emit.bind(targetObj));
+    sourceObj.on(sourceName, targetObj.emit.bind(targetObj, targetName));
 }
 
 
