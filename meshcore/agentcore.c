@@ -3439,7 +3439,7 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				{
 					char idleBuffer[16];
 					idleBuffer[ILibSimpleDataStore_Get(agent->masterDb, "controlChannelIdleTimeout", idleBuffer, sizeof(idleBuffer)-1)] = 0;
-					if (ILib_atoi_int32(&(agent->controlChannel_idleTimeout_seconds), idleBuffer, sizeof(idleBuffer)) == 0)
+					if (ILib_atoi_int32(&(agent->controlChannel_idleTimeout_seconds), idleBuffer, sizeof(idleBuffer)) != 0)
 					{
 						agent->controlChannel_idleTimeout_seconds = DEFAULT_IDLE_TIMEOUT;
 					}
