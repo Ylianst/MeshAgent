@@ -3327,7 +3327,7 @@ duk_ret_t ILibDuktape_Polyfills_altrequire(duk_context *ctx)
 	}
 	duk_get_prop_string(ctx, -1, ILibDuktape_AltRequireTable);		// [stash][table]
 
-	if (ILibDuktape_ModSearch_IsRequired(ctx, id, idLen == 0))
+	if (ILibDuktape_ModSearch_IsRequired(ctx, id, idLen) == 0)
 	{
 		// Module was not 'require'ed yet
 		duk_push_sprintf(ctx, "global._legacyrequire('%s');", id);	// [stash][table][str]
