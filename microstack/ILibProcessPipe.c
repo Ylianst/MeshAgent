@@ -1510,7 +1510,13 @@ ILibTransport_DoneState ILibProcessPipe_Pipe_Write(ILibProcessPipe_Pipe po, char
 		if (result == TRUE) { retVal = ILibTransport_DoneState_COMPLETE; }
 #else
 		int result = (int)write(pipeObject->mPipe_WriteEnd, buffer, bufferLen);
-		if (result > 0) { retVal = ILibTransport_DoneState_COMPLETE; }
+		while (result >= 0 && result < bufferLen)
+		{
+			buffer += result;
+			bufferLen -= result;
+			result = (int)write(pipeObject->mPipe_WriteEnd, buffer, bufferLen);
+		}
+		if (result == bufferLen) { retVal = ILibTransport_DoneState_COMPLETE; }
 #endif
 		else
 		{
