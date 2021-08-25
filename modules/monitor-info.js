@@ -527,11 +527,73 @@ function monitorinfo()
             if (ret == null)
             {
                 // This Linux Distro does not spawn an XServer instance in the user session, that specifies the XAUTHORITY.
+                if (process.platform == 'linux' && require('user-sessions').hasLoginCtl)
+                {
+                    child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+
+                    child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+                    child.stdin.write('printf "[";');
+                    child.stdin.write('del="";');
+                    child.stdin.write('n=split($0, lines, "`");');
+                    child.stdin.write('for(i=1;i<n;++i)');
+                    child.stdin.write('{');
+                    child.stdin.write('   split(lines[i], tok, " ");');
+                    child.stdin.write('   if((tok[2]+0)==' + consoleuid + ')');
+                    child.stdin.write('   {');
+                    child.stdin.write('      if(tok[4]=="") { continue; }');
+                    child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
+                    child.stdin.write('      del=",";');
+                    child.stdin.write('   }');
+                    child.stdin.write('}');
+                    child.stdin.write('printf "]";');
+                    child.stdin.write("}'\nexit\n");
+                    child.waitExit();
+
+                    var info1 = JSON.parse(child.stdout.str);
+                    var sids = [];
+                    var i;
+                    for (i = 0; i < info1.length; ++i) { sids.push(info1[i].SessionId); }
+                    child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("loginctl show-session -p State -p Display " + sids.join(' ') + " | tr '\\n' '`' | awk '{");
+                    child.stdin.write('   len=split($0,tok,"``");');
+                    child.stdin.write('   for(n=1;n<=len;++n)');
+                    child.stdin.write('   {');
+                    child.stdin.write('      len2=split(tok[n],val,"`");');
+                    child.stdin.write('      display="";');
+                    child.stdin.write('      active="";');
+                    child.stdin.write('      for(i=1;i<=len2;++i)');
+                    child.stdin.write('      {');
+                    child.stdin.write('         if(val[i] ~ /^Display=/)');
+                    child.stdin.write('         {');
+                    child.stdin.write('             gsub(/^Display=/,"",val[i]);');
+                    child.stdin.write('             display=val[i];');
+                    child.stdin.write('         }');
+                    child.stdin.write('         if(val[i] ~ /^State=/)');
+                    child.stdin.write('         {');
+                    child.stdin.write('            gsub(/^State=/,"",val[i]);');
+                    child.stdin.write('            active=val[i];');
+                    child.stdin.write('         }');
+                    child.stdin.write('      }');
+                    child.stdin.write('      if(active=="active") { print display; break; }');
+                    child.stdin.write('   }');
+                    child.stdin.write("}'\nexit\n");
+                    child.waitExit();
+
+                    ret = { tty: '?', xauthority: (require('user-sessions').getHomeFolder(consoleuid) + '/.Xauthority').split('//').join('/'), display: child.stdout.str.trim(), exportEnv: exportEnv };
+                    return (xinfo_xdm(ret, consoleuid));  
+                }
+
+
+
                 // So we're going to brute force it, by enumerating all processes owned by this user, and inspect the environment variables
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = '';
                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("ps " + (process.platform=='freebsd'?"-ax ":"") + "-e -o pid -o user | grep " + uname + " | awk '{ print $1 }'\nexit\n");
+                child.stdin.write("ps " + (process.platform=='freebsd'?"-ax ":"") + "-e -o pid -o user | grep \" " + uname + "$\" | awk '{ print $1 }'\nexit\n");
                 child.waitExit();
 
                 var lines = child.stdout.str.split('\n');

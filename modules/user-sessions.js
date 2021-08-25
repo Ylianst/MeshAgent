@@ -419,6 +419,18 @@ function UserSessions()
     }
     else if(process.platform == 'linux' || process.platform == 'freebsd')
     {
+        Object.defineProperty(this, 'hasLoginCtl', 
+            {
+                get: function ()
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("whereis loginctl | awk '{ print $2 }'\nexit\n");
+                    child.waitExit();
+                    return (child.stdout.str.trim()!="");
+                }
+            });
         Object.defineProperty(this, "gdmUid", {
             get: function ()
             {
@@ -435,6 +447,13 @@ function UserSessions()
                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                 child.stderr.str = ''; child.stderr.on('data', function (c) { console.log(c.toString()); });
                 child.stdin.write('getent passwd | grep gdm | ' + "tr '\\n' '`' | awk -F'`' '" + '{ for(i=1;i<NF;++i) { split($i, f, ":"); if(f[3]+0<' + min + '+0) { print f[3]; break; } } }' + "'\nexit\n");
+                child.waitExit();
+                if (child.stdout.str.trim() != '' && (ret = parseInt(child.stdout.str.trim())) < min) { return (parseInt(child.stdout.str.trim())); }
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write('getent passwd | grep "Light Display Manager" | ' + "tr '\\n' '`' | awk -F: '{ print $3 }'\nexit\n");
                 child.waitExit();
                 if (child.stdout.str.trim() != '' && (ret = parseInt(child.stdout.str.trim())) < min) { return (parseInt(child.stdout.str.trim())); }
 
@@ -456,26 +475,77 @@ function UserSessions()
         
         this.Current = function Current(cb)
         {
+            var ret = null;
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
-            child.waitExit();
 
-            var ret = {};
-
-            try
+            if (process.platform == 'freebsd' || !this.hasLoginCtl)
             {
-                ret = JSON.parse(child.stdout.str.trim());
-                for (var key in ret)
+                child.stdin.write("who | tr '\\n' '`' | awk -F'`' '" + '{ printf "{"; for(a=1;a<NF;++a) { n=split($a, tok, " "); printf "%s\\"%s\\": \\"%s\\"", (a>1?",":""), tok[2], tok[1];  } printf "}";  }\'\nexit\n');
+                child.waitExit();
+            }
+            else
+            {
+                var min = this.minUid();
+
+                child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+                child.stdin.write('printf "[";');
+                child.stdin.write('del="";');
+                child.stdin.write('n=split($0, lines, "`");');
+                child.stdin.write('for(i=1;i<n;++i)');
+                child.stdin.write('{');
+                child.stdin.write('   split(lines[i], tok, " ");');
+                child.stdin.write('   if((tok[2]+0)>=' + min + ')');
+                child.stdin.write('   {');
+                child.stdin.write('      if(tok[4]=="") { continue; }');
+                child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
+                child.stdin.write('      del=",";');
+                child.stdin.write('   }');
+                child.stdin.write('}');
+                child.stdin.write('printf "]";');
+                child.stdin.write("}'\nexit\n");
+                child.waitExit();
+
+                var info1 = JSON.parse(child.stdout.str);
+                var sids = [];
+                var i;
+                for (i = 0; i < info1.length; ++i) { sids.push(info1[i].SessionId); }
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
+                child.stdin.write('   for(n=1;n<NF;++n)');
+                child.stdin.write('   {');
+                child.stdin.write('      if($n=="State=active") { print n; break; }');
+                child.stdin.write('   }');
+                child.stdin.write('   if(n==NF) { print 0; }');
+                child.stdin.write("}'\nexit\n");
+                child.waitExit();
+
+                i = parseInt(child.stdout.str.trim());
+                if (i > 0)
                 {
-                    ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+                    info1[i - 1].State = 'Active';
+                }
+                ret = info1;
+            }
+            
+            if (ret == null)
+            {
+                try
+                {
+                    ret = JSON.parse(child.stdout.str.trim());
+                    for (var key in ret)
+                    {
+                        ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+                    }
+                }
+                catch (e)
+                {
                 }
             }
-            catch(e)
-            {
-            }
-
             Object.defineProperty(ret, 'Active', { value: showActiveOnly(ret) });
 
             if (cb)
@@ -566,31 +636,79 @@ function UserSessions()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("who | tr '\\n' '`' | awk -F'`' '{");
-            child.stdin.write("  for(i=1;i<NF;++i) ");
-            child.stdin.write("  { ");
-            child.stdin.write('     split($i,tok," "); x=split(tok[2],itm,"pts"); ');
-            if (process.platform != 'freebsd')
-            {
-                child.stdin.write(' if(x==1) ');
-            }
-            child.stdin.write('     { ');
-            child.stdin.write('        print tok[1]; ');
-            child.stdin.write('        break;  ');
-            child.stdin.write('     }');
-            child.stdin.write('   }');
-            child.stdin.write("}'\nexit\n");
-            child.waitExit();
 
-            if (child.stderr.str != '') { return (0); }
-            if (child.stdout.str.trim() != '')
+            if (process.platform == 'freebsd' || !this.hasLoginCtl)
             {
-                try
+                child.stdin.write("who | tr '\\n' '`' | awk -F'`' '{");
+                child.stdin.write("  for(i=1;i<NF;++i) ");
+                child.stdin.write("  { ");
+                child.stdin.write('     split($i,tok," "); x=split(tok[2],itm,"pts"); ');
+                if (process.platform != 'freebsd')
                 {
-                    return (this.getUid(child.stdout.str.trim()));
+                    child.stdin.write(' if(x==1) ');
                 }
-                catch (e)
+                child.stdin.write('     { ');
+                child.stdin.write('        print tok[1]; ');
+                child.stdin.write('        break;  ');
+                child.stdin.write('     }');
+                child.stdin.write('   }');
+                child.stdin.write("}'\nexit\n");
+                child.waitExit();
+
+                if (child.stderr.str != '') { return (0); }
+                if (child.stdout.str.trim() != '')
                 {
+                    try
+                    {
+                        return (this.getUid(child.stdout.str.trim()));
+                    }
+                    catch (e)
+                    {
+                    }
+                }
+            }
+            else
+            {
+                var min = this.minUid();
+
+                child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+                child.stdin.write('printf "[";');
+                child.stdin.write('del="";');
+                child.stdin.write('n=split($0, lines, "`");');
+                child.stdin.write('for(i=1;i<n;++i)');
+                child.stdin.write('{');
+                child.stdin.write('   split(lines[i], tok, " ");');
+                child.stdin.write('   if((tok[2]+0)>=' + min + ')');
+                child.stdin.write('   {');
+                child.stdin.write('      if(tok[4]=="") { continue; }');
+                child.stdin.write('      printf "%s{\\"uid\\": \\"%s\\", \\"sid\\": \\"%s\\"}", del, tok[2], tok[1];');
+                child.stdin.write('      del=",";');
+                child.stdin.write('   }');
+                child.stdin.write('}');
+                child.stdin.write('printf "]";');
+                child.stdin.write("}'\nexit\n");
+                child.waitExit();
+                var info1 = JSON.parse(child.stdout.str);
+                var sids = [];
+                var i;
+                for (i = 0; i < info1.length; ++i) { sids.push(info1[i].sid); }
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
+                child.stdin.write('   for(n=1;n<NF;++n)');
+                child.stdin.write('   {');
+                child.stdin.write('      if($n=="State=active") { print n; break; }');
+                child.stdin.write('   }');
+                child.stdin.write('   if(n==NF) { print 0; }');
+                child.stdin.write("}'\nexit\n");
+                child.waitExit();
+
+                i = parseInt(child.stdout.str.trim());
+                if (i > 0)
+                {
+                    return (parseInt(info1[i - 1].uid));
                 }
             }
 

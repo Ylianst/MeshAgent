@@ -95,10 +95,11 @@ int g_restartcount = 0;
 int g_totalRestartCount = 0;
 int g_shutdown = 0;
 int change_display = 0;
-unsigned short current_display = 0;
 pid_t g_slavekvm = 0;
 int master2slave[2];
 int slave2master[2];
+char CURRENT_XDISPLAY[256];
+int CURRENT_DISPLAY_ID = -1;
 
 FILE *logFile = NULL;
 int g_enableEvents = 0;
@@ -147,6 +148,7 @@ typedef struct x11_struct
 	KeySym*(*XGetKeyboardMapping)(Display *display, KeyCode first_keycode, int keycode_count, int *keysyms_per_keycode_return);
 	KeySym(*XStringToKeysym)(char *string);
 	int(*XChangeKeyboardMapping)(Display *display, int first_keycode, int keysyms_per_keycode, KeySym *keysyms, int num_codes);
+	int(*XScreenCount)(Display *display);
 }x11_struct;
 x11_struct *x11_exports = NULL;
 
@@ -416,7 +418,7 @@ void kvm_send_display()
 	char buffer[5];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SET_DISPLAY);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
-	buffer[4] = current_display;																// Display number
+	buffer[4] = CURRENT_DISPLAY_ID;																// Display number
 
 	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
 }
@@ -437,64 +439,15 @@ int lockfileCheckFn(const struct dirent *ent) {
 	return 0;
 }
 
-void getAvailableDisplays(unsigned short **array, int *len) {
-	DIR *dir = NULL;
-	struct dirent **ent = NULL;
+void getAvailableDisplays(unsigned short **array, int *len) 
+{
 	int i;
-	*array = NULL;
-	*len = 0;
-
-	dir = opendir("/tmp/");
-	if (dir != NULL) {
-		*len = scandir("/tmp/", &ent, lockfileCheckFn, alphasort);
-
-		if ((*array = (unsigned short *)malloc((*len)*sizeof(unsigned short))) == NULL) ILIBCRITICALEXIT(254);
-
-		for (i = 0; i < *len; i++) {
-			int dispNo = 0;
-
-			sscanf(ent[i]->d_name, ".X%d-lock", &dispNo);
-			(*array)[i] = (unsigned short)dispNo;
-		}
+	*len = x11_exports->XScreenCount(eventdisplay);
+	if ((*array = (unsigned short *)malloc((*len) * sizeof(unsigned short))) == NULL) ILIBCRITICALEXIT(254);
+	for (i = 0; i < (*len); ++i)
+	{
+		(*array)[i] = (unsigned short)i;
 	}
-}
-
-int getNextDisplay() {
-	DIR *dir = NULL;
-	struct dirent **ent = NULL;
-	int i, dispNo;
-
-	dir = opendir("/tmp/");
-	if (dir != NULL) {
-		int numDisplays = scandir("/tmp/", &ent, lockfileCheckFn, alphasort);
-		if (numDisplays == 0) { return -1; }
-
-		for (i = 0; i < numDisplays; i++) {
-
-			sscanf(ent[i]->d_name, ".X%d-lock", &dispNo);
-
-			if (dispNo == (int)current_display) {
-				break;
-			}
-		}
-
-		if (i == numDisplays) {
-			i = 0;
-		}
-		else {
-			i = (i + 1) % numDisplays;
-		}
-
-		sscanf(ent[i]->d_name, ".X%d-lock", &dispNo);
-		current_display = (unsigned short) dispNo;
-		closedir(dir);
-	}
-	else {
-		current_display = 0;
-	}
-
-	//fprintf(logFile, "getNextDisplay() => %d\n", current_display);
-	return 0;
 }
 
 void kvm_send_display_list()
@@ -512,10 +465,11 @@ void kvm_send_display_list()
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_GET_DISPLAYS);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)totalSize);			// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)len);					// Length
-	for (i = 0; i < len; i++) {
+	for (i = 0; i < len; i++) 
+	{
 		((unsigned short*)buffer)[i + 3] = (unsigned short)htons(displays[i]);
 	}
-	((unsigned short*)buffer)[i + 3] = (unsigned short)htons((unsigned short)current_display);	// Current display
+	((unsigned short*)buffer)[i + 3] = (unsigned short)htons((unsigned short)CURRENT_DISPLAY_ID);	// Current display
 
 	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
 }
@@ -534,11 +488,9 @@ void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char 
 
 int kvm_init(int displayNo)
 {
-	//fprintf(logFile, "kvm_init called\n"); fflush(logFile);
+	if (logFile) { fprintf(logFile, "kvm_init(%d) called\n", displayNo); fflush(logFile); }
 	int old_height_count = TILE_HEIGHT_COUNT;
-	int count = 0;
 	int dummy1, dummy2, dummy3;
-	char displayString[256] = "";
 
 	if (clock_gettime(CLOCK_MONOTONIC, &inputtime) != 0) { memset(&inputtime, 0, sizeof(inputtime)); }
 
@@ -592,7 +544,8 @@ int kvm_init(int displayNo)
 			((void**)x11_exports)[18] = (void*)dlsym(x11_exports->x11_lib, "XGetKeyboardMapping");
 			((void**)x11_exports)[19] = (void*)dlsym(x11_exports->x11_lib, "XStringToKeysym");
 			((void**)x11_exports)[20] = (void*)dlsym(x11_exports->x11_lib, "XChangeKeyboardMapping");
-			
+			((void**)x11_exports)[21] = (void*)dlsym(x11_exports->x11_lib, "XScreenCount");
+
 			((void**)x11tst_exports)[4] = (void*)x11_exports->XFlush;
 			((void**)x11tst_exports)[5] = (void*)x11_exports->XKeysymToKeycode;
 		}
@@ -611,39 +564,27 @@ int kvm_init(int displayNo)
 	}
 
 
-	sprintf_s(displayString, sizeof(displayString), ":%d", (int)displayNo);
+	sprintf_s(CURRENT_XDISPLAY, sizeof(CURRENT_XDISPLAY), ":%d", (int)displayNo);
 
-	if (count == 10) { return -1; }
-	count = 0;
-	eventdisplay = x11_exports->XOpenDisplay(displayString);
+	eventdisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY);
 	if (logFile) { fprintf(logFile, "XAUTHORITY is %s\n", getenv("XAUTHORITY")); fflush(logFile); }
-	if (logFile) { fprintf(logFile, "DisplayString is %s\n", displayString); fflush(logFile); }
+	if (logFile) { fprintf(logFile, "DisplayString is %s\n", CURRENT_XDISPLAY); fflush(logFile); }
 
 	if (eventdisplay == NULL)
 	{
 		char tmpBuff[1024];
-		sprintf_s(tmpBuff, sizeof(tmpBuff), "XOpenDisplay(%s) failed, using XAUTHORITY: %s", displayString, getenv("XAUTHORITY"));
+		sprintf_s(tmpBuff, sizeof(tmpBuff), "XOpenDisplay(%s) failed, using XAUTHORITY: %s", CURRENT_XDISPLAY, getenv("XAUTHORITY"));
 		//fprintf(logFile, "DisplayString=%s\n", displayString);
 		//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
 		//fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
 		kvm_send_error(tmpBuff);
+		return(-1);
 	}
-
-	if (eventdisplay != NULL) { current_display = (unsigned short)displayNo; }
-
-	while (eventdisplay == NULL && count++ < 100) 
-	{
-		if (getNextDisplay() == -1) { return -1; }
-		sprintf_s(displayString, sizeof(displayString), ":%d", (int)current_display);
-		eventdisplay = x11_exports->XOpenDisplay(displayString);
-	}
-
-	if (count == 100 && eventdisplay == NULL) { return -1; }
 
 	g_enableEvents = x11_exports->XQueryExtension(eventdisplay, "XTEST", &dummy1, &dummy2, &dummy3)? 1 : 0;
 	if (!g_enableEvents) { printf("FATAL::::Fake motion is not supported.\n\n\n"); }
 
-	SCREEN_NUM = DefaultScreen(eventdisplay);
+	CURRENT_DISPLAY_ID = SCREEN_NUM = DefaultScreen(eventdisplay);
 	SCREEN_HEIGHT = DisplayHeight(eventdisplay, SCREEN_NUM);
 	SCREEN_WIDTH = DisplayWidth(eventdisplay, SCREEN_NUM);
 	SCREEN_DEPTH = DefaultDepth(eventdisplay, SCREEN_NUM);
@@ -674,9 +615,26 @@ int kvm_init(int displayNo)
 
 void CheckDesktopSwitch(int checkres)
 {
-	if (change_display) {
-		kvm_init(current_display);
+	if (change_display) 
+	{
+		if (logFile) { fprintf(logFile, "kvm_init(%d) checkDesktopSwitch\n", CURRENT_DISPLAY_ID);  fflush(logFile); }
+		int old_height_count = TILE_HEIGHT_COUNT;
 		change_display = 0;
+		
+		SCREEN_NUM = CURRENT_DISPLAY_ID;
+		SCREEN_HEIGHT = DisplayHeight(eventdisplay, CURRENT_DISPLAY_ID);
+		SCREEN_WIDTH = DisplayWidth(eventdisplay, CURRENT_DISPLAY_ID);
+		SCREEN_DEPTH = DefaultDepth(eventdisplay, CURRENT_DISPLAY_ID);
+
+		TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
+		TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
+		if (SCREEN_WIDTH % TILE_WIDTH) { TILE_WIDTH_COUNT++; }
+		if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
+
+		kvm_send_resolution();
+		kvm_send_display();
+
+		reset_tile_info(old_height_count);
 		return;
 	}
 }
@@ -776,8 +734,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_SET_DISPLAY:
 		{
-			if (ntohs(((unsigned short*)(block))[2]) == current_display) { break; } // Don't do anything
-			current_display = ntohs(((unsigned short*)(block))[2]);
+			if (ntohs(((unsigned short*)(block))[2]) == CURRENT_DISPLAY_ID) { break; } // Don't do anything
+			CURRENT_DISPLAY_ID = ntohs(((unsigned short*)(block))[2]);
 			change_display = 1;
 			break;
 		}
@@ -964,7 +922,7 @@ void* kvm_server_mainloop(void* parm)
 	unsigned int mr;
 	char *cimage;
 
-	int x, y, height, width, r, c, count = 0;
+	int x, y, height, width, r, c;
 	int sentHideCursor = 0;
 	long long desktopsize = 0;
 	long long tilesize = 0;
@@ -976,7 +934,6 @@ void* kvm_server_mainloop(void* parm)
 	void *buf = NULL;
 	char displayString[256] = "";
 	int event_base = 0, error_base = 0, cursor_descriptor = -1;
-	int screen_height, screen_width, screen_depth, screen_num;
 	ssize_t written;
 	XShmSegmentInfo shminfo;
 	default_JPEG_error_handler = kvm_server_jpegerror;
@@ -987,6 +944,8 @@ void* kvm_server_mainloop(void* parm)
 	fd_set writeset;
 	XEvent XE;
 
+	unsigned short currentDisplayId;
+
 	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)
 	{
@@ -996,7 +955,7 @@ void* kvm_server_mainloop(void* parm)
 		{
 			if (i == 7 && strncmp("DISPLAY", *env, 7) == 0)
 			{
-				current_display = (unsigned short)atoi(*env + i + 2);
+				currentDisplayId = (unsigned short)atoi(*env + i + 2);
 				if (logFile) { fprintf(logFile, "ENV[DISPLAY] = %s\n", *env + i + 2); fflush(logFile); }
 				break;
 			}
@@ -1004,8 +963,8 @@ void* kvm_server_mainloop(void* parm)
 	}
 
 	// Init the kvm
-	//fprintf(logFile, "Before kvm_init.\n"); fflush(logFile);
-	if (kvm_init(current_display) != 0) { return (void*)-1; }
+	if (logFile) { fprintf(logFile, "Before kvm_init(%d).\n", currentDisplayId); fflush(logFile); }
+	if (kvm_init(currentDisplayId) != 0) { return (void*)-1; }
 	kvm_send_display_list();
 	//fprintf(logFile, "After kvm_init.\n"); fflush(logFile);
 
@@ -1043,24 +1002,9 @@ void* kvm_server_mainloop(void* parm)
 		CheckDesktopSwitch(1);
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
 
-		sprintf_s(displayString, sizeof(displayString), ":%d", (int)current_display);
-		imagedisplay = x11_exports->XOpenDisplay(displayString);
+		imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY);
 
-		count = 0;
-
-		if (imagedisplay == NULL && count++ < 100) 
-		{
-			change_display = 1;
-			if (getNextDisplay() == -1) { return (void*)-1; }
-			//fprintf(logFile, "Before kvm_init1.\n"); fflush(logFile);
-			kvm_init(current_display);
-			//fprintf(logFile, "After kvm_init1.\n"); fflush(logFile);
-			change_display = 0;
-			if (image != NULL) { XDestroyImage(image); image = NULL; }
-			continue;
-		}
-
-		if (count == 100 && imagedisplay == NULL) { g_shutdown = 1; break; }
+		if (imagedisplay == NULL) { g_shutdown = 1; break; }
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
@@ -1086,9 +1030,9 @@ void* kvm_server_mainloop(void* parm)
 
 		if (cursordisplay == NULL)
 		{
-			if ((cursordisplay = x11_exports->XOpenDisplay(displayString)))
+			if ((cursordisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY)))
 			{
-				Window rootwin = x11_exports->XRootWindow(cursordisplay, 0);
+				Window rootwin = x11_exports->XRootWindow(cursordisplay, CURRENT_DISPLAY_ID);
 				if (xfixes_exports->XFixesQueryExtension(cursordisplay, &event_base, &error_base))
 				{
 					xfixes_exports->XFixesSelectCursorInput(cursordisplay, rootwin, 1); // Register for Cursor Change Notifications
@@ -1173,29 +1117,10 @@ void* kvm_server_mainloop(void* parm)
 			}
 		}
 
-		screen_num = DefaultScreen(imagedisplay);
-		screen_height = DisplayHeight(imagedisplay, screen_num);
-		screen_width = DisplayWidth(imagedisplay, screen_num);
-		screen_depth = DefaultDepth(imagedisplay, screen_num);
-
-		if (screen_depth <= 15) {
-			//fprintf(logFile, "We do not support display depth %d < 15.\n", screen_depth); fflush(logFile);
-			//fprintf(stderr, "We do not support display depth <= 15.");
-			break;
-		}
-
-		if ((SCREEN_HEIGHT != screen_height || SCREEN_WIDTH != screen_width || SCREEN_DEPTH != screen_depth || SCREEN_NUM != screen_num)) 
-		{
-			kvm_init(current_display);
-			if (image != NULL) { XDestroyImage(image); image = NULL; }
-			continue;
-		}
-
-
 		image = x11ext_exports->XShmCreateImage(imagedisplay,
-			DefaultVisual(imagedisplay, screen_num), // Use a correct visual. Omitted for brevity     
-			screen_depth,
-			ZPixmap, NULL, &shminfo, screen_width, screen_height);
+			DefaultVisual(imagedisplay, SCREEN_NUM), // Use a correct visual. Omitted for brevity     
+			SCREEN_DEPTH,
+			ZPixmap, NULL, &shminfo, SCREEN_WIDTH, SCREEN_HEIGHT);
 		shminfo.shmid = shmget(IPC_PRIVATE,
 			image->bytes_per_line * image->height,
 			IPC_CREAT | 0777);
@@ -1204,7 +1129,7 @@ void* kvm_server_mainloop(void* parm)
 		x11ext_exports->XShmAttach(imagedisplay, &shminfo);
 		
 		x11ext_exports->XShmGetImage(imagedisplay,
-			RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay)),
+			RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
 			image,
 			0,
 			0,
@@ -1220,7 +1145,7 @@ void* kvm_server_mainloop(void* parm)
 		}
 		else 
 		{
-			rs = x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(DefaultScreenOfDisplay(imagedisplay)),
+			rs = x11_exports->XQueryPointer(imagedisplay, RootWindowOfScreen(ScreenOfDisplay(imagedisplay, CURRENT_DISPLAY_ID)),
 				&rr, &cr, &rx, &ry, &wx, &wy, &mr);
 			if (rs == 1 && cursordisplay != NULL)
 			{
@@ -1237,10 +1162,10 @@ void* kvm_server_mainloop(void* parm)
 					//if (logFile) { fprintf(logFile, "BBP: %d, pad: %d, unit: %d, BPP: %d, F: %d, XO: %d: PW: %d\n", image->bytes_per_line, image->bitmap_pad, image->bitmap_unit, image->bits_per_pixel, image->format, image->xoffset, (adjust_screen_size(SCREEN_WIDTH) - image->width) * 3); fflush(logFile); }
 					//if (logFile) { fprintf(logFile, "[%d/ %d x %d] (%d, %d) => (%d, %d | %u, %u)\n", image->bits_per_pixel, xa.width, xa.height, screen_width, screen_height, rx, ry,w , h); fflush(logFile); }
 
-					if (xhot > rx) { mx = 0; } else if ((mx + w) > screen_width) { mx = screen_width - w; }
-					if (yhot > ry) { my = 0; } else if ((my + h) > screen_height) { my = screen_height - h; }
+					if (xhot > rx) { mx = 0; } else if ((mx + w) > SCREEN_WIDTH) { mx = SCREEN_WIDTH - w; }
+					if (yhot > ry) { my = 0; } else if ((my + h) > SCREEN_HEIGHT) { my = SCREEN_HEIGHT - h; }
 
-					bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, screen_width, screen_height, mx, my, 1);
+					bitblt(pixels, (int)w, (int)h, 0, 0, (int)w, (int)h, image->data, SCREEN_WIDTH, SCREEN_HEIGHT, mx, my, 1);
 
 					if (sentHideCursor == 0)
 					{
