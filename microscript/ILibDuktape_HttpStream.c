@@ -4075,7 +4075,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 	if (flags & WEBSOCKET_MASK) 
 	{
 		// We have to copy memory anyways to mask, so we might as well copy the extra few bytes and make a single buffer
-		char *dataFrame = ILibMemory_AllocateA(headerLen + 4 + bufferLen);
+		char *dataFrame = ((headerLen + 4 + bufferLen) < 65535) ? ILibMemory_AllocateA(headerLen + 4 + bufferLen) : ILibMemory_SmartAllocate(headerLen + 4 + bufferLen);
 		char *maskKey = (dataFrame + headerLen);
 		memcpy_s(dataFrame, headerLen, header, headerLen);
 
@@ -4091,6 +4091,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(IL
 			for (x = (x << 2); x < bufferLen; ++x) { dataFrame[x + headerLen + 4] = buffer[x] ^ maskKey[x % 4]; } // Mask the reminder
 		}
 		retVal = ILibDuktape_DuplexStream_WriteData(state->encodedStream, dataFrame, headerLen + 4 + bufferLen) == 0 ? ILibTransport_DoneState_COMPLETE : ILibTransport_DoneState_INCOMPLETE;
+		ILibMemory_Free(dataFrame);
 	}
 	else 
 	{
