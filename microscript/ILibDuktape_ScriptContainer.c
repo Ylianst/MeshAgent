@@ -2049,7 +2049,10 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 #endif
 	ILibDuktape_CreateReadonlyProperty(ctx, "EOL");
 
+#ifndef __APPLE__
 	ILibDuktape_CreateInstanceMethod(ctx, "arch", ILibDuktape_ScriptContainer_OS_arch, 0);
+#endif
+
 	ILibDuktape_CreateInstanceMethod(ctx, "platform", ILibDuktape_ScriptContainer_OS_platform, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "endianness", ILibDuktape_ScriptContainer_OS_endianness, 0);
 #if !defined(__APPLE__) && !defined(_FREEBSD)
@@ -2094,6 +2097,18 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 			return ('');\
 		}\
 	};\
+	if(process.platform == 'darwin')\
+	{\
+		exports.arch = function arch()\
+		{\
+			var child = require('child_process').execFile('/bin/sh', ['sh']);\
+			child.stdout.str = ''; child.stdout.on('data', function(c) { this.str += c.toString(); });\
+			child.stderr.str = ''; child.stderr.on('data', function(c) { this.str += c.toString(); });\
+			child.stdin.write(\"sysctl -a | grep brand_string | awk -F: '{ split($2,tok,\\\" \\\"); if(tok[1]==\\\"Apple\\\" || tok[1]==\\\"VirtualApple\\\") { print \\\"arm64\\\"; } else { print \\\"x64\\\"; } }'\\nexit\\n\");\
+			child.waitExit();\
+			return(child.stdout.str.trim());\
+		};\
+	}\
 	if(process.platform == 'linux')\
 	{\
 		Object.defineProperty(exports, '_longbit', {value: (function ()\
