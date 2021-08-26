@@ -1669,7 +1669,11 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 #else
 	struct utsname u;
 	if (uname(&u) != 0) { return(ILibDuktape_Error(ctx, "Could not determine architecture")); }
-	if (u.machine[0] == 'i')
+	if (strcmp(u.machine, "amd64") == 0)
+	{
+		duk_push_string(ctx, "x64");
+	}
+	else if (u.machine[0] == 'i')
 	{
 		duk_push_string(ctx, "ia32");
 	}
