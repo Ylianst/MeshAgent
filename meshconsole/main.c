@@ -242,7 +242,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 
 		printf("Agent ARCHID: %d\n", MESH_AGENTID);
-		char script[] = "console.log('Detected OS: ' + require('os').Name + ' - ' + require('os').arch());process.exit();";
+		char script[] = "var _tmp = 'Detected OS: ' + require('os').Name; try{_tmp += (' - ' + require('os').arch());}catch(x){}console.log(_tmp);process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
