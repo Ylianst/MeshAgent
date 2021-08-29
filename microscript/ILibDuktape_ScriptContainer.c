@@ -1695,7 +1695,7 @@ duk_ret_t ILibDuktape_ScriptContainer_OS_arch(duk_context *ctx)
 			duk_push_string(ctx, "x64");
 #endif
 		}
-		else if (strcmp(u.machine, "arm64") == 0)
+		else if (strcmp(u.machine, "arm64") == 0 || strcmp(u.machine, "aarch64") == 0)
 		{
 			duk_push_string(ctx, "arm64");
 		}
