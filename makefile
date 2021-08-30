@@ -110,7 +110,7 @@
 #   make linux ARCHID=27 					# Linux ARM 32 bit HardFloat NOKVM (Old Raspberry Pi on Raspian 7, 2015-02-02 build)
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 #   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
-#	gmake openbsd ARCHID=34					# OpenBSD x86 64 bit
+#	gmake openbsd ARCHID=37					# OpenBSD x86 64 bit
 #
 #
 # Alpine Linux (MUSL)
@@ -487,7 +487,7 @@ LMS = 0
 endif
 
 # Official OpenBSD x86-64
-ifeq ($(ARCHID),34)
+ifeq ($(ARCHID),37)
 ARCHNAME = openbsd_x86-64
 CC = clang
 CFLAGS += -I/usr/local/include
