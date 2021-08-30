@@ -34,6 +34,11 @@ limitations under the License.
 #include "microscript/ILibDuktape_Commit.h"
 
 MeshAgentHostContainer *agentHost = NULL;
+#ifdef _OPENBSD
+#include <stdlib.h>
+char __agentExecPath[1024] = { 0 };
+#endif
+
 
 #ifdef WIN32
 BOOL CtrlHandler(DWORD fdwCtrlType)
@@ -81,6 +86,10 @@ int wmain(int argc, char **wargv)
 int main(int argc, char **argv)
 #endif
 {
+#ifdef _OPENBSD
+	realpath(argv[0], __agentExecPath);
+#endif
+
 	// Check if .JS file is integrated with executable
 	char *integratedJavaScript = NULL;
 	int integratedJavaScriptLen = 0;

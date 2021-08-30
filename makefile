@@ -110,6 +110,7 @@
 #   make linux ARCHID=27 					# Linux ARM 32 bit HardFloat NOKVM (Old Raspberry Pi on Raspian 7, 2015-02-02 build)
 #   gmake freebsd ARCHID=30					# FreeBSD x86 64 bit
 #   gmake freebsd ARCHID=31					# Reserved for FreeBSD x86 32 bit
+#	gmake openbsd ARCHID=34					# OpenBSD x86 64 bit
 #
 #
 # Alpine Linux (MUSL)
@@ -485,6 +486,15 @@ KVM = 0
 LMS = 0
 endif
 
+# Official OpenBSD x86-64
+ifeq ($(ARCHID),34)
+ARCHNAME = openbsd_x86-64
+CC = clang
+CFLAGS += -I/usr/local/include
+KVM = 0
+LMS = 0
+endif
+
 
 ifeq ($(WEBLOG),1)
 CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
@@ -724,3 +734,9 @@ freebsd:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
+
+openbsd:
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -DILIB_NO_TIMEDJOIN -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	$(SYMBOLCP)
+	$(STRIP)
+

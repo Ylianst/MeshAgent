@@ -52,6 +52,11 @@ limitations under the License.
 #include <sys/resource.h>
 #endif
 
+#ifdef _OPENBSD
+extern char* __agentExecPath;
+#endif
+
+
 #include "ILibDuktape_ScriptContainer.h"
 #include "ILibDuktapeModSearch.h"
 #include "ILibDuktape_EventEmitter.h"
@@ -453,12 +458,16 @@ void ILibDuktape_ScriptContainer_CheckEmbedded(char **script, int *scriptLen)
 	int x = readlink("/proc/curproc/file", exePath, sizeof(exePath));
 	if (x < 0 || x >= sizeof(exePath))
 	{
+#ifdef _OPENBSD
+		strcpy_s(exePath, sizeof(exePath), __agentExecPath);		
+#else
 		printf("\nYou'll need to mount procfs, which isn't mounted by default on FreeBSD.\n");
 		printf("Add the following line to /etc/fstab\n");
 		printf("   proc	/proc	procfs	rw	0	0\n\n");
 		printf("If you don't reboot after, then you can manually mount with the command:\n");
 		printf("   mount -t procfs proc /proc\n\n");
 		ILIBCRITICALEXIT(246);
+#endif
 	}
 	exePath[x] = 0;
 #else

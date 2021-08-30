@@ -42,7 +42,11 @@ limitations under the License.
 		#include <util.h>
 	#else
 		#include <termios.h>
+#ifdef _OPENBSD
+		#include <util.h>
+#else
 		#include <libutil.h>
+#endif
 	#endif
 #endif
 #endif

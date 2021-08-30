@@ -5770,7 +5770,11 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 #elif defined(NACL)
 #else
 	#ifdef _FREEBSD
-		x = readlink("/proc/curproc/file", exePath, 1024);
+		#ifdef _OPENBSD
+			x = sprintf_s(exePath, 1024, "%s", __agentExecPath);
+		#else
+			x = readlink("/proc/curproc/file", exePath, 1024);
+		#endif
 	#else
 		x = readlink("/proc/self/exe", exePath, 1024);
 	#endif
