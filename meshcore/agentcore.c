@@ -48,6 +48,10 @@ limitations under the License.
 #include <sys/wait.h>
 #endif
 
+#ifdef _OPENBSD
+extern char __agentExecPath[];
+#endif
+
 int gRemoteMouseRenderDefault = 0;
 
 #ifdef _LINKVM

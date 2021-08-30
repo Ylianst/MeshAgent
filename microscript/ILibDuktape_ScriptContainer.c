@@ -53,7 +53,7 @@ limitations under the License.
 #endif
 
 #ifdef _OPENBSD
-extern char* __agentExecPath;
+extern char __agentExecPath[];
 #endif
 
 
