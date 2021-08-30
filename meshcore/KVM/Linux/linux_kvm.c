@@ -574,9 +574,6 @@ int kvm_init(int displayNo)
 	{
 		char tmpBuff[1024];
 		sprintf_s(tmpBuff, sizeof(tmpBuff), "XOpenDisplay(%s) failed, using XAUTHORITY: %s", CURRENT_XDISPLAY, getenv("XAUTHORITY"));
-		//fprintf(logFile, "DisplayString=%s\n", displayString);
-		//fprintf(logFile, "XAUTHORITY is %s", getenv("XAUTHORITY")); fflush(logFile);
-		//fprintf(logFile, "Error calling XOpenDisplay()\n"); fflush(logFile);
 		kvm_send_error(tmpBuff);
 		return(-1);
 	}
@@ -932,7 +929,6 @@ void* kvm_server_mainloop(void* parm)
 	eventdisplay = NULL;
 	Display *imagedisplay = NULL, *cursordisplay = NULL;
 	void *buf = NULL;
-	char displayString[256] = "";
 	int event_base = 0, error_base = 0, cursor_descriptor = -1;
 	ssize_t written;
 	XShmSegmentInfo shminfo;
@@ -944,7 +940,7 @@ void* kvm_server_mainloop(void* parm)
 	fd_set writeset;
 	XEvent XE;
 
-	unsigned short currentDisplayId;
+	unsigned short currentDisplayId = 0;
 
 	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)

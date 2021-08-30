@@ -3126,6 +3126,7 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 
 int ILibStun_AddSctpChunkHeader(char* buffer, int ptr, unsigned char chunktype, unsigned char chunkflags, unsigned short chunklength)
 {
+	if (buffer == NULL) { ILIBCRITICALEXITMSG(255, "ILibStun_AddSctpChunkHeader() Invalid Parameter"); }
 	if (ptr >= 12 && ((int*)buffer)[0] == 0 && ((int*)buffer)[1] == 0)
 	{
 		// This buffer contains a common buffer area, that has control flags
