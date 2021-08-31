@@ -1263,6 +1263,37 @@ function serviceManager()
                 };
                 ret.parameters = function parameters()
                 {
+                    if (this.OpenBSD)
+                    {
+                        var s = require('fs').readFileSync('/etc/rc.d/' + this.name).toString();
+
+                        var loader = s.match('\ndaemon=.*\n');
+                        if (loader && loader[0].match('/' + this.name + '_loader"\n$'))
+                        {
+                            // This is our daemon
+                            var i;
+                            var lines = s.split('\n');
+                            for (i = 0; i < lines.length; ++i)
+                            {
+                                if (lines[i].match('^daemon_flags='))
+                                {
+                                    var b64 = lines[i].split(' ')[1];
+                                    b64 = Buffer.from(b64, 'base64').toString();
+                                    var match = b64.match('\\[.*\\]');
+                                    match = JSON.parse(match);
+                                    return (match);
+                                }
+                            }
+                            return ([]);
+                        }
+                        else
+                        {
+                            // Non-Daemon
+                            return ([]);
+                        }
+                    }
+
+                    // FreeBSD
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                     child.stdin.write("cat " + this.rc + ' | grep "^\\s*command_args=" | awk \'NR==1');
@@ -3279,10 +3310,13 @@ function serviceManager()
             global.child = require('child_process').execFile(path, parameters);
             if(global.child)
             {
+                var name = options.name ? options.name : parameters[0];
+                require('fs').writeFileSync('/var/run/' + name + '.pid', global.child.pid.toString());
                 global.child.stdout.on('data', function(c) { console.log(c.toString()); });
                 global.child.stderr.on('data', function(c) { console.log(c.toString()); });
                 global.child.once('exit', function (code) 
                 {
+                    require('fs').unlinkSync('/var/run/' + name + '.pid');
                     if(options.crashRestart) { spawnChild(); } 
                 });
             }
