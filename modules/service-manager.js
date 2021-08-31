@@ -3303,6 +3303,7 @@ function serviceManager()
     this.daemonEx = function daemonEx(path, parameters, options)
     {
         parameters.unshift(process.platform == 'win32' ? path.split('\\').pop() : path.split('/').pop());
+        var name = options.name ? options.name : parameters[0];
         if (options.cwd) { process.chdir(options.cwd); }
 
         function spawnChild()
@@ -3310,8 +3311,7 @@ function serviceManager()
             global.child = require('child_process').execFile(path, parameters);
             if(global.child)
             {
-                var name = options.name ? options.name : parameters[0];
-                require('fs').writeFileSync('/var/run/' + name + '.pid', global.child.pid.toString());
+                require('fs').writeFileSync('/var/run/' + name + '.pid', global.child.pid.toString() + '\n');
                 global.child.stdout.on('data', function(c) { console.log(c.toString()); });
                 global.child.stderr.on('data', function(c) { console.log(c.toString()); });
                 global.child.once('exit', function (code) 
@@ -3335,7 +3335,11 @@ function serviceManager()
         spawnChild();
         process.on('SIGTERM', function()
         {
-            if(global.child) { child.kill(); }
+            if (global.child)
+            {
+                child.kill();
+                require('fs').unlinkSync('/var/run/' + name + '.pid');
+            }
             process.exit();
         });
     }
