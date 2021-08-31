@@ -1196,18 +1196,35 @@ function serviceManager()
                 };
                 ret.pid = function pid()
                 {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onestatus | awk '");
-                    child.stdin.write('{ split($6, res, ".");  ');
-                    child.stdin.write('  cm=sprintf("ps -p %s -w", res[1]);');
-                    child.stdin.write('  system(cm); ')
-                    child.stdin.write('}\' | awk \'NR>1\' | awk \'');
-                    child.stdin.write('{');
-                    child.stdin.write('   if($5=="daemon:") { split($0, T, "["); split(T[2], X, "]"); print X[1]; } else { print $1; }');
-                    child.stdin.write('}\'\nexit\n');
-                    child.waitExit();
-                    return (parseInt(child.stdout.str.trim()));
+                    if (this.OpenBSD)
+                    {
+                        // OpenBSD
+                        try
+                        {
+                            var pid = require('fs').readFileSync('/var/run/' + this.name + '.pid');
+                            return(parseInt(pid.toString().trim()));
+                        }
+                        catch(e)
+                        {
+                            return (-1);
+                        }
+                    }
+                    else
+                    {
+                        // FreeBSD
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("service " + this.name + " onestatus | awk '");
+                        child.stdin.write('{ split($6, res, ".");  ');
+                        child.stdin.write('  cm=sprintf("ps -p %s -w", res[1]);');
+                        child.stdin.write('  system(cm); ')
+                        child.stdin.write('}\' | awk \'NR>1\' | awk \'');
+                        child.stdin.write('{');
+                        child.stdin.write('   if($5=="daemon:") { split($0, T, "["); split(T[2], X, "]"); print X[1]; } else { print $1; }');
+                        child.stdin.write('}\'\nexit\n');
+                        child.waitExit();
+                        return (parseInt(child.stdout.str.trim()));
+                    }
                 };
                 ret.isMe = function isMe()
                 {
@@ -1256,10 +1273,22 @@ function serviceManager()
                         throw ('Error Restarting via execve()');
                     }
 
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onerestart\nexit\n");
-                    child.waitExit();
+                    if (this.OpenBSD)
+                    {
+                        // OpenBSD
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("rcctl restart " + this.name + "\nexit\n");
+                        child.waitExit();
+                    }
+                    else
+                    {
+                        // FreeBSD
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("service " + this.name + " onerestart\nexit\n");
+                        child.waitExit();
+                    }
                 };
                 ret.parameters = function parameters()
                 {
@@ -3118,6 +3147,17 @@ function serviceManager()
             if (!options || !options.skipDeleteBinary)
             {
                 require('fs').unlinkSync(service.appLocation());
+            }
+            if (this.OpenBSD)
+            {
+                // OpenBSD specific 
+                try
+                {
+                    require('fs').unlinkSync(workingPath + name + '_loader');
+                }
+                catch(e)
+                {
+                }
             }
             if (this.pfSense)
             {
