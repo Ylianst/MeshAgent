@@ -80,7 +80,8 @@ function nativeAddCompressedModule(name)
             ret += ('memcpy_s(_' + name.split('-').join('') + ' + ' + i + ', ' + (tmp.length - i) + ', "' + chunk + '", ' + chunk.length + ');\n');
             i += chunk.length;
         }
-        ret += ('ILibDuktape_AddCompressedModule(ctx, "' + name + '", _' + name.split('-').join('') + valuex + ');\n');
+        valuex = valuex.split("'").join('"');
+        ret += ('ILibDuktape_AddCompressedModuleEx(ctx, "' + name + '", _' + name.split('-').join('') + valuex + ');\n');
         ret += ('free(_' + name.split('-').join('') + ');\n');
     }
     module.exports(ret);

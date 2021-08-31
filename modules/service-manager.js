@@ -1059,6 +1059,8 @@ function serviceManager()
             this.getService = function getService(name)
             {
                 var ret = { name: name, close: function () { } };
+                Object.defineProperty(ret, "OpenBSD", { value: !require('fs').existsSync('/usr/sbin/daemon') });
+
                 if(require('fs').existsSync('/etc/rc.d/' + name)) 
                 {
                     Object.defineProperty(ret, 'rc', { value: '/etc/rc.d/' + name });
@@ -1075,12 +1077,26 @@ function serviceManager()
                     {
                         get: function ()
                         {
-                            var child = require('child_process').execFile('/bin/sh', ['sh']);
-                            child.stderr.on('data', function (c) { });
-                            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                            child.stdin.write('service ' + this.name + ' rcvar | grep _enable= | awk \'{ a=split($0, b, "\\""); if(b[2]=="YES") { print "YES"; } }\'\nexit\n');
-                            child.waitExit();
-                            return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
+                            if (!this.OpenBSD)
+                            {
+                                // FreeBSD
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stderr.on('data', function (c) { });
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stdin.write('service ' + this.name + ' rcvar | grep _enable= | awk \'{ a=split($0, b, "\\""); if(b[2]=="YES") { print "YES"; } }\'\nexit\n');
+                                child.waitExit();
+                                return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
+                            }
+                            else
+                            {
+                                // OpenBSD
+                                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                                child.stderr.on('data', function (c) { });
+                                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                                child.stdin.write('rcctl ls on | awk \'{ if($0=="' + this.name + '") { print "AUTO_START"; } }\'\nexit\n');
+                                child.waitExit();
+                                return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
+                            }
                         }
                     });
 
@@ -1117,6 +1133,16 @@ function serviceManager()
 
                 ret.appLocation = function appLocation()
                 {
+                    if (this.OpenBSD)
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("cat " + this.rc + " | grep daemon= | awk '{ if($0 ~ /_loader\"$/) { gsub(/^daemon=/,\"\", $0); gsub(/_loader\"$/,\"\\\"\",$0); print $0; } else { gsub(/^daemon=/,\"\",$0); print $0; } }'\nexit\n");
+                        child.waitExit();
+                        var ret = child.stdout.str.trim();
+                        if (ret != '') { ret = ret.substring(1, ret.length - 1); }
+                        return (ret);
+                    }
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                     child.stdin.write("cat " + this.rc + " | grep command= | awk -F= '{ print $2 }' | awk -F\\\" '{ print $2 }'\nexit\n");
@@ -1152,6 +1178,16 @@ function serviceManager()
                 };
                 ret.isRunning = function isRunning()
                 {
+                    if (this.OpenBSD)
+                    {
+                        // OpenBSD
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stderr.on('data', function (c) { });
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write('rcctl ls started | awk \'{ if($0=="' + this.name + '") { print "STARTED"; } }\'\nexit\n');
+                        child.waitExit();
+                        return (child.stdout.str.trim() == '' ? false : true);
+                    }
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                     child.stdin.write("service " + this.name + " onestatus | awk '{ print $3 }'\nexit\n");
@@ -1179,17 +1215,37 @@ function serviceManager()
                 };
                 ret.stop = function stop()
                 {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onestop\nexit\n");
-                    child.waitExit();
+                    if (this.OpenBSD)
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("rcctl stop " + this.name + "\nexit\n");
+                        child.waitExit();
+                    }
+                    else
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("service " + this.name + " onestop\nexit\n");
+                        child.waitExit();
+                    }
                 };
                 ret.start = function start()
                 {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                    child.stdin.write("service " + this.name + " onestart\nexit\n");
-                    child.waitExit();
+                    if (this.OpenBSD)
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("rcctl start " + this.name + "\nexit\n");
+                        child.waitExit();
+                    }
+                    else
+                    {
+                        var child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stdin.write("service " + this.name + " onestart\nexit\n");
+                        child.waitExit();
+                    }
                 };
                 ret.restart = function restart()
                 {
@@ -2331,30 +2387,58 @@ function serviceManager()
         {
             if (!this.isAdmin()) { console.log('Installing a Service requires root'); throw ('Installing as Service, requires root'); }
             var parameters = options.parameters ? options.parameters.join(' ') : '';
+            var m;
+            if (require('fs').existsSync('/usr/sbin/daemon'))
+            {
+                // FreeBSD
+                var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
+                rc.write('#!/bin/sh\n');
+                rc.write('# PROVIDE: ' + options.name + '\n');
+                rc.write('# REQUIRE: FILESYSTEMS NETWORKING\n');
+                rc.write('# KEYWORD: shutdown\n');
+                rc.write('. /etc/rc.subr\n\n');
+                rc.write('name="' + options.name + '"\n');
+                rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
+                rc.write('rcvar=${name}_enable\n');
+                rc.write('pidfile="/var/run/' + options.name + '.pid"\n');
+                rc.write(options.name + '_chdir="' + options.installPath.split(' ').join('\\ ') + '"\n');
 
-            var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
-            rc.write('#!/bin/sh\n');
-            rc.write('# PROVIDE: ' + options.name + '\n');
-            rc.write('# REQUIRE: FILESYSTEMS NETWORKING\n');
-            rc.write('# KEYWORD: shutdown\n');
-            rc.write('. /etc/rc.subr\n\n');
-            rc.write('name="' + options.name + '"\n');
-            rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
-            rc.write('rcvar=${name}_enable\n');
-            rc.write('pidfile="/var/run/' + options.name + '.pid"\n');
-            rc.write(options.name + '_chdir="' + options.installPath.split(' ').join('\\ ') + '"\n');
+                rc.write('command="/usr/sbin/daemon"\n');
+                rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0) ? '-r' : '') + ' -f \\"' + options.installPath + options.target + '\\" ' + parameters.split('"').join('\\"') + '"\n');
 
-            rc.write('command="/usr/sbin/daemon"\n');
-            rc.write('command_args="-P ${pidfile} ' + ((options.failureRestart == null || options.failureRestart > 0) ? '-r' : '') + ' -f \\"' + options.installPath + options.target + '\\" ' + parameters.split('"').join('\\"') + '"\n');
+                rc.write('\n');
+                rc.write('load_rc_config $name\n');
+                rc.write(': ${' + options.name + '_enable="' + ((options.startType == 'AUTO_START' || options.startType == 'BOOT_START') ? 'YES' : 'NO') + '"}\n');
+                rc.write('run_rc_command "$1"\n');
+                rc.end();
+                m = require('fs').statSync('/usr/local/etc/rc.d/' + options.name).mode;
+                m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+                require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, m);
+            }
+            else
+            {
+                // OpenBSD
+                var script = "require('service-manager').manager.daemonEx('" + options.installPath + options.target + "', " + JSON.stringify(options.parameters) + ", {crashRestart: " + ((options.failureRestart == null || options.failureRestart > 0) ? "true" : "false") + ', cwd: "' + options.installPath.split(' ').join('\\ ') + '"});';
+                script = Buffer.from(script).toString('base64');
 
-            rc.write('\n');
-            rc.write('load_rc_config $name\n');
-            rc.write(': ${' + options.name + '_enable="' + ((options.startType == 'AUTO_START' || options.startType == 'BOOT_START')?'YES':'NO') + '"}\n');
-            rc.write('run_rc_command "$1"\n');
-            rc.end();
-            var m = require('fs').statSync('/usr/local/etc/rc.d/' + options.name).mode;
-            m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-            require('fs').chmodSync('/usr/local/etc/rc.d/' + options.name, m);
+                var rc = require('fs').createWriteStream('/etc/rc.d/' + options.name, { flags: 'wb' });
+                rc.write('#!/bin/sh\n');
+                rc.write('# PROVIDE: ' + options.name + '\n');
+                rc.write('name="' + options.name + '"\n');
+                rc.write('desc="' + (options.description ? options.description : 'MeshCentral Agent') + '"\n');
+                rc.write(options.name + '_chdir="' + options.installPath.split(' ').join('\\ ') + '"\n');
+                rc.write('daemon="' + options.installPath + options.target + '_loader"\n');
+                rc.write('daemon_flags="-b64exec ' + script + ' &"\n');
+                rc.write('. /etc/rc.d/rc.subr\n\n');
+                rc.write('rc_cmd "$1"\n');
+                rc.end();
+                m = require('fs').statSync('/etc/rc.d/' + options.name).mode;
+                m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+                require('fs').chmodSync('/etc/rc.d/' + options.name, m);
+
+                require('fs').copyFileSync(process.execPath, options.installPath + options.target + '_loader');
+                require('fs').chmodSync(options.installPath + options.target + '_loader', m);
+            }
 
             if ((this.pfSense || this.OPNsense) && (options.startType == 'AUTO_START' || options.startType == 'BOOT_START'))
             {
@@ -3184,6 +3268,42 @@ function serviceManager()
 
         var child = require('child_process').execFile(process.execPath, options._parms, options);       
         if (!child) { throw ('Error spawning process'); }
+    }
+    this.daemonEx = function daemonEx(path, parameters, options)
+    {
+        parameters.unshift(process.platform == 'win32' ? path.split('\\').pop() : path.split('/').pop());
+        if (options.cwd) { process.chdir(options.cwd); }
+
+        function spawnChild()
+        {
+            global.child = require('child_process').execFile(path, parameters);
+            if(global.child)
+            {
+                global.child.stdout.on('data', function(c) { console.log(c.toString()); });
+                global.child.stderr.on('data', function(c) { console.log(c.toString()); });
+                global.child.once('exit', function (code) 
+                {
+                    if(options.crashRestart) { spawnChild(); } 
+                });
+            }
+        }
+        
+        if(options.logOutput)
+        {
+            console.setDestination(console.Destinations.LOGFILE);
+            console.log('Logging Outputs...'); 
+        }
+        else
+        {
+            console.setDestination(console.Destinations.DISABLED);
+        }
+        if(options.cwd) { process.chdir(options.cwd); }
+        spawnChild();
+        process.on('SIGTERM', function()
+        {
+            if(global.child) { child.kill(); }
+            process.exit();
+        });
     }
 }
 
