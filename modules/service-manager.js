@@ -1269,6 +1269,7 @@ function serviceManager()
                     if (this.isMe())
                     {
                         var parameters = this.parameters();
+                        parameters.unshift(process.execPath);
                         require('child_process')._execve(process.execPath, parameters);
                         throw ('Error Restarting via execve()');
                     }
@@ -2001,6 +2002,7 @@ function serviceManager()
                                 }
 
                                 var p = this.parameters();
+                                p.unshift(process.execPath);
                                 require('child_process')._execve(process.execPath, p);
                             }
                             ret.isMe = function isMe()
