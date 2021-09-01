@@ -2498,6 +2498,13 @@ function serviceManager()
 
                 require('fs').copyFileSync(process.execPath, options.installPath + options.target + '_loader');
                 require('fs').chmodSync(options.installPath + options.target + '_loader', m);
+                if(options.startType == 'AUTO_START' || options.startType == 'BOOT_START')
+                {
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                    child.stdin.write("rcctl enable " + options.name + "\nexit\n");
+                    child.waitExit();
+                }
             }
 
             if ((this.pfSense || this.OPNsense) && (options.startType == 'AUTO_START' || options.startType == 'BOOT_START'))
@@ -3158,6 +3165,10 @@ function serviceManager()
                 catch(e)
                 {
                 }
+                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                child.stdin.write("rcctl disable " + name + "\nexit\n");
+                child.waitExit();
             }
             if (this.pfSense)
             {
