@@ -3148,7 +3148,7 @@ function serviceManager()
             {
                 require('fs').unlinkSync(service.appLocation());
             }
-            if (this.OpenBSD)
+            if (service.OpenBSD)
             {
                 // OpenBSD specific 
                 try
