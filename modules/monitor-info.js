@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright 2018 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -584,9 +584,54 @@ function monitorinfo()
                     child.waitExit();
 
                     ret = { tty: '?', xauthority: (require('user-sessions').getHomeFolder(consoleuid) + '/.Xauthority').split('//').join('/'), display: child.stdout.str.trim(), exportEnv: exportEnv };
-                    return (xinfo_xdm(ret, consoleuid));  
-                }
+                    if (!require('fs').existsSync(ret.xauthority))
+                    {
+                        child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stdin.write('loginctl session-status ' + sids.join(' ') + " | tr '\\n' '`' | awk '{");
+                        child.stdin.write('len=split($0,X,"`");');
+                        child.stdin.write('Z="";');
+                        child.stdin.write('printf "[";');
+                        child.stdin.write('for(i=1;i<=len;++i)');
+                        child.stdin.write('{');
+                        child.stdin.write('   if(X[i]~/^.+├─/)');
+                        child.stdin.write('   {');
+                        child.stdin.write('      gsub(/^.+├─/,"",X[i]);');
+                        child.stdin.write('      split(X[i],VAL," ");');
+                        child.stdin.write('      printf "%s%s",Z,VAL[1];');
+                        child.stdin.write('      Z=",";');
+                        child.stdin.write('   }');
+                        child.stdin.write('}');
+                        child.stdin.write('printf "]";');
+                        child.stdin.write("}'\nexit\n");
+                        child.waitExit();
 
+                        var pids = null;
+                        try
+                        {
+                            pids = JSON.parse(child.stdout.str);
+                        }
+                        catch(z)
+                        {
+                        }
+
+                        if (pids != null)
+                        {
+                            var e, i;
+                            for (i in pids)
+                            {
+                                e = require('user-sessions').getEnvFromPid(pids[i]);
+                                if (e.XAUTHORITY)
+                                {
+                                    ret.xauthority = e.XAUTHORITY;
+                                    break;
+                                }
+                            }
+                        }                     
+                    }
+                    return (xinfo_xdm(ret, consoleuid));
+                }
 
 
                 // So we're going to brute force it, by enumerating all processes owned by this user, and inspect the environment variables
