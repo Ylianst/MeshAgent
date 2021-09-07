@@ -662,6 +662,25 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 	int UID = (int)(uint64_t)(ILibPtrCAST)sid;
 	sigset_t sset;
 	sigset_t *set = NULL;
+	char **vars = NULL;
+	if (envvars != NULL)
+	{
+		int i, z, vlen = 0;
+		for (i = 0; ((char**)envvars)[i] != NULL; i += 2)
+		{
+			vlen += (strnlen_s(((char**)envvars)[i], sizeof(ILibScratchPad2)) + 2 + strnlen_s(((char**)envvars)[i + 1], sizeof(ILibScratchPad2)));
+		}
+		vars = (char**)ILibMemory_SmartAllocateEx(((i / 2) + 1) * sizeof(char*), vlen + sizeof(int));
+		((int*)ILibMemory_Extra(vars))[0] = sizeof(int);
+		for (i = 0; ((char**)envvars)[i] != NULL; i += 2)
+		{
+			z = ((int*)ILibMemory_Extra(vars))[0];
+			vars[i / 2] = (char*)ILibMemory_Extra(vars) + z;
+			z += sprintf_s((char*)ILibMemory_Extra(vars) + z, ILibMemory_ExtraSize(vars) - z, "%s=%s", ((char**)envvars)[i], ((char**)envvars)[i + 1]);
+			++z;
+			((int*)ILibMemory_Extra(vars))[0] = z;
+		}
+	}
 
 	if (spawnType == ILibProcessPipe_SpawnTypes_TERM)
 	{
@@ -761,6 +780,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 			ILibProcessPipe_FreePipe(retVal->stdOut);
 			ILibProcessPipe_FreePipe(retVal->stdIn);
 		}
+		ILibMemory_Free(vars);
 		ILibMemory_Free(retVal);
 		return(NULL);
 	}
@@ -812,24 +832,8 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 			ignore_result(setsid());
 		}
 
-		if (envvars != NULL)
+		if (vars != NULL)
 		{
-			char **vars = NULL;
-			int i, z, vlen = 0;
-			for (i = 0; ((char**)envvars)[i] != NULL; i += 2)
-			{
-				vlen += (strnlen_s(((char**)envvars)[i], sizeof(ILibScratchPad2)) + 2 + strnlen_s(((char**)envvars)[i + 1], sizeof(ILibScratchPad2)));
-			}
-			vars = (char**)ILibMemory_SmartAllocateEx(((i / 2) + 1) * sizeof(char*), vlen + sizeof(int));
-			((int*)ILibMemory_Extra(vars))[0] = sizeof(int);
-			for (i = 0; ((char**)envvars)[i] != NULL; i += 2)
-			{
-				z = ((int*)ILibMemory_Extra(vars))[0];
-				vars[i / 2] = (char*)ILibMemory_Extra(vars) + z;
-				z += sprintf_s((char*)ILibMemory_Extra(vars) + z, ILibMemory_ExtraSize(vars) - z, "%s=%s", ((char**)envvars)[i], ((char**)envvars)[i + 1]);
-				++z;
-				((int*)ILibMemory_Extra(vars))[0] = z;
-			}
 			execve(target, parameters, vars);
 		}
 		else
@@ -849,6 +853,7 @@ ILibProcessPipe_Process ILibProcessPipe_Manager_SpawnProcessEx4(ILibProcessPipe_
 		close(retVal->stdErr->mPipe_WriteEnd); retVal->stdErr->mPipe_WriteEnd = -1;
 	}
 	retVal->PID = pid;
+	ILibMemory_Free(vars);
 #endif
 	return retVal;
 }
