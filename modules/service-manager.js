@@ -2737,11 +2737,18 @@ function serviceManager()
                             this._update = require('child_process').execFile('/bin/sh', ['sh']);
                             this._update._moduleName = options.name;
                             this._update.stdout.on('data', function (chunk) { });
+                            this._update.stdin.write('systemctl --system daemon-reload\n');
                             this._update.stdin.write('systemctl enable ' + options.name + '.service\n');
                             this._update.stdin.write('exit\n');
                             this._update.waitExit();
                         default:
                             conf.end();
+                            this._update = require('child_process').execFile('/bin/sh', ['sh']);
+                            this._update._moduleName = options.name;
+                            this._update.stdout.on('data', function (chunk) { });
+                            this._update.stdin.write('systemctl --system daemon-reload\n');
+                            this._update.stdin.write('exit\n');
+                            this._update.waitExit();
                             break;
                     }
                     break;
