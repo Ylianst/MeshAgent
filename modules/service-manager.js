@@ -1885,7 +1885,7 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("systemctl status " + this.name + " | grep 'Main PID:' | awk 'NR==1{print $3}'\nexit\n");
+                                child.stdin.write("systemctl status " + this.name + ".service | grep 'Main PID:' | awk 'NR==1{print $3}'\nexit\n");
                                 child.waitExit();
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
                             };
@@ -1894,33 +1894,33 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("systemctl status " + this.name + " | grep 'Active:' | awk 'NR==1{print $2}'\nexit\n");
+                                child.stdin.write("systemctl status " + this.name + ".service | grep 'Active:' | awk 'NR==1{print $2}'\nexit\n");
                                 child.waitExit();
                                 return (child.stdout.str.trim() == 'active');         
                             };
                             ret.start = function start() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl start ' + this.name + '\nexit\n');
+                                child.stdin.write('systemctl start ' + this.name + '.service\nexit\n');
                                 child.waitExit();
                             };
                             ret.stop = function stop() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl stop ' + this.name + '\nexit\n');
+                                child.stdin.write('systemctl stop ' + this.name + '.service\nexit\n');
                                 child.waitExit();
                             };
                             ret.restart = function restart() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl restart ' + this.name + '\nexit\n');
+                                child.stdin.write('systemctl restart ' + this.name + '.service\nexit\n');
                                 child.waitExit();
                             };
                             ret.status = function status() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout._str = '';
                                 child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
-                                child.stdin.write('systemctl status ' + this.name + '\nexit\n');
+                                child.stdin.write('systemctl status ' + this.name + '.service\nexit\n');
                                 child.waitExit();
                                 return (child.stdout._str);
                             };
