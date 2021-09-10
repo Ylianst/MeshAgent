@@ -999,8 +999,28 @@ void* kvm_server_mainloop(void* parm)
 		//fprintf(logFile, "After CheckDesktopSwitch.\n"); fflush(logFile);
 
 		imagedisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY);
-
 		if (imagedisplay == NULL) { g_shutdown = 1; break; }
+
+		if (DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID) != SCREEN_WIDTH ||
+			DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID) != SCREEN_HEIGHT ||
+			DefaultDepth(eventdisplay, CURRENT_DISPLAY_ID) != SCREEN_DEPTH)
+		{
+			int old = TILE_HEIGHT_COUNT;
+			SCREEN_HEIGHT = DisplayHeight(imagedisplay, CURRENT_DISPLAY_ID);
+			SCREEN_WIDTH = DisplayWidth(imagedisplay, CURRENT_DISPLAY_ID);
+			SCREEN_DEPTH = DefaultDepth(imagedisplay, CURRENT_DISPLAY_ID);
+			if (logFile) { fprintf(logFile, "SLAVE/KVM Resolution Changed: %d x %d x %d bpp\n", SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_DEPTH); fflush(logFile); }
+
+			TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
+			TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
+			if (SCREEN_WIDTH % TILE_WIDTH) { TILE_WIDTH_COUNT++; }
+			if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
+
+			kvm_send_resolution();
+			reset_tile_info(old);
+		}
+
+
 		FD_ZERO(&readset);
 		FD_ZERO(&errorset);
 		FD_ZERO(&writeset);
