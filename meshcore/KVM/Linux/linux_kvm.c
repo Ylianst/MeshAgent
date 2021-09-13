@@ -1330,20 +1330,25 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 
 }
 
-void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
+#include "../../../microstack/ILibParsers.h"
+
+void kvm_relay_brokenPipeSink_2(void *sender)
 {
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
 	void *reserved = ((void**)ILibMemory_Extra(sender))[1];
-
 	char msg[] = "KVM Child process has unexpectedly exited";
 	char buffer[4096];
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);		// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(sizeof(msg) + 3));// Write the size
-	memcpy_s(buffer + 4, sizeof(msg)-1, msg, sizeof(msg)-1);
+	memcpy_s(buffer + 4, sizeof(msg) - 1, msg, sizeof(msg) - 1);
 
 	writeHandler(buffer, sizeof(msg) + 3, reserved);
-
+}
+void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
+{
+	void *chain = ((void**)ILibMemory_Extra(sender))[2];
+	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 1000, kvm_relay_brokenPipeSink_2, NULL);	
 }
 
 void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
@@ -1368,9 +1373,10 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	fcntl(master2slave[0], F_SETFD, FD_CLOEXEC);
 	fcntl(master2slave[1], F_SETFD, FD_CLOEXEC);
 
-	slave_out = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(processPipeMgr, slave2master[0], 2 * sizeof(void*));	
+	slave_out = ILibProcessPipe_Pipe_CreateFromExistingWithExtraMemory(processPipeMgr, slave2master[0], 3 * sizeof(void*));	
 	((void**)ILibMemory_Extra(slave_out))[0] = writeHandler;
 	((void**)ILibMemory_Extra(slave_out))[1] = reserved;
+	((void**)ILibMemory_Extra(slave_out))[2] = ((ILibChain_Link*)processPipeMgr)->ParentChain;
 
 	UNREFERENCED_PARAMETER(r);
 	do

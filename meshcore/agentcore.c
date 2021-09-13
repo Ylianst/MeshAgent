@@ -1103,25 +1103,30 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_ptrs);
 	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);	// [MeshAgent][stream][ptrs]
 
-	duk_peval_string(ctx, "require('user-sessions').consoleUid()");
-	int id = duk_to_int(ctx, -1);
-	duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
-	duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
-	duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
-	duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
-	if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
-	x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
-	d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+	if (ptrs->kvmPipe != NULL)
+	{
+		ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ctx)), ptrs->kvmPipe);
+		ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+		kvm_cleanup();
+
+		duk_peval_string(ctx, "require('user-sessions').consoleUid()");
+		int id = duk_to_int(ctx, -1);
+		duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
+		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
+		duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
+		duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
+		if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
+		x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+		d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
 
 
-	duk_push_heapptr(ctx, s);							// [stream]
-	duk_push_int(ctx, id);								// [stream][id]
-	duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);	// [stream]
-	duk_pop(ctx);										// ...
+		duk_push_heapptr(ctx, s);							// [stream]
+		duk_push_int(ctx, id);								// [stream][id]
+		duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);	// [stream]
+		duk_pop(ctx);										// ...
 
-	ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
-	ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
-
+		ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
+	}
 	return(0);
 }
 #endif
