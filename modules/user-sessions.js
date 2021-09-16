@@ -423,12 +423,14 @@ function UserSessions()
             {
                 get: function ()
                 {
+                    if (this._hasLoginCtl != null) { return (this._hasLoginCtl); }
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = '';
                     child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                     child.stdin.write("whereis loginctl | awk '{ print $2 }'\nexit\n");
                     child.waitExit();
-                    return (child.stdout.str.trim()!="");
+                    this._hasLoginCtl = child.stdout.str.trim() != "";
+                    return (this._hasLoginCtl);
                 }
             });
         Object.defineProperty(this, "gdmUid", {
@@ -473,6 +475,71 @@ function UserSessions()
             throw ('username: ' + username + ' NOT FOUND');
         };
         
+        function linux_Onchange_checkLoginCtl()
+        {
+            if (linux_Onchange_checkLoginCtl.counter > 10)
+            {
+                console.info1("emitting 'changed' because giving up");
+                require('user-sessions').emit('changed');
+                return;
+            }
+
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+
+            child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+            child.stdin.write('printf "[";');
+            child.stdin.write('del="";');
+            child.stdin.write('n=split($0, lines, "`");');
+            child.stdin.write('for(i=2;i<n;++i)');
+            child.stdin.write('{');
+            child.stdin.write('   split(lines[i], tok, " ");');
+            child.stdin.write('   if(tok[4]=="") { continue; }');
+            child.stdin.write('   printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
+            child.stdin.write('   del=",";');
+            child.stdin.write('}');
+            child.stdin.write('printf "]";');
+            child.stdin.write("}'\nexit\n");
+            child.waitExit();
+
+            var info1 = JSON.parse(child.stdout.str);
+            var sids = [];
+            var i;
+            for (i = 0; i < info1.length; ++i) { sids.push(info1[i].SessionId); }
+
+            console.info1('SIDs => ' + JSON.stringify(sids));
+
+            child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
+            child.stdin.write('   for(n=1;n<NF;++n)');
+            child.stdin.write('   {');
+            child.stdin.write('      if($n=="State=active") { print n; break; }');
+            child.stdin.write('   }');
+            child.stdin.write("}'\nexit\n");
+            child.waitExit();
+
+
+            if(child.stdout.str.trim() != '')
+            {
+                // There was an active session
+                console.info1('Active Sessions found');
+                linux_Onchange_checkLoginCtl.counter = 0;
+                linux_Onchange_checkLoginCtl.timer = null;
+                require('user-sessions').emit('changed');
+            }
+            else
+            {
+                // No sessions were active, so we need to try again
+                console.info1('No Active Sessions found, try again');
+                linux_Onchange_checkLoginCtl.counter++;
+                linux_Onchange_checkLoginCtl.timer = setTimeout(linux_Onchange_checkLoginCtl, 500);
+            }
+        }
+
+
         this.Current = function Current(cb)
         {
             var ret = null;
@@ -556,13 +623,21 @@ function UserSessions()
 
         if (process.platform == 'linux')
         {
-            var dbus = require('linux-dbus');
-            if (require('fs').watch) {
+            if (require('fs').watch)
+            {
                 this._linuxWatcher = require('fs').watch('/var/run/utmp');
-                this._linuxWatcher.user_session = this;
                 this._linuxWatcher.on('change', function (a, b)
                 {
-                    this.user_session.emit('changed');
+                    if (require('user-sessions').hasLoginCtl)
+                    {
+                        linux_Onchange_checkLoginCtl.counter = 0;
+                        linux_Onchange_checkLoginCtl.timer = null;
+                        linux_Onchange_checkLoginCtl();
+                    }
+                    else
+                    {
+                        require('user-sessions').emit('changed');
+                    }
                 });
             }
             

@@ -1348,7 +1348,15 @@ void kvm_relay_brokenPipeSink_2(void *sender)
 void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
 {
 	void *chain = ((void**)ILibMemory_Extra(sender))[2];
-	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 1000, kvm_relay_brokenPipeSink_2, NULL);	
+
+	if (g_slavekvm != 0)
+	{
+		int r;
+		waitpid(g_slavekvm, &r, WNOHANG);
+		g_slavekvm = 0;
+	}
+
+	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 4000, kvm_relay_brokenPipeSink_2, NULL);	
 }
 
 void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
