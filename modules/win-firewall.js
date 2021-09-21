@@ -400,7 +400,7 @@ function convertOptions(options)
     verifyValues(options, 'Description');
     verifyValues(options, 'Direction', ['Inbound', 'Outbound']);
     verifyValues(options, 'DisplayName');
-    verifyValues(options, 'DynamicTarget', ['Any', 'ProximityApps', 'ProximitySharing', 'WifiDirectPrinting', 'WifiDirectDisplay', 'WifiDirectDevices'], 'Any');
+    verifyValues(options, 'DynamicTarget', ['Any', 'ProximityApps', 'ProximitySharing', 'WifiDirectPrinting', 'WifiDirectDisplay', 'WifiDirectDevices']);
     verifyValues(options, 'EdgeTraversalPolicy', ['Block', 'Allow', 'DeferToUser', 'DeferToApp']);
     verifyValues(options, 'Enabled', ['True', 'False'], 'True');
     verifyValues(options, 'Encryption', ['NotRequired', 'Required', 'Dynamic']);
