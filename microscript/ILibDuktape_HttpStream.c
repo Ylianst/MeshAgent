@@ -3436,7 +3436,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 
 			if (header->Directive == NULL && data->connectionCloseSpecified == 0)
 			{
-				duk_push_heapptr(ctx, data->DS->ParentObject);					// [httpStream]
+				duk_push_heapptr(ctx, data->DS->ParentObject);						// [httpStream]
 				if (duk_has_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket))
 				{
 					duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2Socket);	// [httpStream][socket]
@@ -3460,7 +3460,6 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 					duk_pop(ctx);
 				}
 			}
-
 		}
 		else
 		{
@@ -3861,7 +3860,8 @@ duk_ret_t ILibDuktape_HttpStream_Agent_createConnection(duk_context *ctx)
 	duk_call_method(ctx, 1); duk_pop_2(ctx);													// [Agent][Socket]
 
 	ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "error", ILibDuktape_HttpStream_Agent_createConnection_eventSink);
-	ILibDuktape_EventEmitter_AddOnceEx3(ctx, -1, "close", ILibDuktape_HttpStream_Agent_socketEndSink);
+	ILibDuktape_EventEmitter_AddOn_Infrastructure(ctx, -1, "close", ILibDuktape_HttpStream_Agent_socketEndSink);
+
 
 	return(1);
 }
