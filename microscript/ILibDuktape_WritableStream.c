@@ -312,7 +312,7 @@ duk_ret_t ILibDuktape_WritableStream_PipeSink(duk_context *ctx)
 	
 	duk_dup(ctx, 0);
 	duk_push_this(ctx);
-	if (g_displayStreamPipeMessages) { printf("PIPE: [%s] => [%s:%d]\n", Duktape_GetStringPropertyValue(ctx, -2, ILibDuktape_OBJID, "unknown"), Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown"), ILibDuktape_GetReferenceCount(ctx, -1)); }
+	if (g_displayStreamPipeMessages) { printf("PIPE: [%s/%p] => [%s:%d]\n", Duktape_GetStringPropertyValue(ctx, -2, ILibDuktape_OBJID, "unknown"), (void*)ws, Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "unknown"), ILibDuktape_GetReferenceCount(ctx, -1)); }
 	return(0);
 }
 duk_ret_t ILibDuktape_WritableStream_Ended(duk_context *ctx)

@@ -158,7 +158,6 @@ function http_digest_instance(options)
                     {
                         this._buffered = Buffer.concat([this._buffered, chunk], this._buffered.length + chunk.length);
                     }
-
                     if (this._request)
                     {
                         if (this.writeCalledByEnd())
@@ -170,6 +169,7 @@ function http_digest_instance(options)
                             this._request.write(chunk);
                         }
                     }
+
                     if (flush != null) { flush(); }
                     return (true);
                 },
@@ -177,7 +177,14 @@ function http_digest_instance(options)
                 {
                     if (this._ended) { throw ('Stream already ended'); }
                     this._ended = true;
-                    if (this._request && !this.writeCalledByEnd()) { this._request.end(); }
+                    if (!(this.options && this.options.delayWrite))
+                    {
+                        if (this._request && !this.writeCalledByEnd()) { this._request.end(); }
+                    }
+                    else
+                    {
+                        this._request.end();
+                    }
                     if (flush != null) { flush(); }
                 }
             });
@@ -235,15 +242,19 @@ function http_digest_instance(options)
 
         ret._request.once('response', function (imsg)
         {
+            console.info1('response status code => ' + imsg.statusCode);
             if (imsg.statusCode == 401)
             {
                 var callend = this.digRequest._request._callend;
                 var auth = generateAuthHeaders(imsg, this.digRequest.options, this.digRequest._digest);
-
+                console.info1(JSON.stringify(auth, null, 1));
+                console.info1(JSON.stringify(this.digRequest.options, null, 1));
                 this.digRequest._request = this.digRequest._digest.http.request(this.digRequest.options);
                 this.digRequest._request.digRequest = this.digRequest;
                 this.digRequest._request.once('response', function (imsg)
                 {
+                    console.info1('inner response status code => ' + imsg.statusCode);
+
                     switch(imsg.statusCode)
                     {
                         case 401:
@@ -259,14 +270,23 @@ function http_digest_instance(options)
                 checkEventForwarding(this.digRequest, 'continue');
                 checkEventForwarding(this.digRequest, 'timeout');
                 checkEventForwarding(this.digRequest, 'drain');
+
+
                 if (callend)
                 {
                     this.digRequest._request.end();
                 }
                 else
                 {
-                    if (this.digRequest._buffered) { this.digRequest._request.write(this.digRequest._buffered); }
-                    if (this.digRequest._ended) { this.digRequest._request.end(); }
+                    if (this.digRequest._buffered && this.digRequest._ended)
+                    {
+                        this.digRequest._request.end(this.digRequest._buffered);
+                    }
+                    else
+                    {
+                        if (this.digRequest._buffered) { this.digRequest._request.write(this.digRequest._buffered); }
+                        if (this.digRequest._ended) { this.digRequest._request.end(); }
+                    }
                 }
             }
             else

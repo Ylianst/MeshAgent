@@ -67,6 +67,7 @@ void ILibDuktape_RemoveObjFromTable(duk_context *ctx, duk_idx_t tableIdx, char *
 #define ILibDuktape_IMSG2SR					"\xFF_IMSG2ServerResponse"
 #define ILibDuktape_NS2HttpServer			"\xFF_Http_NetServer2HttpServer"
 #define ILibDuktape_Options2ClientRequest	"\xFF_Options2ClientRequest"
+#define ILibDuktape_RawOptionsBuffer		"\xFF_RawOptionsBuffer"
 #define ILibDuktape_Socket2AgentStash		"\xFF_Socket2AgentStash"
 #define ILibDuktape_Socket2Agent			"\xFF_Socket2Agent"
 #define ILibDuktape_Socket2AgentKey			"\xFF_Socket2AgentKey"
@@ -648,9 +649,6 @@ duk_ret_t ILibDuktape_HttpStream_http_endResponseSink(duk_context *ctx)
 	duk_insert(ctx, -4);										// [socket][imsg][httpstream][CR]
 
 	ILibDuktape_DeleteReadOnlyProperty(ctx, -1, "socket");
-	ILibDuktape_DeleteReadOnlyProperty(ctx, -2, ILibDuktape_HTTPStream2Socket);
-	ILibDuktape_DeleteReadOnlyProperty(ctx, -4, ILibDuktape_Socket2HttpStream);
-	duk_del_prop_string(ctx, -2, ILibDuktape_HTTP2PipedReadable);
 
 	duk_prepare_method_call(ctx, -1, "removeAllListeners");		// [socket][imsg][httpstream][CR][remove][this]
 	duk_pcall_method(ctx, 0); duk_pop(ctx);						// [socket][imsg][httpstream][CR]
@@ -658,6 +656,10 @@ duk_ret_t ILibDuktape_HttpStream_http_endResponseSink(duk_context *ctx)
 	if (Duktape_GetBooleanProperty(ctx, -2, "connectionCloseSpecified", 0) != 0)
 	{
 		// We cant persist this connection, so close the socket.
+		ILibDuktape_DeleteReadOnlyProperty(ctx, -2, ILibDuktape_HTTPStream2Socket);
+		ILibDuktape_DeleteReadOnlyProperty(ctx, -4, ILibDuktape_Socket2HttpStream);
+		duk_del_prop_string(ctx, -2, ILibDuktape_HTTP2PipedReadable);
+
 		// Agent is already listening for the 'close' event, so it'll cleanup automatically
 		duk_prepare_method_call(ctx, -2, "unpipe");				// [socket][imsg][httpstream][CR][unpipe][this]
 		duk_pcall_method(ctx, 0); duk_pop(ctx);					// [socket][imsg][httpstream][CR]
@@ -877,7 +879,10 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketReady(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, "pipe");							// [socket][clientRequest][HTTPStream][destination][Options][clientRequest][pipe]
 		duk_swap_top(ctx, -2);											// [socket][clientRequest][HTTPStream][destination][Options][pipe][this]
 		duk_dup(ctx, -4);												// [socket][clientRequest][HTTPStream][destination][Options][pipe][this][destination]
-		duk_call_method(ctx, 1);	
+		duk_push_object(ctx);											// [socket][clientRequest][HTTPStream][destination][Options][pipe][this][destination][options]
+		duk_push_false(ctx); duk_put_prop_string(ctx, -2, "end");		// [socket][clientRequest][HTTPStream][destination][Options][pipe][this][destination][options]
+
+		duk_call_method(ctx, 2);	
 
 		return(0);
 	}

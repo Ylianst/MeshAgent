@@ -972,6 +972,38 @@ duk_ret_t ILibDuktape_ReadableStream__pipedStreams(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_PipeArray);		// [readable][array]
 	return(1);
 }
+duk_ret_t ILibDuktape_ReadableStream_getBufferedWrites(duk_context *ctx)
+{
+	ILibDuktape_readableStream *rs;
+	duk_push_this(ctx);													// [stream]
+	rs = (ILibDuktape_readableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_readableStream_RSPTRS);
+	if (rs == NULL) { return(ILibDuktape_Error(ctx, "Internal Error, RS NULL")); }
+	ILibDuktape_readableStream_bufferedData *buffered = rs->paused_data;
+	if (rs->paused_data == NULL) { return(ILibDuktape_Error(ctx, "No Buffered Data")); }
+
+	duk_eval_string(ctx, "Buffer.concat");								// [concat]
+	duk_push_array(ctx);												// [concat][list]
+
+	while (buffered!=NULL)
+	{
+		duk_push_external_buffer(ctx);									// [concat][list][extbuff]
+		duk_config_buffer(ctx, -1, buffered->buffer, buffered->bufferLen);
+		duk_push_buffer_object(ctx, -1, 0, buffered->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);
+		duk_remove(ctx, -2);											// [concat][list][buffer]
+		duk_array_push(ctx, -2);										// [concat][list]
+		buffered = buffered->Next;
+	}
+
+	duk_call(ctx, 1);													// [buffer]
+
+	while ((buffered = rs->paused_data))
+	{
+		rs->paused_data = buffered->Next;
+		free(buffered);
+	}
+
+	return(1);
+}
 ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, ILibDuktape_readableStream_PauseResumeHandler OnPause, ILibDuktape_readableStream_PauseResumeHandler OnResume, ILibDuktape_readableStream_UnShiftHandler OnUnshift, void *user)
 {
 	ILibDuktape_readableStream *retVal;
@@ -1007,5 +1039,6 @@ ILibDuktape_readableStream* ILibDuktape_ReadableStream_InitEx(duk_context *ctx, 
 	ILibDuktape_CreateInstanceMethod(ctx, "isPaused", ILibDuktape_readableStream_isPaused, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "unshift", ILibDuktape_ReadableStream_unshift, 1);
 	ILibDuktape_CreateEventWithGetter(ctx, "_pipedStreams", ILibDuktape_ReadableStream__pipedStreams);
+	ILibDuktape_CreateInstanceMethod(ctx, "_getBufferedWrites", ILibDuktape_ReadableStream_getBufferedWrites, 0);
 	return retVal;
 }
