@@ -139,7 +139,9 @@ const QueryAsyncHandler =
                 console.info1('Release', this.p.refcount);
                 if (this.p.refcount == 0)
                 {
+                    console.info1('No More References');
                     this.p.handlers.cleanup();
+                    this.p.services.funcs.Release(this.p.services.Deref());
                     delete this.p.handlers;
                     delete this.p;
                 }
@@ -155,7 +157,7 @@ const QueryAsyncHandler =
                 for (var i = 0; i < count.Val; ++i)
                 {
                     j = arr.Deref((i * GM.PointerSize) + 0, GM.PointerSize);
-                    this.p.results.push(enumerateProperties(j));
+                    this.p.results.push(enumerateProperties(j, this.p.fields));
                 }
 
                 var ret = GM.CreateVariable(4);
@@ -185,25 +187,34 @@ const QueryAsyncHandler =
     ];
 
 
-function enumerateProperties(j)
+function enumerateProperties(j, fields)
 {
     var nme, len, nn;
-
-    j.funcs = require('win-com').marshalFunctions(j.Deref(), ResultFunctions);
-    nme = GM.CreatePointer();
-    j.funcs.GetNames(j.Deref(), 0, WBEM_FLAG_ALWAYS, 0, nme);
-    len = nme.Deref().Deref(24, 4).toBuffer().readUInt32LE();
-
-    nn = GM.CreatePointer();
-    OleAut32.SafeArrayAccessData(nme.Deref(), nn);
-
     var properties = [];
     var values = {};
 
-    for (var i = 0; i < len - 1; ++i)
+    j.funcs = require('win-com').marshalFunctions(j.Deref(), ResultFunctions);
+
+    if (fields != null && Array.isArray(fields))
     {
-        properties.push(nn.Deref().increment(i * 8).Deref().Wide2UTF8);
+        properties = fields;
     }
+    else
+    {
+        nme = GM.CreatePointer();
+        j.funcs.GetNames(j.Deref(), 0, WBEM_FLAG_ALWAYS, 0, nme);
+        len = nme.Deref().Deref(24, 4).toBuffer().readUInt32LE();
+
+        nn = GM.CreatePointer();
+        OleAut32.SafeArrayAccessData(nme.Deref(), nn);
+
+
+        for (var i = 0; i < len - 1; ++i)
+        {
+            properties.push(nn.Deref().increment(i * 8).Deref().Wide2UTF8);
+        }
+    }
+
 
     for (var i = 0; i < properties.length; ++i)
     {
@@ -258,7 +269,7 @@ function enumerateProperties(j)
     return (values);
 }
 
-function queryAsync(resourceString, queryString)
+function queryAsync(resourceString, queryString, fields)
 {
     var p = new promise(require('promise').defaultInit);
     var resource = GM.CreateVariable(resourceString, { wide: true });
@@ -267,6 +278,7 @@ function queryAsync(resourceString, queryString)
     var results = GM.CreatePointer();
 
     p.refcount = 0;
+    p.fields = fields;
     p.results = [];
     p.locator = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_WbemAdministrativeLocator), require('win-com').IID_IUnknown);
     p.locator.funcs = require('win-com').marshalFunctions(p.locator, LocatorFunctions);
@@ -277,10 +289,13 @@ function queryAsync(resourceString, queryString)
     p.handlers = require('win-com').marshalInterface(QueryAsyncHandler);
     p.handlers.p = p;
     
-    if (p.services.funcs.ExecQueryAsync(p.services.Deref(), language, query, WBEM_FLAG_BIDIRECTIONAL, 0, p.handlers).Val != 0) { throw ('Error in Query'); }
+    if (p.services.funcs.ExecQueryAsync(p.services.Deref(), language, query, WBEM_FLAG_BIDIRECTIONAL, 0, p.handlers).Val != 0)
+    {
+        throw ('Error in Query');
+    }
     return (p);
 }
-function query(resourceString, queryString)
+function query(resourceString, queryString, fields)
 {
     var resource = GM.CreateVariable(resourceString, { wide: true });
     var language = GM.CreateVariable("WQL", { wide: true });
@@ -302,74 +317,11 @@ function query(resourceString, queryString)
 
     while (results.funcs.Next(results.Deref(), WBEM_INFINITE, 1, result, returnedCount).Val == 0)
     {
-        result.funcs = require('win-com').marshalFunctions(result.Deref(), ResultFunctions);
-
-        if (result.funcs.GetNames == null) { console.log('skipskip'); continue; }
-        var nme = GM.CreatePointer();
-        var rr = result.funcs.GetNames(result.Deref(), 0, WBEM_FLAG_ALWAYS, 0, nme);
-        var len = nme.Deref().Deref(24, 4).toBuffer().readUInt32LE();
-
-        var nn = GM.CreatePointer();
-        OleAut32.SafeArrayAccessData(nme.Deref(), nn);
-
-        var properties = [];
-        var values = {};
-
-        for (var i = 0; i < len - 1; ++i)
-        {
-            properties.push(nn.Deref().increment(i * 8).Deref().Wide2UTF8);
-        }
-
-        for(var i=0;i<properties.length;++i)
-        {
-            var tmp1 = GM.CreateVariable(24);
-            if(result.funcs.Get(result.Deref(), GM.CreateVariable(properties[i], {wide: true}), 0, tmp1, 0, 0).Val == 0)
-            {
-                console.log('VARTYPE: ' + tmp1.toBuffer().readUInt16LE());
-                switch(tmp1.toBuffer().readUInt16LE())
-                {
-                    case 0x0000:    // VT_EMPTY
-                    case 0x0001:    // VT_NULL
-                        values[properties[i]] = null;
-                        break;
-                    case 0x0002:    // VT_I2
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt16LE();
-                        break;
-                    case 0x0003:    // VT_I4
-                    case 0x0016:    // VT_INT
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt32LE();
-                        break;
-                    case 0x000B:    // VT_BOOL
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt32LE() != 0;
-                        break;
-                    case 0x000E:    // VT_DECIMAL
-                        break;
-                    case 0x0010:    // VT_I1
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt8();
-                        break;
-                    case 0x0011:    // VT_UI1
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readUInt8();
-                        break;
-                    case 0x0012:    // VT_UI2
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readUInt16LE();
-                        break;
-                    case 0x0013:    // VT_UI4
-                    case 0x0017:    // VT_UINT
-                        values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readUInt32LE();
-                        break;
-                    case 0x0014:    // VT_I8
-                        break;
-                    case 0x0015:    // VT_UI8
-                        break;
-                    case 0x0008:    // VT_BSTR
-                        values[properties[i]] = tmp1.Deref(8, 8).Deref().Wide2UTF8;
-                        break;
-                }
-            }
-        }
-
-        ret.push(values);
+        ret.push(enumerateProperties(result, fields));
     }
+
+    results.funcs.Release(results.Deref());
+    services.funcs.Release(services.Deref());
 
     return (ret);
 }

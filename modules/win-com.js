@@ -21,6 +21,7 @@ const EOAC_NONE = 0;
 const RPC_C_AUTHN_LEVEL_DEFAULT = 0;
 const RPC_C_IMP_LEVEL_IMPERSONATE = 3;
 const COINIT_MULTITHREADED = 0;
+const IUnknownMethods = ['QueryInterface', 'AddRef', 'Release'];
 
 var GM = require('_GenericMarshal');
 var ole32 = GM.CreateNativeProxy('ole32.dll');
@@ -29,10 +30,20 @@ ole32.CreateMethod('CoCreateInstance');
 ole32.CreateMethod('CoInitializeSecurity');
 ole32.CreateMethod('CoInitialize');
 ole32.CreateMethod('CoInitializeEx');
+ole32.CreateMethod('CoUninitialize');
 ole32.CreateMethod('IIDFromString');
 ole32.CreateMethod('StringFromCLSID');
 ole32.CreateMethod('StringFromIID');
 
+
+function createInstance_finalizer()
+{
+    var tmp = marshalFunctions(this, IUnknownMethods);
+    tmp.Release(this);
+
+    ole32.CoUninitialize();
+    console.log('final');
+}
 function createInstance(RFCLSID, RFIID, options)
 {
     ole32.CoInitializeEx(0, COINIT_MULTITHREADED);
@@ -40,9 +51,15 @@ function createInstance(RFCLSID, RFIID, options)
 
     var ppv = GM.CreatePointer();
     var h;
-    if ((h = ole32.CoCreateInstance(RFCLSID, 0, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, RFIID, ppv)).Val == 0)
+    if ((h = ole32.CoCreateInstance(RFCLSID, 0, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, RFIID,ppv)).Val == 0)
     {
-        return (ppv.Deref());
+        var ret = ppv.Deref();
+        ret.once('~', createInstance_finalizer);
+        return (ret);
+    }
+    else
+    {
+        ole32.CoUninitialize();
     }
     throw ('Error calling CoCreateInstance(' + h.Val + ')');
 }
