@@ -502,7 +502,7 @@ void* ILibDuktape_Debugger_StartEngine(duk_context *ctx, int transport, int webp
 duk_ret_t ILibDuktape_Debugger_JSAttach_promise_wait(duk_context *ctx)
 {
 	char *eventName = (char*)duk_require_string(ctx, 0);
-	if (strcmp(eventName, "resolved") != 0) { return(0); }
+	if (strcmp(eventName, "settled") != 0) { return(0); }
 
 	duk_push_heap_stash(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_Debugger_DebugObject);

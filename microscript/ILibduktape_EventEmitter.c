@@ -396,7 +396,12 @@ duk_ret_t ILibDuktape_EventEmitter_on(duk_context *ctx)
 	duk_push_this(ctx);														// [object]
 	data = (ILibDuktape_EventEmitter*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_EventEmitter_Data);
 	duk_push_heapptr(ctx, data->table);										// [object][table]
-	if (!duk_has_prop_string(ctx, -1, propName)) { duk_push_array(ctx); duk_put_prop_string(ctx, -2, propName); }
+	if (!duk_has_prop_string(ctx, -1, propName)) 
+	{
+		if (data->eventType == ILibDuktape_EventEmitter_Type_EXPLICIT) { return(ILibDuktape_Error(ctx, "Cannot register for non-existing event: %s", propName)); }
+		duk_push_array(ctx); 
+		duk_put_prop_string(ctx, -2, propName);
+	}
 	duk_get_prop_string(ctx, -1, propName);									// [object][table][array]
 
 	duk_push_object(ctx);													// [object][table][array][handler]

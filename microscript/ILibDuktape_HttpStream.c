@@ -4799,6 +4799,11 @@ duk_ret_t ILibDuktape_WebSocket_bytesSent_uncompressed(duk_context *ctx)
 
 	ILibDuktape_WebSocket_State *ws = NULL;
 	duk_push_this(ctx);														// [WebSocket_Decoded]
+	if (!duk_has_prop_string(ctx, -1, ILibDuktape_WSDEC2WS))
+	{
+		duk_push_null(ctx);
+		return(1);
+	}
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
 	ws = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
 

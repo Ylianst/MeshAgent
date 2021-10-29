@@ -54,6 +54,7 @@ typedef uintptr_t PTRSIZE;
 #define ILibDuktape_GenericMarshal_Variable_Parms		"\xFF_GenericMarshal_Variable_Parms"
 #define ILibDuktape_GenericMarshal_StashTable			"\xFF_GenericMarshal_StashTable"
 #define ILibDuktape_GenericMarshal_GlobalCallback_ThreadID "\xFF_GenericMarshal_ThreadID"
+#define ILibDutkape_GenericMarshal_INTERNAL				"\xFF_INTERNAL"
 #define ILibDuktape_GenericMarshal_Variable_EnableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_false(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define WAITING_FOR_RESULT__DISPATCHER					2
@@ -436,6 +437,25 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_bignum_SET(duk_context *ctx)
 	return(0);
 }
 #endif
+duk_ret_t ILibDuktape_GenericMarshal_Variable_Increment(duk_context *ctx)
+{
+	duk_push_this(ctx);											// [var]
+	ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, -1);
+	void *_ptr = Duktape_GetPointerProperty(ctx, -1, "_ptr");
+	int offset = duk_require_int(ctx, 0);
+	if (duk_is_boolean(ctx, 1) && duk_require_boolean(ctx, 1))
+	{
+		_ptr = (void*)(uintptr_t)duk_require_uint(ctx, 0);
+	}
+	else
+	{
+		_ptr = (char*)_ptr + offset;
+	}
+	duk_push_this(ctx);
+	duk_push_pointer(ctx, _ptr);
+	duk_put_prop_string(ctx, -2, "_ptr");
+	return(1);
+}
 void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size)
 {
 	duk_push_object(ctx);						// [var]
@@ -463,6 +483,8 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 	ILibDuktape_CreateInstanceMethod(ctx, "autoFree", ILibDuktape_GenericMarshal_Variable_autoFree, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "pointerBuffer", ILibDuktape_GenericMarshal_Variable_pointerBuffer, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "getPointerPointer", ILibDuktape_GenericMarshal_Variable_pointerpointer, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "increment", ILibDuktape_GenericMarshal_Variable_Increment, DUK_VARARGS);
+
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_GenericMarshal_Variable_Finalizer);
 }
@@ -1948,6 +1970,470 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_close(duk_context *ctx)
 	return(0);
 }
 
+int ILibDuktape_GlobalGenericCallbackEx_n[22] = { 0 };
+ILibDuktape_EventEmitter *ILibDuktape_GlobalGenericCallbackEx_nctx[22] = { 0 };
+extern void* gILibChain;
+
+duk_ret_t ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(ILibDuktape_EventEmitter *emitter)
+{
+	duk_push_heapptr(emitter->ctx, emitter->object);		// [array][var]
+	char *id = Duktape_GetStringPropertyValue(emitter->ctx, -1, ILibDuktape_OBJID, "");
+	duk_get_prop_string(emitter->ctx, -1, "emit");			// [array][var][emit]
+	duk_get_prop_string(emitter->ctx, -1, "apply");			// [array][var][emit][apply]
+
+	duk_dup(emitter->ctx, -2);								// [array][var][emit][apply][emit]
+	duk_dup(emitter->ctx, -4);								// [array][var][emit][apply][emit][this]
+	duk_dup(emitter->ctx, -6);								// [array][var][emit][apply][emit][this][array]
+	duk_push_string(emitter->ctx, "GlobalCallback");		// [array][var][emit][apply][emit][this][array][GlobalCallback]
+	duk_array_unshift(emitter->ctx, -2);					// [array][var][emit][apply][emit][this][array]
+	duk_remove(emitter->ctx, -5);							// [array][var][apply][emit][this][array]
+	duk_remove(emitter->ctx, -5);							// [array][apply][emit][this][array]
+	duk_remove(emitter->ctx, -5);							// [apply][emit][this][array]
+	return(duk_pcall_method(emitter->ctx, 2));				// [retVal]
+
+	//duk_dup(emitter->ctx, -3);								// [array][var][emit][apply][this]
+	//duk_dup(emitter->ctx, -5);								// [array][var][emit][apply][this][array]
+	//duk_remove(emitter->ctx, -5);							// [array][emit][apply][this][array]
+	//duk_remove(emitter->ctx, -5);							// [emit][apply][this][array]
+	//duk_remove(emitter->ctx, -4);							// [apply][this][array]
+	//duk_push_string(emitter->ctx, "GlobalCallback");		// [apply][this][array][GlobalCallback]
+	//duk_array_unshift(emitter->ctx, -2);					// [apply][this][array]
+	//return(duk_pcall(emitter->ctx, 2));						// [retVal]
+}
+void ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx(void * chain, void *user)
+{
+	Duktape_GlobalGeneric_Data *data = (Duktape_GlobalGeneric_Data*)user;
+	duk_context *ctx = data->emitter->ctx;
+	int i;
+
+	duk_idx_t top = duk_get_top(ctx);
+	duk_push_array(ctx);																		// [array]
+	for (i = 0; i < data->numArgs; ++i)
+	{
+		ILibDuktape_GenericMarshal_Variable_PUSH(ctx, (void*)data->args[i], sizeof(PTRSIZE));// [array][var]
+		duk_array_push(ctx, -2);																// [array]
+	}
+	if (ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(data->emitter) != 0)
+	{
+		// Exception was thrown
+		ILibDuktape_Process_UncaughtExceptionEx(data->emitter->ctx, "Exception occured in GlobalCallback: %s", duk_safe_to_string(data->emitter->ctx, -1));
+		data->retVal = NULL;
+	}
+	else
+	{
+		if (ILibMemory_CanaryOK(data->emitter))
+		{
+			duk_push_heapptr(ctx, data->emitter->object);			// [obj]
+			duk_prepare_method_call(ctx, -1, "emit_returnValue");	// [obj][emitRV][this]
+			if (duk_pcall_method(ctx, 0) == 0)
+			{
+				data->retVal = Duktape_GetPointerProperty(ctx, -1, "_ptr");
+			}
+		}
+	}
+	duk_set_top(ctx, top);
+	sem_post(&(data->contextWaiter));
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_Process(PTRSIZE arg1, int count, ILibDuktape_EventEmitter *emitter, va_list args)
+{
+	int i;
+	if (gILibChain != NULL && ILibIsRunningOnChainThread(gILibChain) == 0)
+	{
+		// Need to Context Switch to different thread, but before we do, we need to export all the parameters from va_list
+		void *ret = NULL;
+		Duktape_GlobalGeneric_Data *user = ILibMemory_SmartAllocate(sizeof(Duktape_GlobalGeneric_Data) + ((count + 1) * sizeof(PTRSIZE)));
+		user->chain = gILibChain;
+		user->numArgs = count + 1;
+		user->emitter = emitter;
+		for (i = 0; i < user->numArgs; ++i)
+		{
+			user->args[i] = i == 0 ? arg1 : va_arg(args, PTRSIZE);
+		}
+		sem_init(&(user->contextWaiter), 0, 0);
+		ILibChain_RunOnMicrostackThread(user->chain, ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx, user);
+		
+		sem_wait(&(user->contextWaiter));
+		if (user->retVal != NULL) { ret = user->retVal; }
+		sem_destroy(&(user->contextWaiter));
+		ILibMemory_Free(user);
+		return((PTRSIZE)ret);
+	}
+
+	// No Context Switch is necessary
+	duk_push_array(emitter->ctx);																							// [array]
+	for (i = 0; i < (count + 1); ++i)
+	{
+		ILibDuktape_GenericMarshal_Variable_PUSH(emitter->ctx, (void*)( i == 0 ? arg1 : va_arg(args, PTRSIZE)), sizeof(PTRSIZE));		// [array][var]
+		duk_array_push(emitter->ctx, -2);																					// [array]
+	}
+	if (ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(emitter) != 0)
+	{
+		// Exception was thrown
+		ILibDuktape_Process_UncaughtExceptionEx(emitter->ctx, "Exception occured in GlobalCallback: ");
+		duk_pop(emitter->ctx);
+		return(0);
+	}
+	uintptr_t ret = 0;
+	duk_pop(emitter->ctx);
+	if (emitter->lastReturnValue != NULL)
+	{
+		duk_push_heapptr(emitter->ctx, emitter->lastReturnValue);
+		ret = (uintptr_t)Duktape_GetPointerProperty(emitter->ctx, -1, "_ptr");
+		duk_pop(emitter->ctx);
+	}
+	return((PTRSIZE)ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_0(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[0], ILibDuktape_GlobalGenericCallbackEx_nctx[0], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_1(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[1], ILibDuktape_GlobalGenericCallbackEx_nctx[1], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_2(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[2], ILibDuktape_GlobalGenericCallbackEx_nctx[2], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_3(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[3], ILibDuktape_GlobalGenericCallbackEx_nctx[3], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_4(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[4], ILibDuktape_GlobalGenericCallbackEx_nctx[4], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_5(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[5], ILibDuktape_GlobalGenericCallbackEx_nctx[5], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_6(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[6], ILibDuktape_GlobalGenericCallbackEx_nctx[6], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_7(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[7], ILibDuktape_GlobalGenericCallbackEx_nctx[7], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_8(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[8], ILibDuktape_GlobalGenericCallbackEx_nctx[8], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_9(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[9], ILibDuktape_GlobalGenericCallbackEx_nctx[9], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_10(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[10], ILibDuktape_GlobalGenericCallbackEx_nctx[10], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_11(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[11], ILibDuktape_GlobalGenericCallbackEx_nctx[11], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_12(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[12], ILibDuktape_GlobalGenericCallbackEx_nctx[12], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_13(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[13], ILibDuktape_GlobalGenericCallbackEx_nctx[13], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_14(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[14], ILibDuktape_GlobalGenericCallbackEx_nctx[14], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_15(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[15], ILibDuktape_GlobalGenericCallbackEx_nctx[15], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_16(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[16], ILibDuktape_GlobalGenericCallbackEx_nctx[16], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_17(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[17], ILibDuktape_GlobalGenericCallbackEx_nctx[17], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_18(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[18], ILibDuktape_GlobalGenericCallbackEx_nctx[18], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_19(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[19], ILibDuktape_GlobalGenericCallbackEx_nctx[19], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_20(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[20], ILibDuktape_GlobalGenericCallbackEx_nctx[20], args);
+	va_end(args);
+	return(ret);
+}
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_21(PTRSIZE arg1, ...)
+{
+	PTRSIZE ret;
+	va_list args;
+	va_start(args, arg1);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[21], ILibDuktape_GlobalGenericCallbackEx_nctx[21], args);
+	va_end(args);
+	return(ret);
+}
+
+duk_ret_t ILibDuktape_GenericMarshal_PutGlobalGenericCallbackEx(duk_context *ctx)
+{
+	duk_push_global_stash(ctx);											// [stash]
+	duk_get_prop_string(ctx, -1, "GlobalCallBacksEx");					// [stash][array]
+	if (!duk_has_prop_string(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL))
+	{
+		return(ILibDuktape_Error(ctx, "Invalid Parameter"));
+	}
+	duk_get_prop_string(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL);	// [stash][array][obj]
+	duk_array_push(ctx, -2);											// [stash][array]
+	return(0);
+}
+
+duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx(duk_context *ctx)
+{
+	int numParms = duk_require_int(ctx, 0);
+	Duktape_GlobalGeneric_Data *data = NULL;
+
+	duk_push_global_stash(ctx);			// [stash]
+	if (!duk_has_prop_string(ctx, -1, "GlobalCallBacksEx"))
+	{
+		duk_push_array(ctx);			// [stash][array]
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_0); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 0); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_1); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 1); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_2); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 2); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_3); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 3); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_4); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 4); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_5); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 5); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_6); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 6); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_7); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 7); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_8); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 8); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_9); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 9); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_10); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 10); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_11); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 11); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_12); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 12); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_13); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 13); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_14); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 14); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_15); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 15); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_16); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 16); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_17); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 17); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_18); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 18); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_19); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 19); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_20); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 20); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+		duk_push_object(ctx);
+		duk_push_pointer(ctx, (void*)ILibDuktape_GlobalGenericCallbackEx_21); duk_put_prop_string(ctx, -2, "PTR");
+		duk_push_int(ctx, 21); duk_put_prop_string(ctx, -2, "INDEX");
+		duk_array_push(ctx, -2);
+
+
+		duk_put_prop_string(ctx, -2, "GlobalCallBacksEx");				// [stash]
+	}
+	duk_get_prop_string(ctx, -1, "GlobalCallBacksEx");					// [stash][array]
+
+	if (numParms < 1) { return(ILibDuktape_Error(ctx, "Must have 1 or more arguments")); }
+	duk_array_pop(ctx, -1);												// [stash][array][obj]
+	int index = Duktape_GetIntPropertyValue(ctx, -1, "INDEX", -1);
+	void *PTR = Duktape_GetPointerProperty(ctx, -1, "PTR");
+	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, PTR, sizeof(PTRSIZE));// [stash][array][obj][var]
+	ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, -1);
+	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_Create(ctx), "GlobalCallback");
+
+	duk_dup(ctx, -2);													// [stash][array][obj][var][obj]
+	duk_put_prop_string(ctx, -2, ILibDutkape_GenericMarshal_INTERNAL);	// [stash][array][obj][var]
+	ILibDuktape_GlobalGenericCallbackEx_n[index] = numParms;
+	ILibDuktape_GlobalGenericCallbackEx_nctx[index] = ILibDuktape_EventEmitter_GetEmitter(ctx, -1);
+	return(1);
+}
 duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallback(duk_context *ctx)
 {
 	int numParms = duk_require_int(ctx, 0);
@@ -2151,6 +2637,49 @@ duk_ret_t ILibDuktape_GenericMarshal_GetCurrentThread(duk_context *ctx)
 	return(1);
 }
 
+duk_ret_t ILibDuktape_GenericMarshal_MarshalFunction(duk_context *ctx)
+{
+	if (duk_is_object(ctx, 0) && strcmp("_GenericMarshal.Variable", Duktape_GetStringPropertyValue(ctx, 0, ILibDuktape_OBJID, "")) == 0)
+	{
+		duk_push_c_function(ctx, ILibDuktape_GenericMarshal_MethodInvoke, DUK_VARARGS);		// [func]
+		duk_get_prop_string(ctx, 0, "_ptr");												// [func][addr]
+		if (duk_is_number(ctx, 1))
+		{
+			void **p = (void**)duk_get_pointer(ctx, -1);
+			int i = (int)duk_require_int(ctx, 1);
+			duk_push_pointer(ctx, p[i]);													// [func][addr][ptr]
+			duk_remove(ctx, -2);															// [func][ptr]
+		}
+		duk_put_prop_string(ctx, -2, "_address");											// [func]
+		duk_push_string(ctx, "_MarshalledFunction"); duk_put_prop_string(ctx, -2, "_exposedName");
+		return(1);
+	}
+	return(ILibDuktape_Error(ctx, "Invalid Parameter"));
+}
+duk_ret_t ILibDuktape_GenericMarshal_MarshalFunctions(duk_context *ctx)
+{
+	if (duk_is_object(ctx, 0) && strcmp("_GenericMarshal.Variable", Duktape_GetStringPropertyValue(ctx, 0, ILibDuktape_OBJID, "")) == 0 && duk_is_array(ctx, 1))
+	{
+		int i = 0;
+		duk_array_clone(ctx, 1);									// [array]
+		duk_push_object(ctx);										// [array][ret]
+		while (duk_get_length(ctx, -2) > 0)
+		{
+			duk_array_shift(ctx, -2);								// [array][ret][str]
+			duk_push_this(ctx);										// [array][ret][str][this]
+			duk_prepare_method_call(ctx, -1, "MarshalFunction");	// [array][ret][str][this][func][this]
+			duk_dup(ctx, 0);										// [array][ret][str][this][func][this][parm]
+			duk_push_int(ctx, i++);									// [array][ret][str][this][func][this][parm][val]
+			duk_call_method(ctx, 2);								// [array][ret][str][this][marshalled]
+			duk_remove(ctx, -2);									// [array][ret][str][marshalled]
+			duk_put_prop(ctx, -3);									// [array][ret]
+		}
+		return(1);
+	}
+	return(ILibDuktape_Error(ctx, "Invalid Parameters"));
+}
+
+
 void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);												// [obj]
@@ -2162,12 +2691,17 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "CreateCallbackProxy", ILibDuktape_GenericMarshal_CreateCallbackProxy, 2);
 	ILibDuktape_CreateInstanceMethod(ctx, "CreateNativeProxy", ILibDuktape_GenericMarshal_CreateNativeProxy, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "GetGenericGlobalCallback", ILibDuktape_GenericMarshal_GetGlobalGenericCallback, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "GetGenericGlobalCallbackEx", ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "PutGenericGlobalCallbackEx", ILibDuktape_GenericMarshal_PutGlobalGenericCallbackEx, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "WrapObject", ILibDuktape_GenericMarshal_WrapObject, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "UnWrapObject", ILibDuktape_GenericMarshal_UnWrapObject, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "StashObject", ILibDuktape_GenericMarshal_StashObject, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "UnstashObject", ILibDuktape_GenericMarshal_UnstashObject, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "ObjectToPtr", ILibDuktape_GenericMarshal_ObjectToPtr, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "GetCurrentThread", ILibDuktape_GenericMarshal_GetCurrentThread, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "MarshalFunction", ILibDuktape_GenericMarshal_MarshalFunction, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "MarshalFunctions", ILibDuktape_GenericMarshal_MarshalFunctions, 2);
+	
 
 #ifdef WIN32
 	duk_push_object(ctx);
