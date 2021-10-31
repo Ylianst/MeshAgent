@@ -1971,6 +1971,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_close(duk_context *ctx)
 }
 
 int ILibDuktape_GlobalGenericCallbackEx_n[22] = { 0 };
+int ILibDuktape_GlobalGenericCallbackEx_active[22] = { 0 };
 ILibDuktape_EventEmitter *ILibDuktape_GlobalGenericCallbackEx_nctx[22] = { 0 };
 extern void* gILibChain;
 
@@ -2010,9 +2011,11 @@ void ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx(void * chain, void *use
 	duk_push_array(ctx);																		// [array]
 	for (i = 0; i < data->numArgs; ++i)
 	{
-		ILibDuktape_GenericMarshal_Variable_PUSH(ctx, (void*)data->args[i], sizeof(PTRSIZE));// [array][var]
+		ILibDuktape_GenericMarshal_Variable_PUSH(ctx, (void*)data->args[i], sizeof(PTRSIZE));	// [array][var]
 		duk_array_push(ctx, -2);																// [array]
 	}
+	duk_push_heapptr(ctx, data->emitter->object);												// [array][obj]
+	duk_push_true(ctx); duk_put_prop_string(ctx, -2, "callbackDispatched"); duk_pop(ctx);		// [array]
 	if (ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(data->emitter) != 0)
 	{
 		// Exception was thrown
@@ -2034,9 +2037,17 @@ void ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx(void * chain, void *use
 	duk_set_top(ctx, top);
 	sem_post(&(data->contextWaiter));
 }
-PTRSIZE ILibDuktape_GlobalGenericCallbackEx_Process(PTRSIZE arg1, int count, ILibDuktape_EventEmitter *emitter, va_list args)
+PTRSIZE ILibDuktape_GlobalGenericCallbackEx_Process(PTRSIZE arg1, int index, va_list args)
 {
 	int i;
+	int count = ILibDuktape_GlobalGenericCallbackEx_n[index];
+	ILibDuktape_EventEmitter *emitter = ILibDuktape_GlobalGenericCallbackEx_nctx[index];
+
+	if (ILibDuktape_GlobalGenericCallbackEx_active[index] == 0)
+	{
+		return(0);
+	}
+
 	if (gILibChain != NULL && ILibIsRunningOnChainThread(gILibChain) == 0)
 	{
 		// Need to Context Switch to different thread, but before we do, we need to export all the parameters from va_list
@@ -2066,6 +2077,10 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_Process(PTRSIZE arg1, int count, ILi
 		ILibDuktape_GenericMarshal_Variable_PUSH(emitter->ctx, (void*)( i == 0 ? arg1 : va_arg(args, PTRSIZE)), sizeof(PTRSIZE));		// [array][var]
 		duk_array_push(emitter->ctx, -2);																					// [array]
 	}
+	duk_push_heapptr(emitter->ctx, emitter->object);												// [array][obj]
+	duk_push_false(emitter->ctx); duk_put_prop_string(emitter->ctx, -2, "callbackDispatched");		// [array][obj]
+	duk_pop(emitter->ctx);																			// [array]
+
 	if (ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(emitter) != 0)
 	{
 		// Exception was thrown
@@ -2088,7 +2103,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_0(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[0], ILibDuktape_GlobalGenericCallbackEx_nctx[0], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 0, args);
 	va_end(args);
 	return(ret);
 }
@@ -2097,7 +2112,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_1(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[1], ILibDuktape_GlobalGenericCallbackEx_nctx[1], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 1, args);
 	va_end(args);
 	return(ret);
 }
@@ -2106,7 +2121,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_2(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[2], ILibDuktape_GlobalGenericCallbackEx_nctx[2], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 2, args);
 	va_end(args);
 	return(ret);
 }
@@ -2115,7 +2130,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_3(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[3], ILibDuktape_GlobalGenericCallbackEx_nctx[3], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 3, args);
 	va_end(args);
 	return(ret);
 }
@@ -2124,7 +2139,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_4(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[4], ILibDuktape_GlobalGenericCallbackEx_nctx[4], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 4, args);
 	va_end(args);
 	return(ret);
 }
@@ -2133,7 +2148,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_5(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[5], ILibDuktape_GlobalGenericCallbackEx_nctx[5], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 5, args);
 	va_end(args);
 	return(ret);
 }
@@ -2142,7 +2157,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_6(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[6], ILibDuktape_GlobalGenericCallbackEx_nctx[6], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 6, args);
 	va_end(args);
 	return(ret);
 }
@@ -2151,7 +2166,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_7(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[7], ILibDuktape_GlobalGenericCallbackEx_nctx[7], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 7, args);
 	va_end(args);
 	return(ret);
 }
@@ -2160,7 +2175,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_8(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[8], ILibDuktape_GlobalGenericCallbackEx_nctx[8], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 8, args);
 	va_end(args);
 	return(ret);
 }
@@ -2169,7 +2184,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_9(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[9], ILibDuktape_GlobalGenericCallbackEx_nctx[9], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 9, args);
 	va_end(args);
 	return(ret);
 }
@@ -2178,7 +2193,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_10(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[10], ILibDuktape_GlobalGenericCallbackEx_nctx[10], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 10, args);
 	va_end(args);
 	return(ret);
 }
@@ -2187,7 +2202,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_11(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[11], ILibDuktape_GlobalGenericCallbackEx_nctx[11], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 11, args);
 	va_end(args);
 	return(ret);
 }
@@ -2196,7 +2211,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_12(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[12], ILibDuktape_GlobalGenericCallbackEx_nctx[12], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 12, args);
 	va_end(args);
 	return(ret);
 }
@@ -2205,7 +2220,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_13(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[13], ILibDuktape_GlobalGenericCallbackEx_nctx[13], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 13, args);
 	va_end(args);
 	return(ret);
 }
@@ -2214,7 +2229,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_14(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[14], ILibDuktape_GlobalGenericCallbackEx_nctx[14], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 14, args);
 	va_end(args);
 	return(ret);
 }
@@ -2223,7 +2238,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_15(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[15], ILibDuktape_GlobalGenericCallbackEx_nctx[15], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 15, args);
 	va_end(args);
 	return(ret);
 }
@@ -2232,7 +2247,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_16(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[16], ILibDuktape_GlobalGenericCallbackEx_nctx[16], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 16, args);
 	va_end(args);
 	return(ret);
 }
@@ -2241,7 +2256,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_17(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[17], ILibDuktape_GlobalGenericCallbackEx_nctx[17], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 17, args);
 	va_end(args);
 	return(ret);
 }
@@ -2250,7 +2265,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_18(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[18], ILibDuktape_GlobalGenericCallbackEx_nctx[18], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 18, args);
 	va_end(args);
 	return(ret);
 }
@@ -2259,7 +2274,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_19(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[19], ILibDuktape_GlobalGenericCallbackEx_nctx[19], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 19, args);
 	va_end(args);
 	return(ret);
 }
@@ -2268,7 +2283,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_20(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[20], ILibDuktape_GlobalGenericCallbackEx_nctx[20], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 20, args);
 	va_end(args);
 	return(ret);
 }
@@ -2277,7 +2292,7 @@ PTRSIZE ILibDuktape_GlobalGenericCallbackEx_21(PTRSIZE arg1, ...)
 	PTRSIZE ret;
 	va_list args;
 	va_start(args, arg1);
-	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, ILibDuktape_GlobalGenericCallbackEx_n[21], ILibDuktape_GlobalGenericCallbackEx_nctx[21], args);
+	ret = ILibDuktape_GlobalGenericCallbackEx_Process(arg1, 21, args);
 	va_end(args);
 	return(ret);
 }
@@ -2291,7 +2306,13 @@ duk_ret_t ILibDuktape_GenericMarshal_PutGlobalGenericCallbackEx(duk_context *ctx
 		return(ILibDuktape_Error(ctx, "Invalid Parameter"));
 	}
 	duk_get_prop_string(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL);	// [stash][array][obj]
-	duk_array_push(ctx, -2);											// [stash][array]
+	int index = Duktape_GetIntPropertyValue(ctx, -1, "INDEX", -1);
+	duk_array_unshift(ctx, -2);											// [stash][array]
+
+	ILibDuktape_GlobalGenericCallbackEx_n[index] = 0;
+	ILibDuktape_GlobalGenericCallbackEx_active[index] = 0;
+	ILibDuktape_GlobalGenericCallbackEx_nctx[index] = NULL;
+
 	return(0);
 }
 
@@ -2431,6 +2452,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx(duk_context *ctx
 	duk_dup(ctx, -2);													// [stash][array][obj][var][obj]
 	duk_put_prop_string(ctx, -2, ILibDutkape_GenericMarshal_INTERNAL);	// [stash][array][obj][var]
 	ILibDuktape_GlobalGenericCallbackEx_n[index] = numParms;
+	ILibDuktape_GlobalGenericCallbackEx_active[index] = 1;
 	ILibDuktape_GlobalGenericCallbackEx_nctx[index] = ILibDuktape_EventEmitter_GetEmitter(ctx, -1);
 	return(1);
 }

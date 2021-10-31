@@ -25,6 +25,8 @@ const E_NOINTERFACE = 0x80004002;
 var OleAut32 = GM.CreateNativeProxy('OleAut32.dll');
 OleAut32.CreateMethod('SafeArrayAccessData');
 
+var wmi_handlers = {};
+
 const LocatorFunctions = ['QueryInterface', 'AddRef', 'Release', 'ConnectToServer'];
 const ServiceFunctions = [
     'QueryInterface',
@@ -106,14 +108,14 @@ const QueryAsyncHandler =
                     case '0000000000000000C000000000000046': // IID_IUnknown
                         j.pointerBuffer().copy(ppv.Deref(0, 8).toBuffer());
                         ret.increment(0, true);
-                        ++this.p.refcount;
-                        console.info1('QueryInterface (IID_IUnknown)', this.p.refcount);
+                        //++this.p.refcount;
+                        console.info1('QueryInterface (IID_IUnknown)', this.refcount);
                         break;
                     case '0178857C8173CF11884D00AA004B2E24': // IID_IWmiObjectSink
                         j.pointerBuffer().copy(ppv.Deref(0, 8).toBuffer());
                         ret.increment(0, true);
-                        ++this.p.refcount;
-                        console.info1('QueryInterface (IID_IWmiObjectSink)', this.p.refcount);
+                        //++this.p.refcount;
+                        console.info1('QueryInterface (IID_IWmiObjectSink)', this.refcount);
                         break;
                     default:
                         ret.increment(E_NOINTERFACE, true);
@@ -127,23 +129,35 @@ const QueryAsyncHandler =
         {
             parms: 1, name: 'AddRef', func: function ()
             {
-                ++this.p.refcount;
-                console.info1('AddRef', this.p.refcount);
+                ++this.refcount;
+                console.info1('AddRef', this.refcount);
                 return (GM.CreateVariable(4));
             }
         },
         {
             parms: 1, name: 'Release', func: function ()
             {
-                --this.p.refcount;
-                console.info1('Release', this.p.refcount);
-                if (this.p.refcount == 0)
+                --this.refcount;
+                console.info1('Release', this.refcount);
+                if (this.refcount == 0)
                 {
                     console.info1('No More References');
-                    this.p.handlers.cleanup();
-                    this.p.services.funcs.Release(this.p.services.Deref());
-                    delete this.p.handlers;
-                    delete this.p;
+
+                    this.cleanup();
+                    this.services.funcs.Release(this.services.Deref());
+
+                    this.services = null;
+                    this.p = null;
+                    if (this.callbackDispatched)
+                    {
+                        setImmediate(function (j) { j.locator = null; }, this);
+                    }
+                    else
+                    {
+                        this.locator = null;
+                    }
+                    
+                    console.info1('No More References [END]');
                 }
                 return (GM.CreateVariable(4));
             }
@@ -157,7 +171,7 @@ const QueryAsyncHandler =
                 for (var i = 0; i < count.Val; ++i)
                 {
                     j = arr.Deref((i * GM.PointerSize) + 0, GM.PointerSize);
-                    this.p.results.push(enumerateProperties(j, this.p.fields));
+                    this.results.push(enumerateProperties(j, this.fields));
                 }
 
                 var ret = GM.CreateVariable(4);
@@ -175,7 +189,7 @@ const QueryAsyncHandler =
 
                 if (hResult.Val == 0)
                 {
-                    this.p.resolve(this.p.results);
+                    this.p.resolve(this.results);
                 }
                 else
                 {
@@ -277,22 +291,26 @@ function queryAsync(resourceString, queryString, fields)
     var query = GM.CreateVariable(queryString, { wide: true });
     var results = GM.CreatePointer();
 
-    p.refcount = 0;
-    p.fields = fields;
-    p.results = [];
-    p.locator = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_WbemAdministrativeLocator), require('win-com').IID_IUnknown);
-    p.locator.funcs = require('win-com').marshalFunctions(p.locator, LocatorFunctions);
-    p.services = require('_GenericMarshal').CreatePointer();
-    if (p.locator.funcs.ConnectToServer(p.locator, resource, 0, 0, 0, 0, 0, 0, p.services).Val != 0) { throw ('Error calling ConnectToService'); }
 
-    p.services.funcs = require('win-com').marshalFunctions(p.services.Deref(), ServiceFunctions);
-    p.handlers = require('win-com').marshalInterface(QueryAsyncHandler);
-    p.handlers.p = p;
+    var handlers = require('win-com').marshalInterface(QueryAsyncHandler);
+    handlers.refcount = 1;
+    handlers.results = [];
+    handlers.fields = fields;
+    handlers.locator = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_WbemAdministrativeLocator), require('win-com').IID_IUnknown);
+    handlers.locator.funcs = require('win-com').marshalFunctions(handlers.locator, LocatorFunctions);
+
+    handlers.services = require('_GenericMarshal').CreatePointer();
+    if (handlers.locator.funcs.ConnectToServer(handlers.locator, resource, 0, 0, 0, 0, 0, 0, handlers.services).Val != 0) { throw ('Error calling ConnectToService'); }
+
+    handlers.services.funcs = require('win-com').marshalFunctions(handlers.services.Deref(), ServiceFunctions);
+    handlers.p = p;
     
-    if (p.services.funcs.ExecQueryAsync(p.services.Deref(), language, query, WBEM_FLAG_BIDIRECTIONAL, 0, p.handlers).Val != 0)
+    if (handlers.services.funcs.ExecQueryAsync(handlers.services.Deref(), language, query, WBEM_FLAG_BIDIRECTIONAL, 0, handlers).Val != 0)
     {
         throw ('Error in Query');
     }
+
+    wmi_handlers[handlers._hashCode()] = handlers;
     return (p);
 }
 function query(resourceString, queryString, fields)

@@ -40,9 +40,8 @@ function createInstance_finalizer()
 {
     var tmp = marshalFunctions(this, IUnknownMethods);
     tmp.Release(this);
-
     ole32.CoUninitialize();
-    console.log('final');
+    console.info1('CoUninitialize()');
 }
 function createInstance(RFCLSID, RFIID, options)
 {
@@ -131,6 +130,7 @@ function marshalInterface(arr)
                 {
                     args.push(arguments[i]);
                 }
+                obj.callbackDispatched = this.callbackDispatched;
                 return (this.obj.func.apply(obj, args));
             }
         });
