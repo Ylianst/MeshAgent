@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2020 Intel Corporation
+Copyright 2018-2021 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -300,6 +300,7 @@ function AmtStackCreateService(wsmanStack) {
     obj.CIM_AccountManagementService_CreateAccount = function (System, AccountTemplate, callback_func) { obj.Exec("CIM_AccountManagementService", "CreateAccount", { "System": System, "AccountTemplate": AccountTemplate }, callback_func); }
     obj.CIM_BootConfigSetting_ChangeBootOrder = function (Source, callback_func) { obj.Exec("CIM_BootConfigSetting", "ChangeBootOrder", { "Source": Source }, callback_func); }
     obj.CIM_BootService_SetBootConfigRole = function (BootConfigSetting, Role, callback_func) { obj.Exec("CIM_BootService", "SetBootConfigRole", { "BootConfigSetting": BootConfigSetting, "Role": Role }, callback_func, 0, 1); }
+    obj.CIM_BootService_RequestStateChange = function (RequestedState, TimeoutPeriod, callback_func) { obj.Exec('CIM_BootService', 'RequestStateChange', { 'RequestedState': RequestedState, 'TimeoutPeriod': TimeoutPeriod }, callback_func, 0, 1); }
     obj.CIM_Card_ConnectorPower = function (Connector, PoweredOn, callback_func) { obj.Exec("CIM_Card", "ConnectorPower", { "Connector": Connector, "PoweredOn": PoweredOn }, callback_func); }
     obj.CIM_Card_IsCompatible = function (ElementToCheck, callback_func) { obj.Exec("CIM_Card", "IsCompatible", { "ElementToCheck": ElementToCheck }, callback_func); }
     obj.CIM_Chassis_IsCompatible = function (ElementToCheck, callback_func) { obj.Exec("CIM_Chassis", "IsCompatible", { "ElementToCheck": ElementToCheck }, callback_func); }
@@ -487,7 +488,7 @@ function AmtStackCreateService(wsmanStack) {
     function _GetMessageLog1(stack, name, responses, status, tag) {
         if (status != 200 || responses.Body["ReturnValue"] != '0') { tag[0](obj, null, tag[2], status); return; }
         var i, j, x, e, AmtMessages = tag[2], t = new Date(), TimeStamp, ra = responses.Body["RecordArray"];
-        if (typeof ra === 'string') { responses.Body["RecordArray"] = [responses.Body["RecordArray"]]; }
+        if (typeof ra === 'string') { ra = [ra]; }
 
         for (i in ra) {
             e = Buffer.from(ra[i], 'base64');
@@ -613,7 +614,7 @@ function AmtStackCreateService(wsmanStack) {
         1611: 'TLS Trusted Root Certificate Removed',
         1612: 'TLS Preshared Key Set',
         1613: 'Kerberos Settings Modified',
-        1614: 'Kerberos Master Key Modified',
+        1614: 'Kerberos Main Key Modified',
         1615: 'Flash Wear out Counters Reset',
         1616: 'Power Package Modified',
         1617: 'Set Realm Authentication Mode',

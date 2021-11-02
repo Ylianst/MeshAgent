@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2020 Intel Corporation
+Copyright 2018-2021 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,7 +33,8 @@ module.exports.ParseWsman = function (xml) {
         if (!body) return null;
         if (body.childNodes.length > 0) {
             t = body.childNodes[0].localName;
-            if (t.indexOf("_OUTPUT") == t.length - 7) { t = t.substring(0, t.length - 7); }
+            var x = t.indexOf('_OUTPUT');
+            if ((x != -1) && (x == (t.length - 7))) { t = t.substring(0, t.length - 7); }
             r.Header['Method'] = t;
             r.Body = _ParseWsmanRec(body.childNodes[0]);
         }
@@ -130,19 +131,19 @@ function _turnToXmlRec(text) {
                 if (elementName[0] != '/') {
                     var attributes = [], localName, localname2 = elementName.split(' ')[0].split(':'), localName = (localname2.length > 1) ? localname2[1] : localname2[0];
                     Object.defineProperty(attributes, "get",
-                    {
-                        value: function () {
-                            if (arguments.length == 1) {
-                                for (var a in this) { if (this[a].name == arguments[0]) { return (this[a]); } }
+                        {
+                            value: function () {
+                                if (arguments.length == 1) {
+                                    for (var a in this) { if (this[a].name == arguments[0]) { return (this[a]); } }
+                                }
+                                else if (arguments.length == 2) {
+                                    for (var a in this) { if (this[a].name == arguments[1] && (arguments[0] == '*' || this[a].namespace == arguments[0])) { return (this[a]); } }
+                                }
+                                else {
+                                    throw ('attributes.get(): Invalid number of parameters');
+                                }
                             }
-                            else if (arguments.length == 2) {
-                                for (var a in this) { if (this[a].name == arguments[1] && (arguments[0] == '*' || this[a].namespace == arguments[0])) { return (this[a]); } }
-                            }
-                            else {
-                                throw ('attributes.get(): Invalid number of parameters');
-                            }
-                        }
-                    });
+                        });
                     elementStack.push({ name: elementName, localName: localName, getChildElementsByTagName: _getChildElementsByTagName, getElementsByTagNameNS: _getElementsByTagNameNS, getChildElementsByTagNameNS: _getChildElementsByTagNameNS, attributes: attributes, childNodes: [], nsTable: {} });
                     // Parse Attributes
                     if (x3.length > 0) {
