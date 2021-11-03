@@ -23,13 +23,20 @@ function netsecurityExists()
 {
     var child;
     var command = 'Get-Module -ListAvailable -Name netsecurity';
-    if (require('os').arch() == 'x64')
+    try
     {
-        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        if (require('os').arch() == 'x64')
+        {
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        }
+        else
+        {
+            child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        }
     }
-    else
+    catch(e)
     {
-        child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['/C "' + command + '"']);
+        return (false);
     }
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
