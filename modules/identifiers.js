@@ -1,5 +1,5 @@
 /*
-Copyright 2019-2020 Intel Corporation
+Copyright 2019-2021 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,7 +21,42 @@ function trimIdentifiers(val)
         if (!val[v] || val[v] == 'None' || val[v] == '') { delete val[v]; }
     }
 }
-
+function trimResults(val)
+{
+    var i, x;
+    for (i = 0; i < val.length; ++i)
+    {
+        for (x in val[i])
+        {
+            if (x.startsWith('_'))
+            {
+                delete val[i][x];
+            }
+            else
+            {
+                if (val[i][x] == null || val[i][x] == 0)
+                {
+                    delete val[i][x];
+                }
+            }
+        }
+    }
+}
+function brief(headers, obj)
+{
+    var i, x;
+    for (x = 0; x < obj.length; ++x)
+    {
+        for (i in obj[x])
+        {
+            if (!headers.includes(i))
+            {
+                delete obj[x][i];
+            }
+        }
+    }
+    return (obj);
+}
 function linux_identifiers()
 {
     var identifiers = {};
@@ -82,12 +117,18 @@ function windows_wmic_results(str)
     var tokens;
     var result = [];
 
+    console.log('Lines: ' + lines.length, 'Keys: ' + keys.length);
+
     for (i = 1; i < lines.length; ++i)
     {
         var obj = {};
+        console.log('i: ' + i);
         tokens = lines[i].split(',');
         for (key = 0; key < keys.length; ++key)
         {
+            var tmp = Buffer.from(tokens[key], 'binary').toString();
+            console.log(tokens[key], tmp);
+            tokens[key] = tmp == null ? '' : tmp;
             if (tokens[key].trim())
             {
                 obj[keys[key].trim()] = tokens[key].trim();
@@ -169,82 +210,45 @@ function windows_volumes()
 
 function windows_identifiers()
 {
-    var ret = { windows: {}}; values = {}; var items; var i; var item;
-    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'bios', 'get', '/VALUE']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
+    var ret = { windows: {} };
+    var items, item, i;
 
-    var items = child.stdout.str.split('\r\r\n');
-    for(i in items)
-    {
-        item = items[i].split('=');
-        values[item[0]] = item[1];
-    }
-
+    var values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Bios", ['ReleaseDate', 'Manufacturer', 'SMBIOSBIOSVersion']);
     ret['identifiers'] = {};
-    ret['identifiers']['bios_date'] = values['ReleaseDate'];
-    ret['identifiers']['bios_vendor'] = values['Manufacturer'];
-    ret['identifiers']['bios_version'] = values['SMBIOSBIOSVersion'];
+    ret['identifiers']['bios_date'] = values[0]['ReleaseDate'];
+    ret['identifiers']['bios_vendor'] = values[0]['Manufacturer'];
+    ret['identifiers']['bios_version'] = values[0]['SMBIOSBIOSVersion'];
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'BASEBOARD', 'get', '/VALUE']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_BaseBoard", ['Product', 'SerialNumber', 'Manufacturer', 'Version']);
+    ret['identifiers']['board_name'] = values[0]['Product'];
+    ret['identifiers']['board_serial'] = values[0]['SerialNumber'];
+    ret['identifiers']['board_vendor'] = values[0]['Manufacturer'];
+    ret['identifiers']['board_version'] = values[0]['Version'];
 
-    var items = child.stdout.str.split('\r\r\n');
-    for (i in items)
-    {
-        item = items[i].split('=');
-        values[item[0]] = item[1];
-    }
-    ret['identifiers']['board_name'] = values['Product'];
-    ret['identifiers']['board_serial'] = values['SerialNumber'];
-    ret['identifiers']['board_vendor'] = values['Manufacturer'];
-    ret['identifiers']['board_version'] = values['Version'];
-
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'CSProduct', 'get', '/VALUE']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-
-    var items = child.stdout.str.split('\r\r\n');
-    for (i in items)
-    {
-        item = items[i].split('=');
-        values[item[0]] = item[1];
-    }
-    ret['identifiers']['product_uuid'] = values['UUID'];
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_ComputerSystemProduct", ['UUID']);
+    ret['identifiers']['product_uuid'] = values[0]['UUID'];
     trimIdentifiers(ret.identifiers);
 
-    var CSV = '/FORMAT:"' + require('util-language').wmicXslPath + 'csv"';
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_PhysicalMemory");
+    trimResults(values);
+    ret.windows.memory = values;
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'MEMORYCHIP', 'LIST', CSV]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    ret.windows.memory = windows_wmic_results(child.stdout.str);
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_OperatingSystem");
+    trimResults(values);
+    ret.windows.osinfo = values[0];
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'OS', 'GET', CSV]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    ret.windows.osinfo = windows_wmic_results(child.stdout.str)[0];
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_DiskPartition");
+    trimResults(values);
+    ret.windows.partitions = values;
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'PARTITION', 'LIST', CSV]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    ret.windows.partitions = windows_wmic_results(child.stdout.str);
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Processor", ['Caption', 'DeviceID', 'Manufacturer', 'MaxClockSpeed', 'Name', 'SocketDesignation']);
+    ret.windows.cpu = values;
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'CPU', 'LIST', 'BRIEF', CSV]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    ret.windows.cpu = windows_wmic_results(child.stdout.str);
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_VideoController", ['Name', 'CurrentHorizontalResolution', 'CurrentVerticalResolution']);
+    ret.windows.gpu = values;
 
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'PATH', 'Win32_VideoController', 'GET', 'Name,CurrentHorizontalResolution,CurrentVerticalResolution', CSV]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    ret.windows.gpu = windows_wmic_results(child.stdout.str);
-
-    child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'diskdrive', 'LIST', 'BRIEF', CSV]);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.waitExit();
-    ret.windows.drives = windows_wmic_results(child.stdout.str);
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_DiskDrive", ['Caption', 'DeviceID', 'Model', 'Partitions', 'Size']);
+    ret.windows.drives = values;
 
     // Insert GPU names
     ret.identifiers.gpu_name = [];
