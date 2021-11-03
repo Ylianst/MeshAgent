@@ -98,6 +98,7 @@ function marshalFunctions(obj, arr)
 }
 function marshalInterface(arr)
 {
+    if (GM.PointerSize == 4) { throw ('Not supported on 32bit platforms, becuase ellipses function cannot be __stdcall'); }
     var vtbl = GM.CreateVariable(arr.length * GM.PointerSize);
     var obj = GM.CreatePointer();
     vtbl.pointerBuffer().copy(obj.toBuffer());
