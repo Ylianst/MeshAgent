@@ -2466,25 +2466,8 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 		switch (process.platform)\
 		{\
 			case 'win32':\
-				{\
-					try\
-					{\
-						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName') + ' - ' +\
-						require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ReleaseID');\
-					}\
-					catch(xx)\
-					{\
-						winstr = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'ProductName');\
-					}\
-					try\
-					{\
-						winstr += (' [' + require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion', 'CurrentBuild') + ']');\
-					}\
-					catch(ee)\
-					{\
-					}\
-				}\
-				ret = winstr;\
+				ret = require('win-wmi').query('ROOT\\\\CIMV2', \"SELECT * FROM Win32_OperatingSystem\", ['Caption','BuildNumber']);\
+				ret = ret[0].Caption + ' - ' + ret[0].BuildNumber;\
 				break;\
 			case 'linux':\
 				lines = child.stdout.str.split('\\n');\
