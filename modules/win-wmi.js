@@ -106,20 +106,20 @@ const QueryAsyncHandler =
                 switch (riid.Deref(0, 16).toBuffer().toString('hex'))
                 {
                     case '0000000000000000C000000000000046': // IID_IUnknown
-                        j.pointerBuffer().copy(ppv.Deref(0, 8).toBuffer());
+                        j.pointerBuffer().copy(ppv.Deref(0, GM.PointerSize).toBuffer());
                         ret.increment(0, true);
                         //++this.p.refcount;
                         console.info1('QueryInterface (IID_IUnknown)', this.refcount);
                         break;
                     case '0178857C8173CF11884D00AA004B2E24': // IID_IWmiObjectSink
-                        j.pointerBuffer().copy(ppv.Deref(0, 8).toBuffer());
+                        j.pointerBuffer().copy(ppv.Deref(0, GM.PointerSize).toBuffer());
                         ret.increment(0, true);
                         //++this.p.refcount;
                         console.info1('QueryInterface (IID_IWmiObjectSink)', this.refcount);
                         break;
                     default:
                         ret.increment(E_NOINTERFACE, true);
-                        console.info1('returning E_NOINTERFACE');
+                        console.info1(riid.Deref(0, 16).toBuffer().toString('hex'), 'returning E_NOINTERFACE');
                         break;
                 }
 
@@ -217,15 +217,14 @@ function enumerateProperties(j, fields)
     {
         nme = GM.CreatePointer();
         j.funcs.GetNames(j.Deref(), 0, WBEM_FLAG_ALWAYS, 0, nme);
-        len = nme.Deref().Deref(24, 4).toBuffer().readUInt32LE();
-
+        len = nme.Deref().Deref(GM.PointerSize == 8 ? 24 : 16, 4).toBuffer().readUInt32LE();
         nn = GM.CreatePointer();
         OleAut32.SafeArrayAccessData(nme.Deref(), nn);
 
 
         for (var i = 0; i < len - 1; ++i)
         {
-            properties.push(nn.Deref().increment(i * 8).Deref().Wide2UTF8);
+            properties.push(nn.Deref().increment(i * GM.PointerSize).Deref().Wide2UTF8);
         }
     }
 
@@ -242,36 +241,36 @@ function enumerateProperties(j, fields)
                     values[properties[i]] = null;
                     break;
                 case 0x0002:    // VT_I2
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt16LE();
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt16LE();
                     break;
                 case 0x0003:    // VT_I4
                 case 0x0016:    // VT_INT
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt32LE();
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt32LE();
                     break;
                 case 0x000B:    // VT_BOOL
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt32LE() != 0;
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt32LE() != 0;
                     break;
                 case 0x000E:    // VT_DECIMAL
                     break;
                 case 0x0010:    // VT_I1
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readInt8();
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt8();
                     break;
                 case 0x0011:    // VT_UI1
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readUInt8();
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt8();
                     break;
                 case 0x0012:    // VT_UI2
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readUInt16LE();
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt16LE();
                     break;
                 case 0x0013:    // VT_UI4
                 case 0x0017:    // VT_UINT
-                    values[properties[i]] = tmp1.Deref(8, 8).toBuffer().readUInt32LE();
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt32LE();
                     break;
                 //case 0x0014:    // VT_I8
                 //    break;
                 //case 0x0015:    // VT_UI8
                 //    break;
                 case 0x0008:    // VT_BSTR
-                    values[properties[i]] = tmp1.Deref(8, 8).Deref().Wide2UTF8;
+                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).Deref().Wide2UTF8;
                     break;
                 default:
                     console.info1('VARTYPE: ' + tmp1.toBuffer().readUInt16LE());
