@@ -1121,7 +1121,7 @@ function testConsoleHelp()
         this.parent._res();
     }).catch(function (e)
     {
-        this.parent._rej('   => Testing console command: help.......[FAILED]');
+        ret._rej('   => Testing console command: help.......[FAILED]');
     });
     return (ret);
 }
