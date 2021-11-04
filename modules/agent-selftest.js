@@ -609,7 +609,7 @@ function coreInfo()
             // No AMT Support
             r._res();
         }
-    }, 5000, ret);
+    }, 10000, ret);
 
     if (localmode)
     {
@@ -918,13 +918,13 @@ function testCPUInfo()
         }
         catch (e)
         {
-            this.parent._rej('   => Testing CPU Info....................[ERROR]');
+            ret._rej('   => Testing CPU Info....................[ERROR]');
             return;
         }
-        this.parent._res();
+        ret._res();
     }).catch(function (e)
     {  
-        this.parent._rej('   => Testing CPU Info....................[FAILED]');
+        ret._rej('   => Testing CPU Info....................[FAILED]');
     });
     return (ret);
 }
@@ -1168,6 +1168,7 @@ function setup()
     this.toServer.self = this;
     this.toAgent = function(j)
     {
+        if (debugmode) { console.log('toAgent() => ', JSON.stringify(j)); }
         require('MeshAgent').emit('Command', j);
     }
     this.createTunnel = function createTunnel(rights, consent)
@@ -1209,7 +1210,7 @@ function setup()
             r._rej('QueryTimeout');
         }, 8000, ret);
         this.on('command', ret.handler);
-        this.toAgent({ action: 'msg', type: 'console', value: cmd, sessionid: -1 });
+        this.toAgent({ action: 'msg', type: 'console', rights: 0xFFFFFFFF, value: cmd, sessionid: -1 });
         return (ret);
     };
 
@@ -1234,7 +1235,7 @@ function setup()
             r._rej('ConsoleCommandTimeout');
         }, 5000, ret);
         this.on('command', ret.handler);
-        this.toAgent({ action: 'msg', type: 'console', value: cmd, sessionid: -1 });
+        this.toAgent({ action: 'msg', type: 'console',rights: 0xFFFFFFFF, value: cmd, sessionid: -1 });
         return (ret);
     };
 
