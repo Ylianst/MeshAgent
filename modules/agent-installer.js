@@ -250,69 +250,6 @@ function installService(params)
         }
     }
 
-
-    if(process.platform == 'win32')
-    {
-        var loc = svc.appLocation();
-        process.stdout.write('   -> Writing firewall rules for ' + options.name + ' Service...');
-
-        var rule = 
-            {
-                DisplayName: options.name + ' Management Traffic (TCP-1)',
-                direction: 'inbound',
-                Program: loc,
-                Protocol: 'TCP',
-                Profile: 'Public, Private, Domain',
-                LocalPort: 16990,
-                Description: 'Mesh Central Agent Management Traffic',
-                EdgeTraversalPolicy: 'allow',
-                Enabled: true
-            };
-        require('win-firewall').addFirewallRule(rule);
-
-        rule = 
-            {
-                DisplayName: options.name + ' Management Traffic (TCP-2)',
-                direction: 'inbound',
-                Program: loc,
-                Protocol: 'TCP',
-                Profile: 'Public, Private, Domain',
-                LocalPort: 16991,
-                Description: 'Mesh Central Agent Management Traffic',
-                EdgeTraversalPolicy: 'allow',
-                Enabled: true
-            };
-        require('win-firewall').addFirewallRule(rule); 
-
-        rule =
-        {
-            DisplayName: options.name + ' Peer-to-Peer Traffic (UDP-1)',
-            direction: 'inbound',
-            Program: loc,
-            Protocol: 'UDP',
-            Profile: 'Public, Private, Domain',
-            LocalPort: 16990,
-            Description: 'Mesh Central Agent Peer-to-Peer Traffic',
-            EdgeTraversalPolicy: 'allow',
-            Enabled: true
-        };
-        require('win-firewall').addFirewallRule(rule);
-
-        rule =
-            {
-                DisplayName: options.name + ' Peer-to-Peer Traffic (UDP-2)',
-                direction: 'inbound',
-                Program: loc,
-                Protocol: 'UDP',
-                Profile: 'Public, Private, Domain',
-                LocalPort: 16991,
-                Description: 'Mesh Central Agent Peer-to-Peer Traffic',
-                EdgeTraversalPolicy: 'allow',
-                Enabled: true
-            };
-        require('win-firewall').addFirewallRule(rule);
-        process.stdout.write(' [DONE]\n');
-    }
     process.stdout.write('   -> Starting service...');
     try
     {
@@ -539,17 +476,18 @@ function serviceExists(loc, params)
     if(process.platform == 'win32')
     {
         process.stdout.write('   -> Checking firewall rules for previous installation...');
-        require('win-firewall').removeFirewallRule({ program: loc }).then(function ()
+        if(require('win-firewall').removeFirewallRule({ program: loc }))
         {
             // SUCCESS
             process.stdout.write(' [DELETED]\n');
             uninstallService(params);
-        }, function ()
+        }
+        else
         {
             // FAILED
             process.stdout.write(' [No Rules Found]\n');
             uninstallService(params);
-        });
+        }
     }
     else
     {

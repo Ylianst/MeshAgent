@@ -45,6 +45,7 @@ function createInstance_finalizer()
 }
 function createInstance(RFCLSID, RFIID, options)
 {
+    console.info1('CoInitializeEx()');
     ole32.CoInitializeEx(0, COINIT_MULTITHREADED);
     ole32.CoInitializeSecurity(0, -1, 0, 0, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, 0, EOAC_NONE, 0);
 
