@@ -1,5 +1,6 @@
 /*
 Copyright 2021 Intel Corporation
+@author Bryan Roe
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,10 +39,8 @@ ole32.CreateMethod('StringFromIID');
 
 function createInstance_finalizer()
 {
-    var tmp = marshalFunctions(this, IUnknownMethods);
-    tmp.Release(this);
-    ole32.CoUninitialize();
     console.info1('CoUninitialize()');
+    ole32.CoUninitialize();
 }
 function createInstance(RFCLSID, RFIID, options)
 {
@@ -95,7 +94,7 @@ function IIDFromString(IIDString)
 
 function marshalFunctions(obj, arr)
 {
-    return (GM.MarshalFunctions(obj.Deref(), arr));IID_IUnknown
+    return (GM.MarshalFunctions(obj.Deref(), arr));
 }
 function marshalInterface(arr)
 {

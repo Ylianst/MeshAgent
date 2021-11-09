@@ -539,8 +539,7 @@ int wmain(int argc, char* wargv[])
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 
-
-	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
 	{
 		DWORD dummy;

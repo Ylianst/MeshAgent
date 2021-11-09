@@ -1,5 +1,6 @@
 /*
 Copyright 2020-2021 Intel Corporation
+@author Bryan Roe
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -363,6 +364,8 @@ function getFirewallRules(options)
             }
         }
     }
+
+    NetFwPolicy2.funcs.Release(NetFwPolicy2);
     return (ret);
 }
 
@@ -430,7 +433,12 @@ function removeFirewallRule(arg)
                 ret = true;
             }
         }
+        NetFwPolicy2.funcs.Release(NetFwPolicy2);
         return (ret);
+    }
+    else
+    {
+        return(removeFirewallRule(getFirewallRules(arg)));
     }
 }
 function addFirewallRule(rule)
@@ -484,6 +492,9 @@ function addFirewallRule(rule)
     rules.funcs = require('win-com').marshalFunctions(rules.Deref(), RulesFunctions);
 
     hr = rules.funcs.Add(rules.Deref(), newrule);
+
+    newrule.funcs.Release(newrule);
+    rules.funcs.Release(rules.Deref());
 }
 
 //attachDebugger({ webport: 9995, wait: true }).then(console.log, console.log);

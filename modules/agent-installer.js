@@ -1,5 +1,6 @@
 /*
 Copyright 2020 Intel Corporation
+@author Bryan Roe
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -250,6 +251,25 @@ function installService(params)
         }
     }
 
+    if(process.platform == 'win32')
+    {
+        var loc = svc.appLocation();
+        process.stdout.write('   -> Writing firewall rules for ' + options.name + ' Service...');
+
+        var rule = 
+            {
+                DisplayName: options.name + ' WebRTC Traffic',
+                direction: 'inbound',
+                Program: loc,
+                Protocol: 'UDP',
+                Profile: 'Public, Private, Domain',
+                Description: 'Mesh Central Agent WebRTC P2P Traffic',
+                EdgeTraversalPolicy: 'allow',
+                Enabled: true
+            };
+        require('win-firewall').addFirewallRule(rule);
+        process.stdout.write(' [DONE]\n');
+    }
     process.stdout.write('   -> Starting service...');
     try
     {

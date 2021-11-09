@@ -339,6 +339,7 @@ function query(resourceString, queryString, fields)
 
     results.funcs.Release(results.Deref());
     services.funcs.Release(services.Deref());
+    locator.funcs.Release(locator);
 
     return (ret);
 }
