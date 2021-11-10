@@ -301,6 +301,7 @@ function start()
             .then(function () { return (testLMS()); })
             .then(function () { return (testConsoleHelp()); })
             .then(function () { return (testCPUInfo()); })
+            .then(function () { return (WebRTC_Test()); })
             .then(function () { return (testTunnel()); })
             .then(function () { return (testTerminal()); })
             .then(function () { return (testKVM()); })
@@ -319,6 +320,36 @@ function start()
                 process._exit();
             });
     }
+}
+
+function WebRTC_Test()
+{
+    console.log('   => Testing WebRTC');
+
+    var ret = new promise(function (r, j) { this._res = r; this._rej = j; });
+    ret.factory = require('ILibWebRTC').createNewFactory();
+    ret.serverConnection = ret.factory.createConnection();
+    ret.clientConnection = require('ILibWebRTC').createConnection();
+    ret.clientConnection.on('dataChannel', function (rtcchannel) { rtcchannel.write(Buffer.alloc(6665535)); });
+
+    var offer = ret.clientConnection.generateOffer()
+    var counter = ret.serverConnection.setOffer(offer);
+    ret.clientConnection.setOffer(counter);
+
+    ret.serverConnection.on('connected', function ()
+    {
+        this.dc = this.createDataChannel('Test Data Channel');
+        this.dc.on('data', function (b)
+        {
+            if (b.length == 6665535)
+            {
+                console.log('       => WebRTC Data Channel Test........[OK]');
+                ret._res();
+            }
+        });
+    });
+
+    return (ret);
 }
 
 function DumpOnlyTest_cycle(pid, cyclecount, p, self)
