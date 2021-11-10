@@ -597,6 +597,28 @@ duk_ret_t ILibDuktape_WebRTC_CreateConnection(duk_context *ctx)
 
 	return 1;
 }
+duk_ret_t ILibDuktape_WebRTC_newFactory(duk_context *ctx)
+{
+	ILibWrapper_WebRTC_ConnectionFactory factory;
+	struct util_cert *rtcert = NULL;
+
+	if (duk_peval_string(ctx, "require('MeshAgent');") == 0)	// [MeshAgent]
+	{
+		// We can use the Agent Cert
+		rtcert = (struct util_cert*)Duktape_GetPointerProperty(ctx, -1, ILibDuktape_MeshAgent_Cert_Server);
+	}
+	duk_pop(ctx);												// ...
+
+	duk_push_object(ctx);																// [factory]
+	ILibDuktape_WriteID(ctx, "webRTC");
+	factory = ILibWrapper_WebRTC_ConnectionFactory_CreateConnectionFactory2(duk_ctx_chain(ctx), 0, rtcert);
+	duk_push_pointer(ctx, factory);														// [factory][ptr]
+	duk_put_prop_string(ctx, -2, ILibDuktape_WebRTC_ConnectionFactoryPtr);				// [factory]
+	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_WebRTC_ConnectionFactory_Finalizer);
+
+	ILibDuktape_CreateInstanceMethod(ctx, "createConnection", ILibDuktape_WebRTC_CreateConnection, 0);
+	return(1);
+}
 void ILibDuktape_WebRTC_Push(duk_context *ctx, void *chain)
 {
 	ILibWrapper_WebRTC_ConnectionFactory factory;
@@ -617,6 +639,8 @@ void ILibDuktape_WebRTC_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_WebRTC_ConnectionFactory_Finalizer);
 
 	ILibDuktape_CreateInstanceMethod(ctx, "createConnection", ILibDuktape_WebRTC_CreateConnection, 0);
+	ILibDuktape_CreateInstanceMethod(ctx, "createNewFactory", ILibDuktape_WebRTC_newFactory, 0);
+
 }
 void ILibDuktape_WebRTC_Init(duk_context * ctx)
 {
