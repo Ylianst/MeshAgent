@@ -1978,7 +1978,6 @@ extern void* gILibChain;
 duk_ret_t ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(ILibDuktape_EventEmitter *emitter)
 {
 	duk_push_heapptr(emitter->ctx, emitter->object);		// [array][var]
-	char *id = Duktape_GetStringPropertyValue(emitter->ctx, -1, ILibDuktape_OBJID, "");
 	duk_get_prop_string(emitter->ctx, -1, "emit");			// [array][var][emit]
 	duk_get_prop_string(emitter->ctx, -1, "apply");			// [array][var][emit][apply]
 
@@ -1991,15 +1990,6 @@ duk_ret_t ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(ILibDuktape_Even
 	duk_remove(emitter->ctx, -5);							// [array][apply][emit][this][array]
 	duk_remove(emitter->ctx, -5);							// [apply][emit][this][array]
 	return(duk_pcall_method(emitter->ctx, 2));				// [retVal]
-
-	//duk_dup(emitter->ctx, -3);								// [array][var][emit][apply][this]
-	//duk_dup(emitter->ctx, -5);								// [array][var][emit][apply][this][array]
-	//duk_remove(emitter->ctx, -5);							// [array][emit][apply][this][array]
-	//duk_remove(emitter->ctx, -5);							// [emit][apply][this][array]
-	//duk_remove(emitter->ctx, -4);							// [apply][this][array]
-	//duk_push_string(emitter->ctx, "GlobalCallback");		// [apply][this][array][GlobalCallback]
-	//duk_array_unshift(emitter->ctx, -2);					// [apply][this][array]
-	//return(duk_pcall(emitter->ctx, 2));						// [retVal]
 }
 void ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx(void * chain, void *user)
 {
