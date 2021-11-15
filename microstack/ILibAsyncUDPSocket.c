@@ -56,7 +56,7 @@ struct ILibAsyncUDPSocket_Data
 void ILibAsyncUDPSocket_OnDataSink(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncSocket_OnInterrupt* OnInterrupt, void **user, int *PAUSE)
 {
 	struct ILibAsyncUDPSocket_Data *data = (struct ILibAsyncUDPSocket_Data*)*user;
-	char RemoteAddress[8 + sizeof(struct sockaddr_in6)];
+	char RemoteAddress[16 + sizeof(struct sockaddr_in6)] = { 0 };
 	UNREFERENCED_PARAMETER( OnInterrupt );
 	UNREFERENCED_PARAMETER( RemoteAddress );
 	ILibAsyncSocket_GetRemoteInterface(socketModule, (struct sockaddr*)&RemoteAddress);

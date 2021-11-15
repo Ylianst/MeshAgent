@@ -188,7 +188,7 @@ void ILibDuktape_WebRTC_DataChannel_OnData(struct ILibWrapper_WebRTC_DataChannel
 {
 	ILibDuktape_WebRTC_DataChannel *ptrs = (ILibDuktape_WebRTC_DataChannel*)dataChannel->userData;
 	
-	if (ptrs != NULL) { ILibDuktape_DuplexStream_WriteDataEx(ptrs->stream, dataType == 51 ? 1 : 0, data, dataLen); }
+	if (ptrs != NULL && ILibMemory_CanaryOK(ptrs)) { ILibDuktape_DuplexStream_WriteDataEx(ptrs->stream, dataType == 51 ? 1 : 0, data, dataLen); }
 }
 duk_ret_t ILibDuktape_WebRTC_DataChannel_Finalizer(duk_context *ctx)
 {

@@ -3025,7 +3025,7 @@ void ILibDuktape_HttpStream_AddHeaderDef(duk_context *ctx, struct packetheader *
 		duk_get_prop_string(ctx, -1, "toUpperCase");							// [message][method][toUpper]
 		duk_swap_top(ctx, -2);													// [message][toUpper][this]
 		duk_call_method(ctx, 0);												// [message][method]
-		ILibDuktape_CreateReadonlyProperty(ctx, "method");						// [message]
+		ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "method", 1);		// [message]
 
 		duk_push_lstring(ctx, header->DirectiveObj, header->DirectiveObjLength);// [message][url]
 		duk_put_prop_string(ctx, -2, "url");									// [message]

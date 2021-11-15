@@ -5625,7 +5625,7 @@ void ILibStun_CreateDtlsSession(struct ILibStun_Module *obj, int sessionId, int 
 	if (obj->dTlsSessions[sessionId] == NULL) 
 	{ 
 		void *mem;
-		obj->dTlsSessions[sessionId] = ILibMemory_Allocate(sizeof(struct ILibStun_dTlsSession), 8 + sizeof(struct sockaddr_in6), NULL, &mem);
+		obj->dTlsSessions[sessionId] = ILibMemory_Allocate(sizeof(struct ILibStun_dTlsSession), 16 + sizeof(struct sockaddr_in6), NULL, &mem);
 		obj->dTlsSessions[sessionId]->remoteInterface = (struct sockaddr_in6*)mem;
 		((int*)((char*)mem + sizeof(struct sockaddr_in6)))[0] = 4;
 	}
