@@ -52,6 +52,10 @@ extern "C" {
 
 extern char* ILibCriticalLogFilename;
 
+#define LOGEX_OVERLAPPED_IO 0x01
+#define LOGEX_PROCESSPIPE	0x02
+
+
 #ifdef _WIN32_WCE
 #define REQUIRES_MEMORY_ALIGNMENT
 #define errno 0
@@ -1081,6 +1085,7 @@ int ILibIsRunningOnChainThread(void* chain);
 		HANDLE fileHandle;
 		OVERLAPPED *p;
 		void *user;
+		void *reserved;
 	}ILibChain_ReadEx_data;
 	typedef struct ILibChain_WriteEx_data
 	{
@@ -1592,6 +1597,8 @@ int ILibIsRunningOnChainThread(void* chain);
 #define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); exit(code);}
 #define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)
 	void ILIBLOGMESSAGEX(char *format, ...);
+	void ILIBLOGMESSAGEX2(uint32_t m, char *format, ...);
+	void ILIBLOGMESSAGEX2_SetMask(uint32_t m);
 
 #if defined(WIN32)
 #define ILIBCRITICALERREXIT(ex) { ILibCriticalLog(NULL, __FILE__, __LINE__, GetLastError(), 0); exit(ex); }

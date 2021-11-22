@@ -134,6 +134,7 @@ void* gILibChain = NULL;	 // Global Chain Instance used for Remote Logging when 
 
 ILibSemaphoreTrack_Handler ILibSemaphoreTrack_func = NULL;
 void* ILibSemaphoreTrack_user = NULL;
+uint32_t _g_logMessageX = 0;
 
 #define ILibChain_SIGMAX 32
 ILibLinkedList g_signalHandlers[ILibChain_SIGMAX] = { NULL };
@@ -2192,7 +2193,12 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 						// FALSE means to remove tha HANDLE
 						if (((ILibBaseChain*)chain)->currentHandle != NULL && ILibMemory_CanaryOK(info))
 						{
+							ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, " * ILibChain_WindowsSelect(%p) [REMOVED]", ((ILibBaseChain*)chain)->currentHandle);
 							ILibLinkedList_Remove(info->node);
+						}
+						else
+						{
+							ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, " * ILibChain_WindowsSelect(%p) [???] => %p, ", ((ILibBaseChain*)chain)->currentHandle);
 						}
 					}
 				}
@@ -3548,14 +3554,17 @@ BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus sta
 	DWORD bytesRead = 0;
 	DWORD err;
 
+
 	if (status == ILibWaitHandle_ErrorStatus_REMOVED)
 	{
+		ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "ILibChain_ReadEx_Sink(%p) [REMOVED]", h);
 		ILibMemory_Free(data);
 		return(FALSE);
 	}
 
 	if (GetOverlappedResult(data->fileHandle, data->p, &bytesRead, FALSE) && bytesRead > 0)
 	{
+		ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "ILibChain_ReadEx_Sink(%p) [bytesRead: %lu]", h, bytesRead);
 		if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_NONE, data->buffer, bytesRead, data->user); }
 		ILibMemory_Free(data);
 		return(FALSE);
@@ -3564,12 +3573,14 @@ BOOL ILibChain_ReadEx_Sink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus sta
 	{
 		if ((err=GetLastError()) == ERROR_IO_PENDING)
 		{
+			ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "ILibChain_ReadEx_Sink(%p) [PENDING]", h);
 			// Still pending, so wait for another callback
 			return(TRUE);
 		}
 		else
 		{
 			// ERROR
+			ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "ILibChain_ReadEx_Sink(%p) [ERROR]", h);
 			if (data->handler != NULL) { data->handler(chain, data->fileHandle, ILibWaitHandle_ErrorStatus_IO_ERROR, data->buffer, 0, data->user); }
 			ILibMemory_Free(data);
 			return(FALSE);
@@ -3614,8 +3625,25 @@ ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p,
 void ILibChain_ReadEx2_UnwindHandler(void *chain, void *user)
 {
 	ILibChain_ReadEx_data *state = (ILibChain_ReadEx_data*)user;
-	state->handler(chain, state->fileHandle, ILibWaitHandle_ErrorStatus_NONE, state->buffer, (int)(uintptr_t)state->p, state->user);
+	ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, " + ILibChain_ReadEx2_UnwindHandler(%p)", state->reserved);
+
+	if (state->handler(chain, state->fileHandle, ILibWaitHandle_ErrorStatus_NONE, state->buffer, (int)(uintptr_t)state->p, state->user) == FALSE)
+	{
+		ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "   -> ILibChain_ReadEx2_UnwindHandler() [Try Remove: %p]", state->reserved);
+
+		// Need to remove HANDLE from list
+		void *node = ILibLinkedList_GetNode_Search(((ILibBaseChain*)chain)->auxSelectHandles, NULL, state->reserved);
+		if (node != NULL)
+		{
+			ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "   -> Removing Handle [%p]", state->reserved);
+			ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
+			ILibChain_ReadEx_data *data = (ILibChain_ReadEx_data*)info->user;
+			ILibMemory_Free(data);
+			ILibLinkedList_Remove(node);
+		}
+	}
 	free(state);
+	ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "   -> ILibChain_ReadEx2_UnwindHandler() [END]");
 }
 void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata)
 {
@@ -3654,7 +3682,7 @@ void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD
 				state->fileHandle = h;
 				state->user = user;
 				state->p = (void*)(uintptr_t)bytesRead;
-
+				state->reserved = p != NULL ? p->hEvent : NULL;
 				ILibChain_RunOnMicrostackThreadEx2(chain, ILibChain_ReadEx2_UnwindHandler, state, 1);
 			}			
 		}
@@ -3790,6 +3818,8 @@ void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_W
 
 	if (((ILibBaseChain*)chain)->currentHandle != h)
 	{
+		ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, "-- ILibChain_AddWaitHandlesEx(): %p", h);
+
 		void *node = ILibLinkedList_AddTailEx(((ILibBaseChain*)chain)->auxSelectHandles, h, metadata==NULL?1:1+strnlen_s(metadata, 1024));
 		info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
 		info->node = node;
@@ -10744,6 +10774,25 @@ void ILIBLOGMESSAGEX(char *format, ...)
 	va_end(argptr);
 
 	ILIBLOGMESSSAGE(dest);
+}
+void ILIBLOGMESSAGEX2(uint32_t mask, char *format, ...)
+{
+	if ((_g_logMessageX & mask) == mask)
+	{
+		char dest[4096];
+		int len = 0;
+		va_list argptr;
+
+		va_start(argptr, format);
+		len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+		va_end(argptr);
+
+		ILIBLOGMESSSAGE(dest);
+	}
+}
+void ILIBLOGMESSAGEX2_SetMask(uint32_t m)
+{
+	_g_logMessageX = m;
 }
 
 #if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)

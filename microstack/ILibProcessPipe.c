@@ -1173,14 +1173,15 @@ void ILibProcessPipe_Pipe_ResumeEx(ILibProcessPipe_PipeObject* p)
 	ILibChain_AddWaitHandle(p->manager->ChainLink.ParentChain, p->mOverlapped->hEvent, -1, ILibProcessPipe_Process_ReadHandler, p);
 	p->PAUSED = 0;
 	return;
-#endif
-
+#else
 	ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(p);
 	if (p->PAUSED == 0)
 	{
 		ILibLifeTime_Add(ILibGetBaseTimer(p->manager->ChainLink.ParentChain), p, 0, &ILibProcessPipe_Process_StartPipeReaderWriterEx, NULL); // Need to context switch to Chain Thread
 	}
+#endif
 }
+
 #ifdef WIN32
 BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user);
 #endif
@@ -1273,13 +1274,20 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 	size_t consumed = 0;
 	if (status == ILibWaitHandle_ErrorStatus_NONE)
 	{
+		ILIBLOGMESSAGEX2(LOGEX_PROCESSPIPE, "ReadExHandler[%p](%p) -> TotalRead: %llu, bytesRead: %llu", h, buffer, pipeObject->totalRead, bytesRead);
 		pipeObject->totalRead += bytesRead;
 		do
 		{
-			handler(pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead, &consumed, pipeObject->user1, pipeObject->user2);
-			pipeObject->readOffset += consumed;
-			pipeObject->totalRead -= consumed;
+			if (pipeObject->PAUSED == 0)
+			{
+				ILIBLOGMESSAGEX2(LOGEX_PROCESSPIPE, " ReadExHandler(%p, %llu, %llu); [%llu]", pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead, consumed, pipeObject->readOffset);
+				handler(pipeObject->buffer + pipeObject->readOffset, pipeObject->totalRead, &consumed, pipeObject->user1, pipeObject->user2);
+				pipeObject->readOffset += consumed;
+				pipeObject->totalRead -= consumed;
+				ILIBLOGMESSAGEX2(LOGEX_PROCESSPIPE, "  -> readOffset: %llu, totalRead: %llu, consumed: %llu, PAUSE: %d", pipeObject->readOffset, pipeObject->totalRead, consumed, pipeObject->PAUSED);
+			}
 		} while (pipeObject->PAUSED == 0 && consumed != 0 && pipeObject->totalRead > 0);
+
 		if (pipeObject->totalRead == 0) { pipeObject->readOffset = 0; }
 		if (pipeObject->PAUSED == 0)
 		{
@@ -1293,11 +1301,13 @@ BOOL ILibProcessPipe_Process_Pipe_ReadExHandler(void *chain, HANDLE h, ILibWaitH
 				ILibMemory_ReallocateRaw(&(pipeObject->buffer), pipeObject->bufferSize * 2);
 				pipeObject->bufferSize = pipeObject->bufferSize * 2;
 			}
+			ILIBLOGMESSAGEX2(LOGEX_PROCESSPIPE, "ILibChain_ReadEx2() => (%p, %llu, %llu)", pipeObject->buffer, pipeObject->readOffset + pipeObject->totalRead, pipeObject->bufferSize - pipeObject->totalRead);
 			ILibChain_ReadEx2(chain, h, pipeObject->mOverlapped, pipeObject->buffer + pipeObject->readOffset + pipeObject->totalRead, (DWORD)(pipeObject->bufferSize - pipeObject->totalRead), ILibProcessPipe_Process_Pipe_ReadExHandler, pipeObject, pipeObject->metadata);
 			return(TRUE);
 		}
 		else
 		{
+			ILIBLOGMESSAGEX2(LOGEX_PROCESSPIPE, "HANDLE will get removed");
 			return(FALSE);
 		}
 	}

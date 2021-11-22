@@ -839,6 +839,11 @@ duk_ret_t ILibDuktape_Polyfills_Console_setInfoLevel(duk_context *ctx)
 
 	return(0);
 }
+duk_ret_t ILibDuktape_Polyfills_Console_setInfoMask(duk_context *ctx)
+{
+	ILIBLOGMESSAGEX2_SetMask(duk_require_uint(ctx, 0));
+	return(0);
+}
 duk_ret_t ILibDuktape_Polyfills_Console_rawLog(duk_context *ctx)
 {
 	char *val = (char*)duk_require_string(ctx, 0);
@@ -878,6 +883,7 @@ void ILibDuktape_Polyfills_Console(duk_context *ctx)
 	
 	ILibDuktape_CreateInstanceMethod(ctx, "setDestination", ILibDuktape_Polyfills_Console_setDestination, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "setInfoLevel", ILibDuktape_Polyfills_Console_setInfoLevel, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "setInfoMask", ILibDuktape_Polyfills_Console_setInfoMask, 1);
 
 	duk_push_object(ctx);
 	duk_push_int(ctx, ILibDuktape_Console_DestinationFlags_DISABLED); duk_put_prop_string(ctx, -2, "DISABLED");

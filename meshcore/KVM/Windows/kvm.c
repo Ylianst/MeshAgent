@@ -36,7 +36,7 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
-// #define KVMDEBUGENABLED 1
+//#define KVMDEBUGENABLED 1
 ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
 int gProcessTSID = -1;
 extern int gRemoteMouseRenderDefault;
@@ -77,8 +77,10 @@ void KvmCriticalLog(const char* msg, const char* file, int line, int user1, int 
 	if (DontDestroy == 0) CloseHandle(h);
 }
 #define KVMDEBUG(m,u) { KvmCriticalLog(m, __FILE__, __LINE__, u, GetLastError()); printf("KVMMSG: %s (%d,%d).\r\n", m, (int)u, (int)GetLastError()); }
+#define KVMDEBUG2 ILIBLOGMESSAGEX
 #else
 #define KVMDEBUG(m, u)
+#define KVMDEBUG2(...) 
 #endif
 
 int TILE_WIDTH = 0;
@@ -157,7 +159,7 @@ void kvm_setupSasPermissions()
 DWORD WINAPI kvm_ctrlaltdel(LPVOID Param)
 {
 	UNREFERENCED_PARAMETER( Param );
-	KVMDEBUG("kvm_ctrlaltdel", (int)Param);
+	KVMDEBUG("kvm_ctrlaltdel", (int)(uintptr_t)Param);
 	typedef VOID(WINAPI *SendSas)(BOOL asUser);
 	SendSas sas;
 
@@ -667,10 +669,12 @@ void kvm_pause(int pause)
 	{
 		if (pause == 0)
 		{
+			KVMDEBUG2("RESUME: KVM");
 			ILibProcessPipe_Pipe_Resume(ILibProcessPipe_Process_GetStdOut(gChildProcess));
 		}
 		else
 		{
+			KVMDEBUG2("PAUSE: KVM");
 			ILibProcessPipe_Pipe_Pause(ILibProcessPipe_Process_GetStdOut(gChildProcess));
 		}
 	}
@@ -999,16 +1003,19 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 					}
 					if (buf && !g_shutdown)
 					{
+						KVMDEBUG2("Writing JPEG: %llu bytes", tilesize);
 						switch (writeHandler((char*)buf, (int)tilesize, reserved))
 						{
 							case ILibTransport_DoneState_INCOMPLETE:
 								g_pause = 1;
 								ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_2, "Agent KVM: KVM PAUSE");
+								KVMDEBUG2("JPEG WRITE resulted in PAUSE");
 								break;
 							case ILibTransport_DoneState_ERROR:
 								g_shutdown = 1; 
 								height = SCALED_HEIGHT; 
 								width = SCALED_WIDTH; 
+								KVMDEBUG2("JPEG WRITE resulted in ERROR");
 								break;
 						}
 						free(buf);
@@ -1125,6 +1132,10 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_
 
 	if (bufferLen > 4)
 	{
+		if (ntohs(((unsigned short*)(buffer))[0]) > 1000)
+		{
+			KVMDEBUG2("Invalid KVM Command received: %u", ntohs(((unsigned short*)(buffer))[0]));
+		}
 		if (ntohs(((unsigned short*)(buffer))[0]) == (unsigned short)MNG_JUMBO)
 		{
 			if (bufferLen > 8)
@@ -1132,20 +1143,25 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_
 				if (bufferLen >= (size_t)(8 + (int)ntohl(((unsigned int*)(buffer))[1])))
 				{
 					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					KVMDEBUG2("Jumbo Packet received of size: %llu (bufferLen=%llu)", *bytesConsumed, bufferLen);
+
 					writeHandler(buffer, (int)*bytesConsumed, reserved);
 					return;
 				}
 			}
+			KVMDEBUG2("Accumulate => JUMBO: [%llu bytes] bufferLen=%llu ", (size_t)(8 + (int)ntohl(((unsigned int*)(buffer))[1])), bufferLen);
 		}
 		else
 		{
 			size = ntohs(((unsigned short*)(buffer))[1]);
 			if (size <= bufferLen)
 			{
+				KVMDEBUG2("KVM Command: [%u: %llu bytes]", ntohs(((unsigned short*)(buffer))[0]), size);
 				*bytesConsumed = size;
 				writeHandler(buffer, size, reserved);
 				return;
 			}
+			KVMDEBUG2("Accumulate => KVM Command: [%u: %d bytes] bufferLen=%llu ", ntohs(((unsigned short*)(buffer))[0]), bufferLen);
 		}
 	}
 	*bytesConsumed = 0;
@@ -1207,7 +1223,7 @@ int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHan
 
 	// Run the relay
 	g_shutdown = 0;
-	KVMDEBUG("kvm_relay_restart / end", (int)kvmthread);
+	KVMDEBUG("kvm_relay_restart / end", (int)(uintptr_t)kvmthread);
 
 	return 1;
 }
