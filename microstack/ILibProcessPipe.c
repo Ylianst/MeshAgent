@@ -1172,7 +1172,6 @@ void ILibProcessPipe_Pipe_ResumeEx(ILibProcessPipe_PipeObject* p)
 #ifdef WIN32
 	ILibChain_AddWaitHandle(p->manager->ChainLink.ParentChain, p->mOverlapped->hEvent, -1, ILibProcessPipe_Process_ReadHandler, p);
 	p->PAUSED = 0;
-	return;
 #else
 	ILibProcessPipe_Pipe_ResumeEx_ContinueProcessing(p);
 	if (p->PAUSED == 0)
