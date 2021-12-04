@@ -456,6 +456,17 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_Increment(duk_context *ctx)
 	duk_put_prop_string(ctx, -2, "_ptr");
 	return(1);
 }
+duk_ret_t ILibDuktape_GenericMarshal_Variable_debug(duk_context *ctx)
+{
+	UNREFERENCED_PARAMETER(ctx);
+#ifdef WIN32
+	duk_push_this(ctx);
+	void *ptr = Duktape_GetPointerProperty(ctx, -1, "_ptr");
+
+	UNREFERENCED_PARAMETER(ptr);
+#endif
+	return(0);
+}
 void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size)
 {
 	duk_push_object(ctx);						// [var]
@@ -484,6 +495,7 @@ void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int s
 	ILibDuktape_CreateInstanceMethod(ctx, "pointerBuffer", ILibDuktape_GenericMarshal_Variable_pointerBuffer, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "getPointerPointer", ILibDuktape_GenericMarshal_Variable_pointerpointer, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "increment", ILibDuktape_GenericMarshal_Variable_Increment, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "_debug", ILibDuktape_GenericMarshal_Variable_debug, 0);
 
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_GenericMarshal_Variable_Finalizer);

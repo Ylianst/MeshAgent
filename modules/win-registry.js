@@ -265,6 +265,25 @@ function windows_registry()
     };
     this.usernameToUserKey = function usernameToUserKey(user)
     {
+        var domain = null
+        if (typeof (user) == 'object' && user.user)
+        {
+            if (user.domain) { domain = user.domain; }      
+            user = user.user;
+        }
+
+        try
+        {
+            if(domain==null)
+            {
+                domain = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_ComputerSystem", ['Name'])[0].Name;
+                console.info1('usernameToUserKey("' + user + '") => domain: ' + domain);
+            }
+        }
+        catch(z)
+        {
+        }
+
         try
         {
             var sid = user;
@@ -294,9 +313,12 @@ function windows_registry()
             {
                 try
                 {
-                    if (this.QueryKey(this.HKEY.Users, entries.subkeys[i] + '\\Volatile Environment', 'USERNAME') == user)
+                    if (this.QueryKey(this.HKEY.Users, entries.subkeys[i] + '\\Volatile Environment', 'USERDOMAIN') == domain)
                     {
-                        return (entries.subkeys[i]);
+                        if (this.QueryKey(this.HKEY.Users, entries.subkeys[i] + '\\Volatile Environment', 'USERNAME') == user)
+                        {
+                            return (entries.subkeys[i]);
+                        }
                     }
                 }
                 catch(ee)
@@ -304,7 +326,7 @@ function windows_registry()
                 }
             }
         }
-        throw ('Unable to determine HKEY_USERS key for: ' + user);
+        throw ('Unable to determine HKEY_USERS key for: ' + domain + '\\' + user);
     };
 }
 
