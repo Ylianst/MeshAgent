@@ -81,7 +81,8 @@ ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *
 
 #ifdef WIN32
 #define wmain_free(argv) for(argvi=0;argvi<(int)(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
-int wmain(int argc, char **wargv)
+//int wmain(int argc, char **wargv)
+int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE hInstPrev, PWSTR  cmdline, int cmdshow)
 #else
 int main(int argc, char **argv)
 #endif
@@ -95,15 +96,34 @@ int main(int argc, char **argv)
 	int integratedJavaScriptLen = 0;
 	int retCode = 0;
 	int capabilities = 0;
-
+	
 #ifdef WIN32
+	//TODO: This has two leaks... The CommandLineToArgvW below, and the Console below that... It needs to detach. This was only an experiment.
+
+	int argc;
+	LPWSTR *wargv = CommandLineToArgvW(cmdline, &argc);
+
+	WCHAR tmpExePath[2048];
+	GetModuleFileNameW(NULL, tmpExePath, sizeof(tmpExePath) / 2);
+
 	int argvi, argvsz;
-	char **argv = (char**)ILibMemory_SmartAllocate(argc * sizeof(void*));
+	char **argv = (char**)ILibMemory_SmartAllocate((argc + 1) * sizeof(void*));
+
+	argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, NULL, 0, NULL, NULL);
+	argv[0] = (char*)ILibMemory_SmartAllocate(argvsz);
+	WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)tmpExePath, -1, argv[0], argvsz, NULL, NULL);
+
 	for (argvi = 0; argvi < argc; ++argvi)
 	{
 		argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, NULL, 0, NULL, NULL);
-		argv[argvi] = (char*)ILibMemory_SmartAllocate(argvsz);
-		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
+		argv[argvi+1] = (char*)ILibMemory_SmartAllocate(argvsz);
+		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi+1], argvsz, NULL, NULL);
+	}
+	++argc;
+
+	if (AttachConsole((DWORD)-1) == 0)
+	{
+		AllocConsole();
 	}
 #endif
 
@@ -112,7 +132,6 @@ int main(int argc, char **argv)
 char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 #endif
-
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 
@@ -130,7 +149,18 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 			}
 		}
 	}
-
+	if (argc > 2 && strcmp(argv[1], "-hexec") == 0 && integratedJavaScriptLen == 0)
+	{
+		ShowWindow(GetConsoleWindow(), 0);
+		integratedJavaScript = ILibString_Copy(argv[2], 0);
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+	}
+	if (argc > 2 && strcmp(argv[1], "-hb64exec") == 0)
+	{
+		ShowWindow(GetConsoleWindow(), 0);
+		integratedJavaScript = NULL;
+		integratedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char**)&integratedJavaScript);
+	}
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], 0);
