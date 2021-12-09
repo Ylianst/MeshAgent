@@ -519,9 +519,11 @@ function monitorinfo()
             child.stdin.write("ps " + (process.platform == 'freebsd'?"-ax ":"") + "-e -o user" + (process.platform=='linux'?":999":"") + " -o tty -o command | grep X | awk '{ split($0, a, \"-auth\"); split(a[2], b, \" \"); if($1==\"" + uname + "\" && b[1]!=\"\") { printf \"%s,%s,%s\",$1,$2,b[1] } }'\nexit\n");
             child.waitExit();
             var tokens = child.stdout.str.trim().split(',');
+            console.info1(JSON.stringify(tokens));
             if (tokens.length == 3)
             {
                 ret = { tty: tokens[1], xauthority: tokens[2], exportEnv: exportEnv };
+                console.info1('ret => ' + JSON.stringify(ret));
             }
 
             if (ret == null)
@@ -543,7 +545,7 @@ function monitorinfo()
                     child.stdin.write('   if((tok[2]+0)==' + consoleuid + ')');
                     child.stdin.write('   {');
                     child.stdin.write('      if(tok[4]=="") { continue; }');
-                    child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
+                    child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\", \\"tty\\": \\"%s\\"}", del, tok[3], tok[1], tok[2], tok[5];');
                     child.stdin.write('      del=",";');
                     child.stdin.write('   }');
                     child.stdin.write('}');
@@ -551,10 +553,16 @@ function monitorinfo()
                     child.stdin.write("}'\nexit\n");
                     child.waitExit();
 
+                    console.info1('loginctl => ' + child.stdout.str);
                     var info1 = JSON.parse(child.stdout.str);
                     var sids = [];
+                    var ttys = [];
                     var i;
-                    for (i = 0; i < info1.length; ++i) { sids.push(info1[i].SessionId); }
+                    for (i = 0; i < info1.length; ++i)
+                    {
+                        sids.push(info1[i].SessionId);
+                        if (info1[i].tty != '') { ttys.push(info1[i].tty); }
+                    }
                     child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                     child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -629,6 +637,51 @@ function monitorinfo()
                                 }
                             }
                         }                     
+                    }
+                    if (ret.display == '' && ttys.length > 0)
+                    {
+                        // We need to find $DISPLAY by looking at all the processes running on the same tty as the XServer instance for this user session
+                        while (ttys.length > 0)
+                        {
+                            var tty = ttys.pop();
+                            child = require('child_process').execFile('/bin/sh', ['sh']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.stdin.write("ps -e -o tty -o pid -o uid | grep " + tty + " | grep " + consoleuid + " | awk '{ print $2 }' \nexit\n");
+                            child.waitExit();
+
+                            var lines = child.stdout.str.split('\n');
+                            var ps, psx, v, vs = 0;
+                            for (var x in lines)
+                            {
+                                if (lines[x].trim().length > 0)
+                                {
+                                    try
+                                    {
+                                        ps = require('fs').readFileSync('/proc/' + lines[x].trim() + '/environ');
+                                    }
+                                    catch (pse)
+                                    {
+                                        continue;
+                                    }
+                                    vs = 0;
+                                    for (psx = 0; psx < ps.length; ++psx)
+                                    {
+                                        if (ps[psx] == 0)
+                                        {
+                                            v = ps.slice(vs, psx).toString().split('=');
+                                            if (v[0] == 'DISPLAY')
+                                            {
+                                                ret.display = v[1];
+                                                ret.tty = tty;
+                                                return (xinfo_xdm(ret, consoleuid));
+                                            }
+                                            vs = psx + 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     return (xinfo_xdm(ret, consoleuid));
                 }
