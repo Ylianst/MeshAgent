@@ -175,7 +175,7 @@ function childContainer()
             ret._proc = require('child_process').execFile(process.execPath, [process.execPath.split(process.platform == 'win32' ? '\\' : '/').pop(), '-b64exec', script], child_options);
             ret._proc.descriptorMetadata = "child-container";
             ret._proc.parent = ret;
-            ret._proc.stdout.on('data', function (c) { });
+            ret._proc.stdout.on('data', function (c) { console.info2(c.toString()); });
             ret._proc.stderr.on('data', function (c) { });
             ret._proc.on('exit', function (code)
             {

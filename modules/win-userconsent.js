@@ -295,7 +295,7 @@ function createLocal(title, caption, username, options)
 
     var rect = GM.CreateVariable(16);
     var startupinput = require('_GenericMarshal').CreateVariable(24);
-    ret.gdipToken = require('_GenericMarshal').CreateVariable(4);
+    ret.gdipToken = require('_GenericMarshal').CreatePointer();
     ret.pump = new MessagePump(ret.opt);
 
     if (ret.pump._user32.SystemParametersInfoA(SPI_GETWORKAREA, 0, rect, 0).Val != 0)
@@ -332,8 +332,7 @@ function createLocal(title, caption, username, options)
         var hbitmap = require('_GenericMarshal').CreatePointer();
         var status = gdip.GdipCreateBitmapFromStream(istream, pimage);
         status = gdip.GdipCreateHBITMAPFromBitmap(pimage.Deref(), hbitmap, options.background);
-        if (status.Val == 0) { options.bitmap = hbitmap; }
-        
+        if (status.Val == 0) { options.bitmap = hbitmap; }   
     }
 
     ret.pump.on('message', pump_onMessage);
@@ -376,9 +375,69 @@ function create(title, caption, username, options)
     }
 
     // Need to dispatch to user session to display dialog
+    var ret = new promise(promise.defaultInit);
+    ret.options = { launch: { module: 'win-userconsent', method: '_child', args: [] } };
+
+    ret._ipc = require('child-container').create(ret.options);
+    ret._ipc.master = ret;
+    ret._ipc.once('exit', function () { console.log('child exited'); });
+    ret._ipc.on('ready', function ()
+    {
+        console.log('READY');
+        this.descriptorMetadata = 'win-userconsent';
+        this.message({ command: 'dialog', title: title, caption: caption, username: username, options: options });
+    });
+    ret._ipc.on('message', function (msg)
+    {
+        try
+        {
+            switch (msg.command)
+            {
+                case 'allow':
+                    this.master.resolve(msg.always);
+                    break;
+                case 'deny':
+                    this.master.reject(msg.reason);
+                    break;
+                case 'log':
+                    console.log(msg.text);
+                    break;
+                default:
+                    break;
+            }
+        }
+        catch (ff)
+        {
+        }
+    });
+    return (ret);
+}
+
+function _child()
+{
+    global.master = require('child-container');
+    global.master.on('message', function (msg)
+    {
+        switch (msg.command)
+        {
+            case 'dialog':
+                var p = createLocal(msg.title, msg.caption, msg.username, msg.options);
+                p.then(function (always)
+                {
+                    global.master.message({ command: 'allow', always: always });
+                }, function (msg)
+                {
+                    global.master.message({ command: 'deny', reason: msg });
+                }).finally(function (msg)
+                {
+                    process._exit();
+                });
+                break;
+        }
+    });
 }
 
 module.exports =
     {
-        create: create
+        create: create, _child: _child
     };

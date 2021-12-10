@@ -55,6 +55,7 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('ShowWindow');
     this._user32.CreateMethod('SystemParametersInfoA');
     this._user32.CreateMethod('TranslateMessage');
+    this._user32.CreateMethod('UnregisterClassW');
 
     this._user32.CreateMethod('IsDlgButtonChecked');
     this._user32.CreateMethod('CheckDlgButton');
@@ -72,16 +73,15 @@ function WindowsMessagePump(options)
     this.wndclass = GM.CreateVariable(GM.PointerSize == 4 ? 48 : 80);
     this.wndclass.mp = this;
     this.wndclass.hinstance = this._kernel32.GetModuleHandleA(0);
-    //this.wndclass.cname = GM.CreateVariable('MainWWWClass');
 
     if (options && options.window && options.window.background != null)
     {
-        console.info1('SETTING BACKGROUND BRUSH');
+        console.info1('SETTING BACKGROUND BRUSH', options.window.background);
         this.wndclass.bkbrush = this._gdi32.CreateSolidBrush(options.window.background);
         this.wndclass.bkbrush.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 32 : 48, GM.PointerSize).toBuffer())
     }
 
-    this.wndclass.cnamew = GM.CreateVariable('MainWWWClass', { wide: true });
+    this.wndclass.cnamew = GM.CreateVariable('MainWWWClass_' + this.wndclass._hashCode(), { wide: true });
     this.wndclass.wndproc = GM.GetGenericGlobalCallback(4);
     this.wndclass.wndproc.mp = this;
     this.wndclass.toBuffer().writeUInt32LE(this.wndclass._size);
@@ -235,12 +235,14 @@ function WindowsMessagePump(options)
                 // We got a 'QUIT' message
                 this.nativeProxy.DestroyWindow.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp._hwnd).then(function ()
                 {
-                    this.nativeProxy.RegisterClassExW.async.abort();
-                    delete this.nativeProxy.mp._hwnd;
-                    this.nativeProxy.mp.emit('exit', 0);
-
-                    this.nativeProxy.mp.wndclass.wndproc.removeAllListeners('GlobalCallback');
-                    this.nativeProxy.mp.wndclass.wndproc = null;
+                    this.nativeProxy.UnregisterClassW.async(this.nativeProxy.RegisterClassExW.async, this.nativeProxy.mp.wndclass.cnamew, this.nativeProxy.mp.wndclass.hinstance).then(function ()
+                    {
+                        this.nativeProxy.RegisterClassExW.async.abort();
+                        delete this.nativeProxy.mp._hwnd;
+                        this.nativeProxy.mp.emit('exit', 0);
+                        this.nativeProxy.mp.wndclass.wndproc.removeAllListeners('GlobalCallback');
+                        this.nativeProxy.mp.wndclass.wndproc = null;
+                    });
                 });
             }
         }, function (err) { this.nativeProxy.mp.stop(); });
