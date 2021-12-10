@@ -37,22 +37,50 @@ function WindowsMessagePump(options)
 
     this._user32 = GM.CreateNativeProxy('User32.dll');
     this._user32.mp = this;
+    this._user32.CreateMethod('BeginPaint');
     this._user32.CreateMethod('CreateWindowExW');
     this._user32.CreateMethod('DefWindowProcW');
     this._user32.CreateMethod('DestroyWindow');
     this._user32.CreateMethod('DispatchMessageW');
+    this._user32.CreateMethod('EndPaint');
+    this._user32.CreateMethod('FillRect');
+    this._user32.CreateMethod('GetClientRect');
+    this._user32.CreateMethod('GetDC');
     this._user32.CreateMethod('GetMessageW');
+    this._user32.CreateMethod('InvalidateRect')
     this._user32.CreateMethod('PostMessageA');
     this._user32.CreateMethod('RegisterClassExW');
+    this._user32.CreateMethod('SendMessageW');
     this._user32.CreateMethod('SetWindowPos');
     this._user32.CreateMethod('ShowWindow');
+    this._user32.CreateMethod('SystemParametersInfoA');
     this._user32.CreateMethod('TranslateMessage');
 
+    this._user32.CreateMethod('IsDlgButtonChecked');
+    this._user32.CreateMethod('CheckDlgButton');
+
+    this._gdi32 = GM.CreateNativeProxy('Gdi32.dll');
+    this._gdi32.mp = this;
+    this._gdi32.CreateMethod('CreateFontW');
+    this._gdi32.CreateMethod('CreateSolidBrush');
+    this._gdi32.CreateMethod('SetBkColor');
+    this._gdi32.CreateMethod('SetBkMode');
+    this._gdi32.CreateMethod('SetTextColor');
+
+    this._pendingCreate = [];
 
     this.wndclass = GM.CreateVariable(GM.PointerSize == 4 ? 48 : 80);
     this.wndclass.mp = this;
     this.wndclass.hinstance = this._kernel32.GetModuleHandleA(0);
     //this.wndclass.cname = GM.CreateVariable('MainWWWClass');
+
+    if (options && options.window && options.window.background != null)
+    {
+        console.info1('SETTING BACKGROUND BRUSH');
+        this.wndclass.bkbrush = this._gdi32.CreateSolidBrush(options.window.background);
+        this.wndclass.bkbrush.pointerBuffer().copy(this.wndclass.Deref(GM.PointerSize == 4 ? 32 : 48, GM.PointerSize).toBuffer())
+    }
+
     this.wndclass.cnamew = GM.CreateVariable('MainWWWClass', { wide: true });
     this.wndclass.wndproc = GM.GetGenericGlobalCallback(4);
     this.wndclass.wndproc.mp = this;
@@ -83,9 +111,17 @@ function WindowsMessagePump(options)
             }
             else
             {
-                var r = GM.CreatePointer();
-                r.Val = msgRet;
-                this.EndDispatcher(r);
+                console.info1('RETURN VALUE DETECTED', msgRet._ObjectID);
+                if (msgRet._ObjectID == '_GenericMarshal.Variable')
+                {
+                    this.EndDispatcher(msgRet);
+                }
+                else
+                {
+                    var r = GM.CreatePointer();
+                    r.Val = msgRet;
+                    this.EndDispatcher(r);
+                }
             }
         }
         else if(this.mp._hwnd == null && this.CallingThread() == this.mp._user32.RegisterClassExW.async.threadId())
@@ -148,8 +184,40 @@ function WindowsMessagePump(options)
                 }
             });
     });
+    this._addAsyncMethodCall = function addAsyncMethodCall(func, args)
+    {
+        var promise = require('promise');
+        var ret = new promise(promise.defaultInit);
+
+        this._pendingCreate.push({ func: func, args: args, p: ret });
+        return (ret);
+    }
+    this._addCreateWindowEx = function _addCreateWindowEx(dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam)
+    {
+        var args = [];
+        for (var i in arguments)
+        {
+            args.push(arguments[i]);
+        }
+        return (this._addAsyncMethodCall(this._user32.CreateWindowExW.async, args));
+    }
+    this._startPump_continuation = function _startPump_continuation(h)
+    {
+        this.finalpromise.resolve(h);
+        this.nativeProxy.mp._startPump();
+    }
     this._startPump = function _startPump()
     {
+        if (this._pendingCreate.length > 0)
+        {
+            var j = this._pendingCreate.shift();
+            var args = j.args;
+            args.unshift(this._user32.RegisterClassExW.async);
+            var p2 = j.func.apply(this._user32, args);
+            p2.finalpromise = j.p;
+            p2.then(this._startPump_continuation);
+            return;
+        }
         this._user32.GetMessageW.async(this._user32.RegisterClassExW.async, this._msg, this._hwnd, 0, 0).then(function (r)
         {
             if(r.Val > 0)
