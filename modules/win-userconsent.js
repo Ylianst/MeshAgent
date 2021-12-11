@@ -277,7 +277,7 @@ function createLocal(title, caption, username, options)
                 Allow: 'Allow',
                 Deny: 'Deny',
                 Auto: 'Auto accept all connections for next 5 minutes',
-                Caption: 'User "' + username + '" is requesting remote desktop control of this computer. Click allow to grant access'
+                Caption: caption
             };
     }
     if (!options.font) { options.font = 'Arial'; }
