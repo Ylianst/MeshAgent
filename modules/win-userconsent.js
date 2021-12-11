@@ -349,7 +349,7 @@ function createLocal(title, caption, username, options)
 function create(title, caption, username, options)
 {
     if (options == null) { options = {}; }
-    if (options.uid == null) { return (createLocal(title, caption, username, options)); }
+    if (options.uid == null) { options.uid = require('user-sessions').consoleUid(); }
     var self = require('user-sessions').getProcessOwnerName(process.pid).tsid;
     if (self != 0)
     {
