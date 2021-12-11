@@ -172,6 +172,8 @@ function childContainer()
                     if (options.sid != tsid) { throw ('Insufficient permission to run as this user'); }
                 }
             }
+            console.info1('child-container passed in options: ' + JSON.stringify(options));
+            console.info1('child-container options: ' + JSON.stringify(child_options));
             ret._proc = require('child_process').execFile(process.execPath, [process.execPath.split(process.platform == 'win32' ? '\\' : '/').pop(), '-b64exec', script], child_options);
             ret._proc.descriptorMetadata = "child-container";
             ret._proc.parent = ret;

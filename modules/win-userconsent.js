@@ -205,7 +205,7 @@ function pump_onHwnd(h)
 
     this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Allow, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         345,        // x position 
-        225,        // y position 
+        215,        // y position 
         100,        // Button width
         30,         // Button height
         h,          // Parent window
@@ -214,7 +214,7 @@ function pump_onHwnd(h)
         0);
     this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Deny, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         455,        // x position 
-        225,        // y position 
+        215,        // y position 
         100,        // Button width
         30,         // Button height
         h,          // Parent window
@@ -247,7 +247,7 @@ function pump_onHwnd(h)
         }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this.username, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT,
         10,         // x position 
-        225,        // y position 
+        215,        // y position 
         192,        // Button width
         30,         // Button height
         h,          // Parent window
@@ -289,7 +289,7 @@ function createLocal(title, caption, username, options)
         window:
         {
             winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_BORDER | MessagePump.WindowStyles.WS_CAPTION | MessagePump.WindowStyles.WS_SYSMENU,
-            x: 300, y: 300, left: 0, right: 300, width: 580, height: 305, title: title, background: options.background
+            x: 300, y: 300, left: 0, right: 300, width: 580, height: 295, title: title, background: options.background
         },
     };
 
@@ -376,14 +376,13 @@ function create(title, caption, username, options)
 
     // Need to dispatch to user session to display dialog
     var ret = new promise(promise.defaultInit);
-    ret.options = { launch: { module: 'win-userconsent', method: '_child', args: [] } };
+    ret.options = { launch: { module: 'win-userconsent', method: '_child', args: [] }, uid: options.uid };
 
     ret._ipc = require('child-container').create(ret.options);
     ret._ipc.master = ret;
-    ret._ipc.once('exit', function () { console.log('child exited'); });
+    ret._ipc.once('exit', function () { console.info1('user consent child exited'); });
     ret._ipc.on('ready', function ()
     {
-        console.log('READY');
         this.descriptorMetadata = 'win-userconsent';
         this.message({ command: 'dialog', title: title, caption: caption, username: username, options: options });
     });
@@ -410,6 +409,10 @@ function create(title, caption, username, options)
         {
         }
     });
+    ret.close = function close()
+    {
+        this._ipc.exit();
+    }
     return (ret);
 }
 
