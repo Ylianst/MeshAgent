@@ -516,7 +516,7 @@ function monitorinfo()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("ps " + "-e -o user" + (":999") + " -o tty -o command | grep X | ");
+            child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax " : "") + "-e -o user" + (process.platform == 'linux' ? ":999" : "") + " -o tty -o command | grep X | ");
             child.stdin.write("awk '{ ");
             child.stdin.write('        display="";');
             child.stdin.write('        if($4~/^:/)');
