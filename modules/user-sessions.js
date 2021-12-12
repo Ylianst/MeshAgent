@@ -767,6 +767,7 @@ function UserSessions()
                 var sids = [];
                 var i;
                 for (i = 0; i < info1.length; ++i) { sids.push(info1[i].sid); }
+                console.info1('SIDS => ' + JSON.stringify(sids));
 
                 child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -792,6 +793,45 @@ function UserSessions()
             var info = require('monitor-info').getXInfo(gdm);
             if (info == null || !info.xauthority || !info.display)
             {
+                if (gdm == 0)
+                {
+                    // Before we give up, lets see if there is an X session somewhere, probably from VNC
+                    child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+                    child.stdin.write('printf "[";');
+                    child.stdin.write('del="";');
+                    child.stdin.write('n=split($0, lines, "`");');
+                    child.stdin.write('for(i=1;i<n;++i)');
+                    child.stdin.write('{');
+                    child.stdin.write('   split(lines[i], tok, " ");');
+                    child.stdin.write('   if((tok[2]+0)>=' + min + ')');
+                    child.stdin.write('   {');
+                    child.stdin.write('      printf "%s{\\"uid\\": \\"%s\\", \\"sid\\": \\"%s\\"}", del, tok[2], tok[1];');
+                    child.stdin.write('      del=",";');
+                    child.stdin.write('   }');
+                    child.stdin.write('}');
+                    child.stdin.write('printf "]";');
+                    child.stdin.write("}'\nexit\n");
+                    child.waitExit();
+                    var info1 = JSON.parse(child.stdout.str);
+                    var uids = [];
+                    var i;
+                    for (i = 0; i < info1.length; ++i) { uids.push(info1[i].uid); }
+                    console.info1('UIDS => ' + JSON.stringify(sids));
+
+                    while(uids.length>0)
+                    {
+                        var id = uids.pop();
+                        info = require('monitor-info').getXInfo(id);
+                        if(info!=null && info.xauthority != null && info.display != null)
+                        {
+                            return (parseInt(id));
+                        }
+                    }
+                }
+
                 throw ('nobody logged into console');
             }
             else

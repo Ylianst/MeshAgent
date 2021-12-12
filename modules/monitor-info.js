@@ -516,13 +516,27 @@ function monitorinfo()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("ps " + (process.platform == 'freebsd'?"-ax ":"") + "-e -o user" + (process.platform=='linux'?":999":"") + " -o tty -o command | grep X | awk '{ split($0, a, \"-auth\"); split(a[2], b, \" \"); if($1==\"" + uname + "\" && b[1]!=\"\") { printf \"%s,%s,%s\",$1,$2,b[1] } }'\nexit\n");
+            child.stdin.write("ps " + "-e -o user" + (":999") + " -o tty -o command | grep X | ");
+            child.stdin.write("awk '{ ");
+            child.stdin.write('        display="";');
+            child.stdin.write('        if($4~/^:/)');
+            child.stdin.write('        {');
+            child.stdin.write('           display=$4;');
+            child.stdin.write('        }');
+            child.stdin.write('        split($0, a, "-auth");');
+            child.stdin.write('        split(a[2], b, " ");');
+            child.stdin.write('        if($1=="' + uname + '" && b[1]!="")');
+            child.stdin.write("        {");
+            child.stdin.write("           printf \"%s,%s,%s,%s\",$1,$2,b[1],display;");
+            child.stdin.write("        }");
+            child.stdin.write("     }'\nexit\n");
+
             child.waitExit();
             var tokens = child.stdout.str.trim().split(',');
             console.info1(JSON.stringify(tokens));
-            if (tokens.length == 3)
+            if (tokens.length == 4)
             {
-                ret = { tty: tokens[1], xauthority: tokens[2], exportEnv: exportEnv };
+                ret = { tty: tokens[1], xauthority: tokens[2], display: tokens[3], exportEnv: exportEnv };
                 console.info1('ret => ' + JSON.stringify(ret));
             }
 
@@ -754,6 +768,7 @@ function monitorinfo()
                         {
                             if (ps[psx] == 0)
                             {
+                                if (psx == 0) { continue; }
                                 v = ps.slice(vs, psx).toString().split('=');
                                 if (v[0] == 'DISPLAY')
                                 {
