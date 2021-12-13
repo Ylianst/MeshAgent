@@ -6708,12 +6708,13 @@ SOCKET ILibGetSocket(struct sockaddr *localif, int type, int protocol)
 	SOCKET sock;
 	if (localif->sa_family == AF_INET6 && g_ILibDetectIPv6Support == 0) { ILIBMARKPOSITION(1); return -1; }
 	if ((sock = socket(localif->sa_family, type, protocol)) == -1) { ILIBMARKPOSITION(2); return -1; }
+#ifdef _POSIX
 	if (sock == 0)
 	{
 		if ((sock = socket(localif->sa_family, type, protocol)) == -1) { ILIBMARKPOSITION(2); close(0); return -1; }
 		close(0);
 	}
-
+#endif
 #ifdef NACL
 	if (localif->sa_family == AF_INET6) if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) return -1;
 #else
