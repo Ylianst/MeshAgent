@@ -438,7 +438,84 @@ function UserSessions()
             {
                 var ret = null;
                 var min = this.minUid();
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
+                var child;
+                if (process.platform == 'linux' || process.platform == 'freebsd')
+                {
+                    if(this.hasLoginCtl)
+                    {
+                        var pwd = null;
+                        var uids = [];
+                        child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+                        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+
+                        child.stdin.write("getent passwd | tr '\\n' '`' ");
+                        child.stdin.write(" | awk '{ ");
+                        child.stdin.write('         first="";');
+                        child.stdin.write('         printf("{");');
+                        child.stdin.write('         n=split($0, lines, "`");');
+                        child.stdin.write('         for(i=1;i<n;++i)');
+                        child.stdin.write('         {');
+                        child.stdin.write('             split(lines[i],A,":");');
+                        child.stdin.write('             printf "%s\\"%s\\": {\\"user\\":\\"%s\\", \\"desc\\":\\"%s\\"}", first, A[3], A[1], A[5];');
+                        child.stdin.write('             first=",";');
+                        child.stdin.write("         }");
+                        child.stdin.write('         printf("}");');
+                        child.stdin.write("}' ");
+
+                        child.stdin.write('\nexit\n');
+                        child.waitExit();
+                        try
+                        {
+                            pwd = JSON.parse(child.stdout.str);
+                        }
+                        catch(z)
+                        {
+                        }
+
+                        child = require('child_process').execFile('/bin/sh', ['sh']);
+                        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+                        child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+                        child.stdin.write('printf "[";');
+                        child.stdin.write('del="";');
+                        child.stdin.write('n=split($0, lines, "`");');
+                        child.stdin.write('for(i=2;i<n;++i)');
+                        child.stdin.write('{');
+                        child.stdin.write('   split(lines[i], tok, " ");');
+                        child.stdin.write('   if(tok[4]=="") { continue; }');
+                        child.stdin.write('   printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
+                        child.stdin.write('   del=",";');
+                        child.stdin.write('}');
+                        child.stdin.write('printf "]";');
+                        child.stdin.write("}'\nexit\n");
+                        child.waitExit();
+
+                        try
+                        {
+                            var info1 = JSON.parse(child.stdout.str);
+                            var i;
+                            for (i = 0; i < info1.length; ++i) { uids.push(info1[i].uid); }
+                        }
+                        catch(z)
+                        {
+                        }
+
+                        if (pwd != null && uids.length > 0)
+                        {
+                            while(uids.length>0)
+                            {
+                                var tst = uids.pop();
+                                if(pwd[tst].desc.indexOf('Display Manager')>=0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm')
+                                {
+                                    return (parseInt(tst));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
                 child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
                 child.stdin.write('getent passwd | grep "Gnome Display Manager" | ' + "tr '\\n' '`' | awk -F: '{ print $3 }'\nexit\n");
