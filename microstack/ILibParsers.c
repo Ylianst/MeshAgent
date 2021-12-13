@@ -6706,10 +6706,16 @@ SOCKET ILibGetSocket(struct sockaddr *localif, int type, int protocol)
 {
 	int off = 0;
 	SOCKET sock;
-	if (localif->sa_family == AF_INET6 && g_ILibDetectIPv6Support == 0) { ILIBMARKPOSITION(1); return 0; }
-	if ((sock = socket(localif->sa_family, type, protocol)) == -1) { ILIBMARKPOSITION(2); return 0; }
+	if (localif->sa_family == AF_INET6 && g_ILibDetectIPv6Support == 0) { ILIBMARKPOSITION(1); return -1; }
+	if ((sock = socket(localif->sa_family, type, protocol)) == -1) { ILIBMARKPOSITION(2); return -1; }
+	if (sock == 0)
+	{
+		if ((sock = socket(localif->sa_family, type, protocol)) == -1) { ILIBMARKPOSITION(2); close(0); return -1; }
+		close(0);
+	}
+
 #ifdef NACL
-	if (localif->sa_family == AF_INET6) if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) return 0;
+	if (localif->sa_family == AF_INET6) if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) return -1;
 #else
 	if (localif->sa_family == AF_INET6) if (setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&off, sizeof(off)) != 0) ILIBCRITICALERREXIT(253);
 #endif
@@ -6720,9 +6726,14 @@ SOCKET ILibGetSocket(struct sockaddr *localif, int type, int protocol)
 	}
 #endif
 #if defined(WIN32)
-	if (bind(sock, localif, INET_SOCKADDR_LENGTH(localif->sa_family)) != 0) { ILIBMARKPOSITION(3); closesocket(sock); return 0; }
+	if (bind(sock, localif, INET_SOCKADDR_LENGTH(localif->sa_family)) != 0) { ILIBMARKPOSITION(3); closesocket(sock); return -1; }
 #else
-	if (bind(sock, localif, INET_SOCKADDR_LENGTH(localif->sa_family)) != 0) { ILIBMARKPOSITION(4); close(sock); return 0; }
+	if (bind(sock, localif, INET_SOCKADDR_LENGTH(localif->sa_family)) != 0) 
+	{
+		ILIBMARKPOSITION(4);
+		close(sock);
+		return -1; 
+	}
 #endif
 	return sock;
 }
@@ -10488,7 +10499,7 @@ int ILibDetectIPv6Support()
 
 	// Get our listening socket
 	sock = ILibGetSocket((struct sockaddr*)&addr, SOCK_DGRAM, IPPROTO_UDP);
-	if (sock == 0)
+	if (sock < 0)
 	{
 		g_ILibDetectIPv6Support = 0;
 	}

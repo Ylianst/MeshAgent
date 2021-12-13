@@ -963,7 +963,7 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	// Allocate a new socket
 	if (module->RemoteAddress.sin6_family != AF_UNIX)
 	{
-		if (((struct sockaddr_in*)localInterface)->sin_family == AF_UNSPEC ||  (module->internalSocket = ILibGetSocket(localInterface, SOCK_STREAM, IPPROTO_TCP)) == 0)
+		if (((struct sockaddr_in*)localInterface)->sin_family == AF_UNSPEC ||  (module->internalSocket = ILibGetSocket(localInterface, SOCK_STREAM, IPPROTO_TCP)) < 0)
 		{
 			module->internalSocket = 0;
 			module->FinConnect = -1;
