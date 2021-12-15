@@ -343,6 +343,10 @@ function createLocal(title, caption, username, options)
     {
         ret.pump.timeout = setTimeout(pump_onTimeout, options.timeout, ret.pump);
     }
+    ret.close = function close()
+    {
+        this.pump.close();
+    }
     return (ret);
 }
 
