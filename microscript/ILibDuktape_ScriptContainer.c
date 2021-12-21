@@ -2692,6 +2692,118 @@ void ILibDuktape_Polyfills_promise_wait(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "wait", ILibDuktape_Polyfills_promise_wait_impl, DUK_VARARGS);
 	duk_pop(ctx);										// ...
 }
+duk_ret_t ILibDuktape_PAC_Impl(duk_context *ctx)
+{
+	duk_push_current_function(ctx);
+	duk_context *ex = (duk_context*)Duktape_GetPointerProperty(ctx, -1, "embedded");
+	char *fqdn = Duktape_GetStringPropertyValue(ctx, -1, "fqdn", "127.0.0.2");
+	char *url = (char*)duk_require_string(ctx, 0);
+	char *addr;
+	unsigned short port;
+	char *path;
+
+	duk_push_sprintf(ex, "function myIpAddress() { return('%s'); }", fqdn);
+	duk_eval_noresult(ex);
+
+	ILibParseUri(url, &addr, &port, &path, NULL);
+	duk_push_sprintf(ex, "FindProxyForURL('%s', '%s');", url, addr);
+	if (duk_peval(ex) != 0)
+	{
+		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), duk_safe_to_string(ex, -1));
+		duk_pop(ex);
+		return(ILibDuktape_Error(ctx, "Error: %s", ILibScratchPad));
+	}
+	duk_push_sprintf(ctx, "%s", duk_get_string(ex, -1));
+	duk_pop(ex);
+	duk_string_split(ctx, -1, " ");			// [str][array]
+	duk_array_shift(ctx, -1);				// [str][array][type]
+	if (strcasecmp("DIRECT", (char*)duk_get_string(ctx, -1)) == 0)
+	{
+		duk_push_null(ctx);
+	}
+	else
+	{
+		duk_array_pop(ctx, -2);
+	}
+	return(1);
+}
+duk_ret_t ILibDuktape_PAC_MyIPAddress(duk_context *ctx)
+{
+	duk_push_string(ctx, "172.16.2.5");
+	return(1);
+}
+
+extern duk_ret_t ILibDuktape_Polyfills_resolve(duk_context *ctx);
+extern void ILibDuktape_Polyfills_String(duk_context *ctx);
+extern duk_ret_t ILibDuktape_Polyfills_ipv4From(duk_context *ctx);
+
+duk_ret_t ILibDuktape_PAC_Create(duk_context *ctx)
+{
+	duk_size_t wpadLen;
+	char *wpad = (char*)duk_get_lstring(ctx, 0, &wpadLen);
+	duk_context *ex = ILibDuktape_ScriptContainer_InitializeJavaScriptEngine_minimal();
+
+	if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(ex, wpad, (int)wpadLen, "wpad.js", 7) != 0 ||
+		ILibDuktape_ScriptContainer_ExecuteByteCode(ex) != 0)
+	{
+		char *err = (char*)duk_safe_to_string(ex, -1);
+		sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", err);
+		duk_destroy_heap(ex);
+		return(ILibDuktape_Error(ctx, "Error in WPAD: %s", ILibScratchPad));
+	}
+	duk_pop(ex);
+
+	duk_push_global_object(ex);
+	ILibDuktape_Polyfills_String(ex);
+	ILibDuktape_CreateInstanceMethod(ex, "resolve", ILibDuktape_Polyfills_resolve, 1);
+	ILibDuktape_CreateInstanceMethod(ex, "_ipv4From", ILibDuktape_Polyfills_ipv4From, 1);
+	duk_pop(ex);
+
+	char *pac = NULL;
+	pac[ILibBase64Decode("LyoNCkNvcHlyaWdodCAyMDIxIEludGVsIENvcnBvcmF0aW9uDQpAYXV0aG9yIEJyeWFuIFJvZQ0KDQpMaWNlbnNlZCB1bmRlciB0aGUgQXBhY2hlIExpY2Vuc2UsIFZlcnNpb24gMi4wICh0aGUgIkxpY2Vuc2UiKTsNCnlvdSBtYXkgbm90IHVzZSB0aGlzIGZpbGUgZXhjZXB0IGluIGNvbXBsaWFuY2Ugd2l0aCB0aGUgTGljZW5zZS4NCllvdSBtYXkgb2J0YWluIGEgY29weSBvZiB0aGUgTGljZW5zZSBhdA0KDQogICAgaHR0cDovL3d3dy5hcGFjaGUub3JnL2xpY2Vuc2VzL0xJQ0VOU0UtMi4wDQoNClVubGVzcyByZXF1aXJlZCBieSBhcHBsaWNhYmxlIGxhdyBvciBhZ3JlZWQgdG8gaW4gd3JpdGluZywgc29mdHdhcmUNCmRpc3RyaWJ1dGVkIHVuZGVyIHRoZSBMaWNlbnNlIGlzIGRpc3RyaWJ1dGVkIG9uIGFuICJBUyBJUyIgQkFTSVMsDQpXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBBTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC4NClNlZSB0aGUgTGljZW5zZSBmb3IgdGhlIHNwZWNpZmljIGxhbmd1YWdlIGdvdmVybmluZyBwZXJtaXNzaW9ucyBhbmQNCmxpbWl0YXRpb25zIHVuZGVyIHRoZSBMaWNlbnNlLg0KKi8NCg0KDQoNCi8vIEV2YWx1YXRlcyBob3N0bmFtZXMgYW5kIHJldHVybnMgdHJ1ZSBpZiBob3N0bmFtZXMgbWF0Y2gNCmZ1bmN0aW9uIGRuc0RvbWFpbklzKHRhcmdldCwgaG9zdCkNCnsNCiAgICBpZighaG9zdC5zdGFydHNXaXRoKCcuJykpDQogICAgew0KICAgICAgICBob3N0ID0gJy4nICsgaG9zdDsNCiAgICB9DQogICAgcmV0dXJuICh0YXJnZXQudG9Mb3dlckNhc2UoKS5lbmRzV2l0aChob3N0LnRvTG93ZXJDYXNlKCkpKTsNCn0NCg0KLy8gbWF0Y2ggaG9zdG5hbWUgb3IgVVJMIHRvIGEgc3BlY2lmaWVkIHNoZWxsIGV4cHJlc3Npb24sICByZXR1cm5zIHRydWUgaWYgbWF0Y2hlZA0KZnVuY3Rpb24gc2hFeHBNYXRjaChob3N0LCBleHApDQp7DQogICAgZXhwID0gZXhwLnNwbGl0KCcuJykuam9pbignXFwuJyk7DQogICAgZXhwID0gZXhwLnNwbGl0KCc/Jykuam9pbignLicpOw0KICAgIGV4cCA9IGV4cC5zcGxpdCgnKicpLmpvaW4oJy4qJyk7DQogICAgZXhwID0gJ14nICsgZXhwICsgJyQnOw0KICAgIHJldHVybiAoaG9zdC5zZWFyY2goZXhwKSA+PSAwKTsNCn0NCg0KLy8gZXZhbHVhdGVzIHRoZSBJUCBhZGRyZXNzIG9mIGEgaG9zdG5hbWUsIGFuZCBpZiB3aXRoaW4gYSBzcGVjaWZpZWQgc3VibmV0IHJldHVybnMgdHJ1ZQ0KZnVuY3Rpb24gaXNJbk5ldCh0YXJnZXQsIGFkZHJlc3MsIG1hc2spDQp7DQogICAgdHJ5DQogICAgew0KICAgICAgICB2YXIgZGVzdEFkZHIgPSByZXNvbHZlKHRhcmdldCkuX2ludGVnZXJzWzBdOw0KICAgICAgICB2YXIgbWFza0FkZHIgPSByZXNvbHZlKG1hc2spLl9pbnRlZ2Vyc1swXTsNCiAgICAgICAgcmV0dXJuIChfaXB2NEZyb20oZGVzdEFkZHIgJiBtYXNrQWRkcikgPT0gYWRkcmVzcyk7DQogICAgfQ0KICAgIGNhdGNoKGUpDQogICAgew0KICAgICAgICByZXR1cm4gKGZhbHNlKTsNCiAgICB9DQp9DQoNCi8vIGxvY2FsIGhvc3QgYWRkcmVzcw0KZnVuY3Rpb24gbXlJcEFkZHJlc3MoKQ0Kew0KDQp9DQoNCi8vIHJlc29sdmUgaG9zdCBuYW1lIHRvIGFkZHJlc3MNCmZ1bmN0aW9uIGRuc1Jlc29sdmUoaG9zdCkNCnsNCiAgICB2YXIgcmVzdWx0ID0gcmVzb2x2ZShob3N0KTsNCiAgICBpZihyZXN1bHQubGVuZ3RoID09IDApDQogICAgew0KICAgICAgICByZXR1cm4gKCcnKTsNCiAgICB9DQogICAgZWxzZQ0KICAgIHsNCiAgICAgICAgcmV0dXJuIChyZXN1bHRbMF0pOw0KICAgIH0NCn0NCg0KLy8gcmV0dXJuIHRydWUgaWYgdGhlIGhvc3RuYW1lIGNvbnRhaW5zIG5vIGRvdHMNCmZ1bmN0aW9uIGlzUGxhaW5Ib3N0TmFtZShob3N0KQ0Kew0KICAgIHJldHVybiAoaG9zdC5pbmRleE9mKCcuJykgPCAwKTsNCn0NCg0KLy8gZXZhbHVhdGUgaG9zdG5hbWUgYW5kIHJldHVybiB0cnVlIElGRiBleGFjdCBtYXRjaA0KZnVuY3Rpb24gbG9jYWxIb3N0T3JEb21haW5Jcyh0YXJnZXQsIGhvc3QpDQp7DQogICAgcmV0dXJuIChkbnNSZXNvbHZlKHRhcmdldCkgPT0gaG9zdCk7DQp9DQoNCi8vIHJldHVybiB0cnVlIGlmIHJlc29sdmUgaXMgc3VjY2Vzc2Z1bA0KZnVuY3Rpb24gaXNSZXNvbHZhYmxlKGhvc3QpDQp7DQogICAgcmV0dXJuIChyZXNvbHZlKGhvc3QpLmxlbmd0aCA+IDApOw0KfQ0KDQovLyByZXR1cm5zIHRoZSBudW1iZXIgb2YgRE5TIGRvbWFpbiBsZXZlbHMgKG51bWJlciBvZiBkb3RzKSBpbiB0aGUgaG9zdG5hbWUNCmZ1bmN0aW9uIGRuc0RvbWFpbkxldmVscyhob3N0KQ0Kew0KICAgIHJldHVybiAoaG9zdC5zcGxpdCgnLicpLmxlbmd0aCAtIDEpOw0KfQ0KDQoNCmZ1bmN0aW9uIHdlZWtkYXlSYW5nZShzdGFydCwgZW5kKQ0Kew0KDQp9DQpmdW5jdGlvbiBkYXRlUmFuZ2Uoc3RhcnQsIGVuZCkNCnsNCg0KfQ0KZnVuY3Rpb24gdGltZVJhbmdlKHN0YXJ0LCBlbmQpDQp7DQoNCn0NCg0KZnVuY3Rpb24gYWxlcnQobXNnKQ0Kew0KDQp9DQoNCg==", 3356, &pac)] = 0;
+	duk_peval_string_noresult(ex, pac);
+	free(pac);
+
+	duk_push_c_function(ctx, ILibDuktape_PAC_Impl, 1);
+	duk_push_pointer(ctx, ex);
+	duk_put_prop_string(ctx, -2, "embedded");
+
+	char fqdn[] = "(function getFqdnInterface()\
+	{\
+		var interfaces = require('os').networkInterfaces();\
+		for (var i in interfaces)\
+		{\
+			for (var j in interfaces[i])\
+			{\
+				if (interfaces[i][j].fqdn != '' && interfaces[i][j].family == 'IPv4' && interfaces[i][j].status != 'down')\
+				{\
+					return (interfaces[i][j].address);\
+				}\
+			}\
+		}\
+		return ('127.0.0.1');\
+	})();";
+
+	duk_eval_string(ctx, fqdn);	// [func][fqdn]
+	duk_put_prop_string(ctx, -2, "fqdn");
+
+	return(1);
+}
+duk_ret_t ILibDuktape_PAC_Find(duk_context *ctx)
+{
+	duk_eval_string(ctx, "resolve('wpad');");
+}
+void ILibDuktape_PAC_PUSH(duk_context *ctx, void *chain)
+{
+	duk_push_object(ctx);
+	ILibDuktape_WriteID(ctx, "PAC");
+	ILibDuktape_CreateInstanceMethod(ctx, "Create", ILibDuktape_PAC_Create, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "Find", ILibDuktape_PAC_Find, 0);
+}
+void ILibDuktape_PAC_Init(duk_context *ctx)
+{
+	ILibDuktape_ModSearch_AddHandler(ctx, "PAC", ILibDuktape_PAC_PUSH);
+}
 
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_context *ctx, SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
 {
@@ -2755,6 +2867,7 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 	ILibDuktape_MemoryStream_Init(ctx);				// Add MemoryStream support
 	ILibDuktape_NetworkMonitor_Init(ctx);
 	ILibDuktape_CompressedStream_init(ctx);
+	ILibDuktape_PAC_Init(ctx);
 	
 	if (exitHandler != NULL) { ILibDuktape_Helper_AddHeapFinalizer(ctx, exitHandler, exitUser); }
 

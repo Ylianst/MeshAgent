@@ -10684,10 +10684,10 @@ int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, in
 	if (hname != NULL) { MultiByteToWideChar(CP_UTF8, 0, (LPCCH)hostname, -1, (LPWSTR)hname, (int)hnameLen); }
 	if (svc != NULL) { MultiByteToWideChar(CP_UTF8, 0, (LPCCH)service, -1, (LPWSTR)svc, (int)svcLen); }
 	r = GetAddrInfoW(hname, svc, &hints, &result);
-	if (r != 0) { if (result != NULL) { FreeAddrInfoW(result); } return r; }
+	if (r != 0) { if (result != NULL) { FreeAddrInfoW(result); } return 0; }
 #else
 	r = getaddrinfo(hostname, service, &hints, &result);
-	if (r != 0) { if (result != NULL) { freeaddrinfo(result); } return r; }
+	if (r != 0) { if (result != NULL) { freeaddrinfo(result); } return 0; }
 #endif
 
 	if (result == NULL) return -1;
@@ -10729,7 +10729,7 @@ int ILibResolveEx3(char* hostname, char *service, struct sockaddr_in6* addr6, in
 int ILibResolveEx2(char* hostname, unsigned short port, struct sockaddr_in6* addr6, int count)
 {
 	char service[16];
-	if (sprintf_s(service, sizeof(service), "%u", port) <= 0) { return 1; }
+	if (sprintf_s(service, sizeof(service), "%u", port) <= 0) { return 0; }
 	return(ILibResolveEx3(hostname, service, addr6, count));
 }
 

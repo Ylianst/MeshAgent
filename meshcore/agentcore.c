@@ -5192,9 +5192,28 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			ILibIPAddressMonitor_Create(agentHost->chain, MeshAgent_AgentMode_IPAddressChanged_Handler, agentHost);
 		}
-		MeshServer_Connect(agentHost);
+		if (agentHost->localdebugmode == 0) { MeshServer_Connect(agentHost); }
+		else
+		{
+			int CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
+			if (CoreModuleLen > 4)
+			{
+				// There is a core module, launch it now.
+				CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+				ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", CoreModule, CoreModuleLen);
 
+				if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agentHost->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
+					ILibDuktape_ScriptContainer_ExecuteByteCode(agentHost->meshCoreCtx) != 0)
+				{
+					ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+						ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agentHost->meshCoreCtx, -1));
+				}
+				duk_pop(agentHost->meshCoreCtx);
+				free(CoreModule);
+			}
 
+			duk_peval_string_noresult(agentHost->meshCoreCtx, "console.log('Agent running in Local Debug Mode');require('MeshAgent').emit('Connected',1);");
+		}
 		// We are acting as a mesh agent
 		if (((ILibSimpleDataStore_Get(agentHost->masterDb, "MeshServer", ILibScratchPad, sizeof(ILibScratchPad))) > 5) && (memcmp(ILibScratchPad, "local", 5) == 0))
 		{
@@ -5555,7 +5574,14 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 			else if (strncmp(argv[i], "--script-connect", 16) == 0)
 			{
 				// Connect to MeshCentral
-				connectAgent = 1;
+				if (strnlen(argv[i], 19) == 18 && strcmp(argv[i] + 16, "=2") == 0)
+				{
+					connectAgent = 2;
+				}
+				else
+				{
+					connectAgent = 1;
+				}
 				if (agentHost->masterDb == NULL)
 				{
 					agentHost->masterDb = ILibSimpleDataStore_Create(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
@@ -5688,6 +5714,7 @@ void MeshAgent_ScriptMode(MeshAgentHostContainer *agentHost, int argc, char **ar
 	// If in agent mode, setup the chain to be a mesh agent
 	if (connectAgent != 0) 
 	{
+		agentHost->localdebugmode = (connectAgent == 2);
 		if (MeshAgent_AgentMode(agentHost, argc, argv, 0) == 0) 
 		{
 			ILibStopChain(agentHost->chain); // Agent Error, stop the chain

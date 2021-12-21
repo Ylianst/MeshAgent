@@ -4946,7 +4946,12 @@ duk_ret_t ILibDuktape_http_generateNonce(duk_context *ctx)
 		return(ILibDuktape_Error(ctx, "Specified length is too long. Please Specify a value < %llu", (uint64_t)sizeof(ILibScratchPad)));
 	}
 }
-
+duk_ret_t ILibDuktape_http_resolve(duk_context *ctx)
+{
+	duk_push_sprintf(ctx, "resolve('%s');", duk_require_string(ctx, 0));
+	duk_eval(ctx);
+	return(1);
+}
 void ILibDuktape_HttpStream_http_PUSH(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);																							// [http]
@@ -4959,6 +4964,7 @@ void ILibDuktape_HttpStream_http_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "parseUri", ILibDuktape_httpStream_parseUri, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "webSocketStream", ILibDuktape_httpStream_webSocketStream_new, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "generateNonce", ILibDuktape_http_generateNonce, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "resolve", ILibDuktape_http_resolve, 1);
 
 	// HTTP Global Agent
 	duk_push_c_function(ctx, ILibDuktape_HttpStream_Agent_new, DUK_VARARGS);										// [http][newAgent]

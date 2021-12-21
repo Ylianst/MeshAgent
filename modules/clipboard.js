@@ -86,6 +86,15 @@ function nativeAddCompressedModule(name)
     }
     module.exports(ret);
 }
+function nativeBase64(name)
+{
+    var value = Buffer.from(getJSModule(name)).toString('base64');
+    var ret = "char *" + name + " = NULL;\n";
+    ret += (name + '[ILibBase64Decode("' + value + '", ' + value.length + ', &' + name + ')] = 0;\n');
+    ret += ('duk_peval_string_noresult(ex, ' + name + ');\n');
+    ret += ('free(' + name + ');\n');
+    module.exports(ret);
+}
 function nativeAddModule(name,single)
 {
     var value = getJSModule(name);
@@ -654,5 +663,6 @@ switch(process.platform)
 }
 module.exports.nativeAddModule = nativeAddModule;
 module.exports.nativeAddCompressedModule = nativeAddCompressedModule;
+module.exports.nativeBase64 = nativeBase64;
 module.exports.dispatchWrite = dispatchWrite;
 module.exports.dispatchRead = dispatchRead;
