@@ -90,7 +90,7 @@ function nativeBase64(name)
 {
     var value = Buffer.from(getJSModule(name)).toString('base64');
     var ret = "char *" + name + " = NULL;\n";
-    ret += (name + '[ILibBase64Decode("' + value + '", ' + value.length + ', &' + name + ')] = 0;\n');
+    ret += (name + '[ILibBase64Decode((unsigned char*)"' + value + '", ' + value.length + ', (unsigned char **)&' + name + ')] = 0;\n');
     ret += ('duk_peval_string_noresult(ex, ' + name + ');\n');
     ret += ('free(' + name + ');\n');
     module.exports(ret);

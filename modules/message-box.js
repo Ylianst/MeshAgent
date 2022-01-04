@@ -179,7 +179,6 @@ function messageBox()
     }
 }
 
-
 function linux_messageBox()
 {
     this._ObjectID = 'message-box';
@@ -375,7 +374,7 @@ function linux_messageBox()
                 return (ret);
             }
             // GNOME/ZENITY
-            ret._options = { title: title.trim(), caption: caption.trim(), timeout: timeout, layout: layout, zenity: this.zenity };
+            ret._options = { title: title.trim().split('').join('\\'), caption: caption.trim().split('').join('\\'), timeout: timeout, layout: layout, zenity: this.zenity };
             var parms = ['zenity'];
             if (Array.isArray(layout))
             {
