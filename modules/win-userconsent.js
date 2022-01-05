@@ -146,6 +146,21 @@ function RGB(r, g, b)
 {
     return (r | (g << 8) | (b << 16));
 }
+function gdip_RGB(r, g, b)
+{
+    if (g != null && b != null)
+    {
+        return (b | (g << 8) | (r << 16));
+    }
+    else
+    {
+        var _r = (r & 0xFF);
+        var _g = ((r >> 8) & 0xFF);
+        var _b = ((r >> 16) & 0xFF);
+        return (RGB(_b, _g, _r));
+    }
+}
+
 function CENTER(w, cx, cw)
 {
     var a = cw / 2;
@@ -199,8 +214,8 @@ function pump_onMessage(msg)
         case WM_CTLCOLORSTATIC:
             console.info1('WM_CTLCOLORSTATIC => ' + msg.lparam, msg.wparam);
             var hdcStatic = msg.wparam;
-            this._gdi32.SetTextColor(hdcStatic, RGB(200, 200, 200));
-            this._gdi32.SetBkColor(hdcStatic, RGB(0, 54, 105));
+            this._gdi32.SetTextColor(hdcStatic, this.options.foreground);
+            this._gdi32.SetBkColor(hdcStatic, this.options.background);
             return (this.brush);
             break;
         case WM_CREATE:
@@ -297,7 +312,7 @@ function createLocal(title, caption, username, options)
     }
     if (!options.font) { options.font = 'Arial'; }
     if (!options.background) { options.background = RGB(0, 54, 105); }
-
+    if (!options.foreground) { options.foreground = RGB(200, 200, 200); }
     var ret = new promise(promise.defaultInit);
     ret.opt =
     {
@@ -346,7 +361,7 @@ function createLocal(title, caption, username, options)
         var pimage = require('_GenericMarshal').CreatePointer();
         var hbitmap = require('_GenericMarshal').CreatePointer();
         var status = gdip.GdipCreateBitmapFromStream(istream, pimage);
-        status = gdip.GdipCreateHBITMAPFromBitmap(pimage.Deref(), hbitmap, options.background);
+        status = gdip.GdipCreateHBITMAPFromBitmap(pimage.Deref(), hbitmap, options.background); // RGB(0, 54, 105);
         if (status.Val == 0)
         {
             options.bitmap = hbitmap;
@@ -371,7 +386,8 @@ function createLocal(title, caption, username, options)
             console.info1('DrawImage: ' + gdip.GdipDrawImageRectI(graphics.Deref(), pimage.Deref(), 0, 0, 192, 192).Val);
 
             var scaledhbitmap = GM.CreatePointer();
-            console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
+            //console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
+            console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, gdip_RGB(options.background)).Val);
             options.bitmap = scaledhbitmap;
 
             console.info1('ImageDispose: ' + gdip.GdipDisposeImage(pimage.Deref()).Val);
