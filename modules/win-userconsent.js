@@ -15,6 +15,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+const HALFTONE = 4;
+const SmoothingModeAntiAlias = 4;
+const InterpolationModeBicubic = 5;
+
 const WM_SETFONT = 0x0030;
 const WM_CTLCOLORSTATIC = 0x0138;
 const WM_CREATE = 0x0001;
@@ -118,12 +122,23 @@ var GM = require('_GenericMarshal');
 var MessagePump = require('win-message-pump');
 
 var SHM = GM.CreateNativeProxy('Shlwapi.dll');
+SHM.CreateMethod('SHCreateMemStream');
 var gdip = GM.CreateNativeProxy('Gdiplus.dll');
 
-SHM.CreateMethod('SHCreateMemStream');
-gdip.CreateMethod('GdipLoadImageFromStream');
+gdip.CreateMethod('GdipBitmapSetResolution');
 gdip.CreateMethod('GdipCreateBitmapFromStream');
+gdip.CreateMethod('GdipCreateBitmapFromScan0');
 gdip.CreateMethod('GdipCreateHBITMAPFromBitmap');
+gdip.CreateMethod('GdipDisposeImage');
+gdip.CreateMethod('GdipDrawImageRectI');
+gdip.CreateMethod('GdipFree');
+gdip.CreateMethod('GdipLoadImageFromStream');
+gdip.CreateMethod('GdipGetImageGraphicsContext');
+gdip.CreateMethod('GdipGetImageHorizontalResolution');
+gdip.CreateMethod('GdipGetImagePixelFormat');
+gdip.CreateMethod('GdipGetImageVerticalResolution');
+gdip.CreateMethod('GdipSetInterpolationMode');
+gdip.CreateMethod('GdipSetSmoothingMode');
 gdip.CreateMethod('GdiplusStartup');
 gdip.CreateMethod('GdiplusShutdown');
 
@@ -332,7 +347,35 @@ function createLocal(title, caption, username, options)
         var hbitmap = require('_GenericMarshal').CreatePointer();
         var status = gdip.GdipCreateBitmapFromStream(istream, pimage);
         status = gdip.GdipCreateHBITMAPFromBitmap(pimage.Deref(), hbitmap, options.background);
-        if (status.Val == 0) { options.bitmap = hbitmap; }   
+        if (status.Val == 0)
+        {
+            options.bitmap = hbitmap;
+            var format = GM.CreateVariable(4);
+            console.info1('PixelFormatStatus: ' + gdip.GdipGetImagePixelFormat(pimage.Deref(), format).Val);
+            console.info1('PixelFormat: ' + format.toBuffer().readInt32LE());
+            var nb = GM.CreatePointer();
+
+            console.info1('FromScan0: ' + gdip.GdipCreateBitmapFromScan0(192, 192, 0, format.toBuffer().readInt32LE(), 0, nb).Val);
+
+            var REAL_h = GM.CreateVariable(4);
+            var REAL_w = GM.CreateVariable(4);
+            console.info1('GetRes_W: ' + gdip.GdipGetImageHorizontalResolution(pimage.Deref(), REAL_w).Val);
+            console.info1('GetRes_H: ' + gdip.GdipGetImageVerticalResolution(pimage.Deref(), REAL_h).Val);
+            console.info1('Source DPI: ' + REAL_w.toBuffer().readFloatLE() + ' X ' + REAL_h.toBuffer().readFloatLE());
+            console.info1('SetRes: ' + gdip.GdipBitmapSetResolution(nb.Deref(), REAL_w.toBuffer().readFloatLE(), REAL_h.toBuffer().readFloatLE()).Val);
+
+            var graphics = GM.CreatePointer();
+            console.info1('GdipGetImageGraphicsContext: ' + gdip.GdipGetImageGraphicsContext(nb.Deref(), graphics).Val);
+            console.info1('GdipSetSmoothingMode: ' + gdip.GdipSetSmoothingMode(graphics.Deref(), SmoothingModeAntiAlias).Val);
+            console.info1('InterpolationModeBicubic: ' + gdip.GdipSetInterpolationMode(graphics.Deref(), InterpolationModeBicubic).Val);
+            console.info1('DrawImage: ' + gdip.GdipDrawImageRectI(graphics.Deref(), pimage.Deref(), 0, 0, 192, 192).Val);
+
+            var scaledhbitmap = GM.CreatePointer();
+            console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
+            options.bitmap = scaledhbitmap;
+
+            console.info1('ImageDispose: ' + gdip.GdipDisposeImage(pimage.Deref()).Val);
+        }
     }
 
     ret.pump.on('message', pump_onMessage);
