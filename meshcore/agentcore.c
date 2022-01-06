@@ -4578,7 +4578,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	paramLen -= ixr;
 
 	if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
-	if (ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb) == 0)
+	if (ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb) == 0 || ILibSimpleDataStore_Get(agentHost->masterDb, "readmsh", NULL, 0)!=0)
 	{
 		// Check to see if we need to import a settings file
 		if (importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx")) == 0)
