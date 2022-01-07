@@ -1595,7 +1595,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILib_POSIX_InstallCrashHandler(char *exename);
 #endif
 
-#define ILIBCRITICALLOG_DEFAULT_MAXSIZE 8388608
+#define ILIBCRITICALLOG_DEFAULT_MAXSIZE 524288
 	extern uint64_t ILibCriticalLog_MaxSize;
 #define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); exit(code);}
 #define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)
