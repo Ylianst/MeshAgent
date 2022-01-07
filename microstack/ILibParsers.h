@@ -930,11 +930,12 @@ int ILibIsRunningOnChainThread(void* chain);
 	char *ILibReadFileFromDisk(char *FileName);
 	int ILibReadFileFromDiskEx(char **Target, char *FileName);
 	void ILibWriteStringToDisk(char *FileName, char *data);
-	void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen);
+	void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t maxSize);
 	void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen);
 	void ILibDeleteFileFromDisk(char *FileName);
 	void ILibGetDiskFreeSpace(void *i64FreeBytesToCaller, void *i64TotalBytes);
 	int ILibFile_CopyTo(char *source, char *destination);
+	#define ILibAppendStringToDiskEx(FileName, data, dataLen) ILibAppendStringToDiskEx2(FileName, data, dataLen, 0)
 
 	/*! \defgroup StackGroup Stack
 	\ingroup DataStructures
@@ -1594,6 +1595,8 @@ int ILibIsRunningOnChainThread(void* chain);
 	char* ILib_POSIX_InstallCrashHandler(char *exename);
 #endif
 
+#define ILIBCRITICALLOG_DEFAULT_MAXSIZE 8388608
+	extern uint64_t ILibCriticalLog_MaxSize;
 #define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); exit(code);}
 #define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)
 	void ILIBLOGMESSAGEX(char *format, ...);

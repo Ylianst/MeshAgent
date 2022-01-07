@@ -24,7 +24,6 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "meshcore/meshdefines.h"
 
-extern void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen);
 extern ILibQueue gPendingPackets;
 extern int gRemoteMouseRenderDefault;
 extern int gRemoteMouseMoved;

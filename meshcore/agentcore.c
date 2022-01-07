@@ -1874,6 +1874,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 
 		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "ServerInfo", ILibDuktape_MeshAgent_ServerInfo,1);
 
+		duk_push_number(ctx, (duk_double_t)ILibCriticalLog_MaxSize);
+		ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "maxLogSize", 1);
 
 		ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "isControlChannelConnected", ILibDuktape_MeshAgent_isControlChannelConnected,1);
 		ILibDuktape_EventEmitter_AddHook(emitter, "Ready", ILibDuktape_MeshAgent_Ready);
@@ -4592,6 +4594,16 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 					importSettings(agentHost, MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh"));
 				}
 			}
+		}
+	}
+
+	if(ILibSimpleDataStore_Get(agentHost->masterDb, "maxLogSize", NULL, 0) != 0)
+	{
+		int len = ILibSimpleDataStore_Get(agentHost->masterDb, "maxLogSize", ILibScratchPad, sizeof(ILibScratchPad));
+		if (len < sizeof(ILibScratchPad))
+		{
+			uint64_t val = 0;
+			if (ILib_atoi_uint64(&val, ILibScratchPad, len) == 0) { ILibCriticalLog_MaxSize = val; }
 		}
 	}
 

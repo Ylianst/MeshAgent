@@ -9424,7 +9424,7 @@ void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen)
 		fclose(SourceFile);
 	}
 }
-void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen)
+void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t maxSize)
 {
 	FILE *SourceFile = NULL;
 
@@ -9433,10 +9433,25 @@ void ILibAppendStringToDiskEx(char *FileName, char *data, int dataLen)
 #else
 	SourceFile = fopen(FileName, "ab");
 #endif
-
+	
 	if (SourceFile != NULL)
 	{
-		if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+		if (maxSize != 0)
+		{
+			fseek(SourceFile, 0, SEEK_END);
+#ifdef WIN32
+			if ((uint64_t)_ftelli64(SourceFile) < maxSize)
+#else
+			if((uint64_t)ftell(SourceFile) < maxSize)
+#endif
+			{
+				if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+			}
+		}
+		else
+		{
+			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+		}
 		fclose(SourceFile);
 	}
 }
@@ -10752,6 +10767,8 @@ void ILib6to4(struct sockaddr* addr)
 
 // Log a critical error to file
 char ILibCriticalLogBuffer[sizeof(ILibScratchPad)];
+uint64_t ILibCriticalLog_MaxSize = ILIBCRITICALLOG_DEFAULT_MAXSIZE;
+
 char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, int user2)
 {
 	char timeStamp[32];
@@ -10764,7 +10781,7 @@ char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, i
 	{
 		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] [%s] %s", timeStamp, g_ILibCrashID_HASH != NULL ? g_ILibCrashID_HASH : "", msg);
 	}
-	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx(ILibCriticalLogFilename, ILibCriticalLogBuffer, len);
+	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx2(ILibCriticalLogFilename, ILibCriticalLogBuffer, len, ILibCriticalLog_MaxSize);
 	if (file != NULL)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "%s:%d (%d,%d) %s", file, line, user1, user2, msg);

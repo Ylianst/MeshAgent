@@ -283,7 +283,10 @@ forceUpdate:				If set, will cause the agent to perform a self-update on next st
 ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
 logUpdate:					If set, will cause the agent to log self-update status
 jsDebugPort:				Specify a JS Debugger Port
+maxLogSize:					Specifies the maximum size of the error log file. 
 nocertstore:				If set on Windows, will force the Agent to use OpenSSL instead of WinCrypto for cert generation/storage.
+readonly:					If set, forces the agent to open the database in readonly mode
+readmsh:					If set while db is in readonly mode, it will cache the local msh file in the readonly db
 remoteMouseRender:			If set, will always render the remote mouse cursor for KVM
 showModuleNames:			If set, will display the name of modules when they are loaded for the first time
 skipmaccheck:				If set, the agent will not change NodeID on local mac address changes.
