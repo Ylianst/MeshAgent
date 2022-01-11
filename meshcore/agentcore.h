@@ -250,6 +250,9 @@ typedef struct MeshAgentHostContainer
 	char *meshServiceName;
 	char *displayName;
 	int serviceReserved;
+	long consoleText_timeStamp;
+	int consoleText_counter;
+	int consoleText_maxRate;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif
@@ -272,6 +275,7 @@ char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBa
 AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities	
 agentName					If set, this will be sent to the server instead of the hostname
 compactDirtyMinimum			Minimum dirty bytes threshold for db.compact() operation
+consoleTextMaxRate:			Sets rate limit for sendConsoleText. Default is 10 messages per second.
 controlChannelDebug:		If set, will log/display controlChannel messages (Except for JSON messages)
 controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
 coreDumpEnabled:			If set, a dump file will be written when the agent crashes

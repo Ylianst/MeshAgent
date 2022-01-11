@@ -728,6 +728,7 @@ duk_ret_t ILibDuktape_MeshAgent_GenerateCertificate(duk_context *ctx)
 #endif
 }
 
+
 // Javascript SendCommand(obj), send some data to the MeshCentral server
 // This method can handle buffers, string or objects as input.
 duk_ret_t ILibDuktape_MeshAgent_SendCommand(duk_context *ctx)
@@ -767,6 +768,25 @@ duk_ret_t ILibDuktape_MeshAgent_SendCommand(duk_context *ctx)
 	else
 	{
 		// We are trying to send an object, perform JSON serialization first
+		if (strcasecmp(Duktape_GetStringPropertyValue(ctx, 0, "action", ""), "msg") == 0 && strcasecmp(Duktape_GetStringPropertyValue(ctx, 0, "type", ""), "console") == 0)
+		{
+			// sendConsoleText()
+			long current = ILibGetTimeStamp();
+			if (agent->consoleText_timeStamp == 0 || current - agent->consoleText_timeStamp > 1000)
+			{
+				agent->consoleText_timeStamp = current;
+				agent->consoleText_counter = 1;
+			}
+			else
+			{
+				if (agent->consoleText_counter++ > agent->consoleText_maxRate)
+				{
+					return(0);
+				}
+			}
+		}
+
+
 		duk_dup(ctx, 0);							// [object]
 		duk_json_encode(ctx, -1);					// [json]
 		buffer = (char*)duk_get_lstring(ctx, -1, &bufferLen);
@@ -1896,6 +1916,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateEventWithGetter(ctx, "controlChannelDebug", ILibDuktape_MeshAgent_controlChannelDebug);
 		ILibDuktape_CreateInstanceMethod(ctx, "DataPing", ILibDuktape_MeshAgent_DataPing, DUK_VARARGS);
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "ARCHID", MESH_AGENTID);
+		ILibDuktape_CreateReadonlyProperty_int(ctx, "ConsoleTextMaxRate", agent->consoleText_maxRate);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
 		ILibDuktape_EventEmitter_CreateEventEx(emitter, "kvmConnected");
@@ -4046,6 +4067,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	agent->controlChannelDebug = ILibSimpleDataStore_Get(agent->masterDb, "controlChannelDebug", NULL, 0);
 	ILibDuktape_HECI_Debug = (ILibSimpleDataStore_Get(agent->masterDb, "heciDebug", NULL, 0) != 0);
 	agent->timerLogging = ILibSimpleDataStore_Get(agent->masterDb, "timerLogging", NULL, 0);
+	agent->consoleText_maxRate = ILibSimpleDataStore_GetInt(agent->masterDb, "consoleTextMaxRate", 10);
 
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
