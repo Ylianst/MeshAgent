@@ -34,6 +34,7 @@ const WM_COMMAND = 0x0111;
 
 const SPI_GETWORKAREA = 0x0030;
 
+const BS_MULTILINE = 0x00002000;
 const BST_UNCHECKED = 0x0000;
 const BST_CHECKED = 0x0001;
 const SS_BLACKRECT = 0x00000004;
@@ -251,11 +252,11 @@ function pump_onHwnd(h)
         0xFFF3,     // Child ID
         0,
         0);
-    this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Auto, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_CHECKBOX,
+    this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Auto, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_CHECKBOX | BS_MULTILINE,
         210,        // x position 
-        180,        // y position 
+        150,        // y position 
         335,        // Button width
-        30,         // Button height
+        60,         // Button height
         h,          // Parent window
         0xFFF0,     // Child ID
         0,
