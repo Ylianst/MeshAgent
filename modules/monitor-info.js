@@ -638,6 +638,8 @@ function monitorinfo()
                         {
                         }
 
+                        console.info1('Detected PIDS => ' + JSON.stringify(pids));
+
                         if (pids != null)
                         {
                             var e, i;
@@ -647,10 +649,17 @@ function monitorinfo()
                                 if (e.XAUTHORITY)
                                 {
                                     ret.xauthority = e.XAUTHORITY;
+                                    console.info1('  => Setting Xauthority: ' + e.XAUTHORITY + ' from PID: ' + pids[i]);
                                     break;
                                 }
                             }
-                        }                     
+                        }
+
+                        // Still no Xauthority found, so lets check the system location for lightdm
+                        if(require('fs').existsSync('/run/lightdm/' + uname + '/xauthority'))
+                        {
+                            ret.xauthority = '/run/lightdm/' + uname + '/xauthority';
+                        }
                     }
                     if (ret.display == '' && ttys.length > 0)
                     {
