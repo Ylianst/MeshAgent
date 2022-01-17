@@ -82,6 +82,15 @@ or if you get a black screen when connecting to the login screen, you may need t
 DefaultSession=gnome-xorg.desktop
 ```
 
+If you are using LightDM, and the child KVM process unexpectedly closes while connecting to the login screen,
+you'll need to:
+* Open /etc/lightdm/lightdm.conf
+* Uncomment the following line from the [LightDM] section:
+```
+user-authority-in-system-dir=false
+```
+
+
 ##	Special Note For ChromeOS:
 You need to disable rootfs verification, in order to install the meshagent service.
 After running the following commands, and rebooting, you should be able to install the meshagent service.
