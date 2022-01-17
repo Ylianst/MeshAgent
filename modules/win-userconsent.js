@@ -279,7 +279,7 @@ function pump_onHwnd(h)
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this.username, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT,
         10,         // x position 
         215,        // y position 
-        192,        // Button width
+        335,        // Button width
         30,         // Button height
         h,          // Parent window
         0xFFF2,     // Child ID
