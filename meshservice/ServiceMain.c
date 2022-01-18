@@ -15,11 +15,11 @@ limitations under the License.
 */
 
 #if defined(WINSOCK2)
-	#include <winsock2.h>
-	#include <ws2tcpip.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #elif defined(WINSOCK1)
-	#include <winsock.h>
-	#include <wininet.h>
+#include <winsock.h>
+#include <wininet.h>
 #endif
 
 #include <stdio.h>
@@ -57,12 +57,16 @@ TCHAR* serviceName = TEXT("Mesh Agent background service");
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle = 0;
 INT_PTR CALLBACK DialogHandler(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK DialogHandler2(HWND, UINT, WPARAM, LPARAM);
 
 MeshAgentHostContainer *agent = NULL;
 DWORD g_serviceArgc;
 char **g_serviceArgv;
 extern int gRemoteMouseRenderDefault;
 char *DIALOG_LANG = NULL;
+
+HBRUSH DialogBackgroundBrush = NULL;
+HBITMAP g_hbmLogo = NULL;
 
 /*
 extern int g_TrustedHashSet;
@@ -75,6 +79,7 @@ extern char* g_ServiceProxyHost;
 extern int g_ServiceConnectFlags;
 */
 
+
 #if defined(_LINKVM)
 extern DWORD WINAPI kvm_server_mainloop(LPVOID Param);
 #endif
@@ -82,12 +87,12 @@ extern DWORD WINAPI kvm_server_mainloop(LPVOID Param);
 BOOL IsAdmin()
 {
 	BOOL admin;
-	PSID AdministratorsGroup; 
+	PSID AdministratorsGroup;
 	SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
 
-	if ((admin = AllocateAndInitializeSid( &NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &AdministratorsGroup)) != 0)
+	if ((admin = AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &AdministratorsGroup)) != 0)
 	{
-		if (!CheckTokenMembership( NULL, AdministratorsGroup, &admin)) admin = FALSE;
+		if (!CheckTokenMembership(NULL, AdministratorsGroup, &admin)) admin = FALSE;
 		FreeSid(AdministratorsGroup);
 	}
 	return admin;
@@ -96,12 +101,12 @@ BOOL IsAdmin()
 BOOL RunAsAdmin(char* args, int isAdmin)
 {
 	WCHAR szPath[_MAX_PATH + 100];
-	if (GetModuleFileNameW(NULL, szPath, sizeof(szPath)/2))
+	if (GetModuleFileNameW(NULL, szPath, sizeof(szPath) / 2))
 	{
 		SHELLEXECUTEINFOW sei = { sizeof(sei) };
 		sei.hwnd = NULL;
 		sei.nShow = SW_NORMAL;
-		sei.lpVerb = isAdmin?L"open":L"runas";
+		sei.lpVerb = isAdmin ? L"open" : L"runas";
 		sei.lpFile = szPath;
 		sei.lpParameters = ILibUTF8ToWide(args, -1);
 		return ShellExecuteExW(&sei);
@@ -109,68 +114,68 @@ BOOL RunAsAdmin(char* args, int isAdmin)
 	return FALSE;
 }
 
-DWORD WINAPI ServiceControlHandler( DWORD controlCode, DWORD eventType, void *eventData, void* eventContext )
+DWORD WINAPI ServiceControlHandler(DWORD controlCode, DWORD eventType, void *eventData, void* eventContext)
 {
 	switch (controlCode)
 	{
-		case SERVICE_CONTROL_INTERROGATE:
+	case SERVICE_CONTROL_INTERROGATE:
+		break;
+	case SERVICE_CONTROL_SHUTDOWN:
+	case SERVICE_CONTROL_STOP:
+		serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
+		SetServiceStatus(serviceStatusHandle, &serviceStatus);
+		if (agent != NULL) { MeshAgent_Stop(agent); }
+		return(0);
+	case SERVICE_CONTROL_POWEREVENT:
+		switch (eventType)
+		{
+		case PBT_APMPOWERSTATUSCHANGE:	// Power status has changed.
 			break;
-		case SERVICE_CONTROL_SHUTDOWN:
-		case SERVICE_CONTROL_STOP:
-			serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
-			SetServiceStatus( serviceStatusHandle, &serviceStatus );
-			if (agent != NULL) { MeshAgent_Stop(agent); }
-			return(0);
-		case SERVICE_CONTROL_POWEREVENT:
-			switch (eventType)
-			{
-				case PBT_APMPOWERSTATUSCHANGE:	// Power status has changed.
-					break;
-				case PBT_APMRESUMEAUTOMATIC:	// Operation is resuming automatically from a low - power state.This message is sent every time the system resumes.
-					break;
-				case PBT_APMRESUMESUSPEND:		// Operation is resuming from a low - power state.This message is sent after PBT_APMRESUMEAUTOMATIC if the resume is triggered by user input, such as pressing a key.
-					break;
-				case PBT_APMSUSPEND:			// System is suspending operation.
-					break;
-				case PBT_POWERSETTINGCHANGE:	// Power setting change event has been received.
-					break;
-			}
+		case PBT_APMRESUMEAUTOMATIC:	// Operation is resuming automatically from a low - power state.This message is sent every time the system resumes.
 			break;
-		case SERVICE_CONTROL_SESSIONCHANGE:
-			if (agent == NULL)
-			{
-				break; // If there isn't an agent, no point in doing anything, cuz nobody will hear us
-			}
+		case PBT_APMRESUMESUSPEND:		// Operation is resuming from a low - power state.This message is sent after PBT_APMRESUMEAUTOMATIC if the resume is triggered by user input, such as pressing a key.
+			break;
+		case PBT_APMSUSPEND:			// System is suspending operation.
+			break;
+		case PBT_POWERSETTINGCHANGE:	// Power setting change event has been received.
+			break;
+		}
+		break;
+	case SERVICE_CONTROL_SESSIONCHANGE:
+		if (agent == NULL)
+		{
+			break; // If there isn't an agent, no point in doing anything, cuz nobody will hear us
+		}
 
-			switch (eventType)
-			{
-				case WTS_CONSOLE_CONNECT:		// The session identified by lParam was connected to the console terminal or RemoteFX session.
-					break;
-				case WTS_CONSOLE_DISCONNECT:	// The session identified by lParam was disconnected from the console terminal or RemoteFX session.
-					break;
-				case WTS_REMOTE_CONNECT:		// The session identified by lParam was connected to the remote terminal.
-					break;
-				case WTS_REMOTE_DISCONNECT:		// The session identified by lParam was disconnected from the remote terminal.
-					break;
-				case WTS_SESSION_LOGON:			// A user has logged on to the session identified by lParam.
-				case WTS_SESSION_LOGOFF:		// A user has logged off the session identified by lParam.					
-					break;
-				case WTS_SESSION_LOCK:			// The session identified by lParam has been locked.
-					break;
-				case WTS_SESSION_UNLOCK:		// The session identified by lParam has been unlocked.
-					break;
-				case WTS_SESSION_REMOTE_CONTROL:// The session identified by lParam has changed its remote controlled status.To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
-					break;
-				case WTS_SESSION_CREATE:		// Reserved for future use.
-				case WTS_SESSION_TERMINATE:		// Reserved for future use.
-					break;
-			}
+		switch (eventType)
+		{
+		case WTS_CONSOLE_CONNECT:		// The session identified by lParam was connected to the console terminal or RemoteFX session.
 			break;
-		default:
+		case WTS_CONSOLE_DISCONNECT:	// The session identified by lParam was disconnected from the console terminal or RemoteFX session.
 			break;
+		case WTS_REMOTE_CONNECT:		// The session identified by lParam was connected to the remote terminal.
+			break;
+		case WTS_REMOTE_DISCONNECT:		// The session identified by lParam was disconnected from the remote terminal.
+			break;
+		case WTS_SESSION_LOGON:			// A user has logged on to the session identified by lParam.
+		case WTS_SESSION_LOGOFF:		// A user has logged off the session identified by lParam.					
+			break;
+		case WTS_SESSION_LOCK:			// The session identified by lParam has been locked.
+			break;
+		case WTS_SESSION_UNLOCK:		// The session identified by lParam has been unlocked.
+			break;
+		case WTS_SESSION_REMOTE_CONTROL:// The session identified by lParam has changed its remote controlled status.To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
+			break;
+		case WTS_SESSION_CREATE:		// Reserved for future use.
+		case WTS_SESSION_TERMINATE:		// Reserved for future use.
+			break;
+		}
+		break;
+	default:
+		break;
 	}
 
-	SetServiceStatus( serviceStatusHandle, &serviceStatus );
+	SetServiceStatus(serviceStatusHandle, &serviceStatus);
 	return(0);
 }
 
@@ -182,8 +187,8 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	WCHAR str[_MAX_PATH];
 
 
-	UNREFERENCED_PARAMETER( argc );
-	UNREFERENCED_PARAMETER( argv );
+	UNREFERENCED_PARAMETER(argc);
+	UNREFERENCED_PARAMETER(argv);
 
 	// Initialise service status
 	serviceStatus.dwServiceType = SERVICE_WIN32;
@@ -204,7 +209,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		// Service running
 		serviceStatus.dwControlsAccepted |= (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_POWEREVENT | SERVICE_ACCEPT_SESSIONCHANGE);
 		serviceStatus.dwCurrentState = SERVICE_RUNNING;
-		SetServiceStatus( serviceStatusHandle, &serviceStatus);
+		SetServiceStatus(serviceStatusHandle, &serviceStatus);
 
 		// Get our own executable name
 		GetModuleFileNameW(NULL, str, _MAX_PATH);
@@ -251,7 +256,7 @@ int RunService(int argc, char* argv[])
 	g_serviceArgc = argc;
 	g_serviceArgv = argv;
 
-	return StartServiceCtrlDispatcher( serviceTable );
+	return StartServiceCtrlDispatcher(serviceTable);
 }
 
 // SERVICE_STOPPED				  1    The service is not running.
@@ -269,21 +274,21 @@ int GetServiceState(LPCSTR servicename)
 
 	if (serviceControlManager)
 	{
-		SC_HANDLE service = OpenService( serviceControlManager, servicename, SERVICE_QUERY_STATUS );
+		SC_HANDLE service = OpenService(serviceControlManager, servicename, SERVICE_QUERY_STATUS);
 		if (service)
 		{
 			SERVICE_STATUS serviceStatusEx;
-			if ( QueryServiceStatus( service, &serviceStatusEx) )
+			if (QueryServiceStatus(service, &serviceStatusEx))
 			{
 				r = serviceStatusEx.dwCurrentState;
 			}
-			CloseServiceHandle( service );
+			CloseServiceHandle(service);
 		}
 		else
 		{
 			r = 100;
 		}
-		CloseServiceHandle( serviceControlManager );
+		CloseServiceHandle(serviceControlManager);
 	}
 	return r;
 }
@@ -291,9 +296,9 @@ int GetServiceState(LPCSTR servicename)
 
 /*
 int APIENTRY _tWinMain(HINSTANCE hInstance,
-                     HINSTANCE hPrevInstance,
-                     LPTSTR    lpCmdLine,
-                     int       nCmdShow)
+					 HINSTANCE hPrevInstance,
+					 LPTSTR    lpCmdLine,
+					 int       nCmdShow)
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
@@ -335,7 +340,7 @@ int wmain(int argc, char* wargv[])
 	int retCode = 0;
 
 	int argvi, argvsz;
-	char **argv = (char**)ILibMemory_SmartAllocate((argc+1) * sizeof(void*));
+	char **argv = (char**)ILibMemory_SmartAllocate((argc + 1) * sizeof(void*));
 	for (argvi = 0; argvi < argc; ++argvi)
 	{
 		argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, NULL, 0, NULL, NULL);
@@ -343,9 +348,9 @@ int wmain(int argc, char* wargv[])
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
 
-	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 || 
+	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 ||
 		strcasecmp(argv[1], "-fulluninstall") == 0 || strcasecmp(argv[1], "-fullinstall") == 0 ||
-		strcasecmp(argv[1], "-install")==0 || strcasecmp(argv[1], "-uninstall") == 0 ||
+		strcasecmp(argv[1], "-install") == 0 || strcasecmp(argv[1], "-uninstall") == 0 ||
 		strcasecmp(argv[1], "-state") == 0))
 	{
 		argv[argc] = argv[1];
@@ -547,9 +552,9 @@ int wmain(int argc, char* wargv[])
 		wmain_free(argv);
 		return(0);
 	}
-	#if defined(_LINKVM)
+#if defined(_LINKVM)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
-	{		
+	{
 		void **parm = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
 		((int*)&(parm[2]))[0] = 0;
@@ -625,7 +630,7 @@ int wmain(int argc, char* wargv[])
 		wmain_free(argv);
 		return 0;
 	}
-	#endif	
+#endif	
 	if (integratedJavaScript != NULL || (argc > 0 && strcasecmp(argv[0], "--slave") == 0) || (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "connect") == 0) || (strcasecmp(argv[1], "--slave") == 0))))
 	{
 		// Run the mesh agent in console mode, since the agent is compiled for windows service, the KVM will not work right. This is only good for testing.
@@ -652,7 +657,7 @@ int wmain(int argc, char* wargv[])
 		return(retCode);
 	}
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
-	{		
+	{
 		char *update = ILibMemory_Allocate(1024, 0, NULL, NULL);
 		int updateLen;
 
@@ -704,13 +709,15 @@ int wmain(int argc, char* wargv[])
 	{
 		// Reset the firewall rules
 		GetModuleFileNameW(NULL, str, _MAX_PATH);
-		if (IsAdmin() == FALSE) { printf("Must run as administrator"); } else { ClearWindowsFirewall(str); SetupWindowsFirewall(str); printf("Done"); }
+		if (IsAdmin() == FALSE) { printf("Must run as administrator"); }
+		else { ClearWindowsFirewall(str); SetupWindowsFirewall(str); printf("Done"); }
 	}
 	else if (argc > 1 && (strcasecmp(argv[1], "-clearfirewall") == 0))
 	{
 		// Clear the firewall rules
 		GetModuleFileNameW(NULL, str, _MAX_PATH);
-		if (IsAdmin() == FALSE) { printf("Must run as administrator"); } else { ClearWindowsFirewall(str); printf("Done"); }
+		if (IsAdmin() == FALSE) { printf("Must run as administrator"); }
+		else { ClearWindowsFirewall(str); printf("Done"); }
 	}
 #endif
 	else if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
@@ -718,9 +725,9 @@ int wmain(int argc, char* wargv[])
 		// Set "resetnodeid" in registry
 		HKEY hKey;
 #ifndef _WIN64
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_WRITE | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS )
+		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_WRITE | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS)
 #else
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS )
+		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS)
 #endif
 		{
 			i = 1;
@@ -774,7 +781,7 @@ int wmain(int argc, char* wargv[])
 					void *dialogchain = ILibCreateChain();
 					ILibChain_PartialStart(dialogchain);
 					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
-					if (duk_peval_string(ctx, "require('util-language').current.toUpperCase().split('-').join('_');") == 0) 
+					if (duk_peval_string(ctx, "require('util-language').current.toUpperCase().split('-').join('_');") == 0)
 					{
 						lang = (char*)duk_safe_to_string(ctx, -1);
 						printf("Current Language: %s\n", lang);
@@ -814,7 +821,7 @@ int wmain(int argc, char* wargv[])
 					printf("     --WebProxy=\"http://proxyhost:port\"      Specify an HTTPS proxy.\r\n");
 					printf("     --agentName=\"alternate name\"            Specify an alternate name to be provided by the agent.\r\n");
 				}
-				else if(skip==0)
+				else if (skip == 0)
 				{
 					// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
 					FreeConsole();
@@ -892,269 +899,312 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
-	case WM_INITDIALOG:
+	case WM_CTLCOLORDLG: {
+		// Set the background of the dialog box to blue
+		if (DialogBackgroundBrush == NULL) {
+			DialogBackgroundBrush = CreateSolidBrush(RGB(0, 54, 105));
+		}
+		return (INT_PTR)DialogBackgroundBrush;
+	}
+	case WM_CTLCOLORSTATIC: {
+		// Set the left text to white over transparent
+		if ((HWND)lParam == GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT))
 		{
-			char selfexe[_MAX_PATH];
-			char *lang = NULL;
+			SetBkMode((HDC)wParam, TRANSPARENT);
+			SetTextColor((HDC)wParam, RGB(255, 255, 255));
+			return (INT_PTR)GetStockObject(NULL_BRUSH);
+		}
+		break;
+	}
+	case WM_PAINT:
+	{
+		// Paint the logo
+		// TODO: We need to auto-scale the image to fit
+		// TODO: Paint using GDI+ with transparency support
+		if (g_hbmLogo != NULL) {
+			BITMAP bm;
+			PAINTSTRUCT ps;
+			HDC hdc = BeginPaint(hDlg, &ps);
+			HDC hdcMem = CreateCompatibleDC(hdc);
+			HBITMAP hbmOld = SelectObject(hdcMem, g_hbmLogo);
+			GetObject(g_hbmLogo, sizeof(bm), &bm);
+			BitBlt(hdc, 326, 14, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
+			SelectObject(hdcMem, hbmOld);
+			DeleteDC(hdcMem);
+			EndPaint(hDlg, &ps);
+		}
+		break;
+	}
+	case WM_INITDIALOG:
+	{
+		char selfexe[_MAX_PATH];
+		char *lang = NULL;
 
-			WCHAR *agentstatus = NULL;
-			WCHAR *agentversion = NULL;
-			WCHAR *serverlocation = NULL;
-			WCHAR *meshname = NULL;
-			WCHAR *meshidentitifer = NULL;
-			WCHAR *serveridentifier = NULL;
-			WCHAR *dialogdescription = NULL;
-			WCHAR *install_buttontext = NULL;
-			WCHAR *update_buttontext = NULL;
-			WCHAR *uninstall_buttontext = NULL;
-			WCHAR *connect_buttontext = NULL;
-			WCHAR *cancel_buttontext = NULL;
-			WCHAR *disconnect_buttontext = NULL;
-			WCHAR *state_notinstalled = NULL;
-			WCHAR *state_running = NULL;
-			WCHAR *state_notrunning = NULL;
+		WCHAR *agentstatus = NULL;
+		WCHAR *agentversion = NULL;
+		WCHAR *serverlocation = NULL;
+		WCHAR *meshname = NULL;
+		WCHAR *meshidentitifer = NULL;
+		WCHAR *serveridentifier = NULL;
+		WCHAR *dialogdescription = NULL;
+		WCHAR *install_buttontext = NULL;
+		WCHAR *update_buttontext = NULL;
+		WCHAR *uninstall_buttontext = NULL;
+		WCHAR *connect_buttontext = NULL;
+		WCHAR *close_buttontext = NULL;
+		WCHAR *disconnect_buttontext = NULL;
+		WCHAR *state_notinstalled = NULL;
+		WCHAR *state_running = NULL;
+		WCHAR *state_notrunning = NULL;
 
-			// Get current executable path
-			WCHAR wselfexe[MAX_PATH];
-			GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
-			ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
+		// Load the bitmap
+		// TODO: We need to load a PNG from the .MSH file if present
+		g_hbmLogo = LoadBitmap(GetModuleHandle(NULL), MAKEINTRESOURCE(IDB_BITMAP_MC));
 
-			void *dialogchain = ILibCreateChain();
-			ILibChain_PartialStart(dialogchain);
-			duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
-			if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
-			if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
-			{
-				duk_push_object(ctx);															// [translation][en]
-				duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
-				duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
-				duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
-				duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
-				duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
-				duk_push_array(ctx);
-				duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
-				duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
-				duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
-				duk_put_prop_string(ctx, -2, "status");
-				duk_put_prop_string(ctx, -2, "en");												// [translation]
-			}
-			
-			if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
-			if (!duk_has_prop_string(ctx, -1, lang))
-			{
-				duk_push_string(ctx, lang);					// [obj][string]
-				duk_string_split(ctx, -1, "-");				// [obj][string][array]
-				duk_array_shift(ctx, -1);					// [obj][string][array][string]
-				lang = (char*)duk_safe_to_string(ctx, -1);
-				duk_dup(ctx, -4);							// [obj][string][array][string][obj]
-			}
-			if (!duk_has_prop_string(ctx, -1, lang))
-			{
-				lang = "en";
-			}
+		// Get current executable path
+		WCHAR wselfexe[MAX_PATH];
+		GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
+		ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
 
-			if (strcmp("en", lang) != 0)
+		void *dialogchain = ILibCreateChain();
+		ILibChain_PartialStart(dialogchain);
+		duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
+		if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+		if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
+		{
+			duk_push_object(ctx);															// [translation][en]
+			duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
+			duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
+			duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
+			duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
+			duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
+			duk_push_array(ctx);
+			duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
+			duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
+			duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
+			duk_put_prop_string(ctx, -2, "status");
+			duk_put_prop_string(ctx, -2, "en");												// [translation]
+		}
+
+		if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
+		if (!duk_has_prop_string(ctx, -1, lang))
+		{
+			duk_push_string(ctx, lang);					// [obj][string]
+			duk_string_split(ctx, -1, "-");				// [obj][string][array]
+			duk_array_shift(ctx, -1);					// [obj][string][array][string]
+			lang = (char*)duk_safe_to_string(ctx, -1);
+			duk_dup(ctx, -4);							// [obj][string][array][string][obj]
+		}
+		if (!duk_has_prop_string(ctx, -1, lang))
+		{
+			lang = "en";
+		}
+
+		if (strcmp("en", lang) != 0)
+		{
+			// Not English, so check the minimum set is present
+			duk_get_prop_string(ctx, -1, "en");				// [en]
+			duk_get_prop_string(ctx, -2, lang);				// [en][lang]
+			duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
+			while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
 			{
-				// Not English, so check the minimum set is present
-				duk_get_prop_string(ctx, -1, "en");				// [en]
-				duk_get_prop_string(ctx, -2, lang);				// [en][lang]
-				duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
-				while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
+				if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
 				{
-					if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
-					{
-						duk_put_prop(ctx, -4);					// [en][lang][enum]
-					}
-					else
-					{
-						duk_pop_2(ctx);							// [en][lang][enum]
-					}
+					duk_put_prop(ctx, -4);					// [en][lang][enum]
 				}
-				duk_pop_3(ctx);									// ...
-			}
-
-			if (duk_has_prop_string(ctx, -1, lang))
-			{
-				duk_get_prop_string(ctx, -1, lang);
-
-				agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
-				if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
-
-				agentversion = Dialog_GetTranslation(ctx, "agentVersion");
-				if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
-
-				serverlocation = Dialog_GetTranslation(ctx, "url");
-				if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
-
-				meshname = Dialog_GetTranslation(ctx, "meshName");
-				if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
-
-				meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
-				if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
-
-				serveridentifier = Dialog_GetTranslation(ctx, "serverId");
-				if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
-
-				dialogdescription = Dialog_GetTranslation(ctx, "description");
-				if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_DESCRIPTION), dialogdescription); }
-
-				install_buttontext = Dialog_GetTranslation(ctx, "install");
-				update_buttontext = Dialog_GetTranslation(ctx, "update");
-				uninstall_buttontext = Dialog_GetTranslation(ctx, "uninstall");
-				cancel_buttontext = Dialog_GetTranslation(ctx, "cancel");
-				disconnect_buttontext = Dialog_GetTranslation(ctx, "disconnect");
-				if (disconnect_buttontext != NULL)
+				else
 				{
-					wcscpy_s(closeButtonText, sizeof(closeButtonText) / 2, disconnect_buttontext);
-					closeButtonTextSet = 1;
+					duk_pop_2(ctx);							// [en][lang][enum]
 				}
-
-				if (uninstall_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext); }
-				connect_buttontext = Dialog_GetTranslation(ctx, "connect");
-				if (connect_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext); }
-				if (cancel_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCANCEL), cancel_buttontext); }
-
-				duk_get_prop_string(ctx, -1, "status");	// [Array]
-				state_notinstalled = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL));
-				state_running = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL));
-				state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
 			}
-			
+			duk_pop_3(ctx);									// ...
+		}
 
-			fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
+		if (duk_has_prop_string(ctx, -1, lang))
+		{
+			duk_get_prop_string(ctx, -1, lang);
+
+			agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
+			if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
+
+			agentversion = Dialog_GetTranslation(ctx, "agentVersion");
+			if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
+
+			serverlocation = Dialog_GetTranslation(ctx, "url");
+			if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
+
+			meshname = Dialog_GetTranslation(ctx, "meshName");
+			if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
+
+			meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
+			if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
+
+			serveridentifier = Dialog_GetTranslation(ctx, "serverId");
+			if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
+
+			dialogdescription = Dialog_GetTranslation(ctx, "description");
+			if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT), dialogdescription); }
+
+			install_buttontext = Dialog_GetTranslation(ctx, "install");
+			update_buttontext = Dialog_GetTranslation(ctx, "update");
+			uninstall_buttontext = Dialog_GetTranslation(ctx, "uninstall");
+			close_buttontext = Dialog_GetTranslation(ctx, "close");
+			disconnect_buttontext = Dialog_GetTranslation(ctx, "disconnect");
+			if (disconnect_buttontext != NULL)
 			{
-				DWORD               dwSize = 0;
-				BYTE                *pVersionInfo = NULL;
-				VS_FIXEDFILEINFO    *pFileInfo = NULL;
-				UINT                pLenFileInfo = 0;
-				int major, minor, hotfix, other;
+				wcscpy_s(closeButtonText, sizeof(closeButtonText) / 2, disconnect_buttontext);
+				closeButtonTextSet = 1;
+			}
 
-				if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
-				{					
-					if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
-					if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
+			if (uninstall_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext); }
+			connect_buttontext = Dialog_GetTranslation(ctx, "connect");
+			if (connect_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext); }
+			if (close_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), close_buttontext); }
+
+			duk_get_prop_string(ctx, -1, "status");	// [Array]
+			state_notinstalled = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL));
+			state_running = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL));
+			state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
+		}
+
+
+		fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
+		{
+			DWORD               dwSize = 0;
+			BYTE                *pVersionInfo = NULL;
+			VS_FIXEDFILEINFO    *pFileInfo = NULL;
+			UINT                pLenFileInfo = 0;
+			int major, minor, hotfix, other;
+
+			if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
+			{
+				if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
+				if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
+				{
+					if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
 					{
-						if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
-						{
-							// Display the version of this software
-							major = (pFileInfo->dwFileVersionMS >> 16) & 0xffff;
-							minor = (pFileInfo->dwFileVersionMS) & 0xffff;
-							hotfix = (pFileInfo->dwFileVersionLS >> 16) & 0xffff;
-							other = (pFileInfo->dwFileVersionLS) & 0xffff;
+						// Display the version of this software
+						major = (pFileInfo->dwFileVersionMS >> 16) & 0xffff;
+						minor = (pFileInfo->dwFileVersionMS) & 0xffff;
+						hotfix = (pFileInfo->dwFileVersionLS >> 16) & 0xffff;
+						other = (pFileInfo->dwFileVersionLS) & 0xffff;
 #ifdef _WIN64
-							if (SOURCE_COMMIT_DATE != NULL)
-							{
-								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s, 64bit", SOURCE_COMMIT_DATE);
-							}
-							else
-							{
-								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
-							}
-#else
-							if (SOURCE_COMMIT_DATE != NULL)
-							{
-								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", SOURCE_COMMIT_DATE);
-							}
-							else
-							{
-								sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
-							}
-#endif
-							SetWindowTextA(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibScratchPad);
+						if (SOURCE_COMMIT_DATE != NULL)
+						{
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s, 64bit", SOURCE_COMMIT_DATE);
 						}
+						else
+						{
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
+						}
+#else
+						if (SOURCE_COMMIT_DATE != NULL)
+						{
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", SOURCE_COMMIT_DATE);
+						}
+						else
+						{
+							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
+						}
+#endif
+						SetWindowTextA(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibScratchPad);
 					}
-					free(pVersionInfo);
 				}
+				free(pVersionInfo);
 			}
+		}
 
-			if (duk_peval_string(ctx, "_MSH();") == 0)
-			{
-				int installFlagsInt = 0;
-				WINDOWPLACEMENT lpwndpl;
+		if (duk_peval_string(ctx, "_MSH();") == 0)
+		{
+			int installFlagsInt = 0;
+			WINDOWPLACEMENT lpwndpl;
 
-				installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
-				meshname = (WCHAR*)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
-				meshid = Duktape_GetStringPropertyValue(ctx, -1, "MeshID", NULL);
-				serverid = Duktape_GetStringPropertyValue(ctx, -1, "ServerID", NULL);
-				serverurl = Duktape_GetStringPropertyValue(ctx, -1, "MeshServer", NULL);
-				displayName = Duktape_GetStringPropertyValue(ctx, -1, "displayName", NULL);
-				meshServiceName = Duktape_GetStringPropertyValue(ctx, -1, "meshServiceName", NULL);
+			installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
+			meshname = (WCHAR*)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
+			meshid = Duktape_GetStringPropertyValue(ctx, -1, "MeshID", NULL);
+			serverid = Duktape_GetStringPropertyValue(ctx, -1, "ServerID", NULL);
+			serverurl = Duktape_GetStringPropertyValue(ctx, -1, "MeshServer", NULL);
+			displayName = Duktape_GetStringPropertyValue(ctx, -1, "displayName", NULL);
+			meshServiceName = Duktape_GetStringPropertyValue(ctx, -1, "meshServiceName", NULL);
 
-				// Set text in the dialog box
-				if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
-				if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
-				if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
-				if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
-				SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? (char*)meshname : "(None)", -1));
-				SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
-				SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
-				SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
-				if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
-				if ((installFlagsInt & 3) == 1) {
-					// Temporary Agent Only
-					hiddenButtons |= 6; // Both install and uninstall buttons are hidden
-					ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
-					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
-					GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
-					SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
-				}  else if ((installFlagsInt & 3) == 2) {
-					// Background Only
-					hiddenButtons |= 1; // Connect button is hidden hidden
-					ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
-				} else if ((installFlagsInt & 3) == 3) {
-					// Uninstall only
-					GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
-					SetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
-					hiddenButtons |= 5; // Both install and connect buttons are hidden
-					ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
-					ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
-				}
-			}
-			else
-			{
-				EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
-			}
-
-			// Get the current service running state
-			int r = GetServiceState(meshServiceName != NULL ? meshServiceName : serviceFile);
-			SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), update_buttontext);
-
-			switch (r)
-			{
-				case SERVICE_RUNNING:
-					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_running);
-					break;
-				case 0:
-				case 100: // Not installed
-					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notinstalled);
-					SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), install_buttontext);
-					hiddenButtons |= 2; // Uninstall buttons is hidden
-					ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
-					break;
-				default: // Not running
-					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notrunning);
-					break;
-			}
-
-			// Correct the placement of buttons, push them to the left side if some of them are hidden.
-			if (hiddenButtons == 2) { // Uninstall button is the only one hidden. Place connect button at uninstall position
-				WINDOWPLACEMENT lpwndpl;
-				GetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
-				SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
-			} else if (hiddenButtons == 6) { // Only connect button is showing, place it in the install button location
-				WINDOWPLACEMENT lpwndpl;
+			// Set text in the dialog box
+			if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
+			if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
+			if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
+			if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
+			SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? (char*)meshname : "(None)", -1));
+			SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
+			SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
+			SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
+			if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
+			if ((installFlagsInt & 3) == 1) {
+				// Temporary Agent Only
+				hiddenButtons |= 6; // Both install and uninstall buttons are hidden
+				ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
+				ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
 				GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
 				SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
 			}
-
-			if (mshfile != NULL) { free(mshfile); }
-			Duktape_SafeDestroyHeap(ctx);
-			ILibStopChain(dialogchain);
-			ILibStartChain(dialogchain);
-			return (INT_PTR)TRUE;
+			else if ((installFlagsInt & 3) == 2) {
+				// Background Only
+				hiddenButtons |= 1; // Connect button is hidden hidden
+				ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
+			}
+			else if ((installFlagsInt & 3) == 3) {
+				// Uninstall only
+				GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
+				SetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
+				hiddenButtons |= 5; // Both install and connect buttons are hidden
+				ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
+				ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
+			}
 		}
+		else
+		{
+			EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
+		}
+
+		// Get the current service running state
+		int r = GetServiceState(meshServiceName != NULL ? meshServiceName : serviceFile);
+		SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), update_buttontext);
+
+		switch (r)
+		{
+		case SERVICE_RUNNING:
+			SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_running);
+			break;
+		case 0:
+		case 100: // Not installed
+			SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notinstalled);
+			SetWindowTextW(GetDlgItem(hDlg, IDC_INSTALLBUTTON), install_buttontext);
+			hiddenButtons |= 2; // Uninstall buttons is hidden
+			ShowWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), SW_HIDE);
+			break;
+		default: // Not running
+			SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notrunning);
+			break;
+		}
+
+		// Correct the placement of buttons, push them to the left side if some of them are hidden.
+		if (hiddenButtons == 2) { // Uninstall button is the only one hidden. Place connect button at uninstall position
+			WINDOWPLACEMENT lpwndpl;
+			GetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
+			SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
+		}
+		else if (hiddenButtons == 6) { // Only connect button is showing, place it in the install button location
+			WINDOWPLACEMENT lpwndpl;
+			GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
+			SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
+		}
+
+		if (mshfile != NULL) { free(mshfile); }
+		Duktape_SafeDestroyHeap(ctx);
+		ILibStopChain(dialogchain);
+		ILibStartChain(dialogchain);
+		return (INT_PTR)TRUE;
+	}
 	case WM_COMMAND:
-		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCLOSE || LOWORD(wParam) == IDCANCEL)
 		{
 			EndDialog(hDlg, LOWORD(wParam));
 
@@ -1165,13 +1215,17 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			return (INT_PTR)TRUE;
 		}
+		else if (LOWORD(wParam) == IDC_DETAILSBUTTON) {
+			DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_DETAILSDIALOG), hDlg, DialogHandler2);
+			return (INT_PTR)TRUE;
+		}
 		else if (LOWORD(wParam) == IDC_INSTALLBUTTON || LOWORD(wParam) == IDC_UNINSTALLBUTTON)
 		{
 			BOOL result = FALSE;
 
-			EnableWindow( GetDlgItem( hDlg, IDC_INSTALLBUTTON ), FALSE );
-			EnableWindow( GetDlgItem( hDlg, IDC_UNINSTALLBUTTON ), FALSE );
-			EnableWindow( GetDlgItem( hDlg, IDCANCEL ), FALSE );
+			EnableWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), FALSE);
+			EnableWindow(GetDlgItem(hDlg, IDCLOSE), FALSE);
 
 			if (LOWORD(wParam) == IDC_INSTALLBUTTON)
 			{
@@ -1190,7 +1244,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			{
 				EnableWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), TRUE);
 				EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), TRUE);
-				EnableWindow(GetDlgItem(hDlg, IDCANCEL), TRUE);
+				EnableWindow(GetDlgItem(hDlg, IDCLOSE), TRUE);
 			}
 
 #ifdef _DEBUG
@@ -1200,7 +1254,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			return (INT_PTR)TRUE;
 		}
-		else if (LOWORD(wParam) == IDC_CONNECTBUTTON) 
+		else if (LOWORD(wParam) == IDC_CONNECTBUTTON)
 		{
 			//
 			// Temporary Agent
@@ -1209,12 +1263,12 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
 			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), "Running as temporary agent");
-			
+
 			DWORD pid = GetCurrentProcessId();
 			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u", pid);
 			if (RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE) == 0) { RunAsAdmin(ILibScratchPad, 1); }
 
-			if (closeButtonTextSet != 0) { SetWindowTextW(GetDlgItem(hDlg, IDCANCEL), closeButtonText); }
+			if (closeButtonTextSet != 0) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closeButtonText); }
 			return (INT_PTR)TRUE;
 		}
 		break;
@@ -1223,6 +1277,49 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 }
 
 #endif
+
+
+// Message handler for details dialog box.
+INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL;
+	char *displayName = NULL, *meshServiceName = NULL;
+	int hiddenButtons = 0; // Flags: 1 if "Connect" is hidden, 2 if "Uninstall" is hidden, 4 is "Install is hidden"
+
+	UNREFERENCED_PARAMETER(lParam);
+	switch (message)
+	{
+	case WM_CTLCOLORDLG: {
+		// Set the background of the dialog box to blue
+		if (DialogBackgroundBrush == NULL) {
+			DialogBackgroundBrush = CreateSolidBrush(RGB(0, 54, 105));
+		}
+		return (INT_PTR)DialogBackgroundBrush;
+	}
+	case WM_CTLCOLORSTATIC: {
+		// Set the left text to white over transparent
+		SetBkMode((HDC)wParam, TRANSPARENT);
+		SetTextColor((HDC)wParam, RGB(255, 255, 255));
+		return (INT_PTR)GetStockObject(NULL_BRUSH);
+		break;
+	}
+	case WM_INITDIALOG:
+	{
+
+		break;
+	}
+	case WM_COMMAND:
+	{
+		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCLOSE || LOWORD(wParam) == IDCANCEL)
+		{
+			EndDialog(hDlg, LOWORD(wParam));
+			return (INT_PTR)TRUE;
+		}
+	}
+	}
+	return (INT_PTR)FALSE;
+}
+
 
 #ifdef _MINCORE
 BOOL WINAPI AreFileApisANSI(void) { return FALSE; }

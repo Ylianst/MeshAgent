@@ -30,6 +30,9 @@
     <Image Include="MeshService.ico">
       <Filter>Resource Files</Filter>
     </Image>
+    <Image Include="mc.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="firewall.cpp" />
@@ -355,5 +358,6 @@
     <ClInclude Include="..\microscript\ILibDuktape_CompressedStream.h">
       <Filter>Microscript</Filter>
     </ClInclude>
+    <ClInclude Include="stdafx.h" />
   </ItemGroup>
 </Project>

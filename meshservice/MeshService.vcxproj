@@ -552,6 +552,7 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
+    <Image Include="mc.bmp" />
     <Image Include="MeshService.ico" />
   </ItemGroup>
   <ItemGroup>
@@ -666,6 +667,7 @@
     <ClInclude Include="..\microstack\ILibWebServer.h" />
     <ClInclude Include="..\microstack\ILibWrapperWebRTC.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

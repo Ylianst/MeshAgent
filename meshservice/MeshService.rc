@@ -13,6 +13,24 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
+// Neutral resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NEU)
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+#pragma code_page(1252)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_BITMAP_MC           BITMAP                  "mc.bmp"
+
+#endif    // Neutral resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////////////////////////////////////
 // English (United States) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
@@ -43,16 +61,6 @@ BEGIN
 END
 
 #endif    // APSTUDIO_INVOKED
-
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// Icon
-//
-
-// Icon with lowest ID value placed first to ensure application icon
-// remains consistent on all systems.
-IDI_ICON1               ICON                    "MeshService.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -98,30 +106,38 @@ END
 // Dialog
 //
 
-IDD_INSTALLDIALOG DIALOGEX 0, 100, 317, 148
-STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION
+IDD_INSTALLDIALOG DIALOGEX 0, 100, 308, 153
+STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | DS_FIXEDSYS | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "MeshCentral Agent"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    PUSHBUTTON      "Close",IDCANCEL,260,127,50,14
-    LTEXT           "Click the buttons below to install or uninstall the mesh agent. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.",IDC_DESCRIPTION,7,7,275,28
-    GROUPBOX        "Installation Information",IDC_STATIC,7,38,303,87
-    PUSHBUTTON      "Install / Update",IDC_INSTALLBUTTON,7,127,65,14
-    PUSHBUTTON      "Uninstall",IDC_UNINSTALLBUTTON,75,127,65,14
-    ICON            IDI_ICON1,IDC_STATIC,288,7,20,20
-    LTEXT           "Current Agent Status",IDC_AGENTSTATUS_TEXT,14,51,100,8
-    LTEXT           "Unknown",IDC_STATUSTEXT,127,51,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Agent Version",IDC_AGENT_VERSION,14,63, 100,8
-    LTEXT           "Unknown",IDC_VERSIONTEXT,127,63,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Group Id",IDC_MESH_IDENTIFIER,14,99, 100,8
-    LTEXT           "Unknown",IDC_HASHTEXT,127,99,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Group Name",IDC_MESH_NAME,14,87, 100,8
-    LTEXT           "Unknown",IDC_POLICYTEXT,127,87,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Server Identifier",IDC_SERVER_IDENTIFIER,14,111, 100,8
-    LTEXT           "Unknown",IDC_SERVERID,127,111,175,8,0,WS_EX_RIGHT
-    LTEXT           "New Server Location",IDC_SERVER_LOCATION,14,75, 100,8
-    LTEXT           "Unknown",IDC_SERVERLOCATION,127,75,175,8,0,WS_EX_RIGHT
-    PUSHBUTTON      "Connect",IDC_CONNECTBUTTON,143,127,65,14
+    PUSHBUTTON      "Close",IDCLOSE,251,132,50,14
+    PUSHBUTTON      "Install / Update",IDC_INSTALLBUTTON,7,132,65,14
+    PUSHBUTTON      "Uninstall",IDC_UNINSTALLBUTTON,75,132,65,14
+    PUSHBUTTON      "Connect",IDC_CONNECTBUTTON,143,132,65,14
+    LTEXT           "Click the buttons below to install or uninstall this remote management software. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.",IDC_STATIC_LEFTTEXT,7,7,171,63
+    LTEXT           "Static",IDC_STATIC_LINE,7,128,294,1
+    PUSHBUTTON      "Connection Details...",IDC_DETAILSBUTTON,7,111,97,14
+END
+
+IDD_DETAILSDIALOG DIALOGEX 0, 0, 311, 102
+STYLE DS_SETFONT | DS_MODALFRAME | DS_3DLOOK | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Connection Details"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,254,81,50,14
+    LTEXT           "Agent Status",IDC_AGENTSTATUS_TEXT,7,7,100,8
+    LTEXT           "Unknown",IDC_STATUSTEXT,129,7,175,8,0,WS_EX_RIGHT
+    LTEXT           "Agent Version",IDC_AGENT_VERSION,7,19,100,8
+    LTEXT           "Unknown",IDC_VERSIONTEXT,129,19,175,8,0,WS_EX_RIGHT
+    LTEXT           "Group Identifier",IDC_MESH_IDENTIFIER,7,67,100,8
+    LTEXT           "Unknown",IDC_HASHTEXT,129,67,175,8,0,WS_EX_RIGHT
+    LTEXT           "Group Name",IDC_MESH_NAME,7,55,100,8
+    LTEXT           "Unknown",IDC_POLICYTEXT,129,55,175,8,0,WS_EX_RIGHT
+    LTEXT           "Server Identifier",IDC_SERVER_IDENTIFIER,7,43,100,8
+    LTEXT           "Unknown",IDC_SERVERID,129,43,175,8,0,WS_EX_RIGHT
+    LTEXT           "Server Location",IDC_SERVER_LOCATION,7,31,100,8
+    LTEXT           "Unknown",IDC_SERVERLOCATION,129,31,175,8,0,WS_EX_RIGHT
 END
 
 
@@ -136,9 +152,17 @@ BEGIN
     IDD_INSTALLDIALOG, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 310
+        RIGHTMARGIN, 301
         TOPMARGIN, 7
-        BOTTOMMARGIN, 141
+        BOTTOMMARGIN, 146
+    END
+
+    IDD_DETAILSDIALOG, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 304
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 95
     END
 END
 #endif    // APSTUDIO_INVOKED
@@ -150,6 +174,11 @@ END
 //
 
 IDD_INSTALLDIALOG AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_DETAILSDIALOG AFX_DIALOG_LAYOUT
 BEGIN
     0
 END
