@@ -67,6 +67,9 @@ char *DIALOG_LANG = NULL;
 
 HBRUSH DialogBackgroundBrush = NULL;
 HBITMAP g_hbmLogo = NULL;
+duk_context *g_dialogCtx = NULL;
+char *g_dialogLanguage = NULL;
+void *g_dialogTranslationObject = NULL;
 
 /*
 extern int g_TrustedHashSet;
@@ -846,7 +849,74 @@ int wmain(int argc, char* wargv[])
 						SetProcessDPIAware();
 					}
 
+					char selfexe[_MAX_PATH];
+					char *lang = NULL;
+
+					// Get current executable path
+					WCHAR wselfexe[MAX_PATH];
+					GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
+					ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
+
+					void *dialogchain = ILibCreateChain();
+					ILibChain_PartialStart(dialogchain);
+					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
+					if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+					if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
+					{
+						duk_push_object(ctx);															// [translation][en]
+						duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
+						duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
+						duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
+						duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
+						duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
+						duk_push_array(ctx);
+						duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
+						duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
+						duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
+						duk_put_prop_string(ctx, -2, "status");
+						duk_put_prop_string(ctx, -2, "en");												// [translation]
+					}
+					if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
+					if (!duk_has_prop_string(ctx, -1, lang))
+					{
+						duk_push_string(ctx, lang);					// [obj][string]
+						duk_string_split(ctx, -1, "-");				// [obj][string][array]
+						duk_array_shift(ctx, -1);					// [obj][string][array][string]
+						lang = (char*)duk_safe_to_string(ctx, -1);
+						duk_dup(ctx, -4);							// [obj][string][array][string][obj]
+					}
+					if (!duk_has_prop_string(ctx, -1, lang))
+					{
+						lang = "en";
+					}
+
+					if (strcmp("en", lang) != 0)
+					{
+						// Not English, so check the minimum set is present
+						duk_get_prop_string(ctx, -1, "en");				// [en]
+						duk_get_prop_string(ctx, -2, lang);				// [en][lang]
+						duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
+						while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
+						{
+							if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
+							{
+								duk_put_prop(ctx, -4);					// [en][lang][enum]
+							}
+							else
+							{
+								duk_pop_2(ctx);							// [en][lang][enum]
+							}
+						}
+						duk_pop_3(ctx);									// ...
+					}
+					g_dialogTranslationObject = duk_get_heapptr(ctx, -1);
+					g_dialogCtx = ctx;
+					g_dialogLanguage = lang;
 					DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
+
+					Duktape_SafeDestroyHeap(ctx);
+					ILibStopChain(dialogchain);
+					ILibStartChain(dialogchain);
 				}
 			}
 		}
@@ -937,9 +1007,6 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 	}
 	case WM_INITDIALOG:
 	{
-		char selfexe[_MAX_PATH];
-		char *lang = NULL;
-
 		WCHAR *agentstatus = NULL;
 		WCHAR *agentversion = NULL;
 		WCHAR *serverlocation = NULL;
@@ -956,69 +1023,14 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		WCHAR *state_notinstalled = NULL;
 		WCHAR *state_running = NULL;
 		WCHAR *state_notrunning = NULL;
+		WCHAR *connectiondetailsbutton = NULL;
+		WCHAR *closetext = NULL;
+		duk_context *ctx = g_dialogCtx;
+		char *lang = g_dialogLanguage;
 
 		// Load the bitmap
 		// TODO: We need to load a PNG from the .MSH file if present
 		g_hbmLogo = LoadBitmap(GetModuleHandle(NULL), MAKEINTRESOURCE(IDB_BITMAP_MC));
-
-		// Get current executable path
-		WCHAR wselfexe[MAX_PATH];
-		GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
-		ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
-
-		void *dialogchain = ILibCreateChain();
-		ILibChain_PartialStart(dialogchain);
-		duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
-		if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
-		if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
-		{
-			duk_push_object(ctx);															// [translation][en]
-			duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
-			duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
-			duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
-			duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
-			duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
-			duk_push_array(ctx);
-			duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
-			duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
-			duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
-			duk_put_prop_string(ctx, -2, "status");
-			duk_put_prop_string(ctx, -2, "en");												// [translation]
-		}
-
-		if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
-		if (!duk_has_prop_string(ctx, -1, lang))
-		{
-			duk_push_string(ctx, lang);					// [obj][string]
-			duk_string_split(ctx, -1, "-");				// [obj][string][array]
-			duk_array_shift(ctx, -1);					// [obj][string][array][string]
-			lang = (char*)duk_safe_to_string(ctx, -1);
-			duk_dup(ctx, -4);							// [obj][string][array][string][obj]
-		}
-		if (!duk_has_prop_string(ctx, -1, lang))
-		{
-			lang = "en";
-		}
-
-		if (strcmp("en", lang) != 0)
-		{
-			// Not English, so check the minimum set is present
-			duk_get_prop_string(ctx, -1, "en");				// [en]
-			duk_get_prop_string(ctx, -2, lang);				// [en][lang]
-			duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
-			while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
-			{
-				if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
-				{
-					duk_put_prop(ctx, -4);					// [en][lang][enum]
-				}
-				else
-				{
-					duk_pop_2(ctx);							// [en][lang][enum]
-				}
-			}
-			duk_pop_3(ctx);									// ...
-		}
 
 		if (duk_has_prop_string(ctx, -1, lang))
 		{
@@ -1026,24 +1038,22 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
 			if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
-
 			agentversion = Dialog_GetTranslation(ctx, "agentVersion");
 			if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
-
 			serverlocation = Dialog_GetTranslation(ctx, "url");
 			if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
-
 			meshname = Dialog_GetTranslation(ctx, "meshName");
 			if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
-
 			meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
 			if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
-
 			serveridentifier = Dialog_GetTranslation(ctx, "serverId");
 			if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
-
 			dialogdescription = Dialog_GetTranslation(ctx, "description");
 			if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT), dialogdescription); }
+			connectiondetailsbutton = Dialog_GetTranslation(ctx, "connectionDetailsButton");
+			if (connectiondetailsbutton != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_DETAILSBUTTON), connectiondetailsbutton); }
+			closetext = Dialog_GetTranslation(ctx, "close");
+			if (closetext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closetext); }
 
 			install_buttontext = Dialog_GetTranslation(ctx, "install");
 			update_buttontext = Dialog_GetTranslation(ctx, "update");
@@ -1068,57 +1078,58 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		}
 
 
-		fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
-		{
-			DWORD               dwSize = 0;
-			BYTE                *pVersionInfo = NULL;
-			VS_FIXEDFILEINFO    *pFileInfo = NULL;
-			UINT                pLenFileInfo = 0;
-			int major, minor, hotfix, other;
-
-			if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
-			{
-				if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
-				if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
-				{
-					if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
-					{
-						// Display the version of this software
-						major = (pFileInfo->dwFileVersionMS >> 16) & 0xffff;
-						minor = (pFileInfo->dwFileVersionMS) & 0xffff;
-						hotfix = (pFileInfo->dwFileVersionLS >> 16) & 0xffff;
-						other = (pFileInfo->dwFileVersionLS) & 0xffff;
-#ifdef _WIN64
-						if (SOURCE_COMMIT_DATE != NULL)
-						{
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s, 64bit", SOURCE_COMMIT_DATE);
-						}
-						else
-						{
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
-						}
-#else
-						if (SOURCE_COMMIT_DATE != NULL)
-						{
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", SOURCE_COMMIT_DATE);
-						}
-						else
-						{
-							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
-						}
-#endif
-						SetWindowTextA(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibScratchPad);
-					}
-				}
-				free(pVersionInfo);
-			}
-		}
+//		fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
+//		{
+//			DWORD               dwSize = 0;
+//			BYTE                *pVersionInfo = NULL;
+//			VS_FIXEDFILEINFO    *pFileInfo = NULL;
+//			UINT                pLenFileInfo = 0;
+//			int major, minor, hotfix, other;
+//
+//			if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
+//			{
+//				if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
+//				if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
+//				{
+//					if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
+//					{
+//						// Display the version of this software
+//						major = (pFileInfo->dwFileVersionMS >> 16) & 0xffff;
+//						minor = (pFileInfo->dwFileVersionMS) & 0xffff;
+//						hotfix = (pFileInfo->dwFileVersionLS >> 16) & 0xffff;
+//						other = (pFileInfo->dwFileVersionLS) & 0xffff;
+//#ifdef _WIN64
+//						if (SOURCE_COMMIT_DATE != NULL)
+//						{
+//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s, 64bit", SOURCE_COMMIT_DATE);
+//						}
+//						else
+//						{
+//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
+//						}
+//#else
+//						if (SOURCE_COMMIT_DATE != NULL)
+//						{
+//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", SOURCE_COMMIT_DATE);
+//						}
+//						else
+//						{
+//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
+//						}
+//#endif
+//						SetWindowTextA(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibScratchPad);
+//					}
+//				}
+//				free(pVersionInfo);
+//			}
+//		}
 
 		if (duk_peval_string(ctx, "_MSH();") == 0)
 		{
 			int installFlagsInt = 0;
 			WINDOWPLACEMENT lpwndpl;
 
+			char *imageraw = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "image", NULL);
 			installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
 			meshname = (WCHAR*)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
 			meshid = Duktape_GetStringPropertyValue(ctx, -1, "MeshID", NULL);
@@ -1198,9 +1209,6 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		}
 
 		if (mshfile != NULL) { free(mshfile); }
-		Duktape_SafeDestroyHeap(ctx);
-		ILibStopChain(dialogchain);
-		ILibStartChain(dialogchain);
 		return (INT_PTR)TRUE;
 	}
 	case WM_COMMAND:
@@ -1215,7 +1223,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			return (INT_PTR)TRUE;
 		}
-		else if (LOWORD(wParam) == IDC_DETAILSBUTTON) {
+		else if (LOWORD(wParam) == IDC_DETAILSBUTTON) 
+		{
 			DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_DETAILSDIALOG), hDlg, DialogHandler2);
 			return (INT_PTR)TRUE;
 		}
@@ -1285,7 +1294,6 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL;
 	char *displayName = NULL, *meshServiceName = NULL;
 	int hiddenButtons = 0; // Flags: 1 if "Connect" is hidden, 2 if "Uninstall" is hidden, 4 is "Install is hidden"
-
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
@@ -1305,7 +1313,80 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	}
 	case WM_INITDIALOG:
 	{
+		if (duk_peval_string(g_dialogCtx, "_MSH();") == 0)
+		{
+			WCHAR *state_notinstalled = NULL;
+			WCHAR *state_running = NULL;
+			WCHAR *state_notrunning = NULL;
+			WCHAR *agentstatus = NULL;
+			WCHAR *agentversion = NULL;
+			WCHAR *serverlocation = NULL;
+			WCHAR *serveridentifier = NULL;
+			WCHAR *groupname = NULL;
+			WCHAR *meshidentitifer = NULL;
+			WCHAR *oktext = NULL;
+			WCHAR *dialogtitle = NULL;
+			meshname = (WCHAR*)Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshName", NULL);
+			meshid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshID", NULL);
+			serverid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "ServerID", NULL);
+			serverurl = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshServer", NULL);
+			displayName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "displayName", NULL);
+			meshServiceName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "meshServiceName", "Mesh Agent");
 
+			// Set text in the dialog box
+			if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
+			if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
+			if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
+			SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
+			SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
+			SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
+			SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
+			SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? meshname : "(None)", -1));
+			SetWindowTextW(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibUTF8ToWide(SOURCE_COMMIT_DATE, -1));
+
+			duk_push_heapptr(g_dialogCtx, g_dialogTranslationObject); // [obj]
+			if (duk_has_prop_string(g_dialogCtx, -1, g_dialogLanguage))
+			{
+				duk_get_prop_string(g_dialogCtx, -1, g_dialogLanguage);
+				agentstatus = Dialog_GetTranslation(g_dialogCtx, "statusDescription");
+				if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
+				agentversion = Dialog_GetTranslation(g_dialogCtx, "agentVersion");
+				if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
+				serverlocation = Dialog_GetTranslation(g_dialogCtx, "url");
+				if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
+				serveridentifier = Dialog_GetTranslation(g_dialogCtx, "serverId");
+				if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
+				groupname = Dialog_GetTranslation(g_dialogCtx, "meshName");
+				if (groupname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), groupname); }
+				meshidentitifer = Dialog_GetTranslation(g_dialogCtx, "meshId");
+				if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
+				oktext = Dialog_GetTranslation(g_dialogCtx, "ok");
+				if (oktext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDOK), oktext); }
+				dialogtitle = Dialog_GetTranslation(g_dialogCtx, "connectionDetailsTitle");
+				if (dialogtitle != NULL) { SetWindowTextW(hDlg, dialogtitle); }
+
+				duk_get_prop_string(g_dialogCtx, -1, "status");	// [Array]
+				state_notinstalled = Dialog_GetTranslationEx(g_dialogCtx, Duktape_GetStringPropertyIndexValue(g_dialogCtx, -1, 0, NULL));
+				state_running = Dialog_GetTranslationEx(g_dialogCtx, Duktape_GetStringPropertyIndexValue(g_dialogCtx, -1, 1, NULL));
+				state_notrunning = Dialog_GetTranslationEx(g_dialogCtx, Duktape_GetStringPropertyIndexValue(g_dialogCtx, -1, 2, NULL));
+
+				// Get the current service running state
+				int r = GetServiceState(meshServiceName);
+				switch (r)
+				{
+				case SERVICE_RUNNING:
+					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_running);
+					break;
+				case 0:
+				case 100: // Not installed
+					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notinstalled);
+					break;
+				default: // Not running
+					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notrunning);
+					break;
+				}
+			}
+		}
 		break;
 	}
 	case WM_COMMAND:
