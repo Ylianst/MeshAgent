@@ -66,10 +66,10 @@ extern int gRemoteMouseRenderDefault;
 char *DIALOG_LANG = NULL;
 
 HBRUSH DialogBackgroundBrush = NULL;
-HBITMAP g_hbmLogo = NULL;
 duk_context *g_dialogCtx = NULL;
 char *g_dialogLanguage = NULL;
 void *g_dialogTranslationObject = NULL;
+char image_b64[] = "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";
 
 /*
 extern int g_TrustedHashSet;
@@ -86,6 +86,84 @@ extern int g_ServiceConnectFlags;
 #if defined(_LINKVM)
 extern DWORD WINAPI kvm_server_mainloop(LPVOID Param);
 #endif
+
+#include <Shlwapi.h>
+#define SmoothingModeAntiAlias 5
+#define InterpolationModeBicubic 8
+
+
+HMODULE _gdip = NULL;
+HMODULE _shm = NULL;
+typedef int(*_GdipCreateBitmapFromStream)(void *stream, void **bitmap);
+typedef int(*_GdiplusStartup)(void **token, void *input, void *obj);
+typedef int(*_GdiplusShutdown)(void *token);
+typedef IStream*(*_SHCreateMemStream)(void *buffer, uint32_t bufferLen);
+typedef int(*_GdipCreateHBITMAPFromBitmap)(void *bitmap, HBITMAP *hbReturn, int background);
+typedef int(*_GdipGetImagePixelFormat)(void *image, int *format);
+typedef int(*_GdipCreateBitmapFromScan0)(int width, int height, int stride, int format, BYTE* scan0, void** bitmap);
+typedef int(*_GdipGetImageHorizontalResolution)(void *image, float *resolution);
+typedef int(*_GdipGetImageVerticalResolution)(void *image, float *resolution);
+typedef int(*_GdipBitmapSetResolution)(void* bitmap, float xdpi, float ydpi);
+typedef int(*_GdipGetImageGraphicsContext)(void *image, void **graphics);
+typedef int(*_GdipSetSmoothingMode)(void *graphics, int smoothingMode);
+typedef int(*_GdipSetInterpolationMode)(void *graphics, int interpolationMode);
+typedef int(*_GdipDrawImageRectI)(void *graphics, void *image, int x, int y, int width, int height);
+typedef int(*_GdipDisposeImage)(void *image);
+typedef HRESULT(__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
+
+_GdipCreateBitmapFromStream GdipCreateBitmapFromStream;
+_GdipCreateHBITMAPFromBitmap GdipCreateHBITMAPFromBitmap;
+_GdipGetImagePixelFormat GdipGetImagePixelFormat;
+_GdipCreateBitmapFromScan0 GdipCreateBitmapFromScan0;
+_GdipGetImageHorizontalResolution GdipGetImageHorizontalResolution;
+_GdipGetImageVerticalResolution GdipGetImageVerticalResolution;
+_GdipBitmapSetResolution GdipBitmapSetResolution;
+_GdipGetImageGraphicsContext GdipGetImageGraphicsContext;
+_GdipSetSmoothingMode GdipSetSmoothingMode;
+_GdipSetInterpolationMode GdipSetInterpolationMode;
+_GdipDrawImageRectI GdipDrawImageRectI;
+_GdipDisposeImage GdipDisposeImage;
+_GdiplusShutdown GdiplusShutdown;
+
+_GdiplusStartup GdiplusStartup;
+_SHCreateMemStream SHCreateMemStream2;
+void *GdiPlusToken = NULL;
+
+void GdiPlusFlat_Init()
+{
+	char input[24] = { 0 };
+	_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
+	if (_gdip == NULL) { _gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0); }
+	if (_gdip == NULL) { return; }
+	_shm = LoadLibraryExW(L"Shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
+	if (_shm == NULL) { _gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0); }
+	if (_shm == NULL) { FreeLibrary(_gdip); _gdip = NULL; return; }
+
+	GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromStream");
+	GdiplusStartup = (_GdiplusStartup)GetProcAddress(_gdip, (LPCSTR)"GdiplusStartup");
+	SHCreateMemStream2 = (_SHCreateMemStream)GetProcAddress(_shm, (LPCSTR)"SHCreateMemStream");
+	GdipCreateHBITMAPFromBitmap = (_GdipCreateHBITMAPFromBitmap)GetProcAddress(_gdip, (LPCSTR)"GdipCreateHBITMAPFromBitmap");
+	GdipGetImagePixelFormat = (_GdipGetImagePixelFormat)GetProcAddress(_gdip, (LPCSTR)"GdipGetImagePixelFormat");
+	GdipCreateBitmapFromScan0 = (_GdipCreateBitmapFromScan0)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromScan0");
+	GdipGetImageHorizontalResolution = (_GdipGetImageHorizontalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageHorizontalResolution");
+	GdipGetImageVerticalResolution = (_GdipGetImageVerticalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageVerticalResolution");
+	GdipBitmapSetResolution = (_GdipBitmapSetResolution)GetProcAddress(_gdip, (LPCSTR)"GdipBitmapSetResolution");
+	GdipGetImageGraphicsContext = (_GdipGetImageGraphicsContext)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageGraphicsContext");
+	GdipSetSmoothingMode = (_GdipSetSmoothingMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetSmoothingMode");
+	GdipSetInterpolationMode = (_GdipSetInterpolationMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetInterpolationMode");
+	GdipDrawImageRectI = (_GdipDrawImageRectI)GetProcAddress(_gdip, (LPCSTR)"GdipDrawImageRectI");
+	GdipDisposeImage = (_GdipDisposeImage)GetProcAddress(_gdip, (LPCSTR)"GdipDisposeImage");
+	GdiplusShutdown = (_GdiplusShutdown)GetProcAddress(_gdip, (LPCSTR)"GdiplusShutdown");
+
+	((uint32_t*)input)[0] = 1;
+	GdiplusStartup(&GdiPlusToken, input, NULL);
+}
+void GdiPlusFlat_Release()
+{
+	if (GdiPlusToken != NULL) { GdiplusShutdown(GdiPlusToken); GdiPlusToken = NULL; }
+	if (_gdip != NULL) { FreeLibrary(_gdip); _gdip = NULL; }
+	if (_shm != NULL) { FreeLibrary(_shm); _shm = NULL; }
+}
 
 BOOL IsAdmin()
 {
@@ -912,7 +990,21 @@ int wmain(int argc, char* wargv[])
 					g_dialogTranslationObject = duk_get_heapptr(ctx, -1);
 					g_dialogCtx = ctx;
 					g_dialogLanguage = lang;
+					GdiPlusFlat_Init();
+
+					HMODULE sh = LoadLibraryExA((LPCSTR)"SHcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+					if (sh != NULL)
+					{
+						DpiAwarenessFunc func = (DpiAwarenessFunc)GetProcAddress(sh, (LPCSTR)"SetProcessDpiAwareness");
+						if (func != NULL)
+						{
+							func(0);
+						}
+						FreeLibrary(sh); sh = NULL;
+					}
+
 					DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
+					GdiPlusFlat_Release();
 
 					Duktape_SafeDestroyHeap(ctx);
 					ILibStopChain(dialogchain);
@@ -959,6 +1051,35 @@ WCHAR *Dialog_GetTranslation(void *ctx, char *property)
 WCHAR closeButtonText[255] = { 0 };
 int closeButtonTextSet = 0;
 
+HBITMAP GetScaledImage(char *raw, size_t rawLen, int w, int h)
+{
+	size_t newLen = ILibBase64DecodeLength(rawLen);
+	char *decoded = (char*)ILibMemory_SmartAllocate(newLen);
+	newLen = ILibBase64Decode(raw, (int)rawLen, (unsigned char**)&decoded);
+
+	IStream *instream = SHCreateMemStream2(decoded, (uint32_t)newLen);
+	void *bm = NULL;
+	void *g = NULL;
+	void *nb = NULL;
+	HBITMAP hbm;
+	int format;
+	float REAL_w, REAL_h;
+	int s = GdipCreateBitmapFromStream((void*)instream, &bm);
+	s = GdipGetImagePixelFormat(bm, &format);
+	s = GdipCreateBitmapFromScan0(w, h, 0, format, NULL, &nb);
+	s = GdipGetImageHorizontalResolution(bm, &REAL_w);
+	s = GdipGetImageVerticalResolution(bm, &REAL_h);
+	s = GdipBitmapSetResolution(nb, REAL_w, REAL_h);
+	s = GdipGetImageGraphicsContext(nb, &g);
+	s = GdipSetSmoothingMode(g, SmoothingModeAntiAlias);
+	s = GdipSetInterpolationMode(g, InterpolationModeBicubic);
+	s = GdipDrawImageRectI(g, bm, 0, 0, w, h);
+	s = GdipCreateHBITMAPFromBitmap(nb, &hbm, RGB(105, 54, 0));
+	s = GdipDisposeImage(bm);
+	ILibMemory_Free(decoded);
+	return(hbm);
+}
+
 // Message handler for dialog box.
 INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -988,21 +1109,6 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 	}
 	case WM_PAINT:
 	{
-		// Paint the logo
-		// TODO: We need to auto-scale the image to fit
-		// TODO: Paint using GDI+ with transparency support
-		if (g_hbmLogo != NULL) {
-			BITMAP bm;
-			PAINTSTRUCT ps;
-			HDC hdc = BeginPaint(hDlg, &ps);
-			HDC hdcMem = CreateCompatibleDC(hdc);
-			HBITMAP hbmOld = SelectObject(hdcMem, g_hbmLogo);
-			GetObject(g_hbmLogo, sizeof(bm), &bm);
-			BitBlt(hdc, 326, 14, bm.bmWidth, bm.bmHeight, hdcMem, 0, 0, SRCCOPY);
-			SelectObject(hdcMem, hbmOld);
-			DeleteDC(hdcMem);
-			EndPaint(hDlg, &ps);
-		}
 		break;
 	}
 	case WM_INITDIALOG:
@@ -1027,10 +1133,6 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		WCHAR *closetext = NULL;
 		duk_context *ctx = g_dialogCtx;
 		char *lang = g_dialogLanguage;
-
-		// Load the bitmap
-		// TODO: We need to load a PNG from the .MSH file if present
-		g_hbmLogo = LoadBitmap(GetModuleHandle(NULL), MAKEINTRESOURCE(IDB_BITMAP_MC));
 
 		if (duk_has_prop_string(ctx, -1, lang))
 		{
@@ -1077,59 +1179,29 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
 		}
 
-
-//		fileName = MeshAgent_MakeAbsolutePath(selfexe, ".msh");
-//		{
-//			DWORD               dwSize = 0;
-//			BYTE                *pVersionInfo = NULL;
-//			VS_FIXEDFILEINFO    *pFileInfo = NULL;
-//			UINT                pLenFileInfo = 0;
-//			int major, minor, hotfix, other;
-//
-//			if ((dwSize = GetFileVersionInfoSizeW(wselfexe, NULL)))
-//			{
-//				if ((pVersionInfo = malloc(dwSize)) == NULL) { ILIBCRITICALEXIT(254); }
-//				if (GetFileVersionInfoW(wselfexe, 0, dwSize, pVersionInfo))
-//				{
-//					if (VerQueryValue(pVersionInfo, TEXT("\\"), (LPVOID*)&pFileInfo, &pLenFileInfo))
-//					{
-//						// Display the version of this software
-//						major = (pFileInfo->dwFileVersionMS >> 16) & 0xffff;
-//						minor = (pFileInfo->dwFileVersionMS) & 0xffff;
-//						hotfix = (pFileInfo->dwFileVersionLS >> 16) & 0xffff;
-//						other = (pFileInfo->dwFileVersionLS) & 0xffff;
-//#ifdef _WIN64
-//						if (SOURCE_COMMIT_DATE != NULL)
-//						{
-//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s, 64bit", SOURCE_COMMIT_DATE);
-//						}
-//						else
-//						{
-//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d, 64bit", major, minor, hotfix);
-//						}
-//#else
-//						if (SOURCE_COMMIT_DATE != NULL)
-//						{
-//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s", SOURCE_COMMIT_DATE);
-//						}
-//						else
-//						{
-//							sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "v%d.%d.%d", major, minor, hotfix);
-//						}
-//#endif
-//						SetWindowTextA(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibScratchPad);
-//					}
-//				}
-//				free(pVersionInfo);
-//			}
-//		}
-
 		if (duk_peval_string(ctx, "_MSH();") == 0)
 		{
 			int installFlagsInt = 0;
 			WINDOWPLACEMENT lpwndpl;
+			RECT r;
+			GetWindowRect(GetDlgItem(hDlg, IDC_IMAGE), &r);
 
+			duk_size_t rawLen;
 			char *imageraw = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "image", NULL);
+			if (imageraw != NULL)
+			{
+				duk_push_sprintf(g_dialogCtx, "('%s').split(',').pop()", imageraw);					// [msh][str]
+				duk_eval(g_dialogCtx);																// [msh][str]
+				duk_swap_top(g_dialogCtx, -2);														// [str][msh]
+				imageraw = (char*)duk_get_lstring(g_dialogCtx, -2, &rawLen);
+				HBITMAP scaled = GetScaledImage(imageraw, rawLen, 155, 155);
+				SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
+			}
+			else
+			{
+				HBITMAP scaled = GetScaledImage(image_b64, sizeof(image_b64) - 1, 155, 155);
+				SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
+			}
 			installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
 			meshname = (WCHAR*)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
 			meshid = Duktape_GetStringPropertyValue(ctx, -1, "MeshID", NULL);
@@ -1173,6 +1245,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		else
 		{
 			EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
+			HBITMAP scaled = GetScaledImage(image_b64, sizeof(image_b64) - 1, 155, 155);
+			SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
 		}
 
 		// Get the current service running state
@@ -1326,7 +1400,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			WCHAR *meshidentitifer = NULL;
 			WCHAR *oktext = NULL;
 			WCHAR *dialogtitle = NULL;
-			meshname = (WCHAR*)Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshName", NULL);
+			meshname = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshName", NULL);
 			meshid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshID", NULL);
 			serverid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "ServerID", NULL);
 			serverurl = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshServer", NULL);

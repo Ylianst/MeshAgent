@@ -118,6 +118,7 @@ BEGIN
     LTEXT           "Click the buttons below to install or uninstall this remote management software. When installed, this software runs in the background allowing this computer to be managed and controlled by a remote administrator.",IDC_STATIC_LEFTTEXT,7,7,171,63
     LTEXT           "Static",IDC_STATIC_LINE,7,128,294,1
     PUSHBUTTON      "Connection Details...",IDC_DETAILSBUTTON,7,111,97,14
+    CONTROL         "",IDC_IMAGE,"Static",SS_BITMAP | SS_CENTERIMAGE | SS_REALSIZEIMAGE | WS_TABSTOP,185,20,103,95
 END
 
 IDD_DETAILSDIALOG DIALOGEX 0, 0, 311, 102

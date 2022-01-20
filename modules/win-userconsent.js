@@ -16,8 +16,8 @@ limitations under the License.
 */
 
 const HALFTONE = 4;
-const SmoothingModeAntiAlias = 4;
-const InterpolationModeBicubic = 5;
+const SmoothingModeAntiAlias = 5;
+const InterpolationModeBicubic = 8;
 
 const WM_SETFONT = 0x0030;
 const WM_CTLCOLORSTATIC = 0x0138;

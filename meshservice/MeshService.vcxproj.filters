@@ -30,9 +30,6 @@
     <Image Include="MeshService.ico">
       <Filter>Resource Files</Filter>
     </Image>
-    <Image Include="mc.bmp">
-      <Filter>Resource Files</Filter>
-    </Image>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="firewall.cpp" />

@@ -29,6 +29,7 @@
 #define IDC_TAB2                        1021
 #define IDC_TABS                        1021
 #define IDC_STATIC_LEFTTEXT             1022
+#define IDC_IMAGE                       1023
 #define IDC_STATIC_LINE                 1024
 #define IDC_DETAILSBUTTON               1031
 
