@@ -94,21 +94,21 @@ extern DWORD WINAPI kvm_server_mainloop(LPVOID Param);
 
 HMODULE _gdip = NULL;
 HMODULE _shm = NULL;
-typedef int(*_GdipCreateBitmapFromStream)(void *stream, void **bitmap);
-typedef int(*_GdiplusStartup)(void **token, void *input, void *obj);
-typedef int(*_GdiplusShutdown)(void *token);
-typedef IStream*(*_SHCreateMemStream)(void *buffer, uint32_t bufferLen);
-typedef int(*_GdipCreateHBITMAPFromBitmap)(void *bitmap, HBITMAP *hbReturn, int background);
-typedef int(*_GdipGetImagePixelFormat)(void *image, int *format);
-typedef int(*_GdipCreateBitmapFromScan0)(int width, int height, int stride, int format, BYTE* scan0, void** bitmap);
-typedef int(*_GdipGetImageHorizontalResolution)(void *image, float *resolution);
-typedef int(*_GdipGetImageVerticalResolution)(void *image, float *resolution);
-typedef int(*_GdipBitmapSetResolution)(void* bitmap, float xdpi, float ydpi);
-typedef int(*_GdipGetImageGraphicsContext)(void *image, void **graphics);
-typedef int(*_GdipSetSmoothingMode)(void *graphics, int smoothingMode);
-typedef int(*_GdipSetInterpolationMode)(void *graphics, int interpolationMode);
-typedef int(*_GdipDrawImageRectI)(void *graphics, void *image, int x, int y, int width, int height);
-typedef int(*_GdipDisposeImage)(void *image);
+typedef int(__stdcall *_GdipCreateBitmapFromStream)(void *stream, void **bitmap);
+typedef int(__stdcall *_GdiplusStartup)(void **token, void *input, void *obj);
+typedef int(__stdcall *_GdiplusShutdown)(void *token);
+typedef IStream*(__stdcall *_SHCreateMemStream)(void *buffer, uint32_t bufferLen);
+typedef int(__stdcall *_GdipCreateHBITMAPFromBitmap)(void *bitmap, HBITMAP *hbReturn, int background);
+typedef int(__stdcall *_GdipGetImagePixelFormat)(void *image, int *format);
+typedef int(__stdcall *_GdipCreateBitmapFromScan0)(int width, int height, int stride, int format, BYTE* scan0, void** bitmap);
+typedef int(__stdcall *_GdipGetImageHorizontalResolution)(void *image, float *resolution);
+typedef int(__stdcall *_GdipGetImageVerticalResolution)(void *image, float *resolution);
+typedef int(__stdcall *_GdipBitmapSetResolution)(void* bitmap, float xdpi, float ydpi);
+typedef int(__stdcall *_GdipGetImageGraphicsContext)(void *image, void **graphics);
+typedef int(__stdcall *_GdipSetSmoothingMode)(void *graphics, int smoothingMode);
+typedef int(__stdcall *_GdipSetInterpolationMode)(void *graphics, int interpolationMode);
+typedef int(__stdcall *_GdipDrawImageRectI)(void *graphics, void *image, int x, int y, int width, int height);
+typedef int(__stdcall *_GdipDisposeImage)(void *image);
 typedef HRESULT(__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
 
 _GdipCreateBitmapFromStream GdipCreateBitmapFromStream;
@@ -531,7 +531,7 @@ int wmain(int argc, char* wargv[])
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
 		printf("Agent ARCHID: %d\n", MESH_AGENTID);
-		char script[] = "console.log('Detected OS: ' + require('os').Name + ' - ' + require('os').arch());process.exit();";
+		char script[] = "var _tmp = 'Detected OS: ' + require('os').Name; try{_tmp += (' - ' + require('os').arch());}catch(x){}console.log(_tmp);if(process.platform=='win32'){ _tmp=require('win-authenticode-opus')(process.execPath); if(_tmp!=null && _tmp.url!=null){ _tmp=require('win-authenticode-opus').locked(_tmp.url); if(_tmp!=null) { console.log('LOCKED to: ' + _tmp.dns); console.log(' => ' + _tmp.id); } } } process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
@@ -938,74 +938,80 @@ int wmain(int argc, char* wargv[])
 					void *dialogchain = ILibCreateChain();
 					ILibChain_PartialStart(dialogchain);
 					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
-					if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
-					if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
+					if (duk_peval_string(ctx, "require('win-authenticode-opus').checkMSH();") == 0)
 					{
-						duk_push_object(ctx);															// [translation][en]
-						duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
-						duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
-						duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
-						duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
-						duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
-						duk_push_array(ctx);
-						duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
-						duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
-						duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
-						duk_put_prop_string(ctx, -2, "status");
-						duk_put_prop_string(ctx, -2, "en");												// [translation]
-					}
-					if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
-					if (!duk_has_prop_string(ctx, -1, lang))
-					{
-						duk_push_string(ctx, lang);					// [obj][string]
-						duk_string_split(ctx, -1, "-");				// [obj][string][array]
-						duk_array_shift(ctx, -1);					// [obj][string][array][string]
-						lang = (char*)duk_safe_to_string(ctx, -1);
-						duk_dup(ctx, -4);							// [obj][string][array][string][obj]
-					}
-					if (!duk_has_prop_string(ctx, -1, lang))
-					{
-						lang = "en";
-					}
-
-					if (strcmp("en", lang) != 0)
-					{
-						// Not English, so check the minimum set is present
-						duk_get_prop_string(ctx, -1, "en");				// [en]
-						duk_get_prop_string(ctx, -2, lang);				// [en][lang]
-						duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
-						while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
+						if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+						if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
 						{
-							if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
-							{
-								duk_put_prop(ctx, -4);					// [en][lang][enum]
-							}
-							else
-							{
-								duk_pop_2(ctx);							// [en][lang][enum]
-							}
+							duk_push_object(ctx);															// [translation][en]
+							duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
+							duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
+							duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
+							duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
+							duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
+							duk_push_array(ctx);
+							duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
+							duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
+							duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
+							duk_put_prop_string(ctx, -2, "status");
+							duk_put_prop_string(ctx, -2, "en");												// [translation]
 						}
-						duk_pop_3(ctx);									// ...
-					}
-					g_dialogTranslationObject = duk_get_heapptr(ctx, -1);
-					g_dialogCtx = ctx;
-					g_dialogLanguage = lang;
-					GdiPlusFlat_Init();
-
-					HMODULE sh = LoadLibraryExA((LPCSTR)"SHcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-					if (sh != NULL)
-					{
-						DpiAwarenessFunc func = (DpiAwarenessFunc)GetProcAddress(sh, (LPCSTR)"SetProcessDpiAwareness");
-						if (func != NULL)
+						if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
+						if (!duk_has_prop_string(ctx, -1, lang))
 						{
-							func(0);
+							duk_push_string(ctx, lang);					// [obj][string]
+							duk_string_split(ctx, -1, "-");				// [obj][string][array]
+							duk_array_shift(ctx, -1);					// [obj][string][array][string]
+							lang = (char*)duk_safe_to_string(ctx, -1);
+							duk_dup(ctx, -4);							// [obj][string][array][string][obj]
 						}
-						FreeLibrary(sh); sh = NULL;
+						if (!duk_has_prop_string(ctx, -1, lang))
+						{
+							lang = "en";
+						}
+
+						if (strcmp("en", lang) != 0)
+						{
+							// Not English, so check the minimum set is present
+							duk_get_prop_string(ctx, -1, "en");				// [en]
+							duk_get_prop_string(ctx, -2, lang);				// [en][lang]
+							duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
+							while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
+							{
+								if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
+								{
+									duk_put_prop(ctx, -4);					// [en][lang][enum]
+								}
+								else
+								{
+									duk_pop_2(ctx);							// [en][lang][enum]
+								}
+							}
+							duk_pop_3(ctx);									// ...
+						}
+						g_dialogTranslationObject = duk_get_heapptr(ctx, -1);
+						g_dialogCtx = ctx;
+						g_dialogLanguage = lang;
+						GdiPlusFlat_Init();
+
+						HMODULE sh = LoadLibraryExA((LPCSTR)"SHcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+						if (sh != NULL)
+						{
+							DpiAwarenessFunc func = (DpiAwarenessFunc)GetProcAddress(sh, (LPCSTR)"SetProcessDpiAwareness");
+							if (func != NULL)
+							{
+								func(0);
+							}
+							FreeLibrary(sh); sh = NULL;
+						}
+
+						DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
+						GdiPlusFlat_Release();
 					}
-
-					DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
-					GdiPlusFlat_Release();
-
+					else
+					{
+						printf("%s", duk_safe_to_string(ctx, -1));
+					}
 					Duktape_SafeDestroyHeap(ctx);
 					ILibStopChain(dialogchain);
 					ILibStartChain(dialogchain);

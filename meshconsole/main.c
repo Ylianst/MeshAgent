@@ -251,7 +251,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 
 		printf("Agent ARCHID: %d\n", MESH_AGENTID);
-		char script[] = "var _tmp = 'Detected OS: ' + require('os').Name; try{_tmp += (' - ' + require('os').arch());}catch(x){}console.log(_tmp);process.exit();";
+		char script[] = "var _tmp = 'Detected OS: ' + require('os').Name; try{_tmp += (' - ' + require('os').arch());}catch(x){}console.log(_tmp);if(process.platform=='win32'){ _tmp=require('win-authenticode-opus')(process.execPath); if(_tmp!=null && _tmp.url!=null){ _tmp=require('win-authenticode-opus').locked(_tmp.url); if(_tmp!=null) { console.log('LOCKED to: ' + _tmp.dns); console.log(' => ' + _tmp.id); } } } process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
