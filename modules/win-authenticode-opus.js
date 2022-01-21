@@ -67,20 +67,20 @@ function read(path)
             dwSignerInfo).Val != 0)
         {
             var attr;
-            var attributes = pSignerInfo.Deref(104, 16);
+            var attributes = pSignerInfo.Deref(GM.PointerSize == 8 ? 104 : 52, GM.PointerSize * 2);
             var attrCount = attributes.toBuffer().readUInt32LE();
 
             for (n = 0; n < attrCount; n++)
             {
-                attr = attributes.Deref(8, 8).Deref();
-                attr = attr.increment(n * 24);
+                attr = attributes.Deref(GM.PointerSize, GM.PointerSize).Deref();
+                attr = attr.increment(n * (GM.PointerSize == 8 ? 24 : 12));
                 if (SPC_SP_OPUS_INFO_OBJID == attr.Deref().String)
                 {
-                    var blob = attr.Deref(16, 8).Deref();
+                    var blob = attr.Deref(GM.PointerSize * 2, GM.PointerSize).Deref();
                     var dwData = GM.CreateVariable(4);
 
                     var cb = blob.Deref(0, 4).toBuffer().readUInt32LE();
-                    var pb = blob.Deref(8, 8).Deref();
+                    var pb = blob.Deref(GM.PointerSize, GM.PointerSize).Deref();
 
                     if (crypt.CryptDecodeObject(ENCODING, GM.CreateVariable(SPC_SP_OPUS_INFO_OBJID), pb, cb, 0, 0, dwData).Val != 0)
                     {
@@ -88,7 +88,7 @@ function read(path)
                         if (crypt.CryptDecodeObject(ENCODING, GM.CreateVariable(SPC_SP_OPUS_INFO_OBJID), pb, cb, 0, opus, dwData).Val != 0)
                         {
                        
-                            return ({ description: opus.Deref().Val != 0 ? opus.Deref().Wide2UTF8 : null, url: opus.Deref(8, 8).Deref().Val != 0 ? opus.Deref(8, 8).Deref().Deref(8, 8).Deref().Wide2UTF8 : null });
+                            return ({ description: opus.Deref().Val != 0 ? opus.Deref().Wide2UTF8 : null, url: opus.Deref(GM.PointerSize, GM.PointerSize).Deref().Val != 0 ? opus.Deref(GM.PointerSize, GM.PointerSize).Deref().Deref(GM.PointerSize, GM.PointerSize).Deref().Wide2UTF8 : null });
                         }
                     }
                 }
