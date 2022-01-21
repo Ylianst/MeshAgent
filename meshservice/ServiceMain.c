@@ -905,28 +905,6 @@ int wmain(int argc, char* wargv[])
 				else if (skip == 0)
 				{
 					// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
-					FreeConsole();
-					HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-					DpiAwarenessFunc dpiAwareness = NULL;
-					if (shCORE != NULL)
-					{
-						if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
-						{
-							FreeLibrary(shCORE);
-							shCORE = NULL;
-						}
-					}
-					if (dpiAwareness != NULL)
-					{
-						dpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-						FreeLibrary(shCORE);
-						shCORE = NULL;
-					}
-					else
-					{
-						SetProcessDPIAware();
-					}
-
 					char selfexe[_MAX_PATH];
 					char *lang = NULL;
 
@@ -992,19 +970,9 @@ int wmain(int argc, char* wargv[])
 						g_dialogTranslationObject = duk_get_heapptr(ctx, -1);
 						g_dialogCtx = ctx;
 						g_dialogLanguage = lang;
+
+						FreeConsole();
 						GdiPlusFlat_Init();
-
-						HMODULE sh = LoadLibraryExA((LPCSTR)"SHcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-						if (sh != NULL)
-						{
-							DpiAwarenessFunc func = (DpiAwarenessFunc)GetProcAddress(sh, (LPCSTR)"SetProcessDpiAwareness");
-							if (func != NULL)
-							{
-								func(0);
-							}
-							FreeLibrary(sh); sh = NULL;
-						}
-
 						DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
 						GdiPlusFlat_Release();
 					}
