@@ -3678,6 +3678,10 @@ void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
 {
 	ILibMemory_Free(j);
 }
+void MeshServer_ConnectEx_Lockout_Retry(void *j)
+{
+	MeshServer_ConnectEx((MeshAgentHostContainer*)j);
+}
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 {
 	size_t len, serverUrlLen;
@@ -3828,6 +3832,19 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	ILibParseUri(serverUrl, &host, &port, &path, &meshServer);
 #endif
 
+#ifdef WIN32
+	if (agent->DNS_LOCK[0] != 0)
+	{
+		if (strcasecmp(agent->DNS_LOCK, host) != 0)
+		{
+			printf("agentcore: DNS Lock[%s]: Unauthorized to connect to: %s\n", agent->DNS_LOCK, host);
+			free(host); free(path);
+			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
+			return;
+		}
+	}
+#endif
+
 	if (useproxy == 0)
 	{
 		if (meshServer.sin6_family == AF_UNSPEC)
@@ -3891,6 +3908,19 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		free(host); free(path);
 		return;
 	}
+
+#ifdef WIN32
+	if (agent->ID_LOCK[0] != 0)
+	{
+		if(f->datalength > sizeof(agent->ID_LOCK) || strncasecmp(agent->ID_LOCK, f->data, f->datalength)!=0)
+		{
+			printf("agentcore: ServerID Lock: ServerID MISMATCH for: %s\n", host);
+			free(host); free(path);
+			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
+			return;
+		}
+	}
+#endif
 
 	memset(agent->serverHash, 0, sizeof(agent->serverHash));
 	util_hexToBuf(f->data, f->datalength, agent->serverHash);
@@ -4055,6 +4085,32 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 		MeshServer_Agent_SelfTest(agent);
 		return;
 	}
+
+#ifdef WIN32
+	duk_idx_t top = duk_get_top(agent->meshCoreCtx);
+	if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
+	{
+		if (!duk_is_null_or_undefined(agent->meshCoreCtx, -1))
+		{
+			char *url = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "url", NULL);
+			if (url != NULL)
+			{
+				duk_push_sprintf(agent->meshCoreCtx, "require('win-authenticode-opus').locked('%s');", url);						// [obj][str]
+				if (duk_peval(agent->meshCoreCtx) == 0)																				// [obj][obj]
+				{
+					char *dns = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "dns", NULL);
+					char *id = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "id", NULL);
+					if (dns != NULL && id != NULL)
+					{
+						strcpy_s(agent->DNS_LOCK, sizeof(agent->DNS_LOCK), dns);
+						strcpy_s(agent->ID_LOCK, sizeof(agent->ID_LOCK), id);
+					}
+				}
+			}
+		}
+	}
+	duk_set_top(agent->meshCoreCtx, top);																							// ...
+#endif
 
 	util_random(sizeof(int), (char*)&timeout);
 	gRemoteMouseRenderDefault = ILibSimpleDataStore_Get(agent->masterDb, "remoteMouseRender", NULL, 0);

@@ -978,7 +978,7 @@ int wmain(int argc, char* wargv[])
 					}
 					else
 					{
-						printf("%s", duk_safe_to_string(ctx, -1));
+						printf("Error: %s", duk_safe_to_string(ctx, -1));
 					}
 					Duktape_SafeDestroyHeap(ctx);
 					ILibStopChain(dialogchain);

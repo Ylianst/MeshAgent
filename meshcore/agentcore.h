@@ -185,6 +185,8 @@ typedef struct MeshAgentHostContainer
 #ifdef WIN32
 	void *shCore;
 	DpiAwarenessFunc dpiAwareness;
+	char DNS_LOCK[255];
+	char ID_LOCK[255];
 #endif
 
 	int showModuleNames;
