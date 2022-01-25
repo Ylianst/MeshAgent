@@ -42,6 +42,7 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('DefWindowProcW');
     this._user32.CreateMethod('DestroyWindow');
     this._user32.CreateMethod('DispatchMessageW');
+    this._user32.CreateMethod('DrawTextExW');
     this._user32.CreateMethod('EndPaint');
     this._user32.CreateMethod('FillRect');
     this._user32.CreateMethod('GetClientRect');
@@ -52,6 +53,7 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('RegisterClassExW');
     this._user32.CreateMethod('SendMessageW');
     this._user32.CreateMethod('SetWindowPos');
+    this._user32.CreateMethod('SetWindowTextW');
     this._user32.CreateMethod('ShowWindow');
     this._user32.CreateMethod('SystemParametersInfoA');
     this._user32.CreateMethod('TranslateMessage');
