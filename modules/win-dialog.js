@@ -404,6 +404,11 @@ function createLocal(title, caption, username, options)
         this.messages.push(msg);
         if (this.pump._HANDLE && this.pump._captionHwnd)
         {
+            if (this.pump.timeout != null)
+            {
+                clearTimeout(this.pump.timeout);
+                this.pump.timeout = setTimeout(pump_onTimeout, this.pump.options.timeout, this.pump);
+            }
             this.pump._addAsyncMethodCall(this.pump._user32.SetWindowTextW.async, [this.pump._captionHwnd, GM.CreateVariable(this.messages.join('\r\n'), { wide: true })]);
             this.pump._user32.PostMessageA(this.pump._HANDLE, WM_USER, 0, 0);
         }
