@@ -111,22 +111,22 @@ typedef int(__stdcall *_GdipDrawImageRectI)(void *graphics, void *image, int x, 
 typedef int(__stdcall *_GdipDisposeImage)(void *image);
 typedef HRESULT(__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
 
-_GdipCreateBitmapFromStream GdipCreateBitmapFromStream;
-_GdipCreateHBITMAPFromBitmap GdipCreateHBITMAPFromBitmap;
-_GdipGetImagePixelFormat GdipGetImagePixelFormat;
-_GdipCreateBitmapFromScan0 GdipCreateBitmapFromScan0;
-_GdipGetImageHorizontalResolution GdipGetImageHorizontalResolution;
-_GdipGetImageVerticalResolution GdipGetImageVerticalResolution;
-_GdipBitmapSetResolution GdipBitmapSetResolution;
-_GdipGetImageGraphicsContext GdipGetImageGraphicsContext;
-_GdipSetSmoothingMode GdipSetSmoothingMode;
-_GdipSetInterpolationMode GdipSetInterpolationMode;
-_GdipDrawImageRectI GdipDrawImageRectI;
-_GdipDisposeImage GdipDisposeImage;
-_GdiplusShutdown GdiplusShutdown;
+_GdipCreateBitmapFromStream __GdipCreateBitmapFromStream;
+_GdipCreateHBITMAPFromBitmap __GdipCreateHBITMAPFromBitmap;
+_GdipGetImagePixelFormat __GdipGetImagePixelFormat;
+_GdipCreateBitmapFromScan0 __GdipCreateBitmapFromScan0;
+_GdipGetImageHorizontalResolution __GdipGetImageHorizontalResolution;
+_GdipGetImageVerticalResolution __GdipGetImageVerticalResolution;
+_GdipBitmapSetResolution __GdipBitmapSetResolution;
+_GdipGetImageGraphicsContext __GdipGetImageGraphicsContext;
+_GdipSetSmoothingMode __GdipSetSmoothingMode;
+_GdipSetInterpolationMode __GdipSetInterpolationMode;
+_GdipDrawImageRectI __GdipDrawImageRectI;
+_GdipDisposeImage __GdipDisposeImage;
+_GdiplusShutdown __GdiplusShutdown;
 
-_GdiplusStartup GdiplusStartup;
-_SHCreateMemStream SHCreateMemStream2;
+_GdiplusStartup __GdiplusStartup;
+_SHCreateMemStream __SHCreateMemStream2;
 void *GdiPlusToken = NULL;
 
 void GdiPlusFlat_Init()
@@ -139,28 +139,28 @@ void GdiPlusFlat_Init()
 	if (_shm == NULL) { _gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0); }
 	if (_shm == NULL) { FreeLibrary(_gdip); _gdip = NULL; return; }
 
-	GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromStream");
-	GdiplusStartup = (_GdiplusStartup)GetProcAddress(_gdip, (LPCSTR)"GdiplusStartup");
-	SHCreateMemStream2 = (_SHCreateMemStream)GetProcAddress(_shm, (LPCSTR)"SHCreateMemStream");
-	GdipCreateHBITMAPFromBitmap = (_GdipCreateHBITMAPFromBitmap)GetProcAddress(_gdip, (LPCSTR)"GdipCreateHBITMAPFromBitmap");
-	GdipGetImagePixelFormat = (_GdipGetImagePixelFormat)GetProcAddress(_gdip, (LPCSTR)"GdipGetImagePixelFormat");
-	GdipCreateBitmapFromScan0 = (_GdipCreateBitmapFromScan0)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromScan0");
-	GdipGetImageHorizontalResolution = (_GdipGetImageHorizontalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageHorizontalResolution");
-	GdipGetImageVerticalResolution = (_GdipGetImageVerticalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageVerticalResolution");
-	GdipBitmapSetResolution = (_GdipBitmapSetResolution)GetProcAddress(_gdip, (LPCSTR)"GdipBitmapSetResolution");
-	GdipGetImageGraphicsContext = (_GdipGetImageGraphicsContext)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageGraphicsContext");
-	GdipSetSmoothingMode = (_GdipSetSmoothingMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetSmoothingMode");
-	GdipSetInterpolationMode = (_GdipSetInterpolationMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetInterpolationMode");
-	GdipDrawImageRectI = (_GdipDrawImageRectI)GetProcAddress(_gdip, (LPCSTR)"GdipDrawImageRectI");
-	GdipDisposeImage = (_GdipDisposeImage)GetProcAddress(_gdip, (LPCSTR)"GdipDisposeImage");
-	GdiplusShutdown = (_GdiplusShutdown)GetProcAddress(_gdip, (LPCSTR)"GdiplusShutdown");
+	__GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromStream");
+	__GdiplusStartup = (_GdiplusStartup)GetProcAddress(_gdip, (LPCSTR)"GdiplusStartup");
+	__SHCreateMemStream2 = (_SHCreateMemStream)GetProcAddress(_shm, (LPCSTR)"SHCreateMemStream");
+	__GdipCreateHBITMAPFromBitmap = (_GdipCreateHBITMAPFromBitmap)GetProcAddress(_gdip, (LPCSTR)"GdipCreateHBITMAPFromBitmap");
+	__GdipGetImagePixelFormat = (_GdipGetImagePixelFormat)GetProcAddress(_gdip, (LPCSTR)"GdipGetImagePixelFormat");
+	__GdipCreateBitmapFromScan0 = (_GdipCreateBitmapFromScan0)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromScan0");
+	__GdipGetImageHorizontalResolution = (_GdipGetImageHorizontalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageHorizontalResolution");
+	__GdipGetImageVerticalResolution = (_GdipGetImageVerticalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageVerticalResolution");
+	__GdipBitmapSetResolution = (_GdipBitmapSetResolution)GetProcAddress(_gdip, (LPCSTR)"GdipBitmapSetResolution");
+	__GdipGetImageGraphicsContext = (_GdipGetImageGraphicsContext)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageGraphicsContext");
+	__GdipSetSmoothingMode = (_GdipSetSmoothingMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetSmoothingMode");
+	__GdipSetInterpolationMode = (_GdipSetInterpolationMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetInterpolationMode");
+	__GdipDrawImageRectI = (_GdipDrawImageRectI)GetProcAddress(_gdip, (LPCSTR)"GdipDrawImageRectI");
+	__GdipDisposeImage = (_GdipDisposeImage)GetProcAddress(_gdip, (LPCSTR)"GdipDisposeImage");
+	__GdiplusShutdown = (_GdiplusShutdown)GetProcAddress(_gdip, (LPCSTR)"GdiplusShutdown");
 
 	((uint32_t*)input)[0] = 1;
-	GdiplusStartup(&GdiPlusToken, input, NULL);
+	__GdiplusStartup(&GdiPlusToken, input, NULL);
 }
 void GdiPlusFlat_Release()
 {
-	if (GdiPlusToken != NULL) { GdiplusShutdown(GdiPlusToken); GdiPlusToken = NULL; }
+	if (GdiPlusToken != NULL) { __GdiplusShutdown(GdiPlusToken); GdiPlusToken = NULL; }
 	if (_gdip != NULL) { FreeLibrary(_gdip); _gdip = NULL; }
 	if (_shm != NULL) { FreeLibrary(_shm); _shm = NULL; }
 }
@@ -1031,25 +1031,25 @@ HBITMAP GetScaledImage(char *raw, size_t rawLen, int w, int h)
 	char *decoded = (char*)ILibMemory_SmartAllocate(newLen);
 	newLen = ILibBase64Decode(raw, (int)rawLen, (unsigned char**)&decoded);
 
-	IStream *instream = SHCreateMemStream2(decoded, (uint32_t)newLen);
+	IStream *instream = __SHCreateMemStream2(decoded, (uint32_t)newLen);
 	void *bm = NULL;
 	void *g = NULL;
 	void *nb = NULL;
 	HBITMAP hbm;
 	int format;
 	float REAL_w, REAL_h;
-	int s = GdipCreateBitmapFromStream((void*)instream, &bm);
-	s = GdipGetImagePixelFormat(bm, &format);
-	s = GdipCreateBitmapFromScan0(w, h, 0, format, NULL, &nb);
-	s = GdipGetImageHorizontalResolution(bm, &REAL_w);
-	s = GdipGetImageVerticalResolution(bm, &REAL_h);
-	s = GdipBitmapSetResolution(nb, REAL_w, REAL_h);
-	s = GdipGetImageGraphicsContext(nb, &g);
-	s = GdipSetSmoothingMode(g, SmoothingModeAntiAlias);
-	s = GdipSetInterpolationMode(g, InterpolationModeBicubic);
-	s = GdipDrawImageRectI(g, bm, 0, 0, w, h);
-	s = GdipCreateHBITMAPFromBitmap(nb, &hbm, RGB(105, 54, 0));
-	s = GdipDisposeImage(bm);
+	int s = __GdipCreateBitmapFromStream((void*)instream, &bm);
+	s = __GdipGetImagePixelFormat(bm, &format);
+	s = __GdipCreateBitmapFromScan0(w, h, 0, format, NULL, &nb);
+	s = __GdipGetImageHorizontalResolution(bm, &REAL_w);
+	s = __GdipGetImageVerticalResolution(bm, &REAL_h);
+	s = __GdipBitmapSetResolution(nb, REAL_w, REAL_h);
+	s = __GdipGetImageGraphicsContext(nb, &g);
+	s = __GdipSetSmoothingMode(g, SmoothingModeAntiAlias);
+	s = __GdipSetInterpolationMode(g, InterpolationModeBicubic);
+	s = __GdipDrawImageRectI(g, bm, 0, 0, w, h);
+	s = __GdipCreateHBITMAPFromBitmap(nb, &hbm, RGB(105, 54, 0));
+	s = __GdipDisposeImage(bm);
 	ILibMemory_Free(decoded);
 	return(hbm);
 }
