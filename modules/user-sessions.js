@@ -832,7 +832,7 @@ function UserSessions()
                 child.stdin.write('   split(lines[i], tok, " ");');
                 child.stdin.write('   if((tok[2]+0)>=' + min + ')');
                 child.stdin.write('   {');
-                child.stdin.write('      if(tok[4]=="") { continue; }');
+                child.stdin.write('      if(tok[4]=="" || tok[4]~/^pts\\//) { continue; }');
                 child.stdin.write('      printf "%s{\\"uid\\": \\"%s\\", \\"sid\\": \\"%s\\"}", del, tok[2], tok[1];');
                 child.stdin.write('      del=",";');
                 child.stdin.write('   }');
@@ -840,6 +840,7 @@ function UserSessions()
                 child.stdin.write('printf "]";');
                 child.stdin.write("}'\nexit\n");
                 child.waitExit();
+                console.log(child.stdout.str);
                 var info1 = JSON.parse(child.stdout.str);
                 var sids = [];
                 var i;
