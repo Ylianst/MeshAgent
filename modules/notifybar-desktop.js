@@ -16,7 +16,134 @@ limitations under the License.
 
 var ptrsize = require('_GenericMarshal').PointerSize;
 var ClientMessage = 33;
+var GM = require('_GenericMarshal');
+const FW_DONTCARE = 0;
+const DEFAULT_CHARSET = 1;
+const OUT_DEFAULT_PRECIS = 0;
+const CLIP_DEFAULT_PRECIS = 0;
+const DEFAULT_QUALITY = 0;
+const DEFAULT_PITCH = 0;
+const FF_SWISS = (2 << 4);  /* Variable stroke width, sans-serifed. */
 
+const WM_COMMAND = 0x0111;
+const WM_MOUSEMOVE = 0x0200;
+const WM_SETFONT = 0x0030;
+
+const WS_CHILD = 0x40000000;
+const WS_TABSTOP = 0x00010000;
+const WS_VISIBLE = 0x10000000;
+
+const STM_SETIMAGE = 0x0172;
+const STM_GETIMAGE = 0x0173;
+const IMAGE_BITMAP = 0;
+const SmoothingModeAntiAlias = 5;
+const InterpolationModeBicubic = 8;
+
+const BS_BITMAP = 0x00000080;
+const BS_DEFPUSHBUTTON = 0x00000001;
+const BM_SETIMAGE = 0x00F7;
+
+const SS_BITMAP = 0x0000000E;
+const SS_REALSIZECONTROL = 0x00000040;
+const SS_LEFT = 0x00000000;
+const SS_CENTERIMAGE = 0x00000200;
+
+const MK_LBUTTON = 0x001;
+const SWP_NOSIZE = 0x0001;
+const SWP_NOZORDER = 0x0004;
+
+const WS_SIZEBOX = 0x00040000;
+
+var SHM = GM.CreateNativeProxy('Shlwapi.dll');
+SHM.CreateMethod('SHCreateMemStream');
+var gdip = GM.CreateNativeProxy('Gdiplus.dll');
+gdip.CreateMethod('GdipBitmapSetResolution');
+gdip.CreateMethod('GdipCreateBitmapFromStream');
+gdip.CreateMethod('GdipCreateBitmapFromScan0');
+gdip.CreateMethod('GdipCreateHBITMAPFromBitmap');
+gdip.CreateMethod('GdipDisposeImage');
+gdip.CreateMethod('GdipDrawImageRectI');
+gdip.CreateMethod('GdipFree');
+gdip.CreateMethod('GdipLoadImageFromStream');
+gdip.CreateMethod('GdipGetImageGraphicsContext');
+gdip.CreateMethod('GdipGetImageHorizontalResolution');
+gdip.CreateMethod('GdipGetImagePixelFormat');
+gdip.CreateMethod('GdipGetImageVerticalResolution');
+gdip.CreateMethod('GdipSetInterpolationMode');
+gdip.CreateMethod('GdipSetSmoothingMode');
+gdip.CreateMethod('GdiplusStartup');
+gdip.CreateMethod('GdiplusShutdown');
+
+const x_icon = 'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAAXNSR0IArs4c6QAABKlJREFUeF7t3U1S20AQBeAZmaIw5A7ANpfxKmyS4yUbZeXLsMXhDrYpB6SUBBK2kDT66X7zqDRbTNzuT29mNJYU7+yHqgOeqhorxhkI2UFgIAZC1gGyciwhBkLWAbJyLCEGQtYBsnIsIQZC1gGyciwhBkLWAbJyLCEGQtYBsnIsIQZC1gGyciwhBuLc82KxSi4uvvvr6x/+/v7A1JP869fz5z+PP/3T4dfZy2GNrg2ekHyxWOVZlro8P3fL5drf3t6xoBQYLw+b1D/tV875Q56c3aFRoCAnGNWhR4JyjOHzvKwu9wkcBQbSikGC0oZRlYZGgYCUc0Y1THUNypGSUs4Zm8c02W9XVTKaJSJR1EEGYURKyhAMdFJUQUZhgFH6hqmuECOSogbSO2eE1pLKw9cUDFRSVEBmYSgnpcTYbFK/33fOGaHjRTMp4iAFRpZlqS/OM+b+CCdFAkM7KaIgk+aMEJoQypgJPFSSJooYSInxkqXOCSSj2ZGZKK8YmzSZMUyhJnoxkL9XX9Jku/3m3etZrvjPRBTJYarzMy2vfif77Z3EZxYDef3gj6nvOcGaXfBIlDmrqcG1jqwp9O+KgZR7P0QonxGj6KEoyDvKvGVl6CgK7RJjhimdnWpxkNhJqVdTu+1KbT67XK79jc7XBiogFUq5aafZmMb4/ZmTUY0KaiBolOL9qi+XunZtg0Nh6AWKyYCAnKAor74y513xTZ8ahvBqqsteNSH1GS1g9VWc/ah9GBCGyiqr84z26PtqtaM4NORM+T0QAwoCW31NaXrX3wDmjOZbq6W8Lynqqy8JFHAyYJN6W28g5wpzUCJhwIes4x5BtlmmoETEiApCOadExogO8o6ivPc1JCkEGBQgJ0nR3GbpQyHBoAE5OaNHoxBhUIFEQSHDoAM5nlOS3W41ZOif/BpCDF6Qh4fygoTJzR7yhwYS7pLGpTq970qIAt86CW6paG7Tt705GQoFCOSCBFv2hoeoehJ/u40s6rY8SVKiJiR6MprHDAFKNBDIBQnDQnr6qsgoUUDgq6mxMBFR4CC02+4kwxcUhG7OCCUnQlJgILRzBhkKBASRjLy4LovsVoiQddvv1UEgc8Zyuc68d3PuGww2DzR8qYJALmZ4u1SnaCjb/SlB5JYXqIFAktG4bqp+T80vuZSTogKCmDO67hGBpFIRRRwkJkY1AkDSqYQiCsKAcYqifDWLAooYCOQ8Y2QDGGsKTfRiINS3RWtv7zPeFq364IDLy7W/uZn8KEDN1Zf0c0/EElJE8VM8WkNwSSyNoXLViciTgKqBduScERqfJVdfGhgqIOXXshJPBBLGkFx9aWGogVQo9eNgQ4du8/fKdy7NSYomhipIPaeMfUKQUjKa5vWSeLcf/IABbQx1kNEoM1dTY4M4ZpsFgQEBGbz6AiWjLSmhex5RGDCQ4JwSCWPI3hcSAwrSiRIZo2/1hcaAg3xAIcFoS8p/8TD+6oPbf1fRvfwQ3ToZu8qx13/sgIGQHRUGYiBkHSArxxJiIGQdICvHEmIgZB0gK8cSYiBkHSArxxJiIGQdICvHEmIgZB0gK8cSYiBkHSArxxJiIGQdICvnH1Bw7aEQPNppAAAAAElFTkSuQmCC';
+
+function RGB(r, g, b)
+{
+    return (r | (g << 8) | (b << 16));
+}
+function gdip_RGB(r, g, b)
+{
+    if (g != null && b != null)
+    {
+        return (b | (g << 8) | (r << 16));
+    }
+    else
+    {
+        var _r = (r & 0xFF);
+        var _g = ((r >> 8) & 0xFF);
+        var _b = ((r >> 16) & 0xFF);
+        return (RGB(_b, _g, _r));
+    }
+}
+function getScaledImage(b64, width, height)
+{
+
+    var startupinput = require('_GenericMarshal').CreateVariable(24);
+    var gdipToken = require('_GenericMarshal').CreatePointer();
+
+    startupinput.toBuffer().writeUInt32LE(1);
+    gdip.GdiplusStartup(gdipToken, startupinput, 0);
+
+    var raw = Buffer.from(b64, 'base64');
+    var nbuff = require('_GenericMarshal').CreateVariable(raw.length);
+    raw.copy(nbuff.toBuffer());
+    var istream = SHM.SHCreateMemStream(nbuff, raw.length);
+
+    var pimage = require('_GenericMarshal').CreatePointer();
+    var hbitmap = require('_GenericMarshal').CreatePointer();
+    var status = gdip.GdipCreateBitmapFromStream(istream, pimage);
+    status = gdip.GdipCreateHBITMAPFromBitmap(pimage.Deref(), hbitmap, RGB(0, 54, 105)); 
+    if (status.Val == 0)
+    {
+        var format = GM.CreateVariable(4);
+        console.info1('PixelFormatStatus: ' + gdip.GdipGetImagePixelFormat(pimage.Deref(), format).Val);
+        console.info1('PixelFormat: ' + format.toBuffer().readInt32LE());
+        var nb = GM.CreatePointer();
+
+        console.info1('FromScan0: ' + gdip.GdipCreateBitmapFromScan0(width, height, 0, format.toBuffer().readInt32LE(), 0, nb).Val);
+
+        var REAL_h = GM.CreateVariable(4);
+        var REAL_w = GM.CreateVariable(4);
+        console.info1('GetRes_W: ' + gdip.GdipGetImageHorizontalResolution(pimage.Deref(), REAL_w).Val);
+        console.info1('GetRes_H: ' + gdip.GdipGetImageVerticalResolution(pimage.Deref(), REAL_h).Val);
+        console.info1('Source DPI: ' + REAL_w.toBuffer().readFloatLE() + ' X ' + REAL_h.toBuffer().readFloatLE());
+        console.info1('SetRes: ' + gdip.GdipBitmapSetResolution(nb.Deref(), REAL_w.toBuffer().readFloatLE(), REAL_h.toBuffer().readFloatLE()).Val);
+
+        var graphics = GM.CreatePointer();
+        console.info1('GdipGetImageGraphicsContext: ' + gdip.GdipGetImageGraphicsContext(nb.Deref(), graphics).Val);
+        console.info1('GdipSetSmoothingMode: ' + gdip.GdipSetSmoothingMode(graphics.Deref(), SmoothingModeAntiAlias).Val);
+        console.info1('InterpolationModeBicubic: ' + gdip.GdipSetInterpolationMode(graphics.Deref(), InterpolationModeBicubic).Val);
+        console.info1('DrawImage: ' + gdip.GdipDrawImageRectI(graphics.Deref(), pimage.Deref(), 0, 0, width, height).Val);
+
+        var scaledhbitmap = GM.CreatePointer();
+        //console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
+        console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, gdip_RGB(0, 54, 105)).Val);
+        console.info1('ImageDispose: ' + gdip.GdipDisposeImage(pimage.Deref()).Val);
+        scaledhbitmap._token = gdipToken;
+        return (scaledhbitmap);
+    }
+    
+    return (null);
+}
 
 function windows_notifybar_check(title, tsid)
 {
@@ -32,7 +159,7 @@ function windows_notifybar_check(title, tsid)
 function windows_notifybar_system(title, tsid)
 {
     var ret = {};
-
+    
     var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
 
     require('events').EventEmitter.call(ret, true)
@@ -77,27 +204,64 @@ function windows_notifybar_local(title)
 
         for (var i in m)
         {
-            //console.log('Monitor: ' + i + ' = Width[' + (m[i].right - m[i].left) + ']');
             monWidth = (m[i].right - m[i].left);
             monHeight = (m[i].bottom - m[i].top);
             barWidth = Math.floor(monWidth * 0.30);
             barHeight = Math.floor(monHeight * 0.035);
+            console.info1('Monitor: ' + i + ' = Width[' + (m[i].right - m[i].left) + '] BarHeight[' + barHeight + '] BarWidth[' + barWidth + ']');
+
             offset = Math.floor(monWidth * 0.50) - Math.floor(barWidth * 0.50);
             start = m[i].left + offset;
             var options =
                 {
                     window:
                     {
-                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_BORDER | MessagePump.WindowStyles.WS_CAPTION | MessagePump.WindowStyles.WS_SYSMENU,
+                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER /*| MessagePump.WindowStyles.WS_CAPTION | MessagePump.WindowStyles.WS_SYSMENU*/,
                         x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title
                     }
                 };
             
             this.notifybar._pumps.push(new MessagePump(options));
+            this.notifybar._pumps.peek()._L = m[i].left;
+            this.notifybar._pumps.peek()._R = m[i].right;
+
+            this.notifybar._pumps.peek()._X = options.window.x;
+            this.notifybar._pumps.peek()._Y = options.window.y;
+            this.notifybar._pumps.peek().i = i;
             this.notifybar._pumps.peek().notifybar = this.notifybar;
+            this.notifybar._pumps.peek().width = barWidth;
+            this.notifybar._pumps.peek().height = barHeight;
+            this.notifybar._pumps.peek().font = this.notifybar._pumps.peek()._gdi32.CreateFontW(barHeight/2, 0, 0, 0, FW_DONTCARE, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, require('_GenericMarshal').CreateVariable('Arial', { wide: true }));
+            this.notifybar._pumps.peek()._title = this.notifybar.title;
             this.notifybar._pumps.peek().on('hwnd', function (h)
             {
                 this._HANDLE = h;
+                this._icon = getScaledImage(x_icon, this.height * 0.75, this.height * 0.75);
+                this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable('X', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON | BS_BITMAP,
+                    this.width - (this.height * 0.75) - (this.height * 0.125),    // x position 
+                    this.height * 0.125,                                        // y position 
+                    this.height * 0.75,                                         // Button width
+                    this.height * 0.75,                                         // Button height
+                    h,          // Parent window
+                    0xFFF0,     // Child ID
+                    0,
+                    0).then(function (c)
+                    {
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
+                    }).parentPromise.pump = this;
+                this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE,
+                    this.height * 0.125,                // x position 
+                    this.height * 0.125,                // y position 
+                    this.width - (this.height),  // Button width
+                    this.height * 0.75,                 // Button height
+                    h,          // Parent window
+                    0xFFF1,     // Child ID
+                    0,
+                    0).then(function (h)
+                    {
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [h, WM_SETFONT, this.pump.font, 1]);
+                    }).parentPromise.pump = this;
+                //this._addAsyncMethodCall(this._user32.SendMessageW.async, [h, WM_SETFONT, this.font, 1]).then(function (r) { console.log('FONT: ' + r.Val); });
             });
             this.notifybar._pumps.peek().on('exit', function (h)
             {             
@@ -111,53 +275,49 @@ function windows_notifybar_local(title)
             });
             this.notifybar._pumps.peek().on('message', function onWindowsMessage(msg)
             {
-                if (msg.message == 133)
+                switch (msg.message)
                 {
-                    //console.log("WM_NCPAINT");
-                }
-                if (msg.message == 70)   // We are intercepting WM_WINDOWPOSCHANGING to DISABLE moving the window
-                {
-                    if (this._HANDLE)
-                    {
-                        var flags = 0;
-                        switch (ptrsize)
+                    case WM_COMMAND:
+                        switch (msg.wparam)
                         {
-                            case 4:
-                                flags = msg.lparam_raw.Deref(24, 4).toBuffer().readUInt32LE() | 0x0002; // Set SWP_NOMOVE
-
-                                // If the bar is too far left, adjust to left most position
-                                if (msg.lparam_raw.Deref(8, 4).toBuffer().readInt32LE() < this._options.window.left) {
-                                    msg.lparam_raw.Deref(8, 4).toBuffer().writeInt32LE(this._options.window.left);
-                                }
-
-                                // If the bar is too far right, adjust to right most position
-                                if ((msg.lparam_raw.Deref(8, 4).toBuffer().readInt32LE() + this._options.window.width) >= this._options.window.right) {
-                                    msg.lparam_raw.Deref(8, 4).toBuffer().writeInt32LE(this._options.window.right - this._options.window.width);
-                                }
-
-                                // Lock the bar to the y axis
-                                msg.lparam_raw.Deref(12, 4).toBuffer().writeInt32LE(this._options.window.y);
-
-                                break;
-                            case 8:
-                                flags = msg.lparam_raw.Deref(32, 4).toBuffer().readUInt32LE() | 0x0002  // Set SWP_NOMOVE
-
-                                // If the bar is too far left, adjust to left most position
-                                if (msg.lparam_raw.Deref(16, 4).toBuffer().readInt32LE() < this._options.window.left) {
-                                    msg.lparam_raw.Deref(16, 4).toBuffer().writeInt32LE(this._options.window.left);
-                                }
-
-                                // If the bar is too far right, adjust to right most position
-                                if ((msg.lparam_raw.Deref(32, 4).toBuffer().readInt32LE() + this._options.window.width) >= this._options.window.right) {
-                                    msg.lparam_raw.Deref(32, 4).toBuffer().writeInt32LE(this._options.window.right - this._options.window.width);
-                                }
-
-                                // Lock the bar to the y axis
-                                msg.lparam_raw.Deref(20, 4).toBuffer().writeInt32LE(this._options.window.y);
-
+                            case 0xFFF0:
+                                this.close();
                                 break;
                         }
-                    }
+                        break;
+                    case WM_MOUSEMOVE:
+                        if ((msg.wparam & MK_LBUTTON) == MK_LBUTTON)
+                        {
+                            if (this._swp == null)
+                            {
+                                if (this._TX == null)
+                                {
+                                    this._TX = msg.lparam & 0xFFFF;
+                                }
+                                else
+                                {
+                                    var v = this.width / 12;
+                                    if ((msg.lparam & 0xFFF) < this._TX)
+                                    {
+                                        // Move Left
+                                        this._TX = msg.lparam & 0xFFFF;
+                                        v = this._X - v;
+                                        if (v < this._L) { v = this._L; }
+                                    }
+                                    else
+                                    {
+                                        // Move Right
+                                        this._TX = msg.lparam & 0xFFFF;
+                                        v = this._X + v;
+                                        if ((v + this.width) > this._R) { v = this._R - this.width; }
+                                    }
+                                    this._X = v;
+                                    this._swp = this._addAsyncMethodCall(this._user32.SetWindowPos.async, [this._HANDLE, 0, v, 0, -1, -1, SWP_NOSIZE | SWP_NOZORDER]);
+                                    this._swp.then(function () { this.pump._swp = null; this.pump._TX = null; }).parentPromise.pump = this;
+                                }
+                            }
+                        }
+                        break;
                 }
             });
         }
