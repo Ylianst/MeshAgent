@@ -26,6 +26,7 @@ const DEFAULT_PITCH = 0;
 const FF_SWISS = (2 << 4);  /* Variable stroke width, sans-serifed. */
 
 const WM_COMMAND = 0x0111;
+const WM_CTLCOLORSTATIC = 0x0138;
 const WM_MOUSEMOVE = 0x0200;
 const WM_SETFONT = 0x0030;
 
@@ -216,12 +217,13 @@ function windows_notifybar_local(title)
                 {
                     window:
                     {
-                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER /*| MessagePump.WindowStyles.WS_CAPTION | MessagePump.WindowStyles.WS_SYSMENU*/,
-                        x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title
+                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER,
+                        x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title, background: RGB(0, 54, 105)
                     }
                 };
             
             this.notifybar._pumps.push(new MessagePump(options));
+            this.notifybar._pumps.peek().brush = this.notifybar._pumps.peek()._gdi32.CreateSolidBrush(RGB(0, 54, 105));
             this.notifybar._pumps.peek()._L = m[i].left;
             this.notifybar._pumps.peek()._R = m[i].right;
 
@@ -317,6 +319,13 @@ function windows_notifybar_local(title)
                                 }
                             }
                         }
+                        break;
+                    case WM_CTLCOLORSTATIC:
+                        console.info1('WM_CTLCOLORSTATIC => ' + msg.lparam, msg.wparam);
+                        var hdcStatic = msg.wparam;
+                        this._gdi32.SetTextColor(hdcStatic, RGB(200, 200, 200));
+                        this._gdi32.SetBkColor(hdcStatic, RGB(0, 54, 105));
+                        return (this.brush);
                         break;
                 }
             });
