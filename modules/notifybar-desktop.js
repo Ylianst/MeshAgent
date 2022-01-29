@@ -49,6 +49,11 @@ const SS_REALSIZECONTROL = 0x00000040;
 const SS_LEFT = 0x00000000;
 const SS_CENTERIMAGE = 0x00000200;
 
+const SS_PATHELLIPSIS = 0x00008000;
+const SS_WORDELLIPSIS = 0x0000C000;
+const SS_ELLIPSISMASK = 0x0000C000;
+
+
 const MK_LBUTTON = 0x001;
 const SWP_NOSIZE = 0x0001;
 const SWP_NOZORDER = 0x0004;
@@ -251,7 +256,7 @@ function windows_notifybar_local(title)
                     {
                         this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
                     }).parentPromise.pump = this;
-                this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE,
+                this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_WORDELLIPSIS,
                     this.height * 0.125,                // x position 
                     this.height * 0.125,                // y position 
                     this.width - (this.height),  // Button width
