@@ -2475,8 +2475,24 @@ void ILibDuktape_ScriptContainer_OS_Push(duk_context *ctx, void *chain)
 				}\
 				catch(zz)\
 				{}\
-				ret = require('win-wmi').query('ROOT\\\\CIMV2', \"SELECT * FROM Win32_OperatingSystem\", ['Caption','BuildNumber']);\
-				ret = ret[0].Caption + ' - ' + friendly + ret[0].BuildNumber;\
+				try\
+				{\
+					ret = require('win-wmi').query('ROOT\\\\CIMV2', \"SELECT * FROM Win32_OperatingSystem\", ['Caption','BuildNumber']);\
+					ret = ret[0].Caption + ' - ' + friendly + ret[0].BuildNumber;\
+				}\
+				catch(zz)\
+				{\
+					try\
+					{\
+						ret = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\MICROSOFT\\\\WINDOWS NT\\\\CurrentVersion', 'ProductName');\
+						ret = ret + ' - ' + friendly + require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'SOFTWARE\\\\MICROSOFT\\\\WINDOWS NT\\\\CurrentVersion', 'CurrentBuild');\
+					}\
+					catch(zzz)\
+					{\
+						ret = 'Windows (UNKNOWN) - ' + friendly;\
+					}\
+					ret += (' [WMI ERROR] ');\
+				}\
 				break;\
 			case 'linux':\
 				lines = child.stdout.str.split('\\n');\
