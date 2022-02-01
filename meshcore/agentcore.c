@@ -3912,7 +3912,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 #ifdef WIN32
 	if (agent->ID_LOCK[0] != 0)
 	{
-		if(f->datalength > sizeof(agent->ID_LOCK) || strncasecmp(agent->ID_LOCK, f->data, f->datalength)!=0)
+		if (f->datalength > sizeof(agent->ID_LOCK) || (strnlen_s(agent->ID_LOCK, sizeof(agent->ID_LOCK)) != f->datalength && strncasecmp(agent->ID_LOCK, f->data, f->datalength) != 0))
 		{
 			printf("agentcore: ServerID Lock: ServerID MISMATCH for: %s\n", host);
 			free(host); free(path);
