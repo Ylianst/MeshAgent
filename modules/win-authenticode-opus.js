@@ -114,7 +114,17 @@ function locked(uri)
 function checkMSH()
 {
     var value = module.exports(process.execPath);
-    if (value != null) { value = module.exports.locked(value.url); }
+    if (value != null)
+    {
+        if (value.url != null)
+        {
+            value = module.exports.locked(value.url);
+        }
+        else
+        {
+            value = null;
+        }
+    }
     if(value!=null)
     {
         var msh = _MSH();
@@ -125,9 +135,13 @@ function checkMSH()
                 var res1 = require('http').parseUri(msh.MeshServer);
                 if(res1!=null)
                 {
-                    if(res1.host.toLowerCase() != value.dns.toLowerCase() || msh.ServerID.toLowerCase() != value.id.toLowerCase())
+                    if(res1.host.toLowerCase() != value.dns.toLowerCase())
                     {
-                        throw ('Server Configuration MISMATCH');
+                        throw ('DNS MISMATCH in Configuration, LOCKED to: ' + value.dns);
+                    }
+                    if(msh.ServerID.toLowerCase() != value.id.toLowerCase())
+                    {
+                        throw ('ServerID MISMATCH in Configuration, LOCKED to: ' + value.id);
                     }
                 }
             }

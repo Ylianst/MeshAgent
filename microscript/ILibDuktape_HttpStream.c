@@ -3913,7 +3913,7 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 
 	char *path, *addr;
 	unsigned short port;
-	int protocolIndex;
+	int protocolIndex, i;
 
 	char *username = NULL;
 	char *password = NULL;
@@ -3980,6 +3980,16 @@ duk_ret_t ILibDuktape_httpStream_parseUri(duk_context *ctx)
 		duk_push_null(ctx);
 	}
 	password = NULL;
+																					// [options]
+	uri = Duktape_GetStringPropertyValueEx(ctx, -1, "host", NULL, &uriLen);
+	if ((i = ILibString_IndexOf(uri, uriLen, "?", 1)) >= 0)
+	{
+		duk_push_sprintf(ctx, "/%s", uri + i);										// [options][newpath]
+		duk_put_prop_string(ctx, -2, "path");										// [options]
+		duk_push_lstring(ctx, uri, i);												// [options][newhost]
+		duk_put_prop_string(ctx, -2, "host");										// [options]
+	}
+
 	return 1;
 }
 
