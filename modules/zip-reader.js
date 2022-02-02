@@ -385,11 +385,6 @@ function read(path)
             console.info1('   Minimum: ' + buffer.readUInt16LE(6));
             console.info1('   General Purpose Flags: ' + buffer.readUInt16LE(8));
             console.info1('   EFS: ' + efs);
-            if (efs)
-            {
-                console.info1('      => ' + namebuf.toString('hex'));
-                console.info1('         E6B8ACE8A9A6E69687E4BBB62E6C6F67');
-            }
             console.info1('   Name: ' + name);
             console.info1('   CRC-32 of Uncompressed data: ' + buffer.readUInt32LE(16));
             console.info1('   Uncompressed Size: ' + buffer.readUInt32LE(24));
