@@ -121,7 +121,7 @@ function finished(options)
         CD.writeUInt32LE(CDR, 0);               // Signature
         CD.writeUInt16LE(20, 4);                // Version
         CD.writeUInt16LE(20, 6);                // Minimum
-        CD.writeUInt16LE(0x08, 8);              // General Purpose Bit Flag
+        CD.writeUInt16LE(0x08 | 2048, 8);       // General Purpose Bit Flag
         CD.writeUInt16LE(8, 10);                // Compression Method
 
         CD.writeUInt16LE(namelen, 28);          // File Name Length
@@ -169,7 +169,7 @@ function next(options)
     this._header = Buffer.alloc(30 + nameBuffer.length);
 
     this._header.writeUInt32LE(LFR, 0);                             // Signature
-    this._header.writeUInt16LE(0x08, 6);                            // General Purpose Bit Flag
+    this._header.writeUInt16LE(0x08 | 2048, 6);                     // General Purpose Bit Flag
     this._header.writeUInt16LE(8, 8);                               // Compression Method
 
     this._header.writeUInt16LE(this._timestamp.time, 10);           // File Last Modification Time
