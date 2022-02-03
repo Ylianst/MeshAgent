@@ -295,10 +295,6 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		// Get our own executable name
 		GetModuleFileNameW(NULL, str, _MAX_PATH);
 
-#ifndef _MINCORE
-		// Setup firewall
-		SetupWindowsFirewall(str);
-#endif
 
 		// Run the mesh agent
 		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
