@@ -165,6 +165,9 @@
   <ItemGroup>
     <ResourceCompile Include="MeshConsole.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="MeshService.ico" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E377F156-BAED-4086-B534-3CC43164607A}</ProjectGuid>
     <RootNamespace>MicrostackDuktape</RootNamespace>

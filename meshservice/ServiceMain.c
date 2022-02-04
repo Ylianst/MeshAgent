@@ -1,5 +1,5 @@
 /*
-Copyright 2006 - 2018 Intel Corporation
+Copyright 2006 - 2022 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -448,7 +448,7 @@ int wmain(int argc, char* wargv[])
 	if (argc > 1 && strcasecmp(argv[1], "-licenses") == 0)
 	{
 		printf("========================================================================================\n");
-		printf(" MeshCentral MeshAgent: Copyright 2006 - 2020 Intel Corporation\n");
+		printf(" MeshCentral MeshAgent: Copyright 2006 - 2022 Intel Corporation\n");
 		printf("                        https://github.com/Ylianst/MeshAgent \n");
 		printf("----------------------------------------------------------------------------------------\n");
 		printf("   Licensed under the Apache License, Version 2.0 (the \"License\");\n");

@@ -552,6 +552,7 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
+    <Image Include="mc.bmp" />
     <Image Include="MeshService.ico" />
   </ItemGroup>
   <ItemGroup>

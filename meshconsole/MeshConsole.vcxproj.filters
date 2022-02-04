@@ -344,4 +344,7 @@
   <ItemGroup>
     <ResourceCompile Include="MeshConsole.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="MeshService.ico" />
+  </ItemGroup>
 </Project>
