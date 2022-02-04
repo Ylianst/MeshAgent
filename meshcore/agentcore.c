@@ -4096,7 +4096,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 			if (url != NULL)
 			{
 				duk_push_sprintf(agent->meshCoreCtx, "require('win-authenticode-opus').locked('%s');", url);						// [obj][str]
-				if (duk_peval(agent->meshCoreCtx) == 0)																				// [obj][obj]
+				if (duk_peval(agent->meshCoreCtx) == 0 && !duk_is_null_or_undefined(agent->meshCoreCtx, -1))						// [obj][obj]
 				{
 					char *dns = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "dns", NULL);
 					char *id = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "id", NULL);
