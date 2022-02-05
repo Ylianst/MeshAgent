@@ -15,7 +15,22 @@ limitations under the License.
 */
 
 var child = { stdin: { str: '', write: function (v) { this.str += v.trim(); } } };
-
+child.stdin.write("loginctl list-sessions | tr '\\n' '`' | awk '{");
+child.stdin.write('printf "[";');
+child.stdin.write('del="";');
+child.stdin.write('n=split($0, lines, "`");');
+child.stdin.write('for(i=1;i<n;++i)');
+child.stdin.write('{');
+child.stdin.write('   split(lines[i], tok, " ");');
+child.stdin.write('   if((tok[2]+0)>=1000)');
+child.stdin.write('   {');
+child.stdin.write('      if(tok[4]=="" || tok[4]~/^pts\\//) { continue; }');
+child.stdin.write('      printf "%s{\\"uid\\": \\"%s\\", \\"sid\\": \\"%s\\"}", del, tok[2], tok[1];');
+child.stdin.write('      del=",";');
+child.stdin.write('   }');
+child.stdin.write('}');
+child.stdin.write('printf "]";');
+child.stdin.write("}'");
 //child.stdin.write('\nexit\n');
 
 child.stdin.write('\n\n\n');

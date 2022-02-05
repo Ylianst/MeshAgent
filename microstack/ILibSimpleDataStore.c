@@ -54,6 +54,7 @@ typedef struct ILibSimpleDataStore_Root
 	ILibSimpleDataStore_SizeWarningHandler warningSink;
 	void* warningSinkUser;
 	int error;
+	int createdAsNew;
 	ILibSimpleDataStore_WriteErrorHandler ErrorHandler;
 	void *ErrorHandlerUser;
 } ILibSimpleDataStore_Root;
@@ -503,9 +504,10 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 }
 
 // Open the data store file
-FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero, int readonly)
+FILE* ILibSimpleDataStore_OpenFileEx3(char* filePath, int forceTruncateIfNonZero, int readonly, int *created)
 {
 	FILE* f = NULL;
+	if (created != NULL) { *created = 0; }
 
 #ifdef WIN32
 	if (readonly == 0)
@@ -516,6 +518,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 			h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
 			{
+				if (created != NULL) { *created = 1; }
 				h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 			}
 		}
@@ -524,6 +527,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 			h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND)
 			{
+				if (created != NULL) { *created = 1; }
 				h = CreateFileW(ILibUTF8ToWide(filePath, -1), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 			}
 		}
@@ -546,6 +550,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 
 	if (forceTruncateIfNonZero != 0 || (f = fopen(filePath, flag)) == NULL)
 	{
+		if (created != NULL) { *created = 1; }
 		f = fopen(filePath, "wb+");
 	}
 	if (f == NULL) { return NULL; } // If we failed to open the file, stop now.
@@ -556,6 +561,7 @@ FILE* ILibSimpleDataStore_OpenFileEx2(char* filePath, int forceTruncateIfNonZero
 }
 #define ILibSimpleDataStore_OpenFile(filePath) ILibSimpleDataStore_OpenFileEx2(filePath, 0, 0)
 #define ILibSimpleDataStore_OpenFileEx(filePath, forceTruncate) ILibSimpleDataStore_OpenFileEx2(filePath, forceTruncate, 0)
+#define ILibSimpleDataStore_OpenFileEx2(filePath, forceTruncate, readonly) ILibSimpleDataStore_OpenFileEx3(filePath, forceTruncate, readonly, NULL)
 int ILibSimpleDataStore_Exists(char *filePath)
 {
 #ifdef WIN32
@@ -568,11 +574,11 @@ int ILibSimpleDataStore_Exists(char *filePath)
 __EXPORT_TYPE ILibSimpleDataStore ILibSimpleDataStore_CreateEx2(char* filePath, int userExtraMemorySize, int readonly)
 {
 	ILibSimpleDataStore_Root* retVal = (ILibSimpleDataStore_Root*)ILibMemory_Allocate(ILibMemory_SimpleDataStore_CONTAINERSIZE, userExtraMemorySize, NULL, NULL);
-	
+
 	if (filePath != NULL)
 	{
 		retVal->filePath = ILibString_Copy(filePath, strnlen_s(filePath, ILibSimpleDataStore_MaxFilePath));
-		retVal->dataFile = ILibSimpleDataStore_OpenFileEx2(retVal->filePath, 0, readonly);
+		retVal->dataFile = ILibSimpleDataStore_OpenFileEx3(retVal->filePath, 0, readonly, &(retVal->createdAsNew));
 
 		if (retVal->dataFile == NULL)
 		{
@@ -1122,4 +1128,8 @@ __EXPORT_TYPE int ILibSimpleDataStore_Compact(ILibSimpleDataStore dataStore)
 int ILibSimpleDataStore_IsCacheOnly(ILibSimpleDataStore ds)
 {
 	return(((ILibSimpleDataStore_Root*)ds)->dataFile == NULL ? 1 : 0);
+}
+int ILibSimpleDataStore_WasCreatedAsNew(ILibSimpleDataStore ds)
+{
+	return(((ILibSimpleDataStore_Root*)ds)->createdAsNew);
 }

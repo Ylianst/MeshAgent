@@ -2182,10 +2182,6 @@ int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 	return 0;
 }
 
-void agent_LoadCertificates_DB_Check(ILibSimpleDataStore sender, char* Key, int KeyLen, void *user)
-{
-	((size_t*)user)[0] += 1;
-}
 int agent_LoadCertificates(MeshAgentHostContainer *agent)
 {
 	int len;
@@ -2270,11 +2266,7 @@ int agent_LoadCertificates(MeshAgentHostContainer *agent)
 			}
 		}
 #endif
-
-		size_t keycount = 0;
-		ILibSimpleDataStore_EnumerateKeys(agent->masterDb, agent_LoadCertificates_DB_Check, &keycount);
-
-		if (keycount > 1)
+		if(ILibSimpleDataStore_WasCreatedAsNew(agent->masterDb)==0)
 		{
 			// No certificate in the database. Return 1 here so we can generate one.
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Failed to load Node Certificate from Database");

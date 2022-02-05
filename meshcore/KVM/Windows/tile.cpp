@@ -75,6 +75,34 @@ EncoderParameters encParam;
 LPVOID tilebuffer = NULL;
 unsigned int tilebuffersize = 0;
 
+extern "C"
+{
+	void __jpeghelp(void *xx)
+	{
+		EncoderParameters *pp = (EncoderParameters*)xx;
+		GUID x = EncoderQuality;
+		printf("ImageCodecInfo: %d", sizeof(ImageCodecInfo));
+		printf("MimeType: %d\n", FIELD_OFFSET(ImageCodecInfo, MimeType));
+		printf("Clsid: %d\n", FIELD_OFFSET(ImageCodecInfo, Clsid));
+		printf("EncoderParameters::Count => %d\n", FIELD_OFFSET(EncoderParameters, Count));
+		printf("EncoderParameters::Parameter => %d\n", FIELD_OFFSET(EncoderParameters, Parameter));
+		printf("EncoderParameter::Guid => %d\n", FIELD_OFFSET(EncoderParameter, Guid));
+		printf("EncoderParameter::NumberOfValues => %d\n", FIELD_OFFSET(EncoderParameter, NumberOfValues));
+		printf("EncoderParameter::Type => %d\n", FIELD_OFFSET(EncoderParameter, Type));
+		printf("EncoderParameter::Value => %d\n", FIELD_OFFSET(EncoderParameter, Value));
+		printf("sizeof(EncoderParameters): %d\n", sizeof(EncoderParameters));
+	}
+	void __jpeghelp2(void *x)
+	{
+		ImageCodecInfo *info = (ImageCodecInfo*)x;
+		printf("MIME: %d\n", (char*)&(info->MimeType) - (char*)info);
+		if (info != NULL)
+		{
+			printf("x");
+		}
+	}
+}
+
 // Used to obtain the GUID for the image encoder.
 int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
 {
