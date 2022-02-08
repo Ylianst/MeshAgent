@@ -30,13 +30,13 @@ function dataHandler(chunk)
     }
     if ((len + 4) < chunk.length) { this.unshift(chunk.slice(4 + len)); }
 }
-function queryAgent(obj, prev)
+function queryAgent(obj, prev, path)
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     ret._obj = { cmd: 'query', value: obj };
     if (prev == null)
     {
-        ret.client = require('net').createConnection({ path: ipcPath });
+        ret.client = require('net').createConnection({ path: path == null ? ipcPath : path });
         ret.client.on('connect', function ()
         {
             this.on('data', dataHandler);
@@ -95,4 +95,4 @@ function start()
     }).then(function (v) { console.log(v); }).then(function () { process._exit(); }).catch(function () { process._exit(); });
 }
 
-module.exports = { start: start };
+module.exports = { start: start, query: queryAgent };

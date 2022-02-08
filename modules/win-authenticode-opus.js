@@ -106,7 +106,10 @@ function locked(uri)
         var tokens = q.pop().split('=');
         if (tokens[0].trim().toLowerCase() == 'serverid')
         {
-            return ({ dns: f.host, id: tokens[1] });
+            if (f.host != null && f.host != '' && tokens[1] != null && tokens[1] != '')
+            {
+                return ({ dns: f.host, id: tokens[1] });
+            }           
         }
     }
     return (null);
