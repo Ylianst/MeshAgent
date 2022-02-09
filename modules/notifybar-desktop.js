@@ -25,10 +25,16 @@ const DEFAULT_QUALITY = 0;
 const DEFAULT_PITCH = 0;
 const FF_SWISS = (2 << 4);  /* Variable stroke width, sans-serifed. */
 
+const WM_NCLBUTTONDOWN = 0x00A1;
+const HT_CAPTION = 2;
+const WM_WINDOWPOSCHANGING = 70;
+const CS_DROPSHADOW = 0x00020000;
+
 const WM_COMMAND = 0x0111;
 const WM_CTLCOLORSTATIC = 0x0138;
 const WM_MOUSEMOVE = 0x0200;
 const WM_SETFONT = 0x0030;
+const WM_LBUTTONDOWN = 0x0201;
 
 const WS_CHILD = 0x40000000;
 const WS_TABSTOP = 0x00010000;
@@ -222,7 +228,7 @@ function windows_notifybar_local(title)
                 {
                     window:
                     {
-                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER,
+                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER | CS_DROPSHADOW,
                         x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title, background: RGB(0, 54, 105)
                     }
                 };
@@ -292,45 +298,38 @@ function windows_notifybar_local(title)
                                 break;
                         }
                         break;
-                    case WM_MOUSEMOVE:
-                        if ((msg.wparam & MK_LBUTTON) == MK_LBUTTON)
+                    case WM_LBUTTONDOWN:
+                        this._addAsyncMethodCall(this._user32.ReleaseCapture.async, []).then(function ()
                         {
-                            if (this._swp == null)
-                            {
-                                if (this._TX == null)
-                                {
-                                    this._TX = msg.lparam & 0xFFFF;
-                                }
-                                else
-                                {
-                                    var v = this.width / 12;
-                                    if ((msg.lparam & 0xFFF) < this._TX)
-                                    {
-                                        // Move Left
-                                        this._TX = msg.lparam & 0xFFFF;
-                                        v = this._X - v;
-                                        if (v < this._L) { v = this._L; }
-                                    }
-                                    else
-                                    {
-                                        // Move Right
-                                        this._TX = msg.lparam & 0xFFFF;
-                                        v = this._X + v;
-                                        if ((v + this.width) > this._R) { v = this._R - this.width; }
-                                    }
-                                    this._X = v;
-                                    this._swp = this._addAsyncMethodCall(this._user32.SetWindowPos.async, [this._HANDLE, 0, v, 0, -1, -1, SWP_NOSIZE | SWP_NOZORDER]);
-                                    this._swp.then(function () { this.pump._swp = null; this.pump._TX = null; }).parentPromise.pump = this;
-                                }
-                            }
-                        }
+                            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._HANDLE, WM_NCLBUTTONDOWN, HT_CAPTION, 0]);
+                        }).parentPromise.pump = this;
                         break;
+
                     case WM_CTLCOLORSTATIC:
                         console.info1('WM_CTLCOLORSTATIC => ' + msg.lparam, msg.wparam);
                         var hdcStatic = msg.wparam;
                         this._gdi32.SetTextColor(hdcStatic, RGB(200, 200, 200));
                         this._gdi32.SetBkColor(hdcStatic, RGB(0, 54, 105));
                         return (this.brush);
+                        break;
+                    case WM_WINDOWPOSCHANGING:
+                        if (this._HANDLE)
+                        {
+                            // If the bar is too far left, adjust to left most position
+                            if (msg.lparam_raw.Deref(ptrsize == 4 ? 8 : 16, 4).toBuffer().readInt32LE() < this._options.window.left)
+                            {
+                                msg.lparam_raw.Deref(ptrsize == 4 ? 8 : 16, 4).toBuffer().writeInt32LE(this._options.window.left);
+                            }
+
+                            // If the bar is too far right, adjust to right most position
+                            if ( (msg.lparam_raw.Deref(ptrsize == 4 ? 8 : 16, 4).toBuffer().readInt32LE()+this._options.window.width) > this._options.window.right)
+                            {
+                                msg.lparam_raw.Deref(ptrsize == 4 ? 8 : 16, 4).toBuffer().writeInt32LE(this._options.window.right - this._options.window.width);
+                            }
+
+                            // Lock the bar to the y axis
+                            msg.lparam_raw.Deref(ptrsize == 4 ? 12 : 20, 4).toBuffer().writeInt32LE(this._options.window.y);
+                        }
                         break;
                 }
             });
