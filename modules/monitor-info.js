@@ -88,6 +88,18 @@ function monitorinfo()
         this._user32.CreateMethod('EnumDisplayMonitors');
         this._kernel32 = this._gm.CreateNativeProxy('kernel32.dll');
         this._kernel32.CreateMethod('GetLastError');
+        this._shcore = this._gm.CreateNativeProxy('SHCore.dll');
+        if (this._shcore != null)
+        {
+            try
+            {
+                this._shcore.CreateMethod('GetDpiForMonitor');
+            }
+            catch (xx)
+            {
+                this._shcore = null;
+            }
+        }
 
         this.getInfo = function getInfo()
         {
@@ -99,9 +111,21 @@ function monitorinfo()
 
                 this._monitorinfo.callback.results = [];
                 this._monitorinfo.callback.on('GlobalCallback', function OnMonitorInfo(hmon, hdc, r, user) {
-                    if (this.ObjectToPtr_Verify(this.info, user)) {
+                    if (this.ObjectToPtr_Verify(this.info, user))
+                    {
+                        var dpi = null;
+                        var sh = require('monitor-info')._shcore;
+                        if (sh != null)
+                        {
+                            var xdpi = require('_GenericMarshal').CreateVariable(4);
+                            var ydpi = require('_GenericMarshal').CreateVariable(4);
+
+                            sh.GetDpiForMonitor(hmon, 0, xdpi, ydpi);
+                            dpi = xdpi.toBuffer().readUInt32LE();
+                        }
+
                         var rb = r.Deref(0, 16).toBuffer();
-                        this.results.push({ left: rb.readInt32LE(0), top: rb.readInt32LE(4), right: rb.readInt32LE(8), bottom: rb.readInt32LE(12) });
+                        this.results.push({ left: rb.readInt32LE(0), top: rb.readInt32LE(4), right: rb.readInt32LE(8), bottom: rb.readInt32LE(12), dpi: dpi });
 
                         var r = this.info.self._gm.CreateInteger();
                         r.Val = 1;

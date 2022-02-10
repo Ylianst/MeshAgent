@@ -221,6 +221,12 @@ function windows_notifybar_local(title)
             monHeight = (m[i].bottom - m[i].top);
             barWidth = Math.floor(monWidth * 0.30);
             barHeight = Math.floor(monHeight * 0.035);
+            if (m[i].dpi != null)
+            {
+                barHeight = Math.floor(m[i].dpi / 3);
+                barWidth = Math.floor(m[i].dpi * 9);
+                if (barWidth > monWidth) { barWidth = monWidth; }
+            }
             console.info1('Monitor: ' + i + ' = Width[' + (m[i].right - m[i].left) + '] BarHeight[' + barHeight + '] BarWidth[' + barWidth + ']');
 
             offset = Math.floor(monWidth * 0.50) - Math.floor(barWidth * 0.50);
