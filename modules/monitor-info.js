@@ -88,18 +88,17 @@ function monitorinfo()
         this._user32.CreateMethod('EnumDisplayMonitors');
         this._kernel32 = this._gm.CreateNativeProxy('kernel32.dll');
         this._kernel32.CreateMethod('GetLastError');
-        this._shcore = this._gm.CreateNativeProxy('SHCore.dll');
-        if (this._shcore != null)
+
+        try
         {
-            try
-            {
-                this._shcore.CreateMethod('GetDpiForMonitor');
-            }
-            catch (xx)
-            {
-                this._shcore = null;
-            }
+            this._shcore = this._gm.CreateNativeProxy('SHCore.dll');
+            this._shcore.CreateMethod('GetDpiForMonitor');
         }
+        catch (xx)
+        {
+            this._shcore = null;
+        }
+        
 
         this.getInfo = function getInfo()
         {
