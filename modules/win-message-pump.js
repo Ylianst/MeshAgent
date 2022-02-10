@@ -48,11 +48,13 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('GetClientRect');
     this._user32.CreateMethod('GetDC');
     this._user32.CreateMethod('GetMessageW');
-    this._user32.CreateMethod('InvalidateRect')
+    this._user32.CreateMethod('InvalidateRect');
+    this._user32.CreateMethod('LoadCursorA');
     this._user32.CreateMethod('PostMessageA');
     this._user32.CreateMethod('RegisterClassExW');
     this._user32.CreateMethod('ReleaseCapture');
     this._user32.CreateMethod('SendMessageW');
+    this._user32.CreateMethod('SetCursor');
     this._user32.CreateMethod('SetWindowPos');
     this._user32.CreateMethod('SetWindowTextW');
     this._user32.CreateMethod('ShowWindow');

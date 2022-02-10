@@ -28,7 +28,8 @@ const FF_SWISS = (2 << 4);  /* Variable stroke width, sans-serifed. */
 const WM_NCLBUTTONDOWN = 0x00A1;
 const HT_CAPTION = 2;
 const WM_WINDOWPOSCHANGING = 70;
-const CS_DROPSHADOW = 0x00020000;
+const IDC_ARROW = 32512;
+
 
 const WM_COMMAND = 0x0111;
 const WM_CTLCOLORSTATIC = 0x0138;
@@ -228,7 +229,7 @@ function windows_notifybar_local(title)
                 {
                     window:
                     {
-                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER | CS_DROPSHADOW,
+                        winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER,
                         x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title, background: RGB(0, 54, 105)
                     }
                 };
@@ -270,11 +271,14 @@ function windows_notifybar_local(title)
                     h,          // Parent window
                     0xFFF1,     // Child ID
                     0,
-                    0).then(function (h)
+                    0).then(function (c)
                     {
-                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [h, WM_SETFONT, this.pump.font, 1]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.font, 1]);
                     }).parentPromise.pump = this;
-                //this._addAsyncMethodCall(this._user32.SendMessageW.async, [h, WM_SETFONT, this.font, 1]).then(function (r) { console.log('FONT: ' + r.Val); });
+                this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_ARROW]).then(function (cs)
+                {
+                    this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
+                }).parentPromise.pump = this;
             });
             this.notifybar._pumps.peek().on('exit', function (h)
             {             
