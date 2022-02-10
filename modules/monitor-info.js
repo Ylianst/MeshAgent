@@ -113,7 +113,7 @@ function monitorinfo()
                 this._monitorinfo.callback.on('GlobalCallback', function OnMonitorInfo(hmon, hdc, r, user) {
                     if (this.ObjectToPtr_Verify(this.info, user))
                     {
-                        var dpi = null;
+                        var dpi = 96;
                         var sh = require('monitor-info')._shcore;
                         if (sh != null)
                         {
