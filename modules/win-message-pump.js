@@ -50,6 +50,7 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('GetMessageW');
     this._user32.CreateMethod('InvalidateRect');
     this._user32.CreateMethod('LoadCursorA');
+    this._user32.CreateMethod('MonitorFromWindow');
     this._user32.CreateMethod('PostMessageA');
     this._user32.CreateMethod('RegisterClassExW');
     this._user32.CreateMethod('ReleaseCapture');

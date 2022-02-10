@@ -86,6 +86,7 @@ function monitorinfo()
     {
         this._user32 = this._gm.CreateNativeProxy('user32.dll');
         this._user32.CreateMethod('EnumDisplayMonitors');
+        this._user32.CreateMethod('MonitorFromWindow');
         this._kernel32 = this._gm.CreateNativeProxy('kernel32.dll');
         this._kernel32.CreateMethod('GetLastError');
 

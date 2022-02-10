@@ -48,8 +48,10 @@ const SmoothingModeAntiAlias = 5;
 const InterpolationModeBicubic = 8;
 
 const BS_BITMAP = 0x00000080;
+const BS_PUSHBUTTON = 0x00000000;
 const BS_DEFPUSHBUTTON = 0x00000001;
 const BM_SETIMAGE = 0x00F7;
+const BS_FLAT = 0x00008000;
 
 const SS_BITMAP = 0x0000000E;
 const SS_REALSIZECONTROL = 0x00000040;
@@ -59,6 +61,7 @@ const SS_CENTERIMAGE = 0x00000200;
 const SS_PATHELLIPSIS = 0x00008000;
 const SS_WORDELLIPSIS = 0x0000C000;
 const SS_ELLIPSISMASK = 0x0000C000;
+const SS_NOTIFY = 0x00000100;
 
 
 const MK_LBUTTON = 0x001;
@@ -257,9 +260,9 @@ function windows_notifybar_local(title)
             {
                 this._HANDLE = h;
                 this._icon = getScaledImage(x_icon, this.height * 0.75, this.height * 0.75);
-                this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable('X', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON | BS_BITMAP,
-                    this.width - (this.height * 0.75) - (this.height * 0.125),    // x position 
-                    this.height * 0.125,                                        // y position 
+                this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('X', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BITMAP | SS_CENTERIMAGE | SS_NOTIFY,
+                    this.width - (this.height * 0.75) - (this.height * 0.125),  // x position 
+                    this.height * 0.0625,                                        // y position 
                     this.height * 0.75,                                         // Button width
                     this.height * 0.75,                                         // Button height
                     h,          // Parent window
@@ -267,7 +270,8 @@ function windows_notifybar_local(title)
                     0,
                     0).then(function (c)
                     {
-                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
+                        //this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
                     }).parentPromise.pump = this;
                 this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_WORDELLIPSIS,
                     this.height * 0.125,                // x position 
