@@ -102,9 +102,18 @@ function WindowsMessagePump(options)
             // This is for us
             processed = true;
             var d = this.StartDispatcher();
-            this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), lparam_raw: lparam, hwnd: xhwnd, dispatcher: d });
+            var msgRet = null;
 
-            var msgRet = this.mp.emit_returnValue('message');
+            try
+            {
+                this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), lparam_raw: lparam, hwnd: xhwnd, dispatcher: d });
+                msgRet = this.mp.emit_returnValue('message');
+            }
+            catch(zz)
+            {
+                console.info1(zz);
+            }
+
             if (msgRet == null)
             {
                 // We need to call DefWindowProcA, becuase this message was not handled
@@ -124,7 +133,7 @@ function WindowsMessagePump(options)
                 }
                 else
                 {
-                    var r = GM.CreatePointer();
+                    var r = GM.CreateVariable(4);
                     r.Val = msgRet;
                     this.EndDispatcher(r);
                 }
@@ -137,7 +146,14 @@ function WindowsMessagePump(options)
 
             var d = this.StartDispatcher();
 
-            this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), hwnd: xhwnd, dispatcher: d });
+            try
+            {
+                this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), hwnd: xhwnd, dispatcher: d });
+            }
+            catch(zz)
+            {
+                console.info1(zz);
+            }
 
             var msgRet = this.mp.emit_returnValue('message');
             if (msgRet == null)
