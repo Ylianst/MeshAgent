@@ -348,7 +348,7 @@ function pump_onHwnd(h)
         this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
     }).parentPromise.pump = this;
 
-    this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(' ' + this.translations.Title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE,
+    this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('   ' + this.translations.Title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE,
         SCALE(0, this.dpi),         // x position 
         SCALE(0, this.dpi),         // y position 
         SCALE(580, this.dpi),        // Button width
