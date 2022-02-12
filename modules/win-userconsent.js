@@ -19,6 +19,22 @@ const HALFTONE = 4;
 const SmoothingModeAntiAlias = 5;
 const InterpolationModeBicubic = 8;
 
+const x_icon = 'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAAXNSR0IArs4c6QAABKlJREFUeF7t3U1S20AQBeAZmaIw5A7ANpfxKmyS4yUbZeXLsMXhDrYpB6SUBBK2kDT66X7zqDRbTNzuT29mNJYU7+yHqgOeqhorxhkI2UFgIAZC1gGyciwhBkLWAbJyLCEGQtYBsnIsIQZC1gGyciwhBkLWAbJyLCEGQtYBsnIsIQZC1gGyciwhBuLc82KxSi4uvvvr6x/+/v7A1JP869fz5z+PP/3T4dfZy2GNrg2ekHyxWOVZlro8P3fL5drf3t6xoBQYLw+b1D/tV875Q56c3aFRoCAnGNWhR4JyjOHzvKwu9wkcBQbSikGC0oZRlYZGgYCUc0Y1THUNypGSUs4Zm8c02W9XVTKaJSJR1EEGYURKyhAMdFJUQUZhgFH6hqmuECOSogbSO2eE1pLKw9cUDFRSVEBmYSgnpcTYbFK/33fOGaHjRTMp4iAFRpZlqS/OM+b+CCdFAkM7KaIgk+aMEJoQypgJPFSSJooYSInxkqXOCSSj2ZGZKK8YmzSZMUyhJnoxkL9XX9Jku/3m3etZrvjPRBTJYarzMy2vfif77Z3EZxYDef3gj6nvOcGaXfBIlDmrqcG1jqwp9O+KgZR7P0QonxGj6KEoyDvKvGVl6CgK7RJjhimdnWpxkNhJqVdTu+1KbT67XK79jc7XBiogFUq5aafZmMb4/ZmTUY0KaiBolOL9qi+XunZtg0Nh6AWKyYCAnKAor74y513xTZ8ahvBqqsteNSH1GS1g9VWc/ah9GBCGyiqr84z26PtqtaM4NORM+T0QAwoCW31NaXrX3wDmjOZbq6W8Lynqqy8JFHAyYJN6W28g5wpzUCJhwIes4x5BtlmmoETEiApCOadExogO8o6ivPc1JCkEGBQgJ0nR3GbpQyHBoAE5OaNHoxBhUIFEQSHDoAM5nlOS3W41ZOif/BpCDF6Qh4fygoTJzR7yhwYS7pLGpTq970qIAt86CW6paG7Tt705GQoFCOSCBFv2hoeoehJ/u40s6rY8SVKiJiR6MprHDAFKNBDIBQnDQnr6qsgoUUDgq6mxMBFR4CC02+4kwxcUhG7OCCUnQlJgILRzBhkKBASRjLy4LovsVoiQddvv1UEgc8Zyuc68d3PuGww2DzR8qYJALmZ4u1SnaCjb/SlB5JYXqIFAktG4bqp+T80vuZSTogKCmDO67hGBpFIRRRwkJkY1AkDSqYQiCsKAcYqifDWLAooYCOQ8Y2QDGGsKTfRiINS3RWtv7zPeFq364IDLy7W/uZn8KEDN1Zf0c0/EElJE8VM8WkNwSSyNoXLViciTgKqBduScERqfJVdfGhgqIOXXshJPBBLGkFx9aWGogVQo9eNgQ4du8/fKdy7NSYomhipIPaeMfUKQUjKa5vWSeLcf/IABbQx1kNEoM1dTY4M4ZpsFgQEBGbz6AiWjLSmhex5RGDCQ4JwSCWPI3hcSAwrSiRIZo2/1hcaAg3xAIcFoS8p/8TD+6oPbf1fRvfwQ3ToZu8qx13/sgIGQHRUGYiBkHSArxxJiIGQdICvHEmIgZB0gK8cSYiBkHSArxxJiIGQdICvHEmIgZB0gK8cSYiBkHSArxxJiIGQdICvnH1Bw7aEQPNppAAAAAElFTkSuQmCC';
+
+const MONITOR_DEFAULTTOPRIMARY = 0x00000001;
+const SS_CENTERIMAGE = 0x00000200;
+const WM_LBUTTONDOWN = 0x0201;
+const WM_NCLBUTTONDOWN = 0x00A1;
+const HT_CAPTION = 2;
+const SS_NOTIFY = 0x00000100;
+const WM_WINDOWPOSCHANGING = 70;
+const WM_NCCALCSIZE = 0x0083;
+const ptrsize = require('_GenericMarshal').PointerSize;
+const SWP_NOZORDER = 0x0004;
+const IDC_ARROW = 32512;
+const WM_MOUSEMOVE = 0x0200;
+
+
 const WM_SETFONT = 0x0030;
 const WM_CTLCOLORSTATIC = 0x0138;
 const WM_CREATE = 0x0001;
@@ -122,6 +138,7 @@ var promise = require('promise');
 var GM = require('_GenericMarshal');
 var MessagePump = require('win-message-pump');
 
+var sh = require('monitor-info')._shcore;
 var SHM = GM.CreateNativeProxy('Shlwapi.dll');
 SHM.CreateMethod('SHCreateMemStream');
 var gdip = GM.CreateNativeProxy('Gdiplus.dll');
@@ -143,6 +160,12 @@ gdip.CreateMethod('GdipSetSmoothingMode');
 gdip.CreateMethod('GdiplusStartup');
 gdip.CreateMethod('GdiplusShutdown');
 
+
+function SCALE(val, dpi)
+{
+    var factor = val / 96;
+    return (dpi * factor);
+}
 function RGB(r, g, b)
 {
     return (r | (g << 8) | (b << 16));
@@ -182,6 +205,17 @@ function pump_onMessage(msg)
 {
     switch (msg.message)
     {
+        case WM_MOUSEMOVE:
+            var x = msg.lparam & 0xFFFF;
+            var y = msg.lparam >> 16;
+            if (x >= 0 && x <= SCALE(580, this.dpi) && y >= 0 && y <= (this.dpi / 3))
+            {
+                this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_ARROW]).then(function (cs)
+                {
+                    this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
+                }).parentPromise.pump = this;
+            }
+            break;
         case WM_COMMAND:
             switch(msg.wparam)
             {
@@ -205,6 +239,7 @@ function pump_onMessage(msg)
                     this.promise.resolve(this.autoAccept);
                     this.close();
                     break;
+                case 0xFFE0: // X
                 case 0xFFF3: // Deny
                     if (this.timeout != null) { clearTimeout(this.timeout); this.timeout = null; }
                     this.promise.reject('DENIED');
@@ -214,6 +249,10 @@ function pump_onMessage(msg)
             break;
         case WM_CTLCOLORSTATIC:
             console.info1('WM_CTLCOLORSTATIC => ' + msg.lparam, msg.wparam);
+            if (msg.lparam == this._faketitle)
+            {
+                break;
+            }
             var hdcStatic = msg.wparam;
             this._gdi32.SetTextColor(hdcStatic, this.options.foreground);
             this._gdi32.SetBkColor(hdcStatic, this.options.background);
@@ -225,6 +264,74 @@ function pump_onMessage(msg)
         case WM_ERASEBKGND:
             console.info1('WM_ERASEBKGND');
             break;
+        case WM_LBUTTONDOWN:
+            var x = msg.lparam & 0xFFFF;
+            var y = msg.lparam >> 16;
+            if (x >= 0 && x <= SCALE(580, this.dpi) && y >= 0 && y <= (this.dpi / 3))
+            {
+                this._addAsyncMethodCall(this._user32.ReleaseCapture.async, []).then(function ()
+                {
+                    this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._HANDLE, WM_NCLBUTTONDOWN, HT_CAPTION, 0]);
+                }).parentPromise.pump = this;
+            }
+            break;
+        case WM_WINDOWPOSCHANGING:
+            if (this._HANDLE)
+            {
+                if (sh != null)
+                {
+                    var hmon = require('monitor-info')._user32.MonitorFromWindow(this._HANDLE, MONITOR_DEFAULTTOPRIMARY);
+                    var xdpi = require('_GenericMarshal').CreateVariable(4);
+                    var ydpi = require('_GenericMarshal').CreateVariable(4);
+                    sh.GetDpiForMonitor(hmon, 0, xdpi, ydpi);
+
+                    var x = msg.lparam_raw.Deref(ptrsize == 4 ? 8 : 16, 4).toBuffer().readInt32LE();
+                    var y = msg.lparam_raw.Deref(ptrsize == 4 ? 12 : 20, 4).toBuffer().readInt32LE();
+
+                    this.dpi = xdpi.toBuffer().readUInt32LE();
+                    msg.lparam_raw.Deref(ptrsize == 4 ? 16 : 24, 4).toBuffer().writeInt32LE(SCALE(580, this.dpi));
+                    msg.lparam_raw.Deref(ptrsize == 4 ? 20 : 28, 4).toBuffer().writeInt32LE(SCALE(295, this.dpi));
+
+                    var ret = GM.CreatePointer();
+                    ret.increment(0, true);
+                    return (ret);
+                }
+            }
+            break;
+        case WM_NCCALCSIZE:
+            if (msg.wparam != 0)
+            {
+                var buff = msg.lparam_raw.Deref(0, 16).toBuffer();
+                var dpi = (buff.readInt32LE(8) - buff.readInt32LE(0)) / 580 * 96;
+
+                console.info1('[' + (buff.readInt32LE(8) - buff.readInt32LE(0)) + ' x ' + (buff.readInt32LE(12) - buff.readInt32LE(4)) + ']', dpi);
+                this.font = this._gdi32.CreateFontW(SCALE(20, dpi), 0, 0, 0, FW_DONTCARE, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, GM.CreateVariable(this.options.font, { wide: true }));
+                this.buttonfont = this._gdi32.CreateFontW(SCALE(15, dpi), 0, 0, 0, FW_DONTCARE, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, GM.CreateVariable(this.options.font, { wide: true }));
+
+                this._addAsyncMethodCall(this._user32.BeginDeferWindowPos.async, [8]).then(function (HDWP)
+                {
+                    this.pump._user32.DeferWindowPos(HDWP, this.pump._faketitle, 0, 0, 0, SCALE(580, dpi), dpi / 3, SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._fakeclose, 0, SCALE(580, dpi) - ((dpi / 3) * 0.75) - ((dpi / 3) * 0.125), (dpi / 3) * 0.125, (dpi / 3) * 0.75, (dpi / 3) * 0.75, SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._allowbutton, 0, SCALE(345, dpi), SCALE(215 + 32, dpi), SCALE(100, dpi), SCALE(30, dpi), SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._denybutton, 0, SCALE(455, dpi), SCALE(215 + 32, dpi), SCALE(100, dpi), SCALE(30, dpi), SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._checkbox, 0, SCALE(210, dpi), SCALE(150 + 32, dpi), SCALE(335, dpi), SCALE(60, dpi), SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._avatar, 0, SCALE(10, dpi), SCALE(10 + 32, dpi), SCALE(192, dpi), SCALE(192, dpi), SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._username, 0, SCALE(10, dpi), SCALE(215 + 32, dpi), SCALE(335, dpi), SCALE(30, dpi), SWP_NOZORDER);
+                    HDWP = this.pump._user32.DeferWindowPos(HDWP, this.pump._caption, 0, SCALE(210, dpi), SCALE(10 + 32, dpi), SCALE(350, dpi), SCALE(150, dpi), SWP_NOZORDER);
+
+                    this.pump._addAsyncMethodCall(this.pump._user32.InvalidateRect.async, [this.pump._HANDLE, 0, 0]);
+                    this.pump._addAsyncMethodCall(this.pump._user32.EndDeferWindowPos.async, [HDWP]).then(function ()
+                    {
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._faketitle, WM_SETFONT, this.pump.buttonfont, 1]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._allowbutton, WM_SETFONT, this.pump.buttonfont, 1]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._denybutton, WM_SETFONT, this.pump.buttonfont, 1]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._username, WM_SETFONT, this.pump.buttonfont, 1]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._caption, WM_SETFONT, this.pump.font, 1]);
+                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [this.pump._checkbox, WM_SETFONT, this.pump.buttonfont, 1]);
+                    }).parentPromise.pump = this.pump;
+                }).parentPromise.pump = this;
+            }
+            break;
         default:
             //console.log(msg.message);
             break;
@@ -233,68 +340,121 @@ function pump_onMessage(msg)
 function pump_onHwnd(h)
 {
     this._HANDLE = h;
+    this._icon = getScaledImage(x_icon, SCALE(32, this.dpi) * 0.75, SCALE(32, this.dpi) * 0.75);
+    this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_ARROW]).then(function (cs)
+    {
+        this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
+    }).parentPromise.pump = this;
+
+    this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(' ' + this.translations.Title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE,
+        SCALE(0, this.dpi),         // x position 
+        SCALE(0, this.dpi),         // y position 
+        SCALE(580, this.dpi),       // Button width
+        SCALE(32, this.dpi),        // Button height
+        h,          // Parent window
+        0xFFE1,     // Child ID
+        0,
+        0).then(function (h)
+        {
+            this.pump._faketitle = h.Val;
+            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [h, WM_SETFONT, this.pump.buttonfont, 1]);
+        }).parentPromise.pump = this;
+    this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('X', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BITMAP | SS_REALSIZECONTROL | SS_NOTIFY,
+        SCALE(580, this.dpi) - (SCALE(32, this.dpi) * 0.75) - (SCALE(32, this.dpi) * 0.125),        // x position 
+        SCALE(32, this.dpi) * 0.125,                                                                // y position 
+        SCALE(32, this.dpi) * 0.75,                                                                 // Button width
+        SCALE(32, this.dpi) * 0.75,                                                                 // Button height
+        h,          // Parent window
+        0xFFE0,     // Child ID
+        0,
+        0).then(function (c)
+        {
+            this.pump._fakeclose = c;
+            //this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
+            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
+        }).parentPromise.pump = this;
+
+
 
     this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Allow, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-        345,        // x position 
-        215,        // y position 
-        100,        // Button width
-        30,         // Button height
+        SCALE(345, this.dpi),        // x position 
+        SCALE(215 + 32, this.dpi),   // y position 
+        SCALE(100, this.dpi),        // Button width
+        SCALE(30, this.dpi),         // Button height
         h,          // Parent window
         0xFFF2,     // Child ID
         0,
-        0);
+        0).then(function (c)
+        {
+            this.pump._allowbutton = c;
+            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
+        }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Deny, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-        455,        // x position 
-        215,        // y position 
-        100,        // Button width
-        30,         // Button height
+        SCALE(455, this.dpi),        // x position 
+        SCALE(215 + 32, this.dpi),        // y position 
+        SCALE(100, this.dpi),        // Button width
+        SCALE(30, this.dpi),         // Button height
         h,          // Parent window
         0xFFF3,     // Child ID
         0,
-        0);
+        0).then(function (c)
+        {
+            this.pump._denybutton = c;
+            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
+        }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Auto, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_CHECKBOX | BS_MULTILINE,
-        210,        // x position 
-        150,        // y position 
-        335,        // Button width
-        60,         // Button height
+        SCALE(210, this.dpi),        // x position 
+        SCALE(150 + 32, this.dpi),   // y position 
+        SCALE(335, this.dpi),        // Button width
+        SCALE(60, this.dpi),         // Button height
         h,          // Parent window
         0xFFF0,     // Child ID
         0,
-        0);
+        0).then(function (c)
+        {
+            this.pump._checkbox = c;
+            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
+        }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('NONE', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BLACKRECT | SS_BITMAP | SS_REALSIZECONTROL,
-        10,         // x position 
-        10,         // y position 
-        192,        // Button width
-        192,        // Button height
+        SCALE(10, this.dpi),         // x position 
+        SCALE(10 + 32, this.dpi),    // y position 
+        SCALE(192, this.dpi),        // Button width
+        SCALE(192, this.dpi),        // Button height
         h,          // Parent window
         0xFFF1,     // Child ID
         0,
         0).then(function (h)
         {
+            this.pump._avatar = h;
             if (this.pump.options.bitmap != null)
             {
                 this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [h, STM_SETIMAGE, IMAGE_BITMAP, this.pump.options.bitmap.Deref()]);
             }
         }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this.username, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT,
-        10,         // x position 
-        215,        // y position 
-        335,        // Button width
-        30,         // Button height
+        SCALE(10, this.dpi),         // x position 
+        SCALE(215 + 32, this.dpi),   // y position 
+        SCALE(335, this.dpi),        // Button width
+        SCALE(30, this.dpi),         // Button height
         h,          // Parent window
         0xFFF2,     // Child ID
         0,
-        0);
+        0).then(function (c)
+        {
+            this.pump._username = c;
+            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
+        }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this.translations.Caption, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT,
-        210,        // x position 
-        10,         // y position 
-        350,        // Button width
-        150,        // Button height
+        SCALE(210, this.dpi),        // x position 
+        SCALE(10 + 32, this.dpi),    // y position 
+        SCALE(350, this.dpi),        // Button width
+        SCALE(150, this.dpi),        // Button height
         h,          // Parent window
         0xFFF3,     // Child ID
         0,
         0).then(function (h)
         {
+            this.pump._caption = h;
             this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [h, WM_SETFONT, this.pump.font, 1]);
         }).parentPromise.pump = this;
 }
@@ -311,42 +471,58 @@ function createLocal(title, caption, username, options)
                 Caption: caption
             };
     }
+
+    if (!options.translations.Title) { options.translations.Title = title; }
     if (!options.font) { options.font = 'Arial'; }
     if (!options.background) { options.background = RGB(0, 54, 105); }
     if (!options.foreground) { options.foreground = RGB(200, 200, 200); }
+
     var ret = new promise(promise.defaultInit);
     ret.opt =
     {
         window:
         {
-            winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_BORDER | MessagePump.WindowStyles.WS_CAPTION | MessagePump.WindowStyles.WS_SYSMENU,
-            x: 300, y: 300, left: 0, right: 300, width: 580, height: 295, title: title, background: options.background
+            winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_BORDER | MessagePump.WindowStyles.WS_POPUP,
+            x: 300, y: 300, left: 0, right: 300, width: 580, height: 295, title: title, background: options.background, dpi: 96
         },
     };
+    if (sh != null)
+    {
+        var primary = require('monitor-info')._user32.MonitorFromWindow(0, MONITOR_DEFAULTTOPRIMARY);
+        var xdpi = require('_GenericMarshal').CreateVariable(4);
+        var ydpi = require('_GenericMarshal').CreateVariable(4);
 
+        sh.GetDpiForMonitor(primary, 0, xdpi, ydpi);
+        ret.opt.window.dpi = xdpi.toBuffer().readUInt32LE();
+
+        console.info1('DPI of Primary Display is: ' + ret.opt.window.dpi);
+        ret.opt.window.width = SCALE(580, ret.opt.window.dpi);
+        ret.opt.window.height = SCALE(295, ret.opt.window.dpi);
+    }
     var rect = GM.CreateVariable(16);
     var startupinput = require('_GenericMarshal').CreateVariable(24);
     ret.gdipToken = require('_GenericMarshal').CreatePointer();
     ret.pump = new MessagePump(ret.opt);
-
     if (ret.pump._user32.SystemParametersInfoA(SPI_GETWORKAREA, 0, rect, 0).Val != 0)
     {
         var r = { x: rect.toBuffer().readInt32LE(0), y: rect.toBuffer().readInt32LE(4), w: rect.toBuffer().readInt32LE(8), h: rect.toBuffer().readInt32LE(12) };
         r.w = r.w - r.x;
         r.h = r.h - r.y;
         console.info1('Primary Display: ' + JSON.stringify(r));
-        console.info1('   => x: ' + CENTER(580, r.x, r.w) + ', y: ' + CENTER(305, r.y, r.h));
-        ret.opt.window.x = CENTER(580, r.x, r.w);
-        ret.opt.window.y = CENTER(305, r.y, r.h);
+        console.info1('   => x: ' + CENTER(ret.opt.window.width, r.x, r.w) + ', y: ' + CENTER(ret.opt.window.height, r.y, r.h));
+        ret.opt.window.x = CENTER(ret.opt.window.width, r.x, r.w);
+        ret.opt.window.y = CENTER(ret.opt.window.height, r.y, r.h);
     }
 
+    ret.pump.dpi = ret.opt.window.dpi;
     ret.pump.autoAccept = false;
     ret.pump.promise = ret;
     ret.pump.brush = ret.pump._gdi32.CreateSolidBrush(options.background);
     ret.pump.translations = options.translations;
     ret.pump.username = username;
     ret.pump.options = options;
-    ret.pump.font = ret.pump._gdi32.CreateFontW(20, 0, 0, 0, FW_DONTCARE, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, GM.CreateVariable(options.font, { wide: true }));
+    ret.pump.font = ret.pump._gdi32.CreateFontW(SCALE(20, ret.pump.dpi), 0, 0, 0, FW_DONTCARE, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, GM.CreateVariable(options.font, { wide: true }));
+    ret.pump.buttonfont = ret.pump._gdi32.CreateFontW(SCALE(15, ret.pump.dpi), 0, 0, 0, FW_DONTCARE, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, GM.CreateVariable(options.font, { wide: true }));
 
     if (options.b64Image)
     {
@@ -503,7 +679,55 @@ function _child()
         }
     });
 }
+function getScaledImage(b64, width, height)
+{
+    var startupinput = require('_GenericMarshal').CreateVariable(24);
+    var gdipToken = require('_GenericMarshal').CreatePointer();
 
+    startupinput.toBuffer().writeUInt32LE(1);
+    gdip.GdiplusStartup(gdipToken, startupinput, 0);
+
+    var raw = Buffer.from(b64, 'base64');
+    var nbuff = require('_GenericMarshal').CreateVariable(raw.length);
+    raw.copy(nbuff.toBuffer());
+    var istream = SHM.SHCreateMemStream(nbuff, raw.length);
+
+    var pimage = require('_GenericMarshal').CreatePointer();
+    var hbitmap = require('_GenericMarshal').CreatePointer();
+    var status = gdip.GdipCreateBitmapFromStream(istream, pimage);
+    status = gdip.GdipCreateHBITMAPFromBitmap(pimage.Deref(), hbitmap, RGB(0, 54, 105));
+    if (status.Val == 0)
+    {
+        var format = GM.CreateVariable(4);
+        console.info1('PixelFormatStatus: ' + gdip.GdipGetImagePixelFormat(pimage.Deref(), format).Val);
+        console.info1('PixelFormat: ' + format.toBuffer().readInt32LE());
+        var nb = GM.CreatePointer();
+
+        console.info1('FromScan0: ' + gdip.GdipCreateBitmapFromScan0(width, height, 0, format.toBuffer().readInt32LE(), 0, nb).Val);
+
+        var REAL_h = GM.CreateVariable(4);
+        var REAL_w = GM.CreateVariable(4);
+        console.info1('GetRes_W: ' + gdip.GdipGetImageHorizontalResolution(pimage.Deref(), REAL_w).Val);
+        console.info1('GetRes_H: ' + gdip.GdipGetImageVerticalResolution(pimage.Deref(), REAL_h).Val);
+        console.info1('Source DPI: ' + REAL_w.toBuffer().readFloatLE() + ' X ' + REAL_h.toBuffer().readFloatLE());
+        console.info1('SetRes: ' + gdip.GdipBitmapSetResolution(nb.Deref(), REAL_w.toBuffer().readFloatLE(), REAL_h.toBuffer().readFloatLE()).Val);
+
+        var graphics = GM.CreatePointer();
+        console.info1('GdipGetImageGraphicsContext: ' + gdip.GdipGetImageGraphicsContext(nb.Deref(), graphics).Val);
+        console.info1('GdipSetSmoothingMode: ' + gdip.GdipSetSmoothingMode(graphics.Deref(), SmoothingModeAntiAlias).Val);
+        console.info1('InterpolationModeBicubic: ' + gdip.GdipSetInterpolationMode(graphics.Deref(), InterpolationModeBicubic).Val);
+        console.info1('DrawImage: ' + gdip.GdipDrawImageRectI(graphics.Deref(), pimage.Deref(), 0, 0, width, height).Val);
+
+        var scaledhbitmap = GM.CreatePointer();
+        //console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
+        console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, gdip_RGB(0, 54, 105)).Val);
+        console.info1('ImageDispose: ' + gdip.GdipDisposeImage(pimage.Deref()).Val);
+        scaledhbitmap._token = gdipToken;
+        return (scaledhbitmap);
+    }
+
+    return (null);
+}
 module.exports =
     {
         create: create, _child: _child
