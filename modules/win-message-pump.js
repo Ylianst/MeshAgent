@@ -66,6 +66,10 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('IsDlgButtonChecked');
     this._user32.CreateMethod('CheckDlgButton');
 
+    this._user32.CreateMethod('BeginDeferWindowPos');
+    this._user32.CreateMethod('DeferWindowPos');
+    this._user32.CreateMethod('EndDeferWindowPos');
+    
     this._gdi32 = GM.CreateNativeProxy('Gdi32.dll');
     this._gdi32.mp = this;
     this._gdi32.CreateMethod('CreateFontW');
