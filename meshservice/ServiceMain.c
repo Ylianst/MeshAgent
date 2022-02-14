@@ -991,6 +991,32 @@ int wmain(int argc, char* wargv[])
 
 
 #ifndef _MINCORE
+COLORREF gBKCOLOR = RGB(0, 0, 0);
+COLORREF gFGCOLOR = RGB(0, 0, 0);
+COLORREF GDIP_RGB(COLORREF c)
+{
+	unsigned char _r = (c & 0xFF);
+	unsigned char _g = ((c >> 8) & 0xFF);
+	unsigned char _b = ((c >> 16) & 0xFF);
+	return (RGB(_b, _g, _r));
+}
+
+
+uint32_t ColorFromMSH(char *c)
+{
+	uint32_t ret = RGB(0, 54, 105);
+	size_t len = strnlen_s(c, 12);
+	parser_result *pr = ILibParseString(c, 0, len, ",", 1);
+	if (pr->NumResults == 3)
+	{
+		pr->FirstResult->data[pr->FirstResult->datalength] = 0;
+		pr->FirstResult->NextResult->data[pr->FirstResult->NextResult->datalength] = 0;
+		pr->LastResult->data[pr->LastResult->datalength] = 0;
+		ret = RGB(atoi(pr->FirstResult->data), atoi(pr->FirstResult->NextResult->data), atoi(pr->LastResult->data));
+	}
+	ILibDestructParserResults(pr);
+	return(ret);
+}
 
 WCHAR *Dialog_GetTranslationEx(void *ctx, char *utf8)
 {
@@ -1044,7 +1070,7 @@ HBITMAP GetScaledImage(char *raw, size_t rawLen, int w, int h)
 	s = __GdipSetSmoothingMode(g, SmoothingModeAntiAlias);
 	s = __GdipSetInterpolationMode(g, InterpolationModeBicubic);
 	s = __GdipDrawImageRectI(g, bm, 0, 0, w, h);
-	s = __GdipCreateHBITMAPFromBitmap(nb, &hbm, RGB(105, 54, 0));
+	s = __GdipCreateHBITMAPFromBitmap(nb, &hbm, GDIP_RGB(gBKCOLOR));
 	s = __GdipDisposeImage(bm);
 	ILibMemory_Free(decoded);
 	return(hbm);
@@ -1063,7 +1089,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 	case WM_CTLCOLORDLG: {
 		// Set the background of the dialog box to blue
 		if (DialogBackgroundBrush == NULL) {
-			DialogBackgroundBrush = CreateSolidBrush(RGB(0, 54, 105));
+			DialogBackgroundBrush = CreateSolidBrush(gBKCOLOR);
 		}
 		return (INT_PTR)DialogBackgroundBrush;
 	}
@@ -1072,7 +1098,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		if ((HWND)lParam == GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT))
 		{
 			SetBkMode((HDC)wParam, TRANSPARENT);
-			SetTextColor((HDC)wParam, RGB(255, 255, 255));
+			SetTextColor((HDC)wParam, gFGCOLOR);
 			return (INT_PTR)GetStockObject(NULL_BRUSH);
 		}
 		break;
@@ -1155,6 +1181,11 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			WINDOWPLACEMENT lpwndpl;
 			RECT r;
 			GetWindowRect(GetDlgItem(hDlg, IDC_IMAGE), &r);
+
+			char *bkcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "bkcolor", "0,54,105");
+			char *fgcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "fgcolor", "255,255,255");
+			gBKCOLOR = ColorFromMSH(bkcolor);
+			gFGCOLOR = ColorFromMSH(fgcolor);
 
 			duk_size_t rawLen;
 			char *imageraw = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "image", NULL);
@@ -1344,14 +1375,14 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	case WM_CTLCOLORDLG: {
 		// Set the background of the dialog box to blue
 		if (DialogBackgroundBrush == NULL) {
-			DialogBackgroundBrush = CreateSolidBrush(RGB(0, 54, 105));
+			DialogBackgroundBrush = CreateSolidBrush(gBKCOLOR);
 		}
 		return (INT_PTR)DialogBackgroundBrush;
 	}
 	case WM_CTLCOLORSTATIC: {
 		// Set the left text to white over transparent
 		SetBkMode((HDC)wParam, TRANSPARENT);
-		SetTextColor((HDC)wParam, RGB(255, 255, 255));
+		SetTextColor((HDC)wParam, gFGCOLOR);
 		return (INT_PTR)GetStockObject(NULL_BRUSH);
 		break;
 	}
@@ -1376,6 +1407,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			serverurl = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshServer", NULL);
 			displayName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "displayName", NULL);
 			meshServiceName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "meshServiceName", "Mesh Agent");
+			char *bkcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "bkcolor", "0,0,0");
 
 			// Set text in the dialog box
 			if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
