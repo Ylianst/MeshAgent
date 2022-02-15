@@ -92,6 +92,19 @@ gdip.CreateMethod('GdiplusShutdown');
 
 const x_icon = 'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAAXNSR0IArs4c6QAABKlJREFUeF7t3U1S20AQBeAZmaIw5A7ANpfxKmyS4yUbZeXLsMXhDrYpB6SUBBK2kDT66X7zqDRbTNzuT29mNJYU7+yHqgOeqhorxhkI2UFgIAZC1gGyciwhBkLWAbJyLCEGQtYBsnIsIQZC1gGyciwhBkLWAbJyLCEGQtYBsnIsIQZC1gGyciwhBuLc82KxSi4uvvvr6x/+/v7A1JP869fz5z+PP/3T4dfZy2GNrg2ekHyxWOVZlro8P3fL5drf3t6xoBQYLw+b1D/tV875Q56c3aFRoCAnGNWhR4JyjOHzvKwu9wkcBQbSikGC0oZRlYZGgYCUc0Y1THUNypGSUs4Zm8c02W9XVTKaJSJR1EEGYURKyhAMdFJUQUZhgFH6hqmuECOSogbSO2eE1pLKw9cUDFRSVEBmYSgnpcTYbFK/33fOGaHjRTMp4iAFRpZlqS/OM+b+CCdFAkM7KaIgk+aMEJoQypgJPFSSJooYSInxkqXOCSSj2ZGZKK8YmzSZMUyhJnoxkL9XX9Jku/3m3etZrvjPRBTJYarzMy2vfif77Z3EZxYDef3gj6nvOcGaXfBIlDmrqcG1jqwp9O+KgZR7P0QonxGj6KEoyDvKvGVl6CgK7RJjhimdnWpxkNhJqVdTu+1KbT67XK79jc7XBiogFUq5aafZmMb4/ZmTUY0KaiBolOL9qi+XunZtg0Nh6AWKyYCAnKAor74y513xTZ8ahvBqqsteNSH1GS1g9VWc/ah9GBCGyiqr84z26PtqtaM4NORM+T0QAwoCW31NaXrX3wDmjOZbq6W8Lynqqy8JFHAyYJN6W28g5wpzUCJhwIes4x5BtlmmoETEiApCOadExogO8o6ivPc1JCkEGBQgJ0nR3GbpQyHBoAE5OaNHoxBhUIFEQSHDoAM5nlOS3W41ZOif/BpCDF6Qh4fygoTJzR7yhwYS7pLGpTq970qIAt86CW6paG7Tt705GQoFCOSCBFv2hoeoehJ/u40s6rY8SVKiJiR6MprHDAFKNBDIBQnDQnr6qsgoUUDgq6mxMBFR4CC02+4kwxcUhG7OCCUnQlJgILRzBhkKBASRjLy4LovsVoiQddvv1UEgc8Zyuc68d3PuGww2DzR8qYJALmZ4u1SnaCjb/SlB5JYXqIFAktG4bqp+T80vuZSTogKCmDO67hGBpFIRRRwkJkY1AkDSqYQiCsKAcYqifDWLAooYCOQ8Y2QDGGsKTfRiINS3RWtv7zPeFq364IDLy7W/uZn8KEDN1Zf0c0/EElJE8VM8WkNwSSyNoXLViciTgKqBduScERqfJVdfGhgqIOXXshJPBBLGkFx9aWGogVQo9eNgQ4du8/fKdy7NSYomhipIPaeMfUKQUjKa5vWSeLcf/IABbQx1kNEoM1dTY4M4ZpsFgQEBGbz6AiWjLSmhex5RGDCQ4JwSCWPI3hcSAwrSiRIZo2/1hcaAg3xAIcFoS8p/8TD+6oPbf1fRvfwQ3ToZu8qx13/sgIGQHRUGYiBkHSArxxJiIGQdICvHEmIgZB0gK8cSYiBkHSArxxJiIGQdICvHEmIgZB0gK8cSYiBkHSArxxJiIGQdICvnH1Bw7aEQPNppAAAAAElFTkSuQmCC';
 
+function string_RGB(s)
+{
+    var ret = RGB(0, 54, 105);
+    try
+    {
+        var t = s.split(',');
+        ret = RGB(parseInt(t[0]), parseInt(t[1]), parseInt(t[2]));
+    }
+    catch (x)
+    {
+    }
+    return (ret);
+}
 function RGB(r, g, b)
 {
     return (r | (g << 8) | (b << 16));
@@ -110,9 +123,9 @@ function gdip_RGB(r, g, b)
         return (RGB(_b, _g, _r));
     }
 }
-function getScaledImage(b64, width, height)
+function getScaledImage(b64, width, height, options)
 {
-
+    if (!options) { options = {}; }
     var startupinput = require('_GenericMarshal').CreateVariable(24);
     var gdipToken = require('_GenericMarshal').CreatePointer();
 
@@ -152,7 +165,7 @@ function getScaledImage(b64, width, height)
 
         var scaledhbitmap = GM.CreatePointer();
         //console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
-        console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, gdip_RGB(0, 54, 105)).Val);
+        console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background == null ? gdip_RGB(0, 54, 105) : gdip_RGB(options.background)).Val);
         console.info1('ImageDispose: ' + gdip.GdipDisposeImage(pimage.Deref()).Val);
         scaledhbitmap._token = gdipToken;
         return (scaledhbitmap);
@@ -161,22 +174,23 @@ function getScaledImage(b64, width, height)
     return (null);
 }
 
-function windows_notifybar_check(title, tsid)
+function windows_notifybar_check(title, tsid, options)
 {
     if(require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
     {
-        return (windows_notifybar_system(title, tsid));
+        return (windows_notifybar_system(title, tsid, options));
     }
     else
     {
-        return (windows_notifybar_local(title));
+        return (windows_notifybar_local(title, typeof (tsid) == 'object' ? tsid : options));
     }
 }
-function windows_notifybar_system(title, tsid)
+function windows_notifybar_system(title, tsid, options)
 {
     var ret = {};
-    
-    var script = Buffer.from("require('notifybar-desktop')('" + title + "').on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
+    if (!options) { options = {}; }
+
+    var script = Buffer.from("require('notifybar-desktop')('" + title + "', " + JSON.stringify(options) + ").on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
 
     require('events').EventEmitter.call(ret, true)
         .createEvent('close')
@@ -192,10 +206,15 @@ function windows_notifybar_system(title, tsid)
     return (ret);
 }
 
-function windows_notifybar_local(title)
+function windows_notifybar_local(title, bar_options)
 {
     var MessagePump;
     var ret;
+    if (!bar_options) { bar_options = {}; }
+    if (bar_options.foreground == null) { bar_options.foreground = RGB(200, 200, 200); }
+    if (bar_options.background == null) { bar_options.background = RGB(0, 54, 105); }
+    if (typeof (bar_options.foreground) == 'string') { bar_options.foreground = string_RGB(bar_options.foreground); }
+    if (typeof (bar_options.background) == 'string') { bar_options.background = string_RGB(bar_options.background); }
 
     MessagePump = require('win-message-pump');
     ret = { _ObjectID: 'notifybar-desktop.Windows', title: title, _pumps: [], _promise: require('monitor-info').getInfo() };
@@ -239,12 +258,12 @@ function windows_notifybar_local(title)
                     window:
                     {
                         winstyles: MessagePump.WindowStyles.WS_VISIBLE | MessagePump.WindowStyles.WS_POPUP | MessagePump.WindowStyles.WS_BORDER,
-                        x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title, background: RGB(0, 54, 105)
+                        x: start, y: m[i].top, left: m[i].left, right: m[i].right, width: barWidth, height: barHeight, title: this.notifybar.title, background: bar_options.background
                     }
                 };
             
             this.notifybar._pumps.push(new MessagePump(options));
-            this.notifybar._pumps.peek().brush = this.notifybar._pumps.peek()._gdi32.CreateSolidBrush(RGB(0, 54, 105));
+            this.notifybar._pumps.peek().brush = this.notifybar._pumps.peek()._gdi32.CreateSolidBrush(bar_options.background);
             this.notifybar._pumps.peek()._L = m[i].left;
             this.notifybar._pumps.peek()._R = m[i].right;
 
@@ -259,7 +278,7 @@ function windows_notifybar_local(title)
             this.notifybar._pumps.peek().on('hwnd', function (h)
             {
                 this._HANDLE = h;
-                this._icon = getScaledImage(x_icon, this.height * 0.75, this.height * 0.75);
+                this._icon = getScaledImage(x_icon, this.height * 0.75, this.height * 0.75, bar_options);
                 this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('X', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BITMAP | SS_CENTERIMAGE | SS_NOTIFY,
                     this.width - (this.height * 0.75) - (this.height * 0.125),  // x position 
                     this.height * 0.0625,                                        // y position 
@@ -270,7 +289,6 @@ function windows_notifybar_local(title)
                     0,
                     0).then(function (c)
                     {
-                        //this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
                         this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
                     }).parentPromise.pump = this;
                 this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_WORDELLIPSIS,
@@ -322,8 +340,8 @@ function windows_notifybar_local(title)
                     case WM_CTLCOLORSTATIC:
                         console.info1('WM_CTLCOLORSTATIC => ' + msg.lparam, msg.wparam);
                         var hdcStatic = msg.wparam;
-                        this._gdi32.SetTextColor(hdcStatic, RGB(200, 200, 200));
-                        this._gdi32.SetBkColor(hdcStatic, RGB(0, 54, 105));
+                        this._gdi32.SetTextColor(hdcStatic, bar_options.foreground);
+                        this._gdi32.SetBkColor(hdcStatic, bar_options.background);
                         return (this.brush);
                         break;
                     case WM_WINDOWPOSCHANGING:
@@ -563,6 +581,7 @@ switch(process.platform)
     case 'win32':
         module.exports = windows_notifybar_check;
         module.exports.system = windows_notifybar_system;
+        module.exports.RGB = RGB;
         break;
     case 'linux':
     case 'freebsd':

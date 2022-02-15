@@ -166,6 +166,19 @@ function SCALE(val, dpi)
     var factor = val / 96;
     return (dpi * factor);
 }
+function string_RGB(s)
+{
+    var ret = RGB(0, 0, 0);
+    try
+    {
+        var t = s.split(',');
+        ret = RGB(parseInt(t[0]), parseInt(t[1]), parseInt(t[2]));
+    }
+    catch(z)
+    {
+    }
+    return (ret);
+}
 function RGB(r, g, b)
 {
     return (r | (g << 8) | (b << 16));
@@ -340,7 +353,7 @@ function pump_onMessage(msg)
 function pump_onHwnd(h)
 {
     this._HANDLE = h;
-    this._icon = getScaledImage(x_icon, SCALE(32, this.dpi) * 0.75, SCALE(32, this.dpi) * 0.75);
+    this._icon = getScaledImage(x_icon, SCALE(32, this.dpi) * 0.75, SCALE(32, this.dpi) * 0.75, this.options.background);
     this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_ARROW]).then(function (cs)
     {
         this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
@@ -590,6 +603,9 @@ function create(title, caption, username, options)
 {
     if (options == null) { options = {}; }
     if (options.uid == null) { options.uid = require('user-sessions').consoleUid(); }
+    if (options.background != null && typeof (options.background == 'string')) { options.background = string_RGB(options.background); }
+    if (options.foreground != null && typeof (options.foreground == 'string')) { options.foreground = string_RGB(options.foreground); }
+
     var self = require('user-sessions').getProcessOwnerName(process.pid).tsid;
     if (self != 0)
     {
@@ -679,7 +695,7 @@ function _child()
         }
     });
 }
-function getScaledImage(b64, width, height)
+function getScaledImage(b64, width, height, background)
 {
     var startupinput = require('_GenericMarshal').CreateVariable(24);
     var gdipToken = require('_GenericMarshal').CreatePointer();
@@ -720,7 +736,7 @@ function getScaledImage(b64, width, height)
 
         var scaledhbitmap = GM.CreatePointer();
         //console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, options.background).Val);
-        console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, gdip_RGB(0, 54, 105)).Val);
+        console.info1('GetScaledHBITMAP: ' + gdip.GdipCreateHBITMAPFromBitmap(nb.Deref(), scaledhbitmap, gdip_RGB(background)).Val);
         console.info1('ImageDispose: ' + gdip.GdipDisposeImage(pimage.Deref()).Val);
         scaledhbitmap._token = gdipToken;
         return (scaledhbitmap);
