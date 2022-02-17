@@ -684,6 +684,21 @@ function monitorinfo()
                         {
                             ret.xauthority = '/run/lightdm/' + uname + '/xauthority';
                         }
+                        if(consoleuid == require('user-sessions').gdmUid && require('fs').existsSync('/run/sddm'))
+                        {
+                            var info;
+                            var files = require('fs').readdirSync('/run/sddm');
+                            var gdmuid = require('user-sessions').gdmUid;
+                            for(var i=0;i<files.length;++i)
+                            {
+                                info = require('fs').statSync('/run/sddm/' + files[i]);
+                                if(info.uid == gdmuid)
+                                {
+                                    ret.xauthority = '/run/sddm/' + files[i];
+                                    break;
+                                }
+                            }
+                        }
                     }
                     if (ret.display == '' && ttys.length > 0)
                     {

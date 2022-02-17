@@ -468,6 +468,7 @@ function UserSessions()
                         try
                         {
                             pwd = JSON.parse(child.stdout.str);
+                            console.info1(JSON.stringify(pwd, null, 1));
                         }
                         catch(z)
                         {
@@ -496,6 +497,7 @@ function UserSessions()
                             var info1 = JSON.parse(child.stdout.str);
                             var i;
                             for (i = 0; i < info1.length; ++i) { uids.push(info1[i].uid); }
+                            console.info1(JSON.stringify(uids));
                         }
                         catch(z)
                         {
@@ -506,9 +508,12 @@ function UserSessions()
                             while(uids.length>0)
                             {
                                 var tst = uids.pop();
-                                if(pwd[tst].desc.indexOf('Display Manager')>=0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm')
+                                if (pwd[tst].desc.indexOf('Display Manager') >= 0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm' || pwd[tst].user == 'sddm')
                                 {
-                                    return (parseInt(tst));
+                                    if (parseInt(tst) < min)
+                                    {
+                                        return (parseInt(tst));
+                                    }
                                 }
                             }
                         }
