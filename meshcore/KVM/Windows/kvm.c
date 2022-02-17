@@ -115,6 +115,8 @@ struct tileInfo_t **tileInfo = NULL;
 int g_slavekvm = 0;
 static ILibProcessPipe_Process gChildProcess;
 int kvm_relay_restart(int paused, void *pipeMgr, char *exePath, ILibKVM_WriteHandler writeHandler, void *reserved);
+void DD_Init();
+void DD_ReleaseFrame();
 
 HANDLE hStdOut = INVALID_HANDLE_VALUE;
 HANDLE hStdIn = INVALID_HANDLE_VALUE;
@@ -798,6 +800,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	long mouseMove[3] = { 0,0,0 };
 	int sentHideCursor = 0;
 
+	DD_Init();
 	gPendingPackets = ILibQueue_Create();
 	KVM_InitMouseCursors(gPendingPackets);
 
@@ -970,7 +973,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		}
 
 		// Scan the desktop
-		if (get_desktop_buffer(&desktop, &desktopsize, mouseMove) == 1 || desktop == NULL)
+		if (DD_get_desktop_buffer(&desktop, &desktopsize, mouseMove) == 1 || desktop == NULL)
 		{
 #ifdef _WINSERVICE
 			if (!kvmConsoleMode)
@@ -1028,6 +1031,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 			if (desktop) free(desktop);
 			desktop = NULL;
 			desktopsize = 0;
+			DD_ReleaseFrame();
 		}
 
 		KVMDEBUG("kvm_server_mainloop / loop3", (int)GetCurrentThreadId());
@@ -1290,199 +1294,304 @@ void kvm_cleanup()
 }
 
 
-////
-//// Desktop Duplication API KVM
-////
-//#include <d3d11.h>
-//#include <dxgi1_2.h>
+
+
 //
-//typedef struct D3D11_Functions
-//{
-//	HRESULT(*D3D11CreateDevice)(
-//		IDXGIAdapter            *pAdapter,
-//		D3D_DRIVER_TYPE         DriverType,
-//		HMODULE                 Software,
-//		UINT                    Flags,
-//		const D3D_FEATURE_LEVEL *pFeatureLevels,
-//		UINT                    FeatureLevels,
-//		UINT                    SDKVersion,
-//		ID3D11Device            **ppDevice,
-//		D3D_FEATURE_LEVEL       *pFeatureLevel,
-//		ID3D11DeviceContext     **ppImmediateContext
-//		);
-//}D3D11_Functions;
+// Desktop Duplication Based KVM
+//
+#include <d3d11.h>
+#include <dxgi.h>
+#include <dxgi1_2.h>
+
+typedef int(*GdipLoadImageFromStream_func)(IStream* stream, void **image);
+typedef int(*GdiplusStartup_func)(ULONG_PTR *token, void *input, void *output);
+typedef int(*GdipSaveImageToStream_func)(void *image, IStream* stream, void* clsidEncoder, void* encoderParams);
+typedef int(*GetImageEncodersSize_func)(UINT *numEncoders, UINT *size);
+typedef int(*GetImageEncoders_func)(UINT numEncoders, UINT size, void *encoders);
+
+GetImageEncoders_func _GetImageEncoders = NULL;
+GetImageEncodersSize_func _GetImageEncodersSize = NULL;
+GdipLoadImageFromStream_func _GdipLoadImageFromStream = NULL;
+GdiplusStartup_func _GdiplusStartup = NULL;
+GdipSaveImageToStream_func _GdipSaveImageToStream = NULL;
+
+typedef HRESULT(*D3D11CreateDevice_func)(void *pAdapter, int DriverType, HMODULE Software, UINT Flags, int *pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, void **ppDevice, UINT *pFeatureLevel, void **context);
+typedef HRESULT(*GetParent_func)(void *self, void* iid, void **ppParent);
+typedef ULONG(*Release_func)(void *self);
+typedef UINT(*D3D11CalcSubresource_func)(UINT MipSlice, UINT ArraySlice, UINT MipLevels);
 
 
-//void DD_Init()
-//{
-	//int i;
-	//HRESULT hr;
-	//ID3D11Device* m_Device;
-	//ID3D11DeviceContext* m_DeviceContext;
-	//IDXGIFactory2* m_Factory;
-	//DWORD m_OcclusionCookie;
-	//DXGI_OUTDUPL_DESC lOutputDuplDesc;
-	//ID3D11Texture2D *lGDIImage;
-	//ID3D11Texture2D *desktopImage;
-	//ID3D11Texture2D *destinationImage;
-
-	//DXGI_OUTDUPL_FRAME_INFO lFrameInfo;
-	//IDXGIResource *lDesktopResource;
-
-	//D3D11_Functions funcs;
-
-	//HMODULE _D3D = NULL;
-	//if ((_D3D = LoadLibraryExA((LPCSTR)"D3D11.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32)) != NULL)
-	//{
-	//	(FARPROC)funcs.D3D11CreateDevice = GetProcAddress(_D3D, "D3D11CreateDevice");
-	//}
-
-	//D3D_DRIVER_TYPE DriverTypes[] =
-	//{
-	//	D3D_DRIVER_TYPE_HARDWARE,
-	//	D3D_DRIVER_TYPE_WARP,
-	//	D3D_DRIVER_TYPE_REFERENCE,
-	//};
-	//UINT NumDriverTypes = ARRAYSIZE(DriverTypes);
-
-	//// Feature levels supported
-	//D3D_FEATURE_LEVEL FeatureLevels[] =
-	//{
-	//	D3D_FEATURE_LEVEL_11_0,
-	//	D3D_FEATURE_LEVEL_10_1,
-	//	D3D_FEATURE_LEVEL_10_0,
-	//	D3D_FEATURE_LEVEL_9_1
-	//};
-	//UINT NumFeatureLevels = ARRAYSIZE(FeatureLevels);
-	//D3D_FEATURE_LEVEL FeatureLevel;
-
-	//// Create device
-	//for (UINT DriverTypeIndex = 0; DriverTypeIndex < NumDriverTypes; ++DriverTypeIndex)
-	//{
-	//	hr = funcs.D3D11CreateDevice(NULL, DriverTypes[DriverTypeIndex], NULL, 0, FeatureLevels, NumFeatureLevels, D3D11_SDK_VERSION, &m_Device, &FeatureLevel, &m_DeviceContext);
-	//	if (SUCCEEDED(hr))
-	//	{
-	//		// Device creation succeeded, no need to loop anymore
-	//		break;
-	//	}
-	//}
-	//if (FAILED(hr))
-	//{
-	//	DebugBreak();
-	//}
-
-	//// Get DXGI factory
-	//IDXGIDevice* DxgiDevice = NULL;
-	//hr = m_Device->lpVtbl->QueryInterface(m_Device, &IID_IDXGIDevice, (void**)&DxgiDevice);
-	//if (FAILED(hr))
-	//{
-	//	DebugBreak();
-	//}
-
-	//IDXGIAdapter* DxgiAdapter = NULL;
-	//hr = DxgiDevice->lpVtbl->GetParent(DxgiDevice, &IID_IDXGIAdapter, (void**)&DxgiAdapter);
-	//DxgiDevice->lpVtbl->Release(DxgiDevice);
-	//DxgiDevice = NULL;
-	//if (FAILED(hr))
-	//{
-	//	DebugBreak();
-	//}
-
-	//hr = DxgiAdapter->lpVtbl->GetParent(DxgiAdapter, &IID_IDXGIFactory2, (void**)&m_Factory);
-	//DxgiAdapter->lpVtbl->Release(DxgiAdapter);
-	//DxgiAdapter = NULL;
-	//if (FAILED(hr))
-	//{
-	//	DebugBreak();
-	//	//return ProcessFailure(m_Device, L"Failed to get parent DXGI Factory", L"Error", hr, SystemTransitionsExpectedErrors);
-	//}
-
-	//IDXGIOutput1 *DxgiOutput1;
-	//hr = m_Device->lpVtbl->QueryInterface(m_Device, &IID_IDXGIOutput, (void**)&DxgiOutput1);
-	//if (FAILED(hr))
-	//{
-	//	DebugBreak();
-	//}
-
-	//IDXGIOutputDuplication *dupl = NULL;
-	//DxgiOutput1->lpVtbl->DuplicateOutput(DxgiOutput1, m_Device, &dupl);
-
-	//// Create GUI drawing texture
-	//dupl->lpVtbl->GetDesc(dupl, &lOutputDuplDesc);
-
-	//D3D11_TEXTURE2D_DESC desc;
-	//desc.Width = lOutputDuplDesc.ModeDesc.Width;
-	//desc.Height = lOutputDuplDesc.ModeDesc.Height;
-	//desc.Format = lOutputDuplDesc.ModeDesc.Format;
-	//desc.ArraySize = 1;
-	//desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-	//desc.MiscFlags = D3D11_RESOURCE_MISC_GDI_COMPATIBLE;
-	//desc.SampleDesc.Count = 1;
-	//desc.SampleDesc.Quality = 0;
-	//desc.MipLevels = 1;
-	//desc.CPUAccessFlags = 0;
-	//desc.Usage = D3D11_USAGE_DEFAULT;
-
-	//hr = m_Device->lpVtbl->CreateTexture2D(m_Device, &desc, NULL, &lGDIImage);
-	//hr = m_Device->lpVtbl->CreateTexture2D(m_Device, &desc, NULL, &destinationImage);
-
-	//if (FAILED(hr))
-	//{
-	//	DebugBreak();
-	//}
-
-	//// Get new frame
-	//for (i = 0; i < 5; ++i)
-	//{
-	//	hr = dupl->lpVtbl->AcquireNextFrame(dupl, 250, &lFrameInfo, &lDesktopResource);
-	//	if (hr != DXGI_ERROR_WAIT_TIMEOUT) { break; }
-	//	Sleep(100);
-	//}
-	//
-	//hr = lDesktopResource->lpVtbl->QueryInterface(lDesktopResource, &IID_ID3D11Texture2D, &desktopImage);
-
-	//// Copy image into GDI drawing texture
-	//m_DeviceContext->lpVtbl->CopyResource(m_DeviceContext, lGDIImage, desktopImage);
-
-	//// Draw cursor image into GDI drawing texture
-	//IDXGISurface1 *surface;
-	//hr = lGDIImage->lpVtbl->QueryInterface(lGDIImage, &IID_IDXGISurface1, &surface);
+HMODULE GDIP = NULL;
+IDXGIOutputDuplication *lDeskDupl = NULL;
+ID3D11DeviceContext *lImmediateContext = NULL;
+ID3D11Texture2D *lGDIImage = NULL;
+ID3D11Texture2D *lDestImage = NULL;
+DXGI_OUTDUPL_DESC lOutputDuplDesc;
 
 
-	//// Copy from CPU access texture to bitmap buffer
+void DD_Init()
+{
+	if (GDIP != NULL) { return; }
+	HRESULT hr;
+	void *gdiptoken = NULL;
+	char gdipinput[24] = { 0 };
+	((int*)gdipinput)[0] = 1;
 
-	//D3D11_MAPPED_SUBRESOURCE resource;
-	//UINT subresource = D3D11CalcSubresource(0, 0, 0);
-	//m_DeviceContext->lpVtbl->Map(m_DeviceContext, destinationImage, subresource, D3D11_MAP_READ_WRITE, 0, &resource);
+	TILE_WIDTH = 32;
+	TILE_HEIGHT = 32;
+	COMPRESSION_RATIO = 100;
+	FRAME_RATE_TIMER = 50;
+	SCALING_FACTOR = 1024;
+	SCALING_FACTOR_NEW = 1024;
+	SCALED_WIDTH = SCREEN_WIDTH = GetSystemMetrics(SM_CXSCREEN);
+	SCALED_HEIGHT = SCREEN_HEIGHT = GetSystemMetrics(SM_CYSCREEN);
 
-	//BITMAPINFO	lBmpInfo;
+	GDIP = LoadLibraryExW(L"Gdiplus.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	_GdipLoadImageFromStream = (GdipLoadImageFromStream_func)GetProcAddress(GDIP, "GdipLoadImageFromStream");
+	_GdiplusStartup = (GdiplusStartup_func)GetProcAddress(GDIP, "GdiplusStartup");
+	_GdipSaveImageToStream = (GdipSaveImageToStream_func)GetProcAddress(GDIP, "GdipSaveImageToStream");
+	_GetImageEncodersSize = (GetImageEncodersSize_func)GetProcAddress(GDIP, "GdipGetImageEncodersSize");
+	_GetImageEncoders = (GetImageEncoders_func)GetProcAddress(GDIP, "GdipGetImageEncoders");
+	_GdiplusStartup(&gdiptoken, gdipinput, NULL);
 
-	//// BMP 32 bpp
+	HMODULE D3D = LoadLibraryExW(L"D3D11.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	D3D11CreateDevice_func func = (D3D11CreateDevice_func)GetProcAddress(D3D, "D3D11CreateDevice");
+	D3D11CalcSubresource_func func2 = (D3D11CalcSubresource_func)GetProcAddress(D3D, "D3D11CalcSubresource");
 
-	//ZeroMemory(&lBmpInfo, sizeof(BITMAPINFO));
-	//lBmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	//lBmpInfo.bmiHeader.biBitCount = 32;
-	//lBmpInfo.bmiHeader.biCompression = BI_RGB;
-	//lBmpInfo.bmiHeader.biWidth = lOutputDuplDesc.ModeDesc.Width;
-	//lBmpInfo.bmiHeader.biHeight = lOutputDuplDesc.ModeDesc.Height;
-	//lBmpInfo.bmiHeader.biPlanes = 1;
-	//lBmpInfo.bmiHeader.biSizeImage = lOutputDuplDesc.ModeDesc.Width * lOutputDuplDesc.ModeDesc.Height * 4;
+	void *lDevice = NULL;
+	int lFeatureLevel = 0;
+
+	IID iid;
+	hr = IIDFromString(L"{54ec77fa-1377-44e6-8c32-88fd5f44c84c}", &iid);
+
+	// Create device
+	UINT gNumDriverTypes = 1;
+	for (UINT DriverTypeIndex = 0; DriverTypeIndex < gNumDriverTypes; ++DriverTypeIndex)
+	{
+		hr = func(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, NULL, 0, D3D11_SDK_VERSION, &lDevice, &lFeatureLevel, &lImmediateContext);
+
+		if (SUCCEEDED(hr))
+		{
+			// Device creation success, no need to loop anymore
+			break;
+		}
+		((ID3D11Device*)lDevice)->lpVtbl->Release(lDevice);
+		((ID3D11DeviceContext*)lImmediateContext)->lpVtbl->Release(lImmediateContext);
+	}
+
+	// Get DXGI device
+	IDXGIDevice *lDxgiDevice;
+	hr = ((ID3D11Device*)lDevice)->lpVtbl->QueryInterface(lDevice, &iid, &lDxgiDevice);
+
+	// Get DXGI adapter
+	GetParent_func fnc = (GetParent_func)((void**)((void**)lDxgiDevice)[0])[6];		// GetParent
+	IID adapteriid;
+	void *adapter = NULL;
+	IIDFromString(L"{2411e7e1-12ac-4ccf-bd14-9798e8534dc0}", &adapteriid);
+	hr = fnc(lDxgiDevice, &adapteriid, &adapter);
+
+	((Release_func)((void**)((void**)lDxgiDevice)[0])[2])(lDxgiDevice);				// Release
 
 
-	//BYTE* pBuf = (BYTE*)ILibMemory_SmartAllocate(lBmpInfo.bmiHeader.biSizeImage);
-	//UINT lBmpRowPitch = lOutputDuplDesc.ModeDesc.Width * 4;
-	//BYTE* sptr = (BYTE*)resource.pData;
-	//BYTE* dptr = pBuf + lBmpInfo.bmiHeader.biSizeImage - lBmpRowPitch;
-	//UINT lRowPitch = min(lBmpRowPitch, resource.RowPitch);
-	//size_t h;
+	// Figure out right dimensions for full size desktop texture and # of outputs to duplicate
+	UINT Output = 0;
+	DXGI_OUTPUT_DESC outdesc;
+	IDXGIOutput *lDxgiOutput = NULL;
+	hr = 0;
+	int32_t left = INT_MAX, top = INT_MAX, right = INT_MAX, bottom = INT_MAX;
 
-	//for (h = 0; h < lOutputDuplDesc.ModeDesc.Height; ++h)
-	//{
-	//	memcpy_s(dptr, lBmpRowPitch, sptr, lRowPitch);
-	//	sptr += resource.RowPitch;
-	//	dptr -= lBmpRowPitch;
-	//}
-//}
+	for (Output == 0; hr == 0; ++Output)
+	{
+		hr = ((IDXGIAdapter*)adapter)->lpVtbl->EnumOutputs(adapter, Output, &lDxgiOutput);	// Get output
+		((IDXGIAdapter*)adapter)->lpVtbl->Release(adapter);
+		if (lDxgiOutput != NULL)
+		{
+			hr = lDxgiOutput->lpVtbl->GetDesc(lDxgiOutput, &outdesc);
+
+			left = min(outdesc.DesktopCoordinates.left, left);
+			top = min(outdesc.DesktopCoordinates.top, top);
+			right = max(outdesc.DesktopCoordinates.right, right);
+			bottom = max(outdesc.DesktopCoordinates.bottom, bottom);
+		}
+	}
+
+	IID output1IID;
+	IDXGIOutput1 *output1 = NULL;
+	IIDFromString(L"{00cddea8-939b-4b83-a340-a685226666cc}", &output1IID);
+	hr = lDxgiOutput->lpVtbl->QueryInterface(lDxgiOutput, &output1IID, &output1);
+
+	lDxgiOutput->lpVtbl->Release(lDxgiOutput);
+
+	// Create desktop duplication
+	hr = output1->lpVtbl->DuplicateOutput(output1, lDevice, &lDeskDupl);
+	lDxgiOutput->lpVtbl->Release(lDxgiOutput);
+
+	// Create GUI drawing texture
+	lDeskDupl->lpVtbl->GetDesc(lDeskDupl, &lOutputDuplDesc);
+
+	D3D11_TEXTURE2D_DESC desc;
+	ID3D11Texture2D *lAcquiredDesktopImage = NULL;
+
+	desc.Width = lOutputDuplDesc.ModeDesc.Width;
+	desc.Height = lOutputDuplDesc.ModeDesc.Height;
+	//DeskTexD.Width = DeskBounds->right - DeskBounds->left;
+	//DeskTexD.Height = DeskBounds->bottom - DeskBounds->top;
+
+	desc.Format = lOutputDuplDesc.ModeDesc.Format;
+	desc.ArraySize = 1;
+	desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+	desc.MiscFlags = D3D11_RESOURCE_MISC_GDI_COMPATIBLE;
+	desc.SampleDesc.Count = 1;
+	desc.SampleDesc.Quality = 0;
+	desc.MipLevels = 1;
+	desc.CPUAccessFlags = 0;
+	desc.Usage = D3D11_USAGE_DEFAULT;
+	hr = ((ID3D11Device*)lDevice)->lpVtbl->CreateTexture2D(lDevice, &desc, NULL, &lGDIImage);
+
+	// Create CPU access texture
+	desc.Width = lOutputDuplDesc.ModeDesc.Width;
+	desc.Height = lOutputDuplDesc.ModeDesc.Height;
+	desc.Format = lOutputDuplDesc.ModeDesc.Format;
+	desc.ArraySize = 1;
+	desc.BindFlags = 0;
+	desc.MiscFlags = 0;
+	desc.SampleDesc.Count = 1;
+	desc.SampleDesc.Quality = 0;
+	desc.MipLevels = 1;
+	desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+	desc.Usage = D3D11_USAGE_STAGING;
+	hr = ((ID3D11Device*)lDevice)->lpVtbl->CreateTexture2D(lDevice, &desc, NULL, &lDestImage);
+}
+
+void DD_ReleaseFrame()
+{
+	HRESULT hr;
+
+	// Release new frame
+	hr = lDeskDupl->lpVtbl->ReleaseFrame(lDeskDupl);
+}
+int DD_get_desktop_buffer(void **buffer, long long *bufferSize, long* mouseMove)
+{
+	HRESULT hr;
+	ID3D11Texture2D *lAcquiredDesktopImage = NULL;
+	IDXGIResource *lDesktopResource = NULL;
+	DXGI_OUTDUPL_FRAME_INFO lFrameInfo = { 0 };
+	int lTryCount = 4;
+
+	do
+	{
+		Sleep(100);
+
+		// Get new frame
+		hr = lDeskDupl->lpVtbl->AcquireNextFrame(
+			lDeskDupl,
+			250,
+			&lFrameInfo,
+			&lDesktopResource);
+
+		if (SUCCEEDED(hr))
+			break;
+
+		if (hr == DXGI_ERROR_WAIT_TIMEOUT)
+		{
+			continue;
+		}
+		else if (FAILED(hr))
+			break;
+
+	} while (--lTryCount > 0);
+
+
+	IID ID3D11Texture2D_IID;
+	IIDFromString(L"{6f15aaf2-d208-4e89-9ab4-489535d34f9c}", &ID3D11Texture2D_IID);
+	hr = lDesktopResource->lpVtbl->QueryInterface(lDesktopResource, &ID3D11Texture2D_IID, &lAcquiredDesktopImage);
+	lDesktopResource->lpVtbl->Release(lDesktopResource);
+
+	// Copy image into GDI drawing texture
+	lImmediateContext->lpVtbl->CopyResource(lImmediateContext, lGDIImage, lAcquiredDesktopImage);
+
+
+	// Draw cursor image into GDI drawing texture
+	IID IDXGISurface1_IID;
+	IIDFromString(L"{4AE63092-6327-4c1b-80AE-BFE12EA32B86}", &IDXGISurface1_IID);
+	IDXGISurface1 *lIDXGISurface1 = NULL;
+	hr = lGDIImage->lpVtbl->QueryInterface(lGDIImage, &IDXGISurface1_IID, &lIDXGISurface1);
+
+	CURSORINFO lCursorInfo = { 0 };
+	lCursorInfo.cbSize = sizeof(lCursorInfo);
+
+	if (GetCursorInfo(&lCursorInfo) == TRUE)
+	{
+		if (lCursorInfo.flags == CURSOR_SHOWING)
+		{
+			POINT lCursorPosition = lCursorInfo.ptScreenPos;
+			DWORD lCursorSize = lCursorInfo.cbSize;
+			HDC  lHDC;
+
+			lIDXGISurface1->lpVtbl->GetDC(lIDXGISurface1, FALSE, &lHDC);
+
+			DrawIconEx(
+				lHDC,
+				lCursorPosition.x,
+				lCursorPosition.y,
+				lCursorInfo.hCursor,
+				0,
+				0,
+				0,
+				0,
+				DI_NORMAL | DI_DEFAULTSIZE);
+
+			lIDXGISurface1->lpVtbl->ReleaseDC(lIDXGISurface1, NULL);
+		}
+	}
+
+	// Copy image into CPU access texture
+	lImmediateContext->lpVtbl->CopyResource(lImmediateContext, lDestImage, lGDIImage);
+
+	// Copy from CPU access texture to bitmap buffer
+	D3D11_MAPPED_SUBRESOURCE resource;
+	UINT subresource = 0;
+	lImmediateContext->lpVtbl->Map(lImmediateContext, lDestImage, subresource, D3D11_MAP_READ_WRITE, 0, &resource);
+
+	BITMAPINFO	lBmpInfo;
+	ZeroMemory(&lBmpInfo, sizeof(BITMAPINFO));
+	lBmpInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	lBmpInfo.bmiHeader.biBitCount = 32;
+	lBmpInfo.bmiHeader.biCompression = BI_RGB;
+	lBmpInfo.bmiHeader.biWidth = lOutputDuplDesc.ModeDesc.Width;
+	lBmpInfo.bmiHeader.biHeight = lOutputDuplDesc.ModeDesc.Height;
+	lBmpInfo.bmiHeader.biPlanes = 1;
+	lBmpInfo.bmiHeader.biSizeImage = lOutputDuplDesc.ModeDesc.Width * lOutputDuplDesc.ModeDesc.Height * 4;
+
+	BYTE* pBuf;
+	ILibMemory_AllocateRaw(pBuf, lBmpInfo.bmiHeader.biSizeImage);
+	UINT lBmpRowPitch = lOutputDuplDesc.ModeDesc.Width * 4;
+	BYTE* sptr = (BYTE*)resource.pData;
+	BYTE* dptr = pBuf + lBmpInfo.bmiHeader.biSizeImage - lBmpRowPitch;
+	UINT lRowPitch = ((lBmpRowPitch < resource.RowPitch) ? lBmpRowPitch : resource.RowPitch);
+
+	for (size_t h = 0; h < lOutputDuplDesc.ModeDesc.Height; ++h)
+	{
+		memcpy_s(dptr, lBmpRowPitch, sptr, lRowPitch);
+		sptr += resource.RowPitch;
+		dptr -= lBmpRowPitch;
+	}
+
+	char *desk = NULL;
+	int64_t deskSize = 0;
+	int captureWidth = lOutputDuplDesc.ModeDesc.Width;
+	int captureHeight = lOutputDuplDesc.ModeDesc.Height;
+	*buffer = pBuf;
+	*bufferSize = lBmpInfo.bmiHeader.biSizeImage;
+	PIXEL_SIZE = 4;
+	return(0);
+}
+
+
+
+
+
+
 
 
 #endif
