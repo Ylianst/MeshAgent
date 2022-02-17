@@ -1005,16 +1005,28 @@ COLORREF GDIP_RGB(COLORREF c)
 uint32_t ColorFromMSH(char *c)
 {
 	uint32_t ret = RGB(0, 54, 105);
-	size_t len = strnlen_s(c, 12);
-	parser_result *pr = ILibParseString(c, 0, len, ",", 1);
-	if (pr->NumResults == 3)
+	if (c != NULL)
 	{
-		pr->FirstResult->data[pr->FirstResult->datalength] = 0;
-		pr->FirstResult->NextResult->data[pr->FirstResult->NextResult->datalength] = 0;
-		pr->LastResult->data[pr->LastResult->datalength] = 0;
-		ret = RGB(atoi(pr->FirstResult->data), atoi(pr->FirstResult->NextResult->data), atoi(pr->LastResult->data));
+		size_t len = strnlen_s(c, 14);
+		if (c[len] == 0)
+		{
+			parser_result *pr = ILibParseString(c, 0, len, ",", 1);
+			if (pr->NumResults == 3)
+			{
+				pr->FirstResult->data[pr->FirstResult->datalength] = 0;
+				pr->FirstResult->NextResult->data[pr->FirstResult->NextResult->datalength] = 0;
+				pr->LastResult->data[pr->LastResult->datalength] = 0;
+				
+				if (atoi(pr->FirstResult->data) >= 0 && atoi(pr->FirstResult->data) <= UINT8_MAX 
+					&& atoi(pr->FirstResult->NextResult->data) >= 0 && atoi(pr->FirstResult->NextResult->data) <= UINT8_MAX
+					&& atoi(pr->LastResult->data) >= 0 && atoi(pr->LastResult->data) <= UINT8_MAX)
+				{
+					ret = RGB(atoi(pr->FirstResult->data), atoi(pr->FirstResult->NextResult->data), atoi(pr->LastResult->data));
+				}
+			}
+			ILibDestructParserResults(pr);
+		}
 	}
-	ILibDestructParserResults(pr);
 	return(ret);
 }
 
@@ -1182,8 +1194,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			RECT r;
 			GetWindowRect(GetDlgItem(hDlg, IDC_IMAGE), &r);
 
-			char *bkcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "bkcolor", "0,54,105");
-			char *fgcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "fgcolor", "255,255,255");
+			char *bkcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "background", "0,54,105");
+			char *fgcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "foreground", "255,255,255");
 			gBKCOLOR = ColorFromMSH(bkcolor);
 			gFGCOLOR = ColorFromMSH(fgcolor);
 
