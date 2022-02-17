@@ -1012,11 +1012,7 @@ uint32_t ColorFromMSH(char *c)
 		{
 			parser_result *pr = ILibParseString(c, 0, len, ",", 1);
 			if (pr->NumResults == 3)
-			{
-				pr->FirstResult->data[pr->FirstResult->datalength] = 0;
-				pr->FirstResult->NextResult->data[pr->FirstResult->NextResult->datalength] = 0;
-				pr->LastResult->data[pr->LastResult->datalength] = 0;
-				
+			{				
 				if (atoi(pr->FirstResult->data) >= 0 && atoi(pr->FirstResult->data) <= UINT8_MAX 
 					&& atoi(pr->FirstResult->NextResult->data) >= 0 && atoi(pr->FirstResult->NextResult->data) <= UINT8_MAX
 					&& atoi(pr->LastResult->data) >= 0 && atoi(pr->LastResult->data) <= UINT8_MAX)
