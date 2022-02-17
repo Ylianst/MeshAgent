@@ -574,6 +574,7 @@ int kvm_init(int displayNo)
 	{
 		char tmpBuff[1024];
 		sprintf_s(tmpBuff, sizeof(tmpBuff), "XOpenDisplay(%s) failed, using XAUTHORITY: %s", CURRENT_XDISPLAY, getenv("XAUTHORITY"));
+		if (logFile) { fprintf(logFile, "XOpenDisplay(%s) failed, using XAUTHORITY: %s\n", CURRENT_XDISPLAY, getenv("XAUTHORITY")); fflush(logFile); }
 		kvm_send_error(tmpBuff);
 		return(-1);
 	}
