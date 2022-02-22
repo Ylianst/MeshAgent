@@ -206,7 +206,14 @@ function CENTER(w, cx, cw)
 }
 function pump_onTimeout(pump)
 {
-    pump.promise.reject('TIMEOUT');
+    if (pump.options.timeoutAutoAccept == true)
+    {
+        pump.promise.resolve(false);
+    }
+    else
+    {
+        pump.promise.reject('TIMEOUT');
+    }
     pump.close();
 }
 function pump_onExit()
