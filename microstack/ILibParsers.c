@@ -2504,7 +2504,7 @@ ILibExportMethod ILibChain_Continue_Result ILibChain_Continue(void *Chain, ILibC
 		chain->currentWaitTimeout = 0;
 
 		ILibChain_SetupWindowsWaitObject(chain->WaitHandles, &x, &tv, &(chain->currentWaitTimeout), &readset, &writeset, &errorset, chain->auxSelectHandles, handles);
-		if (x == 0 && maxTimeout < 0)
+		if (x == 0 && (maxTimeout < 0 && chain->currentWaitTimeout == UPNP_MAX_WAIT))
 		{
 			root->continuationState = ILibChain_ContinuationState_END_CONTINUE;
 			ret = ILibChain_Continue_Result_ERROR_EMPTY_SET;
@@ -3351,7 +3351,7 @@ int ILibChain_GetMinimumTimer(void *chain)
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 	while (node != NULL)
 	{
-		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL || ILibMemory_CanaryOK(Temp)==0)
 		{
 			node = ILibLinkedList_GetNextNode(node);
 			continue;
@@ -3378,7 +3378,7 @@ char *ILibChain_GetMetadataForTimers(void *chain)
 		node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 		while (node != NULL)
 		{
-			if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+			if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL || ILibMemory_CanaryOK(Temp)==0)
 			{
 				node = ILibLinkedList_GetNextNode(node);
 				continue;
@@ -7533,7 +7533,7 @@ long long ILibLifeTime_GetExpiration(void *LifetimeMonitorObject, void *data)
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 	while (node != NULL)
 	{
-		if ((temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+		if ((temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) != NULL && ILibMemory_CanaryOK(temp))
 		{
 			if (temp->data == data) return temp->ExpirationTick;
 		}
@@ -7565,8 +7565,7 @@ ILibLifeTime_Token ILibLifeTime_AddEx4(void *LifetimeMonitorObject, void *data, 
 		if (Destroy != NULL) { Destroy(data); }
 		return(NULL);
 	}
-	if ((ltms = (struct LifeTimeMonitorData*)malloc(sizeof(struct LifeTimeMonitorData))) == NULL) ILIBCRITICALEXIT(254);
-	memset(ltms,0,sizeof(struct LifeTimeMonitorData));
+	ltms = (struct LifeTimeMonitorData*)ILibMemory_SmartAllocate(sizeof(struct LifeTimeMonitorData));
 
 	//
 	// Set the trigger time
@@ -7601,7 +7600,7 @@ ILibLifeTime_Token ILibLifeTime_AddEx4(void *LifetimeMonitorObject, void *data, 
 	{
 		while (node != NULL)
 		{
-			if ((temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) != NULL)
+			if ((temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) != NULL && ILibMemory_CanaryOK(temp))
 			{
 				if (ltms->ExpirationTick < temp->ExpirationTick)
 				{
@@ -7685,7 +7684,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 	while (node != NULL)
 	{
-		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL)
+		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL || ILibMemory_CanaryOK(Temp)==0)
 		{
 			node = ILibLinkedList_GetNextNode(node);
 			continue;
@@ -7709,7 +7708,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	// Iterate through all the triggers that we need to fire
 	//
 	node = ILibQueue_DeQueue(EventQueue);
-	while (node != NULL)
+	while (node != NULL && ILibMemory_CanaryOK(node))
 	{
 		//
 		// Check to see if the item to be fired, is in the remove list.
@@ -7736,7 +7735,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 			if (EVT->DestroyPtr != NULL) { EVT->DestroyPtr(EVT->data); }
 		}
 		ILibMemory_Free(EVT->metadata);
-		free(EVT);
+		ILibMemory_Free(EVT);
 		node = ILibQueue_DeQueue(EventQueue);
 	}
 
@@ -7771,7 +7770,7 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 		while (node != NULL)
 		{
 			evt = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
-			if (evt!=NULL && evt->data == data)
+			if (evt!=NULL && ILibMemory_CanaryOK(evt) && evt->data == data)
 			{
 				ILibQueue_EnQueue(EventQueue, evt);
 				node = ILibLinkedList_Remove(node);
@@ -7798,11 +7797,11 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 	// Iterate through each node that is to be removed
 	//
 	evt = (struct LifeTimeMonitorData*)ILibQueue_DeQueue(EventQueue);
-	while (evt != NULL)
+	while (evt != NULL && ILibMemory_CanaryOK(evt))
 	{
 		if (evt->DestroyPtr != NULL) {evt->DestroyPtr(evt->data);}
 		ILibMemory_Free(evt->metadata);
-		free(evt);
+		ILibMemory_Free(evt);
 		evt = (struct LifeTimeMonitorData*)ILibQueue_DeQueue(EventQueue);
 	}
 	ILibQueue_Destroy(EventQueue);
@@ -7820,10 +7819,10 @@ void ILibLifeTime_Flush(void *LifeTimeToken)
 	ILibLinkedList_Lock(UPnPLifeTime->ObjectList);
 
 	temp = (struct LifeTimeMonitorData*)ILibQueue_DeQueue(UPnPLifeTime->ObjectList);
-	while (temp != NULL)
+	while (temp != NULL && ILibMemory_CanaryOK(temp))
 	{
 		if (temp->DestroyPtr != NULL) temp->DestroyPtr(temp->data);
-		free(temp);
+		ILibMemory_Free(temp);
 		temp = (struct LifeTimeMonitorData*)ILibQueue_DeQueue(UPnPLifeTime->ObjectList);
 	}
 	ILibLinkedList_UnLock(UPnPLifeTime->ObjectList);
