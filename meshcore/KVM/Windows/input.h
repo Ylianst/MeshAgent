@@ -20,6 +20,7 @@ typedef enum KVM_MouseCursors
 {
 	KVM_MouseCursor_NONE		= 14,
 	KVM_MouseCursor_NOTALLOWED	= 15,
+	KVM_MouseCursor_COL_RESIZE	= 16,
 	KVM_MouseCursor_NOCHANGE	= -1,
 	KVM_MouseCursor_ARROW		= 0, 
 	KVM_MouseCursor_APPSTARTING = 1,

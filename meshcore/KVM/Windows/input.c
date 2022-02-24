@@ -129,6 +129,10 @@ int KVM_CursorHashToMSG(int hashcode)
 	{
 		ret = KVM_MouseCursor_WAIT;
 	}
+	else if (hashcode == -495298424)
+	{
+		ret = KVM_MouseCursor_COL_RESIZE;
+	}
 	return(ret);
 }
 
@@ -219,6 +223,8 @@ void CALLBACK KVMWinEventProc(
 				info.cbSize = sizeof(info);
 				GetCursorInfo(&info);
 				gCurrentCursor = KVM_CursorHashToMSG(KVM_GetCursorHash(info.hCursor, NULL, 0));
+
+				//printf(" MOUSE CURSOR => %d, %d\n", gCurrentCursor, KVM_GetCursorHash(info.hCursor, NULL, 0));
 
 				buffer = (char*)ILibMemory_SmartAllocate(5);
 				((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
