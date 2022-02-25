@@ -46,6 +46,7 @@ typedef enum RemoteManagementCommands
 	MNG_KVM_TOUCH = 15,
 	MNG_KVM_CONNECTCOUNT = 16,
 	MNG_KVM_MESSAGE = 17,
+	MNG_KVM_KEYSTATE = 18,
 	MNG_ECHO = 21,
 	MNG_JUMBO = 27,
 	MNG_GETDIR = 50,

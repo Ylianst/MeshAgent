@@ -284,6 +284,37 @@ void KVM_PumpMessage()
 	}
 }
 
+LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+	if (nCode == HC_ACTION)
+	{
+		switch (wParam)
+		{
+			case WM_KEYUP:
+			case WM_SYSKEYUP:
+				{
+					PKBDLLHOOKSTRUCT p = (PKBDLLHOOKSTRUCT)lParam;
+					switch (p->vkCode)
+					{
+						case 0x90: // NUM_LOCK
+						case 0x91: // SCROLL LOCK
+						case 0x14: // CAPS LOCK
+						{
+							unsigned char *buffer = (char*)ILibMemory_SmartAllocate(5);
+							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+							buffer[4] = (unsigned char)((GetKeyState(0x90) & 0x1) | ((GetKeyState(0x91) & 0x1) << 1) | ((GetKeyState(0x14) & 0x1) << 2));
+							QueueUserAPC((PAPCFUNC)KVM_APCSink, CUR_APCTHREAD, (ULONG_PTR)buffer);
+							break;
+						}
+					}
+				}
+				break;
+		}
+	}
+	return(CallNextHookEx(NULL, nCode, wParam, lParam));
+}
+
 DWORD WINAPI KVM_InitMessagePumpEx(LPVOID parm)
 {
 	ATOM a;
@@ -296,10 +327,14 @@ DWORD WINAPI KVM_InitMessagePumpEx(LPVOID parm)
 
 	if ((a=RegisterClassExA(&CUR_WNDCLASS)) != 0)
 	{
+		HHOOK hhkLowLevelKybd = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, 0, 0);
+
 		CUR_HWND = CreateWindowExA(0x00000088, "MainWWW2Class", "TestTitle", 0x00800000, 0, 0, 100, 100, 0, 0, 0, 0);
 		KVM_PumpMessage();
 		DestroyWindow(CUR_HWND);
 		CUR_HWND = NULL;
+
+		UnhookWindowsHookEx(hhkLowLevelKybd);
 		UnregisterClassA((LPCSTR)a, GetModuleHandleA(NULL));
 	}
 	return(0);
@@ -338,6 +373,12 @@ void KVM_InitMouseCursors(void *pendingPackets)
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_MOUSE_CURSOR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
 	buffer[4] = (char)gCurrentCursor;															// Cursor Type
+	ILibQueue_EnQueue(pendingPackets, buffer);
+
+	buffer = (char*)ILibMemory_SmartAllocate(5);
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+	buffer[4] = (char)((GetKeyState(0x90) & 0x1) | ((GetKeyState(0x91) & 0x1) << 1) | ((GetKeyState(0x14) & 0x1) << 2));
 	ILibQueue_EnQueue(pendingPackets, buffer);
 
 	KVM_InitMessagePump();
