@@ -325,6 +325,7 @@ function monitorinfo()
                     this._X11.CreateMethod('XCreateGC');
                     this._X11.CreateMethod('XGetAtomName');
                     this._X11.CreateMethod('XGetWindowProperty');
+                    this._X11.CreateMethod('XKeysymToKeycode');
                     this._X11.CreateMethod('XInternAtom');
                     this._X11.CreateMethod('XMapWindow');
                     this._X11.CreateMethod({ method: 'XNextEvent', threadDispatch: true });
