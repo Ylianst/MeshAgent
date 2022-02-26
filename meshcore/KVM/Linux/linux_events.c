@@ -196,6 +196,7 @@ void KeyAction(unsigned char vk, int up, Display *display)
 	int i = 0;
 	unsigned int keysym = 0;
 	unsigned int keycode = 0;
+	if (up == 4) { up = 0; }
 
 	if (change_display)
 	{
