@@ -243,6 +243,7 @@ void KeyAction(unsigned char vk, int up)
 	int i;
 	CGKeyCode keycode;
 	CGEventSourceRef source;
+	if (up == 4) { up = 0; }
 
 	source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
 	for (i = 0 ; i < g_keymapLen; i++) {
