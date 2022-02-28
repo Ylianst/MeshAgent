@@ -16,6 +16,8 @@ limitations under the License.
 
 #include "linux_events.h"
 #include "microstack/ILibParsers.h"
+#include "meshcore/meshdefines.h"
+
 
 
 static const int g_keymapLen = 96; // Modify this when you change anything in g_keymap.
@@ -25,6 +27,10 @@ extern void kvm_keyboard_unmap_unicode_key(Display *display, int keycode);
 extern int kvm_keyboard_map_unicode_key(Display *display, uint16_t unicode, int *alreadyExists);
 extern int kvm_keyboard_update_map_unicode_key(Display *display, uint16_t unicode, int keycode);
 extern int SHIFT_STATE;
+extern xkb_struct *xkb_exports;
+extern x11_struct *x11_exports;
+extern FILE *logFile;
+extern int slave2master[2];
 
 #define g_keyboardMapCount 8
 int g_keyboardMap[g_keyboardMapCount] = { 0 };
@@ -197,6 +203,33 @@ void KeyAction(unsigned char vk, int up, Display *display)
 	unsigned int keysym = 0;
 	unsigned int keycode = 0;
 	if (up == 4) { up = 0; }
+
+
+	if (up && (vk == 0x14 || vk == 0x90 || vk == 0x91))
+	{
+		XkbStateRec ptr;
+		xkb_exports->XkbGetState(display, XkbUseCoreKbd, &ptr);
+
+		switch (vk)
+		{
+			case 0x14: // CAPS LOCK
+				xkb_exports->XkbLockModifiers(display, XkbUseCoreKbd, LockMask, (ptr.mods & 2) == 2 ? 0 : 2);
+				break;
+			case 0x90: // NUM LOCK
+				xkb_exports->XkbLockModifiers(display, XkbUseCoreKbd, Mod2Mask, (ptr.mods & 16) == 16 ? 0 : 16);
+				break;
+			case 0x91: // SCROLL LOCK
+				xkb_exports->XkbLockModifiers(display, XkbUseCoreKbd, Mod3Mask, (ptr.mods & 32) == 32 ? 0 : 32);
+				break;
+		}
+		x11_exports->XSync(display, 0);	// Sync with XServer
+		xkb_exports->XkbGetState(display, XkbUseCoreKbd, &ptr);
+		char buffer[5];
+		((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+		buffer[4] = (((ptr.mods & 16) == 16) | (((ptr.mods & 32) == 32) << 1) | (((ptr.mods & 2) == 2) << 2));
+		ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
+	}
 
 	if (change_display)
 	{

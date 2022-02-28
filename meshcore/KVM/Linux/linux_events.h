@@ -19,12 +19,39 @@ limitations under the License.
 
 #include <X11/Xlib.h>
 #include <X11/extensions/XTest.h>
+#include <X11/extensions/XKBstr.h>
 #include <X11/keysym.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include "microstack/ILibParsers.h"
 
+typedef struct x11_struct
+{
+	void *x11_lib;
+	Display*(*XOpenDisplay)(char *display_name);
+	int(*XCloseDisplay)(Display *d);
+	int(*XFlush)(Display *d);
+	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
+	Bool(*XQueryExtension)(Display *d, char *name, int* maj, int *firstev, int *firsterr);
+
+	int(*XConnectionNumber)(Display *d);
+	char*(*XGetAtomName)(Display *d, Atom atom);
+	void(*XNextEvent)(Display *d, XEvent *event_return);
+	int(*XPending)(Display *d);
+	Window(*XRootWindow)(Display *d, int screen_number);
+	void(*XSync)(Display *d, Bool discard);
+	void(*XFree)(void *data);
+	void(*XSelectInput)(Display *d, Window w, long mask);
+	int(*XGetWindowAttributes)(Display *d, Window w, XWindowAttributes *a);
+	void(*XChangeWindowAttributes)(Display *d, Window w, unsigned long valuemask, XSetWindowAttributes *a);
+	int(*XQueryPointer)(Display *d, Window w, Window *rr, Window *cr, int *rx, int *ry, int *wx, int *wy, unsigned int *mr);
+	int(*XDisplayKeycodes)(Display *display, int *min_keycodes_return, int *max_keycodes_return);
+	KeySym*(*XGetKeyboardMapping)(Display *display, KeyCode first_keycode, int keycode_count, int *keysyms_per_keycode_return);
+	KeySym(*XStringToKeysym)(char *string);
+	int(*XChangeKeyboardMapping)(Display *display, int first_keycode, int keysyms_per_keycode, KeySym *keysyms, int num_codes);
+	int(*XScreenCount)(Display *display);
+}x11_struct;
 
 typedef struct x11tst_struct
 {
@@ -36,7 +63,17 @@ typedef struct x11tst_struct
 	int(*XFlush)(Display *d);
 	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
 }x11tst_struct;
+typedef struct xkb_struct
+{
+	void *xkb_lib;
+	Bool(*XkbGetState)(Display *display, uint32_t device_spec, XkbStatePtr state_return);
+	Bool(*XkbLockModifiers)(Display *display, uint32_t device_spec, uint32_t affect, uint32_t values);
+	Bool(*XkbQueryExtension)(Display *dpy, int *opcode_rtrn, int *event_rtrn, int *error_rtrn, int *major_in_out, int *minor_in_out);
+	Bool(*XkbSelectEvents)(Display *display, uint32_t device_spec, uint64_t bits_to_change, uint64_t values_for_bits);
+}xkb_struct;
+
 extern x11tst_struct *x11tst_exports;
+extern xkb_struct* xkb_exports;
 
 enum MOUSE_EVENTS {
 	MOUSEEVENTF_LEFTDOWN = 		0x0002,

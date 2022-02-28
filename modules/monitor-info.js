@@ -251,7 +251,31 @@ function monitorinfo()
                 catch(xx)
                 {
                 }
-
+            }
+            if (!this.Location_X11KB)
+            {
+                var xkbinfo = getLibInfo('libxkbfile');
+                for (ix in xkbinfo)
+                {
+                    if (xkbinfo.length == 1 || xkbinfo[ix].hwcap == "0")
+                    {
+                        try
+                        {
+                            Object.defineProperty(this, 'Location_X11KB', { value: xkbinfo[ix].path });
+                            break;
+                        }
+                        catch (ex)
+                        {
+                        }
+                    }
+                }
+                try
+                {
+                    if (process.env['Location_X11KB']) { Object.defineProperty(this, 'Location_X11KB', { value: process.env['Location_X11KB'] }); }
+                }
+                catch (xx)
+                {
+                }
             }
         };
     }

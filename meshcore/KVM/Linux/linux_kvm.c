@@ -71,6 +71,36 @@ typedef enum KVM_MouseCursors
 	KVM_MouseCursor_NOTALLOWED = 15
 }KVM_MouseCursors;
 
+typedef struct _XkbStateNotifyEvent 
+{
+	int 			type;				/* XkbAnyEvent */
+	unsigned long 	serial;				/* # of last req processed by server */
+	int 			send_event;			/* is this from a SendEvent request? */
+	void			*display;			/* Display the event was read from */
+	uint64_t 		time;				/* milliseconds */
+	int 			xkb_type;			/* XkbStateNotify */
+	int 			device;				/* device ID */
+	unsigned int 	changed;			/* mask of changed state components */
+	int 			group;				/* keyboard group */
+	int 			base_group;			/* base keyboard group */
+	int 			latched_group;		/* latched keyboard group */
+	int 			locked_group;		/* locked keyboard group */
+	unsigned int	mods;				/* modifier state */
+	unsigned int 	base_mods;			/* base modifier state */
+	unsigned int	latched_mods;		/* latched modifiers */
+	unsigned int	locked_mods;		/* locked modifiers */
+	int 			compat_state;		/* compatibility state */
+	unsigned char	grab_mods;			/* mods used for grabs */
+	unsigned char	compat_grab_mods;	/* grab mods for non-XKB clients */
+	unsigned char	lookup_mods;		/* mods sent to clients */
+	unsigned char	compat_lookup_mods; /* mods sent to non-XKB clients */
+	int 			ptr_buttons;		/* pointer button state */
+	char			keycode;			/* keycode that caused the change */
+	char 			event_type;			/* KeyPress or KeyRelease */
+	char 			req_major;			/* Major opcode of request */
+	char 			req_minor;			/* Minor opcode of request */
+} XkbStateNotifyEvent;
+
 int curcursor = KVM_MouseCursor_HELP;
 int SLAVELOG = 0;
 
@@ -123,33 +153,6 @@ typedef struct x11ext_struct
 }x11ext_struct;
 x11ext_struct *x11ext_exports = NULL;
 extern x11tst_struct *x11tst_exports;
-
-typedef struct x11_struct
-{
-	void *x11_lib;
-	Display*(*XOpenDisplay)(char *display_name);
-	int(*XCloseDisplay)(Display *d);
-	int(*XFlush)(Display *d);
-	KeyCode(*XKeysymToKeycode)(Display *d, KeySym keysym);
-	Bool(*XQueryExtension)(Display *d, char *name, int* maj, int *firstev, int *firsterr);
-
-	int(*XConnectionNumber)(Display *d);
-	char*(*XGetAtomName)(Display *d, Atom atom);
-	void(*XNextEvent)(Display *d, XEvent *event_return);
-	int(*XPending)(Display *d);
-	Window(*XRootWindow)(Display *d, int screen_number);
-	void(*XSync)(Display *d, Bool discard);
-	void(*XFree)(void *data);
-	void(*XSelectInput)(Display *d, Window w, long mask);
-	int(*XGetWindowAttributes)(Display *d, Window w, XWindowAttributes *a);
-	void(*XChangeWindowAttributes)(Display *d, Window w, unsigned long valuemask, XSetWindowAttributes *a);
-	int(*XQueryPointer)(Display *d, Window w, Window *rr, Window *cr, int *rx, int *ry, int *wx, int *wy, unsigned int *mr);
-	int(*XDisplayKeycodes)(Display *display, int *min_keycodes_return, int *max_keycodes_return);
-	KeySym*(*XGetKeyboardMapping)(Display *display, KeyCode first_keycode, int keycode_count, int *keysyms_per_keycode_return);
-	KeySym(*XStringToKeysym)(char *string);
-	int(*XChangeKeyboardMapping)(Display *display, int first_keycode, int keysyms_per_keycode, KeySym *keysyms, int num_codes);
-	int(*XScreenCount)(Display *display);
-}x11_struct;
 x11_struct *x11_exports = NULL;
 
 typedef struct xfixes_struct
@@ -161,6 +164,7 @@ typedef struct xfixes_struct
 	void*(*XFixesGetCursorImageAndName)(Display *d);
 }xfixes_struct;
 xfixes_struct *xfixes_exports = NULL;
+xkb_struct *xkb_exports = NULL;
 
 void kvm_keyboard_unmap_unicode_key(Display *display, int keycode)
 {
@@ -478,12 +482,14 @@ char Location_X11LIB[NAME_MAX];
 char Location_X11TST[NAME_MAX];
 char Location_X11EXT[NAME_MAX];
 char Location_X11FIXES[NAME_MAX];
-void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char *libxfixes)
+char Location_X11KB[NAME_MAX];
+void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char *libxfixes, char *libx11kb)
 {
 	if (libx11 != NULL) { strcpy_s(Location_X11LIB, sizeof(Location_X11LIB), libx11); } else { strcpy_s(Location_X11LIB, sizeof(Location_X11LIB), "libX11.so"); }
 	if (libx11tst != NULL) { strcpy_s(Location_X11TST, sizeof(Location_X11TST), libx11tst); } else { strcpy_s(Location_X11TST, sizeof(Location_X11TST), "libXtst.so"); }
 	if (libx11ext != NULL) { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), libx11ext); } else { strcpy_s(Location_X11EXT, sizeof(Location_X11EXT), "libXext.so"); }		
 	if (libxfixes != NULL) { strcpy_s(Location_X11FIXES, sizeof(Location_X11FIXES), libxfixes); } else { strcpy_s(Location_X11FIXES, sizeof(Location_X11FIXES), "libXfixes.so"); }
+	if (libx11kb != NULL) { strcpy_s(Location_X11KB, sizeof(Location_X11KB), libx11kb); } else { strcpy_s(Location_X11KB, sizeof(Location_X11KB), "libxkbfile.so"); }
 }
 
 int kvm_init(int displayNo)
@@ -562,6 +568,18 @@ int kvm_init(int displayNo)
 			((void**)xfixes_exports)[4] = (void*)dlsym(xfixes_exports->xfixes_lib, "XFixesGetCursorImageAndName");
 		}
 	}
+	if (xkb_exports == NULL)
+	{
+		xkb_exports = ILibMemory_SmartAllocate(sizeof(xkb_struct));
+		xkb_exports->xkb_lib = dlopen(Location_X11KB, RTLD_NOW);
+		if (xkb_exports->xkb_lib)
+		{
+			((void**)xkb_exports)[1] = (void*)dlsym(xkb_exports->xkb_lib, "XkbGetState");
+			((void**)xkb_exports)[2] = (void*)dlsym(xkb_exports->xkb_lib, "XkbLockModifiers");
+			((void**)xkb_exports)[3] = (void*)dlsym(xkb_exports->xkb_lib, "XkbQueryExtension");
+			((void**)xkb_exports)[4] = (void*)dlsym(xkb_exports->xkb_lib, "XkbSelectEvents");
+		}
+	}
 
 
 	sprintf_s(CURRENT_XDISPLAY, sizeof(CURRENT_XDISPLAY), ":%d", (int)displayNo);
@@ -605,8 +623,24 @@ int kvm_init(int displayNo)
 
 	kvm_send_resolution();
 	kvm_send_display();
-
 	reset_tile_info(old_height_count);
+
+	if (xkb_exports != NULL)
+	{
+		char buffer[5];
+		int kberror_base = 0, major = 0, minor = 0, opcode = 0, kbevent_base = 0, kb_status = 0;
+
+		XkbStateRec ptr;
+		kb_status = xkb_exports->XkbQueryExtension(eventdisplay, &opcode, &kbevent_base, &kberror_base, &major, &minor);
+		if (logFile) { fprintf(logFile, "XkbQueryExtension(): %d\n", kb_status); fflush(logFile); }
+		xkb_exports->XkbGetState(eventdisplay, XkbUseCoreKbd, &ptr);
+		((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+		buffer[4] = (((ptr.mods & 16) == 16) | (((ptr.mods & 32) == 32) << 1) | (((ptr.mods & 2) == 2) << 2));
+
+		ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
+		if (logFile) { fprintf(logFile, "Keyboard Initial State: NUM[%d], SCROLL[%d], CAPS[%d]\n", (ptr.mods & 16) == 16, (ptr.mods & 32) == 32, (ptr.mods & 2) == 2); fflush(logFile); }
+	}
 
 	return 0;
 }
@@ -662,7 +696,8 @@ int kvm_server_inputdata(char* block, int blocklen)
 			if (size != 6) break;
 			if (g_enableEvents)
 			{
-				KeyAction(block[5], block[4], eventdisplay);
+				if (logFile) { fprintf(logFile, "KeyAction(%u, %d)\n", ((unsigned char*)block)[5], block[4]); fflush(logFile); }
+				KeyAction(((unsigned char*)block)[5], block[4], eventdisplay);
 			}
 			break;
 		}
@@ -931,6 +966,7 @@ void* kvm_server_mainloop(void* parm)
 	Display *imagedisplay = NULL, *cursordisplay = NULL;
 	void *buf = NULL;
 	int event_base = 0, error_base = 0, cursor_descriptor = -1;
+	int kbevent_base = 0;
 	ssize_t written;
 	XShmSegmentInfo shminfo;
 	default_JPEG_error_handler = kvm_server_jpegerror;
@@ -1056,8 +1092,16 @@ void* kvm_server_mainloop(void* parm)
 					x11_exports->XSync(cursordisplay, 0);								// Sync with XServer
 					cursor_descriptor = x11_exports->XConnectionNumber(cursordisplay);	// Get the FD to use in select
 				}
+				curcursor = kvm_fetch_currentCursor(cursordisplay);						// Cursor Type
 
-				curcursor = kvm_fetch_currentCursor(cursordisplay);							// Cursor Type
+				if (xkb_exports != NULL)
+				{
+					int kberror_base = 0, major = 0, minor = 0, opcode = 0;
+					if (xkb_exports->XkbQueryExtension(cursordisplay, &opcode, &kbevent_base, &kberror_base, &major, &minor))
+					{
+						xkb_exports->XkbSelectEvents(cursordisplay, XkbUseCoreKbd, XkbStateNotifyMask, XkbStateNotifyMask);
+					}
+				}
 			}
 		}
 		else if (cursor_descriptor > 0)
@@ -1128,6 +1172,20 @@ void* kvm_server_mainloop(void* parm)
 							buffer[4] = (char)curcursor;																// Cursor Type
 							written = write(slave2master[1], buffer, 5);
 							fsync(slave2master[1]);
+						}
+					}
+					if (kbevent_base != 0 && XE.type == kbevent_base)
+					{
+						XkbStateNotifyEvent *e = (XkbStateNotifyEvent*)&XE;
+						if (e->event_type == 3) // KEY_UP
+						{
+							if (logFile) { fprintf(logFile, "Keyboard Evented State: NUM[%d], SCROLL[%d], CAPS[%d]\n", (e->mods & 16) == 16, (e->mods & 32) == 32, (e->mods & 2) == 2); fflush(logFile); }
+							char buffer[5];
+							((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+							((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+							buffer[4] = (((e->mods & 16) == 16) | (((e->mods & 32) == 32) << 1) | (((e->mods & 2) == 2) << 2));
+
+							ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
 						}
 					}
 				}

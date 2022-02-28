@@ -845,7 +845,8 @@ function UserSessions()
                 child.stdin.write('printf "]";');
                 child.stdin.write("}'\nexit\n");
                 child.waitExit();
-                console.log(child.stdout.str);
+
+                console.info1(child.stdout.str);
                 var info1 = JSON.parse(child.stdout.str);
                 var sids = [];
                 var i;

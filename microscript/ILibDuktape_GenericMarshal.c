@@ -2321,7 +2321,6 @@ duk_ret_t ILibDuktape_GenericMarshal_PutGlobalGenericCallbackEx(duk_context *ctx
 duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx(duk_context *ctx)
 {
 	int numParms = duk_require_int(ctx, 0);
-	Duktape_GlobalGeneric_Data *data = NULL;
 
 	duk_push_global_stash(ctx);			// [stash]
 	if (!duk_has_prop_string(ctx, -1, "GlobalCallBacksEx"))
