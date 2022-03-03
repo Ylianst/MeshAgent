@@ -2258,6 +2258,59 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 		}
 		tv.tv_sec = 0; tv.tv_usec = 0;
 		slct = select(FD_SETSIZE, readset, writeset, errorset, &tv);
+		if (slct == -1)
+		{
+			int badFDSi = 0;
+			SOCKET badFDS[FD_SETSIZE] = { 0 };
+			fd_set tmp_readset, tmp_writeset, tmp_errorset;
+			FD_ZERO(&tmp_writeset);
+			FD_ZERO(&tmp_errorset);
+			for (i = 0; i < (int)readset->fd_count; ++i)
+			{
+				FD_ZERO(&tmp_readset);
+				FD_SET(readset->fd_array[i], &tmp_readset);
+				if (select(FD_SETSIZE, &tmp_readset, &tmp_writeset, &tmp_errorset, &tv) == -1)
+				{
+					badFDS[badFDSi++] = readset->fd_array[i];
+				}
+			}
+			for (i = 0; i < badFDSi; ++i)
+			{
+				FD_CLR(badFDS[i], readset);
+			}
+
+			badFDSi = 0; FD_ZERO(&tmp_readset);
+			for (i = 0; i < (int)writeset->fd_count; ++i)
+			{
+				FD_ZERO(&tmp_writeset);
+				FD_SET(writeset->fd_array[i], &tmp_writeset);
+				if (select(FD_SETSIZE, &tmp_readset, &tmp_writeset, &tmp_errorset, &tv) == -1)
+				{
+					badFDS[badFDSi++] = writeset->fd_array[i];
+				}
+			}
+			for (i = 0; i < badFDSi; ++i)
+			{
+				FD_CLR(badFDS[i], writeset);
+			}
+
+			badFDSi = 0; FD_ZERO(&tmp_readset); FD_ZERO(&tmp_readset); FD_ZERO(&tmp_writeset);
+			for (i = 0; i < (int)errorset->fd_count; ++i)
+			{
+				FD_ZERO(&tmp_errorset);
+				FD_SET(errorset->fd_array[i], &tmp_errorset);
+				if (select(FD_SETSIZE, &tmp_readset, &tmp_writeset, &tmp_errorset, &tv) == -1)
+				{
+					badFDS[badFDSi++] = errorset->fd_array[i];
+				}
+			}
+			for (i = 0; i < badFDSi; ++i)
+			{
+				FD_CLR(badFDS[i], errorset);
+			}
+			
+			if (readset->fd_count > 0 || writeset->fd_count > 0 || errorset->fd_count > 0) { slct = select(FD_SETSIZE, readset, writeset, errorset, &tv); }
+		}
 		((ILibBaseChain*)chain)->UnblockFlag = 0;
 	}
 	return(slct);
@@ -3235,8 +3288,8 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 	size_t tmp;
 	size_t buflen = 0;
 	struct timeval tv = { 0 };
-	fd_set temp_readset, temp_writeset, temp_errorset;
 	int bad;
+	fd_set temp_readset, temp_writeset, temp_errorset;
 
 	while(1)
 	{
@@ -3276,13 +3329,22 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 					}
 					for (f = 0; f < scount; ++f)
 					{
+						bad = 0;
+						if (!FD_ISSET(f, inr) && !FD_ISSET(f, inw) && !FD_ISSET(f, ine))
+						{
+							FD_ZERO(&temp_readset);
+							FD_ZERO(&temp_writeset);
+							FD_ZERO(&temp_errorset);
+							FD_SET(slist[f], &temp_readset);
+							bad = select(FD_SETSIZE, &temp_readset, &temp_writeset, &temp_errorset, &tv) == -1 ? 1 : 0;
+						}
 						if (retStr == NULL)
 						{
-							buflen += snprintf(NULL, 0, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData);
+							buflen += snprintf(NULL, 0, " %sFD[%d] (R: %d, W: %d, E: %d) => %s\n", bad == 0 ? "" : "*", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData);
 						}
 						else
 						{
-							(r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData));
+							(r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " %sFD[%d] (R: %d, W: %d, E: %d) => %s\n", bad == 0 ? "" : "*", (int)slist[f], FD_ISSET(slist[f], inr), FD_ISSET(slist[f], inw), FD_ISSET(slist[f], ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, (int)slist[f], &tmp) : ((ILibChain_Link*)module)->MetaData));
 							if (r > 0) { len += r; }
 						}
 					}
@@ -3978,12 +4040,17 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	ILibChain_Link *module;
 	ILibChain_Link_Hook *nodeHook;
 
-	fd_set readset, tmp_readset;
-	fd_set errorset, tmp_errorset;
-	fd_set writeset, tmp_writeset;
+	fd_set readset;
+	fd_set errorset;
+	fd_set writeset;
+
+#ifdef _POSIX
+	fd_set tmp_readset, tmp_writeset, tmp_errorset;
+	int f;
+#endif
 
 	struct timeval tv, tmp_tv = { 0 };
-	int slct, f;
+	int slct;
 	int vX;
 
 	//
@@ -4090,6 +4157,7 @@ ILibExportMethod void ILibStartChain(void *Chain)
 
 		if (slct == -1)
 		{
+#ifdef _POSIX
 			//
 			// One of the descriptors was invalid
 			//
@@ -4120,6 +4188,12 @@ ILibExportMethod void ILibStartChain(void *Chain)
 				FD_ZERO(&writeset);
 				FD_ZERO(&errorset);
 			}
+#else
+			// Something went wrong, so we have no other choice but to clear the sets
+			FD_ZERO(&readset);
+			FD_ZERO(&writeset);
+			FD_ZERO(&errorset);
+#endif
 		}
 
 #ifndef WIN32
