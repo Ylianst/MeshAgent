@@ -21,10 +21,14 @@ limitations under the License.
 #include "../../../microstack/ILibAsyncSocket.h"
 #include "../../../microstack/ILibAsyncServerSocket.h"
 #include "../../../microstack/ILibProcessPipe.h"
+#include <IOKit/IOKitLib.h>
+#include <IOKit/hidsystem/IOHIDLib.h>
+#include <IOKit/hidsystem/IOHIDParameter.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
 
 int KVM_Listener_FD = -1;
 #define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
@@ -92,7 +96,7 @@ ILibQueue g_messageQ;
 
 
 #define KvmDebugLog(...)
-//#define KvmDebugLog(...) printf(__VA_ARGS__); //if (logfile != NULL) fprintf(logfile, __VA_ARGS__);
+//#define KvmDebugLog(...) printf(__VA_ARGS__); if (logfile != NULL) fprintf(logfile, __VA_ARGS__);
 //#define KvmDebugLog(x) if (logenabled) printf(x);
 //#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Writing from slave in kvm_send_resolution\n");
 
@@ -129,6 +133,138 @@ void kvm_send_resolution()
 
 #define BUFSIZE 65535
 
+int set_kbd_state(int input_state)
+{
+	int ret = 0;
+	kern_return_t kr;
+	io_service_t ios;
+	io_connect_t ioc;
+	CFMutableDictionaryRef mdict;
+
+	while (1)
+	{
+		mdict = IOServiceMatching(kIOHIDSystemClass);
+		ios = IOServiceGetMatchingService(kIOMasterPortDefault, (CFDictionaryRef)mdict);
+		if (!ios)
+		{
+			if (mdict)
+			{
+				CFRelease(mdict);
+			}
+			ILIBLOGMESSAGEX("IOServiceGetMatchingService() failed\n");
+			break;
+		}
+
+		kr = IOServiceOpen(ios, mach_task_self(), kIOHIDParamConnectType, &ioc);
+		IOObjectRelease(ios);
+		if (kr != KERN_SUCCESS)
+		{
+			ILIBLOGMESSAGEX("IOServiceOpen() failed: %x\n", kr);
+			break;
+		}
+
+		// Set CAPSLOCK
+		kr = IOHIDSetModifierLockState(ioc, kIOHIDCapsLockState, (input_state & 4) == 4);
+		if (kr != KERN_SUCCESS)
+		{
+			IOServiceClose(ioc);
+			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+			break;
+		}
+
+		// Set NUMLOCK
+		kr = IOHIDSetModifierLockState(ioc, kIOHIDNumLockState, (input_state & 1) == 1);
+		if (kr != KERN_SUCCESS)
+		{
+			IOServiceClose(ioc);
+			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+			break;
+		}
+
+		// CAPSLOCK_QUERY
+		bool state;
+		kr = IOHIDGetModifierLockState(ioc, kIOHIDCapsLockState, &state);
+		if (kr != KERN_SUCCESS)
+		{
+			IOServiceClose(ioc);
+			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+			break;
+		}
+		ret |= (state << 2);
+
+		// NUMLOCK_QUERY
+		kr = IOHIDGetModifierLockState(ioc, kIOHIDNumLockState, &state);
+		if (kr != KERN_SUCCESS)
+		{
+			IOServiceClose(ioc);
+			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+			break;
+		}
+		ret |= state;
+
+		IOServiceClose(ioc);
+		break;
+	}
+	return(ret);
+}
+int get_kbd_state()
+{
+	int ret = 0;
+	kern_return_t kr;
+	io_service_t ios;
+	io_connect_t ioc;
+	CFMutableDictionaryRef mdict;
+
+	while (1)
+	{
+		mdict = IOServiceMatching(kIOHIDSystemClass);
+		ios = IOServiceGetMatchingService(kIOMasterPortDefault, (CFDictionaryRef)mdict);
+		if (!ios)
+		{
+			if (mdict)
+			{
+				CFRelease(mdict);
+			}
+			ILIBLOGMESSAGEX("IOServiceGetMatchingService() failed\n");
+			break;
+		}
+
+		kr = IOServiceOpen(ios, mach_task_self(), kIOHIDParamConnectType, &ioc);
+		IOObjectRelease(ios);
+		if (kr != KERN_SUCCESS)
+		{
+			ILIBLOGMESSAGEX("IOServiceOpen() failed: %x\n", kr);
+			break;
+		}
+
+		// CAPSLOCK_QUERY
+		bool state;
+		kr = IOHIDGetModifierLockState(ioc, kIOHIDCapsLockState, &state);
+		if (kr != KERN_SUCCESS)
+		{
+			IOServiceClose(ioc);
+			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+			break;
+		}
+		ret |= (state << 2);
+
+		// NUMLOCK_QUERY
+		kr = IOHIDGetModifierLockState(ioc, kIOHIDNumLockState, &state);
+		if (kr != KERN_SUCCESS)
+		{
+			IOServiceClose(ioc);
+			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+			break;
+		}
+		ret |= state;
+
+		IOServiceClose(ioc);
+		break;
+	}
+	return(ret);
+}
+
+
 int kvm_init()
 {
 	ILibCriticalLogFilename = "KVMSlave.log";
@@ -157,9 +293,17 @@ int kvm_init()
 	if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
 	
 	kvm_send_resolution();
-	
 	reset_tile_info(old_height_count);
 	
+	unsigned char *buffer = ILibMemory_SmartAllocate(5);
+	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+	buffer[4] = (unsigned char)get_kbd_state();
+
+	// Write the reply to the pipe.
+	ILibQueue_Lock(g_messageQ);
+	ILibQueue_EnQueue(g_messageQ, buffer);
+	ILibQueue_UnLock(g_messageQ);
 	return 0;
 }
 

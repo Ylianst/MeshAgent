@@ -99,6 +99,9 @@ limitations under the License.
 #define PORTNUMBERRANGE 15000
 #define UPNP_MAX_WAIT 86400			// 24 Hours
 
+extern void _fdsnap();
+extern void _fdsnap2();
+
 #ifdef _REMOTELOGGINGSERVER
 #include "ILibWebServer.h"
 #endif
@@ -3231,6 +3234,9 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 	int f, r;
 	size_t tmp;
 	size_t buflen = 0;
+	struct timeval tv = { 0 };
+	fd_set temp_readset, temp_writeset, temp_errorset;
+	int bad;
 
 	while(1)
 	{
@@ -3286,13 +3292,25 @@ char *ILibChain_GetMetaDataFromDescriptorSetEx(void *chain, fd_set *inr, fd_set 
 					{
 						if (FD_ISSET(f, &readset) || FD_ISSET(f, &writeset) || FD_ISSET(f, &errorset))
 						{
+							bad = 0;
+							if (!FD_ISSET(f, inr) && !FD_ISSET(f, inw) && !FD_ISSET(f, ine))
+							{
+								FD_ZERO(&temp_readset);
+								FD_ZERO(&temp_writeset);
+								FD_ZERO(&temp_errorset);
+								if (FD_ISSET(f, &readset)) { FD_SET(f, &temp_readset); }
+								if (FD_ISSET(f, &writeset)) { FD_SET(f, &temp_writeset); }
+								if (FD_ISSET(f, &errorset)) { FD_SET(f, &temp_errorset); }
+								bad = select(FD_SETSIZE, &temp_readset, &temp_writeset, &temp_errorset, &tv) == -1 ? 1 : 0;
+							}
+
 							if (retStr == NULL)
 							{
-								buflen += snprintf(NULL, 0, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
+								buflen += snprintf(NULL, 0, "%sFD[%d] (R: %d, W: %d, E: %d) => %s\n", bad==0?"":"*", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
 							}
 							else
 							{
-								r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " FD[%d] (R: %d, W: %d, E: %d) => %s\n", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
+								r = sprintf_s(retStr + len, ILibMemory_Size(retStr) - len, " %sFD[%d] (R: %d, W: %d, E: %d) => %s\n", bad == 0 ? "" : "*", f, FD_ISSET(f, inr), FD_ISSET(f, inw), FD_ISSET(f, ine), ((ILibChain_Link*)module)->QueryHandler != NULL ? ((ILibChain_Link*)module)->QueryHandler(chain, module, f, &tmp) : ((ILibChain_Link*)module)->MetaData);
 								if (r > 0) { len += r; }
 							}
 						}
@@ -3386,6 +3404,7 @@ char *ILibChain_GetMetadataForTimers(void *chain)
 			double ex = (double)(Temp->ExpirationTick - current);
 			char *units = "milliseconds";
 
+			if (ex < 0) { ex = 0; }
 			if (ex > 1000)
 			{
 				ex = ex / 1000;
@@ -3959,12 +3978,12 @@ ILibExportMethod void ILibStartChain(void *Chain)
 	ILibChain_Link *module;
 	ILibChain_Link_Hook *nodeHook;
 
-	fd_set readset;
-	fd_set errorset;
-	fd_set writeset;
+	fd_set readset, tmp_readset;
+	fd_set errorset, tmp_errorset;
+	fd_set writeset, tmp_writeset;
 
-  	struct timeval tv;
-	int slct;
+	struct timeval tv, tmp_tv = { 0 };
+	int slct, f;
 	int vX;
 
 	//
@@ -4072,11 +4091,35 @@ ILibExportMethod void ILibStartChain(void *Chain)
 		if (slct == -1)
 		{
 			//
-			// If the select simply timed out, we need to clear these sets
+			// One of the descriptors was invalid
 			//
-			FD_ZERO(&readset);
-			FD_ZERO(&writeset);
-			FD_ZERO(&errorset);
+			for (f = 0; f < FD_SETSIZE; ++f)
+			{
+				if (FD_ISSET(f, &readset) || FD_ISSET(f, &writeset) || FD_ISSET(f, &errorset))
+				{
+					FD_ZERO(&tmp_readset);
+					FD_ZERO(&tmp_writeset);
+					FD_ZERO(&tmp_errorset);
+					if (FD_ISSET(f, &readset)) { FD_SET(f, &tmp_readset); }
+					if (FD_ISSET(f, &writeset)) { FD_SET(f, &tmp_writeset); }
+					if (FD_ISSET(f, &errorset)) { FD_SET(f, &tmp_errorset); }
+					if (select(FD_SETSIZE, &tmp_readset, &tmp_writeset, &tmp_errorset, &tmp_tv) == -1)
+					{
+						// Found the bad descriptor... Let's dump it
+						FD_CLR(f, &readset);
+						FD_CLR(f, &writeset);
+						FD_CLR(f, &errorset);
+					}
+				}
+			}
+
+			if ((slct = select(FD_SETSIZE, &readset, &writeset, &errorset, &tv)) == -1)
+			{
+				// Something went wrong, so we have no other choice but to clear the sets
+				FD_ZERO(&readset);
+				FD_ZERO(&writeset);
+				FD_ZERO(&errorset);
+			}
 		}
 
 #ifndef WIN32
@@ -7565,6 +7608,8 @@ ILibLifeTime_Token ILibLifeTime_AddEx4(void *LifetimeMonitorObject, void *data, 
 		if (Destroy != NULL) { Destroy(data); }
 		return(NULL);
 	}
+	ILibLifeTime_Remove(LifetimeMonitorObject, data);
+
 	ltms = (struct LifeTimeMonitorData*)ILibMemory_SmartAllocate(sizeof(struct LifeTimeMonitorData));
 
 	//

@@ -236,9 +236,42 @@ void MouseAction(double absX, double absY, int button, short wheel)
 	if (source != NULL) CFRelease(source);
 }
 
+extern int set_kbd_state(int state);
+extern int get_kbd_state();
 void KeyAction(unsigned char vk, int up) 
 {
 	//ILIBLOGMESSAGEX("NORMAL: %u [%d]", vk, up);
+	if (up == 4) { up = 0; }
+
+	if (up && (vk == 0x14 || vk == 0x90 || vk == 0x91))
+	{
+		int state = get_kbd_state();
+
+		switch (vk)
+		{
+		case 0x14: // CAPS LOCK
+			state = set_kbd_state(state ^ 4);
+			break;
+		case 0x90: // NUM LOCK
+			state = set_kbd_state(state ^ 1);
+			break;
+		case 0x91: // SCROLL LOCK
+			state = set_kbd_state(state ^ 2);
+			break;
+		}
+
+		unsigned char *buffer = ILibMemory_SmartAllocate(5);
+		((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
+		((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
+		buffer[4] = (unsigned char)get_kbd_state();
+
+		// Write the reply to the pipe.
+		ILibQueue_Lock(g_messageQ);
+		ILibQueue_EnQueue(g_messageQ, buffer);
+		ILibQueue_UnLock(g_messageQ);
+		return;
+	}
+
 
 	int i;
 	CGKeyCode keycode;

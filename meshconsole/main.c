@@ -384,3 +384,21 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 	return retCode;
 }
+
+extern void* gILibChain;
+void _fdsnap()
+{
+	char val[] = "require('ChainViewer').getSnapshot().then(function(c) { console.log(c); console.log(require('ChainViewer').getTimerInfo()); });";
+	duk_eval_string_noresult(agentHost->meshCoreCtx, val);
+}
+void _fdsnap2()
+{
+	char val[] = "console.setDestination(console.Destinations.LOGFILE);require('ChainViewer').getSnapshot().then(function(c) { console.log(c); console.log(require('ChainViewer').getTimerInfo()); });";
+	duk_eval_string_noresult(agentHost->meshCoreCtx, val);
+}
+void _timerinfo()
+{
+	char *s = ILibChain_GetMetadataForTimers(gILibChain);
+	printf("%s\n", s);
+	ILibMemory_Free(s);
+}
