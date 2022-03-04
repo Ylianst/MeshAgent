@@ -2016,6 +2016,11 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		notifyDispatcher->chainLink.QueryHandler = ILibDuktape_fs_notifyDispatcher_Query;
 		notifyDispatcher->watchTable = ILibHashtable_Create();
 		notifyDispatcher->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+		if (notifyDispatcher->fd == 0)
+		{
+			notifyDispatcher->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+			close(0);
+		}
 		notifyDispatcher->ctx = ctx;
 		ILibAddToChain(chain, notifyDispatcher);
 		duk_push_pointer(ctx, notifyDispatcher);							// [fs][ptr]
