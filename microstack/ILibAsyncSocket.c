@@ -827,55 +827,51 @@ void ILibAsyncSocket_Disconnect(ILibAsyncSocket_SocketModule socketModule)
 	}
 	#endif
 
-	if (module->internalSocket != ~0)
+
+	// There is an associated socket that is still valid, so we need to close it
+	module->PAUSE = 1;
+	s = module->internalSocket;
+	module->internalSocket = (SOCKET)~0;
+	if (s != -1)
 	{
-		// There is an associated socket that is still valid, so we need to close it
-		module->PAUSE = 1;
-		s = module->internalSocket;
-		module->internalSocket = (SOCKET)~0;
-		if (s != -1)
-		{
 #if defined(_WIN32_WCE) || defined(WIN32)
 #if defined(WINSOCK2)
-			shutdown(s, SD_SEND);
+		shutdown(s, SD_SEND);
 #endif
-			closesocket(s);
+		closesocket(s);
 #elif defined(_POSIX)
-			shutdown(s, SHUT_WR);
-			close(s);
+		shutdown(s, SHUT_WR);
+		close(s);
 #endif
-		}
+	}
 
-		// Since the socket is closing, we need to clear the data that is pending to be sent
-		ILibAsyncSocket_ClearPendingSend(socketModule);
-		ILibSpinLock_UnLock(&(module->SendLock));
+	// Since the socket is closing, we need to clear the data that is pending to be sent
+	ILibAsyncSocket_ClearPendingSend(socketModule);
+	ILibSpinLock_UnLock(&(module->SendLock));
 
-		#ifndef MICROSTACK_NOTLS
-		if (wasssl == NULL)
-		{
-		#endif
-			// This was a normal socket, fire the event notifying the user. Depending on connection state, we event differently
-			if (module->FinConnect <= 0 && module->OnConnect != NULL) { module->OnConnect(module, 0, module->user); } // Connection Failed
-			if (module->FinConnect > 0 && module->OnDisconnect != NULL) { module->OnDisconnect(module, module->user); } // Socket Disconnected
-		#ifndef MICROSTACK_NOTLS
-		}
-		else
-		{
-			// This was a SSL socket, fire the event notifying the user. Depending on connection state, we event differently
-			if (module->SSLConnect == 0 && module->OnConnect != NULL) { module->OnConnect(module, 0, module->user); } // Connection Failed
-			if (module->SSLConnect != 0 && module->OnDisconnect != NULL) { module->OnDisconnect(module, module->user); } // Socket Disconnected
-		}
-		#endif
-		module->FinConnect = 0;
-		module->user = NULL;
-		#ifndef MICROSTACK_NOTLS
-		module->SSLConnect = 0;
-		#endif
+	#ifndef MICROSTACK_NOTLS
+	if (wasssl == NULL)
+	{
+	#endif
+		// This was a normal socket, fire the event notifying the user. Depending on connection state, we event differently
+		if (module->FinConnect <= 0 && module->OnConnect != NULL) { module->OnConnect(module, 0, module->user); } // Connection Failed
+		if (module->FinConnect > 0 && module->OnDisconnect != NULL) { module->OnDisconnect(module, module->user); } // Socket Disconnected
+	#ifndef MICROSTACK_NOTLS
 	}
 	else
 	{
-		ILibSpinLock_UnLock(&(module->SendLock));
+		// This was a SSL socket, fire the event notifying the user. Depending on connection state, we event differently
+		if (module->SSLConnect == 0 && module->OnConnect != NULL) { module->OnConnect(module, 0, module->user); } // Connection Failed
+		if (module->SSLConnect != 0 && module->OnDisconnect != NULL) { module->OnDisconnect(module, module->user); } // Socket Disconnected
 	}
+	#endif
+	module->FinConnect = 0;
+	module->user = NULL;
+	#ifndef MICROSTACK_NOTLS
+	module->SSLConnect = 0;
+	#endif
+	
+
 }
 
 
@@ -965,7 +961,7 @@ void ILibAsyncSocket_ConnectTo(void* socketModule, struct sockaddr *localInterfa
 	{
 		if (((struct sockaddr_in*)localInterface)->sin_family == AF_UNSPEC ||  (module->internalSocket = ILibGetSocket(localInterface, SOCK_STREAM, IPPROTO_TCP)) < 0)
 		{
-			module->internalSocket = 0;
+			module->internalSocket = ~0;
 			module->FinConnect = -1;
 			ILibLifeTime_Add(module->LifeTime, socketModule, 0, &ILibAsyncSocket_Disconnect, NULL);
 			return;
