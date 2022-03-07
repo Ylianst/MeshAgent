@@ -116,7 +116,7 @@ void ILibDuktape_WritableStream_Ready(ILibDuktape_WritableStream *stream)
 		}
 		else if (stream->OnWriteFlush != NULL)
 		{
-			duk_push_this(stream->ctx);									// [stream]
+			duk_push_heapptr(stream->ctx, stream->obj);					// [stream]
 			duk_push_heapptr(stream->ctx, stream->OnWriteFlush);		// [stream][func]
 			duk_swap_top(stream->ctx, -2);								// [func][stream]
 			stream->OnWriteFlush = NULL;
