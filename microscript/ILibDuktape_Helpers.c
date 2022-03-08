@@ -1155,6 +1155,12 @@ void Duktape_Console_Log_ChainEx(duk_context *ctx, ILibDuktape_LogTypes logType,
 		case ILibDuktape_LogType_Warn:
 			duk_get_prop_string(ctx, -1, "warn");		// [g][console][warn]
 			break;
+		case ILibDuktape_LogType_Info1:
+			duk_get_prop_string(ctx, -1, "info1");		// [g][console][warn]
+			break;
+		case ILibDuktape_LogType_Info2:
+			duk_get_prop_string(ctx, -1, "info2");		// [g][console][warn]
+			break;
 		default:
 			duk_get_prop_string(ctx, -1, "log");		// [g][console][log]
 			break;

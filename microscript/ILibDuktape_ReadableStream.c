@@ -632,13 +632,16 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	int nargs = duk_get_top(ctx);
 
 	duk_push_this(ctx);																		// [readable]
+	char *ID = Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_OBJID, "UNKNOWN");
 	duk_get_prop_string(ctx, -1, ILibDuktape_readableStream_RSPTRS);						// [readable][ptrs]
 	rstream = (ILibDuktape_readableStream*)Duktape_GetBuffer(ctx, -1, NULL);
 	duk_pop_2(ctx);																			// ...
 	
 	ILibSpinLock_Lock(&(rstream->pipeLock));
-	if (rstream->pipeInProgress != 0)
+	if (rstream->pipeInProgress != 0 && rstream->pipeInProgress_counter < 10)
 	{
+		++rstream->pipeInProgress_counter;
+
 		// We must YIELD and try again later, becuase there is an active dispatch going on
 		rstream->pipeImmediate = ILibDuktape_Immediate(ctx, (void*[]) { rstream, duk_get_heapptr(ctx, 0), nargs > 1 ? duk_get_heapptr(ctx, 1) : NULL }, 1 + nargs, ILibDuktape_readableStream_pipe_later);
 		duk_push_heapptr(ctx, rstream->pipeImmediate);	// [immediate]
@@ -655,6 +658,11 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	}
 	else
 	{
+		char tmpbuf[512];
+		int len = sprintf_s(tmpbuf, sizeof(tmpbuf), "PIPE:%s [%d]", ID, rstream->pipeInProgress_counter);
+		if (len > 0) { Duktape_Console_Log(ctx, duk_ctx_chain(ctx), ILibDuktape_LogType_Info1, tmpbuf, len); }
+		rstream->pipeInProgress_counter = 0;
+
 		// No Active Dispatch, so while we hold this lock, we can setup/add the pipe
 		duk_push_heapptr(ctx, rstream->pipeArray);											// [pipeArray]
 		duk_get_prop_string(ctx, -1, "push");												// [pipeArray][push]
@@ -704,6 +712,8 @@ duk_ret_t ILibDuktape_readableStream_pipe(duk_context *ctx)
 	duk_push_string(ctx, "pipe");						// [emit][this][pipe]
 	duk_push_this(ctx);									// [emit][this][pipe][readable]
 	duk_call_method(ctx, 2); duk_pop(ctx);				// ...
+
+
 	if (rstream->paused != 0)
 	{
 		rstream->paused = 0; // Set state now, so nobody tries to resume before we can finish piping

@@ -3865,7 +3865,7 @@ void ILibStun_SctpResent(struct ILibStun_dTlsSession *obj)
 #ifdef _WEBRTCDEBUG
 		if (obj->onT3RTX != NULL) { obj->onT3RTX(obj, "OnT3RTX", -1); }	// Debug event informing of the T3RTX timer expiration
 #endif
-
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->parent->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP[%d]: T3TX Timer Expired", obj->sessionId);
 		obj->senderCredits = ILibRUDP_StartMTU;												// Set CWND to 1 MTU
 		obj->SSTHRESH = MAX(obj->congestionWindowSize / 2, 4 * ILibRUDP_StartMTU);			// Update Slow Start Threshold
 		obj->congestionWindowSize = ILibRUDP_StartMTU;										// Reset the size of the Congestion Window, so that we'll initialy only have one SCTP packet in flight
@@ -3921,6 +3921,7 @@ void ILibStun_SctpResent(struct ILibStun_dTlsSession *obj)
 						if (obj->onT3RTX != NULL) { obj->onT3RTX(obj, "OnT3RTX", obj->RTO); }	// Debug event informing of the T3RTX timer expiration
 #endif
 					}
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->parent->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP[%d]: RESEND", obj->sessionId);
 					ILibStun_SendSctpPacket(obj->parent, obj->sessionId, rpacket->Data - 12, rpacket->PacketSize);
 #ifdef _WEBRTCDEBUG
 					//if (obj->onSendRetry != NULL) { obj->onSendRetry(obj, "OnSendRetry", ((unsigned short*)(rpacket->Data + sizeof(char*)))[0]); }
@@ -3937,6 +3938,7 @@ void ILibStun_SctpResent(struct ILibStun_dTlsSession *obj)
 				else
 				{
 					rpacket->PacketGAPCounter = 0xFF;							// Mark for retransmit later (when CWND allows)
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->parent->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP[%d]: MARK FOR RESEND", obj->sessionId);
 				}
 			}
 			rpacket = rpacket->NextPacket;										// Move to the next packet
@@ -4630,8 +4632,10 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 			o->maxOutStreams = MIN(ntohs(((unsigned short*)(buffer + ptr + 12))[0]), ILibSCTP_Stream_MaximumCount);
 			o->maxInStreams = MIN(ntohs(((unsigned short*)(buffer + ptr + 12))[1]), ILibSCTP_Stream_MaximumCount);
 			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "SCTP: %d received [INIT]", session);
-			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...TSN/IN  = %u", o->intsn);
-			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...TSN/OUT = %u", o->outtsn);
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...TSN/IN        = %u", o->intsn);
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...TSN/OUT       = %u", o->outtsn);
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...SenderCredits = %u", o->senderCredits);
+
 			// Optional/Variable Fields
 			{
 				int varLen = 0;
@@ -5031,7 +5035,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 
 				// Update the packet retry data
 				rpacket->LastSentTimeStamp = o->lastSackTime;								// Last time the packet was sent (Used for retry)
-
+				ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "Sending %u/%u bytes from Holding Queue", (rpacket->PacketSize - (12 + 16)), o->holdingByteCount);
 
 				// Send the packet
 				ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rpacket->PacketSize);	// Send the packet
