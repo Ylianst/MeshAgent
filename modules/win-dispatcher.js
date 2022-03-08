@@ -80,6 +80,40 @@ function dispatch(options)
         this.parent.emit('connection', s);
     });
 
+    try
+    {
+        var user = null;
+        var domain = null;
+        if(options.user == null)
+        {
+            if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
+            {
+                user = 'SYSTEM'
+            }
+            else
+            {
+                var info = require('user-sessions').getProcessOwnerName(process.pid);
+                user = info.name;
+                domain = info.domain;
+            }   
+        }
+        else
+        {
+            var tokens = options.user.split('\\');
+            if(tokens.length!=2) { throw('invalid user format');}
+            user = tokens[1];
+            domain = tokens[0];
+        }
+
+        var task = { name: 'MeshUserTask', user: user, domain: domain, execPath: process.execPath, arguments: ['-b64exec ' + str] };
+        require('win-tasks').addTask(task);
+        require('win-tasks').getTask({ name: 'MeshUserTask' }).run();
+        require('win-tasks').deleteTask('MeshUserTask');
+        return (ret);
+    }
+    catch(xx)
+    {}
+
     var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: '"' + options.user + '"' } };
     for (var c1e in process.env)
     {
