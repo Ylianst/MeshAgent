@@ -788,7 +788,48 @@ function UserSessions()
             child.waitExit();
             return (JSON.parse(child.stdout.str.trim().replace(',]',']')));
         }
-        this.consoleUid = function consoleUid()
+        this.activeUids = function activeUids()
+        {
+            return (this.consoleUid({ active: true }));
+        };
+        this.virtualUids = function virtualUids()
+        {
+            var active = this.activeUids();
+
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stdin.write("ps -e -o uid -o pid -o cmd | grep Xvfb | tr '\\n' '`' | awk '{");
+            child.stdin.write('printf "[";');
+            child.stdin.write('del="";');
+            child.stdin.write('n=split($0, lines, "`");');
+            child.stdin.write('for(i=1;i<n;++i)');
+            child.stdin.write('{');
+            child.stdin.write('   split(lines[i], tok, " ");');
+            child.stdin.write('   if((tok[3])=="Xvfb")');
+            child.stdin.write('   {');
+            child.stdin.write('        match(lines[i], /:[0-9]+/,arg);');
+            child.stdin.write('        _display = substr(lines[i],RSTART,RLENGTH);');
+            child.stdin.write('        match(lines[i], /-auth .+/,arg);');
+            child.stdin.write('        _auth = substr(lines[i],RSTART+6,RLENGTH-6);');
+            child.stdin.write('        printf("%s{\\"uid\\": %s, \\"display\\": \\"%s\\", \\"xauth\\": \\"%s\\", \\"pid\\": %s}", del, tok[1], _display, _auth, tok[2]);');
+            child.stdin.write('        del=",";');
+            child.stdin.write('   }');
+            child.stdin.write('}');
+            child.stdin.write('printf "]";');
+            child.stdin.write("}'\nexit\n");
+            child.waitExit();
+
+            try
+            {
+                return(JSON.parse(child.stdout.str));
+            }
+            catch (x)
+            {
+                return ([]);
+            }
+        };
+        this.consoleUid = function consoleUid(options)
         {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
@@ -837,7 +878,14 @@ function UserSessions()
                 child.stdin.write('   split(lines[i], tok, " ");');
                 child.stdin.write('   if((tok[2]+0)>=' + min + ')');
                 child.stdin.write('   {');
-                child.stdin.write('      if(tok[4]=="" || tok[4]~/^pts\\//) { continue; }');
+                if (options && options.active == true)
+                {
+                    child.stdin.write('      if(tok[4]=="") { continue; }');
+                }
+                else
+                {
+                    child.stdin.write('      if(tok[4]=="" || tok[4]~/^pts\\//) { continue; }');
+                }
                 child.stdin.write('      printf "%s{\\"uid\\": \\"%s\\", \\"sid\\": \\"%s\\"}", del, tok[2], tok[1];');
                 child.stdin.write('      del=",";');
                 child.stdin.write('   }');
@@ -857,18 +905,59 @@ function UserSessions()
                 child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                 child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
                 child.stdin.write("loginctl show-session -p State " + sids.join(' ') + " | grep State= | tr '\\n' '`' | awk -F'`' '{");
+                if (options && options.active == true)
+                {
+                    child.stdin.write('   printf("[");');
+                    child.stdin.write('   _first="";');
+                }
                 child.stdin.write('   for(n=1;n<NF;++n)');
                 child.stdin.write('   {');
-                child.stdin.write('      if($n=="State=active") { print n; break; }');
+                if (options && options.active == true)
+                {
+                    child.stdin.write('      if($n=="State=active")');
+                    child.stdin.write('      {');
+                    child.stdin.write('         printf("%s%s",_first,n);');
+                    child.stdin.write('         _first=",";');
+                    child.stdin.write('      }');
+                }
+                else
+                {
+                    child.stdin.write('      if($n=="State=active") { print n; break; }');
+                }
                 child.stdin.write('   }');
-                child.stdin.write('   if(n==NF) { print 0; }');
+                if (options && options.active == true)
+                {
+                    child.stdin.write('   printf("]");');
+                }
+                else
+                {
+                    child.stdin.write('   if(n==NF) { print 0; }');
+                }
                 child.stdin.write("}'\nexit\n");
                 child.waitExit();
-
-                i = parseInt(child.stdout.str.trim());
-                if (i > 0)
+                if (options && options.active == true)
                 {
-                    return (parseInt(info1[i - 1].uid));
+                    try
+                    {
+                        var ret = JSON.parse(child.stdout.str);
+                        for (var j=0;j<ret.length;++j)
+                        {
+                            ret[j] = parseInt(info1[ret[j] - 1].uid);
+                        }
+                        return (ret);
+                    }
+                    catch(xx)
+                    {
+                        return ([]);
+                    }
+                }
+                else
+                {
+                    i = parseInt(child.stdout.str.trim());
+                    if (i > 0)
+                    {
+                        return (parseInt(info1[i - 1].uid));
+                    }
                 }
             }
 
