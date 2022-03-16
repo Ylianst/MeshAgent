@@ -238,6 +238,7 @@ void MouseAction(double absX, double absY, int button, short wheel)
 
 extern int set_kbd_state(int state);
 extern int get_kbd_state();
+extern ILibQueue g_messageQ;
 void KeyAction(unsigned char vk, int up) 
 {
 	//ILIBLOGMESSAGEX("NORMAL: %u [%d]", vk, up);
