@@ -565,18 +565,18 @@ function monitorinfo()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax " : "") + "-e -o user" + (process.platform == 'linux' ? ":999" : "") + " -o tty -o command | grep X | ");
+            child.stdin.write("ps " + (process.platform == 'freebsd' ? "-ax " : "") + "-e -o uid -o tty -o command | grep X | ");
             child.stdin.write("awk '{ ");
             child.stdin.write('        display="";');
             child.stdin.write('        if($4~/^:/)');
             child.stdin.write('        {');
             child.stdin.write('           display=$4;');
             child.stdin.write('        }');
-            child.stdin.write('        split($0, a, "-auth");');
-            child.stdin.write('        split(a[2], b, " ");');
-            child.stdin.write('        if($1=="' + uname + '" && b[1]!="")');
+            child.stdin.write('        match($0, /-auth .+/,arg);');
+            child.stdin.write('        _auth = substr($0,RSTART+6,RLENGTH-6);');
+            child.stdin.write('        if($1=="' + consoleuid + '" && _auth!="")');
             child.stdin.write("        {");
-            child.stdin.write("           printf \"%s,%s,%s,%s\",$1,$2,b[1],display;");
+            child.stdin.write("           printf \"%s,%s,%s,%s\",$1,$2,_auth,display;");
             child.stdin.write("        }");
             child.stdin.write("     }'\nexit\n");
 
