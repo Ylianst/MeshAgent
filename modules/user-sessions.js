@@ -648,7 +648,9 @@ function UserSessions()
                 child.stdin.write('   if((tok[2]+0)>=' + min + ')');
                 child.stdin.write('   {');
                 child.stdin.write('      if(tok[4]=="") { continue; }');
-                child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\"}", del, tok[3], tok[1], tok[2];');
+                child.stdin.write('      station="Console";');
+                child.stdin.write('      if(tok[4]~/^pts\\//) { station=tok[4]; }');
+                child.stdin.write('      printf "%s{\\"Username\\": \\"%s\\", \\"Domain\\":\\"\\", \\"SessionId\\": \\"%s\\", \\"State\\": \\"Online\\", \\"uid\\": \\"%s\\", \\"StationName\\": \\"%s\\"}", del, tok[3], tok[1], tok[2], station;');
                 child.stdin.write('      del=",";');
                 child.stdin.write('   }');
                 child.stdin.write('}');
@@ -695,6 +697,15 @@ function UserSessions()
                 {
                 }
             }
+
+            var vids = this.virtualUids();
+            for (i in vids)
+            {
+                var u = this.getUsername(vids[i].uid);
+                ret[i] = { Username: u, SessionId: vids[i].pid, State: 'Connected', uid: vids[i].uid, StationName: 'Xvfb-' + vids[i].uid };
+            }
+
+
             Object.defineProperty(ret, 'Active', { value: showActiveOnly(ret) });
 
             if (cb)
