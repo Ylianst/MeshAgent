@@ -1202,7 +1202,21 @@ void Duktape_Console_Log(duk_context *ctx, void *chain, ILibDuktape_LogTypes log
 		ILibChain_RunOnMicrostackThreadEx(chain, Duktape_Console_Log_Chain, data);
 	}
 }
+void Duktape_Console_LogEx(duk_context *ctx, ILibDuktape_LogTypes logType, char *format, ...)
+{
+	char dest[4096];
+	int len = 0;
+	va_list argptr;
 
+	if (ctx != NULL && format != NULL)
+	{
+		va_start(argptr, format);
+		len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr);
+		va_end(argptr);
+	}
+
+	Duktape_Console_Log(ctx, duk_ctx_chain(ctx), logType, dest, (duk_size_t)len);
+}
 char* ILibDuktape_String_AsWide(duk_context *ctx, duk_idx_t idx, duk_size_t *len)
 {
 	char *src;

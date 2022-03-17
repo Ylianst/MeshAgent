@@ -691,6 +691,7 @@ function UserSessions()
                     for (var key in ret)
                     {
                         ret[key] = { Username: ret[key], SessionId: key, State: 'Active', uid: this.getUid(ret[key]) };
+                        if (key.startsWith('pts/')) { delete ret[key]; }
                     }
                 }
                 catch (e)
@@ -702,9 +703,8 @@ function UserSessions()
             for (i in vids)
             {
                 var u = this.getUsername(vids[i].uid);
-                ret[i] = { Username: u, SessionId: vids[i].pid, State: 'Connected', uid: vids[i].uid, StationName: 'Xvfb-' + vids[i].uid };
+                ret.push({ Username: u, SessionId: vids[i].pid, State: 'Connected', uid: vids[i].uid, StationName: 'Xvfb-' + vids[i].uid });
             }
-
 
             Object.defineProperty(ret, 'Active', { value: showActiveOnly(ret) });
 

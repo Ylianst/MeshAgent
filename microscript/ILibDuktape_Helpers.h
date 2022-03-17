@@ -173,6 +173,7 @@ void duk_buffer_enable_autoclear(duk_context *ctx);
 void* Duktape_DynamicBuffer_Resize(duk_context *ctx, duk_idx_t idx, duk_size_t bufSize);
 
 void Duktape_Console_Log(duk_context *ctx, void *chain, ILibDuktape_LogTypes logType, char *msg, duk_size_t msgLen);
+void Duktape_Console_LogEx(duk_context *ctx, ILibDuktape_LogTypes logType, char *format, ...);
 
 typedef void(*ILibDuktape_NativeUncaughtExceptionHandler)(duk_context *ctx, char *msg, void *user);
 void ILibDuktape_SetNativeUncaughtExceptionHandler(duk_context *ctx, ILibDuktape_NativeUncaughtExceptionHandler handler, void *user);
