@@ -36,6 +36,8 @@ limitations under the License.
 #include <crtdbg.h>
 #endif
 
+extern void KVM_WriteLog(ILibKVM_WriteHandler writeHandler, void *user, char *format, ...);
+
 //#define KVMDEBUGENABLED 1
 ILibProcessPipe_SpawnTypes gProcessSpawnType = ILibProcessPipe_SpawnTypes_USER;
 int gProcessTSID = -1;
@@ -473,12 +475,14 @@ int kvm_server_inputdata(char* block, int blocklen, ILibKVM_WriteHandler writeHa
 	case MNG_KVM_KEY: // Key
 		{
 			if (size != 6) break;
+			//KVM_WriteLog(writeHandler, reserved, "Key[%u] UP: %d", (unsigned char)(block[5]), block[4]);
 			KeyAction(block[5], block[4]);
 			break;
 		}
 	case MNG_KVM_KEY_UNICODE: // Unicode key
 		{
 			if (size != 7) break;
+			//KVM_WriteLog(writeHandler, reserved, "UnicodeKey[%u] UP: %d", ((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4]);
 			KeyActionUnicode(((((unsigned char)block[5]) << 8) + ((unsigned char)block[6])), block[4]);
 			break;
 		}

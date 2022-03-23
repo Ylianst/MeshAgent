@@ -100,6 +100,7 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define DEFAULT_IDLE_TIMEOUT	120
 #define MESH_USER_CHANGED_CB	"\xFF_MeshAgent_UserChangedCallback"
 #define REMOTE_DESKTOP_UID		"\xFF_RemoteDesktopUID"
+#define REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME "\xFF_RemoteDesktopUSERNAME"
 #define MESHAGENT_DATAPING_ARRAY "\xFF_MeshAgent_DataPingArray"
 #define MESHAGENT_DATAPAING_PROMISE_TIMEOUT	"\xFF_MeshAgent_DataPing_Timeout"
 
@@ -824,10 +825,38 @@ void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *
 	ILibMemory_Free(user);
 }
 #endif
+
+void KVM_WriteLog(ILibKVM_WriteHandler writeHandler, void *user, char *format, ...)
+{
+	char dest[4096];
+	int len = 4;
+	va_list argptr;
+
+	va_start(argptr, format);
+	if ((size_t)len < sizeof(dest))
+	{
+		if (len < sizeof(dest)) { len += vsnprintf(dest + len, sizeof(dest) - len, format, argptr); }
+	}
+	va_end(argptr);
+
+	if (len < sizeof(dest))
+	{
+		((unsigned short*)dest)[0] = (unsigned short)htons((unsigned short)MNG_DEBUG);		// Write the type
+		((unsigned short*)dest)[1] = (unsigned short)htons((unsigned short)len);			// Write the size
+		writeHandler(dest, len, user);
+	}
+}
+
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *buffer, int bufferLen, void *reserved)
 {
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
 	if (!ILibMemory_CanaryOK(ptrs)) { return(ILibTransport_DoneState_ERROR); }
+
+	if (ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG)
+	{
+		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
+	}
+
 
 #ifdef WIN32
 	if (duk_ctx_is_alive(ptrs->ctx))
@@ -889,12 +918,25 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 }
 void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *stream, void *user)
 {
+
 	// Peer disconnected the data channel
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
 	if (ptrs->ctx != NULL)
 	{
+		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "KVM Session Ending");
+
 		duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
 		duk_get_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);	// [MeshAgent][RD]
+		if (duk_has_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME))
+		{
+			char *user = Duktape_GetStringPropertyValue(ptrs->ctx, -1, REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME, NULL);
+			if (user != NULL)
+			{
+				Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "Need to kill virtual user session: %s", user);
+				duk_push_sprintf(ptrs->ctx, "var _tmp=require('child_process').execFile('/bin/sh', ['sh']);_tmp.stdout.on('data', function (){});_tmp.stdin.write('loginctl kill-user %s\\nexit\\n');_tmp.waitExit();", user);
+				duk_peval_noresult(ptrs->ctx);
+			}
+		}
 		if (duk_has_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET))
 		{
 			duk_get_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET);		// [MeshAgent][RD][IPC]
@@ -1160,7 +1202,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	RemoteDesktop_Ptrs *ptrs;
 	MeshAgentHostContainer *agent;
 
-#ifdef WIN32
+#if defined(WIN32) || (defined(_POSIX) && !defined(__APPLE__))
 	int TSID = duk_is_number(ctx, 0) ? duk_require_int(ctx, 0) : -1;
 #endif
 
@@ -1208,6 +1250,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	ptrs->stream = ILibDuktape_DuplexStream_InitEx(ctx, ILibDuktape_MeshAgent_RemoteDesktop_WriteSink, ILibDuktape_MeshAgent_RemoteDesktop_EndSink, ILibDuktape_MeshAgent_RemoteDesktop_PauseSink, ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink, ILibDuktape_MeshAgent_remoteDesktop_unshiftSink, ptrs);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_MeshAgent_RemoteDesktop_Finalizer);
 	ptrs->stream->readableStream->PipeHookHandler = ILibDuktape_MeshAgent_RemoteDesktop_PipeHook;
+	
 	// Setup Remote Desktop
 #ifdef WIN32
 	#ifdef _WINSERVICE
@@ -1219,7 +1262,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	int console_uid = 0;
 	if (duk_peval_string(ctx, "require('user-sessions').consoleUid();") == 0) { console_uid = duk_get_int(ctx, -1); }
 	duk_pop(ctx);
-
 	#ifdef __APPLE__
 		// MacOS
 		if (console_uid == 0)
@@ -1242,6 +1284,26 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 		}
 	#else
+		if (TSID != -1) 
+		{
+			console_uid = TSID; 
+			duk_push_sprintf(ctx, "require('kvm-helper').createVirtualSession(%d);", console_uid);
+			duk_eval(ctx);																					// [uid]
+			console_uid = duk_get_int(ctx, -1);
+			duk_pop(ctx);																					// ...
+			if (console_uid != TSID)
+			{
+				duk_push_sprintf(ctx, "require('user-sessions').getUsername(%d);", console_uid);
+				if (duk_peval(ctx) == 0)
+				{
+					duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME);
+				}
+				else
+				{
+					duk_pop(ctx);
+				}
+			}
+		}
 		duk_push_int(ctx, console_uid); duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);
 		duk_push_this(ctx);																// [MeshAgent]
 		if (!duk_has_prop_string(ctx, -1, MESH_USER_CHANGED_CB))
@@ -1320,7 +1382,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 			needPop = 1;
 		}
 
-		//MeshAgent_sendConsoleText(ctx, "Using uid: %d, XAUTHORITY: %s\n", console_uid, getenv("XAUTHORITY")==NULL? updateXAuth : getenv("XAUTHORITY"));
+		Duktape_Console_LogEx(ctx, ILibDuktape_LogType_Info1, "Using uid: %d, XAUTHORITY: %s\n", console_uid, getenv("XAUTHORITY") == NULL ? updateXAuth : getenv("XAUTHORITY"));
 		ptrs->kvmPipe = kvm_relay_setup(agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, updateXAuth, updateDisplay);
 		if (needPop!= 0) {duk_pop(ctx); }
 	#endif
