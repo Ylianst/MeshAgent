@@ -23,12 +23,7 @@ function getUsers()
         }
     }
 
-    res = [];
-    for (i in uu)
-    {
-        res.push(uu[i]);
-    }
-    return (res);
+    return (uu);
 }
 
 if (process.platform == 'linux')
