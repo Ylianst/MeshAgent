@@ -813,7 +813,7 @@ function monitorinfo()
                     }
                 }
             }
-            else
+            else if(ret.display == null || ret.display === '')
             {
                 // We need to find $DISPLAY by looking at all the processes running on the same tty as the XServer instance for this user session
                 child = require('child_process').execFile('/bin/sh', ['sh']);

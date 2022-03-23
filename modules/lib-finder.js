@@ -39,8 +39,23 @@ function find(name)
 				ret.push(v);
 			}
 			return(ret);
-		break;
+			break;
+	    case 'linux':
+	        return (require('monitor-info').getLibInfo(name));
+	        break;
 	}
 }
 
+function hasBinary(bin)
+{
+    if (process.platform != 'linux' && process.platform != 'freebsd') { return (false); }
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = '';
+    child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("whereis " + bin + " | awk '{ print $2 }'\nexit\n");
+    child.waitExit();
+    return (child.stdout.str.trim() != '');
+}
+
 module.exports = find;
+module.exports.hasBinary = hasBinary;
