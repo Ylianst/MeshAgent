@@ -852,12 +852,6 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reserved;
 	if (!ILibMemory_CanaryOK(ptrs)) { return(ILibTransport_DoneState_ERROR); }
 
-	if (ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG)
-	{
-		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
-	}
-
-
 #ifdef WIN32
 	if (duk_ctx_is_alive(ptrs->ctx))
 	{
@@ -872,7 +866,7 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 #endif
 
-	if ((bufferLen > 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG))
+	if ((buffer != NULL) && (bufferLen > 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG))
 	{
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
