@@ -872,6 +872,10 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 #endif
 
+	if (bufferLen > 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_DEBUG)
+	{
+		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
+	}
 
 	if (ptrs->stream != NULL)
 	{
