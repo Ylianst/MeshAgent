@@ -258,7 +258,7 @@ uint64_t ILibSimpleDataStore_WriteRecord(FILE *f, char* key, int keyLen, char* v
 		SetFilePointerEx((HANDLE)_get_osfhandle(_fileno(f)), i, NULL, FILE_BEGIN);
 		SetEndOfFile((HANDLE)_get_osfhandle(_fileno(f)));
 #else
-		ftruncate(fileno(f), curlen);
+		ignore_result(ftruncate(fileno(f), curlen));
 #endif
 		return(0);
 	}
@@ -497,7 +497,7 @@ void ILibSimpleDataStore_RebuildKeyTable(ILibSimpleDataStore_Root *root)
 #ifdef WIN32
 			_chsize_s(_fileno(root->dataFile), newoffset);
 #else
-			ftruncate(fileno(root->dataFile), newoffset);
+			ignore_result(ftruncate(fileno(root->dataFile), newoffset));
 #endif
 		}
 	}
