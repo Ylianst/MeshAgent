@@ -29,9 +29,11 @@ function getUsers()
 if (process.platform == 'linux')
 {
     var allowedUIDs = [];
+    var startDM = '';
     const uid_max = require('user-sessions').getUidConfig().MAX;
     const hasXvfb = require('lib-finder').hasBinary('xvfb-run');
     const hasGnomeSession = require('lib-finder').hasBinary('gnome-session');
+    const hasLxde = require('lib-finder').hasBinary('startlxde');
 
     var arg = _MSH().allowedUIDs;
     if (arg) { try { allowedUIDs = JSON.parse(arg) } catch (z) { allowedUIDs = []; } }
@@ -43,8 +45,30 @@ if (process.platform == 'linux')
         if (arg) { try { allowedUIDs = JSON.parse(arg.split('=')[1]); } catch (z) { allowedUIDs = []; } }
         if (!Array.isArray(allowedUIDs)) { allowedUIDs = []; }
     }
-
     if (allowedUIDs.length == 0) { allowedUIDs = require('user-sessions').loginUids(); }
+
+    arg = _MSH().virtualDM;
+    if (arg == null)
+    {
+        arg = process.argv.find(function (a) { return (a.startsWith('--virtualDM=')); });
+        if (arg != null) { arg = arg.split('=').pop(); }
+    }
+    if (arg == null) { arg = ''; }
+
+    switch(arg.toUpperCase())
+    {
+        case 'GDM':
+            if (hasGnomeSession) { startDM = 'gnome-session'; }
+            break;
+        case 'LXDE':
+            if (hasLxde) { startDM = 'startlxde'; }
+            break;
+        default:
+            if (hasGnomeSession) { startDM = 'gnome-session'; }
+            if (hasLxde) { startDM = 'startlxde'; }
+            break;
+    }
+
 
     function spawnVirtualSession(vuid)
     {
@@ -58,7 +82,7 @@ if (process.platform == 'linux')
 
             terminal.stdout.on('data', function (c) { console.info1(c.toString()); });
             terminal.stdin.write('su ' + username + '\n');
-            terminal.stdin.write('xvfb-run -n 99 -a gnome-session &\n');
+            terminal.stdin.write('xvfb-run -n 99 -a ' + startDM + ' &\n');
             terminal.stdin.write('exit\nexit\n');
             terminal.waitExit();
             return (uid);
@@ -71,7 +95,7 @@ if (process.platform == 'linux')
 
     function hasVirtualSessionSupport()
     {
-        return (require('user-sessions').hasLoginCtl && hasXvfb && hasGnomeSession);
+        return (require('user-sessions').hasLoginCtl && hasXvfb && (hasGnomeSession || hasLxde))
     }
 
 
