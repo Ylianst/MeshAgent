@@ -206,6 +206,7 @@ void ILibAsyncUDPSocket_DropMulticastGroupV4(ILibAsyncUDPSocket_SocketModule mod
 void ILibAsyncUDPSocket_JoinMulticastGroupV4(ILibAsyncUDPSocket_SocketModule module, struct sockaddr_in *multicastAddr, struct sockaddr *localAddr)
 {
 	struct ip_mreq mreq;
+	if (module == NULL) { return; }
 #if defined(WIN32) || defined(_WIN32_WCE)
 	SOCKET s = *((SOCKET*)ILibAsyncSocket_GetSocket(module));
 #else
@@ -224,6 +225,8 @@ void ILibAsyncUDPSocket_JoinMulticastGroupV4(ILibAsyncUDPSocket_SocketModule mod
 
 void ILibAsyncUDPSocket_JoinMulticastGroupV6(ILibAsyncUDPSocket_SocketModule module, struct sockaddr_in6 *multicastAddr, int ifIndex)
 {
+	if (module == NULL) { return; }
+
 	struct ipv6_mreq mreq6;
 #if defined(WIN32) || defined(_WIN32_WCE)
 	SOCKET s = *((SOCKET*)ILibAsyncSocket_GetSocket(module));

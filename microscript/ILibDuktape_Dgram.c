@@ -245,6 +245,8 @@ duk_ret_t ILibDuktape_DGram_multicastMembership(duk_context *ctx)
 	struct sockaddr_in6 multicastAddr;
 	struct sockaddr_in6 localAddr;
 
+	if (ptrs->mSocket == NULL) { return ILibDuktape_Error(ctx, "dgram.addMembership(): Invalid Socket"); }
+
 	duk_push_current_function(ctx);
 	duk_get_prop_string(ctx, -1, ILibDuktape_DGRAM_MULTICAST_MEMBERSHIP_TYPE);
 	int isAdd = strcmp((char*)duk_get_string(ctx, -1), "add") == 0 ? 1 : 0;
