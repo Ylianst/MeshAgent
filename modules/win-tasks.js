@@ -15,6 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+const CUSTOM_HANDLER = 0x80000000;
 const GM = require('_GenericMarshal');
 const CLSID_TaskScheduler = '{0f87369f-a4e5-4cfc-bd3e-73e6154572dd}';
 const IID_TimeTrigger = '{b45747e0-eba7-4276-9f29-85c5bb300006}';
@@ -475,6 +476,7 @@ function getTask(options)
     var taskService = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_TaskScheduler), require('win-com').IID_IUnknown);
     taskService.funcs = require('win-com').marshalFunctions(taskService, TaskServiceFunctions);
 
+    taskService.funcs.Connect._callType = 1;
     hr = taskService.funcs.Connect(taskService, serverName, user, domain, password);
     if (hr.Val != 0)
     {
@@ -497,7 +499,7 @@ function getTask(options)
         throw ('Failed to get Task: ' + options.name + ' [' + hr.Val + ']');
     }
     task.funcs = require('win-com').marshalFunctions(task.Deref(), RegisteredTaskFunctions);
-
+    task.funcs.Run._callType = CUSTOM_HANDLER | 2;
     task._rf = rootFolder;
     task._ts = taskService;
 
@@ -515,7 +517,7 @@ function deleteTask(options)
 
     var taskService = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_TaskScheduler), require('win-com').IID_IUnknown);
     taskService.funcs = require('win-com').marshalFunctions(taskService, TaskServiceFunctions);
-
+    hr = taskService.funcs.Connect._callType = 1;
     hr = taskService.funcs.Connect(taskService, serverName, user, domain, password);
     if (hr.Val != 0)
     {
@@ -571,6 +573,8 @@ function addTask(options)
     var execAction = GM.CreatePointer();
     var registeredTask = GM.CreatePointer();
 
+   
+    taskService.funcs.Connect._callType = 1;
     hr = taskService.funcs.Connect(taskService, serverName, user, domain, password);
     if (hr.Val != 0)
     {
@@ -791,7 +795,7 @@ function addTask(options)
     }
 
     var vvar = GM.CreateVariable(GM.PointerSize == 8 ? 24 : 16);
-
+    rootFolder.funcs.RegisterTaskDefinition._callType = 1 | CUSTOM_HANDLER;
     hr = rootFolder.funcs.RegisterTaskDefinition(
         rootFolder.Deref(),
         GM.CreateVariable(options.name, { wide: true }),

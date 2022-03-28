@@ -58,7 +58,7 @@ typedef uintptr_t PTRSIZE;
 #define ILibDuktape_GenericMarshal_Variable_EnableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_false(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define WAITING_FOR_RESULT__DISPATCHER					2
-
+#define ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars) ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(parms, fptr, vars, ILibDuktape_GenericMarshal_CallTypes_DEFAULT)
 
 typedef PTRSIZE(APICALLTYPE *R0)();
 typedef PTRSIZE(APICALLTYPE *R1)(PTRSIZE V1);
@@ -81,6 +81,67 @@ typedef PTRSIZE(APICALLTYPE *R17)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4
 typedef PTRSIZE(APICALLTYPE *R18)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17, PTRSIZE V18);
 typedef PTRSIZE(APICALLTYPE *R19)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17, PTRSIZE V18, PTRSIZE V19);
 typedef PTRSIZE(APICALLTYPE *R20)(PTRSIZE V1, PTRSIZE V2, PTRSIZE V3, PTRSIZE V4, PTRSIZE V5, PTRSIZE V6, PTRSIZE V7, PTRSIZE V8, PTRSIZE V9, PTRSIZE V10, PTRSIZE V11, PTRSIZE V12, PTRSIZE V13, PTRSIZE V14, PTRSIZE V15, PTRSIZE V16, PTRSIZE V17, PTRSIZE V18, PTRSIZE V19, PTRSIZE V20);
+
+#ifdef WIN32
+typedef PTRSIZE(APICALLTYPE *C2)(PTRSIZE V1, VARIANT V2);
+typedef PTRSIZE(APICALLTYPE *C3)(PTRSIZE V1, VARIANT V2, VARIANT V3);
+typedef PTRSIZE(APICALLTYPE *C4)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4);
+typedef PTRSIZE(APICALLTYPE *C5)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5);
+typedef PTRSIZE(APICALLTYPE *C6)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6);
+typedef PTRSIZE(APICALLTYPE *C7)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7);
+typedef PTRSIZE(APICALLTYPE *C8)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8);
+typedef PTRSIZE(APICALLTYPE *C9)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9);
+typedef PTRSIZE(APICALLTYPE *C10)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10);
+typedef PTRSIZE(APICALLTYPE *C11)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11);
+typedef PTRSIZE(APICALLTYPE *C12)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12);
+typedef PTRSIZE(APICALLTYPE *C13)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13);
+typedef PTRSIZE(APICALLTYPE *C14)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14);
+typedef PTRSIZE(APICALLTYPE *C15)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14, VARIANT V15);
+typedef PTRSIZE(APICALLTYPE *C16)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14, VARIANT V15, VARIANT V16);
+typedef PTRSIZE(APICALLTYPE *C17)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14, VARIANT V15, VARIANT V16, VARIANT V17);
+typedef PTRSIZE(APICALLTYPE *C18)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14, VARIANT V15, VARIANT V16, VARIANT V17, VARIANT V18);
+typedef PTRSIZE(APICALLTYPE *C19)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14, VARIANT V15, VARIANT V16, VARIANT V17, VARIANT V18, VARIANT V19);
+typedef PTRSIZE(APICALLTYPE *C20)(PTRSIZE V1, VARIANT V2, VARIANT V3, VARIANT V4, VARIANT V5, VARIANT V6, VARIANT V7, VARIANT V8, VARIANT V9, VARIANT V10, VARIANT V11, VARIANT V12, VARIANT V13, VARIANT V14, VARIANT V15, VARIANT V16, VARIANT V17, VARIANT V18, VARIANT V19, VARIANT V20);
+
+typedef uintptr_t(__stdcall *Z1)(uintptr_t V1, uintptr_t V2, uintptr_t V3, uintptr_t V4, VARIANT V5, VARIANT V6, uintptr_t V7, VARIANT V8, uintptr_t V9);
+typedef uintptr_t(__stdcall *Z2)(uintptr_t V1, VARIANT V2, uintptr_t V3);
+
+#endif
+
+#define ILibDuktape_GenericMarshal_CUSTOM_HANDLER 0x80000000
+#define ILibDuktape_GenericMarshal_CUSTOM_HANDLER_VERIFY 0x40000000
+#define ILibDuktape_GenericMarshal_CUSTOM_HANDLER_MASK 0x3FFFFFFF
+
+uintptr_t ILibDuktape_GenericMarshal_MethodInvoke_CustomEx(int parms, void *fptr, uintptr_t *vars, int check, int index)
+{
+	uintptr_t retVal = 0;
+
+	switch (index)
+	{
+#ifdef WIN32
+		case 1:
+			if (parms == 9)
+			{
+				if (check) { return(1); }
+				retVal = ((Z1)fptr)(vars[0], vars[1], vars[2], vars[3], ((VARIANT*)vars[4])[0], ((VARIANT*)vars[5])[0], vars[6], ((VARIANT*)vars[7])[0], vars[8]);
+			}
+		case 2:
+			if (parms == 3)
+			{
+				if (check) { return(1); }
+				retVal = ((Z2)fptr)(vars[0], ((VARIANT*)vars[1])[0], vars[2]);
+			}
+			break;
+#endif
+		default:
+			retVal = 0;
+			break;
+	}
+
+	return(retVal);
+}
+
+
 
 ILibLinkedList GlobalCallbackList = NULL;
 
@@ -780,76 +841,161 @@ duk_ret_t ILibDuktape_GenericMarshal_CreateCallbackProxy(duk_context *ctx)
 	return 1;
 }
 
-PTRSIZE ILibDuktape_GenericMarshal_MethodInvoke_Native(int parms, void *fptr, PTRSIZE *vars)
+PTRSIZE ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(int parms, void *fptr, PTRSIZE *vars, ILibDuktape_GenericMarshal_CallTypes calltype)
 {
 	PTRSIZE retVal = 0;
 
-	switch (parms)
+	if ((calltype & ILibDuktape_GenericMarshal_CUSTOM_HANDLER_VERIFY) == ILibDuktape_GenericMarshal_CUSTOM_HANDLER_VERIFY)
 	{
-	case 0:
-		retVal = ((R0)fptr)();
-		break;
-	case 1:
-		retVal = ((R1)fptr)(vars[0]);
-		break;
-	case 2:
-		retVal = ((R2)fptr)(vars[0], vars[1]);
-		break;
-	case 3:
-		retVal = ((R3)fptr)(vars[0], vars[1], vars[2]);
-		break;
-	case 4:
-		retVal = ((R4)fptr)(vars[0], vars[1], vars[2], vars[3]);
-		break;
-	case 5:
-		retVal = ((R5)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4]);
-		break;
-	case 6:
-		retVal = ((R6)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5]);
-		break;
-	case 7:
-		retVal = ((R7)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6]);
-		break;
-	case 8:
-		retVal = ((R8)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7]);
-		break;
-	case 9:
-		retVal = ((R9)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8]);
-		break;
-	case 10:
-		retVal = ((R10)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9]);
-		break;
-	case 11:
-		retVal = ((R11)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10]);
-		break;
-	case 12:
-		retVal = ((R12)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11]);
-		break;
-	case 13:
-		retVal = ((R13)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12]);
-		break;
-	case 14:
-		retVal = ((R14)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13]);
-		break;
-	case 15:
-		retVal = ((R15)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14]);
-		break;
-	case 16:
-		retVal = ((R16)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15]);
-		break;
-	case 17:
-		retVal = ((R17)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16]);
-		break;
-	case 18:
-		retVal = ((R18)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17]);
-		break;
-	case 19:
-		retVal = ((R19)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17], vars[18]);
-		break;
-	case 20:
-		retVal = ((R20)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17], vars[18], vars[19]);
-		break;
+		return(ILibDuktape_GenericMarshal_MethodInvoke_CustomEx(parms, fptr, vars, 1, calltype & ILibDuktape_GenericMarshal_CUSTOM_HANDLER_MASK));
 	}
+	if ((calltype & ILibDuktape_GenericMarshal_CUSTOM_HANDLER) == ILibDuktape_GenericMarshal_CUSTOM_HANDLER)
+	{
+		return(ILibDuktape_GenericMarshal_MethodInvoke_CustomEx(parms, fptr, vars, 0, calltype & ILibDuktape_GenericMarshal_CUSTOM_HANDLER_MASK));
+	}
+
+	switch (calltype)
+	{
+		case ILibDuktape_GenericMarshal_CallTypes_DEFAULT:
+			switch (parms)
+			{
+			case 0:
+				retVal = ((R0)fptr)();
+				break;
+			case 1:
+				retVal = ((R1)fptr)(vars[0]);
+				break;
+			case 2:
+				retVal = ((R2)fptr)(vars[0], vars[1]);
+				break;
+			case 3:
+				retVal = ((R3)fptr)(vars[0], vars[1], vars[2]);
+				break;
+			case 4:
+				retVal = ((R4)fptr)(vars[0], vars[1], vars[2], vars[3]);
+				break;
+			case 5:
+				retVal = ((R5)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4]);
+				break;
+			case 6:
+				retVal = ((R6)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5]);
+				break;
+			case 7:
+				retVal = ((R7)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6]);
+				break;
+			case 8:
+				retVal = ((R8)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7]);
+				break;
+			case 9:
+				retVal = ((R9)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8]);
+				break;
+			case 10:
+				retVal = ((R10)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9]);
+				break;
+			case 11:
+				retVal = ((R11)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10]);
+				break;
+			case 12:
+				retVal = ((R12)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11]);
+				break;
+			case 13:
+				retVal = ((R13)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12]);
+				break;
+			case 14:
+				retVal = ((R14)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13]);
+				break;
+			case 15:
+				retVal = ((R15)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14]);
+				break;
+			case 16:
+				retVal = ((R16)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15]);
+				break;
+			case 17:
+				retVal = ((R17)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16]);
+				break;
+			case 18:
+				retVal = ((R18)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17]);
+				break;
+			case 19:
+				retVal = ((R19)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17], vars[18]);
+				break;
+			case 20:
+				retVal = ((R20)fptr)(vars[0], vars[1], vars[2], vars[3], vars[4], vars[5], vars[6], vars[7], vars[8], vars[9], vars[10], vars[11], vars[12], vars[13], vars[14], vars[15], vars[16], vars[17], vars[18], vars[19]);
+				break;
+			}
+			break;
+#ifdef WIN32
+		case ILibDuktape_GenericMarshal_CallTypes_COM_VARIANT:
+			switch (parms)
+			{
+				case 0:
+					retVal = ((R0)fptr)();
+					break;
+				case 1:
+					retVal = ((R1)fptr)(vars[0]);
+					break;
+				case 2:
+					retVal = ((C2)fptr)(vars[0], ((VARIANT*)(vars[1]))[0]);
+					break;
+				case 3:
+					retVal = ((C3)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0]);
+					break;
+				case 4:
+					retVal = ((C4)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0]);
+					break;
+				case 5:
+					retVal = ((C5)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0]);
+					break;
+				case 6:
+					retVal = ((C6)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0]);
+					break;
+				case 7:
+					retVal = ((C7)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0]);
+					break;
+				case 8:
+					retVal = ((C8)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0]);
+					break;
+				case 9:
+					retVal = ((C9)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0]);
+					break;
+				case 10:
+					retVal = ((C10)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0]);
+					break;
+				case 11:
+					retVal = ((C11)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[9]))[0]);
+					break;
+				case 12:
+					retVal = ((C12)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0]);
+					break;
+				case 13:
+					retVal = ((C13)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0]);
+					break;
+				case 14:
+					retVal = ((C14)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0]);
+					break;
+				case 15:
+					retVal = ((C15)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0], ((VARIANT*)(vars[14]))[0]);
+					break;
+				case 16:
+					retVal = ((C16)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0], ((VARIANT*)(vars[14]))[0], ((VARIANT*)(vars[15]))[0]);
+					break;
+				case 17:
+					retVal = ((C17)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0], ((VARIANT*)(vars[14]))[0], ((VARIANT*)(vars[15]))[0], ((VARIANT*)(vars[16]))[0]);
+					break;
+				case 18:
+					retVal = ((C18)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0], ((VARIANT*)(vars[14]))[0], ((VARIANT*)(vars[15]))[0], ((VARIANT*)(vars[16]))[0], ((VARIANT*)(vars[17]))[0]);
+					break;
+				case 19:
+					retVal = ((C19)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0], ((VARIANT*)(vars[14]))[0], ((VARIANT*)(vars[15]))[0], ((VARIANT*)(vars[16]))[0], ((VARIANT*)(vars[17]))[0], ((VARIANT*)(vars[18]))[0]);
+					break;
+				case 20:
+					retVal = ((C20)fptr)(vars[0], ((VARIANT*)(vars[1]))[0], ((VARIANT*)(vars[2]))[0], ((VARIANT*)(vars[3]))[0], ((VARIANT*)(vars[4]))[0], ((VARIANT*)(vars[5]))[0], ((VARIANT*)(vars[6]))[0], ((VARIANT*)(vars[7]))[0], ((VARIANT*)(vars[8]))[0], ((VARIANT*)(vars[9]))[0], ((VARIANT*)(vars[10]))[0], ((VARIANT*)(vars[11]))[0], ((VARIANT*)(vars[12]))[0], ((VARIANT*)(vars[13]))[0], ((VARIANT*)(vars[14]))[0], ((VARIANT*)(vars[15]))[0], ((VARIANT*)(vars[16]))[0], ((VARIANT*)(vars[17]))[0], ((VARIANT*)(vars[18]))[0], ((VARIANT*)(vars[19]))[0]);
+					break;
+			}
+			break;
+#endif
+	}
+	
 
 	return(retVal);
 }
@@ -1341,9 +1487,17 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	duk_push_current_function(ctx);					// [func]
 	exposedName = Duktape_GetStringPropertyValue(ctx, -1, "_exposedName", NULL);
 	int spawnThread = Duktape_GetBooleanProperty(ctx, -1, "_spawnThread", 0);
+#ifndef WIN32
+	ILibDuktape_GenericMarshal_CallTypes calltypes = ILibDuktape_GenericMarshal_CallTypes_DEFAULT;
+#else
+	ILibDuktape_GenericMarshal_CallTypes calltypes = Duktape_GetIntPropertyValue(ctx, -1, "_callType", ILibDuktape_GenericMarshal_CallTypes_DEFAULT);
+	if (sizeof(void*) != 4) { calltypes = ILibDuktape_GenericMarshal_CallTypes_DEFAULT; }
+#endif
 	PTRSIZE *vars = spawnThread == 0 ? ILibMemory_AllocateA(sizeof(PTRSIZE)*parms) : ILibMemory_SmartAllocateEx(sizeof(PTRSIZE)*parms, 6 * sizeof(void*));
 	duk_get_prop_string(ctx, -1, "_address");		// [func][addr]
 	fptr = duk_to_pointer(ctx, -1);
+
+
 
 	if (fptr == NULL || exposedName == NULL)
 	{
@@ -1379,7 +1533,21 @@ duk_ret_t ILibDuktape_GenericMarshal_MethodInvoke(duk_context *ctx)
 	{
 		if (spawnThread == 0)
 		{
-			retVal = ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars);
+			if ((calltypes & ILibDuktape_GenericMarshal_CUSTOM_HANDLER) == ILibDuktape_GenericMarshal_CUSTOM_HANDLER)
+			{
+				if (ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(parms, fptr, vars, calltypes | ILibDuktape_GenericMarshal_CUSTOM_HANDLER_VERIFY) == 1)
+				{
+					retVal = ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(parms, fptr, vars, calltypes);
+				}
+				else
+				{
+					return(ILibDuktape_Error(ctx, "Specified custom handler doesn't exit: %u", calltypes & ILibDuktape_GenericMarshal_CUSTOM_HANDLER_MASK));
+				}
+			}
+			else
+			{
+				retVal = ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(parms, fptr, vars, calltypes);
+			}
 #ifdef WIN32
 			DWORD err = GetLastError();
 #else
@@ -2674,6 +2842,10 @@ duk_ret_t ILibDuktape_GenericMarshal_MarshalFunction(duk_context *ctx)
 			duk_remove(ctx, -2);															// [func][ptr]
 		}
 		duk_put_prop_string(ctx, -2, "_address");											// [func]
+		if (duk_is_number(ctx, 2))
+		{
+			duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "_callType");
+		}
 		duk_push_string(ctx, "_MarshalledFunction"); duk_put_prop_string(ctx, -2, "_exposedName");
 		return(1);
 	}
@@ -2695,6 +2867,8 @@ duk_ret_t ILibDuktape_GenericMarshal_MarshalFunctions(duk_context *ctx)
 			duk_push_int(ctx, i++);									// [array][ret][str][this][func][this][parm][val]
 			duk_call_method(ctx, 2);								// [array][ret][str][this][marshalled]
 			duk_remove(ctx, -2);									// [array][ret][str][marshalled]
+			duk_dup(ctx, -2);										// [array][ret][str][marshalled][str]
+			duk_put_prop_string(ctx, -2, "_exposedName");			// [array][ret][str][marshalled]
 			duk_put_prop(ctx, -3);									// [array][ret]
 		}
 		return(1);

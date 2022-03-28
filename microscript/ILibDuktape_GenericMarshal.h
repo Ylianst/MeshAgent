@@ -20,6 +20,12 @@ limitations under the License.
 
 #include "duktape.h"
 
+typedef enum ILibDuktape_GenericMarshal_CallTypes
+{
+	ILibDuktape_GenericMarshal_CallTypes_DEFAULT = 0,
+	ILibDuktape_GenericMarshal_CallTypes_COM_VARIANT = 1
+}ILibDuktape_GenericMarshal_CallTypes;
+
 void ILibDuktape_GenericMarshal_init(duk_context *ctx);
 
 

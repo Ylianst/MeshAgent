@@ -112,7 +112,9 @@ function dispatch(options)
         return (ret);
     }
     catch(xx)
-    {}
+    {
+        console.info1(xx);
+    }
 
     var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: '"' + options.user + '"' } };
     for (var c1e in process.env)
