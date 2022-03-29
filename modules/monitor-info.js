@@ -572,7 +572,7 @@ function monitorinfo()
             child.stdin.write('        {');
             child.stdin.write('           display=$4;');
             child.stdin.write('        }');
-            child.stdin.write('        match($0, /-auth .+/,arg);');
+            child.stdin.write('        match($0, /-auth .+/);');
             child.stdin.write('        _auth = substr($0,RSTART+6,RLENGTH-6);');
             child.stdin.write('        if($1=="' + consoleuid + '" && _auth!="")');
             child.stdin.write("        {");

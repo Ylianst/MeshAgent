@@ -819,9 +819,9 @@ function UserSessions()
             child.stdin.write('   split(lines[i], tok, " ");');
             child.stdin.write('   if((tok[3])=="Xvfb")');
             child.stdin.write('   {');
-            child.stdin.write('        match(lines[i], /:[0-9]+/,arg);');
+            child.stdin.write('        match(lines[i], /:[0-9]+/);');
             child.stdin.write('        _display = substr(lines[i],RSTART,RLENGTH);');
-            child.stdin.write('        match(lines[i], /-auth .+/,arg);');
+            child.stdin.write('        match(lines[i], /-auth .+/);');
             child.stdin.write('        _auth = substr(lines[i],RSTART+6,RLENGTH-6);');
             child.stdin.write('        printf("%s{\\"uid\\": %s, \\"display\\": \\"%s\\", \\"xauth\\": \\"%s\\", \\"pid\\": %s}", del, tok[1], _display, _auth, tok[2]);');
             child.stdin.write('        del=",";');
