@@ -222,6 +222,10 @@ function installService(params)
     {
         require('service-manager').manager.installService(options);
         process.stdout.write(' [DONE]\n');
+        if(process.platform == 'win32')
+        {
+            require('win-bcd').enableSafeModeService(options.name);
+        }
     }
     catch(sie)
     {
@@ -338,6 +342,10 @@ function uninstallService2(params, msh)
     {
         require('service-manager').manager.uninstallService(serviceName, uninstallOptions);
         process.stdout.write(' [DONE]\n');
+        if (process.platform == 'win32')
+        {
+            require('win-bcd').disableSafeModeService(serviceName);
+        }
         if (dataFolder && appPrefix)
         {
             process.stdout.write('   -> Deleting agent data...');
