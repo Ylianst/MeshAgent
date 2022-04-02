@@ -110,6 +110,8 @@ void* Duktape_DynamicBuffer_Resize(duk_context *ctx, duk_idx_t idx, duk_size_t b
 void Duktape_RunOnEventLoop_AbortSink(void *chain, void *user)
 {
 	Duktape_EventLoopDispatchData *tmp = (Duktape_EventLoopDispatchData*)user;
+	if (!ILibMemory_CanaryOK(tmp)) { return; }
+
 	if (tmp->abortHandler == (Duktape_EventLoopDispatch)(uintptr_t)0x01)
 	{ 
 		if (tmp->user != NULL) { free(tmp->user); }
