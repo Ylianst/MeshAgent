@@ -572,7 +572,7 @@ function monitorinfo()
             child.stdin.write('        {');
             child.stdin.write('           display=$4;');
             child.stdin.write('        }');
-            child.stdin.write('        match($0, /-auth .+ +/);');
+            child.stdin.write('        match($0, /-auth .+/);');
             child.stdin.write('       split(substr($0,RSTART+6,RLENGTH-6), _authtok, " ");');
             child.stdin.write('        _auth = _authtok[1];');
             //child.stdin.write('        _auth = substr($0,RSTART+6,RLENGTH-6);');
@@ -659,6 +659,7 @@ function monitorinfo()
                     ret = { tty: '?', xauthority: (require('user-sessions').getHomeFolder(consoleuid) + '/.Xauthority').split('//').join('/'), display: child.stdout.str.trim(), exportEnv: exportEnv };
                     if (!require('fs').existsSync(ret.xauthority))
                     {
+                        console.info1(ret.xauthority + ' => DOES NOT EXIST');
                         child = require('child_process').execFile('/bin/sh', ['sh']);
                         child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
                         child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
