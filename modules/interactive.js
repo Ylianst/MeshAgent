@@ -261,7 +261,7 @@ limitations under the License.
         console.log(JSON.stringify(translation));
         process.exit();
     }
-    if (process.argv.includes('-help'))
+    if (process.argv.includes('-help') || (process.platform == 'linux' && process.env['XAUTHORITY']==null && process.env['DISPLAY'] == null))
     {
         console.log("\n" + translation[lang].commands + ": ");
         if ((msh.InstallFlags & 1) == 1)
