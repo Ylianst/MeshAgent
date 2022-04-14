@@ -55,10 +55,12 @@ typedef uintptr_t PTRSIZE;
 #define ILibDuktape_GenericMarshal_StashTable			"\xFF_GenericMarshal_StashTable"
 #define ILibDuktape_GenericMarshal_GlobalCallback_ThreadID "\xFF_GenericMarshal_ThreadID"
 #define ILibDutkape_GenericMarshal_INTERNAL				"\xFF_INTERNAL"
+#define ILibDutkape_GenericMarshal_INTERNAL_X			"\xFF_INTERNAL_X"
 #define ILibDuktape_GenericMarshal_Variable_EnableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_true(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, idx) duk_dup(ctx, idx);duk_push_false(ctx);duk_put_prop_string(ctx, -2, ILibDuktape_GenericMarshal_Variable_AutoFree);duk_pop(ctx)
 #define WAITING_FOR_RESULT__DISPATCHER					2
 #define ILibDuktape_GenericMarshal_MethodInvoke_Native(parms, fptr, vars) ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(parms, fptr, vars, ILibDuktape_GenericMarshal_CallTypes_DEFAULT)
+void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size);
 
 typedef PTRSIZE(APICALLTYPE *R0)();
 typedef PTRSIZE(APICALLTYPE *R1)(PTRSIZE V1);
@@ -142,6 +144,176 @@ uintptr_t ILibDuktape_GenericMarshal_MethodInvoke_CustomEx(int parms, void *fptr
 }
 
 
+ILibDuktape_EventEmitter *GenericMarshal_CustomEventHandler_Events[255] = { 0 };
+void ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(duk_context *ctx, void *func, uint32_t index)
+{
+	if (index < 0 || index >((sizeof(GenericMarshal_CustomEventHandler_Events) / sizeof(uintptr_t)) - 1))
+	{
+		ILibDuktape_Error(ctx, "Custom Event Index out of range");
+		return;
+	}
+
+	ILibDuktape_GenericMarshal_Variable_PUSH(ctx, func, sizeof(uintptr_t));
+	ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, -1);
+	ILibDuktape_EventEmitter_CreateEventEx(ILibDuktape_EventEmitter_Create(ctx), "GlobalCallback");
+	GenericMarshal_CustomEventHandler_Events[index] = ILibDuktape_EventEmitter_GetEmitter(ctx, -1);
+	duk_push_uint(ctx, index);
+	duk_put_prop_string(ctx, -2, ILibDutkape_GenericMarshal_INTERNAL_X);
+}
+
+uintptr_t GenericMarshal_CustomEventHandler_DispatchEx(ILibDuktape_EventEmitter *e, uintptr_t *args, size_t argsLen)
+{
+	duk_context *ctx = e->ctx;
+	uintptr_t ret = 0;
+	size_t i;
+	ILibDuktape_EventEmitter_SetupEmit(e->ctx, e->object, "GlobalCallback");					// [emit][this][Name]
+	for (i = 0; i < argsLen; ++i)
+	{
+		ILibDuktape_GenericMarshal_Variable_PUSH(e->ctx, (void*)args[i], sizeof(uintptr_t));	// [emit][this][Name][...]
+		ILibDuktape_GenericMarshal_Variable_DisableAutoFree(e->ctx, -1);
+	}
+	if (duk_pcall_method(e->ctx, (duk_idx_t)argsLen + 1) == 0)
+	{
+		if (ILibMemory_CanaryOK(e))
+		{
+			if (e->lastReturnValue != NULL)
+			{
+				duk_push_heapptr(e->ctx, e->lastReturnValue);
+				ret = (uintptr_t)Duktape_GetPointerProperty(ctx, -1, "_ptr");
+				duk_pop(ctx);
+			}
+		}
+	}
+	duk_pop(ctx);
+	return(ret);
+}
+
+typedef struct GenericMarshal_CustomEventHandler_Dispatch_Data
+{
+	ILibDuktape_EventEmitter *emitter;
+	uintptr_t *args;
+	size_t argsLen;
+	uintptr_t ret;
+	sem_t waiter;
+}GenericMarshal_CustomEventHandler_Dispatch_Data;
+
+void GenericMarshal_CustomEventHandler_Dispatch_Chain(void *chain, void *user)
+{
+	GenericMarshal_CustomEventHandler_Dispatch_Data *data = (GenericMarshal_CustomEventHandler_Dispatch_Data*)user;
+	duk_push_heapptr(data->emitter->ctx, data->emitter->object);		// [obj]
+	duk_push_true(data->emitter->ctx);									// [obj][true]
+	duk_put_prop_string(data->emitter->ctx, -2, "callbackDispatched");	// [obj]
+	data->ret = GenericMarshal_CustomEventHandler_DispatchEx(data->emitter, data->args, data->argsLen);
+	duk_del_prop_string(data->emitter->ctx, -1, "callbackDispatched");
+	sem_post(&(data->waiter));
+}
+uintptr_t GenericMarshal_CustomEventHandler_Dispatch(uintptr_t *args, size_t argsLen, uint32_t index)
+{
+	uintptr_t ret = 0;
+	ILibDuktape_EventEmitter *emitter = GenericMarshal_CustomEventHandler_Events[index];
+	if (emitter != NULL && ILibMemory_CanaryOK(emitter))
+	{
+		int dispatch = ILibIsRunningOnChainThread(duk_ctx_chain(emitter->ctx)) == 0;
+		GenericMarshal_CustomEventHandler_Dispatch_Data user = { 0 };
+
+		if (dispatch)
+		{
+			user.args = args;
+			user.argsLen = argsLen;
+			user.emitter = emitter;
+			sem_init(&(user.waiter), 0, 0);
+			ILibChain_RunOnMicrostackThread(duk_ctx_chain(emitter->ctx), GenericMarshal_CustomEventHandler_Dispatch_Chain, &user);
+			sem_wait(&(user.waiter));
+			sem_destroy(&(user.waiter));
+			ret = user.ret;
+		}
+		else
+		{
+			ret = GenericMarshal_CustomEventHandler_DispatchEx(emitter, args, argsLen);
+		}
+	}
+	return(ret);
+}
+
+#ifdef WIN32
+uintptr_t __stdcall GenericMarshal_CustomEventHandler_10(uintptr_t var1, uintptr_t var2, uintptr_t var3)
+{
+	uintptr_t args[] = { var1, var2, var3 };
+	return(GenericMarshal_CustomEventHandler_Dispatch(args, sizeof(args) / sizeof(uintptr_t), 10));
+}
+uintptr_t __stdcall GenericMarshal_CustomEventHandler_11(uintptr_t var1)
+{
+	uintptr_t args[] = { var1 };
+	return(GenericMarshal_CustomEventHandler_Dispatch(args, sizeof(args) / sizeof(uintptr_t), 11));
+}
+uintptr_t __stdcall GenericMarshal_CustomEventHandler_12(uintptr_t var1)
+{
+	uintptr_t args[] = { var1 };
+	return(GenericMarshal_CustomEventHandler_Dispatch(args, sizeof(args) / sizeof(uintptr_t), 12));
+}
+uintptr_t __stdcall GenericMarshal_CustomEventHandler_13(uintptr_t var1, uintptr_t var2, uintptr_t var3)
+{
+	uintptr_t args[] = { var1, var2, var3 };
+	return(GenericMarshal_CustomEventHandler_Dispatch(args, sizeof(args) / sizeof(uintptr_t), 13));
+}
+uintptr_t __stdcall GenericMarshal_CustomEventHandler_14(uintptr_t var1, uintptr_t var2, uintptr_t var3, uintptr_t var4, uintptr_t var5)
+{
+	uintptr_t args[] = { var1, var2, var3, var4, var5 };
+	return(GenericMarshal_CustomEventHandler_Dispatch(args, sizeof(args) / sizeof(uintptr_t), 14));
+}
+#endif
+
+void ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler(duk_context *ctx, int paramCount, uint32_t index)
+{
+	int ok = 0;
+	switch (index)
+	{
+#ifdef WIN32
+		case 10:
+			if (paramCount == 3)
+			{
+				ok = 1;
+				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_10, index);
+			}
+			break;
+		case 11:
+			if (paramCount == 1)
+			{
+				ok = 1;
+				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_11, index);
+			}
+			break;
+		case 12:
+			if (paramCount == 1)
+			{
+				ok = 1;
+				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_12, index);
+			}
+			break;
+		case 13:
+			if (paramCount == 3)
+			{
+				ok = 1;
+				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_13, index);
+			}
+			break;
+		case 14:
+			if (paramCount == 5)
+			{
+				ok = 1;
+				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_14, index);
+			}
+			break;
+#endif
+		default:
+			ILibDuktape_Error(ctx, "Undefined Custom Event Handler Index: %u", index);
+			break;
+	}
+	if (ok == 0)
+	{
+		ILibDuktape_Error(ctx, "Invalid Parameter count: %d for Custom Event Handler Index: %u", paramCount, index);
+	}
+}
 
 ILibLinkedList GlobalCallbackList = NULL;
 
@@ -184,7 +356,6 @@ typedef struct Duktape_MarshalledObject
 	void *heapptr;
 }Duktape_MarshalledObject;
 
-void ILibDuktape_GenericMarshal_Variable_PUSH(duk_context *ctx, void *ptr, int size);
 
 duk_ret_t ILibDuktape_GenericMarshal_Variable_Val_STRING(duk_context *ctx)
 {
@@ -501,11 +672,13 @@ duk_ret_t ILibDuktape_GenericMarshal_Variable_bignum_SET(duk_context *ctx)
 duk_ret_t ILibDuktape_GenericMarshal_Variable_Increment(duk_context *ctx)
 {
 	duk_push_this(ctx);											// [var]
+	int isAutoFree = Duktape_GetBooleanProperty(ctx, -1, ILibDuktape_GenericMarshal_Variable_AutoFree, 0);
 	ILibDuktape_GenericMarshal_Variable_DisableAutoFree(ctx, -1);
 	void *_ptr = Duktape_GetPointerProperty(ctx, -1, "_ptr");
 	int offset = duk_require_int(ctx, 0);
 	if (duk_is_boolean(ctx, 1) && duk_require_boolean(ctx, 1))
 	{
+		if (isAutoFree != 0) { free(_ptr); }
 		_ptr = (void*)(uintptr_t)duk_require_uint(ctx, 0);
 	}
 	else
@@ -856,7 +1029,7 @@ PTRSIZE ILibDuktape_GenericMarshal_MethodInvoke_NativeEx(int parms, void *fptr, 
 
 	switch (calltype)
 	{
-		case ILibDuktape_GenericMarshal_CallTypes_DEFAULT:
+		default:
 			switch (parms)
 			{
 			case 0:
@@ -2189,7 +2362,7 @@ void ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx(void * chain, void *use
 	if (ILibDuktape_GlobalGenericCallbackEx_Process_ChainEx_2(data->emitter) != 0)
 	{
 		// Exception was thrown
-		ILibDuktape_Process_UncaughtExceptionEx(data->emitter->ctx, "Exception occured in GlobalCallback: %s", duk_safe_to_string(data->emitter->ctx, -1));
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "Exception occured in GlobalCallback: %s", duk_safe_to_string(ctx, -1));
 		data->retVal = NULL;
 	}
 	else
@@ -2473,7 +2646,15 @@ duk_ret_t ILibDuktape_GenericMarshal_PutGlobalGenericCallbackEx(duk_context *ctx
 	duk_get_prop_string(ctx, -1, "GlobalCallBacksEx");					// [stash][array]
 	if (!duk_has_prop_string(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL))
 	{
-		return(ILibDuktape_Error(ctx, "Invalid Parameter"));
+		if (duk_has_prop_string(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL_X))
+		{
+			uint32_t x = Duktape_GetUIntPropertyValue(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL_X, 0);
+			if (x < sizeof(GenericMarshal_CustomEventHandler_Events) / sizeof(void*))
+			{
+				GenericMarshal_CustomEventHandler_Events[x] = NULL;
+			}
+		}
+		return(0);
 	}
 	duk_get_prop_string(ctx, 0, ILibDutkape_GenericMarshal_INTERNAL);	// [stash][array][obj]
 	int index = Duktape_GetIntPropertyValue(ctx, -1, "INDEX", -1);
@@ -2489,6 +2670,11 @@ duk_ret_t ILibDuktape_GenericMarshal_PutGlobalGenericCallbackEx(duk_context *ctx
 duk_ret_t ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx(duk_context *ctx)
 {
 	int numParms = duk_require_int(ctx, 0);
+	if (duk_is_number(ctx, 1))
+	{	
+		ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler(ctx, numParms, duk_require_uint(ctx, 1));
+		return(1);
+	}
 
 	duk_push_global_stash(ctx);			// [stash]
 	if (!duk_has_prop_string(ctx, -1, "GlobalCallBacksEx"))

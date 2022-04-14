@@ -99,7 +99,7 @@ const ResultFunctions = [
 const QueryAsyncHandler =
     [
         {
-            parms: 3, name: 'QueryInterface', func: function (j, riid, ppv)
+            cx: 10, parms: 3, name: 'QueryInterface', func: function (j, riid, ppv)
             {
                 var ret = GM.CreateVariable(4);
                 console.info1('QueryInterface', riid.Deref(0, 16).toBuffer().toString('hex'));
@@ -127,7 +127,7 @@ const QueryAsyncHandler =
             }
         },
         {
-            parms: 1, name: 'AddRef', func: function ()
+            cx: 11, parms: 1, name: 'AddRef', func: function ()
             {
                 ++this.refcount;
                 console.info1('AddRef', this.refcount);
@@ -135,7 +135,7 @@ const QueryAsyncHandler =
             }
         },
         {
-            parms: 1, name: 'Release', func: function ()
+            cx: 12, parms: 1, name: 'Release', func: function ()
             {
                 --this.refcount;
                 console.info1('Release', this.refcount);
@@ -163,7 +163,7 @@ const QueryAsyncHandler =
             }
         },
         {
-            parms: 3, name: 'Indicate', func: function (j, count, arr)
+            cx: 13, parms: 3, name: 'Indicate', func: function (j, count, arr)
             {
                 console.info1('Indicate', count.Val);
                 var j, nme, len, nn;
@@ -180,7 +180,7 @@ const QueryAsyncHandler =
             }
         },
         {
-            parms: 5, name: 'SetStatus', func: function (j, lFlags, hResult, strParam, pObjParam)
+            cx: 14, parms: 5, name: 'SetStatus', func: function (j, lFlags, hResult, strParam, pObjParam)
             {
                 console.info1('SetStatus', hResult.Val);
 

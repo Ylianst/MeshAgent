@@ -98,7 +98,17 @@ function marshalFunctions(obj, arr)
 }
 function marshalInterface(arr)
 {
-    if (GM.PointerSize == 4) { throw ('Not supported on 32bit platforms, becuase ellipses function cannot be __stdcall'); }
+    if (GM.PointerSize == 4)
+    {
+        // For 32 bit, we need to check to make sure custom handlers were used
+        for (var i = 0; i < arr.length; ++i)
+        {
+            if (arr[i].cx == null)
+            {
+                throw ('Not supported on 32bit platforms, becuase ellipses function cannot be __stdcall');
+            }
+        }
+    }
     var vtbl = GM.CreateVariable(arr.length * GM.PointerSize);
     var obj = GM.CreatePointer();
     vtbl.pointerBuffer().copy(obj.toBuffer());
@@ -117,7 +127,7 @@ function marshalInterface(arr)
 
     for (var i = 0; i < arr.length; ++i)
     {
-        _hide(GM.GetGenericGlobalCallbackEx(arr[i].parms));
+        _hide(GM.GetGenericGlobalCallbackEx(arr[i].parms, GM.PointerSize == 4 ? arr[i].cx : null)); // Only 32 bit needs custom handlers
         _hide()._ObjectID = 'GlobalCallback_' + arr[i].name;
         obj._gcallbacks.push(_hide());
         _hide().obj = arr[i];
