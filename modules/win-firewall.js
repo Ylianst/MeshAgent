@@ -284,6 +284,130 @@ function ProfileMaskToString(mask)
     return (val.join(', '));
 }
 
+function getRulesCount()
+{
+    return(getFirewallRules({count: true}));
+}
+function getFirewallRulesAsync2(p)
+{
+    var hr;
+    var rule, tmp;
+    OleAut.VariantClear(p.vvar);
+
+    hr = p.enumerator.funcs.Next(p.enumerator.Deref(), 1, p.vvar, p.fetched);
+    if (hr.Val == 0)
+    {
+        var pct = Math.floor(((p.counter++) / p.count) * 100);
+        if (pct % 5 == 0)
+        {
+            if (p.evented == false)
+            {
+                p.emit('progress', pct + '%');
+                p.evented = true;
+            }
+        }
+        else
+        {
+            p.evented = false;
+        }
+        rule = GM.CreatePointer();
+        tmp = p.vvar.Deref(8, GM.PointerSize);
+        tmp.funcs = require('win-com').marshalFunctions(tmp.Deref(), UnknownFunctions);
+        hr = tmp.funcs.QueryInterface(tmp.Deref(), require('win-com').CLSIDFromString(IID_INetFwRule), rule);
+        rule.funcs = require('win-com').marshalFunctions(rule.Deref(), RuleFunctions);
+        p.val.toBuffer().writeUInt32LE(0);
+
+        if ((p.options && p.options.program && rule.funcs.get_ApplicationName(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0
+            && p.options.program.toLowerCase() == p.val.Deref().Wide2UTF8.toLowerCase()) || !p.options || !p.options.program)
+        {
+            obj = {};
+            obj._rule = rule;
+            obj._rule._i = p.NetFwPolicy2;
+            if (p.val.Deref().Val != 0)
+            {
+                obj.Program = p.val.Deref().Wide2UTF8;
+            }
+            else
+            {
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_ApplicationName(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.Program = p.val.Deref().Wide2UTF8; }
+            }
+            p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Name(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.DisplayName = p.val.Deref().Wide2UTF8; }
+            if (!p.options.minimal)
+            {
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Description(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.Description = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_LocalPorts(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.LocalPorts = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_RemotePorts(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.RemotePorts = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_LocalAddresses(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.LocalAddresses = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_RemoteAddresses(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.RemoteAddresses = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_ApplicationName(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.Program = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_InterfaceTypes(rule.Deref(), p.val).Val == 0 && p.val.Deref().Val != 0) { obj.InterfaceTypes = p.val.Deref().Wide2UTF8; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Enabled(rule.Deref(), p.val).Val == 0) { obj.Enabled = p.val.Deref(0, 2).toBuffer().readInt16LE() != 0; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Direction(rule.Deref(), p.val).Val == 0)
+                {
+                    switch (p.val.Deref(0, 4).toBuffer().readInt32LE())
+                    {
+                        case 1: // INBOUND
+                            obj.direction = 'inbound';
+                            break;
+                        case 2: // OUTBOUND
+                            obj.direction = 'outbound';
+                            break;
+                        default: // UNKNOWN
+                            break;
+                    }
+                }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Protocol(rule.Deref(), p.val).Val == 0) { obj.Protocol = protocolNumbers[p.val.Deref(0, 4).toBuffer().readInt32LE()]; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_EdgeTraversal(rule.Deref(), p.val).Val == 0) { obj.EdgeTraversalPolicy = p.val.Deref(0, 2).toBuffer().readInt16LE() != 0 ? 'Allow' : 'Block'; }
+                p.val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Profiles(rule.Deref(), p.val).Val == 0) { obj.Profile = ProfileMaskToString(p.val.toBuffer().readUInt32LE()); }
+            }
+            p.emit('rule', obj);
+            if (p.options.noResult != true) { p.arr.push(obj); }
+            p.arr.push(obj);
+        }
+        setImmediate(getFirewallRulesAsync2, p);
+    }
+    else
+    {
+        p.resolve(p.options.noResult === true ? null : p.arr);
+    }
+}
+function getFirewallRulesAsync(options)
+{
+    if (options == null) { options = {} };
+    var promise = require('promise');
+    var unknown = GM.CreatePointer();
+    var ret = new promise(promise.defaultInit);
+    ret.NetFwPolicy2 = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_NetFwPolicy2), require('win-com').IID_IUnknown);
+    ret.NetFwPolicy2.funcs = require('win-com').marshalFunctions(ret.NetFwPolicy2, FirewallFunctions);
+    ret.rules = GM.CreatePointer();
+    ret.enumerator = GM.CreatePointer();
+    ret.vvar = GM.CreateVariable(GM.PointerSize == 8 ? 24 : 16);
+    ret.fetched = GM.CreateVariable(4);
+    ret.options = options;
+    ret.val = GM.CreatePointer();
+    ret.arr = [];
+    ret.counter = 0;
+    ret.evented = false;
+    require('events').EventEmitter.call(ret, true)
+        .createEvent('progress')
+        .createEvent('rule');
+
+    ret.NetFwPolicy2.funcs.get_Rules(ret.NetFwPolicy2, ret.rules).Val;
+    ret.rules.funcs = require('win-com').marshalFunctions(ret.rules.Deref(), RulesFunctions);
+
+    ret.rules.funcs.get__NewEnum(ret.rules.Deref(), unknown);
+    unknown.funcs = require('win-com').marshalFunctions(unknown.Deref(), UnknownFunctions);
+    unknown.funcs.QueryInterface(unknown.Deref(), require('win-com').CLSIDFromString(IID_IEnumVARIANT), ret.enumerator);
+    ret.enumerator.funcs = require('win-com').marshalFunctions(ret.enumerator.Deref(), EnumVariantFunctions);
+
+    var count = GM.CreateVariable(4);
+    ret.rules.funcs.get_Count(ret.rules.Deref(), count).Val;
+    ret.count = count.toBuffer().readInt32LE();
+
+    setImmediate(getFirewallRulesAsync2, ret);
+
+    return (ret);
+}
 function getFirewallRules(options)
 {
     var ret = [];
@@ -311,11 +435,19 @@ function getFirewallRules(options)
    
     console.info1('Number of Rules: ' + count.toBuffer().readInt32LE());
 
+    if (options && options.count === true)
+    {
+        var ret = count.toBuffer().readInt32LE();
+        NetFwPolicy2.funcs.Release(NetFwPolicy2);
+        return (ret);
+    }
+
     hr = rules.funcs.get__NewEnum(rules.Deref(), unknown);
     unknown.funcs = require('win-com').marshalFunctions(unknown.Deref(), UnknownFunctions);
     hr = unknown.funcs.QueryInterface(unknown.Deref(), require('win-com').CLSIDFromString(IID_IEnumVARIANT), enumerator);
     enumerator.funcs = require('win-com').marshalFunctions(enumerator.Deref(), EnumVariantFunctions);
 
+    var ii = 0; jj = 0;
     while (hr.Val == 0)
     {
         OleAut.VariantClear(vvar);
@@ -334,6 +466,14 @@ function getFirewallRules(options)
                 obj = {};
                 obj._rule = rule;
                 obj._rule._i = NetFwPolicy2;
+                if (val.Deref().Val != 0)
+                {
+                    obj.Program = val.Deref().Wide2UTF8;
+                }
+                else
+                {
+                    val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_ApplicationName(rule.Deref(), val).Val == 0 && val.Deref().Val != 0) { obj.Program = val.Deref().Wide2UTF8; }
+                }
                 val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Name(rule.Deref(), val).Val == 0 && val.Deref().Val != 0) { obj.DisplayName = val.Deref().Wide2UTF8; }
                 val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_Description(rule.Deref(), val).Val == 0 && val.Deref().Val != 0) { obj.Description = val.Deref().Wide2UTF8; }
                 val.toBuffer().writeUInt32LE(0); if (rule.funcs.get_LocalPorts(rule.Deref(), val).Val == 0 && val.Deref().Val != 0) { obj.LocalPorts = val.Deref().Wide2UTF8; }
@@ -500,7 +640,9 @@ function addFirewallRule(rule)
 //attachDebugger({ webport: 9995, wait: true }).then(console.log, console.log);
 module.exports =
     {
+        getRulesCount: getRulesCount,
         getFirewallRules: getFirewallRules,
+        getFirewallRulesAsync: getFirewallRulesAsync,
         disableFirewallRules:   disableFirewallRules,
         enableFirewallRules:    enableFirewallRules,
         addFirewallRule:        addFirewallRule,
