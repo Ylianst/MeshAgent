@@ -294,6 +294,13 @@ function getFirewallRulesAsync2(p)
     var rule, tmp;
     OleAut.VariantClear(p.vvar);
 
+    if (p.options.timeout != null && (Date.now() - p.startTime) > p.options.timeout)
+    {
+        p.NetFwPolicy2.funcs.Release(p.NetFwPolicy2);
+        p.reject();
+        return;
+    }
+
     hr = p.enumerator.funcs.Next(p.enumerator.Deref(), 1, p.vvar, p.fetched);
     if (hr.Val == 0)
     {
@@ -321,8 +328,6 @@ function getFirewallRulesAsync2(p)
             && p.options.program.toLowerCase() == p.val.Deref().Wide2UTF8.toLowerCase()) || !p.options || !p.options.program)
         {
             obj = {};
-            obj._rule = rule;
-            obj._rule._i = p.NetFwPolicy2;
             if (p.val.Deref().Val != 0)
             {
                 obj.Program = p.val.Deref().Wide2UTF8;
@@ -364,10 +369,12 @@ function getFirewallRulesAsync2(p)
             if (p.options.noResult != true) { p.arr.push(obj); }
             p.arr.push(obj);
         }
+        rule.funcs.Release(rule.Deref());
         setImmediate(getFirewallRulesAsync2, p);
     }
     else
     {
+        p.NetFwPolicy2.funcs.Release(p.NetFwPolicy2);
         p.resolve(p.options.noResult === true ? null : p.arr);
     }
 }
@@ -403,6 +410,7 @@ function getFirewallRulesAsync(options)
     var count = GM.CreateVariable(4);
     ret.rules.funcs.get_Count(ret.rules.Deref(), count).Val;
     ret.count = count.toBuffer().readInt32LE();
+    ret.startTime = Date.now();
 
     setImmediate(getFirewallRulesAsync2, ret);
 
