@@ -263,6 +263,7 @@ function windows_notifybar_local(title, bar_options)
                 barHeight = Math.floor(m[i].dpi / 3);
                 barWidth = Math.floor(m[i].dpi * 9);
                 if (barWidth > monWidth) { barWidth = monWidth; }
+                if (barWidth > (monWidth * 0.45)) { barWidth = monWidth * 0.45; }
             }
             console.info1('Monitor: ' + i + ' = Width[' + (m[i].right - m[i].left) + '] BarHeight[' + barHeight + '] BarWidth[' + barWidth + ']');
 
