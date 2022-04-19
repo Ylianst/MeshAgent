@@ -113,6 +113,7 @@ typedef uintptr_t(__stdcall *Z2)(uintptr_t V1, VARIANT V2, uintptr_t V3);
 #define ILibDuktape_GenericMarshal_CUSTOM_HANDLER 0x80000000
 #define ILibDuktape_GenericMarshal_CUSTOM_HANDLER_VERIFY 0x40000000
 #define ILibDuktape_GenericMarshal_CUSTOM_HANDLER_MASK 0x3FFFFFFF
+ILibHashtable marshal_data = NULL;
 
 uintptr_t ILibDuktape_GenericMarshal_MethodInvoke_CustomEx(int parms, void *fptr, uintptr_t *vars, int check, int index)
 {
@@ -207,10 +208,9 @@ void GenericMarshal_CustomEventHandler_Dispatch_Chain(void *chain, void *user)
 	duk_del_prop_string(data->emitter->ctx, -1, "callbackDispatched");
 	sem_post(&(data->waiter));
 }
-uintptr_t GenericMarshal_CustomEventHandler_Dispatch(uintptr_t *args, size_t argsLen, uint32_t index)
+uintptr_t GenericMarshal_CustomEventHandler_Dispatch2(ILibDuktape_EventEmitter *emitter, uintptr_t *args, size_t argsLen)
 {
 	uintptr_t ret = 0;
-	ILibDuktape_EventEmitter *emitter = GenericMarshal_CustomEventHandler_Events[index];
 	if (emitter != NULL && ILibMemory_CanaryOK(emitter))
 	{
 		int dispatch = ILibIsRunningOnChainThread(duk_ctx_chain(emitter->ctx)) == 0;
@@ -233,6 +233,11 @@ uintptr_t GenericMarshal_CustomEventHandler_Dispatch(uintptr_t *args, size_t arg
 		}
 	}
 	return(ret);
+}
+uintptr_t GenericMarshal_CustomEventHandler_Dispatch(uintptr_t *args, size_t argsLen, uint32_t index)
+{
+	ILibDuktape_EventEmitter *emitter = GenericMarshal_CustomEventHandler_Events[index];
+	return(GenericMarshal_CustomEventHandler_Dispatch2(emitter, args, argsLen));
 }
 
 #ifdef WIN32
@@ -260,6 +265,31 @@ uintptr_t __stdcall GenericMarshal_CustomEventHandler_14(uintptr_t var1, uintptr
 {
 	uintptr_t args[] = { var1, var2, var3, var4, var5 };
 	return(GenericMarshal_CustomEventHandler_Dispatch(args, sizeof(args) / sizeof(uintptr_t), 14));
+}
+uintptr_t __stdcall GenericMarshal_CustomEventHandler_55(uintptr_t var1, uintptr_t var2, uintptr_t var3, uintptr_t var4)
+{
+	uintptr_t args[] = { var1, var2, var3, var4 };
+	uintptr_t ret = 0;
+	
+	void **val;
+
+	if (marshal_data != NULL)
+	{
+		ILibHashtable_Lock(marshal_data);
+		val = (void**)ILibHashtable_Get(marshal_data, (void*)var1, NULL, 0);
+		ILibHashtable_UnLock(marshal_data);
+
+		if (val != NULL)
+		{
+			WNDPROC func = (WNDPROC)val[0];
+			ret = (uintptr_t)func((HWND)var1, (UINT)var2, (WPARAM)var3, (LPARAM)var4);
+			if (val[1] != NULL)
+			{
+				GenericMarshal_CustomEventHandler_Dispatch2(val[1], args, sizeof(args) / sizeof(uintptr_t));
+			}
+		}
+	}
+	return(ret);
 }
 #endif
 
@@ -302,6 +332,13 @@ void ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler(duk_con
 			{
 				ok = 1;
 				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_14, index);
+			}
+			break;
+		case 55:
+			if (paramCount == 4)
+			{
+				ok = 1;
+				ILibDuktape_GenericMarshal_GetGlobalGenericCallbackEx_CustomHandler_Setup(ctx, GenericMarshal_CustomEventHandler_55, index);
 			}
 			break;
 #endif
@@ -3032,6 +3069,7 @@ duk_ret_t ILibDuktape_GenericMarshal_MarshalFunction(duk_context *ctx)
 		{
 			duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "_callType");
 		}
+
 		duk_push_string(ctx, "_MarshalledFunction"); duk_put_prop_string(ctx, -2, "_exposedName");
 		return(1);
 	}
@@ -3062,7 +3100,43 @@ duk_ret_t ILibDuktape_GenericMarshal_MarshalFunctions(duk_context *ctx)
 	return(ILibDuktape_Error(ctx, "Invalid Parameters"));
 }
 
+duk_ret_t ILibDuktape_GenericMarshal_PutData(duk_context *ctx)
+{
+	void *arg1 = Duktape_GetPointerProperty(ctx, 0, "_ptr");
+	void *arg2 = Duktape_GetPointerProperty(ctx, 1, "_ptr");
+	ILibDuktape_EventEmitter *e = NULL;
+	if (!duk_is_null_or_undefined(ctx, 2)) { e = ILibDuktape_EventEmitter_GetEmitter(ctx, 2); }
+	void **val = (void**)ILibMemory_SmartAllocate(2 * sizeof(void*));
+	val[0] = arg2;
+	val[1] = e;
 
+	if (marshal_data == NULL) { marshal_data = ILibHashtable_Create(); }
+	if (!duk_is_null_or_undefined(ctx, 2))
+	{
+		duk_push_heap_stash(ctx);																																				// [stash]
+		if (!duk_has_prop_string(ctx, -1, ILibDutkape_GenericMarshal_INTERNAL)) { duk_push_object(ctx); duk_put_prop_string(ctx, -2, ILibDutkape_GenericMarshal_INTERNAL); }	// [stash][obj]
+		duk_push_sprintf(ctx, "%p", arg1);																																		// [stash][obj][key]
+		duk_dup(ctx, 2);																																						// [stash][obj][key][val]
+		duk_put_prop(ctx, -3);
+	}
+
+	ILibHashtable_Lock(marshal_data);
+	ILibHashtable_Put(marshal_data, arg1, NULL, 0, val);
+	ILibHashtable_UnLock(marshal_data);
+	return(0);
+}
+duk_ret_t ILibDuktape_GenericMarshal_RemoveData(duk_context *ctx)
+{
+	if (marshal_data != NULL)
+	{
+		void *arg1 = Duktape_GetPointerProperty(ctx, 0, "_ptr");
+
+		ILibHashtable_Lock(marshal_data);
+		ILibHashtable_Remove(marshal_data, arg1, NULL, 0);
+		ILibHashtable_UnLock(marshal_data);
+	}
+	return(0);
+}
 void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 {
 	duk_push_object(ctx);												// [obj]
@@ -3084,7 +3158,9 @@ void ILibDuktape_GenericMarshal_Push(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethod(ctx, "GetCurrentThread", ILibDuktape_GenericMarshal_GetCurrentThread, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "MarshalFunction", ILibDuktape_GenericMarshal_MarshalFunction, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "MarshalFunctions", ILibDuktape_GenericMarshal_MarshalFunctions, 2);
-	
+	ILibDuktape_CreateInstanceMethod(ctx, "PutData", ILibDuktape_GenericMarshal_PutData, DUK_VARARGS);
+	ILibDuktape_CreateInstanceMethod(ctx, "RemoveData", ILibDuktape_GenericMarshal_RemoveData, 1);
+
 
 #ifdef WIN32
 	duk_push_object(ctx);

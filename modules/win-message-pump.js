@@ -18,6 +18,7 @@ var WH_CALLWNDPROC = 4;
 var WM_QUIT =  0x0012;
 var WM_CLOSE = 0x0010;
 var GM = require('_GenericMarshal');
+const GWLP_WNDPROC = -4;
 
 function WindowsMessagePump(options)
 {
@@ -55,11 +56,15 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('RegisterClassExW');
     this._user32.CreateMethod('ReleaseCapture');
     this._user32.CreateMethod('SendMessageW');
+    this._user32.CreateMethod('SetClassLongA');
+    this._user32.CreateMethod('SetClassLongPtrA');
     this._user32.CreateMethod('SetCursor');
+    this._user32.CreateMethod('SetWindowLongPtrA');
     this._user32.CreateMethod('SetWindowPos');
     this._user32.CreateMethod('SetWindowTextW');
     this._user32.CreateMethod('ShowWindow');
     this._user32.CreateMethod('SystemParametersInfoA');
+    this._user32.CreateMethod('TrackMouseEvent');
     this._user32.CreateMethod('TranslateMessage');
     this._user32.CreateMethod('UnregisterClassW');
 
@@ -101,6 +106,7 @@ function WindowsMessagePump(options)
     this.wndclass.wndproc.on('GlobalCallback', function onWndProc(xhwnd, xmsg, wparam, lparam)
     {
         var processed = false;
+
         if (this.mp._hwnd != null && this.mp._hwnd.Val == xhwnd.Val)
         {
             // This is for us
@@ -186,6 +192,7 @@ function WindowsMessagePump(options)
         if (!this.nativeProxy.mp._options)  {   this.nativeProxy.mp._options = {};  }
         if (!this.nativeProxy.mp._options.window) { this.nativeProxy.mp._options.window = {}; }
         if (this.nativeProxy.mp._options.window.exstyles == null) { this.nativeProxy.mp._options.window.exstyles = 0x00000088; }    // TopMost Tool Window
+        //if (this.nativeProxy.mp._options.window.exstyles == null) { this.nativeProxy.mp._options.window.exstyles = 0x00000080; }    // Tool Window
         if (this.nativeProxy.mp._options.window.winstyles == null) { this.nativeProxy.mp._options.window.winstyles = 0x00800000; }  // WS_BORDER
         if (this.nativeProxy.mp._options.window.x == null) { this.nativeProxy.mp._options.window.x = 0; }
         if (this.nativeProxy.mp._options.window.y == null) { this.nativeProxy.mp._options.window.y = 0; }
@@ -230,7 +237,8 @@ function WindowsMessagePump(options)
     this._startPump_continuation = function _startPump_continuation(h)
     {
         this.finalpromise.resolve(h);
-        this.nativeProxy.mp._startPump();
+        //this.nativeProxy.mp._startPump();
+        this.mp._startPump();
     }
     this._startPump = function _startPump()
     {
@@ -241,6 +249,7 @@ function WindowsMessagePump(options)
             args.unshift(this._user32.RegisterClassExW.async);
             var p2 = j.func.apply(this._user32, args);
             p2.finalpromise = j.p;
+            p2.mp = this;
             p2.then(this._startPump_continuation);
             return;
         }
@@ -294,6 +303,36 @@ function WindowsMessagePump(options)
     {
         this.stop();
     });
+    
+    this.hookChild = function hookChild(childHwnd)
+    {
+        if (this.wndclass.wndproc.hooks == null) { this.wndclass.wndproc.hooks = []; }
+
+        var newval = GM.GetGenericGlobalCallbackEx(4, 55);
+        newval.childHwnd = childHwnd;
+        newval.mp = this;
+        newval.on('GlobalCallback', function hookedWndProc(xhwnd, xmsg, wparam, lparam)
+        {
+            if (this.childHwnd.Val == xhwnd.Val)
+            {
+                try
+                {
+                    this.mp.emit('message', { message: xmsg.Val, wparam: wparam.Val, lparam: lparam.Val, lparam_hex: lparam.pointerBuffer().toString('hex'), lparam_raw: lparam, hwnd: xhwnd });
+                }
+                catch (zz)
+                {
+                    console.info1(zz);
+                }
+            }
+        });
+        var old = this._user32.SetWindowLongPtrA(childHwnd, GWLP_WNDPROC, newval);
+        if (old.Val != 0)
+        {
+            GM.PutData(childHwnd, old, newval);
+            return (true);
+        }
+        return (false);
+    }
 }
 
 module.exports = WindowsMessagePump;

@@ -26,10 +26,15 @@ const DEFAULT_QUALITY = 0;
 const DEFAULT_PITCH = 0;
 const FF_SWISS = (2 << 4);  /* Variable stroke width, sans-serifed. */
 
+const TME_HOVER = 0x00000001;
+const TME_LEAVE = 0x00000002;
+const TME_NONCLIENT = 0x00000010;
+
 const WM_NCLBUTTONDOWN = 0x00A1;
 const HT_CAPTION = 2;
 const WM_WINDOWPOSCHANGING = 70;
 const IDC_ARROW = 32512;
+const IDC_HAND = 32649;
 
 const SW_SHOW = 5;
 const SW_HIDE = 0;
@@ -40,10 +45,16 @@ const WM_MOUSEMOVE = 0x0200;
 const WM_SETFONT = 0x0030;
 const WM_LBUTTONDOWN = 0x0201;
 const WM_USER = 0x0400;
-
+const WM_MOUSEHOVER = 0x02A1;
+const WM_MOUSELEAVE = 0x02A3;
+const WM_NCMOUSEHOVER = 0x02A0;
+const WM_NCMOUSELEAVE = 0x02A2;
 const WS_CHILD = 0x40000000;
 const WS_TABSTOP = 0x00010000;
 const WS_VISIBLE = 0x10000000;
+const WM_SETCURSOR = 0x0020;
+const GCL_HCURSOR = -12;
+const GCLP_HCURSOR = -12;
 
 const STM_SETIMAGE = 0x0172;
 const STM_GETIMAGE = 0x0173;
@@ -294,6 +305,11 @@ function windows_notifybar_local(title, bar_options)
             this.notifybar._pumps.peek().on('hwnd', function (h)
             {
                 this._HANDLE = h;
+                this._HAND = this._user32.LoadCursorA(0, IDC_HAND);
+                this._ARROW = this._user32.LoadCursorA(0, IDC_ARROW);
+
+                this._addAsyncMethodCall(this._user32.SetClassLongPtrA.async, [h, GCLP_HCURSOR, this._ARROW]).then(function (z) { console.log('SetClassLong: ' + z.Val, z._LastError); });
+
                 this._icon = getScaledImage(x_icon, this.height * 0.75, this.height * 0.75, bar_options);
                 this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('X', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BITMAP | SS_CENTERIMAGE | SS_NOTIFY,
                     this.width - (this.height * 0.75) - (this.height * 0.125),  // x position 
@@ -323,6 +339,17 @@ function windows_notifybar_local(title, bar_options)
                         this.pump._pushpin = c;
                         this.pump._pinned = true;
                         this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._pin1.Deref()]);
+                        c.x = this.pump.height * 0.125;
+                        c.y = this.pump.height * 0.0625;
+                        c.w = this.pump.height * 0.75;
+                        c.h = this.pump.height * 0.75;
+                        
+                        var r = GM.CreateVariable(4);
+                        r.increment(4294967284, true);
+
+                        this.pump._addAsyncMethodCall(this.pump._user32.SetClassLongPtrA.async, [c, GCLP_HCURSOR, this.pump._HAND]).then(function (z) { console.log('SetClassLong: ' + z.Val, z._LastError); });
+
+                        //this.pump.hookChild(c);
                     }).parentPromise.pump = this;
                 this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_WORDELLIPSIS,
                     this.height,                        // x position 
@@ -419,6 +446,26 @@ function windows_notifybar_local(title, bar_options)
                         }
                         break;
                     case WM_MOUSEMOVE:
+                        if (msg.hwnd.Val == this._pushpin.Val)
+                        {
+                            if (this.pushpincursor == null || this.pushpincursor === false)
+                            {
+                                this.pushpincursor = true;
+
+                                console.log('PUSHPIN!');
+                                var v = GM.CreateVariable(24);
+                                v.toBuffer().writeUInt32LE(24);
+                                v.toBuffer().writeUInt32LE(TME_LEAVE, 4);
+                                this._pushpin.pointerBuffer().copy(v.Deref(8, 8).toBuffer());
+                                this._user32.TrackMouseEvent(v);
+
+                                //this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_HAND]).then(function (cs)
+                                //{
+                                //    this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
+                                //}).parentPromise.pump = this;
+                                //break;
+                            }
+                        }
                         if (!this._pinned)
                         {
                             if (this._minimized)
@@ -429,6 +476,29 @@ function windows_notifybar_local(title, bar_options)
                             }
                             if (this._idle) { clearTimeout(this._idle); this._idle = null; }
                             this._idle = setTimeout(this._idleTimeout.bind(this), 3000);
+                        }
+                        break;
+                    case WM_MOUSELEAVE:
+                    case WM_NCMOUSELEAVE:
+                        console.log('LEAVE!');
+                        this.pushpincursor = false;
+                        this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_ARROW]).then(function (cs)
+                        {
+                            this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
+                        }).parentPromise.pump = this;
+                        break;
+                    case WM_SETCURSOR:
+                        console.log('SETCURSOR', this._HANDLE.Val == msg.hwnd.Val);
+                        if (this._HANDLE.Val == msg.hwnd.Val)
+                        {
+                            //if(this.pushpincursor === true)
+                            //{
+                            //    return (this._HAND);
+                            //}
+                            //else
+                            //{
+                            //    return (this._ARROW);
+                            //}
                         }
                         break;
                 }
