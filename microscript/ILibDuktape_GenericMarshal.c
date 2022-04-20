@@ -2145,7 +2145,10 @@ void* ILibDuktape_GlobalGenericCallback_Process(int numParms, ...)
 #ifdef WIN32
 	if (windispatch)
 	{
-		while (windispatch->finished == 0) { SleepEx(INFINITE, TRUE); }
+		while (windispatch->finished == 0) 
+		{
+			if (SleepEx(5000, TRUE) == 0) { break; }
+		}
 		retVal = windispatch->retValue;
 		ILibMemory_Free(windispatch);
 		ILibMemory_Free(user);
