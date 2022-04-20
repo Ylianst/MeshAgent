@@ -423,19 +423,23 @@ function pump_onHwnd(h)
             this.pump._denybutton = c;
             this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
         }).parentPromise.pump = this;
-    this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Auto, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_CHECKBOX | BS_MULTILINE,
-        SCALE(210, this.dpi),        // x position 
-        SCALE(150 + 32, this.dpi),   // y position 
-        SCALE(335, this.dpi),        // Button width
-        SCALE(60, this.dpi),         // Button height
-        h,          // Parent window
-        0xFFF0,     // Child ID
-        0,
-        0).then(function (c)
-        {
-            this.pump._checkbox = c;
-            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
-        }).parentPromise.pump = this;
+
+    if (this.options.noCheck != true)
+    {
+        this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.Auto, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_CHECKBOX | BS_MULTILINE,
+            SCALE(210, this.dpi),        // x position 
+            SCALE(150 + 32, this.dpi),   // y position 
+            SCALE(335, this.dpi),        // Button width
+            SCALE(60, this.dpi),         // Button height
+            h,          // Parent window
+            0xFFF0,     // Child ID
+            0,
+            0).then(function (c)
+            {
+                this.pump._checkbox = c;
+                this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, WM_SETFONT, this.pump.buttonfont, 1]);
+            }).parentPromise.pump = this;
+    }
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('NONE', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BLACKRECT | SS_BITMAP | SS_REALSIZECONTROL,
         SCALE(10, this.dpi),         // x position 
         SCALE(10 + 32, this.dpi),    // y position 
