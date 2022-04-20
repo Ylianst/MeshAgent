@@ -51,6 +51,9 @@ const HT_CAPTION = 2;
 const WM_WINDOWPOSCHANGING = 70;
 const WM_WINDOWPOSCHANGED = 0x0047;
 const IDC_ARROW = 32512;
+const IDC_HAND = 32649;
+const GCLP_HCURSOR = -12;
+
 const WM_NCCALCSIZE = 0x0083;
 const WM_MOUSEMOVE = 0x0200;
 const WVR_REDRAW = 0x0300;
@@ -354,12 +357,12 @@ function pump_onMessage(msg)
 function pump_onHwnd(h)
 {
     this._HANDLE = h;
+    this._HAND = this._user32.LoadCursorA(0, IDC_HAND);
+    this._ARROW = this._user32.LoadCursorA(0, IDC_ARROW);
+
+    this._addAsyncMethodCall(this._user32.SetClassLongPtrA.async, [h, GCLP_HCURSOR, this._ARROW]);
     this._icon = getScaledImage(x_icon, SCALE(this.dpi / 3, this.dpi) * 0.75, SCALE(this.dpi / 3, this.dpi) * 0.75, this.options.background);
 
-    this._addAsyncMethodCall(this._user32.LoadCursorA.async, [0, IDC_ARROW]).then(function (cs)
-    {
-        this.pump._addAsyncMethodCall(this.pump._user32.SetCursor.async, [cs]);
-    }).parentPromise.pump = this;
 
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('   ' + this.translations.Title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE,
         SCALE(0, this.dpi),         // x position 
@@ -385,8 +388,8 @@ function pump_onHwnd(h)
         0).then(function (c)
         {
             this.pump._fakeclose = c;
-            //this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, BM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
             this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._icon.Deref()]);
+            this.pump._addAsyncMethodCall(this.pump._user32.SetClassLongPtrA.async, [c, GCLP_HCURSOR, this.pump._HAND]);
         }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('BUTTON', { wide: true }), GM.CreateVariable(this.translations.OK, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         SCALE(465, this.dpi),        // x position 
@@ -400,6 +403,7 @@ function pump_onHwnd(h)
         {
             this.pump._button = h;
             this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [h, WM_SETFONT, this.pump.buttonfont, 1]);
+            this.pump._addAsyncMethodCall(this.pump._user32.SetClassLongPtrA.async, [h, GCLP_HCURSOR, this.pump._HAND]);
         }).parentPromise.pump = this;
     this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable('NONE', { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_BLACKRECT | SS_BITMAP | SS_REALSIZECONTROL,
         SCALE(10, this.dpi),         // x position 
