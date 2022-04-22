@@ -408,6 +408,29 @@ BOOL CtrlHandler(DWORD fdwCtrlType)
 }
 
 #define wmain_free(argv) for(argvi=0;argvi<(int)(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
+
+void need_stop_chain(duk_context *ctx, void *user)
+{
+	void *chain = duk_ctx_chain(ctx);
+	ILibStopChain(chain);
+}
+
+duk_ret_t _start(duk_context *ctx)
+{
+	duk_push_global_object(ctx);
+	if (Duktape_GetBooleanProperty(ctx, -1, "_OK", 0))
+	{
+		duk_get_prop_string(ctx, -1, "_start_data");
+		FreeConsole();
+		GdiPlusFlat_Init();
+		DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
+		GdiPlusFlat_Release();
+	}
+	duk_eval_string_noresult(ctx, "process._exit();");
+
+	return(0);
+}
+
 int wmain(int argc, char* wargv[])
 {
 	int i;
@@ -911,7 +934,7 @@ int wmain(int argc, char* wargv[])
 
 					void *dialogchain = ILibCreateChain();
 					ILibChain_PartialStart(dialogchain);
-					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
+					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, need_stop_chain, dialogchain);
 					if (duk_peval_string(ctx, "require('win-authenticode-opus').checkMSH();") == 0)
 					{
 						if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
@@ -967,18 +990,40 @@ int wmain(int argc, char* wargv[])
 						g_dialogCtx = ctx;
 						g_dialogLanguage = lang;
 
-						FreeConsole();
-						GdiPlusFlat_Init();
-						DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_INSTALLDIALOG), NULL, DialogHandler);
-						GdiPlusFlat_Release();
+						duk_push_global_object(ctx);
+						duk_dup(ctx, -2); duk_put_prop_string(ctx, -2, "_start_data");
+						duk_push_c_function(ctx, _start, 0);
+						duk_put_prop_string(ctx, -2, "_start");
+
+						duk_eval_string(ctx, "global.__msh = _MSH()");
+						if (duk_has_prop_string(ctx, -1, "ack"))
+						{
+							duk_pop(ctx);
+							duk_eval_string_noresult(ctx, "global.ack=JSON.parse(global.__msh.ack)");
+							duk_eval_string_noresult(ctx, "global.bcolor=global.__msh.background");
+							duk_eval_string_noresult(ctx, "global.fcolor=global.__msh.foreground");
+							duk_eval_string_noresult(ctx, "global.bimage=global.__msh.image?global.__msh.image:'default2';");
+							duk_push_sprintf(ctx, "global.ackTitle = global.ack.captions['%s']?global.ack.captions['%s'].title:global.ack.captions['en'].title;", lang, lang);
+							duk_eval_noresult(ctx);
+							duk_push_sprintf(ctx, "global.ackText = global.ack.captions['%s']?global.ack.captions['%s'].caption:global.ack.captions['en'].caption;", lang, lang);
+							duk_eval_noresult(ctx);
+							duk_push_sprintf(ctx, "global.ackLink = { text: global.ack.captions['%s'].linkText, url: global.ack.captions['%s'].linkUrl };if(global.ackLink.text==null || global.ackLink.url==null){delete global.ackLink;}", lang, lang);
+							duk_eval_noresult(ctx);
+							duk_eval_string_noresult(ctx, "var x = require('win-userconsent').create(global.ackTitle, global.ackText, '', {noCheck: true, background: global.bcolor, foreground: global.fcolor, b64Image: global.bimage, linkText: global.ackLink});x.then(function () { global._OK = true; }); x.pump.on('exit', function () { _start(); });");
+						}
+						else
+						{
+							duk_pop(ctx);
+							duk_eval_string_noresult(ctx, "global._OK=true; _start();");
+						}
+						ILibStartChain(dialogchain);
 					}
 					else
 					{
 						printf("Error: %s", duk_safe_to_string(ctx, -1));
+						Duktape_SafeDestroyHeap(ctx);
+						ILibStartChain(dialogchain);
 					}
-					Duktape_SafeDestroyHeap(ctx);
-					ILibStopChain(dialogchain);
-					ILibStartChain(dialogchain);
 				}
 			}
 		}
