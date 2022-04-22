@@ -56,10 +56,22 @@ function WindowsMessagePump(options)
     this._user32.CreateMethod('RegisterClassExW');
     this._user32.CreateMethod('ReleaseCapture');
     this._user32.CreateMethod('SendMessageW');
+
     this._user32.CreateMethod('SetClassLongA');
-    this._user32.CreateMethod('SetClassLongPtrA');
+    this._user32.CreateMethod('SetWindowLongA');
+
+    if (GM.PointerSize == 4)
+    {
+        this._user32.CreateMethod({ method: 'SetClassLongA', newName: 'SetClassLongPtrA' });
+        this._user32.CreateMethod({ method: 'SetWindowLongA', newName: 'SetWindowLongPtrA' });
+    }
+    else
+    {
+        this._user32.CreateMethod('SetClassLongPtrA');
+        this._user32.CreateMethod('SetWindowLongPtrA');
+    }
+
     this._user32.CreateMethod('SetCursor');
-    this._user32.CreateMethod('SetWindowLongPtrA');
     this._user32.CreateMethod('SetWindowPos');
     this._user32.CreateMethod('SetWindowTextW');
     this._user32.CreateMethod('ShowWindow');
