@@ -503,19 +503,21 @@ function serviceExists(loc, params)
     process.stdout.write(' [FOUND: ' + loc + ']\n');
     if(process.platform == 'win32')
     {
-        process.stdout.write('   -> Checking firewall rules for previous installation...');
-        if(require('win-firewall').removeFirewallRule({ program: loc }))
+        process.stdout.write('   -> Checking firewall rules for previous installation... [0%]');
+        var p = require('win-firewall').getFirewallRulesAsync({ program: loc, noResult: true, minimal: true, timeout: 15000 });
+        p.on('progress', function (c)
         {
-            // SUCCESS
-            process.stdout.write(' [DELETED]\n');
-            uninstallService(params);
-        }
-        else
+            process.stdout.write('\r   -> Checking firewall rules for previous installation... [' + c + ']');
+        });
+        p.on('rule', function (r)
         {
-            // FAILED
-            process.stdout.write(' [No Rules Found]\n');
+            require('win-firewall').removeFirewallRule(r.DisplayName);
+        });
+        p.finally(function ()
+        {
+            process.stdout.write('\r   -> Checking firewall rules for previous installation... [DONE]\n');
             uninstallService(params);
-        }
+        });
     }
     else
     {

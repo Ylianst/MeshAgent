@@ -378,6 +378,45 @@ function getFirewallRulesAsync2(p)
         p.resolve(p.options.noResult === true ? null : p.arr);
     }
 }
+
+function getRulesCount2(options)
+{
+    if (options == null) { options = {} };
+    var promise = require('promise');
+    var unknown = GM.CreatePointer();
+    var ret = new promise(promise.defaultInit);
+    ret.NetFwPolicy2 = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_NetFwPolicy2), require('win-com').IID_IUnknown);
+    ret.NetFwPolicy2.funcs = require('win-com').marshalFunctions(ret.NetFwPolicy2, FirewallFunctions);
+    ret.rules = GM.CreatePointer();
+    ret.enumerator = GM.CreatePointer();
+    ret.vvar = GM.CreateVariable(GM.PointerSize == 8 ? 24 : 16);
+    ret.fetched = GM.CreateVariable(4);
+    ret.options = options;
+    ret.val = GM.CreatePointer();
+    ret.arr = [];
+    ret.counter = 0;
+    ret.evented = false;
+    require('events').EventEmitter.call(ret, true)
+        .createEvent('progress')
+        .createEvent('rule');
+
+    ret.NetFwPolicy2.funcs.get_Rules(ret.NetFwPolicy2, ret.rules).Val;
+    ret.rules.funcs = require('win-com').marshalFunctions(ret.rules.Deref(), RulesFunctions);
+
+    ret.__count = GM.CreateVariable(4);
+    ret.rules.funcs.get_Count._spawnThread = true;
+    ret.__countobj = ret.rules.funcs.get_Count(ret.rules.Deref(), ret.__count);
+    ret.__countobj.ret = ret;
+    ret.__countobj.once('done', function (r)
+    {
+        var result = this.ret.__count.toBuffer().readUInt32LE()
+        this.ret.NetFwPolicy2.funcs.Release(this.ret.NetFwPolicy2);
+        this.ret.resolve(result);
+    });
+    ret.timeout = setTimeout(function (r) { r.reject(); }, 5000, ret);
+    return (ret);
+}
+
 function getFirewallRulesAsync(options)
 {
     if (options == null) { options = {} };
@@ -410,6 +449,7 @@ function getFirewallRulesAsync(options)
     var count = GM.CreateVariable(4);
     ret.rules.funcs.get_Count(ret.rules.Deref(), count).Val;
     ret.count = count.toBuffer().readInt32LE();
+
     ret.startTime = Date.now();
 
     setImmediate(getFirewallRulesAsync2, ret);
@@ -440,7 +480,6 @@ function getFirewallRules(options)
 
     var count = GM.CreateVariable(4);
     hr = rules.funcs.get_Count(rules.Deref(), count).Val;
-   
     console.info1('Number of Rules: ' + count.toBuffer().readInt32LE());
 
     if (options && options.count === true)
@@ -649,6 +688,7 @@ function addFirewallRule(rule)
 module.exports =
     {
         getRulesCount: getRulesCount,
+        getRulesCount2: getRulesCount2,
         getFirewallRules: getFirewallRules,
         getFirewallRulesAsync: getFirewallRulesAsync,
         disableFirewallRules:   disableFirewallRules,
