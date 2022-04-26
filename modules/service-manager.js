@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 var promise = require('promise');
+var systemd_escape = null;
 
 function failureActionToInteger(action)
 {
@@ -1805,14 +1806,20 @@ function serviceManager()
                         }
                         break;
                     case 'systemd':
-                        if (require('fs').existsSync('/lib/systemd/system/' + name + '.service'))
+                        var tries = 0;
+                        do
                         {
-                            ret.conf = '/lib/systemd/system/' + name + '.service';
-                        }
-                        else if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service'))
-                        {
-                            ret.conf = '/usr/lib/systemd/system/' + name + '.service';
-                        }
+                            ret.escname = tries == 0 ? this.escape(name) : name;
+                            if (require('fs').existsSync('/lib/systemd/system/' + ret.escname + '.service'))
+                            {
+                                ret.conf = '/lib/systemd/system/' + ret.escname + '.service';
+                            }
+                            else if (require('fs').existsSync('/usr/lib/systemd/system/' + ret.escname + '.service'))
+                            {
+                                ret.conf = '/usr/lib/systemd/system/' + ret.escname + '.service';
+                            }
+                        } while (ret.conf == null && tries++<1);
+
                         if (ret.conf)
                         {
                             Object.defineProperty(ret, "startType",
@@ -1822,7 +1829,7 @@ function serviceManager()
                                         var child = require('child_process').execFile('/bin/sh', ['sh']);
                                         child.stderr.on('data', function (c) { });
                                         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                        child.stdin.write('systemctl status ' + this.name + ' | grep Loaded: | awk \'{ a=split($0, b, ";"); for(c=1;c<=a;++c) { if(b[c]=="enabled" || b[c]==" enabled") { print "true"; } } }\'\nexit\n');
+                                        child.stdin.write('systemctl status ' + this.escname.split('\\').join('\\\\') + ' | grep Loaded: | awk \'{ a=split($0, b, ";"); for(c=1;c<=a;++c) { if(b[c]=="enabled" || b[c]==" enabled") { print "true"; } } }\'\nexit\n');
                                         child.waitExit();
                                         return (child.stdout.str.trim() == '' ? 'DEMAND_START' : 'AUTO_START');
                                     }
@@ -1831,13 +1838,15 @@ function serviceManager()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + name + '.service'))
+                                if (require('fs').existsSync('/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service'))
                                 {
-                                    child.stdin.write('cat /lib/systemd/system/' + name + '.service');
+                                    console.info1('cat /lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service')
+                                    child.stdin.write('cat /lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service');
                                 }
                                 else
                                 {
-                                    child.stdin.write('cat /usr/lib/systemd/system/' + name + '.service');
+                                    console.info1('cat /usr/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service')
+                                    child.stdin.write('cat /usr/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service');
                                 }
                                 child.stdin.write(' | grep Description= | awk -F= \'{ if($1=="Description") { $1=""; print $0; }}\'\nexit\n');
                                 child.waitExit();
@@ -1848,13 +1857,13 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service'))
+                                if (require('fs').existsSync('/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service'))
                                 {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
+                                    child.stdin.write("cat /lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
                                 }
                                 else
                                 {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
                                 }
                                 child.waitExit();
                                 return (child.stdout.str.trim());
@@ -1864,16 +1873,17 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + this.name + '.service'))
+                                if (require('fs').existsSync('/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service'))
                                 {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '");
+                                    child.stdin.write("cat /lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'ExecStart=' | awk -F= '");
                                 }
                                 else
                                 {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.name + ".service | grep 'ExecStart=' | awk -F= '");
+                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'ExecStart=' | awk -F= '");
                                 }
                                 child.stdin.write('{');
                                 child.stdin.write('   split($2, a, " ");');
+                                child.stdin.write('   gsub(/-/,"\\\\x2d",a[1]);');
                                 child.stdin.write('   sh=sprintf("systemd-escape -u \\"%s\\"",a[1]);');
                                 child.stdin.write('   system(sh);')
                                 child.stdin.write("}'\nexit\n");
@@ -1885,7 +1895,8 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("systemctl status " + this.name + ".service | grep 'Main PID:' | awk 'NR==1{print $3}'\nexit\n");
+                                console.info1("systemctl status " + this.escname.split('\\').join('\\\\') + ".service");
+                                child.stdin.write("systemctl status " + this.escname.split('\\').join('\\\\') + ".service | grep 'Main PID:' | awk 'NR==1{print $3}'\nexit\n");
                                 child.waitExit();
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
                             };
@@ -1894,33 +1905,34 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = '';
                                 child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("systemctl status " + this.name + ".service | grep 'Active:' | awk 'NR==1{print $2}'\nexit\n");
+                                child.stdin.write("systemctl status " + this.escname.split('\\').join('\\\\') + ".service | grep 'Active:' | awk 'NR==1{print $2}'\nexit\n");
                                 child.waitExit();
                                 return (child.stdout.str.trim() == 'active');         
                             };
-                            ret.start = function start() {
+                            ret.start = function start()
+                            {
                                 var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl start ' + this.name + '.service\nexit\n');
+                                child.stdin.write('systemctl start ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
                                 child.waitExit();
                             };
                             ret.stop = function stop() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl stop ' + this.name + '.service\nexit\n');
+                                child.stdin.write('systemctl stop ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
                                 child.waitExit();
                             };
                             ret.restart = function restart() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
                                 child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl restart ' + this.name + '.service\nexit\n');
+                                child.stdin.write('systemctl restart ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
                                 child.waitExit();
                             };
                             ret.status = function status() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout._str = '';
                                 child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
-                                child.stdin.write('systemctl status ' + this.name + '.service\nexit\n');
+                                child.stdin.write('systemctl status ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
                                 child.waitExit();
                                 return (child.stdout._str);
                             };
@@ -1929,7 +1941,7 @@ function serviceManager()
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout._str = '';
                                 child.stdout.on('data', function (chunk) { this._str += chunk.toString(); });
-                                child.stdin.write('cat ' + this.conf + ' | grep "^ExecStart=" | awk \'NR==1{ gsub(/^ExecStart=/,"",$0); print $0; }\'\nexit\n');
+                                child.stdin.write('cat ' + this.conf.split('\\').join('\\\\') + ' | grep "^ExecStart=" | awk \'NR==1{ gsub(/^ExecStart=/,"",$0); print $0; }\'\nexit\n');
                                 child.waitExit();
                                 var str = child.stdout._str.trim();
                                 return (str.match(/(?:[^\s"]+|"[^"]*")+/g));
@@ -2230,12 +2242,14 @@ function serviceManager()
     }
     this.installService = function installService(options)
     {
+        if (process.platform == 'linux') { options.name = this.escape(options.name); }
         if (!options.target) { options.target = options.name; }
         if (!options.displayName) { options.displayName = options.name; }
         if (options.installPath && options.installInPlace) { throw ('Cannot specify both installPath and installInPlace'); }
         if (process.platform != 'win32')
         {
             if (!options.servicePlatform) { options.servicePlatform = this.getServiceType(); }
+            if (options.servicePlatform == 'systemd') { options.target = options.target.split("'").join('-'); }
             if (options.installInPlace)
             {
                 options.installPath = options.servicePath.split('/');
@@ -2257,12 +2271,12 @@ function serviceManager()
                 }
                 else
                 {
-                    options.installPath = '/usr/local/mesh_services/' + (options.companyName != null ? (options.companyName + '/') : ('')) + options.name;
+                    options.installPath = '/usr/local/mesh_services/' + (options.companyName != null ? (options.companyName + '/') : ('')) + this.unescape(options.name).split("'").join('-');
                 }
             }
         }
         if (options.installPath) { if (!options.installPath.endsWith(process.platform == 'win32' ? '\\' : '/')) { options.installPath += (process.platform == 'win32' ? '\\' : '/'); } }
-
+        console.info1('Service Install Path = ' + options.installPath);
         if (process.platform == 'win32')
         {
             var reg = require('win-registry');
@@ -2440,7 +2454,7 @@ function serviceManager()
                     require('fs').copyFileSync(options.servicePath, options.installPath + options.target);
                 }
             }
-
+            console.info1('Files Copied');
             var m = require('fs').statSync(options.installPath + options.target).mode;
             m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
             require('fs').chmodSync(options.installPath + options.target, m);
@@ -2698,16 +2712,17 @@ function serviceManager()
                     if (require('fs').existsSync('/lib/systemd/system'))
                     {
                         conf = require('fs').createWriteStream('/lib/systemd/system/' + options.name + '.service', { flags: 'wb' });
+                        console.info1('/lib/systemd/system/' + options.name + '.service');
                     }
                     else if (require('fs').existsSync('/usr/lib/systemd/system'))
                     {
                         conf = require('fs').createWriteStream('/usr/lib/systemd/system/' + options.name + '.service', { flags: 'wb' });
+                        console.info1('/usr/lib/systemd/system/' + options.name + '.service');
                     }
                     else
                     {
                         throw ('unknown location for systemd configuration files');
                     }
-
                     conf.write('[Unit]\nDescription=' + serviceDescription + '\n');
                     conf.write('[Service]\n');
                     conf.write('WorkingDirectory=' + options.installPath + '\n');
@@ -2737,8 +2752,10 @@ function serviceManager()
                             this._update = require('child_process').execFile('/bin/sh', ['sh']);
                             this._update._moduleName = options.name;
                             this._update.stdout.on('data', function (chunk) { });
+                            this._update.stderr.on('data', function (chunk) { console.info1(chunk.toString()); });
                             this._update.stdin.write('systemctl --system daemon-reload\n');
-                            this._update.stdin.write('systemctl enable ' + options.name + '.service\n');
+                            console.info1('systemctl enable ' + options.name + '.service');
+                            this._update.stdin.write('systemctl enable ' + options.name.split('\\').join('\\\\') + '.service\n');
                             this._update.stdin.write('exit\n');
                             this._update.waitExit();
                         default:
@@ -3096,10 +3113,13 @@ function serviceManager()
                     {
                         if (!options || !options.skipDeleteBinary)
                         {
-                            require('fs').unlinkSync(servicePath);
+                            if (require('fs').existsSync(servicePath)) { require('fs').unlinkSync(servicePath); }                 
                         }
                         if (require('fs').existsSync('/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + name + '.service'); }
                         if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + name + '.service'); }
+                        var escname = this.escape(name);
+                        if (require('fs').existsSync('/lib/systemd/system/' + escname + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + escname + '.service'); }
+                        if (require('fs').existsSync('/usr/lib/systemd/system/' + escname + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + escname + '.service'); }
                         console.log(name + ' uninstalled');
                     }
                     catch (e)
@@ -3262,6 +3282,7 @@ function serviceManager()
 
     this.getServiceType = function getServiceType()
     {
+        if (this._platform != null) { return (this._platform); }
         var platform = 'unknown';
         switch(process.platform)
         {
@@ -3304,8 +3325,42 @@ function serviceManager()
                 }
                 break;
         }
+        this._platform = platform;
         return (platform);
     };
+
+    this.escape = function escape(str)
+    {
+        if (this.getServiceType() != 'systemd') { return (str); }
+        if (systemd_escape == null)
+        {
+            systemd_escape = require('lib-finder').findBinary('systemd-escape');
+            if (systemd_escape == null) { systemd_escape = false; }
+        }
+        if (systemd_escape === false) { return (str); }
+
+        var child = require('child_process').execFile(systemd_escape, ['systemd-escape', str]);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.waitExit();
+
+        return (child.stdout.str.trim());
+    }
+    this.unescape = function unescape(str)
+    {
+        if (this.getServiceType() != 'systemd') { return (str); }
+        if (systemd_escape == null)
+        {
+            systemd_escape = require('lib-finder').findBinary('systemd-escape');
+            if (systemd_escape == null) { systemd_escape = false; }
+        }
+        if (systemd_escape === false) { return (str); }
+
+        var child = require('child_process').execFile(systemd_escape, ['systemd-escape', '-u', str]);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.waitExit();
+
+        return (child.stdout.str.trim());
+    }
 
 
     this.daemon = function daemon(path, parameters, options)
@@ -3412,3 +3467,4 @@ if (process.platform == 'darwin')
 {
     module.exports.getOSVersion = getOSVersion;
 }
+

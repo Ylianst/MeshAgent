@@ -180,7 +180,8 @@ function installService(params)
     {
         var mshFile = process.platform == 'win32' ? (process.execPath.split('.exe').join('.msh')) : (process.execPath + '.msh');
         if (options.files == null) { options.files = []; }
-        options.files.push({ source: mshFile, newName: options.target + '.msh' });
+        var newtarget = (process.platform == 'linux' && require('service-manager').manager.getServiceType() == 'systemd') ? options.target.split("'").join('-') : options.target;
+        options.files.push({ source: mshFile, newName: newtarget + '.msh' });
         options.parameters.splice(i, 1);
     }
     if ((i=params.indexOf('--_localService="1"'))>=0)

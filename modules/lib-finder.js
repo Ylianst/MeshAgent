@@ -56,6 +56,17 @@ function hasBinary(bin)
     child.waitExit();
     return (child.stdout.str.trim() != '');
 }
+function findBinary(bin)
+{
+    if (process.platform != 'linux' && process.platform != 'freebsd') { return (null); }
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = '';
+    child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("whereis " + bin + " | awk '{ print $2 }'\nexit\n");
+    child.waitExit();
+    return (child.stdout.str.trim()!=""?child.stdout.str.trim():null);
+}
 
 module.exports = find;
 module.exports.hasBinary = hasBinary;
+module.exports.findBinary = findBinary;
