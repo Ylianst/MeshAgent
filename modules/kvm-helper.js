@@ -34,6 +34,7 @@ if (process.platform == 'linux')
     const hasXvfb = require('lib-finder').hasBinary('xvfb-run');
     const hasGnomeSession = require('lib-finder').hasBinary('gnome-session');
     const hasLxde = require('lib-finder').hasBinary('startlxde');
+    const hasXfce = require('lib-finder').hasBinary('startxfce4');
 
     var arg = _MSH().allowedUIDs;
     if (arg) { try { allowedUIDs = JSON.parse(arg) } catch (z) { allowedUIDs = []; } }
@@ -63,9 +64,13 @@ if (process.platform == 'linux')
         case 'LXDE':
             if (hasLxde) { startDM = 'startlxde'; }
             break;
+        case 'XFCE':
+            if (hasXfce) { startDM = 'startxfce4'; }
+            break;
         default:
             if (hasGnomeSession) { startDM = 'gnome-session'; }
             if (hasLxde) { startDM = 'startlxde'; }
+            if (hasXfce) { startDM = 'startxfce4'; }
             break;
     }
 
