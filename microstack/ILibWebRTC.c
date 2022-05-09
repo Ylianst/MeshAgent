@@ -106,6 +106,10 @@ limitations under the License.
 
 #define ReceiveHoldBuffer_Increment(list, value) {union{int i;void*p;}u; u.p = ILibLinkedList_GetTag(list); u.i += value; ILibLinkedList_SetTag(list, u.p);}
 #define ReceiveHoldBuffer_Decrement(list, value) {union{int i;void*p;}u; u.p = ILibLinkedList_GetTag(list); u.i -= value; ILibLinkedList_SetTag(list, u.p);}
+#ifdef _REMOTELOGGING
+void ILibSctp_DebugSctpPacket(ILibRemoteLogging *logger, char *packet, int packetLen, char *note);
+#endif
+
 int ReceiveHoldBuffer_Used(ILibLinkedList list)
 {
 	union { int i; void *p; } u;
@@ -272,6 +276,27 @@ typedef enum RCTP_CHUNK_TYPES
 	RCTP_CHUNK_TYPE_ASCONF = 0x00C1,
 	RCTP_CHUNK_TYPE_ASCONFACK = 0x0080
 } RCTP_CHUNK_TYPES;
+
+char* SCTP_CHUNK_TYPE_NAMES[] = 
+{
+	"DATA",
+	"INIT",
+	"INIT ACK",
+	"SACK",
+	"HEARTBEAT",
+	"HEARTBEAT ACK",
+	"ABORT",
+	"SHUTDOWN",
+	"SHUTDOWN ACK",
+	"ERROR",
+	"COOKIE ECHO",
+	"COOKIE ACK",
+	"ECNE",
+	"RECONFIG",
+	"FWDTSN",
+	"ASCONF",
+	"ASCONF ACK"
+};
 
 typedef enum SCTP_ERROR_CAUSE_CODES
 {
@@ -3120,8 +3145,35 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 	((unsigned int*)buffer)[2] = 0;
 	((unsigned int*)buffer)[2] = crc32c(0, (unsigned char*)buffer, (uint32_t)bufferLength);
 
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "SCTP[%d]: Send", session);
+	
+	int i = 12;
+	while (i < bufferLength)
+	{
+		if ((buffer + i)[0] < ((sizeof(SCTP_CHUNK_TYPE_NAMES) / sizeof(void*))))
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... ChunkType: %s", SCTP_CHUNK_TYPE_NAMES[(buffer+i)[0]]);
+		}
+		else
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... ChunkType: %d", (buffer + i)[0]);
+		}
+		if ((buffer + i)[0] == 0)
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... TSN: %u", ntohl(((ILibSCTP_DataPayload*)(buffer + i))->TSN));
+		}
+		i += ((uint16_t*)(buffer + i))[1];
+	}
+
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... Source: %u , Destination: %u", obj->dTlsSessions[session]->inport, obj->dTlsSessions[session]->outport);
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... TAG: %u", obj->dTlsSessions[session]->tag);
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... Checksum: %u", ((unsigned int*)buffer)[2]);
+
+#ifdef _REMOTELOGGING
+	ILibSctp_DebugSctpPacket(ILibChainGetLogger(obj->ChainLink.ParentChain), buffer, bufferLength, "ILibStun_SendSctpPacket");
+#endif
+
 	return(ILibStun_SendDtls(obj, session, buffer, bufferLength));
-	// ILibStun_ProcessSctpPacket(obj, -1, buffer, bufferLength); // DEBUG
 }
 
 int ILibStun_AddSctpChunkHeader(char* buffer, int ptr, unsigned char chunktype, unsigned char chunkflags, unsigned short chunklength)
@@ -3227,13 +3279,19 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "SCTP[%d] ILibStun_SctpSendDataEx -> outtsn = %u", session, tsn);
 
 	// Create data packet, allow for a header in front.
-	if ((rpacket = (ILibSCTP_RPACKET*)malloc(sizeof(ILibSCTP_RPACKET) + datalen + 16)) == NULL) ILIBCRITICALERREXIT(254);
+	size_t newlen = sizeof(ILibSCTP_RPACKET) + datalen + 16;
+	newlen = FOURBYTEBOUNDARY(newlen);
+
+	if ((rpacket = (ILibSCTP_RPACKET*)malloc(newlen)) == NULL) ILIBCRITICALERREXIT(254);
+	memset(rpacket, 0, newlen);
 	rpacket->Reliability = 0;																					// Full Reliable Mode (Default)
 	rpacket->NextPacket = NULL;																					// Pointer to the next packet (Used for queuing)
-	rpacket->PacketSize = (unsigned short)(12 + 16 + datalen);													// Size of the packet (Used for queuing)					
+	rpacket->PacketSize = (unsigned short)(12 + 16 + FOURBYTEBOUNDARY(datalen));								// Size of the packet (Used for queuing)					
 	rpacket->PacketGAPCounter = rpacket->PacketResendCounter = 0;												// Number of times the packet was resent (Used for retry)
 	rpacket->LastSentTimeStamp = 0;																				// Last time the packet was sent (Used for retry)
 	rpacket->CreationTimeStamp = (unsigned int)ILibGetUptime();
+
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...Size: %u", rpacket->PacketSize);
 
 	sattr.Raw = ILibSparseArray_Get(obj->dTlsSessions[session]->DataChannelMetaDeta, streamid);
 	sattrData.Raw = ILibSparseArray_Get(obj->dTlsSessions[session]->DataChannelMetaDetaValues, streamid);
@@ -3249,16 +3307,19 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 	((ILibSCTP_DataPayload*)rpacket->Data)->StreamID = htons(streamid);											// Stream Identifier
 	((ILibSCTP_DataPayload*)rpacket->Data)->StreamSequenceNumber = htons(streamnum);							// Stream Sequence Number
 	((ILibSCTP_DataPayload*)rpacket->Data)->ProtocolID = htonl(pid);											// Payload Protocol Identifier
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...TSN [%u]", tsn);
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...SEQ [%u]", ((ILibSCTP_DataPayload*)rpacket->Data)->StreamSequenceNumber);
+
 	memcpy_s(((ILibSCTP_DataPayload*)rpacket->Data)->UserData, datalen + 16, data, datalen);									// Copy the user data
 	rptr += (16 + datalen);
-
 	RCTPDEBUG(printf("OUT DATA_CHUNK FLAGS: %d, TSN: %u, ID: %d, SEQ: %d, PID: %u, SIZE: %d\r\n", flags, tsn, streamid, streamnum, pid, datalen);)
 
 	// Check the credits
 	if ((obj->dTlsSessions[session]->receiverCredits < datalen) || datalen > obj->dTlsSessions[session]->senderCredits || (obj->dTlsSessions[session]->holdingCount != 0))
 	{
-		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...To Holding Queue");
-		
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...To Holding Queue (%u bytes)", rpacket->PacketSize);
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "......LEN: %u", ntohs(((ILibSCTP_DataPayload*)rpacket->Data)->length));
+
 		// Add this packet to the holding queue
 		if (obj->dTlsSessions[session]->holdingQueueTail == NULL) { obj->dTlsSessions[session]->holdingQueueHead = (char*)rpacket; }
 		else { ((char**)(obj->dTlsSessions[session]->holdingQueueTail))[0] = (char*)rpacket; }
@@ -3290,8 +3351,16 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 	obj->dTlsSessions[session]->receiverCredits -= datalen; // Receiver Window
 	obj->dTlsSessions[session]->senderCredits -= datalen;   // Congestion Window
 
-	if (obj->dTlsSessions[session]->pendingQueueTail == NULL) { obj->dTlsSessions[session]->pendingQueueHead = (char*)rpacket; }
-	else { ((char**)(obj->dTlsSessions[session]->pendingQueueTail))[0] = (char*)rpacket; }
+	if (obj->dTlsSessions[session]->pendingQueueTail == NULL) 
+	{
+		obj->dTlsSessions[session]->pendingQueueHead = (char*)rpacket; 
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "......HEAD");
+	}
+	else 
+	{
+		((char**)(obj->dTlsSessions[session]->pendingQueueTail))[0] = (char*)rpacket; 
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "......TAIL");
+	}
 	obj->dTlsSessions[session]->pendingQueueTail = (char*)rpacket;
 	obj->dTlsSessions[session]->pendingCount++;
 	
@@ -3324,8 +3393,8 @@ ILibTransport_DoneState ILibStun_SctpSendDataEx(struct ILibStun_Module *obj, int
 	else
 	{
 		// Send in a seperate packet
-		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...Sending");
-		return ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rptr - sizeof(ILibSCTP_RPACKET) + 12); // Problem sending
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...Sending as separate packet");
+		return ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rpacket->PacketSize); // Problem sending
 	}
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...Complete");
 	return ILibTransport_DoneState_COMPLETE; // Everything is ok
@@ -3340,6 +3409,8 @@ ILibTransport_DoneState ILibStun_SctpSendData(struct ILibStun_Module *obj, int s
 	ILibSCTP_StreamAttributes attr;
 	ILibSCTP_StreamAttributes_Data attrData;
 	unsigned short seq;
+
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "ILibStun_SctpSendData[%d]: %d bytes (SID: %u, PID: %d)", session, datalen, streamid, pid);
 
 	attr.Raw = ILibSparseArray_Get(obj->dTlsSessions[session]->DataChannelMetaDeta, streamid);
 	attrData.Raw = ILibSparseArray_Get(obj->dTlsSessions[session]->DataChannelMetaDetaValues, streamid);
@@ -3499,16 +3570,23 @@ void ILibStun_SctpProcessStreamData(struct ILibStun_Module *obj, int session, un
 					ILibSparseArray_Add(obj->dTlsSessions[session]->DataChannelMetaDeta, streamId, attributes.Raw);
 					ILibSparseArray_Add(obj->dTlsSessions[session]->DataChannelMetaDetaValues, streamId, attributesData.Raw);
 
-					ILibSpinLock_UnLock(&(obj->dTlsSessions[session]->Lock));
-					if (obj->OnWebRTCDataChannel != NULL) { sendAck = obj->OnWebRTCDataChannel(obj, obj->dTlsSessions[session], streamId, data + 12, channelNameLength); }
-					ILibSpinLock_Lock(&(obj->dTlsSessions[session]->Lock));
-
 					if (sendAck == 0)
 					{
 						// Respond with DATA_CHANNEL_ACK
 						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Responding with DataChannel ACK");
 						ILibStun_SctpSendData(obj, session, streamId, 50, &DATA_CHANNEL_ACK, 1);
 					}
+
+					ILibSpinLock_UnLock(&(obj->dTlsSessions[session]->Lock));
+					if (obj->OnWebRTCDataChannel != NULL) { sendAck = obj->OnWebRTCDataChannel(obj, obj->dTlsSessions[session], streamId, data + 12, channelNameLength); }
+					ILibSpinLock_Lock(&(obj->dTlsSessions[session]->Lock));
+
+					//if (sendAck == 0)
+					//{
+					//	// Respond with DATA_CHANNEL_ACK
+					//	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Responding with DataChannel ACK");
+					//	ILibStun_SctpSendData(obj, session, streamId, 50, &DATA_CHANNEL_ACK, 1);
+					//}
 				}
 				break;
 		}
@@ -4123,7 +4201,7 @@ void ILibSctp_DebugSctpPacket(ILibRemoteLogging *logger, char *packet, int packe
 		switch (chunktype)
 		{
 			case RCTP_CHUNK_TYPE_DATA:
-				ILibRemoteLogging_printf(logger, ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "...[DATA]");
+				ILibRemoteLogging_printf(logger, ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "...[DATA] TSN: %u, U: %u, B: %u, E: %u", ntohl(((ILibSCTP_DataPayload*)(packet + ptr))->TSN), (((ILibSCTP_ChunkHeader*)(packet + ptr))->chunkFlags >> 2) & 0x01, (((ILibSCTP_ChunkHeader*)(packet + ptr))->chunkFlags >> 1) & 0x01, ((ILibSCTP_ChunkHeader*)(packet + ptr))->chunkFlags & 0x01);
 				break;
 			case RCTP_CHUNK_TYPE_INIT:
 				ILibRemoteLogging_printf(logger, ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "...[INIT]");
@@ -4173,8 +4251,11 @@ void ILibSctp_DebugSctpPacket(ILibRemoteLogging *logger, char *packet, int packe
 			case RCTP_CHUNK_TYPE_ASCONFACK:
 				ILibRemoteLogging_printf(logger, ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "...[ASCONF-ACK]");
 				break;
+			default:
+				ILibRemoteLogging_printf(logger, ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "...ChunkFlags: %u", ((ILibSCTP_ChunkHeader*)(packet + ptr))->chunkFlags);
+				break;
 		}
-
+		
 		ptr += FOURBYTEBOUNDARY(chunksize); // Add chunk size and padding
 	}
 	ILibRemoteLogging_printf(logger, ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "<-- End Debugging SCTP (%s)", note);
@@ -4714,7 +4795,16 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "SCTP [SACK] Received");
 			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... TSN = %u", tsn);
 			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "... GAP Count = %u", GapAckCount);
-
+			if (GapAckCount > 0)
+			{
+				int y;
+				for (y = 0; y < GapAckCount; ++y)
+				{
+					gstart = tsn + ntohs(((unsigned short*)(buffer + ptr + 16 + (y * 4)))[0]);	// Start of GAP Block
+					gend = tsn + ntohs(((unsigned short*)(buffer + ptr + 16 + (y * 4)))[1]);	// End of GAP Block
+					ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "... GAP [%u] - [%u]", gstart, gend);
+				}
+			}
 
 
 			if (o->FastRetransmitExitPoint != 0 && tsn >= o->FastRetransmitExitPoint)
@@ -4838,6 +4928,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 			{
 				gstart = tsn + ntohs(((unsigned short*)(buffer + ptr + 16 + (GapAckPtr * 4)))[0]);	// Start of GAP Block
 				gend = tsn + ntohs(((unsigned short*)(buffer + ptr + 18 + (GapAckPtr * 4)))[0]);	// End of GAP Block
+				//ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "... GAP [%u] - [%u]", gstart, gend);
 				tsnx = ntohl(((ILibSCTP_DataPayload*)rpacket->Data)->TSN);		// TSN of Pending Packet
 				while (rpacket != NULL && tsnx <= gend)
 				{
@@ -4919,6 +5010,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 							rpacket->LastSentTimeStamp = o->lastSackTime;								// Update Send Time, used for retry
 							ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rpacket->PacketSize);
 							rpacket->PacketResendCounter++;												// Add to the packet resent counter
+							ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_3, "...TSN=%u", ntohl(((ILibSCTP_DataPayload*)(rpacket->Data))->TSN));
 							//printf("RESEND COUNT %d, TSN=%u\r\n", ((unsigned char*)(packet + sizeof(char*) + 2))[0], tsnx);
 
 							FastRetryDisabled = 1;
@@ -5036,6 +5128,8 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 				// Update the packet retry data
 				rpacket->LastSentTimeStamp = o->lastSackTime;								// Last time the packet was sent (Used for retry)
 				ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "Sending %u/%u bytes from Holding Queue", (rpacket->PacketSize - (12 + 16)), o->holdingByteCount);
+				ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...TSN=%u", ntohl(((ILibSCTP_DataPayload*)rpacket->Data)->TSN));
+				ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_2, "...LEN=%u", ntohs(((ILibSCTP_DataPayload*)rpacket->Data)->length));
 
 				// Send the packet
 				ILibStun_SendSctpPacket(obj, session, rpacket->Data - 12, rpacket->PacketSize);	// Send the packet
