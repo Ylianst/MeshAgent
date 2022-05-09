@@ -3152,7 +3152,7 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 	{
 		if ((buffer + i)[0] < ((sizeof(SCTP_CHUNK_TYPE_NAMES) / sizeof(void*))))
 		{
-			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... ChunkType: %s", SCTP_CHUNK_TYPE_NAMES[(buffer+i)[0]]);
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... ChunkType: %s", SCTP_CHUNK_TYPE_NAMES[(int)((buffer+i)[0])]);
 		}
 		else
 		{
