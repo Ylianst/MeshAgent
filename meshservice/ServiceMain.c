@@ -38,12 +38,6 @@ limitations under the License.
 #include "microscript/ILibDuktape_Commit.h"
 #include <shellscalingapi.h>
 
-#ifndef _MINCORE
-// #include "../kvm/kvm.h"
-int SetupWindowsFirewall(wchar_t* processname);
-int ClearWindowsFirewall(wchar_t* processname);
-#endif
-
 #if defined(WIN32) && defined (_DEBUG) && !defined(_MINCORE)
 #include <crtdbg.h>
 #define _CRTDBG_MAP_ALLOC
@@ -167,7 +161,7 @@ void GdiPlusFlat_Release()
 
 BOOL IsAdmin()
 {
-	BOOL admin;
+	BOOL admin = 0;
 	PSID AdministratorsGroup;
 	SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
 
@@ -805,40 +799,10 @@ int wmain(int argc, char* wargv[])
 		int len = MeshInfo_GetSystemInformation(&data);
 		if (len > 0) { printf_s(data); }
 	}
-	else if (argc > 1 && (strcasecmp(argv[1], "-setfirewall") == 0))
-	{
-		// Reset the firewall rules
-		GetModuleFileNameW(NULL, str, _MAX_PATH);
-		if (IsAdmin() == FALSE) { printf("Must run as administrator"); }
-		else { ClearWindowsFirewall(str); SetupWindowsFirewall(str); printf("Done"); }
-	}
-	else if (argc > 1 && (strcasecmp(argv[1], "-clearfirewall") == 0))
-	{
-		// Clear the firewall rules
-		GetModuleFileNameW(NULL, str, _MAX_PATH);
-		if (IsAdmin() == FALSE) { printf("Must run as administrator"); }
-		else { ClearWindowsFirewall(str); printf("Done"); }
-	}
 #endif
 	else if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
 	{
 		// Set "resetnodeid" in registry
-		HKEY hKey;
-#ifndef _WIN64
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_WRITE | KEY_WOW64_32KEY, &hKey) == ERROR_SUCCESS)
-#else
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, "Software\\Open Source\\MeshAgent2", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS)
-#endif
-		{
-			i = 1;
-			DWORD err = RegSetValueEx(hKey, "ResetNodeId", 0, REG_DWORD, (BYTE*)&i, (DWORD)4);
-			if (err == ERROR_SUCCESS) { printf("NodeID will be reset next time the Mesh Agent service is started."); }
-			RegCloseKey(hKey);
-		}
-		else
-		{
-			printf("Error writing to registry, try running as administrator.");
-		}
 		wmain_free(argv);
 		return 0;
 	}
