@@ -427,9 +427,7 @@ duk_ret_t _start(duk_context *ctx)
 
 int wmain(int argc, char* wargv[])
 {
-	int i;
 	size_t str2len = 0;// , proxylen = 0, taglen = 0;
-	wchar_t str[_MAX_PATH];
 	ILib_DumpEnabledContext winException;
 	int retCode = 0;
 
