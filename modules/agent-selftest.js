@@ -308,6 +308,7 @@ function start()
             .then(function () { return (testTunnel()); })
             .then(function () { return (testTerminal()); })
             .then(function () { return (testKVM()); })
+            .then(function () { return (testFileUpload()); })
             .then(function () { return (testFileDownload()); })
             .then(function () { return (testCoreDump()); })
             .then(function () { return (testServiceRestart()); })
@@ -808,9 +809,9 @@ function testCoreDump()
 
     return (ret);
 }
-function testFileDownload()
+function testFileUpload()
 {
-    console.log('   => File Transfer Test');
+    console.log('   => File Transfer Test (Upload)');
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
     ret.tester = this;
     ret.tunnel = this.createTunnel(0x1FF, 0x00);
@@ -820,7 +821,7 @@ function testFileDownload()
         this.connection = c;
         c.ret = this.ret;
         c.ret.testbuffer = require('EncryptionStream').GenerateRandom(65535); // Generate 64k Test Buffer
-        c.ret.testbufferCRC = crc32c(c.ret.testbuffer);
+        global.testbufferCRC = crc32c(c.ret.testbuffer);
 
         c.on('data', function (buf)
         {
@@ -846,6 +847,7 @@ function testFileDownload()
                     console.log('      -> File Transfer (Upload)...........[OK]');
                     this.uploadsuccess = true;
                     this.end();
+                    this.ret._res();
                     break;
             }
         });
@@ -856,67 +858,6 @@ function testFileDownload()
                 this.ret._rej('      -> File Transfer (Upload)...........[FAILED]');
                 return;
             }
-
-            // Start download test, so we can verify the data
-            this.ret.download = this.ret.tester.createTunnel(0x1FF, 0x00);
-            this.ret.download.ret = this.ret;
-            this.ret.download.tester = this.ret.tester;
-
-            this.ret.download.then(
-                function (dt)
-                {
-                    dt.ret = this.ret;
-                    dt.crc = 0;
-                    dt.on('data', function (b)
-                    {
-                        if(typeof(b)=='string')
-                        {
-                            var cmd = JSON.parse(b);
-                            if (cmd.action != 'download') { return; }
-                            switch(cmd.sub)
-                            {
-                                case 'start':
-                                    this.write({ action: 'download', sub: 'startack', id: 0 });
-                                    break;
-                            }
-                        }
-                        else
-                        {
-                            var fin = (b.readInt32BE(0) & 0x01000001) == 0x01000001;
-                            this.crc = crc32c(b.slice(4), this.crc);
-                            this.write({ action: 'download', sub: 'ack', id: 0 });
-                            if(fin)
-                            {
-                                if(this.crc == this.ret.testbufferCRC)
-                                {
-                                    // SUCCESS!
-
-                                    console.log('      -> File Transfer (Download).........[OK]');
-                                    this.end();
-                                    this.ret._res();
-                                }
-                                else
-                                {
-                                    this.end();
-                                    this.ret._rej('      -> File Transfer (Download).........[CRC FAILED]');
-                                }
-                            }
-                        }
-                    });
-                    dt.on('end', function ()
-                    {
-
-                    });
-
-                    console.log('      -> Tunnel (Download)................[CONNECTED]');
-                    dt.write('c');
-                    dt.write('5'); // Request Files
-                    dt.write(JSON.stringify({ action: 'download', sub: 'start', path: process.cwd() + 'testFile', id: 0 }));
-                })
-                .catch(function (dte)
-                {
-                    ret._rej('      -> Tunnel (Download)................[FAILED]');
-                });
         });
 
         console.log('      -> Tunnel (Upload)..................[CONNECTED]');
@@ -927,6 +868,76 @@ function testFileDownload()
     {
         this.parent._rej('   => File Transfer Test (Upload) [TUNNEL FAILED] ' + e);
     });
+
+    return (ret);
+}
+function testFileDownload()
+{
+    console.log('   => File Transfer Test (Download)');
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    ret.tester = this;
+
+    // Start download test, so we can verify the data
+    ret.download = ret.tester.createTunnel(0x1FF, 0x00);
+    ret.download.ret = ret;
+    ret.download.tester = ret.tester;
+
+    ret.download.then(
+        function (dt)
+        {
+            dt.ret = this.ret;
+            dt.crc = 0;
+            dt.on('data', function (b)
+            {
+                if(typeof(b)=='string')
+                {
+                    var cmd = JSON.parse(b);
+                    if (cmd.action != 'download') { return; }
+                    switch(cmd.sub)
+                    {
+                        case 'start':
+                            this.write({ action: 'download', sub: 'startack', id: 0 });
+                            break;
+                    }
+                }
+                else
+                {
+                    var fin = (b.readInt32BE(0) & 0x01000001) == 0x01000001;
+                    this.crc = crc32c(b.slice(4), this.crc);
+                    this.write({ action: 'download', sub: 'ack', id: 0 });
+                    if(fin)
+                    {
+                        if (this.crc == global.testbufferCRC)
+                        {
+                            // SUCCESS!
+
+                            console.log('      -> File Transfer (Download).........[OK]');
+                            this.end();
+                            this.ret._res();
+                        }
+                        else
+                        {
+                            this.end();
+                            this.ret._rej('      -> File Transfer (Download).........[CRC FAILED]');
+                        }
+                    }
+                }
+            });
+            dt.on('end', function ()
+            {
+
+            });
+
+            console.log('      -> Tunnel (Download)................[CONNECTED]');
+            dt.write('c');
+            dt.write('5'); // Request Files
+            dt.write(JSON.stringify({ action: 'download', sub: 'start', path: process.cwd() + 'testFile', id: 0 }));
+        })
+        .catch(function (dte)
+        {
+            console.log(dte);
+            ret._rej('      -> Tunnel (Download)................[FAILED]');
+        });
 
     return (ret);
 }
@@ -1187,6 +1198,11 @@ function setup()
     this._tunnelServer = require('http').createServer();
     this._tunnelServer.promises = [];
     this._tunnelServer.listen({ port: 9250 });
+    this._tunnelServer.on('connection', function (c)
+    {
+        global._test = c;
+    });
+
     this._tunnelServer.on('upgrade', function (imsg, sck, head)
     {
         var p = this.promises.shift();
