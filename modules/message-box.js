@@ -400,7 +400,6 @@ function linux_messageBox()
             parms.push('--text=' + caption);
             parms.push('--no-wrap');
             if (this.zenity.timeout) { parms.push('--timeout=' + timeout); }
-
             ret.child = require('child_process').execFile(this.zenity.path, parms, { uid: uid, env: { XAUTHORITY: xinfo.xauthority ? xinfo.xauthority : "", DISPLAY: xinfo.display } });
             if (this.zenity.timeout)
             {
@@ -419,24 +418,27 @@ function linux_messageBox()
             ret.child.on('exit', function (code)
             {
                 if (this.timeout) { clearTimeout(this.timeout); }
-                if (Array.isArray(this.promise._options.layout))
+                if (!(this.stderr.str.includes('option is not') && this.promise._options.zenity.timeout))
                 {
-                    if (code == 0 && ((process.platform == 'freebsd' && this.stdout.ostr.trim() == '') || process.platform != 'freebsd'))
+                    if (Array.isArray(this.promise._options.layout))
                     {
-                        this.promise._res(this.promise._options.layout[0]);
-                    }
-                    else
-                    {
-                        var val = this.stdout.ostr.trim();
-                        for (var i = 1; i < this.promise._options.layout.length; ++i)
+                        if (code == 0 && ((process.platform == 'freebsd' && this.stdout.ostr.trim() == '') || process.platform != 'freebsd'))
                         {
-                            if (this.promise._options.layout[i] == val)
-                            {
-                                this.promise._res(val);
-                                return;
-                            }
+                            this.promise._res(this.promise._options.layout[0]);
                         }
-                        this.promise._rej('timeout');
+                        else
+                        {
+                            var val = this.stdout.ostr.trim();
+                            for (var i = 1; i < this.promise._options.layout.length; ++i)
+                            {
+                                if (this.promise._options.layout[i] == val)
+                                {
+                                    this.promise._res(val);
+                                    return;
+                                }
+                            }
+                            this.promise._rej('timeout');
+                        }
                     }
                 }
                 switch (code)
@@ -458,16 +460,55 @@ function linux_messageBox()
                             this.promise._ch.stdout.str = ''; this.promise._ch.stdout.on('data', function (c)
                             {
                                 this.str += c.toString();
+                                if (Array.isArray(layout))
+                                {
+                                    var i;
+                                    var tmp = c.toString().trim();
+                                    for (i = 0; i < layout.length; ++i)
+                                    {
+                                        if(layout[i] == tmp)
+                                        {
+                                            this.parent.result = tmp;
+                                            //this.parent.promise._res(tmp);
+                                            return;
+                                        }
+                                    }
+                                }
                                 if (this.str.includes('<<<<$_RESULT>>>>')) { this.str = this.str.split('<<<<$_RESULT>>>>')[1]; }
                                 if (this.str.includes('>>>>')) { this.parent.kill(); }
                             });
                             this.promise._ch.stdin.write('su - ' + uname + '\n');
                             this.promise._ch.stdin.write('export DISPLAY=' + xinfo.display + '\n');
-                            this.promise._ch.stdin.write('zenity ' + (this.promise._options.layout == null ? '--question' : '--warning'));
+                            this.promise._ch.stdin.write('zenity ');
+                            if (Array.isArray(layout))
+                            {
+                                var i;
+                                this.promise._ch.stdin.write('--info');
+                                for (i = 0; i < layout.length; ++i)
+                                {
+                                    if (i == 0)
+                                    {
+                                        this.promise._ch.stdin.write(' --ok-label=' + layout[i]);
+                                    }
+                                    else
+                                    {
+                                        this.promise._ch.stdin.write(' --extra-button=' + layout[i]);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                this.promise._ch.stdin.write((this.promise._options.layout == null ? '--question' : '--warning'));
+                            }
                             this.promise._ch.stdin.write(' --title=' + this.promise._options.title + ' --text=' + this.promise._options.caption);
                             this.promise._ch.stdin.write(' --timeout=' + this.promise._options.timeout + '\nexport _RESULT=$?\necho "<<<<$_RESULT>>>>"\nexit');
                             this.promise._ch.on('exit', function ()
                             {
+                                if (this.result != null)
+                                {
+                                    this.promise._res(this.result);
+                                    return;
+                                }
                                 var res = this.stdout.str.split('>>>>')[0].split('<<<<')[1];
                                 switch(parseInt(res))
                                 {

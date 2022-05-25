@@ -919,6 +919,7 @@ function testFileDownload()
                         {
                             this.end();
                             this.ret._rej('      -> File Transfer (Download).........[CRC FAILED]');
+                            console.log('         -> CRC=' + this.crc + ' , expected: ' + global.testbufferCRC);
                         }
                     }
                 }
