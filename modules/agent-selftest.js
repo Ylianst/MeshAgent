@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright 2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -305,6 +305,7 @@ function start()
             .then(function () { return (testConsoleHelp()); })
             .then(function () { return (testCPUInfo()); })
             .then(function () { return (WebRTC_Test()); })
+            .then(function () { return (testDialogBox_UTF8()); })
             .then(function () { return (testTunnel()); })
             .then(function () { return (testTerminal()); })
             .then(function () { return (testKVM()); })
@@ -329,7 +330,7 @@ function start()
 function WebRTC_Test()
 {
     console.log('   => Testing WebRTC');
-
+    process.stdout.write('       => In progress, please wait...');
     var ret = new promise(function (r, j) { this._res = r; this._rej = j; });
     ret.factory = require('ILibWebRTC').createNewFactory();
     ret.serverConnection = ret.factory.createConnection();
@@ -347,6 +348,7 @@ function WebRTC_Test()
         {
             if (b.length == 6665535)
             {
+                process.stdout.write('\r');
                 console.log('       => WebRTC Data Channel Test........[OK]');
                 ret._res();
             }
@@ -1171,6 +1173,42 @@ function testConsoleHelp()
     });
     return (ret);
 }
+
+function testDialogBox_UTF8()
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    switch(process.platform)
+    {
+        default:
+            ret._res();
+            break;
+        case 'linux':
+        case 'freebsd':
+            if (!require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
+            {
+                console.log('   => Dialog Test.........................[N/A]');
+                ret._res();
+            }
+            process.stdout.write('   => Dialog Test... Press any button...');
+            var r = require('message-box').create('示例標題 (Example Title)', '示例標題 (Example Caption)', 10, ['按鈕_1', '按鈕_2']);
+            r.promise = ret;
+            r.then(
+                function ()
+                {
+                    process.stdout.write('\r');
+                    console.log('   => Dialog Test.........................[OK]');
+                    this.promise._res();
+                },
+                function ()
+                {
+                    process.stdout.write('\r');
+                    this.promise._rej('   => Dialog Test.........................[FAILED]');
+                });
+            break;
+    }
+    return (ret);
+}
+
 function testTunnel()
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
