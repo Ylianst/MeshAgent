@@ -203,6 +203,7 @@ function getVersionInfoData(fd, header)
             const actualPtr = (verInfo.offsetToData - header.sections['.rsrc'].virtualAddr) + ptr;
             var buffer = Buffer.alloc(verInfo.size);
             require('fs').readSync(fd, buffer, 0, buffer.length, actualPtr);
+            header.resourcebuffer = buffer;
             return (buffer);
         }
     }
@@ -272,6 +273,7 @@ function readStringTableStruct(buf, ptr)
     r.szKey = require('_GenericMarshal').CreateVariable(buf.slice(ptr + 6, ptr + 6 + 16)).Wide2UTF8; // An 8-digit hexadecimal number stored as a Unicode string.
     //console.log('readStringTableStruct', r.wLength, r.wValueLength, r.wType, r.szKey);
     r.strings = readStringStructs(buf, ptr + 24 + r.wValueLength, r.wLength - 22);
+    console.info1('readStringTableStruct', JSON.stringify(r, null, 1));
     return r;
 }
 
@@ -315,10 +317,15 @@ function readVersionInfo(buf, ptr)
     r.szKey = require('_GenericMarshal').CreateVariable(buf.slice(ptr + 6, ptr + 36)).Wide2UTF8;
     if (r.szKey != 'VS_VERSION_INFO') return null;
     ////console.log('getVersionInfo', r.wLength, r.wValueLength, r.wType, r.szKey.toString());
-    if (r.wValueLength == 52) { r.fixedFileInfo = readFixedFileInfoStruct(buf, ptr + 40); }
+    if (r.wValueLength == 52)
+    {
+        r.fixedFileInfoBuffer = buf.slice(ptr + 40, ptr + 40 + 52);
+        r.fixedFileInfo = readFixedFileInfoStruct(buf, ptr + 40);
+    }
     r.stringFiles = readStringFilesStruct(buf, ptr + 40 + r.wValueLength, r.wLength - 40 - r.wValueLength);
     return r;
 }
+
 function getVersionInfo(fd, header, resources)
 {
     var r = {};
@@ -334,6 +341,107 @@ function getVersionInfo(fd, header, resources)
     for (var i in strings) { r[strings[i].key] = strings[i].value; }
     return r;
 }
-module.exports = parse;
 
+function encodeVersionInfo(info)
+{
+    console.log(JSON.stringify(info, null, 1));
+
+    var i;
+    var tableLen = 0;
+    for (i = 0; i < info.stringFiles[0].stringTable.strings.length; ++i)
+    {
+        // Update wValueLength fields
+        info.stringFiles[0].stringTable.strings[i].wValueLength = info.stringFiles[0].stringTable.strings[i].value.length + 1;
+
+        // Calculate Padding:
+        var p = 6 + (2 * (info.stringFiles[0].stringTable.strings[i].key.length + 1));
+        p = (4 - (p % 4)) % 4;
+
+        // Update wLength fields
+        info.stringFiles[0].stringTable.strings[i].wLength = p + (2*info.stringFiles[0].stringTable.strings[i].wValueLength) + (2*(info.stringFiles[0].stringTable.strings[i].key.length + 1)) + 6;
+        tableLen += info.stringFiles[0].stringTable.strings[i].wLength;
+        console.log(info.stringFiles[0].stringTable.strings[i]);
+    }
+    
+    // Update stringTable wLength 
+    info.stringFiles[0].stringTable.wLength = 6 + (2 * (info.stringFiles[0].stringTable.szKey.length)) + 1;
+    console.log('X=>' + info.stringFiles[0].stringTable.wLength);
+    info.stringFiles[0].stringTable.wLength += ((4 - (info.stringFiles[0].stringTable.wLength % 4)) % 4);
+    info.stringFiles[0].stringTable.wLength += tableLen;
+    
+    // Update Wlength
+    info.stringFiles[0].wLength = 6 + (2 * info.stringFiles[0].szKey.length + 1);
+    info.stringFiles[0].wLength += ((4 - (info.stringFiles[0].wLength % 4)) % 4);
+    info.stringFiles[0].wLength += info.stringFiles[0].stringTable.wLength;
+
+    console.log(JSON.stringify(info.stringFiles, null, 1));
+
+    
+    // Calculate Table Lengths:
+    var tableLengths = 0;
+    for(i=0;i<info.stringFiles.length;++i)
+    {
+        tableLengths += (info.stringFiles[i].wLength + ((4 - (info.stringFiles[i].wLength % 4)) % 4));
+    }
+    console.log('tableLengths: ' + tableLengths);
+    console.log(info.szKey);
+
+    var bufLen = 0;
+    var loc1, loc2;
+    bufLen = (info.szKey.length + 1) * 2;
+    bufLen += 6;
+    bufLen += ((4 - (bufLen % 4)) % 4);
+    loc1 = bufLen;
+    bufLen += info.wValueLength;
+    bufLen += ((4 - (bufLen % 4)) % 4);
+    loc2 = bufLen;
+    bufLen += tableLengths;
+
+    console.log('bufLen: ' + bufLen);
+    console.log('location ', loc1, loc2);
+
+    var out = Buffer.alloc(bufLen);
+    out.writeUInt16LE(bufLen);
+    out.writeUInt16LE(info.wValueLength, 2);
+    out.writeUInt16LE(info.wType, 4);
+    require('_GenericMarshal').CreateVariable(info.szKey, { wide: true }).toBuffer().copy(out, 6);
+    info.fixedFileInfoBuffer.copy(out, loc1);
+    for (i = 0; i < info.stringFiles.length; ++i)
+    {
+        out.writeUInt16LE(info.stringFiles[i].wLength, loc2); loc2 += 4; // Yes, incremented by 4, becuase the next DWORD is 0, and is already 0
+        out.writeUInt16LE(info.stringFiles[i].wType, loc2); loc2 += 2;
+        loc2 += require('_GenericMarshal').CreateVariable(info.stringFiles[i].szKey, { wide: true }).toBuffer().copy(out, loc2);
+        loc2 += ((4 - (loc2 % 4)) % 4);
+        console.log('Writing: ' + info.stringFiles[i].szKey);
+        if (info.stringFiles[i].stringTable == null) { continue; }
+
+        // Write String Table
+        out.writeUInt16LE(info.stringFiles[i].stringTable.wLength, loc2); loc2 += 2;
+        out.writeUInt16LE(info.stringFiles[i].stringTable.wValueLength, loc2); loc2 += 2;
+        out.writeUInt16LE(info.stringFiles[i].stringTable.wType, loc2); loc2 += 2;
+        loc2 += require('_GenericMarshal').CreateVariable(info.stringFiles[i].stringTable.szKey, { wide: true }).toBuffer().copy(out, loc2);
+        loc2 += ((4 - (loc2 % 4)) % 4);
+
+        for(var j=0;j<info.stringFiles[i].stringTable.strings.length;++j)
+        {
+            out.writeUInt16LE(info.stringFiles[i].stringTable.strings[j].wLength, loc2); loc2 += 2;
+            out.writeUInt16LE(info.stringFiles[i].stringTable.strings[j].wValueLength, loc2); loc2 += 2;
+            out.writeUInt16LE(info.stringFiles[i].stringTable.strings[j].wType, loc2); loc2 += 2;
+            loc2 += require('_GenericMarshal').CreateVariable(info.stringFiles[i].stringTable.strings[j].key, { wide: true }).toBuffer().copy(out, loc2);
+            loc2 += ((4 - (loc2 % 4)) % 4);
+            loc2 += require('_GenericMarshal').CreateVariable(info.stringFiles[i].stringTable.strings[j].value, { wide: true }).toBuffer().copy(out, loc2);
+            loc2 += ((4 - (loc2 % 4)) % 4);
+        }
+
+        //console.log(info.stringFiles[i]);
+    }
+
+    var tst = readVersionInfo(out, 0);
+    console.log('TEST');
+    console.log(JSON.stringify(tst, null, 1));
+}
+
+module.exports = parse;
+module.exports.readVersionInfo = readVersionInfo;
+module.exports.encodeVersionInfo = encodeVersionInfo;
 

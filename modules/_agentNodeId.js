@@ -114,6 +114,41 @@ function _meshName()
     return (name);
 }
 
+function _resetNodeId()
+{
+    var name = _meshName();
+    require('win-registry').WriteKey(require('win-registry').HKEY.LocalMachine, 'Software\\Open Source\\' + name, 'ResetNodeId', 1);
+    console.log('Resetting NodeID for: ' + name);
+}
+function _checkResetNodeId(name)
+{
+    var status = false;
+    try
+    {
+        // Check if reset node id was set in the registry
+        status = require('win-registry').QueryKey(require('win-registry').HKEY.LocalMachine, 'Software\\Open Source\\' + name, 'ResetNodeId') == 1 ? true : false;
+    }
+    catch(x)
+    {
+    }
+    if (status)
+    {
+        try
+        {
+            // Delete the reset node id field in the registry
+            require('win-registry').DeleteKey(require('win-registry').HKEY.LocalMachine, 'Software\\Open Source\\' + name, 'ResetNodeId');
+        }
+        catch(y)
+        {
+            // If we can't delete it, we must pretend that it was never set, otherwise we risk getting in a loop where we constantly reset the node id
+            status = false;
+        }
+    }
+    return (status);
+}
+
 module.exports = _meshNodeId;
 module.exports.serviceName = _meshName;
+module.exports.resetNodeId = _resetNodeId;
+module.exports.checkResetNodeId = _checkResetNodeId;
 

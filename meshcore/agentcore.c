@@ -4853,26 +4853,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agentHost->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: argv[0] = %s", param[0]);
 
-#if defined(_WINSERVICE)
-	// If running as a windows services, check the "ResetNodeId" key.
-	{
-		HKEY hKey;
-		DWORD len = 0;
-		if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, TEXT("Software\\Open Source\\MeshAgent2"), 0, KEY_ALL_ACCESS, &hKey) == ERROR_SUCCESS)
-		{
-			if (RegQueryValueExA(hKey, TEXT("ResetNodeId"), NULL, NULL, NULL, &len) == ERROR_SUCCESS && len > 0)
-			{
-				if (RegDeleteValue(hKey, TEXT("ResetNodeId")) == ERROR_SUCCESS) 
-				{
-					// Force certificate reset
-					ILIBLOGMESSAGEX("NodeID will reset, because ResetNodeID key was found in registry");
-					resetNodeId = 1;
-				} 
-			}
-			RegCloseKey(hKey);
-		}
-	}
-#else
+#if !defined(_WINSERVICE)
 	// If running in console mode, check the --resetnodeid command switch
 	if (parseCommands != 0)
 	{
@@ -4960,6 +4941,22 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 #endif
 	}
+#if defined(_WINSERVICE)
+	duk_push_sprintf(tmpCtx, "require('_agentNodeId').checkResetNodeId('%s');", agentHost->meshServiceName);
+	if (duk_peval(tmpCtx) == 0)
+	{
+		if (duk_is_boolean(tmpCtx, -1) && duk_get_boolean(tmpCtx, -1) != 0)
+		{
+			resetNodeId = 1;
+			ILIBLOGMESSAGEX("NodeID will reset, because ResetNodeId was set in the registry");
+		}
+	}
+	else
+	{
+		char *tmp = (char*)duk_safe_to_string(tmpCtx, -1);
+		ILIBLOGMESSAGEX("Error checking ResetNodeId in registry: %s", tmp);
+	}
+#endif
 #endif
 #if !defined(MICROSTACK_NOTLS)
 

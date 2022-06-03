@@ -635,6 +635,13 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
+	{
+		// Set "resetnodeid" in registry
+		char script[] = "require('_agentNodeId').resetNodeId();process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
@@ -798,12 +805,6 @@ int wmain(int argc, char* wargv[])
 		if (len > 0) { printf_s(data); }
 	}
 #endif
-	else if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
-	{
-		// Set "resetnodeid" in registry
-		wmain_free(argv);
-		return 0;
-	}
 	else
 	{
 		int skip = 0;
