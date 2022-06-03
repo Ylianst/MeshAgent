@@ -5,6 +5,7 @@
 [About](#about)  
 [Social Media](#social-media)  
 [MSH format](#msh-format)  
+[Self Test](#selftest)  
 [Feedback](#feedback)  
 [License](#license)
 ## About
@@ -108,6 +109,34 @@ reboot
 When you are ready to install the agent, you'll need to copy the binary to a path that is not marked noexec, like /usr/local,
 so that you can execute the installer from there.
 
+## Self Test
+The MeshAgent has the ability to run a self test script, to aid in testing features of the Mesh Agent in consistent/reproducable fashion. 
+
+There are two modes of operation of the self test:
+* Stand-alone Mode. This runs the tests in place directly from the command line
+* IPC Mode. This opens an IPC to a currently running/installed agent, and runs the tests from there.
+
+The easiest way to run the self tests, is by using Stand-alone mode, as it can be quickly setup and run anywhere. To get started, you will
+need make sure that the agent that you will be testing, has successfully connected to the server at least once. This is becuase the self test 
+will simulate a server connection with the agent, so the agent will need to be running the meshcore that was pushed by the server, which is 
+stored in the db. If the agent has not yet connected with a server, or the meshcore is missing from the .db, the self test will error out 
+with a message stating that the meshcore could not be loaded.
+
+Once the agent has successfully connected at least once, simply exit/stop the agent. Make sure that you have placed a copy of the agent-selftest.js
+file from the modules folder of the agent repository to the folder where the agent that you wish to test is located. 
+
+To start the test on Windows, from a command prompt, simply run the agent from the command line, with the --selfTest=1 switch:
+```
+MeshAgent --selfTest=1
+```
+The self test does not explicitly need an elevated command prompt to run, but some tests, such as the AMT tests require elevated permissions.
+
+To start the test on other platforms, simply run the agent from a console session. It will run best from a GUI capable console session, so that
+it can test features such as user consent. If you use SU to elevate the self test, it is best to pass in the -p flag, to preserve the envionment
+variables. To start the test, simply run the agent with the --selfTest=1 switch:
+```
+./MeshAgent --selfTest=1
+```
 
 ## Feedback
 If you encounter a problem or have a suggestion to improve the product, you may file an [issue report](https://github.com/Ylianst/MeshAgent/issues/)
