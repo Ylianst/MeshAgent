@@ -5,7 +5,7 @@
 [About](#about)  
 [Social Media](#social-media)  
 [MSH format](#msh-format)  
-[Self Test](#selftest)  
+[Self Test](#self-test)  
 [Feedback](#feedback)  
 [License](#license)
 ## About
