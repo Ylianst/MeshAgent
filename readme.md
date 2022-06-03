@@ -138,6 +138,22 @@ variables. To start the test, simply run the agent with the --selfTest=1 switch:
 ./MeshAgent --selfTest=1
 ```
 
+## Self Test Coverage, Stand Alone
+The following is the list of basic tests that the Stand Alone test mode will test:
+* Server Initialization. This verifies that the agent sends the correct startup sequence to the server.
+* AMT/LMS. If detected, will attempt to verify LMS operation.
+* Console command. Verifies that the agent is responsive to performing console commands.
+* Basic Telemetry. Verifies the operation of some basic telemetry operations requested from the server.
+* Web RTC. Verifies ability to establish Peer Data Channels, and transfer large data chunks.
+* Non-English UTF8 Dialog Boxes. Linux specific test to verify capability to display non-english utf8 characters on configurable dialog boxes.
+* Tunnel Sessions. Verifies ability of agent to establish tunnel session with server.
+* Remote Terminal. Verifies ability of agent to establish terminal session with user-consent.
+* Remote KVM. Verifies ability of agent to establish KVM session with user-consent, and verifies receipt of correct KVM packets.
+* File Transfer Upload. Verifies ability to upload files, by uploading a random stream of bytes.
+* File Transfer Download. Verifies ability to doanload files, by downloading the bytes uploaded in previous test, and verifying CRC.
+
+
+
 ## Feedback
 If you encounter a problem or have a suggestion to improve the product, you may file an [issue report](https://github.com/Ylianst/MeshAgent/issues/)
 
