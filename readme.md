@@ -162,6 +162,15 @@ that contains the agent, and run the the agent from the command line with the fo
 ```
 This will return the service name for that agent.
 
+After concluding the tests, you can again disable the debugConsole flag by editing the msh configuration file of the agent like the following, and restarting the agent:
+```
+debugConsole=
+```
+This will ensure that the debugConsole flag is cleared on the agent. This can be verified by running the following console command, similar to before. It should return false:
+```
+eval debugConsole
+```
+
 ## Self Test Coverage
 The following is the list of basic tests that the Stand Alone test mode will test:
 * Server Initialization. This verifies that the agent sends the correct startup sequence to the server.
