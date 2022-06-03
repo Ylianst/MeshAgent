@@ -642,7 +642,27 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
-
+	if (argc > 1 && (strcasecmp(argv[1], "-setfirewall") == 0))
+	{
+		// Reset the firewall rules
+		char script[] = "require('agent-installer').setfirewall();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && (strcasecmp(argv[1], "-clearfirewall") == 0))
+	{
+		// Clear the firewall rules
+		char script[] = "require('agent-installer').clearfirewall();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
+	if (argc > 1 && (strcasecmp(argv[1], "-checkfirewall") == 0))
+	{
+		// Clear the firewall rules
+		char script[] = "require('agent-installer').checkfirewall();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
 	{

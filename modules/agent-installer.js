@@ -786,6 +786,72 @@ function agent_updaterVersion(updatePath)
     return (ret);
 }
 
+function win_clearfirewall(passthru)
+{
+    process.stdout.write('Clearing firewall rules... [0%]');
+    var p = require('win-firewall').getFirewallRulesAsync({ program: process.execPath, noResult: true, minimal: true, timeout: 15000 });
+    p.on('progress', function (c)
+    {
+        process.stdout.write('\rClearing firewall rules... [' + c + ']');
+    });
+    p.on('rule', function (r)
+    {
+        require('win-firewall').removeFirewallRule(r.DisplayName);
+    });
+    p.finally(function ()
+    {
+        process.stdout.write('\rClearing firewall rules... [DONE]\n');
+        if (passthru == null) { process.exit(); }
+    });
+    if(passthru!=null)
+    {
+        return (p);
+    }
+}
+function win_checkfirewall()
+{
+    process.stdout.write('Checking firewall rules... [0%]');
+    var p = require('win-firewall').getFirewallRulesAsync({ program: process.execPath, noResult: true, minimal: true, timeout: 15000 });
+    p.foundItems = 0;
+    p.on('progress', function (c)
+    {
+        process.stdout.write('\rChecking firewall rules... [' + c + ']');
+    });
+    p.on('rule', function (r)
+    {
+        this.foundItems++;
+    });
+    p.finally(function ()
+    {
+        process.stdout.write('\rChecking firewall rules... [DONE]\n');
+        process.stdout.write('Rules found: ' + this.foundItems + '\n');
+
+        process.exit();
+    });
+}
+function win_setfirewall()
+{
+    var p = win_clearfirewall(true);
+    p.finally(function ()
+    {
+        var rule =
+            {
+                DisplayName: 'MeshCentral WebRTC Traffic',
+                direction: 'inbound',
+                Program: process.execPath,
+                Protocol: 'UDP',
+                Profile: 'Public, Private, Domain',
+                Description: 'Mesh Central Agent WebRTC P2P Traffic',
+                EdgeTraversalPolicy: 'allow',
+                Enabled: true
+            };
+        require('win-firewall').addFirewallRule(rule);
+        process.stdout.write('Adding firewall rules..... [DONE]\n');
+        process.exit();
+    });
+
+}
+
 function win_consoleUpdate()
 {
     // This is run from the 'old' agent, to copy the 'updated' agent.
@@ -807,4 +873,7 @@ module.exports.updaterVersion = agent_updaterVersion;
 if (process.platform == 'win32')
 {
     module.exports.consoleUpdate = win_consoleUpdate;
+    module.exports.clearfirewall = win_clearfirewall;
+    module.exports.setfirewall = win_setfirewall;
+    module.exports.checkfirewall = win_checkfirewall;
 }
