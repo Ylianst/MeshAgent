@@ -234,7 +234,9 @@ function start()
         }
         else
         {
-            ipcPath = svc.appWorkingDirectory() + 'DAIPC';
+            ipcPath = svc.appWorkingDirectory();
+            if (ipcPath.endsWith('/')) { ipcPath += 'DAIPC'; }
+            else { ipcPath += '/DAIPC'; }
         }
     }
 

@@ -138,7 +138,31 @@ variables. To start the test, simply run the agent with the --selfTest=1 switch:
 ./MeshAgent --selfTest=1
 ```
 
-## Self Test Coverage, Stand Alone
+To run the self test in IPC Mode, requires a little more preparation. For security reasons, by default the agent does not allow running 'eval' 
+commands thru the IPC channel, however, the Self Test IPC Mode, requires this functionality. The simplest way to allow this command, is to add
+the following entry in the msh configuration file of the agent, then restart the agent:
+```
+debugConsole=1
+```
+
+To verify if this flag has been enabled, from the console tab for the agent, run the following command:
+```
+eval debugConsole
+```
+If this returns 'true', then you are ready to run the self test in IPC Mode.
+To start the self test in IPC Mode, start the self test similarly to how you launch the Stand Alone test, from an elevated console, but add the
+following command line switch:
+```
+--serviceName="xxx"
+```
+substituting xxx, with the service name of the agent you are trying to test. If you do not know the service name, you can navigate to the folder
+that contains the agent, and run the the agent from the command line with the following command line switch:
+```
+-name
+```
+This will return the service name for that agent.
+
+## Self Test Coverage
 The following is the list of basic tests that the Stand Alone test mode will test:
 * Server Initialization. This verifies that the agent sends the correct startup sequence to the server.
 * AMT/LMS. If detected, will attempt to verify LMS operation.
@@ -152,6 +176,9 @@ The following is the list of basic tests that the Stand Alone test mode will tes
 * File Transfer Upload. Verifies ability to upload files, by uploading a random stream of bytes.
 * File Transfer Download. Verifies ability to doanload files, by downloading the bytes uploaded in previous test, and verifying CRC.
 
+In addition to the above tests, IPC Mode test adds the following tests:
+* Mesh Core Dump Test. Attempts to clear/restart JS core while running KVM test, verifying the agent does not crash. 
+* Service Restart Test. Verifies that the agent can successfully restart itself.
 
 
 ## Feedback
