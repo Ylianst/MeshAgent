@@ -180,7 +180,6 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
     <TargetName>$(ProjectName)64</TargetName>
-    <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_NoOpenSSL|x64'">
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
@@ -228,7 +227,7 @@
         @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 --format=%%H | FOR /F "tokens=1" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
-      </Command>
+      powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)..\Microscript\ILibDuktape_Commit.h $(ProjectDir)MeshService.rc</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" "$(TargetPath)"</Command>
@@ -316,7 +315,7 @@
         @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 --format=%%H | FOR /F "tokens=1" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
-      </Command>
+powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)..\Microscript\ILibDuktape_Commit.h $(ProjectDir)MeshService.rc</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" "$(TargetPath)"</Command>
@@ -401,7 +400,7 @@
         @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 --format=%%H | FOR /F "tokens=1" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
-      </Command>
+      powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)..\Microscript\ILibDuktape_Commit.h $(ProjectDir)MeshService.rc</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>REM signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" /t http://timestamp.comodoca.com/authenticode "$(TargetPath)"
@@ -489,7 +488,7 @@
         @echo // This file is auto-generated, any edits may be overwritten &gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 2&gt;nul | FINDSTR /C:"Date:" | FOR /F "tokens=3,4,5,6,7" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_DATE "%%I-%%F-%%G %%H%%J" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
         git log -1 --format=%%H | FOR /F "tokens=1" %%F in ('findstr "."') do @echo #define SOURCE_COMMIT_HASH "%%F" &gt;&gt; $(ProjectDir)..\microscript\ILibDuktape_Commit.h
-      </Command>
+powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)..\Microscript\ILibDuktape_Commit.h $(ProjectDir)MeshService.rc</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>REM signtool.exe sign /sha1 fd5940d8fd585545614fea6da455f25d224b00c9 /d "MeshService" /du "http://opentools.homeip.net" /t http://timestamp.comodoca.com/authenticode "$(TargetPath)"
