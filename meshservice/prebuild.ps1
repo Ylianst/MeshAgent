@@ -61,7 +61,7 @@ for($x=0;$x -lt $i.length;++$x)
 	  # Update the ProductVersion
 	  #
       $current = $z[3];
-      $z[3] = "Commit: " +  $hash;
+      $z[3] = "Commit: " +  $hashdate;
 	  $updated = $z[3];
    }
    if($z[1] -eq "FileVersion")
