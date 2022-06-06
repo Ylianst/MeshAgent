@@ -2679,8 +2679,16 @@ duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)
 	int len;
 	struct util_cert cert;
 	char *data;
+	int noUsages = 0;
+	int certType = CERTIFICATE_TLS_CLIENT;
 
-	len = util_mkCert(NULL, &(cert), 3072, 10000, "localhost", CERTIFICATE_TLS_CLIENT, NULL);
+	if (!duk_is_null_or_undefined(ctx, 1) && duk_is_object(ctx, 1))
+	{
+		certType = Duktape_GetIntPropertyValue(ctx, 1, "certType", CERTIFICATE_TLS_CLIENT);
+		noUsages = Duktape_GetIntPropertyValue(ctx, 1, "noUsages", 0);
+	}
+
+	len = util_mkCertEx(NULL, &(cert), 3072, 10000, "localhost", certType, NULL, noUsages);
 	len = util_to_p12(cert, passphrase, &data);
 
 	duk_push_fixed_buffer(ctx, len);
@@ -2788,7 +2796,7 @@ void ILibDuktape_tls_PUSH(duk_context *ctx, void *chain)
 	ILibDuktape_CreateInstanceMethodWithIntProperty(ctx, "tls", 1, "createServer", ILibDuktape_net_createServer, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "connect", ILibDuktape_TLS_connect, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "createSecureContext", ILibDuktape_TLS_createSecureContext, 1);
-	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "generateCertificate", ILibDuktape_TLS_generateCertificate, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "loadCertificate", ILibDuktape_TLS_loadCertificate, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "loadpkcs7b", ILibDuktape_TLS_loadpkcs7b, 1);
 

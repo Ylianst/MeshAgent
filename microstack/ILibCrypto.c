@@ -682,7 +682,7 @@ void __fastcall util_printcert_pk(struct util_cert cert)
 
 // Creates a X509 certificate, if rootcert is NULL this creates a root (self-signed) certificate.
 // Is the name parameter is NULL, the hex value of the hash of the public key will be the subject name.
-int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, int bits, int days, char* name, enum CERTIFICATE_TYPES certtype, struct util_cert* initialcert)
+int __fastcall util_mkCertEx(struct util_cert *rootcert, struct util_cert* cert, int bits, int days, char* name, enum CERTIFICATE_TYPES certtype, struct util_cert* initialcert, int noUsages)
 {
 	X509 *x = NULL;
 	X509_EXTENSION *ex = NULL;
@@ -762,8 +762,7 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 
 		// Add various extensions: standard extensions
 		util_add_ext(x, NID_basic_constraints, "critical,CA:TRUE");
-		util_add_ext(x, NID_key_usage, "critical,keyCertSign,cRLSign");
-
+		if (noUsages == 0) { util_add_ext(x, NID_key_usage, "critical,keyCertSign,cRLSign"); }
 		util_add_ext(x, NID_subject_key_identifier, "hash");
 		//util_add_ext(x, NID_netscape_cert_type, "sslCA");
 		//util_add_ext(x, NID_netscape_comment, "example comment extension");
@@ -777,9 +776,12 @@ int __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, i
 		X509_set_issuer_name(x, cname);
 
 		// Add usual cert stuff
-		ex = X509V3_EXT_conf_nid(NULL, NULL, NID_key_usage, "digitalSignature, keyEncipherment, keyAgreement");
-		X509_add_ext(x, ex, -1);
-		X509_EXTENSION_free(ex);
+		if (noUsages == 0)
+		{
+			ex = X509V3_EXT_conf_nid(NULL, NULL, NID_key_usage, "digitalSignature, keyEncipherment, keyAgreement");
+			X509_add_ext(x, ex, -1);
+			X509_EXTENSION_free(ex);
+		}
 
 		// Add usages: TLS server, TLS client, Intel(R) AMT Console
 		//ex = X509V3_EXT_conf_nid(NULL, NULL, NID_ext_key_usage, "TLS Web Server Authentication, TLS Web Client Authentication, 2.16.840.1.113741.1.2.1, 2.16.840.1.113741.1.2.2");

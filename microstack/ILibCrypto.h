@@ -154,7 +154,9 @@ int   __fastcall util_from_cer(char* data, int datalen, struct util_cert* cert);
 int   __fastcall util_from_pem(char* filename, struct util_cert* cert);
 int	  __fastcall util_from_pem_string(char *data, int datalen, struct util_cert* cert);
 int	  __fastcall util_from_pkcs7b_string(char *data, int datalen, char *out, int outLen);
-int   __fastcall util_mkCert(struct util_cert *rootcert, struct util_cert* cert, int bits, int days, char* name, enum CERTIFICATE_TYPES certtype, struct util_cert* initialcert);
+int   __fastcall util_mkCertEx(struct util_cert *rootcert, struct util_cert* cert, int bits, int days, char* name, enum CERTIFICATE_TYPES certtype, struct util_cert* initialcert, int noUsages);
+#define util_mkCert(rootcert, cert, bits, days, name, certtype, initialcert) util_mkCertEx(rootcert, cert, bits, days, name, certtype, initialcert,0)
+
 void  __fastcall util_printcert(struct util_cert cert);
 void  __fastcall util_printcert_pk(struct util_cert cert);
 
