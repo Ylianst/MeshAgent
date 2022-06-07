@@ -79,7 +79,6 @@ Object.defineProperty(Array.prototype, 'getParameterValue',
 function checkParameters(parms)
 {
     var msh = _MSH();
-
     if (parms.getParameter('description', null) == null && msh.description != null) { parms.push('--description="' + msh.description + '"'); }
     if (parms.getParameter('displayName', null) == null && msh.displayName != null) { parms.push('--displayName="' + msh.displayName + '"'); }
     if (parms.getParameter('companyName', null) == null && msh.companyName != null) { parms.push('--companyName="' + msh.companyName + '"'); }
@@ -287,7 +286,10 @@ function installService(params)
     }
 
     if (process.platform == 'win32') { svc.close(); }
-    process.exit();
+    if (parseInt(params.getParameter('__skipExit', 0)) == 0)
+    {
+        process.exit();
+    }
 }
 
 function uninstallService3(params)
