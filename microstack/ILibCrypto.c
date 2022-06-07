@@ -549,7 +549,7 @@ void __fastcall util_freecert(struct util_cert* cert)
 
 int __fastcall util_to_cer(struct util_cert cert, char** data)
 {
-	*data = NULL;
+	if (data != NULL) { *data = NULL; }
 	return i2d_X509(cert.x509, (unsigned char**)data);
 }
 

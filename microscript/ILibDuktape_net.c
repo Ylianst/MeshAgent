@@ -2681,6 +2681,8 @@ duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)
 	char *data;
 	int noUsages = 0;
 	int certType = CERTIFICATE_TLS_CLIENT;
+	char certHash[UTIL_SHA384_HASHSIZE];
+	char fingerprint[150];
 
 	if (!duk_is_null_or_undefined(ctx, 1) && duk_is_object(ctx, 1))
 	{
@@ -2695,9 +2697,16 @@ duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)
 	memcpy_s((void*)Duktape_GetBuffer(ctx, -1, NULL), len, data, len);
 	duk_push_buffer_object(ctx, -1, 0, len, DUK_BUFOBJ_NODEJS_BUFFER);
 	ILibDuktape_WriteID(ctx, "tls.pfxCertificate");
+
+	util_certhash2(cert.x509, certHash);
+	util_tohex2(certHash, UTIL_SHA384_HASHSIZE, fingerprint);
+	duk_push_string(ctx, fingerprint);				// [cert][digest]
+	duk_put_prop_string(ctx, -2, "digest");			// [cert]
+
 	util_free(data);
 	util_freecert(&cert);
 	passphrase = NULL;
+
 	return 1;
 }
 duk_ret_t ILibDuktape_TLS_loadpkcs7b(duk_context *ctx)
