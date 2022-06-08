@@ -32,6 +32,12 @@ const MeshCommand_CoreOk = 16;	                // Sent by the server to indicate
 const MeshCommand_HostInfo = 31;	            // Host OS and CPU Architecture
 
 const PLATFORMS = ['UNKNOWN', 'DESKTOP', 'LAPTOP', 'MOBILE', 'SERVER', 'DISK', 'ROUTER', 'PI', 'VIRTUAL'];
+var agentConnectionCount = 0;
+var updateState = 0;
+var agentBinaryFD = null;
+var agentBinary_Size = 0;
+var agentBinary_BytesSent = 0;
+
 
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
@@ -59,6 +65,10 @@ server.on('upgrade', function (msg, sck, head)
     global._client.on('data', function (buffer)
     {
         this.processCommand(buffer);
+    });
+    global._client.on('end', function ()
+    {
+        console.log('Agent Disconnected...');
     });
     global._client.processCommand = function processCommand(buffer)
     {
@@ -190,7 +200,54 @@ server.on('upgrade', function (msg, sck, head)
                 break;
             case MeshCommand_CoreModuleHash:
                 var hash = buffer.slice(4).toString('hex');
-                console.log('CoreModuleHash=' + hash);
+                console.log('CoreModuleHash[' + hash.length + ']=' + hash);
+                console.log('Service PID: ' + getPID());
+                switch(updateState)
+                {
+                    case 0:
+                        updateState = 1;
+                        agentBinaryFD = require('fs').openSync(process.execPath, 'rb');
+                        agentBinary_Size = require('fs').statSync(process.execPath).size;
+                        process.stdout.write('Sending update to Agent... [0%]');
+
+                        var b = Buffer.alloc(4);
+                        b.writeUInt16BE(MeshCommand_AgentUpdate);
+                        b.writeUInt16BE(1, 2);
+                        this.write(b);
+
+                        b = Buffer.alloc(4100);
+                        b.writeUInt16BE(MeshCommand_AgentUpdateBlock);
+                        b.writeUInt16BE(1, 2);              
+                        agentBinary_BytesSent = require('fs').readSync(agentBinaryFD, b, 4, 4096, -1);
+                        this.write(b);
+                        break;
+                }
+                break;
+            case MeshCommand_AgentUpdateBlock:
+                if (agentBinary_BytesSent < agentBinary_Size)
+                {
+                    var pct = Math.floor((agentBinary_BytesSent / agentBinary_Size) * 100);
+                    if (pct % 5 == 0)
+                    {
+                        process.stdout.write('\rSending update to Agent... [' + pct + '%]');
+                    }
+
+                    var b = Buffer.alloc(4100);
+                    var r;
+                    b.writeUInt16BE(MeshCommand_AgentUpdateBlock);
+                    b.writeUInt16BE(1, 2);
+                    agentBinary_BytesSent += (r = require('fs').readSync(agentBinaryFD, b, 4, 4096, -1));
+                    this.write(b.slice(0,r+4));
+                }
+                else
+                {
+                    process.stdout.write('\rSending update to Agent... [100%]\n');
+                    var b = Buffer.alloc(52);
+                    b.writeUInt16BE(MeshCommand_AgentUpdate);
+                    b.writeUInt16BE(1, 2);
+                    getSHA384FileHash(process.execPath).copy(b, 4);
+                    this.write(b);
+                }
                 break;
             default:
                 console.log('Command: ' + cmd);
@@ -301,14 +358,30 @@ function getSystemName(id)
     return (ret);
 }
 
+function getPID()
+{
+    var s = require('service-manager').manager.getService('TestAgent');
+    var ret = 0;
+    switch(process.platform)
+    {
+        case 'win32':
+            ret = s.status.pid;
+            s.close();
+            break;
+        default:
+            ret = 0;
+            break;
+    }
 
+    return (ret);
+}
 
 
 
 //
 // Start by installing agent as service
 //
-var params = ['--__skipExit=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
+var params = ['--__skipExit=1', '--logUpdate=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
 var paramsString = JSON.stringify(params);
 require('agent-installer').fullInstall(paramsString);
 console.setDestination(console.Destinations.STDOUT);
