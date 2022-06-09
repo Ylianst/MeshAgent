@@ -15,66 +15,85 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-
-Object.defineProperty(Array.prototype, 'getParameterEx',
-    {
-        value: function (name, defaultValue)
+try
+{
+    Object.defineProperty(Array.prototype, 'getParameterEx',
         {
-            var i, ret;
-            for (i = 0; i < this.length; ++i)
+            value: function (name, defaultValue)
             {
-                if (this[i].startsWith(name + '='))
+                var i, ret;
+                for (i = 0; i < this.length; ++i)
                 {
-                    ret = this[i].substring(name.length + 1);
-                    if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
-                    return (ret);
+                    if (this[i].startsWith(name + '='))
+                    {
+                        ret = this[i].substring(name.length + 1);
+                        if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                        return (ret);
+                    }
+                }
+                return (defaultValue);
+            }
+        });
+    Object.defineProperty(Array.prototype, 'getParameter',
+        {
+            value: function (name, defaultValue)
+            {
+                return (this.getParameterEx('--' + name, defaultValue));
+            }
+        });
+}
+catch(x)
+{ }
+try
+{
+    Object.defineProperty(Array.prototype, 'getParameterIndex',
+        {
+            value: function (name)
+            {
+                var i;
+                for (i = 0; i < this.length; ++i)
+                {
+                    if (this[i].startsWith('--' + name + '='))
+                    {
+                        return (i);
+                    }
+                }
+                return (-1);
+            }
+        });
+}
+catch(x)
+{ }
+try
+{
+    Object.defineProperty(Array.prototype, 'deleteParameter',
+        {
+            value: function (name)
+            {
+                var i = this.getParameterIndex(name);
+                if(i>=0)
+                {
+                    this.splice(i, 1);
                 }
             }
-            return (defaultValue);
-        }
-    });
-Object.defineProperty(Array.prototype, 'getParameter',
-    {
-        value: function (name, defaultValue)
+        });
+}
+catch(x)
+{ }
+try
+{
+    Object.defineProperty(Array.prototype, 'getParameterValue',
         {
-            return (this.getParameterEx('--' + name, defaultValue));
-        }
-    });
-Object.defineProperty(Array.prototype, 'getParameterIndex',
-    {
-        value: function (name)
-        {
-            var i;
-            for (i = 0; i < this.length; ++i)
+            value: function (i)
             {
-                if (this[i].startsWith('--' + name + '='))
-                {
-                    return (i);
-                }
+                var ret = this[i].substring(this[i].indexOf('=')+1);
+                if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                return (ret);
             }
-            return (-1);
-        }
-    });
-Object.defineProperty(Array.prototype, 'deleteParameter',
-    {
-        value: function (name)
-        {
-            var i = this.getParameterIndex(name);
-            if(i>=0)
-            {
-                this.splice(i, 1);
-            }
-        }
-    });
-Object.defineProperty(Array.prototype, 'getParameterValue',
-    {
-        value: function (i)
-        {
-            var ret = this[i].substring(this[i].indexOf('=')+1);
-            if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
-            return (ret);
-        }
-    });
+        });
+}
+catch(x)
+{ }
 
 function checkParameters(parms)
 {
