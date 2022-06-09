@@ -15,6 +15,37 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+try
+{
+    Object.defineProperty(Array.prototype, 'getParameterEx',
+        {
+            value: function (name, defaultValue)
+            {
+                var i, ret;
+                for (i = 0; i < this.length; ++i)
+                {
+                    if (this[i].startsWith(name + '='))
+                    {
+                        ret = this[i].substring(name.length + 1);
+                        if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                        return (ret);
+                    }
+                }
+                return (defaultValue);
+            }
+        });
+    Object.defineProperty(Array.prototype, 'getParameter',
+        {
+            value: function (name, defaultValue)
+            {
+                return (this.getParameterEx('--' + name, defaultValue));
+            }
+        });
+}
+catch(x)
+{ }
+
+var Writable = require('stream').Writable;
 const MeshCommand_AuthRequest = 1;              // Server web certificate public key sha384 hash + agent or server nonce
 const MeshCommand_AuthVerify = 2;               // Agent or server signature
 const MeshCommand_AuthInfo = 3;	                // Agent information
@@ -37,7 +68,7 @@ var updateState = 0;
 var agentBinaryFD = null;
 var agentBinary_Size = 0;
 var agentBinary_BytesSent = 0;
-
+const recoveryCore = require('fs').readFileSync('recoverycore.js');
 
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
@@ -58,6 +89,38 @@ server.on('connection', function (c)
     global._test.push(c);
     console.info1('inbound connection received');
 });
+server.on('request', function (imsg, resp)
+{
+    if (imsg.method == 'GET' && imsg.url == '/update')
+    {
+        var accumulator = new Writable(
+            {
+                write: function write(chunk, flush)
+                {
+                    this.sent += chunk.length;
+                    var pct = Math.floor((this.sent / this.total) * 100);
+                    if (pct % 5 == 0)
+                    {
+                        process.stdout.write('\rPushing Update via HTTPS...[' + pct + '%]');
+                    }
+                    flush();
+                },
+                final: function final(flush)
+                {
+                    process.stdout.write('\n');
+                    flush();
+                }
+            });
+        accumulator.sent = 0;
+
+        process.stdout.write('Pushing Update via HTTPS...[0%]');
+        var update = require('fs').createReadStream(process.execPath, { flags: 'rb' });
+        accumulator.total = require('fs').statSync(process.execPath).size;
+
+        update.pipe(resp);
+        update.pipe(accumulator);
+    }
+});
 server.on('upgrade', function (msg, sck, head)
 {
     console.info1('upgrade requested');
@@ -70,6 +133,22 @@ server.on('upgrade', function (msg, sck, head)
     {
         console.log('Agent Disconnected...');
     });
+    global._client.command = function command(j)
+    {
+        this.write(JSON.stringify(j));
+    }
+    global._client.console = function console(str)
+    {
+        this.command(
+            {
+                action: 'msg',
+                type: 'console',
+                value: str,
+                sessionid: 'none',
+                rights: 4294967295,
+                consent: 0
+            });
+    }
     global._client.processCommand = function processCommand(buffer)
     {
         if (buffer[0] == '{')
@@ -201,7 +280,43 @@ server.on('upgrade', function (msg, sck, head)
             case MeshCommand_CoreModuleHash:
                 var hash = buffer.slice(4).toString('hex');
                 console.log('CoreModuleHash[' + hash.length + ']=' + hash);
-                console.log('Service PID: ' + getPID());
+                if (process.argv.getParameter('NoInstall') == null)
+                {
+                    console.log('Service PID: ' + getPID());
+                }
+
+                if (process.argv.getParameter('JS') === '1')
+                {
+                    switch (updateState)
+                    {
+                        case 0:
+                            console.log('Pushing Recovery Core');
+                            updateState = 1;
+                            var b = Buffer.alloc(recoveryCore.length + 48 + 4 + 4);
+                            b.writeUInt16BE(MeshCommand_CoreModule);
+                            b.writeUInt16BE(1, 2);
+                            recoveryCore.copy(b, 56);
+                            require('SHA384Stream').create().syncHash(b.slice(52)).copy(b, 4);
+                            this.write(b);
+                            break;
+                        case 1:
+                            updateState = 2;
+                            var b = Buffer.alloc(4);
+                            b.writeUInt16BE(MeshCommand_CoreOk);
+                            b.writeUInt16BE(1, 2);
+                            this.write(b);
+
+                            this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(process.execPath).toString('hex'), sessionid: 'none' });
+
+                           // this.console('eval "sendConsoleText(\'this is testing\');"');
+                            break;
+                        default:
+                            console.log('Agent Update State: ' + updateState);
+                            break;
+                    }
+                    break;
+                }
+
                 switch(updateState)
                 {
                     case 0:
@@ -256,7 +371,26 @@ server.on('upgrade', function (msg, sck, head)
     };
     global._client.processJSON = function processJSON(j)
     {
-        console.info1(JSON.stringify(j, null, 1));
+        switch(j.action)
+        {
+            case 'agentupdatedownloaded':
+                console.log('Agent reports successfully downloaded update');
+                break;
+            case 'coreinfo':
+                console.log('Agent is running core: ' + j.value);
+                break;
+            case 'msg':
+                if (j.type == 'console')
+                {
+                    console.log('Agent: ' + j.value);
+                }
+                break;
+            case 'sessions':
+                break;
+            default:
+                console.log(JSON.stringify(j, null, 1));
+                break;
+        }
     }
 });
 function getSystemName(id)
@@ -377,15 +511,16 @@ function getPID()
 }
 
 
-
-//
-// Start by installing agent as service
-//
-var params = ['--__skipExit=1', '--logUpdate=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
-var paramsString = JSON.stringify(params);
-require('agent-installer').fullInstall(paramsString);
-console.setDestination(console.Destinations.STDOUT);
+if (process.argv.getParameter('NoInstall') == null)
+{
+    //
+    // Start by installing agent as service
+    //
+    var params = ['--__skipExit=1', '--logUpdate=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
+    var paramsString = JSON.stringify(params);
+    require('agent-installer').fullInstall(paramsString);
+    console.setDestination(console.Destinations.STDOUT);
+}
 console.log('\nWaiting for Agent Connection...');
-
 
 
