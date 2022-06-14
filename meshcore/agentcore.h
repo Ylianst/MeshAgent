@@ -255,6 +255,7 @@ typedef struct MeshAgentHostContainer
 	long consoleText_timeStamp;
 	int consoleText_counter;
 	int consoleText_maxRate;
+	int autoproxy_status;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

@@ -533,6 +533,43 @@ function windows_getProxy()
         throw ('No proxies');
     }
 }
+
+function auto_proxy_helper(target)
+{
+    var promise = require('promise');
+
+    var ret = new promise(promise.defaultInit);
+    var wpadip = resolve('wpad');
+    ret.target = target;
+    ret.r = require('http').get('http://' + wpadip + '/wpad.dat');
+    ret.r.p = ret;
+    ret.r.on('response', function (img)
+    {
+        if (img.statusCode == 200 && img.headers['Content-Type'] == 'application/x-ns-proxy-autoconfig')
+        {
+            img.wpad = '';
+            this.i = img;
+            this.i.p = this.p;
+            img.on('data', function (c)
+            {
+                this.wpad += c.toString();
+            });
+            img.on('end', function ()
+            {
+                var z = require('PAC').Create(this.wpad);
+                this.p.resolve(z(this.p.target));
+            });
+        }
+        else
+        {
+            this.p.resolve(null);
+        }
+    });
+    ret.r.on('error', function () { this.p.resolve(null); });
+    return (ret);
+}
+
+
 switch (process.platform)
 {
     case 'linux':
@@ -546,3 +583,4 @@ switch (process.platform)
         module.exports = { getProxy: macos_getProxy };
         break;
 }
+module.exports.autoHelper = auto_proxy_helper;

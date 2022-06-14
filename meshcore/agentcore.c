@@ -103,6 +103,7 @@ char exeMeshPolicyGuid[] = { 0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB
 #define REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME "\xFF_RemoteDesktopUSERNAME"
 #define MESHAGENT_DATAPING_ARRAY "\xFF_MeshAgent_DataPingArray"
 #define MESHAGENT_DATAPAING_PROMISE_TIMEOUT	"\xFF_MeshAgent_DataPing_Timeout"
+char autoproxy_setup[255] = { 0 };
 
 #define KVM_IPC_SOCKET			"\xFF_KVM_IPC_SOCKET"
 int ILibDuktape_HECI_Debug = 0;
@@ -3735,6 +3736,40 @@ void MeshServer_ConnectEx_Lockout_Retry(void *j)
 {
 	MeshServer_ConnectEx((MeshAgentHostContainer*)j);
 }
+
+duk_ret_t MeshServer_ConnectEx_AutoProxy(duk_context *ctx)
+{
+	MeshAgentHostContainer *agent;
+
+	duk_push_heap_stash(ctx);									// [stash]
+	duk_get_prop_string(ctx, -1, "MeshAgentPtr");				// [stash][agentPtr]
+	agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
+	agent->autoproxy_status = 1;
+
+	if (duk_is_null_or_undefined(ctx, 0))
+	{
+		duk_eval_string_noresult(ctx, "process.stdout.write(' [DIRECT]\\n');");
+	}
+	else
+	{
+		char *result = (char*)duk_require_string(ctx, 0);
+		int len = sprintf_s(autoproxy_setup, sizeof(autoproxy_setup), "http://%s", result);
+		if (len > 0)
+		{
+			duk_push_sprintf(ctx, "process.stdout.write(' [%s]\\n');", result);
+			duk_peval_noresult(ctx);
+			ILibSimpleDataStore_Cached(agent->masterDb, "WebProxy", 8, autoproxy_setup, len + 1);
+		}
+		else
+		{
+			duk_eval_string_noresult(ctx, "process.stdout.write(' [ERROR]\\n');");
+		}
+	}
+
+	MeshServer_ConnectEx(agent);
+	return(0);
+}
+
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 {
 	size_t len, serverUrlLen;
@@ -3764,6 +3799,30 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 
 	len = ILibSimpleDataStore_Get(agent->masterDb, "MeshServer", ILibScratchPad2, sizeof(ILibScratchPad2));
 	if (len == 0) { printf("No MeshCentral settings found, place .msh file with this executable and restart.\r\n"); ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: MeshServer URI not found"); return; }
+
+	if (ILibSimpleDataStore_Get(agent->masterDb, "autoproxy", ILibScratchPad, sizeof(ILibScratchPad)) != 0)
+	{
+		if (agent->autoproxy_status == 0)
+		{
+			duk_push_sprintf(agent->meshCoreCtx, "require('proxy-helper').autoHelper(require('http').parseUri('%s').host);", ILibScratchPad2);
+			if (duk_peval(agent->meshCoreCtx) == 0)														// [promise]
+			{
+				duk_eval_string_noresult(agent->meshCoreCtx, "process.stdout.write('Checking Autoproxy...');");
+				duk_prepare_method_call(agent->meshCoreCtx, -1, "then");								// [promise][then][this]
+				duk_push_c_function(agent->meshCoreCtx, MeshServer_ConnectEx_AutoProxy, DUK_VARARGS);	// [promise][then][this][func]
+				duk_pcall_method(agent->meshCoreCtx, 1);												// [ret]
+				duk_pop(agent->meshCoreCtx);															// ...
+				return;
+			}
+			else
+			{
+				char *foo = duk_safe_to_string(agent->meshCoreCtx, -1);
+				printf("%s\n", foo);
+			}
+			duk_pop(agent->meshCoreCtx);																// ...
+		}
+	}
+
 
 	rs = ILibParseString(ILibScratchPad2, 0, len, ",", 1);
 	if (agent->serverIndex == 0)
