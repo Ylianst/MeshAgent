@@ -1,5 +1,5 @@
 /*
-Copyright 2019 - 2020 Intel Corporation
+Copyright 2019 - 2022 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,6 +14,52 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+try
+{
+    Object.defineProperty(Array.prototype, 'getParameterEx',
+        {
+            value: function (name, defaultValue)
+            {
+                var i, ret;
+                for (i = 0; i < this.length; ++i)
+                {
+                    if (this[i].startsWith(name + '='))
+                    {
+                        ret = this[i].substring(name.length + 1);
+                        if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                        return (ret);
+                    }
+                }
+                return (defaultValue);
+            }
+        });
+    Object.defineProperty(Array.prototype, 'getParameter',
+        {
+            value: function (name, defaultValue)
+            {
+                return (this.getParameterEx('--' + name, defaultValue));
+            }
+        });
+}
+catch (x)
+{ }
+
+function getAutoProxyDomain()
+{
+    var domain = null;
+    try
+    {
+        domain = _MSH().autoproxy;
+    }
+    catch (e) { }
+    if (domain == null)
+    {
+        domain = process.argv.getParameter('autoproxy');
+    }
+    if (domain.indexOf('.') < 0) { return (null); }
+    if (domain != null && !domain.startsWith('.')) { domain = '.' + domain; }
+    return (domain);
+}
 
 function linux_getProxy()
 {
@@ -539,7 +585,7 @@ function auto_proxy_helper(target)
     var promise = require('promise');
 
     var ret = new promise(promise.defaultInit);
-    var wpadip = resolve('wpad');
+    var wpadip = resolve('wpad' + (this.domain!=null?this.domain:''));
     ret.target = target;
     ret.r = require('http').get('http://' + wpadip + '/wpad.dat');
     ret.r.p = ret;
@@ -584,3 +630,4 @@ switch (process.platform)
         break;
 }
 module.exports.autoHelper = auto_proxy_helper;
+module.exports.domain = getAutoProxyDomain();
