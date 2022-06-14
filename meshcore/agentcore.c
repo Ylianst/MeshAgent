@@ -3816,8 +3816,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			}
 			else
 			{
-				char *foo = duk_safe_to_string(agent->meshCoreCtx, -1);
-				printf("%s\n", foo);
+				const char *foo = duk_safe_to_string(agent->meshCoreCtx, -1);
+				printf("AutoProxy Error: %s\n", foo);
 			}
 			duk_pop(agent->meshCoreCtx);																// ...
 		}

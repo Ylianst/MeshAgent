@@ -1993,8 +1993,8 @@ ILibDuktape_globalTunnel_data* ILibDuktape_GetNewGlobalTunnelEx(duk_context *ctx
 	retVal->exceptionsTable = ILibHashtable_Create();
 	ILibDuktape_CreateInstanceMethod(ctx, "initialize", ILibDuktape_globalTunnel_initialize, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "end", ILibDuktape_globalTunnel_end, 0);
-	ILibDuktape_CreateEventWithGetter(ctx, "proxyConfig", ILibDuktape_globalTunnel_proxyConfig);
-	ILibDuktape_CreateEventWithGetter(ctx, "isProxying", ILibDuktape_globalTunnel_isProxying);
+	ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "proxyConfig", ILibDuktape_globalTunnel_proxyConfig, 1);
+	ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "isProxying", ILibDuktape_globalTunnel_isProxying, 1);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_globalTunnel_finalizer);
 
 	if (native != 0) { duk_pop(ctx); }									// ...
