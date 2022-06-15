@@ -70,6 +70,11 @@ var agentBinary_Size = 0;
 var agentBinary_BytesSent = 0;
 const recoveryCore = require('fs').readFileSync('recoverycore.js');
 
+var cycleCount = -1;
+var targetCount = 1;
+var delayMinimum = 0;
+var delayMaximum = 100;
+
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
 var server = require('https').createServer({ pfx: cert, passphrase: 'test' });
@@ -276,6 +281,78 @@ server.on('upgrade', function (msg, sck, head)
             case MeshCommand_AgentHash:
                 var hash = buffer.slice(4).toString('hex');
                 console.log('AgentHash=' + hash);
+                console.log('');
+                console.log('==> CycleCount: ' + (++cycleCount) + ' of ' + targetCount);
+                console.log('');
+
+                if (cycleCount < targetCount)
+                {
+                    // Need to do another round of updates
+                    updateState = 0;
+
+                    var delay = Math.floor((Math.random() * delayMaximum) + delayMinimum);
+                    console.log('==> Performing Update in: ' + delay + 'ms');
+                    global._delay = setTimeout(function ()
+                    {
+                        if (process.argv.getParameter('JS') === '1')
+                        {
+                            // Recovery Core Update Path
+                            switch (updateState)
+                            {
+                                case 0:
+                                    console.log('Pushing Recovery Core');
+                                    updateState = 1;
+                                    var b = Buffer.alloc(recoveryCore.length + 48 + 4 + 4);
+                                    b.writeUInt16BE(MeshCommand_CoreModule);
+                                    b.writeUInt16BE(1, 2);
+                                    recoveryCore.copy(b, 56);
+                                    require('SHA384Stream').create().syncHash(b.slice(52)).copy(b, 4);
+                                    this.write(b);
+                                    break;
+                                case 1:
+                                    updateState = 2;
+                                    var b = Buffer.alloc(4);
+                                    b.writeUInt16BE(MeshCommand_CoreOk);
+                                    b.writeUInt16BE(1, 2);
+                                    this.write(b);
+
+                                    this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(process.execPath).toString('hex'), sessionid: 'none' });
+
+                                    // this.console('eval "sendConsoleText(\'this is testing\');"');
+                                    break;
+                                default:
+                                    console.log('Agent Update State: ' + updateState);
+                                    break;
+                            }
+                        }
+                        else
+                        {
+                            // Native Update Path
+                            switch(updateState)
+                            {
+                                case 0:
+                                    updateState = 1;
+                                    agentBinaryFD = require('fs').openSync(process.execPath, 'rb');
+                                    agentBinary_Size = require('fs').statSync(process.execPath).size;
+                                    process.stdout.write('Sending update to Agent... [0%]');
+
+                                    var b = Buffer.alloc(4);
+                                    b.writeUInt16BE(MeshCommand_AgentUpdate);
+                                    b.writeUInt16BE(1, 2);
+                                    this.write(b);
+
+                                    b = Buffer.alloc(4100);
+                                    b.writeUInt16BE(MeshCommand_AgentUpdateBlock);
+                                    b.writeUInt16BE(1, 2);              
+                                    agentBinary_BytesSent = require('fs').readSync(agentBinaryFD, b, 4, 4096, -1);
+                                    this.write(b);
+                                    break;
+                            }
+                        }
+
+                    }.bind(this), delay);
+                }
+
                 break;
             case MeshCommand_CoreModuleHash:
                 var hash = buffer.slice(4).toString('hex');
@@ -289,53 +366,19 @@ server.on('upgrade', function (msg, sck, head)
                 {
                     switch (updateState)
                     {
-                        case 0:
-                            console.log('Pushing Recovery Core');
-                            updateState = 1;
-                            var b = Buffer.alloc(recoveryCore.length + 48 + 4 + 4);
-                            b.writeUInt16BE(MeshCommand_CoreModule);
-                            b.writeUInt16BE(1, 2);
-                            recoveryCore.copy(b, 56);
-                            require('SHA384Stream').create().syncHash(b.slice(52)).copy(b, 4);
-                            this.write(b);
-                            break;
                         case 1:
                             updateState = 2;
                             var b = Buffer.alloc(4);
                             b.writeUInt16BE(MeshCommand_CoreOk);
                             b.writeUInt16BE(1, 2);
                             this.write(b);
-
                             this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(process.execPath).toString('hex'), sessionid: 'none' });
-
-                           // this.console('eval "sendConsoleText(\'this is testing\');"');
                             break;
                         default:
                             console.log('Agent Update State: ' + updateState);
                             break;
                     }
                     break;
-                }
-
-                switch(updateState)
-                {
-                    case 0:
-                        updateState = 1;
-                        agentBinaryFD = require('fs').openSync(process.execPath, 'rb');
-                        agentBinary_Size = require('fs').statSync(process.execPath).size;
-                        process.stdout.write('Sending update to Agent... [0%]');
-
-                        var b = Buffer.alloc(4);
-                        b.writeUInt16BE(MeshCommand_AgentUpdate);
-                        b.writeUInt16BE(1, 2);
-                        this.write(b);
-
-                        b = Buffer.alloc(4100);
-                        b.writeUInt16BE(MeshCommand_AgentUpdateBlock);
-                        b.writeUInt16BE(1, 2);              
-                        agentBinary_BytesSent = require('fs').readSync(agentBinaryFD, b, 4, 4096, -1);
-                        this.write(b);
-                        break;
                 }
                 break;
             case MeshCommand_AgentUpdateBlock:
@@ -377,7 +420,9 @@ server.on('upgrade', function (msg, sck, head)
                 console.log('Agent reports successfully downloaded update');
                 break;
             case 'coreinfo':
+                console.log('');
                 console.log('Agent is running core: ' + j.value);
+                console.log('');
                 break;
             case 'msg':
                 if (j.type == 'console')
@@ -510,6 +555,34 @@ function getPID()
     return (ret);
 }
 
+
+if (process.argv.getParameter('CycleCount') != null)
+{
+    try
+    {
+        targetCount = parseInt(process.argv.getParameter('CycleCount'));
+    }
+    catch(e)
+    {}
+}
+if (process.argv.getParameter('MinimumDelay') != null)
+{
+    try
+    {
+        delayMinimum = parseInt(process.argv.getParameter('MinimumDelay'));
+    }
+    catch (e)
+    { }
+}
+if (process.argv.getParameter('MaximumDelay') != null)
+{
+    try
+    {
+        delayMaximum = parseInt(process.argv.getParameter('MaximumDelay'));
+    }
+    catch (e)
+    { }
+}
 
 if (process.argv.getParameter('NoInstall') == null)
 {

@@ -382,7 +382,7 @@ function lin_xclip_copy(txt)
     ret.child.promise = ret;
     ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
     ret.child.stdout.on('data', function (c) { console.log(c.toString()); });
-    ret.child._cleanup = function _cleanup(p)
+    ret.child._helper = function _helper(p)
     {
         var ch = require('child_process').execFile('/bin/sh', ['sh']);
         ch.stdout.str = ''; ch.stdout.on('data', function (c) { this.str += c.toString(); });
@@ -412,8 +412,20 @@ function lin_xclip_copy(txt)
         ch.waitExit();
         if (ch.stdout.str != '')
         {
-            process.kill(parseInt(ch.stdout.str), 'SIGKILL');
+            try
+            {
+                return (parseInt(ch.stdout.str.trim()));
+            }
+            catch (x)
+            {
+                return (-1);
+            }
         }
+        return (-1);
+    };
+    ret.child._cleanup = function _cleanup(p)
+    {
+        process.kill(this._xclip_PID, 'SIGKILL');
         delete xclipTable[p._hashCode()];
     };
     ret.child.on('exit', function ()
@@ -435,7 +447,7 @@ function lin_xclip_copy(txt)
             this._cleanup(this.promise);
         }
     });
-
+    ret.child._xclip_PID = ret.child._helper(ret);
     return (ret);
 }
 
