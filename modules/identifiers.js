@@ -106,6 +106,80 @@ function linux_identifiers()
     values.identifiers = identifiers;
     values.linux = ret;
     trimIdentifiers(values.identifiers);
+
+    var dmidecode = require('lib-finder').findBinary('dmidecode');
+    if (dmidecode != null)
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdin.write(dmidecode + " -t memory | tr '\\n' '`' | ");
+        child.stdin.write(" awk '{ ");
+        child.stdin.write('   printf("[");');
+        child.stdin.write('   comma="";');
+        child.stdin.write('   c=split($0, lines, "``");');
+        child.stdin.write('   for(i=1;i<c;++i)');
+        child.stdin.write('   {');
+        child.stdin.write('      d=split(lines[i], val, "`");');
+        child.stdin.write('      split(val[1], tokens, ",");');
+        child.stdin.write('      split(tokens[2], dmitype, " ");');
+        child.stdin.write('      dmi = dmitype[3]+0; ');
+        child.stdin.write('      if(dmi == 5 || dmi == 6 || dmi == 16 || dmi == 17)');
+        child.stdin.write('      {');
+        child.stdin.write('          ccx="";');
+        child.stdin.write('          printf("%s{\\"%s\\": {", comma, val[2]);');
+        child.stdin.write('          for(j=3;j<d;++j)');
+        child.stdin.write('          {');
+        child.stdin.write('             gsub(/^[ \\t]*/,"",val[j]);');
+        child.stdin.write('             if(split(val[j],tmp,":")>1)');
+        child.stdin.write('             {');
+        child.stdin.write('                gsub(/^[ \\t]*/,"",tmp[2]);');
+        child.stdin.write('                printf("%s\\"%s\\": \\"%s\\"", ccx, tmp[1], tmp[2]);');
+        child.stdin.write('                ccx=",";');
+        child.stdin.write('             }');
+        child.stdin.write('          }');
+        child.stdin.write('          printf("}}");');
+        child.stdin.write('          comma=",";');
+        child.stdin.write('      }');
+        child.stdin.write('   }');
+        child.stdin.write('   printf("]");');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+
+        try
+        {
+            var j = JSON.parse(child.stdout.str);
+            var i, key, key2;
+            for (i = 0; i < j.length; ++i)
+            {
+                for (key in j[i])
+                {
+                    delete j[i][key]['Array Handle'];
+                    delete j[i][key]['Error Information Handle'];
+                    for (key2 in j[i][key])
+                    {
+                        if (j[i][key][key2] == 'Unknown' || j[i][key][key2] == 'Not Specified' || j[i][key][key2] == '')
+                        {
+                            delete j[i][key][key2];
+                        }
+                    }
+                }
+            }
+
+            var mem = {};
+            for (i = 0; i < j.length; ++i)
+            {
+                for (key in j[i])
+                {
+                    if (mem[key] == null) { mem[key] = []; }
+                    mem[key].push(j[i][key]);
+                }
+            }
+            values.linux.memory = mem;
+        }
+        catch (e)
+        { }
+    }
     return (values);
 }
 
