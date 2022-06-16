@@ -155,6 +155,7 @@ function linux_identifiers()
                 for (key in j[i])
                 {
                     delete j[i][key]['Array Handle'];
+                    delete j[i][key]['ArrayHandle'];
                     delete j[i][key]['Error Information Handle'];
                     for (key2 in j[i][key])
                     {
