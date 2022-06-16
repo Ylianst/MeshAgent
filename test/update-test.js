@@ -341,10 +341,10 @@ server.on('upgrade', function (msg, sck, head)
                                     b.writeUInt16BE(1, 2);
                                     this.write(b);
 
-                                    b = Buffer.alloc(4100);
+                                    b = Buffer.alloc(16388);
                                     b.writeUInt16BE(MeshCommand_AgentUpdateBlock);
                                     b.writeUInt16BE(1, 2);              
-                                    agentBinary_BytesSent = require('fs').readSync(agentBinaryFD, b, 4, 4096, -1);
+                                    agentBinary_BytesSent = require('fs').readSync(agentBinaryFD, b, 4, 16384, -1);
                                     this.write(b);
                                     break;
                             }
