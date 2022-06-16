@@ -134,6 +134,7 @@ function linux_identifiers()
         child.stdin.write('             if(split(val[j],tmp,":")>1)');
         child.stdin.write('             {');
         child.stdin.write('                gsub(/^[ \\t]*/,"",tmp[2]);');
+        child.stdin.write('                gsub(/ /,"",tmp[1]);');
         child.stdin.write('                printf("%s\\"%s\\": \\"%s\\"", ccx, tmp[1], tmp[2]);');
         child.stdin.write('                ccx=",";');
         child.stdin.write('             }');
@@ -154,9 +155,7 @@ function linux_identifiers()
             {
                 for (key in j[i])
                 {
-                    delete j[i][key]['Array Handle'];
                     delete j[i][key]['ArrayHandle'];
-                    delete j[i][key]['Error Information Handle'];
                     delete j[i][key]['ErrorInformationHandle'];
                     for (key2 in j[i][key])
                     {
