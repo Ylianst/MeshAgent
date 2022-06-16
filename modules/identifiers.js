@@ -157,6 +157,7 @@ function linux_identifiers()
                     delete j[i][key]['Array Handle'];
                     delete j[i][key]['ArrayHandle'];
                     delete j[i][key]['Error Information Handle'];
+                    delete j[i][key]['ErrorInformationHandle'];
                     for (key2 in j[i][key])
                     {
                         if (j[i][key][key2] == 'Unknown' || j[i][key][key2] == 'Not Specified' || j[i][key][key2] == '')
