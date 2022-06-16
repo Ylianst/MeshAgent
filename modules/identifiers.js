@@ -118,7 +118,7 @@ function linux_identifiers()
         child.stdin.write('   printf("[");');
         child.stdin.write('   comma="";');
         child.stdin.write('   c=split($0, lines, "``");');
-        child.stdin.write('   for(i=1;i<c;++i)');
+        child.stdin.write('   for(i=1;i<=c;++i)');
         child.stdin.write('   {');
         child.stdin.write('      d=split(lines[i], val, "`");');
         child.stdin.write('      split(val[1], tokens, ",");');
@@ -130,10 +130,10 @@ function linux_identifiers()
         child.stdin.write('          printf("%s{\\"%s\\": {", comma, val[2]);');
         child.stdin.write('          for(j=3;j<d;++j)');
         child.stdin.write('          {');
-        child.stdin.write('             gsub(/^[ \\t]*/,"",val[j]);');
+        child.stdin.write('             sub(/^[ \\t]*/,"",val[j]);');
         child.stdin.write('             if(split(val[j],tmp,":")>1)');
         child.stdin.write('             {');
-        child.stdin.write('                gsub(/^[ \\t]*/,"",tmp[2]);');
+        child.stdin.write('                sub(/^[ \\t]*/,"",tmp[2]);');
         child.stdin.write('                gsub(/ /,"",tmp[1]);');
         child.stdin.write('                printf("%s\\"%s\\": \\"%s\\"", ccx, tmp[1], tmp[2]);');
         child.stdin.write('                ccx=",";');
@@ -181,6 +181,77 @@ function linux_identifiers()
         catch (e)
         { }
     }
+
+    var usbdevices = require('lib-finder').findBinary('usb-devices');
+    if (usbdevices != null)
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdin.write(usbdevices + " | tr '\\n' '`' | ");
+        child.stdin.write(" awk '");
+        child.stdin.write('{');
+        child.stdin.write('   comma="";');
+        child.stdin.write('   printf("[");');
+        child.stdin.write('   len=split($0, group, "``");');
+        child.stdin.write('   for(i=1;i<=len;++i)');
+        child.stdin.write('   {');
+        child.stdin.write('      comma2="";');
+        child.stdin.write('      xlen=split(group[i], line, "`");');
+        child.stdin.write('      scount=0;');
+        child.stdin.write('      for(x=1;x<xlen;++x)');
+        child.stdin.write('      {');
+        child.stdin.write('         if(line[x] ~ "^S:")');
+        child.stdin.write('         {');
+        child.stdin.write('            ++scount;');
+        child.stdin.write('         }');
+        child.stdin.write('      }');
+        child.stdin.write('      if(scount>0)');
+        child.stdin.write('      {');
+        child.stdin.write('         printf("%s{", comma); comma=",";');
+        child.stdin.write('         for(x=1;x<xlen;++x)');
+        child.stdin.write('         {');
+        child.stdin.write('            if(line[x] ~ "^T:")');
+        child.stdin.write('            {');
+        child.stdin.write('               comma3="";');
+        child.stdin.write('               printf("%s\\"hardware\\": {", comma2); comma2=",";');
+        child.stdin.write('               sub(/^T:[ \\t]*/, "", line[x]);');
+        child.stdin.write('               gsub(/= */, "=", line[x]);');
+        child.stdin.write('               blen=split(line[x], tokens, " ");');
+        child.stdin.write('               for(y=1;y<blen;++y)');
+        child.stdin.write('               {');
+        child.stdin.write('                  match(tokens[y],/=/);');
+        child.stdin.write('                  h=substr(tokens[y],1,RSTART-1);');
+        child.stdin.write('                  v=substr(tokens[y],RSTART+1);');
+        child.stdin.write('                  sub(/#/, "", h);');
+        child.stdin.write('                  printf("%s\\"%s\\": \\"%s\\"", comma3, h, v); comma3=",";');
+        child.stdin.write('               }');
+        child.stdin.write('               printf("}");');
+        child.stdin.write('            }');
+        child.stdin.write('            if(line[x] ~ "^S:")');
+        child.stdin.write('            {');
+        child.stdin.write('               sub(/^S:[ \\t]*/, "", line[x]);');
+        child.stdin.write('               match(line[x], /=/);');
+        child.stdin.write('               h=substr(line[x],1,RSTART-1);');
+        child.stdin.write('               v=substr(line[x],RSTART+1);');
+        child.stdin.write('               printf("%s\\"%s\\": \\"%s\\"", comma2, h,v); comma2=",";');
+        child.stdin.write('            }');
+        child.stdin.write('         }');
+        child.stdin.write('         printf("}");');
+        child.stdin.write('      }');
+        child.stdin.write('   }');
+        child.stdin.write('   printf("]");');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+
+        try
+        {
+            values.linux.usb = JSON.parse(child.stdout.str);
+        }
+        catch(x)
+        {}
+    }
+
     return (values);
 }
 
