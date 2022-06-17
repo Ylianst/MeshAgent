@@ -252,6 +252,49 @@ function linux_identifiers()
         {}
     }
 
+    var pcidevices = require('lib-finder').findBinary('lspci');
+    if (pcidevices != null)
+    {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdin.write(pcidevices + " -m | tr '\\n' '`' | ");
+        child.stdin.write(" awk '");
+        child.stdin.write('{');
+        child.stdin.write('   printf("[");');
+        child.stdin.write('   comma="";');
+        child.stdin.write('   alen=split($0, lines, "`");');
+        child.stdin.write('   for(a=1;a<alen;++a)');
+        child.stdin.write('   {');
+        child.stdin.write('      match(lines[a], / /);');
+        child.stdin.write('      blen=split(lines[a], meta, "\\"");');
+        child.stdin.write('      bus=substr(lines[a], 1, RSTART);');
+        child.stdin.write('      gsub(/ /, "", bus);');
+        child.stdin.write('      printf("%s{\\"bus\\": \\"%s\\"", comma, bus); comma=",";');
+        child.stdin.write('      printf(", \\"device\\": \\"%s\\"", meta[2]);');
+        child.stdin.write('      printf(", \\"manufacturer\\": \\"%s\\"", meta[4]);');
+        child.stdin.write('      printf(", \\"description\\": \\"%s\\"", meta[6]);');
+        child.stdin.write('      if(meta[8] != "")');
+        child.stdin.write('      {');
+        child.stdin.write('         printf(", \\"subsystem\\": {");');
+        child.stdin.write('         printf("\\"manufacturer\\": \\"%s\\"", meta[8]);');
+        child.stdin.write('         printf(", \\"description\\": \\"%s\\"", meta[10]);');
+        child.stdin.write('         printf("}");');
+        child.stdin.write('      }');
+        child.stdin.write('      printf("}");');
+        child.stdin.write('   }');
+        child.stdin.write('   printf("]");');
+        child.stdin.write("}'\nexit\n");
+        child.waitExit();
+
+        try
+        {
+            values.linux.pci = JSON.parse(child.stdout.str);
+        }
+        catch (x)
+        { }
+    }
+
     return (values);
 }
 
