@@ -39,7 +39,10 @@ process.stdin.on('data', function (c)
             process.stdout.write('\r');
             for (i = 0; i < this.chars.length; ++i)
             {
-                process.stdout.write(' '); // Whenever BS is pressed, we need to clear the entire line, so we can redraw the '*' characters
+                process.stdout.write(' ');  // Whenever BS is pressed, we need to clear the entire line, so we can redraw the '*' characters
+                // The order is important. We must clear the entire line first, because when we redraw the '*', the cursor will
+                // remain at that location, so if another key is pressed, the next '*' will be drawn there... If we only clear the removed '*',
+                // the cursor will be left in the wrong position for when the next key is pressed.
             }
             process.stdout.write('\r');
             if (this.chars.length > 0) { this.chars = this.chars.substring(0,this.chars.length-1); } // On BS press, we will remove the last character we saved
