@@ -32,6 +32,14 @@ limitations under the License.
 #include "../microstack/ILibCrypto.h"
 #include "../microstack/ILibRemoteLogging.h"
 
+#ifdef _POSIX
+	#ifdef __APPLE__
+		#include <util.h>
+	#else
+		#include <termios.h>
+	#endif
+#endif
+
 
 #define ILibDuktape_Timer_Ptrs					"\xFF_DuktapeTimer_PTRS"
 #define ILibDuktape_Queue_Ptr					"\xFF_Queue"
@@ -852,6 +860,102 @@ duk_ret_t ILibDuktape_Polyfills_Console_setInfoMask(duk_context *ctx)
 	ILIBLOGMESSAGEX2_SetMask(duk_require_uint(ctx, 0));
 	return(0);
 }
+duk_ret_t ILibDuktape_Polyfills_Console_canonical_get(duk_context *ctx)
+{
+#if defined(WIN32)
+	DWORD mode = 0;
+	GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode);
+	duk_push_boolean(ctx, (mode & ENABLE_LINE_INPUT) == ENABLE_LINE_INPUT);
+#elif defined(_POSIX)
+	struct termios term;
+	tcgetattr(fileno(stdin), &term);
+	duk_push_boolean(ctx, (term.c_lflag & ICANON) == ICANON);
+#else
+	duk_push_boolean(ctx, 1);
+#endif
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_canonical_set(duk_context *ctx)
+{
+	int val = duk_require_boolean(ctx, 0) ? 1 : 0;
+
+#if defined(WIN32)
+	DWORD mode = 0;
+	GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode);
+	if (val == 0)
+	{
+		mode = mode & 0xFFFFFFFD;
+	}
+	else
+	{
+		mode |= ENABLE_LINE_INPUT;
+	}
+	SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), mode);
+#elif defined(_POSIX)
+	struct termios term;
+	tcgetattr(fileno(stdin), &term);
+
+	if (val == 0)
+	{
+		term.c_lflag &= ~ICANON;
+	}
+	else
+	{
+		term.c_lflag |= ICANON;
+	}
+	tcsetattr(fileno(stdin), 0, &term);
+#else
+	duk_push_boolean(ctx, 1);
+#endif
+	return(0);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_echo_get(duk_context *ctx)
+{
+#if defined(WIN32)
+	DWORD mode = 0;
+	GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode);
+	duk_push_boolean(ctx, (mode & ENABLE_ECHO_INPUT) == ENABLE_ECHO_INPUT);
+#elif defined(_POSIX)
+	struct termios term;
+	tcgetattr(fileno(stdin), &term);
+	duk_push_boolean(ctx, (term.c_lflag & ECHO) == ECHO);
+#else
+	duk_push_boolean(ctx, 1);
+#endif
+	return(1);
+}
+duk_ret_t ILibDuktape_Polyfills_Console_echo_set(duk_context *ctx)
+{
+	int val = duk_require_boolean(ctx, 0) ? 1 : 0;
+
+#if defined(WIN32)
+	DWORD mode = 0;
+	GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode);
+	if (val == 0)
+	{
+		mode = mode & 0xFFFFFFFB;
+	}
+	else
+	{
+		mode |= ENABLE_ECHO_INPUT;
+	}
+	SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), mode);
+#elif defined(_POSIX)
+	struct termios term;
+	tcgetattr(fileno(stdin), &term);
+
+	if (val == 0)
+	{
+		term.c_lflag &= ~ECHO;
+	}
+	else
+	{
+		term.c_lflag |= ECHO;
+	}
+	tcsetattr(fileno(stdin), 0, &term);
+#endif
+	return(0);
+}
 duk_ret_t ILibDuktape_Polyfills_Console_rawLog(duk_context *ctx)
 {
 	char *val = (char*)duk_require_string(ctx, 0);
@@ -892,6 +996,8 @@ void ILibDuktape_Polyfills_Console(duk_context *ctx)
 	ILibDuktape_CreateInstanceMethod(ctx, "setDestination", ILibDuktape_Polyfills_Console_setDestination, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "setInfoLevel", ILibDuktape_Polyfills_Console_setInfoLevel, 1);
 	ILibDuktape_CreateInstanceMethod(ctx, "setInfoMask", ILibDuktape_Polyfills_Console_setInfoMask, 1);
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "echo", ILibDuktape_Polyfills_Console_echo_get, ILibDuktape_Polyfills_Console_echo_set);
+	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "canonical", ILibDuktape_Polyfills_Console_canonical_get, ILibDuktape_Polyfills_Console_canonical_set);
 
 	duk_push_object(ctx);
 	duk_push_int(ctx, ILibDuktape_Console_DestinationFlags_DISABLED); duk_put_prop_string(ctx, -2, "DISABLED");

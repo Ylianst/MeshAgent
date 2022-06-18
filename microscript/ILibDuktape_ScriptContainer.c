@@ -773,6 +773,30 @@ duk_ret_t ILibDuktape_Process_stdin_finalizer(duk_context *ctx)
 	free(data);
 	return(0);
 }
+#ifdef _POSIX
+duk_ret_t ILibDuktape_Process_stdin_readset(duk_context *ctx)
+{
+	ILibDuktape_readableStream *rs; 
+	
+	duk_push_this(ctx);						// [descriptorevents]
+	duk_get_prop_string(ctx, -1, "stdin");	// [descriptorevents][stdin]
+
+	rs = (ILibDuktape_readableStream*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_readableStream_RSPTRS);
+	
+	char buffer[1024];
+	int bufferLen;
+	duk_push_this(ctx);						// [descriptorevents]
+	duk_get_prop_string(ctx, -1, "stdin");	// [descriptorevents][stdin]
+
+	bufferLen = read(0, buffer, sizeof(buffer));
+
+	if (bufferLen > 0)
+	{
+		ILibDuktape_readableStream_WriteData(rs, buffer, bufferLen);
+	}
+	return(0);
+}
+#endif
 duk_ret_t ILibDuktape_Process_stdin_get(duk_context *ctx)
 {
 	duk_push_this(ctx);																// [process]
@@ -794,8 +818,16 @@ duk_ret_t ILibDuktape_Process_stdin_get(duk_context *ctx)
 #ifdef WIN32
 	((ILibDuktape_Process_StdIn_Data*)rs->user)->resumeEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
 	((ILibDuktape_Process_StdIn_Data*)rs->user)->workerThread = ILibSpawnNormalThread(ILibDuktape_Process_stdin_WindowsRunLoop, rs->user);
+#else
+	duk_push_heap_stash(ctx);																	// [stash]
+	duk_eval_string(ctx, "require('DescriptorEvents').addDescriptor(0, { readset: true });");	// [stash][descriptorevents]
+	duk_dup(ctx, -3);
+	duk_put_prop_string(ctx, -2, "stdin");
+	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "readset", ILibDuktape_Process_stdin_readset);
+	duk_put_prop_string(ctx, -2, "FD_STDIN");													// [stash]
+	duk_pop(ctx);																				// ...
 #endif
-	
+
 	ILibDuktape_EventEmitter_AddOnEx(ctx, -1, "~", ILibDuktape_Process_stdin_finalizer);
 	return(1);
 }
