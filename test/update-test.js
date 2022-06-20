@@ -45,6 +45,12 @@ try
 catch(x)
 { }
 
+var updateSource = [process.execPath];
+function getCurrentUpdatePath()
+{
+    return (updateSource[(1+cycleCount) % updateSource.length]);
+}
+
 var Writable = require('stream').Writable;
 const MeshCommand_AuthRequest = 1;              // Server web certificate public key sha384 hash + agent or server nonce
 const MeshCommand_AuthVerify = 2;               // Agent or server signature
@@ -119,8 +125,8 @@ server.on('request', function (imsg, resp)
         accumulator.sent = 0;
 
         process.stdout.write('Pushing Update via HTTPS...[0%]');
-        var update = require('fs').createReadStream(process.execPath, { flags: 'rb' });
-        accumulator.total = require('fs').statSync(process.execPath).size;
+        var update = require('fs').createReadStream(getCurrentUpdatePath(), { flags: 'rb' });
+        accumulator.total = require('fs').statSync(getCurrentUpdatePath()).size;
 
         update.pipe(resp);
         update.pipe(accumulator);
@@ -291,7 +297,7 @@ server.on('upgrade', function (msg, sck, head)
                     updateState = 0;
 
                     var delay = Math.floor((Math.random() * delayMaximum) + delayMinimum);
-                    console.log('==> Performing Update in: ' + delay + 'ms');
+                    console.log('==> Performing Update to: (' + getCurrentUpdatePath() + ') ' + '[' + getSHA384FileHash(getCurrentUpdatePath()).toString('hex').substring(0,8) + '] in: ' + delay + 'ms');
                     global._delay = setTimeout(function ()
                     {
                         if (process.argv.getParameter('JS') === '1')
@@ -316,9 +322,7 @@ server.on('upgrade', function (msg, sck, head)
                                     b.writeUInt16BE(1, 2);
                                     this.write(b);
 
-                                    this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(process.execPath).toString('hex'), sessionid: 'none' });
-
-                                    // this.console('eval "sendConsoleText(\'this is testing\');"');
+                                    this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(getCurrentUpdatePath()).toString('hex'), sessionid: 'none' });
                                     break;
                                 default:
                                     console.log('Agent Update State: ' + updateState);
@@ -332,9 +336,9 @@ server.on('upgrade', function (msg, sck, head)
                             {
                                 case 0:
                                     updateState = 1;
-                                    agentBinaryFD = require('fs').openSync(process.execPath, 'rb');
-                                    agentBinary_Size = require('fs').statSync(process.execPath).size;
-                                    process.stdout.write('Sending update to Agent... [0%]');
+                                    agentBinaryFD = require('fs').openSync(getCurrentUpdatePath(), 'rb');
+                                    agentBinary_Size = require('fs').statSync(getCurrentUpdatePath()).size;
+                                    process.stdout.write('Sending update to Agent (' + getCurrentUpdatePath() + ')... [0%]');
 
                                     var b = Buffer.alloc(4);
                                     b.writeUInt16BE(MeshCommand_AgentUpdate);
@@ -372,7 +376,7 @@ server.on('upgrade', function (msg, sck, head)
                             b.writeUInt16BE(MeshCommand_CoreOk);
                             b.writeUInt16BE(1, 2);
                             this.write(b);
-                            this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(process.execPath).toString('hex'), sessionid: 'none' });
+                            this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(getCurrentUpdatePath()).toString('hex'), sessionid: 'none' });
                             break;
                         default:
                             console.log('Agent Update State: ' + updateState);
@@ -387,7 +391,7 @@ server.on('upgrade', function (msg, sck, head)
                     var pct = Math.floor((agentBinary_BytesSent / agentBinary_Size) * 100);
                     if (pct % 5 == 0)
                     {
-                        process.stdout.write('\rSending update to Agent... [' + pct + '%]');
+                        process.stdout.write('\rSending update to Agent (' + getCurrentUpdatePath() + ')... [' + pct + '%]');
                     }
 
                     var b = Buffer.alloc(4100);
@@ -399,11 +403,11 @@ server.on('upgrade', function (msg, sck, head)
                 }
                 else
                 {
-                    process.stdout.write('\rSending update to Agent... [100%]\n');
+                    process.stdout.write('\rSending update to Agent (' + getCurrentUpdatePath() + ')... [100%]\n');
                     var b = Buffer.alloc(52);
                     b.writeUInt16BE(MeshCommand_AgentUpdate);
                     b.writeUInt16BE(1, 2);
-                    getSHA384FileHash(process.execPath).copy(b, 4);
+                    getSHA384FileHash(getCurrentUpdatePath()).copy(b, 4);
                     this.write(b);
                 }
                 break;
@@ -582,6 +586,14 @@ if (process.argv.getParameter('MaximumDelay') != null)
     }
     catch (e)
     { }
+}
+if (process.argv.getParameter('AltBinary') != null)
+{
+    var alt = process.argv.getParameter('AltBinary');
+    if(require('fs').existsSync(alt))
+    {
+        updateSource.push(alt);
+    }
 }
 
 if (process.argv.getParameter('NoInstall') == null)
