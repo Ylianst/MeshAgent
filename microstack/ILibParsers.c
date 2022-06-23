@@ -919,7 +919,8 @@ struct ILibLifeTime
 
 	void *Reserved;
 	char *CurrentTriggeredMetaData;
-
+	
+	void *DeleteList;
 	void *ObjectList;
 	int ObjectCount;
 };
@@ -5218,7 +5219,7 @@ void *ILibQueue_DeQueue(ILibQueue q)
 	void *node;
 
 	node = ILibLinkedList_GetNode_Head((ILibLinkedList)q);
-	if (node!=NULL)
+	if (node!=NULL && ILibMemory_CanaryOK(node))
 	{
 		RetVal = ILibLinkedList_GetDataFromNode(node);
 		ILibLinkedList_Remove(node);
@@ -7880,6 +7881,19 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 	void *EventQueue;
 
 	if (UPnPLifeTime == NULL || UPnPLifeTime->ObjectList == NULL) return;
+
+	////
+	//// Check to see if we are on the Microstack Thread, to see if we can simplify this
+	////
+	//if (ILibIsRunningOnChainThread(UPnPLifeTime->ChainLink.ParentChain) == 0)
+	//{
+	//	// Not on the right thread, so we need to defer processing to the Microstack Thread
+	//	ILibQueue_Lock(NULL);
+
+	//	ILibQueue_UnLock(NULL);
+	//}
+
+
 	EventQueue = ILibQueue_Create();
 	ILibLinkedList_Lock(UPnPLifeTime->ObjectList);
 
@@ -8194,6 +8208,14 @@ void* ILibLinkedList_GetNode_Tail(void *LinkedList)
 */
 void* ILibLinkedList_GetNextNode(void *LinkedList_Node)
 {
+	if (ILibMemory_CanaryOK(LinkedList_Node))
+	{
+		if (((struct ILibLinkedListNode*)LinkedList_Node)->Next == LinkedList_Node)
+		{
+			// There is a circular reference, so we need to break the loop
+			return(NULL);
+		}
+	}
 	return(ILibMemory_CanaryOK(LinkedList_Node) ? ((struct ILibLinkedListNode*)LinkedList_Node)->Next : NULL);
 }
 

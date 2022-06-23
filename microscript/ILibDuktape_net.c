@@ -1898,8 +1898,16 @@ void ILibDuktape_net_PUSH_net(duk_context *ctx, void *chain)
 }
 duk_ret_t ILibDuktape_globalTunnel_end(duk_context *ctx)
 {
-	duk_push_heap_stash(ctx);
-	duk_del_prop_string(ctx, -1, ILibDuktape_GlobalTunnel_Stash);
+	ILibDuktape_globalTunnel_data *data;
+	ILibHashtable tmp;
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_GlobalTunnel_DataPtr);
+	data = (ILibDuktape_globalTunnel_data*)Duktape_GetBuffer(ctx, -1, NULL);
+	tmp = data->exceptionsTable;
+	ILibHashtable_Clear(tmp);
+
+	memset(data, 0, sizeof(ILibDuktape_globalTunnel_data));
+	data->exceptionsTable = tmp;
 	return 0;
 }
 duk_ret_t ILibDuktape_globalTunnel_initialize(duk_context *ctx)

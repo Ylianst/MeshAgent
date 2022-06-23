@@ -125,18 +125,21 @@ void Duktape_RunOnEventLoop_AbortSink(void *chain, void *user)
 void Duktape_RunOnEventLoop_Sink(void *chain, void *user)
 {
 	Duktape_EventLoopDispatchData *tmp = (Duktape_EventLoopDispatchData*)user;
-	if (duk_ctx_is_alive(tmp->ctx) && duk_ctx_is_valid(tmp->nonce, tmp->ctx))
+	if (tmp != NULL)
 	{
-		// duk_context matches the intended context
-		if (tmp->handler != NULL) { tmp->handler(chain, tmp->user); }
+		if (duk_ctx_is_alive(tmp->ctx) && duk_ctx_is_valid(tmp->nonce, tmp->ctx))
+		{
+			// duk_context matches the intended context
+			if (tmp->handler != NULL) { tmp->handler(chain, tmp->user); }
+		}
+		else
+		{
+			// duk_context does not match the intended context
+			Duktape_RunOnEventLoop_AbortSink(chain, user);
+			return;
+		}
+		ILibMemory_Free(tmp);
 	}
-	else
-	{
-		// duk_context does not match the intended context
-		Duktape_RunOnEventLoop_AbortSink(chain, user);
-		return;
-	}
-	ILibMemory_Free(tmp);
 }
 #ifdef WIN32
 void __stdcall Duktape_RunOnEventLoop_SanityCheck(ULONG_PTR u)
