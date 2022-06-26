@@ -2723,7 +2723,10 @@ function serviceManager()
                     {
                         throw ('unknown location for systemd configuration files');
                     }
-                    conf.write('[Unit]\nDescription=' + serviceDescription + '\n');
+                    conf.write('[Unit]\n');
+                    conf.write('Description=' + serviceDescription + '\n');
+                    conf.write('Wants=network-online.target\n');
+                    conf.write('After=network-online.target\n');
                     conf.write('[Service]\n');
                     conf.write('WorkingDirectory=' + options.installPath + '\n');
                     conf.write('ExecStart=' + options.installPath.split(' ').join('\\x20') + options.target.split(' ').join('\\x20') + ' ' + parameters + '\n');
