@@ -917,7 +917,6 @@ struct ILibLifeTime
 	struct LifeTimeMonitorData *LM;
 	long long NextTriggerTick;
 
-	void *Reserved;
 	char *CurrentTriggeredMetaData;
 	
 	void *DeleteList;
@@ -7767,7 +7766,6 @@ char *ILibLifeTime_GetCurrentTriggeredMetadata(void* LifeTimeMonitorObject)
 void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	void *node;
-	int removed;
 	void *EventQueue;
 	long long CurrentTick;
 	struct LifeTimeMonitorData *EVT, *Temp = NULL;
@@ -7776,6 +7774,16 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	UNREFERENCED_PARAMETER( readset );
 	UNREFERENCED_PARAMETER( writeset );
 	UNREFERENCED_PARAMETER( errorset );
+
+	ILibQueue_Lock(LifeTimeMonitor->DeleteList);
+	while(ILibQueue_GetCount(LifeTimeMonitor->DeleteList) > 0)
+	{
+		// This is re-entrant, becuase we are on the microstack thread. 
+		// DeleteList is only locked when called from a different thread.
+		void *d = ILibQueue_DeQueue(LifeTimeMonitor->DeleteList);
+		ILibLifeTime_Remove(LifeTimeMonitorObject, d);																					
+	}
+	ILibQueue_UnLock(LifeTimeMonitor->DeleteList);
 
 
 	//
@@ -7796,11 +7804,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	// This is an optimization. We are going to create the root of this linked list on the stack instead of the heap.
 	EventQueue = ILibMemory_AllocateA(sizeof(ILibLinkedListNode_Root));
 
-	ILibLinkedList_Lock(LifeTimeMonitor->Reserved);
 	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
-
-	while (ILibQueue_DeQueue(LifeTimeMonitor->Reserved) != NULL);
-
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
 	while (node != NULL)
 	{
@@ -7820,9 +7824,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 			node = ILibLinkedList_GetNextNode(node);
 		}
 	}
-
 	ILibLinkedList_UnLock(LifeTimeMonitor->ObjectList);
-	ILibLinkedList_UnLock(LifeTimeMonitor->Reserved);
 
 	//
 	// Iterate through all the triggers that we need to fire
@@ -7830,30 +7832,12 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	node = ILibQueue_DeQueue(EventQueue);
 	while (node != NULL && ILibMemory_CanaryOK(node))
 	{
-		//
-		// Check to see if the item to be fired, is in the remove list.
-		// If it is, that means we shouldn't fire this item anymore.
-		//
-		ILibLinkedList_Lock(LifeTimeMonitor->Reserved);
-		removed = ILibLinkedList_Remove_ByData(LifeTimeMonitor->Reserved,((struct LifeTimeMonitorData*)node)->data);
-		ILibLinkedList_UnLock(LifeTimeMonitor->Reserved);
-
+		// Trigger the callback
 		EVT = (struct LifeTimeMonitorData*)node;
-		if (removed == 0)
-		{
-			// Trigger the callback
-			LifeTimeMonitor->CurrentTriggeredMetaData = EVT->metadata;
-			EVT->CallbackPtr(EVT->data);
-			LifeTimeMonitor->CurrentTriggeredMetaData = NULL;
-		}
-		else
-		{
-			//
-			// This item was flagged for removal, so intead of triggering it,
-			// call the destroy pointer if it exists
-			//
-			if (EVT->DestroyPtr != NULL) { EVT->DestroyPtr(EVT->data); }
-		}
+		LifeTimeMonitor->CurrentTriggeredMetaData = EVT->metadata;
+		EVT->CallbackPtr(EVT->data);
+		LifeTimeMonitor->CurrentTriggeredMetaData = NULL;
+
 		ILibMemory_Free(EVT->metadata);
 		ILibMemory_Free(EVT);
 		node = ILibQueue_DeQueue(EventQueue);
@@ -7867,31 +7851,56 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	}
 }
 
+
+
 /*! \fn ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 \brief Removes a timed callback from an \a ILibLifeTime module
 \param LifeTimeToken The \a ILibLifeTime object to remove the callback from
 \param data The data object to remove
+\return 0 if remove was not deferred, 1 if it was deferred
 */
-void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
+int ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 {
 	void *node;
-	int removed = 0;
 	struct LifeTimeMonitorData *evt;
 	struct ILibLifeTime *UPnPLifeTime = (struct ILibLifeTime*)LifeTimeToken;
 	void *EventQueue;
 
-	if (UPnPLifeTime == NULL || UPnPLifeTime->ObjectList == NULL) return;
+	if (UPnPLifeTime == NULL || UPnPLifeTime->ObjectList == NULL) return(0);
 
-	////
-	//// Check to see if we are on the Microstack Thread, to see if we can simplify this
-	////
-	//if (ILibIsRunningOnChainThread(UPnPLifeTime->ChainLink.ParentChain) == 0)
-	//{
-	//	// Not on the right thread, so we need to defer processing to the Microstack Thread
-	//	ILibQueue_Lock(NULL);
+	//
+	// Check to see if we are on the Microstack Thread, to see if we can simplify this
+	//
+	if (ILibIsRunningOnChainThread(UPnPLifeTime->ChainLink.ParentChain) == 0)
+	{
+		int found = 0;
 
-	//	ILibQueue_UnLock(NULL);
-	//}
+		ILibLinkedList_Lock(UPnPLifeTime->ObjectList);
+		node = ILibLinkedList_GetNode_Head(UPnPLifeTime->ObjectList);
+		if (node != NULL)
+		{
+			while (node != NULL)
+			{
+				evt = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
+				if (evt != NULL && ILibMemory_CanaryOK(evt) && evt->data == data)
+				{
+					found = 1;
+				}
+				node = ILibLinkedList_GetNextNode(node);
+			}
+		}
+		ILibLinkedList_UnLock(UPnPLifeTime->ObjectList);
+
+		if (found != 0)
+		{
+			// Not on the right thread, so we need to defer processing to the Microstack Thread
+			ILibQueue_Lock(UPnPLifeTime->DeleteList);
+			ILibQueue_EnQueue(UPnPLifeTime->DeleteList, data); // It's ok if *data gets deleted before we process it, becuase we aren't dereferencing it, just removing references to it
+			ILibQueue_UnLock(UPnPLifeTime->DeleteList);
+			ILibForceUnBlockChain(UPnPLifeTime->ChainLink.ParentChain);
+			return(1);
+		}
+	}
 
 
 	EventQueue = ILibQueue_Create();
@@ -7907,22 +7916,12 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 			{
 				ILibQueue_EnQueue(EventQueue, evt);
 				node = ILibLinkedList_Remove(node);
-				removed = 1;
 			}
 			else
 			{
 				node = ILibLinkedList_GetNextNode(node);
 			}
 		}
-	}
-	if (removed == 0)
-	{
-		//
-		// The item wasn't in the list, so maybe it is pending to be triggered
-		//
-		ILibLinkedList_Lock(UPnPLifeTime->Reserved);
-		ILibLinkedList_AddTail(UPnPLifeTime->Reserved, data);
-		ILibLinkedList_UnLock(UPnPLifeTime->Reserved);
 	}
 	ILibLinkedList_UnLock(UPnPLifeTime->ObjectList);
 
@@ -7938,6 +7937,7 @@ void ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 		evt = (struct LifeTimeMonitorData*)ILibQueue_DeQueue(EventQueue);
 	}
 	ILibQueue_Destroy(EventQueue);
+	return(0);
 }
 
 /*! \fn ILibLifeTime_Flush(void *LifeTimeToken)
@@ -7969,7 +7969,6 @@ void ILibLifeTime_Destroy(void *LifeTimeToken)
 	struct ILibLifeTime *UPnPLifeTime = (struct ILibLifeTime*)LifeTimeToken;
 	ILibLifeTime_Flush(LifeTimeToken);
 	ILibLinkedList_Destroy(UPnPLifeTime->ObjectList);
-	ILibQueue_Destroy(UPnPLifeTime->Reserved);
 	UPnPLifeTime->ObjectCount = 0;
 	UPnPLifeTime->ObjectList = NULL;
 }
@@ -7992,7 +7991,7 @@ void *ILibCreateLifeTime(void *Chain)
 	RetVal->ChainLink.PreSelectHandler = &ILibLifeTime_Check;
 	RetVal->ChainLink.DestroyHandler = &ILibLifeTime_Destroy;
 	RetVal->ChainLink.ParentChain = Chain;
-	RetVal->Reserved = ILibQueue_Create();
+	RetVal->DeleteList = ILibQueue_Create();
 
 	ILibAddToChain(Chain, RetVal);
 	return((void*)RetVal);

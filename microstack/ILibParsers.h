@@ -1399,7 +1399,7 @@ int ILibIsRunningOnChainThread(void* chain);
 	//
 	// Removes all event triggers that contain the specified data object.
 	//
-	void ILibLifeTime_Remove(void *LifeTimeToken, void *data);
+	int ILibLifeTime_Remove(void *LifeTimeToken, void *data);
 
 	//
 	// Return the expiration time for an event
