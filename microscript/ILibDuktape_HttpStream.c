@@ -786,7 +786,6 @@ duk_ret_t ILibDuktape_HttpStream_http_OnSocketClosed(duk_context *ctx)
 	if (duk_has_prop_string(ctx, -1, ILibDuktape_Socket2HttpStream))
 	{
 		duk_get_prop_string(ctx, -1, ILibDuktape_Socket2HttpStream);
-		printf(" REMOVING reference to HttpStream: %s\n", Duktape_GetStringPropertyValue(ctx, -1, ILibDuktape_EventEmitter_FinalizerDebugMessage, ""));
 		duk_pop(ctx);
 		duk_del_prop_string(ctx, -1, ILibDuktape_Socket2HttpStream);
 	}
