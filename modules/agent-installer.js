@@ -216,11 +216,25 @@ function installService(params)
     options.description = params.getParameter('description', options.name + ' background service'); params.deleteParameter('description');
 
     if (process.platform == 'win32') { options.companyName = ''; }
+    if (global.gOptions != null)
+    {
+        if(Array.isArray(global.gOptions.files))
+        {
+            options.files = global.gOptions.files;
+        }
+        if(global.gOptions.binary != null)
+        {
+            options.servicePath = global.gOptions.binary;
+        }
+    }
 
     // If a .proxy file was found, we'll include it in the list of files to be copied when installing the agent
-    if (require('fs').existsSync(proxyFile)) { options.files = [{ source: proxyFile, newName: options.target + '.proxy' }]; } 
+    if (require('fs').existsSync(proxyFile))
+    {
+        if (options.files == null) { options.files = []; }
+        options.files.push({ source: proxyFile, newName: options.target + '.proxy' });
+    }
     
-
     // if '--copy-msh' is specified, we will try to copy the .msh configuration file found in the current working directory
     var i;
     if ((i = params.indexOf('--copy-msh="1"')) >= 0)
@@ -267,6 +281,8 @@ function installService(params)
         options.companyName = options.parameters.getParameterValue(i);
         options.parameters.splice(i, 1);
     }
+
+    if (global.gOptions != null && global.gOptions.noParams === true) { options.parameters = []; }
 
     try
     {
@@ -657,11 +673,19 @@ function fullUninstall(jsonString)
     serviceExists(loc, parms);
 }
 
-// Entry point for -fullinstall
-function fullInstall(jsonString)
+// Entry point for -fullinstall, using JSON string
+function fullInstall(jsonString, gOptions)
 {
-    // Perform some checks on the specified parameters
     var parms = JSON.parse(jsonString);
+    fullInstallEx(parms, gOptions);
+}
+
+// Entry point for -fullinstall, using JSON object
+function fullInstallEx(parms, gOptions)
+{
+    if (gOptions != null) { global.gOptions = gOptions; }
+
+    // Perform some checks on the specified parameters
     checkParameters(parms);
 
     var loc = null;
@@ -708,6 +732,7 @@ function fullInstall(jsonString)
 
 module.exports =
     {
+        fullInstallEx: fullInstallEx,
         fullInstall: fullInstall,
         fullUninstall: fullUninstall
     };

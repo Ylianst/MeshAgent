@@ -15,6 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+_MSH = function _MSH() { return ({}); };
 try
 {
     Object.defineProperty(Array.prototype, 'getParameterEx',
@@ -173,7 +174,6 @@ server.on('request', function (imsg, resp)
                 }
             });
         accumulator.sent = 0;
-
         process.stdout.write('Pushing Update via HTTPS...[0%]');
         var update = require('fs').createReadStream(getCurrentUpdatePath(), { flags: 'rb' });
         accumulator.total = require('fs').statSync(getCurrentUpdatePath()).size;
@@ -674,16 +674,25 @@ if (process.argv.getParameter('AltBinary') != null)
         updateSource.push(alt);
     }
 }
-
 if (process.argv.getParameter('NoInstall') == null)
 {
     //
     // Start by installing agent as service
     //
-    var params = ['--__skipExit=1', '--logUpdate=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
-    var paramsString = JSON.stringify(params);
-
-    require('agent-installer').fullInstall(paramsString);
+    var params = ['--__skipExit=1', '--logUpdate=1', '--meshServiceName=TestAgent'];
+    var options =
+        {
+            files:
+                [
+                    {
+                        newName: (process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh'),
+                        _buffer: 'logUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:9250/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
+                    }
+                ],
+            binary: updateSource.length > 1 ? updateSource[1] : null,
+            noParams: true
+        };
+    require('agent-installer').fullInstallEx(params, options);
     console.setDestination(console.Destinations.STDOUT);
 }
 console.log('\nWaiting for Agent Connection...');
