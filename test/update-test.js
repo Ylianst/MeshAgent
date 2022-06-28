@@ -30,6 +30,11 @@ try
                         if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
                         return (ret);
                     }
+                    else if(this[i] == name)
+                    {
+                        ret = this[i];
+                        return (ret);
+                    }
                 }
                 return (defaultValue);
             }
@@ -80,6 +85,28 @@ var cycleCount = -1;
 var targetCount = 1;
 var delayMinimum = 0;
 var delayMaximum = 100;
+
+// Check Permissions... Need Root/Elevated Permissions
+if (!require('user-sessions').isRoot())
+{
+    console.log('update-test.js requires elevated permissions to run.');
+    process.exit();
+}
+if (process.argv.getParameter('help') != null)
+{
+    console.log("\nupdate-test is a Self-Contained test harnass for testing the MeshAgent's Self-Update functionality");
+    console.log('\n   Available options:');
+    console.log('   --CycleCount=         The number of update cycles to test. --CycleCount=3 will update the agent 3 times');
+    console.log('   --MinimumDelay=       The minimum number of milliseconds to wait between update cycles. Default = 0');
+    console.log('   --MaximumDelay=       The maximum number of milliseconds to wait between update cycles. Default = 100');
+    console.log('                         update-test will select a random interval between MinimumDeay and MaximumDelay.');
+    console.log('   --AltBinary=          Path to alternate mesh agent binary. update-test will alternate between the main');
+    console.log('                         binary, and the specified binary, up until CycleCount cycles are completed.');
+    console.log('   --JS                  If specified, update-test will utilize the recoverycore to perform the update');
+    console.log('                         rather than the native update mechanism.');
+    console.log('');
+    process.exit();
+}
 
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
@@ -303,7 +330,7 @@ server.on('upgrade', function (msg, sck, head)
                     console.log('==> Performing Update to: (' + getCurrentUpdatePath() + ') ' + '[' + getSHA384FileHash(getCurrentUpdatePath()).toString('hex').substring(0,8) + '] in: ' + delay + 'ms');
                     global._delay = setTimeout(function ()
                     {
-                        if (process.argv.getParameter('JS') === '1')
+                        if (process.argv.getParameter('JS') != null)
                         {
                             // Recovery Core Update Path
                             switch (updateState)
@@ -379,7 +406,7 @@ server.on('upgrade', function (msg, sck, head)
                     console.log('Service PID: ' + getPID());
                 }
 
-                if (process.argv.getParameter('JS') === '1')
+                if (process.argv.getParameter('JS') != null)
                 {
                     switch (updateState)
                     {
