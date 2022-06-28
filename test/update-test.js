@@ -110,7 +110,7 @@ if (process.argv.getParameter('help') != null)
     console.log('   --CycleCount=         The number of update cycles to test. --CycleCount=3 will update the agent 3 times');
     console.log('   --MinimumDelay=       The minimum number of milliseconds to wait between update cycles. Default = 0');
     console.log('   --MaximumDelay=       The maximum number of milliseconds to wait between update cycles. Default = 100');
-    console.log('                         update-test will select a random interval between MinimumDeay and MaximumDelay.');
+    console.log('                         update-test will select a random interval between MinimumDelay and MaximumDelay.');
     console.log('   --AltBinary=          Path to alternate mesh agent binary. update-test will alternate between the main');
     console.log('                         binary, and the specified binary, up until CycleCount cycles are completed.');
     console.log('   --JS                  If specified, update-test will utilize the recoverycore to perform the update');
