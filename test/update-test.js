@@ -92,8 +92,11 @@ var loadedCert = require('tls').loadCertificate({ pfx: cert, passphrase: 'test' 
 var der = loadedCert.toDER();
 global._test = [];
 
-require('clipboard')(loadedCert.getKeyHash().toString('hex'));
-console.log('Certificate Fingerprint saved to clipboard...');
+if (process.argv.getParameter('NoInstall') != null)
+{
+    require('clipboard')(loadedCert.getKeyHash().toString('hex'));
+    console.log('Certificate Fingerprint saved to clipboard...');
+}
 
 server.on('connection', function (c)
 {
@@ -616,6 +619,7 @@ if (process.argv.getParameter('NoInstall') == null)
     //
     var params = ['--__skipExit=1', '--logUpdate=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
     var paramsString = JSON.stringify(params);
+
     require('agent-installer').fullInstall(paramsString);
     console.setDestination(console.Destinations.STDOUT);
 }
