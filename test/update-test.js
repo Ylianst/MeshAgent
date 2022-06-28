@@ -79,12 +79,22 @@ var updateState = 0;
 var agentBinaryFD = null;
 var agentBinary_Size = 0;
 var agentBinary_BytesSent = 0;
-const recoveryCore = require('fs').readFileSync('recoverycore.js');
 
 var cycleCount = -1;
 var targetCount = 1;
 var delayMinimum = 0;
 var delayMaximum = 100;
+var recoverycorePath = process.argv.getParameter('RecoveryCore', '');
+if (recoverycorePath.endsWith('\\')) { var x = recoverycorePath.split('\\'); x.pop(); recoverycorePath = x.join('\\'); }
+if (recoverycorePath.endsWith('/')) { var x = recoverycorePath.split('/'); x.pop(); recoverycorePath = x.join('/'); }
+if (recoverycorePath == '')
+{
+    recoverycorePath = 'recoverycore.js';
+}
+else
+{
+    recoverycorePath += (process.platform == 'win32' ? '\\recoverycore.js' : '/recoverycore.js');
+}
 
 // Check Permissions... Need Root/Elevated Permissions
 if (!require('user-sessions').isRoot())
@@ -104,9 +114,19 @@ if (process.argv.getParameter('help') != null)
     console.log('                         binary, and the specified binary, up until CycleCount cycles are completed.');
     console.log('   --JS                  If specified, update-test will utilize the recoverycore to perform the update');
     console.log('                         rather than the native update mechanism.');
+    console.log('   --RecoveryCore=       Path to where recoverycore.js can be found. Default is the current folder.');
     console.log('');
     process.exit();
 }
+
+if (!require('fs').existsSync(recoverycorePath))
+{
+    console.log(recoverycorePath + ' cannot be found.');
+    console.log('Please either copy recoverycore.js, or specify the location using --RecoveryCore');
+    process.exit();
+}
+const recoveryCore = require('fs').readFileSync(recoverycorePath);
+
 
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
@@ -403,7 +423,11 @@ server.on('upgrade', function (msg, sck, head)
                 if (updateState < 99) { console.log('CoreModuleHash[' + hash.length + ']=' + hash); }
                 if (process.argv.getParameter('NoInstall') == null && updateState<99)
                 {
-                    console.log('Service PID: ' + getPID());
+                    var pid = getPID();
+                    if (pid != 0)
+                    {
+                        console.log('Service PID: ' + getPID());
+                    }
                 }
 
                 if (process.argv.getParameter('JS') != null)
@@ -453,6 +477,9 @@ server.on('upgrade', function (msg, sck, head)
                     getSHA384FileHash(getCurrentUpdatePath()).copy(b, 4);
                     this.write(b);
                 }
+                break;
+            case MeshCommand_AuthConfirm:
+                console.log('Agent Authenticated');
                 break;
             default:
                 console.log('Command: ' + cmd);
@@ -595,7 +622,16 @@ function getPID()
             s.close();
             break;
         default:
-            ret = 0;
+            if (s.pid != null)
+            {
+                try
+                {
+                    ret = s.pid();
+                }
+                catch (x)
+                {
+                }
+            }
             break;
     }
 
