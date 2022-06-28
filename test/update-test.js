@@ -142,7 +142,7 @@ server.on('upgrade', function (msg, sck, head)
     });
     global._client.on('end', function ()
     {
-        console.log('Agent Disconnected...');
+        if (updateState < 99) { console.log('Agent Disconnected...'); }
     });
     global._client.command = function command(j)
     {
@@ -356,12 +356,22 @@ server.on('upgrade', function (msg, sck, head)
 
                     }.bind(this), delay);
                 }
+                else
+                {
+                    updateState = 99;
+                    console.log('==> End of Test');
+                    var params = ['--meshServiceName=TestAgent'];
+                    var paramsString = JSON.stringify(params);
+
+                    require('agent-installer').fullUninstall(paramsString);
+                    console.setDestination(console.Destinations.STDOUT);
+                }
 
                 break;
             case MeshCommand_CoreModuleHash:
                 var hash = buffer.slice(4).toString('hex');
-                console.log('CoreModuleHash[' + hash.length + ']=' + hash);
-                if (process.argv.getParameter('NoInstall') == null)
+                if (updateState < 99) { console.log('CoreModuleHash[' + hash.length + ']=' + hash); }
+                if (process.argv.getParameter('NoInstall') == null && updateState<99)
                 {
                     console.log('Service PID: ' + getPID());
                 }
@@ -377,6 +387,9 @@ server.on('upgrade', function (msg, sck, head)
                             b.writeUInt16BE(1, 2);
                             this.write(b);
                             this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(getCurrentUpdatePath()).toString('hex'), sessionid: 'none' });
+                            break;
+                        case 99:
+                            // No-Op because we are done
                             break;
                         default:
                             console.log('Agent Update State: ' + updateState);
