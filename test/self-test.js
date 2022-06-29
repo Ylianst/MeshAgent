@@ -19,6 +19,7 @@ _MSH = function _MSH() { return ({}); };
 process.coreDumpLocation = process.platform == 'win32' ? (process.execPath.replace('.exe', '.dmp')) : (process.execPath + '.dmp');
 
 var updateSource = null;
+var promise = require('promise');
 
 try
 {
@@ -57,6 +58,8 @@ catch (x)
 
 var Writable = require('stream').Writable;
 var meshcore = null;
+var TunnelPromises = [];
+
 const MeshCommand_AuthRequest = 1;              // Server web certificate public key sha384 hash + agent or server nonce
 const MeshCommand_AuthVerify = 2;               // Agent or server signature
 const MeshCommand_AuthInfo = 3;	                // Agent information
@@ -77,6 +80,8 @@ const PLATFORMS = ['UNKNOWN', 'DESKTOP', 'LAPTOP', 'MOBILE', 'SERVER', 'DISK', '
 var agentConnectionCount = 0;
 var updateState = 0;
 const consoleMode = process.argv.getParameter('console') != null;
+
+
 
 // Check Permissions... Need Root/Elevated Permissions
 if (!require('user-sessions').isRoot())
@@ -118,6 +123,21 @@ else
     }
 }
 
+var promises =
+    {
+        CommitInfo: null,
+        AgentInfo: null,
+        netinfo: null,
+        smbios: null
+    };
+function resetPromises()
+{
+    var i;
+    for(i in promises)
+    {
+        promises[i] = new promise(promise.defaultInit);
+    }
+}
 
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
@@ -176,6 +196,24 @@ server.on('request', function (imsg, resp)
 server.on('upgrade', function (msg, sck, head)
 {
     console.info1('upgrade requested');
+
+    switch(msg.url)
+    {
+        case '/tunnel':
+            var p = TunnelPromises.shift();
+            clearTimeout(p.timeout);
+            p.resolve(sck.upgradeWebSocket());
+            return;
+            break;
+        case '/agent.ashx': // No-Op, because we'll continue processing after the switch statement
+            break;
+        default:
+            return;         // We will not handle other requests
+            break;
+    }
+
+
+    resetPromises();
     global._client = sck.upgradeWebSocket();
     global._client.on('data', function (buffer)
     {
@@ -214,9 +252,11 @@ server.on('upgrade', function (msg, sck, head)
         switch(cmd)
         {
             case MeshCommand_AgentCommitDate:    // Agent Commit Date
+                promises.CommitInfo.resolve(buffer.slice(2).toString());
                 console.log("Connected Agent's Commit Date: " + buffer.slice(2).toString());
                 break;
             case MeshCommand_HostInfo:
+                promises.AgentInfo.resolve(buffer.slice(2).toString());
                 console.log("Connected Agent Info: " + buffer.slice(2).toString());
                 break;
             case MeshCommand_ServerId:
@@ -400,16 +440,26 @@ server.on('upgrade', function (msg, sck, head)
                 break;
             case 'sessions':
                 break;
+            case 'netinfo':
+                console.info1(j.action, JSON.stringify(j, null, 1));
+                promises.netinfo.resolve(j);
+                break;
+            case 'smbios':
+                console.info1(j.action, JSON.stringify(j, null, 1));
+                promises.smbios.resolve(j);
+                break;
             default:
-                console.info1(JSON.stringify(j, null, 1));
+                console.info1(j.action, JSON.stringify(j, null, 1));
                 break;
         }
     }
+
     global._client.runCommands = function runCommands()
     {
         if (process.argv.getParameter('PrivacyBar') != null)
         {
             this.command({  sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'eval "global._n=require(\'notifybar-desktop\')(\'Self Test Privacy Bar\', require(\'MeshAgent\')._tsid);global._n.on(\'close\', function (){sendConsoleText(\'PrivacyBarClosed\');});"' });
+            return;
         }
         if(consoleMode)
         {
@@ -428,9 +478,66 @@ server.on('upgrade', function (msg, sck, head)
                     global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: c.toString().trim() });
                 }
             });
+            return;
         }
+
+        //
+        // Run thru the main tests, becuase no special options were sent
+        //
+        console.log('\nRunning Meshcore Tests:');
+        console.setDestination(console.Destinations.DISABLED);
+
+        process.stdout.write('   Agent sent version information to server......');
+
+        promises.CommitInfo.then(function ()
+        {
+            process.stdout.write('[OK]\n');
+            process.stdout.write('   Agent sent AgentInfo to server................');
+            return (promises.AgentInfo);
+        }).then(function ()
+        {
+            process.stdout.write('[OK]\n');
+            process.stdout.write('   Agent sent Network Info to server.............[WAITING]');
+            return (promises.netinfo);
+        }).then(function ()
+        {
+            process.stdout.write('\r');
+            process.stdout.write('   Agent sent Network Info to server.............[OK]      \n');
+            process.stdout.write('   Agent sent SMBIOS info to server..............[WAITING]');
+            return (promises.smbios);
+        }).then(function ()
+        {
+            process.stdout.write('\r');
+            process.stdout.write('   Agent sent SMBIOS info to server..............[OK]      \n');
+            process.stdout.write('   Tunnel Test...................................[WAITING]');
+            return (createTunnel(0, 0));
+        }).then(function (t)
+        {
+            process.stdout.write('\r   Tunnel Test...................................[OK]      \n');
+            t.end();
+        }).finally(function ()
+        {
+            process.stdout.write('\nTesting Complete\n\n');
+            endTest();
+        });
+
     };
 });
+
+function createTunnel(rights, consent)
+{
+    var ret = new promise(promise.defaultInit);
+    TunnelPromises.push(ret);
+
+    ret.parent = global._client;
+    ret.timeout = setTimeout(function ()
+    {
+        ret.reject('timeout');
+    }, 2000);
+    ret.options = { action: 'msg', type: 'tunnel', rights: rights, consent: consent, username: '(test script)', value: 'wss://127.0.0.1:9250/tunnel' };
+    global._client.command(ret.options);
+    return (ret);
+}
 function getSystemName(id)
 {
     var ret = 'unknown';
@@ -558,6 +665,8 @@ function getPID()
 }
 function endTest()
 {
+    global._client.removeAllListeners('end');
+
     console.log('==> End of Test');
     var params = ['--meshServiceName=TestAgent'];
     var paramsString = JSON.stringify(params);
