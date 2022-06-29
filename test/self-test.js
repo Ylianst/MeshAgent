@@ -15,6 +15,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+_MSH = function _MSH() { return ({}); };
+process.coreDumpLocation = process.platform == 'win32' ? (process.execPath.replace('.exe', '.dmp')) : (process.execPath + '.dmp');
+
+var updateSource = null;
+
 try
 {
     Object.defineProperty(Array.prototype, 'getParameterEx',
@@ -30,6 +35,11 @@ try
                         if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
                         return (ret);
                     }
+                    else if (this[i] == name)
+                    {
+                        ret = this[i];
+                        return (ret);
+                    }
                 }
                 return (defaultValue);
             }
@@ -42,7 +52,7 @@ try
             }
         });
 }
-catch(x)
+catch (x)
 { }
 
 var Writable = require('stream').Writable;
@@ -66,8 +76,48 @@ const MeshCommand_HostInfo = 31;	            // Host OS and CPU Architecture
 const PLATFORMS = ['UNKNOWN', 'DESKTOP', 'LAPTOP', 'MOBILE', 'SERVER', 'DISK', 'ROUTER', 'PI', 'VIRTUAL'];
 var agentConnectionCount = 0;
 var updateState = 0;
+const consoleMode = process.argv.getParameter('console') != null;
 
-const recoveryCore = require('fs').readFileSync('recoverycore.js');
+// Check Permissions... Need Root/Elevated Permissions
+if (!require('user-sessions').isRoot())
+{
+    console.log('self-test.js requires elevated permissions to run.');
+    process.exit();
+}
+if (process.argv.getParameter('AltBinary') != null)
+{
+    var alt = process.argv.getParameter('AltBinary');
+    if (require('fs').existsSync(alt))
+    {
+        updateSource = alt;
+    }
+}
+
+if (process.argv.getParameter('help') != null)
+{
+    console.log("\nself-test is a Self-Contained test harnass for testing the MeshAgent and MeshCore functions");
+    console.log('\n   Available options:');
+    console.log('   --AgentsFolder=         The path to the agents folder of the Server Repository');
+    console.log('   --console               If specified, enables console command mode');
+    console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
+    console.log('   --verbose=              Specifies the verbosity level of the displayed output. Default = 0');
+    console.log('');
+    process.exit();
+}
+if (process.argv.getParameter('AgentsFolder') == null)
+{
+    console.log('\nRequired parameter: AgentsFolder,  was not specified.');
+    process.exit();
+}
+else
+{
+    if(!require('fs').existsSync(process.argv.getParameter('AgentsFolder')))
+    {
+        console.log('\nThe specified folder does not exist: ' + process.argv.getParameter('AgentsFolder'));
+        process.exit();
+    }
+}
+
 
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
@@ -80,8 +130,11 @@ var loadedCert = require('tls').loadCertificate({ pfx: cert, passphrase: 'test' 
 var der = loadedCert.toDER();
 global._test = [];
 
-require('clipboard')(loadedCert.getKeyHash().toString('hex'));
-console.log('Certificate Fingerprint saved to clipboard...');
+if (process.argv.getParameter('NoInstall') != null)
+{
+    require('clipboard')(loadedCert.getKeyHash().toString('hex'));
+    console.log('Certificate Fingerprint saved to clipboard...');
+}
 
 server.on('connection', function (c)
 {
@@ -150,12 +203,13 @@ server.on('upgrade', function (msg, sck, head)
     }
     global._client.processCommand = function processCommand(buffer)
     {
-        if (buffer[0] == '{')
+        if (buffer[0] == '{' || buffer[0] == 123)
         {
             // JSON Command
             this.processJSON(JSON.parse(buffer.toString()));
             return;
         }
+
         var cmd = buffer.readUInt16BE(0);
         switch(cmd)
         {
@@ -317,6 +371,9 @@ server.on('upgrade', function (msg, sck, head)
                 }
                 this.runCommands();
                 break;
+            case MeshCommand_AuthConfirm:
+                console.log('Agent Authenticated');
+                break;
             default:
                 console.log('Command: ' + cmd);
                 break;
@@ -337,7 +394,8 @@ server.on('upgrade', function (msg, sck, head)
             case 'msg':
                 if (j.type == 'console')
                 {
-                    console.log('Agent: ' + j.value);
+                    if (j.value != 'Command returned an exception error: TypeError: cyclic input') { console.log('Agent: ' + j.value); }         
+                    if (j.value == "PrivacyBarClosed") { endTest(); }
                 }
                 break;
             case 'sessions':
@@ -351,7 +409,25 @@ server.on('upgrade', function (msg, sck, head)
     {
         if (process.argv.getParameter('PrivacyBar') != null)
         {
-            this.command({  sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'eval "global._n=require(\'notifybar-desktop\')(\'Self Test Privacy Bar\', require(\'MeshAgent\')._tsid);global._n.on(\'close\', function (){sendConsoleText(\'Closed\');});"' });
+            this.command({  sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'eval "global._n=require(\'notifybar-desktop\')(\'Self Test Privacy Bar\', require(\'MeshAgent\')._tsid);global._n.on(\'close\', function (){sendConsoleText(\'PrivacyBarClosed\');});"' });
+        }
+        if(consoleMode)
+        {
+            console.log("\nEntering CONSOLE mode. Type 'exit' when done.");
+            this.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'help' });
+            process.stdin.on('data', function (c)
+            {
+                if (c == null || c.toString() == null) { return; }
+                if (c.toString().toLowerCase().trim() == 'exit')
+                {
+                    console.log('EXITING console mode');
+                    endTest();
+                }
+                else
+                {
+                    global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: c.toString().trim() });
+                }
+            });
         }
     };
 });
@@ -465,12 +541,31 @@ function getPID()
             s.close();
             break;
         default:
-            ret = 0;
+            if (s.pid != null)
+            {
+                try
+                {
+                    ret = s.pid();
+                }
+                catch (x)
+                {
+                }
+            }
             break;
     }
 
     return (ret);
 }
+function endTest()
+{
+    console.log('==> End of Test');
+    var params = ['--meshServiceName=TestAgent'];
+    var paramsString = JSON.stringify(params);
+
+    require('agent-installer').fullUninstall(paramsString);
+    console.setDestination(console.Destinations.STDOUT);
+}
+
 
 if (process.argv.getParameter('AgentsFolder') != null)
 {
@@ -482,13 +577,13 @@ if (process.argv.getParameter('AgentsFolder') != null)
     meshcore = require('fs').readFileSync(folder + (process.platform == 'win32' ? '\\' : '/') + 'meshcore.js').toString();
     var modules = folder + (process.platform == 'win32' ? '\\' : '/') + 'modules_meshcore';
     var modules_folder = require('fs').readdirSync(modules);
-    var i, tmp;
+    var i, tmp, m;
 
-    var lines = [];
+    var lines = ['var addedModules = [];'];
     for (i = 0; i < modules_folder.length; ++i)
     {
         tmp = require('fs').readFileSync(modules + (process.platform == 'win32' ? '\\' : '/') + modules_folder[i]);
-        lines.push('try { addModule("' + modules_folder[i].split('.').shift() + '", Buffer.from("' + tmp.toString('base64') + '", base64).toString()); } catch (x) { }');
+        lines.push('try { addModule("' + (m = modules_folder[i].split('.').shift()) + '", Buffer.from("' + tmp.toString('base64') + '", "base64").toString()); addedModules.push("' + m + '");} catch (x) { }');
     }
 
     meshcore = lines.join('\n') + meshcore;
@@ -504,9 +599,20 @@ if (process.argv.getParameter('NoInstall') == null)
     //
     // Start by installing agent as service
     //
-    var params = ['--__skipExit=1', '--logUpdate=1', '--MeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC', '--MeshServer=wss://127.0.0.1:9250/agent.ashx', '--meshServiceName=TestAgent', '--ServerID=' + loadedCert.getKeyHash().toString('hex')];
-    var paramsString = JSON.stringify(params);
-    require('agent-installer').fullInstall(paramsString);
+    var params = ['--__skipExit=1', '--logUpdate=1', '--meshServiceName=TestAgent'];
+    var options =
+        {
+            files:
+                [
+                    {
+                        newName: (process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh'),
+                        _buffer: 'logUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:9250/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
+                    }
+                ],
+            binary: updateSource,
+            noParams: true
+        };
+    require('agent-installer').fullInstallEx(params, options);
     console.setDestination(console.Destinations.STDOUT);
 }
 console.log('\nWaiting for Agent Connection...');

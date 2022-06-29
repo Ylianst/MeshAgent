@@ -4373,6 +4373,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 			if (state->WebSocketFragmentIndex + plen >= state->WebSocketFragmentBufferSize)
 			{
 				// Need to grow the buffer
+				if (state->WebSocketFragmentBufferSize == 0) { state->WebSocketFragmentBufferSize = 4096; }
 				state->WebSocketFragmentBufferSize = state->WebSocketFragmentBufferSize * 2;
 				if ((state->WebSocketFragmentBuffer = (char*)realloc(state->WebSocketFragmentBuffer, state->WebSocketFragmentBufferSize)) == NULL) { ILIBCRITICALEXIT(254); } // MS Static Analyser erroneously reports that this leaks the original memory block
 			}
