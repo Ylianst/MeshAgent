@@ -16,6 +16,8 @@ limitations under the License.
 */
 
 _MSH = function _MSH() { return ({}); };
+process.coreDumpLocation = process.platform == 'win32' ? (process.execPath.replace('.exe', '.dmp')) : (process.execPath + '.dmp');
+
 try
 {
     Object.defineProperty(Array.prototype, 'getParameterEx',
