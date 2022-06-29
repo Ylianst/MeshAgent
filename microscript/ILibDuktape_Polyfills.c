@@ -855,6 +855,12 @@ duk_ret_t ILibDuktape_Polyfills_Console_setInfoLevel(duk_context *ctx)
 
 	return(0);
 }
+duk_ret_t ILibDuktape_Polyfills_Console_getInfoLevel(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, ILibDuktape_Console_INFO_Level);
+	return(1);
+}
 duk_ret_t ILibDuktape_Polyfills_Console_setInfoMask(duk_context *ctx)
 {
 	ILIBLOGMESSAGEX2_SetMask(duk_require_uint(ctx, 0));
@@ -995,6 +1001,7 @@ void ILibDuktape_Polyfills_Console(duk_context *ctx)
 	
 	ILibDuktape_CreateInstanceMethod(ctx, "setDestination", ILibDuktape_Polyfills_Console_setDestination, DUK_VARARGS);
 	ILibDuktape_CreateInstanceMethod(ctx, "setInfoLevel", ILibDuktape_Polyfills_Console_setInfoLevel, 1);
+	ILibDuktape_CreateInstanceMethod(ctx, "getInfoLevel", ILibDuktape_Polyfills_Console_getInfoLevel, 0);
 	ILibDuktape_CreateInstanceMethod(ctx, "setInfoMask", ILibDuktape_Polyfills_Console_setInfoMask, 1);
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "echo", ILibDuktape_Polyfills_Console_echo_get, ILibDuktape_Polyfills_Console_echo_set);
 	ILibDuktape_CreateEventWithGetterAndSetterEx(ctx, "canonical", ILibDuktape_Polyfills_Console_canonical_get, ILibDuktape_Polyfills_Console_canonical_set);

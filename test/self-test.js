@@ -128,7 +128,13 @@ var promises =
         CommitInfo: null,
         AgentInfo: null,
         netinfo: null,
-        smbios: null
+        smbios: null,
+        cpuinfo: null,
+        ps: null,
+        help: null,
+        services: null,
+        setclip: null,
+        getclip: null,
     };
 function resetPromises()
 {
@@ -421,6 +427,8 @@ server.on('upgrade', function (msg, sck, head)
     };
     global._client.processJSON = function processJSON(j)
     {
+        console.info2(JSON.stringify(j, null, 1));
+
         switch(j.action)
         {
             case 'agentupdatedownloaded':
@@ -432,10 +440,28 @@ server.on('upgrade', function (msg, sck, head)
                 console.log('');
                 break;
             case 'msg':
-                if (j.type == 'console')
+                switch(j.type)
                 {
-                    if (j.value != 'Command returned an exception error: TypeError: cyclic input') { console.log('Agent: ' + j.value); }         
-                    if (j.value == "PrivacyBarClosed") { endTest(); }
+                    case 'console':
+                        if (j.value != 'Command returned an exception error: TypeError: cyclic input') { console.log('Agent: ' + j.value); }
+                        if (j.value == "PrivacyBarClosed") { endTest(); }
+                        if (j.value.startsWith('Available commands:')) { promises.help.resolve(j.value); }
+                        break;
+                    case 'cpuinfo':
+                        promises.cpuinfo.resolve(j);
+                        break;
+                    case 'ps':
+                        promises.ps.resolve(j);
+                        break;
+                    case 'services':
+                        promises.services.resolve(j);
+                        break;
+                    case 'setclip':
+                        promises.setclip.resolve(j);
+                        break;
+                    case 'getclip':
+                        promises.getclip.resolve(j);
+                        break;
                 }
                 break;
             case 'sessions':
@@ -447,6 +473,16 @@ server.on('upgrade', function (msg, sck, head)
             case 'smbios':
                 console.info1(j.action, JSON.stringify(j, null, 1));
                 promises.smbios.resolve(j);
+                break;
+            case 'result':
+                if (promises[j.id] != null)
+                {
+                    if (promises[j.id].timeout != null)
+                    {
+                        clearTimeout(promises[j.id].timeout);
+                    }
+                    promises[j.id].resolve(j.value);
+                }
                 break;
             default:
                 console.info1(j.action, JSON.stringify(j, null, 1));
@@ -485,39 +521,124 @@ server.on('upgrade', function (msg, sck, head)
         // Run thru the main tests, becuase no special options were sent
         //
         console.log('\nRunning Meshcore Tests:');
-        console.setDestination(console.Destinations.DISABLED);
+        if (console.getInfoLevel() == 0) { console.setDestination(console.Destinations.DISABLED); }
 
-        process.stdout.write('   Agent sent version information to server......');
+        process.stdout.write('   Agent sent version information to server................');
 
         promises.CommitInfo.then(function ()
         {
             process.stdout.write('[OK]\n');
-            process.stdout.write('   Agent sent AgentInfo to server................');
+            process.stdout.write('   Agent sent AgentInfo to server..........................');
             return (promises.AgentInfo);
         }).then(function ()
         {
             process.stdout.write('[OK]\n');
-            process.stdout.write('   Agent sent Network Info to server.............[WAITING]');
+            process.stdout.write('   Agent sent Network Info to server.......................[WAITING]');
             return (promises.netinfo);
         }).then(function ()
         {
             process.stdout.write('\r');
-            process.stdout.write('   Agent sent Network Info to server.............[OK]      \n');
-            process.stdout.write('   Agent sent SMBIOS info to server..............[WAITING]');
+            process.stdout.write('   Agent sent Network Info to server.......................[OK]      \n');
+            process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
             return (promises.smbios);
         }).then(function ()
         {
             process.stdout.write('\r');
-            process.stdout.write('   Agent sent SMBIOS info to server..............[OK]      \n');
-            process.stdout.write('   Tunnel Test...................................[WAITING]');
+            process.stdout.write('   Agent sent SMBIOS info to server........................[OK]      \n');
+            process.stdout.write('   Tunnel Test.............................................[WAITING]');
             return (createTunnel(0, 0));
         }).then(function (t)
         {
-            process.stdout.write('\r   Tunnel Test...................................[OK]      \n');
+            process.stdout.write('\r   Tunnel Test.............................................[OK]      \n');
             t.end();
-        }).finally(function ()
+        }).then(function ()
+        {
+            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'help' });
+            process.stdout.write('   Console Test (Help).....................................[WAITING]');
+            return (promises.help);
+        }).then(function (v)
+        {
+            //var vals = v.substring(19).split('\n').join('').split('\r').join('').split('.').join('').split(' ').join('');
+            process.stdout.write('\r   Console Test (Help).....................................[OK]      \n');
+            process.stdout.write('   CPUINFO Test............................................[WAITING]');
+            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'cpuinfo' });
+            return (promises.cpuinfo);
+        }).then(function (v)
+        {
+            process.stdout.write('\r   CPUINFO Test............................................[OK]      \n');
+            process.stdout.write('   PS Test.................................................[WAITING]');
+            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'ps' });
+            return (promises.ps);
+        }).then(function (v)
+        {
+            var p;
+            try
+            {
+                p = JSON.parse(v.value);
+            }
+            catch(e)
+            {
+                process.stdout.write('\r   PS Test.................................................[FAILED]      \n');
+                process.stdout.write('   => ' + e + '\n');
+                return;
+            }
+            process.stdout.write('\r   PS Test.................................................[OK]      \n');
+            process.stdout.write('      => ' + p.keys().length + ' processes retrieved.\n');
+
+            process.stdout.write('   Service Enumeration Test................................[WAITING]');
+            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'services' });
+            return (promises.services);
+        }).then(function (v)
+        {
+            var services;
+            try
+            {
+                services = JSON.parse(v.value);
+            }
+            catch (x)
+            {
+                process.stdout.write('\r   Service Enumeration Test................................[INVALID JSON]\n');
+                process.stdout.write('      => ' + x + '\n');
+                return;
+            }
+            process.stdout.write('\r   Service Enumeration Test................................[OK]      \n');
+            process.stdout.write('\r      => ' + services.length + ' services retrieved.\n');
+        }).then(function ()
+        {
+            process.stdout.write('   Clipboard Test..........................................[WAITING]');
+            var b = Buffer.alloc(16);
+            b.randomFill();
+            global._cliptest = b.toString('base64');
+            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'setclip', data: global._cliptest });
+            return (promises.setclip);
+        }).then(function (v)
+        {
+            if (!v.success)
+            {
+                process.stdout.write('\r   Clipboard Test..........................................[FAILED TO SET]\n');
+                return;
+            }
+            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'getclip' });
+            return (promises.getclip);
+        }).then(function (v)
+        {
+            if(v.data == global._cliptest)
+            {
+                process.stdout.write('\r   Clipboard Test..........................................[OK]      \n');
+            }
+            else
+            {
+                process.stdout.write('\r   Clipboard Test..........................................[FAILED]  \n');
+                process.stdout.write('      => Expected: ' + global._cliptest + '\n');
+                process.stdout.write('      => Received: ' + v.data + '\n');
+            }
+        }).then(function ()
         {
             process.stdout.write('\nTesting Complete\n\n');
+            endTest();
+        }).catch(function (e)
+        {
+            process.stdout.write('\nTesting Failed (' + e + ')\n\n');
             endTest();
         });
 
@@ -689,6 +810,7 @@ if (process.argv.getParameter('AgentsFolder') != null)
     var i, tmp, m;
 
     var lines = ['var addedModules = [];'];
+    lines.push("function selfTestResponse(id, value) { require('MeshAgent').SendCommand({ action: 'result', id: id, value: JSON.stringify(value) }); }");
     for (i = 0; i < modules_folder.length; ++i)
     {
         tmp = require('fs').readFileSync(modules + (process.platform == 'win32' ? '\\' : '/') + modules_folder[i]);
