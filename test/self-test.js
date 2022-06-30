@@ -148,7 +148,7 @@ function resetPromises()
 process.stdout.write('Generating Certificate...');
 var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
 var server = require('https').createServer({ pfx: cert, passphrase: 'test' });
-server.listen({ port: 9250 });
+server.listen();
 
 process.stdout.write('\rGenerating Certificate... [DONE]\n');
 
@@ -540,11 +540,28 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('\r');
             process.stdout.write('   Agent sent Network Info to server.......................[OK]      \n');
             process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
-            return (promises.smbios);
+            switch(process.platform)
+            {
+                case 'linux':
+                case 'win32':
+                    return (promises.smbios);
+                    break;
+                default:
+                    break;
+            }
         }).then(function ()
         {
             process.stdout.write('\r');
-            process.stdout.write('   Agent sent SMBIOS info to server........................[OK]      \n');
+            switch (process.platform)
+            {
+                case 'linux':
+                case 'win32':
+                    process.stdout.write('   Agent sent SMBIOS info to server........................[OK]      \n');
+                    break;
+                default:
+                    process.stdout.write('   Agent sent SMBIOS info to server........................[NA]      \n');
+                    break;
+            }
             process.stdout.write('   Tunnel Test.............................................[WAITING]');
             return (createTunnel(0, 0));
         }).then(function (t)
@@ -613,6 +630,7 @@ server.on('upgrade', function (msg, sck, head)
             return (promises.setclip);
         }).then(function (v)
         {
+            console.info1(JSON.stringify(v));
             if (!v.success)
             {
                 process.stdout.write('\r   Clipboard Test..........................................[FAILED TO SET]\n');
@@ -655,7 +673,7 @@ function createTunnel(rights, consent)
     {
         ret.reject('timeout');
     }, 2000);
-    ret.options = { action: 'msg', type: 'tunnel', rights: rights, consent: consent, username: '(test script)', value: 'wss://127.0.0.1:9250/tunnel' };
+    ret.options = { action: 'msg', type: 'tunnel', rights: rights, consent: consent, username: '(test script)', value: 'wss://127.0.0.1:' + server.address().port + '/tunnel' };
     global._client.command(ret.options);
     return (ret);
 }
@@ -837,7 +855,7 @@ if (process.argv.getParameter('NoInstall') == null)
                 [
                     {
                         newName: (process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh'),
-                        _buffer: 'logUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:9250/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
+                        _buffer: 'logUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:' + server.address().port + '/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
                     }
                 ],
             binary: updateSource,

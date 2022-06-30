@@ -2028,17 +2028,9 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 	#endif
 		ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "isService",1);
 #else
-	#ifndef __APPLE__
 		// Determine if we're running as service on Linux
-		if (duk_peval_string(ctx, "require('service-manager').manager.getService('meshagent').isMe();") == 0)
-		{
-			ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "isService",1);
-		}
-		else
-		{
-			duk_pop(ctx);
-		}
-	#endif
+		duk_push_boolean(ctx, agent->JSRunningAsService);
+		ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "isService",1);
 #endif
 
 	}
@@ -2048,6 +2040,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "Acquired MeshAgent");
 }
+
 void ILibDuktape_MeshAgent_Init(duk_context* ctx, void *chain, MeshAgentHostContainer *agent)
 {
 	duk_push_heap_stash(ctx);						// [stash]
