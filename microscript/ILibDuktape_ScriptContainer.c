@@ -2863,6 +2863,13 @@ void ILibDuktape_PAC_Init(duk_context *ctx)
 	ILibDuktape_ModSearch_AddHandler(ctx, "PAC", ILibDuktape_PAC_PUSH);
 }
 
+duk_ret_t ILibDuktape_ScriptContainer_SIGTERM_HANDLER(duk_context *ctx)
+{
+	void *chain = duk_ctx_chain(ctx);
+	ILibStopChain(chain);
+	return(0);
+}
+
 duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_context *ctx, SCRIPT_ENGINE_SECURITY_FLAGS securityFlags, unsigned int executionTimeout, void *chain, char **argList, ILibSimpleDataStore *db, char *exePath, ILibProcessPipe_Manager pipeManager, ILibDuktape_HelperEvent exitHandler, void *exitUser)
 {
 	void **timeoutKey = executionTimeout > 0 ? (void**)ILibMemory_Allocate(sizeof(void*), 0, NULL, NULL) : NULL;
@@ -2961,6 +2968,16 @@ duk_context *ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx3(duk_conte
 
 	ILibDuktape_Polyfills_JS_Init(ctx);
 	ILibDuktape_Polyfills_promise_wait(ctx);
+
+#ifdef _POSIX
+	int tp = duk_get_top(ctx);
+	duk_eval_string(ctx, "process");													// [process]
+	duk_prepare_method_call(ctx, -1, "on");												// [process][on][this]
+	duk_push_string(ctx, "SIGTERM");													// [process][on][this][SIGTERM]
+	duk_push_c_function(ctx, ILibDuktape_ScriptContainer_SIGTERM_HANDLER, DUK_VARARGS);	// [process][on][this][SIGTERM][func]
+	duk_pcall_method(ctx, 2);
+	duk_set_top(ctx, tp);
+#endif
 
 	return ctx;
 }

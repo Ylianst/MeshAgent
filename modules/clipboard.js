@@ -400,8 +400,7 @@ function lin_xclip_copy(txt)
         ch.stdin.write('   for(i=1;i<NF;++i)');
         ch.stdin.write('   {');
         ch.stdin.write('       split($i,tokens," ");');
-        ch.stdin.write('       name=substr($i, length(tokens[1])+2);');
-        ch.stdin.write('       if(substr(name,1,1)==" ") { name=substr($i, length(tokens[1])+3); }');
+        ch.stdin.write('       name=tokens[2];');
         ch.stdin.write('       chkname=substr(name,1,6);')
         ch.stdin.write('       if(chkname=="xclip(")');
         ch.stdin.write('       {');
@@ -425,7 +424,12 @@ function lin_xclip_copy(txt)
     };
     ret.child._cleanup = function _cleanup(p)
     {
-        process.kill(this._xclip_PID, 'SIGKILL');
+        if (this.cleaned) { return; }
+        this.cleaned = true;
+
+        // During Cleanup, we need to kill the xclip process that was spawned, becuase xclip likes to hang around
+        console.info1('XCLIP/' + (this._xclip_PID) + ' => SIGKILL');
+        if (this._xclip_PID > 0) { process.kill(this._xclip_PID, 'SIGKILL'); }
         delete xclipTable[p._hashCode()];
     };
     ret.child.on('exit', function ()
@@ -442,10 +446,7 @@ function lin_xclip_copy(txt)
     });
     ret.child.on('~', function ()
     {
-        if (xclipTable[this.promise._hashCode()])
-        {
-            this._cleanup(this.promise);
-        }
+        this._cleanup(this.promise);
     });
     ret.child._xclip_PID = ret.child._helper(ret);
     return (ret);
