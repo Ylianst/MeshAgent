@@ -71,7 +71,6 @@ function generateAuthHeaders(imsg, options, digest)
                         if (options.qop != null) { auth.qop = qop.includes(options.qop) ? options.qop : null; }
                         else if (qop.includes('auth-int')) { auth.qop = 'auth-int'; }
                         else if (qop.includes('auth')) { auth.qop = 'auth'; }
-                        console.log('QOP', auth.qop);
                         break;
                 }
             }
