@@ -2726,13 +2726,20 @@ duk_ret_t ILibDuktape_HttpStream_ServerResponse_Digest_SendUnauthorized(duk_cont
 	char *realm;
 	duk_size_t realmLen, htmlLen = 0;
 	void *hptr;
+	char *qop = NULL;
+
+	if (!duk_is_null_or_undefined(ctx, 1) && duk_is_object(ctx, 1))
+	{
+		// Options Object is present
+		qop = Duktape_GetStringPropertyValue(ctx, 1, "qop", NULL);
+		if (qop != NULL) { duk_push_sprintf(ctx, ", qop=\"%s\"", qop); qop = (char*)duk_get_string(ctx, -1); }
+	}
 
 	if (nargs > 0)
 	{
 		duk_get_lstring(ctx, 1, &htmlLen);
 	}
 	
-
 	duk_push_this(ctx);											// [serverResponse]
 	duk_get_prop_string(ctx, -1, ILibDuktape_SR2HttpStream);	// [serverResponse][httpStream]
 	duk_get_prop_string(ctx, -1, ILibDuktape_HTTPStream2HTTP);	// [serverResponse][httpStream][http]
@@ -2749,7 +2756,7 @@ duk_ret_t ILibDuktape_HttpStream_ServerResponse_Digest_SendUnauthorized(duk_cont
 	duk_push_string(ctx, "Unauthorized");			// [writeHead][this][401][Unauthorized]
 	duk_push_object(ctx);							// [writeHead][this][401][Unauthorized][headers]
 	duk_push_string(ctx, "WWW-Authenticate");		// [writeHead][this][401][Unauthorized][headers][name]
-	int wwwLen = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "Digest realm=\"%s\", nonce=\"%s\", opaque=\"%s\"", realm, nonce, opaque);
+	int wwwLen = sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "Digest realm=\"%s\", nonce=\"%s\", opaque=\"%s\"%s", realm, nonce, opaque, qop == NULL ? "" : qop);
 	duk_push_lstring(ctx, ILibScratchPad, wwwLen);	// [writeHead][this][401][Unauthorized][headers][name][value]
 	duk_put_prop(ctx, -3);							// [writeHead][this][401][Unauthorized][headers]
 	if (htmlLen > 0)
@@ -2930,9 +2937,9 @@ duk_ret_t ILibDuktape_HttpStream_IncomingMessage_Digest_ValidatePassword(duk_con
 
 	MD5_CTX mctx;
 
-	char *auth, *username, *password, *opaque, *response, *uri, *realm, *method;
+	char *auth, *username, *password, *opaque, *response, *uri, *realm, *method, *qop, *nc, *cnonce;
 	duk_size_t authLen, passwordLen, methodLen;
-	int usernameLen, opaqueLen, responseLen, uriLen, realmLen;
+	int usernameLen, opaqueLen, responseLen, uriLen, realmLen, qopLen, ncLen, cnonceLen;
 
 	void *DigestTable = ILibInitHashTree_CaseInSensitiveEx(ILibMemory_AllocateA(8000));
 	void *hptr;
@@ -2958,6 +2965,11 @@ duk_ret_t ILibDuktape_HttpStream_IncomingMessage_Digest_ValidatePassword(duk_con
 	ILibGetEntryEx(DigestTable, "uri", 3, (void**)&uri, &uriLen);
 	ILibGetEntryEx(DigestTable, "response", 8, (void**)&response, &responseLen);
 	ILibGetEntryEx(DigestTable, "opaque", 6, (void**)&opaque, &opaqueLen);
+	ILibGetEntryEx(DigestTable, "qop", 3, (void**)&qop, &qopLen);
+	ILibGetEntryEx(DigestTable, "nc", 2, (void**)&nc, &ncLen);
+	ILibGetEntryEx(DigestTable, "cnonce", 6, (void**)&cnonce, &cnonceLen);
+
+
 
 	if (username == NULL || uri == NULL || password == NULL || passwordLen == 0 || response == NULL || opaqueLen != 16)
 	{

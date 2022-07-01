@@ -42,7 +42,7 @@ function generateAuthHeaders(imsg, options, digest)
     {
         auth = { realm: null, nonce: null, opaque: null, qop: null };
         var www = imsg.headers['WWW-Authenticate'];
-        var tokens = www.split(',');
+        var tokens = www.splitEx(',');
 
         var pairs;
         for (var i in tokens)
@@ -65,8 +65,13 @@ function generateAuthHeaders(imsg, options, digest)
                         if (auth.opaque[0] == '"') { auth.opaque = auth.opaque.substring(1, auth.opaque.length - 1); }
                         break;
                     case 'qop':
-                        auth.qop = pairs[1];
-                        if (auth.qop[0] == '"') { auth.qop = auth.qop.substring(1, auth.qop.length - 1); }
+                        var qop = pairs[1];
+                        if (qop[0] == '"') { qop = qop.substring(1, qop.length - 1); }
+                        qop = qop.split(' ').join('').split(',');
+                        if (options.qop != null) { auth.qop = qop.includes(options.qop) ? options.qop : null; }
+                        else if (qop.includes('auth-int')) { auth.qop = 'auth-int'; }
+                        else if (qop.includes('auth')) { auth.qop = 'auth'; }
+                        console.log('QOP', auth.qop);
                         break;
                 }
             }
@@ -78,12 +83,14 @@ function generateAuthHeaders(imsg, options, digest)
         if (!(auth = digest._auth)) { return; }
     }
 
+    if (digest._auth.qop == 'auth-int' && options.oneshotEntity == null) { return; } // For auth-int, we need to hash the entity body, so if we don't have it, we must return
+
     var step1 = digest._options.username + ':' + auth.realm + ':' + digest._options.password;
     auth.step1 = md5.syncHash(step1).toString('hex').toLowerCase();
 
     var step2 = options.method + ':' + options.path;
+    if (qop == 'auth-int' && options.oneshotEntity != null) { step2 += (':' + md5.syncHash(options.oneshotEntity).toString('hex').toLowerCase()); }
     auth.step2 = md5.syncHash(step2).toString('hex').toLowerCase();
-
 
     if (auth.qop == null)
     {
@@ -245,6 +252,7 @@ function http_digest_instance(options)
             console.info1('response status code => ' + imsg.statusCode);
             if (imsg.statusCode == 401)
             {
+                if (this.digRequest._buffered && this.digRequest._ended) { this.digRequest.options.oneshotEntity = this.digRequest._buffered; }
                 var callend = this.digRequest._request._callend;
                 var auth = generateAuthHeaders(imsg, this.digRequest.options, this.digRequest._digest);
                 console.info1(JSON.stringify(auth, null, 1));
