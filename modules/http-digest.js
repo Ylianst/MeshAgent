@@ -81,14 +81,13 @@ function generateAuthHeaders(imsg, options, digest)
     {
         if (!(auth = digest._auth)) { return; }
     }
-
     if (digest._auth.qop == 'auth-int' && options.oneshotEntity == null) { return; } // For auth-int, we need to hash the entity body, so if we don't have it, we must return
 
     var step1 = digest._options.username + ':' + auth.realm + ':' + digest._options.password;
     auth.step1 = md5.syncHash(step1).toString('hex').toLowerCase();
 
     var step2 = options.method + ':' + options.path;
-    if (qop == 'auth-int' && options.oneshotEntity != null) { step2 += (':' + md5.syncHash(options.oneshotEntity).toString('hex').toLowerCase()); }
+    if (auth.qop == 'auth-int' && options.oneshotEntity != null) { step2 += (':' + md5.syncHash(options.oneshotEntity).toString('hex').toLowerCase()); }
     auth.step2 = md5.syncHash(step2).toString('hex').toLowerCase();
 
     if (auth.qop == null)
