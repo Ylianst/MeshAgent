@@ -1163,10 +1163,11 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 {
 	ILibDuktape_Timer *ptrs = (ILibDuktape_Timer*)obj;
 	int argCount, i;
-	duk_context *ctx = ptrs->ctx;
 	char *funcName;
 
 	if (!ILibMemory_CanaryOK(ptrs)) { return; }
+	
+	duk_context *ctx = ptrs->ctx;
 	if (duk_check_stack(ctx, 3) == 0) { return; }
 
 	duk_push_heapptr(ctx, ptrs->callback);				// [func]
