@@ -81,6 +81,9 @@ var agentConnectionCount = 0;
 var updateState = 0;
 const consoleMode = process.argv.getParameter('console') != null;
 
+var digest_realm;
+var digest_username;
+var digest_password;
 
 
 // Check Permissions... Need Root/Elevated Permissions
@@ -135,7 +138,33 @@ var promises =
         services: null,
         setclip: null,
         getclip: null,
+        digest: null,
+        digest_auth: null,
+        digest_authint: null,
     };
+
+function generateRandomNumber(lower, upper)
+{
+    return (Math.floor(Math.random() * (upper - lower)) + lower);
+}
+function generateRandomLetter()
+{
+    return (String.fromCharCode(generateRandomNumber(97, 122)));
+}
+function generateRandomString(len)
+{
+    var ret = '', i;
+    for (i = 0; i < len; ++i)
+    {
+        ret += generateRandomLetter();
+    }
+    return (ret);
+}
+function generateRandomRealm()
+{
+    realm = generateRandomString(generateRandomNumber(1, 5)) + '.' + generateRandomString(generateRandomNumber(8, 20)) + '.com';
+    return (realm);
+}
 function resetPromises()
 {
     var i;
@@ -167,7 +196,7 @@ server.on('connection', function (c)
     global._test.push(c);
     console.info1('inbound connection received');
 });
-server.on('request', function (imsg, resp)
+server.on('request', function (imsg, rsp)
 {
     if (imsg.method == 'GET' && imsg.url == '/update')
     {
@@ -195,8 +224,77 @@ server.on('request', function (imsg, resp)
         var update = require('fs').createReadStream(getCurrentUpdatePath(), { flags: 'rb' });
         accumulator.total = require('fs').statSync(getCurrentUpdatePath()).size;
 
-        update.pipe(resp);
+        update.pipe(rsp);
         update.pipe(accumulator);
+    }
+    if (imsg.method == 'POST')
+    {
+        var username, qop;
+        if (imsg.Digest_IsAuthenticated(digest_realm))
+        {
+            username = imsg.Digest_GetUsername();
+            qop = imsg.Digest_GetQOP();
+
+            switch (imsg.url)
+            {
+                case '/':
+                    if (imsg.Digest_ValidatePassword(digest_password))
+                    {
+                        rsp.statusCode = 200;
+                        rsp.setHeader('Content-Type', 'text/html');
+                        rsp.end('<html>Success!</html>');
+                    }
+                    else
+                    {
+                        rsp.Digest_writeUnauthorized(digest_realm);
+                    }
+                    break;
+                case '/auth':
+                    if (qop != 'auth') { promises.digest_auth.reject('Received Incorrect QOP: ' + qop); }
+                    if (imsg.Digest_ValidatePassword(digest_password))
+                    {
+                        rsp.statusCode = 200;
+                        rsp.setHeader('Content-Type', 'text/html');
+                        rsp.end('<html>Success!</html>');
+                    }
+                    else
+                    {
+                        rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth' });
+                    }
+                    break;
+                case '/auth-int':
+                    if (qop != 'auth-int') { promises.digest_authint.reject('Received Incorrect QOP: ' + qop); }
+                    imsg.on('end', function ()
+                    {
+                        if (imsg.Digest_ValidatePassword(digest_password))
+                        {
+                            rsp.statusCode = 200;
+                            rsp.setHeader('Content-Type', 'text/html');
+                            rsp.end('<html>Success!</html>');
+                        }
+                        else
+                        {
+                            rsp.Digest_writeUnauthorized(digest_realm);
+                        }
+                    });
+                    break;
+            }
+        }
+        else
+        {
+            switch (imsg.url)
+            {
+                case '/':
+                    rsp.Digest_writeUnauthorized(digest_realm);
+                    break;
+                case '/auth':
+                    rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth' });
+                    break;
+                case '/auth-int':
+                    rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth-int, auth' });
+                    break;
+            }
+        }
     }
 });
 server.on('upgrade', function (msg, sck, head)
@@ -475,13 +573,22 @@ server.on('upgrade', function (msg, sck, head)
                 promises.smbios.resolve(j);
                 break;
             case 'result':
+                console.info1(JSON.stringify(j, null, 1));
+
                 if (promises[j.id] != null)
                 {
                     if (promises[j.id].timeout != null)
                     {
                         clearTimeout(promises[j.id].timeout);
                     }
-                    promises[j.id].resolve(j.value);
+                    if (j.result===true)
+                    {
+                        promises[j.id].resolve(j);
+                    }
+                    else
+                    {
+                        promises[j.id].reject(j.reason == null ? '' : j.reason);
+                    }
                 }
                 break;
             default:
@@ -652,6 +759,63 @@ server.on('upgrade', function (msg, sck, head)
             }
         }).then(function ()
         {
+            digest_realm = generateRandomRealm();
+            digest_username = generateRandomString(generateRandomNumber(5, 10));
+            digest_password = generateRandomString(generateRandomNumber(8, 20));
+
+            process.stdout.write('   HTTP Digest Test\n');
+            process.stdout.write('      => Basic.............................................[WAITING]');
+
+            sendEval("var digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
+            sendEval("digest.http = require('http');");
+            sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/', method: 'POST', rejectUnauthorized: false };");
+            sendEval("var req = digest.request(options);");
+            sendEval("req.on('error', function (e) { selfTestResponse('digest', false, JSON.stringify(e)); req = null; });");
+            sendEval("req.on('response', function (imsg) { selfTestResponse('digest', true); });");
+            sendEval("req.end('TestData');");
+
+            return (promises.digest);
+        }).then(function (v)
+        {
+            process.stdout.write('\r      => Basic.............................................[OK]     \n');
+            process.stdout.write('      => QOP = auth........................................[WAITING]');
+
+            digest_realm = generateRandomRealm();
+            digest_username = generateRandomString(generateRandomNumber(5, 10));
+            digest_password = generateRandomString(generateRandomNumber(8, 20));
+
+            sendEval("digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
+            sendEval("digest.http = require('http');");
+            sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth', method: 'POST', rejectUnauthorized: false };");
+            sendEval("var req = digest.request(options);");
+            sendEval("req.on('error', function (e) { selfTestResponse('digest_auth', false, JSON.stringify(e)); req = null; });");
+            sendEval("req.on('response', function (imsg) { selfTestResponse('digest_auth', true); });");
+            sendEval("req.end('TestData');");
+
+            return (promises.digest_auth);
+        }).then(function ()
+        {
+            process.stdout.write('\r      => QOP = auth........................................[OK]     \n');
+            process.stdout.write('      => QOP = auth-int....................................[WAITING]');
+
+            digest_realm = generateRandomRealm();
+            digest_username = generateRandomString(generateRandomNumber(5, 10));
+            digest_password = generateRandomString(generateRandomNumber(8, 20));
+
+            sendEval("digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
+            sendEval("digest.http = require('http');");
+            sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth-int', method: 'POST', rejectUnauthorized: false };");
+            sendEval("var req = digest.request(options);");
+            sendEval("req.on('error', function (e) { selfTestResponse('digest_authint', false, JSON.stringify(e)); req = null; });");
+            sendEval("req.on('response', function (imsg) { selfTestResponse('digest_authint', true); });");
+            sendEval("req.end('TestData');");
+
+            return (promises.digest_authint);
+        }).then(function ()
+        {
+            process.stdout.write('\r      => QOP = auth-int....................................[OK]     \n');
+        }).then(function ()
+        {
             process.stdout.write('\nTesting Complete\n\n');
             endTest();
         }).catch(function (e)
@@ -813,7 +977,10 @@ function endTest()
     require('agent-installer').fullUninstall(paramsString);
     console.setDestination(console.Destinations.STDOUT);
 }
-
+function sendEval(cmd)
+{
+    global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'eval "' + cmd + '"' });
+}
 
 if (process.argv.getParameter('AgentsFolder') != null)
 {
@@ -828,7 +995,7 @@ if (process.argv.getParameter('AgentsFolder') != null)
     var i, tmp, m;
 
     var lines = ['var addedModules = [];'];
-    lines.push("function selfTestResponse(id, value) { require('MeshAgent').SendCommand({ action: 'result', id: id, value: JSON.stringify(value) }); }");
+    lines.push("function selfTestResponse(id, result, reason) { require('MeshAgent').SendCommand({ action: 'result', id: id, result: result, reason: reason }); }");
     for (i = 0; i < modules_folder.length; ++i)
     {
         tmp = require('fs').readFileSync(modules + (process.platform == 'win32' ? '\\' : '/') + modules_folder[i]);

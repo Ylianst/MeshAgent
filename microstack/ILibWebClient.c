@@ -1865,9 +1865,16 @@ ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule sock
 										// so we need to copy it out, so we can recycle the buffer
 										// for the body
 										//
-										tph = ILibClonePacket(wcdo->header);
-										ILibDestructPacket(wcdo->header);
-										wcdo->header = tph;
+										if (wcdo->header != NULL)
+										{
+											tph = ILibClonePacket(wcdo->header);
+											ILibDestructPacket(wcdo->header);
+											wcdo->header = tph;
+										}
+										//else
+										//{
+										//	printf("WCDO/HEADER was NULL\n");
+										//}
 									}
 								}
 							}
