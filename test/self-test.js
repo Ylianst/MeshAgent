@@ -235,65 +235,46 @@ server.on('request', function (imsg, rsp)
             username = imsg.Digest_GetUsername();
             qop = imsg.Digest_GetQOP();
 
-            switch (imsg.url)
+            imsg.on('end', function ()
             {
-                case '/':
-                    if (imsg.Digest_ValidatePassword(digest_password))
-                    {
-                        rsp.statusCode = 200;
-                        rsp.setHeader('Content-Type', 'text/html');
-                        rsp.end('<html>Success!</html>');
-                    }
-                    else
-                    {
-                        rsp.Digest_writeUnauthorized(digest_realm);
-                    }
-                    break;
-                case '/auth':
-                    if (qop != 'auth') { promises.digest_auth.reject('Received Incorrect QOP: ' + qop); }
-                    if (imsg.Digest_ValidatePassword(digest_password))
-                    {
-                        rsp.statusCode = 200;
-                        rsp.setHeader('Content-Type', 'text/html');
-                        rsp.end('<html>Success!</html>');
-                    }
-                    else
-                    {
-                        rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth' });
-                    }
-                    break;
-                case '/auth-int':
-                    if (qop != 'auth-int') { promises.digest_authint.reject('Received Incorrect QOP: ' + qop); }
-                    imsg.on('end', function ()
-                    {
-                        if (imsg.Digest_ValidatePassword(digest_password))
-                        {
-                            rsp.statusCode = 200;
-                            rsp.setHeader('Content-Type', 'text/html');
-                            rsp.end('<html>Success!</html>');
-                        }
-                        else
-                        {
-                            rsp.Digest_writeUnauthorized(digest_realm);
-                        }
-                    });
-                    break;
-            }
+                switch (imsg.url)
+                {
+                    case '/auth':
+                        if (qop != 'auth') { promises.digest_auth.reject('Received Incorrect QOP: ' + qop); }
+                        break;
+                    case '/auth-int':
+                        if (qop != 'auth-int') { promises.digest_authint.reject('Received Incorrect QOP: ' + qop); }
+                        break;
+                }
+                if (imsg.Digest_ValidatePassword(digest_password))
+                {
+                    rsp.statusCode = 200;
+                    rsp.setHeader('Content-Type', 'text/html');
+                    rsp.end('<html>Success!</html>');
+                }
+                else
+                {
+                    rsp.Digest_writeUnauthorized(digest_realm);
+                }
+            });
         }
         else
         {
-            switch (imsg.url)
+            imsg.on('end', function ()
             {
-                case '/':
-                    rsp.Digest_writeUnauthorized(digest_realm);
-                    break;
-                case '/auth':
-                    rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth' });
-                    break;
-                case '/auth-int':
-                    rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth-int, auth' });
-                    break;
-            }
+                switch (imsg.url)
+                {
+                    case '/':
+                        rsp.Digest_writeUnauthorized(digest_realm);
+                        break;
+                    case '/auth':
+                        rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth' });
+                        break;
+                    case '/auth-int':
+                        rsp.Digest_writeUnauthorized(digest_realm, { qop: 'auth-int, auth' });
+                        break;
+                }
+            });
         }
     }
 });

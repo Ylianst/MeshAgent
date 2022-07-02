@@ -1871,10 +1871,6 @@ ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule sock
 											ILibDestructPacket(wcdo->header);
 											wcdo->header = tph;
 										}
-										//else
-										//{
-										//	printf("WCDO/HEADER was NULL\n");
-										//}
 									}
 								}
 							}
@@ -2216,6 +2212,7 @@ void ILibWebClient_OnDisconnectSink(ILibAsyncSocket_SocketModule socketModule, v
 		wcdo->FinHeader = 0;
 		h = wcdo->header;
 		wcdo->header = NULL;
+
 		if (wr != NULL && wr->OnResponse != NULL)
 		{				
 			wr->OnResponse(
