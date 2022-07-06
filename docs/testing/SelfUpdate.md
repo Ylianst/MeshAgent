@@ -13,7 +13,7 @@ There are two main update mechanisms that the Mesh Agent will utilize to be able
 The primary update mechanism utilized by the Mesh Agent, is the Native Update mechanism. This utilizes the Server Control Channel, as the main update mechanism.
 When the agent connects to the Server and is authenticated, the server will ask the Agent for the Agent Hash. The Mesh Agent will respond by sending to the server,
 the hash of the currently installed agent binary. Note, the agent and server hash the binary in such a way, that it excludes any embedded configurations. When a user installs a new agent,
-and downloads the agent from the server, the server will embed the user's configuration in the binary, such that only a single file can be downloaded.
+and downloads the agent from the server, the server will embed the user's configuration in the binary, such that only a single file download is necessary.
 
 If the server determines that the hash does not match the hash of the currently deployed agent in this version of the server, the server may elect to update the agent to the latest version.
 To kick off this process, the server will send a MeshAgent_AgentUpdate (13) command to the agent, via the control channel, followed by a series of MeshCommand_AgentUpdateBlock (14) commands,
