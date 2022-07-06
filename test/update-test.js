@@ -122,13 +122,14 @@ if (process.argv.getParameter('help') != null)
     process.exit();
 }
 
-if (!require('fs').existsSync(recoverycorePath))
+if (process.argv.getParameter('JS') != null && !require('fs').existsSync(recoverycorePath))
 {
     console.log(recoverycorePath + ' cannot be found.');
     console.log('Please either copy recoverycore.js, or specify the location using --RecoveryCore');
     process.exit();
 }
-const recoveryCore = require('fs').readFileSync(recoverycorePath);
+
+const recoveryCore = process.argv.getParameter('JS') == null ? null : require('fs').readFileSync(recoverycorePath);
 
 
 process.stdout.write('Generating Certificate...');
