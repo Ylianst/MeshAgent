@@ -40,6 +40,7 @@ This update mechanism starts with the server sending the Recovery Core to the ag
 the server will send a JSON command on the control channel with the action set to 'agentupdate', hash set to the SHA384 hash of the update, and the url set to an https url where the agent can fetch the updated agent binary.
 The recovery core JS, will download the update from the specified url, verifying the hash with the received hash value. During this process, the recovery core may send progress data via the control channel. 
 Once the update has been received and verified, the agent will send a JSON command back to the server with the action field set to 'agentupdatedownloaded'. This will indicate to the server that the update has been successfully downloaded and verified.
+It should be noted that the TLS certificate presented by the server hosting the agent update, must match the TLS certificate presented by the server in the Agent control channel. 
 
 To perform the actual update after verifying receipt, the recovery core will utilise _wexecve() to stop the agent service, overwrite the agent binary, then restart the service.
 On Linux and BSD platforms, the recovery core will simply overwrite the agent binary and utilize execv() to restart the agent after closing all open descriptors.
