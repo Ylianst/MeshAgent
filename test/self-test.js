@@ -107,7 +107,9 @@ if (process.argv.getParameter('help') != null)
     console.log('\n   Available options:');
     console.log('   --AgentsFolder=         The path to the agents folder of the Server Repository');
     console.log('   --console               If specified, enables console command mode');
+    console.log('   --FileTransfer          If specified, individually runs the FileTransfer Unit Test');
     console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
+    console.log('   --WebRTC                If specified, individually runs the WebRTC Unit Test');
     console.log('   --verbose=              Specifies the verbosity level of the displayed output. Default = 0');
     console.log('');
     process.exit();
