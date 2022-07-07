@@ -372,7 +372,7 @@ powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)
       <Optimization>Full</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>..\openssl\include;..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>MESH_AGENTID=3;DUK_USE_DATE_NOW_WINDOWS;NOLMSCOMMANDER;MICROSTACK_PROXY;_LINKVM;WIN32;NDEBUG;_WINSERVICE;_CONSOLE;WINSOCK2;MICROSTACK_NO_STDAFX;MICROSTACK_TLS_DETECT;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);ILibChain_WATCHDOG_TIMEOUT=600000;DUK_USE_DEBUGGER_SUPPORT;DUK_USE_INTERRUPT_COUNTER;DUK_USE_DEBUGGER_INSPECT;DUK_USE_DEBUGGER_PAUSE_UNCAUGHT;DUK_USE_DEBUGGER_DUMPHEAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>MESH_AGENTID=3;DUK_USE_DATE_NOW_WINDOWS;NOLMSCOMMANDER;MICROSTACK_PROXY;_LINKVM;WIN32;NDEBUG;_WINSERVICE;_CONSOLE;WINSOCK2;MICROSTACK_NO_STDAFX;MICROSTACK_TLS_DETECT;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);ILibChain_WATCHDOG_TIMEOUT=600000;DUK_USE_DEBUGGER_SUPPORT;DUK_USE_INTERRUPT_COUNTER;DUK_USE_DEBUGGER_INSPECT;DUK_USE_DEBUGGER_PAUSE_UNCAUGHT;DUK_USE_DEBUGGER_DUMPHEAP;_REMOTELOGGING;_REMOTELOGGINGSERVER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader>
@@ -461,7 +461,7 @@ powershell -ExecutionPolicy Unrestricted $(ProjectDir)prebuild.ps1 $(ProjectDir)
       <Optimization>MinSpace</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>..\openssl\include;..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>MESH_AGENTID=4;DUK_USE_DATE_NOW_WINDOWS;NOLMSCOMMANDER;MICROSTACK_PROXY;WIN32;WIN64;_WINSERVICE;NDEBUG;_LINKVM;_CONSOLE;MICROSTACK_NO_STDAFX;MICROSTACK_PROXY;WINSOCK2;MICROSTACK_TLS_DETECT;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);ILibChain_WATCHDOG_TIMEOUT=600000;DUK_USE_DEBUGGER_SUPPORT;DUK_USE_INTERRUPT_COUNTER;DUK_USE_DEBUGGER_INSPECT;DUK_USE_DEBUGGER_PAUSE_UNCAUGHT;DUK_USE_DEBUGGER_DUMPHEAP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>MESH_AGENTID=4;DUK_USE_DATE_NOW_WINDOWS;NOLMSCOMMANDER;MICROSTACK_PROXY;WIN32;WIN64;_WINSERVICE;NDEBUG;_LINKVM;_CONSOLE;MICROSTACK_NO_STDAFX;WINSOCK2;MICROSTACK_TLS_DETECT;_MSC_PLATFORM_TOOLSET_$(PlatformToolset);ILibChain_WATCHDOG_TIMEOUT=600000;DUK_USE_DEBUGGER_SUPPORT;DUK_USE_INTERRUPT_COUNTER;DUK_USE_DEBUGGER_INSPECT;DUK_USE_DEBUGGER_PAUSE_UNCAUGHT;DUK_USE_DEBUGGER_DUMPHEAP;_REMOTELOGGING;_REMOTELOGGINGSERVER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader>

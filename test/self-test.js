@@ -108,6 +108,7 @@ if (process.argv.getParameter('help') != null)
     console.log('\n   Available options:');
     console.log('   --AgentsFolder=         The path to the agents folder of the Server Repository');
     console.log('   --console               If specified, enables console command mode');
+    console.log('   --Delay                 If specified, will prompt the user to hit enter before starting unit tests');
     console.log('   --FileTransfer          If specified, individually runs the FileTransfer Unit Test');
     console.log('   --LocalDebug            Specifies a port number for the Local Web Debug Interface');
     console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
@@ -157,6 +158,7 @@ if (process.argv.getParameter('RemoteDebug') != null)
 
 var promises =
     {
+        delay: null,
         coreinfo: null,
         CommitInfo: null,
         AgentInfo: null,
@@ -657,6 +659,25 @@ server.on('upgrade', function (msg, sck, head)
             });
             return;
         }
+
+        if (process.argv.getParameter('Delay') != null)
+        {
+            process.stdout.write('\nPress any key to start running Mesh Core Unit Tests\n');
+            console.canonical = false;  // This takes the console out of canonical mode, which means stdin will process each key press individually, instead of by line.
+            process.stdin.once('data', function ()
+            {
+                console.canonical = true;
+                promises.delay.resolve();
+            });
+        }
+        else
+        {
+            promises.delay.resolve();
+        }
+    };
+
+    promises.delay.then(function runCommands2()
+    {
         if (process.argv.getParameter('WebRTC') != null)
         {
             WebRTC_Test().finally(function () { endTest(); });
@@ -691,7 +712,7 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('\r');
             process.stdout.write('   Agent sent Network Info to server.......................[OK]      \n');
             process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
-            switch(process.platform)
+            switch (process.platform)
             {
                 case 'linux':
                 case 'win32':
@@ -759,7 +780,7 @@ server.on('upgrade', function (msg, sck, head)
             {
                 p = JSON.parse(v.value);
             }
-            catch(e)
+            catch (e)
             {
                 process.stdout.write('\r   PS Test.................................................[FAILED]      \n');
                 process.stdout.write('   => ' + e + '\n');
@@ -806,7 +827,7 @@ server.on('upgrade', function (msg, sck, head)
             return (promises.getclip);
         }).then(function (v)
         {
-            if(v.data == global._cliptest)
+            if (v.data == global._cliptest)
             {
                 process.stdout.write('\r   Clipboard Test..........................................[OK]      \n');
             }
@@ -889,7 +910,7 @@ server.on('upgrade', function (msg, sck, head)
             endTest();
         });
 
-    };
+    });
 });
 
 function FileTransfer_Test_Download()
