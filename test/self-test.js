@@ -144,7 +144,8 @@ var promises =
         digest_authint: null,
         webrtc_test: null,
         webrtc_offer: null,
-        webrtc_hash: null
+        webrtc_hash: null,
+        filetransfer: null
     };
 
 function generateRandomNumber(lower, upper)
@@ -310,6 +311,9 @@ server.on('upgrade', function (msg, sck, head)
 
     resetPromises();
     global._client = sck.upgradeWebSocket();
+    require('events').EventEmitter.call(global._client, true)
+        .createEvent('JSONCommand');
+
     global._client.on('data', function (buffer)
     {
         this.processCommand(buffer);
@@ -339,7 +343,8 @@ server.on('upgrade', function (msg, sck, head)
         if (buffer[0] == '{' || buffer[0] == 123)
         {
             // JSON Command
-            this.processJSON(JSON.parse(buffer.toString()));
+            jcmd = JSON.parse(buffer.toString());
+            this.emit('JSONCommand', jcmd);
             return;
         }
 
@@ -591,6 +596,7 @@ server.on('upgrade', function (msg, sck, head)
                 break;
         }
     }
+    global._client.on('JSONCommand', global._client.processJSON);
 
     global._client.runCommands = function runCommands()
     {
@@ -621,6 +627,11 @@ server.on('upgrade', function (msg, sck, head)
         if (process.argv.getParameter('WebRTC') != null)
         {
             WebRTC_Test().finally(function () { endTest(); });
+            return;
+        }
+        if (process.argv.getParameter('FileTransfer') != null)
+        {
+            FileTransfer_Test().finally(function () { endTest(); });
             return;
         }
 
@@ -829,6 +840,9 @@ server.on('upgrade', function (msg, sck, head)
             return (WebRTC_Test());
         }).then(function ()
         {
+            return (FileTransfer_Test());
+        }).then(function ()
+        {
             process.stdout.write('\nTesting Complete\n\n');
             endTest();
         }).catch(function (e)
@@ -839,6 +853,140 @@ server.on('upgrade', function (msg, sck, head)
 
     };
 });
+
+function FileTransfer_Test_Download()
+{
+    process.stdout.write('      => Initialize Download...............................[WAITING]');
+
+    createTunnel(0x1FF, 0x00).then(function (t)
+    {
+        process.stdout.write('\r      => Initialize Download...............................[OK]     \n');
+        process.stdout.write('      => Downloading File..................................[0 bytes]');
+
+        t.crc = 0;  // Set the CRC to 0, so we can validate the download on the fly
+        t.bytes = 0;
+        t.on('data', function (b)
+        {
+            if (typeof (b) == 'string')
+            {
+                var cmd = JSON.parse(b);
+                if (cmd.action != 'download') { return; }
+                switch (cmd.sub)
+                {
+                    case 'start':
+                        this.write({ action: 'download', sub: 'startack', id: 0 });
+                        break;
+                }
+            }
+            else
+            {
+                var fin = (b.readInt32BE(0) & 0x01000001) == 0x01000001;
+                this.crc = crc32c(b.slice(4), this.crc);
+                this.bytes += (b.length - 4);
+                this.write({ action: 'download', sub: 'ack', id: 0 });
+                process.stdout.write('\r      => Downloading File..................................[' + b.length + ' bytes]');
+
+                if (fin)
+                {
+                    process.stdout.write('\r      => Downloading File..................................[DONE]                    \n');
+                    process.stdout.write('         => CRC CHECK......................................[' + (this.crc == global.testbufferCRC ? 'OK' : 'FAILED') + ']\n');
+                    this.end();
+                }
+            }
+        });
+        t.on('end', function ()
+        {
+            if(this.crc == global.testbufferCRC)
+            {
+                global.promises.filetransfer.resolve();
+            }
+            else
+            {
+                global.promises.filetransfer.reject('Download FAILED');
+            }
+        });
+
+        t.write('c');
+        t.write('5'); // Request Files
+        t.write(JSON.stringify({ action: 'download', sub: 'start', path: process.cwd() + 'testFile', id: 0 }));
+
+
+        //promises.filetransfer.resolve();
+    }).catch(function ()
+    {
+        process.stdout.write('\r      => Initialize Download...............................[FAILED] \n');
+        promises.filetransfer.reject('Failed to create tunnel');
+    });
+}
+function FileTransfer_Test()
+{
+    process.stdout.write('   File Transfer Test\n');
+    process.stdout.write('      => Initialize Upload.................................[WAITING]');
+
+    createTunnel(0x1FF, 0x00).then(function (t)
+    {
+        t.on('data', function (buffer)
+        {
+            var jcmd = JSON.parse(buffer.toString());
+            switch (jcmd.action)
+            {
+                case 'uploadstart':
+                    // Start sending the file in 16k blocks
+                    this.uploadBuffer = global.testbuffer.slice(0);
+                    this.write(this.uploadBuffer.slice(0, 16384));
+                    this.uploadBuffer = this.uploadBuffer.slice(16384);
+                    break;
+                case 'uploadack':
+                    {
+                        var bytesSent = global.testbuffer.length = this.uploadBuffer.length;
+                        var pct = bytesSent / global.testbuffer.length;
+                        pct = Math.floor(pct * 100);
+                        process.stdout.write('\r      => Uploading File....................................[' + pct + '%]   ');
+
+                        this.write(this.uploadBuffer.slice(0, this.uploadBuffer.length > 16384 ? 16384 : this.uploadBuffer.length));
+                        this.uploadBuffer = this.uploadBuffer.slice(this.uploadBuffer.length > 16384 ? 16384 : this.uploadBuffer.length);
+                        if (this.uploadBuffer.length == 0)
+                        {
+                            this.write({ action: 'uploaddone' });
+                        }
+                    }
+                    break;
+                case 'uploaddone':
+                    process.stdout.write('\r      => Uploading File....................................[100%]   \n');
+                    this.uploadsuccess = true;
+                    this.end();
+                    break;
+            }
+        });
+        t.on('end', function ()
+        {
+            if (!this.uploadsuccess)
+            {
+                promises.filetransfer.reject('Upload FAILED');
+                return;
+            }
+            FileTransfer_Test_Download();
+        });
+        process.stdout.write('\r      => Initialize Upload.................................[OK]     \n');
+
+        global.testbuffer = require('EncryptionStream').GenerateRandom(65535); // Generate 64k Test Buffer
+        global.testbufferCRC = crc32c(global.testbuffer);
+
+        process.stdout.write('      => Uploading File....................................[0%]');
+
+        t.write('c');
+        t.write('5'); // Request Files
+        t.write(JSON.stringify({ action: 'upload', name: 'testFile', path: process.cwd(), reqid: '0' }));
+
+        //promises.filetransfer.resolve();
+    }).catch(function ()
+    {
+        process.stdout.write('\r      => Initialize Upload.................................[FAILED] \n');
+        promises.filetransfer.reject('Failed to create tunnel');
+    });
+
+    return (promises.filetransfer);
+}
 
 function WebRTC_Test()
 {
