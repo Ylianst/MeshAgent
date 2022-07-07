@@ -84,7 +84,8 @@ const consoleMode = process.argv.getParameter('console') != null;
 var digest_realm;
 var digest_username;
 var digest_password;
-
+var remoteDebug = 0;
+var localDebug = 0;
 
 // Check Permissions... Need Root/Elevated Permissions
 if (!require('user-sessions').isRoot())
@@ -108,7 +109,9 @@ if (process.argv.getParameter('help') != null)
     console.log('   --AgentsFolder=         The path to the agents folder of the Server Repository');
     console.log('   --console               If specified, enables console command mode');
     console.log('   --FileTransfer          If specified, individually runs the FileTransfer Unit Test');
+    console.log('   --LocalDebug            Specifies a port number for the Local Web Debug Interface');
     console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
+    console.log("   --RemoteDebug           Specifies a port number for the Agent's Web Debug Interface");
     console.log('   --WebRTC                If specified, individually runs the WebRTC Unit Test');
     console.log('   --verbose=              Specifies the verbosity level of the displayed output. Default = 0');
     console.log('');
@@ -124,6 +127,30 @@ else
     if(!require('fs').existsSync(process.argv.getParameter('AgentsFolder')))
     {
         console.log('\nThe specified folder does not exist: ' + process.argv.getParameter('AgentsFolder'));
+        process.exit();
+    }
+}
+if (process.argv.getParameter('LocalDebug') != null)
+{
+    try
+    {
+        localDebug = parseInt(process.argv.getParameter('LocalDebug'));
+    }
+    catch(z)
+    {
+        console.log('Invalid Parameter specified for LocalDebug');
+        process.exit();
+    }
+}
+if (process.argv.getParameter('RemoteDebug') != null)
+{
+    try
+    {
+        remoteDebug = parseInt(process.argv.getParameter('RemoteDebug'));
+    }
+    catch (z)
+    {
+        console.log('Invalid Parameter specified for RemoteDebug');
         process.exit();
     }
 }
@@ -181,10 +208,14 @@ function resetPromises()
     }
 }
 
-if (process.argv.getParameter('Debug') != null)
+if (localDebug > 0)
 {
-    console.enableWebLog(parseInt(process.argv.getParameter('Debug')));
-    process.stdout.write('WebDebug Listening on port: ' + process.argv.getParameter('Debug') + '\n');
+    process.stdout.write('Local WebDebug Listening on port: ' + localDebug + '\n');
+    console.enableWebLog(localDebug);
+}
+if (remoteDebug > 0)
+{
+    process.stdout.write('Remote WebDebug will listen on port: ' + remoteDebug + '\n');
 }
 
 process.stdout.write('Generating Certificate...');
@@ -1217,6 +1248,10 @@ if (process.argv.getParameter('AgentsFolder') != null)
     var i, tmp, m;
 
     var lines = ['var addedModules = [];'];
+    if (remoteDebug != 0)
+    {
+        lines.push("console.enableWebLog(" + remoteDebug + ");");
+    }
     lines.push("function selfTestResponse(id, result, reason) { require('MeshAgent').SendCommand({ action: 'result', id: id, result: result, reason: reason }); }");
     for (i = 0; i < modules_folder.length; ++i)
     {
