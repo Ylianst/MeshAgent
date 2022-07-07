@@ -539,7 +539,7 @@ server.on('upgrade', function (msg, sck, head)
                     case 'console':
                         if (j.value != 'Command returned an exception error: TypeError: cyclic input')
                         {
-                            if (j.sessionid == null || process.argv.getParameter('verbose') != null)
+                            if (j.sessionid == null || process.argv.getParameter('verbose') != null || consoleMode)
                             {
                                 console.log('Agent: ' + j.value);
                             }
