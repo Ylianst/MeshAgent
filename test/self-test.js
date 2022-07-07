@@ -141,6 +141,9 @@ var promises =
         digest: null,
         digest_auth: null,
         digest_authint: null,
+        webrtc_test: null,
+        webrtc_offer: null,
+        webrtc_hash: null
     };
 
 function generateRandomNumber(lower, upper)
@@ -172,6 +175,12 @@ function resetPromises()
     {
         promises[i] = new promise(promise.defaultInit);
     }
+}
+
+if (process.argv.getParameter('Debug') != null)
+{
+    console.enableWebLog(parseInt(process.argv.getParameter('Debug')));
+    process.stdout.write('WebDebug Listening on port: ' + process.argv.getParameter('Debug') + '\n');
 }
 
 process.stdout.write('Generating Certificate...');
@@ -797,6 +806,9 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('\r      => QOP = auth-int....................................[OK]     \n');
         }).then(function ()
         {
+            return (WebRTC_Test());
+        }).then(function ()
+        {
             process.stdout.write('\nTesting Complete\n\n');
             endTest();
         }).catch(function (e)
@@ -807,6 +819,60 @@ server.on('upgrade', function (msg, sck, head)
 
     };
 });
+
+function WebRTC_Test()
+{
+    process.stdout.write('   WebRTC Test\n');
+    process.stdout.write('      => Recieved Initial Offer............................[WAITING]');
+
+    sendEval("var clientConnection = require('ILibWebRTC').createConnection();")
+    sendEval("var hasher = require('SHA384Stream').create();");
+    sendEval("clientConnection.on('dataChannel', function (rtcchannel) { var b = Buffer.alloc(6665535); b.randomFill(); selfTestResponse('webrtc_hash', true, hasher.syncHash(b).toString('hex')); rtcchannel.write(b); });");
+    sendEval("var offer = clientConnection.generateOffer(); var ob = Buffer.from(offer); selfTestResponse('webrtc_offer', true, ob.toString('base64'));");
+    
+    promises.webrtc_test.serverConnection = require('ILibWebRTC').createConnection();
+    promises.webrtc_offer.then(function (offer)
+    {
+        process.stdout.write('\r      => Recieved Initial Offer............................[OK]     \n');
+        //process.stdout.write(JSON.stringify(offer, null, 1));
+        process.stdout.write('      => Counter-Offer Set.................................[OK]\n');
+        process.stdout.write('      => Peer Connection Established.......................[WAITING]');
+
+        var offer = Buffer.from(offer.reason, 'base64').toString();
+        var counter = promises.webrtc_test.serverConnection.setOffer(offer);
+        var b = Buffer.from(counter).toString('base64');
+        sendEval("try{clientConnection.setOffer(Buffer.from('" + b + "', 'base64').toString());} catch(z) { sendConsoleText(JSON.stringify(z)); }");
+    });
+
+    promises.webrtc_test.serverConnection.on('connected', function ()
+    {
+        process.stdout.write('\r      => Peer Connection Established.......................[OK]     \n');
+        process.stdout.write('      => Data Channel Creation.............................[WAITING]');
+        this.dc = this.createDataChannel('Test Data Channel');
+        this.dc.on('data', function (b)
+        {
+            var h = require('SHA384Stream').create();
+            var dataHash = h.syncHash(b).toString('hex');
+
+            promises.webrtc_hash.then(function (j)
+            {
+                process.stdout.write('\r      => Data Channel Creation.............................[OK]     \n');
+                if (j.reason == dataHash)
+                {
+                    process.stdout.write('      => Data Fragmentation Test...........................[OK]');
+                    promises.webrtc_test.resolve();
+                }
+                else
+                {
+                    promises.webrtc_test.reject('WebRTC Data Channel received corrupt data (' + b.length + ' bytes');
+                }
+            });
+        });
+
+    });
+
+    return (promises.webrtc_test);
+}
 
 function createTunnel(rights, consent)
 {
@@ -1003,7 +1069,7 @@ if (process.argv.getParameter('NoInstall') == null)
                 [
                     {
                         newName: (process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh'),
-                        _buffer: 'logUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:' + server.address().port + '/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
+                        _buffer: 'enableILibRemoteLogging=5556\nlogUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:' + server.address().port + '/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
                     }
                 ],
             binary: updateSource,
