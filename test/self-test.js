@@ -707,6 +707,11 @@ server.on('upgrade', function (msg, sck, head)
         {
             //var vals = v.substring(19).split('\n').join('').split('\r').join('').split('.').join('').split(' ').join('');
             process.stdout.write('\r   Console Test (Help).....................................[OK]      \n');
+            if (process.platform == 'freebsd')
+            {
+                process.stdout.write('   CPUINFO Test............................................[NA]\n');
+                return;
+            }
             process.stdout.write('   CPUINFO Test............................................[WAITING]');
             global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'cpuinfo' });
             return (promises.cpuinfo);
