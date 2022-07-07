@@ -77,7 +77,7 @@ This test involves testing the different authentication modes of HTTP Digest, wh
 Each of these tests will utilize a variable length randomized string for the Realm, username, password, and entity body. The 3 different authentication modes are:
 - Basic: This will test the basic digest method, to validate successful authentication.
 - auth: This will test that the client can negotiate quality of protection, and select and use auth correctly.
-- auth-int: This will present all modes to the agent as being available, and will verify that the agent will correctly select anduse the most stringent mode. 
+- auth-int: This will present all modes to the agent as being available, and will verify that the agent will correctly select and use the most stringent mode. 
 
 **WebRTC Test:**
 In this test, the test tool will attempt to negotiate a Peer to Peer WebRTC Datachannel session between the test tool and the agent. This test is split into the various phases of the channel negotionation:
