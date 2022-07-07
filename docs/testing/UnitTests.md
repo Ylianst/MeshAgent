@@ -2,7 +2,7 @@
 
 ## Abstract
 
-TDhis document presents an overview of what a Mesh Core is,
+This document presents an overview of what a Mesh Core is,
 how the agent runs it, as well as how self-test.js can be used to test it.
 
 ## Mesh Core
