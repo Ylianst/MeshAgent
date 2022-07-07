@@ -1049,6 +1049,11 @@ function FileTransfer_Test()
 
 function WebRTC_Test()
 {
+    promises.webrtc_test.timeout = setTimeout(function ()
+    {
+        process.stdout.write('\n *TIMEOUT*\n');
+        promises.webrtc_test.resolve();
+    }, 10000);
     process.stdout.write('   WebRTC Test\n');
     process.stdout.write('      => Recieved Initial Offer............................[WAITING]');
 
@@ -1087,10 +1092,12 @@ function WebRTC_Test()
                 if (j.reason == dataHash)
                 {
                     process.stdout.write('      => Data Fragmentation Test...........................[OK]\n');
+                    clearTimeout(promises.webrtc_test.timeout);
                     promises.webrtc_test.resolve();
                 }
                 else
                 {
+                    clearTimeout(promises.webrtc_test.timeout);
                     promises.webrtc_test.reject('WebRTC Data Channel received corrupt data (' + b.length + ' bytes');
                 }
             });
