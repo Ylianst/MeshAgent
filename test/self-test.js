@@ -128,6 +128,7 @@ else
 
 var promises =
     {
+        coreinfo: null,
         CommitInfo: null,
         AgentInfo: null,
         netinfo: null,
@@ -523,15 +524,19 @@ server.on('upgrade', function (msg, sck, head)
                 console.log('Agent reports successfully downloaded update');
                 break;
             case 'coreinfo':
-                console.log('');
-                console.log('Agent is running core: ' + j.value);
-                console.log('');
+                promises.coreinfo.resolve('Agent is running core: ' + j.value);
                 break;
             case 'msg':
                 switch(j.type)
                 {
                     case 'console':
-                        if (j.value != 'Command returned an exception error: TypeError: cyclic input') { console.log('Agent: ' + j.value); }
+                        if (j.value != 'Command returned an exception error: TypeError: cyclic input')
+                        {
+                            if (j.sessionid == null || process.argv.getParameter('verbose') != null)
+                            {
+                                console.log('Agent: ' + j.value);
+                            }
+                        }
                         if (j.value == "PrivacyBarClosed") { endTest(); }
                         if (j.value.startsWith('Available commands:')) { promises.help.resolve(j.value); }
                         break;
@@ -613,6 +618,11 @@ server.on('upgrade', function (msg, sck, head)
             });
             return;
         }
+        if (process.argv.getParameter('WebRTC') != null)
+        {
+            WebRTC_Test().finally(function () { endTest(); });
+            return;
+        }
 
         //
         // Run thru the main tests, becuase no special options were sent
@@ -659,6 +669,16 @@ server.on('upgrade', function (msg, sck, head)
                     process.stdout.write('   Agent sent SMBIOS info to server........................[NA]      \n');
                     break;
             }
+        }).then(function ()
+        {
+            process.stdout.write('   Agent sent CoreInfo to server...........................[WAITING]');
+            return (promises.coreinfo);
+        }).then(function (v)
+        {
+            process.stdout.write('\r   Agent sent CoreInfo to server...........................[OK]     \n');
+            process.stdout.write('      => ' + v + '\n');
+        }).then(function ()
+        {
             process.stdout.write('   Tunnel Test.............................................[WAITING]');
             return (createTunnel(0, 0));
         }).then(function (t)
@@ -859,7 +879,7 @@ function WebRTC_Test()
                 process.stdout.write('\r      => Data Channel Creation.............................[OK]     \n');
                 if (j.reason == dataHash)
                 {
-                    process.stdout.write('      => Data Fragmentation Test...........................[OK]');
+                    process.stdout.write('      => Data Fragmentation Test...........................[OK]\n');
                     promises.webrtc_test.resolve();
                 }
                 else
