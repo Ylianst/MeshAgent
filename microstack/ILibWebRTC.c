@@ -2461,7 +2461,7 @@ void ILibStun_DelaySendIceRequest_OnLifeTimeDestroy(void *object)
 
 void ILibStun_DelaySendIceRequest_OnLifeTime(void *object)
 {
-	char dest[8 + sizeof(struct sockaddr_in6)];
+	char dest[8 + sizeof(size_t) + sizeof(struct sockaddr_in6)] = { 0 };
 	int Ptr;
 	char *Packet = (char*)object;
 	struct ILibStun_Module *stun;
@@ -2471,8 +2471,8 @@ void ILibStun_DelaySendIceRequest_OnLifeTime(void *object)
 	Data = (ILibICE_PeriodicState*)(Packet + Ptr);
 	stun = (struct ILibStun_Module*)Data->ptr;
 
-	((int*)(dest + sizeof(struct sockaddr_in6)))[0] = 4;
-	((int*)(dest + sizeof(struct sockaddr_in6)))[1] = Data->flags << 16;
+	((int*)ILibMemory_GetExtraMemory(&dest, sizeof(struct sockaddr_in6)))[0] = 4;
+	((int*)ILibMemory_GetExtraMemory(&dest, sizeof(struct sockaddr_in6)))[1] = Data->flags << 16;
 	memcpy_s(dest, sizeof(dest), &(Data->addr), sizeof(struct sockaddr_in6));
 
 	ILibStun_SendPacket(stun, Packet, 0, Ptr, (struct sockaddr_in6*)&dest, ILibAsyncSocket_MemoryOwnership_CHAIN);
