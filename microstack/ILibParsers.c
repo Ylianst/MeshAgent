@@ -1278,8 +1278,9 @@ ILibExportMethod void* ILibMemory_GetExtraMemory(void *container, size_t contain
 size_t ILibMemory_GetExtraMemorySize(void* extraMemory)
 {
 	if (extraMemory == NULL) { return 0; }
-	return(((size_t*)((char*)extraMemory - sizeof(size_t)))[0]);
+	return(ILibMemory_Legacy_GetExtraSizePtr(extraMemory)[0]);
 }
+
 
 ILibChain_Link* ILibChain_Link_Allocate(size_t structSize, size_t extraMemorySize)
 {

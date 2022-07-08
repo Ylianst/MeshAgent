@@ -489,6 +489,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
 	void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t extraSize);
 
+	#define ILibMemory_Legacy_RawSize(containerSize, extraSize) (containerSize + extraSize + sizeof(size_t))
+	#define ILibMemory_Legacy_GetExtraSizePtr(extra) ((size_t*)(((char*)extra)-sizeof(size_t)))
+	#define ILibMemory_Legacy_GetExtraSizePtrEx(container, containerSize) ILibMemory_Legacy_GetExtraSizePtr(ILibMemory_GetExtraMemory(container, containerSize))
+
 	void ILibMemory_SecureZero(void *ptr, size_t len);
 	void ILibMemory_Free(void *ptr);
 	void* ILibMemory_AllocateTemp(void* chain, size_t sz);
