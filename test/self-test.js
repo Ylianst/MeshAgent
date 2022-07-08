@@ -86,6 +86,23 @@ var digest_username;
 var digest_password;
 var remoteDebug = 0;
 var localDebug = 0;
+var testTimeout = 10;
+
+if (process.argv.getParameter('Timeout') != null)
+{
+    try
+    {
+        testTimeout = parseInt(process.argv.getParameter('Timeout'));
+    }
+    catch(x)
+    {
+    }
+    if(isNaN(testTimeout))
+    {
+        console.log('Invalid timeout specified: ' + process.argv.getParameter('Timeout'));
+        process.exit();
+    }
+}
 
 // Check Permissions... Need Root/Elevated Permissions
 if (!require('user-sessions').isRoot())
@@ -113,6 +130,7 @@ if (process.argv.getParameter('help') != null)
     console.log('   --LocalDebug            Specifies a port number for the Local Web Debug Interface');
     console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
     console.log("   --RemoteDebug           Specifies a port number for the Agent's Web Debug Interface");
+    console.log('   --Timeout               Specifies a timeout in seconds for the unit tests. Default is 10 seconds');
     console.log('   --WebRTC                If specified, individually runs the WebRTC Unit Test');
     console.log('   --verbose=              Specifies the verbosity level of the displayed output. Default = 0');
     console.log('');
@@ -208,6 +226,10 @@ function resetPromises()
     {
         promises[i] = new promise(promise.defaultInit);
     }
+}
+function addTimeout(prom)
+{
+    prom.timeout = setTimeout(function (p) { p.reject('Timeout'); }, testTimeout * 1000, prom);
 }
 
 if (localDebug > 0)
@@ -678,6 +700,8 @@ server.on('upgrade', function (msg, sck, head)
 
     promises.delay.then(function runCommands2()
     {
+        console.log('\nRunning Meshcore Tests [Timeout = ' + testTimeout + ' seconds]:');
+
         if (process.argv.getParameter('WebRTC') != null)
         {
             WebRTC_Test().finally(function () { endTest(); });
@@ -692,7 +716,6 @@ server.on('upgrade', function (msg, sck, head)
         //
         // Run thru the main tests, becuase no special options were sent
         //
-        console.log('\nRunning Meshcore Tests:');
         if (console.getInfoLevel() == 0) { console.setDestination(console.Destinations.DISABLED); }
 
         process.stdout.write('   Agent sent version information to server................');
@@ -752,12 +775,12 @@ server.on('upgrade', function (msg, sck, head)
             t.end();
         }).then(function ()
         {
+            addTimeout(promises.help);
             global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'console', value: 'help' });
             process.stdout.write('   Console Test (Help).....................................[WAITING]');
             return (promises.help);
         }).then(function (v)
         {
-            //var vals = v.substring(19).split('\n').join('').split('\r').join('').split('.').join('').split(' ').join('');
             process.stdout.write('\r   Console Test (Help).....................................[OK]      \n');
             if (process.platform == 'freebsd')
             {
@@ -765,12 +788,14 @@ server.on('upgrade', function (msg, sck, head)
                 return;
             }
             process.stdout.write('   CPUINFO Test............................................[WAITING]');
+            addTimeout(promises.cpuinfo);
             global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'cpuinfo' });
             return (promises.cpuinfo);
         }).then(function (v)
         {
             process.stdout.write('\r   CPUINFO Test............................................[OK]      \n');
             process.stdout.write('   PS Test.................................................[WAITING]');
+            addTimeout(promises.ps);
             global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'ps' });
             return (promises.ps);
         }).then(function (v)
@@ -790,6 +815,7 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('      => ' + p.keys().length + ' processes retrieved.\n');
 
             process.stdout.write('   Service Enumeration Test................................[WAITING]');
+            addTimeout(promises.services);
             global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'services' });
             return (promises.services);
         }).then(function (v)
@@ -809,6 +835,7 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('\r      => ' + services.length + ' services retrieved.\n');
         }).then(function ()
         {
+            addTimeout(promises.setclip);
             process.stdout.write('   Clipboard Test..........................................[WAITING]');
             var b = Buffer.alloc(16);
             b.randomFill();
@@ -823,6 +850,7 @@ server.on('upgrade', function (msg, sck, head)
                 process.stdout.write('\r   Clipboard Test..........................................[FAILED TO SET]\n');
                 return;
             }
+            addTimeout(promises.getclip);
             global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'getclip' });
             return (promises.getclip);
         }).then(function (v)
@@ -1053,7 +1081,7 @@ function WebRTC_Test()
     {
         process.stdout.write('\n *TIMEOUT*\n');
         promises.webrtc_test.resolve();
-    }, 10000);
+    }, testTimeout * 1000);
     process.stdout.write('   WebRTC Test\n');
     process.stdout.write('      => Recieved Initial Offer............................[WAITING]');
 
@@ -1117,7 +1145,7 @@ function createTunnel(rights, consent)
     ret.timeout = setTimeout(function ()
     {
         ret.reject('timeout');
-    }, 2000);
+    }, testTimeout*1000);
     ret.options = { action: 'msg', type: 'tunnel', rights: rights, consent: consent, username: '(test script)', value: 'wss://127.0.0.1:' + server.address().port + '/tunnel' };
     global._client.command(ret.options);
     return (ret);
