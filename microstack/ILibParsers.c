@@ -921,6 +921,7 @@ struct ILibLifeTime
 	
 	void *DeleteList;
 	void *ObjectList;
+	void *ActiveList;
 	int ObjectCount;
 };
 
@@ -7803,7 +7804,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	LifeTimeMonitor->NextTriggerTick = -1;
 
 	// This is an optimization. We are going to create the root of this linked list on the stack instead of the heap.
-	EventQueue = ILibMemory_AllocateA(sizeof(ILibLinkedListNode_Root));
+	LifeTimeMonitor->ActiveList = (EventQueue = ILibMemory_AllocateA(sizeof(ILibLinkedListNode_Root)));
 
 	ILibLinkedList_Lock(LifeTimeMonitor->ObjectList);
 	node = ILibLinkedList_GetNode_Head(LifeTimeMonitor->ObjectList);
@@ -7843,6 +7844,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 		ILibMemory_Free(EVT);
 		node = ILibQueue_DeQueue(EventQueue);
 	}
+	LifeTimeMonitor->ActiveList = NULL;
 
 	// Compute how much time until next trigger
 	if (LifeTimeMonitor->NextTriggerTick != -1 && *blocktime > (int)(LifeTimeMonitor->NextTriggerTick - CurrentTick))
@@ -7901,9 +7903,12 @@ int ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 			ILibForceUnBlockChain(UPnPLifeTime->ChainLink.ParentChain);
 			return(1);
 		}
+		return(0);
 	}
 
-
+	//
+	// We are on the Microstack Thread
+	//
 	EventQueue = ILibQueue_Create();
 	ILibLinkedList_Lock(UPnPLifeTime->ObjectList);
 
@@ -7925,6 +7930,28 @@ int ILibLifeTime_Remove(void *LifeTimeToken, void *data)
 		}
 	}
 	ILibLinkedList_UnLock(UPnPLifeTime->ObjectList);
+
+	if (UPnPLifeTime->ActiveList != NULL)
+	{
+		// 
+		// We were called from a Timer Dispatch, but since we are on the same thread, we are ok to modify this Queue
+		//
+		node = ILibLinkedList_GetNode_Head(UPnPLifeTime->ActiveList);
+		while (node != NULL)
+		{
+			evt = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node);
+			if (evt != NULL && ILibMemory_CanaryOK(evt) && evt->data == data)
+			{
+				ILibQueue_EnQueue(EventQueue, evt);
+				node = ILibLinkedList_Remove(node);
+			}
+			else
+			{
+				node = ILibLinkedList_GetNextNode(node);
+			}
+		}
+	}
+
 
 	//
 	// Iterate through each node that is to be removed
