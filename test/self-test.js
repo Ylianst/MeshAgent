@@ -713,6 +713,12 @@ server.on('upgrade', function (msg, sck, head)
             return;
         }
 
+        if (process.argv.getParameter('Digest') != null)
+        {
+            Digest_Test().finally(function () { endTest(); });
+            return;
+        }
+
         //
         // Run thru the main tests, becuase no special options were sent
         //
@@ -867,61 +873,7 @@ server.on('upgrade', function (msg, sck, head)
             }
         }).then(function ()
         {
-            digest_realm = generateRandomRealm();
-            digest_username = generateRandomString(generateRandomNumber(5, 10));
-            digest_password = generateRandomString(generateRandomNumber(8, 20));
-
-            process.stdout.write('   HTTP Digest Test\n');
-            process.stdout.write('      => Basic.............................................[WAITING]');
-
-            sendEval("var digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
-            sendEval("digest.http = require('http');");
-            sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/', method: 'POST', rejectUnauthorized: false };");
-            sendEval("var req = digest.request(options);");
-            sendEval("req.on('error', function (e) { selfTestResponse('digest', false, JSON.stringify(e)); req = null; });");
-            sendEval("req.on('response', function (imsg) { selfTestResponse('digest', true); });");
-            sendEval("req.end('TestData');");
-
-            return (promises.digest);
-        }).then(function (v)
-        {
-            process.stdout.write('\r      => Basic.............................................[OK]     \n');
-            process.stdout.write('      => QOP = auth........................................[WAITING]');
-
-            digest_realm = generateRandomRealm();
-            digest_username = generateRandomString(generateRandomNumber(5, 10));
-            digest_password = generateRandomString(generateRandomNumber(8, 20));
-
-            sendEval("digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
-            sendEval("digest.http = require('http');");
-            sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth', method: 'POST', rejectUnauthorized: false };");
-            sendEval("var req = digest.request(options);");
-            sendEval("req.on('error', function (e) { selfTestResponse('digest_auth', false, JSON.stringify(e)); req = null; });");
-            sendEval("req.on('response', function (imsg) { selfTestResponse('digest_auth', true); });");
-            sendEval("req.end('TestData');");
-
-            return (promises.digest_auth);
-        }).then(function ()
-        {
-            process.stdout.write('\r      => QOP = auth........................................[OK]     \n');
-            process.stdout.write('      => QOP = auth-int....................................[WAITING]');
-
-            digest_realm = generateRandomRealm();
-            digest_username = generateRandomString(generateRandomNumber(5, 10));
-            digest_password = generateRandomString(generateRandomNumber(8, 20));
-
-            sendEval("digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
-            sendEval("digest.http = require('http');");
-            sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth-int', method: 'POST', rejectUnauthorized: false };");
-            sendEval("var req = digest.request(options);");
-            sendEval("req.on('error', function (e) { selfTestResponse('digest_authint', false, JSON.stringify(e)); req = null; });");
-            sendEval("req.on('response', function (imsg) { selfTestResponse('digest_authint', true); });");
-            sendEval("req.end('TestData');");
-
-            return (promises.digest_authint);
-        }).then(function ()
-        {
-            process.stdout.write('\r      => QOP = auth-int....................................[OK]     \n');
+            return (Digest_Test());
         }).then(function ()
         {
             return (WebRTC_Test());
@@ -1073,6 +1025,65 @@ function FileTransfer_Test()
     });
 
     return (promises.filetransfer);
+}
+
+function Digest_Test()
+{
+    digest_realm = generateRandomRealm();
+    digest_username = generateRandomString(generateRandomNumber(5, 10));
+    digest_password = generateRandomString(generateRandomNumber(8, 20));
+
+    process.stdout.write('   HTTP Digest Test\n');
+    process.stdout.write('      => Basic.............................................[WAITING]');
+
+    sendEval("var digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
+    sendEval("digest.http = require('http');");
+    sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/', method: 'POST', rejectUnauthorized: false };");
+    sendEval("var req = digest.request(options);");
+    sendEval("req.on('error', function (e) { selfTestResponse('digest', false, JSON.stringify(e)); req = null; });");
+    sendEval("req.on('response', function (imsg) { selfTestResponse('digest', true); });");
+    sendEval("req.end('TestData');");
+
+    promises.digest.then(function (v)
+    {
+        process.stdout.write('\r      => Basic.............................................[OK]     \n');
+        process.stdout.write('      => QOP = auth........................................[WAITING]');
+
+        digest_realm = generateRandomRealm();
+        digest_username = generateRandomString(generateRandomNumber(5, 10));
+        digest_password = generateRandomString(generateRandomNumber(8, 20));
+
+        sendEval("digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
+        sendEval("digest.http = require('http');");
+        sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth', method: 'POST', rejectUnauthorized: false };");
+        sendEval("var req = digest.request(options);");
+        sendEval("req.on('error', function (e) { selfTestResponse('digest_auth', false, JSON.stringify(e)); req = null; });");
+        sendEval("req.on('response', function (imsg) { selfTestResponse('digest_auth', true); });");
+        sendEval("req.end('TestData');");
+    });
+
+    promises.digest_auth.then(function ()
+    {
+        process.stdout.write('\r      => QOP = auth........................................[OK]     \n');
+        process.stdout.write('      => QOP = auth-int....................................[WAITING]');
+
+        digest_realm = generateRandomRealm();
+        digest_username = generateRandomString(generateRandomNumber(5, 10));
+        digest_password = generateRandomString(generateRandomNumber(8, 20));
+
+        sendEval("digest = require('http-digest').create('" + digest_username + "', '" + digest_password + "');");
+        sendEval("digest.http = require('http');");
+        sendEval("var options = { protocol: 'https:', host: '127.0.0.1', port: " + server.address().port + ", path: '/auth-int', method: 'POST', rejectUnauthorized: false };");
+        sendEval("var req = digest.request(options);");
+        sendEval("req.on('error', function (e) { selfTestResponse('digest_authint', false, JSON.stringify(e)); req = null; });");
+        sendEval("req.on('response', function (imsg) { selfTestResponse('digest_authint', true); });");
+        sendEval("req.end('TestData');");
+    });
+
+    return (promises.digest_authint.then(function ()
+    {
+        process.stdout.write('\r      => QOP = auth-int....................................[OK]     \n');
+    }));
 }
 
 function WebRTC_Test()
