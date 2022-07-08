@@ -2461,7 +2461,7 @@ void ILibStun_DelaySendIceRequest_OnLifeTimeDestroy(void *object)
 
 void ILibStun_DelaySendIceRequest_OnLifeTime(void *object)
 {
-	char dest[8 + sizeof(size_t) + sizeof(struct sockaddr_in6)] = { 0 };
+	char dest[ILibMemory_Legacy_RawSize(sizeof(struct sockaddr_in6), 4)] = { 0 };
 	int Ptr;
 	char *Packet = (char*)object;
 	struct ILibStun_Module *stun;
@@ -2471,8 +2471,8 @@ void ILibStun_DelaySendIceRequest_OnLifeTime(void *object)
 	Data = (ILibICE_PeriodicState*)(Packet + Ptr);
 	stun = (struct ILibStun_Module*)Data->ptr;
 
-	((int*)ILibMemory_GetExtraMemory(&dest, sizeof(struct sockaddr_in6)))[0] = 4;
-	((int*)ILibMemory_GetExtraMemory(&dest, sizeof(struct sockaddr_in6)))[1] = Data->flags << 16;
+	ILibMemory_Legacy_GetExtraSizePtrEx(&dest, sizeof(struct sockaddr_in6))[0] = 4;
+	((int*)ILibMemory_GetExtraMemory(&dest, sizeof(struct sockaddr_in6)))[0] = Data->flags << 16;
 	memcpy_s(dest, sizeof(dest), &(Data->addr), sizeof(struct sockaddr_in6));
 
 	ILibStun_SendPacket(stun, Packet, 0, Ptr, (struct sockaddr_in6*)&dest, ILibAsyncSocket_MemoryOwnership_CHAIN);
@@ -5723,9 +5723,10 @@ void ILibStun_CreateDtlsSession(struct ILibStun_Module *obj, int sessionId, int 
 	if (obj->dTlsSessions[sessionId] == NULL) 
 	{ 
 		void *mem;
-		obj->dTlsSessions[sessionId] = ILibMemory_Allocate(sizeof(struct ILibStun_dTlsSession), 16 + sizeof(struct sockaddr_in6), NULL, &mem);
+		
+		obj->dTlsSessions[sessionId] = ILibMemory_Allocate(sizeof(struct ILibStun_dTlsSession), ILibMemory_Legacy_RawSize(sizeof(struct sockaddr_in6), 4), NULL, &mem);
 		obj->dTlsSessions[sessionId]->remoteInterface = (struct sockaddr_in6*)mem;
-		((int*)((char*)mem + sizeof(struct sockaddr_in6)))[0] = 4;
+		ILibMemory_Legacy_GetExtraSizePtrEx(mem, sizeof(struct sockaddr_in6))[0] = 4;
 	}
 	else
 	{
@@ -5733,8 +5734,7 @@ void ILibStun_CreateDtlsSession(struct ILibStun_Module *obj, int sessionId, int 
 
 		memset(obj->dTlsSessions[sessionId], 0, sizeof(struct ILibStun_dTlsSession));
 		obj->dTlsSessions[sessionId]->remoteInterface = (struct sockaddr_in6*)ILibMemory_GetExtraMemory(obj->dTlsSessions[sessionId], sizeof(struct ILibStun_dTlsSession));
-		memset(obj->dTlsSessions[sessionId]->remoteInterface, 0, sizeof(struct sockaddr_in6));
-		memset(ILibMemory_GetExtraMemory(obj->dTlsSessions[sessionId]->remoteInterface, sizeof(struct sockaddr_in6)), 0, ILibMemory_GetExtraMemorySize(ILibMemory_GetExtraMemory(obj->dTlsSessions[sessionId]->remoteInterface, sizeof(struct sockaddr_in6))));
+		memset(obj->dTlsSessions[sessionId]->remoteInterface, 0, ILibMemory_GetExtraMemorySize(obj->dTlsSessions[sessionId]->remoteInterface));
 	}
 	obj->IceStates[iceSlot]->dtlsSession = sessionId;
 	obj->dtlsSessionNextSlot = sessionId + 1;
