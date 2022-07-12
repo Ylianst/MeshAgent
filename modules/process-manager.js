@@ -132,8 +132,11 @@ function processManager() {
                 p.stdin.write('       gsub(/[ \\t]*[0-9]+[ \\t]*[^ ^\\t]+[ \\t]+/,"",$i);');
                 p.stdin.write('       gsub(/\\\\/,"\\\\\\\\",$i);');
                 p.stdin.write('       gsub(/"/,"\\\\\\"",$i);');
-                p.stdin.write('       printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i==1?"":","),A[1],A[1],A[2],$i;');
-                //                                  PID               PID                 USER               command     
+                p.stdin.write('       if($i !~ /^awk /)');
+                p.stdin.write('       {');
+                p.stdin.write('          printf "%s\\"%s\\":{\\"pid\\":\\"%s\\",\\"user\\":\\"%s\\",\\"cmd\\":\\"%s\\"}",(i==1?"":","),A[1],A[1],A[2],$i;');
+                //                                     PID               PID                 USER               command     
+                p.stdin.write('       }');
                 p.stdin.write('   }');
                 p.stdin.write('   printf "}";');
                 p.stdin.write("}'\nexit\n");
