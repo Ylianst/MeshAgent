@@ -77,6 +77,16 @@ const MeshCommand_AgentTag = 15;	            // Send the mesh agent tag to the s
 const MeshCommand_CoreOk = 16;	                // Sent by the server to indicate the meshcore is ok
 const MeshCommand_HostInfo = 31;	            // Host OS and CPU Architecture
 
+const MNG_KVM_PICTURE = 3;
+const MNG_KVM_SCREEN = 7;
+const MNG_KVM_GET_DISPLAYS = 11;
+const MNG_KVM_SET_DISPLAY = 12;
+const MNG_KVM_KEYSTATE = 18;
+const MNG_JUMBO = 27;
+const MNG_KVM_DISPLAY_INFO = 82;
+const MNG_KVM_MOUSE_CURSOR = 88;
+
+
 const PLATFORMS = ['UNKNOWN', 'DESKTOP', 'LAPTOP', 'MOBILE', 'SERVER', 'DISK', 'ROUTER', 'PI', 'VIRTUAL'];
 var agentConnectionCount = 0;
 var updateState = 0;
@@ -197,7 +207,8 @@ var promises =
         webrtc_offer: null,
         webrtc_hash: null,
         filetransfer: null,
-        terminal: null
+        terminal: null,
+        kvm : null
     };
 
 function generateRandomNumber(lower, upper)
@@ -730,6 +741,11 @@ server.on('upgrade', function (msg, sck, head)
             Terminal_Test().finally(function () { endTest(); });
             return;
         }
+        if (process.argv.getParameter('KVM') != null)
+        {
+            KVM_Test().finally(function () { endTest(); });
+            return;
+        }
 
         //
         // Run thru the main tests, becuase no special options were sent
@@ -895,6 +911,9 @@ server.on('upgrade', function (msg, sck, head)
         }).then(function ()
         {
             return (Terminal_Test());
+        }).then(function ()
+        {
+            return (KVM_Test());
         }).then(function ()
         {
             process.stdout.write('\nTesting Complete\n\n');
@@ -1136,6 +1155,162 @@ function Terminal_Test()
     return (p);
 }
 
+function KVM_Test()
+{
+    process.stdout.write('   KVM Test\n');
+
+    if (process.platform == 'linux' || process.platform == 'freebsd')
+    {
+        if (require('monitor-info').kvm_x11_support == false)
+        {
+            process.stdout.write('      => Support not detected on this platform\n');
+            promises.kvm.resolve();
+            return (promises.kvm);
+        }
+    }
+
+    promises.kvm.DisplayInfo = new promise(promise.defaultInit);
+    promises.kvm.ScreenSize = new promise(promise.defaultInit);
+    promises.kvm.MouseCursor = new promise(promise.defaultInit);
+    promises.kvm.Keyboard = new promise(promise.defaultInit);
+    promises.kvm.Selected = new promise(promise.defaultInit);
+    promises.kvm.Jumbo = new promise(promise.defaultInit);
+    promises.kvm.Picture = new promise(promise.defaultInit);
+    promises.kvm.Connected = new promise(promise.defaultInit);
+    promises.kvm.Set = new promise(promise.defaultInit);
+
+    process.stdout.write('      => Initiating KVM Tunnel.............................[WAITING]');
+    createTunnel(0x1FF, 0xFF).then(function (t)
+    {
+        promises.kvm.tunnel = t;
+
+        t.on('data', function (buf)
+        {
+            if (typeof (buf) == 'string') { return; }
+            var type = buf.readUInt16BE(0);
+            var sz = buf.readUInt16BE(2);
+
+            if (promises.kvm.OK == null)
+            {
+                process.stdout.write('\r      => Initiating KVM Tunnel.............................[OK]     \n');
+                promises.kvm.OK = true;
+                promises.kvm.Connected.resolve();
+            }
+
+            switch(type)
+            {
+                case MNG_JUMBO:
+                    // JUMBO PACKET
+                    sz = buf.readUInt32BE(4);
+                    type = buf.readUInt16BE(8);
+                    if (buf.readUInt16BE(12) != 0)
+                    {
+                        promises.kvm.Jumbo.reject('JUMBO ERROR');
+                        this.end();
+                    }
+                    else
+                    {
+                        promises.kvm.Jumbo.resolve(sz);
+                    }
+                    buf = buf.slice(8);
+                    break;
+                case MNG_KVM_PICTURE:
+                    promises.kvm.Picture.resolve(sz);
+                    break;
+                case MNG_KVM_SCREEN:
+                    if (sz != 8)
+                    {
+                        process.stdout.write('         => MNG_KVM_SCREEN (ERROR)\n');
+                        promises.kvm.ScreenSize.reject('MNG_KVM_SCREEN ERROR');
+                        this.end();
+                    }
+                    promises.kvm.ScreenSize.resolve(buf.readUInt16BE(3) + ' x ' + buf.readUInt16BE(4));
+                    break;
+                case MNG_KVM_DISPLAY_INFO:
+                    {
+                        var entries = (sz - 4) / 10, i, offset;
+                        var n = [];
+
+                        for(i=0;i<entries;++i)
+                        {
+                            offset = (10 * i) + 4;
+                            n.push({ ID: buf.readUInt16BE(offset), X: buf.readUInt16BE(offset + 2), Y: buf.readUInt16BE(offset + 4), W: buf.readUInt16BE(offset + 6), H: buf.readUInt16BE(offset + 8) });
+                        }
+                        promises.kvm.DisplayInfo.resolve(n);
+                    }
+                    break;
+                case MNG_KVM_MOUSE_CURSOR:
+                    promises.kvm.MouseCursor.resolve();
+                    break;
+                case MNG_KVM_KEYSTATE:
+                    promises.kvm.Keyboard.resolve();
+                    break;
+                case MNG_KVM_GET_DISPLAYS:
+                    promises.kvm.Selected.resolve();
+                    break;
+                case MNG_KVM_SET_DISPLAY:
+                    promises.kvm.Set.resolve(buf[5]);
+                    break;
+                default:
+                    process.stdout.write('         => Received KVM PACKET TYPE: ' + type + ' (' + sz + ' bytes)\n');
+                    break;
+            }
+        });
+        t.on('end', function () { });
+
+        promises.kvm.Connected.then(function ()
+        {
+            process.stdout.write('         => Display Info Received..........................[WAITING]');
+            promises.kvm.DisplayInfo.timeout = setTimeout(function () { promises.kvm.DisplayInfo.resolve([]); }, 3000);
+            return (promises.kvm.DisplayInfo);
+        }).then(function (v)
+        {
+            if (v.length == 0)
+            {
+                process.stdout.write('\r         => Display Info Received..........................[NA]     \n');
+            }
+            else
+            {
+                process.stdout.write('\r         => Display Info Received..........................[OK]     \n');
+                process.stdout.write('              => Number of Displays: ' + v.length + '\n');
+            }
+            while (v.length > 0)
+            {
+                var info = v.pop();
+                process.stdout.write('                 ID: ' + info.ID + ' (' + info.W + ' x ' + info.H + ')\n');
+            }
+        }).then(function ()
+        {
+            process.stdout.write('         => Display Selection Received.....................[WAITING]');
+            return (promises.kvm.Selected);
+        }).then(function ()
+        {
+            process.stdout.write('\r         => Display Selection Received.....................[OK]     \n');
+            process.stdout.write('         => Screen Resolution..............................[WAITING]');
+            return (promises.kvm.ScreenSize);
+        }).then(function (s)
+        {
+            process.stdout.write('\r         => Screen Resolution..............................[OK]     \n');
+            process.stdout.write('         => JUMBO Packet Received..........................[WAITING]');
+            return (promises.kvm.Jumbo);
+        }).then(function ()
+        {
+            process.stdout.write('\r         => JUMBO Packet Received..........................[OK]     \n');
+            process.stdout.write('         => JPEG Received..................................[WAITING]');
+            return (promises.kvm.Picture);
+        }).then(function ()
+        {
+            process.stdout.write('\r         => JPEG Received..................................[OK]     \n');
+            promises.kvm.resolve();
+        });
+
+
+        t.write('c');
+        t.write('2'); // Request KVM
+    });
+
+    return (promises.kvm);
+}
 function Digest_Test()
 {
     digest_realm = generateRandomRealm();
