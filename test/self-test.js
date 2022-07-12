@@ -188,6 +188,7 @@ if (process.argv.getParameter('RemoteDebug') != null)
 
 var promises =
     {
+        amt: null,
         conpty: null,
         delay: null,
         coreinfo: null,
@@ -747,7 +748,11 @@ server.on('upgrade', function (msg, sck, head)
             KVM_Test().finally(function () { endTest(); });
             return;
         }
-
+        if (process.argv.getParameter('AMT') != null)
+        {
+            AMT_Detection().finally(function () { endTest(); });
+            return;
+        }
         //
         // Run thru the main tests, becuase no special options were sent
         //
@@ -800,6 +805,9 @@ server.on('upgrade', function (msg, sck, head)
         {
             process.stdout.write('\r   Agent sent CoreInfo to server...........................[OK]     \n');
             process.stdout.write('      => ' + v + '\n');
+        }).then(function ()
+        {
+            return (AMT_Detection());
         }).then(function ()
         {
             process.stdout.write('   Tunnel Test.............................................[WAITING]');
@@ -1172,6 +1180,82 @@ function Terminal_Test()
     }
 
     return (p);
+}
+
+function AMT_Detection()
+{
+    process.stdout.write('   AMT Detection\n');
+    var ret = new promise(promise.defaultInit);
+
+    sendEval(" var amtMeiModule=null,amtMei=null; try { amtMeiModule = require('amt-mei'); amtMei = new amtMeiModule(); } catch (ex) { selfTestResponse('amt', false); }")
+    sendEval("\
+    try\
+    {\
+        amtMei.getVersion(function (result)\
+        {\
+            if (result)\
+            {\
+                var rs = {};\
+                for (var version in result.Versions)\
+                {\
+                    if (result.Versions[version].Description == 'AMT') { rs.version = result.Versions[version].Version; }\
+                    if (result.Versions[version].Description == 'Sku') { rs.sku = parseInt(result.Versions[version].Version); }\
+                }\
+                if (rs.sku & 8) { rs.version = 'Intel AMT v' + rs.version; }\
+                else if (rs.sku & 16) { rs.version = 'Intel SM v' + rs.version }\
+                else { rs.version = 'Intel ME v' + rs.version;}\
+                amtMei.getProvisioningState(function (state) { if (state) { rs.ProvisioningState = state.stateStr; } });\
+                amtMei.getProvisioningMode(function (result) { if (result) { rs.ProvisioningMode = result; } });\
+                amtMei.getControlMode(function (result) \
+                {\
+                    if (result) \
+                    {\
+                        rs.controlmode = result;\
+                        if (rs.ProvisioningState == 'PRE') { rs.ProvisioningState = 'pre-provisioning state'; }\
+                        else if (rs.ProvisioningState == 'IN') { rs.ProvisioningState = 'in-provisioning state'; }\
+                        else if (rs.ProvisioningState == 'POST')\
+                        {\
+                            if (rs.ProvisioningMode) \
+                            {\
+                                if (rs.controlmode) \
+                                {\
+                                    if (rs.ProvisioningMode.modeStr == 'ENTERPRISE') { rs.ProvisioningState= 'activated in ' + ['none', 'Client Control Mode (CCM)', 'Admin Control Mode (ACM)', 'remote assistance mode'][rs.controlmode.controlMode]; } else { rs.ProvisioningState = 'activated in ' + rs.ProvisioningMode.modeStr; }\
+                                }\
+                                else\
+                                {\
+                                    rs.ProvisioningState = 'activated in ' + rs.ProvisioningMode.modeStr;\
+                                }\
+                            }\
+                        }\
+                        selfTestResponse('amt', true, rs);\
+                    }\
+                });\
+            }\
+        });\
+    }\
+    catch(ex)\
+    {\
+        selfTestResponse('amt', false);\
+    }");
+    promises.amt.then(function (j)
+    {
+        if (j.reason && j.reason.version)
+        {
+            process.stdout.write('      => Version: ' + j.reason.version + '\n');
+            process.stdout.write('      => Provisioning State: ' + j.reason.ProvisioningState + '\n');
+            ret.resolve();
+        }
+        else
+        {
+            process.stdout.write('      => NOT DETECTED\n');
+            ret.resolve();
+        }
+    }).catch(function ()
+    {
+        process.stdout.write('      => NOT DETECTED\n');
+        ret.resolve();
+    });
+    return (ret);
 }
 
 function KVM_Test()
