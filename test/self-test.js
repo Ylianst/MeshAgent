@@ -188,6 +188,7 @@ if (process.argv.getParameter('RemoteDebug') != null)
 
 var promises =
     {
+        conpty: null,
         delay: null,
         coreinfo: null,
         CommitInfo: null,
@@ -1149,7 +1150,25 @@ function Terminal_Test()
                 .then(function () { return (Terminal_Test2(8)); });
     if (process.platform == 'win32')
     {
-        p = p.then(function () { return (Terminal_Test2(6)) }).then(function () { return (Terminal_Test2(9)); });
+        p = p.then(function ()
+        {
+            sendEval("selfTestResponse('conpty', true, {support: require('win-virtual-terminal').supported});");
+            return (promises.conpty);
+        }).then(function (j)
+        {
+            if (j.reason.support === true)
+            {
+                return (Terminal_Test2(6).then(function () { return (Terminal_Test2(9)); }));
+            }
+            else
+            {
+                process.stdout.write('      => CONPTY NOT Supported on this Platform\n');
+                process.stdout.write('         => PowerShell ROOT Terminal.......................[SKIPPING]\n');
+                process.stdout.write('         => PowerShell USER Terminal.......................[SKIPPING]\n');
+            }
+        });
+
+        //p = p.then(function () { return (Terminal_Test2(6)) }).then(function () { return (Terminal_Test2(9)); });
     }
 
     return (p);
