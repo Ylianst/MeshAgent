@@ -47,6 +47,9 @@ more unit tests will be added, and this document will be updated to reflect the 
 The first four tests, (Version Information, Agent Info, Network Info, and SMBIOS Info) deal with the agent startup sequence, as these data structures are sent to the server upon connection to the server. 
 These values are used by the server to populate various meta data about the agent. The rest of the tests, involve the server testing individual components of Mesh Core.
 
+**AMT Detection:**
+This test will validate the agent's AMT detection logic, and display if AMT is supported, and display it's version and provisioning state.
+
 **Tunnel Test:**
 This test will validate that the agent is able to instantiate a tunnel session with the server. This is a core building block for the agent,
 as it is used for most all of the interactive usages, such as File Transfer, Terminal, and KVM. The test server will instruct the agent to connect a tunnel session, 
@@ -87,6 +90,32 @@ In this test, the test tool will attempt to negotiate a Peer to Peer WebRTC Data
 4. Data Channel Creation. Once the peer connection is established, the test tool will attempt to create a named DataChannel in the session, and verify that the agent correctly negotiates an SCTP DataChannel.
 5. Data Fragmentation Test. After a data channel is established, the test tool will verify that the agent correctly reassembles large data blocks, by sending randomized blocks of data, and verifying the hash on the received blocks to validate that they are correctly received.
 
+**File Transfer Test:**
+In this test, the test tool will validate agent's File Transfer capability, in 5 steps:
+1. Initialize Upload. This will ask the agent to instantiate a data tunnel with the server for file upload
+2. Uploading a file. This will generate random data, and upload it to the agent
+3. Initialize Download. This will ask the agent to instantiate a data tunnel with the server for file download
+4. Download a file. This will cause the agent to download the uploaded file from the server
+5. CRC Check. This will verify the downloaded data exactly matches the data that was uploaded
+
+**Terminal Test:**
+This test will validate that the agent is able to instantiate a terminal session. This test consists of up to 4 seperate tests, depending on the platform:
+1. ROOT Terminal. This will prompt the agent to spawn a user consent dialog asking for a Terminal Session. Once allowed, the agent will spawn a ROOT terminal, that the test tool will then send input to close the session.
+2. USER Terminal. This will prompt the agent to spawn a user consent dialog asking for a Terminal Session. Once allowed, the agent will spawn a USER terminal, that the test tool will then send input to close the session.
+3. PowerShell ROOT Terminal. On Windows platforms with ConPTY support, this will prompt the agent to spawn a user consent dialog asking for a Terminal Session. Once allowed, the agent will spawn a ROOT PowerShell terminal, that the test tool will then send input to close the session.
+4. PowerShell USER Terminal. On Windows platforms with ConPTY support, this will prompt the agent to spawn a user consent dialog asking for a Terminal Session. Once allowed, the agent will spawn a USER PowerShell terminal, that the test tool will then send input to close the session.
+
+**KVM Test:**
+This test will validate that the agent is able to instantiate a Remote KVM session. This test is carried about in multiple steps:
+1. Initiate KVM Tunnel. This will prompt the agent to spawn a user consent dialog asking for a Remote KVM Session. Once allowed, the agent will spawn a KVM session.
+2. Display Info. On platforms with multiple detected monitors, the agent will send a control packet with meta-data about each attached display, including resolution of each display. Note: On linux, X currently does not detect each attached display, it detects a single virtual display that encapsulates all displays.
+3. Display Selection. The agent will send a control packet indicating the selected display.
+4. Screen Resolution. The agent will send a control packet indicating the resolution of the selected display.
+5. JUMBO Packet. For large JPEGs, the agent will send an encoded JUMBO packet encapsulating the JPEG data.
+6. JPEG Received. This validates that the test tool was able to receive encodeded image data from the agent.
+
+
+
 ### Different Testing Modes
 
 The self-test.js test tool supports different testing modes, to aid in testing/debugging Mesh Agent features.
@@ -101,3 +130,9 @@ This is useful for debugging the Privacy Bar itself. This mode can be started by
 ```bash
 MeshService64 ..\test\self-test.js --AgentsFolder="C:\GITHub\MeshCentral\agents" --PrivacyBar
 ```
+
+**Delay:** This will cause the test tool to wait for user input on stdin after the agent connects to the test server, before running the unit tests. This can be used to help with debugging, by delaying unit test start until the user is ready.
+
+**LocalDebug:** If specified, this will enable the WebDebug Web interface on the specified port, for the local test tool. This is useful for debugging things like WebRTC, DTLS, etc.
+
+**RemoteDebug:** If specified, this will enable the WebDebug Web interface on the specified port, for the agent. This is useful for debugging things like WebRTC, DTLS, etc.

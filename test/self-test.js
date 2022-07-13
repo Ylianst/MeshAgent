@@ -136,12 +136,17 @@ if (process.argv.getParameter('help') != null)
     console.log("\nself-test is a Self-Contained test harnass for testing the MeshAgent and MeshCore functions");
     console.log('\n   Available options:');
     console.log('   --AgentsFolder=         The path to the agents folder of the Server Repository');
+    console.log('   --AMT                   If specified, individually runs the AMT tests');
+    console.log('   --CLIP                  If specified, individually runs the clipboard test');
     console.log('   --console               If specified, enables console command mode');
     console.log('   --Delay                 If specified, will prompt the user to hit enter before starting unit tests');
+    console.log('   --Digest                If specified, individually runs the HTTP Digest tests.');
     console.log('   --FileTransfer          If specified, individually runs the FileTransfer Unit Test');
+    console.log('   --KVM                   If specified, individually runs the KVM tests');
     console.log('   --LocalDebug            Specifies a port number for the Local Web Debug Interface');
     console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
     console.log("   --RemoteDebug           Specifies a port number for the Agent's Web Debug Interface");
+    console.log('   --Terminal              If specified, individually runs the Terminal tests');
     console.log('   --Timeout               Specifies a timeout in seconds for the unit tests. Default is 10 seconds');
     console.log('   --WebRTC                If specified, individually runs the WebRTC Unit Test');
     console.log('   --verbose=              Specifies the verbosity level of the displayed output. Default = 0');
