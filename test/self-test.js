@@ -753,6 +753,11 @@ server.on('upgrade', function (msg, sck, head)
             AMT_Detection().finally(function () { endTest(); });
             return;
         }
+        if (process.argv.getParameter('CLIP') != null)
+        {
+            Clipboard_Test().finally(function () { endTest(); });
+            return;
+        }
         //
         // Run thru the main tests, becuase no special options were sent
         //
@@ -878,36 +883,7 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('\r      => ' + services.length + ' services retrieved.\n');
         }).then(function ()
         {
-            addTimeout(promises.setclip);
-            process.stdout.write('   Clipboard Test..........................................[WAITING]');
-            var b = Buffer.alloc(16);
-            b.randomFill();
-            global._cliptest = b.toString('base64');
-            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'setclip', data: global._cliptest });
-            return (promises.setclip);
-        }).then(function (v)
-        {
-            console.info1(JSON.stringify(v));
-            if (!v.success)
-            {
-                process.stdout.write('\r   Clipboard Test..........................................[FAILED TO SET]\n');
-                return;
-            }
-            addTimeout(promises.getclip);
-            global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'getclip' });
-            return (promises.getclip);
-        }).then(function (v)
-        {
-            if (v.data == global._cliptest)
-            {
-                process.stdout.write('\r   Clipboard Test..........................................[OK]      \n');
-            }
-            else
-            {
-                process.stdout.write('\r   Clipboard Test..........................................[FAILED]  \n');
-                process.stdout.write('      => Expected: ' + global._cliptest + '\n');
-                process.stdout.write('      => Received: ' + v.data + '\n');
-            }
+            return (Clipboard_Test());
         }).then(function ()
         {
             return (Digest_Test());
@@ -1534,6 +1510,42 @@ function WebRTC_Test()
     return (promises.webrtc_test);
 }
 
+function Clipboard_Test()
+{
+    addTimeout(promises.setclip);
+    process.stdout.write('   Clipboard Test..........................................[WAITING]');
+    var b = Buffer.alloc(16);
+    b.randomFill();
+    global._cliptest = b.toString('base64');
+    global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'setclip', data: global._cliptest });
+    
+    var r = promises.setclip.then(function (v)
+    {
+        console.info1(JSON.stringify(v));
+        if (!v.success)
+        {
+            process.stdout.write('\r   Clipboard Test..........................................[FAILED TO SET]\n');
+            return;
+        }
+        addTimeout(promises.getclip);
+        global._client.command({ sessionid: 'user//foo//bar', rights: 4294967295, consent: 64, action: 'msg', type: 'getclip' });
+        return (promises.getclip);
+    }).then(function (v)
+    {
+        if (v.data == global._cliptest)
+        {
+            process.stdout.write('\r   Clipboard Test..........................................[OK]      \n');
+        }
+        else
+        {
+            process.stdout.write('\r   Clipboard Test..........................................[FAILED]  \n');
+            process.stdout.write('      => Expected: ' + global._cliptest + '\n');
+            process.stdout.write('      => Received: ' + v.data + '\n');
+        }
+    });
+    return (r);
+}
+
 function createTunnel(rights, consent)
 {
     var ret = new promise(promise.defaultInit);
@@ -1752,5 +1764,3 @@ if (process.argv.getParameter('NoInstall') == null)
     console.setDestination(console.Destinations.STDOUT);
 }
 console.log('\nWaiting for Agent Connection...');
-
-
