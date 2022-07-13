@@ -3806,9 +3806,9 @@ duk_ret_t ILibDuktape_ScriptContainer_SendToSlave(duk_context *ctx)
 		char *payload = duk_push_fixed_buffer(ctx, jsonlen + 5);
 
 		len = sprintf_s(payload + 4, jsonlen + 1, "%s", json);
-		((int*)json)[0] = len + 4;
+		((int*)payload)[0] = len + 4;
 
-		ILibProcessPipe_Process_WriteStdIn(master->child, json, len + 4, ILibTransport_MemoryOwnership_USER);
+		ILibProcessPipe_Process_WriteStdIn(master->child, payload, len + 4, ILibTransport_MemoryOwnership_USER);
 	}
 	else if(master->PeerChain != NULL)
 	{
