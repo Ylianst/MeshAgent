@@ -374,8 +374,8 @@ server.on('upgrade', function (msg, sck, head)
                                     b.writeUInt16BE(MeshCommand_CoreOk);
                                     b.writeUInt16BE(1, 2);
                                     this.write(b);
-
-                                    this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(getCurrentUpdatePath()).toString('hex'), sessionid: 'none' });
+                                    
+                                    this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: require('SHA384Stream').create().syncHash(require('fs').readFileSync(getCurrentUpdatePath())).toString('hex').toLocaleLowerCase(), sessionid: 'none' });
                                     break;
                                 default:
                                     console.log('Agent Update State: ' + updateState);
@@ -443,7 +443,7 @@ server.on('upgrade', function (msg, sck, head)
                             b.writeUInt16BE(MeshCommand_CoreOk);
                             b.writeUInt16BE(1, 2);
                             this.write(b);
-                            this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: getSHA384FileHash(getCurrentUpdatePath()).toString('hex'), sessionid: 'none' });
+                            this.command({ url: 'https://127.0.0.1:9250/update', action: 'agentupdate', hash: require('SHA384Stream').create().syncHash(require('fs').readFileSync(getCurrentUpdatePath())).toString('hex').toLocaleLowerCase(), sessionid: 'none' });
                             break;
                         case 99:
                             // No-Op because we are done
