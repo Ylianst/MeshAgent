@@ -787,8 +787,15 @@ server.on('upgrade', function (msg, sck, head)
             process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
             switch (process.platform)
             {
-                case 'linux':
                 case 'win32':
+                    return (promises.smbios);
+                    break;
+                case 'linux':
+                    promises.smbios.timeout = setTimeout(function ()
+                    {
+                        process.stdout.write('\r   Agent sent SMBIOS info to server........................[NA]     \n');
+                        promises.smbios.resolve();
+                    }, testTimeout * 1000);
                     return (promises.smbios);
                     break;
                 default:
@@ -1517,6 +1524,14 @@ function WebRTC_Test()
 
 function Clipboard_Test()
 {
+    if ((process.platform == 'linux' || process.platform == 'freebsd') && !require('monitor-info').kvm_x11_support)
+    {
+        // X11 Support Missing, so Clipboard is not supported
+        process.stdout.write('   Clipboard Test..........................................[NOT SUPPORTED]\n');
+        promises.setclip.resolve();
+        return (promises.setclip);
+    }
+
     addTimeout(promises.setclip);
     process.stdout.write('   Clipboard Test..........................................[WAITING]');
     var b = Buffer.alloc(16);
