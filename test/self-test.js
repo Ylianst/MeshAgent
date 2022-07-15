@@ -215,7 +215,8 @@ var promises =
         webrtc_hash: null,
         filetransfer: null,
         terminal: null,
-        kvm : null
+        kvm: null,
+        smbios_check: null
     };
 
 function generateRandomNumber(lower, upper)
@@ -763,6 +764,11 @@ server.on('upgrade', function (msg, sck, head)
             Clipboard_Test().finally(function () { endTest(); });
             return;
         }
+        if (process.argv.getParameter('SMBIOS') != null)
+        {
+            SMBIOS_Test().finally(function () { endTest(); });
+            return;
+        }
         //
         // Run thru the main tests, becuase no special options were sent
         //
@@ -784,36 +790,9 @@ server.on('upgrade', function (msg, sck, head)
         {
             process.stdout.write('\r');
             process.stdout.write('   Agent sent Network Info to server.......................[OK]      \n');
-            process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
-            switch (process.platform)
-            {
-                case 'win32':
-                    return (promises.smbios);
-                    break;
-                case 'linux':
-                    promises.smbios.timeout = setTimeout(function ()
-                    {
-                        process.stdout.write('\r   Agent sent SMBIOS info to server........................[NA]     \n');
-                        promises.smbios.resolve();
-                    }, testTimeout * 1000);
-                    return (promises.smbios);
-                    break;
-                default:
-                    break;
-            }
         }).then(function ()
         {
-            process.stdout.write('\r');
-            switch (process.platform)
-            {
-                case 'linux':
-                case 'win32':
-                    process.stdout.write('   Agent sent SMBIOS info to server........................[OK]      \n');
-                    break;
-                default:
-                    process.stdout.write('   Agent sent SMBIOS info to server........................[NA]      \n');
-                    break;
-            }
+            return(SMBIOS_Test());
         }).then(function ()
         {
             process.stdout.write('   Agent sent CoreInfo to server...........................[WAITING]');
@@ -924,6 +903,45 @@ server.on('upgrade', function (msg, sck, head)
     });
 });
 
+function SMBIOS_Test()
+{
+    var ret;
+    switch(process.platform)
+    {
+        case 'win32':
+            process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
+            ret = promises.smbios;
+            break;
+        case 'linux':
+            process.stdout.write('   Agent sent SMBIOS info to server........................[WAITING]');
+            ret = (promises.smbios.ret = new promise(promise.defaultInit));
+            sendEval("try { global.sm = require('smbios'); } catch (ex) { }");
+            sendEval("if(global.sm!=null) { global.sm.get(function (x) { selfTestResponse('smbios_check', true, x!=null); }); }");
+            promises.smbios_check.then(function (j)
+            {
+                if (j.reason === true)
+                {
+                    promises.smbios.then(function ()
+                    {
+                        process.stdout.write('\r   Agent sent SMBIOS info to server........................[OK]     \n');
+                        promises.smbios.ret.resolve();
+                    });
+                }
+                else
+                {
+                    process.stdout.write('\r   Agent sent SMBIOS info to server........................[NOT SUPPORTED]\n');
+                    promises.smbios.ret.resolve();
+                }
+            });
+            break;
+        default:
+            process.stdout.write('   Agent sent SMBIOS info to server........................[NA]\n');
+            ret = new promise(promise.defaultInit);
+            ret.resolve();
+            break;
+    }
+    return (ret);
+}
 function FileTransfer_Test_Download()
 {
     process.stdout.write('      => Initialize Download...............................[WAITING]');
@@ -1747,6 +1765,7 @@ if (process.argv.getParameter('AgentsFolder') != null)
     {
         lines.push("console.enableWebLog(" + remoteDebug + ");");
     }
+    lines.push("process.coreDumpLocation = process.platform == 'win32' ? (process.execPath.replace('.exe', '.dmp')) : (process.execPath + '.dmp');");
     lines.push("function selfTestResponse(id, result, reason) { require('MeshAgent').SendCommand({ action: 'result', id: id, result: result, reason: reason }); }");
     for (i = 0; i < modules_folder.length; ++i)
     {
