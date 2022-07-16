@@ -216,7 +216,7 @@ function windows_notifybar_system(title, tsid, options)
     var ret = {};
     if (!options) { options = {}; }
 
-    var script = Buffer.from("require('notifybar-desktop')('" + title + "', " + JSON.stringify(options) + ").on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
+    var script = Buffer.from("require('notifybar-desktop').DefaultPinned=" + require('notifybar-desktop').DefaultPinned + ";require('notifybar-desktop')('" + title + "', " + JSON.stringify(options) + ").on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
 
     require('events').EventEmitter.call(ret, true)
         .createEvent('close')
@@ -337,8 +337,18 @@ function windows_notifybar_local(title, bar_options)
                     0).then(function (c)
                     {
                         this.pump._pushpin = c;
-                        this.pump._pinned = true;
-                        this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._pin1.Deref()]);                        
+                        this.pump._pinned = module.exports.DefaultPinned;
+                        if (this.pump._pinned)
+                        {
+                            // Pinned
+                            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._pin1.Deref()]);
+                        }
+                        else
+                        {
+                            // Unpinned
+                            this.pump._addAsyncMethodCall(this.pump._user32.SendMessageW.async, [c, STM_SETIMAGE, IMAGE_BITMAP, this.pump._pin2.Deref()]);
+                            this.pump._idle = setTimeout(this.pump._idleTimeout.bind(this.pump), 3000);
+                        }
                         this.pump._addAsyncMethodCall(this.pump._user32.SetClassLongPtrA.async, [c, GCLP_HCURSOR, this.pump._HAND]);
                     }).parentPromise.pump = this;
                 this._addCreateWindowEx(0, GM.CreateVariable('STATIC', { wide: true }), GM.CreateVariable(this._title, { wide: true }), WS_TABSTOP | WS_VISIBLE | WS_CHILD | SS_LEFT | SS_CENTERIMAGE | SS_WORDELLIPSIS,
@@ -667,6 +677,7 @@ switch(process.platform)
         module.exports = windows_notifybar_check;
         module.exports.system = windows_notifybar_system;
         module.exports.RGB = RGB;
+        module.exports.DefaultPinned = true;
         break;
     case 'linux':
     case 'freebsd':
