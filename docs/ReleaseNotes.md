@@ -44,4 +44,5 @@
 - Fixed process enumeration that could result in JSON error on some linux distros
 - Updated to OpenSSL/1.1.1q
 - Fixed bug with ScriptContainer JSON dispatcher, that caused clipboard to not work correctly if xclip isn't installed
+- Added ability to set default pinning behavior for Privacy Bar on Windows
 
