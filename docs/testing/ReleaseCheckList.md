@@ -3,7 +3,36 @@
 ## Abstract
 This document goes thru a basic check list of tasks that should be done, to test the agent prior to releasing an agent update.
 
+
 ## Preparation
+
+### Compiling the Agent
+The first step in being able to compile the Mesh Agent, is to pull the MeshAgent repository from GIT. The repository contains the necessary solution and project files
+to compile on Windows using Visual Studio, as well as a makefile to compile on Linux, BSD, and macOS.
+
+On Windows, simply load the MeshAgent solution file, and build the MeshService project, using either Debug or Release, for x86 or x64.
+For other platforms, refer to the [Makefile](https://github.com/Ylianst/MeshAgent/blob/master/makefile) which has detailed notes on how to compile for various different platforms.
+As an example, to compile for Linux x86_64, you can run the following command:
+```bash
+make linux ARCHID=6 WEBLOG=1
+```
+or for macOS Apple Silicon and Intel Silicon with the following commands:
+```bash
+make macos ARCHID=29 WEBLOG=1
+make macos ARCHID=16 WEBLOG=1
+```
+
+### Compiling OpenSSL
+The Mesh Agent uses a statically linked OpenSSL library. If you need to compile OpenSSL on your own, use the following flags when compiling OpenSSL:
+
+```bash
+no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic no-threads no-hw no-err no-dso no-shared -no-asm no-rc5 no-idea no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-dso no-bf no-cast no-md2 no-mdc2
+```
+
+A special note for macOS... When compiling OpenSSL for macOS for Intel Silicon, it is important that you modify the makefile after running **./Configure** to add the following
+to the CFLAGS: **-mmacosx-version-min=10.5**. This will insure that the static library will be compatible with older macOS releases.
+
+### Getting ready to test
 1. Prior to testing the Mesh Agent release candidate, you should pull the latest MeshCentral from GIT, as we'll be needing to use some
 things from MeshCentral for testing. This folder should be separate from your actual MeshCentral server, as it will be used as a Test Server.
 2. After compiling the Mesh Agent, copy the two Windows Binaries (`MeshService64.exe and MeshService.exe`) from the `MeshAgent/Release` folder
