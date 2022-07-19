@@ -106,62 +106,61 @@ typedef struct ILibDuktape_fs_appleWatcher
 {
 	int exit;
 	void *chain;
-	void *kthread;
-	int kq;
-	sem_t exitWaiter;
-	sem_t inputWaiter;
-	int unblocker[2];
+	void *kthread;									// Worker thread running kevent()
+	int kq;											// kqueue() object
+	sem_t inputWaiter;								// Semaphore used to dispatch between Microstack Event Loop and kevent loop.
+	int unblocker[2];								// pipe used to unblock thread
 	ILibDuktape_fs_descriptorInfo **descriptors;
 }ILibDuktape_fs_appleWatcher;
 #endif
 
 typedef struct ILibDuktape_fs_writeStreamData
 {
-	duk_context *ctx;
-	ILibDuktape_EventEmitter *emitter;
-	void *fsObject;
-	void *WriteStreamObject;
-	FILE *fPtr;
-	int fd;
+	duk_context *ctx;					// Duktape Context Object
+	ILibDuktape_EventEmitter *emitter;	// Event Emitter
+	void *fsObject;						// 'fs' Object
+	void *WriteStreamObject;			// stream.Writable
+	FILE *fPtr;							// FILE* handle
+	int fd;								// descriptor
 	int autoClose;
 	ILibDuktape_WritableStream *stream;
 }ILibDuktape_fs_writeStreamData;
 
 typedef struct ILibDuktape_fs_readStreamData
 {
-	duk_context *ctx;
-	void *ReadStreamObject;
-	void *fsObject;
-	ILibDuktape_EventEmitter *emitter;
-	FILE *fPtr;
-	int fd;
+	duk_context *ctx;						// Duktape Context Object
+	void *ReadStreamObject;					// stream.readable
+	void *fsObject;							// 'fs' object
+	ILibDuktape_EventEmitter *emitter;		// Event Emitter
+	FILE *fPtr;								// FILE* handle
+	int fd;									// descriptor
 	int autoClose;
 	ILibDuktape_readableStream *stream;
-	int bytesRead;
-	int bytesLeft;
-	int readLoopActive;
-	int unshiftedBytes;
+	int bytesRead;							// Number of bytes read
+	int bytesLeft;							// Number of bytes left
+	int readLoopActive;						// Event Dispatch thread is actively reading
+	int unshiftedBytes;						// Number of bytes to mark as unread
 	char buffer[FS_READSTREAM_BUFFERSIZE];
 }ILibDuktape_fs_readStreamData;
 
 #ifdef WIN32
 typedef struct ILibDuktape_WindowsHandle_Data
 {
-	duk_context *ctx;
-	HANDLE *H;
+	duk_context *ctx;					// Duktape Context Object
+	HANDLE *H;							// File Handle from CreateFileW()
 
 	// read
 	void *callback;
-	void *userBuffer;
-	OVERLAPPED p;
-	char *buffer;
+	void *userBuffer;					// heap pointer to user provided buffer object
+	OVERLAPPED p;						// Read Overlapped Structure
+	char *buffer;						// Read Buffer
 	size_t bufferSize;
 
 	//write
 	void *write_callback;
-	void *write_userBuffer;
-	OVERLAPPED write_p;
-	char *write_buffer;
+	void *write_userBuffer;				// heap pointer to user provided write buffer object
+	OVERLAPPED write_p;					// overlapped structure for write
+	char *write_buffer;					// Write Buffer
 	size_t write_bufferSize;
 }ILibDuktape_WindowsHandle_Data;
 #endif
@@ -169,20 +168,20 @@ typedef struct ILibDuktape_WindowsHandle_Data
 #ifndef _NOFSWATCHER
 typedef struct ILibDuktape_fs_watcherData
 {
-	duk_context *ctx;
-	void *object;
-	void *parent;
-	ILibDuktape_EventEmitter *emitter;
+	duk_context *ctx;							// Duktape Context Object
+	void *object;								// fs.Watcher object
+	void *parent;								// fs
+	ILibDuktape_EventEmitter *emitter;			// Event Emitter
 #if defined(WIN32)
-	int recursive;
-	HANDLE h;
-	struct _OVERLAPPED overlapped;
+	int recursive;								// Indicates whether all subdirectories should be watched, or only the current directory.
+	HANDLE h;									// File Handle from CreateFileW() for watched folder
+	struct _OVERLAPPED overlapped;				// Overlapped structure for event handling on Windows
 	void *chain;
 	void *pipeManager;
 	char results[4096];
 #elif defined(_POSIX)
 #ifndef __APPLE__
-	ILibDuktape_fs_linuxWatcher* linuxWatcher;
+	ILibDuktape_fs_linuxWatcher* linuxWatcher;	// Linux specific data structure, holding the descriptors
 #endif
 	union { int i; void *p; } wd;
 #endif
@@ -190,6 +189,8 @@ typedef struct ILibDuktape_fs_watcherData
 #endif
 
 #ifndef WIN32
+
+// Helper method used to manipulate linux paths, so that it's high level behavior matches Windows.
 char ILibDuktape_fs_linuxPath[1024];
 char* ILibDuktape_fs_fixLinuxPath(char *path)
 {
@@ -208,6 +209,7 @@ char* ILibDuktape_fs_fixLinuxPath(char *path)
 }
 #endif
 
+// Helper method to retrive FILE* from supplied integer value
 FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 {
 	FILE *retVal = NULL;
@@ -215,7 +217,7 @@ FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", fd);
 
 	duk_push_this(ctx);						// [fs]
-	duk_get_prop_string(ctx, -1, FS_FDS);	// [fs][fds]
+	duk_get_prop_string(ctx, -1, FS_FDS);	// [fs][fds]   (File Descriptor Table)
 	if (duk_has_prop_string(ctx, -1, key))
 	{
 		duk_get_prop_string(ctx, -1, key);	// [fs][fds][ptr]
@@ -229,6 +231,7 @@ FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 	return retVal;
 }
 
+// Closes file descriptor
 duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 {
 	if (duk_is_object(ctx, 0) && strcmp(Duktape_GetStringPropertyValue(ctx, 0, "_ObjectID", ""), "fs.bufferDescriptor") == 0)
@@ -248,6 +251,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 			ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)Duktape_GetBufferProperty(ctx, -1, FS_WINDOWS_DataPTR);
 			if (data != NULL)
 			{
+				// Free all the resources associated with this
 				CloseHandle(data->H);
 				CloseHandle(data->p.hEvent);
 				CloseHandle(data->write_p.hEvent);
@@ -260,6 +264,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 	}
 #endif
 
+	// if fd is < 65535, then it is the actual descriptor
 	int fd = duk_require_int(ctx, 0);
 	if (fd < 65535)
 	{
@@ -271,6 +276,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 		return(0);
 	}
 
+	// fd is mapped, so we have to fetch it
 	FILE *f;
 	char *key = ILibScratchPad;
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", fd);
@@ -294,6 +300,7 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 	return 0;
 }
 
+// Helper method to open a file and map the FILE* to an integral descriptor
 int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *mode)
 {
 	int retVal;
@@ -313,6 +320,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 #endif
 	if (f != NULL)
 	{
+		// MAP FILE* to FD
 		duk_get_prop_string(ctx, -1, FS_FDS);							// [fs][fds]
 		duk_push_pointer(ctx, f);										// [fs][fds][ptr]
 		duk_put_prop_string(ctx, -2, key);								// [fs][fds]
@@ -329,6 +337,7 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 	}
 }
 
+// Opens a file and returns a descriptor
 duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -339,6 +348,7 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 #endif
 	if (duk_is_string(ctx, 1))
 	{
+		// If flags are passed in as a string, then the Descriptor returned is mapped from a FILE*
 		char *flags = (char*)duk_require_string(ctx, 1);
 		int retVal = -1;
 
@@ -355,6 +365,9 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 			return(ILibDuktape_Error(ctx, "fs.openSync(): Error opening '%s'", path));
 		}
 	}
+
+
+	// If flags are passed in numerically, then the returned FD is the actual descriptor
 	int flags = (int)duk_require_int(ctx, 1);
 #ifdef WIN32
 	HANDLE fd = NULL;
@@ -405,6 +418,8 @@ duk_ret_t ILibDuktape_fs_openSync(duk_context *ctx)
 #endif
 	return(1);
 }
+
+// Synchronously read from a descriptor
 duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 {
 	int narg = (int)duk_get_top(ctx);
@@ -441,6 +456,8 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 
 	return(ILibDuktape_Error(ctx, "FS I/O Error"));
 }
+
+// Event Callback from DescriptorEvents, when readset is triggered
 duk_ret_t ILibDuktape_fs_read_readsetSink(duk_context *ctx)
 {
 	int fd = duk_require_int(ctx, 0);
@@ -487,6 +504,8 @@ duk_ret_t ILibDuktape_fs_read_readsetSink(duk_context *ctx)
 	}
 	return(0);
 }
+
+// Event callback from DescriptorEvents when writeset triggers
 duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
 {
 	int fd = (int)duk_require_int(ctx, 0);
