@@ -3268,7 +3268,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 		}
 		if (recvStatus == ILibWebClient_ReceiveStatus_Complete) 
 		{ 
-			MD5_Final(data->entityHash, &(data->entityHashCtx));
+			MD5_Final((unsigned char*)data->entityHash, &(data->entityHashCtx));
 			ILibDuktape_readableStream_WriteEnd(data->bodyStream); 
 			if (ILibMemory_CanaryOK(data)) { data->bodyStream = NULL; }
 		}
@@ -3521,7 +3521,7 @@ void ILibDuktape_HttpStream_OnReceive(ILibWebClient_StateObject WebStateObject, 
 
 	if (data->bodyStream != NULL && recvStatus == ILibWebClient_ReceiveStatus_Complete)
 	{
-		MD5_Final(data->entityHash, &(data->entityHashCtx));
+		MD5_Final((unsigned char*)data->entityHash, &(data->entityHashCtx));
 		ILibDuktape_readableStream_WriteEnd(data->bodyStream);
 		data->endPropagated = 1;
 	}
