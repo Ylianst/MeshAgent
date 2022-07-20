@@ -674,6 +674,8 @@ cleanbin:
 	rm -f $(EXENAME)_armhf
 	rm -f $(EXENAME)_arm-linaro
 	rm -f $(EXENAME)_freebsd_x86-64
+	rm -f $(EXENAME)_openbsd_x86-64
+	rm -f $(EXENAME)_openwrt_x86_64
 	rm -f $(EXENAME)_linux-armada370-hf
 	rm -f $(EXENAME)_mips
 	rm -f $(EXENAME)_mips24kc
@@ -690,6 +692,31 @@ cleanbin:
 	rm -f $(EXENAME)_x86_nokvm
 	rm -f $(EXENAME)_x86-64
 	rm -f $(EXENAME)_x86-64_nokvm
+	rm -f DEBUG_$(EXENAME)_aarch64
+	rm -f DEBUG_$(EXENAME)_aarch64-cortex-a53
+	rm -f DEBUG_$(EXENAME)_alpine-x86-64
+	rm -f DEBUG_$(EXENAME)_arm
+	rm -f DEBUG_$(EXENAME)_armhf
+	rm -f DEBUG_$(EXENAME)_arm-linaro
+	rm -f DEBUG_$(EXENAME)_freebsd_x86-64
+	rm -f DEBUG_$(EXENAME)_openbsd_x86-64
+	rm -f DEBUG_$(EXENAME)_openwrt_x86_64
+	rm -f DEBUG_$(EXENAME)_linux-armada370-hf
+	rm -f DEBUG_$(EXENAME)_mips
+	rm -f DEBUG_$(EXENAME)_mips24kc
+	rm -f DEBUG_$(EXENAME)_mipsel24kc
+	rm -f DEBUG_$(EXENAME)_osx-arm-64
+	rm -f DEBUG_$(EXENAME)_osx-x86-64
+	rm -f DEBUG_$(EXENAME)_osx-universal-64
+	rm -f DEBUG_$(EXENAME)_pi
+	rm -f DEBUG_$(EXENAME)_pi2
+	rm -f DEBUG_$(EXENAME)_pogo
+	rm -f DEBUG_$(EXENAME)_poky
+	rm -f DEBUG_$(EXENAME)_poky64
+	rm -f DEBUG_$(EXENAME)_x86
+	rm -f DEBUG_$(EXENAME)_x86_nokvm
+	rm -f DEBUG_$(EXENAME)_x86-64
+	rm -f DEBUG_$(EXENAME)_x86-64_nokvm
 
 
 depend: $(SOURCES)
