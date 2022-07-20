@@ -590,6 +590,7 @@ duk_ret_t ILibDuktape_fs_write_writeset_sink(duk_context *ctx)
 	return(0);
 }
 #ifdef WIN32
+// Windows Overlapped callback on WRITE
 BOOL ILibDuktape_fs_write_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, DWORD bytesWritten, void* user)
 {
 	ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)user;
@@ -617,6 +618,8 @@ BOOL ILibDuktape_fs_write_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_Erro
 	return(FALSE);
 }
 #endif
+
+// fs.write()  Writes to a descriptor
 duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 {
 	duk_size_t bufferLen;
@@ -625,6 +628,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	int offset = 0, length = (int)bufferLen;
 	int position = -1;
 
+	// If offset and length are specified, use those values
 	if (duk_is_number(ctx, 2)) { offset = (int)duk_require_int(ctx, 2); cbx++; }
 	if (duk_is_number(ctx, 3)) { length = (int)duk_require_int(ctx, 3); cbx++; }
 	if (duk_is_number(ctx, 4))
@@ -638,6 +642,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 	HANDLE H = (HANDLE)(uintptr_t)duk_require_uint(ctx, 0);
 	ILibDuktape_WindowsHandle_Data *data = NULL;
 
+	// Windows handles are mapped, so we need to look it up
 	duk_push_this(ctx);											// [fs]
 	duk_get_prop_string(ctx, -1, FS_WINDOWS_HANDLES);			// [fs][table]
 	duk_push_pointer(ctx, H);									// [fs][table][key]
@@ -654,6 +659,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 
 	if (position >= 0)
 	{
+		// If position was specified, we need to set the current position in a 64bit manner
 		DWORD highorder = 0;
 		DWORD loworder = SetFilePointer(data->H, (LONG)position, (LONG*)&highorder, FILE_BEGIN);
 		if (loworder == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
@@ -668,9 +674,10 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 
 #else
 	int e;
-	int fd = (int)duk_require_int(ctx, 0);
+	int fd = (int)duk_require_int(ctx, 0); // On non-Windows platforms, the descriptor is directly passed
 	if (position >= 0)
 	{
+		// If position was specified, we need to seek to it
 		if (lseek(fd, (off_t)position, SEEK_SET) < 0) { return(ILibDuktape_Error(ctx, "Unable to seek to Position")); }
 	}
 	int bytesWritten = write(fd, buffer + offset, length);
@@ -694,6 +701,9 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, FS_EVENT_W_DESCRIPTORS);		// [fs][table]
 		if (!duk_has_prop_index(ctx, -1, fd))
 		{
+			//
+			// We're going to stick our descriptor in DescriptorEvents, so we can get asyncronously notified
+			//
 			duk_eval_string(ctx, "require('DescriptorEvents');");	// [fs][table][DescriptorEvents]
 			duk_get_prop_string(ctx, -1, "addDescriptor");			// [fs][table][DescriptorEvents][add]
 			duk_swap_top(ctx, -2);									// [fs][table][add][this]
@@ -717,6 +727,9 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 			duk_call_method(ctx, 2); duk_pop(ctx);					// [fs][table][events]  .............................
 			duk_put_prop_index(ctx, -2, fd);						// [fs][table]
 		}
+		//
+		// We're going to update the pending buffer
+		//
 		duk_get_prop_index(ctx, -1, fd);							// [fs][table][events]
 		duk_push_object(ctx);										// [fs][table][events][pending]
 		if (duk_is_object(ctx, cbx + 1)) { duk_dup(ctx, cbx + 1); duk_put_prop_string(ctx, -2, "opt"); }
@@ -745,6 +758,7 @@ duk_ret_t ILibDuktape_fs_write(duk_context *ctx)
 }
 
 #ifdef WIN32
+// Overlapped callback for Windows Read
 BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus status, char *buffer, DWORD bytesRead, void* user)
 {
 	ILibDuktape_WindowsHandle_Data *data = (ILibDuktape_WindowsHandle_Data*)user;
@@ -772,6 +786,8 @@ BOOL ILibDuktape_fs_read_WindowsSink(void *chain, HANDLE h, ILibWaitHandle_Error
 	return(FALSE);
 }
 #endif
+
+// Helper method to do a read from a buffer, after unraveling the event loop, to prevent stack overflow
 void ILibDuktape_fs_buffer_fd_read(duk_context *ctx, void ** args, int argsLen)
 {
 	duk_idx_t top = duk_get_top(ctx);
@@ -797,6 +813,8 @@ void ILibDuktape_fs_buffer_fd_read(duk_context *ctx, void ** args, int argsLen)
 	}
 	duk_set_top(ctx, top);
 }
+
+// fs.read()  Perform a read from a descriptor
 duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 {
 	int top = duk_get_top(ctx);
@@ -835,6 +853,8 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		duk_call_method(ctx, 3);
 		return(1);
 	}
+
+	// Options object was specified, with an object instead of descriptor
 	if (duk_is_object(ctx, 0) && duk_is_object(ctx, 1) && duk_is_function(ctx, 2))
 	{
 		if (strcmp(Duktape_GetStringPropertyValue(ctx, 0, "_ObjectID", ""), "fs.bufferDescriptor") != 0) { return(ILibDuktape_Error(ctx, "Invalid Parameter")); }
@@ -853,19 +873,21 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 		char *srbuf = (char*)Duktape_GetBufferPropertyEx(ctx, 0, "buffer", &srbufLen);
 		memcpy_s(wrbuf + offset, bytesRead, srbuf + dpos, bytesRead);
 
-		duk_push_int(ctx, bytesRead + dpos);							// [bufferDescriptor][buffer][position]
-		duk_put_prop_string(ctx, -3, "position");						// [bufferDescriptor][buffer]
-		duk_push_this(ctx);												// [bufferDescriptor][buffer][fs]
-		duk_get_prop_string(ctx, -1, FS_BUFFER_DESCRIPTOR_PENDING);		// [bufferDescriptor][buffer][fs][array]
-		duk_push_object(ctx);											// [bufferDescriptor][buffer][fs][array][object]
+		duk_push_int(ctx, bytesRead + dpos);								// [bufferDescriptor][buffer][position]
+		duk_put_prop_string(ctx, -3, "position");							// [bufferDescriptor][buffer]
+		duk_push_this(ctx);													// [bufferDescriptor][buffer][fs]
+		duk_get_prop_string(ctx, -1, FS_BUFFER_DESCRIPTOR_PENDING);			// [bufferDescriptor][buffer][fs][array]
+		duk_push_object(ctx);												// [bufferDescriptor][buffer][fs][array][object]
 		duk_dup(ctx, 2); duk_put_prop_string(ctx, -2, "func");
 		duk_push_int(ctx, bytesRead); duk_put_prop_string(ctx, -2, "bytesRead");
 		duk_get_prop_string(ctx, 1, "buffer"); duk_put_prop_string(ctx, -2, "buffer");
 		duk_push_int(ctx, 0); duk_put_prop_string(ctx, -2, "err");
-		duk_array_push(ctx, -2);										// [bufferDescriptor][buffer][fs][array]
-		ILibDuktape_Immediate(ctx, NULL, 0, ILibDuktape_fs_buffer_fd_read);
+		duk_array_push(ctx, -2);											// [bufferDescriptor][buffer][fs][array]
+		ILibDuktape_Immediate(ctx, NULL, 0, ILibDuktape_fs_buffer_fd_read);	// Use an immediate, to unravel the callstack, so we don't risk a stack overflow, if this ends up recursing
 		return(0);
 	}
+
+	// If we get here, we are going to do an actual read
 	if (!(duk_is_number(ctx, 0) && duk_is_object(ctx, 1) && duk_is_function(ctx, 2))) { return(ILibDuktape_Error(ctx, "Invalid Parameters")); }
 #ifdef WIN32
 	HANDLE H = (HANDLE)(uintptr_t)duk_require_uint(ctx, 0);
@@ -909,6 +931,7 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 #endif
 	}
 #ifdef WIN32
+	// On Windows, we'll use overlapped I/O
 	data->buffer = buffer + offset;
 	data->bufferSize = length;
 	ILibChain_ReadEx2(duk_ctx_chain(ctx), data->H, &(data->p), data->buffer, (DWORD)data->bufferSize, ILibDuktape_fs_read_WindowsSink, data, "fs.read()");
@@ -972,6 +995,8 @@ duk_ret_t ILibDuktape_fs_read(duk_context *ctx)
 	return(0);
 #endif
 }
+
+// Syncronously write to a descriptor
 duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -995,6 +1020,7 @@ duk_ret_t ILibDuktape_fs_writeSync(duk_context *ctx)
 	return(ILibDuktape_Error(ctx, "FS I/O Error"));
 }
 
+// Helper function to call closeSync()
 int ILibduktape_fs_CloseFD(duk_context *ctx, void *fs, int fd)
 {
 	int retVal = 1;
@@ -1007,6 +1033,7 @@ int ILibduktape_fs_CloseFD(duk_context *ctx, void *fs, int fd)
 	return retVal;
 }
 
+// Write handler called by stream.Writable.write()
 ILibTransport_DoneState ILibDuktape_fs_writeStream_writeHandler(struct ILibDuktape_WritableStream *stream, char *buffer, int bufferLen, void *user)
 {
 	ILibDuktape_fs_writeStreamData *data = (ILibDuktape_fs_writeStreamData*)user;
@@ -1023,11 +1050,14 @@ ILibTransport_DoneState ILibDuktape_fs_writeStream_writeHandler(struct ILibDukta
 	}
 	return retVal;
 }
+
+// End handler called by stream.Writable.end()
 void ILibDuktape_fs_writeStream_endHandler(struct ILibDuktape_WritableStream *stream, void *user)
 {
 	ILibDuktape_fs_writeStreamData *data = (ILibDuktape_fs_writeStreamData*)user;
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", data->fd);
 
+	// If AutoClose is specified, then when the stream is ended, we will close the descriptor
 	if (data->autoClose != 0 && data->fPtr != NULL)
 	{
 		if (ILibduktape_fs_CloseFD(data->ctx, data->fsObject, data->fd) != 0)
@@ -1047,6 +1077,8 @@ void ILibDuktape_fs_writeStream_endHandler(struct ILibDuktape_WritableStream *st
 	if (duk_pcall_method(data->ctx, 1) != 0) { ILibDuktape_Process_UncaughtException(data->ctx); }
 	duk_pop(data->ctx);										// ...
 }
+
+// Called by Garbage Collector
 duk_ret_t ILibDuktape_fs_writeStream_finalizer(duk_context *ctx)
 {
 	ILibDuktape_fs_writeStreamData *data;
@@ -1054,6 +1086,7 @@ duk_ret_t ILibDuktape_fs_writeStream_finalizer(duk_context *ctx)
 	duk_get_prop_string(ctx, 0, FS_WRITESTREAM);
 	data = (ILibDuktape_fs_writeStreamData*)Duktape_GetBuffer(ctx, -1, NULL);
 
+	// If AutoClose was specified, then the descriptor will be explicitely closed
 	if (data->autoClose != 0 && data->fPtr != NULL)
 	{
 		if (ILibduktape_fs_CloseFD(data->ctx, data->fsObject, data->fd) != 0)
@@ -1067,6 +1100,8 @@ duk_ret_t ILibDuktape_fs_writeStream_finalizer(duk_context *ctx)
 
 	return 0;
 }
+
+// fs.createWriteStream()
 duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -1103,11 +1138,15 @@ duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 
 	if (fd == 0)
 	{
+		// If a descriptor is not set, then we'll open the file first
 		fd = ILibDuktape_fs_openSyncEx(ctx, path, flags, NULL);
 	}
 	f = ILibDuktape_fs_getFilePtr(ctx, fd);
 	if (f != NULL)
 	{
+		//
+		// Create the stream object
+		//
 		duk_push_object(ctx);													// [writeStream]
 		ILibDuktape_WriteID(ctx, "fs.writeStream");
 		duk_push_fixed_buffer(ctx, sizeof(ILibDuktape_fs_writeStreamData));		// [writeStream][buffer]
@@ -1131,6 +1170,7 @@ duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 	}
 	else
 	{
+		// Descriptor Error
 		return(ILibDuktape_Error(ctx, "FS CreateWriteStream Error"));
 	}
 }
@@ -1146,6 +1186,7 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	ILibDuktape_fs_readStreamData *data = (ILibDuktape_fs_readStreamData*)user;
 	int bytesToRead;
 
+	// If this is set, it means this thread is trying to re-enter this processing loop
 	if (data->readLoopActive != 0) { return; }
 	data->readLoopActive = 1;
 	sender->paused = 0;
@@ -1172,6 +1213,7 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	}
 	if (sender->paused == 0 && data->bytesRead == 0)
 	{
+		// We aren't paused, but the read resulted in a graceful
 		ILibDuktape_readableStream_WriteEnd(sender);
 
 		if (data->autoClose != 0 && data->fPtr != NULL)
