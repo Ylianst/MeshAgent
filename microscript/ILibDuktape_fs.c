@@ -108,6 +108,7 @@ typedef struct ILibDuktape_fs_appleWatcher
 	void *chain;
 	void *kthread;									// Worker thread running kevent()
 	int kq;											// kqueue() object
+	sem_t exitWaiter;
 	sem_t inputWaiter;								// Semaphore used to dispatch between Microstack Event Loop and kevent loop.
 	int unblocker[2];								// pipe used to unblock thread
 	ILibDuktape_fs_descriptorInfo **descriptors;
