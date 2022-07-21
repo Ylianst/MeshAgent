@@ -149,7 +149,7 @@ wincrypto_object __fastcall wincrypto_open(int newcert, char *rootSubject)
 	BOOL hFreeKeyNode = FALSE;
 	BOOL status = FALSE;
 	PBYTE subjectEncoded = NULL;
-	DWORD subjectEncodedSize;
+	DWORD subjectEncodedSize = 0;
 	CRYPT_KEY_PROV_INFO kpi;
 #ifdef _CONSOLE
 	DWORD machineflag = 0;
@@ -550,7 +550,7 @@ int  __fastcall wincrypto_mkCert(wincrypto_object j, char* rootSubject, wchar_t*
 	PBYTE subject1Encoded = NULL;
 	DWORD subject1EncodedSize;
 	PBYTE subject2Encoded = NULL;
-	DWORD subject2EncodedSize;
+	DWORD subject2EncodedSize = 0;
 
 	CRYPT_KEY_PROV_INFO kpi;
 	BYTE* pbPolicyInfo = NULL;

@@ -1260,7 +1260,7 @@ int kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler wr
 
 		if (ThreadRunning == 1 && g_shutdown == 0) { KVMDEBUG("kvm_relay_setup() session already exists", 0); free(parms); return 0; }
 		kvmthread = CreateThread(NULL, 0, kvm_server_mainloop, (void*)parms, 0, 0);
-		CloseHandle(kvmthread);
+		if (kvmthread != 0) { CloseHandle(kvmthread); }
 		return 1;
 	}
 }

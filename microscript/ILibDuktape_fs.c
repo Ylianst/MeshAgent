@@ -1180,6 +1180,10 @@ void ILibDuktape_fs_readStream_Pause(struct ILibDuktape_readableStream *sender, 
 	UNREFERENCED_PARAMETER(user);
 	sender->paused = 1;
 }
+
+//
+// The stream.resume() contains the main processing loop.
+//
 void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender, void *user)
 {
 	if (!ILibMemory_CanaryOK(user)) { return; }
@@ -1196,6 +1200,7 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	data->unshiftedBytes = 0;
 	while (sender->paused == 0 && data->bytesRead > 0 && (data->bytesLeft < 0 || data->bytesLeft > 0))
 	{
+		// The main read processing loop. we'll read as much as we can until we can't read anymore
 		bytesToRead = data->bytesLeft < 0 ? (int)sizeof(data->buffer) : (data->bytesLeft > ((int)sizeof(data->buffer) - data->unshiftedBytes) ? (int)sizeof(data->buffer) - data->unshiftedBytes : data->bytesLeft);
 		data->bytesRead = (int)fread(data->buffer + data->unshiftedBytes, 1, bytesToRead, data->fPtr);
 		if (data->bytesRead > 0)
@@ -1214,7 +1219,7 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	}
 	if (sender->paused == 0 && data->bytesRead == 0)
 	{
-		// We aren't paused, but the read resulted in a graceful
+		// We aren't paused, but the read resulted in a graceful end
 		ILibDuktape_readableStream_WriteEnd(sender);
 
 		if (data->autoClose != 0 && data->fPtr != NULL)
@@ -1239,6 +1244,8 @@ void ILibDuktape_fs_readStream_Resume(struct ILibDuktape_readableStream *sender,
 	}
 	data->readLoopActive = 0;
 }
+
+// Destructor called by Garbage Collector
 duk_ret_t ILibDuktape_fs_readStream_finalizer(duk_context *ctx)
 {
 	ILibDuktape_fs_readStreamData *data;
@@ -1247,6 +1254,7 @@ duk_ret_t ILibDuktape_fs_readStream_finalizer(duk_context *ctx)
 
 	if (data->autoClose != 0 && data->fPtr != NULL)
 	{
+		// If autoclose was specified, we need to close the descriptor
 		if (ILibduktape_fs_CloseFD(data->ctx, data->fsObject, data->fd) != 0)
 		{
 			ILibDuktape_Process_UncaughtExceptionEx(data->ctx, "fs.readStream._finalizer(): Error closing FD: %d", data->fd);
@@ -1257,6 +1265,8 @@ duk_ret_t ILibDuktape_fs_readStream_finalizer(duk_context *ctx)
 
 	return 0;
 }
+
+// If the user can't process all the data, they call unshift() to mark some of the data as unread. The actual logic is handled in the main processing loop in the resume() function
 int ILibDuktape_fs_readStream_unshift(struct ILibDuktape_readableStream *sender, int unshiftBytes, void *user)
 {
 	if (!ILibMemory_CanaryOK(user)) { return(unshiftBytes); }
@@ -1264,6 +1274,8 @@ int ILibDuktape_fs_readStream_unshift(struct ILibDuktape_readableStream *sender,
 	data->unshiftedBytes = unshiftBytes;
 	return(unshiftBytes);
 }
+
+// fs.createReadStream() will create a stream.readable. The main processing loop will start when resume() is called, either directly or indirectly.
 duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 {
 	int nargs = duk_get_top(ctx);
@@ -1280,6 +1292,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	int start = 0;
 	int end = -1;
 
+	// If an options object was specified, fetch some properties
 	if (nargs > 1)
 	{
 		fd = Duktape_GetIntPropertyValue(ctx, 1, "fd", 0);
@@ -1300,9 +1313,11 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	f = ILibDuktape_fs_getFilePtr(ctx, fd);
 	if (f == NULL)
 	{
+		// Could not find a mapped descriptor
 		return(ILibDuktape_Error(ctx, "FS CreateReadStream Error"));
 	}
 
+	// create the stream object
 	duk_push_object(ctx);													// [readStream]
 	ILibDuktape_WriteID(ctx, "fs.readStream");
 	data = (ILibDuktape_fs_readStreamData*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_fs_readStreamData));
@@ -1320,7 +1335,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	data->bytesRead = -1;
 	//data->stream = ILibDuktape_ReadableStream_Init(ctx, ILibDuktape_fs_readStream_Pause, ILibDuktape_fs_readStream_Resume, data);
 	data->stream = ILibDuktape_ReadableStream_InitEx(ctx, ILibDuktape_fs_readStream_Pause, ILibDuktape_fs_readStream_Resume, ILibDuktape_fs_readStream_unshift, data);
-	data->stream->paused = 1;
+	data->stream->paused = 1; // The stream starts in the paused state... All the work is done in the resume() function
 
 	//printf("readStream [start: %d, end: %d\n", start, end);
 
@@ -1329,11 +1344,14 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 
 	if (start != 0)
 	{
+		// If a starting position was specified, we need to seek to it
 		fseek(f, start, SEEK_SET);
 	}
 
 	return 1;
 }
+
+// Desctructor called by Garbage Collector
 duk_ret_t ILibDuktape_fs_Finalizer(duk_context *ctx)
 {
 	if (duk_has_prop_string(ctx, 0, FS_PIPEMANAGER_PTR) && duk_has_prop_string(ctx, 0, FS_CHAIN_PTR))
@@ -1369,6 +1387,8 @@ duk_ret_t ILibDuktape_fs_Finalizer(duk_context *ctx)
 	return 0;
 }
 
+
+// Enumerate a folder path
 duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 {
 	int i = 0;
@@ -1444,6 +1464,8 @@ duk_ret_t ILibDuktape_fs_readdirSync(duk_context *ctx)
 
 	return 1;
 }
+
+// Helper function to populate IsFile() and IsDirectory()
 duk_ret_t ILibDuktape_fs_statSyncEx(duk_context *ctx)
 {
 	duk_push_current_function(ctx);
@@ -1451,6 +1473,7 @@ duk_ret_t ILibDuktape_fs_statSyncEx(duk_context *ctx)
 	return 1;
 }
 
+// Helper function to convert file time to JS time
 #ifdef WIN32
 char *ILibDuktape_fs_convertTime(SYSTEMTIME *st, char *dest, int destLen)
 #else
@@ -1477,6 +1500,7 @@ char *ILibDuktape_fs_convertTime(uint64_t st, char *dest, int destLen)
 	return(dest);
 }
 
+// Fetch various attributes from the file system about a file/folder
 duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 {
 #ifdef WIN32	
@@ -1545,13 +1569,18 @@ duk_ret_t ILibDuktape_fs_statSync(duk_context *ctx)
 	return 1;
 #endif
 }
+
+
 #ifdef WIN32
+// Override for toString() for Windows
 duk_ret_t ILibDuktape_fs_readDrivesSync_result_toString(duk_context *ctx)
 {
 	duk_push_this(ctx);
 	duk_get_prop_string(ctx, -1, "name");
 	return 1;
 }
+
+// Pushes the result object for readDrivesSync() on Windows
 int ILibDuktape_fs_readDrivesSync_result_PUSH(duk_context *ctx, char *volumeName)
 {
 	char driveName[1024];
@@ -1603,6 +1632,7 @@ int ILibDuktape_fs_readDrivesSync_result_PUSH(duk_context *ctx, char *volumeName
 }
 #endif
 
+// Fetches drive information on Windows
 duk_ret_t ILibDuktape_fs_readDrivesSync(duk_context *ctx)
 {
 	duk_push_array(ctx);
@@ -1629,6 +1659,7 @@ duk_ret_t ILibDuktape_fs_readDrivesSync(duk_context *ctx)
 }
 
 #ifndef _NOFSWATCHER
+// Closes a file watcher
 duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 {
 	ILibDuktape_fs_watcherData *data;
@@ -1639,11 +1670,13 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 	data = (ILibDuktape_fs_watcherData*)Duktape_GetBuffer(ctx, -1, NULL);
 
 #if defined(WIN32)
+	// On windows, we have to cancel pending I/O on the handle
 	int r = CancelIo(data->h);
 	ILibChain_RemoveWaitHandle(data->chain, data->overlapped.hEvent);
 	CloseHandle(data->h);
 	data->h = NULL;
 #elif defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+	// On Linux, we have to remove the watcher on the descriptor
 	ILibHashtable_Remove(data->linuxWatcher->watchTable, data->wd.p, NULL, 0);
 	if (inotify_rm_watch(data->linuxWatcher->fd, data->wd.i) != 0) { ILibRemoteLogging_printf(ILibChainGetLogger(Duktape_GetChain(ctx)), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "FSWatcher.close(): Error removing wd[%d] from fd[%d]", data->wd.i, data->linuxWatcher->fd); }
 	else
@@ -1652,6 +1685,7 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 	}
 	data->wd.p = NULL;
 #elif defined(__APPLE__)
+	// On macOS we have to signal to the kevent() loop to exit
 	duk_push_this(ctx);
 	duk_get_prop_string(ctx, -1, FS_WATCHER_2_FS);
 	duk_get_prop_string(ctx, -1, FS_NOTIFY_DISPATCH_PTR);

@@ -579,7 +579,7 @@ int TouchAction1(unsigned char id, unsigned int flags, unsigned short x, unsigne
 
 	if (g_TouchLoadLibraryState != 1) return 0;
 	MakeTouchObject(&contact, id, (POINTER_FLAGS)flags, x, y);
-	if (!g_TouchInjectionCall(1, &contact)) { printf("TOUCH1ERROR: id=%d, flags=%d, x=%d, y=%d, err=%ld\r\n", id, flags, x, y, GetLastError()); return 1; }
+	if (!g_TouchInjectionCall(1, &contact)) { printf("TOUCH1ERROR: id=%u, flags=%u, x=%u, y=%u, err=%ld\r\n", id, flags, x, y, GetLastError()); return 1; }
 
 	//printf("TOUCH: id=%d, flags=%d, x=%d, y=%d\r\n", id, flags, x, y);
 	return 0;

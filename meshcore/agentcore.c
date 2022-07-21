@@ -818,6 +818,8 @@ void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventNa
 #ifdef WIN32
 void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *user)
 {
+	if (user == NULL) { return; }
+
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)((void**)ILibMemory_Extra(user))[0];
 	char *buffer = (char*)user;
 	size_t bufferLen = ILibMemory_Size(user);
@@ -915,11 +917,11 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 #endif
 	return ILibTransport_DoneState_COMPLETE;
 }
-void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *stream, void *user)
+void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *stream, void *ptr_user)
 {
 
 	// Peer disconnected the data channel
-	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)ptr_user;
 	if (ptrs->ctx != NULL)
 	{
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "KVM Session Ending");
@@ -1667,7 +1669,7 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 #ifndef MICROSTACK_NOTLS
 duk_ret_t ILibDuktape_MeshAgent_GenerateCertsForDiagnosticAgent(duk_context *ctx)
 {
-	char tmp[UTIL_SHA384_HASHSIZE];
+	char tmp[UTIL_SHA384_HASHSIZE] = { 0 };
 	struct util_cert tmpCert;
 
 #ifdef WIN32
@@ -5388,7 +5390,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (agentHost->localdebugmode == 0) { MeshServer_Connect(agentHost); }
 		else
 		{
-			int CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
+			CoreModuleLen = ILibSimpleDataStore_Get(agentHost->masterDb, "CoreModule", NULL, 0);
 			if (CoreModuleLen > 4)
 			{
 				// There is a core module, launch it now.
