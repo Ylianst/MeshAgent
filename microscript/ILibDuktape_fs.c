@@ -1711,6 +1711,7 @@ duk_ret_t ILibDuktape_fs_watcher_close(duk_context *ctx)
 #endif
 
 #ifdef WIN32
+// Windows Callback for file watcher
 BOOL ILibDuktape_fs_watch_iocompletion(void *chain, HANDLE h, ILibWaitHandle_ErrorStatus errors, void *user)
 {
 	if (errors != ILibWaitHandle_ErrorStatus_NONE || !ILibMemory_CanaryOK(user)) { return(FALSE); }
@@ -1762,7 +1763,7 @@ BOOL ILibDuktape_fs_watch_iocompletion(void *chain, HANDLE h, ILibWaitHandle_Err
 		n = (n->NextEntryOffset != 0) ? ((FILE_NOTIFY_INFORMATION*)((char*)n + n->NextEntryOffset)) : NULL;
 	}
 
-
+	// Emit change event
 	duk_push_heapptr(data->ctx, data->object);						// [detail][fsWatcher]
 	duk_get_prop_string(data->ctx, -1, "emit");						// [detail][fsWatcher][emit]
 	duk_swap_top(data->ctx, -2);									// [detail][emit][this]
@@ -1799,6 +1800,7 @@ BOOL ILibDuktape_fs_watch_iocompletion(void *chain, HANDLE h, ILibWaitHandle_Err
 #endif
 
 #ifndef _NOFSWATCHER
+// Called by Garbage Collector
 duk_ret_t ILibDuktape_fs_watcher_finalizer(duk_context *ctx)
 {
 	duk_get_prop_string(ctx, 0, "close");		// [close]
@@ -1808,8 +1810,10 @@ duk_ret_t ILibDuktape_fs_watcher_finalizer(duk_context *ctx)
 	return 0;
 }
 
+// This a helper function that is indirectly called by the Microstack Event loop, to query metadata
 void ILibDuktape_fs_notifyDispatcher_QueryEx(ILibHashtable sender, void *Key1, char* Key2, int Key2Len, void *Data, void *user)
 {
+	// We're going to push the metadata into the supplied array
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)Data;
 	duk_push_heapptr(data->ctx, user);					// [array]
 	duk_push_heapptr(data->ctx, data->object);			// [array][watcher]
@@ -1820,12 +1824,14 @@ void ILibDuktape_fs_notifyDispatcher_QueryEx(ILibHashtable sender, void *Key1, c
 }
 
 #if defined(_POSIX) && !defined(__APPLE__) && !defined(_FREEBSD)
+// This function is called by the Microstack Event loop, to query metadata about a descriptor
 char* ILibDuktape_fs_notifyDispatcher_Query(void* chain, void *object, int fd, size_t *dataLen)
 {
 	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
 
 	if (duk_ctx_is_alive(data->ctx) == 0) 
 	{
+		// Context isn't valid, so just return generic metadata
 		return(" (ILibDuktape_fs_linuxWatcher)"); 
 	}
 
@@ -1838,15 +1844,19 @@ char* ILibDuktape_fs_notifyDispatcher_Query(void* chain, void *object, int fd, s
 	duk_size_t tmpLen;
 	char *tmp = (char*)duk_get_lstring(data->ctx, -1, &tmpLen);
 	char *tmp2 = ILibMemory_AllocateTemp(chain, tmpLen + 12);
-	*dataLen = sprintf_s(tmp2, tmpLen + 12, "fs.watch(%s)", tmp);
+	*dataLen = sprintf_s(tmp2, tmpLen + 12, "fs.watch(%s)", tmp); // Populate metadata with what we are watching
 	duk_set_top(data->ctx, top);
 	return tmp2;
 }
+
+// Called by Microstack event loop, to add our descriptors
 void ILibDuktape_fs_notifyDispatcher_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
 {
 	ILibDuktape_fs_linuxWatcher *data = (ILibDuktape_fs_linuxWatcher*)object;
 	FD_SET(data->fd, readset);
 }
+
+// Called by Microstack event loop, to check our descriptors
 void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
 {
 	struct inotify_event *evt;
@@ -1859,6 +1869,7 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 
 	if (!FD_ISSET(data->fd, readset)) { return; }
 
+	// We were signaled that data is available, so let's get it
 	while ((len = read(data->fd, buffer, sizeof(buffer))) > 0)
 	{
 		while (i < len)
@@ -1870,7 +1881,7 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 			wd.p = NULL;
 			wd.i = evt->wd;
 			watcher = (ILibDuktape_fs_watcherData*)ILibHashtable_Get(data->watchTable, wd.p, NULL, 0);
-			if (watcher == NULL || ILibDuktape_EventEmitter_HasListeners(watcher->emitter, "change") == 0) { continue; }
+			if (watcher == NULL || ILibDuktape_EventEmitter_HasListeners(watcher->emitter, "change") == 0) { continue; } // If nobody is listening for this event, no need to waste cycles processing it
 
 			duk_push_object(watcher->ctx);					// [detail]
 
@@ -1890,6 +1901,8 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 				duk_push_string(watcher->ctx, evt->name);
 				duk_put_prop_string(watcher->ctx, -2, "\xFF_FileName");
 			}
+
+			// emit the event
 			ILibDuktape_EventEmitter_SetupEmit(watcher->ctx, watcher->object, "change");// [detail][emit][this][change]
 			duk_push_string(watcher->ctx, changed == 0 ? "rename" : "change");			// [detail][emit][this][change][type]
 			if (changed == 0)
@@ -1906,6 +1919,8 @@ void ILibDuktape_fs_notifyDispatcher_PostSelect(void* object, int slct, fd_set *
 		}
 	}
 }
+
+// Called by the microstack event loop to cleanup
 void ILibDuktape_fs_notifyDispatcher_Destroy(void *object)
 {
 	ILibHashtable_Destroy(((ILibDuktape_fs_linuxWatcher*)object)->watchTable);
@@ -1913,6 +1928,7 @@ void ILibDuktape_fs_notifyDispatcher_Destroy(void *object)
 #endif
 
 #ifdef __APPLE__
+// Dispatched callback from kevent(), to be emitted on JS event loop
 void ILibduktape_fs_watch_appleWorker_MODIFIED(void *chain, void *user, char *changeType)
 {
 	ILibDuktape_fs_watcherData *data = (ILibDuktape_fs_watcherData*)user;
@@ -1978,6 +1994,8 @@ void ILibduktape_fs_watch_appleWorker_LINK(void *chain, void *user)
 {
 	ILibduktape_fs_watch_appleWorker_MODIFIED(chain, user, "MODIFIED_LINK");
 }
+
+// macOS kevent loop
 void ILibduktape_fs_watch_appleWorker(void *obj)
 {
 	ILibDuktape_fs_appleWatcher *watcher = (ILibDuktape_fs_appleWatcher*)obj;
@@ -1993,7 +2011,7 @@ void ILibduktape_fs_watch_appleWorker(void *obj)
 		n = kevent(watcher->kq, change, inCount, &event, 1, NULL); inCount = 0;
 		if (n > 0)
 		{
-			if (event.ident == watcher->unblocker[0])
+			if (event.ident == watcher->unblocker[0]) // Check our 'wakeup' descriptor, which we use to force unblock, so we can add other descriptors
 			{
 				// Force Unblock
 				read(watcher->unblocker[0], tmp, event.data < sizeof(tmp) ? event.data : sizeof(tmp));
@@ -2077,6 +2095,8 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 #if defined(WIN32)
 	int recursive = 0;
 	ILibProcessPipe_Manager pipeMgr;
+
+	// Setup an ILibProcessPipe_Manager object, that we can use for dispatching if necessary
 	duk_push_this(ctx);														// [fs]
 	if (duk_has_prop_string(ctx, -1, FS_PIPEMANAGER_PTR))
 	{
@@ -2104,6 +2124,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 	}
 	else
 	{
+		// if a notifyDispatcher wasn't setup, let's setup a new one and hook it up to the event loop, so we can add descriptors
 		notifyDispatcher = ILibMemory_Allocate(sizeof(ILibDuktape_fs_linuxWatcher), 0, NULL, NULL);
 		notifyDispatcher->chainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibDuktape_fs_linuxWatcher");
 		notifyDispatcher->chainLink.PreSelectHandler = ILibDuktape_fs_notifyDispatcher_PreSelect;
@@ -2146,9 +2167,9 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		}		
 		sem_init(&(watcher->exitWaiter), 0, 0);
 		sem_init(&(watcher->inputWaiter), 0, 0);
-		pipe(watcher->unblocker);
+		pipe(watcher->unblocker); // Setup a pipe, so we can use it to force unblock the child, so it can add descriptors
 		watcher->chain = Duktape_GetChain(ctx);
-		watcher->kthread = ILibSpawnNormalThread(ILibduktape_fs_watch_appleWorker, watcher);
+		watcher->kthread = ILibSpawnNormalThread(ILibduktape_fs_watch_appleWorker, watcher); // Spawn a thread to act as the kevent loop
 	}
 #endif
 #endif
@@ -2188,7 +2209,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 		}
 	}
 
-
+	// Setup the file system watcher
 #if defined(WIN32)
 	if ((data->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL)) == NULL) { return(ILibDuktape_Error(ctx, "Could not create handle")); }
 	data->h = CreateFileW(path, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
@@ -2232,6 +2253,7 @@ duk_ret_t ILibDuktape_fs_watch(duk_context *ctx)
 }
 #endif
 
+// fs.renameSync() to rename a file
 duk_ret_t ILibDuktape_fs_rename(duk_context *ctx)
 {
 	char *oldPath = (char*)duk_require_string(ctx, 0);
@@ -2248,6 +2270,8 @@ duk_ret_t ILibDuktape_fs_rename(duk_context *ctx)
 	}
 	return 0;
 }
+
+// fs.unlinkSync() to delete a file
 duk_ret_t ILibDuktape_fs_unlink(duk_context *ctx)
 {
 #ifdef WIN32
@@ -2270,6 +2294,8 @@ duk_ret_t ILibDuktape_fs_unlink(duk_context *ctx)
 	}
 	return 0;
 }
+
+// fs.rmdirSync() to delete a folder
 duk_ret_t ILibDuktape_fs_rmdirSync(duk_context *ctx)
 {
 #ifdef WIN32
@@ -2285,6 +2311,8 @@ duk_ret_t ILibDuktape_fs_rmdirSync(duk_context *ctx)
 	}
 	return 0;
 }
+
+// fs.mkdirSync() to create a folder
 duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 {
 	//int nargs = duk_get_top(ctx);
@@ -2302,6 +2330,8 @@ duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 	}
 	return 0;
 }
+
+// fs.readFileSync() to read an entire file into a buffer
 duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 {
 	char *filePath = (char*)duk_require_string(ctx, 0);
@@ -2332,6 +2362,7 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	fseek(f, 0, SEEK_SET);
 	if(fileLen > 0)
 	{
+		// If the filesystem gives us the file length, we'll allocate the buffer first, and then fill it up
 		duk_push_fixed_buffer(ctx, (duk_size_t)fileLen);
 		ignore_result(fread(Duktape_GetBuffer(ctx, -1, NULL), 1, (size_t)fileLen, f));
 		fclose(f);
@@ -2339,6 +2370,7 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	}
 	else
 	{
+		// If the filesystem can't tell us the file length, we'll need to use a dynamic buffer, so it will just realloc as we go along
 		duk_size_t bufferSize = 1024;
 		char *buffer = (char*)duk_push_dynamic_buffer(ctx, bufferSize);				// [dynamicBuffer]
 		size_t bytesRead = 0;
@@ -2358,6 +2390,8 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 
 	return(1);
 }
+
+// fs.existsSync() to determine if a path exists
 duk_ret_t ILibDuktape_fs_existsSync(duk_context *ctx)
 {
 	duk_push_this(ctx);							// [fs]
@@ -2375,6 +2409,7 @@ duk_ret_t ILibDuktape_fs_existsSync(duk_context *ctx)
 	return(1);
 }
 #ifdef _POSIX
+// fs.chmodSync()
 duk_ret_t ILibduktape_fs_chmodSync(duk_context *ctx)
 {
 	if(chmod((char*)duk_require_string(ctx, 0), (mode_t)duk_require_int(ctx, 1)) != 0)
@@ -2386,6 +2421,7 @@ duk_ret_t ILibduktape_fs_chmodSync(duk_context *ctx)
 		return(0);
 	}
 }
+// fs.chownSync()
 duk_ret_t ILibDuktape_fs_chownSync(duk_context *ctx)
 {
 	if (chown((char*)duk_require_string(ctx, 0), (uid_t)duk_require_int(ctx, 1), (gid_t)duk_require_int(ctx, 2)) != 0)
@@ -2399,6 +2435,7 @@ duk_ret_t ILibDuktape_fs_chownSync(duk_context *ctx)
 }
 #endif
 #ifdef WIN32
+// Windows helper to convert file time to system time
 duk_ret_t ILibDuktape_fs_convertFileTime(duk_context *ctx)
 {
 	if (!(duk_is_object(ctx, 0) && duk_has_prop_string(ctx, -1, "_ptr"))) { return(ILibDuktape_Error(ctx, "Invalid Input Parameters")); }
@@ -2488,6 +2525,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_fs_Finalizer);
 
+	// JavaScript Polyfills
 	char copyFile[] = "exports.copyFile = function copyFile(src, dest)\
 						{\
 							var ss = this.createReadStream(src, {flags: 'rb'});\
