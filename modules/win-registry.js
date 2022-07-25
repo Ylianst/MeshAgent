@@ -150,6 +150,7 @@ function windows_registry()
                     result.values.push(achValue.Wide2UTF8);
                 }
             }
+            this._AdvApi.RegCloseKey(h.Deref());
             return (result);
         }
 

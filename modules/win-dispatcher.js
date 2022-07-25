@@ -57,6 +57,7 @@ function dispatch(options)
             this._control.write(h);
             this._control.write(d);
         };
+        s.on('end', function () { }); // DO NOT DELETE this line
     });
     ret._ipc.once('connection', function onConnect(s)
     {

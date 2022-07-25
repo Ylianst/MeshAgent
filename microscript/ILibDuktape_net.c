@@ -433,7 +433,6 @@ duk_ret_t ILibDuktape_net_socket_connect(duk_context *ctx)
 
 		ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_net_WindowsIPC));
 		duk_put_prop_string(ctx, -2, ILibDuktape_net_WindowsIPC_Buffer);
-		winIPC->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		winIPC->read_overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		winIPC->write_overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 		winIPC->ctx = ctx;
@@ -1261,6 +1260,8 @@ BOOL ILibDuktape_net_server_IPC_ConnectSink(void *chain, HANDLE event, ILibWaitH
 		ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 		if (winIPC->mServer != NULL)
 		{
+			if (winIPC->overlapped.hEvent != NULL) { CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL; }
+
 			duk_push_heapptr(winIPC->ctx, winIPC->mServer);							// [server]
 			duk_get_prop_string(winIPC->ctx, -1, ILibDuktape_net_ConcurrencyArray);	// [server][array]
 			int maxCount = Duktape_GetIntPropertyValue(winIPC->ctx, -2, ILibDuktape_net_ConcurrencyMaxSize, 0);	
@@ -1730,6 +1731,10 @@ duk_ret_t ILibDuktape_net_server_close(duk_context *ctx)
 					CloseHandle(winIPC->mPipeHandle);
 					winIPC->mPipeHandle = NULL;
 					ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), winIPC->overlapped.hEvent);
+
+					if (winIPC->overlapped.hEvent != NULL) { CloseHandle(winIPC->overlapped.hEvent); winIPC->overlapped.hEvent = NULL; }
+					if (winIPC->read_overlapped.hEvent != NULL) { CloseHandle(winIPC->read_overlapped.hEvent); winIPC->read_overlapped.hEvent = NULL; }
+					if (winIPC->write_overlapped.hEvent != NULL) { CloseHandle(winIPC->write_overlapped.hEvent); winIPC->write_overlapped.hEvent = NULL; }
 				}
 				else
 				{
