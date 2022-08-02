@@ -22,6 +22,25 @@ process.coreDumpLocation = process.platform == 'win32' ? (process.execPath.repla
 var updateSource = null;
 var promise = require('promise');
 
+if (process.platform == 'win32') { global.kernel32 = require('_GenericMarshal').CreateNativeProxy('kernel32.dll'); global.kernel32.CreateMethod('GetCurrentProcess'); global.kernel32.CreateMethod('GetProcessHandleCount'); }
+
+function getHandleCount()
+{
+    var ret = 0;
+    switch(process.platform)
+    {
+        case 'win32':
+            var h = kernel32.GetCurrentProcess();
+            var c = require('_GenericMarshal').CreateVariable(4);
+            kernel32.GetProcessHandleCount(h, c);
+            ret = c.toBuffer().readUInt32LE();
+            break;
+        default:
+            break;
+    }
+    return (ret);
+}
+
 try
 {
     Object.defineProperty(Array.prototype, 'getParameterEx',
@@ -216,7 +235,10 @@ var promises =
         filetransfer: null,
         terminal: null,
         kvm: null,
-        smbios_check: null
+        smbios_check: null,
+        fs_1: null,
+        fs_2: null,
+        fs_3: null
     };
 
 function generateRandomNumber(lower, upper)
@@ -769,6 +791,12 @@ server.on('upgrade', function (msg, sck, head)
             SMBIOS_Test().finally(function () { endTest(); });
             return;
         }
+        if (process.argv.getParameter('MODULES') != null)
+        {
+            MODULES_Test().finally(function () { endTest(); });
+            return;
+        }
+
         //
         // Run thru the main tests, becuase no special options were sent
         //
@@ -902,6 +930,77 @@ server.on('upgrade', function (msg, sck, head)
 
     });
 });
+
+function MODULES_Test()
+{
+    var ret;
+
+    ret = fs_test();
+
+    return (ret);
+}
+
+function fs_test()
+{
+    var ret = new promise(promise.defaultInit);
+
+    process.stdout.write('   Module Tests:\n');
+    process.stdout.write('      File System Tests\n');
+    process.stdout.write('         fs.readFileSync().................................[WAITING]');
+
+    sendEval("global._fsh1=getHandleCount();");
+    sendEval("var test1 = require('fs').readFileSync(process.execPath);");
+    sendEval("global._fsh2=getHandleCount();");
+    sendEval("selfTestResponse('fs_1', true, {pre: global._fsh1, post: global._fsh2});");
+
+    promises.fs_1.then(function (r)
+    {
+        process.stdout.write('\r         fs.readFileSync().................................[OK]     \n');
+        process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
+    }).then(function ()
+    {
+        var tmp = generateRandomString(5);
+        process.stdout.write('         fs.writeFileSync()................................[WAITING]');
+        sendEval("var testh=getHandleCount();");
+        sendEval("var testname='" + tmp + "';");
+        sendEval("var testvalue=Buffer.alloc(" + generateRandomNumber(1024, 4096) + ");");
+        sendEval("testvalue.randomFill();");
+        sendEval("require('fs').writeFileSync(testname, testvalue);");
+        sendEval("var testx = require('fs').existsSync(testname);");
+        sendEval("var testcount=getHandleCount();");
+        sendEval("selfTestResponse('fs_2', testx, {pre: testh, post: testcount});");
+    });
+
+    promises.fs_2.then(function (r)
+    {
+        process.stdout.write('\r         fs.writeFileSync()................................[OK]     \n');
+        process.stdout.write('         fs.existsSync()...................................[OK]     \n');
+        process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
+    }).then(function ()
+    {
+        process.stdout.write('         fs.renameSync()...................................[WAITING]');
+        sendEval("var renamedfile = '" + generateRandomString(5) + "'");
+        sendEval("testh=getHandleCount();");
+        sendEval("require('fs').renameSync(testname,renamedfile);");
+        sendEval("testcount=getHandleCount();");
+        sendEval("var testx = !require('fs').existsSync(testname) && require('fs').existsSync(renamedfile);");
+        sendEval("selfTestResponse('fs_3', testx, {pre: testh, post: testcount});");
+    });
+
+    promises.fs_3.then(function (r)
+    {
+        process.stdout.write('\r         fs.renameSync()...................................[OK]     \n');
+        process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
+
+        ret.resolve();
+    }).catch(function ()
+    {
+        process.stdout.write('\r         fs.renameSync()...................................[FAILED] \n');
+        ret.reject('rename failed');
+    });
+
+    return (ret);
+}
 
 function SMBIOS_Test()
 {
@@ -1750,8 +1849,24 @@ function sendEval(cmd)
 
 if (process.argv.getParameter('AgentsFolder') != null)
 {
+    var helper = "function getHandleCount()\
+    {\
+        var ret = 0;\
+        switch (process.platform)\
+        {\
+            case 'win32':\
+                var h = kernel32.GetCurrentProcess();\
+                var c = require('_GenericMarshal').CreateVariable(4);\
+                kernel32.GetProcessHandleCount(h, c);\
+                ret = c.toBuffer().readUInt32LE();\
+                break;\
+            default:\
+                break;\
+        }\
+        return (ret);\
+    }";
+
     var folder = process.argv.getParameter('AgentsFolder');
-    
     if (folder.endsWith('/')) { folder = folder.split('/'); folder.pop(); folder = folder.join('/'); }
     if (folder.endsWith('\\')) { folder = folder.split('\\'); folder.pop(); folder = folder.join('\\'); }
 
@@ -1765,6 +1880,8 @@ if (process.argv.getParameter('AgentsFolder') != null)
     {
         lines.push("console.enableWebLog(" + remoteDebug + ");");
     }
+    lines.push("if (process.platform == 'win32') { global.kernel32 = require('_GenericMarshal').CreateNativeProxy('kernel32.dll'); global.kernel32.CreateMethod('GetCurrentProcess'); global.kernel32.CreateMethod('GetProcessHandleCount'); }");
+    lines.push(helper);
     lines.push("process.coreDumpLocation = process.platform == 'win32' ? (process.execPath.replace('.exe', '.dmp')) : (process.execPath + '.dmp');");
     lines.push("function selfTestResponse(id, result, reason) { require('MeshAgent').SendCommand({ action: 'result', id: id, result: result, reason: reason }); }");
     for (i = 0; i < modules_folder.length; ++i)
