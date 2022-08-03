@@ -349,24 +349,40 @@ function processManager() {
                 return (JSON.parse(child.stdout.str.trim()));
             };
         }
-
-        this.getProcessEx = function getProcessEx(cmd)
+    }
+    this.getProcessEx = function getProcessEx(cmd)
+    {
+        if (process.platform == 'win32')
         {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write('ps -ax -o pid -o command | grep ' + cmd + " | tr '\\n' '\\t' | awk -F" + '"\\t" \'{ printf "["; for(i=1;i<NF;++i) { split($i,r," "); if(r[2]!="grep") { if(i>1) { printf ","; } printf "%s", r[1]; } } printf "]"; }\'');
-            child.stdin.write('\nexit\n');
-            child.waitExit();
+            var result = [];
+            this.getProcesses(function (j)
+            {
+                var i;
+                for(i in j)
+                {
+                    if(j[i].cmd.toLowerCase() == cmd.toLowerCase())
+                    {
+                        result.push(j[i].pid);
+                    }
+                }
+            });
+            return (result);
+        }
 
-            if (child.stdout.str.trim() == '')
-            {
-                throw (cmd + ' not found');
-            }
-            else
-            {
-                return (JSON.parse(child.stdout.str.trim()));
-            }
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+        child.stdin.write('ps -ax -o pid -o command | grep ' + cmd + " | tr '\\n' '\\t' | awk -F" + '"\\t" \'{ printf "["; for(i=1;i<NF;++i) { split($i,r," "); if(r[2]!="grep") { if(i>1) { printf ","; } printf "%s", r[1]; } } printf "]"; }\'');
+        child.stdin.write('\nexit\n');
+        child.waitExit();
+
+        if (child.stdout.str.trim() == '')
+        {
+            throw (cmd + ' not found');
+        }
+        else
+        {
+            return (JSON.parse(child.stdout.str.trim()));
         }
     }
 }
