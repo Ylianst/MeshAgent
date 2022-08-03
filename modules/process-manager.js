@@ -350,7 +350,7 @@ function processManager() {
             };
         }
     }
-    this.getProcessEx = function getProcessEx(cmd)
+    this.getProcessEx = function getProcessEx(cmd, options)
     {
         if (process.platform == 'win32')
         {
@@ -362,7 +362,10 @@ function processManager() {
                 {
                     if(j[i].cmd.toLowerCase() == cmd.toLowerCase())
                     {
-                        result.push(j[i].pid);
+                        if (options == null || options.path.toLowerCase() == j[i].path.toLowerCase())
+                        {
+                            result.push(j[i].pid);
+                        }
                     }
                 }
             });
