@@ -7997,6 +7997,7 @@ void ILibLifeTime_Destroy(void *LifeTimeToken)
 	struct ILibLifeTime *UPnPLifeTime = (struct ILibLifeTime*)LifeTimeToken;
 	ILibLifeTime_Flush(LifeTimeToken);
 	ILibLinkedList_Destroy(UPnPLifeTime->ObjectList);
+	ILibLinkedList_Destroy(UPnPLifeTime->DeleteList);
 	UPnPLifeTime->ObjectCount = 0;
 	UPnPLifeTime->ObjectList = NULL;
 }

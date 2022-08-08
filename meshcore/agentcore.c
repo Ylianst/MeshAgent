@@ -1654,7 +1654,9 @@ duk_ret_t ILibDuktape_MeshAgent_ServerInfo(duk_context *ctx)
 #ifndef MICROSTACK_NOTLS
 	if (agent->controlChannel != NULL)
 	{
-		ILibDuktape_TLS_X509_PUSH(ctx, ILibWebClient_SslGetCert(agent->controlChannel));
+		X509 *cert = ILibWebClient_SslGetCert(agent->controlChannel);
+		ILibDuktape_TLS_X509_PUSH(ctx, cert);
+		X509_free(cert);
 	}
 	else
 	{
