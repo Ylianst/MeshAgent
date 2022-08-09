@@ -39,6 +39,11 @@ limitations under the License.
 #include <AclAPI.h>
 #endif
 
+#if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#endif
+
 #ifdef OLDSSL
 #define TLS_method SSLv23_method
 #endif
@@ -1137,6 +1142,7 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	ILibDuktape_net_WindowsIPC *winIPC = (ILibDuktape_net_WindowsIPC*)user;
 	if (winIPC->mServer != NULL && winIPC->mPipeHandle == NULL) { return; } // Already Closed
 	winIPC->endCalled = 1;
+	if (winIPC->metadata != NULL) { ILibMemory_Free(winIPC->metadata); winIPC->metadata = NULL; }
 	if (winIPC->reservedState != NULL)
 	{
 		ILibChain_WaitHandle_DestroySavedState(winIPC->mChain, winIPC->reservedState);
@@ -1145,8 +1151,8 @@ void ILibDuktape_net_server_IPC_EndSink(ILibDuktape_DuplexStream *stream, void *
 	else
 	{
 		// We probably aren't paused, so we need to remove our wait handles
-		if (winIPC->read_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandle(winIPC->mChain, winIPC->read_overlapped.hEvent); }
-		if (winIPC->write_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandle(winIPC->mChain, winIPC->write_overlapped.hEvent); }
+		if (winIPC->read_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandleEx(winIPC->mChain, winIPC->read_overlapped.hEvent, 1); }
+		if (winIPC->write_overlapped.hEvent != NULL) { ILibChain_RemoveWaitHandleEx(winIPC->mChain, winIPC->write_overlapped.hEvent, 1); }
 	}
 	if (winIPC->mPipeHandle != NULL) 
 	{
@@ -1224,18 +1230,19 @@ duk_ret_t ILibDuktape_net_server_IPC_ConnectSink_Finalizer(duk_context *ctx)
 		}
 		if (winIPC->read_overlapped.hEvent != NULL)
 		{
-			ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), winIPC->read_overlapped.hEvent);
+			ILibChain_RemoveWaitHandleEx(duk_ctx_chain(ctx), winIPC->read_overlapped.hEvent, 1);
 			CloseHandle(winIPC->read_overlapped.hEvent);
 			winIPC->read_overlapped.hEvent = NULL;
 		}
 		if (winIPC->write_overlapped.hEvent != NULL)
 		{
-			ILibChain_RemoveWaitHandle(duk_ctx_chain(ctx), winIPC->write_overlapped.hEvent);
+			ILibChain_RemoveWaitHandleEx(duk_ctx_chain(ctx), winIPC->write_overlapped.hEvent, 1);
 			CloseHandle(winIPC->write_overlapped.hEvent);
 			winIPC->write_overlapped.hEvent = NULL;
 		}
 		
 		if (winIPC->buffer != NULL) { free(winIPC->buffer); }
+		if (winIPC->metadata != NULL) { ILibMemory_Free(winIPC->metadata); winIPC->metadata = NULL; }
 	}
 	return(0);
 }

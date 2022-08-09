@@ -2199,6 +2199,7 @@ int ILibChain_WindowsSelect(void *chain, fd_set *readset, fd_set *writeset, fd_s
 						if (((ILibBaseChain*)chain)->currentHandle != NULL && ILibMemory_CanaryOK(info))
 						{
 							ILIBLOGMESSAGEX2(LOGEX_OVERLAPPED_IO, " * ILibChain_WindowsSelect(%p) [REMOVED]", ((ILibBaseChain*)chain)->currentHandle);
+							info->user = NULL;
 							ILibLinkedList_Remove(info->node);
 						}
 						else
@@ -3930,7 +3931,7 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 {
 	ILibBaseChain *chain = (ILibBaseChain*)((void**)u)[0];
 	HANDLE h = (HANDLE)((void**)u)[1];
-
+	int clean = (int)(intptr_t)((void**)u)[2];
 	void *node = ILibLinkedList_GetNode_Search(chain->auxSelectHandles, NULL, h);
 	if (node != NULL)
 	{
@@ -3943,17 +3944,20 @@ void __stdcall ILibChain_RemoveWaitHandle_APC(ULONG_PTR u)
 			chain->currentHandle = NULL; chain->currentInfo = NULL; 
 		}
 		ILibChain_WaitHandleInfo *info = (ILibChain_WaitHandleInfo*)ILibMemory_Extra(node);
+		if (clean != 0) { ILibMemory_Free(info->user); }
 		ILibLinkedList_Remove(node);
 		chain->UnblockFlag = 1;
 	}
 }
-void ILibChain_RemoveWaitHandle(void *chain, HANDLE h)
+
+void ILibChain_RemoveWaitHandleEx(void *chain, HANDLE h, int clean)
 {
 	if (ILibIsRunningOnChainThread(chain))
 	{
-		void *tmp[2];
+		void *tmp[3];
 		tmp[0] = chain;
 		tmp[1] = h;
+		tmp[2] = (void*)(intptr_t)clean;
 		ILibChain_RemoveWaitHandle_APC((ULONG_PTR)tmp);
 	}
 	else
@@ -3962,9 +3966,10 @@ void ILibChain_RemoveWaitHandle(void *chain, HANDLE h)
 		// We must dispatch an APC to remove the wait handle,
 		// because we can't change the wait list during a WaitForMultipleObjectsEx() call
 		//
-		void **tmp = (void**)ILibMemory_SmartAllocate(2 * sizeof(void*));
+		void **tmp = (void**)ILibMemory_SmartAllocate(3 * sizeof(void*));
 		tmp[0] = chain;
 		tmp[1] = h;
+		tmp[2] = (void*)(intptr_t)clean;
 		QueueUserAPC((PAPCFUNC)ILibChain_RemoveWaitHandle_APC, ILibChain_GetMicrostackThreadHandle(chain), (ULONG_PTR)tmp);
 	}
 }

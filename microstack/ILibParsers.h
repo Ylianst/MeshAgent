@@ -1113,7 +1113,9 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibChain_WaitHandle_UpdateMetadata(void *chain, HANDLE h, char *metadata);
 	void ILibChain_AddWaitHandleEx(void *chain, HANDLE h, int msTIMEOUT, ILibChain_WaitHandleHandler handler, void *user, char *metadata);
 	#define ILibChain_AddWaitHandle(chain, h, msTIMEOUT, handler, user) ILibChain_AddWaitHandleEx(chain, h, msTIMEOUT, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
-	void ILibChain_RemoveWaitHandle(void *chain, HANDLE h);
+	#define ILibChain_RemoveWaitHandle(chain, h) ILibChain_RemoveWaitHandleEx(chain, h, 0)
+	void ILibChain_RemoveWaitHandleEx(void *chain, HANDLE h, int clean);
+
 	void ILibChain_ReadEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_ReadEx_Handler handler, void *user, char *metadata);
 	#define ILibChain_ReadEx(chain, h, overlapped, buffer, bufferLen, handler, user) ILibChain_ReadEx2(chain, h, overlapped, buffer, bufferLen, handler, user, ILibChain_MetaData(__FILE__, __LINE__))
 	ILibTransport_DoneState ILibChain_WriteEx2(void *chain, HANDLE h, OVERLAPPED *p, char *buffer, DWORD bufferLen, ILibChain_WriteEx_Handler handler, void *user, char *metadata);
