@@ -516,6 +516,9 @@ void ILibWrapper_WebRTC_Connection_DestroyConnectionEx(ILibSparseArray sender, i
 	UNREFERENCED_PARAMETER(index);
 	UNREFERENCED_PARAMETER(sender);
 
+	ILibMemory_Free(dc->Header.transport.ChainLink.MetaData);
+	dc->Header.transport.ChainLink.MetaData = NULL;
+
 	if(dc->OnClosed!=NULL) {dc->OnClosed(dc);}
 	free(dc->channelName);
 	free(dc);
