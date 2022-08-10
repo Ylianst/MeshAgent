@@ -2324,6 +2324,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_StartDispatcher(duk_context 
 }
 void __stdcall ILibDuktape_GenericMarshal_GlobalCallback_EndDispatcher_APC(ULONG_PTR u)
 {
+	if (!ILibMemory_CanaryOK((void*)u)) { return; }
 	((Duktape_GlobalGeneric_Data*)u)->dispatch->finished = 1;
 	CloseHandle(((Duktape_GlobalGeneric_Data*)u)->dispatch->WorkerThreadHandle);
 }
@@ -2339,7 +2340,7 @@ duk_ret_t ILibDuktape_GenericMarshal_GlobalCallback_EndDispatcher(duk_context *c
 	data = (Duktape_GlobalGeneric_Data*)duk_get_pointer(ctx, -1);
 
 	if (data == NULL) { return(ILibDuktape_Error(ctx, "Internal Error")); }
-	if (data->dispatch == NULL || data->dispatch->WorkerThreadHandle == NULL) { return(ILibDuktape_Error(ctx, "No Dispatcher")); }
+	if (data->dispatch == NULL || !ILibMemory_CanaryOK(data->dispatch) || data->dispatch->WorkerThreadHandle == NULL) { return(ILibDuktape_Error(ctx, "No Dispatcher")); }
 	data->dispatch->retValue = Duktape_GetPointerProperty(ctx, 0, "_ptr");
 	QueueUserAPC((PAPCFUNC)ILibDuktape_GenericMarshal_GlobalCallback_EndDispatcher_APC, data->dispatch->WorkerThreadHandle, (ULONG_PTR)data);
 	

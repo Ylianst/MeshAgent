@@ -24,6 +24,11 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "meshcore/meshdefines.h"
 
+#if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#endif
+
 extern ILibQueue gPendingPackets;
 extern int gRemoteMouseRenderDefault;
 extern int gRemoteMouseMoved;
@@ -199,7 +204,7 @@ void CALLBACK KVMWinEventProc(
 	char *buffer;
 	CURSORINFO info = { 0 };
 
-	if (hwnd == NULL && idObject == OBJID_CURSOR)
+	if (hwnd == NULL && idObject == OBJID_CURSOR && CUR_APCTHREAD != NULL)
 	{
 		switch (event)
 		{
@@ -244,7 +249,7 @@ void KVM_StopMessagePump()
 	if (CUR_HWND != NULL) 
 	{
 		PostMessageA(CUR_HWND, WM_QUIT, 0, 0);
-		if (WaitForSingleObject(CUR_WORKTHREAD, 5000) == 0) { CloseHandle(CUR_WORKTHREAD); CUR_WORKTHREAD = NULL; }
+		if (WaitForSingleObjectEx(CUR_WORKTHREAD, 5000, TRUE) == 0) { CloseHandle(CUR_WORKTHREAD); CUR_WORKTHREAD = NULL; }
 		if (CUR_APCTHREAD != NULL) { CloseHandle(CUR_APCTHREAD); CUR_APCTHREAD = NULL; }
 	}
 }
