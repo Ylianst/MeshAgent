@@ -327,6 +327,8 @@ void ILibAsyncServerSocket_PostSelect(void* socketModule, int slct, fd_set *read
 void ILibAsyncServerSocket_Destroy(void *socketModule)
 {
 	struct ILibAsyncServerSocketModule *module =(struct ILibAsyncServerSocketModule*)socketModule;
+	ILibMemory_Free(module->ChainLink.MetaData);
+	module->ChainLink.MetaData = NULL;
 
 	free(module->AsyncSockets);
 	module->AsyncSockets = NULL;
@@ -637,7 +639,6 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 
 	// Instantiate a new AsyncServer module
 	RetVal = (struct ILibAsyncServerSocketModule*)ILibChain_Link_Allocate(sizeof(struct ILibAsyncServerSocketModule), ServerUserMappedMemorySize);
-	RetVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibAsyncServerSocket");
 	RetVal->ChainLink.PreSelectHandler = &ILibAsyncServerSocket_PreSelect;
 	RetVal->ChainLink.PostSelectHandler = &ILibAsyncServerSocket_PostSelect;
 	RetVal->ChainLink.DestroyHandler = &ILibAsyncServerSocket_Destroy;
@@ -738,6 +739,7 @@ ILibAsyncServerSocket_ServerModule ILibCreateAsyncServerSocketModuleWithMemoryEx
 	#pragma warning( push, 3 ) // warning C4127: conditional expression is constant
 	#endif
 
+	RetVal->ChainLink.MetaData = ILibMemory_SmartAllocate_FromString("ILibAsyncServerSocket");
 	ILibAddToChain(Chain, RetVal);
 	return RetVal;
 }
