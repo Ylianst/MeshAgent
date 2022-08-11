@@ -403,7 +403,8 @@ KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
 				break;
 		}
 	}
-	
+		
+	x11_exports->XFree(cursor_image);
 	return(ret);
 }
 void kvm_send_resolution()
@@ -1252,6 +1253,7 @@ void* kvm_server_mainloop(void* parm)
 						written = write(slave2master[1], tmpbuffer, 5);
 						fsync(slave2master[1]);
 					}
+					x11_exports->XFree(cimage);
 				}
 				else
 				{
@@ -1327,6 +1329,7 @@ void* kvm_server_mainloop(void* parm)
 		}
 	}
 
+	if (desktop != NULL) { free(desktop); desktop = NULL; }
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
