@@ -191,6 +191,7 @@ function linux_messageBox()
                 child.stdin.write("whereis zenity | awk '{ print $2 }'\nexit\n");
                 child.waitExit();
                 var location = child.stdout.str.trim();
+                if (location.split('/man/').length > 1) { location = ''; }
                 if (location == '' && require('fs').existsSync('/usr/local/bin/zenity')) { location = '/usr/local/bin/zenity'; }
                 if (location == '') { return (null); }
 
