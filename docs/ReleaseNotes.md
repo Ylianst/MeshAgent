@@ -45,4 +45,20 @@
 - Updated to OpenSSL/1.1.1q
 - Fixed bug with ScriptContainer JSON dispatcher, that caused clipboard to not work correctly if xclip isn't installed
 - Added ability to set default pinning behavior for Privacy Bar on Windows
+- Fixed potential 100% CPU utilization by WebRTC, caused iterating on buffer length without 4 byte aligning it
+- Fixed Windows Handle Leak, by win-registry not closing a registry key in one of the code paths
+- Fixed Windows Handle Leaks, by win-dispatcher caused by Read/Write overlapped event handles not getting closed
+- Fixed Windows Handle Leak, by windows IPC socket overlapped handle not getting closed if close was called before overlapped IO returned
+- Added ability for process-manager to search processes on Windows
+- Added ability to set/query autohide of system taskbar on Windows
+- Fixed Memory leak in ILibLifeTime, where DeleteList was not destroyed
+- Fixed Memory Leak of Certificate Chain, by MeshAgent.ControlChannelCertificate property
+- Fixed Memory Leak of Metadata string by Windows IPC Socket
+- Fixed Memory Leak of Read/Write overlapped data structure by Windows IPC Socket, in certain edge cases
+- Fixed Memory Leak in Windows KVM, caused by Windows APC not getting dispatched becuase the event loop thread was not waiting for shutdown in an alertable state
+- Fixed Edge case crash in Windows KVM when dispatcher is shut down
+- Fixed Memory Leak in WebRTC DataChannel, of metadata string
+- Fixed Memory leak of TCP Server Socket metadata that occurs when an error occurs
+- Fixed Memory Leak of image data by Linux/BSD KVM
+- Fixed user-consent issue on BSD with Zenity
 
