@@ -82,3 +82,14 @@ Using the meshcmd that we built previously, we can manually run some AMT tests o
 
 1. `meshcmd AmtInfo`. This will test mei functionality, and let you know the provisioning state of AMT.
 2. `meshcmd AmtEventLog`. If you run this on an already provisioned AMT, it will test the WSMAN functionality to retrieve the AMT event log.
+
+### Manual Leak Tests
+
+The leaktest.js can be run with the agent, using Visual Studio or Valgrind, to aid in testing for memory leaks. For windows, simply load the solution in Visual Studio, and run the MeshService project in the debugger, with the following cmdline options:
+```bash
+..\test\leaktest.js
+```
+For Linux, run Valgrind with the agent, in the following way:
+```bash
+valgrind ./meshagent_x86-64 test/leaktest.js_
+```
