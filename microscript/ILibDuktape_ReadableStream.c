@@ -602,9 +602,14 @@ duk_ret_t ILibDuktape_readableStream_resume(duk_context *ctx)
 void ILibDuktape_ReadableStream_pipe_ResumeLater(duk_context *ctx, void **args, int argsLen)
 {
 	ILibDuktape_readableStream *rs = (ILibDuktape_readableStream*)args[0];
+
 	rs->resumeImmediate = NULL;
 	if (ILibDuktape_readableStream_resume_flush(rs) == 0 && rs->ResumeHandler != NULL) { rs->paused = 0; rs->ResumeHandler(rs, rs->user); }
 	if (rs->PipeHookHandler != NULL) { rs->PipeHookHandler(rs, args[1], rs->user); }
+
+	duk_push_this(ctx);						// [immediate]
+	duk_del_prop_string(ctx, -1, "self");
+	duk_pop(ctx);							// ...
 }
 void ILibDuktape_readableStream_pipe_later(duk_context *ctx, void **args, int argsLen)
 {
@@ -761,6 +766,12 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 		if (argsLen > 1 && args[1] != NULL) { duk_push_heapptr(ctx, args[1]); duk_put_prop_string(ctx, -2, "\xFF_w"); }
 		duk_pop(ctx);								// ...
 		ILibSpinLock_UnLock(&(data->pipeLock));
+
+		// Delete reference, before returning
+		duk_push_this(ctx);
+		duk_del_prop_string(ctx, -1, "\xFF_Self");
+		duk_pop(ctx);
+
 		return;
 	}
 	else
@@ -847,6 +858,11 @@ void ILibDuktape_readableStream_unpipe_later(duk_context *ctx, void ** args, int
 	}
 	data->unpipeInProgress = 0;
 	ILibSpinLock_UnLock(&(data->pipeLock));
+
+	// Delete Reference before returning
+	duk_push_this(ctx);
+	duk_del_prop_string(ctx, -1, "\xFF_Self");
+	duk_pop(ctx);
 }
 duk_ret_t ILibDuktape_readableStream_unpipe(duk_context *ctx)
 {

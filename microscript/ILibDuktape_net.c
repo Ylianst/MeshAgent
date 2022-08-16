@@ -333,6 +333,7 @@ void ILibDuktape_net_Socket_ipc_dataHookCallbackCont(duk_context *ctx, void ** a
 {
 	ILibDuktape_EventEmitter *emitter = (ILibDuktape_EventEmitter*)args[0];
 
+	if (!ILibMemory_CanaryOK(emitter)) { return; }
 	duk_push_heapptr(emitter->ctx, emitter->object);		// [stream]
 	duk_get_prop_string(emitter->ctx, -1, "resume");		// [stream][resume]
 	duk_dup(emitter->ctx, -2);								// [stream][resume][this]
