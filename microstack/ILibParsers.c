@@ -7817,7 +7817,7 @@ void ILibLifeTime_Check(void *LifeTimeMonitorObject, fd_set *readset, fd_set *wr
 	{
 		if ((Temp = (struct LifeTimeMonitorData*)ILibLinkedList_GetDataFromNode(node)) == NULL || ILibMemory_CanaryOK(Temp)==0)
 		{
-			node = ILibLinkedList_GetNextNode(node);
+			node = ILibLinkedList_Remove(node);
 			continue;
 		}
 		if (Temp->ExpirationTick == 0 || Temp->ExpirationTick < CurrentTick)
