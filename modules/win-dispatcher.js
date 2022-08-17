@@ -14,6 +14,69 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function empty_func()
+{
+    var p = this.parent;
+    p._ipc.parent = null;
+    p._ipc2.parent = null;
+    p._client._parent = null;
+    p._client = null;
+    p._control._parent = null;
+    p._control = null;
+    p = null;
+}
+function empty_func2()
+{
+}
+
+function ipc_invoke(method, args)
+{
+    var d, h = Buffer.alloc(4);
+    d = Buffer.from(JSON.stringify({ command: 'invoke', value: { method: method, args: args } }));
+    h.writeUInt32LE(d.length + 4);
+    this._control.write(h);
+    this._control.write(d);
+}
+
+function ipc1_finalized()
+{
+    //console.log('IPC1 Finalized');
+}
+function ipc2_finalized()
+{
+    //console.log('IPC2 Finalized');
+}
+function ipc2_connection(s)
+{
+    this.parent._control = s;
+    this.parent._control._parent = this;
+    this.close();
+    this.parent.invoke = ipc_invoke;
+    s.on('end', empty_func2); // DO NOT DELETE this line
+    s.on('~', ipc2_finalized);
+}
+function ipc_connection(s)
+{
+    this.parent._client = s;
+    this.parent._client._parent = this;
+    this.close();
+    var d, h = Buffer.alloc(4);
+    s.descriptorMetadata = 'win-dispatcher, ' + this.parent.options.launch.module + '.' + this.parent.options.launch.method + '()';
+
+    for (var m in this.parent.options.modules)
+    {
+        d = Buffer.from(JSON.stringify({ command: 'addModule', value: { name: this.parent.options.modules[m].name, js: this.parent.options.modules[m].script } }));
+        h.writeUInt32LE(d.length + 4);
+        s.write(h);
+        s.write(d);
+    }
+    d = Buffer.from(JSON.stringify({ command: 'launch', value: { split: this.parent.options.launch.split ? true : false, module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
+    h.writeUInt32LE(d.length + 4);
+    s.write(h);
+    s.write(d);
+    s.on('~', ipc1_finalized);
+    this.parent.emit('connection', s);
+}
 
 function dispatch(options)
 {
@@ -25,8 +88,8 @@ function dispatch(options)
 
     ret._ipc = require('net').createServer(); ret._ipc.parent = ret;
     ret._ipc2 = require('net').createServer(); ret._ipc2.parent = ret;
-    ret._ipc.on('close', function () { });
-    ret._ipc2.on('close', function () { });
+    ret._ipc.on('close', empty_func);
+    ret._ipc2.on('close', empty_func);
 
     while (true)
     {
@@ -44,42 +107,8 @@ function dispatch(options)
         }
     }
     var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
-    ret._ipc2.once('connection', function onConnect(s)
-    {
-        this.parent._control = s;
-        this.parent._control._parent = this;
-        this.close();
-        this.parent.invoke = function (method, args)
-        {
-            var d, h = Buffer.alloc(4);
-            d = Buffer.from(JSON.stringify({ command: 'invoke', value: { method: method, args: args } }));
-            h.writeUInt32LE(d.length + 4);
-            this._control.write(h);
-            this._control.write(d);
-        };
-        s.on('end', function () { }); // DO NOT DELETE this line
-    });
-    ret._ipc.once('connection', function onConnect(s)
-    {
-        this.parent._client = s;
-        this.parent._client._parent = this;
-        this.close();
-        var d, h = Buffer.alloc(4);
-        s.descriptorMetadata = 'win-dispatcher, ' + this.parent.options.launch.module + '.' + this.parent.options.launch.method + '()';
-
-        for (var m in this.parent.options.modules)
-        {
-            d = Buffer.from(JSON.stringify({ command: 'addModule', value: { name: this.parent.options.modules[m].name, js: this.parent.options.modules[m].script } }));
-            h.writeUInt32LE(d.length + 4);
-            s.write(h);
-            s.write(d);
-        }
-        d = Buffer.from(JSON.stringify({ command: 'launch', value: { split: this.parent.options.launch.split?true:false, module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
-        h.writeUInt32LE(d.length + 4);
-        s.write(h);
-        s.write(d);
-        this.parent.emit('connection', s);
-    });
+    ret._ipc2.once('connection', ipc2_connection);
+    ret._ipc.once('connection', ipc_connection);
 
     try
     {
