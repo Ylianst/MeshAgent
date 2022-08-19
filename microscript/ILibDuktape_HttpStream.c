@@ -4499,7 +4499,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 		case WEBSOCKET_OPCODE_CLOSE:
 			state->closed = 1;
 			ILibDuktape_DuplexStream_WriteEnd(state->decodedStream);
-			if (ILibIsRunningOnChainThread(state->chain) != 0 && state->encodedStream->writableStream->pipedReadable != NULL)
+			if (ILibMemory_CanaryOK(state) && ILibIsRunningOnChainThread(state->chain) != 0 && state->encodedStream->writableStream->pipedReadable != NULL)
 			{
 				duk_context *ctx = state->ctx;
 				duk_push_heapptr(state->ctx, state->encodedStream->writableStream->pipedReadable);	// [stream]
@@ -4657,11 +4657,14 @@ void ILibDuktape_httpStream_webSocket_DecodedEndSink(ILibDuktape_DuplexStream *s
 	//
 	// We need to call 'end' on the encoded stream, so that it can disconnect
 	//
-	duk_push_heapptr(state->ctx, state->ObjectPtr);					// [websocket]
-	duk_get_prop_string(state->ctx, -1, "encoded");					// [websocket][encoded]
-	duk_prepare_method_call(state->ctx, -1, "end");					// [websocket][encoded][end][this]
-	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][encoded]
-	duk_pop_2(state->ctx);											// ...
+	if (ILibMemory_CanaryOK(state) && ILibMemory_CanaryOK(state->ctx))
+	{
+		duk_push_heapptr(state->ctx, state->ObjectPtr);					// [websocket]
+		duk_get_prop_string(state->ctx, -1, "encoded");					// [websocket][encoded]
+		duk_prepare_method_call(state->ctx, -1, "end");					// [websocket][encoded][end][this]
+		duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][encoded]
+		duk_pop_2(state->ctx);											// ...
+	}
 }
 void ILibDuktape_httpStream_webSocket_DecodedPauseSink_Chain(void *chain, void *user)
 {
