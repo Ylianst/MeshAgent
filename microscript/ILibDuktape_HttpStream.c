@@ -4548,7 +4548,7 @@ ILibTransport_DoneState ILibDuktape_httpStream_webSocket_EncodedWriteSink(ILibDu
 void ILibDuktape_httpStream_webSocket_EncodedEndSink(ILibDuktape_DuplexStream *stream, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
-	if (duk_ctx_shutting_down(state->ctx)) { return; }
+	if (!ILibMemory_CanaryOK(state) || duk_ctx_shutting_down(state->ctx)) { return; }
 
 	duk_push_heapptr(state->ctx, state->ObjectPtr);					// [websocket]
 	duk_get_prop_string(state->ctx, -1, "decoded");					// [websocket][decoded]
@@ -4653,6 +4653,15 @@ void ILibDuktape_httpStream_webSocket_DecodedEndSink(ILibDuktape_DuplexStream *s
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
 	ILibDuktape_httpStream_webSocket_WriteWebSocketPacket(state, WEBSOCKET_OPCODE_CLOSE, NULL, 0, ILibWebClient_WebSocket_FragmentFlag_Complete);
+
+	//
+	// We need to call 'end' on the encoded stream, so that it can disconnect
+	//
+	duk_push_heapptr(state->ctx, state->ObjectPtr);					// [websocket]
+	duk_get_prop_string(state->ctx, -1, "encoded");					// [websocket][encoded]
+	duk_prepare_method_call(state->ctx, -1, "end");					// [websocket][encoded][end][this]
+	duk_pcall_method(state->ctx, 0); duk_pop(state->ctx);			// [websocket][encoded]
+	duk_pop_2(state->ctx);											// ...
 }
 void ILibDuktape_httpStream_webSocket_DecodedPauseSink_Chain(void *chain, void *user)
 {
@@ -4678,7 +4687,7 @@ void ILibDuktape_httpStream_webSocket_DecodedPauseSink_Chain(void *chain, void *
 void ILibDuktape_httpStream_webSocket_DecodedPauseSink(ILibDuktape_DuplexStream *sender, void *user)
 {
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
-	if (state == NULL || state->encodedStream == NULL || state->encodedStream->writableStream == NULL) { return; } // ERROR
+	if (state == NULL || !ILibMemory_CanaryOK(state) || state->encodedStream == NULL || state->encodedStream->writableStream == NULL) { return; } // ERROR
 
 	if (state->encodedStream->writableStream->pipedReadable_native != NULL && state->encodedStream->writableStream->pipedReadable_native->PauseHandler != NULL)
 	{

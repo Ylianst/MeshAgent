@@ -16,7 +16,7 @@ limitations under the License.
 */
 var duplex = require('stream').Duplex;
 var promise = require('promise');
-var http = require('http');
+var http = require('https');
 var processes = [];
 
 //setModulePath('../modules');
@@ -33,7 +33,28 @@ var sample = new duplex(
         {
         }                   
     });
-
+var sample2 = new duplex(
+    {
+        'write': function (chunk, flush)
+        {
+            console.log(chunk.toString());
+            flush();
+            return (true);
+        },
+        'final': function (flush)
+        {
+        }
+    });
+function sample_final()
+{
+    console.log('Sample was finalized');
+}
+function sample2_final()
+{
+    console.log('Sample2 was finalized');
+}
+sample.once('~', sample_final);
+sample2.once('~', sample2_final);
 
 if (process.platform == 'win32')
 {
@@ -83,6 +104,9 @@ process.stdin.on('data', function (c)
     if (c.toString() == null) { return; }
     switch(c.toString().trim().toUpperCase())
     {
+        case 'PIPE':
+            console.displayStreamPipeMessages = 1;
+            break;
         case 'FINAL':
             console.displayFinalizerMessages = 1;
             break;
@@ -131,7 +155,9 @@ process.stdin.on('data', function (c)
             console.log('Web Socket Server on port: ' + global.wsserver.address().port);
             break;
         case 'WSS4433':
-            global.wsserver = require('http').createServer();
+            console.log('Generating Cert...');
+            var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
+            global.wsserver = require('https').createServer({ pfx: cert, passphrase: 'test' });
             global.wsserver.on('upgrade', wss_OnUpgrade);
             global.wsserver.listen({ port: 4433 });
             console.log('Web Socket Server on port: ' + global.wsserver.address().port);
@@ -141,11 +167,23 @@ process.stdin.on('data', function (c)
             break;
         case 'TUNEND':
             global.tun.end();
+            //_debug();
             global.tun.unpipe();
+            if (global.ipc) { global.ipc.unpipe(); }
             global.tun = null;
+            global.ipc = null;
+            //sample.unpipe();
             break;
         case 'GC':
             _debugGC();
+            break;
+        case 'SAMPLE':
+            sample.unpipe();
+            sample = null;
+            break;
+        case 'SAMPLEPIPE':
+            sample.pipe(sample2);
+            console.log('Sample Piped to Sample2');
             break;
     }
 });
@@ -156,6 +194,7 @@ function wss_OnUpgrade(msg, sck, head)
     {
         case '/tunnel':
             this.cws = sck.upgradeWebSocket();
+            this.cws.on('end', function () { console.log('Client WebSocket CLOSED'); });
             console.log('Accepted Client WebSocket');
             break;
     }
@@ -175,16 +214,19 @@ function req_ws_upgrade(response, s, head)
 
     global.tun = s;
 
-    _debug();
-    s.pipe(sample);
-    _debug();
-    //global.req = null;
+    ////_debug();
+    //sample.pipe(s);
+    //s.pipe(sample);
+    ////_debug();
+    ////global.req = null;
 }
 function webSocketClientTest(port)
 {
     console.log('Initiating WebSocket');
 
-    var woptions = http.parseUri('ws://127.0.0.1:' + port + '/tunnel');
+    var woptions = http.parseUri('wss://127.0.0.1:' + port + '/tunnel');
+    woptions.rejectUnauthorized = 0;
+
     var req = http.request(woptions);
     req.on('upgrade', req_ws_upgrade);
     req.once('~', req_finalized);
@@ -277,6 +319,14 @@ function startClient()
                 _debug();
             });
             this.on('data', function (c) { });
+
+            if(global.tun!=null)
+            {
+                global.ipc = this;
+                console.log('Piping Together Stuff');
+                global.tun.pipe(this);
+                this.pipe(global.tun);
+            }
         });
         ret.kill = function ()
         {
@@ -320,6 +370,7 @@ function server_connection (c)
     c.on('data', _data);
     c.on('close', _close);
     c.on('~', _f);
+    global.serverc = c;
 }
 
 function server_closed()
