@@ -4849,7 +4849,7 @@ void ILibDuktape_httpStream_webSocketStream_descriptorMetadataEx(duk_context *ct
 	ILibDuktape_WebSocket_State *ws = (ILibDuktape_WebSocket_State*)args[0];
 	char *str = (char*)args[1];
 
-	if(ws->encodedStream->writableStream->pipedReadable != NULL)
+	if(ILibMemory_CanaryOK(ws) && ws->encodedStream->writableStream->pipedReadable != NULL)
 	{
 		duk_idx_t top = duk_get_top(ctx);
 		duk_push_heapptr(ctx, ws->encodedStream->writableStream->pipedReadable);	// [WebSocket_Decoded][WebSocket][Readable]
