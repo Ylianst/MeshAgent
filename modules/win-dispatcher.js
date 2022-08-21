@@ -129,11 +129,15 @@ function dispatch(options)
         }
         else
         {
-            var tokens = options.user.split('\\');
+            var u = options.user;
+            if (u[0] == '"') { u = u.substring(1, u.length - 1); }
+            var tokens = u.split('\\');
             if(tokens.length!=2) { throw('invalid user format');}
             user = tokens[1];
             domain = tokens[0];
         }
+
+        console.info1('user- ' + user, 'domain- ' + domain);
 
         var task = { name: 'MeshUserTask', user: user, domain: domain, execPath: process.execPath, arguments: ['-b64exec ' + str] };
         require('win-tasks').addTask(task);
@@ -146,6 +150,8 @@ function dispatch(options)
         console.info1(xx);
     }
 
+    console.info1('Using SCHTASKS...');
+
     var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: '"' + options.user + '"' } };
     for (var c1e in process.env)
     {
@@ -153,8 +159,8 @@ function dispatch(options)
     }
 
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
-    child.stderr.on('data', function (c) { });
-    child.stdout.on('data', function (c) { });
+    child.stderr.on('data', empty_func2);
+    child.stdout.on('data', empty_func2);
     child.stdin.write('SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ');
     if (options.user)
     {
@@ -184,7 +190,6 @@ function dispatch(options)
     child.stdin.write('SCHTASKS /DELETE /F /TN MeshUserTask\r\nexit\r\n');
 
     child.waitExit();
-
     return (ret);
 }
 
