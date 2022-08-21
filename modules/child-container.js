@@ -40,9 +40,17 @@ function childContainer()
             })
             .addMethod('exit', function (code)
             {
-                this.send({ command: 'exit', value: code });
+                try
+                {
+                    this.send({ command: 'exit', value: code });
+                }
+                catch(z)
+                {
+                    // IPC is not connected, so we need to shutdown the IPC Server, to prevent the child from hanging
+                    this._ipc.close();
+                }
             })
-            .addMethod('send', function (obj)
+            .addMethod('send', function child_container_send2(obj)
             {
                 if (!this._client) { throw ('Not Connected'); }
                 var d, h = Buffer.alloc(4);
@@ -130,7 +138,27 @@ function childContainer()
         // Spawn the child
         if(options.user && process.platform == 'win32')
         {
-            // Use Task Scheduler
+            try
+            {
+                // First try to use Win-Task
+                var u = options.user;
+                if (u[0] == '"') { u = u.substring(1, u.length - 1); }
+                var tokens = u.split('\\');
+                if (tokens.length != 2) { throw ('invalid user format'); }
+                user = tokens[1];
+                domain = tokens[0];
+
+                var task = { name: 'MeshUserTask', user: user, domain: domain, execPath: process.execPath, arguments: ['-b64exec ' + script] };
+                require('win-tasks').addTask(task);
+                require('win-tasks').getTask({ name: 'MeshUserTask' }).run();
+                require('win-tasks').deleteTask('MeshUserTask');
+                return (ret);
+            }
+            catch(z)
+            {
+            }
+
+            // Use Task Scheduler, as failover
             var parms = '/C SCHTASKS /CREATE /F /TN MeshUserTask /SC ONCE /ST 00:00 ';
             parms += ('/RU ' + options.user + ' ');
             parms += ('/TR "\\"' + process.execPath + '\\" -b64exec ' + script + '"');
@@ -198,7 +226,7 @@ function childContainer()
             {
                 this.send({ command: 'message', value: msg });
             })
-            .addMethod('send', function (data)
+            .addMethod('send', function child_container_send1(data)
             {
                 if (!this._ipcClient) { throw ('Not Connected'); }
                 var d, h = Buffer.alloc(4);
@@ -209,6 +237,7 @@ function childContainer()
                 this._ipcClient.write(d);
             });
         Object.defineProperty(this, 'child', { value: true });
+        this._ipcClient.on('error', function () { console.log('ERROR/EXITING'); process._exit(); }); // If the child can't connect to the parent, we must exit, because otherwise we will just hang around forever.
         this._ipcClient.on('connect', function ()
         {
             this.on('close', function () { process._exit(0); });

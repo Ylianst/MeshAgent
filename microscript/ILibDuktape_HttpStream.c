@@ -4717,6 +4717,8 @@ void ILibDuktape_httpStream_webSocket_DecodedResumeSink_Chain(void *chain, void 
 }
 void ILibDuktape_httpStream_webSocket_DecodedResumeSink(ILibDuktape_DuplexStream *sender, void *user)
 {
+	if (!ILibMemory_CanaryOK(user)) { return; }
+
 	ILibDuktape_WebSocket_State *state = (ILibDuktape_WebSocket_State*)user;
 	if (state->encodedStream->writableStream->pipedReadable_native != NULL && state->encodedStream->writableStream->pipedReadable_native->ResumeHandler != NULL)
 	{
