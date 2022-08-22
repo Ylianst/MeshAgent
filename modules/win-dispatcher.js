@@ -17,13 +17,16 @@ limitations under the License.
 function empty_func()
 {
     var p = this.parent;
-    p._ipc.parent = null;
-    p._ipc2.parent = null;
-    p._client._parent = null;
-    p._client = null;
-    p._control._parent = null;
-    p._control = null;
-    p = null;
+    if (p != null)
+    {
+        if (p._ipc) { p._ipc.parent = null };
+        if (p._ipc2) { p._ipc2.parent = null; }
+        if (p._client) { p._client._parent = null; }
+        p._client = null;
+        if (p._control) { p._control._parent = null; }
+        p._control = null;
+        p = null;
+    }
 }
 function empty_func2()
 {
@@ -45,6 +48,14 @@ function ipc1_finalized()
 function ipc2_finalized()
 {
     //console.log('IPC2 Finalized');
+}
+function ipc1_server_finalized()
+{
+    //console.log('IPC1 Server Finalized');
+}
+function ipc2_server_finalized()
+{
+    //console.log('IPC2 Server Finalized');
 }
 function ipc2_connection(s)
 {
@@ -78,6 +89,14 @@ function ipc_connection(s)
     this.parent.emit('connection', s);
 }
 
+function dispatcher_shutdown()
+{
+    this._ipc.close();
+    this._ipc2.close();
+    this._ipc = null;
+    this._ipc2 = null;
+}
+
 function dispatch(options)
 {
     if (!options || !options.modules || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
@@ -90,6 +109,8 @@ function dispatch(options)
     ret._ipc2 = require('net').createServer(); ret._ipc2.parent = ret;
     ret._ipc.on('close', empty_func);
     ret._ipc2.on('close', empty_func);
+    ret._ipc.once('~', ipc1_server_finalized);
+    ret._ipc2.once('~', ipc2_server_finalized);
 
     while (true)
     {
@@ -109,6 +130,7 @@ function dispatch(options)
     var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
     ret._ipc2.once('connection', ipc2_connection);
     ret._ipc.once('connection', ipc_connection);
+    ret.close = dispatcher_shutdown;
 
     try
     {
