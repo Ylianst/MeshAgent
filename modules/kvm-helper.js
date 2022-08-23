@@ -11,7 +11,7 @@ function getUsers()
         if (res[i].State == 'Active' || res[i].State == 'Connected') { uu[process.platform == 'win32' ? res[i].SessionId : res[i].uid] = res[i]; }
     }
 
-    if (process.platform != 'win32')
+    if (process.platform == 'linux')
     {
         var spawnable = this.loginUids();
         for (i in spawnable)
