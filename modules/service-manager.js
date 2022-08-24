@@ -2432,6 +2432,7 @@ function serviceManager()
                     {
                         reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'UninstallString', options.servicePath + ' -b64exec ' + script);
                     }
+                    reg.WriteKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\' + options.name, 'DisplayVersion', process.versions.commitDate.toString());
                 }
                 catch (xx)
                 {
