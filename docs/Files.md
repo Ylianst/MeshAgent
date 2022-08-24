@@ -9,9 +9,9 @@ as the main event loop. It is inherently single threaded using Asynchronous I/O 
 
 - **[ILibAsyncSocket](files/ILibAsyncSocket.md)**
 Provides the underyling TCP socket functionality
-- **[ILibAsyncSocket](files/ILibAsyncUDPSocket.md)**
+- **[ILibAsyncUDPSocket](files/ILibAsyncUDPSocket.md)**
 Provides the underlying UDP socket functionality
-- **ILibAsyncServerSocket**
+- **[ILibAsyncServerSocket](files/ILibAsyncServerSocket.md)**
 Provides the underlying TCP Server functionality
 - ILibCrypto
 - **ILibIPAddressMonitor**
