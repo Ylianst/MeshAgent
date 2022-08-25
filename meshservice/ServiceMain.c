@@ -638,7 +638,7 @@ int wmain(int argc, char* wargv[])
 	if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
 	{
 		// Set "resetnodeid" in registry
-		char script[] = "require('_agentNodeId').resetNodeId();process.exit();";
+		char script[] = "try{require('_agentNodeId').resetNodeId();}catch(z){console.log('This command requires admin.');}process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
