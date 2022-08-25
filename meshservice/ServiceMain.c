@@ -894,7 +894,8 @@ int wmain(int argc, char* wargv[])
 					printf("  -signcheck        Perform self - check.\r\n");
 					printf("  -install          Install the service from this location.\r\n");
 					printf("  -uninstall        Remove the service from this location.\r\n");
-					printf("  -nodeid			Return the current agent identifier.\r\n");
+					printf("  -nodeid           Return the current agent identifier.\r\n");
+					printf("  -info             Return agent version information.\r\n");
 					printf("  -resetnodeid      Reset the NodeID next time the service is started.\r\n");
 					printf("  -fulluninstall    Stop agent and clean up the program files location.\r\n");
 					printf("  -fullinstall      Copy agent into program files, install and launch.\r\n");
