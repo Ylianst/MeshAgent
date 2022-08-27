@@ -13,10 +13,11 @@ Provides the underyling TCP socket functionality
 Provides the underlying UDP socket functionality
 - **[ILibAsyncServerSocket](files/ILibAsyncServerSocket.md)**
 Provides the underlying TCP Server functionality
-- ILibCrypto
-- **ILibIPAddressMonitor**
+- **[ILibCrypto](files/ILibCrypto.md)**
+Provides platform agnostic cryptographic functions for the Mesh Agent
+- **[ILibIPAddressMonitor](files/ILibIPAddressMonitor.md)**
 Provides events for Network state changes
-- **ILibMulticastSocket** 
+- **[ILibMulticastSocket](files/ILibMulticastSocket.md)**
 Provides UDP Multicast/Broadcast functionality
 - **[ILibParsers](files/ILibParsers.md)**
 Provides the core event loop implementation, as well as some helper methods
