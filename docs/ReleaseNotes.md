@@ -66,6 +66,7 @@
 
 **Known Issues**
 - Quickly/Repeatedly opening tunnels can accumulate descriptors faster than they are released
-- Quickly/Repeatedly calling 'setclip' on Windows could cause the service to crash/restart if repeated quickly enough
+- Quickly/Repeatedly calling a dispatcher on windows, can cause the service to crash/restart if an overlapping dispatcher is created without cleaning up the existing instance.
 - Garbage Collection (Finalization) of some objects can be delayed when there is a circular loop in the referencing. These objects only get finalized with a mark-and-sweep. The biggest culprit is anonymous functions, where the runtime automatically will reference locally scoped objects by the anonymous function object
+- Not all the code-paths in meshcore.js has been analyzed for GC() issues, so it is possible that some agent functions may appear to leak memory
 
