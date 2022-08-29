@@ -61,4 +61,10 @@
 - Fixed Memory leak of TCP Server Socket metadata that occurs when an error occurs
 - Fixed Memory Leak of image data by Linux/BSD KVM
 - Fixed user-consent issue on BSD with Zenity
+- Updated Windows Installer to populate DisplayVersion in registry, with Commit Date
+- Added close() method to win-dispatcher to try to mitigate an edge case crash
+
+**Known Issues**
+- Quickly/Repeatedly opening tunnels can accumulate descriptors faster than they are released
+- Quickly/Repeatedly calling 'setclip' on Windows could cause the service to crash/restart if repeated quickly enough
 
