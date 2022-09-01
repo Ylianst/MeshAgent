@@ -339,6 +339,10 @@ limitations under the License.
                     {
                         p.push('--installPath="' + process.argv[i].split('=').pop() + '"');
                     }
+                    else if(process.argv[i].startsWith('--'))
+                    {
+                        p.push(process.argv[i]);
+                    }
                 }
                 _install(p);
                 process.exit();
