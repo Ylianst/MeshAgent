@@ -23,6 +23,8 @@ var updateSource = null;
 var promise = require('promise');
 
 if (process.platform == 'win32') { global.kernel32 = require('_GenericMarshal').CreateNativeProxy('kernel32.dll'); global.kernel32.CreateMethod('GetCurrentProcess'); global.kernel32.CreateMethod('GetProcessHandleCount'); }
+var localOnly = false;
+
 
 function getHandleCount()
 {
@@ -162,6 +164,7 @@ if (process.argv.getParameter('help') != null)
     console.log('   --Digest                If specified, individually runs the HTTP Digest tests.');
     console.log('   --FileTransfer          If specified, individually runs the FileTransfer Unit Test');
     console.log('   --KVM                   If specified, individually runs the KVM tests');
+    console.log('   --LocalTests            If specified, runs the tests that are able to run locally');
     console.log('   --LocalDebug            Specifies a port number for the Local Web Debug Interface');
     console.log('   --PrivacyBar            If specified, causes the agent to spawn a privacy bar');
     console.log("   --RemoteDebug           Specifies a port number for the Agent's Web Debug Interface");
@@ -172,19 +175,26 @@ if (process.argv.getParameter('help') != null)
     console.log('');
     process.exit();
 }
-if (process.argv.getParameter('AgentsFolder') == null)
+
+localOnly = process.argv.getParameter('LocalTests') != null;
+
+if (!localOnly)
 {
-    console.log('\nRequired parameter: AgentsFolder,  was not specified.');
-    process.exit();
-}
-else
-{
-    if(!require('fs').existsSync(process.argv.getParameter('AgentsFolder')))
+    if (process.argv.getParameter('AgentsFolder') == null)
     {
-        console.log('\nThe specified folder does not exist: ' + process.argv.getParameter('AgentsFolder'));
+        console.log('\nRequired parameter: AgentsFolder,  was not specified.');
         process.exit();
     }
+    else
+    {
+        if (!require('fs').existsSync(process.argv.getParameter('AgentsFolder')))
+        {
+            console.log('\nThe specified folder does not exist: ' + process.argv.getParameter('AgentsFolder'));
+            process.exit();
+        }
+    }
 }
+
 if (process.argv.getParameter('LocalDebug') != null)
 {
     try
@@ -286,16 +296,23 @@ if (remoteDebug > 0)
     process.stdout.write('Remote WebDebug will listen on port: ' + remoteDebug + '\n');
 }
 
-process.stdout.write('Generating Certificate...');
-var cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
-var server = require('https').createServer({ pfx: cert, passphrase: 'test' });
-server.listen();
+var cert;
+var server = { on: function () { } };
+var loadedCert;
+var der;
 
-process.stdout.write('\rGenerating Certificate... [DONE]\n');
+if (!localOnly)
+{
+    process.stdout.write('Generating Certificate...');
+    cert = require('tls').generateCertificate('test', { certType: 2, noUsages: 1 });
+    server = require('https').createServer({ pfx: cert, passphrase: 'test' });
+    server.listen();
+    process.stdout.write('\rGenerating Certificate... [DONE]\n');
 
-var loadedCert = require('tls').loadCertificate({ pfx: cert, passphrase: 'test' });
-var der = loadedCert.toDER();
-global._test = [];
+    loadedCert = require('tls').loadCertificate({ pfx: cert, passphrase: 'test' });
+    der = loadedCert.toDER();
+    global._test = [];
+}
 
 if (process.argv.getParameter('NoInstall') != null)
 {
@@ -956,7 +973,7 @@ function fs_test()
     promises.fs_1.then(function (r)
     {
         process.stdout.write('\r         fs.readFileSync().................................[OK]     \n');
-        process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
+        //process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
     }).then(function ()
     {
         var tmp = generateRandomString(5);
@@ -975,7 +992,7 @@ function fs_test()
     {
         process.stdout.write('\r         fs.writeFileSync()................................[OK]     \n');
         process.stdout.write('         fs.existsSync()...................................[OK]     \n');
-        process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
+        //process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
     }).then(function ()
     {
         process.stdout.write('         fs.renameSync()...................................[WAITING]');
@@ -990,7 +1007,7 @@ function fs_test()
     promises.fs_3.then(function (r)
     {
         process.stdout.write('\r         fs.renameSync()...................................[OK]     \n');
-        process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
+        //process.stdout.write('            => Handle Counts (Pre/Post): ' + r.reason.pre + '/' + r.reason.post + '\n');
 
         ret.resolve();
     }).catch(function ()
@@ -1898,25 +1915,33 @@ if (process.argv.getParameter('verbose') != null)
     console.setInfoLevel(parseInt(process.argv.getParameter('verbose')));
 }
 
-if (process.argv.getParameter('NoInstall') == null)
+if (!localOnly)
 {
-    //
-    // Start by installing agent as service
-    //
-    var params = ['--__skipExit=1', '--logUpdate=1', '--meshServiceName=TestAgent'];
-    var options =
-        {
-            files:
-                [
-                    {
-                        newName: (process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh'),
-                        _buffer: 'enableILibRemoteLogging=5556\nlogUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:' + server.address().port + '/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
-                    }
-                ],
-            binary: updateSource,
-            noParams: true
-        };
-    require('agent-installer').fullInstallEx(params, options);
-    console.setDestination(console.Destinations.STDOUT);
+    if (process.argv.getParameter('NoInstall') == null)
+    {
+        //
+        // Start by installing agent as service
+        //
+        var params = ['--__skipExit=1', '--logUpdate=1', '--meshServiceName=TestAgent'];
+        var options =
+            {
+                files:
+                    [
+                        {
+                            newName: (process.platform == 'win32' ? 'MeshAgent.msh' : 'meshagent.msh'),
+                            _buffer: 'enableILibRemoteLogging=5556\nlogUpdate=1\nMeshID=0x43FEF862BF941B2BBE5964CC7CA02573BBFB94D5A717C5AA3FC103558347D0BE26840ACBD30FFF981F7F5A2083D0DABC\nMeshServer=wss://127.0.0.1:' + server.address().port + '/agent.ashx\nmeshServiceName=TestAgent\nServerID=' + loadedCert.getKeyHash().toString('hex')
+                        }
+                    ],
+                binary: updateSource,
+                noParams: true
+            };
+        require('agent-installer').fullInstallEx(params, options);
+        console.setDestination(console.Destinations.STDOUT);
+    }
+    console.log('\nWaiting for Agent Connection...');
 }
-console.log('\nWaiting for Agent Connection...');
+
+if (localOnly)
+{
+    console.log('Running Local Tests');
+}
