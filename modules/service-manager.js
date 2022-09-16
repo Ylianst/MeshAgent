@@ -80,7 +80,8 @@ function parseServiceStatus(token)
     j.isOwnProcess = ((serviceType & 0x00000010) == 0x00000010);
     j.isInteractive = ((serviceType & 0x00000100) == 0x00000100);
     j.waitHint = token.Deref((6 * 4), 4).toBuffer().readUInt32LE();
-    switch (token.Deref((1 * 4), 4).toBuffer().readUInt32LE())
+    j.rawState = token.Deref((1 * 4), 4).toBuffer().readUInt32LE();
+    switch (j.rawState)
     {
         case 0x00000005:
             j.state = 'CONTINUE_PENDING';

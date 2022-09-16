@@ -598,6 +598,12 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && (strcasecmp(argv[1], "exstate") == 0))
+	{
+		char script[] = "var r={rawState: -1, state: 'NOT INSTALLED'};try{r=require('service-manager').manager.getService(require('_agentNodeId').serviceName()).status;}catch(z){};console.log(r.state);process.exit(r.rawState);";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 	if (argc > 1 && (strcasecmp(argv[1], "state") == 0))
 	{
 		char script[] = "try{console.log(require('service-manager').manager.getService(require('_agentNodeId').serviceName()).status.state);}catch(z){console.log('NOT INSTALLED');};process.exit();";
