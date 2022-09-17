@@ -57,13 +57,23 @@ function brief(headers, obj)
     }
     return (obj);
 }
+
+function dataHandler(c)
+{
+    this.str += c.toString();
+}
+
 function linux_identifiers()
 {
     var identifiers = {};
     var ret = {};
     var values = {};
+
     if (!require('fs').existsSync('/sys/class/dmi/id')) { throw ('this platform does not have DMI statistics'); }
+
     var entries = require('fs').readdirSync('/sys/class/dmi/id');
+    entries = null;
+
     for(var i in entries)
     {
         if (require('fs').statSync('/sys/class/dmi/id/' + entries[i]).isFile())
@@ -73,6 +83,7 @@ function linux_identifiers()
             if (ret[entries[i]] == 'None') { delete ret[entries[i]];}
         }
     }
+
     identifiers['bios_date'] = ret['bios_date'];
     identifiers['bios_vendor'] = ret['bios_vendor'];
     identifiers['bios_version'] = ret['bios_version'];
@@ -83,22 +94,24 @@ function linux_identifiers()
     identifiers['product_uuid'] = ret['product_uuid'];
 
     var child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdout.str = ''; child.stdout.on('data', dataHandler);
     child.stdin.write('cat /proc/cpuinfo | grep "model name" | ' + "tr '\\n' ':' | awk -F: '{ print $2 }'\nexit\n");
     child.waitExit();
     identifiers['cpu_name'] = child.stdout.str.trim();
+    child = null;
 
 
     // Fetch GPU info
-    var child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', dataHandler);
     child.stdin.write("lspci | grep ' VGA ' | tr '\\n' '`' | awk '{ a=split($0,lines" + ',"`"); printf "["; for(i=1;i<a;++i) { split(lines[i],gpu,"r: "); printf "%s\\"%s\\"", (i==1?"":","),gpu[2]; } printf "]"; }\'\nexit\n');
     child.waitExit();
     try { identifiers['gpu_name'] = JSON.parse(child.stdout.str.trim()); } catch (xx) { }
+    child = null;
 
     // Fetch Storage Info
-    var child = require('child_process').execFile('/bin/sh', ['sh']);
-    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', dataHandler);
     child.stdin.write("lshw -class disk | tr '\\n' '`' | awk '" + '{ len=split($0,lines,"*"); printf "["; for(i=2;i<=len;++i) { model=""; caption=""; size=""; clen=split(lines[i],item,"`"); for(j=2;j<clen;++j) { split(item[j],tokens,":"); split(tokens[1],key," "); if(key[1]=="description") { caption=substr(tokens[2],2); } if(key[1]=="product") { model=substr(tokens[2],2); } if(key[1]=="size") { size=substr(tokens[2],2);  } } if(model=="") { model=caption; } if(caption!="" || model!="") { printf "%s{\\"Caption\\":\\"%s\\",\\"Model\\":\\"%s\\",\\"Size\\":\\"%s\\"}",(i==2?"":","),caption,model,size; }  } printf "]"; }\'\nexit\n');
     child.waitExit();
     try { identifiers['storage_devices'] = JSON.parse(child.stdout.str.trim()); } catch (xx) { }
@@ -106,13 +119,15 @@ function linux_identifiers()
     values.identifiers = identifiers;
     values.linux = ret;
     trimIdentifiers(values.identifiers);
+    child = null;
+
 
     var dmidecode = require('lib-finder').findBinary('dmidecode');
     if (dmidecode != null)
     {
-        var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+        child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = ''; child.stdout.on('data', dataHandler);
+        child.stderr.str = ''; child.stderr.on('data', dataHandler);
         child.stdin.write(dmidecode + " -t memory | tr '\\n' '`' | ");
         child.stdin.write(" awk '{ ");
         child.stdin.write('   printf("[");');
@@ -180,14 +195,15 @@ function linux_identifiers()
         }
         catch (e)
         { }
+        child = null;
     }
 
     var usbdevices = require('lib-finder').findBinary('usb-devices');
     if (usbdevices != null)
     {
         var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdout.str = ''; child.stdout.on('data', dataHandler);
+        child.stderr.str = ''; child.stderr.on('data', dataHandler);
         child.stdin.write(usbdevices + " | tr '\\n' '`' | ");
         child.stdin.write(" awk '");
         child.stdin.write('{');
@@ -249,15 +265,16 @@ function linux_identifiers()
             values.linux.usb = JSON.parse(child.stdout.str);
         }
         catch(x)
-        {}
+        { }
+        child = null;
     }
 
     var pcidevices = require('lib-finder').findBinary('lspci');
     if (pcidevices != null)
     {
         var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-        child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stdout.str = ''; child.stdout.on('data', dataHandler);
+        child.stderr.str = ''; child.stderr.on('data', dataHandler);
         child.stdin.write(pcidevices + " -m | tr '\\n' '`' | ");
         child.stdin.write(" awk '");
         child.stdin.write('{');
@@ -293,6 +310,7 @@ function linux_identifiers()
         }
         catch (x)
         { }
+        child = null;
     }
 
     return (values);

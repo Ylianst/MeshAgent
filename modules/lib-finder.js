@@ -54,7 +54,9 @@ function hasBinary(bin)
     child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stdin.write("whereis " + bin + " | awk '{ print $2 }'\nexit\n");
     child.waitExit();
-    return (child.stdout.str.trim() != '');
+    var ret = child.stdout.str.trim() != '';
+    child = null;
+    return (ret);
 }
 function findBinary(bin)
 {
@@ -64,7 +66,9 @@ function findBinary(bin)
     child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stdin.write("whereis " + bin + " | awk '{ print $2 }'\nexit\n");
     child.waitExit();
-    return (child.stdout.str.trim()!=""?child.stdout.str.trim():null);
+    var ret = child.stdout.str.trim() != "" ? child.stdout.str.trim() : null;
+    child = null;
+    return (ret);
 }
 
 module.exports = find;
