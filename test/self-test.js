@@ -1944,4 +1944,73 @@ if (!localOnly)
 if (localOnly)
 {
     console.log('Running Local Tests');
+    eventtests()
+
+
+    process.exit();
+}
+
+
+function newListenerSink(name, handler)
+{
+    global.evresults[name]++;
+}
+function removeListenerSink(name, handler)
+{
+    global.evresults[name + '_Rem']++;
+}
+
+function A_Sink()
+{
+    global.evresults.A_Res += '2';
+}
+function B_Sink()
+{
+    global.evresults.B_Trig++;
+}
+function A_Prepended_Sink()
+{
+    global.evresults.A_Res += '1';
+}
+function A_Prepended_Once_Sink()
+{
+    global.evresults.A_Res += 'A';
+}
+
+function eventtests()
+{
+    global.evresults = { A: 0, B: 0, B_Trig: 0, A_Res: '', A_Rem: 0, B_Rem: 0 };
+    var obj = {};
+    var res;
+    require('events').EventEmitter.call(obj);
+
+    console.log('   Event Emitter Tests');
+
+    obj.on('removeListener', removeListenerSink);
+    obj.on('newListener', newListenerSink);
+
+    obj.on('A', A_Sink);
+    obj.once('B', B_Sink);
+    obj.prependListener('A', A_Prepended_Sink);
+    obj.prependOnceListener('A', A_Prepended_Once_Sink);
+
+    res = (global.evresults.A==3 && global.evresults.B==1) ? 'OK' : 'FAILED'
+    console.log('      newListener dispatched correctly with on/once/prepend/prependOnce..............................[' + res + ']');
+
+    obj.emit('B');
+    obj.emit('B');
+    obj.emit('B');
+    obj.emit('A');
+    obj.emit('A');
+    obj.removeListener('A', A_Prepended_Sink);
+    obj.emit('A');
+
+    res = (global.evresults.B_Trig == 1) ? 'OK' : 'FAILED';
+    console.log('      once events correctly auto unregister..........................................................[' + res + ']');
+
+    res = (global.evresults.A_Rem == 2 && global.evresults.B_Rem == 1) ? 'OK' : 'FAILED';
+    console.log('      removeListener correctly dispatched unsubscriptions............................................[' + res + ']');
+
+    res = (global.evresults.A_Res == 'A12122') ? 'OK' : 'FAILED';
+    console.log('      events are dispatched in correct order.........................................................[' + res + ']');
 }

@@ -1899,6 +1899,14 @@ duk_ret_t ILibDuktape_MeshAgent_DataPing(duk_context *ctx)
 	MeshServer_SendJSON(agent, agent->controlChannel, "{\"action\":\"ping\"}", 17);
 	return(1);
 }
+duk_ret_t ILibDuktape_MeshAgent_Disconnect(duk_context *ctx)
+{
+	duk_push_this(ctx);																								// [MeshAgent]
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)Duktape_GetPointerProperty(ctx, -1, MESH_AGENT_PTR);
+	ILibWebClient_Disconnect(agent->controlChannel);
+	return(0);
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -2013,6 +2021,7 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "eval", ILibDuktape_MeshAgent_eval, 1);
 		ILibDuktape_CreateInstanceMethod(ctx, "forceExit", ILibDuktape_MeshAgent_forceExit, DUK_VARARGS);
 		ILibDuktape_CreateInstanceMethod(ctx, "hostname", ILibDuktape_MeshAgent_hostname, 0);
+		ILibDuktape_CreateInstanceMethod(ctx, "disconnect", ILibDuktape_MeshAgent_Disconnect, 0);
 
 		Duktape_CreateEnum(ctx, "ContainerPermissions", (char*[]) { "DEFAULT", "NO_AGENT", "NO_MARSHAL", "NO_PROCESS_SPAWNING", "NO_FILE_SYSTEM_ACCESS", "NO_NETWORK_ACCESS" }, (int[]) { 0x00, 0x10000000, 0x08000000, 0x04000000, 0x00000001, 0x00000002 }, 6);
 		duk_push_string(ctx, agent->displayName); ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "displayName",1);
