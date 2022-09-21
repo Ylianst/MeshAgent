@@ -582,6 +582,10 @@ function windows_getProxy()
 
 function auto_proxy_helper(target)
 {
+    // The first thing we need to do, is disable any existing proxy settings, otherwise we won't be able to find the autoconfig script
+    require('global-tunnel').end();
+
+
     var promise = require('promise');
 
     var ret = new promise(promise.defaultInit);

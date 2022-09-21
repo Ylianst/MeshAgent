@@ -1998,7 +1998,18 @@ ILibDuktape_globalTunnel_data* ILibDuktape_GetNewGlobalTunnelEx(duk_context *ctx
 {
 	ILibDuktape_globalTunnel_data *retVal;
 
-	if (native != 0) { duk_push_heap_stash(ctx); }						// [stash]
+	if (native != 0)
+	{
+		//
+		// If native is calling us, we will use JavaScript to return the pointer value, becuase
+		// JS module loader caches entries, so we need to make sure we don't instantiate a new structure,
+		// but instead re-use the existing one.
+		//
+		duk_eval_string(ctx, "require('global-tunnel')");				// [global-tunnel]
+		retVal = (ILibDuktape_globalTunnel_data*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_GlobalTunnel_DataPtr);
+		duk_pop(ctx);													// ...
+		return(retVal);
+	}
 
 	duk_push_object(ctx);												// [stash][tunnel]
 	duk_dup(ctx, -1);													// [stash][tunnel][dup]
@@ -2018,7 +2029,6 @@ ILibDuktape_globalTunnel_data* ILibDuktape_GetNewGlobalTunnelEx(duk_context *ctx
 	ILibDuktape_CreateEventWithGetter_SetEnumerable(ctx, "isProxying", ILibDuktape_globalTunnel_isProxying, 1);
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_globalTunnel_finalizer);
 
-	if (native != 0) { duk_pop(ctx); }									// ...
 	return retVal;
 }
 
@@ -2035,7 +2045,7 @@ void ILibDuktape_globalTunnel_PUSH(duk_context *ctx, void *chain)
 	else
 	{
 		ILibDuktape_GetNewGlobalTunnelEx(ctx, 0);						// [tunnel]
-	}
+	}	
 	return;
 }
 ILibDuktape_globalTunnel_data* ILibDuktape_GetGlobalTunnel(duk_context *ctx)
