@@ -250,39 +250,39 @@ limitations under the License.
         msh.InstallFlags = parseInt(msh.InstallFlags.toString());
     }
 
-    if (process.argv.includes('-mesh'))
+if (process.argv.includes('-mesh'))
+{
+    console.log(JSON.stringify(msh, null, 2));
+    process.exit();
+}
+if (process.argv.includes('-translations'))
+{
+    console.log(JSON.stringify(translation));
+    process.exit();
+}
+if (process.argv.includes('-help') || (process.platform == 'linux' && process.env['XAUTHORITY'] == null && process.env['DISPLAY'] == null && process.argv.length == 1))
+{
+    console.log("\n" + translation[lang].commands + ": ");
+    if ((msh.InstallFlags & 1) == 1)
     {
-        console.log(JSON.stringify(msh, null, 2));
-        process.exit();
+        console.log('./' + process.execPath.split('/').pop() + ' -connect');
     }
-    if (process.argv.includes('-translations'))
+    if ((msh.InstallFlags & 2) == 2)
     {
-        console.log(JSON.stringify(translation));
-        process.exit();
-    }
-    if (process.argv.includes('-help') || (process.platform == 'linux' && process.env['XAUTHORITY']==null && process.env['DISPLAY'] == null))
-    {
-        console.log("\n" + translation[lang].commands + ": ");
-        if ((msh.InstallFlags & 1) == 1)
+        if (s)
         {
-            console.log('./' + process.execPath.split('/').pop() + ' -connect');
+            console.log('./' + process.execPath.split('/').pop() + ' -update');
+            console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
         }
-        if ((msh.InstallFlags & 2) == 2)
+        else
         {
-            if (s)
-            {
-                console.log('./' + process.execPath.split('/').pop() + ' -update');
-                console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
-            }
-            else
-            {
-                console.log('./' + process.execPath.split('/').pop() + ' -install');
-                console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
-            }
+            console.log('./' + process.execPath.split('/').pop() + ' -install');
+            console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
         }
-        console.log('');
-        process.exit();
     }
+    console.log('');
+    process.exit();
+}
 
     if ((msh.InstallFlags & 1) == 1)
     {
