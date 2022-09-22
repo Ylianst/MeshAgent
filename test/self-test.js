@@ -1944,8 +1944,8 @@ if (!localOnly)
 if (localOnly)
 {
     console.log('Running Local Tests');
-    eventtests()
-
+    eventtests();
+    promisetest();
 
     process.exit();
 }
@@ -2013,4 +2013,45 @@ function eventtests()
 
     res = (global.evresults.A_Res == 'A12122') ? 'OK' : 'FAILED';
     console.log('      events are dispatched in correct order.........................................................[' + res + ']');
+}
+
+function promisetest()
+{
+    var promise = require('promise');
+
+    console.log('   Promise Tests');
+
+    var ret = new promise(promise.defaultInit);
+    var ret2 = new promise(promise.defaultInit);
+    var res = '';
+
+    ret.then(function () { res += '1'; }).
+    then(function () { res += '2'; }).
+    then(function () { res += '3'; });
+
+    ret.resolve();
+    console.log(res);
+
+    var ret = new promise(promise.defaultInit);
+    var res = '';
+
+    ret.then(function () { res += '1'; }).
+    then(function () { return (ret2); }).
+    then(function () { res += '3'; });
+
+    ret.resolve();
+    console.log(res);
+    ret2.resolve();
+    console.log(res);
+
+    var ret = new promise(promise.defaultInit);
+    var res = '';
+
+    ret.then(function () { res += '1'; }).
+    then(function () { return (ret2); }).
+    then(function () { res += '3'; }).catch(function (){ res += 'E'; });
+
+    ret.resolve();
+    ret2.reject('nope');
+    console.log('X: ' + res);
 }
