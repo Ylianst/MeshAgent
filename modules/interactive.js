@@ -327,60 +327,57 @@ if (process.argv.includes('-help') || (process.platform == 'linux' && process.en
 
     if (!skip)
     {
-        if (process.platform != 'darwin')
+        if (process.argv.includes('-install') || process.argv.includes('-update'))
         {
-            if (process.argv.includes('-install') || process.argv.includes('-update'))
+            var p = [];
+            for (var i = 0; i < process.argv.length; ++i)
             {
-                var p = [];
-                for (var i = 0; i < process.argv.length; ++i)
+                if (process.argv[i].startsWith('--installPath='))
                 {
-                    if (process.argv[i].startsWith('--installPath='))
-                    {
-                        p.push('--installPath="' + process.argv[i].split('=').pop() + '"');
-                    }
-                    else if(process.argv[i].startsWith('--'))
-                    {
-                        p.push(process.argv[i]);
-                    }
+                    p.push('--installPath="' + process.argv[i].split('=').pop() + '"');
                 }
-                _install(p);
-                process.exit();
-            }
-            else if (process.argv.includes('-uninstall'))
-            {
-                _uninstall();
-                process.exit();
-            }
-            else
-            {
-                if (!require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
+                else if(process.argv[i].startsWith('--'))
                 {
-                    console.log('\n' + translation[lang].graphicalerror + '.');
-                    console.log(translation[lang].zenity + ".\n");
-                    console.log(translation[lang].commands + ": ");
-                    if ((msh.InstallFlags & 1) == 1)
-                    {
-                        console.log('./' + process.execPath.split('/').pop() + ' -connect');
-                    }
-                    if ((msh.InstallFlags & 2) == 2)
-                    {
-                        if (s)
-                        {
-                            console.log('./' + process.execPath.split('/').pop() + ' -update');
-                            console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
-                        }
-                        else
-                        {
-                            console.log('./' + process.execPath.split('/').pop() + ' -install');
-                            console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
-                        }
-                    }
-                    console.log('');
-                    process.exit();
+                    p.push(process.argv[i]);
                 }
             }
+            _install(p);
+            process.exit();
+        }
+        else if (process.argv.includes('-uninstall'))
+        {
+            _uninstall();
+            process.exit();
         }
         else
+        {
+            if (!require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
+            {
+                console.log('\n' + translation[lang].graphicalerror + '.');
+                console.log(translation[lang].zenity + ".\n");
+                console.log(translation[lang].commands + ": ");
+                if ((msh.InstallFlags & 1) == 1)
+                {
+                    console.log('./' + process.execPath.split('/').pop() + ' -connect');
+                }
+                if ((msh.InstallFlags & 2) == 2)
+                {
+                    if (s)
+                    {
+                        console.log('./' + process.execPath.split('/').pop() + ' -update');
+                        console.log('./' + process.execPath.split('/').pop() + ' -uninstall');
+                    }
+                    else
+                    {
+                        console.log('./' + process.execPath.split('/').pop() + ' -install');
+                        console.log('./' + process.execPath.split('/').pop() + ' -install --installPath="/alternate/path"');
+                    }
+                }
+                console.log('');
+                process.exit();
+            }
+        }
+        if (process.platform == 'darwin')
         {
             if (!require('user-sessions').isRoot()) { console.log('\n' + translation[lang].elevation); process.exit(); }
         }
