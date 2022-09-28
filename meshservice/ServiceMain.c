@@ -123,8 +123,23 @@ _GdiplusStartup __GdiplusStartup;
 _SHCreateMemStream __SHCreateMemStream2;
 void *GdiPlusToken = NULL;
 
+#if defined _M_IX86
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='x86' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#elif defined _M_IA64
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='ia64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#elif defined _M_X64
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='amd64' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#else
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+#endif
+
 void GdiPlusFlat_Init()
 {
+	INITCOMMONCONTROLSEX icex;		// declare an INITCOMMONCONTROLSEX Structure
+	icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+	icex.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_PROGRESS_CLASS;   // This is needed for tooltips  									
+	BOOL _ok = InitCommonControlsEx(&icex);
+
 	char input[24] = { 0 };
 	_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
 	if (_gdip == NULL) { _gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0); }
@@ -1238,12 +1253,12 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				duk_eval(g_dialogCtx);																// [msh][str]
 				duk_swap_top(g_dialogCtx, -2);														// [str][msh]
 				imageraw = (char*)duk_get_lstring(g_dialogCtx, -2, &rawLen);
-				HBITMAP scaled = GetScaledImage(imageraw, rawLen, 155, 155);
+				HBITMAP scaled = GetScaledImage(imageraw, rawLen, 162, 162);
 				SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
 			}
 			else
 			{
-				HBITMAP scaled = GetScaledImage(image_b64, sizeof(image_b64) - 1, 155, 155);
+				HBITMAP scaled = GetScaledImage(image_b64, sizeof(image_b64) - 1, 162, 162);
 				SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
 			}
 			installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
@@ -1289,7 +1304,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		else
 		{
 			EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
-			HBITMAP scaled = GetScaledImage(image_b64, sizeof(image_b64) - 1, 155, 155);
+			HBITMAP scaled = GetScaledImage(image_b64, sizeof(image_b64) - 1, 162, 162);
 			SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
 		}
 
@@ -1463,6 +1478,25 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? meshname : "(None)", -1));
 			SetWindowTextW(GetDlgItem(hDlg, IDC_VERSIONTEXT), ILibUTF8ToWide(SOURCE_COMMIT_DATE, -1));
 
+			// Set Tooltip for ServerLocation
+			HWND hServerLocationHWND = GetDlgItem(hDlg, IDC_SERVERLOCATION);
+			HWND hToolTip = CreateWindowExW(NULL, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, hDlg, NULL, GetModuleHandle(NULL), NULL);
+			DWORD _e = GetLastError();
+			if (hToolTip != NULL && hServerLocationHWND != NULL)
+			{
+				// Associate the tooltip
+				TOOLINFOW toolInfo = { 0 };
+				toolInfo.cbSize = sizeof(TOOLINFOW);
+				toolInfo.hwnd = hDlg;
+				toolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+				toolInfo.uId = (UINT_PTR)hServerLocationHWND;
+				toolInfo.lpszText = ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1);
+				toolInfo.hinst = GetModuleHandle(NULL);
+
+				SendMessageW(hToolTip, TTM_ADDTOOLW, 0, (LPARAM)&toolInfo);
+			}
+
+
 			duk_push_heapptr(g_dialogCtx, g_dialogTranslationObject); // [obj]
 			if (duk_has_prop_string(g_dialogCtx, -1, g_dialogLanguage))
 			{
@@ -1508,7 +1542,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		}
 		break;
 	}
-	case WM_COMMAND:
+	case WM_COMMAND: 
 	{
 		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCLOSE || LOWORD(wParam) == IDCANCEL)
 		{
