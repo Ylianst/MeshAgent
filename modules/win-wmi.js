@@ -28,6 +28,11 @@ OleAut32.CreateMethod('SafeArrayAccessData');
 var wmi_handlers = {};
 
 const LocatorFunctions = ['QueryInterface', 'AddRef', 'Release', 'ConnectToServer'];
+
+//
+// Reference for IWbemServices can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/wbemcli/nn-wbemcli-iwbemservices
+//
 const ServiceFunctions = [
     'QueryInterface',
     'AddRef',
@@ -56,6 +61,11 @@ const ServiceFunctions = [
     'ExecMethod',
     'ExecMethodAsync'
 ];
+
+//
+// Reference to IEnumWbemClassObject can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/wbemcli/nn-wbemcli-ienumwbemclassobject
+//
 const ResultsFunctions = [
         'QueryInterface',
         'AddRef',
@@ -66,6 +76,11 @@ const ResultsFunctions = [
         'Clone',
         'Skip'
 ];
+
+//
+// Reference to IWbemClassObject can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/wbemcli/nn-wbemcli-iwbemclassobject
+//
 const ResultFunctions = [
             'QueryInterface',
             'AddRef',
@@ -96,6 +111,10 @@ const ResultFunctions = [
             'GetMethodOrigin'
 ];
 
+//
+// Reference to IWbemObjectSink can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/wmisdk/iwbemobjectsink
+//
 const QueryAsyncHandler =
     [
         {
@@ -203,12 +222,18 @@ const QueryAsyncHandler =
 
 function enumerateProperties(j, fields)
 {
+    //
+    // Reference to SafeArrayAccessData() can be found at:
+    // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearrayaccessdata
+    //
+
     var nme, len, nn;
     var properties = [];
     var values = {};
 
     j.funcs = require('win-com').marshalFunctions(j.Deref(), ResultFunctions);
 
+    // First we need to enumerate the COM Array
     if (fields != null && Array.isArray(fields))
     {
         properties = fields;
@@ -228,12 +253,17 @@ function enumerateProperties(j, fields)
         }
     }
 
-
+    // Now we need to introspect the Array Fields
     for (var i = 0; i < properties.length; ++i)
     {
         var tmp1 = GM.CreateVariable(24);
         if (j.funcs.Get(j.Deref(), GM.CreateVariable(properties[i], { wide: true }), 0, tmp1, 0, 0).Val == 0)
         {
+            //
+            // Reference for IWbemClassObject::Get() can be found at:
+            // https://learn.microsoft.com/en-us/windows/win32/api/wbemcli/nf-wbemcli-iwbemclassobject-get
+            //
+
             switch (tmp1.toBuffer().readUInt16LE())
             {
                 case 0x0000:    // VT_EMPTY
@@ -290,7 +320,7 @@ function queryAsync(resourceString, queryString, fields)
     var query = GM.CreateVariable(queryString, { wide: true });
     var results = GM.CreatePointer();
 
-
+    // Setup the Async COM handler for QueryAsync() 
     var handlers = require('win-com').marshalInterface(QueryAsyncHandler);
     handlers.refcount = 1;
     handlers.results = [];
@@ -304,11 +334,13 @@ function queryAsync(resourceString, queryString, fields)
     handlers.services.funcs = require('win-com').marshalFunctions(handlers.services.Deref(), ServiceFunctions);
     handlers.p = p;
     
+    // Make the COM call
     if (handlers.services.funcs.ExecQueryAsync(handlers.services.Deref(), language, query, WBEM_FLAG_BIDIRECTIONAL, 0, handlers).Val != 0)
     {
         throw ('Error in Query');
     }
 
+    // Hold a reference to the callback object
     wmi_handlers[handlers._hashCode()] = handlers;
     return (p);
 }
@@ -319,11 +351,13 @@ function query(resourceString, queryString, fields)
     var query = GM.CreateVariable(queryString, { wide: true });
     var results = GM.CreatePointer();
 
+    // Connect the locator connection for WMI
     var locator = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_WbemAdministrativeLocator), require('win-com').IID_IUnknown);
     locator.funcs = require('win-com').marshalFunctions(locator, LocatorFunctions);
     var services = require('_GenericMarshal').CreatePointer();
     if (locator.funcs.ConnectToServer(locator, resource, 0, 0, 0, 0, 0, 0, services).Val != 0) { throw ('Error calling ConnectToService'); }
 
+    // Execute the Query
     services.funcs = require('win-com').marshalFunctions(services.Deref(), ServiceFunctions);
     if (services.funcs.ExecQuery(services.Deref(), language, query, WBEM_FLAG_BIDIRECTIONAL, 0, results).Val != 0) { throw ('Error in Query'); }
 
@@ -332,6 +366,7 @@ function query(resourceString, queryString, fields)
     var result = GM.CreatePointer();
     var ret = [];
 
+    // Enumerate the results
     while (results.funcs.Next(results.Deref(), WBEM_INFINITE, 1, result, returnedCount).Val == 0)
     {
         ret.push(enumerateProperties(result, fields));

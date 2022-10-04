@@ -25,6 +25,9 @@ function winutils()
     this._ObjectID = 'win-utils';
     this.taskBar =
         {
+            //
+            // This function will enable/disable the system taskbar autohide functionality
+            //
             autoHide: function autoHide(tsid, value)
             {
                 var domain = require('user-sessions').getDomain(tsid);
@@ -38,12 +41,16 @@ function winutils()
                 }
                 else
                 {
+                    // Set the state, into the registry
                     var rv = reg.QueryKey(reg.HKEY.Users, key + '\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRects3', 'Settings');
                     rv[8] = value === true ? 3 : 2;
                     reg.WriteKey(reg.HKEY.Users, key + '\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StuckRects3', 'Settings', rv);
+
+                    // In order for the changes to take effect, we must restart the explorer shell.
                     var pids = require('process-manager').getProcessEx('explorer.exe');
                     if(pids.length == 1)
                     {
+                        // Windows will automatically restart explorer if you kill it
                         process.kill(pids[0]);
                     }
                     return (this.autoHide(tsid));

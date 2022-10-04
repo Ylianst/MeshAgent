@@ -27,9 +27,14 @@ function trimObject(j)
     return (j);
 }
 
-
+//
+// Fetches volume information from Windows
+//
 function getVolumes()
 {
+    //
+    // Query Volume Information from WMI
+    //
     var v = require('win-wmi').query('ROOT\\CIMV2', 'SELECT * FROM Win32_Volume');
     var i;
 
@@ -40,6 +45,9 @@ function getVolumes()
         ret[v[i].DeviceID] = trimObject(v[i]);
     }
 
+    //
+    // Queries BitLocker status for Windows Volumes from WMI
+    //
     v = require('win-wmi').query('ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption', 'SELECT * FROM Win32_EncryptableVolume');
     for (i in v)
     {

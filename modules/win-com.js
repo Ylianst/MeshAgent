@@ -26,15 +26,15 @@ const IUnknownMethods = ['QueryInterface', 'AddRef', 'Release'];
 
 var GM = require('_GenericMarshal');
 var ole32 = GM.CreateNativeProxy('ole32.dll');
-ole32.CreateMethod('CLSIDFromString');
-ole32.CreateMethod('CoCreateInstance');
-ole32.CreateMethod('CoInitializeSecurity');
-ole32.CreateMethod('CoInitialize');
-ole32.CreateMethod('CoInitializeEx');
-ole32.CreateMethod('CoUninitialize');
-ole32.CreateMethod('IIDFromString');
-ole32.CreateMethod('StringFromCLSID');
-ole32.CreateMethod('StringFromIID');
+ole32.CreateMethod('CLSIDFromString');          // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-clsidfromstring
+ole32.CreateMethod('CoCreateInstance');         // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-cocreateinstance
+ole32.CreateMethod('CoInitializeSecurity');     // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coinitializesecurity
+ole32.CreateMethod('CoInitialize');             // https://learn.microsoft.com/en-us/windows/win32/api/objbase/nf-objbase-coinitialize
+ole32.CreateMethod('CoInitializeEx');           // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coinitializeex
+ole32.CreateMethod('CoUninitialize');           // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-couninitialize
+ole32.CreateMethod('IIDFromString');            // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-iidfromstring
+ole32.CreateMethod('StringFromCLSID');          // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-stringfromclsid
+ole32.CreateMethod('StringFromIID');            // https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-stringfromiid
 
 
 function createInstance_finalizer()
@@ -44,10 +44,14 @@ function createInstance_finalizer()
 }
 function createInstance(RFCLSID, RFIID, options)
 {
+    // Start by initializing the Windows COM Library
     console.info1('CoInitializeEx()');
     ole32.CoInitializeEx(0, COINIT_MULTITHREADED);
+
+    // Set default Security Values for COM
     ole32.CoInitializeSecurity(0, -1, 0, 0, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, 0, EOAC_NONE, 0);
 
+    // Create Instance of COM Object
     var ppv = GM.CreatePointer();
     var h;
     if ((h = ole32.CoCreateInstance(RFCLSID, 0, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, RFIID,ppv)).Val == 0)
@@ -58,11 +62,13 @@ function createInstance(RFCLSID, RFIID, options)
     }
     else
     {
+        // If it fails, we can tear down the COM library
         ole32.CoUninitialize();
     }
     throw ('Error calling CoCreateInstance(' + h.Val + ')');
 }
 
+// Convert from STRING to CLSID
 function CLSIDFromString(CLSIDString)
 {
     var v = GM.CreateVariable(CLSIDString, { wide: true });
@@ -77,6 +83,8 @@ function CLSIDFromString(CLSIDString)
         throw ('Error Converting CLSIDString');
     }
 }
+
+// Convert from STRING to IID
 function IIDFromString(IIDString)
 {
     var v = GM.CreateVariable(IIDString, { wide: true });
@@ -92,10 +100,13 @@ function IIDFromString(IIDString)
     }
 }
 
+// Create an array of functions, from the definitions
 function marshalFunctions(obj, arr)
 {
     return (GM.MarshalFunctions(obj.Deref(), arr));
 }
+
+// Implement a COM interface, and attach it to the local vtable
 function marshalInterface(arr)
 {
     if (GM.PointerSize == 4)
@@ -114,6 +125,7 @@ function marshalInterface(arr)
     vtbl.pointerBuffer().copy(obj.toBuffer());
     obj._gcallbacks = [];
 
+    // Cleanup function, which clears all the callbacks
     obj.cleanup = function ()
     {
         var v;
@@ -125,6 +137,8 @@ function marshalInterface(arr)
         }
     };
 
+
+    // Enumerate the functions, and put them in the local vtable for the COM interface
     for (var i = 0; i < arr.length; ++i)
     {
         _hide(GM.GetGenericGlobalCallbackEx(arr[i].parms, GM.PointerSize == 4 ? arr[i].cx : null)); // Only 32 bit needs custom handlers
