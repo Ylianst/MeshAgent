@@ -63,16 +63,19 @@ const TASK_DONT_ADD_PRINCIPAL_ACE = 0x10;
 const TASK_IGNORE_REGISTRATION_TRIGGERS = 0x20;
 
 var OleAut32 = GM.CreateNativeProxy('OleAut32.dll');
-OleAut32.CreateMethod('SafeArrayAccessData');
-OleAut32.CreateMethod('SafeArrayCreate');
-OleAut32.CreateMethod('SafeArrayCreateVector');
-OleAut32.CreateMethod('SafeArrayPutElement');
-OleAut32.CreateMethod('SafeArrayDestroy');
-OleAut32.CreateMethod('VariantClear');
-OleAut32.CreateMethod('VariantInit');
-OleAut32.CreateMethod('SysAllocString');
+OleAut32.CreateMethod('SafeArrayAccessData');           // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearrayaccessdata
+OleAut32.CreateMethod('SafeArrayCreate');               // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreate
+OleAut32.CreateMethod('SafeArrayCreateVector');         // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraycreatevector
+OleAut32.CreateMethod('SafeArrayPutElement');           // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearrayputelement
+OleAut32.CreateMethod('SafeArrayDestroy');              // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-safearraydestroy
+OleAut32.CreateMethod('VariantClear');                  // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-variantclear
+OleAut32.CreateMethod('VariantInit');                   // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-variantinit
+OleAut32.CreateMethod('SysAllocString');                // https://learn.microsoft.com/en-us/windows/win32/api/oleauto/nf-oleauto-sysallocstring
 
 
+// 
+// This function converts an array of strings, to a variant array of BSTR
+//
 function ConvertStringArray(strarr)
 {
     if (!strarr || !Array.isArray(strarr)) { return (GM.CreateVariable(24)); }
@@ -112,6 +115,10 @@ const UnknownFunctions =
         'Release'
     ];
 
+//
+// Reference for ITaskService interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itaskservice
+//
 const TaskServiceFunctions =
     [
         'QueryInterface',
@@ -131,6 +138,11 @@ const TaskServiceFunctions =
         'get_ConnectedDomain',
         'get_HighestVersion'
     ];
+
+//
+// Reference for ITaskFolder interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itaskfolder
+//
 const TaskFolderFunctions =
     [
         'QueryInterface',
@@ -154,6 +166,11 @@ const TaskFolderFunctions =
         'GetSecurityDescriptor',
         'SetSecurityDescriptor'
     ];
+
+//
+// Reference for IRegistrationInfo interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iregistrationinfo
+//
 const RegistrationInfoFunctions =
     [
         'QueryInterface',
@@ -182,6 +199,11 @@ const RegistrationInfoFunctions =
         'get_Source',
         'put_Source'
     ];
+
+//
+// Reference for ITaskDefinition interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itaskdefinition
+//
 const TaskDefinitionFunctions =
     [
         'QueryInterface',
@@ -206,6 +228,11 @@ const TaskDefinitionFunctions =
         'get_XmlText',
         'put_XmlText'
     ];
+
+//
+// Reference for IPrincipal interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iprincipal
+//
 const PrincipalFunctions =
     [
         'QueryInterface',
@@ -228,6 +255,11 @@ const PrincipalFunctions =
         'get_RunLevel',
         'put_RunLevel'
     ];
+
+//
+// Reference for ITaskSettings interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itasksettings
+//
 const TaskSettingsFunctions =
     [
         'QueryInterface',
@@ -278,6 +310,11 @@ const TaskSettingsFunctions =
         'get_NetworkSettings',
         'put_NetworkSettings'
     ];
+
+//
+// Reference for IIdleSettings interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iidlesettings
+//
 const IdleSettingsFunctions =
     [
         'QueryInterface',
@@ -296,6 +333,11 @@ const IdleSettingsFunctions =
         'get_RestartOnIdle',
         'put_RestartOnIdle'
     ];
+
+//
+// Reference for ITriggerCollection interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itriggercollection
+//
 const TriggerCollectionFunctions =
     [
         'QueryInterface',
@@ -312,6 +354,11 @@ const TriggerCollectionFunctions =
         'Remove',
         'Clear'
     ];
+
+//
+// Reference for ITrigger interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itrigger
+//
 const TriggerFunctions =
     [
         'QueryInterface',
@@ -335,6 +382,11 @@ const TriggerFunctions =
         'get_Enabled',
         'put_Enabled'
     ];
+
+//
+// Reference for ITimeTrigger interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-itimetrigger
+//
 const TimeTriggerFunctions =
     [
         'QueryInterface',
@@ -360,6 +412,11 @@ const TimeTriggerFunctions =
         'get_RandomDelay',
         'put_RandomDelay'
     ];
+
+//
+// Reference for IActionCollection interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iactioncollection
+//
 const ActionCollectionFunctions =
     [
         'QueryInterface',
@@ -380,6 +437,11 @@ const ActionCollectionFunctions =
         'get_Context',
         'put_Context'
     ];
+
+// 
+// Reference for IAction interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iaction
+//
 const ActionFunctions =
     [
         'QueryInterface',
@@ -393,6 +455,11 @@ const ActionFunctions =
         'put_Id',
         'get_Type' 
     ];
+
+//
+// Reference for IExecAction interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iexecaction
+//
 const ExecActionFunctions =
     [
         'QueryInterface',
@@ -412,6 +479,11 @@ const ExecActionFunctions =
         'get_WorkingDirectory',
         'put_WorkingDirectory'
     ];
+
+//
+// Reference for IRegisteredTask interface can be found at:
+// https://learn.microsoft.com/en-us/windows/win32/api/taskschd/nn-taskschd-iregisteredtask
+//
 const RegisteredTaskFunctions =
     [
         'QueryInterface',
@@ -441,6 +513,10 @@ const RegisteredTaskFunctions =
         'GetRunTimes'
     ];
 
+//
+// JavaScript abstraction for Task. This constructor adds the "Run" function, and 
+// adds a finalizer to handle cleanup and unregistration
+//
 function taskObject(j)
 {
     this._task = j;
@@ -463,6 +539,9 @@ function taskObject(j)
     })
 }
 
+//
+// Finds and returns the specified Task
+//
 function getTask(options)
 {
     var hr;
@@ -473,6 +552,7 @@ function getTask(options)
     var rootFolder = GM.CreatePointer();
     var task = GM.CreatePointer();
 
+    // Connect to the TaskScheduler COM object
     var taskService = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_TaskScheduler), require('win-com').IID_IUnknown);
     taskService.funcs = require('win-com').marshalFunctions(taskService, TaskServiceFunctions);
 
@@ -483,6 +563,8 @@ function getTask(options)
         taskService.funcs.Release(taskService);
         throw ('ITaskService::Connect failed ' + hr.Val);
     }
+
+    // Get the folder object
     hr = taskService.funcs.GetFolder(taskService, GM.CreateVariable('\\', { wide: true }), rootFolder);
     if (hr.Val != 0)
     {
@@ -491,6 +573,7 @@ function getTask(options)
     }
     rootFolder.funcs = require('win-com').marshalFunctions(rootFolder.Deref(), TaskFolderFunctions);
 
+    // Get the tasks for that folder object
     hr = rootFolder.funcs.GetTask(rootFolder.Deref(), GM.CreateVariable(options.name, { wide: true }), task);
     if (hr.Val != 0)
     {
@@ -499,12 +582,16 @@ function getTask(options)
         throw ('Failed to get Task: ' + options.name + ' [' + hr.Val + ']');
     }
     task.funcs = require('win-com').marshalFunctions(task.Deref(), RegisteredTaskFunctions);
-    task.funcs.Run._callType = CUSTOM_HANDLER | 2;
+    task.funcs.Run._callType = CUSTOM_HANDLER | 2; // This must be declared like this, so that VARIANT can be marshaled correctly
     task._rf = rootFolder;
     task._ts = taskService;
 
     return (new taskObject(task));
 }
+
+// 
+// Delete a scheduled task
+//
 function deleteTask(options)
 {
     if (typeof (options) == 'string') { options = { name: options } }
@@ -515,6 +602,7 @@ function deleteTask(options)
     var password = GM.CreateVariable(24);
     var rootFolder = GM.CreatePointer();
 
+    // Instantiate and connect to the Window Task Scheduler service
     var taskService = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_TaskScheduler), require('win-com').IID_IUnknown);
     taskService.funcs = require('win-com').marshalFunctions(taskService, TaskServiceFunctions);
     hr = taskService.funcs.Connect._callType = 1;
@@ -524,6 +612,8 @@ function deleteTask(options)
         taskService.funcs.Release(taskService);
         throw ('ITaskService::Connect failed ' + hr.Val);
     }
+
+    // Get the root folder
     hr = taskService.funcs.GetFolder(taskService, GM.CreateVariable('\\', { wide: true }), rootFolder);
     if (hr.Val != 0)
     {
@@ -532,6 +622,8 @@ function deleteTask(options)
     }
     console.info1('Deleting Task: ' + options.name);
     rootFolder.funcs = require('win-com').marshalFunctions(rootFolder.Deref(), TaskFolderFunctions);
+
+    // Delete the specified task
     hr = rootFolder.funcs.DeleteTask(rootFolder.Deref(), GM.CreateVariable(options.name, { wide: true }), 0);
     if (hr.Val != 0)
     {
@@ -542,15 +634,21 @@ function deleteTask(options)
     rootFolder.funcs.Release(rootFolder.Deref());
     taskService.funcs.Release(taskService);
 }
+
+//
+// Add a new task to the Windows Task Scheduler
+//
 function addTask(options)
 {
+    // Set some defaults if they are not specified
     if (!options) { throw ('Need to specify options object'); }
     if (!options.author) { options.author = 'win-task'; }
     if (!options.id) { options.id = 'win-task'; }
-
     if (!options.startTime) { options.startTime = '2021-01-01T00:00'; }
     if (!options.endTime) { options.endTime = '2021-01-01T00:30'; }
 
+
+    // Instantiate the Windows Task Scheduler service
     var taskService = require('win-com').createInstance(require('win-com').CLSIDFromString(CLSID_TaskScheduler), require('win-com').IID_IUnknown);
     taskService.funcs = require('win-com').marshalFunctions(taskService, TaskServiceFunctions);
 
@@ -573,7 +671,7 @@ function addTask(options)
     var execAction = GM.CreatePointer();
     var registeredTask = GM.CreatePointer();
 
-   
+    // Connect to the Task Scheduler
     taskService.funcs.Connect._callType = 1;
     hr = taskService.funcs.Connect(taskService, serverName, user, domain, password);
     if (hr.Val != 0)
@@ -589,6 +687,7 @@ function addTask(options)
     }
     rootFolder.funcs = require('win-com').marshalFunctions(rootFolder.Deref(), TaskFolderFunctions);
 
+    // Create an empty task
     hr = taskService.funcs.NewTask(taskService, 0, task);
     taskService.funcs.Release(taskService); // No longer needed going forward
     if (hr.Val != 0)
@@ -597,6 +696,7 @@ function addTask(options)
         throw ('ITaskService failed to create new task ' + hr.Val);
     }
 
+    // Fetch the registration data for the ampty task
     task.funcs = require('win-com').marshalFunctions(task.Deref(), TaskDefinitionFunctions);
     hr = task.funcs.get_RegistrationInfo(task.Deref(), regInfo);
     if (hr.Val != 0)
@@ -618,7 +718,7 @@ function addTask(options)
 
     if (options.userID != null || options.user)
     {
-        if (options.user == 'SYSTEM') { options.userID = 'S-1-5-18'; }
+        if (options.user == 'SYSTEM') { options.userID = 'S-1-5-18'; } // If the task is to run as SYSTEM, set the security descriptor for SYSTEM
         hr = task.funcs.get_Principal(task.Deref(), principal);
         if (hr.Val != 0)
         {
@@ -632,6 +732,7 @@ function addTask(options)
         {
             try
             {
+                // If the task is to run as user, we need to fetch the Windows Security Descriptor for that user
                 options.userID = require('win-registry').usernameToUserKey({ user: options.user, domain: options.domain });
             }
             catch (z)
@@ -654,6 +755,7 @@ function addTask(options)
 
         if (options.userID)
         {
+            // Set the security descriptor for the task
             hr = principal.funcs.put_UserId(principal.Deref(), GM.CreateVariable(options.userID, { wide: true }));
             if (hr.Val != 0)
             {
@@ -675,6 +777,7 @@ function addTask(options)
     }
     taskSettings.funcs = require('win-com').marshalFunctions(taskSettings.Deref(), TaskSettingsFunctions);
 
+    // Set some atrtibutes, so that the task will run, regardless of AC power state and network state
     if(taskSettings.funcs.put_StopIfGoingOnBatteries(taskSettings.Deref(), 0).Val != 0 || 
         taskSettings.funcs.put_DisallowStartIfOnBatteries(taskSettings.Deref(), 0).Val != 0 ||
         taskSettings.funcs.put_RunOnlyIfNetworkAvailable(taskSettings.Deref(), 0).Val != 0)
@@ -693,6 +796,7 @@ function addTask(options)
     }
     triggerCollection.funcs = require('win-com').marshalFunctions(triggerCollection.Deref(), TriggerCollectionFunctions);
 
+    // Create the trigger
     hr = triggerCollection.funcs.Create(triggerCollection.Deref(), TASK_TRIGGER_TIME, unknownTrigger);
     if (hr.Val != 0)
     {
@@ -719,6 +823,7 @@ function addTask(options)
         throw ('ITaskService failed to get put TriggerID ' + hr.Val);
     }
 
+    // Set the start time
     hr = timeTrigger.funcs.put_StartBoundary(timeTrigger.Deref(), GM.CreateVariable(options.startTime, { wide: true }));
     if (hr.Val != 0)
     {
@@ -727,6 +832,7 @@ function addTask(options)
         throw ('ITaskService failed to set StartBoundary ' + hr.Val);
     }
 
+    // Set the end time, if specified
     if (options.endTime)
     {
         hr = timeTrigger.funcs.put_EndBoundary(timeTrigger.Deref(), GM.CreateVariable(options.endTime, { wide: true }));
@@ -738,6 +844,7 @@ function addTask(options)
         }
     }
 
+    // Fetch the ActionCollection
     hr = task.funcs.get_Actions(task.Deref(), actionCollection);
     if (hr.Val != 0)
     {
@@ -747,6 +854,7 @@ function addTask(options)
     }
     actionCollection.funcs = require('win-com').marshalFunctions(actionCollection.Deref(), ActionCollectionFunctions);
 
+    // Now we're going to create an ExecAction
     hr = actionCollection.funcs.Create(actionCollection.Deref(), TASK_ACTION_EXEC, taskAction);
     if (hr.Val != 0)
     {
@@ -773,6 +881,7 @@ function addTask(options)
         throw ('ITaskService failed to put action path ' + hr.Val);
     }
 
+    // Set the exec arguments if specified
     if (options.arguments && Array.isArray(options.arguments))
     {
         hr = execAction.funcs.put_Arguments(execAction.Deref(), GM.CreateVariable(options.arguments.join(' '), { wide: true }));
@@ -783,6 +892,8 @@ function addTask(options)
             throw ('ITaskService failed to put action arguments ' + hr.Val);
         }  
     }
+
+    // Set the working path if specified
     if (options.workingDirectory)
     {
         hr = execAction.funcs.put_WorkingDirectory(execAction.Deref(), GM.CreateVariable(options.workingDirectory, { wide: true }));
@@ -794,6 +905,7 @@ function addTask(options)
         } 
     }
 
+    // Register the new task
     var vvar = GM.CreateVariable(GM.PointerSize == 8 ? 24 : 16);
     rootFolder.funcs.RegisterTaskDefinition._callType = 1 | CUSTOM_HANDLER;
     hr = rootFolder.funcs.RegisterTaskDefinition(

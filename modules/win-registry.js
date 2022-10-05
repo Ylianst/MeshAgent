@@ -1,5 +1,5 @@
 /*
-Copyright 2018 Intel Corporation
+Copyright 2018-2022 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,10 @@ var KEY_QUERY_VALUE = 0x0001;
 var KEY_ENUMERATE_SUB_KEYS = 0x0008;
 var KEY_WRITE = 0x20006;
 
+//
+// Registry
+// https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rprn/25cce700-7fcf-4bb6-a2f3-0f6d08430a55
+//
 var KEY_DATA_TYPES =
     {
         REG_NONE: 0,
@@ -39,18 +43,18 @@ function windows_registry()
     this._ObjectId = 'win-registry';
     this._marshal = require('_GenericMarshal');
     this._Kernel32 = this._marshal.CreateNativeProxy('Kernel32.dll');
-    this._Kernel32.CreateMethod('FileTimeToSystemTime');
+    this._Kernel32.CreateMethod('FileTimeToSystemTime');                // https://learn.microsoft.com/en-us/windows/win32/api/timezoneapi/nf-timezoneapi-filetimetosystemtime
     this._AdvApi = this._marshal.CreateNativeProxy('Advapi32.dll');
-    this._AdvApi.CreateMethod('RegCreateKeyExW');
-    this._AdvApi.CreateMethod('RegEnumKeyExW');
-    this._AdvApi.CreateMethod('RegEnumValueW');
-    this._AdvApi.CreateMethod('RegOpenKeyExW');
-    this._AdvApi.CreateMethod('RegQueryInfoKeyW');
-    this._AdvApi.CreateMethod('RegQueryValueExW');
-    this._AdvApi.CreateMethod('RegCloseKey');
-    this._AdvApi.CreateMethod('RegDeleteKeyW');
-    this._AdvApi.CreateMethod('RegDeleteValueW');
-    this._AdvApi.CreateMethod('RegSetValueExW');
+    this._AdvApi.CreateMethod('RegCreateKeyExW');                       // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regcreatekeyexw
+    this._AdvApi.CreateMethod('RegEnumKeyExW');                         // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regenumkeyexw
+    this._AdvApi.CreateMethod('RegEnumValueW');                         // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regenumvaluew
+    this._AdvApi.CreateMethod('RegOpenKeyExW');                         // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regopenkeyexw
+    this._AdvApi.CreateMethod('RegQueryInfoKeyW');                      // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regqueryinfokeyw
+    this._AdvApi.CreateMethod('RegQueryValueExW');                      // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regqueryvalueexw
+    this._AdvApi.CreateMethod('RegCloseKey');                           // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regclosekey
+    this._AdvApi.CreateMethod('RegDeleteKeyW');                         // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regdeletekeyw
+    this._AdvApi.CreateMethod('RegDeleteValueW');                       // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regdeletevaluew
+    this._AdvApi.CreateMethod('RegSetValueExW');                        // https://learn.microsoft.com/en-us/windows/win32/api/winreg/nf-winreg-regsetvalueexw
     this.HKEY = { Root: Buffer.from('80000000', 'hex').swap32(), CurrentUser: Buffer.from('80000001', 'hex').swap32(), LocalMachine: Buffer.from('80000002', 'hex').swap32(), Users: Buffer.from('80000003', 'hex').swap32() };
 
     this.QueryKey = function QueryKey(hkey, path, key)
@@ -65,6 +69,7 @@ function windows_registry()
         if (!path) { path = ''; }
 
 
+        // Try to open the registry key for enumeration first.
         if ((err = this._AdvApi.RegOpenKeyExW(HK, this._marshal.CreateVariable(path, { wide: true }), 0, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, h).Val) != 0)
         {
             throw ('Opening Registry Key: ' + path + ' => Returned Error: ' + err);
@@ -78,6 +83,10 @@ function windows_registry()
             {
                 switch (valType.toBuffer().readUInt32LE())
                 {
+                    //
+                    // Registry Value Types can be found at:
+                    // https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
+                    //
                     case KEY_DATA_TYPES.REG_DWORD:
                         retVal = data.toBuffer().readUInt32LE();
                         break;
@@ -157,6 +166,8 @@ function windows_registry()
         this._AdvApi.RegCloseKey(h.Deref());
         return (retVal);
     };
+
+    // Query the last time the key was modified
     this.QueryKeyLastModified = function QueryKeyLastModified(hkey, path, key)
     {
         var v;
@@ -167,6 +178,7 @@ function windows_registry()
         if (key) { key = this._marshal.CreateVariable(key, { wide: true }); }
         if (!path) { path = ''; }
 
+        // Open the registry key
         if ((err = this._AdvApi.RegOpenKeyExW(HK, this._marshal.CreateVariable(path, { wide: true }), 0, KEY_QUERY_VALUE, h).Val) != 0)
         {
             throw ('Opening Registry Key: ' + path + ' => Returned Error: ' + err);
@@ -187,20 +199,24 @@ function windows_registry()
         var securityDescriptor = this._marshal.CreateVariable(4);
         var lastWriteTime = this._marshal.CreateVariable(8);
 
+        // Get the metadata for the registry value
         v = this._AdvApi.RegQueryInfoKeyW(h.Deref(), achClass, achClassSize, 0,
             numSubKeys, longestSubkeySize, longestClassString, numValues,
             longestValueName, longestValueData, securityDescriptor, lastWriteTime);
         if (v.Val != 0) { throw ('RegQueryInfoKeyW() returned error: ' + v.Val); }
 
+        // Convert the time format
         var systime = this._marshal.CreateVariable(16);
         if (this._Kernel32.FileTimeToSystemTime(lastWriteTime, systime).Val == 0) { throw ('Error parsing time'); }
         return (require('fs').convertFileTime(lastWriteTime));
     };
+
     this.WriteKey = function WriteKey(hkey, path, key, value)
     {
         var result;
         var h = this._marshal.CreatePointer();
 
+        // Create the registry key
         if (this._AdvApi.RegCreateKeyExW(this._marshal.CreatePointer(hkey), this._marshal.CreateVariable(path, { wide: true }), 0, 0, 0, KEY_WRITE, 0, h, 0).Val != 0)
         {
             throw ('Error Opening Registry Key: ' + path);
@@ -209,8 +225,13 @@ function windows_registry()
         var data;
         var dataType;
 
+        // Create the value entry
         switch(typeof(value))
         {
+            //
+            // Registry Value Types can be found at:
+            // https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types
+            //
             case 'boolean':
                 dataType = KEY_DATA_TYPES.REG_DWORD;
                 data = this._marshal.CreateVariable(4);
@@ -232,6 +253,7 @@ function windows_registry()
                 break;
         }
 
+        // Save the registry value
         if (this._AdvApi.RegSetValueExW(h.Deref(), key?this._marshal.CreateVariable(key, { wide: true }):0, 0, dataType, data, data._size).Val != 0)
         {           
             this._AdvApi.RegCloseKey(h.Deref());
@@ -239,6 +261,8 @@ function windows_registry()
         }
         this._AdvApi.RegCloseKey(h.Deref());
     };
+
+    // Delete a registry entry
     this.DeleteKey = function DeleteKey(hkey, path, key)
     {
         if(!key)
@@ -264,6 +288,10 @@ function windows_registry()
             this._AdvApi.RegCloseKey(h.Deref());
         }
     };
+
+    //
+    // This function trys to convert a user name, to a windows security descriptor, which is used as the registry key for user entries
+    //
     this.usernameToUserKey = function usernameToUserKey(user)
     {
         var domain = null
@@ -275,6 +303,7 @@ function windows_registry()
 
         try
         {
+            // Try to fetch the current domain
             if(domain==null)
             {
                 domain = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_ComputerSystem", ['Name'])[0].Name;
@@ -290,6 +319,7 @@ function windows_registry()
             var sid = user;
             if (typeof (user) == 'string')
             {
+                // Try to find the Session ID for the specified domain user
                 var r = this.QueryKey(this.HKEY.LocalMachine, 'SAM\\SAM\\Domains\\Account\\Users\\Names\\' + user);
                 sid = r.default._type;
             }
@@ -298,6 +328,7 @@ function windows_registry()
             {
                 if(u.subkeys[i].endsWith('-' + sid))
                 {
+                    // Try to find the Descriptor Key with the SID that we found
                     return (u.subkeys[i]);
                 }
             }
@@ -312,6 +343,7 @@ function windows_registry()
         {
             if(entries.subkeys[i].split('-').length>5 && !entries.subkeys[i].endsWith('_Classes'))
             {
+                // This will look at the list of domain users that have recently logged into the system
                 try
                 {
                     if (this.QueryKey(this.HKEY.Users, entries.subkeys[i] + '\\Volatile Environment', 'USERDOMAIN') == domain)

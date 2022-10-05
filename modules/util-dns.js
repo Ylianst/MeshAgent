@@ -14,8 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//
+// This module is used to query the DNS server address from the OS
+//
+
 function windows_dns()
 {
+    //
+    // Reference for GetNetworkParams() can be found at:
+    // https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getnetworkparams
+    //
+
     var ret = [];
     var ip = require('_GenericMarshal').CreateNativeProxy('Iphlpapi.dll');
     ip.CreateMethod('GetNetworkParams');
@@ -31,12 +40,16 @@ function windows_dns()
         do
         {
             ret.push(dnsList.Deref(require('_GenericMarshal').PointerSize, 16).toBuffer().toString());
-        } while ((dnsList = dnsList.Deref(0, require('_GenericMarshal').PointerSize).Deref().Deref(0, 48)).Val != 0);
+        } while ((dnsList = dnsList.Deref(0, require('_GenericMarshal').PointerSize).Deref().Deref(0, 48)).Val != 0); // Itereate the list
     }
     return (ret);
 }
 function linux_dns()
 {
+
+    //
+    // The linux implementation will look for the dns address in /etc/resolve.conf
+    //
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.on('data', function () { });
@@ -70,6 +83,9 @@ function linux_dns()
 
 function macos_dns()
 {
+    //
+    // macOS implementation will use the system utility scutil to fetch the dns address
+    //
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.on('data', function () { });
@@ -108,13 +124,13 @@ switch (process.platform)
 {
     case 'linux':
     case 'freebsd':
-        module.exports = linux_dns;
+        module.exports = linux_dns;     // Linux and BSD will use /etc/resolve.conf
         break;
     case 'win32':
-        module.exports = windows_dns;
+        module.exports = windows_dns;   // Windows will use Iphlpapi
         break;
     case 'darwin':
-        module.exports = macos_dns;
+        module.exports = macos_dns;     // macOS will use scutil
         break;
     default:
         module.exports = function () { return ([]); };

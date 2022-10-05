@@ -14,8 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+//
+// This module fetches various Windows System information, such as pending reboot status,
+// volume defrag state, installed applications, windows update status, etc
+//
+
+
 var promise = require('promise');
 
+//
+// This function queries WMI to fetch Windows Update Status
+//
 function qfe()
 {
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\wbem\\wmic.exe', ['wmic', 'qfe', 'list', 'full', '/FORMAT:CSV']);
@@ -41,6 +51,8 @@ function qfe()
     }
     return (result);
 }
+
+// This function uses Windows Powershell to fetch metadata about the currently configured AntiVirus
 function av()
 {
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
@@ -77,6 +89,11 @@ function av()
     }
     return (result);
 }
+
+//
+// This function uses the defrag system utility to query defrag state of the specified volume
+//
+// Note: options.volume must be specified
 function defrag(options)
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -142,6 +159,8 @@ function defrag(options)
     });
     return (ret);
 }
+
+// Helper/Shortcut for registry query
 function regQuery(H, Path, Key)
 {
     try
@@ -153,6 +172,8 @@ function regQuery(H, Path, Key)
         return (null);
     }
 }
+
+// This function returns details on any system pending reboots
 function pendingReboot()
 {
     var tmp = null;
@@ -177,6 +198,9 @@ function pendingReboot()
     return (ret);
 }
 
+//
+// Returns a promise that fetches the list of installed applications
+//
 function installedApps()
 {
     var promise = require('promise');

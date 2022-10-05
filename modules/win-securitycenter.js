@@ -14,6 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+//
+// win-securitycenter queries Windows Security Center to determine status of AntiVirus, Firewall, and Auto Update
+// It should be noted that Window Security Center is not present on Windows Server Skus.
+//
+
 var seccenter = null;
 var WSC_SECURITY_PROVIDER_FIREWALL = 0x1;
 var WSC_SECURITY_PROVIDER_AUTOUPDATE_SETTINGS = 0x2;
@@ -27,10 +33,14 @@ var WSC_SECURITY_PROVIDER_HEALTH_SNOOZE = 3;        // Yellow pillar in English 
 
 try
 {
+    //
+    // Try to dynamically load the APIs for WSC, becuase it is not
+    // present on Windows Server SKUs
+    //
     seccenter = require('_GenericMarshal').CreateNativeProxy('Wscapi.dll');
-    seccenter.CreateMethod('WscGetSecurityProviderHealth');
-    seccenter.CreateMethod('WscRegisterForChanges');
-    seccenter.CreateMethod('WscUnRegisterChanges'); 
+    seccenter.CreateMethod('WscGetSecurityProviderHealth');     // https://learn.microsoft.com/en-us/windows/win32/api/wscapi/nf-wscapi-wscgetsecurityproviderhealth
+    seccenter.CreateMethod('WscRegisterForChanges');            // https://learn.microsoft.com/en-us/windows/win32/api/wscapi/nf-wscapi-wscregisterforchanges
+    seccenter.CreateMethod('WscUnRegisterChanges');             // https://learn.microsoft.com/en-us/windows/win32/api/wscapi/nf-wscapi-wscunregisterchanges
 }
 catch(e)
 {
@@ -63,6 +73,7 @@ function getStatus()
     var ret = { firewall: 'UNKNOWN', antiVirus: 'UNKNOWN', autoUpdate: 'UNKNOWN' };
     if (seccenter != null)
     {
+        // Fetch the current status of Firewall, AntiVirus, and AutoUpdate
         var status = require('_GenericMarshal').CreateVariable(4);
         if (seccenter.WscGetSecurityProviderHealth(WSC_SECURITY_PROVIDER_FIREWALL, status).Val == 0) { ret.firewall = statusString(status.toBuffer().readUInt32LE()); }
         if (seccenter.WscGetSecurityProviderHealth(WSC_SECURITY_PROVIDER_ANTIVIRUS, status).Val == 0) { ret.antiVirus = statusString(status.toBuffer().readUInt32LE()); }
@@ -73,6 +84,9 @@ function getStatus()
 
 if (process.platform == 'win32' && seccenter != null)
 {
+    // 
+    // Setup the event handler for when system status changes
+    //
     var j = { status: getStatus };
     require('events').EventEmitter.call(j, true)
         .createEvent('changed');
@@ -86,10 +100,11 @@ if (process.platform == 'win32' && seccenter != null)
     });
     j.on('~', function ()
     {
+        // Unregister our event handler
         if (seccenter.WscUnRegisterChanges(this._H).Val == 0) { }
     });
 
-    if (seccenter.WscRegisterForChanges(0, j._H, j._EV, require('_GenericMarshal').ObjectToPtr(j)).Val == 0)
+    if (seccenter.WscRegisterForChanges(0, j._H, j._EV, require('_GenericMarshal').ObjectToPtr(j)).Val == 0) // Setup event handling
     {
         j._H = j._H.Deref();
     }
