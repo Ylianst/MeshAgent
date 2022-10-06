@@ -15,11 +15,21 @@ limitations under the License.
 */
 
 
+// 
+// This is a helper module for parsing and enumerating Mesh Agent log entries
+//
+
+//
+// This function parses a log entry, and and pushes each parsed log entry into the results array
+//
 function parseLine(entry)
 {
+
+    // Use a regex to parse the log entry
     var test = entry.match(/^\[.*M\]/);
     if (test == null)
     {
+        // Use a regex to find a windows crash entry
         test = entry.match(/\[.+ => .+:[0-9]+\]/);
         if (test != null)
         {
@@ -34,6 +44,7 @@ function parseLine(entry)
         }
         else
         {
+            // On linux, use a regex to determine if a crash entry contains symbol info
             test = entry.match(/^[\.\/].+\(\) \[0x[0-9a-fA-F]+\]$/);
             if (test != null)
             {
@@ -47,6 +58,7 @@ function parseLine(entry)
             }
             else
             {
+                // use a regex to try to finx the CrashID on linux
                 test = entry.match(/^\[.+_[0-9a-fA-F]{16}\]$/);
                 if(test!=null)
                 {
@@ -56,6 +68,7 @@ function parseLine(entry)
                 }
             }
 
+            // Use a regex to find the crash entry
             test = entry.match(/(?!^=>)\/+.+:[0-9]+$/);
             if(test!=null)
             {
@@ -69,11 +82,13 @@ function parseLine(entry)
     }
     test = test[0];
 
+    // Parse out the timestamp
     var dd = test.substring(1, test.length -1);
     var c = dd.split(' ');
     var t = c[1].split(':');
     if (c[2] == 'PM') { t[0] = parseInt(t[0]) + 12; if (t[0] == 24) { t[0] = 0; } }
 
+    // Parse out the message and the agent hash
     var d = Date.parse(c[0] + 'T' + t.join(':'));
     var msg = entry.substring(test.length).trim();
     var hash = msg.match(/^\[[0-9a-fA-F]{16}\]/);
@@ -107,6 +122,10 @@ function parseLine(entry)
     this.results.push(log);
 }
 
+//
+// This function will accumulate a raw data read from the file system, and attempt
+// to parse the entries line by line
+//
 function readLog_data(buffer)
 {
     var lines = buffer.toString();
@@ -130,6 +149,10 @@ function readLog_data(buffer)
     }
 }
 
+//
+// This function will attempt to read the Mesh Agent log specified by 'path'
+// and return an array of log entries
+//
 function readLogEx(path)
 {
     var ret = [];
@@ -138,7 +161,7 @@ function readLogEx(path)
         var s = require('fs').createReadStream(path);
         s.buffered = null;
         s.results = ret;
-        s.on('data', readLog_data);
+        s.on('data', readLog_data); 
         s.resume();
         if (s.buffered != null) { readLog_data.call(s, s.buffered); s.buffered = null; }
         s.removeAllListeners('data');
@@ -151,6 +174,10 @@ function readLogEx(path)
     return (ret);
 }
 
+//
+// This function will attempt to read the Mesh Agent log specified by 'path'
+// and return an array of log entries. 'criteria' can be the number of log entries to fetch, or a timestamp of the oldest entry to fetch
+//
 function readLog(criteria, path)
 {
     var objects = readLogEx(path == null ? (process.execPath.split('.exe').join('') + '.log') : path);
