@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+//
+// This module provides helper functions to interact/manipulate the windows console
+//
+
 var TrayIconFlags =
     {
         NIF_MESSAGE: 0x00000001,
@@ -33,6 +38,7 @@ var TrayIconFlags =
     };
 var NOTIFYICON_VERSION_4 = 4;
 var MessageTypes = { WM_APP: 0x8000, WM_USER: 0x0400 };
+
 function WindowsConsole()
 {
     if (process.platform == 'win32')
@@ -41,13 +47,13 @@ function WindowsConsole()
         this._Marshal = require('_GenericMarshal');
         this._kernel32 = this._Marshal.CreateNativeProxy("kernel32.dll");
         this._user32 = this._Marshal.CreateNativeProxy("user32.dll");
-        this._kernel32.CreateMethod("GetConsoleWindow");
-        this._kernel32.CreateMethod('GetCurrentThread');
-        this._user32.CreateMethod("ShowWindow");
-        this._user32.CreateMethod("LoadImageA");
-        this._user32.CreateMethod({ method: 'GetMessageA', threadDispatch: 1 });
+        this._kernel32.CreateMethod("GetConsoleWindow");                            // https://learn.microsoft.com/en-us/windows/console/getconsolewindow
+        this._kernel32.CreateMethod('GetCurrentThread');                            // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthread
+        this._user32.CreateMethod("ShowWindow");                                    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
+        this._user32.CreateMethod("LoadImageA");                                    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadimagea
+        this._user32.CreateMethod({ method: 'GetMessageA', threadDispatch: 1 });    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessagea
         this._shell32 = this._Marshal.CreateNativeProxy('Shell32.dll');
-        this._shell32.CreateMethod('Shell_NotifyIconA');
+        this._shell32.CreateMethod('Shell_NotifyIconA');                            // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyicona
 
         this._handle = this._kernel32.GetConsoleWindow();
         this.minimize = function () {
@@ -64,11 +70,14 @@ function WindowsConsole()
         };
 
 
-        this._loadicon = function (imagePath) {
+        // Load an icon, and return a HANDLE to it
+        this._loadicon = function (imagePath)
+        {
             var h = this._user32.LoadImageA(0, this._Marshal.CreateVariable(imagePath), 1, 0, 0, 0x00000010 | 0x00008000 | 0x00000040); // LR_LOADFROMFILE | LR_SHARED | LR_DEFAULTSIZE
             return (h);
         };
 
+        // Create a tray icon
         this.SetTrayIcon = function SetTrayIcon(options)
         {
             var data = this._Marshal.CreateVariable(this._Marshal.PointerSize == 4 ? 508 : 528);
@@ -101,13 +110,13 @@ function WindowsConsole()
             if (options.szInfo) { Buffer.from(options.szInfo).copy(szInfo.toBuffer()); }
             if (options.szInfoTitle) { Buffer.from(options.szInfoTitle).copy(szInfoTitle.toBuffer()); }
 
-
+            // Setup a message pump, so we can receive windows events for the tray icon
             var MessagePump = require('win-message-pump');
             retVal = { _ObjectID: 'WindowsConsole.TrayIcon', MessagePump: new MessagePump(options) };
             var retValEvents = require('events').inherits(retVal);
-            retValEvents.createEvent('ToastClicked');
-            retValEvents.createEvent('IconHover');
-            retValEvents.createEvent('ToastDismissed');
+            retValEvents.createEvent('ToastClicked');   // Dispatched when the user clicks on the toast
+            retValEvents.createEvent('IconHover');      // Dispatched when the user hovers over the tray icon
+            retValEvents.createEvent('ToastDismissed'); // Dispatched when the toast is dismissed
             retVal.Options = options;
             retVal.MessagePump.TrayIcon = retVal;
             retVal.MessagePump.NotifyData = data;
@@ -126,6 +135,7 @@ function WindowsConsole()
             });
             retVal.MessagePump.on('message', function onWindowsMessage(msg)
             {
+                // Process the Windows Message, if we are interested in it
                 if(msg.message == this.TrayIcon.Options.filter)
                 {
                     var handled = false;

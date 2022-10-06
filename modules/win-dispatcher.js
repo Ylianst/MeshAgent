@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Intel Corporation
+Copyright 2019-2022 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,6 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+//
+// win-dispatcher is used as a helper function to be able to dispatch
+// code to be executed by a child process, by way of using an IPC to interact
+// with the child process
+//
+
+//
+// This was an anonymous function that was pulled out, so that the 
+// JS runtime would not try to create strong references to parent scoped objects, 
+// when the anonymous function was used as a function callback
+//
 function empty_func()
 {
     var p = this.parent;
@@ -28,10 +40,19 @@ function empty_func()
         p = null;
     }
 }
+
+//
+// This was an anonymous function that was pulled out, so that the 
+// JS runtime would not try to create strong references to parent scoped objects, 
+// when the anonymous function was used as a function callback
+//
 function empty_func2()
 {
 }
 
+//
+// This function sends a command via IPC to the child process to invoke an action
+//
 function ipc_invoke(method, args)
 {
     var d, h = Buffer.alloc(4);
@@ -57,30 +78,41 @@ function ipc2_server_finalized()
 {
     //console.log('IPC2 Server Finalized');
 }
+
+//
+// Secondary Connection handler function that is called on IPC connection, to initialize some back pointers
+//
 function ipc2_connection(s)
 {
     this.parent._control = s;
     this.parent._control._parent = this;
     this.close();
     this.parent.invoke = ipc_invoke;
-    s.on('end', empty_func2); // DO NOT DELETE this line
+    s.on('end', empty_func2); // DO NOT DELETE this line! 
     s.on('~', ipc2_finalized);
 }
+
+//
+// Primary Connection handler function that is called on IPC connection, that is used to initialize the child process
+//
 function ipc_connection(s)
 {
     this.parent._client = s;
     this.parent._client._parent = this;
     this.close();
     var d, h = Buffer.alloc(4);
-    s.descriptorMetadata = 'win-dispatcher, ' + this.parent.options.launch.module + '.' + this.parent.options.launch.method + '()';
+    s.descriptorMetadata = 'win-dispatcher, ' + this.parent.options.launch.module + '.' + this.parent.options.launch.method + '()'; // Set metadata for FDSNAPSHOT
 
     for (var m in this.parent.options.modules)
     {
+        // Enumerate each module passed in, and pass it along to the child via IPC
         d = Buffer.from(JSON.stringify({ command: 'addModule', value: { name: this.parent.options.modules[m].name, js: this.parent.options.modules[m].script } }));
         h.writeUInt32LE(d.length + 4);
         s.write(h);
         s.write(d);
     }
+
+    // Launch the specified module/function via IPC
     d = Buffer.from(JSON.stringify({ command: 'launch', value: { split: this.parent.options.launch.split ? true : false, module: this.parent.options.launch.module, method: this.parent.options.launch.method, args: this.parent.options.launch.args } }));
     h.writeUInt32LE(d.length + 4);
     s.write(h);
@@ -89,6 +121,7 @@ function ipc_connection(s)
     this.parent.emit('connection', s);
 }
 
+// Shutdown the IPC to the child. The child will detect this and shutdown as well.
 function dispatcher_shutdown()
 {
     this._ipc.close();
@@ -97,14 +130,22 @@ function dispatcher_shutdown()
     this._ipc2 = null;
 }
 
+//
+// Dispatch an operation to a child process
+//
 function dispatch(options)
 {
+    // These are the minimum options that MUST be passed in
     if (!options || !options.modules || !options.launch || !options.launch.module || !options.launch.method || !options.launch.args) { throw ('Invalid Parameters'); }
 
     var ipcInteger
     var ret = { options: options };
     require('events').EventEmitter.call(ret, true).createEvent('connection');
 
+    //
+    // Create TWO IPC channels to the child process... The primary is used to implement a stream directly to the child process's stream object
+    // The secondary IPC channel is used as a "control channel" with the child process itself.
+    //
     ret._ipc = require('net').createServer(); ret._ipc.parent = ret;
     ret._ipc2 = require('net').createServer(); ret._ipc2.parent = ret;
     ret._ipc.on('close', empty_func);
@@ -127,6 +168,10 @@ function dispatch(options)
         {
         }
     }
+
+    //
+    // The child process will hide the console, and then initalize as a client to the parent process
+    //
     var str = Buffer.from("require('win-console').hide();require('win-dispatcher').connect('" + ipcInteger + "');").toString('base64');
     ret._ipc2.once('connection', ipc2_connection);
     ret._ipc.once('connection', ipc_connection);
@@ -134,10 +179,16 @@ function dispatch(options)
 
     try
     {
+        //
+        // Try to fetch user/domain settings to configure the child process
+        //
         var user = null;
         var domain = null;
         if(options.user == null)
         {
+            // 
+            // If no user was specified, we'll use the same user as the parent
+            //
             if (require('user-sessions').getProcessOwnerName(process.pid).tsid == 0)
             {
                 user = 'SYSTEM'
@@ -161,6 +212,9 @@ function dispatch(options)
 
         console.info1('user- ' + user, 'domain- ' + domain);
 
+        //
+        // Use the windows scheduler to schedule the child process to run as the specified user, immediately
+        //
         var task = { name: 'MeshUserTask', user: user, domain: domain, execPath: process.execPath, arguments: ['-b64exec ' + str] };
         require('win-tasks').addTask(task);
         require('win-tasks').getTask({ name: 'MeshUserTask' }).run();
@@ -172,6 +226,10 @@ function dispatch(options)
         console.info1(xx);
     }
 
+    //
+    // If we get here, it means we were unable to use the Windows Task Schedular COM API, so we will
+    // fallback to using SCHTASKS instead
+    //
     console.info1('Using SCHTASKS...');
 
     var taskoptions = { env: { _target: process.execPath, _args: '-b64exec ' + str, _user: '"' + options.user + '"' } };
@@ -180,6 +238,10 @@ function dispatch(options)
         taskoptions.env[c1e] = process.env[c1e];
     }
 
+    //
+    // We're going to use Windows Powershell to schedule the task, because there are a few settings that we need to
+    // also specify which cannot be set directly with SCHTASKS
+    //
     var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
     child.stderr.on('data', empty_func2);
     child.stdout.on('data', empty_func2);
@@ -201,9 +263,9 @@ function dispatch(options)
     child.stdin.write('$ts.connect()\r\n');
     child.stdin.write('$tsfolder = $ts.getfolder("\\")\r\n');
     child.stdin.write('$task = $tsfolder.GetTask("MeshUserTask")\r\n');
-    child.stdin.write('$taskdef = $task.Definition\r\n');
-    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');
-    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');
+    child.stdin.write('$taskdef = $task.Definition\r\n');                               
+    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');         // This needs to be set, so that the task will be scheduled regardless of AC power state
+    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');     // This needs to be set, so that the task will be scheduled regardless of AC power state
     child.stdin.write('$taskdef.Actions.Item(1).Path = $env:_target\r\n');
     child.stdin.write('$taskdef.Actions.Item(1).Arguments = $env:_args\r\n');
     child.stdin.write('$tsfolder.RegisterTaskDefinition($task.Name, $taskdef, 4, $null, $null, $null)\r\n');
@@ -215,11 +277,18 @@ function dispatch(options)
     return (ret);
 }
 
+//
+// This function is called by the child process, so that it can act as client to the parent process
+// It contains all the logic to establish the two IPC channels
+//
 function connect(ipc)
 {
     var ipcPath = '\\\\.\\pipe\\taskRedirection-' + ipc;
     global.ipc2Client = require('net').createConnection({ path: ipcPath + 'C' }, function ()
     {
+        //
+        // This is the secondary channel, that is used as a control channel after the child operation is launched
+        //
         this.on('data', function (c)
         {
             var cLen = c.readUInt32LE(0);
@@ -241,6 +310,10 @@ function connect(ipc)
     });
     global.ipcClient = require('net').createConnection({ path: ipcPath }, function ()
     {
+        //
+        // This is the primary IPC channel. It is used to establish/initialize what will run in the child process
+        // It will ultimately result in a stream object being piped to whatever function is launched
+        //
         this.on('close', function () { process.exit(); });
         this.on('data', function (c)
         {
@@ -254,9 +327,9 @@ function connect(ipc)
             switch (cmd.command)
             {
                 case 'addModule':
-                    addModule(cmd.value.name, cmd.value.js);
+                    addModule(cmd.value.name, cmd.value.js);        // Adds a JS module to the module loader
                     break;
-                case 'launch':
+                case 'launch':                                      // Launches the specified module/function
                     var obj = require(cmd.value.module);
                     global._proxyStream = obj[cmd.value.method].apply(obj, cmd.value.args);
                     if (cmd.value.split)
