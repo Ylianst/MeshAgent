@@ -14,9 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//
+// util-language is a helper module to fetch the currently configured Language Locale of the Operating System
+//
 
+//
+// This is a windows helper function to convert LCID to language name
+//
 function toLang(val)
 {
+    //
+    // Windows Language codes can be found at:
+    // https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/6c085406-a698-4e12-9d4d-c3b0ee3dbc4a
+    //
+
     var ret;
     switch (val)
     {
@@ -959,10 +970,15 @@ function toLang(val)
     }
     return (ret);
 }
+
+//
+// Try to determine the current language locale
+//
 function getCurrent()
 {
     if(process.platform == 'win32')
     {
+        // On windows wi will use WMI via WMIC to get the LCID. 
         var child = require('child_process').execFile(process.env['windir'] + '\\system32\\wbem\\wmic.exe', ['wmic', 'os', 'get', 'oslanguage','/FORMAT:LIST']);
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
@@ -975,6 +991,7 @@ function getCurrent()
             tokens = lines[i].split('=');
             if(tokens[0]=='OSLanguage')
             {
+                // Convert LCID to language string
                 return (toLang(tokens[1]));
             }
         }
@@ -983,12 +1000,14 @@ function getCurrent()
 
     if(process.env['LANG'])
     {
+        // If 'LANG" is defined in the environment variable, we can just return that
         return (process.env['LANG'].split('.')[0]);
     }
     else
     {
         if (process.platform == 'darwin')
         {
+            // On macOS we can use the system utility 'osascript' to fetch the current locale of the system
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
@@ -1000,6 +1019,7 @@ function getCurrent()
         {
             try
             {
+                // On Linux/BSD, we are goign to fetch the environment variables of the Display Manager process, and see what locale was set for it
                 var uid = require('user-sessions').gdmUid;
                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
@@ -1019,7 +1039,7 @@ function getCurrent()
     }
 }
 
-
+// This property will fetch the current locale the first time, and cache the results
 var obj = {};
 Object.defineProperty(obj, 'current', {
     get: function ()
@@ -1039,6 +1059,9 @@ module.exports = obj;
 
 if (process.platform == 'win32')
 {
+    //
+    // On Windows, we will set a property to fetch/cache the wmicXslPath
+    //
     Object.defineProperty(module.exports, 'wmicXslPath',
         {
             get: function ()

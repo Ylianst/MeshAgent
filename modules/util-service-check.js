@@ -15,21 +15,40 @@ limitations under the License.
 */
 
 
+//
+// This is a windows helper that will try to determine the service name for the currently running service
+//
+
+//
+// Will return the name of the currently running service if it can be determined, null otherwise
+//
 function win_serviceCheck()
 {
     var s;
     var reg = require('win-registry');
     var path;
     var values = reg.QueryKey(reg.HKEY.LocalMachine, 'SOFTWARE\\Open Source');
+
+    //
+    // The MeshAgent will normally add a registry entry into the above registry path, at installation time
+    //
+
     if (values.subkeys)
     {
         for (var i in values.subkeys)
         {
             try
             {
+                //
+                // We are enumerating all the Mesh Agents listed in the registry above, and check with the
+                // windows service manager to see if the PID matches the PID of the current process
+                //
                 s = require('service-manager').manager.getService(values.subkeys[i]);
                 if(s.isMe())
                 {
+                    //
+                    // This service is us, so we can return the results
+                    //           
                     s.close();
                     return (values.subkeys[i]);
                 }
@@ -48,10 +67,16 @@ function win_serviceCheck()
     values = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services');
     if (values.subkeys)
     {
+        //
+        // We couldn't find a match in the registry where the Mesh Agent normally saves information about installation,
+        // so we're going to just enumerate all the windows services, and try to manually brute force it
+        //
+
         for(var i in values.subkeys)
         {
             try
             {
+                // We're going to look at the exe path for each enumerated service
                 path = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + values.subkeys[i], 'ImagePath');
             }
             catch(xx)
@@ -65,13 +90,16 @@ function win_serviceCheck()
                 if (path.startsWith('"')) { path = path.substring(1); }
                 if(path == process.execPath)
                 {
+                    //
+                    // If the service's exe path matches the exe path of the current process, we'll check the PID to see if it is indeed us
+                    //
                     try
                     {
                         s = require('service-manager').manager.getService(values.subkeys[i]);
                         if(s.isMe())
                         {
                             s.close();
-                            return (values.subkeys[i]);
+                            return (values.subkeys[i]); // It is a match!
                         }
                         s.close();
                     }
@@ -82,7 +110,7 @@ function win_serviceCheck()
             }
         }
     }
-    return (null);
+    return (null); // We couldn't find the right service
 }
 
 switch(process.platform)
