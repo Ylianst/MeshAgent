@@ -15,11 +15,18 @@ limitations under the License.
 */
 
 
+//
+// This module provides wget functionality on platforms that lack wget
+//
+
 var promise = require('promise');
 var http = require('http');
 var writable = require('stream').Writable;
 
 
+//
+// Returns a promise, that connects to a remoteUri, saving the target to localFilePath, using the specified options
+//
 function wget(remoteUri, localFilePath, wgetoptions)
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -58,7 +65,9 @@ function wget(remoteUri, localFilePath, wgetoptions)
     var reqOptions = require('http').parseUri(remoteUri);
     if (wgetoptions)
     {
-        for (var inputOption in wgetoptions) {
+        // Enumerate the specified options, and save them as http options
+        for (var inputOption in wgetoptions)
+        {
             reqOptions[inputOption] = wgetoptions[inputOption];
         }
     }
@@ -76,6 +85,9 @@ function wget(remoteUri, localFilePath, wgetoptions)
         }
         else
         {
+            //
+            // The http response was successful, so lets setup the destination stream, and hash stream
+            //
             try
             {
                 this._file = require('fs').createWriteStream(this.promise._localFilePath, { flags: 'wb' });
@@ -87,13 +99,13 @@ function wget(remoteUri, localFilePath, wgetoptions)
                 this.promise._rej(e);
                 return;
             }
-            this._sha.on('hash', function (h) { this.promise._res(h.toString('hex')); });
+            this._sha.on('hash', function (h) { this.promise._res(h.toString('hex')); }); // Resolve the promise with the hash of the received data
             this._accumulator = new writable(
                 {
                     write: function(chunk, callback)
                     {
                         this.promise._totalBytes += chunk.length;
-                        this.promise.emit('bytes', this.promise._totalBytes);
+                        this.promise.emit('bytes', this.promise._totalBytes); // Emit the running total of bytes received as 'bytes'
                         return (true);
                     },
                     final: function(callback)
@@ -102,9 +114,9 @@ function wget(remoteUri, localFilePath, wgetoptions)
                     }
                 });
             this._accumulator.promise = this.promise;
-            imsg.pipe(this._file);
-            imsg.pipe(this._accumulator);
-            imsg.pipe(this._sha);
+            imsg.pipe(this._file);          // Write the received data to the file stream
+            imsg.pipe(this._accumulator);   // Accumulate the number of bytes received to emit 'byte'
+            imsg.pipe(this._sha);           // Hash the received data using SHA384
         }
     });
     ret.progress = function () { return (this._totalBytes); };
