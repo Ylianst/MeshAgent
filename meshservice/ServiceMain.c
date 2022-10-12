@@ -1480,7 +1480,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
 			// Set Tooltip for ServerLocation
 			HWND hServerLocationHWND = GetDlgItem(hDlg, IDC_SERVERLOCATION);
-			HWND hToolTip = CreateWindowExW(NULL, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, hDlg, NULL, GetModuleHandle(NULL), NULL);
+			HWND hToolTip = CreateWindowExW(0, TOOLTIPS_CLASSW, NULL, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, hDlg, NULL, GetModuleHandle(NULL), NULL);
 			DWORD _e = GetLastError();
 			if (hToolTip != NULL && hServerLocationHWND != NULL)
 			{
