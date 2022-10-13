@@ -56,7 +56,8 @@ function getAutoProxyDomain()
     {
         domain = process.argv.getParameter('autoproxy');
     }
-    if (domain.indexOf('.') < 0) { return (null); }
+
+    if (domain == null || domain.indexOf('.') < 0) { return (null); }
     if (domain != null && !domain.startsWith('.')) { domain = '.' + domain; }
     return (domain);
 }
@@ -585,13 +586,21 @@ function auto_proxy_helper(target)
     // The first thing we need to do, is disable any existing proxy settings, otherwise we won't be able to find the autoconfig script
     require('global-tunnel').end();
 
-
     var promise = require('promise');
 
     var ret = new promise(promise.defaultInit);
-    var wpadip = resolve('wpad' + (this.domain!=null?this.domain:''));
+    if (!this.enabled) { ret.resolve(null); return (ret); }
+
+    var wpadip = resolve('wpad' + (this.domain != null ? this.domain : ''));
+
+    if (wpadip.length == 0)
+    {
+        ret.resolve(null);
+        return (ret);
+    }
+
     ret.target = target;
-    ret.r = require('http').get('http://' + wpadip + '/wpad.dat');
+    ret.r = require('http').get('http://' + wpadip[0] + '/wpad.dat');
     ret.r.p = ret;
     ret.r.on('response', function (img)
     {
@@ -635,3 +644,41 @@ switch (process.platform)
 }
 module.exports.autoHelper = auto_proxy_helper;
 module.exports.domain = getAutoProxyDomain();
+
+Object.defineProperty(module.exports, 'auto',
+    {
+        get: function ()
+        {
+            if (this.enabled)
+            {
+                var result = resolve('wpad' + (this.domain != null ? this.domain : ''));
+                return (result.length > 0);
+            }
+            else
+            {
+                return (false);
+            }
+        }
+    });
+
+Object.defineProperty(module.exports, 'enabled',
+    {
+        get: function ()
+        {
+            var domain = null;
+            try
+            {
+                domain = _MSH().autoproxy;
+            }
+            catch (e) { }
+            if (domain == null)
+            {
+                domain = process.argv.getParameter('autoproxy');
+            }
+            if (domain != null)
+            {
+                if (domain.indexOf('.') >= 0) { domain = 1; }
+            }
+            return (domain == 1 || domain == '"1"');
+        }
+    })
