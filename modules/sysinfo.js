@@ -14,6 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+//
+// sysinfo is a helper module used to query various system metrics in a platform agnostic fashion
+//
+
+
 var PDH_FMT_LONG = 0x00000100;
 var PDH_FMT_DOUBLE = 0x00000200;
 
@@ -22,18 +28,21 @@ if (process.platform == 'win32')
 {
     var GM = require('_GenericMarshal');
     GM.kernel32 = GM.CreateNativeProxy('kernel32.dll');
-    GM.kernel32.CreateMethod('GlobalMemoryStatusEx');
+    GM.kernel32.CreateMethod('GlobalMemoryStatusEx');       // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-globalmemorystatusex
 
     GM.pdh = GM.CreateNativeProxy('pdh.dll');
-    GM.pdh.CreateMethod('PdhAddEnglishCounterA');
-    GM.pdh.CreateMethod('PdhCloseQuery');
-    GM.pdh.CreateMethod('PdhCollectQueryData');
-    GM.pdh.CreateMethod('PdhGetFormattedCounterValue');
-    GM.pdh.CreateMethod('PdhGetFormattedCounterArrayA');
-    GM.pdh.CreateMethod('PdhOpenQueryA');
-    GM.pdh.CreateMethod('PdhRemoveCounter');
+    GM.pdh.CreateMethod('PdhAddEnglishCounterA');           // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhaddenglishcountera
+    GM.pdh.CreateMethod('PdhCloseQuery');                   // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhclosequery
+    GM.pdh.CreateMethod('PdhCollectQueryData');             // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhcollectquerydata
+    GM.pdh.CreateMethod('PdhGetFormattedCounterValue');     // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhgetformattedcountervalue
+    GM.pdh.CreateMethod('PdhGetFormattedCounterArrayA');    // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhgetformattedcounterarraya
+    GM.pdh.CreateMethod('PdhOpenQueryA');                   // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhopenquerya
+    GM.pdh.CreateMethod('PdhRemoveCounter');                // https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhremovecounter
 }
 
+//
+// Windows Implementation for fetching CPU utilization
+//
 function windows_cpuUtilization()
 {
     var p = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -49,12 +58,14 @@ function windows_cpuUtilization()
     if ((err = GM.pdh.PdhCollectQueryData(p.cpu.Deref()).Val != 0)) { p._rej(err); return; }
     p._timeout = setTimeout(function (po)
     {
+        // Query in 100ms
+
         var u = { cpus: [] };
         var bufSize = GM.CreateVariable(4);
         var itemCount = GM.CreateVariable(4);
         var buffer, szName, item;
         var e;
-        if ((e = GM.pdh.PdhCollectQueryData(po.cpu.Deref()).Val != 0)) { po._rej(e); return; }
+        if ((e = GM.pdh.PdhCollectQueryData(po.cpu.Deref()).Val != 0)) { po._rej(e); return; /* Reject Promise if this fails */ }
 
         if ((e = GM.pdh.PdhGetFormattedCounterArrayA(po.cpuTotal.Deref(), PDH_FMT_DOUBLE, bufSize, itemCount, 0).Val) == -2147481646)
         {
@@ -62,21 +73,22 @@ function windows_cpuUtilization()
         }
         else
         {
+            // Reject Promise if this failed
             po._rej(e);
             return;
         }
-        if ((e = GM.pdh.PdhGetFormattedCounterArrayA(po.cpuTotal.Deref(), PDH_FMT_DOUBLE, bufSize, itemCount, buffer).Val) != 0) { po._rej(e); return; }
-        for(var i=0;i<itemCount.toBuffer().readUInt32LE();++i)
+        if ((e = GM.pdh.PdhGetFormattedCounterArrayA(po.cpuTotal.Deref(), PDH_FMT_DOUBLE, bufSize, itemCount, buffer).Val) != 0) { po._rej(e); return;  /* reject promise on failuer */ }
+        for(var i=0;i<itemCount.toBuffer().readUInt32LE();++i) // Enumerate the counter array
         {
             item = buffer.Deref(i * 24, 24);
             szName = item.Deref(0, GM.PointerSize).Deref();
             if (szName.String == '_Total')
             {
-                u.total = item.Deref(16, 8).toBuffer().readDoubleLE();
+                u.total = item.Deref(16, 8).toBuffer().readDoubleLE();      // Add Value for TOTAL
             }
             else
             {
-                u.cpus[parseInt(szName.String)] = item.Deref(16, 8).toBuffer().readDoubleLE();
+                u.cpus[parseInt(szName.String)] = item.Deref(16, 8).toBuffer().readDoubleLE();  // Add Value for CPU index
             }
         }
 
@@ -87,18 +99,23 @@ function windows_cpuUtilization()
 
     return (p);
 }
+
+//
+// Windows Implementation to fetch memory utilization
+//
 function windows_memUtilization()
 {
     var info = GM.CreateVariable(64);
     info.Deref(0, 4).toBuffer().writeUInt32LE(64);
-    GM.kernel32.GlobalMemoryStatusEx(info);
+    GM.kernel32.GlobalMemoryStatusEx(info); // Fetch the memory Utilization Metrics
 
     var ret =
         {
-            MemTotal: require('bignum').fromBuffer(info.Deref(8, 8).toBuffer(), { endian: 'little' }),
-            MemFree: require('bignum').fromBuffer(info.Deref(16, 8).toBuffer(), { endian: 'little' })
+            MemTotal: require('bignum').fromBuffer(info.Deref(8, 8).toBuffer(), { endian: 'little' }),  // Convert total to bignum type
+            MemFree: require('bignum').fromBuffer(info.Deref(16, 8).toBuffer(), { endian: 'little' })   // Convert free to bignum type
         };
 
+    // Calculate the remaining metrics, and convert to bignum type
     ret.percentFree = ((ret.MemFree.div(require('bignum')('1048576')).toNumber() / ret.MemTotal.div(require('bignum')('1048576')).toNumber()) * 100);//.toFixed(2);
     ret.percentConsumed = ((ret.MemTotal.sub(ret.MemFree).div(require('bignum')('1048576')).toNumber() / ret.MemTotal.div(require('bignum')('1048576')).toNumber()) * 100);//.toFixed(2);
     ret.MemTotal = ret.MemTotal.toString();
@@ -108,9 +125,14 @@ function windows_memUtilization()
 
 var cpuLastIdle = [];
 var cpuLastSum = [];
+
+
+//
+// Linux Implementation of fetching the CPU Utilization, which uses procfs
+//
 function linux_cpuUtilization() {
     var ret = { cpus: [] };
-    var info = require('fs').readFileSync('/proc/stat');
+    var info = require('fs').readFileSync('/proc/stat');  // fetch metrics from procfs
     var lines = info.toString().split('\n');
     var columns;
     var x, y;
@@ -120,6 +142,7 @@ function linux_cpuUtilization() {
         columns = lines[i].split(' ');
         if (!columns[0].startsWith('cpu')) { break; }
 
+        // Parse out the utilization metrics, calulcating the values if necessary
         x = 0, currSum = 0;
         while (columns[++x] == '');
         for (y = x; y < columns.length; ++y) { currSum += parseInt(columns[y]); }
@@ -145,6 +168,10 @@ function linux_cpuUtilization() {
     p._res(ret);
     return (p);
 }
+
+//
+// Linux implementation of memory utilization, using procfs
+//
 function linux_memUtilization()
 {
     var ret = {};
@@ -169,6 +196,9 @@ function linux_memUtilization()
     return (ret);
 }
 
+//
+// macOS CPU Utilization, where we just use system utility 'top'
+//
 function macos_cpuUtilization()
 {
     var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
@@ -194,6 +224,10 @@ function macos_cpuUtilization()
 
     return (ret);
 }
+
+//
+// macOS Memory Utilization, using system utility 'top'
+//
 function macos_memUtilization()
 {
     var mem = { };
@@ -222,6 +256,9 @@ function macos_memUtilization()
     }
 }
 
+//
+// Windows Implementation of fetching system thermals, using WMI and system utility 'wmic'
+//
 function windows_thermals()
 {
     var ret = [];
@@ -241,6 +278,9 @@ function windows_thermals()
     return (ret);
 }
 
+//
+// Linux Implementation of fetching system thermals, from the filesystem
+//
 function linux_thermals()
 {
     child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -253,6 +293,9 @@ function linux_thermals()
     return (ret);
 }
 
+//
+// macOS Implementation of fetching system thermals, using system utility 'powermetrics'
+//
 function macos_thermals()
 {
     var ret = [];

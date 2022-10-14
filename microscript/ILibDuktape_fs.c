@@ -2590,7 +2590,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 							exports.statSync = function statSync(pathstr) { return(this._statSync(this._fixwinpath(pathstr))); };\
 							exports.readdirSync = function readdirSync(pathstr)\
 							{\
+								var sysnative=false;\
 								pathstr = exports._fixwinpath(pathstr);\
+								if(require('os').arch()=='x64' && require('_GenericMarshal').PointerSize==4 && pathstr.split('\\\\*').join('').toLowerCase()==process.env['windir'].toLowerCase()) { sysnative=true; }\
 								if(!pathstr.endsWith('*'))\
 								{\
 									if(pathstr.endsWith('\\\\'))\
@@ -2602,7 +2604,9 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 										pathstr += '\\\\*';\
 									}\
 								}\
-								return(exports._readdirSync(pathstr));\
+								var ret = exports._readdirSync(pathstr);\
+								if(sysnative) { ret.push('sysnative'); }\
+								return(ret);\
 							};\
 						}";
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, copyFile, sizeof(copyFile) - 1);
