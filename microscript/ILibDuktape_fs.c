@@ -2608,6 +2608,7 @@ void ILibDuktape_fs_PUSH(duk_context *ctx, void *chain)
 								if(sysnative) { ret.push('sysnative'); }\
 								return(ret);\
 							};\
+							exports.readdirSync.version=1;\
 						}";
 	ILibDuktape_ModSearch_AddHandler_AlsoIncludeJS(ctx, copyFile, sizeof(copyFile) - 1);
 }
