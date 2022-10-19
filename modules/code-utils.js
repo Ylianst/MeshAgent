@@ -15,7 +15,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//
+// code-utils is a helper module that enables the ability to compress and decompress on the fly
+// to be able to embed and extact JavaScript modules from native C code on the fly.
+//
 
+//
+// This function will read the specified C file, and decompress(inflate)/extract all the embedded JavaScript modules,
+// and save them to the specified path
+//
+// filePath: C file to read from. By default: ILibDuktape_Polyfills.c
+// expandedPath: Destination folder for extracted files. By default: modules_expanded
+//
 function expand(options)
 {
     if (options == null) { options = {}; }
@@ -80,6 +91,10 @@ function expand(options)
     writeExpandedModules(options);
 }
 
+//
+// This function writes the extracted modules into the specified path
+// expandedPath: The destination folder to write the extracted files. By default: modules_expanded
+//
 function writeExpandedModules(options)
 {
     if (options.expandedPath == null) { options.expandedPath = 'modules_expanded'; }
@@ -100,5 +115,136 @@ function writeExpandedModules(options)
     }
 }
 
-module.exports = { expand: expand }
+//
+// This function reads all the Javascript files from the specified folder, and creates a table
+// expandedPath: The folder to read the files from. By default: modules_expanded
+//
+function readExpandedModules(options)
+{
+    var valuex, name;
+    var data;
+    var i;
+    options.modules = [];
+    var files = require('fs').readdirSync(options.expandedPath);
+    files.sort();
+
+    for (i = 0; i < files.length; ++i)
+    {
+        if (files[i].endsWith('.js'))
+        {
+            name = files[i].split('.js')[0];
+            try
+            {
+                valuex = (new Date(require('fs').statSync(options.expandedPath + '/' + files[i]).mtime)).getTime() / 1000;
+                if (valuex > 0)
+                {
+                    valuex = (new Date(valuex * 1000)).toString().split(' ').join('T');
+                    valuex = ", '" + valuex + "'";
+
+                }
+                else
+                {
+                    valuex = '';
+                }
+
+                data = require('fs').readFileSync(options.expandedPath + '/' + files[i]);
+                data = compress(data);
+                var ret = "duk_peval_string_noresult(ctx, \"addCompressedModule('" + name + "', Buffer.from('" + data + "', 'base64')" + valuex + ");\");";
+
+                if (ret.length > 16300)
+                {
+                    // MS Visual Studio has a maxsize limitation
+                    ret = '\n\tchar *_' + name.split('-').join('') + ' = ILibMemory_Allocate(' + (data.length + 1) + ', 0, NULL, NULL);\n';
+                    var z = 0;
+                    while (z < data.length)
+                    {
+                        var chunk = data.substring(z, z + 16000);
+                        ret += ('\tmemcpy_s(_' + name.split('-').join('') + ' + ' + z + ', ' + (data.length - z) + ', "' + chunk + '", ' + chunk.length + ');\n');
+                        z += chunk.length;
+                    }
+                    valuex = valuex.split("'").join('"');
+                    ret += ('\tILibDuktape_AddCompressedModuleEx(ctx, "' + name + '", _' + name.split('-').join('') + valuex + ');\n');
+                    ret += ('\tfree(_' + name.split('-').join('') + ');\n');
+                }
+
+                options.modules.push({ name: files[i], data: ret });
+            }
+            catch (x)
+            {
+            }
+        }
+    }
+}
+
+//
+// This function reads all the JavaScript files in the specified path, 'modules_expanded' by default, and
+// deflates them, and embeds the modules into the specified C file, 'ILibDuktape_Polyfills.c' by default.
+//
+function shrink(options)
+{
+    if (options == null) { options = {}; }
+    if (options.expandedPath == null) { options.expandedPath = 'modules_expanded'; }
+    if (options.filePath == null) { options.filePath = 'C:/GITHub//MeshAgent/microscript/ILibDuktape_Polyfills.c'; }
+    if (options.modulesPath == null) { options.modulesPath = 'C:/GITHub/MeshAgent/modules'; }
+
+    readExpandedModules(options);
+    insertCompressed(options);
+}
+
+//
+// This function reads the specified C file, 'ILibDuktape_Polyfills.c' by default, end replaces the embedded JavaScript modules
+// with the ones specified in options.
+//
+function insertCompressed(options)
+{
+    var inserted = [];
+    var file = require('fs').readFileSync(options.filePath);
+    var section = file.toString().split('void ILibDuktape_Polyfills_JS_Init(');
+    var match1 = section[1].split('// {{ BEGIN AUTO-GENERATED BODY');
+    var match2 = match1[1].split('// }} END OF AUTO-GENERATED BODY');
+    var i;
+
+    match2[0] = '\n';
+    for (i = 0; i < options.modules.length; ++i)
+    {
+        match2[0] += ('\t' + options.modules[i].data + '\n');
+        inserted.push(options.modules[i].name);
+    }
+
+    match2 = match2.join('\t// }} END OF AUTO-GENERATED BODY');
+    match1[1] = match2;
+    match1 = match1.join('// {{ BEGIN AUTO-GENERATED BODY');
+
+    section[1] = match1;
+    section = section.join('void ILibDuktape_Polyfills_JS_Init(');
+
+    require('fs').writeFileSync(options.filePath, section);
+
+    inserted.sort();
+    require('fs').writeFileSync(options.modulesPath + '/embedded.info', inserted.join('\n'));
+}
+
+//
+// This function takes the input and returns the base64 encoding of the deflated input.
+//
+function compress(data)
+{
+    var zip = require('compressed-stream').createCompressor();
+    zip.buffer = null;
+    zip.on('data', function (c)
+    {
+        if (this.buffer == null)
+        {
+            this.buffer = Buffer.concat([c]);
+        }
+        else
+        {
+            this.buffer = Buffer.concat([this.buffer, c]);
+        }
+    });
+    zip.end(data);
+    return(vstring = zip.buffer.toString('base64'));
+}
+
+module.exports = { expand: expand, shrink: shrink }
 
