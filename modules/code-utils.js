@@ -224,6 +224,40 @@ function insertCompressed(options)
     require('fs').writeFileSync(options.modulesPath + '/embedded.info', inserted.join('\n'));
 }
 
+function update(options)
+{
+    if (options == null) { options = {}; }
+    if (options.modulesFolder == null) { options.modulesFolder = 'C:/GITHub/MeshAgent/modules'; }
+    if (options.expandedPath == null) { options.expandedPath = 'modules_expanded'; }
+
+    var files = require('fs').readFileSync(options.modulesFolder + '/embedded.info');
+    files = files.toString().split('\r').join('').split('\n');
+    for(var i in files)
+    {
+        try
+        {
+            var mtime = require('fs').statSync(options.modulesFolder + '/' + files[i]).mtime;
+            var etime = require('fs').statSync(options.expandedPath + '/' + files[i]).mtime;
+
+            if ((new Date(mtime)) > (new Date(etime)))
+            {
+                // Modules version is newer than expanded version, so we should over-write
+                require('fs').copyFileSync(options.modulesFolder + '/' + files[i], options.expandedPath + '/' + files[i]);
+            }
+            else
+            {
+                // Don't copy modules version, becuase it's older
+                console.log('Not copied: ' + files[i], mtime, etime);
+            }
+        }
+        catch(x)
+        {
+            require('fs').copyFileSync(options.modulesFolder + '/' + files[i], options.expandedPath + '/' + files[i]);
+        }
+    }
+
+}
+
 //
 // This function takes the input and returns the base64 encoding of the deflated input.
 //
@@ -246,5 +280,5 @@ function compress(data)
     return(vstring = zip.buffer.toString('base64'));
 }
 
-module.exports = { expand: expand, shrink: shrink }
+module.exports = { expand: expand, shrink: shrink, update: update }
 
