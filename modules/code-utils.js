@@ -20,6 +20,144 @@ limitations under the License.
 // to be able to embed and extact JavaScript modules from native C code on the fly.
 //
 
+
+
+
+
+
+try
+{
+    // This peroperty is a polyfill for an Array, to fetch the specified element if it exists, removing the surrounding quotes if they are there
+    Object.defineProperty(Array.prototype, 'getParameterEx',
+        {
+            value: function (name, defaultValue)
+            {
+                var i, ret;
+                for (i = 0; i < this.length; ++i)
+                {
+                    if (this[i].startsWith(name + '='))
+                    {
+                        ret = this[i].substring(name.length + 1);
+                        if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                        return (ret);
+                    }
+                }
+                return (defaultValue);
+            }
+        });
+
+    // This property is a polyfill for an Array, to fetch the specified element if it exists 
+    Object.defineProperty(Array.prototype, 'getParameter',
+        {
+            value: function (name, defaultValue)
+            {
+                return (this.getParameterEx('--' + name, defaultValue));
+            }
+        });
+}
+catch (x)
+{ }
+try
+{
+    // This property is a polyfill for an Array, to fetch the index of the specified element, if it exists
+    Object.defineProperty(Array.prototype, 'getParameterIndex',
+        {
+            value: function (name)
+            {
+                var i;
+                for (i = 0; i < this.length; ++i)
+                {
+                    if (this[i].startsWith('--' + name + '='))
+                    {
+                        return (i);
+                    }
+                }
+                return (-1);
+            }
+        });
+}
+catch (x)
+{ }
+try
+{
+    // This property is a polyfill for an Array, to remove the specified element, if it exists
+    Object.defineProperty(Array.prototype, 'deleteParameter',
+        {
+            value: function (name)
+            {
+                var i = this.getParameterIndex(name);
+                if (i >= 0)
+                {
+                    this.splice(i, 1);
+                }
+            }
+        });
+}
+catch (x)
+{ }
+try
+{
+    // This property is a polyfill for an Array, to to fetch the value YY of an element XX in the format --XX=YY, if it exists
+    Object.defineProperty(Array.prototype, 'getParameterValue',
+        {
+            value: function (i)
+            {
+                var ret = this[i].substring(this[i].indexOf('=') + 1);
+                if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                return (ret);
+            }
+        });
+}
+catch (x)
+{ }
+
+
+
+
+//
+// This function will export the JavaScript modules that have been embedded/compiled into the agent
+//
+function expand2(options)
+{
+    // Check the command line parameters to set some of the options
+    var cmdline_expandedPath = process.argv.getParameter('expandedPath', 'modules_expanded');
+    var cmdline_filePath = process.argv.getParameter('filePath', null);
+
+    options.expandedPath = cmdline_expandedPath; 
+    if (cmdline_filePath != null) { options.filePath = cmdline_filePath; }
+
+    if (cmdline_filePath != null)
+    {
+        // If a filepath was specified, then rerun this thru expand(), so that it can read from the specified file, instead of exporting from what was compiled in the agent
+        options.embedded = false;
+        console.log('Exporting modules from ' + cmdline_filePath + ', into ' + options.expandedPath + ':\n');
+
+        return (expand(options));
+    }
+
+    console.log('Exporting modules from Agent, into ' + options.expandedPath + ':\n');
+
+    var modulenames = getModules();
+    var i;
+
+    options.modules = [];
+
+    for (i = 0; i < modulenames.length; ++i)
+    {
+        try
+        {
+            options.modules.push({ name: modulenames[i], data: getJSModule(modulenames[i]) });
+        }
+        catch(x)
+        {
+            console.log(x);
+        }
+    }
+
+    writeExpandedModules(options);
+}
+
+
 //
 // This function will read the specified C file, and decompress(inflate)/extract all the embedded JavaScript modules,
 // and save them to the specified path
@@ -30,6 +168,8 @@ limitations under the License.
 function expand(options)
 {
     if (options == null) { options = {}; }
+    if (options.embedded === true) { return(expand2(options)); }
+
     if (options.filePath == null) { options.filePath = 'C:/GITHub//MeshAgent/microscript/ILibDuktape_Polyfills.c'; }
 
     var file = require('fs').readFileSync(options.filePath);
