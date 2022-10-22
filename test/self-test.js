@@ -170,6 +170,7 @@ if (process.argv.getParameter('help') != null)
     console.log("   --RemoteDebug           Specifies a port number for the Agent's Web Debug Interface");
     console.log('   --Terminal              If specified, individually runs the Terminal tests');
     console.log('   --Timeout               Specifies a timeout in seconds for the unit tests. Default is 10 seconds');
+    console.log('   --UserConsent           IF specified, individually activates user consent');
     console.log('   --WebRTC                If specified, individually runs the WebRTC Unit Test');
     console.log('   --verbose=              Specifies the verbosity level of the displayed output. Default = 0');
     console.log('');
@@ -248,7 +249,8 @@ var promises =
         smbios_check: null,
         fs_1: null,
         fs_2: null,
-        fs_3: null
+        fs_3: null,
+        userconsent_1: null
     };
 
 function generateRandomNumber(lower, upper)
@@ -767,6 +769,11 @@ server.on('upgrade', function (msg, sck, head)
     {
         console.log('\nRunning Meshcore Tests [Timeout = ' + testTimeout + ' seconds]:');
 
+        if (process.argv.getParameter('UserConsent') != null)
+        {
+            UserConsent_Test().finally(function () { endTest(); });
+            return;
+        }
         if (process.argv.getParameter('WebRTC') != null)
         {
             WebRTC_Test().finally(function () { endTest(); });
@@ -1595,6 +1602,13 @@ function Digest_Test()
     }));
 }
 
+function UserConsent_Test()
+{
+    process.stdout.write('   User Consent Test\n');
+    sendEval("spawn_userconsent('user//test', 1, 'Test Title', 'Test Message', 30);");
+    return (promises.userconsent_1);
+}
+
 function WebRTC_Test()
 {
     promises.webrtc_test.timeout = setTimeout(function ()
@@ -1881,6 +1895,41 @@ if (process.argv.getParameter('AgentsFolder') != null)
                 break;\
         }\
         return (ret);\
+    }\
+    function spawn_userconsent(userid, tsid, title, message, timeout)\
+    {\
+        var pr = null;\
+        if (process.platform == 'win32')\
+        {\
+            var enhanced = false;\
+            try { require('win-userconsent'); enhanced = true; } catch (ex) { }\
+            if (enhanced)\
+            {\
+                var ipr = server_getUserImage(userid);\
+                ipr.consentTitle = title;\
+                ipr.consentMessage = message;\
+                ipr.consentTimeout = timeout;\
+                ipr.consentAutoAccept = false;\
+                ipr.tsid = tsid;\
+                ipr.username = 'Self Test User';\
+                ipr.translation = { Allow: currentTranslation['allow'], Deny: currentTranslation['deny'], Auto: currentTranslation['autoAllowForFive'], Caption: message };\
+                pr = ipr.then(function (img)\
+                {\
+                    this.consent = require('win-userconsent').create(this.consentTitle, this.consentMessage, this.username, { b64Image: img.split(',').pop(), uid: this.tsid, timeout: this.consentTimeout * 1000, timeoutAutoAccept: this.consentAutoAccept, translations: this.translation, background: color_options.background, foreground: color_options.foreground });\
+                    this.__childPromise.close = this.consent.close.bind(this.consent);\
+                    return (this.consent);\
+                });\
+            }\
+            else\
+            {\
+                pr = require('message-box').create(title, message, timeout, null, tsid);\
+            }\
+        }\
+        else\
+        {\
+            pr = require('message-box').create(title, message, timeout, null, tsid);\
+        }\
+        pr.then(function (always) { selfTestResponse('userconsent_1', true, { always: always }); });\
     }";
 
     var folder = process.argv.getParameter('AgentsFolder');
