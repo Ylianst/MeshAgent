@@ -1046,6 +1046,9 @@ int wmain(int argc, char* wargv[])
 }
 
 
+int autoproxy_checked = 0;
+char *configured_autoproxy_value = NULL;
+
 #ifndef _MINCORE
 COLORREF gBKCOLOR = RGB(0, 0, 0);
 COLORREF gFGCOLOR = RGB(0, 0, 0);
@@ -1194,6 +1197,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		duk_context *ctx = g_dialogCtx;
 		char *lang = g_dialogLanguage;
 
+
 		if (duk_has_prop_string(ctx, -1, lang))
 		{
 			duk_get_prop_string(ctx, -1, lang);
@@ -1274,6 +1278,9 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			serverurl = Duktape_GetStringPropertyValue(ctx, -1, "MeshServer", NULL);
 			displayName = Duktape_GetStringPropertyValue(ctx, -1, "displayName", NULL);
 			meshServiceName = Duktape_GetStringPropertyValue(ctx, -1, "meshServiceName", NULL);
+
+			configured_autoproxy_value = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "autoproxy", NULL);
+			autoproxy_checked = configured_autoproxy_value != NULL;
 
 			// Set text in the dialog box
 			if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
@@ -1375,14 +1382,8 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			EnableWindow(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), FALSE);
 			EnableWindow(GetDlgItem(hDlg, IDCLOSE), FALSE);
 
-			if (LOWORD(wParam) == IDC_INSTALLBUTTON)
-			{
-				result = RunAsAdmin("-fullinstall", IsAdmin() == TRUE);
-			}
-			else
-			{
-				result = RunAsAdmin("-fulluninstall", IsAdmin() == TRUE);
-			}
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "-full%s %s%s", LOWORD(wParam) == IDC_INSTALLBUTTON ? "install" : "uninstall", autoproxy_checked != 0 ? "--autoproxy=" : "", autoproxy_checked != 0 ? (configured_autoproxy_value != NULL ? configured_autoproxy_value : "1") : "");
+			result = RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE);
 
 			if (result)
 			{
@@ -1413,7 +1414,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			SetWindowTextA(GetDlgItem(hDlg, IDC_STATUSTEXT), "Running as temporary agent");
 
 			DWORD pid = GetCurrentProcessId();
-			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u", pid);
+			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u %s%s", pid, autoproxy_checked != 0 ? "--autoproxy=" : "", autoproxy_checked != 0 ? (configured_autoproxy_value != NULL ? configured_autoproxy_value : "1") : "");
 			if (RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE) == 0) { RunAsAdmin(ILibScratchPad, 1); }
 
 			if (closeButtonTextSet != 0) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closeButtonText); }
@@ -1430,12 +1431,15 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 // Message handler for details dialog box.
 INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL;
+	char *fileName = NULL, *meshname = NULL, *meshid = NULL, *serverid = NULL, *serverurl = NULL, *installFlags = NULL, *mshfile = NULL, *autoproxy = NULL;
 	char *displayName = NULL, *meshServiceName = NULL;
 	int hiddenButtons = 0; // Flags: 1 if "Connect" is hidden, 2 if "Uninstall" is hidden, 4 is "Install is hidden"
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
+		case WM_CLOSE:
+			autoproxy_checked = IsDlgButtonChecked(hDlg, IDC_AUTOPROXY_CHECK);
+			break;
 	case WM_CTLCOLORDLG: {
 		// Set the background of the dialog box to blue
 		if (DialogBackgroundBrush == NULL) {
@@ -1443,11 +1447,30 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		}
 		return (INT_PTR)DialogBackgroundBrush;
 	}
-	case WM_CTLCOLORSTATIC: {
+	case WM_CTLCOLORSTATIC: 
+	{
+		if (GetDlgCtrlID((HWND)lParam) == IDC_AUTOPROXY_CHECK)
+		{
+			HBRUSH h=CreateSolidBrush(gBKCOLOR);
+			SetBkColor((HDC)wParam, gBKCOLOR);
+			SetTextColor((HDC)wParam, gFGCOLOR);
+			return((INT_PTR)h);
+		}
 		// Set the left text to white over transparent
 		SetBkMode((HDC)wParam, TRANSPARENT);
 		SetTextColor((HDC)wParam, gFGCOLOR);
 		return (INT_PTR)GetStockObject(NULL_BRUSH);
+		break;
+	}
+	case WM_CTLCOLORBTN:
+	{
+		DWORD ID = GetDlgCtrlID((HWND)lParam);
+		if(ID == IDC_AUTOPROXY_CHECK)
+		{
+			SetBkMode((HDC)wParam, TRANSPARENT);
+			SetTextColor((HDC)wParam, gFGCOLOR);
+			return (INT_PTR)GetStockObject(NULL_BRUSH);
+		}
 		break;
 	}
 	case WM_INITDIALOG:
@@ -1471,7 +1494,13 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			serverurl = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshServer", NULL);
 			displayName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "displayName", NULL);
 			meshServiceName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "meshServiceName", "Mesh Agent");
+			autoproxy = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "autoproxy", NULL);
 			char *bkcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "bkcolor", "0,0,0");
+
+			if (autoproxy != NULL || autoproxy_checked != 0)
+			{
+				CheckDlgButton(hDlg, IDC_AUTOPROXY_CHECK, BST_CHECKED);
+			}
 
 			// Set text in the dialog box
 			if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
@@ -1552,6 +1581,8 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	{
 		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCLOSE || LOWORD(wParam) == IDCANCEL)
 		{
+			autoproxy_checked = IsDlgButtonChecked(hDlg, IDC_AUTOPROXY_CHECK);
+
 			EndDialog(hDlg, LOWORD(wParam));
 			return (INT_PTR)TRUE;
 		}
