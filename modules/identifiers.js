@@ -72,17 +72,21 @@ function linux_identifiers()
     if (!require('fs').existsSync('/sys/class/dmi/id')) { throw ('this platform does not have DMI statistics'); }
 
     var entries = require('fs').readdirSync('/sys/class/dmi/id');
-    entries = null;
-
     for(var i in entries)
     {
         if (require('fs').statSync('/sys/class/dmi/id/' + entries[i]).isFile())
         {
-            ret[entries[i]] = require('fs').readFileSync('/sys/class/dmi/id/' + entries[i]).toString().trim();
-
+            try
+            {
+                ret[entries[i]] = require('fs').readFileSync('/sys/class/dmi/id/' + entries[i]).toString().trim();
+            }
+            catch(z)
+            {
+            }
             if (ret[entries[i]] == 'None') { delete ret[entries[i]];}
         }
     }
+    entries = null;
 
     identifiers['bios_date'] = ret['bios_date'];
     identifiers['bios_vendor'] = ret['bios_vendor'];
