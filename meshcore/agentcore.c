@@ -643,6 +643,11 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		packet = ILibScratchPad;
 		EVP_CIPHER_CTX_free(dec_ctx);
 		packet[packetLen] = 0; 
+		if (agentHost->controlChannelDebug != 0)
+		{
+			printf("Received encrypted discovery response...\n");
+			ILIBLOGMESSAGEX("Received encrypted discovery response...\n");
+		}
 	}
 	else
 #endif
@@ -651,19 +656,38 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		packet = buffer;
 		packetLen = bufferLength;
 		packet[packetLen] = 0;
+		if (agentHost->controlChannelDebug != 0)
+		{
+			printf("Received unencrypted discovery response...\n");
+			ILIBLOGMESSAGEX("Received unencrypted discovery response...\n");
+		}
 	}
 
 	// Check if this is a Mesh Server discovery packet and it is for our server
 	// It will have this form: "MeshCentral2|f5a50091028fe2c122434cbcbd2709a7ec10369295e5a0e43db8853a413d89df|wss://~:443/agent.ashx"
-	if ((packetLen > 109) && (memcmp(packet, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2))) == 97) && (memcmp(ILibScratchPad2, packet + 13, 96) == 0)) {
+	if ((packetLen > 109) && (memcmp(packet, "MeshCentral2|", 13) == 0) && ((ILibSimpleDataStore_Get(agentHost->masterDb, "ServerID", ILibScratchPad2, sizeof(ILibScratchPad2))) == 97) && (memcmp(ILibScratchPad2, packet + 13, 96) == 0)) 
+	{
 		// We have a match, set the server URL correctly.
 		if (agentHost->multicastServerUrl != NULL) { free(agentHost->multicastServerUrl); agentHost->multicastServerUrl = NULL; }
 
 		ILibInet_ntop2((struct sockaddr*)remoteInterface, (char*)ILibScratchPad2, sizeof(ILibScratchPad));
 		agentHost->multicastServerUrl = ILibString_Replace(packet + 78 + 32, packetLen - 78 - 32, "%s", 2, (char*)ILibScratchPad2, (int)strnlen_s((char*)ILibScratchPad2, sizeof(ILibScratchPad2)));
 
-		//printf("FoundServer: %s\r\n", agentHost->multicastServerUrl);
+		if (agentHost->controlChannelDebug != 0)
+		{
+			printf("FoundServer: %s\n", agentHost->multicastServerUrl);
+			ILIBLOGMESSAGEX("FoundServer: %s\n", agentHost->multicastServerUrl);
+		}
+
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
+	}
+	else
+	{
+		if (agentHost->controlChannelDebug != 0)
+		{
+			printf("Failed to parse response...\n");
+			ILIBLOGMESSAGEX("Failed to parse response...\n");
+		}
 	}
 }
 
@@ -3882,6 +3906,12 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 						{
 							// Send the encrypted packet
 							ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad, 16 + packetLen + enclength, 1);
+
+							if (agent->controlChannelDebug != 0)
+							{
+								printf("Broadcasting encrypted discovery packet...\n");
+								ILIBLOGMESSAGEX("Broadcasting encrypted discovery packet...");
+							}
 						}
 					}
 					EVP_CIPHER_CTX_free(enc_ctx);
@@ -3891,6 +3921,11 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 				{
 					// No discovery key set, broadcast without encryption
 					ILibMulticastSocket_Broadcast(agent->multicastDiscovery2, ILibScratchPad2, 96, 1);
+					if (agent->controlChannelDebug != 0)
+					{
+						printf("Broadcasting unencrypted discovery packet...\n");
+						ILIBLOGMESSAGEX("Broadcasting unencrypted discovery packet...");
+					}
 				}
 			}
 			ILibDestructParserResults(rs);
@@ -4549,6 +4584,26 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 		printf("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
 		ILIBLOGMESSAGEX("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
 	}
+
+	if (agentHost->multicastDiscovery != NULL)
+	{
+		if (agentHost->controlChannelDebug != 0)
+		{
+			printf("Resetting MulticastSocketv4\n");
+			ILIBLOGMESSAGEX("Resetting MulticastSocketv4\n");
+		}
+		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery, 0);
+	}
+	if (agentHost->multicastDiscovery2 != NULL)
+	{
+		if (agentHost->controlChannelDebug != 0)
+		{
+			printf("Resetting MulticastSocketv6\n");
+			ILIBLOGMESSAGEX("Resetting MulticastSocketv6\n");
+		}
+		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery2, 0);
+	}
+
 
 	if (agentHost->serverConnectionState == 0)
 	{
