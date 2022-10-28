@@ -1437,7 +1437,14 @@ duk_ret_t ILibDuktape_MeshAgent_ConnectedServer(duk_context *ctx)
 		f->datalength = ILibTrimString(&(f->data), f->datalength);
 		f->data[f->datalength] = 0;
 
-		duk_push_lstring(ctx, f->data, f->datalength);
+		if (strncmp(f->data, "local", 5) == 0 && f->datalength == 5)
+		{
+			duk_push_sprintf(ctx, "[local] %s", agent->serveruri);
+		}
+		else
+		{
+			duk_push_lstring(ctx, f->data, f->datalength);
+		}
 		ILibDestructParserResults(rs);
 	}
 	else
