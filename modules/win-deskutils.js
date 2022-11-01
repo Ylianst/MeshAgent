@@ -77,12 +77,13 @@ function sessionDispatch(tsid, parent, method, args)
     }
 
     // Spawn a child process in the appropriate user session, and relay the response back via stdout
-    var prog = "setModulePath('../modules');var x;try{x=require('win-deskutils').dispatch('" + parent + "', '" + method + "', " + JSON.stringify(args) + ");console.log(x);}catch(z){console.log(z);process.exit(1);}process.exit(0);";
-    var child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-b64exec', Buffer.from(prog).toString('base64')], { type: stype, uid: sid });
+    var mod = Buffer.from(getJSModule('win-deskutils')).toString('base64');
+    var prog = "try { addModule('win-deskutils', process.env['win_deskutils']);} catch (x) { } var x;try{x=require('win-deskutils').dispatch('" + parent + "', '" + method + "', " + JSON.stringify(args) + ");console.log(x);}catch(z){console.log(z);process.exit(1);}process.exit(0);";
+    var child = require('child_process').execFile(process.execPath, [process.execPath.split('\\').pop(), '-b64exec', Buffer.from(prog).toString('base64')], { type: stype, uid: sid, env: { win_deskutils: getJSModule('win-deskutils') } });
 
     child.stdout.str = '';
     child.stdout.on('data', function (c) { this.str += c.toString(); });
-    child.stderr.on('data', function () { });
+    child.stderr.on('data', function (c) { });
     child.on('exit', function (c) { this.exitCode = c; });
     child.waitExit();
     if (child.exitCode == 0)
