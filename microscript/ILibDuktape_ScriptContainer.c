@@ -3765,7 +3765,9 @@ duk_ret_t ILibDuktape_ScriptContainer_Finalizer(duk_context *ctx)
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)Duktape_GetBuffer(ctx, -1, NULL);
 	if (master->child != NULL)
 	{
+#ifdef WIN32
 		ILibProcessPipe_Process_RemoveHandlers(master->child);
+#endif
 		ILibProcessPipe_Process_SoftKill(master->child);
 	}
 	else if (master->PeerChain != NULL)
