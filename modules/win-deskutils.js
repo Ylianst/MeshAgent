@@ -88,11 +88,11 @@ function sessionDispatch(tsid, parent, method, args)
     child.waitExit();
     if (child.exitCode == 0)
     {
-        return (child.stdout.str); // If the return code was 0, then relay the response from stdout
+        return (child.stdout.str.trim()); // If the return code was 0, then relay the response from stdout
     }
     else
     {
-        throw (child.stdout.str); // If the return code was nonzero, then the stdout response is the exception that should be bubbled
+        throw (child.stdout.str.trim()); // If the return code was nonzero, then the stdout response is the exception that should be bubbled
     }
 }
 
