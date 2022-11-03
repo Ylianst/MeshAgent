@@ -3145,11 +3145,15 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 	((unsigned int*)buffer)[2] = 0;
 	((unsigned int*)buffer)[2] = crc32c(0, (unsigned char*)buffer, (uint32_t)bufferLength);
 
-	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "SCTP[%d]: Send", session);
+	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "SCTP[%d] (%d): Send", session, bufferLength);
 	
 	int i = 12;
+	unsigned short utmp;
+
 	while (FOURBYTEBOUNDARY(i) < bufferLength)
 	{
+		ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... FOURBYTEBOUNDARY (%d, %d)", i, FOURBYTEBOUNDARY(i));
+
 		if ((buffer + i)[0] < ((sizeof(SCTP_CHUNK_TYPE_NAMES) / sizeof(void*))))
 		{
 			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... ChunkType: %s", SCTP_CHUNK_TYPE_NAMES[(int)((buffer+i)[0])]);
@@ -3162,7 +3166,14 @@ ILibTransport_DoneState ILibStun_SendSctpPacket(struct ILibStun_Module *obj, int
 		{
 			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... TSN: %u", ntohl(((ILibSCTP_DataPayload*)(buffer + i))->TSN));
 		}
-		i += ntohs(((uint16_t*)(buffer + i))[1]);
+		utmp = ntohs(((uint16_t*)(buffer + i))[1]);
+		i += utmp;
+
+		if (utmp == 0) 
+		{
+			ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_4, "... force BREAK");
+			break;
+		}
 	}
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_5, "... Source: %u , Destination: %u", obj->dTlsSessions[session]->inport, obj->dTlsSessions[session]->outport);
@@ -4660,6 +4671,7 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 				int varLen = 0;
 				unsigned short tLen = 0;
 				int chunkIndex;
+				int tmpval1, tmpval2, tmpval3;
 
 				while (chunksize - varLen > 20)
 				{
@@ -4682,10 +4694,16 @@ void ILibStun_ProcessSctpPacket(struct ILibStun_Module *obj, int session, char* 
 						cookieLen = tLen - 4;
 						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "...Received Cookie: %s", ILibRemoteLogging_ConvertToHex(cookie, cookieLen));
 						
+						tmpval1 = *rptr;
+
 						// We need to send a RCTP_CHUNK_TYPE_COOKIEECHO response
-						*rptr = ILibStun_AddSctpChunkHeader(rpacket, *rptr, RCTP_CHUNK_TYPE_COOKIEECHO, 0, tLen);
+						tmpval3 = *rptr = ILibStun_AddSctpChunkHeader(rpacket, *rptr, RCTP_CHUNK_TYPE_COOKIEECHO, 0, tLen);
 						memcpy_s(rpacket + *rptr, 4096 - *rptr, cookie, cookieLen);
 						*rptr += FOURBYTEBOUNDARY(tLen);
+
+						tmpval2 = *rptr;
+						ILibRemoteLogging_printf(ILibChainGetLogger(obj->ChainLink.ParentChain), ILibRemoteLogging_Modules_WebRTC_SCTP, ILibRemoteLogging_Flags_VerbosityLevel_1, "......RPTR Pre: %d Mid %d Post: %d tLen: %u", tmpval1, tmpval3, tmpval2, tLen);
+
 						break;
 					default:
 						break;
