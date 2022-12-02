@@ -1168,6 +1168,12 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			SetTextColor((HDC)wParam, gFGCOLOR);
 			return (INT_PTR)GetStockObject(NULL_BRUSH);
 		}
+		if ((HWND)lParam == GetDlgItem(hDlg, IDC_IMAGE))
+		{
+			// Set the background mode to transparent for the customized bitmap
+			SetBkMode((HDC)wParam, TRANSPARENT);
+			return (INT_PTR)GetStockObject(NULL_BRUSH);
+		}
 		break;
 	}
 	case WM_PAINT:
