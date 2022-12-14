@@ -273,6 +273,8 @@ function readExpandedModules(options)
         if (files[i].endsWith('.js'))
         {
             name = files[i].split('.js')[0];
+            console.log('Importing: ' + name);
+
             try
             {
                 valuex = (new Date(require('fs').statSync(options.expandedPath + '/' + files[i]).mtime)).getTime() / 1000;
@@ -323,9 +325,9 @@ function readExpandedModules(options)
 function shrink(options)
 {
     if (options == null) { options = {}; }
-    if (options.expandedPath == null) { options.expandedPath = 'modules_expanded'; }
-    if (options.filePath == null) { options.filePath = 'C:/GITHub//MeshAgent/microscript/ILibDuktape_Polyfills.c'; }
-    if (options.modulesPath == null) { options.modulesPath = 'C:/GITHub/MeshAgent/modules'; }
+    if (options.expandedPath == null) { options.expandedPath =  process.argv.getParameter('expandedPath', 'modules_expanded'); }
+    if (options.filePath == null) { options.filePath =  process.argv.getParameter('filePath', 'C:/GITHub//MeshAgent/microscript/ILibDuktape_Polyfills.c'); }
+    if (options.modulesPath == null) { options.modulesPath = process.argv.getParameter('modulesPath', 'C:/GITHub/MeshAgent/modules'); }
 
     readExpandedModules(options);
     insertCompressed(options);
