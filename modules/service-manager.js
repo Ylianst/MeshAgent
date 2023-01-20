@@ -1954,7 +1954,7 @@ function serviceManager()
                         }
                         break;
                     default:
-                        // Peudo Service (meshDaemon)
+                        // Pseudo Service (meshDaemon)
                         if (require('fs').existsSync('/usr/local/mesh_daemons/' + name + '.service'))
                         {
                             ret.conf = '/usr/local/mesh_daemons/' + name + '.service';
@@ -1988,14 +1988,15 @@ function serviceManager()
                                 var parameters = this.parameters();
                                 var location = wd + parameters.shift();
 
-                                var options = { pidPath: wd + 'pid', logOutputs: false, crashRestart: respawn, cwd: wd };
+                                var options = { pidPath: wd + 'pid', logOutputs: true, crashRestart: respawn, cwd: wd };
                                 require('service-manager').manager.daemon(location, parameters, options);
                             };
                             ret.stop = function stop()
                             {
+                                var pidpath = this.appWorkingDirectory().split(' ').join('\\ ') + 'pid';
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
+                                child.stdin.write('cat ' + pidpath + '\nexit\n');
                                 child.waitExit();
                                 try
                                 {
@@ -2020,9 +2021,10 @@ function serviceManager()
                             }
                             ret.isMe = function isMe()
                             {
+                                var pidpath = this.appWorkingDirectory().split(' ').join('\\ ') + 'pid';
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
+                                child.stdin.write('cat ' + pidpath + '\nexit\n');
                                 child.waitExit();
                                 var pid = child.stdout.str.trim();
                                 if (pid == '') { return (false); }
@@ -2050,11 +2052,14 @@ function serviceManager()
                             };
                             ret.isRunning = function isRunning()
                             {
-                                if(require('fs').existsSync('/usr/local/mesh_daemons/' + name + '/pid'))
+                                var pidpath = this.appWorkingDirectory() + 'pid';
+                                console.log('pidpath', pidpath);
+
+                                if(require('fs').existsSync(pidpath))
                                 {
                                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                                     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                                    child.stdin.write('cat /usr/local/mesh_daemons/' + name + '/pid \nexit\n');
+                                    child.stdin.write('cat ' + pidpath.split(' ').join('\\ ') + '\nexit\n');
                                     child.waitExit();
                                     var pid = child.stdout.str.trim();
 
@@ -2806,10 +2811,10 @@ function serviceManager()
                     require('fs').chmodSync('/usr/local/mesh_daemons/' + options.name + '/' + options.target, m);
 
                     conf = require('fs').createWriteStream('/usr/local/mesh_daemons/' + options.name + '.service', { flags: 'wb' });
-                    conf.write('workingDirectory=' + '/usr/local/mesh_daemons/' + options.name + '\n');
+                    conf.write('workingDirectory=' + '/usr/local/mesh_daemons/' + (options.companyName!=null?(options.companyName + '/'):'') + options.name + '\n');
 
                     if(!options.parameters) {options.parameters = [];}
-                    options.parameters.unshift(options.name);
+                    options.parameters.unshift(options.target);
                     conf.write('parameters=' + JSON.stringify(options.parameters) + '\n');
                     options.parameters.shift();
                     if (options.failureRestart == null || options.failureRestart > 0)
@@ -3330,6 +3335,7 @@ function serviceManager()
                 }
                 break;
         }
+
         this._platform = platform;
         return (platform);
     };
@@ -3370,14 +3376,40 @@ function serviceManager()
 
     this.daemon = function daemon(path, parameters, options)
     {
+        require('code-utils');
+        console.log('PATH => ' + JSON.stringify(path, null, 1));
+        console.log('parameters => ' + JSON.stringify(parameters, null, 1));
+        console.log('options => ' + JSON.stringify(options, null, 1));
+    
+        var z =  parameters.getParameterIndex('meshServiceName');
+        console.log('meshServiceName => ' + z);
+        if (z >= 0)
+        {
+            parameters.splice(z, 1);
+            console.log('parameters => ' + JSON.stringify(parameters, null, 1));
+        }
+
         var tmp = JSON.stringify(parameters);
         tmp = tmp.substring(1, tmp.length - 1);
+
+        if (options.cwd)
+        {
+            process.chdir(options.cwd);
+            console.log('Setting CWD to: ' + options.cwd);
+        }
+
+
+        console.log('\n\n');
+        console.log("child = require('child_process').execFile('" + path + "', ['" + (process.platform == 'win32' ? path.split('\\').pop() : path.split('/').pop() + "'" + (tmp != '' ? (", " + tmp) : "")) + "]);");
+        console.log('\n\n');
+
+
 
         if (!options) { options = {}; }
         var childParms = "\
             var child = null; \
             var options = " + JSON.stringify(options) + ";\
-            if(options.logOutput)\
+            if(options.logOutputs)\
             { console.setDestination(console.Destinations.LOGFILE); console.log('Logging Outputs...'); }\
             else\
             {\
@@ -3397,8 +3429,14 @@ function serviceManager()
                     child.stderr.on('data', function(c) { console.log(c.toString()); });\
                     child.once('exit', function (code) \
                     {\
+                        console.log('Child Exited');\
                         if(options.crashRestart) { spawnChild(); } else { cleanupAndExit(); }\
                     });\
+                    console.log('Child Spawned');\
+                }\
+                else\
+                {\
+                    console.log('Child Spawn Failed');\
                 }\
             }\
             if(options.pidPath) { require('fs').writeFileSync(options.pidPath, process.pid.toString()); }\
