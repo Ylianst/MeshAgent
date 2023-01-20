@@ -107,7 +107,6 @@ char exeJavaScriptGuid[] = "B996015880544A19B7F7E9BE44914C18";
 #define ILibDuktape_ScriptContainer_Settings_DB					"\xFF_ScriptContainerSettings_DB"
 #define ILibDuktape_ScriptContainer_Settings_ExitHandler		"\xFF_ScriptContainerSettings_ExitHandler"
 #define ILibDuktape_ScriptContainer_Settings_ExitUser			"\xFF_ScriptContainerSettings_ExitUser"
-#define ILibDuktape_ScriptContainer_Process_ArgArray			"\xFF_argArray"
 #define ILibDuktape_ScriptContainer_Process_CoreDumpPath		"\xFF_coreDumpPath"
 #define ILibDuktape_ScriptContainer_Process_Restart				"\xFF_ScriptContainer_Process_Restart"
 #define ILibDuktape_ScriptContainer_Process_stdin				"\xFF_stdin"

@@ -3263,6 +3263,25 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_CoreOk: // Message from the server indicating our meshcore is ok. No update needed.
 		{
 			printf("Server verified meshcore...");
+			
+			duk_eval_string(agent->meshCoreCtx, "_MSH().setuid;");
+			if (duk_is_null_or_undefined(agent->meshCoreCtx, -1) == 0)
+			{
+				int uid = atoi(duk_get_string(agent->meshCoreCtx, -1));
+
+				duk_push_global_object(agent->meshCoreCtx);													// [g]
+				duk_get_prop_string(agent->meshCoreCtx, -1, "process");										// [g][process]
+				duk_push_array(agent->meshCoreCtx);															// [g][process][arr]
+				duk_push_sprintf(agent->meshCoreCtx, "--setuid=%d", uid);									// [g][process][arr][entry]
+				duk_array_push(agent->meshCoreCtx, -2);														// [g][process][arr]
+				duk_put_prop_string(agent->meshCoreCtx, -2, ILibDuktape_ScriptContainer_Process_ArgArray);	// [g][process]
+				duk_pop_2(agent->meshCoreCtx);
+#ifdef _POSIX
+				ignore_result(setuid((uid_t)uid));
+#endif
+			}
+			duk_pop(agent->meshCoreCtx);
+
 			if (agent->coreTimeout != NULL)
 			{
 				// Cancel the timeout
