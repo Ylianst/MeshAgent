@@ -25,10 +25,14 @@ limitations under the License.
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDParameter.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <CoreGraphics/CoreGraphics.h>
+#include <CoreServices/CoreServices.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <string.h>
+#include <pwd.h>
 
 int KVM_Listener_FD = -1;
 #define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
@@ -901,4 +905,105 @@ void kvm_cleanup()
 		ILibProcessPipe_Process_SoftKill(gChildProcess);
 		gChildProcess = NULL;
 	}
+}
+
+
+typedef enum {
+    MPAuthorizationStatusNotDetermined,
+    MPAuthorizationStatusAuthorized,
+    MPAuthorizationStatusDenied
+} MPAuthorizationStatus;
+
+
+
+
+MPAuthorizationStatus _checkFDAUsingFile(const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd != -1)
+    {
+        close(fd);
+        return MPAuthorizationStatusAuthorized;
+    }
+
+    if (errno == EPERM || errno == EACCES)
+    {
+        return MPAuthorizationStatusDenied;
+    }
+
+    return MPAuthorizationStatusNotDetermined;
+}
+
+MPAuthorizationStatus _fullDiskAuthorizationStatus() {
+    char *userHomeFolderPath = getenv("HOME");
+    if (userHomeFolderPath == NULL) {
+        struct passwd *pw = getpwuid(getuid());
+        if (pw == NULL) {
+            return MPAuthorizationStatusNotDetermined;
+        }
+        userHomeFolderPath = pw->pw_dir;
+    }
+
+    const char *testFiles[] = {
+        strcat(strcpy(malloc(strlen(userHomeFolderPath) + 30), userHomeFolderPath), "/Library/Safari/CloudTabs.db"),
+        strcat(strcpy(malloc(strlen(userHomeFolderPath) + 30), userHomeFolderPath), "/Library/Safari/Bookmarks.plist"),
+        "/Library/Application Support/com.apple.TCC/TCC.db",
+        "/Library/Preferences/com.apple.TimeMachine.plist",
+    };
+
+    MPAuthorizationStatus resultStatus = MPAuthorizationStatusNotDetermined;
+    for (int i = 0; i < 4; i++) {
+        MPAuthorizationStatus status = _checkFDAUsingFile(testFiles[i]);
+        if (status == MPAuthorizationStatusAuthorized) {
+            resultStatus = MPAuthorizationStatusAuthorized;
+            break;
+        }
+        if (status == MPAuthorizationStatusDenied) {
+            resultStatus = MPAuthorizationStatusDenied;
+        }
+    }
+
+    return resultStatus;
+}
+
+
+void kvm_check_permission()
+{
+
+    //Request screen recording access
+    if(__builtin_available(macOS 10.15, *)){
+        if(!CGPreflightScreenCaptureAccess()) {
+            CGRequestScreenCaptureAccess();
+        }
+    }
+
+
+    // Request accessibility access
+    if(__builtin_available(macOS 10.9, *)){
+        const void * keys[] = { kAXTrustedCheckOptionPrompt };
+        const void * values[] = { kCFBooleanTrue };
+
+        CFDictionaryRef options = CFDictionaryCreate(
+            kCFAllocatorDefault,
+            keys,
+            values,
+            sizeof(keys) / sizeof(*keys),
+            &kCFCopyStringDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+
+        AXIsProcessTrustedWithOptions(options);
+    }
+
+    // Request full disk access
+    if(__builtin_available(macOS 10.14, *)) {
+        if(_fullDiskAuthorizationStatus() != MPAuthorizationStatusAuthorized) {
+            CFStringRef URL =  CFStringCreateWithCString(NULL, "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", kCFStringEncodingASCII);
+            CFURLRef pathRef = CFURLCreateWithString( NULL, URL, NULL );
+            if( pathRef )
+            {
+                LSOpenCFURLRef(pathRef, NULL);
+                CFRelease(pathRef);
+            }
+            CFRelease(URL);
+        }
+    }
 }

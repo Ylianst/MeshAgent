@@ -4489,6 +4489,13 @@ void agentDumpKeysSink(ILibSimpleDataStore sender, char* Key, int KeyLen, void *
 
 MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities)
 {
+
+#if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
+    //Before anything, check for permissions (macos requirement)
+    kvm_check_permission();
+#endif
+
+
 	MeshAgentHostContainer* retVal = (MeshAgentHostContainer*)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 #ifdef WIN32
 	SYSTEM_POWER_STATUS stats;
