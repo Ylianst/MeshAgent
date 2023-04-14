@@ -2713,6 +2713,14 @@ void ILib_WindowsExceptionDebugEx(ILib_DumpEnabledContext *dumpEnabledExceptionC
 	StackFrame.AddrFrame.Mode = AddrModeFlat;
 	StackFrame.AddrStack.Offset = exceptionContext->Esp;
 	StackFrame.AddrStack.Mode = AddrModeFlat;
+#elif ARM64
+	MachineType = IMAGE_FILE_MACHINE_ARM64;
+	StackFrame.AddrPC.Offset = exceptionContext->Pc;
+	StackFrame.AddrPC.Mode = AddrModeFlat;
+	StackFrame.AddrFrame.Offset = exceptionContext->Sp;
+	StackFrame.AddrFrame.Mode = AddrModeFlat;
+	StackFrame.AddrStack.Offset = exceptionContext->Sp;
+	StackFrame.AddrStack.Mode = AddrModeFlat;
 #else
 	MachineType = IMAGE_FILE_MACHINE_AMD64;
 	StackFrame.AddrPC.Offset = exceptionContext->Rip;
@@ -3038,6 +3046,14 @@ char* ILibChain_Debug(void *chain, char* buffer, int bufferLen)
 	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Ebp : ctx.Ebp;
 	StackFrame.AddrFrame.Mode = AddrModeFlat;
 	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Esp : ctx.Esp;
+	StackFrame.AddrStack.Mode = AddrModeFlat;
+#elif ARM64
+	MachineType = IMAGE_FILE_MACHINE_ARM64;
+	StackFrame.AddrPC.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Pc : ctx.Pc;
+	StackFrame.AddrPC.Mode = AddrModeFlat;
+	StackFrame.AddrFrame.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Sp : ctx.Sp;
+	StackFrame.AddrFrame.Mode = AddrModeFlat;
+	StackFrame.AddrStack.Offset = bChain != NULL ? bChain->MicrostackThreadContext.Sp : ctx.Sp;
 	StackFrame.AddrStack.Mode = AddrModeFlat;
 #else
 	MachineType = IMAGE_FILE_MACHINE_AMD64;
