@@ -1360,7 +1360,9 @@ int ILibWebClient_ProcessWebSocketData(char* buffer, int offset, int length, ILi
 		} 
 		else
 		{
-			unsigned long long v = ILibNTOHLL(((unsigned long long*)(buffer + offset + 2))[0]);
+			unsigned long long v;
+			memcpy(&v, buffer + offset + 2, sizeof(v));
+			v = ILibNTOHLL(v);
 			if(v > 0x7FFFFFFFUL)
 			{
 				// this value is too big to store in a 32 bit signed variable, so disconnect the websocket.
