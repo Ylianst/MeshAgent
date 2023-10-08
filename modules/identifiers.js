@@ -429,9 +429,10 @@ function windows_identifiers()
     var ret = { windows: {} };
     var items, item, i;
 
+    ret['identifiers'] = {};
+
     var values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Bios", ['ReleaseDate', 'Manufacturer', 'SMBIOSBIOSVersion', 'SerialNumber']);
     if(values[0]){
-        ret['identifiers'] = {};
         ret['identifiers']['bios_date'] = values[0]['ReleaseDate'];
         ret['identifiers']['bios_vendor'] = values[0]['Manufacturer'];
         ret['identifiers']['bios_version'] = values[0]['SMBIOSBIOSVersion'];
