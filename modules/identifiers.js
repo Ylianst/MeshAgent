@@ -91,11 +91,16 @@ function linux_identifiers()
     identifiers['bios_date'] = ret['bios_date'];
     identifiers['bios_vendor'] = ret['bios_vendor'];
     identifiers['bios_version'] = ret['bios_version'];
+    identifiers['bios_serial'] = ret['product_serial'];
     identifiers['board_name'] = ret['board_name'];
     identifiers['board_serial'] = ret['board_serial'];
     identifiers['board_vendor'] = ret['board_vendor'];
     identifiers['board_version'] = ret['board_version'];
     identifiers['product_uuid'] = ret['product_uuid'];
+
+    try {
+        identifiers['bios_mode'] = (require('fs').statSync('/sys/firmware/efi').isDirectory() ? 'UEFI': 'Legacy');
+    } catch (ex) { identifiers['bios_mode'] = 'Legacy'; }
 
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', dataHandler);
@@ -426,12 +431,14 @@ function windows_identifiers()
 
     ret['identifiers'] = {};
 
-    var values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Bios", ['ReleaseDate', 'Manufacturer', 'SMBIOSBIOSVersion']);
+    var values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Bios", ['ReleaseDate', 'Manufacturer', 'SMBIOSBIOSVersion', 'SerialNumber']);
     if(values[0]){
         ret['identifiers']['bios_date'] = values[0]['ReleaseDate'];
         ret['identifiers']['bios_vendor'] = values[0]['Manufacturer'];
         ret['identifiers']['bios_version'] = values[0]['SMBIOSBIOSVersion'];
+        ret['identifiers']['bios_serial'] = values[0]['SerialNumber'];
     }
+    ret['identifiers']['bios_mode'] = 'Legacy';
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_BaseBoard", ['Product', 'SerialNumber', 'Manufacturer', 'Version']);
     if(values[0]){
@@ -463,6 +470,11 @@ function windows_identifiers()
     if(values[0]){
         trimResults(values);
         ret.windows.partitions = values;
+        for (var i in values) {
+            if (values[i].Description=='GPT: System') {
+                ret['identifiers']['bios_mode'] = 'UEFI';
+            }
+        }
     }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Processor", ['Caption', 'DeviceID', 'Manufacturer', 'MaxClockSpeed', 'Name', 'SocketDesignation']);
