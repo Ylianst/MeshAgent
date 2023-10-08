@@ -492,7 +492,6 @@ function windows_identifiers()
         ret.windows.drives = values;
     }
 
-    
     // Insert GPU names
     ret.identifiers.gpu_name = [];
     for (var gpuinfo in ret.windows.gpu)
