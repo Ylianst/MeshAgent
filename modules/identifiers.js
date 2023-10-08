@@ -492,10 +492,6 @@ function windows_identifiers()
         ret.windows.drives = values;
     }
 
-    values = require('win-wmi').query('ROOT\\CIMV2\\Security\\MicrosoftTpm', "SELECT * FROM Win32_Tpm", ['IsActivated_InitialValue','IsEnabled_InitialValue','IsOwned_InitialValue','ManufacturerIdTxt','ManufacturerVersion','ManufacturerVersionInfo','PhysicalPresenceVersionInfo','SpecVersion']);
-    if(values[0]) {
-        ret.tpm = values;
-    }
     
     // Insert GPU names
     ret.identifiers.gpu_name = [];
