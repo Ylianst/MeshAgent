@@ -91,11 +91,16 @@ function linux_identifiers()
     identifiers['bios_date'] = ret['bios_date'];
     identifiers['bios_vendor'] = ret['bios_vendor'];
     identifiers['bios_version'] = ret['bios_version'];
+    identifiers['bios_serial'] = ret['product_serial'];
     identifiers['board_name'] = ret['board_name'];
     identifiers['board_serial'] = ret['board_serial'];
     identifiers['board_vendor'] = ret['board_vendor'];
     identifiers['board_version'] = ret['board_version'];
     identifiers['product_uuid'] = ret['product_uuid'];
+
+    try {
+        identifiers['bios_mode'] = (require('fs').statSync('/sys/firmware/efi').isDirectory() ? 'UEFI': 'Legacy');
+    } catch (ex) { identifiers['bios_mode'] = 'Legacy'; }
 
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', dataHandler);
@@ -424,43 +429,69 @@ function windows_identifiers()
     var ret = { windows: {} };
     var items, item, i;
 
-    var values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Bios", ['ReleaseDate', 'Manufacturer', 'SMBIOSBIOSVersion']);
     ret['identifiers'] = {};
-    ret['identifiers']['bios_date'] = values[0]['ReleaseDate'];
-    ret['identifiers']['bios_vendor'] = values[0]['Manufacturer'];
-    ret['identifiers']['bios_version'] = values[0]['SMBIOSBIOSVersion'];
+
+    var values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Bios", ['ReleaseDate', 'Manufacturer', 'SMBIOSBIOSVersion', 'SerialNumber']);
+    if(values[0]){
+        ret['identifiers']['bios_date'] = values[0]['ReleaseDate'];
+        ret['identifiers']['bios_vendor'] = values[0]['Manufacturer'];
+        ret['identifiers']['bios_version'] = values[0]['SMBIOSBIOSVersion'];
+        ret['identifiers']['bios_serial'] = values[0]['SerialNumber'];
+    }
+    ret['identifiers']['bios_mode'] = 'Legacy';
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_BaseBoard", ['Product', 'SerialNumber', 'Manufacturer', 'Version']);
-    ret['identifiers']['board_name'] = values[0]['Product'];
-    ret['identifiers']['board_serial'] = values[0]['SerialNumber'];
-    ret['identifiers']['board_vendor'] = values[0]['Manufacturer'];
-    ret['identifiers']['board_version'] = values[0]['Version'];
+    if(values[0]){
+        ret['identifiers']['board_name'] = values[0]['Product'];
+        ret['identifiers']['board_serial'] = values[0]['SerialNumber'];
+        ret['identifiers']['board_vendor'] = values[0]['Manufacturer'];
+        ret['identifiers']['board_version'] = values[0]['Version'];
+    }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_ComputerSystemProduct", ['UUID']);
-    ret['identifiers']['product_uuid'] = values[0]['UUID'];
-    trimIdentifiers(ret.identifiers);
+    if(values[0]){
+        ret['identifiers']['product_uuid'] = values[0]['UUID'];
+        trimIdentifiers(ret.identifiers);
+    }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_PhysicalMemory");
-    trimResults(values);
-    ret.windows.memory = values;
+    if(values[0]){
+        trimResults(values);
+        ret.windows.memory = values;
+    }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_OperatingSystem");
-    trimResults(values);
-    ret.windows.osinfo = values[0];
+    if(values[0]){
+        trimResults(values);
+        ret.windows.osinfo = values[0];
+    }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_DiskPartition");
-    trimResults(values);
-    ret.windows.partitions = values;
+    if(values[0]){
+        trimResults(values);
+        ret.windows.partitions = values;
+        for (var i in values) {
+            if (values[i].Description=='GPT: System') {
+                ret['identifiers']['bios_mode'] = 'UEFI';
+            }
+        }
+    }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_Processor", ['Caption', 'DeviceID', 'Manufacturer', 'MaxClockSpeed', 'Name', 'SocketDesignation']);
-    ret.windows.cpu = values;
-
+    if(values[0]){
+        ret.windows.cpu = values;
+    }
+    
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_VideoController", ['Name', 'CurrentHorizontalResolution', 'CurrentVerticalResolution']);
-    ret.windows.gpu = values;
+    if(values[0]){
+        ret.windows.gpu = values;
+    }
 
     values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_DiskDrive", ['Caption', 'DeviceID', 'Model', 'Partitions', 'Size']);
-    ret.windows.drives = values;
-
+    if(values[0]){
+        ret.windows.drives = values;
+    }
+    
     // Insert GPU names
     ret.identifiers.gpu_name = [];
     for (var gpuinfo in ret.windows.gpu)
