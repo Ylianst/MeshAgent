@@ -113,6 +113,7 @@ function linux_identifiers()
     identifiers['board_vendor'] = ret['board_vendor'];
     identifiers['board_version'] = ret['board_version'];
     identifiers['product_uuid'] = ret['product_uuid'];
+    identifiers['product_name'] = ret['product_name'];
 
     try {
         identifiers['bios_mode'] = (require('fs').statSync('/sys/firmware/efi').isDirectory() ? 'UEFI': 'Legacy');
@@ -472,9 +473,10 @@ function windows_identifiers()
         ret['identifiers']['board_version'] = values[0]['Version'];
     }
 
-    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_ComputerSystemProduct", ['UUID']);
+    values = require('win-wmi').query('ROOT\\CIMV2', "SELECT * FROM Win32_ComputerSystemProduct", ['UUID','Name']);
     if(values[0]){
         ret['identifiers']['product_uuid'] = values[0]['UUID'];
+        ret['identifiers']['product_name'] = values[0]['Name'];
         trimIdentifiers(ret.identifiers);
     }
 
