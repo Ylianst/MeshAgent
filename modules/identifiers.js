@@ -379,7 +379,7 @@ function windows_volumes()
         for (i = 1; i < a.length; ++i)
         {
             tokens = a[i].split(',');
-            if (tokens[0] != '')
+            if (tokens[0] != '' && tokens[1] != undefined)
             {
                 ret[tokens[0].split('"')[1]] =
                     {
