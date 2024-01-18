@@ -953,7 +953,7 @@ function macos_messageBox()
             ret.child.on('exit', function ()
             {
                 var res = this.stdout.str.split('\x1e')[1];
-                if (res.length > 2) { res = res.substring(0, res.length - 2); }
+                // if (res.length > 2) { res = res.substring(0, res.length - 2); }
                 this.promise._res(res);
             });
             ret.child.stdin.write('su - ' + ret.name + '\n');
@@ -1130,7 +1130,7 @@ function macos_messageBox()
                     }
                     else
                     {
-                        if (this._shell.stdout.str.length > 2) { this._shell.stdout.str = this._shell.stdout.str.substring(0, this._shell.stdout.str.length - 2); }
+                        // if (this._shell.stdout.str.length > 2) { this._shell.stdout.str = this._shell.stdout.str.substring(0, this._shell.stdout.str.length - 2); }
                         this.end(translateObject({ command: 'readClip', clipValue: this._shell.stdout.str }));
                     }
                     break;
