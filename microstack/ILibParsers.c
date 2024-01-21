@@ -1095,6 +1095,7 @@ void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t newExtraSize)
 void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType)
 {
 	if (ptr == NULL) { ILIBCRITICALEXIT(254); }
+	if (extraSize) primarySize = (primarySize + sizeof(void *) - 1) & -sizeof(void *);
 	memset(ptr, 0, primarySize + extraSize + sizeof(ILibMemory_Header) + (extraSize > 0 ? sizeof(ILibMemory_Header) : 0));
 
 	void *primary = ILibMemory_FromRaw(ptr);
