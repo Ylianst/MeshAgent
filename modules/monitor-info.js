@@ -390,7 +390,7 @@ function monitorinfo()
                 }
                 else
                 {
-                    ch.stdin.write('ps -e | grep X\nexit\n');
+                    ch.stdin.write("ps -e -o comm,cgroup|egrep '^X.*(-|::/user.slice.*)$'\nexit\n");
                 }
                 ch.waitExit();
 
