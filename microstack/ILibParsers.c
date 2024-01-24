@@ -1036,6 +1036,8 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 		size_t originalRawSize = ILibMemory_Init_Size(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
 		size_t originalSize = ILibMemory_Size(ptr);
 		size_t originalExtraSize = ILibMemory_ExtraSize(ptr);
+		if (originalExtraSize)
+			len = (len + sizeof(void *) - 1) & -sizeof(void *);
 		size_t newRawSize = ILibMemory_Init_Size(len, originalExtraSize);
 
 		if (newRawSize < originalRawSize && originalExtraSize > 0)
