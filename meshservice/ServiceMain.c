@@ -1499,6 +1499,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			WCHAR *meshidentitifer = NULL;
 			WCHAR *oktext = NULL;
 			WCHAR *dialogtitle = NULL;
+			WCHAR *osname = NULL;
 			meshname = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshName", NULL);
 			meshid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshID", NULL);
 			serverid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "ServerID", NULL);
@@ -1584,6 +1585,41 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					SetWindowTextW(GetDlgItem(hDlg, IDC_STATUSTEXT), state_notrunning);
 					break;
 				}
+				char osnametmp[255];
+				#ifdef WIN32
+					// This is only supported on Windows 8 and above
+					HMODULE wsCORE = LoadLibraryExA((LPCSTR)"Ws2_32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+					GetHostNameWFunc ghnw = NULL;
+					if (wsCORE != NULL)
+					{
+						if ((ghnw = (GetHostNameWFunc)GetProcAddress(wsCORE, (LPCSTR)"GetHostNameW")) == NULL)
+						{
+							FreeLibrary(wsCORE);
+							wsCORE = NULL;
+						}
+					}
+					if (ghnw != NULL)
+					{
+						WCHAR whostname[MAX_PATH];
+						if (ghnw(whostname, MAX_PATH) == 0)
+						{
+							WideCharToMultiByte(CP_UTF8, 0, whostname, -1, osnametmp, (int)sizeof(osnametmp), NULL, NULL);
+						}
+					}
+					else
+					{
+						gethostname(osnametmp, (int)sizeof(osnametmp));
+					}
+					if (wsCORE != NULL)
+					{
+						FreeLibrary(wsCORE);
+						wsCORE = NULL;
+					}
+				#else
+					gethostname(osnametmp, (int)sizeof(osnametmp));
+				#endif
+				osname = Dialog_GetTranslationEx(g_dialogCtx, osnametmp);
+				SetWindowTextW(GetDlgItem(hDlg, IDC_OSNAME), osname);
 			}
 		}
 		break;
