@@ -370,30 +370,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Debug_NoOpenSSL|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetExt>.dll</TargetExt>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_NoOpenSSL|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Release_NoOpenSSL|Win32'">
-    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetExt>.dll</TargetExt>
-    <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
+    <TargetName>MeshConsole</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -402,16 +379,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>$(ProjectName)ARM64</TargetName>
+    <TargetName>MeshConsoleARM64</TargetName>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|x64'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Debug_NoOpenSSL|Win32'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>MeshConsole64</TargetName>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|ARM64'">
-    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>$(ProjectName)64</TargetName>
+    <TargetName>MeshConsole</TargetName>
+    <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Debug_NoOpenSSL|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -421,8 +395,28 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Debug_NoOpenSSL|ARM64'">
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>$(ProjectName)64</TargetName>
+    <TargetName>MeshConsoleARM64</TargetName>
     <TargetExt>.dll</TargetExt>
+  </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|Win32'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>MeshConsole</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|x64'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>MeshConsole64</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug_NoOpenSSL|ARM64'">
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>MeshConsoleARM64</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>MeshConsole</TargetName>
+    <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -432,8 +426,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>$(ProjectName)ARM64</TargetName>
+    <TargetName>MeshConsoleARM64</TargetName>
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_NoOpenSSL|Win32'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>MeshConsole</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_NoOpenSSL|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -442,7 +441,14 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release_NoOpenSSL|ARM64'">
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>$(ProjectName)64</TargetName>
+    <TargetName>MeshConsoleARM64</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Release_NoOpenSSL|Win32'">
+    <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
+    <TargetName>MeshConsole</TargetName>
+    <TargetExt>.dll</TargetExt>
+    <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Release_NoOpenSSL|x64'">
     <OutDir>$(SolutionDir)$(Configuration)\</OutDir>
@@ -453,7 +459,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Library_Release_NoOpenSSL|ARM64'">
     <IntDir>$(SolutionDir)$(Configuration)\$(TargetName)\$(Platform)\OBJ\</IntDir>
-    <TargetName>$(ProjectName)64</TargetName>
+    <TargetName>MeshConsole64</TargetName>
     <TargetExt>.dll</TargetExt>
     <PostBuildEventUseInBuild>false</PostBuildEventUseInBuild>
   </PropertyGroup>
