@@ -4129,6 +4129,13 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		ILibAddHeaderLine(req, "Host", 4, ILibScratchPad, (int)sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%s:%u", host, port));
 	}
 
+	// Set User-Agent for proxies to identify agents and versions
+	const char* FieldData = "MeshAgent ";
+	char combined[40];
+	strcpy(combined, FieldData);
+	strcat(combined, SOURCE_COMMIT_DATE);
+	ILibAddHeaderLine(req, "User-Agent", 10, combined, (int)strnlen_s(combined, 50));
+
 	free(path);
 
 	if (useproxy != 0 || meshServer.sin6_family != AF_UNSPEC)
