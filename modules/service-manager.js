@@ -2936,7 +2936,7 @@ function serviceManager()
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
             plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '</string>\n');
+            plist += ('     <string>' + options.name + '-launchagent</string>\n');
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.workingDirectory + '</string>\n');
