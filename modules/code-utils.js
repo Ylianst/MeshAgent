@@ -170,7 +170,7 @@ function expand(options)
     if (options == null) { options = {}; }
     if (options.embedded === true) { return(expand2(options)); }
 
-    if (options.filePath == null) { options.filePath = 'C:/GITHub//MeshAgent/microscript/ILibDuktape_Polyfills.c'; }
+    if (options.filePath == null) { options.filePath = 'microscript/ILibDuktape_Polyfills.c'; }
 
     var file = require('fs').readFileSync(options.filePath);
     var section = file.toString().split('void ILibDuktape_Polyfills_JS_Init(');
@@ -326,8 +326,8 @@ function shrink(options)
 {
     if (options == null) { options = {}; }
     if (options.expandedPath == null) { options.expandedPath =  process.argv.getParameter('expandedPath', 'modules_expanded'); }
-    if (options.filePath == null) { options.filePath =  process.argv.getParameter('filePath', 'C:/GITHub//MeshAgent/microscript/ILibDuktape_Polyfills.c'); }
-    if (options.modulesPath == null) { options.modulesPath = process.argv.getParameter('modulesPath', 'C:/GITHub/MeshAgent/modules'); }
+    if (options.filePath == null) { options.filePath =  process.argv.getParameter('filePath', 'microscript/ILibDuktape_Polyfills.c'); }
+    if (options.modulesPath == null) { options.modulesPath = process.argv.getParameter('modulesPath', 'modules'); }
 
     readExpandedModules(options);
     insertCompressed(options);
@@ -369,7 +369,7 @@ function insertCompressed(options)
 function update(options)
 {
     if (options == null) { options = {}; }
-    if (options.modulesFolder == null) { options.modulesFolder = 'C:/GITHub/MeshAgent/modules'; }
+    if (options.modulesFolder == null) { options.modulesFolder = 'modules'; }
     if (options.expandedPath == null) { options.expandedPath = 'modules_expanded'; }
 
     var files = require('fs').readFileSync(options.modulesFolder + '/embedded.info');
