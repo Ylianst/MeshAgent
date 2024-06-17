@@ -182,6 +182,7 @@ EXENAME = meshagent
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
 PATH_MIPS24KC = ../ToolChains/toolchain-mips_24kc_gcc-7.3.0_musl/
+PATH_OPENWRT_ARMVIRT32 = ../ToolChains/staging_dir/toolchain-arm_cortex-a15+neon-vfpv4_gcc-8.4.0_musl_eabi/
 PATH_MIPSEL24KC = ../ToolChains/toolchain-mipsel_24kc_gcc-7.3.0_musl/
 PATH_ARM5 = ../ToolChains/LinuxArm/bin/
 PATH_POGO = ../ToolChains/pogoplug-gcc/bin/
@@ -371,6 +372,20 @@ KVM = 0
 LMS = 0
 endif
 
+# Official Linux ARMVIRT32 (OpenWRT)
+ifeq ($(ARCHID),42)
+ARCHNAME = armvirt32
+export PATH := $(PATH_OPENWRT_ARMVIRT32)bin:$(PATH_OPENWRT_ARMVIRT32)libexec/gcc/arm-openwrt-linux-muslgnueabi/8.4.0:$(PATH_OPENWRT_ARMVIRT32)arm-openwrt-linux-muslgnueabi/bin:$(PATH)
+export STAGING_DIR := $(PATH_OPENWRT_ARMVIRT32)
+CC = $(PATH_OPENWRT_ARMVIRT32)bin/arm-openwrt-linux-gcc --sysroot=$(PATH_OPENWRT_ARMVIRT32)
+STRIP = $(PATH_OPENWRT_ARMVIRT32)bin/arm-openwrt-linux-muslgnueabi-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing
+CFLAGS += -DBADMATH 
+INCDIRS += -I$(PATH_OPENWRT_ARMVIRT32)include
+
+KVM = 0
+LMS = 0
+endif
 
 # Official Linux ARM
 ifeq ($(ARCHID),9)
@@ -680,6 +695,7 @@ cleanbin:
 	rm -f $(EXENAME)_mips
 	rm -f $(EXENAME)_mips24kc
 	rm -f $(EXENAME)_mipsel24kc
+	rm -f $(EXENAME)_armvirt32
 	rm -f $(EXENAME)_osx-arm-64
 	rm -f $(EXENAME)_osx-x86-64
 	rm -f $(EXENAME)_osx-universal-64
@@ -705,6 +721,7 @@ cleanbin:
 	rm -f DEBUG_$(EXENAME)_mips
 	rm -f DEBUG_$(EXENAME)_mips24kc
 	rm -f DEBUG_$(EXENAME)_mipsel24kc
+	rm -f DEBUG_$(EXENAME)_armvirt32
 	rm -f DEBUG_$(EXENAME)_osx-arm-64
 	rm -f DEBUG_$(EXENAME)_osx-x86-64
 	rm -f DEBUG_$(EXENAME)_osx-universal-64
