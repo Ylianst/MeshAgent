@@ -319,7 +319,7 @@ function windows_registry()
             var sid = user;
             if (typeof (user) == 'string')
             {
-                // Try to find the Session ID for the specified domain user
+                // Try to find the Session ID for the specified local user
                 var r = this.QueryKey(this.HKEY.LocalMachine, 'SAM\\SAM\\Domains\\Account\\Users\\Names\\' + user);
                 sid = r.default._type;
             }
@@ -328,8 +328,11 @@ function windows_registry()
             {
                 if(u.subkeys[i].endsWith('-' + sid))
                 {
-                    // Try to find the Descriptor Key with the SID that we found
-                    return (u.subkeys[i]);
+                    if (this.QueryKey(this.HKEY.Users, u.subkeys[i] + '\\Volatile Environment', 'USERDOMAIN') == domain)
+                    {
+                        // Try to find the Descriptor Key with the SID that we found
+                        return (u.subkeys[i]);
+                    }
                 }
             }
         }
