@@ -978,21 +978,26 @@ function getCurrent()
 {
     if(process.platform == 'win32')
     {
-        // On windows wi will use WMI via WMIC to get the LCID. 
-        var child = require('child_process').execFile(process.env['windir'] + '\\system32\\wbem\\wmic.exe', ['wmic', 'os', 'get', 'oslanguage','/FORMAT:LIST']);
+        // On windows we will use Get-WinSystemLocale via powershell to get the LCID.
+        var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
+        if (child == null) { return ([]); }
+
+        child.descriptorMetadata = 'process-manager';
         child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
         child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+
+        child.stdin.write('Get-WinSystemLocale | Select-Object -ExpandProperty LCID\r\n');
+        child.stdin.write('exit\r\n');
         child.waitExit();
 
         var lines = child.stdout.str.trim().split('\r\n');
         var tokens;
         for (var i in lines)
         {
-            tokens = lines[i].split('=');
-            if(tokens[0]=='OSLanguage')
-            {
-                // Convert LCID to language string
-                return (toLang(tokens[1]));
+            // Convert LCID to language string
+            var lang = toLang(lines[i]);
+            if (lang !== null) {
+                return lang;
             }
         }
         return (null);
