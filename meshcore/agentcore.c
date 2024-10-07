@@ -4352,8 +4352,14 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 }
 
 #ifndef MICROSTACK_NOTLS
-int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address)
+int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address, MeshAgentHostContainer *agent)
 {
+	int len = ILibSimpleDataStore_Get(agent->masterDb, "validateWebCert", ILibScratchPad, sizeof(ILibScratchPad));
+	// Values here are 0 terminated, but the 0 is counted in size, so add one to the length check.
+	if ((len == 2 && strncmp("1", ILibScratchPad, 1) == 0) ||
+		(len == 5 && strncmp("true", ILibScratchPad, 4) == 0)) {
+		return preverify_ok;
+	}
 	// Server validation is always true here. We will do a second round within the websocket to see if the server is really valid or not.
 	return 1;
 }
@@ -5331,10 +5337,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #ifndef MICROSTACK_NOTLS
 	if (agentHost->selftlscert.x509 == NULL) {
 		// We don't have a TLS certificate, so setup the client without one.
-		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, NULL, NULL, ValidateMeshServer);
+		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, NULL, NULL, ValidateMeshServer, agentHost);
 	} else {
 		// We have a TLS certificate, use it for HTTPS client side auth (not super useful).
-		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, &(agentHost->selftlscert), agentHost->selfcert.x509, ValidateMeshServer);
+		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, &(agentHost->selftlscert), agentHost->selfcert.x509, ValidateMeshServer, agentHost);
 	}
 #endif
 
