@@ -143,6 +143,7 @@ typedef enum CERTIFICATE_TYPES
 
 void  __fastcall util_openssl_init();
 void  __fastcall util_openssl_uninit();
+int  __fastcall util_load_system_certs(SSL_CTX *ctx);
 void  __fastcall util_free(char* ptr);
 
 // Certificate & crypto methods
