@@ -9405,14 +9405,14 @@ char* ILibString_Cat_s(char *destination, size_t destinationSize, char *source)
 {
 	size_t sourceLen = strnlen_s(source, destinationSize);
 	size_t i;
-	size_t *x = NULL;
+	size_t x = destinationSize;
 	for (i = 0; i < destinationSize - 1; ++i)
 	{
-		if (destination[i] == 0) { *x = i; break; }
+		if (destination[i] == 0) { x = i; break; }
 	}
-	if (x == NULL || ((*x + sourceLen + 1 )> destinationSize)) { ILIBCRITICALEXIT(254); }
-	memcpy_s(destination + *x, destinationSize - *x, source, sourceLen);
-	destination[*x + sourceLen] = 0;
+	if (((x + sourceLen + 1 )> destinationSize)) { ILIBCRITICALEXIT(254); }
+	memcpy_s(destination + x, destinationSize - x, source, sourceLen);
+	destination[x + sourceLen] = 0;
 	return(destination);
 }
 #ifndef WIN32
