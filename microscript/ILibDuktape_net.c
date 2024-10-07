@@ -2702,6 +2702,8 @@ duk_ret_t ILibDuktape_TLS_createSecureContext(duk_context *ctx)
 		SSL_CTX_use_PrivateKey(ssl_ctx, cert->pkey);
 	}
 
+	util_load_system_certs(ssl_ctx);
+
 	return(1);
 }
 duk_ret_t ILibDuktape_TLS_generateCertificate(duk_context *ctx)

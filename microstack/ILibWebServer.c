@@ -996,6 +996,7 @@ int ILibWebServer_EnableHTTPS(ILibWebServer_ServerToken object, struct util_cert
 
 	SSL_CTX_set_options(ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1);
 
+	util_load_system_certs(ctx);
 	SSL_CTX_use_certificate(ctx, leafCert->x509);
 	SSL_CTX_use_PrivateKey(ctx, leafCert->pkey);
 

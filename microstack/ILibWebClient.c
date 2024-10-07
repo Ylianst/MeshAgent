@@ -3583,6 +3583,9 @@ int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_
 			SSL_CTX_add_extra_chain_cert(ctx, X509_dup(nonLeafCert));
 		}
 	}
+	
+	util_load_system_certs(ctx);
+	
 	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, ILibWebClient_Https_AuthenticateServer); // Ask for server authentication
 
 	if (ILibWebClientDataObjectIndex < 0)

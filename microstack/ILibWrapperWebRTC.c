@@ -452,6 +452,7 @@ void ILibWrapper_WebRTC_InitializeCrypto(ILibWrapper_WebRTC_ConnectionFactoryStr
 		factory->ctx = SSL_CTX_new(DTLS_method());
 		//SSL_CTX_set_ecdh_auto(factory->ctx, 1); // Turn on elliptic curve for dTLS, this is required starting with Firefox 39. (DEPRECATED for OpenSSL/1.1.x)
 #endif
+		util_load_system_certs(factory->ctx);
 		if (ILibWrapper_WebRTC_ConnectionFactoryIndex < 0)
 		{
 			ILibWrapper_WebRTC_ConnectionFactoryIndex = SSL_CTX_get_ex_new_index(0, "ILibWrapper_WebRTC_ConnectionFactoryStruct index", NULL, NULL, NULL);
