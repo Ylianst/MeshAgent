@@ -2780,7 +2780,8 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 			ILibUTF8ToWideEx(agent->exePath, (int)strnlen_s(agent->exePath, 4096), w_exepath, 4096);
 
 			swprintf_s(cmd, MAX_PATH, L"%s\\system32\\cmd.exe", env);
-			swprintf_s(parms, 65535, L"/C wmic service \"%s\" call stopservice & \"%s\" -b64exec %s \"%s\" & copy \"%s\" \"%s\" & wmic service \"%s\" call startservice & erase \"%s\"",
+			// get-ciminstance win32_service -filter "Name='this.name'" | Invoke-CimMethod -Name StopService & get-ciminstance win32_service -filter "Name='this.name'" | Invoke-CimMethod -Name StartService
+			swprintf_s(parms, 65535, L"/C net stop \"%s\" & \"%s\" -b64exec %s \"%s\" & copy \"%s\" \"%s\" & net stort \"%s\" & erase \"%s\"",
 				w_meshservicename,
 				w_updatefile, L"dHJ5CnsKICAgIHZhciBzZXJ2aWNlTG9jYXRpb24gPSBwcm9jZXNzLmFyZ3YucG9wKCkudG9Mb3dlckNhc2UoKTsKICAgIHJlcXVpcmUoJ3Byb2Nlc3MtbWFuYWdlcicpLmVudW1lcmF0ZVByb2Nlc3NlcygpLnRoZW4oZnVuY3Rpb24gKHByb2MpCiAgICB7CiAgICAgICAgZm9yICh2YXIgcCBpbiBwcm9jKQogICAgICAgIHsKICAgICAgICAgICAgaWYgKHByb2NbcF0ucGF0aCAmJiAocHJvY1twXS5wYXRoLnRvTG93ZXJDYXNlKCkgPT0gc2VydmljZUxvY2F0aW9uKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcHJvY2Vzcy5raWxsKHByb2NbcF0ucGlkKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBwcm9jZXNzLmV4aXQoKTsKICAgIH0pOwp9CmNhdGNoIChlKQp7CiAgICBwcm9jZXNzLmV4aXQoKTsKfQ==", w_exepath,
 				w_updatefile, w_exepath, w_meshservicename, w_updatefile);
