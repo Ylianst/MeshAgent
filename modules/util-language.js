@@ -978,24 +978,17 @@ function getCurrent()
 {
     if(process.platform == 'win32')
     {
-        // On windows wi will use WMI via WMIC to get the LCID. 
-        var child = require('child_process').execFile(process.env['windir'] + '\\system32\\wbem\\wmic.exe', ['wmic', 'os', 'get', 'oslanguage','/FORMAT:LIST']);
-        child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-        child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-        child.waitExit();
-
-        var lines = child.stdout.str.trim().split('\r\n');
-        var tokens;
-        for (var i in lines)
-        {
-            tokens = lines[i].split('=');
-            if(tokens[0]=='OSLanguage')
-            {
+        // On windows we will use WMI to get the LCID. 
+        if (process.platform == 'win32') {
+            var tokens = require('win-wmi').query('ROOT\\CIMV2', 'SELECT OSLanguage FROM Win32_OperatingSystem', ['OSLanguage']);
+            if (tokens[0]) {
                 // Convert LCID to language string
-                return (toLang(tokens[1]));
+                return (toLang(tokens[0]['OSLanguage'].toString()));
+            } else {
+                // fallback to en-us to avoid crashing
+                return ("en-us");
             }
         }
-        return (null);
     }
 
     if(process.env['LANG'])
