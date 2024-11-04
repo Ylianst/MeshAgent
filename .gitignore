@@ -329,3 +329,5 @@ ASALocalRun/
 
 # Klocwork
 .klocwork/
+
+*.o
