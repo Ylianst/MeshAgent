@@ -803,12 +803,13 @@ function hexToAscii(hexString) {
 function win_chassisType()
 {
     // needs to be replaced with win-wmi but due to bug in win-wmi it doesnt handle arrays correctly
-    var cmd = '"Get-CimInstance Win32_SystemEnclosure | Select-Object -ExpandProperty ChassisTypes"';
-    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', cmd], {});
+    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
     if (child == null) { return ([]); }
     child.descriptorMetadata = 'process-manager';
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write('Get-WmiObject Win32_SystemEnclosure | Select-Object -ExpandProperty ChassisTypes\r\n');
+    child.stdin.write('exit\r\n');
     child.waitExit();
     try {
         return (parseInt(child.stdout.str));
