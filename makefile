@@ -127,11 +127,17 @@
 #	make linux ARCHID=36					# Linux x86_64/MUSL (OpenWRT)
 #	make linux ARCHID=40					# Linux MIPSEL24KC/MUSL (OpenWRT)
 #	make linux ARCHID=41					# Linux ARMADA/CORTEX-A53/MUSL (OpenWRT)
+#   make linux ARCHID=44					# Linux ARMVIRT32/MUSL (OpenWRT)
 #
 # Synology Builds
 #
 #	make linux ARCHID=35					# Linux ARMADA 370 Hardfloat
-
+#
+# Windows Builds for ARCHID:
+#   1 - 4 are Windows builds. please use Visual Studio to compile.
+#   21 - 22 are Windows builds, please use Visual Studio to compile.
+#   34 is Windows build, please use Visual Studio to compile.
+#   42 - 43 are Windows builds, please use Visual Studio to compile.
 # 
 # Required build switches:
 #	ARCHID									Architecture ID
@@ -373,7 +379,7 @@ LMS = 0
 endif
 
 # Official Linux ARMVIRT32 (OpenWRT)
-ifeq ($(ARCHID),42)
+ifeq ($(ARCHID),44)
 ARCHNAME = armvirt32
 export PATH := $(PATH_OPENWRT_ARMVIRT32)bin:$(PATH_OPENWRT_ARMVIRT32)libexec/gcc/arm-openwrt-linux-muslgnueabi/8.4.0:$(PATH_OPENWRT_ARMVIRT32)arm-openwrt-linux-muslgnueabi/bin:$(PATH)
 export STAGING_DIR := $(PATH_OPENWRT_ARMVIRT32)

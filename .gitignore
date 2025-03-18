@@ -331,3 +331,5 @@ ASALocalRun/
 .klocwork/
 
 *.o
+ToolChains/
+.DS_Store
