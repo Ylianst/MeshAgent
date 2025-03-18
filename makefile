@@ -129,6 +129,10 @@
 #	make linux ARCHID=41					# Linux ARMADA/CORTEX-A53/MUSL (OpenWRT)
 #   make linux ARCHID=44					# Linux ARMVIRT32/MUSL (OpenWRT)
 #
+# RISC-V Builds:
+#
+#	make linux ARCHID=45					# Linux RISC-V 64 bit
+#
 # Synology Builds
 #
 #	make linux ARCHID=35					# Linux ARMADA 370 Hardfloat
@@ -200,6 +204,7 @@ PATH_AARCH64_CORTEXA53 = ../ToolChains/toolchain-aarch64_cortex-a53_gcc-7.5.0_mu
 PATH_ARMADA370_HF = /home/dev/arm-unknown-linux-gnueabi/
 PATH_RPI = ../ToolChains/arm-rpi-4.9.3-linux-gnueabihf/
 PATH_OPENWRT_X86_64 = /home/dev/openwrt/staging_dir/toolchain-x86_64_gcc-7.3.0_musl/
+PATH_RISCV64 = ../ToolChains/riscv64-linux-musl-x86_64/
 
 OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
 
@@ -389,6 +394,19 @@ CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wforma
 CFLAGS += -DBADMATH 
 INCDIRS += -I$(PATH_OPENWRT_ARMVIRT32)include
 
+KVM = 0
+LMS = 0
+endif
+
+# Official Linux RISC-V 64bit
+ifeq ($(ARCHID),45)
+ARCHNAME = riscv64
+export PATH := $(PATH_RISCV64)bin:$(PATH_RISKV64)libexec/gcc/riscv64-unknown-linux-musl/10.2.0:$(PATH_RISCV64)riscv64-unknown-linux-musl/bin:$(PATH)
+export STAGING_DIR := $(PATH_RISCV64)
+CC = $(PATH_RISCV64)bin/riscv64-unknown-linux-musl-gcc
+STRIP = $(PATH_RISCV64)bin/riscv64-unknown-linux-musl-strip
+CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -mcpu=c906fdv -march=rv64imafdcv0p7xthead -mcmodel=medany -mabi=lp64d
+INCDIRS += -I$(PATH_RISCV64)include
 KVM = 0
 LMS = 0
 endif
