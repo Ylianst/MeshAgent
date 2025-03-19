@@ -12,14 +12,14 @@
 
 The MeshCentral Agent is the software that runs on remote devices and connects to the MeshCentral server to allow for remote device management. This agent is compiled for Windows, many different Linux distributions, macOS and FreeBSD. In addition compiled for many different processors x86-32, x86-64, ARM, MIPS. For most users, install the MeshCentral server first and install the agent from your server.
 
-To try out this software on the public server, please visit [MeshCentral.com/login](https://meshcentral.com/login). Be mindful that the public MeshCentral server comes with no guaranties, most should setup their own server.
-
 For more information, [visit MeshCentral.com](https://www.meshcentral.com).
 
 ## Social Media
+[YouTube](https://www.youtube.com/channel/UCJWz607A8EVlkilzcrb-GKg/videos)  
 [Reddit](https://www.reddit.com/r/MeshCentral/)  
-[Twitter](https://twitter.com/MeshCentral)  
+[X](https://x.com/MeshCentral)  
 [BlogSpot](https://meshcentral2.blogspot.com/)  
+[LinkedIn](https://www.linkedin.com/groups/13067101/)  
 
 ## MSH format
 The MeshAgent gets it's security and connection instructions from a .msh text file formatted with each line being a "key=value". The .msh file is generally created by the MeshCentral server and, for example, would look like this:
