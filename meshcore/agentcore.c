@@ -3623,7 +3623,7 @@ void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject
 	}
 
 #ifdef _REMOTELOGGING
-	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
+    ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost , ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
 #endif
 }
 void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int InterruptFlag, struct packetheader *header, char *bodyBuffer, int *beginPointer, int endPointer, ILibWebClient_ReceiveStatus recvStatus, void *user1, void *user2, int *PAUSE)
@@ -4322,6 +4322,8 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 {
 	int CoreModuleLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", NULL, 0);
 	char *CoreModule;
+	//int CoreModuleTesterLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", NULL, 0);
+    //char *CoreModule, *CoreModuleTester;
 
 	duk_push_heapptr(agent->meshCoreCtx, ILibDuktape_GetProcessObject(agent->meshCoreCtx));		// [process]
 	ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(agent->meshCoreCtx, agent->masterDb);	// [process][array]
