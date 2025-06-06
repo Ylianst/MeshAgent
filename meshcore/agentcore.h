@@ -256,6 +256,8 @@ typedef struct MeshAgentHostContainer
 	int consoleText_counter;
 	int consoleText_maxRate;
 	int autoproxy_status;
+	bool openFrameMode;
+	char* openFrameSecret;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif

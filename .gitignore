@@ -333,3 +333,9 @@ ASALocalRun/
 *.o
 ToolChains/
 .DS_Store
+
+#openframe
+*.db
+meshagent_osx-arm-64
+DEBUG_meshagent_osx-arm-64
+*.msh
