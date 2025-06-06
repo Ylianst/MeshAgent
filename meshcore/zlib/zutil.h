@@ -137,7 +137,10 @@ extern z_const char * const z_errmsg[10]; /* indexed by 2-zlib_error */
 #      include <unix.h> /* for fdopen */
 #    else
 #      ifndef fdopen
-#        define fdopen(fd,mode) NULL /* No fdopen() */
+         /* Only define fdopen as NULL for older Mac systems, not modern macOS with Xcode */
+#        if !defined(__APPLE__) || defined(__MWERKS__)
+#          define fdopen(fd,mode) NULL /* No fdopen() */
+#        endif
 #      endif
 #    endif
 #  endif
@@ -163,7 +166,7 @@ extern z_const char * const z_errmsg[10]; /* indexed by 2-zlib_error */
 #  define OS_CODE 19
 #endif
 
-#if defined(_BEOS_) || defined(RISCOS)
+#if defined(_BEOS_) || (defined(RISCOS) && !defined(__APPLE__))
 #  define fdopen(fd,mode) NULL /* No fdopen() */
 #endif
 

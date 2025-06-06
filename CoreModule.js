@@ -1001,7 +1001,14 @@ function getServerTargetUrl(path) {
     if (path == null) { path = ''; }
     x = http.parseUri(x);
     if (x == null) return null;
-    return x.protocol + '//' + x.host + ':' + x.port + '/' + path;
+    var url = x.protocol + '//' + x.host + '/ws/tools/agent/meshcentral/' + path;
+
+    // Inject Openframe JWT token
+    console.log("Inject Openframe JWT token")
+    var separator = path.indexOf('?') !== -1 ? '&' : '?';
+    url += separator + 'authorization=Bearer%20' + mesh.authToken();
+
+    return url;
 }
 
 // Get server url. If the url starts with "*/..." change it, it not use the url as is.
@@ -1145,11 +1152,15 @@ function handleServerCommand(data) {
                     }
                     case 'tunnel':
                         {
+                        console.log("Process tunnel request")
                         if (data.value != null) { // Process a new tunnel connection request
                             // Create a new tunnel object
                             var xurl = getServerTargetUrlEx(data.value);
+                            // TODO: remove
+                            console.log("Connect to " + xurl)
                             if (xurl != null) {
                                 xurl = xurl.split('$').join('%24').split('@').join('%40'); // Escape the $ and @ characters
+
                                 var woptions = http.parseUri(xurl);
                                 woptions.perMessageDeflate = false;
                                 if (typeof data.perMessageDeflate == 'boolean') { woptions.perMessageDeflate = data.perMessageDeflate; }

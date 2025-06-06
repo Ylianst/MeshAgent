@@ -42,6 +42,7 @@ limitations under the License.
 #include "microstack/ILibMulticastSocket.h"
 #include "microscript/ILibDuktape_ScriptContainer.h"
 #include "../microstack/ILibIPAddressMonitor.h"
+#include "../openframe/token_extractor.h"
 
 #ifdef _POSIX
 #include <sys/stat.h>
@@ -1938,6 +1939,39 @@ duk_ret_t ILibDuktape_MeshAgent_Disconnect(duk_context *ctx)
 	return(0);
 }
 
+duk_ret_t ILibDuktape_MeshAgent_AuthToken(duk_context *ctx)
+{
+	duk_push_this(ctx);
+	duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
+
+	if (!agent->openFrameMode) {
+		printf("JWT token is not available in openframe mode\n");
+		duk_push_string(ctx, NULL);
+		return 1;
+	}
+
+	// Use token extractor with openframe-secret if available
+	if (agent->openFrameSecret != NULL) {
+		char* extracted_token = extract_token(agent->openFrameSecret);
+		if (extracted_token != NULL) {
+			duk_push_string(ctx, extracted_token);
+			free(extracted_token);  // Free the allocated memory
+			return 1;
+		}
+		else {
+			printf("Failed to extract token\n");
+			duk_push_string(ctx, NULL);
+			return 1;
+		}
+	}
+	else {
+		printf("Openframe secret is not available\n");
+		duk_push_string(ctx, NULL);
+		return 1;
+	}
+}
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -2081,6 +2115,8 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 
 	ILibDuktape_CreateInstanceMethod(ctx, "GenerateCertificate", ILibDuktape_MeshAgent_GenerateCertificate, 1);
 	duk_push_pointer(ctx, agent->masterDb); duk_put_prop_string(ctx, -2, "\xFF_MasterDB");
+
+	ILibDuktape_CreateInstanceMethod(ctx, "authToken", ILibDuktape_MeshAgent_AuthToken, 0);
 
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "Acquired MeshAgent");
 }
@@ -3200,16 +3236,25 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						break;
 					}
 
-					// Stop the current JavaScript core if present and launch the new one.
-					// JavaScript located at (cmd + 36) of length (cmdLen - 36)
-					//printf("CORE: Restart\r\n");
-					ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
-						ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Restart");
-					if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, coremodule + 4, (int)coremoduleLen - 4)) != NULL)
+					// Check if we are in openFrame mode
+					if (agent->openFrameMode) 
 					{
+						// For openFrame mode: update database but don't restart core module
+						printf("No CoreModule update for openframe mode\n");
+					}
+					else
+					{
+						// Stop the current JavaScript core if present and launch the new one.
+						// JavaScript located at (cmd + 36) of length (cmdLen - 36)
+						//printf("CORE: Restart\r\n");
 						ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
-							ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Error: %s", coreException);
-						// TODO: Ylian: New Java Core threw an exception... Exception String is stored in 'coreException'
+							ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Restart");
+						if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, coremodule + 4, (int)coremoduleLen - 4)) != NULL)
+						{
+							ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+								ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Error: %s", coreException);
+							// TODO: Ylian: New Java Core threw an exception... Exception String is stored in 'coreException'
+						}
 					}
 
 					// Since we did a big write to the data store, good time to compact the store
@@ -3264,7 +3309,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_CoreOk: // Message from the server indicating our meshcore is ok. No update needed.
 		{
 			printf("Server verified meshcore...");
-			
+
 			duk_eval_string(agent->meshCoreCtx, "_MSH().setuid;");
 			if (duk_is_null_or_undefined(agent->meshCoreCtx, -1) == 0)
 			{
@@ -3283,8 +3328,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			}
 			duk_pop(agent->meshCoreCtx);
 
-			if (agent->coreTimeout != NULL)
+			if (agent->openFrameMode || agent->coreTimeout != NULL)
 			{
+				printf("Start meshcore. Openframe mode: %d, coreTimeout: %p\n", agent->openFrameMode, agent->coreTimeout);
 				// Cancel the timeout
 				duk_push_global_object(agent->meshCoreCtx);					// [g]
 				duk_get_prop_string(agent->meshCoreCtx, -1, "clearTimeout");// [g][clearTimeout]
@@ -3314,8 +3360,46 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					}
 					else
 					{
-						CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
-						ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+						if (agent->openFrameMode)
+						{
+							printf("Use OpenFrame CoreModule from file\n");
+							FILE *file = fopen("./CoreModule.js", "rb");
+							if (file != NULL) {
+								// Get file size
+								fseek(file, 0, SEEK_END);
+								CoreModuleLen = ftell(file);
+								fseek(file, 0, SEEK_SET);
+
+								printf("File size: %d bytes\n", CoreModuleLen);
+								
+								// Allocate memory and read file
+								CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+								printf("Memory allocated");
+								if (CoreModule != NULL) {
+									size_t bytesRead = fread(CoreModule, 1, CoreModuleLen, file);
+									printf("Bytes read: %d\n", bytesRead);
+									if (bytesRead != CoreModuleLen) {
+										// Обработка ошибки чтения
+										ILibMemory_Free(CoreModule);
+										CoreModule = NULL;
+										CoreModuleLen = 0;
+									}
+								}
+								printf("Successfully read file ");
+								fclose(file);
+						        printf("File closed\n");
+							} else {
+								printf("OpenFrame CoreModule file not found\n");
+								CoreModule = NULL;
+								CoreModuleLen = 0;
+							}
+						}
+						else
+						{
+							printf("Use standard CoreModule from database\n");
+							CoreModule = (char*)ILibMemory_Allocate(CoreModuleLen, 0, NULL, NULL);
+							ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", CoreModule, CoreModuleLen);
+						}
 					}
 
 					if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agent->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
@@ -3539,7 +3623,7 @@ void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject
 	}
 
 #ifdef _REMOTELOGGING
-	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost , ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
+	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Received Pong");
 #endif
 }
 void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int InterruptFlag, struct packetheader *header, char *bodyBuffer, int *beginPointer, int endPointer, ILibWebClient_ReceiveStatus recvStatus, void *user1, void *user2, int *PAUSE)
@@ -4137,6 +4221,33 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	strcat(combined, SOURCE_COMMIT_DATE);
 	ILibAddHeaderLine(req, "User-Agent", 10, combined, (int)strnlen_s(combined, 50));
 
+	// Add custom JWT for openframe mode
+	if (agent->openFrameMode)
+	{
+		printf("Use JWT for openframe mode\n");
+		
+		// Use token extractor with openframe-secret if available
+		if (agent->openFrameSecret != NULL) {
+			char* extracted_token = extract_token(agent->openFrameSecret);
+			if (extracted_token != NULL) {
+				int authLen = 7 + strlen(extracted_token) + 1; // "Bearer " + token + null terminator
+				char openframeAuthorization[authLen];
+				sprintf(openframeAuthorization, "Bearer %s", extracted_token);
+				ILibAddHeaderLine(req, "Authorization", 13, openframeAuthorization, (int)strlen(openframeAuthorization));
+				free(extracted_token);  // Free the allocated memory
+				printf("Added authorization header with openframe JWT\n");
+			}
+			else {
+				printf("Failed to extract token for authorization header\n");
+			}
+		}
+		else {
+			printf("Openframe secret is not available for authorization header\n");
+		}
+	} else {
+		printf("Use no JWT for not openframe mode\n");
+	}
+
 	free(path);
 
 	if (useproxy != 0 || meshServer.sin6_family != AF_UNSPEC)
@@ -4211,8 +4322,6 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 {
 	int CoreModuleLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModule", NULL, 0);
 	char *CoreModule;
-	//int CoreModuleTesterLen = ILibSimpleDataStore_Get(agent->masterDb, "CoreModuleTester", NULL, 0);
-	//char *CoreModule, *CoreModuleTester;
 
 	duk_push_heapptr(agent->meshCoreCtx, ILibDuktape_GetProcessObject(agent->meshCoreCtx));		// [process]
 	ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(agent->meshCoreCtx, agent->masterDb);	// [process][array]
@@ -4794,6 +4903,16 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (strcmp(param[ri], "-recovery") == 0) 
 		{ 
 			agentHost->capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY; parseCommands = 0; 
+		}
+		if (strcmp(param[ri], "--openframe-mode") == 0) 
+		{ 
+			agentHost->openFrameMode = true; parseCommands = 0; 
+			printf("OpenFrame Mode: %d\n", agentHost->openFrameMode);
+		}
+		if (strcmp(param[ri], "--openframe-secret") == 0 && ((ri + 1) < paramLen))
+		{
+			agentHost->openFrameSecret = param[ri + 1]; parseCommands = 0;
+			++ri;
 		}
 #ifndef MICROSTACK_NOTLS
 		if (strcmp(param[ri], "-nocertstore") == 0)

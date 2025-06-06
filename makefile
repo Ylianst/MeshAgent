@@ -183,7 +183,7 @@ SOURCES += microscript/ILibDuktape_CompressedStream.c meshcore/zlib/adler32.c me
 SOURCES += $(ADDITIONALSOURCES)
 
 # Mesh Agent core
-SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
+SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c openframe/token_extractor.c
 
 # Mesh Agent settings
 MESH_VER = 194
