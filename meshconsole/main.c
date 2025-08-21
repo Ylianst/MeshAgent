@@ -60,12 +60,23 @@ BOOL CtrlHandler(DWORD fdwCtrlType)
 
 
 #if defined(_POSIX)
+static int shutdownAttempts = 0;
+
 void BreakSink(int s)
 {
 	UNREFERENCED_PARAMETER(s);
 
-	signal(SIGINT, SIG_IGN);	// To ignore any more ctrl c interrupts
-	if (agentHost != NULL) { MeshAgent_Stop(agentHost); }
+	shutdownAttempts++;
+	
+	if (shutdownAttempts == 1) {
+		printf("\nShutting down MeshAgent... (Press Ctrl+C again to force exit)\n");
+		if (agentHost != NULL) {
+			MeshAgent_Stop(agentHost);
+		}
+	} else if (shutdownAttempts >= 2) {
+		printf("\nForcing exit...\n");
+		exit(1);
+	}
 }
 #endif
 

@@ -258,6 +258,7 @@ typedef struct MeshAgentHostContainer
 	int autoproxy_status;
 	bool openFrameMode;
 	char* openFrameSecret;
+	char* openFrameTokenPath;
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif
