@@ -996,7 +996,6 @@ function parseArgs(argv) {
 // Get server target url with a custom path
 function getServerTargetUrl(path) {
     var x = mesh.ServerUrl;
-    //sendConsoleText("mesh.ServerUrl: " + mesh.ServerUrl);
     if (x == null) { return null; }
     if (path == null) { path = ''; }
     x = http.parseUri(x);
@@ -1006,7 +1005,7 @@ function getServerTargetUrl(path) {
     // Inject Openframe JWT token
     console.log("Inject Openframe JWT token")
     var separator = path.indexOf('?') !== -1 ? '&' : '?';
-    url += separator + 'authorization=Bearer%20' + mesh.authToken();
+    url += separator + 'authorization=' + mesh.authToken();
 
     return url;
 }
