@@ -1953,7 +1953,7 @@ duk_ret_t ILibDuktape_MeshAgent_AuthToken(duk_context *ctx)
 
 	// Use token extractor with openframe-secret if available
 	if (agent->openFrameSecret != NULL) {
-		char* extracted_token = extract_token(agent->openFrameSecret);
+		char* extracted_token = extract_token(agent->openFrameSecret, agent->openFrameTokenPath);
 		if (extracted_token != NULL) {
 			duk_push_string(ctx, extracted_token);
 			free(extracted_token);  // Free the allocated memory
@@ -4228,7 +4228,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		
 		// Use token extractor with openframe-secret if available
 		if (agent->openFrameSecret != NULL) {
-			char* extracted_token = extract_token(agent->openFrameSecret);
+			char* extracted_token = extract_token(agent->openFrameSecret, agent->openFrameTokenPath);
 			if (extracted_token != NULL) {
 				int authLen = 7 + strlen(extracted_token) + 1; // "Bearer " + token + null terminator
 				char openframeAuthorization[authLen];
@@ -4914,6 +4914,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		if (strcmp(param[ri], "--openframe-secret") == 0 && ((ri + 1) < paramLen))
 		{
 			agentHost->openFrameSecret = param[ri + 1]; parseCommands = 0;
+			++ri;
+		}
+		if (strcmp(param[ri], "--openframe-token-path") == 0 && ((ri + 1) < paramLen))
+		{
+			agentHost->openFrameTokenPath = param[ri + 1]; parseCommands = 0;
 			++ri;
 		}
 #ifndef MICROSTACK_NOTLS
