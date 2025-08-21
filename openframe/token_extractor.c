@@ -17,9 +17,10 @@ char* decrypt_aes_gcm(const unsigned char* ciphertext, size_t ciphertext_len,
                       const unsigned char* key, size_t* plaintext_len);
 char* base64_decode(const char* input, size_t* output_len);
 
-// Main token extraction function with secret parameter
-char* extract_token(const char* secret) {
-    const char* filename = "/etc/openframe/token.txt";
+// Main token extraction function with secret and token path parameters
+char* extract_token(const char* secret, const char* token_path) {
+    // Use provided path or default to /etc/openframe/token.txt
+    const char* filename = (token_path && strlen(token_path) > 0) ? token_path : "/etc/openframe/token.txt";
     
     if (!secret || strlen(secret) != 32) {
         printf("Secret must be exactly 32 bytes for AES-256\n");
