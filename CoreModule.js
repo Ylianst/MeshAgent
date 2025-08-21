@@ -1001,7 +1001,7 @@ function getServerTargetUrl(path) {
     if (path == null) { path = ''; }
     x = http.parseUri(x);
     if (x == null) return null;
-    var url = x.protocol + '//' + x.host + '/ws/tools/agent/meshcentral/' + path;
+    var url = x.protocol + '//' + x.host + '/ws/tools/agent/meshcentral-server/' + path;
 
     // Inject Openframe JWT token
     console.log("Inject Openframe JWT token")
