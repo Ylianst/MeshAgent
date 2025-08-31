@@ -3363,7 +3363,14 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						if (agent->openFrameMode)
 						{
 							printf("Use OpenFrame CoreModule from file\n");
-							FILE *file = fopen("./CoreModule.js", "rb");
+
+							char* lastSep = strrchr(agent->exePath, '/');
+							char coreModulePath[4096];
+							snprintf(coreModulePath, sizeof(coreModulePath), "%.*s/CoreModule.js", 
+								(int)(lastSep - agent->exePath), agent->exePath);
+							printf("CoreModule path: %s\n", coreModulePath);
+							
+							FILE *file = fopen(coreModulePath, "rb");
 							if (file != NULL) {
 								// Get file size
 								fseek(file, 0, SEEK_END);
@@ -3377,7 +3384,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 								printf("Memory allocated");
 								if (CoreModule != NULL) {
 									size_t bytesRead = fread(CoreModule, 1, CoreModuleLen, file);
-									printf("Bytes read: %d\n", bytesRead);
+									printf("Bytes read: %zu\n", bytesRead);
 									if (bytesRead != CoreModuleLen) {
 										// Обработка ошибки чтения
 										ILibMemory_Free(CoreModule);
