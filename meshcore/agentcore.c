@@ -22,6 +22,7 @@ limitations under the License.
 #include "wincrypto.h"
 #include <shellscalingapi.h>
 #include <process.h>
+#include "meshservice/resource.h"
 #endif
 
 #include "agentcore.h"
@@ -3856,7 +3857,34 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if (ILibIsChainBeingDestroyed(agent->chain) != 0) { return; }
 
 	len = ILibSimpleDataStore_Get(agent->masterDb, "MeshServer", ILibScratchPad2, sizeof(ILibScratchPad2));
-	if (len == 0) { printf("No MeshCentral settings found, place .msh file with this executable and restart.\r\n"); ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: MeshServer URI not found"); return; }
+	if (len == 0) {
+		printf("No MeshCentral settings found, place .msh file with this executable and restart.\r\n");
+		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "agentcore: MeshServer URI not found");
+		return;
+	}
+
+#ifdef WIN32
+	// Check if winpty.dll and winpty-agent.exe are present and try to deploy them if not.
+	int length = ILibString_LastIndexOf(agent->exePath, strnlen_s(agent->exePath, MAX_PATH), "\\", 1) + 1;
+	char basePath[MAX_PATH];
+	char winPtyDllPath[MAX_PATH];
+	char winPtyAgentExePath[MAX_PATH];
+	_snprintf_s(basePath, MAX_PATH, length, "%s", agent->exePath);
+	sprintf_s(winPtyDllPath, MAX_PATH, "%swinpty.dll", basePath);
+	sprintf_s(winPtyAgentExePath, MAX_PATH, "%swinpty-agent.exe", basePath);
+	if (GetFileAttributes(winPtyDllPath) == INVALID_FILE_ATTRIBUTES ||
+		GetFileAttributes(winPtyAgentExePath) == INVALID_FILE_ATTRIBUTES &&
+		GetLastError() == ERROR_FILE_NOT_FOUND)
+	{
+		printf("Either winpty.dll or winpty-agent.exe is missing. Trying to deploy missing dependencies.\r\n");
+		duk_push_sprintf(agent->meshCoreCtx, "require('service-manager').manager.deployWinPtyDependencies('%s')", basePath);
+		duk_string_split(agent->meshCoreCtx, -1, "\\"); // [string][array]
+		duk_array_join(agent->meshCoreCtx, -1, "\\\\"); // [string][array][string]
+		duk_remove(agent->meshCoreCtx, -2);             // [string][string]
+		duk_remove(agent->meshCoreCtx, -2);             // [string]
+		duk_peval_noresult(agent->meshCoreCtx);
+	}
+#endif
 
 	if (ILibSimpleDataStore_Get(agent->masterDb, "autoproxy", ILibScratchPad, sizeof(ILibScratchPad)) != 0)
 	{
@@ -6340,8 +6368,6 @@ void MeshAgent_Stop(MeshAgentHostContainer *agent)
 {
 	ILibStopChain(agent->chain);
 }
-
-
 
 #ifdef WIN32
 // Perform self-update (Windows console/tray version)
