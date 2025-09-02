@@ -20,6 +20,12 @@
     <Filter Include="Meshcore\zlib">
       <UniqueIdentifier>{cb187bde-f3b9-48e0-b3fd-f1732a3b3de2}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Resource Files\x64">
+      <UniqueIdentifier>{4e67d388-0e2f-479f-848f-cac0c5576346}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files\ia32">
+      <UniqueIdentifier>{a21d9586-6d67-4efa-a44b-403321268b1a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MeshService.rc">
@@ -359,5 +365,19 @@
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="stdafx.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="x64\winpty.dll">
+      <Filter>Resource Files\x64</Filter>
+    </None>
+    <None Include="x64\winpty-agent.exe">
+      <Filter>Resource Files\x64</Filter>
+    </None>
+    <None Include="ia32\winpty.dll">
+      <Filter>Resource Files\ia32</Filter>
+    </None>
+    <None Include="ia32\winpty-agent.exe">
+      <Filter>Resource Files\ia32</Filter>
+    </None>
   </ItemGroup>
 </Project>

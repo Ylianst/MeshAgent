@@ -19,6 +19,48 @@
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 #pragma code_page(1252)
 
+/////////////////////////////////////////////////////////////////////////////
+//
+// BIN
+//
+
+#if defined(APSTUDIO_INVOKED) || defined(_ARCH_64)
+#if defined(APSTUDIO_INVOKED)
+IDR_WINPTY_DLL_X64$(_ARCH_64) BIN                     "x64\\winpty.dll"
+
+#else
+IDR_WINPTY_DLL_X64      BIN                     "x64\\winpty.dll"
+
+#endif
+#endif
+#if defined(APSTUDIO_INVOKED) || defined(_ARCH_64)
+#if defined(APSTUDIO_INVOKED)
+IDR_WINPTY_AGENT_EXE_X64$(_ARCH_64) BIN                     "x64\\winpty-agent.exe"
+
+#else
+IDR_WINPTY_AGENT_EXE_X64 BIN                     "x64\\winpty-agent.exe"
+
+#endif
+#endif
+#if defined(APSTUDIO_INVOKED) || defined(_ARCH_32)
+#if defined(APSTUDIO_INVOKED)
+IDR_WINPTY_DLL_IA32$(_ARCH_32) BIN                     "ia32\\winpty.dll"
+
+#else
+IDR_WINPTY_DLL_IA32     BIN                     "ia32\\winpty.dll"
+
+#endif
+#endif
+#if defined(APSTUDIO_INVOKED) || defined(_ARCH_32)
+#if defined(APSTUDIO_INVOKED)
+IDR_WINPTY_AGENT_EXE_IA32$(_ARCH_32) BIN                     "ia32\\winpty-agent.exe"
+
+#else
+IDR_WINPTY_AGENT_EXE_IA32 BIN                     "ia32\\winpty-agent.exe"
+
+#endif
+#endif
+
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
 //
