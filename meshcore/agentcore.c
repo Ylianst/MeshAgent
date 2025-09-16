@@ -2191,6 +2191,41 @@ char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBa
 	return(ILibScratchPad2);
 }
 
+// TODO: make as external cmd arg and configure from openframe agent
+// Build path to CoreModule.js for OpenFrame mode using platform-specific path separators
+// Returns: Path to CoreModule.js in the same directory as the executable
+// Note: Uses ILibScratchPad for the result
+static char* buildOpenframeCoreModulePath(const char* exePath)
+{
+	char* lastSep;
+	
+#ifdef WIN32
+	lastSep = strrchr(exePath, '\\');
+	if (lastSep != NULL)
+	{
+		snprintf(ILibScratchPad, sizeof(ILibScratchPad), "%.*s\\CoreModule.js", 
+			(int)(lastSep - exePath), exePath);
+	}
+	else
+	{
+		strcpy_s(ILibScratchPad, sizeof(ILibScratchPad), "CoreModule.js");
+	}
+#else
+	lastSep = strrchr(exePath, '/');
+	if (lastSep != NULL)
+	{
+		snprintf(ILibScratchPad, sizeof(ILibScratchPad), "%.*s/CoreModule.js", 
+			(int)(lastSep - exePath), exePath);
+	}
+	else
+	{
+		strcpy_s(ILibScratchPad, sizeof(ILibScratchPad), "CoreModule.js");
+	}
+#endif
+	
+	return ILibScratchPad;
+}
+
 #ifndef MICROSTACK_NOTLS
 int agent_GenerateCertificates(MeshAgentHostContainer *agent, char* certfile)
 {
@@ -3328,7 +3363,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			}
 			duk_pop(agent->meshCoreCtx);
 
-			if (agent->openFrameMode || agent->coreTimeout != NULL)
+			if (agent->coreTimeout != NULL)
 			{
 				printf("Start meshcore. Openframe mode: %d, coreTimeout: %p\n", agent->openFrameMode, agent->coreTimeout);
 				// Cancel the timeout
@@ -3363,7 +3398,11 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						if (agent->openFrameMode)
 						{
 							printf("Use OpenFrame CoreModule from file\n");
-							FILE *file = fopen("./CoreModule.js", "rb");
+
+							char* coreModulePath = buildOpenframeCoreModulePath(agent->exePath);
+							printf("CoreModule path: %s\n", coreModulePath);
+							
+							FILE *file = fopen(coreModulePath, "rb");
 							if (file != NULL) {
 								// Get file size
 								fseek(file, 0, SEEK_END);
@@ -3377,7 +3416,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 								printf("Memory allocated");
 								if (CoreModule != NULL) {
 									size_t bytesRead = fread(CoreModule, 1, CoreModuleLen, file);
-									printf("Bytes read: %d\n", bytesRead);
+									printf("Bytes read: %zu\n", bytesRead);
 									if (bytesRead != CoreModuleLen) {
 										// Обработка ошибки чтения
 										ILibMemory_Free(CoreModule);
@@ -3402,12 +3441,18 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						}
 					}
 
+					printf("About to compile and execute CoreModule...\n");
 					if (ILibDuktape_ScriptContainer_CompileJavaScriptEx(agent->meshCoreCtx, CoreModule + 4, CoreModuleLen - 4, "CoreModule.js", 13) != 0 ||
 						ILibDuktape_ScriptContainer_ExecuteByteCode(agent->meshCoreCtx) != 0)
 					{
+						printf("ERROR executing CoreModule: %s\n", duk_safe_to_string(agent->meshCoreCtx, -1));
 						ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
 							ILibRemoteLogging_Flags_VerbosityLevel_1, "Error Executing MeshCore: %s", duk_safe_to_string(agent->meshCoreCtx, -1));
 						duk_pop(agent->meshCoreCtx);
+					}
+					else
+					{
+						printf("CoreModule executed successfully!\n");
 					}
 					free(CoreModule);
 				}
@@ -3415,7 +3460,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			else
 			{
 				// There's no timeout, probably because the core is already running
-				printf(" meshcore already running...\n");
+				printf("Meshcore already running (coreTimeout=%p)...\n", agent->coreTimeout);
 			}
 			break;
 		}
