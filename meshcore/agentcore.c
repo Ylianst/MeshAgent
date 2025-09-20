@@ -3274,8 +3274,42 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					// Check if we are in openFrame mode
 					if (agent->openFrameMode) 
 					{
-						// For openFrame mode: update database but don't restart core module
-						printf("No CoreModule update for openframe mode\n");
+						// For openFrame mode: start CoreModule from file instead of server data
+						printf("OpenFrame mode: starting CoreModule from file instead of server data\n");
+						
+						char* coreModulePath = buildOpenframeCoreModulePath(agent->exePath);
+						FILE *file = fopen(coreModulePath, "rb");
+						if (file != NULL) {
+							// Get file size
+							fseek(file, 0, SEEK_END);
+							int fileSize = ftell(file);
+							fseek(file, 0, SEEK_SET);
+
+							printf("OpenFrame CoreModule file found, size: %d bytes\n", fileSize);
+							
+							// Allocate memory and read file
+							char* fileCoreModule = (char*)ILibMemory_Allocate(fileSize, 0, NULL, NULL);
+							if (fileCoreModule != NULL) {
+								size_t bytesRead = fread(fileCoreModule, 1, fileSize, file);
+								if (bytesRead == fileSize) {
+									ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+										ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Restart (OpenFrame from file)");
+									if ((coreException = ScriptEngine_Restart(agent, MeshAgent_JavaCore_ContextGuid, fileCoreModule, fileSize)) != NULL)
+									{
+										ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Microstack_Generic | ILibRemoteLogging_Modules_ConsolePrint,
+											ILibRemoteLogging_Flags_VerbosityLevel_1, "MeshCore: Error (OpenFrame): %s", coreException);
+									} else {
+										printf("OpenFrame CoreModule started successfully from file!\n");
+									}
+								} else {
+									printf("Error reading OpenFrame CoreModule file\n");
+								}
+								ILibMemory_Free(fileCoreModule);
+							}
+							fclose(file);
+						} else {
+							printf("OpenFrame CoreModule file not found at: %s\n", coreModulePath);
+						}
 					}
 					else
 					{

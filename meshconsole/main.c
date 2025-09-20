@@ -164,6 +164,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && strcasecmp(argv[1], "-nodeid-base64") == 0 && integratedJavaScriptLen == 0)
+	{
+		char script[] = "console.log(Buffer.from(require('_agentNodeId')(), 'hex').toString('base64').replace(/\\+/g, '@').replace(/\\//g, '$'));process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 	if (argc > 1 && strcasecmp(argv[1], "-name") == 0 && integratedJavaScriptLen == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId').serviceName());process.exit();";
