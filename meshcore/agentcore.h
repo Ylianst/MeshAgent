@@ -45,6 +45,19 @@ typedef char JS_ENGINE_CONTEXT[16];
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibCrypto.h"
 
+#ifndef WIN32
+#include <stdbool.h>
+#else
+// For Windows, define bool if not already defined
+#ifndef __cplusplus
+#ifndef bool
+typedef int bool;
+#define true 1
+#define false 0
+#endif
+#endif
+#endif
+
 #define ILibDuktape_MeshAgent_LoggedOnUsers	"\xFF_MeshAgent_LoggedOnUsers"
 
 typedef enum MeshAgent_Posix_PlatformTypes

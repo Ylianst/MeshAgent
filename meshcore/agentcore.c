@@ -4310,9 +4310,12 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			char* extracted_token = extract_token(agent->openFrameSecret, agent->openFrameTokenPath);
 			if (extracted_token != NULL) {
 				int authLen = 7 + strlen(extracted_token) + 1; // "Bearer " + token + null terminator
-				char openframeAuthorization[authLen];
-				sprintf(openframeAuthorization, "Bearer %s", extracted_token);
-				ILibAddHeaderLine(req, "Authorization", 13, openframeAuthorization, (int)strlen(openframeAuthorization));
+				char *openframeAuthorization = (char*)malloc(authLen);
+				if (openframeAuthorization != NULL) {
+					sprintf(openframeAuthorization, "Bearer %s", extracted_token);
+					ILibAddHeaderLine(req, "Authorization", 13, openframeAuthorization, (int)strlen(openframeAuthorization));
+					free(openframeAuthorization);
+				}
 				free(extracted_token);  // Free the allocated memory
 				printf("Added authorization header with openframe JWT\n");
 			}

@@ -81,6 +81,7 @@
     <ClCompile Include="..\meshcore\KVM\Windows\tile.cpp" />
     <ClCompile Include="..\meshcore\meshinfo.c" />
     <ClCompile Include="..\meshcore\wincrypto.cpp" />
+    <ClCompile Include="..\openframe\token_extractor.c" />
     <ClCompile Include="..\meshcore\zlib\adler32.c" />
     <ClCompile Include="..\meshcore\zlib\deflate.c" />
     <ClCompile Include="..\meshcore\zlib\inffast.c" />
@@ -136,6 +137,7 @@
     <ClInclude Include="..\meshcore\meshdefines.h" />
     <ClInclude Include="..\meshcore\meshinfo.h" />
     <ClInclude Include="..\meshcore\wincrypto.h" />
+    <ClInclude Include="..\openframe\token_extractor.h" />
     <ClInclude Include="..\meshcore\zlib\deflate.h" />
     <ClInclude Include="..\meshcore\zlib\gzguts.h" />
     <ClInclude Include="..\meshcore\zlib\inffast.h" />
