@@ -24,6 +24,7 @@ env:
   REGISTRY: "ghcr.io"
   ORGANISATION: ${{ github.repository_owner }}
   REPOSITORY: ${{ github.event.repository.name }}
+  BINARY_NAME: meshagent
 
 # =============================================================================
 # JOBS
@@ -56,13 +57,7 @@ jobs:
             os: windows-latest
             os_arch: x64
             archid: 4
-            artifact_name: meshagent-windows-x64.exe
-###          - name: "Windows x86"
-###            os: windows-latest
-###            os_arch: x86
-###            archid: 3
-###            artifact_name: meshagent-windows-x86.exe
-
+            artifact_name: meshagent-windows-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,36 +92,43 @@ jobs:
         shell: bash
 
       - name: Prepare Artifacts
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          mkdir -p artifacts          
-          if [[ "${{ matrix.os_arch }}" == "arm64" ]]; then
-            BINARY_NAME="meshagent_osx-arm-64"
-          elif [[ "${{ matrix.os_arch }}" == "x86-64" ]]; then
-            BINARY_NAME="meshagent_osx-x86-64"
-          fi
-          cp "$BINARY_NAME" "artifacts/"
-
-      - name: Prepare Windows Artifacts
-        if: runner.os == 'Windows'
         shell: bash
         run: |
           mkdir -p artifacts
-          if [[ -f "Release/MeshService64.exe" ]]; then
-            cp "Release/MeshService64.exe" "artifacts/meshagent-windows-${{ matrix.os_arch }}.exe"
-            echo "Found and copied: Release/MeshService64.exe"
-          elif [[ -f "x64/Release/MeshService64.exe" ]]; then
-            cp "x64/Release/MeshService64.exe" "artifacts/meshagent-windows-${{ matrix.os_arch }}.exe"
-            echo "Found and copied: x64/Release/MeshService64.exe"
+          
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            if [[ -f "Release/MeshService64.exe" ]]; then
+              cp "Release/MeshService64.exe" "artifacts/${{ env.BINARY_NAME }}.exe"
+              echo "Copied Windows binary"
+            else
+              echo "MeshService64.exe not found, checking available files:"
+              find . -name "*.exe" -type f | head -10
+              exit 1
+            fi
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            if [[ "${{ matrix.os_arch }}" == "arm64" ]]; then
+              BUILT_BINARY_NAME="meshagent_osx-arm-64"
+            elif [[ "${{ matrix.os_arch }}" == "x86-64" ]]; then
+              BUILT_BINARY_NAME="meshagent_osx-x86-64"
+            else
+              echo "Unknown macOS architecture: ${{ matrix.os_arch }}"
+              exit 1
+            fi
+            if [[ -f "$BUILT_BINARY_NAME" ]]; then
+              cp "$BUILT_BINARY_NAME" "artifacts/${{ env.BINARY_NAME }}"
+              echo "Copied macOS binary: $BUILT_BINARY_NAME"
+            else
+              echo "$BUILT_BINARY_NAME not found"
+              ls -la meshagent* || echo "No meshagent files found"
+              exit 1
+            fi
           else
-            echo "MeshService64.exe not found, checking available files:"
-            find . -name "*.exe" -type f | head -10
+            echo "Unsupported OS: ${{ runner.os }}"
             exit 1
           fi
           
-          # List what we're uploading
-          ls -la artifacts/
+          echo "Artifacts prepared:"
+          ls -la artifacts/          
 
       - name: Upload client artifact
         uses: actions/upload-artifact@v4
@@ -166,18 +168,17 @@ jobs:
 
       - name: Create Universal Binary
         run: |
-          echo "Creating universal macOS binary..."
-          X64_BINARY="x64-artifacts/meshagent_osx-x86-64"
-          ARM64_BINARY="arm64-artifacts/meshagent_osx-arm-64"
+          echo "Creating universal macOS binary with lipo..."
+          X64_BINARY="x64-artifacts/${{ env.BINARY_NAME }}"
+          ARM64_BINARY="arm64-artifacts/${{ env.BINARY_NAME }}"
           
-          echo "Creating universal binary with lipo..."
           mkdir -p artifacts
-          lipo -create "$X64_BINARY" "$ARM64_BINARY" -output ./artifacts/meshagent-osx-universal
+          lipo -create "$X64_BINARY" "$ARM64_BINARY" -output ./artifacts/${{ env.BINARY_NAME }}
           
           # Verify universal binary
           echo "Universal binary info:"
-          lipo -info ./artifacts/meshagent-osx-universal
-          file ./artifacts/meshagent-osx-universal
+          lipo -info ./artifacts/${{ env.BINARY_NAME }}
+          file ./artifacts/${{ env.BINARY_NAME }}
           
       - name: Sign MacOS package
         uses: ./.github/steps/sign-macos-package
@@ -188,9 +189,7 @@ jobs:
           apple_id_username: ${{ secrets.APPLE_ID_USERNAME }}
           apple_id_password: ${{ secrets.APPLE_ID_PASSWORD }}
           apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
-          binary_name: meshagent-osx-universal
-          app_name: MeshAgent
-
+          binary_name: ${{ env.BINARY_NAME }}
 
       - name: Upload Universal Binary
         uses: actions/upload-artifact@v4

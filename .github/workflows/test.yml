@@ -14,12 +14,6 @@ on:
     branches: [master]
     paths-ignore:
       - "**/*.md"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g., v1.2.3)"
-        required: true
-        type: string
 
 concurrency:
   group: pr-${{ github.head_ref || github.ref }}
@@ -39,7 +33,7 @@ jobs:
     name: "Build C Client (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     if: |
-      (github.event_name == 'pull_request' && !github.event.pull_request.draft) || github.event_name == 'workflow_dispatch'
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft)
     defaults:
       run:
         shell: bash
@@ -61,13 +55,7 @@ jobs:
             os: windows-latest
             os_arch: x64
             archid: 4
-            artifact_name: meshagent-windows-x64.exe
-###          - name: "Windows x86"
-###            os: windows-latest
-###            os_arch: x86
-###            archid: 3
-###            artifact_name: meshagent-windows-x86.exe
-
+            artifact_name: meshagent-windows-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,98 +88,3 @@ jobs:
           echo "Building MeshAgent for macOS ${{ matrix.os_arch }}"
           make macos ARCHID=${{ matrix.archid }}
         shell: bash
-
-      - name: Prepare Artifacts
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          mkdir -p artifacts          
-          if [[ "${{ matrix.os_arch }}" == "arm64" ]]; then
-            BINARY_NAME="meshagent_osx-arm-64"
-          elif [[ "${{ matrix.os_arch }}" == "x86-64" ]]; then
-            BINARY_NAME="meshagent_osx-x86-64"
-          fi
-          cp "$BINARY_NAME" "artifacts/"
-
-      - name: Prepare Windows Artifacts
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          if [[ -f "Release/MeshService64.exe" ]]; then
-            cp "Release/MeshService64.exe" "artifacts/meshagent-windows-${{ matrix.os_arch }}.exe"
-            echo "Found and copied: Release/MeshService64.exe"
-          elif [[ -f "x64/Release/MeshService64.exe" ]]; then
-            cp "x64/Release/MeshService64.exe" "artifacts/meshagent-windows-${{ matrix.os_arch }}.exe"
-            echo "Found and copied: x64/Release/MeshService64.exe"
-          else
-            echo "MeshService64.exe not found, checking available files:"
-            find . -name "*.exe" -type f | head -10
-            exit 1
-          fi
-          
-          # List what we're uploading
-          ls -la artifacts/
-
-      - name: Upload client artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: |
-            artifacts/
-          if-no-files-found: warn
-          retention-days: 30
-          compression-level: 9
-
-  create_universal_macos:
-    name: "Create Universal macOS Binary"
-    needs: [build_client]
-    runs-on: macos-latest
-    if: |
-      ((github.event_name == 'pull_request' && !github.event.pull_request.draft) || github.event_name == 'workflow_dispatch') &&
-      !failure() && !cancelled()
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Download macOS x86-64 Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: meshagent_osx-x86-64
-          path: x64-artifacts/
-
-      - name: Download macOS ARM64 Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: meshagent_osx-arm-64
-          path: arm64-artifacts/
-
-      - name: Create Universal Binary
-        run: |
-          echo "Creating universal macOS binary..."
-          X64_BINARY="x64-artifacts/meshagent_osx-x86-64"
-          ARM64_BINARY="arm64-artifacts/meshagent_osx-arm-64"
-          
-          echo "Creating universal binary with lipo..."
-          mkdir -p artifacts
-          lipo -create "$X64_BINARY" "$ARM64_BINARY" -output ./artifacts/meshagent-osx-universal
-          
-          # Verify universal binary
-          echo "Universal binary info:"
-          lipo -info ./artifacts/meshagent-osx-universal
-          file ./artifacts/meshagent-osx-universal
-          
-      - name: Sign MacOS package
-        uses: ./.github/steps/sign-macos-package
-        with:
-          apple_certificate_p12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          apple_certificate_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          apple_developer_id: ${{ secrets.APPLE_DEVELOPER_ID }}
-          apple_id_username: ${{ secrets.APPLE_ID_USERNAME }}
-          apple_id_password: ${{ secrets.APPLE_ID_PASSWORD }}
-          apple_team_id: ${{ secrets.APPLE_TEAM_ID }}
-          binary_name: meshagent-osx-universal
-          app_name: MeshAgent
