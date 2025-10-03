@@ -618,6 +618,12 @@ int wmain(int argc, char* wargv[])
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integragedJavaScriptLen = (int)sizeof(script) - 1;
 	}
+	if (argc > 1 && strcasecmp(argv[1], "-nodeid-base64") == 0)
+	{
+		char script[] = "console.log(Buffer.from(require('_agentNodeId')(), 'hex').toString('base64').replace(/\\+/g, '@').replace(/\\//g, '$'));process.exit();";
+		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
+		integragedJavaScriptLen = (int)sizeof(script) - 1;
+	}
 	if (argc > 1 && strcasecmp(argv[1], "-name") == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId').serviceName());process.exit();";
@@ -927,6 +933,7 @@ int wmain(int argc, char* wargv[])
 					printf("  -install          Install the service from this location.\r\n");
 					printf("  -uninstall        Remove the service from this location.\r\n");
 					printf("  -nodeid           Return the current agent identifier.\r\n");
+					printf("  -nodeid-base64    Return the current agent identifier in base64 format.\r\n");
 					printf("  -info             Return agent version information.\r\n");
 					printf("  -resetnodeid      Reset the NodeID next time the service is started.\r\n");
 					printf("  -fulluninstall    Stop agent and clean up the program files location.\r\n");
