@@ -10,7 +10,7 @@ permissions:
 
 on:
   push:
-    branches: [master]
+    branches: [master, feature/test-win]
     paths-ignore:
       - "**/*.md"
   workflow_dispatch:
@@ -78,6 +78,26 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install openssl jpeg zlib
         shell: bash
+
+      - name: Setup Node.js for Windows module embedding
+        if: runner.os == 'Windows'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Embed JavaScript modules into Windows binary
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "Embedding JavaScript modules into C code..."
+          powershell -Command "& { 
+            try { 
+              $env:NODE_PATH = './modules'; 
+              node -e \"try { require('./modules/code-utils.js').shrink(); console.log('Modules embedded successfully'); } catch(e) { console.log('Error embedding modules: ' + e.toString()); process.exit(1); }\"
+            } catch { 
+              Write-Host 'Node.js embedding failed, will rely on filesystem modules'; 
+            } 
+          }"
+        shell: cmd
       
       - name: Build MeshAgent for Windows ${{ matrix.os_arch }} with MSBuild
         if: matrix.os == 'windows-latest'
@@ -100,6 +120,9 @@ jobs:
             if [[ -f "Release/MeshService64.exe" ]]; then
               cp "Release/MeshService64.exe" "artifacts/${{ env.BINARY_NAME }}.exe"
               echo "Copied Windows binary"
+              # Copy modules folder for runtime module loading fallback
+              cp -r "modules" "artifacts/"
+              echo "Copied modules folder for fallback"
             else
               echo "MeshService64.exe not found, checking available files:"
               find . -name "*.exe" -type f | head -10
