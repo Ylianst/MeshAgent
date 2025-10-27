@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.meshcentral.kvm</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/mesh_services/meshagent/meshagent</string>
+		<string>-kvm1</string>
+	</array>
+
+	<key>LimitLoadToSessionType</key>
+	<array>
+		<string>LoginWindow</string>
+		<string>Aqua</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>KeepAlive</key>
+	<true/>
+
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+
+	<key>StandardOutPath</key>
+	<string>/var/log/meshagent-kvm.log</string>
+
+	<key>StandardErrorPath</key>
+	<string>/var/log/meshagent-kvm.log</string>
+
+	<key>WorkingDirectory</key>
+	<string>/usr/local/mesh_services/meshagent</string>
+</dict>
+</plist>

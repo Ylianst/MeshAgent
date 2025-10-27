@@ -1288,26 +1288,33 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	if (duk_peval_string(ctx, "require('user-sessions').consoleUid();") == 0) { console_uid = duk_get_int(ctx, -1); }
 	duk_pop(ctx);
 	#ifdef __APPLE__
-		// MacOS
+		// macOS - Connect to KVM LaunchAgent via Unix domain socket
+		// The KVM service runs as a LaunchAgent (meshagent -kvm1) in both
+		// LoginWindow and Aqua session contexts, creating a socket at:
+		// /usr/local/mesh_services/meshagent/kvm
+		//
+		// This architecture complies with Apple's security requirements where
+		// screen capture must be initiated from a LaunchAgent, not LaunchDaemon.
+
 		if (console_uid == 0)
 		{
-			MeshAgent_sendConsoleText(ctx, "Establishing IPC-x-Connection to LoginWindow for KVM");
-			char *ipc = (char*)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
-			duk_eval_string(ctx, "require('net');");														// [rd][net]
-			duk_get_prop_string(ctx, -1, "createConnection");												// [rd][net][createConnection]
-			duk_swap_top(ctx, -2);																			// [rd][createConnection][this]
-			duk_push_object(ctx);																			// [rd][createConnection][this][options]
-			duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, "path");								// [rd][createConnection][this][options]
-			duk_push_c_function(ctx, ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_Sink, DUK_VARARGS);	// [rd][createConnection][this][options][callback]
-			duk_push_pointer(ctx, ptrs); duk_put_prop_string(ctx, -2, "ptrs");
-			duk_call_method(ctx, 2);																		// [rd][icpSocket]
-			duk_put_prop_string(ctx, -2, KVM_IPC_SOCKET);													// [rd]
-			//ptrs->kvmDomainSocket = (int)(uint64_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			MeshAgent_sendConsoleText(ctx, "Establishing IPC Connection to KVM Service (LoginWindow)");
 		}
 		else
 		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			MeshAgent_sendConsoleText(ctx, "Establishing IPC Connection to KVM Service (Aqua)");
 		}
+
+		char *ipc = (char*)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		duk_eval_string(ctx, "require('net');");														// [rd][net]
+		duk_get_prop_string(ctx, -1, "createConnection");												// [rd][net][createConnection]
+		duk_swap_top(ctx, -2);																			// [rd][createConnection][this]
+		duk_push_object(ctx);																			// [rd][createConnection][this][options]
+		duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, "path");								// [rd][createConnection][this][options]
+		duk_push_c_function(ctx, ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_Sink, DUK_VARARGS);	// [rd][createConnection][this][options][callback]
+		duk_push_pointer(ctx, ptrs); duk_put_prop_string(ctx, -2, "ptrs");
+		duk_call_method(ctx, 2);																		// [rd][icpSocket]
+		duk_put_prop_string(ctx, -2, KVM_IPC_SOCKET);													// [rd]
 	#else
 		if (TSID != -1) 
 		{

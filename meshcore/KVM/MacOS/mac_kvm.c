@@ -844,46 +844,25 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
-	char * parms0[] = { "meshagent_osx64", "-kvm0", NULL };
-	void **user = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
-	user[0] = writeHandler;
-	user[1] = reserved;
-	user[2] = processPipeMgr;
-	user[3] = exePath;
+	// With the new LaunchAgent architecture, KVM runs as a separate service
+	// in both LoginWindow and Aqua session contexts. The main agent always
+	// connects to the KVM service via Unix domain socket, regardless of
+	// which user session is active.
+	//
+	// The LaunchAgent (meshagent -kvm1) creates the socket at:
+	// /usr/local/mesh_services/meshagent/kvm
+	//
+	// This approach complies with Apple's security model where LaunchAgents
+	// must spawn KVM processes, not LaunchDaemons.
 
-	if (uid != 0)
-	{
-		// Spawn child kvm process into a specific user session
-		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
-		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
-		
-		char tmp[255];
-		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
-		ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
-		
-		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
+	UNREFERENCED_PARAMETER(exePath);
+	UNREFERENCED_PARAMETER(processPipeMgr);
+	UNREFERENCED_PARAMETER(writeHandler);
+	UNREFERENCED_PARAMETER(reserved);
+	UNREFERENCED_PARAMETER(uid);
 
-		// Run the relay
-		g_shutdown = 0;
-		return(ILibProcessPipe_Process_GetStdOut(gChildProcess));
-	}
-	else
-	{
-		// No users are logged in. This is a special case for MacOS
-		//int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		//if (!fd < 0)
-		//{
-		//	struct sockaddr_un serveraddr;
-		//	memset(&serveraddr, 0, sizeof(serveraddr));
-		//	serveraddr.sun_family = AF_UNIX;
-		//	strcpy(serveraddr.sun_path, KVM_Listener_Path);
-		//	if (!connect(fd, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
-		//	{
-		//		return((void*)(uint64_t)fd);
-		//	}
-		//}
-		return((void*)KVM_Listener_Path);
-	}
+	// Return the socket path - the main agent will connect to it
+	return((void*)KVM_Listener_Path);
 }
 
 // Force a KVM reset & refresh
