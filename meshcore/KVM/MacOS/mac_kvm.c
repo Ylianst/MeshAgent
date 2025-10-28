@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "mac_kvm.h"
+#include "mac_kvm_auth.h"
 #include "../../meshdefines.h"
 #include "../../meshinfo.h"
 #include "../../../microstack/ILibParsers.h"
@@ -34,7 +35,8 @@ limitations under the License.
 #include <string.h>
 #include <pwd.h>
 
-int KVM_Listener_FD = -1;
+int KVM_Listener_FD = -1;  // Used by -kvm1 child (now unused in reversed architecture)
+static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
 #define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
@@ -524,64 +526,64 @@ void* kvm_server_mainloop(void* param)
 	}
 	else
 	{
-		// this is doing I/O via a Unix Domain Socket
-		if ((KVM_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+		// REVERSED ARCHITECTURE: -kvm1 now CONNECTS to main agent's listener socket
+		// This fixes the bootstrap namespace issue and null data problem
+
+		written = write(STDOUT_FILENO, "Connecting to daemon socket...\n", 31);
+		fsync(STDOUT_FILENO);
+
+		// Create socket
+		if ((KVM_AGENT_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		{
 			char tmp[255];
-			int tmplen = sprintf_s(tmp, sizeof(tmp), "ERROR CREATING DOMAIN SOCKET: %d\n", errno);
-			// Error creating domain socket
+			int tmplen = sprintf_s(tmp, sizeof(tmp), "ERROR CREATING SOCKET: %d\n", errno);
 			written = write(STDOUT_FILENO, tmp, tmplen);
 			fsync(STDOUT_FILENO);
 			return(NULL);
 		}
 
-		int flags;
-		flags = fcntl(KVM_Listener_FD, F_GETFL, 0);
-		if (fcntl(KVM_Listener_FD, F_SETFL, (O_NONBLOCK | flags) ^ O_NONBLOCK) == -1) { }
-
-		written = write(STDOUT_FILENO, "Set FCNTL2\n", 11);
-		fsync(STDOUT_FILENO);
-
+		// Set up address to connect to
 		memset(&serveraddr, 0, sizeof(serveraddr));
 		serveraddr.sun_family = AF_UNIX;
 		strcpy(serveraddr.sun_path, KVM_Listener_Path);
-		remove(KVM_Listener_Path);
-		if (bind(KVM_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
+
+		// Connect to main agent's listener socket
+		// Retry logic for robustness (daemon might not be ready yet)
+		int retry_count = 0;
+		while (retry_count < 10)
 		{
-			char tmp[255];
-			int tmplen = sprintf_s(tmp, sizeof(tmp), "BIND ERROR on DOMAIN SOCKET: %d\n", errno);
-			// Error creating domain socket
-			written = write(STDOUT_FILENO, tmp, tmplen);
-			fsync(STDOUT_FILENO);
-			return(NULL);
+			if (connect(KVM_AGENT_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) == 0)
+			{
+				// Success!
+				char tmp[255];
+				int tmpLen = sprintf_s(tmp, sizeof(tmp), "Connected to daemon socket (fd=%d)\n", KVM_AGENT_FD);
+				written = write(STDOUT_FILENO, tmp, tmpLen);
+				fsync(STDOUT_FILENO);
+				break;
+			}
+
+			// Connection failed
+			if (retry_count == 0)
+			{
+				char tmp[255];
+				int tmplen = sprintf_s(tmp, sizeof(tmp), "CONNECT FAILED (errno=%d), retrying...\n", errno);
+				written = write(STDOUT_FILENO, tmp, tmplen);
+				fsync(STDOUT_FILENO);
+			}
+
+			retry_count++;
+			sleep(1);  // Wait 1 second before retry
 		}
 
-		if (listen(KVM_Listener_FD, 1) < 0)
+		if (retry_count >= 10)
 		{
-			written = write(STDOUT_FILENO, "LISTEN ERROR ON DOMAIN SOCKET", 29);
+			written = write(STDOUT_FILENO, "CONNECT ERROR: Failed after 10 retries\n", 40);
 			fsync(STDOUT_FILENO);
+			close(KVM_AGENT_FD);
 			return(NULL);
 		}
-
-		written = write(STDOUT_FILENO, "LISTENING ON DOMAIN SOCKET\n", 27);
-		fsync(STDOUT_FILENO);
 
 		signal(SIGTERM, ExitSink);
-
-		if ((KVM_AGENT_FD = accept(KVM_Listener_FD, NULL, NULL)) < 0)
-		{
-			written = write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
-			fsync(STDOUT_FILENO);
-			return(NULL);
-		}
-		else
-		{
-			char tmp[255];
-			int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-
-		}
 	}
 	// Init the kvm
 	g_messageQ = ILibQueue_Create();
@@ -613,21 +615,33 @@ void* kvm_server_mainloop(void* param)
 			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
 
 			char stmp[255];
-			int stmpLen = sprintf_s(stmp, sizeof(stmp), "Waiting for NEXT DomainSocket, TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
+			int stmpLen = sprintf_s(stmp, sizeof(stmp), "Reconnecting to daemon socket, TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
 			written = write(STDOUT_FILENO, stmp, stmpLen);
 			fsync(STDOUT_FILENO);
 
-			if ((KVM_AGENT_FD = accept(KVM_Listener_FD, NULL, NULL)) < 0)
+			// REVERSED: Reconnect to daemon socket
+			if ((KVM_AGENT_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 			{
 				g_shutdown = 1;
-				written = write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
+				written = write(STDOUT_FILENO, "SOCKET ERROR ON RECONNECT\n", 26);
 				fsync(STDOUT_FILENO);
+				break;
+			}
+
+			if (connect(KVM_AGENT_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
+			{
+				g_shutdown = 1;
+				char tmp[255];
+				int tmplen = sprintf_s(tmp, sizeof(tmp), "RECONNECT FAILED (errno=%d)\n", errno);
+				written = write(STDOUT_FILENO, tmp, tmplen);
+				fsync(STDOUT_FILENO);
+				close(KVM_AGENT_FD);
 				break;
 			}
 			else
 			{
 				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
+				int tmpLen = sprintf_s(tmp, sizeof(tmp), "Reconnected to daemon socket (fd=%d)\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
@@ -869,20 +883,86 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	}
 	else
 	{
-		// No users are logged in. This is a special case for MacOS
-		//int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		//if (!fd < 0)
-		//{
-		//	struct sockaddr_un serveraddr;
-		//	memset(&serveraddr, 0, sizeof(serveraddr));
-		//	serveraddr.sun_family = AF_UNIX;
-		//	strcpy(serveraddr.sun_path, KVM_Listener_Path);
-		//	if (!connect(fd, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
-		//	{
-		//		return((void*)(uint64_t)fd);
-		//	}
-		//}
-		return((void*)KVM_Listener_Path);
+		// REVERSED ARCHITECTURE: Main daemon creates listener, accepts connection from -kvm1
+		// This fixes bootstrap namespace issues and allows proper code signature verification
+
+		struct sockaddr_un serveraddr;
+		mode_t old_umask;
+		int client_fd;
+
+		// Create listener socket if not already created
+		if (KVM_Daemon_Listener_FD == -1)
+		{
+			printf("KVM: Creating daemon listener socket at %s\n", KVM_Listener_Path);
+
+			if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+			{
+				fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
+				return NULL;
+			}
+
+			// Set socket to allow world-writable (code signature verification provides security)
+			old_umask = umask(0000);
+
+			memset(&serveraddr, 0, sizeof(serveraddr));
+			serveraddr.sun_family = AF_UNIX;
+			strcpy(serveraddr.sun_path, KVM_Listener_Path);
+
+			// Remove old socket file if exists
+			unlink(KVM_Listener_Path);
+
+			if (bind(KVM_Daemon_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
+			{
+				fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
+				close(KVM_Daemon_Listener_FD);
+				KVM_Daemon_Listener_FD = -1;
+				umask(old_umask);
+				return NULL;
+			}
+
+			umask(old_umask);
+
+			// Explicitly set permissions (defense in depth)
+			chmod(KVM_Listener_Path, 0777);
+
+			// Listen with backlog of 2 (handles fast-user-switching edge case)
+			if (listen(KVM_Daemon_Listener_FD, 2) < 0)
+			{
+				fprintf(stderr, "KVM: Failed to listen on socket: %s\n", strerror(errno));
+				close(KVM_Daemon_Listener_FD);
+				KVM_Daemon_Listener_FD = -1;
+				unlink(KVM_Listener_Path);
+				return NULL;
+			}
+
+			printf("KVM: Daemon listener socket created and listening\n");
+		}
+
+		// Accept connection from -kvm1 LaunchAgent
+		printf("KVM: Waiting for -kvm1 to connect...\n");
+		client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
+
+		if (client_fd < 0)
+		{
+			fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
+			return NULL;
+		}
+
+		printf("KVM: Connection accepted (fd=%d), verifying peer...\n", client_fd);
+
+		// Verify connecting process is legitimate meshagent binary
+		if (!verify_peer_codesign(client_fd))
+		{
+			fprintf(stderr, "KVM: Peer verification FAILED - rejecting connection\n");
+			close(client_fd);
+			return NULL;
+		}
+
+		printf("KVM: Peer verified successfully - connection established\n");
+
+		// Return FD cast as void* (similar to pipe case)
+		// Note: This will need special handling in agentcore.c
+		return (void*)(intptr_t)client_fd;
 	}
 }
 
