@@ -12,9 +12,17 @@
 
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <unistd.h>
+
+// Security framework headers
 #include <Security/Security.h>
 #include <Security/SecCode.h>
-#include <unistd.h>
+
+// Forward declarations for Code Signing APIs (may not be in all SDK versions)
+#ifndef CODESIGNING_APIS_DECLARED
+extern OSStatus SecCodeCreateWithPID(pid_t pid, SecCSFlags flags, SecCodeRef *code);
+#define CODESIGNING_APIS_DECLARED 1
+#endif
 
 /**
  * Verify that the peer process connected to the socket is a legitimate
