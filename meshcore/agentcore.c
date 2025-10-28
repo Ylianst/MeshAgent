@@ -913,6 +913,7 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	}
 	return ILibTransport_DoneState_ERROR;
 }
+#endif
 ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktape_DuplexStream *stream, char *buffer, int bufferLen, void *user)
 {
 #ifdef _LINKVM
@@ -1448,7 +1449,8 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					ILibDuktape_MeshAgent_DomainSocket_OnData,
 					ILibDuktape_MeshAgent_DomainSocket_OnConnect,
 					ILibDuktape_MeshAgent_DomainSocket_OnDisconnect,
-					NULL);
+					NULL,  // OnSendOK - not needed
+					0);    // UserMappedMemorySize
 
 				// Attach the already-connected FD to the socket module
 				ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
