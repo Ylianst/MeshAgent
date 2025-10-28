@@ -35,7 +35,7 @@ limitations under the License.
 #include <pwd.h>
 
 int KVM_Listener_FD = -1;
-#define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
+#define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
 #else
