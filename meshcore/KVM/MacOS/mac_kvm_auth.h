@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <Security/Security.h>
+#include <Security/SecCode.h>
 #include <unistd.h>
 
 /**
