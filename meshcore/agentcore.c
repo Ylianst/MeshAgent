@@ -39,6 +39,7 @@ limitations under the License.
 #include "microscript/ILibDuktape_Dgram.h"
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibAsyncUDPSocket.h"
+#include "microstack/ILibAsyncSocket.h"
 #include "microstack/ILibMulticastSocket.h"
 #include "microscript/ILibDuktape_ScriptContainer.h"
 #include "../microstack/ILibIPAddressMonitor.h"
@@ -133,6 +134,7 @@ typedef struct RemoteDesktop_Ptrs
 	void *kvmPipe;
 #ifdef __APPLE__
 	int kvmDomainSocket;
+	void *kvmDomainSocketModule;  // ILibAsyncSocket module for uid==0 case
 #endif
 #endif
 	ILibDuktape_DuplexStream *stream;
@@ -918,9 +920,20 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	kvm_relay_feeddata(buffer, bufferLen, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
 #else
 #ifdef __APPLE__
-	if (((RemoteDesktop_Ptrs*)user)->kvmPipe == NULL)
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+	if (ptrs->kvmDomainSocketModule != NULL)
 	{
-		// Write to AF_UNIX Domain Socket
+		// Phase 3: Write to ILibAsyncSocket domain socket
+		ILibAsyncSocket_Send(ptrs->kvmDomainSocketModule, buffer, bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
+	}
+	else if (ptrs->kvmPipe != NULL)
+	{
+		// Write to pipe (uid != 0 case)
+		kvm_relay_feeddata(buffer, bufferLen);
+	}
+	else
+	{
+		// Old Node.js socket path (deprecated, but kept for compatibility)
 		duk_push_external_buffer(stream->writableStream->ctx);														// [ext]
 		duk_config_buffer(stream->writableStream->ctx, -1, buffer, (duk_size_t)bufferLen);
 		duk_push_heapptr(stream->writableStream->ctx, stream->writableStream->obj);									// [ext][rd]
@@ -932,8 +945,7 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 																													// [ext][rd][ret]
 		duk_pop_n(stream->writableStream->ctx, 3);																	// ...
 	}
-	else
-#endif
+#else
 	{
 		kvm_relay_feeddata(buffer, bufferLen);
 	}
@@ -962,7 +974,17 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 				duk_peval_noresult(ptrs->ctx);
 			}
 		}
-		if (duk_has_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET))
+#ifdef __APPLE__
+		// Disconnect domain socket if active
+		if (ptrs->kvmDomainSocketModule != NULL)
+		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "Closing KVM domain socket");
+			ILibAsyncSocket_Disconnect(ptrs->kvmDomainSocketModule);
+			ptrs->kvmDomainSocketModule = NULL;
+			ptrs->kvmDomainSocket = 0;
+		}
+		// Old Node.js socket path
+		else if (duk_has_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET))
 		{
 			duk_get_prop_string(ptrs->ctx, -1, KVM_IPC_SOCKET);		// [MeshAgent][RD][IPC]
 			duk_get_prop_string(ptrs->ctx, -1, "end");				// [MeshAgent][RD][IPC][end]
@@ -971,8 +993,9 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 
 			duk_peval_string(ptrs->ctx, "require('MeshAgent').SendCommand({ 'action': 'msg', 'type' : 'console', 'value' : 'Closing IPC Socket' });"); duk_pop(ptrs->ctx);
 		}
+#endif
 		duk_pop(ptrs->ctx);											// [MeshAgent]
-		
+
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
@@ -987,10 +1010,16 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sen
 {
 	//printf("KVM/PAUSE\n");
 #ifdef _POSIX
-	if (((RemoteDesktop_Ptrs*)user)->kvmPipe != NULL) { ILibProcessPipe_Pipe_Pause(((RemoteDesktop_Ptrs*)user)->kvmPipe); }
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+	if (ptrs->kvmPipe != NULL) { ILibProcessPipe_Pipe_Pause(ptrs->kvmPipe); }
 #ifdef __APPLE__
-	else
+	else if (ptrs->kvmDomainSocketModule != NULL)
 	{
+		// ILibAsyncSocket handles flow control internally, no explicit pause needed
+	}
+	else if (duk_has_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET))
+	{
+		// Old Node.js socket path
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
 		duk_get_prop_string(sender->writableStream->ctx, -1, "pause");												// [rd][IPC][pause]
@@ -1008,10 +1037,16 @@ void ILibDuktape_MeshAgent_RemoteDesktop_ResumeSink(ILibDuktape_DuplexStream *se
 	//printf("KVM/RESUME\n");
 
 #ifdef _POSIX
-	if (((RemoteDesktop_Ptrs*)user)->kvmPipe != NULL) { ILibProcessPipe_Pipe_Resume(((RemoteDesktop_Ptrs*)user)->kvmPipe); }
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+	if (ptrs->kvmPipe != NULL) { ILibProcessPipe_Pipe_Resume(ptrs->kvmPipe); }
 #ifdef __APPLE__
-	else
+	else if (ptrs->kvmDomainSocketModule != NULL)
 	{
+		// ILibAsyncSocket handles flow control internally, no explicit resume needed
+	}
+	else if (duk_has_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET))
+	{
+		// Old Node.js socket path
 		duk_push_heapptr(sender->writableStream->ctx, sender->writableStream->obj);									// [rd]
 		duk_get_prop_string(sender->writableStream->ctx, -1, KVM_IPC_SOCKET);										// [rd][IPC]
 		duk_get_prop_string(sender->writableStream->ctx, -1, "resume");												// [rd][IPC][resume]
@@ -1067,6 +1102,115 @@ int ILibDuktape_MeshAgent_remoteDesktop_unshiftSink(ILibDuktape_DuplexStream *se
 }
 
 #ifdef __APPLE__
+
+// ILibAsyncSocket callbacks for console_uid==0 domain socket connection
+void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncSocket_OnInterrupt* OnInterrupt, void **user, int *PAUSE)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)(*user);
+	int beginPointer = *p_beginPointer;
+	int bufferLen = endPointer - beginPointer;
+	unsigned short size;
+
+	// Process all complete frames in the buffer
+	while (bufferLen > 4)
+	{
+		size = ntohs(((unsigned short*)(buffer + beginPointer))[1]);
+
+		if (size <= bufferLen)
+		{
+			// We have a complete frame, propagate it up
+			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer + beginPointer, (int)size, ptrs);
+			beginPointer += size;
+			bufferLen -= size;
+		}
+		else
+		{
+			// Incomplete frame, wait for more data
+			break;
+		}
+	}
+
+	// Update the read pointer
+	*p_beginPointer = beginPointer;
+}
+
+void ILibDuktape_MeshAgent_DomainSocket_OnDisconnect(ILibAsyncSocket_SocketModule socketModule, void *user)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+
+	if (ptrs != NULL && ptrs->ctx != NULL)
+	{
+		MeshAgent_sendConsoleText(ptrs->ctx, "KVM Domain Socket Disconnected");
+
+		// Check if a user has logged in and we can restart with pipe connection
+		if (duk_peval_string(ptrs->ctx, "require('user-sessions').consoleUid()") == 0)
+		{
+			int console_uid = duk_get_int(ptrs->ctx, -1);
+			duk_pop(ptrs->ctx);
+
+			if (console_uid != 0 && ptrs->stream != NULL)
+			{
+				char tmp[255];
+				sprintf_s(tmp, sizeof(tmp), "User id: %d has logged in, switching to pipe connection", console_uid);
+				MeshAgent_sendConsoleText(ptrs->ctx, tmp);
+
+				duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);
+				duk_get_prop_string(ptrs->ctx, -1, MESH_AGENT_PTR);
+				MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ptrs->ctx, -1);
+				duk_pop_n(ptrs->ctx, 2);
+
+				ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			}
+			else if (ptrs->stream != NULL)
+			{
+				// No user logged in, end the stream
+				ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+			}
+		}
+		else
+		{
+			duk_pop(ptrs->ctx);
+			if (ptrs->stream != NULL)
+			{
+				ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+			}
+		}
+	}
+
+	// Clean up
+	if (ptrs != NULL)
+	{
+		ptrs->kvmDomainSocketModule = NULL;
+		ptrs->kvmDomainSocket = 0;
+	}
+}
+
+void ILibDuktape_MeshAgent_DomainSocket_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Connected, void *user)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+
+	if (Connected == 0)
+	{
+		// Connection failed
+		if (ptrs != NULL && ptrs->ctx != NULL)
+		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "KVM Domain Socket Connection Failed");
+		}
+		if (ptrs != NULL && ptrs->stream != NULL)
+		{
+			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+		}
+	}
+	else
+	{
+		// Connection established (should already be connected when using UseThisSocket)
+		if (ptrs != NULL && ptrs->ctx != NULL)
+		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "KVM Domain Socket Connected");
+		}
+	}
+}
+
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *ctx)
 {
 	MeshAgent_sendConsoleText(ctx, "IPC Connection Closed...");
@@ -1291,18 +1435,34 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// MacOS
 		if (console_uid == 0)
 		{
-			MeshAgent_sendConsoleText(ctx, "Establishing IPC-x-Connection to LoginWindow for KVM");
-			char *ipc = (char*)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
-			duk_eval_string(ctx, "require('net');");														// [rd][net]
-			duk_get_prop_string(ctx, -1, "createConnection");												// [rd][net][createConnection]
-			duk_swap_top(ctx, -2);																			// [rd][createConnection][this]
-			duk_push_object(ctx);																			// [rd][createConnection][this][options]
-			duk_push_string(ctx, ipc); duk_put_prop_string(ctx, -2, "path");								// [rd][createConnection][this][options]
-			duk_push_c_function(ctx, ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_Sink, DUK_VARARGS);	// [rd][createConnection][this][options][callback]
-			duk_push_pointer(ctx, ptrs); duk_put_prop_string(ctx, -2, "ptrs");
-			duk_call_method(ctx, 2);																		// [rd][icpSocket]
-			duk_put_prop_string(ctx, -2, KVM_IPC_SOCKET);													// [rd]
-			//ptrs->kvmDomainSocket = (int)(uint64_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			// Phase 3: Use ILibAsyncSocket with the FD returned from kvm_relay_setup
+			MeshAgent_sendConsoleText(ctx, "Establishing domain socket connection to LoginWindow for KVM");
+
+			// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
+			int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+
+			if (client_fd > 0)
+			{
+				// Create ILibAsyncSocket module to wrap the FD
+				ptrs->kvmDomainSocketModule = ILibCreateAsyncSocketModuleWithMemory(duk_ctx_chain(ctx), 65535,
+					ILibDuktape_MeshAgent_DomainSocket_OnData,
+					ILibDuktape_MeshAgent_DomainSocket_OnConnect,
+					ILibDuktape_MeshAgent_DomainSocket_OnDisconnect,
+					NULL);
+
+				// Attach the already-connected FD to the socket module
+				ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
+
+				// Store the FD
+				ptrs->kvmDomainSocket = client_fd;
+
+				MeshAgent_sendConsoleText(ctx, "Domain socket connection established");
+			}
+			else
+			{
+				MeshAgent_sendConsoleText(ctx, "Failed to establish domain socket connection");
+				ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+			}
 		}
 		else
 		{
