@@ -93,8 +93,9 @@
 #   ARCHID=2                                # Windows Console x86 64 bit
 #   ARCHID=3                                # Windows Service x86 32 bit
 #   ARCHID=4                                # Windows Service x86 64 bit
-#   make macos ARCHID=16					# macOS x86 64 bit
-#	make macos ARCHID=29					# macOS ARM 64 bit
+#   make macos ARCHID=16					# macOS x86 64 bit (Intel)
+#	make macos ARCHID=29					# macOS ARM 64 bit (Apple Silicon)
+#	make macos ARCHID=universal				# macOS Universal (Intel + Apple Silicon)
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPSEL
@@ -222,7 +223,13 @@ INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshcons
 
 # Compiler and linker flags
 CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+# macOS (Darwin) doesn't have separate libutil - functions are in libSystem
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+LDFLAGS ?= -L. -lpthread -lm
+else
 LDFLAGS ?= -L. -lpthread -lutil -lm
+endif
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
@@ -318,7 +325,7 @@ ARCHNAME = macos-x86-64
 OSNAME = macos
 KVM = 1
 LMS = 0
-MACOSARCH = -mmacosx-version-min=10.5
+MACOSARCH = -mmacosx-version-min=10.13
 CC = gcc -arch x86_64
 endif
 
@@ -328,7 +335,7 @@ ARCHNAME = macos-arm-64
 OSNAME = macos
 KVM = 1
 LMS = 0
-MACOSARCH = -target arm64-apple-macos11
+MACOSARCH = -mmacosx-version-min=11.0
 CC = gcc -arch arm64
 endif
 
@@ -678,9 +685,13 @@ ifeq ($(MEMTRACK),1)
 CFLAGS += -DILIBMEMTRACK
 endif
 
+# Skip -no-pie on macOS (Darwin) as clang warns it's unused during compilation
+UNAME := $(shell uname -s)
+ifneq ($(UNAME),Darwin)
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie
+endif
 endif
 
 GITTEST := $(shell git log -1 > /dev/null 2>&1 ; echo $$? )
@@ -734,7 +745,6 @@ cleanbin:
 	rm -f $(EXENAME)_armvirt32
 	rm -f $(EXENAME)_macos-arm-64
 	rm -f $(EXENAME)_macos-x86-64
-	rm -f $(EXENAME)_macos-universal-64
 	rm -f $(EXENAME)_pi
 	rm -f $(EXENAME)_pi2
 	rm -f $(EXENAME)_pogo
@@ -814,16 +824,37 @@ linux:
 	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
 macos:
-	@mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
-	@if [ "$(DEBUG)" != "1" ]; then \
-		cp ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/DEBUG_$(EXENAME); \
-		strip ./$(EXENAME)_$(ARCHNAME); \
-		mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	@if [ "$(ARCHID)" = "universal" ]; then \
+		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
+		echo "Building x86-64..."; \
+		$(MAKE) clean; \
+		$(MAKE) macos ARCHID=16; \
+		echo "Building ARM64..."; \
+		$(MAKE) clean; \
+		$(MAKE) macos ARCHID=29; \
+		echo "Creating universal binary..."; \
+		mkdir -p $(BUILD_DIR)/macos/universal; \
+		lipo -create \
+			$(BUILD_DIR)/macos/macos-x86-64/$(EXENAME) \
+			$(BUILD_DIR)/macos/macos-arm-64/$(EXENAME) \
+			-output $(BUILD_DIR)/macos/universal/$(EXENAME); \
+		lipo -create \
+			$(BUILD_DIR)/macos/macos-x86-64/DEBUG_$(EXENAME) \
+			$(BUILD_DIR)/macos/macos-arm-64/DEBUG_$(EXENAME) \
+			-output $(BUILD_DIR)/macos/universal/DEBUG_$(EXENAME); \
+		echo "Build complete: $(BUILD_DIR)/macos/universal/$(EXENAME)"; \
 	else \
-		mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+		mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME); \
+		$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) $(MACSSL) $(MACOSFLAGS) -lz -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
+		if [ "$(DEBUG)" != "1" ]; then \
+			cp ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/DEBUG_$(EXENAME); \
+			strip ./$(EXENAME)_$(ARCHNAME); \
+			mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+		else \
+			mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+		fi; \
+		echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"; \
 	fi
-	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
 freebsd:
 	@mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)
