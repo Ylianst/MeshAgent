@@ -823,6 +823,11 @@ linux:
 	fi
 	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
+# macOS build target
+# Note: -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null enables keyboard/mouse
+# input at loginwindow (pre-login screen). This is required for remote desktop functionality
+# before user login and is used by Chrome Remote Desktop, TeamViewer, etc.
+# Reference: https://stackoverflow.com/questions/41429524/how-to-simulate-keyboard-and-mouse-events-using-cgeventpost-in-login-window-mac
 macos:
 	@if [ "$(ARCHID)" = "universal" ]; then \
 		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
