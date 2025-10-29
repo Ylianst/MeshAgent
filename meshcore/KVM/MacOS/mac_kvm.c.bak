@@ -731,18 +731,16 @@ void* kvm_server_mainloop(void* param)
 						continue;
 					}
 					
-				KvmDebugLog("Tile[%d][%d] calling getTileAt\n", y, x);
 					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
-				KvmDebugLog("Tile[%d][%d] getTileAt returned buf=%p tilesize=%lld\n", y, x, buf, tilesize);
 					
 					if (buf && !g_shutdown)
 					{	
 						// Write the reply to the pipe.
-						KvmDebugLog("Tile[%d][%d] Writing %lld bytes to master\n", y, x, tilesize);
+						//KvmDebugLog("Writing to master in kvm_server_mainloop\n");
 
 						written = KVM_SEND(buf, tilesize);
 
-						KvmDebugLog("Wrote %d bytes to master in kvm_server_mainloop\n", written);
+						//KvmDebugLog("Wrote %d bytes to master in kvm_server_mainloop\n", written);
 						if (written == -1) 
 						{ 
 							/*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ 
