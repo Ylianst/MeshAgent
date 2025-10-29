@@ -1143,38 +1143,12 @@ void ILibDuktape_MeshAgent_DomainSocket_OnDisconnect(ILibAsyncSocket_SocketModul
 	{
 		MeshAgent_sendConsoleText(ptrs->ctx, "KVM Domain Socket Disconnected");
 
-		// Check if a user has logged in and we can restart with pipe connection
-		if (duk_peval_string(ptrs->ctx, "require('user-sessions').consoleUid()") == 0)
+		// NEW ARCHITECTURE: LaunchAgent runs in both LoginWindow and Aqua contexts
+		// No need to switch connections - just end the stream
+		if (ptrs->stream != NULL)
 		{
-			int console_uid = duk_get_int(ptrs->ctx, -1);
-			duk_pop(ptrs->ctx);
-
-			if (console_uid != 0 && ptrs->stream != NULL)
-			{
-				char tmp[255];
-				sprintf_s(tmp, sizeof(tmp), "User id: %d has logged in, switching to pipe connection", console_uid);
-				MeshAgent_sendConsoleText(ptrs->ctx, tmp);
-
-				duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);
-				duk_get_prop_string(ptrs->ctx, -1, MESH_AGENT_PTR);
-				MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ptrs->ctx, -1);
-				duk_pop_n(ptrs->ctx, 2);
-
-				ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
-			}
-			else if (ptrs->stream != NULL)
-			{
-				// No user logged in, end the stream
-				ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
-			}
-		}
-		else
-		{
-			duk_pop(ptrs->ctx);
-			if (ptrs->stream != NULL)
-			{
-				ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
-			}
+			MeshAgent_sendConsoleText(ptrs->ctx, "KVM session ended");
+			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
 		}
 	}
 
@@ -1219,29 +1193,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *
 	duk_push_this(ctx);
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)Duktape_GetPointerProperty(ctx, -1, KVM_IPC_SOCKET);
 
-	// Check to see if there is a user logged in
-	if (duk_peval_string(ctx, "require('user-sessions').consoleUid()") == 0)
+	// NEW ARCHITECTURE: LaunchAgent runs in both LoginWindow and Aqua contexts
+	// No need to switch connections based on user login - just end the stream
+	if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
 	{
-		int console_uid = duk_get_int(ctx, -1);
-		char tmp[255];
-		sprintf_s(tmp, sizeof(tmp), "User id: %d has logged in", console_uid);
-		MeshAgent_sendConsoleText(ctx, tmp);
-
-		duk_push_heapptr(ctx, ptrs->MeshAgentObject);
-		duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
-		MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
-
-		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
-		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
-		}
-	}
-	else
-	{
-		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
-		{
-			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
-		}
+		MeshAgent_sendConsoleText(ctx, "IPC connection ended");
+		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
 	}
 
 
@@ -1433,42 +1390,39 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	if (duk_peval_string(ctx, "require('user-sessions').consoleUid();") == 0) { console_uid = duk_get_int(ctx, -1); }
 	duk_pop(ctx);
 	#ifdef __APPLE__
-		// MacOS
-		if (console_uid == 0)
+		// MacOS - REVERSED ARCHITECTURE with QueueDirectories
+		// Always use domain socket, regardless of console_uid
+		// LaunchAgent handles both LoginWindow (console_uid=0) and Aqua (console_uid!=0) via LimitLoadToSessionType
+
+		char msg[128];
+		sprintf_s(msg, sizeof(msg), "Establishing domain socket connection for KVM (console_uid=%d)", console_uid);
+		MeshAgent_sendConsoleText(ctx, msg);
+
+		// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
+		int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+
+		if (client_fd > 0)
 		{
-			// Phase 3: Use ILibAsyncSocket with the FD returned from kvm_relay_setup
-			MeshAgent_sendConsoleText(ctx, "Establishing domain socket connection to LoginWindow for KVM");
+			// Create ILibAsyncSocket module to wrap the FD
+			ptrs->kvmDomainSocketModule = ILibCreateAsyncSocketModuleWithMemory(duk_ctx_chain(ctx), 65535,
+				ILibDuktape_MeshAgent_DomainSocket_OnData,
+				ILibDuktape_MeshAgent_DomainSocket_OnConnect,
+				ILibDuktape_MeshAgent_DomainSocket_OnDisconnect,
+				NULL,  // OnSendOK - not needed
+				0);    // UserMappedMemorySize
 
-			// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
-			int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			// Attach the already-connected FD to the socket module
+			ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
 
-			if (client_fd > 0)
-			{
-				// Create ILibAsyncSocket module to wrap the FD
-				ptrs->kvmDomainSocketModule = ILibCreateAsyncSocketModuleWithMemory(duk_ctx_chain(ctx), 65535,
-					ILibDuktape_MeshAgent_DomainSocket_OnData,
-					ILibDuktape_MeshAgent_DomainSocket_OnConnect,
-					ILibDuktape_MeshAgent_DomainSocket_OnDisconnect,
-					NULL,  // OnSendOK - not needed
-					0);    // UserMappedMemorySize
+			// Store the FD
+			ptrs->kvmDomainSocket = client_fd;
 
-				// Attach the already-connected FD to the socket module
-				ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
-
-				// Store the FD
-				ptrs->kvmDomainSocket = client_fd;
-
-				MeshAgent_sendConsoleText(ctx, "Domain socket connection established");
-			}
-			else
-			{
-				MeshAgent_sendConsoleText(ctx, "Failed to establish domain socket connection");
-				ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
-			}
+			MeshAgent_sendConsoleText(ctx, "Domain socket connection established");
 		}
 		else
 		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			MeshAgent_sendConsoleText(ctx, "Failed to establish domain socket connection");
+			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
 		}
 	#else
 		if (TSID != -1) 

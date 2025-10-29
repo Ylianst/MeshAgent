@@ -978,69 +978,52 @@ void kvm_cleanup_session(void)
 
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
-	char * parms0[] = { "meshagent_osx64", "-kvm0", NULL };
-	void **user = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
-	user[0] = writeHandler;
-	user[1] = reserved;
-	user[2] = processPipeMgr;
-	user[3] = exePath;
+	// REVERSED ARCHITECTURE: Always use on-demand session with QueueDirectories
+	// The uid parameter is ignored - LaunchAgent runs in correct user context via LimitLoadToSessionType
+	// No child process spawning - -kvm1 LaunchAgent connects to us
 
-	if (uid != 0)
+	UNREFERENCED_PARAMETER(exePath);
+	UNREFERENCED_PARAMETER(processPipeMgr);
+	UNREFERENCED_PARAMETER(writeHandler);
+	UNREFERENCED_PARAMETER(reserved);
+	UNREFERENCED_PARAMETER(uid);
+
+	int client_fd;
+
+	// Create KVM session (directory + signal file + socket)
+	// This triggers QueueDirectories to start -kvm1
+	if (kvm_create_session() < 0)
 	{
-		// Spawn child kvm process into a specific user session
-		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
-		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
-
-		char tmp[255];
-		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
-		ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
-
-		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
-
-		// Run the relay
-		g_shutdown = 0;
-		return(ILibProcessPipe_Process_GetStdOut(gChildProcess));
+		fprintf(stderr, "KVM: Failed to create session\n");
+		return NULL;
 	}
-	else
+
+	// Accept connection from -kvm1 LaunchAgent (triggered by QueueDirectories)
+	printf("KVM: Waiting for -kvm1 to connect...\n");
+	client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
+
+	if (client_fd < 0)
 	{
-		// ON-DEMAND ARCHITECTURE: Create session when user clicks "Connect" in MeshCentral
-		// This creates directory + signal file + socket, triggering QueueDirectories
-
-		int client_fd;
-
-		// Create KVM session (directory + signal file + socket)
-		if (kvm_create_session() < 0)
-		{
-			fprintf(stderr, "KVM: Failed to create session\n");
-			return NULL;
-		}
-
-		// Accept connection from -kvm1 LaunchAgent (triggered by QueueDirectories)
-		printf("KVM: Waiting for -kvm1 to connect...\n");
-		client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
-
-		if (client_fd < 0)
-		{
-			fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
-			return NULL;
-		}
-
-		printf("KVM: Connection accepted (fd=%d), verifying peer...\n", client_fd);
-
-		// Verify connecting process is legitimate meshagent binary
-		if (!verify_peer_codesign(client_fd))
-		{
-			fprintf(stderr, "KVM: Peer verification FAILED - rejecting connection\n");
-			close(client_fd);
-			return NULL;
-		}
-
-		printf("KVM: Peer verified successfully - connection established\n");
-
-		// Return FD cast as void* (similar to pipe case)
-		// Note: This will need special handling in agentcore.c
-		return (void*)(intptr_t)client_fd;
+		fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
+		kvm_cleanup_session();  // Clean up on failure
+		return NULL;
 	}
+
+	printf("KVM: Connection accepted (fd=%d), verifying peer...\n", client_fd);
+
+	// Verify connecting process is legitimate meshagent binary
+	if (!verify_peer_codesign(client_fd))
+	{
+		fprintf(stderr, "KVM: Peer verification FAILED - rejecting connection\n");
+		close(client_fd);
+		kvm_cleanup_session();  // Clean up on failure
+		return NULL;
+	}
+
+	printf("KVM: Peer verified successfully - connection established\n");
+
+	// Return FD cast as void* for use with ILibAsyncSocket
+	return (void*)(intptr_t)client_fd;
 }
 
 // Force a KVM reset & refresh
