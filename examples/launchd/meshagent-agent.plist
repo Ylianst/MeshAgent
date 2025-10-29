@@ -13,20 +13,14 @@
 	</array>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/opt/tacticalmesh/meshagent</string>
+		<string>/usr/local/mesh_services/meshagent</string>
 		<string>-kvm1</string>
 	</array>
 	<key>QueueDirectories</key>
 	<array>
-		<string>/var/run/meshagent</string>
+		<string>/usr/local/mesh_services/meshagent/run</string>
 	</array>
-	<key>RunAtLoad</key>
-	<false/>
-	<key>StandardErrorPath</key>
-	<string>/tmp/meshagent-agent_err.log</string>
-	<key>StandardOutPath</key>
-	<string>/tmp/meshagent-agent.log</string>
 	<key>WorkingDirectory</key>
-	<string>/opt/tacticalmesh</string>
+	<string>/usr/local/mesh_services/meshagent</string>
 </dict>
 </plist>
