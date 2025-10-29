@@ -34,6 +34,8 @@ limitations under the License.
 
 #include <string.h>
 #include <pwd.h>
+#include <dirent.h>
+#include <limits.h>
 
 int KVM_Listener_FD = -1;  // Used by -kvm1 child (now unused in reversed architecture)
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
@@ -887,8 +889,8 @@ int kvm_create_session(void)
 	return 0;
 }
 
-// Cleanup KVM session: remove socket, signal file, and directory
-// This causes -kvm1 to exit (directory empty or removed)
+// Cleanup KVM session: remove socket, signal file, and clear directory contents
+// This causes -kvm1 to exit (directory empty, avoiding QueueDirectories weirdness)
 void kvm_cleanup_session(void)
 {
 	printf("KVM: Cleaning up KVM session\n");
@@ -904,15 +906,41 @@ void kvm_cleanup_session(void)
 	// Remove signal file (makes directory empty)
 	unlink(KVM_Session_Signal_File);
 
-	// Remove directory
-	// Note: This will fail if directory not empty, which is fine
-	if (rmdir(KVM_Queue_Directory) == 0)
+	// Clear all contents from directory (equivalent to rm -rf /var/run/meshagent/*)
+	// Keep the directory itself to avoid QueueDirectories weirdness with folder deletion
+	DIR *dir = opendir(KVM_Queue_Directory);
+	if (dir != NULL)
 	{
-		printf("KVM: Queue directory removed - -kvm1 should exit\n");
+		struct dirent *entry;
+		char filepath[PATH_MAX];
+		
+		while ((entry = readdir(dir)) != NULL)
+		{
+			// Skip . and .. entries
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+				continue;
+				
+			snprintf(filepath, sizeof(filepath), "%s/%s", KVM_Queue_Directory, entry->d_name);
+			
+			if (entry->d_type == DT_DIR)
+			{
+				// Recursively remove subdirectory - this shouldn't happen but handle it
+				char rm_cmd[PATH_MAX + 20];
+				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
+				system(rm_cmd);
+			}
+			else
+			{
+				// Remove regular file
+				unlink(filepath);
+			}
+		}
+		closedir(dir);
+		printf("KVM: Queue directory contents cleared - -kvm1 should exit\n");
 	}
-	else if (errno != ENOTEMPTY && errno != ENOENT)
+	else if (errno != ENOENT)
 	{
-		fprintf(stderr, "KVM: Warning - failed to remove queue directory: %s\n", strerror(errno));
+		fprintf(stderr, "KVM: Warning - failed to open queue directory: %s\n", strerror(errno));
 	}
 }
 
