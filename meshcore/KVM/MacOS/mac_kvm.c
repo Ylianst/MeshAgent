@@ -409,13 +409,15 @@ int kvm_server_inputdata(char* block, int blocklen)
 
 
 // DEPRECATED: Process pipe data feeding - no longer used in socket architecture
-/*
+// TEMPORARILY UNCOMMENTED as stub: Still has active callers in agentcore.c that need migration
+// In socket architecture, data is written directly to the socket, not through this function
+// TODO: Remove all callers and delete this function
 int kvm_relay_feeddata(char* buf, int len)
 {
-	ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
+	// Stub implementation - actual socket writes happen in agentcore.c
+	// This is only here to satisfy the linker while we migrate callers
 	return(len);
 }
-*/
 
 // Set the KVM pause state
 void kvm_pause(int pause)

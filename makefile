@@ -189,6 +189,11 @@ SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
 MESH_VER = 194
 EXENAME = meshagent
 
+# Build output directories
+BUILD_DIR = build
+OSNAME =
+BUILD_OUTPUT_DIR = .
+
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
 PATH_MIPS24KC = ../ToolChains/toolchain-mips_24kc_gcc-7.3.0_musl/
@@ -293,6 +298,7 @@ endif
 # Official Linux x86 32bit
 ifeq ($(ARCHID),5)
 ARCHNAME = x86
+OSNAME = linux
 CC = gcc -m32
 KVM = 1
 LMS = 1
@@ -301,6 +307,7 @@ endif
 # Official Linux x86 64bit
 ifeq ($(ARCHID),6)
 ARCHNAME = x86-64
+OSNAME = linux
 KVM = 1
 LMS = 1
 endif
@@ -308,6 +315,7 @@ endif
 # Official macOS x86 64bit
 ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
+OSNAME = macos
 KVM = 1
 LMS = 0
 MACOSARCH = -mmacosx-version-min=10.5
@@ -317,6 +325,7 @@ endif
 # Official macOS ARM 64bit
 ifeq ($(ARCHID),29)
 ARCHNAME = osx-arm-64
+OSNAME = macos
 KVM = 1
 LMS = 0
 MACOSARCH = -target arm64-apple-macos11
@@ -327,10 +336,11 @@ endif
 # Official Linux MIPSEL
 ifeq ($(ARCHID),7)
 ARCHNAME = mips
+OSNAME = linux
 CC = $(PATH_MIPS)mipsel-linux-gcc
 STRIP = $(PATH_MIPS)mipsel-linux-strip
 CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
-CFLAGS += -DBADMATH 
+CFLAGS += -DBADMATH
 IPADDR_MONITOR_DISABLE = 1
 IFADDR_DISABLE = 1
 KVM = 0
@@ -414,11 +424,12 @@ endif
 # Official Linux ARM
 ifeq ($(ARCHID),9)
 ARCHNAME = arm
+OSNAME = linux
 CC = $(PATH_ARM5)arm-none-linux-gnueabi-gcc
 STRIP = $(PATH_ARM5)arm-none-linux-gnueabi-strip
 KVM = 0
 LMS = 0
-CFLAGS += -D_NOFSWATCHER 
+CFLAGS += -D_NOFSWATCHER
 CFLAGS += -DILIBCHAIN_GLOBAL_LOCK
 CEXTRA = -fno-strict-aliasing
 endif
@@ -519,6 +530,7 @@ endif
 # Official FreeBSD x86-64
 ifeq ($(ARCHID),30)
 ARCHNAME = freebsd_x86-64
+OSNAME = freebsd
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -528,6 +540,7 @@ endif
 # Official OpenBSD x86-64
 ifeq ($(ARCHID),37)
 ARCHNAME = openbsd_x86-64
+OSNAME = openbsd
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -602,13 +615,12 @@ endif
 
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
-CFLAGS += -g -D_DEBUG 
+CFLAGS += -g -D_DEBUG
 STRIP = $(NOECHO) $(NOOP)
 SYMBOLCP = $(NOECHO) $(NOOP)
 else
 CFLAGS += -O2
-STRIP += ./$(EXENAME)_$(ARCHNAME)$(EXENAME2)
-SYMBOLCP = cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./DEBUG_$(EXENAME)_$(ARCHNAME)$(EXENAME2)
+# Strip command will be set by build targets
 endif
 
 ifeq ($(SSL_TRACE),1)
@@ -758,6 +770,7 @@ cleanbin:
 	rm -f DEBUG_$(EXENAME)_x86_nokvm
 	rm -f DEBUG_$(EXENAME)_x86-64
 	rm -f DEBUG_$(EXENAME)_x86-64_nokvm
+	rm -rf $(BUILD_DIR)
 
 
 depend: $(SOURCES)
@@ -789,22 +802,50 @@ pi:
 	strip meshagent_pi
 
 linux:
+	@mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/DEBUG_$(EXENAME); \
+		strip ./$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
 macos:
+	@mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)
 	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/DEBUG_$(EXENAME); \
+		strip ./$(EXENAME)_$(ARCHNAME); \
+		mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
 freebsd:
+	@mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/DEBUG_$(EXENAME); \
+		strip ./$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
 openbsd:
+	@mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -DILIB_NO_TIMEDJOIN -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/DEBUG_$(EXENAME); \
+		strip ./$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME)/$(EXENAME)"
 
