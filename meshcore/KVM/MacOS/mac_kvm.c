@@ -21,7 +21,8 @@ limitations under the License.
 #include "../../../microstack/ILibParsers.h"
 #include "../../../microstack/ILibAsyncSocket.h"
 #include "../../../microstack/ILibAsyncServerSocket.h"
-#include "../../../microstack/ILibProcessPipe.h"
+// DEPRECATED: Process pipe header - no longer used in socket architecture
+// #include "../../../microstack/ILibProcessPipe.h"
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDParameter.h>
@@ -93,9 +94,10 @@ int g_restartcount = 0;
 int g_totalRestartCount = 0;
 int restartKvm = 0;
 extern void* tilebuffer;
-pid_t g_slavekvm = 0;
+// DEPRECATED: Process spawning variables - no longer used in socket architecture
+// pid_t g_slavekvm = 0;
 pthread_t kvmthread = (pthread_t)NULL;
-ILibProcessPipe_Process gChildProcess;
+// ILibProcessPipe_Process gChildProcess;
 ILibQueue g_messageQ;
 
 //int logenabled = 1;
@@ -406,11 +408,14 @@ int kvm_server_inputdata(char* block, int blocklen)
 }
 
 
+// DEPRECATED: Process pipe data feeding - no longer used in socket architecture
+/*
 int kvm_relay_feeddata(char* buf, int len)
 {
 	ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
 	return(len);
 }
+*/
 
 // Set the KVM pause state
 void kvm_pause(int pause)
@@ -732,6 +737,8 @@ void* kvm_server_mainloop(void* param)
 	return (void*)0;
 }
 
+// DEPRECATED: Process pipe exit handler - no longer used in socket architecture
+/*
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	//ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)user)[0];
@@ -742,6 +749,9 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 	UNREFERENCED_PARAMETER(exitCode);
 	UNREFERENCED_PARAMETER(user);
 }
+*/
+// DEPRECATED: Process pipe stdout handler - no longer used in socket architecture
+/*
 void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	unsigned short size = 0;
@@ -780,6 +790,9 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_
 	}
 	*bytesConsumed = 0;
 }
+*/
+// DEPRECATED: Process pipe stderr handler - no longer used in socket architecture
+/*
 void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	//KVMDebugLog *log = (KVMDebugLog*)buffer;
@@ -793,6 +806,7 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 	//ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, (ILibRemoteLogging_Flags)log->logFlags, "%s", log->logData);
 	*bytesConsumed = bufferLen;
 }
+*/
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
@@ -1008,11 +1022,14 @@ void kvm_cleanup()
 {
 	KvmDebugLog("kvm_cleanup\n");
 	g_shutdown = 1;
+	// DEPRECATED: Process pipe cleanup - no longer used in socket architecture
+	/*
 	if (gChildProcess != NULL)
 	{
 		ILibProcessPipe_Process_SoftKill(gChildProcess);
 		gChildProcess = NULL;
 	}
+	*/
 
 	// Cleanup session resources (directory, signal file, socket)
 	// This triggers -kvm1 to exit (QueueDirectories detects empty directory)
