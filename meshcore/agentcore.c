@@ -1130,6 +1130,44 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 			(unsigned char)(buffer[beginPointer + 3]));
 		fflush(stdout);
 
+		// Handle MNG_JUMBO frames (type 27) for large payloads > 65500 bytes
+		if (type == 27)  // MNG_JUMBO
+		{
+			// JUMBO frame format:
+			// [0-1]: type=27
+			// [2-3]: size=8 (jumbo header size)
+			// [4-7]: payloadSize (32-bit, big-endian) = size of nested frame
+			if (bufferLen < 8)
+			{
+				printf("[DEBUG]   Frame %d: JUMBO incomplete header (need 8 bytes, have %d)\n", frameCount, bufferLen);
+				fflush(stdout);
+				break;  // Wait for full jumbo header
+			}
+
+			unsigned int payloadSize = ntohl(((unsigned int*)(buffer + beginPointer))[1]);
+			unsigned int totalSize = 8 + payloadSize;  // Jumbo header + payload
+
+			printf("[DEBUG]   Frame %d: JUMBO payloadSize=%u totalSize=%u\n", frameCount, payloadSize, totalSize);
+			fflush(stdout);
+
+			if (bufferLen < totalSize)
+			{
+				printf("[DEBUG]   Frame %d: JUMBO incomplete (need %u bytes, have %d) - waiting\n",
+					frameCount, totalSize, bufferLen);
+				fflush(stdout);
+				break;  // Wait for complete jumbo frame
+			}
+
+			// We have the complete jumbo frame
+			printf("[DEBUG]   Frame %d: JUMBO COMPLETE - processing %u bytes\n", frameCount, totalSize);
+			fflush(stdout);
+			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer + beginPointer, (int)totalSize, ptrs);
+			beginPointer += totalSize;
+			bufferLen -= totalSize;
+			frameCount++;
+			continue;
+		}
+
 		// Validate frame size - must be at least 4 bytes (header size)
 		if (size < 4)
 		{
