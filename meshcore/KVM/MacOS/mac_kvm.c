@@ -523,7 +523,7 @@ void* kvm_server_mainloop(void* param)
 		// Connect to main agent's listener socket
 		// Retry logic for robustness (daemon might not be ready yet)
 		int retry_count = 0;
-		while (retry_count < 10)
+		while (retry_count < 30)
 		{
 			if (connect(KVM_AGENT_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) == 0)
 			{
@@ -548,9 +548,9 @@ void* kvm_server_mainloop(void* param)
 			sleep(1);  // Wait 1 second before retry
 		}
 
-		if (retry_count >= 10)
+		if (retry_count >= 30)
 		{
-			written = write(STDOUT_FILENO, "KVM: Connect failed after 10 retries\n", 38);
+			written = write(STDOUT_FILENO, "KVM: Connect failed after 30 retries\n", 38);
 			fsync(STDOUT_FILENO);
 			close(KVM_AGENT_FD);
 			return(NULL);
