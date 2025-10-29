@@ -287,6 +287,15 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	}
 #endif
 
+#if defined(__APPLE__) && defined(_LINKVM)
+	// Clean up stale KVM session files from previous crash/unclean shutdown
+	// Only do this for main daemon (not -kvm0 or -kvm1)
+	unlink("/tmp/meshagent-kvm.sock");
+	unlink("/var/run/meshagent/session-active");
+	rmdir("/var/run/meshagent");  // Only succeeds if empty
+	// Errors are ignored - files might not exist and that's fine
+#endif
+
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
 	{
 #if !defined(WIN32)
