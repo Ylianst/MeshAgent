@@ -1112,6 +1112,12 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 	int bufferLen = endPointer - beginPointer;
 	unsigned short size;
 
+	static int frame_count = 0;
+	if (++frame_count % 100 == 0) {
+		printf("KVM: OnData received data (bufferLen=%d, total frames=%d)\n", bufferLen, frame_count);
+		fflush(stdout);
+	}
+
 	// Process all complete frames in the buffer
 	while (bufferLen > 4)
 	{
@@ -1446,7 +1452,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				0);    // UserMappedMemorySize
 
 			// Attach the already-connected FD to the socket module
-			fflush(stdout);
+			ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
 
 			// Store the FD
 			ptrs->kvmDomainSocket = client_fd;
