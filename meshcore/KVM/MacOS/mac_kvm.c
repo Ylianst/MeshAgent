@@ -856,6 +856,65 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
+// Initialize the daemon's domain socket listener at startup
+// This allows -kvm1 LaunchAgent to connect immediately
+int kvm_init_daemon_socket(void)
+{
+	struct sockaddr_un serveraddr;
+	mode_t old_umask;
+
+	// Check if already initialized
+	if (KVM_Daemon_Listener_FD != -1)
+	{
+		return 0;  // Already initialized
+	}
+
+	printf("KVM: Initializing daemon listener socket at %s\n", KVM_Listener_Path);
+
+	if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
+		return -1;
+	}
+
+	// Set socket to allow world-writable (code signature verification provides security)
+	old_umask = umask(0000);
+
+	memset(&serveraddr, 0, sizeof(serveraddr));
+	serveraddr.sun_family = AF_UNIX;
+	strcpy(serveraddr.sun_path, KVM_Listener_Path);
+
+	// Remove old socket file if exists
+	unlink(KVM_Listener_Path);
+
+	if (bind(KVM_Daemon_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		umask(old_umask);
+		return -1;
+	}
+
+	umask(old_umask);
+
+	// Explicitly set permissions (defense in depth)
+	chmod(KVM_Listener_Path, 0777);
+
+	// Listen with backlog of 2 (handles fast-user-switching edge case)
+	if (listen(KVM_Daemon_Listener_FD, 2) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to listen on socket: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		return -1;
+	}
+
+	printf("KVM: Daemon listener socket created successfully, ready for -kvm1 connections\n");
+	return 0;
+}
+
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
 	char * parms0[] = { "meshagent_osx64", "-kvm0", NULL };
@@ -870,11 +929,11 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		// Spawn child kvm process into a specific user session
 		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
 		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
-		
+
 		char tmp[255];
 		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
 		ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
-		
+
 		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
 
 		// Run the relay
@@ -883,59 +942,16 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	}
 	else
 	{
-		// REVERSED ARCHITECTURE: Main daemon creates listener, accepts connection from -kvm1
-		// This fixes bootstrap namespace issues and allows proper code signature verification
+		// REVERSED ARCHITECTURE: Main daemon accepts connection from -kvm1
+		// Socket is already initialized at daemon startup by kvm_init_daemon_socket()
 
-		struct sockaddr_un serveraddr;
-		mode_t old_umask;
 		int client_fd;
 
-		// Create listener socket if not already created
+		// Ensure socket is initialized (safety check)
 		if (KVM_Daemon_Listener_FD == -1)
 		{
-			printf("KVM: Creating daemon listener socket at %s\n", KVM_Listener_Path);
-
-			if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
-			{
-				fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
-				return NULL;
-			}
-
-			// Set socket to allow world-writable (code signature verification provides security)
-			old_umask = umask(0000);
-
-			memset(&serveraddr, 0, sizeof(serveraddr));
-			serveraddr.sun_family = AF_UNIX;
-			strcpy(serveraddr.sun_path, KVM_Listener_Path);
-
-			// Remove old socket file if exists
-			unlink(KVM_Listener_Path);
-
-			if (bind(KVM_Daemon_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
-			{
-				fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
-				close(KVM_Daemon_Listener_FD);
-				KVM_Daemon_Listener_FD = -1;
-				umask(old_umask);
-				return NULL;
-			}
-
-			umask(old_umask);
-
-			// Explicitly set permissions (defense in depth)
-			chmod(KVM_Listener_Path, 0777);
-
-			// Listen with backlog of 2 (handles fast-user-switching edge case)
-			if (listen(KVM_Daemon_Listener_FD, 2) < 0)
-			{
-				fprintf(stderr, "KVM: Failed to listen on socket: %s\n", strerror(errno));
-				close(KVM_Daemon_Listener_FD);
-				KVM_Daemon_Listener_FD = -1;
-				unlink(KVM_Listener_Path);
-				return NULL;
-			}
-
-			printf("KVM: Daemon listener socket created and listening\n");
+			fprintf(stderr, "KVM: FATAL - Daemon socket not initialized! Call kvm_init_daemon_socket() at startup\n");
+			return NULL;
 		}
 
 		// Accept connection from -kvm1 LaunchAgent

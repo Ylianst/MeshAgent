@@ -28,6 +28,7 @@ typedef ILibTransport_DoneState(*ILibKVM_WriteHandler)(char *buffer, int bufferL
 
 void kvm_check_permission();
 
+int kvm_init_daemon_socket(void);  // Initialize domain socket listener at daemon startup
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid);
