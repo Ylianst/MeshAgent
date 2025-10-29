@@ -876,32 +876,11 @@ int kvm_create_session(void)
 
 	printf("KVM: Creating KVM session (on-demand)\n");
 
-	// 1. Create queue directory for LaunchAgent QueueDirectories monitoring
-	if (mkdir(KVM_Queue_Directory, 0755) < 0 && errno != EEXIST)
-	{
-		fprintf(stderr, "KVM: Failed to create queue directory %s: %s\n", KVM_Queue_Directory, strerror(errno));
-		return -1;
-	}
-	printf("KVM: Created queue directory: %s\n", KVM_Queue_Directory);
-
-	// 2. Create signal file to trigger QueueDirectories (directory not empty)
-	signal_fd = open(KVM_Session_Signal_File, O_CREAT | O_WRONLY, 0644);
-	if (signal_fd < 0)
-	{
-		fprintf(stderr, "KVM: Failed to create session signal file: %s\n", strerror(errno));
-		rmdir(KVM_Queue_Directory);
-		return -1;
-	}
-	write(signal_fd, "1", 1);  // Write something so file is not empty
-	close(signal_fd);
-	printf("KVM: Created signal file: %s\n", KVM_Session_Signal_File);
-
-	// 3. Create domain socket for -kvm1 to connect to
+	// 1. Create domain socket FIRST (before directory/signal file)
+	// This prevents race condition where -kvm1 starts before socket is ready
 	if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 	{
 		fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
-		unlink(KVM_Session_Signal_File);
-		rmdir(KVM_Queue_Directory);
 		return -1;
 	}
 
@@ -920,8 +899,6 @@ int kvm_create_session(void)
 		fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
-		unlink(KVM_Session_Signal_File);
-		rmdir(KVM_Queue_Directory);
 		umask(old_umask);
 		return -1;
 	}
@@ -938,12 +915,39 @@ int kvm_create_session(void)
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
 		unlink(KVM_Listener_Path);
-		unlink(KVM_Session_Signal_File);
-		rmdir(KVM_Queue_Directory);
 		return -1;
 	}
 
-	printf("KVM: Session created successfully - QueueDirectories will trigger -kvm1 startup\n");
+	printf("KVM: Socket ready at %s\n", KVM_Listener_Path);
+
+	// 2. NOW create queue directory for LaunchAgent QueueDirectories monitoring
+	// Socket is guaranteed ready before -kvm1 can start
+	if (mkdir(KVM_Queue_Directory, 0755) < 0 && errno != EEXIST)
+	{
+		fprintf(stderr, "KVM: Failed to create queue directory %s: %s\n", KVM_Queue_Directory, strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		return -1;
+	}
+	printf("KVM: Created queue directory: %s\n", KVM_Queue_Directory);
+
+	// 3. Create signal file to trigger QueueDirectories (directory not empty)
+	signal_fd = open(KVM_Session_Signal_File, O_CREAT | O_WRONLY, 0644);
+	if (signal_fd < 0)
+	{
+		fprintf(stderr, "KVM: Failed to create session signal file: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		rmdir(KVM_Queue_Directory);
+		return -1;
+	}
+	write(signal_fd, "1", 1);  // Write something so file is not empty
+	close(signal_fd);
+	printf("KVM: Created signal file: %s\n", KVM_Session_Signal_File);
+
+	printf("KVM: Session ready - QueueDirectories will trigger -kvm1 startup\n");
 	return 0;
 }
 
