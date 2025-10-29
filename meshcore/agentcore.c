@@ -1113,7 +1113,7 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 	unsigned short size;
 
 	static int frame_count = 0;
-	if (++frame_count % 100 == 0) {
+	if (++frame_count % 1000 == 0) {
 		printf("KVM: OnData received data (bufferLen=%d, total frames=%d)\n", bufferLen, frame_count);
 		fflush(stdout);
 	}
