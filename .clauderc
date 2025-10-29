@@ -1,0 +1,12 @@
+# Project-specific instructions for Claude Code
+
+## Git Workflow
+
+After completing logical chunks of work (fixing issues, implementing features, refactoring), proactively offer to commit the changes with a clear summary of what was accomplished. Don't wait for the user to ask - offer to commit when:
+
+- A feature or fix is complete and tested
+- Multiple related changes have been made
+- A logical milestone has been reached
+- Files have been modified and the work is in a stable state
+
+When offering to commit, briefly summarize what will be committed.
