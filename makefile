@@ -314,7 +314,7 @@ endif
 
 # Official macOS x86 64bit
 ifeq ($(ARCHID),16)
-ARCHNAME = osx-x86-64
+ARCHNAME = macos-x86-64
 OSNAME = macos
 KVM = 1
 LMS = 0
@@ -324,7 +324,7 @@ endif
 
 # Official macOS ARM 64bit
 ifeq ($(ARCHID),29)
-ARCHNAME = osx-arm-64
+ARCHNAME = macos-arm-64
 OSNAME = macos
 KVM = 1
 LMS = 0
@@ -732,9 +732,9 @@ cleanbin:
 	rm -f $(EXENAME)_mips24kc
 	rm -f $(EXENAME)_mipsel24kc
 	rm -f $(EXENAME)_armvirt32
-	rm -f $(EXENAME)_osx-arm-64
-	rm -f $(EXENAME)_osx-x86-64
-	rm -f $(EXENAME)_osx-universal-64
+	rm -f $(EXENAME)_macos-arm-64
+	rm -f $(EXENAME)_macos-x86-64
+	rm -f $(EXENAME)_macos-universal-64
 	rm -f $(EXENAME)_pi
 	rm -f $(EXENAME)_pi2
 	rm -f $(EXENAME)_pogo
@@ -758,9 +758,9 @@ cleanbin:
 	rm -f DEBUG_$(EXENAME)_mips24kc
 	rm -f DEBUG_$(EXENAME)_mipsel24kc
 	rm -f DEBUG_$(EXENAME)_armvirt32
-	rm -f DEBUG_$(EXENAME)_osx-arm-64
-	rm -f DEBUG_$(EXENAME)_osx-x86-64
-	rm -f DEBUG_$(EXENAME)_osx-universal-64
+	rm -f DEBUG_$(EXENAME)_macos-arm-64
+	rm -f DEBUG_$(EXENAME)_macos-x86-64
+	rm -f DEBUG_$(EXENAME)_macos-universal-64
 	rm -f DEBUG_$(EXENAME)_pi
 	rm -f DEBUG_$(EXENAME)_pi2
 	rm -f DEBUG_$(EXENAME)_pogo
