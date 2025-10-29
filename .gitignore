@@ -32,6 +32,9 @@ Library_Release_NoOpenSSL/
 # Makefile build output directory (organized by OS and architecture)
 build/
 
+# Auto-generated git commit info (regenerated on every build)
+microscript/ILibDuktape_Commit.h
+
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
