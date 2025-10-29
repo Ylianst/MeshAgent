@@ -1112,23 +1112,11 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 	int bufferLen = endPointer - beginPointer;
 	unsigned short size;
 
-	printf("[DEBUG] OnData called: bufferLen=%d, beginPointer=%d, endPointer=%d\n", bufferLen, beginPointer, endPointer);
-	fflush(stdout);
-
 	// Process all complete frames in the buffer
-	int frameCount = 0;
 	while (bufferLen > 4)
 	{
 		unsigned short type = ntohs(((unsigned short*)(buffer + beginPointer))[0]);
 		size = ntohs(((unsigned short*)(buffer + beginPointer))[1]);
-
-		printf("[DEBUG]   Frame %d: type=%u size=%d, bufferLen=%d (header bytes: %02x %02x %02x %02x)\n",
-			frameCount, type, size, bufferLen,
-			(unsigned char)(buffer[beginPointer]),
-			(unsigned char)(buffer[beginPointer + 1]),
-			(unsigned char)(buffer[beginPointer + 2]),
-			(unsigned char)(buffer[beginPointer + 3]));
-		fflush(stdout);
 
 		// Handle MNG_JUMBO frames (type 27) for large payloads > 65500 bytes
 		if (type == 27)  // MNG_JUMBO
@@ -1139,66 +1127,45 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 			// [4-7]: payloadSize (32-bit, big-endian) = size of nested frame
 			if (bufferLen < 8)
 			{
-				printf("[DEBUG]   Frame %d: JUMBO incomplete header (need 8 bytes, have %d)\n", frameCount, bufferLen);
-				fflush(stdout);
 				break;  // Wait for full jumbo header
 			}
 
 			unsigned int payloadSize = ntohl(((unsigned int*)(buffer + beginPointer))[1]);
 			unsigned int totalSize = 8 + payloadSize;  // Jumbo header + payload
 
-			printf("[DEBUG]   Frame %d: JUMBO payloadSize=%u totalSize=%u\n", frameCount, payloadSize, totalSize);
-			fflush(stdout);
-
 			if (bufferLen < totalSize)
 			{
-				printf("[DEBUG]   Frame %d: JUMBO incomplete (need %u bytes, have %d) - waiting\n",
-					frameCount, totalSize, bufferLen);
-				fflush(stdout);
 				break;  // Wait for complete jumbo frame
 			}
 
 			// We have the complete jumbo frame
-			printf("[DEBUG]   Frame %d: JUMBO COMPLETE - processing %u bytes\n", frameCount, totalSize);
-			fflush(stdout);
 			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer + beginPointer, (int)totalSize, ptrs);
 			beginPointer += totalSize;
 			bufferLen -= totalSize;
-			frameCount++;
 			continue;
 		}
 
 		// Validate frame size - must be at least 4 bytes (header size)
 		if (size < 4)
 		{
-			printf("[DEBUG]   Frame %d: INVALID size=%d (< 4) - breaking out to avoid infinite loop\n", frameCount, size);
-			fflush(stdout);
-			break;
+			break;  // Invalid frame, break to avoid infinite loop
 		}
 
 		if (size <= bufferLen)
 		{
 			// We have a complete frame, propagate it up
-			printf("[DEBUG]   Frame %d: COMPLETE - processing\n", frameCount);
-			fflush(stdout);
 			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer + beginPointer, (int)size, ptrs);
 			beginPointer += size;
 			bufferLen -= size;
-			frameCount++;
 		}
 		else
 		{
 			// Incomplete frame, wait for more data
-			printf("[DEBUG]   Frame %d: INCOMPLETE - waiting for %d more bytes\n", frameCount, size - bufferLen);
-			fflush(stdout);
 			break;
 		}
 	}
 
 	// Update the read pointer
-	printf("[DEBUG] OnData finished: processed %d frames, updating beginPointer to %d (consumed %d bytes)\n",
-		frameCount, beginPointer, beginPointer - *p_beginPointer);
-	fflush(stdout);
 	*p_beginPointer = beginPointer;
 }
 
@@ -1230,9 +1197,6 @@ void ILibDuktape_MeshAgent_DomainSocket_OnDisconnect(ILibAsyncSocket_SocketModul
 void ILibDuktape_MeshAgent_DomainSocket_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Connected, void *user)
 {
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
-
-	printf("[DEBUG] OnConnect called: Connected=%d\n", Connected);
-	fflush(stdout);
 
 	if (Connected == 0)
 	{
@@ -1482,10 +1446,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				0);    // UserMappedMemorySize
 
 			// Attach the already-connected FD to the socket module
-			printf("[DEBUG] Calling ILibAsyncSocket_UseThisSocket with fd=%d\n", client_fd);
-			fflush(stdout);
-			ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
-			printf("[DEBUG] ILibAsyncSocket_UseThisSocket completed\n");
 			fflush(stdout);
 
 			// Store the FD
