@@ -1112,6 +1112,9 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 	int bufferLen = endPointer - beginPointer;
 	unsigned short size;
 
+	printf("[DEBUG] OnData called: bufferLen=%d, beginPointer=%d, endPointer=%d\n", bufferLen, beginPointer, endPointer);
+	fflush(stdout);
+
 	// Process all complete frames in the buffer
 	while (bufferLen > 4)
 	{
@@ -1163,6 +1166,9 @@ void ILibDuktape_MeshAgent_DomainSocket_OnDisconnect(ILibAsyncSocket_SocketModul
 void ILibDuktape_MeshAgent_DomainSocket_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Connected, void *user)
 {
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+
+	printf("[DEBUG] OnConnect called: Connected=%d\n", Connected);
+	fflush(stdout);
 
 	if (Connected == 0)
 	{
@@ -1412,7 +1418,11 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				0);    // UserMappedMemorySize
 
 			// Attach the already-connected FD to the socket module
+			printf("[DEBUG] Calling ILibAsyncSocket_UseThisSocket with fd=%d\n", client_fd);
+			fflush(stdout);
 			ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
+			printf("[DEBUG] ILibAsyncSocket_UseThisSocket completed\n");
+			fflush(stdout);
 
 			// Store the FD
 			ptrs->kvmDomainSocket = client_fd;
