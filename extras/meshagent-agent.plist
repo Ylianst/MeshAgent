@@ -20,16 +20,16 @@
 		<string>LoginWindow</string>
 	</array>
 
-	<key>WatchPaths</key>
+	<key>QueueDirectories</key>
 	<array>
-		<string>/tmp/meshagent-kvm.sock</string>
+		<string>/var/run/meshagent</string>
 	</array>
 
 	<key>RunAtLoad</key>
 	<false/>
 
 	<key>KeepAlive</key>
-	<true/>
+	<false/>
 
 	<key>StandardOutPath</key>
 	<string>/tmp/meshagent-agent.log</string>

@@ -38,6 +38,8 @@ limitations under the License.
 int KVM_Listener_FD = -1;  // Used by -kvm1 child (now unused in reversed architecture)
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
 #define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
+#define KVM_Queue_Directory "/var/run/meshagent"
+#define KVM_Session_Signal_File "/var/run/meshagent/session-active"
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
 #else
@@ -856,24 +858,50 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
-// Initialize the daemon's domain socket listener at startup
-// This allows -kvm1 LaunchAgent to connect immediately
-int kvm_init_daemon_socket(void)
+// Create KVM session: directory + signal file + socket
+// This triggers QueueDirectories to start -kvm1 LaunchAgent
+// Only called when user clicks "Connect" in MeshCentral
+int kvm_create_session(void)
 {
 	struct sockaddr_un serveraddr;
 	mode_t old_umask;
+	int signal_fd;
 
-	// Check if already initialized
+	// Check if session already active
 	if (KVM_Daemon_Listener_FD != -1)
 	{
+		printf("KVM: Session already active\n");
 		return 0;  // Already initialized
 	}
 
-	printf("KVM: Initializing daemon listener socket at %s\n", KVM_Listener_Path);
+	printf("KVM: Creating KVM session (on-demand)\n");
 
+	// 1. Create queue directory for LaunchAgent QueueDirectories monitoring
+	if (mkdir(KVM_Queue_Directory, 0755) < 0 && errno != EEXIST)
+	{
+		fprintf(stderr, "KVM: Failed to create queue directory %s: %s\n", KVM_Queue_Directory, strerror(errno));
+		return -1;
+	}
+	printf("KVM: Created queue directory: %s\n", KVM_Queue_Directory);
+
+	// 2. Create signal file to trigger QueueDirectories (directory not empty)
+	signal_fd = open(KVM_Session_Signal_File, O_CREAT | O_WRONLY, 0644);
+	if (signal_fd < 0)
+	{
+		fprintf(stderr, "KVM: Failed to create session signal file: %s\n", strerror(errno));
+		rmdir(KVM_Queue_Directory);
+		return -1;
+	}
+	write(signal_fd, "1", 1);  // Write something so file is not empty
+	close(signal_fd);
+	printf("KVM: Created signal file: %s\n", KVM_Session_Signal_File);
+
+	// 3. Create domain socket for -kvm1 to connect to
 	if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 	{
 		fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
+		unlink(KVM_Session_Signal_File);
+		rmdir(KVM_Queue_Directory);
 		return -1;
 	}
 
@@ -892,6 +920,8 @@ int kvm_init_daemon_socket(void)
 		fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Session_Signal_File);
+		rmdir(KVM_Queue_Directory);
 		umask(old_umask);
 		return -1;
 	}
@@ -908,11 +938,42 @@ int kvm_init_daemon_socket(void)
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
 		unlink(KVM_Listener_Path);
+		unlink(KVM_Session_Signal_File);
+		rmdir(KVM_Queue_Directory);
 		return -1;
 	}
 
-	printf("KVM: Daemon listener socket created successfully, ready for -kvm1 connections\n");
+	printf("KVM: Session created successfully - QueueDirectories will trigger -kvm1 startup\n");
 	return 0;
+}
+
+// Cleanup KVM session: remove socket, signal file, and directory
+// This causes -kvm1 to exit (directory empty or removed)
+void kvm_cleanup_session(void)
+{
+	printf("KVM: Cleaning up KVM session\n");
+
+	// Close and remove socket
+	if (KVM_Daemon_Listener_FD != -1)
+	{
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+	}
+	unlink(KVM_Listener_Path);
+
+	// Remove signal file (makes directory empty)
+	unlink(KVM_Session_Signal_File);
+
+	// Remove directory
+	// Note: This will fail if directory not empty, which is fine
+	if (rmdir(KVM_Queue_Directory) == 0)
+	{
+		printf("KVM: Queue directory removed - -kvm1 should exit\n");
+	}
+	else if (errno != ENOTEMPTY && errno != ENOENT)
+	{
+		fprintf(stderr, "KVM: Warning - failed to remove queue directory: %s\n", strerror(errno));
+	}
 }
 
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
@@ -942,19 +1003,19 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	}
 	else
 	{
-		// REVERSED ARCHITECTURE: Main daemon accepts connection from -kvm1
-		// Socket is already initialized at daemon startup by kvm_init_daemon_socket()
+		// ON-DEMAND ARCHITECTURE: Create session when user clicks "Connect" in MeshCentral
+		// This creates directory + signal file + socket, triggering QueueDirectories
 
 		int client_fd;
 
-		// Ensure socket is initialized (safety check)
-		if (KVM_Daemon_Listener_FD == -1)
+		// Create KVM session (directory + signal file + socket)
+		if (kvm_create_session() < 0)
 		{
-			fprintf(stderr, "KVM: FATAL - Daemon socket not initialized! Call kvm_init_daemon_socket() at startup\n");
+			fprintf(stderr, "KVM: Failed to create session\n");
 			return NULL;
 		}
 
-		// Accept connection from -kvm1 LaunchAgent
+		// Accept connection from -kvm1 LaunchAgent (triggered by QueueDirectories)
 		printf("KVM: Waiting for -kvm1 to connect...\n");
 		client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
 
@@ -1001,6 +1062,10 @@ void kvm_cleanup()
 		ILibProcessPipe_Process_SoftKill(gChildProcess);
 		gChildProcess = NULL;
 	}
+
+	// Cleanup session resources (directory, signal file, socket)
+	// This triggers -kvm1 to exit (QueueDirectories detects empty directory)
+	kvm_cleanup_session();
 }
 
 

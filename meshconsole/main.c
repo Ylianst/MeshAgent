@@ -72,7 +72,6 @@ void BreakSink(int s)
 #if defined(_LINKVM) && defined(__APPLE__)
 extern void* kvm_server_mainloop(void *parm);
 extern void senddebug(int val);
-extern int kvm_init_daemon_socket(void);
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
 {
 	ignore_result(write(STDOUT_FILENO, (void*)buffer, bufferLen));
@@ -382,11 +381,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
 
-#if defined(__APPLE__) && defined(_LINKVM)
-	// Initialize KVM domain socket listener at daemon startup
-	// This allows -kvm1 LaunchAgent to connect immediately
-	kvm_init_daemon_socket();
-#endif
+	// Note: KVM socket is now created on-demand when session starts (not at startup)
+	// QueueDirectories triggers -kvm1 only when /var/run/meshagent/ contains session file
 
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);
 	retCode = agentHost->exitCode;
