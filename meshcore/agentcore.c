@@ -1123,6 +1123,14 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 		printf("[DEBUG]   Frame %d: size=%d, bufferLen=%d\n", frameCount, size, bufferLen);
 		fflush(stdout);
 
+		// Validate frame size - must be at least 4 bytes (header size)
+		if (size < 4)
+		{
+			printf("[DEBUG]   Frame %d: INVALID size=%d (< 4) - breaking out to avoid infinite loop\n", frameCount, size);
+			fflush(stdout);
+			break;
+		}
+
 		if (size <= bufferLen)
 		{
 			// We have a complete frame, propagate it up
