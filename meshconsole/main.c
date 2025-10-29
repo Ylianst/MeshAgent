@@ -33,6 +33,11 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "microscript/ILibDuktape_Commit.h"
 
+#if defined(__APPLE__) && defined(_LINKVM)
+#include <dirent.h>
+#include <limits.h>
+#endif
+
 MeshAgentHostContainer *agentHost = NULL;
 #ifdef _OPENBSD
 #include <stdlib.h>
@@ -292,7 +297,38 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	// Only do this for main daemon (not -kvm0 or -kvm1)
 	unlink("/tmp/meshagent-kvm.sock");
 	unlink("/var/run/meshagent/session-active");
-	rmdir("/var/run/meshagent");  // Only succeeds if empty
+	
+	// Clear all contents from /var/run/meshagent but keep the directory itself
+	// This avoids QueueDirectories weirdness while cleaning up stale files
+	DIR *dir = opendir("/var/run/meshagent");
+	if (dir != NULL)
+	{
+		struct dirent *entry;
+		char filepath[PATH_MAX];
+		
+		while ((entry = readdir(dir)) != NULL)
+		{
+			// Skip . and .. entries
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+				continue;
+				
+			snprintf(filepath, sizeof(filepath), "/var/run/meshagent/%s", entry->d_name);
+			
+			if (entry->d_type == DT_DIR)
+			{
+				// Recursively remove subdirectory - this shouldn't happen but handle it
+				char rm_cmd[PATH_MAX + 20];
+				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
+				system(rm_cmd);
+			}
+			else
+			{
+				// Remove regular file
+				unlink(filepath);
+			}
+		}
+		closedir(dir);
+	}
 	// Errors are ignored - files might not exist and that's fine
 #endif
 
