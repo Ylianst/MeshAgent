@@ -2,39 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>KeepAlive</key>
+	<false/>
 	<key>Label</key>
 	<string>meshagent-agent</string>
-
-	<key>ProgramArguments</key>
-	<array>
-		<string>/opt/tacticalmesh/meshagent</string>
-		<string>-kvm1</string>
-	</array>
-
-	<key>WorkingDirectory</key>
-	<string>/opt/tacticalmesh</string>
-
 	<key>LimitLoadToSessionType</key>
 	<array>
 		<string>Aqua</string>
 		<string>LoginWindow</string>
 	</array>
-
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/tacticalmesh/meshagent</string>
+		<string>-kvm1</string>
+	</array>
 	<key>QueueDirectories</key>
 	<array>
 		<string>/var/run/meshagent</string>
 	</array>
-
 	<key>RunAtLoad</key>
 	<false/>
-
-	<key>KeepAlive</key>
-	<false/>
-
-	<key>StandardOutPath</key>
-	<string>/tmp/meshagent-agent.log</string>
-
 	<key>StandardErrorPath</key>
 	<string>/tmp/meshagent-agent_err.log</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/meshagent-agent.log</string>
+	<key>WorkingDirectory</key>
+	<string>/opt/tacticalmesh</string>
 </dict>
 </plist>
