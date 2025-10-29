@@ -1116,25 +1116,36 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 	fflush(stdout);
 
 	// Process all complete frames in the buffer
+	int frameCount = 0;
 	while (bufferLen > 4)
 	{
 		size = ntohs(((unsigned short*)(buffer + beginPointer))[1]);
+		printf("[DEBUG]   Frame %d: size=%d, bufferLen=%d\n", frameCount, size, bufferLen);
+		fflush(stdout);
 
 		if (size <= bufferLen)
 		{
 			// We have a complete frame, propagate it up
+			printf("[DEBUG]   Frame %d: COMPLETE - processing\n", frameCount);
+			fflush(stdout);
 			ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(buffer + beginPointer, (int)size, ptrs);
 			beginPointer += size;
 			bufferLen -= size;
+			frameCount++;
 		}
 		else
 		{
 			// Incomplete frame, wait for more data
+			printf("[DEBUG]   Frame %d: INCOMPLETE - waiting for %d more bytes\n", frameCount, size - bufferLen);
+			fflush(stdout);
 			break;
 		}
 	}
 
 	// Update the read pointer
+	printf("[DEBUG] OnData finished: processed %d frames, updating beginPointer to %d (consumed %d bytes)\n",
+		frameCount, beginPointer, beginPointer - *p_beginPointer);
+	fflush(stdout);
 	*p_beginPointer = beginPointer;
 }
 
