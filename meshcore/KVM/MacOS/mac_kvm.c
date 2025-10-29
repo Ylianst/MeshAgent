@@ -437,27 +437,10 @@ void* kvm_mainloopinput(void* param)
 
 	while (!g_shutdown)
 	{
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "About to read from IPC Socket\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-
-		KvmDebugLog("Reading from master in kvm_mainloopinput\n");
 		cbBytesRead = read(KVM_AGENT_FD == -1 ? STDIN_FILENO: KVM_AGENT_FD, pchRequest2 + len, 30000 - len);
-		KvmDebugLog("Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
 
-		if (KVM_AGENT_FD != -1)
+		if (cbBytesRead == -1 || cbBytesRead == 0)
 		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "Read %d bytes from IPC-xx-Socket\n", cbBytesRead);
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-
-		if (cbBytesRead == -1 || cbBytesRead == 0) 
-		{ 
-			/*ILIBMESSAGE("KVMBREAK-K1\r\n"); g_shutdown = 1; printf("shutdown\n");*/ 
 			if (KVM_AGENT_FD == -1)
 			{
 				g_shutdown = 1;
@@ -466,25 +449,12 @@ void* kvm_mainloopinput(void* param)
 			{
 				g_resetipc = 1;
 			}
-			break; 
+			break;
 		}
 		len += cbBytesRead;
 		ptr2 = 0;
-		
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "enter while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
 
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "exited while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
 
 		if (ptr == len) { len = 0; ptr = 0; }
 		// TODO: else move the reminder.
@@ -530,14 +500,14 @@ void* kvm_server_mainloop(void* param)
 		// REVERSED ARCHITECTURE: -kvm1 now CONNECTS to main agent's listener socket
 		// This fixes the bootstrap namespace issue and null data problem
 
-		written = write(STDOUT_FILENO, "Connecting to daemon socket...\n", 31);
+		written = write(STDOUT_FILENO, "KVM: Connecting to daemon socket...\n", 37);
 		fsync(STDOUT_FILENO);
 
 		// Create socket
 		if ((KVM_AGENT_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		{
 			char tmp[255];
-			int tmplen = sprintf_s(tmp, sizeof(tmp), "ERROR CREATING SOCKET: %d\n", errno);
+			int tmplen = sprintf_s(tmp, sizeof(tmp), "KVM: Failed to create socket (errno=%d)\n", errno);
 			written = write(STDOUT_FILENO, tmp, tmplen);
 			fsync(STDOUT_FILENO);
 			return(NULL);
@@ -557,7 +527,7 @@ void* kvm_server_mainloop(void* param)
 			{
 				// Success!
 				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "Connected to daemon socket (fd=%d)\n", KVM_AGENT_FD);
+				int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM: Connected (fd=%d)\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
 				break;
@@ -567,7 +537,7 @@ void* kvm_server_mainloop(void* param)
 			if (retry_count == 0)
 			{
 				char tmp[255];
-				int tmplen = sprintf_s(tmp, sizeof(tmp), "CONNECT FAILED (errno=%d), retrying...\n", errno);
+				int tmplen = sprintf_s(tmp, sizeof(tmp), "KVM: Connect failed (errno=%d), retrying...\n", errno);
 				written = write(STDOUT_FILENO, tmp, tmplen);
 				fsync(STDOUT_FILENO);
 			}
@@ -578,7 +548,7 @@ void* kvm_server_mainloop(void* param)
 
 		if (retry_count >= 10)
 		{
-			written = write(STDOUT_FILENO, "CONNECT ERROR: Failed after 10 retries\n", 40);
+			written = write(STDOUT_FILENO, "KVM: Connect failed after 10 retries\n", 38);
 			fsync(STDOUT_FILENO);
 			close(KVM_AGENT_FD);
 			return(NULL);
@@ -594,18 +564,6 @@ void* kvm_server_mainloop(void* param)
 	g_shutdown = 0;
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 
-
-	if (KVM_AGENT_FD != -1)
-	{
-		written = write(STDOUT_FILENO, "Starting Loop []\n", 14);
-		fsync(STDOUT_FILENO);
-
-		char stmp[255];
-		int stmpLen = sprintf_s(stmp, sizeof(stmp), "TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-		written = write(STDOUT_FILENO, stmp, stmpLen);
-		fsync(STDOUT_FILENO);
-	}
-
 	while (!g_shutdown) 
 	{
 		if (g_resetipc != 0)
@@ -615,16 +573,14 @@ void* kvm_server_mainloop(void* param)
 
 			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
 
-			char stmp[255];
-			int stmpLen = sprintf_s(stmp, sizeof(stmp), "Reconnecting to daemon socket, TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-			written = write(STDOUT_FILENO, stmp, stmpLen);
+			written = write(STDOUT_FILENO, "KVM: Reconnecting to daemon socket...\n", 39);
 			fsync(STDOUT_FILENO);
 
 			// REVERSED: Reconnect to daemon socket
 			if ((KVM_AGENT_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 			{
 				g_shutdown = 1;
-				written = write(STDOUT_FILENO, "SOCKET ERROR ON RECONNECT\n", 26);
+				written = write(STDOUT_FILENO, "KVM: Socket error on reconnect\n", 32);
 				fsync(STDOUT_FILENO);
 				break;
 			}
@@ -633,7 +589,7 @@ void* kvm_server_mainloop(void* param)
 			{
 				g_shutdown = 1;
 				char tmp[255];
-				int tmplen = sprintf_s(tmp, sizeof(tmp), "RECONNECT FAILED (errno=%d)\n", errno);
+				int tmplen = sprintf_s(tmp, sizeof(tmp), "KVM: Reconnect failed (errno=%d)\n", errno);
 				written = write(STDOUT_FILENO, tmp, tmplen);
 				fsync(STDOUT_FILENO);
 				close(KVM_AGENT_FD);
@@ -642,7 +598,7 @@ void* kvm_server_mainloop(void* param)
 			else
 			{
 				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "Reconnected to daemon socket (fd=%d)\n", KVM_AGENT_FD);
+				int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM: Reconnected (fd=%d)\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
@@ -709,14 +665,6 @@ void* kvm_server_mainloop(void* param)
 			//senddebug(100);
 			getScreenBuffer((unsigned char **)&desktop, &desktopsize, image);
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...Enter for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
-
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
 			{
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
@@ -729,19 +677,13 @@ void* kvm_server_mainloop(void* param)
 					if (g_tileInfo[y][x].flag == TILE_SENT || g_tileInfo[y][x].flag == TILE_DONT_SEND) {
 						continue;
 					}
-					
-				KvmDebugLog("Tile[%d][%d] calling getTileAt\n", y, x);
+
 					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
-				KvmDebugLog("Tile[%d][%d] getTileAt returned buf=%p tilesize=%lld\n", y, x, buf, tilesize);
-					
+
 					if (buf && !g_shutdown)
-					{	
+					{
 						// Write the reply to the pipe.
-						KvmDebugLog("Tile[%d][%d] Writing %lld bytes to master\n", y, x, tilesize);
-
 						written = KVM_SEND(buf, tilesize);
-
-						KvmDebugLog("Wrote %d bytes to master in kvm_server_mainloop\n", written);
 						if (written == -1) 
 						{ 
 							/*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ 
@@ -764,14 +706,6 @@ void* kvm_server_mainloop(void* param)
 				}
 			}
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...exit for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
-
 		}
 		CGImageRelease(image);
 
@@ -792,7 +726,7 @@ void* kvm_server_mainloop(void* param)
 
 	if (KVM_AGENT_FD != -1)
 	{
-		written = write(STDOUT_FILENO, "Exiting...\n", 11);
+		written = write(STDOUT_FILENO, "KVM: Exiting\n", 13);
 		fsync(STDOUT_FILENO);
 	}
 	ILibQueue_Destroy(g_messageQ);
