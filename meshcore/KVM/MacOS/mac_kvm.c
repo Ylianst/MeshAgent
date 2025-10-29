@@ -339,7 +339,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 			break;
 		case MNG_KVM_KEY: // Key
 		{
-			if (size != 6 || KVM_AGENT_FD != -1) { break; }
+			if (size != 6) { break; }
 			KeyAction(block[5], block[4]);
 			break;
 		}
@@ -347,7 +347,6 @@ int kvm_server_inputdata(char* block, int blocklen)
 		{
 			int x, y;
 			short w = 0;
-			if (KVM_AGENT_FD != -1) { break; }
 			if (size == 10 || size == 12)
 			{
 				x = ((int)ntohs(((unsigned short*)(block))[3])) / SCREEN_SCALE;
