@@ -103,8 +103,8 @@ ILibQueue g_messageQ;
 //#define LOGFILE "/dev/null"
 
 
-//#define KvmDebugLog(...)
-#define KvmDebugLog(...) printf(__VA_ARGS__); fflush(stdout);
+#define KvmDebugLog(...) ;
+//#define KvmDebugLog(...) printf(__VA_ARGS__); fflush(stdout);
 //#define KvmDebugLog(x) if (logenabled) printf(x);
 //#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Writing from slave in kvm_send_resolution\n");
 
