@@ -709,9 +709,6 @@ void* kvm_server_mainloop(void* param)
 		}
 		CGImageRelease(image);
 
-	// Throttle frame rate to ~30 FPS (33ms delay) to prevent 100% CPU usage
-	// This limits screen capture to a reasonable rate while maintaining responsive updates
-	//usleep(33000);
 	}
 	
 	pthread_join(kvmthread, NULL);
