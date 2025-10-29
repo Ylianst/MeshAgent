@@ -1119,8 +1119,15 @@ void ILibDuktape_MeshAgent_DomainSocket_OnData(ILibAsyncSocket_SocketModule sock
 	int frameCount = 0;
 	while (bufferLen > 4)
 	{
+		unsigned short type = ntohs(((unsigned short*)(buffer + beginPointer))[0]);
 		size = ntohs(((unsigned short*)(buffer + beginPointer))[1]);
-		printf("[DEBUG]   Frame %d: size=%d, bufferLen=%d\n", frameCount, size, bufferLen);
+
+		printf("[DEBUG]   Frame %d: type=%u size=%d, bufferLen=%d (header bytes: %02x %02x %02x %02x)\n",
+			frameCount, type, size, bufferLen,
+			(unsigned char)(buffer[beginPointer]),
+			(unsigned char)(buffer[beginPointer + 1]),
+			(unsigned char)(buffer[beginPointer + 2]),
+			(unsigned char)(buffer[beginPointer + 3]));
 		fflush(stdout);
 
 		// Validate frame size - must be at least 4 bytes (header size)
