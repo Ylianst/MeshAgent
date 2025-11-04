@@ -33,7 +33,7 @@ void kvm_cleanup_session(void);    // Cleanup KVM session (triggers -kvm1 exit)
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid);
-void kvm_relay_reset();
+void kvm_relay_reset(void *reserved);
 void kvm_cleanup();
 
 #endif /* LINUX_KVM_H_ */

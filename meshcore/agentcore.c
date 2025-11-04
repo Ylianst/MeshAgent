@@ -1113,8 +1113,11 @@ void ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(ILibDuktape_readableStream *st
 	ILibDuktape_DuplexStream *ds = (ILibDuktape_DuplexStream*)user;
 	kvm_relay_reset(ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ds->user);
 #else
-	printf("DEBUG: PipeHook - Calling kvm_relay_reset() to send MNG_KVM_REFRESH\n");
-	kvm_relay_reset();
+	printf("DEBUG: PipeHook - macOS/Linux path - extracting ptrs from DuplexStream\n");
+	ILibDuktape_DuplexStream *ds = (ILibDuktape_DuplexStream*)user;
+	printf("DEBUG: PipeHook - ds=%p, ds->user=%p\n", ds, ds->user);
+	printf("DEBUG: PipeHook - Calling kvm_relay_reset() with ptrs to send MNG_KVM_REFRESH\n");
+	kvm_relay_reset(ds->user);
 	printf("DEBUG: PipeHook - kvm_relay_reset() completed\n");
 #endif
 #else

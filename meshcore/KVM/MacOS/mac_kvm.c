@@ -1044,27 +1044,51 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 }
 
 // Force a KVM reset & refresh
-void kvm_relay_reset()
+void kvm_relay_reset(void *reserved)
 {
 	int written = write(STDOUT_FILENO, "DEBUG: ===== kvm_relay_reset() CALLED ===== (Sending MNG_KVM_REFRESH)\n", 72);
 	fsync(STDOUT_FILENO);
 	(void)written;
 
-	// FIX: kvm_relay_feeddata() is a stub on macOS - need to write to message queue directly
-	char *buffer = ILibMemory_SmartAllocate(4);
+	if (reserved == NULL)
+	{
+		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - reserved is NULL, cannot send\n", 58);
+		fsync(STDOUT_FILENO);
+		return;
+	}
+
+	// Create MNG_KVM_REFRESH message
+	char buffer[4];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_REFRESH);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)4);				// Write the size
 
-	written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - Enqueuing MNG_KVM_REFRESH to message queue\n", 71);
-	fsync(STDOUT_FILENO);
+	// Get RemoteDesktop_Ptrs from reserved parameter (same structure as Windows)
+	// On macOS, we need to forward this via ILibAsyncSocket to the -kvm1 domain socket
+	// The reserved pointer is RemoteDesktop_Ptrs*, which contains kvmDomainSocketModule
 
-	// Enqueue the refresh command (same pattern as kvm_send_resolution)
-	ILibQueue_Lock(g_messageQ);
-	ILibQueue_EnQueue(g_messageQ, buffer);
-	ILibQueue_UnLock(g_messageQ);
+	// We need to include the agentcore header to access RemoteDesktop_Ptrs structure
+	// For now, just cast to void** and access kvmDomainSocketModule at the correct offset
+	// Structure: ctx, object, MeshAgentObject, kvmPipe, kvmDomainSocket, kvmDomainSocketModule, stream
+	// On 64-bit: 0, 8, 16, 24, 32, 40, 48
+	void **ptrs = (void**)reserved;
+	void *kvmDomainSocketModule = ptrs[5];  // kvmDomainSocketModule is at offset 5 (after ctx, object, MeshAgentObject, kvmPipe, kvmDomainSocket)
 
-	written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - MNG_KVM_REFRESH enqueued successfully\n", 66);
-	fsync(STDOUT_FILENO);
+	if (kvmDomainSocketModule != NULL)
+	{
+		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - Sending via domain socket\n", 54);
+		fsync(STDOUT_FILENO);
+
+		// Send to -kvm1 via domain socket (same as ILibDuktape_MeshAgent_RemoteDesktop_WriteSink)
+		ILibAsyncSocket_Send(kvmDomainSocketModule, buffer, 4, ILibAsyncSocket_MemoryOwnership_USER);
+
+		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - MNG_KVM_REFRESH sent via domain socket\n", 67);
+		fsync(STDOUT_FILENO);
+	}
+	else
+	{
+		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - kvmDomainSocketModule is NULL\n", 58);
+		fsync(STDOUT_FILENO);
+	}
 }
 
 // Clean up the KVM session.
