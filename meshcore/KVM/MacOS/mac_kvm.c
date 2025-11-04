@@ -610,6 +610,26 @@ void* kvm_server_mainloop(void* param)
 				int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM: Reconnected (fd=%d)\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
+
+				// Reset all tile CRCs to force full screen send to new viewer
+				// This fixes the multi-session bug where second viewer only got ~75x150px updates
+				if (g_tileInfo != NULL)
+				{
+					int r, c;
+					for (r = 0; r < TILE_HEIGHT_COUNT; r++)
+					{
+						for (c = 0; c < TILE_WIDTH_COUNT; c++)
+						{
+							g_tileInfo[r][c].crc = 0xFF;  // Force send all tiles
+							g_tileInfo[r][c].flag = TILE_TODO;
+						}
+					}
+					tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM: Reset %d x %d tiles for new session\n",
+					                   TILE_WIDTH_COUNT, TILE_HEIGHT_COUNT);
+					written = write(STDOUT_FILENO, tmp, tmpLen);
+					fsync(STDOUT_FILENO);
+				}
+
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
 			}
 		}
