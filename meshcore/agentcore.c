@@ -4989,12 +4989,21 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{ 
 			agentHost->capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY; parseCommands = 0; 
 		}
-		if (strcmp(param[ri], "--openframe-mode") == 0) 
-		{ 
-			agentHost->openFrameMode = true; parseCommands = 0; 
-			printf("OpenFrame Mode: %d\n", agentHost->openFrameMode);
-			enable_file_logging_simple();
-		}
+	if (strcmp(param[ri], "--openframe-mode") == 0) 
+	{ 
+		agentHost->openFrameMode = true; parseCommands = 0; 
+		printf("OpenFrame Mode: %d\n", agentHost->openFrameMode);
+		
+		// Use fixed log directory for OpenFrame
+		#ifdef WIN32
+			const char* logDir = "C:\\ProgramData\\OpenFrame\\meshcentral-agent";
+		#else
+			const char* logDir = "/var/log/openframe/meshcentral-agent";
+		#endif
+		
+		printf("Log directory: %s\n", logDir);
+		enable_file_logging(logDir, "meshagent");
+	}
 		if (strcmp(param[ri], "--openframe-secret") == 0 && ((ri + 1) < paramLen))
 		{
 			agentHost->openFrameSecret = param[ri + 1]; parseCommands = 0;
