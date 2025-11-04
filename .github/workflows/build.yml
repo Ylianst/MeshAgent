@@ -10,7 +10,7 @@ permissions:
 
 on:
   push:
-    branches: [master]
+    branches: [master,feature/improve-logging]
     paths-ignore:
       - "**/*.md"
   workflow_dispatch:
