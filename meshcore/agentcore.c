@@ -135,6 +135,9 @@ typedef struct RemoteDesktop_Ptrs
 #ifdef __APPLE__
 	int kvmDomainSocket;
 	void *kvmDomainSocketModule;  // ILibAsyncSocket module for uid==0 case
+	int kvmListenerSocket;         // ASYNC: Listener socket FD (for accepting -kvm1 connections)
+	void *kvmListenerSocketModule; // ASYNC: ILibAsyncSocket module for listener socket
+	int kvmPendingConnection;      // ASYNC: Flag indicating waiting for -kvm1 connection
 #endif
 #endif
 	ILibDuktape_DuplexStream *stream;
@@ -1076,6 +1079,22 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 #if defined(_POSIX) && !defined(__APPLE__)
 		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
 #endif
+#ifdef __APPLE__
+		// ASYNC: Clean up listener socket if still active
+		if (ptrs->kvmListenerSocketModule != NULL)
+		{
+			ILibAsyncSocket_Disconnect(ptrs->kvmListenerSocketModule);
+			ptrs->kvmListenerSocketModule = NULL;
+			ptrs->kvmListenerSocket = 0;
+		}
+		// Clean up data socket if connected
+		if (ptrs->kvmDomainSocketModule != NULL)
+		{
+			ILibAsyncSocket_Disconnect(ptrs->kvmDomainSocketModule);
+			ptrs->kvmDomainSocketModule = NULL;
+			ptrs->kvmDomainSocket = 0;
+		}
+#endif
 		kvm_cleanup();
 #endif
 	}
@@ -1198,6 +1217,101 @@ void ILibDuktape_MeshAgent_DomainSocket_OnDisconnect(ILibAsyncSocket_SocketModul
 		ptrs->kvmDomainSocketModule = NULL;
 		ptrs->kvmDomainSocket = 0;
 	}
+}
+
+// ASYNC: Callback when -kvm1 connects to the listener socket
+void ILibDuktape_MeshAgent_ListenerSocket_OnData(ILibAsyncSocket_SocketModule socketModule, char* buffer, int *p_beginPointer, int endPointer, ILibAsyncSocket_OnInterrupt* OnInterrupt, void **user, int *PAUSE)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)*user;
+
+	// Accept the incoming connection
+	int client_fd = kvm_accept_connection();
+
+	if (client_fd > 0)
+	{
+		MeshAgent_sendConsoleText(ptrs->ctx, "KVM: -kvm1 connected, setting up data channel");
+
+		// Success! Now set up the data socket
+		// Create ILibAsyncSocket module for the accepted connection
+		ptrs->kvmDomainSocketModule = ILibCreateAsyncSocketModuleWithMemory(duk_ctx_chain(ptrs->ctx), 65535,
+			ILibDuktape_MeshAgent_DomainSocket_OnData,
+			ILibDuktape_MeshAgent_DomainSocket_OnConnect,
+			ILibDuktape_MeshAgent_DomainSocket_OnDisconnect,
+			NULL,  // OnSendOK - not needed
+			0);    // UserMappedMemorySize
+
+		// Attach the connected FD to the socket module
+		ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
+
+		// Store the FD
+		ptrs->kvmDomainSocket = client_fd;
+		ptrs->kvmPendingConnection = 0;  // Connection established
+
+		// We can now close/cleanup the listener socket
+		if (ptrs->kvmListenerSocketModule != NULL)
+		{
+			ILibAsyncSocket_Disconnect(ptrs->kvmListenerSocketModule);
+			ptrs->kvmListenerSocketModule = NULL;
+			ptrs->kvmListenerSocket = 0;
+		}
+
+		MeshAgent_sendConsoleText(ptrs->ctx, "Domain socket connection established");
+	}
+	else
+	{
+		// Accept failed - may be EAGAIN (no connection ready yet)
+		// Just return and wait for next event
+	}
+
+	*p_beginPointer = endPointer;  // Consume any data (shouldn't be any on listener)
+}
+
+void ILibDuktape_MeshAgent_ListenerSocket_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Connected, void *user)
+{
+	// This is called when listener socket is ready to accept
+	// The actual accept happens in OnData callback
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+	if (Connected == 0)
+	{
+		// Listener socket failed
+		MeshAgent_sendConsoleText(ptrs->ctx, "KVM: Listener socket failed");
+		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+	}
+}
+
+void ILibDuktape_MeshAgent_ListenerSocket_OnDisconnect(ILibAsyncSocket_SocketModule socketModule, void *user)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+	if (ptrs != NULL)
+	{
+		ptrs->kvmListenerSocketModule = NULL;
+		ptrs->kvmListenerSocket = 0;
+	}
+}
+
+// TIMEOUT: Called if -kvm1 doesn't connect within 30 seconds
+void ILibDuktape_MeshAgent_ListenerSocket_Timeout(ILibAsyncSocket_SocketModule module, void *user)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
+
+	MeshAgent_sendConsoleText(ptrs->ctx, "KVM: Timeout - -kvm1 did not connect within 30 seconds");
+
+	// Clean up listener
+	if (ptrs->kvmListenerSocketModule != NULL)
+	{
+		ILibAsyncSocket_Disconnect(ptrs->kvmListenerSocketModule);
+		ptrs->kvmListenerSocketModule = NULL;
+		ptrs->kvmListenerSocket = 0;
+	}
+
+	// End the stream since we couldn't establish KVM
+	if (ptrs->stream != NULL)
+	{
+		ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+	}
+
+	// Clean up the session (removes trigger files)
+	kvm_cleanup_session();
 }
 
 void ILibDuktape_MeshAgent_DomainSocket_OnConnect(ILibAsyncSocket_SocketModule socketModule, int Connected, void *user)
@@ -1435,33 +1549,46 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// LaunchAgent handles both LoginWindow (console_uid=0) and Aqua (console_uid!=0) via LimitLoadToSessionType
 
 		char msg[128];
-		sprintf_s(msg, sizeof(msg), "Establishing domain socket connection for KVM (console_uid=%d)", console_uid);
+		sprintf_s(msg, sizeof(msg), "Setting up async domain socket listener for KVM (console_uid=%d)", console_uid);
 		MeshAgent_sendConsoleText(ctx, msg);
 
-		// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
-		int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		// ASYNC: Get the LISTENER FD from kvm_relay_setup (no longer blocks)
+		int listener_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
 
-		if (client_fd > 0)
+		if (listener_fd < 0)
 		{
-			// Create ILibAsyncSocket module to wrap the FD
-			ptrs->kvmDomainSocketModule = ILibCreateAsyncSocketModuleWithMemory(duk_ctx_chain(ctx), 65535,
-				ILibDuktape_MeshAgent_DomainSocket_OnData,
-				ILibDuktape_MeshAgent_DomainSocket_OnConnect,
-				ILibDuktape_MeshAgent_DomainSocket_OnDisconnect,
-				NULL,  // OnSendOK - not needed
+			// Negative value indicates listener socket (we negate it to get actual FD)
+			listener_fd = -listener_fd;
+
+			// Store the listener FD
+			ptrs->kvmListenerSocket = listener_fd;
+			ptrs->kvmPendingConnection = 1;
+
+			// Create ILibAsyncSocket module for the LISTENER socket
+			// This will handle accept() asynchronously when -kvm1 connects
+			ptrs->kvmListenerSocketModule = ILibCreateAsyncSocketModuleWithMemory(duk_ctx_chain(ctx), 65535,
+				ILibDuktape_MeshAgent_ListenerSocket_OnData,      // OnData handles accept()
+				ILibDuktape_MeshAgent_ListenerSocket_OnConnect,    // OnConnect for listener
+				ILibDuktape_MeshAgent_ListenerSocket_OnDisconnect, // OnDisconnect for listener
+				NULL,  // OnSendOK - not needed for listener
 				0);    // UserMappedMemorySize
 
-			// Attach the already-connected FD to the socket module
-			ILibAsyncSocket_UseThisSocket(ptrs->kvmDomainSocketModule, client_fd, NULL, ptrs);
+			// Attach the listener FD to the socket module
+			ILibAsyncSocket_UseThisSocket(ptrs->kvmListenerSocketModule, listener_fd, NULL, ptrs);
 
-			// Store the FD
-			ptrs->kvmDomainSocket = client_fd;
+			// Mark socket as listening (this enables accept handling)
+			ILibAsyncSocket_SetRemoteAddress(ptrs->kvmListenerSocketModule, NULL);  // NULL = listener mode
 
-			MeshAgent_sendConsoleText(ctx, "Domain socket connection established");
+			// TIMEOUT: Set a 30-second timeout for -kvm1 to connect
+			ILibAsyncSocket_SetTimeout(ptrs->kvmListenerSocketModule, 30, ILibDuktape_MeshAgent_ListenerSocket_Timeout);
+
+			MeshAgent_sendConsoleText(ctx, "KVM: Async listener ready, waiting for -kvm1 connection (30s timeout)");
+			// Stream setup continues - multiple viewers can now connect while waiting
 		}
-		else
+		else if (listener_fd == 0)
 		{
-			MeshAgent_sendConsoleText(ctx, "Failed to establish domain socket connection");
+			// Failed to create listener
+			MeshAgent_sendConsoleText(ctx, "Failed to create domain socket listener");
 			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
 		}
 	#else

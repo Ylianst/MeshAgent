@@ -37,6 +37,7 @@ limitations under the License.
 #include <pwd.h>
 #include <dirent.h>
 #include <limits.h>
+#include <fcntl.h>
 
 int KVM_Listener_FD = -1;  // Used by -kvm1 child (now unused in reversed architecture)
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
@@ -872,7 +873,18 @@ int kvm_create_session(void)
 		return -1;
 	}
 
-	printf("KVM: Socket ready at %s\n", KVM_Listener_Path);
+	// ASYNC: Make the listener socket non-blocking for async accept
+	int flags = fcntl(KVM_Daemon_Listener_FD, F_GETFL, 0);
+	if (flags < 0 || fcntl(KVM_Daemon_Listener_FD, F_SETFL, flags | O_NONBLOCK) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to set non-blocking mode: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		return -1;
+	}
+
+	printf("KVM: Non-blocking socket ready at %s\n", KVM_Listener_Path);
 
 	// 2. NOW create queue directory for LaunchAgent QueueDirectories monitoring
 	// Socket is guaranteed ready before -kvm1 can start
@@ -972,8 +984,6 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	UNREFERENCED_PARAMETER(reserved);
 	UNREFERENCED_PARAMETER(uid);
 
-	int client_fd;
-
 	// Create KVM session (directory + signal file + socket)
 	// This triggers QueueDirectories to start -kvm1
 	if (kvm_create_session() < 0)
@@ -982,15 +992,33 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		return NULL;
 	}
 
-	// Accept connection from -kvm1 LaunchAgent (triggered by QueueDirectories)
-	printf("KVM: Waiting for -kvm1 to connect...\n");
+	// ASYNC CHANGE: Return the LISTENER socket FD immediately
+	// The accept() will be handled asynchronously in agentcore.c
+	// This prevents blocking the daemon's event loop, allowing multiple viewers to connect
+	printf("KVM: Listener ready (fd=%d), waiting for async connection\n", KVM_Daemon_Listener_FD);
+
+	// Return listener FD cast as void* for async handling
+	// Note: Negative value indicates this is a listener socket, not a connected socket
+	return (void*)(intptr_t)(-KVM_Daemon_Listener_FD);
+}
+
+// ASYNC: Accept connection from -kvm1 LaunchAgent when it connects
+// Returns the connected client FD, or -1 on error
+// This is called from agentcore.c when the listener socket has incoming connection
+int kvm_accept_connection(void)
+{
+	int client_fd;
+
+	// Accept the connection (should be non-blocking now)
 	client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
 
 	if (client_fd < 0)
 	{
-		fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
-		kvm_cleanup_session();  // Clean up on failure
-		return NULL;
+		if (errno != EAGAIN && errno != EWOULDBLOCK)
+		{
+			fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
+		}
+		return -1;
 	}
 
 	printf("KVM: Connection accepted (fd=%d), verifying peer...\n", client_fd);
@@ -1000,14 +1028,11 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	{
 		fprintf(stderr, "KVM: Peer verification FAILED - rejecting connection\n");
 		close(client_fd);
-		kvm_cleanup_session();  // Clean up on failure
-		return NULL;
+		return -1;
 	}
 
 	printf("KVM: Peer verified successfully - connection established\n");
-
-	// Return FD cast as void* for use with ILibAsyncSocket
-	return (void*)(intptr_t)client_fd;
+	return client_fd;
 }
 
 // Force a KVM reset & refresh
