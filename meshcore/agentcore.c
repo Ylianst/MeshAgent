@@ -1104,17 +1104,25 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 }
 void ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(ILibDuktape_readableStream *stream, void *wstream, void *user)
 {
+	printf("DEBUG: ===== PipeHook CALLED ===== (New viewer connecting to stream)\n");
+	printf("DEBUG: PipeHook - stream=%p, wstream=%p, user=%p\n", stream, wstream, user);
 #ifdef _LINKVM
+	printf("DEBUG: PipeHook - _LINKVM is defined\n");
 #ifdef WIN32
+	printf("DEBUG: PipeHook - Windows path\n");
 	ILibDuktape_DuplexStream *ds = (ILibDuktape_DuplexStream*)user;
 	kvm_relay_reset(ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ds->user);
 #else
+	printf("DEBUG: PipeHook - Calling kvm_relay_reset() to send MNG_KVM_REFRESH\n");
 	kvm_relay_reset();
+	printf("DEBUG: PipeHook - kvm_relay_reset() completed\n");
 #endif
 #else
+	printf("DEBUG: PipeHook - _LINKVM NOT defined (no KVM support)\n");
 	UNREFERENCED_PARAMETER(stream);
 	UNREFERENCED_PARAMETER(user);
 #endif
+	printf("DEBUG: ===== PipeHook FINISHED =====\n");
 }
 #endif
 
