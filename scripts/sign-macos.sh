@@ -42,14 +42,26 @@ fi
 
 # Find all meshagent binaries (including DEBUG versions)
 SIGNED_COUNT=0
-find "$BUILD_DIR" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) | while read binary; do
+
+# Use array to avoid subshell issues where SIGNED_COUNT doesn't persist
+BINARIES=()
+while IFS= read -r -d '' binary; do
+    BINARIES+=("$binary")
+done < <(find "$BUILD_DIR" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) -print0)
+
+for binary in "${BINARIES[@]}"; do
     if [ -f "$binary" ]; then
         echo -e "${BLUE}Signing:${NC} $binary"
+
+        # Get script directory
+        SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+        ENTITLEMENTS="$SCRIPT_DIR/meshagent-macos.entitlements"
 
         # Sign with hardened runtime for distribution
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
                  --options runtime \
+                 --entitlements "$ENTITLEMENTS" \
                  --force \
                  "$binary"
 

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for hardened runtime -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+
+	<!-- Required for JIT compilation (Duktape JavaScript engine) -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+
+	<!-- Required to load dynamic libraries -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+
+	<!-- Allow DYLD environment variables -->
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+
+	<!-- Accessibility for keyboard/mouse control -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+
+	<!-- Network client access -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<!-- Network server access (for mesh connections) -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>

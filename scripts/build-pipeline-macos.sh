@@ -106,7 +106,14 @@ if [ "$DO_STAPLE" = true ]; then
 
     # Find all signed binaries and staple
     STAPLED_COUNT=0
-    find "$SCRIPT_DIR/build/macos" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) | while read binary; do
+
+    # Use array to avoid subshell issues where STAPLED_COUNT doesn't persist
+    BINARIES=()
+    while IFS= read -r -d '' binary; do
+        BINARIES+=("$binary")
+    done < <(find "$SCRIPT_DIR/build/macos" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) -print0)
+
+    for binary in "${BINARIES[@]}"; do
         echo "Stapling: $binary"
         xcrun stapler staple "$binary"
 
