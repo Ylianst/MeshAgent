@@ -900,17 +900,40 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
 
+	// DEBUG LOGGING: Track data broadcast to viewers
+	if (buffer != NULL && bufferLen >= 4)
+	{
+		unsigned short cmd = ntohs(((unsigned short*)buffer)[0]);
+		char logMsg[256];
+		sprintf_s(logMsg, sizeof(logMsg), "DEBUG: Broadcasting data to viewers - Command: 0x%04x, Length: %d bytes", cmd, bufferLen);
+		MeshAgent_sendConsoleText(ptrs->ctx, logMsg);
+
+		// Log specific important commands
+		if (cmd == MNG_KVM_SCREEN) // 0x0007
+		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "DEBUG: ** Broadcasting MNG_KVM_SCREEN (resolution) to viewers **");
+		}
+		else if (cmd == MNG_KVM_REFRESH) // 0x0006
+		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "DEBUG: ** Broadcasting MNG_KVM_REFRESH to viewers **");
+		}
+	}
+
 	if (ptrs->stream != NULL)
 	{
+		MeshAgent_sendConsoleText(ptrs->ctx, "DEBUG: Broadcasting to stream (DuplexStream multiplexing to all viewers)");
 		if (ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen) != ILibTransport_DoneState_ERROR)
 		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "DEBUG: Broadcast successful");
 			return ILibTransport_DoneState_COMPLETE;		// Always returning complete, because we'll let the stream object handle flow control
 		}
 		else
 		{
+			MeshAgent_sendConsoleText(ptrs->ctx, "DEBUG: ERROR - Broadcast failed!");
 			return ILibTransport_DoneState_ERROR;
 		}
 	}
+	MeshAgent_sendConsoleText(ptrs->ctx, "DEBUG: ERROR - ptrs->stream is NULL, cannot broadcast!");
 	return ILibTransport_DoneState_ERROR;
 }
 #endif
@@ -1386,22 +1409,22 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 #endif
 
 
+	// DEBUG LOGGING: Track viewer connections
+	MeshAgent_sendConsoleText(ctx, "=== getRemoteDesktop() CALLED ===");
+
 	duk_push_this(ctx);											// [MeshAgent]
-	// MULTI-VIEWER FIX: Commented out early return for existing desktop
-	// This forces each viewer to go through full initialization
-	// Each viewer will send MNG_KVM_INIT and receive MNG_KVM_SCREEN resolution
-	// Without this change, second viewer skips initialization and never gets resolution
-	/*
 	if (duk_has_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM))
 	{
+		MeshAgent_sendConsoleText(ctx, "DEBUG: REMOTE_DESKTOP_STREAM exists - returning existing session (SECOND VIEWER)");
 		duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_STREAM);	// [MeshAgent][RemoteDesktop]
 		duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_ptrs);
 		ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);
 		duk_pop(ctx);
+		MeshAgent_sendConsoleText(ctx, "DEBUG: Returning existing desktop session to second viewer");
 		return 1;
 	}
-	*/
-	
+
+	MeshAgent_sendConsoleText(ctx, "DEBUG: REMOTE_DESKTOP_STREAM does NOT exist - creating NEW session (FIRST VIEWER)");
 #ifdef __APPLE__
 	duk_peval_string_noresult(ctx, "require('power-monitor').wakeDisplay();");
 #endif
@@ -1410,10 +1433,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 	agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
 	duk_pop(ctx);
 
+	MeshAgent_sendConsoleText(ctx, "DEBUG: Creating new desktop object");
 	duk_push_object(ctx);															// [MeshAgent][RemoteDesktop]
 	ILibDuktape_WriteID(ctx, "MeshAgent.kvmSession");
 	duk_dup(ctx, -1);																// [MeshAgent][RemoteDesktop][RemoteDesktop]
 	duk_put_prop_string(ctx, -3, REMOTE_DESKTOP_STREAM);							// [MeshAgent][RemoteDesktop]
+	MeshAgent_sendConsoleText(ctx, "DEBUG: Stored REMOTE_DESKTOP_STREAM property");
 	ptrs = (RemoteDesktop_Ptrs*)Duktape_PushBuffer(ctx, sizeof(RemoteDesktop_Ptrs));// [MeshAgent][RemoteDesktop][buffer]
 	duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_ptrs);								// [MeshAgent][RemoteDesktop]
 	memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));

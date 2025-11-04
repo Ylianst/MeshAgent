@@ -127,20 +127,34 @@ void senddebug(int val)
 
 
 
-void kvm_send_resolution() 
+void kvm_send_resolution()
 {
+	// DEBUG LOGGING: Track resolution messages
+	char tmp[256];
+	int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: kvm_send_resolution() CALLED - Sending resolution %dx%d (MNG_KVM_SCREEN)\n", SCREEN_WIDTH, SCREEN_HEIGHT);
+	int written = write(STDOUT_FILENO, tmp, tmpLen);
+	fsync(STDOUT_FILENO);
+	(void)written;
+
 	char *buffer = ILibMemory_SmartAllocate(8);
-	
+
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
 
+	tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: Resolution message queued - bytes: 00 07 00 08 %04x %04x\n",
+		ntohs(((unsigned short*)buffer)[2]), ntohs(((unsigned short*)buffer)[3]));
+	written = write(STDOUT_FILENO, tmp, tmpLen);
+	fsync(STDOUT_FILENO);
 
 	// Write the reply to the pipe.
 	ILibQueue_Lock(g_messageQ);
 	ILibQueue_EnQueue(g_messageQ, buffer);
 	ILibQueue_UnLock(g_messageQ);
+
+	written = write(STDOUT_FILENO, "DEBUG: Resolution message enqueued successfully\n", 48);
+	fsync(STDOUT_FILENO);
 }
 
 #define BUFSIZE 65535
@@ -279,11 +293,16 @@ int get_kbd_state()
 
 int kvm_init()
 {
+	// DEBUG LOGGING: Track kvm_init() calls
+	int written = write(STDOUT_FILENO, "DEBUG: ===== kvm_init() CALLED =====\n", 38);
+	fsync(STDOUT_FILENO);
+	(void)written;
+
 	ILibCriticalLogFilename = "KVMSlave.log";
 	int old_height_count = TILE_HEIGHT_COUNT;
-	
+
 	SCREEN_NUM = CGMainDisplayID();
-	
+
 	if (SCREEN_WIDTH > 0)
 	{
 		CGDisplayModeRef mode = CGDisplayCopyDisplayMode(SCREEN_NUM);
@@ -293,17 +312,26 @@ int kvm_init()
 
 	SCREEN_HEIGHT = CGDisplayPixelsHigh(SCREEN_NUM) * SCREEN_SCALE;
 	SCREEN_WIDTH = CGDisplayPixelsWide(SCREEN_NUM) * SCREEN_SCALE;
+
+	char tmp[256];
+	int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: kvm_init() - Screen dimensions: %dx%d (scale=%d)\n", SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_SCALE);
+	written = write(STDOUT_FILENO, tmp, tmpLen);
+	fsync(STDOUT_FILENO);
+
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
 	COMPRESSION_RATIO = 50;
 	FRAME_RATE_TIMER = 100;
-	
+
 	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
 	TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
 	if (SCREEN_WIDTH % TILE_WIDTH) { TILE_WIDTH_COUNT++; }
 	if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
-	
+
+	written = write(STDOUT_FILENO, "DEBUG: kvm_init() - Calling kvm_send_resolution()\n", 51);
+	fsync(STDOUT_FILENO);
+
 	kvm_send_resolution();
 	reset_tile_info(old_height_count);
 	
@@ -372,6 +400,11 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_REFRESH: // Refresh
 		{
+			// DEBUG LOGGING: Track refresh commands
+			int written = write(STDOUT_FILENO, "DEBUG: MNG_KVM_REFRESH command received from viewer\n", 53);
+			fsync(STDOUT_FILENO);
+			(void)written;
+
 			kvm_send_resolution();
 
 			int row, col;
