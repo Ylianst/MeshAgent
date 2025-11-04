@@ -1393,6 +1393,24 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, REMOTE_DESKTOP_ptrs);
 		ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);
 		duk_pop(ctx);
+
+#ifdef _LINKVM
+#ifdef __APPLE__
+		// MULTI-VIEWER FIX: Send MNG_KVM_REFRESH to -kvm1 when second viewer joins
+		// This ensures the new viewer receives the screen resolution message
+		// Without this, only the first viewer gets resolution from kvm_init()
+		MeshAgent_sendConsoleText(ctx, "Second viewer joining - sending refresh to update resolution");
+
+		char refresh_cmd[4];
+		((unsigned short*)refresh_cmd)[0] = (unsigned short)htons((unsigned short)MNG_KVM_REFRESH);  // 0x0006
+		((unsigned short*)refresh_cmd)[1] = (unsigned short)htons((unsigned short)4);                 // size = 4
+
+		// Send refresh command to -kvm1 process
+		// This will trigger kvm_send_resolution() and reset tile CRCs
+		kvm_relay_feeddata(refresh_cmd, 4);
+#endif
+#endif
+
 		return 1;
 	}
 	
