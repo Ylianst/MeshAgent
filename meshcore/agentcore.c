@@ -903,17 +903,28 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	// DEBUG LOGGING: Track data broadcast to viewers
 	if (buffer != NULL && bufferLen >= 4)
 	{
+		static int broadcast_seq = 0;
+		broadcast_seq++;
+
 		unsigned short cmd = ntohs(((unsigned short*)buffer)[0]);
-		printf("DEBUG: Broadcasting data to viewers - Command: 0x%04x, Length: %d bytes\n", cmd, bufferLen);
+		printf("DEBUG: [SEQ:%d] Broadcasting data to viewers - Command: 0x%04x, Length: %d bytes\n", broadcast_seq, cmd, bufferLen);
 
 		// Log specific important commands
 		if (cmd == MNG_KVM_SCREEN) // 0x0007
 		{
-			printf("DEBUG: ** Broadcasting MNG_KVM_SCREEN (resolution) to viewers **\n");
+			printf("DEBUG: [SEQ:%d] ** Broadcasting MNG_KVM_SCREEN (resolution) to viewers **\n", broadcast_seq);
 		}
 		else if (cmd == MNG_KVM_REFRESH) // 0x0006
 		{
-			printf("DEBUG: ** Broadcasting MNG_KVM_REFRESH to viewers **\n");
+			printf("DEBUG: [SEQ:%d] ** Broadcasting MNG_KVM_REFRESH to viewers **\n", broadcast_seq);
+		}
+		else if (cmd == MNG_KVM_PICTURE) // 0x0003
+		{
+			printf("DEBUG: [SEQ:%d] Broadcasting MNG_KVM_PICTURE (tile data)\n", broadcast_seq);
+		}
+		else if (cmd == MNG_JUMBO) // 0x001b
+		{
+			printf("DEBUG: [SEQ:%d] Broadcasting MNG_JUMBO (large tile data)\n", broadcast_seq);
 		}
 	}
 

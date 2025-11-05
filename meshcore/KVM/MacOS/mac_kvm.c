@@ -425,7 +425,23 @@ int kvm_server_inputdata(char* block, int blocklen)
 			written = write(STDOUT_FILENO, tmp, tmpLen);
 			fsync(STDOUT_FILENO);
 
-			kvm_send_resolution();
+			// FIX: Send resolution IMMEDIATELY, not via queue, to ensure it arrives before any tile data
+			// This fixes the race condition where tiles were sent before resolution, causing wrong canvas size
+			tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: MNG_KVM_REFRESH - Sending resolution IMMEDIATELY (not queued) to ensure proper ordering\n");
+			written = write(STDOUT_FILENO, tmp, tmpLen);
+			fsync(STDOUT_FILENO);
+
+			char resolution_buffer[8];
+			((unsigned short*)resolution_buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);
+			((unsigned short*)resolution_buffer)[1] = (unsigned short)htons((unsigned short)8);
+			((unsigned short*)resolution_buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);
+			((unsigned short*)resolution_buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);
+
+			int send_result = KVM_SEND(resolution_buffer, 8);
+			tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: MNG_KVM_REFRESH - Resolution sent immediately: %dx%d (result=%d)\n",
+				SCREEN_WIDTH, SCREEN_HEIGHT, send_result);
+			written = write(STDOUT_FILENO, tmp, tmpLen);
+			fsync(STDOUT_FILENO);
 
 			int row, col;
 			if (size != 4) break;
