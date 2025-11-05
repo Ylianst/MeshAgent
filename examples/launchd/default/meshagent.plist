@@ -2,16 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Disabled</key>
+	<false/>
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
 	<string>meshagent</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/mesh_services/meshagent</string>
+		<string>/usr/local/mesh_services/meshagent/meshagent</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
+	<key>StandardErrorPath</key>
+	<string>/tmp/meshagent-daemon.log</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/meshagent-daemon.log</string>
 	<key>WorkingDirectory</key>
 	<string>/usr/local/mesh_services/meshagent</string>
 </dict>

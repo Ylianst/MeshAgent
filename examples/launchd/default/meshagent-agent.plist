@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Disabled</key>
+	<false/>
 	<key>KeepAlive</key>
 	<false/>
 	<key>Label</key>
@@ -13,13 +15,17 @@
 	</array>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/mesh_services/meshagent</string>
+		<string>/usr/local/mesh_services/meshagent/meshagent</string>
 		<string>-kvm1</string>
 	</array>
 	<key>QueueDirectories</key>
 	<array>
-		<string>/usr/local/mesh_services/meshagent/run</string>
+		<string>/var/run/meshagent</string>
 	</array>
+	<key>StandardErrorPath</key>
+	<string>/tmp/meshagent-agent.log</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/meshagent-agent.log</string>
 	<key>WorkingDirectory</key>
 	<string>/usr/local/mesh_services/meshagent</string>
 </dict>
