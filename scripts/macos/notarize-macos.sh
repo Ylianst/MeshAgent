@@ -131,11 +131,11 @@ echo -e "${GREEN}✓ Keychain profile found${NC}"
 # FIND BINARIES TO NOTARIZE
 #==============================================================================
 
-# Find all release binaries (exclude DEBUG builds)
+# Find all release binaries (exclude DEBUG builds and binaries inside .app bundles)
 BINARIES=()
 while IFS= read -r -d '' binary; do
     BINARIES+=("$binary")
-done < <(find "$BUILD_DIR" -type f -name "meshagent" ! -name "DEBUG_*" -print0)
+done < <(find "$BUILD_DIR" -type f -name "meshagent" ! -name "DEBUG_*" ! -path "*.app/*" -print0)
 
 # Also find app bundles
 BUNDLES=()
