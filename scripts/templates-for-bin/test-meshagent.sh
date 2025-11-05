@@ -4,8 +4,8 @@
 # Builds, signs, and deploys meshagent with configurable options
 #
 # Usage:
-#   sudo ./scripts/macos/test-meshagent.sh --archid 29 --daemon enable --agent disable
-#   sudo ./scripts/macos/test-meshagent.sh --archid universal --daemon disable --agent disable
+#   sudo ./bin/test-meshagent.sh --archid 29 --daemon enable --agent disable
+#   sudo ./bin/test-meshagent.sh --archid universal --daemon disable --agent disable
 
 set -e  # Exit on error
 
