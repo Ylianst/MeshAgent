@@ -280,12 +280,26 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return(0);
 	}
 #if defined(_LINKVM) && defined(__APPLE__)
+	// -kvm0 DISABLED: macOS now uses REVERSED ARCHITECTURE with -kvm1
+	//
+	// Historical context:
+	// - -kvm0: Original process-spawning architecture (stdin/stdout I/O)
+	// - -kvm1: Apple-required architecture using QueueDirectories + domain sockets
+	//
+	// The -kvm1 REVERSED ARCHITECTURE was required to work within Apple's
+	// LaunchAgent/LaunchDaemon framework and bootstrap namespace restrictions.
+	// -kvm0 is kept commented here for function/feature comparison purposes.
+	//
+	// See commit 8772b02 (Oct 29, 2025) for removal of -kvm0 spawning code.
+	/*
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
 		kvm_server_mainloop(NULL);
 		return 0;
 	}
-	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
+	else
+	*/
+	if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
 		kvm_server_mainloop((void*)(uint64_t)getpid());
 		return 0;

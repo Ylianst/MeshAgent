@@ -14,6 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/*
+ * REVERSED ARCHITECTURE for macOS KVM (-kvm1)
+ *
+ * Unlike Windows/Linux where the main daemon spawns a child KVM process,
+ * macOS uses a REVERSED pattern where:
+ *
+ * 1. Main daemon creates a listening socket at /tmp/meshagent-kvm.sock
+ * 2. Main daemon creates a signal file at /var/run/meshagent/session-active
+ * 3. LaunchAgent (/Library/LaunchAgents/meshagent-kvm1.plist) monitors directory via QueueDirectories
+ * 4. When signal file appears, LaunchAgent starts -kvm1 process
+ * 5. -kvm1 process CONNECTS to the daemon socket (not spawned by daemon)
+ * 6. When signal file removed, LaunchAgent exits -kvm1 process
+ *
+ * This design works around Apple's bootstrap namespace restrictions and
+ * ensures -kvm1 runs in the correct user context (LoginWindow or Aqua).
+ *
+ * See commit 8772b02 (Oct 29, 2025) for removal of old spawning architecture.
+ */
+
 #include "mac_kvm.h"
 #include "mac_kvm_auth.h"
 #include "../../meshdefines.h"
@@ -84,16 +103,18 @@ int TILE_HEIGHT_COUNT = 0;
 int COMPRESSION_RATIO = 0;
 int FRAME_RATE_TIMER = 0;
 struct tileInfo_t **g_tileInfo = NULL;
-int g_remotepause = 0;
-int g_pause = 0;
-int g_shutdown = 0;
-int g_resetipc = 0;
-int kvm_clientProcessId = 0;
-int g_restartcount = 0;
-int g_totalRestartCount = 0;
-int restartKvm = 0;
+int g_remotepause = 0;           // Remote pause signal from daemon
+int g_pause = 0;                 // Local pause state
+int g_shutdown = 0;              // Shutdown signal
+int g_resetipc = 0;              // Signal to reconnect to daemon socket (not restart process)
+int kvm_clientProcessId = 0;     // Client process ID (unused in REVERSED ARCHITECTURE, kept for compatibility)
+int g_restartcount = 0;          // Socket reconnection attempt counter (not process restart)
+int g_totalRestartCount = 0;     // Total socket reconnection attempts
+int restartKvm = 0;              // Flag to trigger socket reconnect (not process restart)
 extern void* tilebuffer;
 // DEPRECATED: Process spawning variables - no longer used in socket architecture
+// OLD ARCHITECTURE: Main daemon spawned -kvm1 as a child process (pid_t g_slavekvm = 0)
+// CURRENT REVERSED ARCHITECTURE: -kvm1 is an independent LaunchAgent that connects to daemon socket
 // pid_t g_slavekvm = 0;
 pthread_t kvmthread = (pthread_t)NULL;
 // ILibProcessPipe_Process gChildProcess;
@@ -109,7 +130,8 @@ ILibQueue g_messageQ;
 #define KvmDebugLog(...) ;
 //#define KvmDebugLog(...) printf(__VA_ARGS__); fflush(stdout);
 //#define KvmDebugLog(x) if (logenabled) printf(x);
-//#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Writing from slave in kvm_send_resolution\n");
+// DEPRECATED: Old debug line used "slave" terminology (incorrect for REVERSED ARCHITECTURE)
+//#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Processing KVM data in domain socket handler\n");
 
 void senddebug(int val)
 {
@@ -277,7 +299,7 @@ int get_kbd_state()
 
 int kvm_init()
 {
-	ILibCriticalLogFilename = "KVMSlave.log";
+	ILibCriticalLogFilename = "KVMAgent.log";  // -kvm1 is a LaunchAgent, not a slave process
 	int old_height_count = TILE_HEIGHT_COUNT;
 
 	SCREEN_NUM = CGMainDisplayID();
@@ -723,6 +745,8 @@ void* kvm_server_mainloop(void* param)
 }
 
 // DEPRECATED: Process pipe exit handler - no longer used in socket architecture
+// OLD ARCHITECTURE: This handled child process exits and respawned -kvm1
+// CURRENT REVERSED ARCHITECTURE: -kvm1 is LaunchAgent managed by QueueDirectories, not spawned by daemon
 /*
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
