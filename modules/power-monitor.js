@@ -135,35 +135,19 @@ function powerMonitor()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write("pmset -g batt | tr '\\n' '`' | awk -F'`' '");
-            child.stdin.write('{');
-            child.stdin.write('   power=split($1,pwr,"AC")>1?"1":"0";');
-            child.stdin.write('   split($2, batt, " ");');
-            child.stdin.write('   split(batt[2],chg,"%");');
-            child.stdin.write('   printf "{\\"ac\\": %s,\\"level\\": %s}",power, chg[1]; ');
-            child.stdin.write("}'\nexit\n");
+            child.stdin.write("pmset -g batt | awk 'NR==2 {");
+            child.stdin.write('   power=index($0,\"AC\")>0?\"1\":\"0\";');
+            child.stdin.write('   for(i=1;i<=NF;i++) { if(index($i,\"%\")>0) { split($i,chg,\";\"); split(chg[1],pct,\"%\"); level=pct[1]; break; } }');
+            child.stdin.write('   printf \"{\\\"ac\\\": %s,\\\"level\\\": %s}\",power, (level==\"\"?\"0\":level); ');
+            child.stdin.write("}'");
+            child.stdin.write("\nexit\n");
             child.waitExit();
             try {
                 var info = JSON.parse(child.stdout.str.trim());
                 return (info);
             } catch (e) {
-                child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-                child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-                child.stdin.write("pmset -g batt | tr '\\n' '`' | awk -F'`' '");
-                child.stdin.write('{');
-                child.stdin.write('   power=split($1,pwr,"AC")>1?"1":"0";');
-                child.stdin.write('   split($2, batt, " ");');
-                child.stdin.write('   split(batt[3],chg,"%");');
-                child.stdin.write('   printf "{\\"ac\\": %s,\\"level\\": %s}",power, chg[1]; ');
-                child.stdin.write("}'\nexit\n");
-                child.waitExit();
-                try {
-                    var info = JSON.parse(child.stdout.str.trim());
-                    return (info);
-                } catch (er) {
-                    return ({ ac: 1, level: -1 });
-                }
+                // Fallback: return default values if parsing fails
+                return({ ac: 1, level: 100 });
             }
         };
         this._batteryLevelCheck = function _batteryLevelCheck()
