@@ -15,7 +15,7 @@ CERT="Developer ID Application: Your Name (TEAMID)"
 # What to run (set to true/false)
 DO_SIGN=true           # Code sign the binaries
 DO_NOTARIZE=false      # Submit to Apple for notarization (requires keychain profile setup)
-DO_STAPLE=false        # Staple notarization ticket to binary (requires notarization)
+DO_STAPLE=false        # Staple notarization ticket (only works for .app/.pkg/.dmg bundles, not standalone binaries)
 
 # Notarization uses keychain profile "meshagent-notary"
 # Set it up once with:

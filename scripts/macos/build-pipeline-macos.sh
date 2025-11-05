@@ -24,7 +24,7 @@ set -e  # Exit on error
 # What to run (override with environment variables)
 DO_SIGN="${DO_SIGN:-true}"           # Code sign the binaries
 DO_NOTARIZE="${DO_NOTARIZE:-false}"  # Submit to Apple for notarization
-DO_STAPLE="${DO_STAPLE:-false}"      # Staple notarization ticket
+DO_STAPLE="${DO_STAPLE:-false}"      # Staple notarization ticket (only works for .app/.pkg/.dmg bundles, not standalone binaries)
 
 #==============================================================================
 # SCRIPT LOGIC
