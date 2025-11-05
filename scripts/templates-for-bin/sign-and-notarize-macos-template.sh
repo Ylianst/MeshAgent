@@ -106,33 +106,58 @@ if [ "$DO_STAPLE" = true ]; then
 
     # Note: Can staple previously-notarized binaries without re-notarizing
     # Find release binaries only (DEBUG binaries are not notarized)
-    # Use array to avoid subshell issues
     BINARIES=()
     while IFS= read -r -d '' binary; do
         BINARIES+=("$binary")
     done < <(find "$REPO_DIR/build/macos" -type f -name "meshagent" ! -name "DEBUG_*" -print0)
 
+    # Find app bundles
+    BUNDLES=()
+    while IFS= read -r -d '' bundle; do
+        BUNDLES+=("$bundle")
+    done < <(find "$REPO_DIR/build/macos" -name "*.app" -type d -print0)
+
+    # Process standalone binaries (expected to fail with Error 73)
     for binary in "${BINARIES[@]}"; do
-        echo "Stapling: $binary"
+        echo "Checking: $binary"
 
         # Attempt to staple (will fail for standalone binaries with Error 73)
         STAPLE_OUTPUT=$(xcrun stapler staple "$binary" 2>&1)
         STAPLE_EXIT=$?
 
         if [ $STAPLE_EXIT -eq 0 ]; then
-            # Stapling succeeded (bundle or package)
-            if xcrun stapler validate "$binary" 2>&1 | grep -q "The validate action worked"; then
-                echo -e "${GREEN}✓ Successfully stapled${NC}"
-            else
-                echo -e "${YELLOW}⚠ Stapling completed but validation unclear${NC}"
-            fi
+            # Stapling succeeded (shouldn't happen for standalone binaries)
+            echo -e "${GREEN}✓ Successfully stapled${NC}"
         elif echo "$STAPLE_OUTPUT" | grep -q "Error 73"; then
             # Error 73 means standalone binary (expected - not an error)
-            echo -e "${YELLOW}⚠ Note: Stapling is not supported for standalone binaries${NC}"
+            echo -e "${YELLOW}⚠ Note: Stapling not supported for standalone binaries${NC}"
             echo -e "${GREEN}✓ Binary is notarized and will verify online when first run${NC}"
         else
             # Other error
             echo -e "${RED}⚠ Stapling failed with unexpected error${NC}"
+            echo "$STAPLE_OUTPUT"
+        fi
+        echo ""
+    done
+
+    # Process app bundles (should succeed)
+    for bundle in "${BUNDLES[@]}"; do
+        echo "Stapling: $bundle"
+
+        # Attempt to staple (should succeed for app bundles)
+        STAPLE_OUTPUT=$(xcrun stapler staple "$bundle" 2>&1)
+        STAPLE_EXIT=$?
+
+        if [ $STAPLE_EXIT -eq 0 ]; then
+            # Stapling succeeded - validate it
+            if xcrun stapler validate "$bundle" 2>&1 | grep -q "The validate action worked"; then
+                echo -e "${GREEN}✓ Successfully stapled and validated${NC}"
+            else
+                echo -e "${YELLOW}⚠ Stapling completed but validation unclear${NC}"
+            fi
+        else
+            # Stapling failed
+            echo -e "${RED}✗ Stapling failed${NC}"
             echo "$STAPLE_OUTPUT"
         fi
         echo ""

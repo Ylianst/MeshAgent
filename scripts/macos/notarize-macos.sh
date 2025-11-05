@@ -137,16 +137,29 @@ while IFS= read -r -d '' binary; do
     BINARIES+=("$binary")
 done < <(find "$BUILD_DIR" -type f -name "meshagent" ! -name "DEBUG_*" -print0)
 
-if [ ${#BINARIES[@]} -eq 0 ]; then
-    echo -e "${RED}Error: No binaries found to notarize${NC}"
-    echo "Expected to find: build/macos/*/meshagent"
+# Also find app bundles
+BUNDLES=()
+while IFS= read -r -d '' bundle; do
+    BUNDLES+=("$bundle")
+done < <(find "$BUILD_DIR" -name "*.app" -type d -print0)
+
+# Combine for reporting
+TOTAL_COUNT=$((${#BINARIES[@]} + ${#BUNDLES[@]}))
+
+if [ $TOTAL_COUNT -eq 0 ]; then
+    echo -e "${RED}Error: No binaries or bundles found to notarize${NC}"
+    echo "Expected to find: build/macos/*/meshagent or build/macos/*/*.app"
     exit 1
 fi
 
-echo "Found ${#BINARIES[@]} binaries to notarize:"
+echo "Found $TOTAL_COUNT items to notarize:"
 for binary in "${BINARIES[@]}"; do
     ARCH=$(echo "$binary" | sed 's|.*/build/macos/\([^/]*\)/.*|\1|')
-    echo "  - meshagent ($ARCH)"
+    echo "  - meshagent ($ARCH) [standalone binary]"
+done
+for bundle in "${BUNDLES[@]}"; do
+    ARCH=$(echo "$bundle" | sed 's|.*/build/macos/\([^/]*\)/.*|\1|')
+    echo "  - meshagent.app ($ARCH) [app bundle]"
 done
 echo ""
 
@@ -215,6 +228,62 @@ notarize_binary() {
     fi
 }
 
+notarize_bundle() {
+    local bundle="$1"
+    local arch=$(echo "$bundle" | sed 's|.*/build/macos/\([^/]*\)/.*|\1|')
+    local bundle_name=$(basename "$bundle")
+
+    # Create unique ZIP path
+    local zip_path="$TEMP_DIR/${bundle_name%.*}-${arch}.zip"
+
+    if [ "$VERBOSE" = false ]; then
+        echo -e "${YELLOW}Notarizing: $bundle_name ($arch)${NC}"
+    else
+        echo -e "${YELLOW}=== Notarizing: $bundle_name ($arch) ===${NC}"
+    fi
+
+    # Create ZIP archive of the entire app bundle
+    if [ "$VERBOSE" = true ]; then
+        echo "Creating ZIP: $zip_path"
+    fi
+
+    # Zip the entire app bundle
+    ditto -c -k --keepParent "$bundle" "$zip_path"
+
+    # Submit to Apple and wait for completion
+    local submit_args=(
+        "$zip_path"
+        --keychain-profile "$KEYCHAIN_PROFILE"
+        --wait
+        --timeout 30m
+    )
+
+    if [ "$VERBOSE" = false ]; then
+        if xcrun notarytool submit "${submit_args[@]}" &>/dev/null; then
+            echo -e "${GREEN}✓ Notarization successful: $bundle_name ($arch)${NC}"
+            rm -f "$zip_path"
+            return 0
+        else
+            echo -e "${RED}✗ Notarization failed: $bundle_name ($arch)${NC}"
+            echo "  Run with --verbose for detailed output"
+            rm -f "$zip_path"
+            return 1
+        fi
+    else
+        if xcrun notarytool submit "${submit_args[@]}"; then
+            echo -e "${GREEN}✓ Notarization successful: $bundle_name ($arch)${NC}"
+            echo ""
+            rm -f "$zip_path"
+            return 0
+        else
+            echo -e "${RED}✗ Notarization failed: $bundle_name ($arch)${NC}"
+            echo ""
+            rm -f "$zip_path"
+            return 1
+        fi
+    fi
+}
+
 #==============================================================================
 # PROCESS BINARIES
 #==============================================================================
@@ -223,7 +292,7 @@ NOTARIZED_COUNT=0
 FAILED_COUNT=0
 
 if [ "$PARALLEL" = true ]; then
-    # Parallel mode: Submit all binaries concurrently
+    # Parallel mode: Submit all binaries and bundles concurrently
     echo "Mode: Parallel submission"
     echo ""
 
@@ -231,6 +300,12 @@ if [ "$PARALLEL" = true ]; then
     PIDS=()
     for binary in "${BINARIES[@]}"; do
         notarize_binary "$binary" &
+        PIDS+=($!)
+    done
+
+    # Submit all bundles in background
+    for bundle in "${BUNDLES[@]}"; do
+        notarize_bundle "$bundle" &
         PIDS+=($!)
     done
 
@@ -247,8 +322,18 @@ else
     echo "Mode: Sequential processing"
     echo ""
 
+    # Process standalone binaries first
     for binary in "${BINARIES[@]}"; do
         if notarize_binary "$binary"; then
+            NOTARIZED_COUNT=$((NOTARIZED_COUNT + 1))
+        else
+            FAILED_COUNT=$((FAILED_COUNT + 1))
+        fi
+    done
+
+    # Process app bundles second
+    for bundle in "${BUNDLES[@]}"; do
+        if notarize_bundle "$bundle"; then
             NOTARIZED_COUNT=$((NOTARIZED_COUNT + 1))
         else
             FAILED_COUNT=$((FAILED_COUNT + 1))

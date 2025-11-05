@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- REQUIRED: Basic Bundle Identity -->
+	<key>CFBundleExecutable</key>
+	<string>meshagent</string>
+
+	<key>CFBundleIdentifier</key>
+	<string>com.ylianst.meshagent</string>
+
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+
+	<!-- REQUIRED: Versioning (auto-generated from SOURCE_COMMIT_DATE) -->
+	<!-- Format: YY.MMDD.HHMM (e.g., 25.1105.0928 for 2025-Nov-05 09:28) -->
+	<key>CFBundleVersion</key>
+	<string>{{VERSION}}</string>
+
+	<key>CFBundleShortVersionString</key>
+	<string>{{VERSION}}</string>
+
+	<!-- REQUIRED: Display Names -->
+	<key>CFBundleName</key>
+	<string>meshagent</string>
+
+	<key>CFBundleDisplayName</key>
+	<string>Mesh Agent</string>
+
+	<!-- REQUIRED: Minimum System Version -->
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13</string>
+
+	<!-- Background Agent Configuration - runs without Dock icon -->
+	<key>LSUIElement</key>
+	<true/>
+
+	<!-- Human-readable copyright -->
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2024 Ylian Saint-Hilaire. All rights reserved.</string>
+</dict>
+</plist>

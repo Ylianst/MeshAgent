@@ -164,8 +164,45 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
     fi
 fi
 
+# Step 3: Sign app bundles if they exist
+echo -e "${YELLOW}Step 3: Signing app bundles${NC}"
+echo ""
+
+# Find all .app bundles in build directory
+APP_BUNDLES=()
+while IFS= read -r -d '' bundle; do
+    APP_BUNDLES+=("$bundle")
+done < <(find "$BUILD_DIR" -name "*.app" -type d -print0)
+
+if [ ${#APP_BUNDLES[@]} -gt 0 ]; then
+    for bundle in "${APP_BUNDLES[@]}"; do
+        echo -e "${BLUE}Signing app bundle:${NC} $bundle"
+
+        # Sign the bundle deeply (sign all nested code) WITHOUT entitlements
+        codesign --sign "$MACOS_SIGN_CERT" \
+                 --timestamp \
+                 --options runtime \
+                 $ENTITLEMENTS_FLAG \
+                 --deep \
+                 --force \
+                 "$bundle"
+
+        # Verify bundle signature
+        if codesign -vvv --deep --strict "$bundle" 2>&1 | grep -q "satisfies its Designated Requirement"; then
+            echo -e "${GREEN}✓ App bundle signed and verified${NC}"
+            SIGNED_COUNT=$((SIGNED_COUNT + 1))
+        else
+            echo "⚠ Warning: Bundle signature verification had issues"
+        fi
+        echo ""
+    done
+else
+    echo "No app bundles found to sign"
+    echo ""
+fi
+
 if [ $SIGNED_COUNT -eq 0 ]; then
-    echo "No binaries found to sign in $BUILD_DIR"
+    echo "No binaries or bundles found to sign in $BUILD_DIR"
     exit 1
 fi
 

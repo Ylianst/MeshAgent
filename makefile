@@ -847,6 +847,8 @@ macos:
 			$(BUILD_DIR)/macos/macos-x86-64/DEBUG_$(EXENAME) \
 			$(BUILD_DIR)/macos/macos-arm-64/DEBUG_$(EXENAME) \
 			-output $(BUILD_DIR)/macos/universal/DEBUG_$(EXENAME); \
+		echo "Creating app bundle..."; \
+		./scripts/macos/create-app-bundle.sh $(BUILD_DIR)/macos/universal/$(EXENAME); \
 		echo "Build complete: $(BUILD_DIR)/macos/universal/$(EXENAME)"; \
 	else \
 		mkdir -p $(BUILD_DIR)/$(OSNAME)/$(ARCHNAME); \
