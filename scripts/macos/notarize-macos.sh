@@ -169,10 +169,15 @@ notarize_binary() {
     fi
 
     # Create ZIP archive (Apple requires ZIP format)
+    # Note: Don't use --keepParent as it creates path mismatches for stapling
     if [ "$VERBOSE" = true ]; then
         echo "Creating ZIP: $zip_path"
     fi
-    ditto -c -k --keepParent "$binary" "$zip_path"
+
+    # Change to binary's directory and zip just the file
+    local binary_dir=$(dirname "$binary")
+    local binary_file=$(basename "$binary")
+    (cd "$binary_dir" && ditto -c -k "$binary_file" "$zip_path")
 
     # Submit to Apple and wait for completion
     local submit_args=(
