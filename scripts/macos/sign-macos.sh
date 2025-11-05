@@ -112,6 +112,16 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
             echo "⚠ Warning: Universal binary signature verification had issues"
         fi
         echo ""
+
+        # Replace the binary inside app bundles with the signed universal binary
+        while IFS= read -r -d '' bundle; do
+            if [ -f "$bundle/Contents/MacOS/meshagent" ]; then
+                echo -e "${BLUE}Updating app bundle with signed binary:${NC} $bundle"
+                cp "$BUILD_DIR/universal/meshagent" "$bundle/Contents/MacOS/meshagent"
+                echo -e "${GREEN}✓ Signed binary copied into app bundle${NC}"
+                echo ""
+            fi
+        done < <(find "$BUILD_DIR" -name "meshagent.app" -type d -print0)
     fi
 
     # Rebuild DEBUG binary if both arch-specific versions exist
@@ -138,6 +148,16 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
             echo "⚠ Warning: Universal DEBUG binary signature verification had issues"
         fi
         echo ""
+
+        # Replace DEBUG binary inside app bundles if they exist
+        while IFS= read -r -d '' bundle; do
+            if [ -f "$bundle/Contents/MacOS/DEBUG_meshagent" ]; then
+                echo -e "${BLUE}Updating app bundle with signed DEBUG binary:${NC} $bundle"
+                cp "$BUILD_DIR/universal/DEBUG_meshagent" "$bundle/Contents/MacOS/DEBUG_meshagent"
+                echo -e "${GREEN}✓ Signed DEBUG binary copied into app bundle${NC}"
+                echo ""
+            fi
+        done < <(find "$BUILD_DIR" -name "*.app" -type d -print0)
     fi
 fi
 
