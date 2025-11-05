@@ -1,0 +1,150 @@
+#!/bin/bash
+# Personal wrapper for signing/notarizing macOS MeshAgent binaries
+# This is a TEMPLATE - copy to /bin/sign-my-macos-binaries.sh and customize
+# Version: 0.0.7
+
+set -e  # Exit on error
+
+#==============================================================================
+# CONFIGURATION - Edit these variables to control what runs
+#==============================================================================
+
+# Your Apple Developer certificate name
+CERT="Developer ID Application: Your Name (TEAMID)"
+
+# Apple credentials for notarization (required if DO_NOTARIZE=true)
+APPLE_ID=""                    # Example: "developer@example.com"
+APPLE_TEAM_ID=""               # Your team ID
+APPLE_APP_PASSWORD=""          # App-specific password from appleid.apple.com
+
+# What to run (set to true/false)
+DO_SIGN=true           # Code sign the binaries
+DO_NOTARIZE=false      # Submit to Apple for notarization (requires credentials above)
+DO_STAPLE=false        # Staple notarization ticket to binary (requires notarization)
+
+#==============================================================================
+# END CONFIGURATION
+#==============================================================================
+
+# Colors for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Get script directory
+# If running from /bin, repo is parent
+# If running from scripts/macos, repo is two levels up
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [[ "$SCRIPT_DIR" == */bin ]]; then
+    REPO_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
+elif [[ "$SCRIPT_DIR" == */scripts/macos ]]; then
+    REPO_DIR="$( cd "$SCRIPT_DIR/../.." && pwd )"
+else
+    REPO_DIR="$SCRIPT_DIR"
+fi
+
+echo -e "${BLUE}====================================${NC}"
+echo -e "${BLUE}MeshAgent macOS Build Pipeline${NC}"
+echo -e "${BLUE}====================================${NC}"
+echo ""
+
+# Step 1: Code Signing
+if [ "$DO_SIGN" = true ]; then
+    echo -e "${YELLOW}[1/3] Code Signing${NC}"
+    echo "Certificate: $CERT"
+    echo ""
+
+    export MACOS_SIGN_CERT="$CERT"
+    "$REPO_DIR/scripts/macos/sign-macos.sh"
+
+    echo ""
+else
+    echo -e "${YELLOW}[1/3] Code Signing - SKIPPED${NC}"
+    echo ""
+fi
+
+# Step 2: Notarization
+if [ "$DO_NOTARIZE" = true ]; then
+    echo -e "${YELLOW}[2/3] Notarization${NC}"
+
+    # Validate credentials
+    if [ -z "$APPLE_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
+        echo -e "${RED}Error: Notarization credentials not configured${NC}"
+        echo "Please set APPLE_ID, APPLE_TEAM_ID, and APPLE_APP_PASSWORD in this script"
+        exit 1
+    fi
+
+    # Check if notarize script exists and is implemented
+    if grep -q "NOT YET IMPLEMENTED" "$REPO_DIR/scripts/macos/notarize-macos.sh"; then
+        echo -e "${RED}Error: Notarization script not yet implemented${NC}"
+        echo "See scripts/macos/notarize-macos.sh for manual steps"
+        exit 1
+    fi
+
+    export APPLE_ID="$APPLE_ID"
+    export APPLE_TEAM_ID="$APPLE_TEAM_ID"
+    export APPLE_APP_PASSWORD="$APPLE_APP_PASSWORD"
+    "$REPO_DIR/scripts/macos/notarize-macos.sh"
+
+    echo ""
+else
+    echo -e "${YELLOW}[2/3] Notarization - SKIPPED${NC}"
+    echo ""
+fi
+
+# Step 3: Stapling
+if [ "$DO_STAPLE" = true ]; then
+    echo -e "${YELLOW}[3/3] Stapling Notarization Ticket${NC}"
+
+    if [ "$DO_NOTARIZE" != true ]; then
+        echo -e "${RED}Error: Cannot staple without notarization${NC}"
+        echo "Set DO_NOTARIZE=true to notarize first"
+        exit 1
+    fi
+
+    # Find all macOS signed binaries and staple
+    # Use array to avoid subshell issues
+    BINARIES=()
+    while IFS= read -r -d '' binary; do
+        BINARIES+=("$binary")
+    done < <(find "$REPO_DIR/build/macos" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) -print0)
+
+    for binary in "${BINARIES[@]}"; do
+        echo "Stapling: $binary"
+        xcrun stapler staple "$binary"
+
+        # Verify stapling
+        if xcrun stapler validate "$binary" | grep -q "The validate action worked"; then
+            echo -e "${GREEN}✓ Successfully stapled${NC}"
+        else
+            echo -e "${RED}⚠ Stapling verification failed${NC}"
+        fi
+        echo ""
+    done
+
+    echo ""
+else
+    echo -e "${YELLOW}[3/3] Stapling - SKIPPED${NC}"
+    echo ""
+fi
+
+echo -e "${GREEN}====================================${NC}"
+echo -e "${GREEN}Pipeline Complete!${NC}"
+echo -e "${GREEN}====================================${NC}"
+echo ""
+
+# Summary
+echo "Summary:"
+if [ "$DO_SIGN" = true ]; then
+    echo "  ✓ Signed with: $CERT"
+fi
+if [ "$DO_NOTARIZE" = true ]; then
+    echo "  ✓ Notarized with Apple ID: $APPLE_ID"
+fi
+if [ "$DO_STAPLE" = true ]; then
+    echo "  ✓ Stapled notarization tickets"
+fi
+echo ""
+echo "Binaries ready in: build/"

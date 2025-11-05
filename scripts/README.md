@@ -7,8 +7,16 @@ This directory contains scripts for building, signing, and distributing MeshAgen
 Scripts are organized by platform:
 
 - **`macos/`** - macOS-specific scripts (signing, notarization, testing, build pipeline)
+  - `sign-macos.sh` - Sign binaries with Developer ID
+  - `notarize-macos.sh` - Notarize binaries with Apple (placeholder)
+  - `build-pipeline-macos.sh` - Complete signing/notarization workflow
+  - `sign-and-notarize-template.sh` - Template for personal wrapper script
+  - `test-meshagent.sh` - Development testing script
+  - `meshagent-macos.entitlements` - Entitlements file for signing
 - **`windows/`** - Windows-specific scripts (cleaning build artifacts)
+  - `clean-windows.bat` - Clean build artifacts
 - **`linux/`** - Linux-specific scripts (multi-architecture builds)
+  - `build-linux-all.sh` - Build all Linux architectures
 
 ## Quick Start: Complete macOS Pipeline
 
@@ -92,6 +100,21 @@ export DO_STAPLE=true
 ### Personal Wrapper
 
 For frequent use, create a personal wrapper in `/bin/` (gitignored):
+
+**Option 1: Use the template**
+
+```bash
+# Copy the template to your bin directory
+cp scripts/macos/sign-and-notarize-template.sh bin/sign-my-macos-binaries.sh
+
+# Edit to add your credentials
+nano bin/sign-my-macos-binaries.sh
+
+# Run it
+./bin/sign-my-macos-binaries.sh
+```
+
+**Option 2: Call build-pipeline-macos.sh directly**
 
 ```bash
 #!/bin/bash
