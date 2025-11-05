@@ -194,20 +194,71 @@ codesign -d --entitlements - build/macos/macos-arm-64/meshagent
 
 ## macOS Notarization
 
-**Status: Not yet implemented** (see `notarize-macos.sh` for manual steps)
+Automated notarization using `xcrun notarytool`. Notarization is required for distribution outside the Mac App Store on macOS 10.15+.
 
-Notarization is required for distribution outside the Mac App Store on macOS 10.15+.
+### One-Time Setup
 
-### Manual Notarization Process
+Before using notarization, set up a keychain profile once:
 
-1. Sign the binary first
-2. Create a ZIP of the signed binary
-3. Submit to Apple's notarization service
-4. Wait for approval (minutes to hours)
-5. Staple the notarization ticket to the binary
+```bash
+xcrun notarytool store-credentials "meshagent-notary" \
+  --apple-id "developer@example.com" \
+  --team-id "TEAMID" \
+  --password "xxxx-xxxx-xxxx-xxxx"
+```
 
-See Apple's documentation:
-https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution
+**Get your credentials:**
+
+1. **Apple ID**: Your Apple Developer account email
+2. **Team ID**: Log in to https://developer.apple.com/account → Membership section
+3. **App-Specific Password**:
+   - Go to https://appleid.apple.com
+   - Sign in → Security → App-Specific Passwords
+   - Generate a new password named "MeshAgent Notarization"
+
+This stores credentials securely in your macOS keychain. You only need to do this once per machine.
+
+### Running Notarization
+
+Once the keychain profile is set up:
+
+```bash
+# Notarize all release binaries (sequential, default)
+./scripts/macos/notarize-macos.sh
+
+# Notarize with parallel submissions (faster)
+./scripts/macos/notarize-macos.sh --parallel
+
+# Show detailed notarytool output
+./scripts/macos/notarize-macos.sh --verbose
+
+# Combine flags
+./scripts/macos/notarize-macos.sh --parallel --verbose
+```
+
+**What gets notarized:**
+- All release binaries in `build/macos/*/meshagent`
+- DEBUG binaries are automatically excluded (not needed for distribution)
+
+**Processing modes:**
+- **Sequential** (default): Process binaries one at a time, easier to debug
+- **Parallel** (`--parallel`): Submit all at once, faster overall
+
+**Output modes:**
+- **Clean** (default): Show only script progress and results
+- **Verbose** (`--verbose`): Show full notarytool output with status updates
+
+### Notarization Process
+
+The script automatically:
+
+1. Finds all release binaries in `build/macos/`
+2. Creates ZIP archives for each binary
+3. Submits to Apple's notarization service
+4. Waits for notarization to complete (typically 5-10 minutes)
+5. Reports success/failure for each binary
+
+After notarization, the pipeline will staple the tickets to the binaries.
 
 ## Build Workflow
 
@@ -227,8 +278,14 @@ make macos ARCHID=universal
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAM123456)"
 ./scripts/macos/sign-macos.sh
 
-# (Future) Notarize
-# ./scripts/macos/notarize-macos.sh
+# Notarize (requires keychain profile setup - see Notarization section)
+./scripts/macos/notarize-macos.sh
+
+# Or use the complete pipeline
+export DO_SIGN=true
+export DO_NOTARIZE=true
+export DO_STAPLE=true
+./scripts/macos/build-pipeline-macos.sh
 ```
 
 ## Environment Variables
@@ -242,11 +299,9 @@ Example:
 export MACOS_SIGN_CERT="Developer ID Application: Peet, Inc. (UW6CS5W75L)"
 ```
 
-### Future Variables (for notarization)
+### Notarization Credentials
 
-- `APPLE_ID` - Your Apple ID email
-- `APPLE_TEAM_ID` - Your Apple Developer Team ID
-- `APPLE_APP_PASSWORD` - App-specific password for notarytool
+Notarization uses a keychain profile instead of environment variables. See the **macOS Notarization** section above for setup instructions.
 
 ## Troubleshooting
 

@@ -44,14 +44,15 @@ Complete signing, notarization, and stapling workflow.
 # Copy to bin directory
 cp scripts/templates-for-bin/sign-and-notarize-template.sh bin/sign-my-macos-binaries.sh
 
-# Edit to add your credentials
+# Edit to add your certificate name
 nano bin/sign-my-macos-binaries.sh
+# Update: CERT="Developer ID Application: Your Name (TEAMID)"
 
-# Update these values:
-CERT="Developer ID Application: Your Name (TEAMID)"
-APPLE_ID="developer@example.com"
-APPLE_TEAM_ID="TEAMID"
-APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
+# Set up notarization keychain profile (one-time)
+xcrun notarytool store-credentials "meshagent-notary" \
+  --apple-id "developer@example.com" \
+  --team-id "TEAMID" \
+  --password "xxxx-xxxx-xxxx-xxxx"
 
 # Run it
 ./bin/sign-my-macos-binaries.sh
@@ -59,12 +60,12 @@ APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 
 **What to Configure:**
 - `CERT` - Your Apple Developer ID certificate name
-- `APPLE_ID` - Your Apple ID email (for notarization)
-- `APPLE_TEAM_ID` - Your Apple Developer Team ID
-- `APPLE_APP_PASSWORD` - App-specific password from appleid.apple.com
 - `DO_SIGN` - Enable/disable code signing (default: true)
 - `DO_NOTARIZE` - Enable/disable notarization (default: false)
 - `DO_STAPLE` - Enable/disable stapling (default: false)
+
+**Notarization Setup (one-time):**
+Notarization now uses a keychain profile instead of credentials in the script. Set it up once with the command above. This stores your credentials securely in macOS keychain.
 
 ## Finding Your Credentials
 

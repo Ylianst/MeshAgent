@@ -80,13 +80,7 @@ fi
 # Step 2: Notarization
 if [ "$DO_NOTARIZE" = true ]; then
     echo -e "${YELLOW}[2/3] Notarization${NC}"
-
-    # Check if notarize script is implemented
-    if grep -q "NOT YET IMPLEMENTED" "$SCRIPT_DIR/notarize-macos.sh"; then
-        echo -e "${RED}Error: Notarization script not yet implemented${NC}"
-        echo "See scripts/macos/notarize-macos.sh for manual steps"
-        exit 1
-    fi
+    echo ""
 
     "$SCRIPT_DIR/notarize-macos.sh"
     echo ""

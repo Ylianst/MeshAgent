@@ -12,15 +12,21 @@ set -e  # Exit on error
 # Your Apple Developer certificate name
 CERT="Developer ID Application: Your Name (TEAMID)"
 
-# Apple credentials for notarization (required if DO_NOTARIZE=true)
-APPLE_ID=""                    # Example: "developer@example.com"
-APPLE_TEAM_ID=""               # Your team ID
-APPLE_APP_PASSWORD=""          # App-specific password from appleid.apple.com
-
 # What to run (set to true/false)
 DO_SIGN=true           # Code sign the binaries
-DO_NOTARIZE=false      # Submit to Apple for notarization (requires credentials above)
+DO_NOTARIZE=false      # Submit to Apple for notarization (requires keychain profile setup)
 DO_STAPLE=false        # Staple notarization ticket to binary (requires notarization)
+
+# Notarization uses keychain profile "meshagent-notary"
+# Set it up once with:
+#   xcrun notarytool store-credentials "meshagent-notary" \
+#     --apple-id "developer@example.com" \
+#     --team-id "TEAMID" \
+#     --password "xxxx-xxxx-xxxx-xxxx"
+# Get credentials:
+#   - Apple ID: Your Apple Developer account email
+#   - Team ID: https://developer.apple.com/account (Membership section)
+#   - Password: https://appleid.apple.com → Security → App-Specific Passwords
 
 #==============================================================================
 # END CONFIGURATION
@@ -68,24 +74,15 @@ fi
 # Step 2: Notarization
 if [ "$DO_NOTARIZE" = true ]; then
     echo -e "${YELLOW}[2/3] Notarization${NC}"
+    echo ""
 
-    # Validate credentials
-    if [ -z "$APPLE_ID" ] || [ -z "$APPLE_TEAM_ID" ] || [ -z "$APPLE_APP_PASSWORD" ]; then
-        echo -e "${RED}Error: Notarization credentials not configured${NC}"
-        echo "Please set APPLE_ID, APPLE_TEAM_ID, and APPLE_APP_PASSWORD in this script"
-        exit 1
-    fi
+    # Note: Notarization now uses keychain profile (meshagent-notary)
+    # Make sure you've set it up once with:
+    #   xcrun notarytool store-credentials "meshagent-notary" \
+    #     --apple-id "developer@example.com" \
+    #     --team-id "TEAMID" \
+    #     --password "xxxx-xxxx-xxxx-xxxx"
 
-    # Check if notarize script exists and is implemented
-    if grep -q "NOT YET IMPLEMENTED" "$REPO_DIR/scripts/macos/notarize-macos.sh"; then
-        echo -e "${RED}Error: Notarization script not yet implemented${NC}"
-        echo "See scripts/macos/notarize-macos.sh for manual steps"
-        exit 1
-    fi
-
-    export APPLE_ID="$APPLE_ID"
-    export APPLE_TEAM_ID="$APPLE_TEAM_ID"
-    export APPLE_APP_PASSWORD="$APPLE_APP_PASSWORD"
     "$REPO_DIR/scripts/macos/notarize-macos.sh"
 
     echo ""
