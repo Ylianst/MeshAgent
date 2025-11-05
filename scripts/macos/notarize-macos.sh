@@ -18,12 +18,12 @@
 #   export APPLE_ID="developer@example.com"
 #   export APPLE_TEAM_ID="TEAMID"
 #   export APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-#   ./scripts/notarize-macos.sh
+#   ./scripts/macos/notarize-macos.sh
 
 echo "macOS notarization script - NOT YET IMPLEMENTED"
 echo ""
 echo "Manual notarization steps:"
-echo "1. Sign the binary: ./scripts/sign-macos.sh"
+echo "1. Sign the binary: ./scripts/macos/sign-macos.sh"
 echo "2. Create ZIP: zip -r meshagent.zip build/macos/macos-arm-64/meshagent"
 echo "3. Submit: xcrun notarytool submit meshagent.zip --apple-id YOUR_ID --team-id TEAM_ID --password APP_PASSWORD --wait"
 echo "4. Staple: xcrun stapler staple build/macos/macos-arm-64/meshagent"

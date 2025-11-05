@@ -4,9 +4,13 @@
 #
 # Usage:
 #   export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-#   ./scripts/sign-macos.sh
+#   ./scripts/macos/sign-macos.sh
 
 set -e  # Exit on error
+
+# Get the repository root directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_DIR="$( cd "$SCRIPT_DIR/../.." && pwd )"
 
 # Check if certificate is specified
 if [ -z "$MACOS_SIGN_CERT" ]; then
@@ -14,14 +18,14 @@ if [ -z "$MACOS_SIGN_CERT" ]; then
     echo ""
     echo "Usage:"
     echo "  export MACOS_SIGN_CERT=\"Developer ID Application: Your Name (TEAMID)\""
-    echo "  ./scripts/sign-macos.sh"
+    echo "  ./scripts/macos/sign-macos.sh"
     echo ""
     echo "To list available certificates:"
     echo "  security find-identity -v -p codesigning"
     exit 1
 fi
 
-BUILD_DIR="build/macos"
+BUILD_DIR="$REPO_DIR/build/macos"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -85,5 +89,5 @@ echo -e "${GREEN}Signing complete!${NC}"
 echo ""
 echo "Next steps for distribution:"
 echo "1. Test the signed binaries"
-echo "2. Submit to Apple for notarization (see scripts/notarize-macos.sh)"
+echo "2. Submit to Apple for notarization (see scripts/macos/notarize-macos.sh)"
 echo "3. Staple notarization ticket to the binary"

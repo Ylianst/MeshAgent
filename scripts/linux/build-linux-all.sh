@@ -1,3 +1,11 @@
+#!/bin/bash
+# Build MeshAgent for all supported Linux architectures
+# Builds sequentially with clean between each arch
+
+# Get the repository root directory (script is in scripts/linux, repo is two levels up)
+REPO_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+cd "$REPO_DIR"
+
 make clean
 make linux ARCHID=5 -j8
 make clean

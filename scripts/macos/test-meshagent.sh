@@ -1,16 +1,16 @@
 #!/bin/bash
 # MeshAgent macOS Development Testing Script
-# Version: 0.0.6
+# Version: 0.0.7
 # Builds, signs, and deploys meshagent with configurable options
 #
 # Usage:
-#   sudo ./scripts/test-meshagent.sh --archid 29 --daemon enable --agent disable
-#   sudo ./scripts/test-meshagent.sh --archid universal --daemon disable --agent disable
+#   sudo ./scripts/macos/test-meshagent.sh --archid 29 --daemon enable --agent disable
+#   sudo ./scripts/macos/test-meshagent.sh --archid universal --daemon disable --agent disable
 
 set -e  # Exit on error
 
-# Get the repository root directory (script is in /scripts, repo is parent)
-REPO_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# Get the repository root directory (script is in /scripts/macos, repo is two levels up)
+REPO_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
 cd "$REPO_DIR"
 
 #==============================================================================
@@ -24,6 +24,8 @@ SKIP_BUILD=false               # Skip build step (use existing binary)
 SKIP_SIGN=false                # Skip signing step
 DEPLOY="enable"                # enable/disable - Deploy built binary to DEPLOY_PATH
 DEPLOY_PATH="/usr/local/mesh_services/meshagent"  # Full path to deploy meshagent binary
+GIT_PULL=false                 # enable/disable - Pull latest changes before building
+REFRESH_PLISTS=false           # Refresh launchd plists from examples/launchd/tacticalrmm/
 
 #==============================================================================
 # PARSE COMMAND LINE ARGUMENTS
@@ -59,6 +61,14 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_PATH="$2"
             shift 2
             ;;
+        --git-pull)
+            GIT_PULL=true
+            shift
+            ;;
+        --refresh-plists)
+            REFRESH_PLISTS=true
+            shift
+            ;;
         --help)
             echo "Usage: sudo $0 [OPTIONS]"
             echo ""
@@ -73,6 +83,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --skip-sign                   Skip signing step"
             echo "  --deploy <enable|disable>     Deploy binary to system (default: enable)"
             echo "  --deploy-path <path>          Deployment path (default: /usr/local/mesh_services/meshagent)"
+            echo "  --git-pull                    Pull latest changes before building (default: disabled)"
+            echo "  --refresh-plists              Refresh launchd plists from examples/launchd/tacticalrmm/"
             echo "  --help                        Show this help message"
             echo ""
             echo "Examples:"
@@ -81,6 +93,7 @@ while [[ $# -gt 0 ]]; do
             echo "  sudo $0 --skip-build --daemon enable"
             echo "  sudo $0 --deploy disable --skip-build    # Build only, no deployment"
             echo "  sudo $0 --deploy-path /usr/local/bin/meshagent"
+            echo "  sudo $0 --git-pull --refresh-plists      # Update repo and plists"
             exit 0
             ;;
         *)
@@ -140,6 +153,8 @@ echo "Skip Build:       $SKIP_BUILD"
 echo "Skip Sign:        $SKIP_SIGN"
 echo "Deploy:           $DEPLOY"
 echo "Deploy Path:      $DEPLOY_PATH"
+echo "Git Pull:         $GIT_PULL"
+echo "Refresh Plists:   $REFRESH_PLISTS"
 echo "=========================================="
 echo ""
 
@@ -159,11 +174,28 @@ elif [ "$ARCHID" = "universal" ]; then
 fi
 
 #==============================================================================
+# GIT PULL STEP
+#==============================================================================
+
+if [ "$GIT_PULL" = true ]; then
+    echo "[0/6] Updating repository..."
+    echo "[$(date '+%H:%M:%S')] Git pull started"
+    # Run git pull as the actual user (not root)
+    sudo -u $SUDO_USER git pull
+    echo "[$(date '+%H:%M:%S')] Git pull complete"
+    echo "✓ Repository updated"
+    echo ""
+else
+    echo "[0/6] Git pull - SKIPPED"
+    echo ""
+fi
+
+#==============================================================================
 # BUILD STEP
 #==============================================================================
 
 if [ "$SKIP_BUILD" = false ]; then
-    echo "[1/5] Building meshagent ($ARCH_DESC)..."
+    echo "[1/6] Building meshagent ($ARCH_DESC)..."
     echo "[$(date '+%H:%M:%S')] Build started"
     # Run build as the actual user (not root)
     sudo -u $SUDO_USER make clean
@@ -173,7 +205,7 @@ if [ "$SKIP_BUILD" = false ]; then
     echo "✓ Build complete"
     echo ""
 else
-    echo "[1/5] Build - SKIPPED"
+    echo "[1/6] Build - SKIPPED"
     echo ""
 fi
 
@@ -182,7 +214,7 @@ fi
 #==============================================================================
 
 if [ "$SKIP_SIGN" = false ]; then
-    echo "[2/5] Signing binary..."
+    echo "[2/6] Signing binary..."
     echo "[$(date '+%H:%M:%S')] Signing started"
     sleep 2
     # Run signing as the actual user (not root) to access user's keychain
@@ -191,7 +223,7 @@ if [ "$SKIP_SIGN" = false ]; then
     echo "✓ Signing complete"
     echo ""
 else
-    echo "[2/5] Signing - SKIPPED"
+    echo "[2/6] Signing - SKIPPED"
     echo ""
 fi
 
@@ -199,7 +231,7 @@ fi
 # STOP SERVICES
 #==============================================================================
 
-echo "[3/5] Stopping services..."
+echo "[3/6] Stopping services..."
 echo "[$(date '+%H:%M:%S')] Stopping services"
 
 # Stop LaunchDaemon (system-wide)
@@ -224,11 +256,59 @@ echo "✓ Services stopped"
 echo ""
 
 #==============================================================================
+# REFRESH LAUNCHD PLISTS (OPTIONAL)
+#==============================================================================
+
+if [ "$REFRESH_PLISTS" = true ]; then
+    echo "[3.5/6] Refreshing launchd plists..."
+    echo "[$(date '+%H:%M:%S')] Plist refresh started"
+
+    # Source plists from examples/launchd/tacticalrmm/
+    DAEMON_PLIST_SRC="$REPO_DIR/examples/launchd/tacticalrmm/meshagent.plist"
+    AGENT_PLIST_SRC="$REPO_DIR/examples/launchd/tacticalrmm/meshagent-agent.plist"
+
+    # Destination paths
+    DAEMON_PLIST_DEST="/Library/LaunchDaemons/meshagent.plist"
+    AGENT_PLIST_DEST="/Library/LaunchAgents/meshagent-agent.plist"
+
+    # Verify source files exist
+    if [ ! -f "$DAEMON_PLIST_SRC" ]; then
+        echo "  ERROR: Source plist not found: $DAEMON_PLIST_SRC"
+        exit 1
+    fi
+    if [ ! -f "$AGENT_PLIST_SRC" ]; then
+        echo "  ERROR: Source plist not found: $AGENT_PLIST_SRC"
+        exit 1
+    fi
+
+    # Copy LaunchDaemon plist
+    echo "  Copying LaunchDaemon plist..."
+    echo "    From: $DAEMON_PLIST_SRC"
+    echo "    To:   $DAEMON_PLIST_DEST"
+    cp "$DAEMON_PLIST_SRC" "$DAEMON_PLIST_DEST"
+    chmod 644 "$DAEMON_PLIST_DEST"
+
+    # Copy LaunchAgent plist
+    echo "  Copying LaunchAgent plist..."
+    echo "    From: $AGENT_PLIST_SRC"
+    echo "    To:   $AGENT_PLIST_DEST"
+    cp "$AGENT_PLIST_SRC" "$AGENT_PLIST_DEST"
+    chmod 644 "$AGENT_PLIST_DEST"
+
+    echo "[$(date '+%H:%M:%S')] Plist refresh complete"
+    echo "✓ Plists refreshed from examples/launchd/tacticalrmm/"
+    echo ""
+else
+    echo "[3.5/6] Refresh plists - SKIPPED"
+    echo ""
+fi
+
+#==============================================================================
 # DEPLOY BINARY
 #==============================================================================
 
 if [ "$DEPLOY" = "enable" ]; then
-    echo "[4/5] Deploying binary..."
+    echo "[4/6] Deploying binary..."
     echo "[$(date '+%H:%M:%S')] Deployment started"
 
     # Ensure destination directory exists
@@ -252,7 +332,7 @@ if [ "$DEPLOY" = "enable" ]; then
     echo "✓ Binary deployed"
     echo ""
 else
-    echo "[4/5] Deploy - SKIPPED"
+    echo "[4/6] Deploy - SKIPPED"
     echo ""
 fi
 
@@ -260,7 +340,7 @@ fi
 # START SERVICES & SET STATE
 #==============================================================================
 
-echo "[5/5] Starting services..."
+echo "[5/6] Starting services..."
 echo "[$(date '+%H:%M:%S')] Starting services"
 
 # Configure and start LaunchDaemon

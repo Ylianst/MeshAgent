@@ -2,6 +2,14 @@
 
 This directory contains scripts for building, signing, and distributing MeshAgent binaries.
 
+## Directory Structure
+
+Scripts are organized by platform:
+
+- **`macos/`** - macOS-specific scripts (signing, notarization, testing, build pipeline)
+- **`windows/`** - Windows-specific scripts (cleaning build artifacts)
+- **`linux/`** - Linux-specific scripts (multi-architecture builds)
+
 ## Quick Start: Complete macOS Pipeline
 
 **For the full workflow (signing + notarization + stapling), use the pipeline script:**
@@ -19,7 +27,7 @@ export DO_NOTARIZE=false  # Set to true when ready
 export DO_STAPLE=false    # Set to true after notarization works
 
 # Run the pipeline
-./scripts/build-pipeline-macos.sh
+./scripts/macos/build-pipeline-macos.sh
 ```
 
 **Or use individual scripts for specific tasks** (see sections below).
@@ -56,7 +64,7 @@ Control the pipeline with environment variables:
 **Just signing (default):**
 ```bash
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-./scripts/build-pipeline-macos.sh
+./scripts/macos/build-pipeline-macos.sh
 ```
 
 **Signing + Notarization:**
@@ -66,7 +74,7 @@ export APPLE_ID="developer@example.com"
 export APPLE_TEAM_ID="TEAMID"
 export APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export DO_NOTARIZE=true
-./scripts/build-pipeline-macos.sh
+./scripts/macos/build-pipeline-macos.sh
 ```
 
 **Full pipeline:**
@@ -78,7 +86,7 @@ export APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export DO_SIGN=true
 export DO_NOTARIZE=true
 export DO_STAPLE=true
-./scripts/build-pipeline-macos.sh
+./scripts/macos/build-pipeline-macos.sh
 ```
 
 ### Personal Wrapper
@@ -97,7 +105,7 @@ export DO_SIGN=true
 export DO_NOTARIZE=false
 export DO_STAPLE=false
 
-./scripts/build-pipeline-macos.sh
+./scripts/macos/build-pipeline-macos.sh
 ```
 
 This keeps your credentials out of git while using the standardized pipeline.
@@ -140,7 +148,7 @@ export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAM123456)"
 2. Run the signing script:
 
 ```bash
-./scripts/sign-macos.sh
+./scripts/macos/sign-macos.sh
 ```
 
 This will sign all binaries in `build/macos/` including DEBUG versions.
@@ -208,10 +216,10 @@ make macos ARCHID=universal
 
 # Sign all binaries
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAM123456)"
-./scripts/sign-macos.sh
+./scripts/macos/sign-macos.sh
 
 # (Future) Notarize
-# ./scripts/notarize-macos.sh
+# ./scripts/macos/notarize-macos.sh
 ```
 
 ## Environment Variables

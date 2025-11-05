@@ -13,7 +13,7 @@
 #   export DO_NOTARIZE=false
 #   export DO_STAPLE=false
 #
-#   ./scripts/build-pipeline-macos.sh
+#   ./scripts/macos/build-pipeline-macos.sh
 
 set -e  # Exit on error
 
@@ -37,8 +37,9 @@ YELLOW='\033[0;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Get script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# Get script directory (in scripts/macos, repo is two levels up)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+REPO_DIR="$( cd "$SCRIPT_DIR/../.." && pwd )"
 
 echo -e "${BLUE}====================================${NC}"
 echo -e "${BLUE}MeshAgent macOS Build Pipeline${NC}"
@@ -69,7 +70,7 @@ if [ "$DO_SIGN" = true ]; then
     echo "Certificate: $MACOS_SIGN_CERT"
     echo ""
 
-    "$SCRIPT_DIR/scripts/sign-macos.sh"
+    "$SCRIPT_DIR/sign-macos.sh"
     echo ""
 else
     echo -e "${YELLOW}[1/3] Code Signing - SKIPPED${NC}"
@@ -81,13 +82,13 @@ if [ "$DO_NOTARIZE" = true ]; then
     echo -e "${YELLOW}[2/3] Notarization${NC}"
 
     # Check if notarize script is implemented
-    if grep -q "NOT YET IMPLEMENTED" "$SCRIPT_DIR/scripts/notarize-macos.sh"; then
+    if grep -q "NOT YET IMPLEMENTED" "$SCRIPT_DIR/notarize-macos.sh"; then
         echo -e "${RED}Error: Notarization script not yet implemented${NC}"
-        echo "See scripts/notarize-macos.sh for manual steps"
+        echo "See scripts/macos/notarize-macos.sh for manual steps"
         exit 1
     fi
 
-    "$SCRIPT_DIR/scripts/notarize-macos.sh"
+    "$SCRIPT_DIR/notarize-macos.sh"
     echo ""
 else
     echo -e "${YELLOW}[2/3] Notarization - SKIPPED${NC}"
