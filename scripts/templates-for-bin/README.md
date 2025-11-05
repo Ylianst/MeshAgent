@@ -42,10 +42,10 @@ Complete signing, notarization, and stapling workflow.
 **Setup:**
 ```bash
 # Copy to bin directory
-cp scripts/templates-for-bin/sign-and-notarize-macos-template.sh bin/sign-my-macos-binaries.sh
+cp scripts/templates-for-bin/sign-and-notarize-macos-template.sh bin/
 
 # Edit to add your certificate name
-nano bin/sign-my-macos-binaries.sh
+nano bin/sign-and-notarize-macos-template.sh
 # Update: CERT="Developer ID Application: Your Name (TEAMID)"
 
 # Set up notarization keychain profile (one-time)
@@ -55,7 +55,7 @@ xcrun notarytool store-credentials "meshagent-notary" \
   --password "xxxx-xxxx-xxxx-xxxx"
 
 # Run it
-./bin/sign-my-macos-binaries.sh
+./bin/sign-and-notarize-macos-template.sh
 ```
 
 **What to Configure:**

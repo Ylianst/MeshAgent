@@ -108,13 +108,13 @@ See **[templates-for-bin/README.md](templates-for-bin/README.md)** for ready-to-
 
 ```bash
 # Copy signing template to your bin directory
-cp scripts/templates-for-bin/sign-and-notarize-macos-template.sh bin/sign-my-macos-binaries.sh
+cp scripts/templates-for-bin/sign-and-notarize-macos-template.sh bin/
 
 # Edit to add your credentials
-nano bin/sign-my-macos-binaries.sh
+nano bin/sign-and-notarize-macos-template.sh
 
 # Run it
-./bin/sign-my-macos-binaries.sh
+./bin/sign-and-notarize-macos-template.sh
 ```
 
 This keeps your credentials out of git while using the standardized pipeline.

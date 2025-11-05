@@ -224,7 +224,7 @@ if [ "$SKIP_SIGN" = false ]; then
     echo "[$(date '+%H:%M:%S')] Signing started"
     sleep 2
     # Run signing as the actual user (not root) to access user's keychain
-    sudo -u $SUDO_USER ./bin/sign-my-macos-binaries.sh
+    sudo -u $SUDO_USER ./bin/sign-and-notarize-macos-template.sh
     echo "[$(date '+%H:%M:%S')] Signing complete"
     echo "✓ Signing complete"
     echo ""
