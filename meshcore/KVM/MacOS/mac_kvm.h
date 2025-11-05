@@ -30,7 +30,6 @@ void kvm_check_permission();
 
 int kvm_create_session(void);      // Create KVM session on-demand (directory + signal file + socket)
 void kvm_cleanup_session(void);    // Cleanup KVM session (triggers -kvm1 exit)
-int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid);
 void kvm_relay_reset(void *reserved);

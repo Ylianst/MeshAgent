@@ -924,13 +924,8 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)user;
 	if (ptrs->kvmDomainSocketModule != NULL)
 	{
-		// Phase 3: Write to ILibAsyncSocket domain socket
+		// Write to ILibAsyncSocket domain socket
 		ILibAsyncSocket_Send(ptrs->kvmDomainSocketModule, buffer, bufferLen, ILibAsyncSocket_MemoryOwnership_USER);
-	}
-	else if (ptrs->kvmPipe != NULL)
-	{
-		// Write to pipe (uid != 0 case)
-		kvm_relay_feeddata(buffer, bufferLen);
 	}
 	else
 	{
