@@ -4,7 +4,6 @@
 #
 # Usage:
 #   export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-#   export MACOS_SIGN_ENTITLEMENTS=""  # Optional: empty=no entitlements, "full"=use entitlements, or path to custom file
 #   ./scripts/macos/sign-macos.sh
 
 set -e  # Exit on error
@@ -36,25 +35,6 @@ NC='\033[0m' # No Color
 
 echo "Signing macOS binaries..."
 echo -e "${YELLOW}Certificate:${NC} $MACOS_SIGN_CERT"
-
-# Handle entitlements configuration
-# Default to empty (no entitlements) if not specified
-MACOS_SIGN_ENTITLEMENTS="${MACOS_SIGN_ENTITLEMENTS:-}"
-
-if [ -z "$MACOS_SIGN_ENTITLEMENTS" ]; then
-    echo -e "${YELLOW}Entitlements:${NC} None (standalone binary mode)"
-    ENTITLEMENTS_FLAG=""
-elif [ "$MACOS_SIGN_ENTITLEMENTS" = "full" ]; then
-    SCRIPT_DIR_FOR_ENT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-    ENTITLEMENTS_FILE="$SCRIPT_DIR_FOR_ENT/meshagent-macos.entitlements"
-    echo -e "${YELLOW}Entitlements:${NC} $ENTITLEMENTS_FILE"
-    ENTITLEMENTS_FLAG="--entitlements $ENTITLEMENTS_FILE"
-else
-    # Custom path provided
-    ENTITLEMENTS_FILE="$MACOS_SIGN_ENTITLEMENTS"
-    echo -e "${YELLOW}Entitlements:${NC} $ENTITLEMENTS_FILE"
-    ENTITLEMENTS_FLAG="--entitlements $ENTITLEMENTS_FILE"
-fi
 echo ""
 
 # Check if build directory exists
@@ -87,7 +67,6 @@ for binary in "${ARCH_BINARIES[@]}"; do
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
                  --options runtime \
-                 $ENTITLEMENTS_FLAG \
                  --force \
                  "$binary"
 
@@ -123,7 +102,6 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
                  --options runtime \
-                 $ENTITLEMENTS_FLAG \
                  --force \
                  "$BUILD_DIR/universal/meshagent"
 
@@ -150,7 +128,6 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
                  --options runtime \
-                 $ENTITLEMENTS_FLAG \
                  --force \
                  "$BUILD_DIR/universal/DEBUG_meshagent"
 
@@ -178,11 +155,10 @@ if [ ${#APP_BUNDLES[@]} -gt 0 ]; then
     for bundle in "${APP_BUNDLES[@]}"; do
         echo -e "${BLUE}Signing app bundle:${NC} $bundle"
 
-        # Sign the bundle deeply (sign all nested code) WITHOUT entitlements
+        # Sign the bundle deeply (sign all nested code)
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
                  --options runtime \
-                 $ENTITLEMENTS_FLAG \
                  --deep \
                  --force \
                  "$bundle"

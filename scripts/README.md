@@ -10,7 +10,8 @@ Scripts are organized by platform:
   - `sign-macos.sh` - Sign binaries with Developer ID
   - `notarize-macos.sh` - Notarize binaries with Apple (placeholder)
   - `build-pipeline-macos.sh` - Complete signing/notarization workflow
-  - `meshagent-macos.entitlements` - Entitlements file for signing
+  - `create-app-bundle.sh` - Create macOS app bundle from standalone binary
+  - `Info.plist.template` - Template for app bundle Info.plist
 - **`windows/`** - Windows-specific scripts (cleaning build artifacts)
   - `clean-windows.bat` - Clean build artifacts
 - **`linux/`** - Linux-specific scripts (multi-architecture builds)
@@ -154,22 +155,7 @@ Look for a line like:
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAM123456)"
 ```
 
-2. **(Optional)** Configure entitlements (important for standalone binaries):
-
-```bash
-# For standalone binaries (default - makes binary appear in Privacy & Security settings)
-export MACOS_SIGN_ENTITLEMENTS=""
-
-# For app bundles with full entitlements
-export MACOS_SIGN_ENTITLEMENTS="full"
-
-# Or use custom entitlements file
-export MACOS_SIGN_ENTITLEMENTS="/path/to/custom.entitlements"
-```
-
-**Important:** Standalone binaries should be signed WITHOUT entitlements to appear in System Settings > Privacy & Security. App bundles need entitlements for certain permissions.
-
-3. Run the signing script:
+2. Run the signing script:
 
 ```bash
 ./scripts/macos/sign-macos.sh
@@ -199,12 +185,6 @@ Check if a binary is properly signed:
 
 ```bash
 codesign -vvv --deep --strict build/macos/macos-arm-64/meshagent
-```
-
-Check signature details:
-
-```bash
-codesign -d --entitlements - build/macos/macos-arm-64/meshagent
 ```
 
 ## macOS Notarization

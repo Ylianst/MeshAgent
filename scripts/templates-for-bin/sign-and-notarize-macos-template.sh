@@ -17,13 +17,6 @@ DO_SIGN=true           # Code sign the binaries
 DO_NOTARIZE=false      # Submit to Apple for notarization (requires keychain profile setup)
 DO_STAPLE=false        # Staple notarization ticket (only works for .app/.pkg/.dmg bundles, not standalone binaries)
 
-# Entitlements configuration (IMPORTANT for standalone binaries)
-# Options:
-#   "" (empty)  - No entitlements (recommended for standalone binaries to appear in Privacy & Security settings)
-#   "full"      - Use full entitlements from meshagent-macos.entitlements (for app bundles only)
-#   "/path/..."  - Use custom entitlements file
-SIGN_ENTITLEMENTS=""   # Default: no entitlements for standalone binary
-
 # Notarization uses keychain profile "meshagent-notary"
 # Set it up once with:
 #   xcrun notarytool store-credentials "meshagent-notary" \
@@ -70,7 +63,6 @@ if [ "$DO_SIGN" = true ]; then
     echo ""
 
     export MACOS_SIGN_CERT="$CERT"
-    export MACOS_SIGN_ENTITLEMENTS="$SIGN_ENTITLEMENTS"
     "$REPO_DIR/scripts/macos/sign-macos.sh"
 
     echo ""
