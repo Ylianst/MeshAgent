@@ -101,8 +101,23 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
             "$BUILD_DIR/macos-arm-64/meshagent" \
             -output "$BUILD_DIR/universal/meshagent"
         echo -e "${GREEN}✓ Universal binary created with signed slices${NC}"
+
+        # Sign the universal binary to ensure consistent top-level signature
+        echo -e "${BLUE}Signing universal binary:${NC} meshagent"
+        codesign --sign "$MACOS_SIGN_CERT" \
+                 --timestamp \
+                 --options runtime \
+                 --entitlements "$ENTITLEMENTS" \
+                 --force \
+                 "$BUILD_DIR/universal/meshagent"
+
+        if codesign -vvv --deep --strict "$BUILD_DIR/universal/meshagent" 2>&1 | grep -q "satisfies its Designated Requirement"; then
+            echo -e "${GREEN}✓ Universal binary signed and verified${NC}"
+            SIGNED_COUNT=$((SIGNED_COUNT + 1))
+        else
+            echo "⚠ Warning: Universal binary signature verification had issues"
+        fi
         echo ""
-        SIGNED_COUNT=$((SIGNED_COUNT + 1))
     fi
 
     # Rebuild DEBUG binary if both arch-specific versions exist
@@ -113,8 +128,23 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
             "$BUILD_DIR/macos-arm-64/DEBUG_meshagent" \
             -output "$BUILD_DIR/universal/DEBUG_meshagent"
         echo -e "${GREEN}✓ Universal DEBUG binary created with signed slices${NC}"
+
+        # Sign the universal binary to ensure consistent top-level signature
+        echo -e "${BLUE}Signing universal binary:${NC} DEBUG_meshagent"
+        codesign --sign "$MACOS_SIGN_CERT" \
+                 --timestamp \
+                 --options runtime \
+                 --entitlements "$ENTITLEMENTS" \
+                 --force \
+                 "$BUILD_DIR/universal/DEBUG_meshagent"
+
+        if codesign -vvv --deep --strict "$BUILD_DIR/universal/DEBUG_meshagent" 2>&1 | grep -q "satisfies its Designated Requirement"; then
+            echo -e "${GREEN}✓ Universal DEBUG binary signed and verified${NC}"
+            SIGNED_COUNT=$((SIGNED_COUNT + 1))
+        else
+            echo "⚠ Warning: Universal DEBUG binary signature verification had issues"
+        fi
         echo ""
-        SIGNED_COUNT=$((SIGNED_COUNT + 1))
     fi
 fi
 
