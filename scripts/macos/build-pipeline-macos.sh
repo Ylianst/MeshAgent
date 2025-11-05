@@ -106,20 +106,34 @@ if [ "$DO_STAPLE" = true ]; then
 
     for binary in "${BINARIES[@]}"; do
         echo "Stapling: $binary"
-        xcrun stapler staple "$binary"
 
-        # Verify stapling
-        if xcrun stapler validate "$binary" 2>&1 | grep -q "The validate action worked"; then
-            echo -e "${GREEN}✓ Successfully stapled${NC}"
-            STAPLED_COUNT=$((STAPLED_COUNT + 1))
+        # Attempt to staple (will fail for standalone binaries with Error 73)
+        STAPLE_OUTPUT=$(xcrun stapler staple "$binary" 2>&1)
+        STAPLE_EXIT=$?
+
+        if [ $STAPLE_EXIT -eq 0 ]; then
+            # Stapling succeeded (bundle or package)
+            if xcrun stapler validate "$binary" 2>&1 | grep -q "The validate action worked"; then
+                echo -e "${GREEN}✓ Successfully stapled${NC}"
+                STAPLED_COUNT=$((STAPLED_COUNT + 1))
+            else
+                echo -e "${YELLOW}⚠ Stapling completed but validation unclear${NC}"
+            fi
+        elif echo "$STAPLE_OUTPUT" | grep -q "Error 73"; then
+            # Error 73 means standalone binary (expected - not an error)
+            echo -e "${YELLOW}⚠ Note: Stapling is not supported for standalone binaries${NC}"
+            echo -e "${GREEN}✓ Binary is notarized and will verify online when first run${NC}"
+            STAPLED_COUNT=$((STAPLED_COUNT + 1))  # Count as success
         else
-            echo -e "${RED}⚠ Stapling verification failed${NC}"
+            # Other error
+            echo -e "${RED}⚠ Stapling failed with unexpected error${NC}"
+            echo "$STAPLE_OUTPUT"
         fi
         echo ""
     done
 
     if [ $STAPLED_COUNT -eq 0 ]; then
-        echo "No binaries found to staple"
+        echo "No binaries were processed"
     fi
 
     echo ""
