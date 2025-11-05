@@ -44,22 +44,28 @@ if [ ! -d "$BUILD_DIR" ]; then
     exit 1
 fi
 
-# Find all meshagent binaries (including DEBUG versions)
+# Step 1: Sign architecture-specific binaries first
 SIGNED_COUNT=0
 
-# Use array to avoid subshell issues where SIGNED_COUNT doesn't persist
-BINARIES=()
+# Get script directory and entitlements
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ENTITLEMENTS="$SCRIPT_DIR/meshagent-macos.entitlements"
+
+echo -e "${YELLOW}Step 1: Signing architecture-specific binaries${NC}"
+echo ""
+
+# Find and sign only arch-specific binaries (not universal)
+ARCH_BINARIES=()
 while IFS= read -r -d '' binary; do
-    BINARIES+=("$binary")
+    # Skip universal directory binaries in this pass
+    if [[ "$binary" != *"/universal/"* ]]; then
+        ARCH_BINARIES+=("$binary")
+    fi
 done < <(find "$BUILD_DIR" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) -print0)
 
-for binary in "${BINARIES[@]}"; do
+for binary in "${ARCH_BINARIES[@]}"; do
     if [ -f "$binary" ]; then
         echo -e "${BLUE}Signing:${NC} $binary"
-
-        # Get script directory
-        SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-        ENTITLEMENTS="$SCRIPT_DIR/meshagent-macos.entitlements"
 
         # Sign with hardened runtime for distribution
         codesign --sign "$MACOS_SIGN_CERT" \
@@ -79,6 +85,38 @@ for binary in "${BINARIES[@]}"; do
         echo ""
     fi
 done
+
+# Step 2: Rebuild universal binaries from signed arch-specific binaries
+if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
+    echo -e "${YELLOW}Step 2: Rebuilding universal binaries from signed slices${NC}"
+    echo ""
+
+    mkdir -p "$BUILD_DIR/universal"
+
+    # Rebuild release binary if both arch-specific versions exist
+    if [ -f "$BUILD_DIR/macos-x86-64/meshagent" ] && [ -f "$BUILD_DIR/macos-arm-64/meshagent" ]; then
+        echo -e "${BLUE}Creating universal binary:${NC} meshagent"
+        lipo -create \
+            "$BUILD_DIR/macos-x86-64/meshagent" \
+            "$BUILD_DIR/macos-arm-64/meshagent" \
+            -output "$BUILD_DIR/universal/meshagent"
+        echo -e "${GREEN}✓ Universal binary created with signed slices${NC}"
+        echo ""
+        SIGNED_COUNT=$((SIGNED_COUNT + 1))
+    fi
+
+    # Rebuild DEBUG binary if both arch-specific versions exist
+    if [ -f "$BUILD_DIR/macos-x86-64/DEBUG_meshagent" ] && [ -f "$BUILD_DIR/macos-arm-64/DEBUG_meshagent" ]; then
+        echo -e "${BLUE}Creating universal binary:${NC} DEBUG_meshagent"
+        lipo -create \
+            "$BUILD_DIR/macos-x86-64/DEBUG_meshagent" \
+            "$BUILD_DIR/macos-arm-64/DEBUG_meshagent" \
+            -output "$BUILD_DIR/universal/DEBUG_meshagent"
+        echo -e "${GREEN}✓ Universal DEBUG binary created with signed slices${NC}"
+        echo ""
+        SIGNED_COUNT=$((SIGNED_COUNT + 1))
+    fi
+fi
 
 if [ $SIGNED_COUNT -eq 0 ]; then
     echo "No binaries found to sign in $BUILD_DIR"
