@@ -95,14 +95,14 @@ if [ "$DO_STAPLE" = true ]; then
     echo ""
 
     # Note: Can staple previously-notarized binaries without re-notarizing
-    # Find all binaries and staple
+    # Find release binaries only (DEBUG binaries are not notarized)
     STAPLED_COUNT=0
 
     # Use array to avoid subshell issues where STAPLED_COUNT doesn't persist
     BINARIES=()
     while IFS= read -r -d '' binary; do
         BINARIES+=("$binary")
-    done < <(find "$SCRIPT_DIR/build/macos" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) -print0)
+    done < <(find "$SCRIPT_DIR/build/macos" -type f -name "meshagent" ! -name "DEBUG_*" -print0)
 
     for binary in "${BINARIES[@]}"; do
         echo "Stapling: $binary"
