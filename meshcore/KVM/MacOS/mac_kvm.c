@@ -1153,17 +1153,13 @@ void kvm_check_permission()
         AXIsProcessTrustedWithOptions(options);
     }
 
-    // Request full disk access
+    // Check full disk access status
+    // Note: If not granted, do nothing here. This will be addressed later with a GUI
+    // permission helper that users can launch on-demand to review and grant permissions.
     if(__builtin_available(macOS 10.14, *)) {
         if(_fullDiskAuthorizationStatus() != MPAuthorizationStatusAuthorized) {
-            CFStringRef URL =  CFStringCreateWithCString(NULL, "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", kCFStringEncodingASCII);
-            CFURLRef pathRef = CFURLCreateWithString( NULL, URL, NULL );
-            if( pathRef )
-            {
-                LSOpenCFURLRef(pathRef, NULL);
-                CFRelease(pathRef);
-            }
-            CFRelease(URL);
+            // TODO: Launch permission helper GUI (when implemented)
+            // For now, silently continue - don't auto-open System Settings
         }
     }
 }
