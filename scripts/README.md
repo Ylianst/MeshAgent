@@ -16,8 +16,8 @@ Scripts are organized by platform:
 - **`linux/`** - Linux-specific scripts (multi-architecture builds)
   - `build-linux-all.sh` - Build all Linux architectures
 - **`templates-for-bin/`** - Templates to copy to `/bin` for personal use (see [README](templates-for-bin/README.md))
-  - `test-meshagent.sh` - Development testing script template
-  - `sign-and-notarize-template.sh` - Signing/notarization workflow template
+  - `test-macos-meshagent.sh` - Development testing script template
+  - `sign-and-notarize-macos-template.sh` - Signing/notarization workflow template
 
 ## Quick Start: Complete macOS Pipeline
 
@@ -108,7 +108,7 @@ See **[templates-for-bin/README.md](templates-for-bin/README.md)** for ready-to-
 
 ```bash
 # Copy signing template to your bin directory
-cp scripts/templates-for-bin/sign-and-notarize-template.sh bin/sign-my-macos-binaries.sh
+cp scripts/templates-for-bin/sign-and-notarize-macos-template.sh bin/sign-my-macos-binaries.sh
 
 # Edit to add your credentials
 nano bin/sign-my-macos-binaries.sh

@@ -8,18 +8,18 @@ The `/bin` directory is gitignored to keep personal credentials and configuratio
 
 ## Usage
 
-### 1. test-meshagent.sh
+### 1. test-macos-meshagent.sh
 
 Development testing script for building, signing, and deploying meshagent.
 
 **Setup:**
 ```bash
 # Copy to bin directory
-cp scripts/templates-for-bin/test-meshagent.sh bin/
+cp scripts/templates-for-bin/test-macos-meshagent.sh bin/
 
 # The script is ready to use with default settings
 # Customize the configuration section if needed
-sudo ./bin/test-meshagent.sh
+sudo ./bin/test-macos-meshagent.sh
 ```
 
 **Key Features:**
@@ -35,14 +35,14 @@ sudo ./bin/test-meshagent.sh
 - Architecture: ARM64 (use `--archid 16` for Intel, `--archid universal` for both)
 - Both daemon and agent enabled
 
-### 2. sign-and-notarize-template.sh
+### 2. sign-and-notarize-macos-template.sh
 
 Complete signing, notarization, and stapling workflow.
 
 **Setup:**
 ```bash
 # Copy to bin directory
-cp scripts/templates-for-bin/sign-and-notarize-template.sh bin/sign-my-macos-binaries.sh
+cp scripts/templates-for-bin/sign-and-notarize-macos-template.sh bin/sign-my-macos-binaries.sh
 
 # Edit to add your certificate name
 nano bin/sign-my-macos-binaries.sh
@@ -98,6 +98,6 @@ By keeping them in `/bin` (gitignored), you never accidentally commit your crede
 
 ## Version
 
-Current version: **0.0.7**
+Current version: **0.0.8**
 
 Both templates are kept in sync with the latest features and improvements.
