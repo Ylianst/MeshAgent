@@ -98,6 +98,6 @@ By keeping them in `/bin` (gitignored), you never accidentally commit your crede
 
 ## Version
 
-Current version: **0.0.8**
+Current version: **0.0.9**
 
 Both templates are kept in sync with the latest features and improvements.

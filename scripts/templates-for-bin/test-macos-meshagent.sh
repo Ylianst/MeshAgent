@@ -1,6 +1,6 @@
 #!/bin/bash
 # MeshAgent macOS Development Testing Script
-# Version: 0.0.7
+# Version: 0.0.9
 # Builds, signs, and deploys meshagent with configurable options
 #
 # Usage:

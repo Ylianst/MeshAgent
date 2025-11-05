@@ -1,7 +1,7 @@
 #!/bin/bash
 # Personal wrapper for signing/notarizing macOS MeshAgent binaries
 # This is a TEMPLATE - copy to /bin/sign-my-macos-binaries.sh and customize
-# Version: 0.0.8
+# Version: 0.0.9
 
 set -e  # Exit on error
 
