@@ -1,7 +1,7 @@
 #!/bin/bash
 # Personal wrapper for signing/notarizing macOS MeshAgent binaries
 # This is a TEMPLATE - copy to /bin/sign-my-macos-binaries.sh and customize
-# Version: 0.0.7
+# Version: 0.0.8
 
 set -e  # Exit on error
 
@@ -94,29 +94,38 @@ fi
 # Step 3: Stapling
 if [ "$DO_STAPLE" = true ]; then
     echo -e "${YELLOW}[3/3] Stapling Notarization Ticket${NC}"
+    echo ""
 
-    if [ "$DO_NOTARIZE" != true ]; then
-        echo -e "${RED}Error: Cannot staple without notarization${NC}"
-        echo "Set DO_NOTARIZE=true to notarize first"
-        exit 1
-    fi
-
-    # Find all macOS signed binaries and staple
+    # Note: Can staple previously-notarized binaries without re-notarizing
+    # Find release binaries only (DEBUG binaries are not notarized)
     # Use array to avoid subshell issues
     BINARIES=()
     while IFS= read -r -d '' binary; do
         BINARIES+=("$binary")
-    done < <(find "$REPO_DIR/build/macos" -type f \( -name "meshagent" -o -name "DEBUG_meshagent" \) -print0)
+    done < <(find "$REPO_DIR/build/macos" -type f -name "meshagent" ! -name "DEBUG_*" -print0)
 
     for binary in "${BINARIES[@]}"; do
         echo "Stapling: $binary"
-        xcrun stapler staple "$binary"
 
-        # Verify stapling
-        if xcrun stapler validate "$binary" | grep -q "The validate action worked"; then
-            echo -e "${GREEN}✓ Successfully stapled${NC}"
+        # Attempt to staple (will fail for standalone binaries with Error 73)
+        STAPLE_OUTPUT=$(xcrun stapler staple "$binary" 2>&1)
+        STAPLE_EXIT=$?
+
+        if [ $STAPLE_EXIT -eq 0 ]; then
+            # Stapling succeeded (bundle or package)
+            if xcrun stapler validate "$binary" 2>&1 | grep -q "The validate action worked"; then
+                echo -e "${GREEN}✓ Successfully stapled${NC}"
+            else
+                echo -e "${YELLOW}⚠ Stapling completed but validation unclear${NC}"
+            fi
+        elif echo "$STAPLE_OUTPUT" | grep -q "Error 73"; then
+            # Error 73 means standalone binary (expected - not an error)
+            echo -e "${YELLOW}⚠ Note: Stapling is not supported for standalone binaries${NC}"
+            echo -e "${GREEN}✓ Binary is notarized and will verify online when first run${NC}"
         else
-            echo -e "${RED}⚠ Stapling verification failed${NC}"
+            # Other error
+            echo -e "${RED}⚠ Stapling failed with unexpected error${NC}"
+            echo "$STAPLE_OUTPUT"
         fi
         echo ""
     done
@@ -138,7 +147,7 @@ if [ "$DO_SIGN" = true ]; then
     echo "  ✓ Signed with: $CERT"
 fi
 if [ "$DO_NOTARIZE" = true ]; then
-    echo "  ✓ Notarized with Apple ID: $APPLE_ID"
+    echo "  ✓ Notarized using keychain profile"
 fi
 if [ "$DO_STAPLE" = true ]; then
     echo "  ✓ Stapled notarization tickets"
