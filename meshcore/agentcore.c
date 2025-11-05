@@ -25,6 +25,7 @@ limitations under the License.
 #endif
 
 #include "agentcore.h"
+#include "openframe_file_logger.h"
 #include "signcheck.h"
 #include "meshdefines.h"
 #include "meshinfo.h"
@@ -4992,6 +4993,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{ 
 			agentHost->openFrameMode = true; parseCommands = 0; 
 			printf("OpenFrame Mode: %d\n", agentHost->openFrameMode);
+			enable_file_logging_simple();
 		}
 		if (strcmp(param[ri], "--openframe-secret") == 0 && ((ri + 1) < paramLen))
 		{
