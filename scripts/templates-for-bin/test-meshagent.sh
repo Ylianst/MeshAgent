@@ -9,8 +9,14 @@
 
 set -e  # Exit on error
 
-# Get the repository root directory (script is in /scripts/macos, repo is two levels up)
-REPO_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+# Get the repository root directory
+# If copied to /bin, repo is parent; if in scripts/templates-for-bin, repo is two levels up
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [[ "$SCRIPT_DIR" == */bin ]]; then
+    REPO_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
+else
+    REPO_DIR="$( cd "$SCRIPT_DIR/../.." && pwd )"
+fi
 cd "$REPO_DIR"
 
 #==============================================================================

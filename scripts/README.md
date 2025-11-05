@@ -6,17 +6,18 @@ This directory contains scripts for building, signing, and distributing MeshAgen
 
 Scripts are organized by platform:
 
-- **`macos/`** - macOS-specific scripts (signing, notarization, testing, build pipeline)
+- **`macos/`** - macOS-specific scripts (signing, notarization, build pipeline)
   - `sign-macos.sh` - Sign binaries with Developer ID
   - `notarize-macos.sh` - Notarize binaries with Apple (placeholder)
   - `build-pipeline-macos.sh` - Complete signing/notarization workflow
-  - `sign-and-notarize-template.sh` - Template for personal wrapper script
-  - `test-meshagent.sh` - Development testing script
   - `meshagent-macos.entitlements` - Entitlements file for signing
 - **`windows/`** - Windows-specific scripts (cleaning build artifacts)
   - `clean-windows.bat` - Clean build artifacts
 - **`linux/`** - Linux-specific scripts (multi-architecture builds)
   - `build-linux-all.sh` - Build all Linux architectures
+- **`templates-for-bin/`** - Templates to copy to `/bin` for personal use (see [README](templates-for-bin/README.md))
+  - `test-meshagent.sh` - Development testing script template
+  - `sign-and-notarize-template.sh` - Signing/notarization workflow template
 
 ## Quick Start: Complete macOS Pipeline
 
@@ -99,36 +100,21 @@ export DO_STAPLE=true
 
 ### Personal Wrapper
 
-For frequent use, create a personal wrapper in `/bin/` (gitignored):
+For frequent use, create a personal wrapper in `/bin/` (gitignored).
 
-**Option 1: Use the template**
+See **[templates-for-bin/README.md](templates-for-bin/README.md)** for ready-to-use templates with detailed setup instructions.
+
+**Quick setup:**
 
 ```bash
-# Copy the template to your bin directory
-cp scripts/macos/sign-and-notarize-template.sh bin/sign-my-macos-binaries.sh
+# Copy signing template to your bin directory
+cp scripts/templates-for-bin/sign-and-notarize-template.sh bin/sign-my-macos-binaries.sh
 
 # Edit to add your credentials
 nano bin/sign-my-macos-binaries.sh
 
 # Run it
 ./bin/sign-my-macos-binaries.sh
-```
-
-**Option 2: Call build-pipeline-macos.sh directly**
-
-```bash
-#!/bin/bash
-# bin/my-build-pipeline.sh
-
-export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-export APPLE_ID="developer@example.com"
-export APPLE_TEAM_ID="TEAMID"
-export APPLE_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-export DO_SIGN=true
-export DO_NOTARIZE=false
-export DO_STAPLE=false
-
-./scripts/macos/build-pipeline-macos.sh
 ```
 
 This keeps your credentials out of git while using the standardized pipeline.

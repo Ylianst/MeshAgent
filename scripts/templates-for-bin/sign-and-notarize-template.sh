@@ -35,11 +35,11 @@ NC='\033[0m' # No Color
 
 # Get script directory
 # If running from /bin, repo is parent
-# If running from scripts/macos, repo is two levels up
+# If running from scripts/templates-for-bin, repo is two levels up
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [[ "$SCRIPT_DIR" == */bin ]]; then
     REPO_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
-elif [[ "$SCRIPT_DIR" == */scripts/macos ]]; then
+elif [[ "$SCRIPT_DIR" == */scripts/templates-for-bin ]]; then
     REPO_DIR="$( cd "$SCRIPT_DIR/../.." && pwd )"
 else
     REPO_DIR="$SCRIPT_DIR"
