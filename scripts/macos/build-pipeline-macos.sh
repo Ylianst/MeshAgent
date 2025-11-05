@@ -92,14 +92,10 @@ fi
 # Step 3: Stapling
 if [ "$DO_STAPLE" = true ]; then
     echo -e "${YELLOW}[3/3] Stapling Notarization Ticket${NC}"
+    echo ""
 
-    if [ "$DO_NOTARIZE" != true ]; then
-        echo -e "${RED}Error: Cannot staple without notarization${NC}"
-        echo "Set DO_NOTARIZE=true to notarize first"
-        exit 1
-    fi
-
-    # Find all signed binaries and staple
+    # Note: Can staple previously-notarized binaries without re-notarizing
+    # Find all binaries and staple
     STAPLED_COUNT=0
 
     # Use array to avoid subshell issues where STAPLED_COUNT doesn't persist
