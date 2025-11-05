@@ -40,7 +40,6 @@ limitations under the License.
 
 int KVM_Listener_FD = -1;  // Used by -kvm1 child (now unused in reversed architecture)
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
-static int g_log_next_tile_batch = 1;  // Flag to log the next tile batch after init/refresh
 #define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
 #define KVM_Queue_Directory "/var/run/meshagent"
 #define KVM_Session_Signal_File "/var/run/meshagent/session-active"
@@ -130,13 +129,6 @@ void senddebug(int val)
 
 void kvm_send_resolution()
 {
-	// DEBUG LOGGING: Track resolution messages
-	char tmp[256];
-	int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: kvm_send_resolution() CALLED - Sending resolution %dx%d (MNG_KVM_SCREEN)\n", SCREEN_WIDTH, SCREEN_HEIGHT);
-	int written = write(STDOUT_FILENO, tmp, tmpLen);
-	fsync(STDOUT_FILENO);
-	(void)written;
-
 	char *buffer = ILibMemory_SmartAllocate(8);
 
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
@@ -144,18 +136,10 @@ void kvm_send_resolution()
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
 
-	tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: Resolution message queued - bytes: 00 07 00 08 %04x %04x\n",
-		ntohs(((unsigned short*)buffer)[2]), ntohs(((unsigned short*)buffer)[3]));
-	written = write(STDOUT_FILENO, tmp, tmpLen);
-	fsync(STDOUT_FILENO);
-
 	// Write the reply to the pipe.
 	ILibQueue_Lock(g_messageQ);
 	ILibQueue_EnQueue(g_messageQ, buffer);
 	ILibQueue_UnLock(g_messageQ);
-
-	written = write(STDOUT_FILENO, "DEBUG: Resolution message enqueued successfully\n", 48);
-	fsync(STDOUT_FILENO);
 }
 
 #define BUFSIZE 65535
@@ -294,11 +278,6 @@ int get_kbd_state()
 
 int kvm_init()
 {
-	// DEBUG LOGGING: Track kvm_init() calls
-	int written = write(STDOUT_FILENO, "DEBUG: ===== kvm_init() CALLED =====\n", 38);
-	fsync(STDOUT_FILENO);
-	(void)written;
-
 	ILibCriticalLogFilename = "KVMSlave.log";
 	int old_height_count = TILE_HEIGHT_COUNT;
 
@@ -314,11 +293,6 @@ int kvm_init()
 	SCREEN_HEIGHT = CGDisplayPixelsHigh(SCREEN_NUM) * SCREEN_SCALE;
 	SCREEN_WIDTH = CGDisplayPixelsWide(SCREEN_NUM) * SCREEN_SCALE;
 
-	char tmp[256];
-	int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: kvm_init() - Screen dimensions: %dx%d (scale=%d)\n", SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_SCALE);
-	written = write(STDOUT_FILENO, tmp, tmpLen);
-	fsync(STDOUT_FILENO);
-
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
@@ -330,14 +304,6 @@ int kvm_init()
 	if (SCREEN_WIDTH % TILE_WIDTH) { TILE_WIDTH_COUNT++; }
 	if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
 
-	tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: kvm_init() - Tile grid: %dx%d tiles (total %d tiles)\n",
-		TILE_WIDTH_COUNT, TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT * TILE_HEIGHT_COUNT);
-	written = write(STDOUT_FILENO, tmp, tmpLen);
-	fsync(STDOUT_FILENO);
-
-	written = write(STDOUT_FILENO, "DEBUG: kvm_init() - Calling kvm_send_resolution() to send MNG_KVM_SCREEN\n", 74);
-	fsync(STDOUT_FILENO);
-
 	kvm_send_resolution();
 	reset_tile_info(old_height_count);
 
@@ -346,16 +312,10 @@ int kvm_init()
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
 	buffer[4] = (unsigned char)get_kbd_state();
 
-	written = write(STDOUT_FILENO, "DEBUG: kvm_init() - Enqueuing MNG_KVM_KEYSTATE message\n", 56);
-	fsync(STDOUT_FILENO);
-
 	// Write the reply to the pipe.
 	ILibQueue_Lock(g_messageQ);
 	ILibQueue_EnQueue(g_messageQ, buffer);
 	ILibQueue_UnLock(g_messageQ);
-
-	written = write(STDOUT_FILENO, "DEBUG: kvm_init() - Initialization complete\n", 45);
-	fsync(STDOUT_FILENO);
 
 	return 0;
 }
@@ -413,35 +373,15 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_REFRESH: // Refresh
 		{
-			// DEBUG LOGGING: Track refresh commands
-			int written = write(STDOUT_FILENO, "DEBUG: MNG_KVM_REFRESH command received from viewer\n", 53);
-			fsync(STDOUT_FILENO);
-			(void)written;
-
-			// Log current tile counts and screen dimensions
-			char tmp[256];
-			int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: MNG_KVM_REFRESH - SCREEN: %dx%d, TILES: %dx%d (total %d tiles)\n",
-				SCREEN_WIDTH, SCREEN_HEIGHT, TILE_WIDTH_COUNT, TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT * TILE_HEIGHT_COUNT);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-
 			// FIX: Send resolution IMMEDIATELY, not via queue, to ensure it arrives before any tile data
 			// This fixes the race condition where tiles were sent before resolution, causing wrong canvas size
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: MNG_KVM_REFRESH - Sending resolution IMMEDIATELY (not queued) to ensure proper ordering\n");
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-
 			char resolution_buffer[8];
 			((unsigned short*)resolution_buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);
 			((unsigned short*)resolution_buffer)[1] = (unsigned short)htons((unsigned short)8);
 			((unsigned short*)resolution_buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);
 			((unsigned short*)resolution_buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);
 
-			int send_result = KVM_SEND(resolution_buffer, 8);
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: MNG_KVM_REFRESH - Resolution sent immediately: %dx%d (result=%d)\n",
-				SCREEN_WIDTH, SCREEN_HEIGHT, send_result);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
+			KVM_SEND(resolution_buffer, 8);
 
 			int row, col;
 			if (size != 4) break;
@@ -451,27 +391,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 					if ((g_tileInfo[row] = (struct tileInfo_t *) malloc(TILE_WIDTH_COUNT * sizeof(struct tileInfo_t))) == NULL) ILIBCRITICALEXIT(254);
 				}
 			}
-			int tiles_reset = 0;
 			for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
 				for (col = 0; col < TILE_WIDTH_COUNT; col++) {
 					g_tileInfo[row][col].crc = 0xFF;
 					g_tileInfo[row][col].flag = 0;
-					tiles_reset++;
 				}
 			}
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: MNG_KVM_REFRESH - Reset %d tiles (expected %d x %d = %d)\n",
-				tiles_reset, TILE_WIDTH_COUNT, TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT * TILE_HEIGHT_COUNT);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-
-			// Verify first few tiles are reset
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: After reset - tile[0][0].flag=%d, tile[0][1].flag=%d, tile[1][0].flag=%d\n",
-				g_tileInfo[0][0].flag, g_tileInfo[0][1].flag, g_tileInfo[1][0].flag);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-
-			// Set flag to log the next batch of tiles sent (for second viewer debugging)
-			g_log_next_tile_batch = 1;
 
 			break;
 		}
@@ -701,34 +626,16 @@ void* kvm_server_mainloop(void* param)
 		
 		// Check if there are pending messages to be sent
 		ILibQueue_Lock(g_messageQ);
-		int msg_count = 0;
 		while (ILibQueue_IsEmpty(g_messageQ) == 0)
 		{
 			if ((buf = (char*)ILibQueue_DeQueue(g_messageQ)) != NULL)
 			{
 				int msg_size = (int)ILibMemory_Size(buf);
-				unsigned short msg_type = ntohs(((unsigned short*)buf)[0]);
-
-				// Log what message is being sent
-				char tmp[256];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: Sending queued message - type=0x%04x, size=%d\n", msg_type, msg_size);
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-
 				KVM_SEND(buf, msg_size);
 				ILibMemory_Free(buf);
-				msg_count++;
 			}
 		}
 		ILibQueue_UnLock(g_messageQ);
-
-		if (msg_count > 0)
-		{
-			char tmp[256];
-			int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: Sent %d queued messages\n", msg_count);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
 
 
 		for (r = 0; r < TILE_HEIGHT_COUNT; r++) 
@@ -778,12 +685,6 @@ void* kvm_server_mainloop(void* param)
 			//senddebug(100);
 			getScreenBuffer((unsigned char **)&desktop, &desktopsize, image);
 
-			// Track tile sending statistics
-			int tiles_sent = 0;
-			int tiles_skipped_already_sent = 0;
-			int tiles_skipped_dont_send = 0;
-			int tiles_failed_to_generate = 0;
-
 			for (y = 0; y < TILE_HEIGHT_COUNT; y++)
 			{
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
@@ -793,14 +694,8 @@ void* kvm_server_mainloop(void* param)
 
 					if (g_shutdown) { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
 
-					if (g_tileInfo[y][x].flag == TILE_SENT) {
-						tiles_skipped_already_sent++;
-						continue;
-					}
-					if (g_tileInfo[y][x].flag == TILE_DONT_SEND) {
-						tiles_skipped_dont_send++;
-						continue;
-					}
+					if (g_tileInfo[y][x].flag == TILE_SENT) continue;
+					if (g_tileInfo[y][x].flag == TILE_DONT_SEND) continue;
 
 					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
 
@@ -817,40 +712,9 @@ void* kvm_server_mainloop(void* param)
 								g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break;
 							}
 						}
-						else
-						{
-							tiles_sent++;
-						}
 						free(buf);
 					}
-					else if (!buf)
-					{
-						tiles_failed_to_generate++;
-					}
 				}
-			}
-
-			// Log tile statistics every frame (we can filter this later if too verbose)
-			static int frame_count = 0;
-			frame_count++;
-
-			// Always log the first batch of tiles after init/refresh
-			if (g_log_next_tile_batch && tiles_sent > 0)
-			{
-				char tmp[256];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: ===== FIRST TILE BATCH ===== Frame %d - Sent: %d tiles (out of %d total)\n",
-					frame_count, tiles_sent, TILE_WIDTH_COUNT * TILE_HEIGHT_COUNT);
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-				g_log_next_tile_batch = 0;
-			}
-			else if (tiles_sent > 0 || frame_count % 100 == 0)  // Log when tiles sent or every 100 frames
-			{
-				char tmp[256];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "DEBUG: Frame %d - Sent: %d, Skipped(SENT): %d, Skipped(DONT): %d, Failed: %d (Total tiles: %d)\n",
-					frame_count, tiles_sent, tiles_skipped_already_sent, tiles_skipped_dont_send, tiles_failed_to_generate, TILE_WIDTH_COUNT * TILE_HEIGHT_COUNT);
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
 			}
 
 		}
@@ -1151,14 +1015,8 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 // Force a KVM reset & refresh
 void kvm_relay_reset(void *reserved)
 {
-	int written = write(STDOUT_FILENO, "DEBUG: ===== kvm_relay_reset() CALLED ===== (Sending MNG_KVM_REFRESH)\n", 72);
-	fsync(STDOUT_FILENO);
-	(void)written;
-
 	if (reserved == NULL)
 	{
-		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - reserved is NULL, cannot send\n", 58);
-		fsync(STDOUT_FILENO);
 		return;
 	}
 
@@ -1180,19 +1038,8 @@ void kvm_relay_reset(void *reserved)
 
 	if (kvmDomainSocketModule != NULL)
 	{
-		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - Sending via domain socket\n", 54);
-		fsync(STDOUT_FILENO);
-
 		// Send to -kvm1 via domain socket (same as ILibDuktape_MeshAgent_RemoteDesktop_WriteSink)
 		ILibAsyncSocket_Send(kvmDomainSocketModule, buffer, 4, ILibAsyncSocket_MemoryOwnership_USER);
-
-		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - MNG_KVM_REFRESH sent via domain socket\n", 67);
-		fsync(STDOUT_FILENO);
-	}
-	else
-	{
-		written = write(STDOUT_FILENO, "DEBUG: kvm_relay_reset() - kvmDomainSocketModule is NULL\n", 58);
-		fsync(STDOUT_FILENO);
 	}
 }
 
