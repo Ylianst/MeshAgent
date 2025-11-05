@@ -23,15 +23,16 @@ cd "$REPO_DIR"
 # DEFAULT CONFIGURATION
 #==============================================================================
 
-ARCHID="29"                    # Default: ARM64 (16=Intel, 29=ARM, universal=both)
-LAUNCHDAEMON="enable"          # enable/disable
-LAUNCHAGENT="enable"           # enable/disable
+ARCHID="universal"                    # Default: ARM64 (16=Intel, 29=ARM, universal=both)
+LAUNCHDAEMON="enable"          # enable/disable - Install and load LaunchDaemon for testing on this device (if disabled, can run daemon manually in terminal)
+LAUNCHAGENT="enable"           # enable/disable - Install and load LaunchAgent for testing on this device (if disabled, can run agent manually in terminal)
 SKIP_BUILD=false               # Skip build step (use existing binary)
 SKIP_SIGN=false                # Skip signing step
 DEPLOY="enable"                # enable/disable - Deploy built binary to DEPLOY_PATH
 DEPLOY_PATH="/usr/local/mesh_services/meshagent"  # Full path to deploy meshagent binary
 GIT_PULL=false                 # enable/disable - Pull latest changes before building
-REFRESH_PLISTS=false           # Refresh launchd plists from examples/launchd/tacticalrmm/
+REFRESH_PLISTS=false           # Refresh launchd plists from PATH_PLISTS directory
+PATH_PLISTS="examples/launchd/mesh_services"  # Path to plist directory (required if REFRESH_PLISTS=true)
 
 #==============================================================================
 # PARSE COMMAND LINE ARGUMENTS
@@ -161,6 +162,7 @@ echo "Deploy:           $DEPLOY"
 echo "Deploy Path:      $DEPLOY_PATH"
 echo "Git Pull:         $GIT_PULL"
 echo "Refresh Plists:   $REFRESH_PLISTS"
+echo "Plists Path:      $PATH_PLISTS"
 echo "=========================================="
 echo ""
 
@@ -269,9 +271,17 @@ if [ "$REFRESH_PLISTS" = true ]; then
     echo "[3.5/6] Refreshing launchd plists..."
     echo "[$(date '+%H:%M:%S')] Plist refresh started"
 
-    # Source plists from examples/launchd/tacticalrmm/
-    DAEMON_PLIST_SRC="$REPO_DIR/examples/launchd/tacticalrmm/meshagent.plist"
-    AGENT_PLIST_SRC="$REPO_DIR/examples/launchd/tacticalrmm/meshagent-agent.plist"
+    # Validate PATH_PLISTS is set
+    if [ -z "$PATH_PLISTS" ]; then
+        echo "  ERROR: REFRESH_PLISTS is true but PATH_PLISTS is not defined"
+        echo "  Please set PATH_PLISTS to the directory containing your plist files"
+        echo "  Example: PATH_PLISTS=\"examples/launchd/tacticalrmm\""
+        exit 1
+    fi
+
+    # Source plists from configured path
+    DAEMON_PLIST_SRC="$REPO_DIR/$PATH_PLISTS/meshagent.plist"
+    AGENT_PLIST_SRC="$REPO_DIR/$PATH_PLISTS/meshagent-agent.plist"
 
     # Destination paths
     DAEMON_PLIST_DEST="/Library/LaunchDaemons/meshagent.plist"

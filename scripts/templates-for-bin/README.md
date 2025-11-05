@@ -63,6 +63,13 @@ xcrun notarytool store-credentials "meshagent-notary" \
 - `DO_SIGN` - Enable/disable code signing (default: true)
 - `DO_NOTARIZE` - Enable/disable notarization (default: false)
 - `DO_STAPLE` - Enable/disable stapling (default: false)
+- `SIGN_ENTITLEMENTS` - Entitlements mode (default: "" for standalone binaries)
+  - `""` (empty) - No entitlements (recommended for standalone binaries)
+  - `"full"` - Use full entitlements (for app bundles only)
+  - Custom path - Use specific entitlements file
+
+**Important for Standalone Binaries:**
+The default `SIGN_ENTITLEMENTS=""` (no entitlements) is correct for standalone binaries. This allows the binary to appear in System Settings > Privacy & Security so users can grant Full Disk Access, Screen Recording, and Accessibility permissions. Only use `"full"` entitlements if you're packaging as an app bundle (.app).
 
 **Notarization Setup (one-time):**
 Notarization now uses a keychain profile instead of credentials in the script. Set it up once with the command above. This stores your credentials securely in macOS keychain.

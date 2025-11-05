@@ -2,32 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Required for hardened runtime -->
+	<!-- OPTIONAL: May be needed for Duktape JavaScript interpreter and GenericMarshal FFI
+	     The Duktape interpreter and FFI system may need to create executable memory pages
+	     for certain advanced operations. Testing shows MeshAgent runs without this, but it
+	     may be required for specific JavaScript or FFI use cases. Include if you encounter
+	     issues with JavaScript execution or FFI functionality. -->
 	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
 	<true/>
 
-	<!-- Required for JIT compilation (Duktape JavaScript engine) -->
-	<key>com.apple.security.cs.allow-jit</key>
-	<true/>
-
-	<!-- Required to load dynamic libraries -->
+	<!-- OPTIONAL: May be needed if GenericMarshal FFI loads non-Apple libraries
+	     The FFI system uses dlopen/dlsym to load libraries dynamically. This allows loading
+	     libraries not signed by your Team ID. Testing shows MeshAgent runs without this,
+	     but may be required if FFI attempts to load third-party or unsigned system libraries.
+	     Remove for better security if not needed. -->
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 
-	<!-- Allow DYLD environment variables -->
-	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
-	<true/>
-
-	<!-- Accessibility for keyboard/mouse control -->
-	<key>com.apple.security.automation.apple-events</key>
-	<true/>
-
-	<!-- Network client access -->
-	<key>com.apple.security.network.client</key>
-	<true/>
-
-	<!-- Network server access (for mesh connections) -->
-	<key>com.apple.security.network.server</key>
-	<true/>
+	<!-- Note: TCC permissions (Full Disk Access, Screen Recording, Accessibility) are
+	     requested at runtime via API calls, NOT via entitlements. They will work correctly
+	     for standalone binaries with these minimal entitlements. -->
 </dict>
 </plist>

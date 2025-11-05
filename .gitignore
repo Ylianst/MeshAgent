@@ -340,3 +340,6 @@ ASALocalRun/
 *.o
 ToolChains/
 .DS_Store
+
+# Private files and directories
+private/
