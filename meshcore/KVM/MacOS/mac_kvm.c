@@ -38,7 +38,6 @@ limitations under the License.
 #include <dirent.h>
 #include <limits.h>
 
-int KVM_Listener_FD = -1;  // Used by -kvm1 child (now unused in reversed architecture)
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
 #define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
 #define KVM_Queue_Directory "/var/run/meshagent"
@@ -485,14 +484,8 @@ void ExitSink(int s)
 {
 	UNREFERENCED_PARAMETER(s);
 
-	signal(SIGTERM, SIG_IGN);	
-	
-	if (KVM_Listener_FD > 0) 
-	{
-		write(STDOUT_FILENO, "EXITING\n", 8);
-		fsync(STDOUT_FILENO);
-		close(KVM_Listener_FD); 
-	}
+	signal(SIGTERM, SIG_IGN);
+
 	g_shutdown = 1;
 }
 void* kvm_server_mainloop(void* param)
