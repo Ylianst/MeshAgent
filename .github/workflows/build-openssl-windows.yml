@@ -54,16 +54,15 @@ jobs:
         shell: bash
         run: |
           VERSION="${{ github.event.inputs.openssl_version || '3.5.4' }}"
-          if [ ! -d ".docker/openssl/openssl-$VERSION" ]; then
-            curl -L "https://github.com/openssl/openssl/releases/download/openssl-$VERSION/openssl-$VERSION.tar.gz" -o openssl.tar.gz
-            mkdir -p .docker/openssl
-            tar -xzf openssl.tar.gz -C .docker/openssl
-            rm openssl.tar.gz
-          fi
+          BUILD_DIR="openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}"
+          curl -L "https://github.com/openssl/openssl/releases/download/openssl-$VERSION/openssl-$VERSION.tar.gz" -o openssl.tar.gz
+          mkdir -p "$BUILD_DIR"
+          tar -xzf openssl.tar.gz -C "$BUILD_DIR" --strip-components=1
+          rm openssl.tar.gz
 
       - name: Configure OpenSSL
         shell: cmd
-        working-directory: .docker/openssl/openssl-${{ github.event.inputs.openssl_version || '3.5.4' }}
+        working-directory: openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}
         run: |
           perl Configure ${{ matrix.arch.openssl }} ^
             no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic ^
@@ -74,22 +73,21 @@ jobs:
 
       - name: Build OpenSSL
         shell: cmd
-        working-directory: .docker/openssl/openssl-${{ github.event.inputs.openssl_version || '3.5.4' }}
+        working-directory: openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}
         run: |
           nmake clean
           nmake build_libs
 
       - name: Rename libraries to match format
         shell: bash
-        working-directory: .docker/openssl/openssl-${{ github.event.inputs.openssl_version || '3.5.4' }}
         run: |
           # OpenSSL 3.x builds create libcrypto_static.lib and libssl_static.lib
           # We need to rename them to match the existing format
-          mkdir -p ../../../openssl/libstatic/windows/${{ matrix.arch.name }}
+          mkdir -p openssl/libstatic/windows/${{ matrix.arch.name }}
 
           # Rename based on architecture and config
-          cp libcrypto_static.lib "../../../openssl/libstatic/windows/${{ matrix.arch.name }}/libcrypto${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
-          cp libssl_static.lib "../../../openssl/libstatic/windows/${{ matrix.arch.name }}/libssl${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
+          cp openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}/libcrypto_static.lib "openssl/libstatic/windows/${{ matrix.arch.name }}/libcrypto${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
+          cp openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}/libssl_static.lib "openssl/libstatic/windows/${{ matrix.arch.name }}/libssl${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
 
       - name: Verify build
         shell: bash
