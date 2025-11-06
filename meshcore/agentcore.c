@@ -1947,7 +1947,7 @@ duk_ret_t ILibDuktape_MeshAgent_AuthToken(duk_context *ctx)
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)duk_get_pointer(ctx, -1);
 
 	if (!agent->openFrameMode) {
-		printf("JWT token is not available in openframe mode\n");
+		printf("JWT token is only available in openframe mode\n");
 		duk_push_string(ctx, NULL);
 		return 1;
 	}
@@ -5332,7 +5332,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 #if !defined(MICROSTACK_NOTLS)
 
-	if (ILibSimpleDataStore_Get(agentHost->masterDb, "skipmaccheck", NULL, 0) == 0)
+	// In OpenFrame mode, never reset NodeID based on MAC address changes
+	if (!agentHost->openFrameMode && ILibSimpleDataStore_Get(agentHost->masterDb, "skipmaccheck", NULL, 0) == 0)
 	{
 		// Check the local MacAddresses, to see if we need to reset our NodeId
 		if (duk_peval_string(tmpCtx, "(function _getMac() { var ret = ''; var ni = require('os').networkInterfaces(); for (var f in ni) { for (var i in ni[f]) { if(ni[f][i].type == 'ethernet' || ni[f][i].type == 'wireless') {ret += ('[' + ni[f][i].mac + ']');} } } return(ret); })();") == 0)
@@ -5385,6 +5386,13 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 	Duktape_SafeDestroyHeap(tmpCtx);
+
+	// In OpenFrame mode, never reset NodeID
+	if (agentHost->openFrameMode && resetNodeId == 1)
+	{
+		ILIBLOGMESSAGEX("OpenFrame mode: ignoring NodeID reset request");
+		resetNodeId = 0;
+	}
 
 	// Load the mesh agent certificates
 	if ((resetNodeId == 1 || agent_LoadCertificates(agentHost) != 0) && agent_GenerateCertificates(agentHost, NULL) != 0) { printf("Certificate error\r\n"); }
