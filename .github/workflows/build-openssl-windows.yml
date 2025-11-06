@@ -1,52 +1,195 @@
-name: "Code scanning - action"
+name: Build OpenSSL Windows (MSVC)
 
 on:
+  workflow_dispatch:
+    inputs:
+      openssl_version:
+        description: 'OpenSSL version to build'
+        required: false
+        default: '3.5.4'
   push:
-  pull_request:
-  schedule:
-    - cron: '0 1 * * 1'
+    branches:
+      - master
+    paths:
+      - '.docker/openssl/**'
+      - '.github/workflows/build-openssl-windows.yml'
 
 jobs:
-  CodeQL-Build:
+  build-windows:
+    strategy:
+      matrix:
+        arch:
+          - { name: 'x64', openssl: 'VC-WIN64A', platform: 'x64', lib_suffix: '64' }
+          - { name: 'x86', openssl: 'VC-WIN32', platform: 'Win32', lib_suffix: '32' }
+          - { name: 'arm64', openssl: 'VC-WIN64-ARM', platform: 'ARM64', lib_suffix: '64ARM' }
+        config:
+          - { name: 'Release', runtime: 'MT', suffix: 'MT' }
+          - { name: 'Debug', runtime: 'MTd', suffix: 'MTd' }
+      fail-fast: false
 
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
+
+    name: Build ${{ matrix.arch.name }} ${{ matrix.config.name }}
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
-      with:
-        # We must fetch at least the immediate parents so that if this is
-        # a pull request then we can checkout the head.
-        fetch-depth: 2
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # If this run was triggered by a pull request event, then checkout
-    # the head of the pull request instead of the merge commit.
-    - run: git checkout HEAD^2
-      if: ${{ github.event_name == 'pull_request' }}
-      
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v1
-      # Override language selection by uncommenting this and choosing your languages
-      with:
-         languages: javascript, cpp
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch.platform }}
 
-    # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
-    # If this step fails, then you should remove it and run the build manually (see below)
-    #- name: Autobuild
-    #  uses: github/codeql-action/autobuild@v1
+      - name: Install Perl (Strawberry)
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.38'
 
-    # ℹ️ Command-line programs to run using the OS shell.
-    # 📚 https://git.io/JvXDl
+      - name: Install NASM
+        run: |
+          choco install nasm -y
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-    # ✏️ If the Autobuild fails above, remove it and uncomment the following three lines
-    #    and modify them (or add more) to build your code if your project
-    #    uses a compiled language
+      - name: Download OpenSSL source
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.openssl_version || '3.5.4' }}"
+          if [ ! -d ".docker/openssl/openssl-$VERSION" ]; then
+            curl -L "https://github.com/openssl/openssl/releases/download/openssl-$VERSION/openssl-$VERSION.tar.gz" -o openssl.tar.gz
+            mkdir -p .docker/openssl
+            tar -xzf openssl.tar.gz -C .docker/openssl
+            rm openssl.tar.gz
+          fi
 
-    - run: |
-        make linux ARCHID=6 KVM=0
-    #   make bootstrap
-    #   make release
+      - name: Configure OpenSSL
+        shell: cmd
+        working-directory: .docker/openssl/openssl-${{ github.event.inputs.openssl_version || '3.5.4' }}
+        run: |
+          perl Configure ${{ matrix.arch.openssl }} ^
+            no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic ^
+            no-threads no-err no-dso no-shared no-asm no-rc5 no-idea ^
+            no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast ^
+            no-md2 no-mdc2 ^
+            --release
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v1
+      - name: Build OpenSSL
+        shell: cmd
+        working-directory: .docker/openssl/openssl-${{ github.event.inputs.openssl_version || '3.5.4' }}
+        run: |
+          nmake clean
+          nmake build_libs
+
+      - name: Rename libraries to match format
+        shell: bash
+        working-directory: .docker/openssl/openssl-${{ github.event.inputs.openssl_version || '3.5.4' }}
+        run: |
+          # OpenSSL 3.x builds create libcrypto_static.lib and libssl_static.lib
+          # We need to rename them to match the existing format
+          mkdir -p ../../../openssl/libstatic/windows/${{ matrix.arch.name }}
+
+          # Rename based on architecture and config
+          cp libcrypto_static.lib "../../../openssl/libstatic/windows/${{ matrix.arch.name }}/libcrypto${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
+          cp libssl_static.lib "../../../openssl/libstatic/windows/${{ matrix.arch.name }}/libssl${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
+
+      - name: Verify build
+        shell: bash
+        run: |
+          ls -lh openssl/libstatic/windows/${{ matrix.arch.name }}/
+          file openssl/libstatic/windows/${{ matrix.arch.name }}/*.lib || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-windows-${{ matrix.arch.name }}-${{ matrix.config.suffix }}
+          path: openssl/libstatic/windows/${{ matrix.arch.name }}/*.lib
+          retention-days: 30
+
+  combine-artifacts:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    name: Combine all Windows builds
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Combine into single structure
+        run: |
+          mkdir -p openssl-windows-libs/x64
+          mkdir -p openssl-windows-libs/x86
+          mkdir -p openssl-windows-libs/arm64
+
+          # Copy all libraries to their respective architecture folders
+          cp artifacts/openssl-windows-x64-MT/*.lib openssl-windows-libs/x64/ || true
+          cp artifacts/openssl-windows-x64-MTd/*.lib openssl-windows-libs/x64/ || true
+          cp artifacts/openssl-windows-x86-MT/*.lib openssl-windows-libs/x86/ || true
+          cp artifacts/openssl-windows-x86-MTd/*.lib openssl-windows-libs/x86/ || true
+          cp artifacts/openssl-windows-arm64-MT/*.lib openssl-windows-libs/arm64/ || true
+          cp artifacts/openssl-windows-arm64-MTd/*.lib openssl-windows-libs/arm64/ || true
+
+          # Display results
+          echo "=== Build Results ==="
+          find openssl-windows-libs -type f -exec ls -lh {} \;
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-3.5.4-windows-all
+          path: openssl-windows-libs/
+          retention-days: 90
+
+      - name: Create build report
+        run: |
+          cat > BUILD_REPORT.md << 'EOF'
+          # OpenSSL 3.5.4 Windows Build Report
+
+          ## Build Date
+          $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          ## Architectures Built
+          - **x64** (64-bit Intel/AMD)
+          - **x86** (32-bit Intel/AMD)
+          - **ARM64** (64-bit ARM)
+
+          ## Library Variants
+          Each architecture includes:
+          - **MT** (Multi-Threaded Release)
+          - **MTd** (Multi-Threaded Debug)
+
+          ## Libraries Created
+
+          ### x64
+          $(ls -lh openssl-windows-libs/x64/*.lib 2>/dev/null || echo "No files")
+
+          ### x86
+          $(ls -lh openssl-windows-libs/x86/*.lib 2>/dev/null || echo "No files")
+
+          ### ARM64
+          $(ls -lh openssl-windows-libs/arm64/*.lib 2>/dev/null || echo "No files")
+
+          ## Build Configuration
+          All builds use identical OpenSSL configure options:
+          ```
+          no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic
+          no-threads no-err no-dso no-shared no-asm no-rc5 no-idea
+          no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast
+          no-md2 no-mdc2
+          ```
+
+          ## Compiler
+          - Visual Studio 2022 (MSVC)
+          - Static runtime linking (/MT and /MTd)
+
+          ## GitHub Actions Workflow
+          Built using: `.github/workflows/build-openssl-windows.yml`
+
+          EOF
+
+      - name: Upload build report
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-report
+          path: BUILD_REPORT.md
+          retention-days: 90
