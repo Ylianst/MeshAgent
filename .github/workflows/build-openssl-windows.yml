@@ -19,12 +19,12 @@ jobs:
     strategy:
       matrix:
         arch:
-          - { name: 'x64', openssl: 'VC-WIN64A', platform: 'x64', lib_suffix: '64' }
-          - { name: 'x86', openssl: 'VC-WIN32', platform: 'x86', lib_suffix: '32' }
+          # - { name: 'x64', openssl: 'VC-WIN64A', platform: 'x64', lib_suffix: '64' }
+          # - { name: 'x86', openssl: 'VC-WIN32', platform: 'x86', lib_suffix: '32' }
           - { name: 'arm64', openssl: 'VC-WIN64-ARM', platform: 'amd64_arm64', lib_suffix: '64ARM' }
         config:
           - { name: 'Release', runtime: 'MT', suffix: 'MT' }
-          - { name: 'Debug', runtime: 'MTd', suffix: 'MTd' }
+          # - { name: 'Debug', runtime: 'MTd', suffix: 'MTd' }
       fail-fast: false
 
     runs-on: windows-2022
@@ -81,13 +81,13 @@ jobs:
       - name: Rename libraries to match format
         shell: bash
         run: |
-          # OpenSSL 3.x builds create libcrypto_static.lib and libssl_static.lib
+          # OpenSSL 3.x with no-shared creates libcrypto.lib and libssl.lib
           # We need to rename them to match the existing format
           mkdir -p openssl/libstatic/windows/${{ matrix.arch.name }}
 
           # Rename based on architecture and config
-          cp openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}/libcrypto_static.lib "openssl/libstatic/windows/${{ matrix.arch.name }}/libcrypto${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
-          cp openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}/libssl_static.lib "openssl/libstatic/windows/${{ matrix.arch.name }}/libssl${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
+          cp openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}/libcrypto.lib "openssl/libstatic/windows/${{ matrix.arch.name }}/libcrypto${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
+          cp openssl-build-${{ matrix.arch.name }}-${{ matrix.config.suffix }}/libssl.lib "openssl/libstatic/windows/${{ matrix.arch.name }}/libssl${{ matrix.arch.lib_suffix }}${{ matrix.config.suffix }}.lib"
 
       - name: Verify build
         shell: bash
