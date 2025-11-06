@@ -111,58 +111,12 @@ jobs:
           echo "=== Build Results ==="
           find openssl-macos-libs -type f -exec ls -lh {} \;
 
-  create-universal:
-    needs: build-macos
-    runs-on: macos-15
-    name: Create universal binaries
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create universal binaries with lipo
-        run: |
-          mkdir -p openssl-macos-universal/universal
-
-          # Create universal binary for libcrypto.a
-          lipo -create \
-            artifacts/openssl-macos-x86_64/libcrypto.a \
-            artifacts/openssl-macos-arm64/libcrypto.a \
-            -output openssl-macos-universal/universal/libcrypto.a
-
-          # Create universal binary for libssl.a
-          lipo -create \
-            artifacts/openssl-macos-x86_64/libssl.a \
-            artifacts/openssl-macos-arm64/libssl.a \
-            -output openssl-macos-universal/universal/libssl.a
-
-          # Verify universal binaries
-          echo "=== Universal Binary Info ==="
-          file openssl-macos-universal/universal/*.a
-          lipo -info openssl-macos-universal/universal/*.a
-          ls -lh openssl-macos-universal/universal/
-
-      - name: Upload universal artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: openssl-macos-universal
-          path: openssl-macos-universal/universal/*.a
-          retention-days: 30
-
       - name: Upload combined artifact
         uses: actions/upload-artifact@v4
         with:
           name: openssl-3.5.4-macos-all
           path: openssl-macos-libs/
           retention-days: 90
-
-      - name: Download universal artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: openssl-macos-universal
-          path: universal-libs
 
       - name: Create build report
         run: |
@@ -175,7 +129,6 @@ jobs:
           ## Architectures Built
           - **x86_64** (Intel)
           - **ARM64** (Apple Silicon)
-          - **Universal** (Combined x86_64 + ARM64)
 
           ## Libraries Created
 
@@ -184,9 +137,6 @@ jobs:
 
           ### ARM64
           $(ls -lh openssl-macos-libs/macos-arm-64/*.a 2>/dev/null || echo "No files")
-
-          ### Universal (Fat Binary)
-          $(ls -lh universal-libs/*.a 2>/dev/null || echo "No files")
 
           ## Build Configuration
           All builds use identical OpenSSL configure options:
@@ -201,7 +151,6 @@ jobs:
           - Xcode Command Line Tools (Clang)
           - x86_64: darwin64-x86_64-cc target with -mmacosx-version-min=10.5
           - ARM64: darwin64-arm64-cc target
-          - Universal binaries created with `lipo -create`
 
           ## GitHub Actions Workflow
           Built using: `.github/workflows/build-openssl-macos.yml`
