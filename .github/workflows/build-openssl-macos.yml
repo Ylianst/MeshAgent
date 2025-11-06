@@ -19,10 +19,10 @@ jobs:
     strategy:
       matrix:
         arch:
-          # x86_64 build - COMMENTED OUT for initial ARM64 test
-          # - { runner: 'macos-15-intel', name: 'x86_64', openssl: 'darwin64-x86_64-cc', archname: 'macos-x86-64', needs_min_version: true }
+          # x86_64 build
+          - { runner: 'macos-15-intel', name: 'x86_64', openssl: 'darwin64-x86_64-cc', archname: 'macos-x86-64', needs_min_version: true }
 
-          # ARM64 build - ACTIVE for testing
+          # ARM64 build
           - { runner: 'macos-15', name: 'arm64', openssl: 'darwin64-arm64-cc', archname: 'macos-arm-64', needs_min_version: false }
       fail-fast: false
 
@@ -100,11 +100,11 @@ jobs:
 
       - name: Combine into single structure
         run: |
-          # mkdir -p openssl-macos-libs/macos-x86-64
+          mkdir -p openssl-macos-libs/macos-x86-64
           mkdir -p openssl-macos-libs/macos-arm-64
 
           # Copy all libraries to their respective architecture folders
-          # cp artifacts/openssl-macos-x86_64/*.a openssl-macos-libs/macos-x86-64/ || true
+          cp artifacts/openssl-macos-x86_64/*.a openssl-macos-libs/macos-x86-64/ || true
           cp artifacts/openssl-macos-arm64/*.a openssl-macos-libs/macos-arm-64/ || true
 
           # Display results
@@ -127,16 +127,16 @@ jobs:
           $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
           ## Architectures Built
+          - **x86_64** (Intel)
           - **ARM64** (Apple Silicon)
-          <!-- - **x86_64** (Intel) - Commented out for initial test -->
 
           ## Libraries Created
 
+          ### x86_64
+          $(ls -lh openssl-macos-libs/macos-x86-64/*.a 2>/dev/null || echo "No files")
+
           ### ARM64
           $(ls -lh openssl-macos-libs/macos-arm-64/*.a 2>/dev/null || echo "No files")
-
-          <!-- ### x86_64
-          $(ls -lh openssl-macos-libs/macos-x86-64/*.a 2>/dev/null || echo "No files") -->
 
           ## Build Configuration
           All builds use identical OpenSSL configure options:
@@ -149,8 +149,8 @@ jobs:
 
           ## Compiler
           - Xcode Command Line Tools (Clang)
+          - x86_64: darwin64-x86_64-cc target with -mmacosx-version-min=10.5
           - ARM64: darwin64-arm64-cc target
-          <!-- - x86_64: darwin64-x86_64-cc target with -mmacosx-version-min=10.5 -->
 
           ## GitHub Actions Workflow
           Built using: `.github/workflows/build-openssl-macos.yml`
