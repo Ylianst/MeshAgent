@@ -20,8 +20,8 @@ jobs:
       matrix:
         arch:
           - { name: 'x64', openssl: 'VC-WIN64A', platform: 'x64', lib_suffix: '64' }
-          - { name: 'x86', openssl: 'VC-WIN32', platform: 'Win32', lib_suffix: '32' }
-          - { name: 'arm64', openssl: 'VC-WIN64-ARM', platform: 'ARM64', lib_suffix: '64ARM' }
+          - { name: 'x86', openssl: 'VC-WIN32', platform: 'x86', lib_suffix: '32' }
+          - { name: 'arm64', openssl: 'VC-WIN64-ARM', platform: 'amd64_arm64', lib_suffix: '64ARM' }
         config:
           - { name: 'Release', runtime: 'MT', suffix: 'MT' }
           - { name: 'Debug', runtime: 'MTd', suffix: 'MTd' }
