@@ -33,6 +33,11 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "microscript/ILibDuktape_Commit.h"
 
+#if defined(__APPLE__) && defined(_LINKVM)
+#include <dirent.h>
+#include <limits.h>
+#endif
+
 MeshAgentHostContainer *agentHost = NULL;
 #ifdef _OPENBSD
 #include <stdlib.h>
@@ -275,16 +280,70 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return(0);
 	}
 #if defined(_LINKVM) && defined(__APPLE__)
+	// -kvm0 DISABLED: macOS now uses REVERSED ARCHITECTURE with -kvm1
+	//
+	// Historical context:
+	// - -kvm0: Original process-spawning architecture (stdin/stdout I/O)
+	// - -kvm1: Apple-required architecture using QueueDirectories + domain sockets
+	//
+	// The -kvm1 REVERSED ARCHITECTURE was required to work within Apple's
+	// LaunchAgent/LaunchDaemon framework and bootstrap namespace restrictions.
+	// -kvm0 is kept commented here for function/feature comparison purposes.
+	//
+	// See commit 8772b02 (Oct 29, 2025) for removal of -kvm0 spawning code.
+	/*
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
 		kvm_server_mainloop(NULL);
 		return 0;
 	}
-	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
+	else
+	*/
+	if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
 		kvm_server_mainloop((void*)(uint64_t)getpid());
 		return 0;
 	}
+#endif
+
+#if defined(__APPLE__) && defined(_LINKVM)
+	// Clean up stale KVM session files from previous crash/unclean shutdown
+	// Only do this for main daemon (not -kvm0 or -kvm1)
+	unlink("/tmp/meshagent-kvm.sock");
+	unlink("/var/run/meshagent/session-active");
+	
+	// Clear all contents from /var/run/meshagent but keep the directory itself
+	// This avoids QueueDirectories weirdness while cleaning up stale files
+	DIR *dir = opendir("/var/run/meshagent");
+	if (dir != NULL)
+	{
+		struct dirent *entry;
+		char filepath[PATH_MAX];
+		
+		while ((entry = readdir(dir)) != NULL)
+		{
+			// Skip . and .. entries
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+				continue;
+				
+			snprintf(filepath, sizeof(filepath), "/var/run/meshagent/%s", entry->d_name);
+			
+			if (entry->d_type == DT_DIR)
+			{
+				// Recursively remove subdirectory - this shouldn't happen but handle it
+				char rm_cmd[PATH_MAX + 20];
+				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
+				system(rm_cmd);
+			}
+			else
+			{
+				// Remove regular file
+				unlink(filepath);
+			}
+		}
+		closedir(dir);
+	}
+	// Errors are ignored - files might not exist and that's fine
 #endif
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
@@ -380,6 +439,10 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	agentHost = MeshAgent_Create(capabilities);
 	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
+
+	// Note: KVM socket is now created on-demand when session starts (not at startup)
+	// QueueDirectories triggers -kvm1 only when /var/run/meshagent/ contains session file
+
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);
 	retCode = agentHost->exitCode;
 	MeshAgent_Destroy(agentHost);
