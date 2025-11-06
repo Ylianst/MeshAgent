@@ -81,23 +81,13 @@ for binary in "${ARCH_BINARIES[@]}"; do
     fi
 done
 
-# Step 2: Rebuild universal binaries from signed arch-specific binaries
-if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
-    echo -e "${YELLOW}Step 2: Rebuilding universal binaries from signed slices${NC}"
+# Step 2: Sign universal binaries (standalone distribution)
+if [ -d "$BUILD_DIR/universal" ]; then
+    echo -e "${YELLOW}Step 2: Signing universal binaries${NC}"
     echo ""
 
-    mkdir -p "$BUILD_DIR/universal"
-
-    # Rebuild release binary if both arch-specific versions exist
-    if [ -f "$BUILD_DIR/macos-x86-64/meshagent" ] && [ -f "$BUILD_DIR/macos-arm-64/meshagent" ]; then
-        echo -e "${BLUE}Creating universal binary:${NC} meshagent"
-        lipo -create \
-            "$BUILD_DIR/macos-x86-64/meshagent" \
-            "$BUILD_DIR/macos-arm-64/meshagent" \
-            -output "$BUILD_DIR/universal/meshagent"
-        echo -e "${GREEN}✓ Universal binary created with signed slices${NC}"
-
-        # Sign the universal binary to ensure consistent top-level signature
+    # Sign release universal binary if it exists
+    if [ -f "$BUILD_DIR/universal/meshagent" ]; then
         echo -e "${BLUE}Signing universal binary:${NC} meshagent"
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
@@ -112,28 +102,10 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
             echo "⚠ Warning: Universal binary signature verification had issues"
         fi
         echo ""
-
-        # Replace the binary inside app bundles with the signed universal binary
-        while IFS= read -r -d '' bundle; do
-            if [ -f "$bundle/Contents/MacOS/meshagent" ]; then
-                echo -e "${BLUE}Updating app bundle with signed binary:${NC} $bundle"
-                cp "$BUILD_DIR/universal/meshagent" "$bundle/Contents/MacOS/meshagent"
-                echo -e "${GREEN}✓ Signed binary copied into app bundle${NC}"
-                echo ""
-            fi
-        done < <(find "$BUILD_DIR" -name "meshagent.app" -type d -print0)
     fi
 
-    # Rebuild DEBUG binary if both arch-specific versions exist
-    if [ -f "$BUILD_DIR/macos-x86-64/DEBUG_meshagent" ] && [ -f "$BUILD_DIR/macos-arm-64/DEBUG_meshagent" ]; then
-        echo -e "${BLUE}Creating universal binary:${NC} DEBUG_meshagent"
-        lipo -create \
-            "$BUILD_DIR/macos-x86-64/DEBUG_meshagent" \
-            "$BUILD_DIR/macos-arm-64/DEBUG_meshagent" \
-            -output "$BUILD_DIR/universal/DEBUG_meshagent"
-        echo -e "${GREEN}✓ Universal DEBUG binary created with signed slices${NC}"
-
-        # Sign the universal binary to ensure consistent top-level signature
+    # Sign DEBUG universal binary if it exists
+    if [ -f "$BUILD_DIR/universal/DEBUG_meshagent" ]; then
         echo -e "${BLUE}Signing universal binary:${NC} DEBUG_meshagent"
         codesign --sign "$MACOS_SIGN_CERT" \
                  --timestamp \
@@ -148,16 +120,6 @@ if [ -d "$BUILD_DIR/macos-x86-64" ] && [ -d "$BUILD_DIR/macos-arm-64" ]; then
             echo "⚠ Warning: Universal DEBUG binary signature verification had issues"
         fi
         echo ""
-
-        # Replace DEBUG binary inside app bundles if they exist
-        while IFS= read -r -d '' bundle; do
-            if [ -f "$bundle/Contents/MacOS/DEBUG_meshagent" ]; then
-                echo -e "${BLUE}Updating app bundle with signed DEBUG binary:${NC} $bundle"
-                cp "$BUILD_DIR/universal/DEBUG_meshagent" "$bundle/Contents/MacOS/DEBUG_meshagent"
-                echo -e "${GREEN}✓ Signed DEBUG binary copied into app bundle${NC}"
-                echo ""
-            fi
-        done < <(find "$BUILD_DIR" -name "*.app" -type d -print0)
     fi
 fi
 
