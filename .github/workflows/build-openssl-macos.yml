@@ -1,0 +1,165 @@
+name: Build OpenSSL macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      openssl_version:
+        description: 'OpenSSL version to build'
+        required: false
+        default: '3.5.4'
+  push:
+    branches:
+      - master
+    paths:
+      - '.docker/openssl/**'
+      - '.github/workflows/build-openssl-macos.yml'
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        arch:
+          # x86_64 build - COMMENTED OUT for initial ARM64 test
+          # - { runner: 'macos-15-intel', name: 'x86_64', openssl: 'darwin64-x86_64-cc', archname: 'macos-x86-64', needs_min_version: true }
+
+          # ARM64 build - ACTIVE for testing
+          - { runner: 'macos-15', name: 'arm64', openssl: 'darwin64-arm64-cc', archname: 'macos-arm-64', needs_min_version: false }
+      fail-fast: false
+
+    runs-on: ${{ matrix.arch.runner }}
+
+    name: Build ${{ matrix.arch.name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download OpenSSL source
+        run: |
+          VERSION="${{ github.event.inputs.openssl_version || '3.5.4' }}"
+          BUILD_DIR="openssl-build-macos-${{ matrix.arch.name }}"
+          curl -L "https://github.com/openssl/openssl/releases/download/openssl-$VERSION/openssl-$VERSION.tar.gz" -o openssl.tar.gz
+          mkdir -p "$BUILD_DIR"
+          tar -xzf openssl.tar.gz -C "$BUILD_DIR" --strip-components=1
+          rm openssl.tar.gz
+
+      - name: Configure OpenSSL
+        working-directory: openssl-build-macos-${{ matrix.arch.name }}
+        run: |
+          ./Configure ${{ matrix.arch.openssl }} \
+            no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic \
+            no-threads no-dso no-shared no-asm no-rc5 no-idea \
+            no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast \
+            no-md2 no-mdc2 \
+            --release
+
+      - name: Modify CFLAGS for backward compatibility (x86_64 only)
+        if: matrix.arch.needs_min_version == true
+        working-directory: openssl-build-macos-${{ matrix.arch.name }}
+        run: |
+          # Add -mmacosx-version-min=10.5 for compatibility with older macOS versions
+          sed -i '' 's/^CFLAGS=/CFLAGS=-mmacosx-version-min=10.5 /' Makefile
+          echo "Modified CFLAGS to include -mmacosx-version-min=10.5"
+
+      - name: Build OpenSSL
+        working-directory: openssl-build-macos-${{ matrix.arch.name }}
+        run: |
+          make -j$(sysctl -n hw.ncpu) build_libs
+
+      - name: Copy libraries to output directory
+        run: |
+          # Create output directory structure
+          mkdir -p openssl/libstatic/macos/${{ matrix.arch.archname }}
+
+          # Copy libraries
+          cp openssl-build-macos-${{ matrix.arch.name }}/libcrypto.a "openssl/libstatic/macos/${{ matrix.arch.archname }}/libcrypto.a"
+          cp openssl-build-macos-${{ matrix.arch.name }}/libssl.a "openssl/libstatic/macos/${{ matrix.arch.archname }}/libssl.a"
+
+      - name: Verify build
+        run: |
+          ls -lh openssl/libstatic/macos/${{ matrix.arch.archname }}/
+          file openssl/libstatic/macos/${{ matrix.arch.archname }}/*.a || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-macos-${{ matrix.arch.name }}
+          path: openssl/libstatic/macos/${{ matrix.arch.archname }}/*.a
+          retention-days: 30
+
+  combine-artifacts:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    name: Combine all macOS builds
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Combine into single structure
+        run: |
+          # mkdir -p openssl-macos-libs/macos-x86-64
+          mkdir -p openssl-macos-libs/macos-arm-64
+
+          # Copy all libraries to their respective architecture folders
+          # cp artifacts/openssl-macos-x86_64/*.a openssl-macos-libs/macos-x86-64/ || true
+          cp artifacts/openssl-macos-arm64/*.a openssl-macos-libs/macos-arm-64/ || true
+
+          # Display results
+          echo "=== Build Results ==="
+          find openssl-macos-libs -type f -exec ls -lh {} \;
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-3.5.4-macos-all
+          path: openssl-macos-libs/
+          retention-days: 90
+
+      - name: Create build report
+        run: |
+          cat > BUILD_REPORT.md << 'EOF'
+          # OpenSSL 3.5.4 macOS Build Report
+
+          ## Build Date
+          $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          ## Architectures Built
+          - **ARM64** (Apple Silicon)
+          <!-- - **x86_64** (Intel) - Commented out for initial test -->
+
+          ## Libraries Created
+
+          ### ARM64
+          $(ls -lh openssl-macos-libs/macos-arm-64/*.a 2>/dev/null || echo "No files")
+
+          <!-- ### x86_64
+          $(ls -lh openssl-macos-libs/macos-x86-64/*.a 2>/dev/null || echo "No files") -->
+
+          ## Build Configuration
+          All builds use identical OpenSSL configure options:
+          ```
+          no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic
+          no-threads no-dso no-shared no-asm no-rc5 no-idea
+          no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast
+          no-md2 no-mdc2
+          ```
+
+          ## Compiler
+          - Xcode Command Line Tools (Clang)
+          - ARM64: darwin64-arm64-cc target
+          <!-- - x86_64: darwin64-x86_64-cc target with -mmacosx-version-min=10.5 -->
+
+          ## GitHub Actions Workflow
+          Built using: `.github/workflows/build-openssl-macos.yml`
+
+          EOF
+
+      - name: Upload build report
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-report
+          path: BUILD_REPORT.md
+          retention-days: 90
