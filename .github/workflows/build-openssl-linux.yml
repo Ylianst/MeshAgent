@@ -22,14 +22,14 @@ jobs:
           # x86-64 build (glibc)
           - { name: 'x86-64', platform: 'linux/amd64', image: 'debian:bullseye', openssl: 'linux-x86_64', archname: 'x86-64' }
 
-          # x86 build (glibc) - DISABLED FOR TESTING
-          # - { name: 'x86', platform: 'linux/386', image: 'i386/debian:bullseye', openssl: 'linux-x86', archname: 'x86' }
+          # x86 build (glibc)
+          - { name: 'x86', platform: 'linux/386', image: 'i386/debian:bullseye', openssl: 'linux-x86', archname: 'x86' }
 
-          # ARM64 build (glibc) - DISABLED FOR TESTING
-          # - { name: 'arm64', platform: 'linux/arm64', image: 'arm64v8/debian:bullseye', openssl: 'linux-aarch64', archname: 'arm64' }
+          # ARM64 build (glibc)
+          - { name: 'arm64', platform: 'linux/arm64', image: 'arm64v8/debian:bullseye', openssl: 'linux-aarch64', archname: 'arm64' }
 
-          # ARMhf build (glibc) - DISABLED FOR TESTING
-          # - { name: 'armhf', platform: 'linux/arm/v7', image: 'arm32v7/debian:bullseye', openssl: 'linux-armv4', archname: 'armhf' }
+          # ARMhf build (glibc)
+          - { name: 'armhf', platform: 'linux/arm/v7', image: 'arm32v7/debian:bullseye', openssl: 'linux-armv4', archname: 'armhf' }
       fail-fast: false
 
     runs-on: ubuntu-latest
