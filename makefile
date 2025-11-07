@@ -702,6 +702,7 @@ $(shell git log -1 --format=%H | awk '{ printf "#define SOURCE_COMMIT_HASH \"%s\
 endif
 
 .PHONY: all clean polyfills polyfills-setup polyfills-update polyfills-compress
+.DEFAULT_GOAL := all
 
 #
 # JavaScript Module Polyfill System
