@@ -36,6 +36,8 @@ limitations under the License.
 #if defined(__APPLE__) && defined(_LINKVM)
 #include <dirent.h>
 #include <limits.h>
+#include <libgen.h>
+#include <string.h>
 #endif
 
 MeshAgentHostContainer *agentHost = NULL;
@@ -306,14 +308,17 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		char *meshServiceName = NULL;
 		void *masterDb = NULL;
 		char dbPath[PATH_MAX];
+		char exePath[PATH_MAX];
 		int msnlen;
 
-		// Build database path (same logic as MeshAgent_Create)
-		char *exedir = ILibFileDir(argv[0]);
+		// Get executable directory using dirname() which requires a modifiable string
+		strncpy(exePath, argv[0], sizeof(exePath) - 1);
+		exePath[sizeof(exePath) - 1] = '\0';
+		char *exedir = dirname(exePath);
+
 		if (exedir != NULL)
 		{
 			snprintf(dbPath, sizeof(dbPath), "%s/meshagent.db", exedir);
-			free(exedir);
 
 			// Open database
 			masterDb = ILibSimpleDataStore_Create(dbPath);
