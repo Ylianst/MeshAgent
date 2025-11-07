@@ -75,7 +75,7 @@ void BreakSink(int s)
 #endif
 
 #if defined(_LINKVM) && defined(__APPLE__)
-extern void* kvm_server_mainloop(void *parm);
+extern void* kvm_server_mainloop(void *parm, char *companyName, char *meshServiceName);
 extern void senddebug(int val);
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
 {
@@ -301,17 +301,79 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	*/
 	if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
-		kvm_server_mainloop((void*)(uint64_t)getpid());
+		// Read companyName and meshServiceName from database for dynamic path generation
+		char *companyName = NULL;
+		char *meshServiceName = NULL;
+		void *masterDb = NULL;
+		char dbPath[PATH_MAX];
+		int msnlen;
+
+		// Build database path (same logic as MeshAgent_Create)
+		char *exedir = ILibFileDir(argv[0]);
+		if (exedir != NULL)
+		{
+			snprintf(dbPath, sizeof(dbPath), "%s/meshagent.db", exedir);
+			free(exedir);
+
+			// Open database
+			masterDb = ILibSimpleDataStore_Create(dbPath);
+			if (masterDb != NULL)
+			{
+				// Read meshServiceName
+				if ((msnlen = ILibSimpleDataStore_Get(masterDb, "meshServiceName", NULL, 0)) != 0)
+				{
+					meshServiceName = (char*)malloc(msnlen + 1);
+					ILibSimpleDataStore_Get(masterDb, "meshServiceName", meshServiceName, msnlen);
+					meshServiceName[msnlen] = '\0';
+				}
+				else
+				{
+					meshServiceName = strdup("meshagent");
+				}
+
+				// Read companyName
+				if ((msnlen = ILibSimpleDataStore_Get(masterDb, "companyName", NULL, 0)) != 0)
+				{
+					companyName = (char*)malloc(msnlen + 1);
+					ILibSimpleDataStore_Get(masterDb, "companyName", companyName, msnlen);
+					companyName[msnlen] = '\0';
+				}
+
+				ILibSimpleDataStore_Close(masterDb);
+			}
+			else
+			{
+				// Fallback if database can't be opened
+				meshServiceName = strdup("meshagent");
+			}
+		}
+		else
+		{
+			// Fallback if exedir can't be determined
+			meshServiceName = strdup("meshagent");
+		}
+
+		kvm_server_mainloop((void*)(uint64_t)getpid(), companyName, meshServiceName);
+
+		// Cleanup
+		if (companyName != NULL) free(companyName);
+		if (meshServiceName != NULL) free(meshServiceName);
+
 		return 0;
 	}
 #endif
 
 #if defined(__APPLE__) && defined(_LINKVM)
-	// Clean up stale KVM session files from previous crash/unclean shutdown
-	// Only do this for main daemon (not -kvm0 or -kvm1)
+	// TODO: Clean up stale KVM session files from previous crash/unclean shutdown
+	// Now that paths are dynamic based on companyName.meshServiceName, we need to either:
+	// 1. Read companyName/meshServiceName early to build correct paths for cleanup
+	// 2. Use glob patterns to clean up all matching files (/tmp/*-kvm.sock, /var/run/*/session-active)
+	// 3. Move cleanup to after database is loaded in MeshAgent_Start
+	// For now, skipping cleanup - each serviceId has its own paths and won't conflict
+	/*
 	unlink("/tmp/meshagent-kvm.sock");
 	unlink("/var/run/meshagent/session-active");
-	
+
 	// Clear all contents from /var/run/meshagent but keep the directory itself
 	// This avoids QueueDirectories weirdness while cleaning up stale files
 	DIR *dir = opendir("/var/run/meshagent");
@@ -344,6 +406,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		closedir(dir);
 	}
 	// Errors are ignored - files might not exist and that's fine
+	*/
 #endif
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)

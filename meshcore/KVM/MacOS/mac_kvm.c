@@ -58,9 +58,11 @@ limitations under the License.
 #include <limits.h>
 
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
-#define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
-#define KVM_Queue_Directory "/var/run/meshagent"
-#define KVM_Session_Signal_File "/var/run/meshagent/session-active"
+
+// Dynamic paths built from companyName and meshServiceName at runtime
+static char *KVM_Listener_Path = NULL;
+static char *KVM_Queue_Directory = NULL;
+static char *KVM_Session_Signal_File = NULL;
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
 #else
@@ -444,6 +446,45 @@ void kvm_pause(int pause)
 	g_pause = pause;
 }
 
+// Build dynamic KVM paths based on companyName and meshServiceName
+// Pattern matches JavaScript in service-manager.js:
+//   serviceId = companyName ? (companyName + '.' + meshServiceName) : meshServiceName
+//   Socket: /tmp/{serviceId}-kvm.sock
+//   Queue: /var/run/{serviceId}
+//   Signal: /var/run/{serviceId}/session-active
+static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName)
+{
+	char serviceId[512];
+
+	// Free any previously allocated paths
+	if (KVM_Listener_Path != NULL) { free(KVM_Listener_Path); KVM_Listener_Path = NULL; }
+	if (KVM_Queue_Directory != NULL) { free(KVM_Queue_Directory); KVM_Queue_Directory = NULL; }
+	if (KVM_Session_Signal_File != NULL) { free(KVM_Session_Signal_File); KVM_Session_Signal_File = NULL; }
+
+	// Build composite serviceId: companyName.meshServiceName or just meshServiceName
+	if (companyName != NULL && strlen(companyName) > 0)
+	{
+		snprintf(serviceId, sizeof(serviceId), "%s.%s", companyName, meshServiceName);
+	}
+	else
+	{
+		snprintf(serviceId, sizeof(serviceId), "%s", meshServiceName);
+	}
+
+	// Build dynamic paths
+	KVM_Listener_Path = (char*)malloc(PATH_MAX);
+	KVM_Queue_Directory = (char*)malloc(PATH_MAX);
+	KVM_Session_Signal_File = (char*)malloc(PATH_MAX);
+
+	snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s-kvm.sock", serviceId);
+	snprintf(KVM_Queue_Directory, PATH_MAX, "/var/run/%s", serviceId);
+	snprintf(KVM_Session_Signal_File, PATH_MAX, "/var/run/%s/session-active", serviceId);
+
+	printf("KVM: Built dynamic paths for serviceId='%s'\n", serviceId);
+	printf("KVM:   Socket: %s\n", KVM_Listener_Path);
+	printf("KVM:   Queue: %s\n", KVM_Queue_Directory);
+	printf("KVM:   Signal: %s\n", KVM_Session_Signal_File);
+}
 
 void* kvm_mainloopinput(void* param)
 {
@@ -498,7 +539,7 @@ void ExitSink(int s)
 
 	g_shutdown = 1;
 }
-void* kvm_server_mainloop(void* param)
+void* kvm_server_mainloop(void* param, char *companyName, char *meshServiceName)
 {
 	int x, y, height, width, r, c = 0;
 	long long desktopsize = 0;
@@ -521,6 +562,12 @@ void* kvm_server_mainloop(void* param)
 	{
 		// REVERSED ARCHITECTURE: -kvm1 now CONNECTS to main agent's listener socket
 		// This fixes the bootstrap namespace issue and null data problem
+
+		// Build dynamic paths based on companyName and meshServiceName (must match daemon)
+		if (KVM_Listener_Path == NULL)
+		{
+			kvm_build_dynamic_paths(companyName, meshServiceName);
+		}
 
 		written = write(STDOUT_FILENO, "KVM: Connecting to daemon socket...\n", 37);
 		fsync(STDOUT_FILENO);
@@ -822,11 +869,19 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 // Create KVM session: directory + signal file + socket
 // This triggers QueueDirectories to start -kvm1 LaunchAgent
 // Only called when user clicks "Connect" in MeshCentral
-int kvm_create_session(void)
+int kvm_create_session(char *companyName, char *meshServiceName)
 {
 	struct sockaddr_un serveraddr;
 	mode_t old_umask;
 	int signal_fd;
+
+	// Build dynamic paths based on companyName and meshServiceName
+	// This must be called before checking if session is already active
+	// because paths might not have been built yet
+	if (KVM_Listener_Path == NULL)
+	{
+		kvm_build_dynamic_paths(companyName, meshServiceName);
+	}
 
 	// Check if session already active
 	if (KVM_Daemon_Listener_FD != -1)
@@ -967,7 +1022,7 @@ void kvm_cleanup_session(void)
 	}
 }
 
-void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
+void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *companyName, char *meshServiceName)
 {
 	// REVERSED ARCHITECTURE: Always use on-demand session with QueueDirectories
 	// The uid parameter is ignored - LaunchAgent runs in correct user context via LimitLoadToSessionType
@@ -983,7 +1038,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 
 	// Create KVM session (directory + signal file + socket)
 	// This triggers QueueDirectories to start -kvm1
-	if (kvm_create_session() < 0)
+	if (kvm_create_session(companyName, meshServiceName) < 0)
 	{
 		fprintf(stderr, "KVM: Failed to create session\n");
 		return NULL;

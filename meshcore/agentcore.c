@@ -1445,7 +1445,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		MeshAgent_sendConsoleText(ctx, msg);
 
 		// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
-		int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+		int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, agent->companyName, agent->meshServiceName);
 
 		if (client_fd > 0)
 		{
@@ -5217,6 +5217,16 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 	}
 
+	if ((msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "companyName", NULL, 0)) != 0)
+	{
+		agentHost->companyName = (char*)ILibMemory_SmartAllocate(msnlen+1);
+		ILibSimpleDataStore_Get(agentHost->masterDb, "companyName", agentHost->companyName, msnlen);
+	}
+	else
+	{
+		agentHost->companyName = NULL;
+	}
+
 	if ((msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "displayName", NULL, 0)) != 0)
 	{
 		agentHost->displayName = (char*)ILibMemory_SmartAllocate(msnlen + 1);
@@ -6488,6 +6498,7 @@ void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 	if (agent->multicastDiscoveryKey != NULL) { free(agent->multicastDiscoveryKey); agent->multicastDiscoveryKey = NULL; }
 	if (agent->multicastServerUrl != NULL) { free(agent->multicastServerUrl); agent->multicastServerUrl = NULL; }
 	if (agent->meshServiceName != NULL) { ILibMemory_Free(agent->meshServiceName); agent->meshServiceName = NULL; }
+	if (agent->companyName != NULL) { ILibMemory_Free(agent->companyName); agent->companyName = NULL; }
 	if (agent->displayName != NULL) { ILibMemory_Free(agent->displayName); agent->displayName = NULL; }
 	if (agent->execparams != NULL) { ILibMemory_Free(agent->execparams); agent->execparams = NULL; }
 #ifdef WIN32
