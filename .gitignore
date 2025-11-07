@@ -35,6 +35,9 @@ build/
 # Auto-generated git commit info (regenerated on every build)
 microscript/ILibDuktape_Commit.h
 
+# JavaScript polyfill working directory (auto-generated from modules/)
+modules_expanded/
+
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
