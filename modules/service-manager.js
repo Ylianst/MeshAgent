@@ -2831,7 +2831,12 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires root'); }
 
             // Mac OS
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
+            // Build composite service identifier from companyName and service name
+            var serviceId = options.companyName ?
+                (options.companyName + '.' + options.name) :
+                options.name;
+
+            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
@@ -2850,7 +2855,7 @@ function serviceManager()
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
             plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '</string>\n');
+            plist += ('     <string>' + serviceId + '</string>\n');
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.installPath + '</string>\n');
@@ -2877,13 +2882,13 @@ function serviceManager()
 
             plist += '  </dict>\n';
             plist += '</plist>';
-            if (!require('fs').existsSync('/Library/LaunchDaemons/' + options.name + '.plist'))
+            if (!require('fs').existsSync('/Library/LaunchDaemons/' + serviceId + '.plist'))
             {
-                require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
+                require('fs').writeFileSync('/Library/LaunchDaemons/' + serviceId + '.plist', plist);
             }
             else
             {
-                throw ('Service: ' + options.name + ' already exists');
+                throw ('Service: ' + serviceId + ' already exists');
             }
         }
 
@@ -2914,13 +2919,18 @@ function serviceManager()
                 throw ('Installing a Global Agent/Daemon, requires admin');
             }
 
+            // Build composite service identifier from companyName and service name
+            var serviceId = options.companyName ?
+                (options.companyName + '.' + options.name) :
+                options.name;
+
             var servicePathTokens = options.servicePath.split('/');
             servicePathTokens.pop();
             if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
             options.workingDirectory = servicePathTokens.join('/');
 
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
+            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
             var params =         '     <key>ProgramArguments</key>\n';
             params +=            '     <array>\n';
             params +=           ('         <string>' + options.servicePath + '</string>\n');
@@ -2937,7 +2947,7 @@ function serviceManager()
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
             plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '-launchagent</string>\n');
+            plist += ('     <string>' + serviceId + '-agent</string>\n');
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.workingDirectory + '</string>\n');
@@ -2954,6 +2964,10 @@ function serviceManager()
                 }
                 plist += '      </array>\n';
             }
+            plist += '      <key>QueueDirectories</key>\n';
+            plist += '      <array>\n';
+            plist += ('         <string>/var/run/' + serviceId + '</string>\n');
+            plist += '      </array>\n';
             plist += '      <key>KeepAlive</key>\n';
             if (options.failureRestart == null || options.failureRestart > 0) {
                 plist += '      <dict>\n';
@@ -2984,10 +2998,10 @@ function serviceManager()
                 require('fs').mkdirSync(folder);
                 require('fs').chownSync(folder, options.uid, options.gid);
             }
-            require('fs').writeFileSync(folder + options.name + '.plist', plist);
+            require('fs').writeFileSync(folder + serviceId + '-agent.plist', plist);
             if(options.user)
             {
-                require('fs').chownSync(folder + options.name + '.plist', options.uid, options.gid);
+                require('fs').chownSync(folder + serviceId + '-agent.plist', options.uid, options.gid);
             }
         };
     }
