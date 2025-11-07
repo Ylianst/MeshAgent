@@ -313,6 +313,7 @@ function installService(params)
             require('service-manager').manager.installLaunchAgent(
                 {
                     name: options.name,
+                    companyName: options.companyName,
                     servicePath: svc.appLocation(),
                     startType: 'AUTO_START',
                     sessionTypes: ['LoginWindow'],
