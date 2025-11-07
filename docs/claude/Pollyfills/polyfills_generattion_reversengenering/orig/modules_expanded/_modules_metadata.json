@@ -1,0 +1,845 @@
+{
+  "extraction_date": "2025-11-07",
+  "total_modules": 93,
+  "successful_extractions": 93,
+  "failed_extractions": 0,
+  "modules": [
+    {
+      "name": "AgentHashTool",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1259,
+      "decompressed_size": 3760,
+      "compression_ratio": 66.51595744680851,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "CSP",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 9652,
+      "decompressed_size": 50265,
+      "compression_ratio": 80.79777180941012,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "DeviceManager",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3633,
+      "decompressed_size": 17002,
+      "compression_ratio": 78.6319256558052,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "MSH_Installer",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2563,
+      "decompressed_size": 9337,
+      "compression_ratio": 72.55006961550819,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "PE_Parser",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4221,
+      "decompressed_size": 18190,
+      "compression_ratio": 76.79494227597581,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "PostBuild",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 690,
+      "decompressed_size": 2305,
+      "compression_ratio": 70.06507592190889,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "RecoveryCore",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5473,
+      "decompressed_size": 25516,
+      "compression_ratio": 78.55071327794325,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "_agentNodeId",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1598,
+      "decompressed_size": 5086,
+      "compression_ratio": 68.58041683051515,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "_agentStatus",
+      "timestamp": "2025-11-04T19:56:07.000-07:00",
+      "compressed_size": 1416,
+      "decompressed_size": 4613,
+      "compression_ratio": 69.30414047257749,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "agent-installer",
+      "timestamp": "2025-10-29T18:22:33.000-06:00",
+      "compressed_size": 8050,
+      "decompressed_size": 35961,
+      "compression_ratio": 77.61463808014237,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-lme",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5203,
+      "decompressed_size": 24858,
+      "compression_ratio": 79.06911255933704,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-mei",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4741,
+      "decompressed_size": 22525,
+      "compression_ratio": 78.95227524972253,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-scanner",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1762,
+      "decompressed_size": 4393,
+      "compression_ratio": 59.890735260641925,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-script",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5597,
+      "decompressed_size": 22431,
+      "compression_ratio": 75.04792474700191,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-wsman-duk",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2165,
+      "decompressed_size": 6600,
+      "compression_ratio": 67.1969696969697,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-wsman",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3443,
+      "decompressed_size": 14754,
+      "compression_ratio": 76.66395553748136,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt-xml",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2987,
+      "decompressed_size": 11568,
+      "compression_ratio": 74.17876901798064,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "amt_heci",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2774,
+      "decompressed_size": 14589,
+      "compression_ratio": 80.98567413804922,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "awk-helper",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 793,
+      "decompressed_size": 1627,
+      "compression_ratio": 51.259987707437006,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "child-container",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3006,
+      "decompressed_size": 11475,
+      "compression_ratio": 73.80392156862744,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "clipboard",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5308,
+      "decompressed_size": 26020,
+      "compression_ratio": 79.60030745580323,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "code-utils",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3541,
+      "decompressed_size": 14037,
+      "compression_ratio": 74.77381206810571,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "crc32-stream",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 612,
+      "decompressed_size": 1197,
+      "compression_ratio": 48.872180451127825,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "daemon",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 875,
+      "decompressed_size": 1990,
+      "compression_ratio": 56.03015075376885,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "dbTool",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1415,
+      "decompressed_size": 5161,
+      "compression_ratio": 72.58283278434412,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "default_route",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1093,
+      "decompressed_size": 2952,
+      "compression_ratio": 62.97425474254743,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "desktop-lock",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 825,
+      "decompressed_size": 1810,
+      "compression_ratio": 54.41988950276243,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "dhcp",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 7464,
+      "decompressed_size": 26633,
+      "compression_ratio": 71.9746179551684,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "exe",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2680,
+      "decompressed_size": 7524,
+      "compression_ratio": 64.3806485911749,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "file-search",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1736,
+      "decompressed_size": 6426,
+      "compression_ratio": 72.98474945533768,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "heci",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4960,
+      "decompressed_size": 24293,
+      "compression_ratio": 79.58259580949245,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "heciRedirector",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2063,
+      "decompressed_size": 8758,
+      "compression_ratio": 76.44439369719113,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "http-digest",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2912,
+      "decompressed_size": 11923,
+      "compression_ratio": 75.57661662333305,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "identifiers",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 8997,
+      "decompressed_size": 43941,
+      "compression_ratio": 79.52481736874445,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "interactive",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4582,
+      "decompressed_size": 18721,
+      "compression_ratio": 75.52481170877624,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "kvm-helper",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1834,
+      "decompressed_size": 10257,
+      "compression_ratio": 82.1195281271327,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "lib-finder",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1075,
+      "decompressed_size": 2858,
+      "compression_ratio": 62.386284114765566,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "linux-acpi",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 847,
+      "decompressed_size": 1746,
+      "compression_ratio": 51.48911798396334,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "linux-cpuflags",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5607,
+      "decompressed_size": 18945,
+      "compression_ratio": 70.40380047505938,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "linux-cursors",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1663,
+      "decompressed_size": 4699,
+      "compression_ratio": 64.60949138114492,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "linux-dbus",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2185,
+      "decompressed_size": 7384,
+      "compression_ratio": 70.40899241603466,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "linux-gnome-helpers",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2123,
+      "decompressed_size": 8258,
+      "compression_ratio": 74.29159602809396,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "linux-pathfix",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 702,
+      "decompressed_size": 1264,
+      "compression_ratio": 44.4620253164557,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "lme_heci",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2880,
+      "decompressed_size": 14058,
+      "compression_ratio": 79.5134443021767,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "mac-powerutil",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 763,
+      "decompressed_size": 2769,
+      "compression_ratio": 72.44492596605272,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "message-box",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 8300,
+      "decompressed_size": 56339,
+      "compression_ratio": 85.26775413124123,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "monitor-border",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2609,
+      "decompressed_size": 20898,
+      "compression_ratio": 87.51555172743804,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "monitor-info",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 8360,
+      "decompressed_size": 44784,
+      "compression_ratio": 81.33261879242588,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "pac",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1022,
+      "decompressed_size": 2346,
+      "compression_ratio": 56.43648763853367,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "parseXml",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2040,
+      "decompressed_size": 8167,
+      "compression_ratio": 75.0214276968287,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "power-monitor",
+      "timestamp": "2025-11-04T20:15:32.000-07:00",
+      "compressed_size": 2787,
+      "decompressed_size": 11447,
+      "compression_ratio": 75.65300952214554,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "process-manager",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4088,
+      "decompressed_size": 18127,
+      "compression_ratio": 77.44800573729795,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "promise",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2801,
+      "decompressed_size": 12866,
+      "compression_ratio": 78.22944193999689,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "proxy-helper",
+      "timestamp": "2025-11-04T20:14:27.000-07:00",
+      "compressed_size": 5153,
+      "decompressed_size": 25825,
+      "compression_ratio": 80.04646660212971,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "service-host",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3084,
+      "decompressed_size": 13228,
+      "compression_ratio": 76.685817961899,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "smbios",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3998,
+      "decompressed_size": 14218,
+      "compression_ratio": 71.88071458714306,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "tar-encoder",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2413,
+      "decompressed_size": 8590,
+      "compression_ratio": 71.90919674039581,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "task-scheduler",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4146,
+      "decompressed_size": 26689,
+      "compression_ratio": 84.46551013526171,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "toaster",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4237,
+      "decompressed_size": 19538,
+      "compression_ratio": 78.31405466270857,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "update-helper",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 859,
+      "decompressed_size": 2172,
+      "compression_ratio": 60.451197053407,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "upnp",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5593,
+      "decompressed_size": 26044,
+      "compression_ratio": 78.52480417754569,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "user-sessions",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 10565,
+      "decompressed_size": 66867,
+      "compression_ratio": 84.19997906291594,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "util-agentlog",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2068,
+      "decompressed_size": 6348,
+      "compression_ratio": 67.42281033396344,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "util-descriptors",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2306,
+      "decompressed_size": 7367,
+      "compression_ratio": 68.6982489480114,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "util-dns",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1502,
+      "decompressed_size": 4517,
+      "compression_ratio": 66.74784148771309,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "util-language",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4458,
+      "decompressed_size": 26133,
+      "compression_ratio": 82.94110894271611,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "util-pathHelper",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 916,
+      "decompressed_size": 2011,
+      "compression_ratio": 54.450522128294374,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "util-service-check",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1372,
+      "decompressed_size": 3996,
+      "compression_ratio": 65.66566566566567,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "wget",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1700,
+      "decompressed_size": 4627,
+      "compression_ratio": 63.25913118651394,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "wifi-scanner-windows",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1729,
+      "decompressed_size": 5734,
+      "compression_ratio": 69.84652947331705,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "wifi-scanner",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1473,
+      "decompressed_size": 4558,
+      "compression_ratio": 67.68319438350154,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-authenticode-opus",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1702,
+      "decompressed_size": 5675,
+      "compression_ratio": 70.00881057268722,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-bcd",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1775,
+      "decompressed_size": 5731,
+      "compression_ratio": 69.0280928284767,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-certstore",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1631,
+      "decompressed_size": 5079,
+      "compression_ratio": 67.88737940539477,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-com",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2028,
+      "decompressed_size": 6112,
+      "compression_ratio": 66.81937172774869,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-console",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2298,
+      "decompressed_size": 8237,
+      "compression_ratio": 72.10149326211,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-crypto",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 6720,
+      "decompressed_size": 38555,
+      "compression_ratio": 82.57035403968356,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-deskutils",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2485,
+      "decompressed_size": 7393,
+      "compression_ratio": 66.38712295414581,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-dispatcher",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3827,
+      "decompressed_size": 13110,
+      "compression_ratio": 70.80854309687261,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-firewall",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 4944,
+      "decompressed_size": 25253,
+      "compression_ratio": 80.42212806399239,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-message-pump",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3691,
+      "decompressed_size": 15922,
+      "compression_ratio": 76.8182389147092,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-registry",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3588,
+      "decompressed_size": 16289,
+      "compression_ratio": 77.97286512370312,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-securitycenter",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1565,
+      "decompressed_size": 4232,
+      "compression_ratio": 63.01984877126654,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-systray",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2427,
+      "decompressed_size": 8836,
+      "compression_ratio": 72.53282028066998,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-tasks",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 5371,
+      "decompressed_size": 30843,
+      "compression_ratio": 82.58600006484454,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-terminal",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 6955,
+      "decompressed_size": 32480,
+      "compression_ratio": 78.58682266009852,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-utils",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 1012,
+      "decompressed_size": 2466,
+      "compression_ratio": 58.96188158961881,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-virtual-terminal",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 2875,
+      "decompressed_size": 11885,
+      "compression_ratio": 75.80984434160708,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-volumes",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 879,
+      "decompressed_size": 1714,
+      "compression_ratio": 48.716452742123685,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "win-wmi",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3215,
+      "decompressed_size": 13710,
+      "compression_ratio": 76.54996353026988,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "zip-reader",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3913,
+      "decompressed_size": 16540,
+      "compression_ratio": 76.3422007255139,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "zip-writer",
+      "timestamp": "2025-08-19T13:12:47.000-06:00",
+      "compressed_size": 3311,
+      "decompressed_size": 12288,
+      "compression_ratio": 73.05501302083333,
+      "success": true,
+      "error": null
+    },
+    {
+      "name": "code-utils",
+      "timestamp": "2022-12-14T10:05:36.000-08:00",
+      "compressed_size": 3594,
+      "decompressed_size": 14545,
+      "compression_ratio": 75.2904778274321,
+      "success": true,
+      "error": null
+    }
+  ]
+}
