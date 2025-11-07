@@ -1,0 +1,94 @@
+name: Build OpenSSL MIPS (Debug)
+
+on:
+  workflow_dispatch:
+    inputs:
+      openssl_version:
+        description: 'OpenSSL version to build'
+        required: false
+        default: '3.5.4'
+
+jobs:
+  build-mips:
+    runs-on: ubuntu-latest
+    name: Build MIPS OpenWrt
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Download OpenSSL source
+        run: |
+          VERSION="${{ github.event.inputs.openssl_version || '3.5.4' }}"
+          BUILD_DIR="openssl-build-mips"
+          curl -L "https://github.com/openssl/openssl/releases/download/openssl-$VERSION/openssl-$VERSION.tar.gz" -o openssl.tar.gz
+          mkdir -p "$BUILD_DIR"
+          tar -xzf openssl.tar.gz -C "$BUILD_DIR" --strip-components=1
+          rm openssl.tar.gz
+
+      - name: Build OpenSSL for MIPS with Debian cross-compiler
+        run: |
+          docker run --rm --platform=linux/amd64 \
+            -v "$PWD/openssl-build-mips:/build" \
+            -v "$PWD/openssl-output:/output" \
+            -w /build \
+            debian:bullseye \
+            bash -c "
+              echo '=== Installing MIPS cross-compiler ==='
+              apt-get update -qq
+              apt-get install -y -qq build-essential gcc-10-mips-linux-gnu g++-10-mips-linux-gnu perl > /dev/null 2>&1
+
+              echo ''
+              echo '=== Compiler version ==='
+              mips-linux-gnu-gcc-10 --version
+
+              # Create symlinks for versioned compilers
+              echo ''
+              echo '=== Creating compiler symlinks ==='
+              ln -s /usr/bin/mips-linux-gnu-gcc-10 /usr/bin/mips-linux-gnu-gcc
+              ln -s /usr/bin/mips-linux-gnu-g++-10 /usr/bin/mips-linux-gnu-g++
+              ln -s /usr/bin/mips-linux-gnu-ar-10 /usr/bin/mips-linux-gnu-ar || true
+              ln -s /usr/bin/mips-linux-gnu-ranlib-10 /usr/bin/mips-linux-gnu-ranlib || true
+
+              # Configure OpenSSL
+              echo ''
+              echo '=== Configuring OpenSSL ==='
+              ./Configure linux-mips32 \
+                no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic \
+                no-threads no-dso no-shared no-asm no-rc5 no-idea \
+                no-md4 no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast \
+                no-md2 no-mdc2 \
+                --cross-compile-prefix=mips-linux-gnu- \
+                --release
+
+              # Build
+              echo ''
+              echo '=== Building OpenSSL ==='
+              make -j\$(nproc) build_libs
+
+              # Copy output
+              mkdir -p /output/mips24kc
+              cp libssl.a libcrypto.a /output/mips24kc/
+
+              echo ''
+              echo '=== Build complete ==='
+              ls -lh /output/mips24kc/
+              file /output/mips24kc/*.a
+            "
+
+      - name: Verify build
+        run: |
+          ls -lh openssl-output/mips24kc/
+          file openssl-output/mips24kc/*.a || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-mips24kc
+          path: openssl-output/mips24kc/*.a
+          retention-days: 30
