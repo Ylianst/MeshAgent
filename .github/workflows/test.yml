@@ -1,5 +1,4 @@
-name: MeshAgent Build and Test Latest
-
+name: MeshAgent Test
 permissions:
   contents: write
   packages: write
