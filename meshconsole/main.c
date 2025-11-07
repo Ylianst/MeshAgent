@@ -36,7 +36,6 @@ limitations under the License.
 #if defined(__APPLE__) && defined(_LINKVM)
 #include <dirent.h>
 #include <limits.h>
-#include "meshcore/KVM/MacOS/mac_kvm.h"
 #endif
 
 MeshAgentHostContainer *agentHost = NULL;
@@ -302,69 +301,49 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	*/
 	if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
-		// Initialize dynamic KVM paths based on binary location
-		if (initialize_kvm_paths(argv[0]) < 0)
-		{
-			fprintf(stderr, "Failed to initialize KVM paths\n");
-			return 1;
-		}
 		kvm_server_mainloop((void*)(uint64_t)getpid());
 		return 0;
 	}
 #endif
 
 #if defined(__APPLE__) && defined(_LINKVM)
-	// Initialize dynamic KVM paths for main daemon
-	if (initialize_kvm_paths(argv[0]) < 0)
+	// Clean up stale KVM session files from previous crash/unclean shutdown
+	// Only do this for main daemon (not -kvm0 or -kvm1)
+	unlink("/tmp/meshagent-kvm.sock");
+	unlink("/var/run/meshagent/session-active");
+	
+	// Clear all contents from /var/run/meshagent but keep the directory itself
+	// This avoids QueueDirectories weirdness while cleaning up stale files
+	DIR *dir = opendir("/var/run/meshagent");
+	if (dir != NULL)
 	{
-		fprintf(stderr, "Warning: Failed to initialize KVM paths for cleanup\n");
-		// Continue anyway - cleanup is best-effort
-	}
-	else
-	{
-		// Clean up stale KVM session files from previous crash/unclean shutdown
-		// Only do this for main daemon (not -kvm0 or -kvm1)
-		// Use dynamically determined paths
-		extern char *KVM_Listener_Path;
-		extern char *KVM_Queue_Directory;
-		extern char *KVM_Session_Signal_File;
-
-		unlink(KVM_Listener_Path);
-		unlink(KVM_Session_Signal_File);
-
-		// Clear all contents from queue directory but keep the directory itself
-		// This avoids QueueDirectories weirdness while cleaning up stale files
-		DIR *dir = opendir(KVM_Queue_Directory);
-		if (dir != NULL)
+		struct dirent *entry;
+		char filepath[PATH_MAX];
+		
+		while ((entry = readdir(dir)) != NULL)
 		{
-			struct dirent *entry;
-			char filepath[PATH_MAX];
-
-			while ((entry = readdir(dir)) != NULL)
+			// Skip . and .. entries
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+				continue;
+				
+			snprintf(filepath, sizeof(filepath), "/var/run/meshagent/%s", entry->d_name);
+			
+			if (entry->d_type == DT_DIR)
 			{
-				// Skip . and .. entries
-				if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-					continue;
-
-				snprintf(filepath, sizeof(filepath), "%s/%s", KVM_Queue_Directory, entry->d_name);
-
-				if (entry->d_type == DT_DIR)
-				{
-					// Recursively remove subdirectory - this shouldn't happen but handle it
-					char rm_cmd[PATH_MAX + 20];
-					snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
-					system(rm_cmd);
-				}
-				else
-				{
-					// Remove regular file
-					unlink(filepath);
-				}
+				// Recursively remove subdirectory - this shouldn't happen but handle it
+				char rm_cmd[PATH_MAX + 20];
+				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
+				system(rm_cmd);
 			}
-			closedir(dir);
+			else
+			{
+				// Remove regular file
+				unlink(filepath);
+			}
 		}
-		// Errors are ignored - files might not exist and that's fine
+		closedir(dir);
 	}
+	// Errors are ignored - files might not exist and that's fine
 #endif
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)

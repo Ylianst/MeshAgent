@@ -56,85 +56,11 @@ limitations under the License.
 #include <pwd.h>
 #include <dirent.h>
 #include <limits.h>
-#include <CommonCrypto/CommonDigest.h>
-#include <libgen.h>
-
-//
-// Dynamic path generation based on binary name and location
-// Pattern: /tmp/{binary_name}-{hash}-kvm.sock and /var/run/{binary_name}-{hash}
-// This allows multiple MeshCentral agents to coexist on the same machine
-//
-
-// Global variables for dynamic paths (allocated at runtime)
-// These are accessible via extern from main.c for cleanup operations
-char *KVM_Listener_Path = NULL;
-char *KVM_Queue_Directory = NULL;
-char *KVM_Session_Signal_File = NULL;
 
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
-
-// Generate 8-character hex hash from input string using SHA-256
-static void generate_hash(const char *input, char *output_hash)
-{
-	unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-	CC_SHA256(input, (CC_LONG)strlen(input), digest);
-
-	// Use first 4 bytes (8 hex chars) of SHA-256
-	snprintf(output_hash, 9, "%02x%02x%02x%02x",
-		digest[0], digest[1], digest[2], digest[3]);
-}
-
-// Initialize dynamic paths based on binary location
-// Called once at startup with argv[0]
-int initialize_kvm_paths(const char *argv0)
-{
-	char resolved_path[PATH_MAX];
-	char binary_name[256];
-	char hash[9];
-	char *base_name;
-
-	// Resolve full path of binary
-	if (realpath(argv0, resolved_path) == NULL)
-	{
-		fprintf(stderr, "KVM: Failed to resolve binary path from argv[0]: %s\n", argv0);
-		return -1;
-	}
-
-	// Extract binary name (basename)
-	base_name = basename(resolved_path);
-	strncpy(binary_name, base_name, sizeof(binary_name) - 1);
-	binary_name[sizeof(binary_name) - 1] = '\0';
-
-	// Generate hash from full resolved path
-	generate_hash(resolved_path, hash);
-
-	// Allocate and build dynamic paths
-	// Pattern: {binary_name}-{hash}
-
-	// Socket: /tmp/{binary_name}-{hash}-kvm.sock
-	KVM_Listener_Path = malloc(PATH_MAX);
-	if (KVM_Listener_Path == NULL) return -1;
-	snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s-%s-kvm.sock", binary_name, hash);
-
-	// Queue directory: /var/run/{binary_name}-{hash}
-	KVM_Queue_Directory = malloc(PATH_MAX);
-	if (KVM_Queue_Directory == NULL) return -1;
-	snprintf(KVM_Queue_Directory, PATH_MAX, "/var/run/%s-%s", binary_name, hash);
-
-	// Signal file: /var/run/{binary_name}-{hash}/session-active
-	KVM_Session_Signal_File = malloc(PATH_MAX);
-	if (KVM_Session_Signal_File == NULL) return -1;
-	snprintf(KVM_Session_Signal_File, PATH_MAX, "%s/session-active", KVM_Queue_Directory);
-
-	printf("KVM: Dynamic paths initialized:\n");
-	printf("  Binary: %s\n", resolved_path);
-	printf("  Hash: %s\n", hash);
-	printf("  Socket: %s\n", KVM_Listener_Path);
-	printf("  Queue: %s\n", KVM_Queue_Directory);
-	printf("  Signal: %s\n", KVM_Session_Signal_File);
-
-	return 0;
-}
+#define KVM_Listener_Path "/tmp/meshagent-kvm.sock"
+#define KVM_Queue_Directory "/var/run/meshagent"
+#define KVM_Session_Signal_File "/var/run/meshagent/session-active"
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
 #else

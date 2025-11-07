@@ -26,9 +26,6 @@
 
 typedef ILibTransport_DoneState(*ILibKVM_WriteHandler)(char *buffer, int bufferLen, void *reserved);
 
-// Initialize dynamic paths based on binary location (call once at startup with argv[0])
-int initialize_kvm_paths(const char *argv0);
-
 void kvm_check_permission();
 
 int kvm_create_session(void);      // Create KVM session on-demand (directory + signal file + socket)
