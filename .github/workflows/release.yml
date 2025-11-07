@@ -1,4 +1,4 @@
-name: MeshAgent Build and Push Latest
+name: MeshAgent Release
 
 permissions:
   contents: write
@@ -10,7 +10,7 @@ permissions:
 
 on:
   push:
-    branches: [master]
+    branches: [master, feature/release]
     paths-ignore:
       - "**/*.md"
   workflow_dispatch:
@@ -140,6 +140,7 @@ jobs:
           retention-days: 30
           compression-level: 9
 
+
   create_universal_macos:
     name: "Create Universal macOS Binary"
     needs: [build_client]
@@ -198,3 +199,61 @@ jobs:
           path: artifacts/
           retention-days: 30
           compression-level: 9
+  
+
+  release:
+    name: "Create Release"
+    needs: [build_client, create_universal_macos]
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'push'
+      # github.event_name == 'workflow_dispatch' && 
+      # inputs.version != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+        continue-on-error: true
+
+      - name: Prepare release artifacts
+        run: |
+          set -e
+          ls -lR final-artifacts
+          mkdir -p final-artifacts/clients
+
+          # macOS
+          if [ -d "release-artifacts/fleet-mac-universal" ]; then
+            tar -czf "final-artifacts/clients/fleet-macos-universal.tar.gz" \
+              -C "release-artifacts/fleet-mac-universal" fleet
+          fi
+          # Windows
+          if [ -d "release-artifacts/fleet-windows-amd64" ]; then
+            (cd "release-artifacts/fleet-windows-amd64" && \
+              zip "${GITHUB_WORKSPACE}/final-artifacts/clients/fleet-windows-amd64.zip" fleet.exe)
+          fi
+
+          ls -lh final-artifacts/clients/
+
+      - name: Generate release header
+        run: |
+          cat > RELEASE_HEADER.md <<EOF
+          ## Fleet Clients
+          - **macOS** (Universal): \`fleet-macos-universal.tar.gz\`
+          - **Windows** (amd64): \`fleet-windows-amd64.zip\`
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: "🦩 ${{ inputs.version }}"
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body_path: RELEASE_HEADER.md
+          files: |
+            final-artifacts/clients/*
