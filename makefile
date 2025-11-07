@@ -701,7 +701,68 @@ $(shell git log -1 | grep "Date: " | awk '{ aLen=split($$0, a, " "); printf "#de
 $(shell git log -1 --format=%H | awk '{ printf "#define SOURCE_COMMIT_HASH \"%s\"\n", $$0; }' >> microscript/ILibDuktape_Commit.h )
 endif
 
-.PHONY: all clean
+.PHONY: all clean polyfills polyfills-setup polyfills-update polyfills-compress
+
+#
+# JavaScript Module Polyfill System
+# ==================================
+# MeshAgent embeds JavaScript modules into the C binary by compressing them and
+# storing them as base64-encoded strings in microscript/ILibDuktape_Polyfills.c
+#
+# This is NOT standard Duktape behavior - it's a custom MeshAgent build tool.
+#
+# Workflow:
+#   1. JavaScript source files live in modules/
+#   2. They are copied to modules_expanded/ (working directory)
+#   3. code-utils.js compresses each .js file using deflate
+#   4. Compressed modules are embedded into ILibDuktape_Polyfills.c as C code
+#   5. At runtime, the agent decompresses and loads them
+#
+# Manual commands (if needed):
+#   node -e "require('./modules/code-utils').expand()"   # Extract from C file
+#   node -e "require('./modules/code-utils').update()"   # Sync modules/ → modules_expanded/
+#   node -e "require('./modules/code-utils').shrink()"   # Compress and embed
+#
+# Automatic commands (use these):
+#   make polyfills           # Complete workflow: setup → update → compress
+#   make polyfills-compress  # Just compress (if modules_expanded/ already set up)
+#
+
+# List all JavaScript modules that need to be embedded
+JS_MODULES := $(wildcard modules/*.js)
+
+# Setup: Create modules_expanded/ and copy all JavaScript files
+polyfills-setup:
+	@echo "Setting up modules_expanded/ directory..."
+	@if [ ! -d modules_expanded ]; then \
+		mkdir -p modules_expanded; \
+		echo "Created modules_expanded/"; \
+	fi
+	@echo "Copying $(words $(JS_MODULES)) JavaScript modules from modules/ to modules_expanded/..."
+	@cp modules/*.js modules_expanded/
+	@echo "Setup complete: modules_expanded/ ready"
+
+# Update: Sync newer files from modules/ to modules_expanded/ using code-utils
+polyfills-update: polyfills-setup
+	@echo "Updating modules_expanded/ with newer files from modules/..."
+	@node -e "require('./modules/code-utils').update()"
+	@echo "Update complete"
+
+# Compress: Run code-utils shrink() to embed modules into ILibDuktape_Polyfills.c
+polyfills-compress: polyfills-update
+	@echo "Compressing JavaScript modules into microscript/ILibDuktape_Polyfills.c..."
+	@node -e "require('./modules/code-utils').shrink()"
+	@echo "Compression complete: JavaScript modules embedded successfully"
+
+# Complete polyfill workflow
+polyfills: polyfills-compress
+	@echo "Polyfill generation complete"
+
+# Make ILibDuktape_Polyfills.c depend on all JavaScript modules
+# This ensures polyfills are regenerated when any .js file changes
+microscript/ILibDuktape_Polyfills.c: $(JS_MODULES) modules/code-utils.js
+	@echo "JavaScript modules changed, regenerating polyfills..."
+	$(MAKE) polyfills-compress
 
 all: $(EXENAME) $(LIBNAME)
 
