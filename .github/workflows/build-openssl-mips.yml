@@ -41,7 +41,7 @@ jobs:
             bash -c "
               echo '=== Installing MIPS cross-compiler ==='
               apt-get update -qq
-              apt-get install -y -qq build-essential gcc-10-mips-linux-gnu g++-10-mips-linux-gnu perl > /dev/null 2>&1
+              apt-get install -y -qq build-essential gcc-10-mips-linux-gnu g++-10-mips-linux-gnu perl file > /dev/null 2>&1
 
               echo ''
               echo '=== Compiler version ==='
