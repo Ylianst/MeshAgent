@@ -2248,6 +2248,19 @@ function serviceManager()
     }
     this.installService = function installService(options)
     {
+        // Sanitize companyName and service name for macOS to follow reverse DNS naming conventions
+        // Only allow alphanumeric, hyphens, and underscores
+        if (process.platform == 'darwin' && options.companyName) {
+            options.companyName = options.companyName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+        }
+        if (process.platform == 'darwin' && options.name) {
+            var originalName = options.name;
+            options.name = options.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+            if (!options.name) {
+                throw ('Service name "' + originalName + '" contains no valid characters. Use alphanumeric, hyphens, or underscores only.');
+            }
+        }
+
         if (process.platform == 'linux') { options.name = this.escape(options.name); }
         if (!options.target) { options.target = options.name; }
         if (!options.displayName) { options.displayName = options.name; }
@@ -2831,10 +2844,25 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires root'); }
 
             // Mac OS
+            // Sanitize companyName and service name to follow reverse DNS naming conventions
+            // Only allow alphanumeric, hyphens, and underscores (dots will be added between components)
+            function sanitizeIdentifier(str) {
+                if (!str) return null;
+                // Replace spaces with hyphens, remove all non-alphanumeric except hyphens/underscores
+                return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+            }
+
+            var sanitizedCompanyName = sanitizeIdentifier(options.companyName);
+            var sanitizedServiceName = sanitizeIdentifier(options.name);
+
+            if (!sanitizedServiceName) {
+                throw ('Service name is required and must contain valid characters (alphanumeric, hyphens, underscores)');
+            }
+
             // Build composite service identifier from companyName and service name
-            var serviceId = options.companyName ?
-                (options.companyName + '.' + options.name) :
-                options.name;
+            var serviceId = sanitizedCompanyName ?
+                (sanitizedCompanyName + '.' + sanitizedServiceName) :
+                sanitizedServiceName;
 
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
@@ -2919,10 +2947,25 @@ function serviceManager()
                 throw ('Installing a Global Agent/Daemon, requires admin');
             }
 
+            // Sanitize companyName and service name to follow reverse DNS naming conventions
+            // Only allow alphanumeric, hyphens, and underscores (dots will be added between components)
+            function sanitizeIdentifier(str) {
+                if (!str) return null;
+                // Replace spaces with hyphens, remove all non-alphanumeric except hyphens/underscores
+                return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+            }
+
+            var sanitizedCompanyName = sanitizeIdentifier(options.companyName);
+            var sanitizedServiceName = sanitizeIdentifier(options.name);
+
+            if (!sanitizedServiceName) {
+                throw ('Service name is required and must contain valid characters (alphanumeric, hyphens, underscores)');
+            }
+
             // Build composite service identifier from companyName and service name
-            var serviceId = options.companyName ?
-                (options.companyName + '.' + options.name) :
-                options.name;
+            var serviceId = sanitizedCompanyName ?
+                (sanitizedCompanyName + '.' + sanitizedServiceName) :
+                sanitizedServiceName;
 
             var servicePathTokens = options.servicePath.split('/');
             servicePathTokens.pop();
