@@ -734,26 +734,66 @@ JS_MODULES := $(wildcard modules/*.js)
 
 # Setup: Create modules_expanded/ and copy all JavaScript files
 polyfills-setup:
-	@echo "Setting up modules_expanded/ directory..."
+	@echo "========================================="
+	@echo "Polyfill Setup: Preparing modules_expanded/ directory"
+	@echo "========================================="
+	@echo "Source directory: modules/"
+	@echo "Target directory: modules_expanded/"
+	@echo "JavaScript modules found: $(words $(JS_MODULES))"
 	@if [ ! -d modules_expanded ]; then \
+		echo "Creating modules_expanded/ directory..."; \
 		mkdir -p modules_expanded; \
-		echo "Created modules_expanded/"; \
+		echo "✓ Created modules_expanded/"; \
+	else \
+		echo "✓ modules_expanded/ already exists"; \
 	fi
-	@echo "Copying $(words $(JS_MODULES)) JavaScript modules from modules/ to modules_expanded/..."
-	@cp modules/*.js modules_expanded/
-	@echo "Setup complete: modules_expanded/ ready"
+	@echo "Copying $(words $(JS_MODULES)) JavaScript files..."
+	@cp -v modules/*.js modules_expanded/ | head -10
+	@if [ $(words $(JS_MODULES)) -gt 10 ]; then \
+		echo "... and $$(expr $(words $(JS_MODULES)) - 10) more files"; \
+	fi
+	@echo "✓ Setup complete: modules_expanded/ ready with $(words $(JS_MODULES)) files"
+	@echo ""
 
 # Update: Sync newer files from modules/ to modules_expanded/ using code-utils
 polyfills-update: polyfills-setup
-	@echo "Updating modules_expanded/ with newer files from modules/..."
+	@echo "========================================="
+	@echo "Polyfill Update: Syncing newer files with code-utils.js"
+	@echo "========================================="
+	@echo "Running: node -e \"require('./modules/code-utils').update()\""
+	@echo "This will compare timestamps and copy newer files from modules/ to modules_expanded/"
+	@echo ""
 	@node -e "require('./modules/code-utils').update()"
-	@echo "Update complete"
+	@echo ""
+	@echo "✓ Update complete"
+	@echo ""
 
 # Compress: Run code-utils shrink() to embed modules into ILibDuktape_Polyfills.c
 polyfills-compress: polyfills-update
-	@echo "Compressing JavaScript modules into microscript/ILibDuktape_Polyfills.c..."
+	@echo "========================================="
+	@echo "Polyfill Compress: Embedding JavaScript into C source"
+	@echo "========================================="
+	@echo "Input directory: modules_expanded/"
+	@echo "Output file: microscript/ILibDuktape_Polyfills.c"
+	@echo "Running: node -e \"require('./modules/code-utils').shrink()\""
+	@echo ""
+	@echo "Compression process:"
+	@echo "  1. Reading all .js files from modules_expanded/"
+	@echo "  2. Compressing each module using deflate"
+	@echo "  3. Encoding compressed data as base64"
+	@echo "  4. Embedding into ILibDuktape_Polyfills.c as C strings"
+	@echo ""
 	@node -e "require('./modules/code-utils').shrink()"
-	@echo "Compression complete: JavaScript modules embedded successfully"
+	@echo ""
+	@if [ -f microscript/ILibDuktape_Polyfills.c ]; then \
+		echo "✓ Compression successful"; \
+		echo "Output file size: $$(ls -lh microscript/ILibDuktape_Polyfills.c | awk '{print $$5}')"; \
+		echo "Embedded modules: $(words $(JS_MODULES))"; \
+	else \
+		echo "✗ ERROR: microscript/ILibDuktape_Polyfills.c not found!"; \
+		exit 1; \
+	fi
+	@echo ""
 
 # Complete polyfill workflow
 polyfills: polyfills-compress
