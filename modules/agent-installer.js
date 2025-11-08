@@ -700,11 +700,11 @@ function installService(params)
         options.parameters.splice(i, 1);
     }
 
-    // If companyName was specified, we're going to move it into the structure
+    // If companyName was specified, extract it but keep it in parameters so it gets written to .msh
     if ((i = options.parameters.getParameterIndex('companyName')) >= 0)
     {
         options.companyName = options.parameters.getParameterValue(i);
-        options.parameters.splice(i, 1);
+        // Don't remove from parameters - agent needs it to write to .msh file
     }
 
     if (global.gOptions != null && global.gOptions.noParams === true) { options.parameters = []; }
