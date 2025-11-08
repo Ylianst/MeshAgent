@@ -2860,11 +2860,13 @@ function serviceManager()
             }
 
             // Build composite service identifier from companyName and service name
+            // Format: meshagent.{serviceName}.{companyName} when companyName provided
             var serviceId = sanitizedCompanyName ?
-                (sanitizedCompanyName + '.' + sanitizedServiceName) :
+                ('meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName) :
                 sanitizedServiceName;
 
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
+            var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
@@ -2882,31 +2884,19 @@ function serviceManager()
             plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
+            plist += '      <key>Disabled</key>\n';
+            plist += '      <false/>\n';
+            plist += '      <key>KeepAlive</key>\n';
+            plist += '      <true/>\n';
             plist += '      <key>Label</key>\n';
             plist += ('     <string>' + serviceId + '</string>\n');
             plist += (params + '\n');
-            plist += '      <key>WorkingDirectory</key>\n';
-            plist += ('     <string>' + options.installPath + '</string>\n');
-            plist += (stdoutpath + '\n');
             plist += '      <key>RunAtLoad</key>\n';
             plist += (autoStart + '\n');
-            plist += '      <key>KeepAlive</key>\n';
-            if(options.failureRestart == null || options.failureRestart > 0)
-            {
-                plist += '      <dict>\n';
-                plist += '         <key>Crashed</key>\n';
-                plist += '         <true/>\n';
-                plist += '      </dict>\n';
-            }
-            else
-            {
-                plist += '      <false/>\n';
-            }
-            if(options.failureRestart != null)
-            {
-                plist += '      <key>ThrottleInterval</key>\n';
-                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
-            }
+            plist += (stderrpath + '\n');
+            plist += (stdoutpath + '\n');
+            plist += '      <key>WorkingDirectory</key>\n';
+            plist += ('     <string>' + options.installPath.replace(/\/$/, '') + '</string>\n');
 
             plist += '  </dict>\n';
             plist += '</plist>';
@@ -2963,8 +2953,9 @@ function serviceManager()
             }
 
             // Build composite service identifier from companyName and service name
+            // Format: meshagent.{serviceName}.{companyName} when companyName provided
             var serviceId = sanitizedCompanyName ?
-                (sanitizedCompanyName + '.' + sanitizedServiceName) :
+                ('meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName) :
                 sanitizedServiceName;
 
             var servicePathTokens = options.servicePath.split('/');
@@ -2974,6 +2965,7 @@ function serviceManager()
 
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
+            var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
             var params =         '     <key>ProgramArguments</key>\n';
             params +=            '     <array>\n';
             params +=           ('         <string>' + options.servicePath + '</string>\n');
@@ -2989,14 +2981,15 @@ function serviceManager()
             plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
+            plist += '      <key>Disabled</key>\n';
+            plist += '      <false/>\n';
             plist += '      <key>Label</key>\n';
             plist += ('     <string>' + serviceId + '-agent</string>\n');
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.workingDirectory + '</string>\n');
+            plist += (stderrpath + '\n');
             plist += (stdoutpath + '\n');
-            plist += '      <key>RunAtLoad</key>\n';
-            plist += (autoStart + '\n');
             if (options.sessionTypes && options.sessionTypes.length > 0)
             {
                 plist += '      <key>LimitLoadToSessionType</key>\n';
@@ -3007,24 +3000,12 @@ function serviceManager()
                 }
                 plist += '      </array>\n';
             }
+            plist += '      <key>KeepAlive</key>\n';
+            plist += '      <false/>\n';
             plist += '      <key>QueueDirectories</key>\n';
             plist += '      <array>\n';
-            plist += ('         <string>/var/run/' + serviceId + '</string>\n');
+            plist += ('         <string>/var/run/' + serviceId + '-agent</string>\n');
             plist += '      </array>\n';
-            plist += '      <key>KeepAlive</key>\n';
-            if (options.failureRestart == null || options.failureRestart > 0) {
-                plist += '      <dict>\n';
-                plist += '         <key>Crashed</key>\n';
-                plist += '         <true/>\n';
-                plist += '      </dict>\n';
-            }
-            else {
-                plist += '      <false/>\n';
-            }
-            if (options.failureRestart != null) {
-                plist += '      <key>ThrottleInterval</key>\n';
-                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
-            }
 
             plist += '  </dict>\n';
             plist += '</plist>';

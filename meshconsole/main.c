@@ -84,6 +84,169 @@ ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *
 	ignore_result(write(STDOUT_FILENO, (void*)buffer, bufferLen));
 	return ILibTransport_DoneState_COMPLETE;
 }
+
+// Helper function to extract Label from a plist file
+char* extract_plist_label(const char* plistPath)
+{
+	FILE *fp;
+	char cmd[1024];
+	char *result = NULL;
+	char buffer[512];
+
+	// Use awk to extract Label value from plist
+	snprintf(cmd, sizeof(cmd),
+		"cat '%s' | tr '\\n' '.' | awk '{ split($0, a, \"<key>Label</key>\"); "
+		"split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'",
+		plistPath);
+
+	fp = popen(cmd, "r");
+	if (fp != NULL)
+	{
+		if (fgets(buffer, sizeof(buffer), fp) != NULL)
+		{
+			// Remove trailing newline
+			size_t len = strlen(buffer);
+			if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
+			if (strlen(buffer) > 0)
+			{
+				result = strdup(buffer);
+			}
+		}
+		pclose(fp);
+	}
+
+	return result;
+}
+
+// Helper function to extract first ProgramArguments path from plist
+char* extract_plist_program_path(const char* plistPath)
+{
+	FILE *fp;
+	char cmd[1024];
+	char *result = NULL;
+	char buffer[512];
+
+	// Use awk to extract first ProgramArguments string (the binary path)
+	snprintf(cmd, sizeof(cmd),
+		"cat '%s' | tr '\\n' '.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); "
+		"split(a[2], b, \"</array>\"); split(b[1], c, \"<string>\"); "
+		"split(c[2], d, \"</string>\"); print d[1]; }'",
+		plistPath);
+
+	fp = popen(cmd, "r");
+	if (fp != NULL)
+	{
+		if (fgets(buffer, sizeof(buffer), fp) != NULL)
+		{
+			// Remove trailing newline
+			size_t len = strlen(buffer);
+			if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
+			if (strlen(buffer) > 0)
+			{
+				result = strdup(buffer);
+			}
+		}
+		pclose(fp);
+	}
+
+	return result;
+}
+
+// Discover serviceId by finding which LaunchAgent plist references our binary
+char* discover_service_id_from_plist(const char* binaryPath)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char *serviceId = NULL;
+	const char *launchAgentDir = "/Library/LaunchAgents";
+
+	dir = opendir(launchAgentDir);
+	if (dir == NULL)
+	{
+		return NULL;
+	}
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		// Look for .plist files
+		if (strstr(entry->d_name, ".plist") == NULL)
+			continue;
+
+		// Build full plist path
+		char plistPath[PATH_MAX];
+		snprintf(plistPath, sizeof(plistPath), "%s/%s", launchAgentDir, entry->d_name);
+
+		// Extract ProgramArguments path
+		char *programPath = extract_plist_program_path(plistPath);
+		if (programPath != NULL)
+		{
+			// Check if it matches our binary path
+			if (strcmp(programPath, binaryPath) == 0)
+			{
+				// Found it! Extract the Label
+				serviceId = extract_plist_label(plistPath);
+				free(programPath);
+				break;
+			}
+			free(programPath);
+		}
+	}
+
+	closedir(dir);
+	return serviceId;
+}
+
+// Parse serviceId to extract serviceName and companyName
+// Format: meshagent.{serviceName}.{companyName}-agent or {serviceName}-agent
+void parse_service_id(const char* serviceId, char** serviceName, char** companyName)
+{
+	if (serviceId == NULL)
+	{
+		*serviceName = strdup("meshagent");
+		*companyName = NULL;
+		return;
+	}
+
+	// Make a working copy
+	char workingCopy[512];
+	strncpy(workingCopy, serviceId, sizeof(workingCopy) - 1);
+	workingCopy[sizeof(workingCopy) - 1] = '\0';
+
+	// Strip -agent suffix if present
+	char *agentSuffix = strstr(workingCopy, "-agent");
+	if (agentSuffix != NULL)
+	{
+		*agentSuffix = '\0';  // Terminate string before -agent
+	}
+
+	// Check if format is meshagent.{serviceName}.{companyName}
+	if (strncmp(workingCopy, "meshagent.", 10) == 0)
+	{
+		// Skip "meshagent." prefix
+		char *remainder = workingCopy + 10;
+
+		// Find the next dot to separate serviceName and companyName
+		char *dot = strchr(remainder, '.');
+		if (dot != NULL)
+		{
+			*dot = '\0';  // Split at dot
+			*serviceName = strdup(remainder);
+			*companyName = strdup(dot + 1);
+		}
+		else
+		{
+			// Only serviceName, no companyName
+			*serviceName = strdup(remainder);
+			*companyName = NULL;
+		}
+	}
+	else
+	{
+		// Simple format - just serviceName
+		*serviceName = strdup(workingCopy);
+		*companyName = NULL;
+	}
+}
 #endif
 
 #ifdef WIN32
@@ -301,61 +464,56 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	}
 	else
 	*/
+
 	if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
-		// Read companyName and meshServiceName from database for dynamic path generation
+		// Discover serviceId by parsing LaunchAgent plist (most reliable, no .db permission issues)
 		char *companyName = NULL;
 		char *meshServiceName = NULL;
-		void *masterDb = NULL;
-		char dbPath[PATH_MAX];
-		char exePath[PATH_MAX];
-		int msnlen;
+		char binaryPath[PATH_MAX];
+		char *serviceId = NULL;
 
-		// Get executable directory using dirname() which requires a modifiable string
-		strncpy(exePath, argv[0], sizeof(exePath) - 1);
-		exePath[sizeof(exePath) - 1] = '\0';
-		char *exedir = dirname(exePath);
-
-		if (exedir != NULL)
+		// Get absolute path of our binary
+		if (realpath(argv[0], binaryPath) != NULL)
 		{
-			snprintf(dbPath, sizeof(dbPath), "%s/meshagent.db", exedir);
+			printf("KVM: Binary path: %s\n", binaryPath);
+			printf("KVM: Scanning /Library/LaunchAgents/ for matching plist...\n");
 
-			// Open database
-			masterDb = ILibSimpleDataStore_Create(dbPath);
-			if (masterDb != NULL)
+			// Find which LaunchAgent plist references this binary
+			serviceId = discover_service_id_from_plist(binaryPath);
+
+			if (serviceId != NULL)
 			{
-				// Read meshServiceName
-				if ((msnlen = ILibSimpleDataStore_Get(masterDb, "meshServiceName", NULL, 0)) != 0)
+				printf("KVM: Discovered serviceId from plist: %s\n", serviceId);
+
+				// Parse serviceId to extract serviceName and companyName
+				parse_service_id(serviceId, &meshServiceName, &companyName);
+
+				if (meshServiceName != NULL)
 				{
-					meshServiceName = (char*)malloc(msnlen + 1);
-					ILibSimpleDataStore_Get(masterDb, "meshServiceName", meshServiceName, msnlen);
-					meshServiceName[msnlen] = '\0';
+					printf("KVM: Parsed meshServiceName: %s\n", meshServiceName);
 				}
-				else
+				if (companyName != NULL)
 				{
-					meshServiceName = strdup("meshagent");
+					printf("KVM: Parsed companyName: %s\n", companyName);
 				}
 
-				// Read companyName
-				if ((msnlen = ILibSimpleDataStore_Get(masterDb, "companyName", NULL, 0)) != 0)
-				{
-					companyName = (char*)malloc(msnlen + 1);
-					ILibSimpleDataStore_Get(masterDb, "companyName", companyName, msnlen);
-					companyName[msnlen] = '\0';
-				}
-
-				ILibSimpleDataStore_Close(masterDb);
+				free(serviceId);
 			}
 			else
 			{
-				// Fallback if database can't be opened
+				printf("KVM: Warning - Could not find LaunchAgent plist for %s\n", binaryPath);
+				printf("KVM: Falling back to default service name\n");
 				meshServiceName = strdup("meshagent");
+				companyName = NULL;
 			}
 		}
 		else
 		{
-			// Fallback if exedir can't be determined
+			printf("KVM: Warning - Could not determine binary path (argv[0]=%s)\n", argv[0]);
+			printf("KVM: Falling back to default service name\n");
 			meshServiceName = strdup("meshagent");
+			companyName = NULL;
 		}
 
 		kvm_server_mainloop((void*)(uint64_t)getpid(), companyName, meshServiceName);

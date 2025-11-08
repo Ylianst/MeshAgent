@@ -5015,6 +5015,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			installFlag = 2;
 		}
+		if (strcmp("-upgrade", param[ri]) == 0)
+		{
+			installFlag = 3;
+		}
 
 		if ((ix = ILibString_IndexOf(param[ri], len, "=", 1)) > 2 && strncmp(param[ri], "--", 2) == 0)
 		{
@@ -5110,6 +5114,21 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				duk_swap_top(ctxx, -2);																// [func][this]
 				ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);	// [func][this][array]
 				duk_json_encode(ctxx, -1);															// [func][this][json]
+				if (duk_pcall_method(ctxx, 1) != 0)
+				{
+					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)
+					{
+						printf("%s\n", duk_safe_to_string(ctxx, -1));
+					}
+				}
+				duk_pop(ctxx);
+				return(1);
+				break;
+			case 3:
+				duk_eval_string(ctxx, "require('agent-installer');");
+				duk_get_prop_string(ctxx, -1, "upgradeAgent");
+				duk_swap_top(ctxx, -2);																// [func][this]
+				ILibDuktape_SimpleDataStore_raw_GetCachedValues_Array(ctxx, agentHost->masterDb);	// [func][this][array]
 				if (duk_pcall_method(ctxx, 1) != 0)
 				{
 					if (strcmp(duk_safe_to_string(ctxx, -1), "Process.exit() forced script termination") != 0)

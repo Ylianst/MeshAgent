@@ -446,29 +446,63 @@ void kvm_pause(int pause)
 	g_pause = pause;
 }
 
+// Sanitize identifier string to match JavaScript sanitizeIdentifier() behavior
+// Replaces spaces with hyphens, removes all non-alphanumeric except hyphens/underscores
+static void sanitize_identifier(char *dest, size_t destSize, const char *src)
+{
+	size_t i, j = 0;
+
+	if (src == NULL || dest == NULL || destSize == 0) {
+		if (dest != NULL && destSize > 0) dest[0] = '\0';
+		return;
+	}
+
+	for (i = 0; src[i] != '\0' && j < destSize - 1; i++) {
+		if (src[i] == ' ') {
+			// Replace spaces with hyphens
+			dest[j++] = '-';
+		} else if ((src[i] >= 'a' && src[i] <= 'z') ||
+		           (src[i] >= 'A' && src[i] <= 'Z') ||
+		           (src[i] >= '0' && src[i] <= '9') ||
+		           src[i] == '-' || src[i] == '_') {
+			// Keep alphanumeric, hyphens, and underscores
+			dest[j++] = src[i];
+		}
+		// Skip all other characters
+	}
+	dest[j] = '\0';
+}
+
 // Build dynamic KVM paths based on companyName and meshServiceName
 // Pattern matches JavaScript in service-manager.js:
-//   serviceId = companyName ? (companyName + '.' + meshServiceName) : meshServiceName
+//   serviceId = companyName ? ('meshagent.' + meshServiceName + '.' + companyName) : meshServiceName
 //   Socket: /tmp/{serviceId}-kvm.sock
 //   Queue: /var/run/{serviceId}
 //   Signal: /var/run/{serviceId}/session-active
 static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName)
 {
 	char serviceId[512];
+	char sanitizedCompanyName[256];
+	char sanitizedServiceName[256];
 
 	// Free any previously allocated paths
 	if (KVM_Listener_Path != NULL) { free(KVM_Listener_Path); KVM_Listener_Path = NULL; }
 	if (KVM_Queue_Directory != NULL) { free(KVM_Queue_Directory); KVM_Queue_Directory = NULL; }
 	if (KVM_Session_Signal_File != NULL) { free(KVM_Session_Signal_File); KVM_Session_Signal_File = NULL; }
 
-	// Build composite serviceId: companyName.meshServiceName or just meshServiceName
+	// Sanitize identifiers (replace spaces with hyphens, remove special chars)
+	sanitize_identifier(sanitizedServiceName, sizeof(sanitizedServiceName), meshServiceName);
+
+	// Build composite serviceId: meshagent.{meshServiceName}.{companyName}-agent or just meshServiceName-agent
+	// This matches the JavaScript format in service-manager.js and agent-installer.js with -agent suffix
 	if (companyName != NULL && strlen(companyName) > 0)
 	{
-		snprintf(serviceId, sizeof(serviceId), "%s.%s", companyName, meshServiceName);
+		sanitize_identifier(sanitizedCompanyName, sizeof(sanitizedCompanyName), companyName);
+		snprintf(serviceId, sizeof(serviceId), "meshagent.%s.%s-agent", sanitizedServiceName, sanitizedCompanyName);
 	}
 	else
 	{
-		snprintf(serviceId, sizeof(serviceId), "%s", meshServiceName);
+		snprintf(serviceId, sizeof(serviceId), "%s-agent", sanitizedServiceName);
 	}
 
 	// Build dynamic paths
@@ -476,7 +510,7 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName)
 	KVM_Queue_Directory = (char*)malloc(PATH_MAX);
 	KVM_Session_Signal_File = (char*)malloc(PATH_MAX);
 
-	snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s-kvm.sock", serviceId);
+	snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s.sock", serviceId);
 	snprintf(KVM_Queue_Directory, PATH_MAX, "/var/run/%s", serviceId);
 	snprintf(KVM_Session_Signal_File, PATH_MAX, "/var/run/%s/session-active", serviceId);
 
@@ -586,6 +620,12 @@ void* kvm_server_mainloop(void* param, char *companyName, char *meshServiceName)
 		memset(&serveraddr, 0, sizeof(serveraddr));
 		serveraddr.sun_family = AF_UNIX;
 		strcpy(serveraddr.sun_path, KVM_Listener_Path);
+
+		// Print socket path we're connecting to
+		char tmp_path[512];
+		int tmp_path_len = sprintf_s(tmp_path, sizeof(tmp_path), "KVM: -kvm1 connecting to socket: %s\n", KVM_Listener_Path);
+		written = write(STDOUT_FILENO, tmp_path, tmp_path_len);
+		fsync(STDOUT_FILENO);
 
 		// Connect to main agent's listener socket
 		// Retry logic for robustness (daemon might not be ready yet)
