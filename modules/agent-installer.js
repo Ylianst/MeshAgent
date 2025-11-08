@@ -367,6 +367,66 @@ function getProgramPathFromPlist(plistPath) {
     }
 }
 
+// Helper to extract serviceName and companyName from a LaunchDaemon plist Label
+// Input: Label like "meshagent.TacticalMesh.Peet-Inc" or "meshagent"
+// Output: { serviceName: "TacticalMesh", companyName: "Peet-Inc" } or { serviceName: "meshagent", companyName: null }
+function parseServiceIdFromLabel(label) {
+    if (!label) {
+        return { serviceName: 'meshagent', companyName: null };
+    }
+
+    // Check if format is meshagent.{serviceName}.{companyName}
+    if (label.startsWith('meshagent.')) {
+        var parts = label.substring(10).split('.'); // Remove "meshagent." prefix and split
+        if (parts.length >= 2) {
+            return {
+                serviceName: parts[0],
+                companyName: parts[1]
+            };
+        } else if (parts.length === 1) {
+            return {
+                serviceName: parts[0],
+                companyName: null
+            };
+        }
+    }
+
+    // Simple format - just the service name
+    return {
+        serviceName: label,
+        companyName: null
+    };
+}
+
+// Helper to get Label from LaunchDaemon plist for a given binary path
+function getLabelFromLaunchDaemon(binaryPath) {
+    try {
+        var daemonDir = '/Library/LaunchDaemons';
+        var files = require('fs').readdirSync(daemonDir);
+
+        for (var i = 0; i < files.length; i++) {
+            if (files[i].startsWith('meshagent') && files[i].endsWith('.plist')) {
+                var plistPath = daemonDir + '/' + files[i];
+                var plistBinary = getProgramPathFromPlist(plistPath);
+
+                if (plistBinary === binaryPath) {
+                    // Found the plist for this binary - extract Label
+                    var child = require('child_process').execFile('/bin/sh', ['sh']);
+                    child.stdout.str = '';
+                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                    child.stdin.write("cat '" + plistPath + "' | tr '\\n' '.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
+                    child.waitExit();
+                    return child.stdout.str.trim();
+                }
+            }
+        }
+    } catch (e) {
+        // Error reading plists
+    }
+
+    return null;
+}
+
 // Helper to find and clean up all plists pointing to the same binary
 function cleanupOrphanedPlists(installPath) {
     var binaryPath = installPath + 'meshagent';
@@ -1328,8 +1388,10 @@ function upgradeAgent(params) {
     var mshPath = installPath + 'meshagent.msh';
     var currentServiceName = 'meshagent';
     var currentCompanyName = null;
+    var mshExists = require('fs').existsSync(mshPath);
+    var needsMshUpdate = false;
 
-    if (require('fs').existsSync(mshPath)) {
+    if (mshExists) {
         try {
             var config = parseMshFile(mshPath);
             currentServiceName = config.meshServiceName || 'meshagent';
@@ -1340,7 +1402,40 @@ function upgradeAgent(params) {
         }
     } else {
         console.log('WARNING: .msh file not found at: ' + mshPath);
-        console.log('Assuming default service name: meshagent\n');
+        console.log('Will create .msh file with current configuration\n');
+        needsMshUpdate = true;
+    }
+
+    // If .msh is missing serviceName/companyName, try to extract from LaunchDaemon plist
+    if (!currentServiceName || currentServiceName === 'meshagent' && !currentCompanyName) {
+        console.log('Checking LaunchDaemon plist for service configuration...');
+        var binaryPath = installPath + 'meshagent';
+        var plistLabel = getLabelFromLaunchDaemon(binaryPath);
+
+        if (plistLabel) {
+            var plistConfig = parseServiceIdFromLabel(plistLabel);
+            console.log('   Found in plist - Service: ' + plistConfig.serviceName +
+                        (plistConfig.companyName ? ', Company: ' + plistConfig.companyName : ''));
+
+            // Use plist values if .msh doesn't have them
+            if (!config || !config.meshServiceName || config.meshServiceName === 'meshagent') {
+                currentServiceName = plistConfig.serviceName;
+                needsMshUpdate = true;
+            }
+            if (!config || !config.companyName) {
+                currentCompanyName = plistConfig.companyName;
+                if (plistConfig.companyName) {
+                    needsMshUpdate = true;
+                }
+            }
+
+            if (needsMshUpdate) {
+                console.log('   Will migrate plist configuration to .msh file');
+            }
+            console.log('');
+        } else {
+            console.log('   No LaunchDaemon plist found for this binary\n');
+        }
     }
 
     // Build CURRENT service identifier (for stopping old services)
@@ -1374,30 +1469,52 @@ function upgradeAgent(params) {
     }
     console.log('');
 
-    // Update .msh file if parameters were provided
-    if (useProvidedParams) {
-        console.log('Updating configuration...');
-        if (require('fs').existsSync(mshPath)) {
-            try {
-                var mshUpdates = {};
-                if (newServiceName) {
-                    mshUpdates.meshServiceName = newServiceName;
-                }
-                if (newCompanyName !== null) {
-                    mshUpdates.companyName = newCompanyName;
-                }
+    // Update .msh file if parameters were provided OR if we need to migrate from plist
+    if (useProvidedParams || needsMshUpdate) {
+        console.log(useProvidedParams ? 'Updating configuration...' : 'Migrating plist configuration to .msh file...');
+        try {
+            var mshUpdates = {};
 
-                updateMshFile(mshPath, mshUpdates);
-                console.log('   Updated .msh file:');
-                console.log('   Service Name: ' + newServiceNameFinal);
-                if (newCompanyNameFinal) {
-                    console.log('   Company Name: ' + newCompanyNameFinal);
-                }
-                console.log('');
-            } catch (e) {
-                console.log('   WARNING: Could not update .msh file: ' + e.message);
-                console.log('   Continuing with upgrade using provided parameters.\n');
+            // Add user-provided parameters
+            if (newServiceName) {
+                mshUpdates.meshServiceName = newServiceName;
             }
+            if (newCompanyName !== null) {
+                mshUpdates.companyName = newCompanyName;
+            }
+
+            // Add migrated values from plist (if not overridden by user params)
+            if (needsMshUpdate && !newServiceName && currentServiceName !== 'meshagent') {
+                mshUpdates.meshServiceName = currentServiceName;
+            }
+            if (needsMshUpdate && newCompanyName === null && currentCompanyName) {
+                mshUpdates.companyName = currentCompanyName;
+            }
+
+            // Create or update .msh file
+            if (mshExists) {
+                updateMshFile(mshPath, mshUpdates);
+            } else {
+                // Create new .msh file with migrated/provided values
+                var mshContent = '';
+                if (mshUpdates.meshServiceName) {
+                    mshContent += 'meshServiceName=' + mshUpdates.meshServiceName + '\n';
+                }
+                if (mshUpdates.companyName) {
+                    mshContent += 'companyName=' + mshUpdates.companyName + '\n';
+                }
+                require('fs').writeFileSync(mshPath, mshContent);
+            }
+
+            console.log('   Updated .msh file:');
+            console.log('   Service Name: ' + newServiceNameFinal);
+            if (newCompanyNameFinal) {
+                console.log('   Company Name: ' + newCompanyNameFinal);
+            }
+            console.log('');
+        } catch (e) {
+            console.log('   WARNING: Could not update .msh file: ' + e.message);
+            console.log('   Continuing with upgrade using current parameters.\n');
         }
     } else {
         console.log('Using existing configuration from .msh file');
