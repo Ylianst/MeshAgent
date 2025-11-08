@@ -26,13 +26,14 @@ cd "$REPO_DIR"
 ARCHID="universal"                    # Default: ARM64 (16=Intel, 29=ARM, universal=both)
 LAUNCHDAEMON="enable"          # enable/disable - Install and load LaunchDaemon for testing on this device (if disabled, can run daemon manually in terminal)
 LAUNCHAGENT="enable"           # enable/disable - Install and load LaunchAgent for testing on this device (if disabled, can run agent manually in terminal)
+SKIP_POLYFILLS=false           # Skip polyfills regeneration (use existing ILibDuktape_Polyfills.c)
 SKIP_BUILD=false               # Skip build step (use existing binary)
 SKIP_SIGN=false                # Skip signing step
 DEPLOY="enable"                # enable/disable - Deploy built binary to DEPLOY_PATH
-DEPLOY_PATH="/usr/local/mesh_services/meshagent"  # Full path to deploy meshagent binary
-GIT_PULL=false                 # enable/disable - Pull latest changes before building
-REFRESH_PLISTS=false           # Refresh launchd plists from PATH_PLISTS directory
-PATH_PLISTS="examples/launchd/mesh_services"  # Path to plist directory (required if REFRESH_PLISTS=true)
+DEPLOY_PATH="/opt/tacticalmesh/meshagent"  # Full path to deploy meshagent binary
+GIT_PULL=true                 # enable/disable - Pull latest changes before building
+REFRESH_PLISTS=true           # Refresh launchd plists from PATH_PLISTS directory
+PATH_PLISTS="examples/launchd/tacticalrmm"  # Path to plist directory (required if REFRESH_PLISTS=true)
 
 #==============================================================================
 # PARSE COMMAND LINE ARGUMENTS
@@ -51,6 +52,10 @@ while [[ $# -gt 0 ]]; do
         --agent)
             LAUNCHAGENT="$2"
             shift 2
+            ;;
+        --skip-polyfills)
+            SKIP_POLYFILLS=true
+            shift
             ;;
         --skip-build)
             SKIP_BUILD=true
@@ -86,6 +91,7 @@ while [[ $# -gt 0 ]]; do
             echo "                                  universal = Universal binary"
             echo "  --daemon <enable|disable>     LaunchDaemon state (default: enable)"
             echo "  --agent <enable|disable>      LaunchAgent state (default: enable)"
+            echo "  --skip-polyfills              Skip polyfills regeneration from modules/"
             echo "  --skip-build                  Skip build step, use existing binary"
             echo "  --skip-sign                   Skip signing step"
             echo "  --deploy <enable|disable>     Deploy binary to system (default: enable)"
@@ -156,6 +162,7 @@ echo "Start Time:       $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Architecture:     $ARCHID"
 echo "LaunchDaemon:     $LAUNCHDAEMON"
 echo "LaunchAgent:      $LAUNCHAGENT"
+echo "Skip Polyfills:   $SKIP_POLYFILLS"
 echo "Skip Build:       $SKIP_BUILD"
 echo "Skip Sign:        $SKIP_SIGN"
 echo "Deploy:           $DEPLOY"
@@ -186,7 +193,7 @@ fi
 #==============================================================================
 
 if [ "$GIT_PULL" = true ]; then
-    echo "[0/6] Updating repository..."
+    echo "[0/7] Updating repository..."
     echo "[$(date '+%H:%M:%S')] Git pull started"
     # Run git pull as the actual user (not root)
     sudo -u $SUDO_USER git pull
@@ -194,7 +201,35 @@ if [ "$GIT_PULL" = true ]; then
     echo "✓ Repository updated"
     echo ""
 else
-    echo "[0/6] Git pull - SKIPPED"
+    echo "[0/7] Git pull - SKIPPED"
+    echo ""
+fi
+
+#==============================================================================
+# POLYFILLS REGENERATION STEP
+#==============================================================================
+
+if [ "$SKIP_POLYFILLS" = false ]; then
+    echo "[1/7] Regenerating polyfills from modules/..."
+    echo "[$(date '+%H:%M:%S')] Polyfills regeneration started"
+
+    # Check if minimal meshagent exists
+    if [ ! -f "scripts/meshagent/macos/meshagent" ]; then
+        echo "  ERROR: Minimal meshagent not found at scripts/meshagent/macos/meshagent"
+        echo "  Please ensure the minimal meshagent binary exists"
+        exit 1
+    fi
+
+    # Run as actual user to regenerate polyfills
+    echo "  Reading modules from: ./modules/"
+    echo "  Updating file: ./microscript/ILibDuktape_Polyfills.c"
+    sudo -u $SUDO_USER ./scripts/meshagent/macos/meshagent -exec "require('code-utils').shrink({expandedPath: './modules', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+
+    echo "[$(date '+%H:%M:%S')] Polyfills regeneration complete"
+    echo "✓ Polyfills regenerated from modules/"
+    echo ""
+else
+    echo "[1/7] Polyfills regeneration - SKIPPED"
     echo ""
 fi
 
@@ -203,7 +238,7 @@ fi
 #==============================================================================
 
 if [ "$SKIP_BUILD" = false ]; then
-    echo "[1/6] Building meshagent ($ARCH_DESC)..."
+    echo "[2/7] Building meshagent ($ARCH_DESC)..."
     echo "[$(date '+%H:%M:%S')] Build started"
     # Run build as the actual user (not root)
     sudo -u $SUDO_USER make clean
@@ -213,7 +248,7 @@ if [ "$SKIP_BUILD" = false ]; then
     echo "✓ Build complete"
     echo ""
 else
-    echo "[1/6] Build - SKIPPED"
+    echo "[2/7] Build - SKIPPED"
     echo ""
 fi
 
@@ -222,7 +257,7 @@ fi
 #==============================================================================
 
 if [ "$SKIP_SIGN" = false ]; then
-    echo "[2/6] Signing binary..."
+    echo "[3/7] Signing binary..."
     echo "[$(date '+%H:%M:%S')] Signing started"
     sleep 2
     # Run signing as the actual user (not root) to access user's keychain
@@ -231,7 +266,7 @@ if [ "$SKIP_SIGN" = false ]; then
     echo "✓ Signing complete"
     echo ""
 else
-    echo "[2/6] Signing - SKIPPED"
+    echo "[3/7] Signing - SKIPPED"
     echo ""
 fi
 
@@ -239,7 +274,7 @@ fi
 # STOP SERVICES
 #==============================================================================
 
-echo "[3/6] Stopping services..."
+echo "[4/7] Stopping services..."
 echo "[$(date '+%H:%M:%S')] Stopping services"
 
 # Stop LaunchDaemon (system-wide)
@@ -268,7 +303,7 @@ echo ""
 #==============================================================================
 
 if [ "$REFRESH_PLISTS" = true ]; then
-    echo "[3.5/6] Refreshing launchd plists..."
+    echo "[4.5/7] Refreshing launchd plists..."
     echo "[$(date '+%H:%M:%S')] Plist refresh started"
 
     # Validate PATH_PLISTS is set
@@ -315,7 +350,7 @@ if [ "$REFRESH_PLISTS" = true ]; then
     echo "✓ Plists refreshed from examples/launchd/tacticalrmm/"
     echo ""
 else
-    echo "[3.5/6] Refresh plists - SKIPPED"
+    echo "[4.5/7] Refresh plists - SKIPPED"
     echo ""
 fi
 
@@ -324,7 +359,7 @@ fi
 #==============================================================================
 
 if [ "$DEPLOY" = "enable" ]; then
-    echo "[4/6] Deploying binary..."
+    echo "[5/7] Deploying binary..."
     echo "[$(date '+%H:%M:%S')] Deployment started"
 
     # Ensure destination directory exists
@@ -348,7 +383,7 @@ if [ "$DEPLOY" = "enable" ]; then
     echo "✓ Binary deployed"
     echo ""
 else
-    echo "[4/6] Deploy - SKIPPED"
+    echo "[5/7] Deploy - SKIPPED"
     echo ""
 fi
 
@@ -356,7 +391,7 @@ fi
 # START SERVICES & SET STATE
 #==============================================================================
 
-echo "[5/6] Starting services..."
+echo "[6/7] Starting services..."
 echo "[$(date '+%H:%M:%S')] Starting services"
 
 # Configure and start LaunchDaemon
