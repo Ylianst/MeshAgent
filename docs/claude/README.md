@@ -21,6 +21,8 @@ This documentation exists to prevent knowledge loss and avoid having to re-learn
 
 **Summary**: Complete system for programmatically regenerating the `ILibDuktape_Polyfills.c` file from JavaScript source modules. Includes both the original Node.js tooling and a standalone Python implementation.
 
+**Latest Update (2025-11-08)**: Added cross-platform `-import` command support to macOS and Linux binaries, bringing feature parity with Windows. Now you can use `./meshagent -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"` on any platform!
+
 **Quick Links**:
 - [Project Overview](Pollyfills/README.md)
 - [Complete Technical Documentation](Pollyfills/Polyfills-Regeneration.md)

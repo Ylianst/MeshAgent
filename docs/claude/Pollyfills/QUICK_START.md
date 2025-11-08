@@ -26,23 +26,26 @@ python3 regenerate_polyfills_complete.py
 # Creates: modules_expanded/*.js
 ```
 
-### Embed Modules into C File (Built-in - Windows Only)
+### Embed Modules into C File (Built-in - Cross-Platform)
 
 ```bash
-# Windows only - MeshService64.exe has -import command
+# Cross-platform - Works on macOS, Linux, Windows
 ./meshagent -import
-# Reads: modules_expanded/*.js
-# Updates: microscript/ILibDuktape_Polyfills.c
+# Reads: modules_expanded/*.js (by default)
+# Updates: microscript/ILibDuktape_Polyfills.c (by default)
+
+# With custom paths
+./meshagent -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"
 ```
 
-### Embed Modules into C File (Cross-Platform Workaround)
+### Embed Modules into C File (Alternative - Using -exec)
 
 ```bash
-# Works on all platforms (macOS, Linux, Windows)
+# Alternative method using -exec (also cross-platform)
 ./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
 ```
 
-**Note**: The `-import` command only exists in Windows MeshService64.exe (service version). Use the `-exec` workaround on macOS/Linux or with console binaries.
+**Note**: The `-import` command now works on all platforms (macOS, Linux, Windows) as of this update. The command-line parameters are passed through to the code-utils.js module which reads them via `process.argv.getParameter()`.
 
 ### Verify Byte-Perfect Match
 
@@ -68,7 +71,7 @@ diff microscript/ILibDuktape_Polyfills.c docs/claude/Pollyfills/polyfills_genera
 
 ## Three Methods
 
-### Method 1: Built-in with -import (Windows Only)
+### Method 1: Built-in with -import (Cross-Platform) ⭐ RECOMMENDED
 
 **Extract**:
 ```bash
@@ -77,14 +80,17 @@ diff microscript/ILibDuktape_Polyfills.c docs/claude/Pollyfills/polyfills_genera
 
 **Embed**:
 ```bash
-# Windows MeshService64.exe only
+# Works on macOS, Linux, Windows (all binaries)
 ./meshagent -import
+
+# With custom paths
+./meshagent -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"
 ```
 
-**Pros**: Official tooling, simple command
-**Cons**: Windows only, requires service binary, no verification
+**Pros**: Official tooling, simple command, cross-platform, supports custom paths
+**Cons**: No verification output
 
-### Method 2: Built-in with -exec (Cross-Platform)
+### Method 2: Built-in with -exec (Cross-Platform - Alternative)
 
 **Extract**:
 ```bash
@@ -143,10 +149,10 @@ vim modules_expanded/some-module.js
 
 # 3. Re-embed (choose one method)
 
-# Method A: Built-in -import (Windows only)
+# Method A: Built-in -import (cross-platform) ⭐ RECOMMENDED
 ./meshagent -import
 
-# Method B: Built-in -exec (cross-platform)
+# Method B: Built-in -exec (cross-platform alternative)
 ./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
 
 # Method C: Python script (with verification)

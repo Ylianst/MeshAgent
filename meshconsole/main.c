@@ -307,6 +307,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 
+	if (argc > 1 && strcmp(argv[1], "-import") == 0 && integratedJavaScriptLen == 0)
+	{
+		integratedJavaScript = ILibString_Copy("require('code-utils').shrink();process.exit();",0);
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+	}
+
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], 0);

@@ -223,7 +223,7 @@ if [ "$SKIP_POLYFILLS" = false ]; then
     # Run as actual user to regenerate polyfills
     echo "  Reading modules from: ./modules/"
     echo "  Updating file: ./microscript/ILibDuktape_Polyfills.c"
-    sudo -u $SUDO_USER ./scripts/meshagent/macos/meshagent -exec "require('code-utils').shrink({expandedPath: './modules', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+    sudo -u $SUDO_USER ./scripts/meshagent/macos/meshagent -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"
 
     echo "[$(date '+%H:%M:%S')] Polyfills regeneration complete"
     echo "✓ Polyfills regenerated from modules/"

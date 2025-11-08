@@ -38,27 +38,31 @@ The MeshAgent embeds 100 JavaScript modules into a C file (`microscript/ILibDukt
 
 This project documented three methods for module embedding:
 
-### 1. Built-in -import Command (Windows Only)
+### 1. Built-in -import Command (Cross-Platform) ⭐ RECOMMENDED
 
-The Windows MeshService64.exe includes the `-import` command:
+All platform binaries now support the `-import` command:
 
 ```bash
 ./meshagent -export   # Extract modules to modules_expanded/
 ./meshagent -import   # Embed modules from modules_expanded/ into C file
+
+# With custom paths
+./meshagent -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"
 ```
 
 **Pros**:
 - Official tooling
 - Simple command
+- **Works on macOS, Linux, Windows**
+- Supports custom paths via command-line parameters
 - Used in production builds
 
 **Cons**:
-- **Windows only** (service binary only)
 - Requires compiled agent
 - Limited diagnostics
 - No verification built-in
 
-### 2. Built-in -exec Workaround (Cross-Platform)
+### 2. Built-in -exec Alternative (Cross-Platform)
 
 Works on all platforms using the `-exec` command:
 
