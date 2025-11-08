@@ -26,13 +26,23 @@ python3 regenerate_polyfills_complete.py
 # Creates: modules_expanded/*.js
 ```
 
-### Embed Modules into C File (Built-in)
+### Embed Modules into C File (Built-in - Windows Only)
 
 ```bash
+# Windows only - MeshService64.exe has -import command
 ./meshagent -import
 # Reads: modules_expanded/*.js
 # Updates: microscript/ILibDuktape_Polyfills.c
 ```
+
+### Embed Modules into C File (Cross-Platform Workaround)
+
+```bash
+# Works on all platforms (macOS, Linux, Windows)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+```
+
+**Note**: The `-import` command only exists in Windows MeshService64.exe (service version). Use the `-exec` workaround on macOS/Linux or with console binaries.
 
 ### Verify Byte-Perfect Match
 
@@ -56,9 +66,9 @@ diff microscript/ILibDuktape_Polyfills.c docs/claude/Pollyfills/polyfills_genera
 - **Test C File**: `docs/claude/Pollyfills/polyfills_generattion_reversengenering/orig/ILibDuktape_Polyfills.c`
 - **Test Modules**: `docs/claude/Pollyfills/polyfills_generattion_reversengenering/orig/modules/`
 
-## Two Methods
+## Three Methods
 
-### Method 1: Built-in Node.js (Canonical)
+### Method 1: Built-in with -import (Windows Only)
 
 **Extract**:
 ```bash
@@ -67,13 +77,30 @@ diff microscript/ILibDuktape_Polyfills.c docs/claude/Pollyfills/polyfills_genera
 
 **Embed**:
 ```bash
+# Windows MeshService64.exe only
 ./meshagent -import
 ```
 
-**Pros**: Official tooling, used in production
-**Cons**: Requires compiled agent, no verification
+**Pros**: Official tooling, simple command
+**Cons**: Windows only, requires service binary, no verification
 
-### Method 2: Python Script (Standalone)
+### Method 2: Built-in with -exec (Cross-Platform)
+
+**Extract**:
+```bash
+./meshagent -export
+```
+
+**Embed**:
+```bash
+# Works on macOS, Linux, Windows (all binaries)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+```
+
+**Pros**: Works everywhere, uses embedded modules, official code
+**Cons**: Longer command, requires compiled agent, no verification
+
+### Method 3: Python Script (Standalone)
 
 **Regenerate**:
 ```bash
@@ -116,10 +143,13 @@ vim modules_expanded/some-module.js
 
 # 3. Re-embed (choose one method)
 
-# Method A: Built-in
+# Method A: Built-in -import (Windows only)
 ./meshagent -import
 
-# Method B: Python script (with verification)
+# Method B: Built-in -exec (cross-platform)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+
+# Method C: Python script (with verification)
 cd docs/claude/Pollyfills/polyfills_generattion_reversengenering
 python3 regenerate_polyfills_complete.py
 # Then copy the generated file to microscript/

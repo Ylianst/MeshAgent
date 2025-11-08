@@ -422,10 +422,21 @@ The agent binary has special command-line flags that trigger the code-utils modu
 # Output: modules_expanded/*.js files
 ```
 
-**Embed modules into C file:**
+**Embed modules into C file (Windows only):**
 ```bash
+# Windows MeshService64.exe only - has -import command
 ./meshagent -import
 # Runs: require('code-utils').shrink()
+# Reads: modules_expanded/*.js
+# Updates: microscript/ILibDuktape_Polyfills.c
+# Creates: modules/embedded.info
+```
+
+**Embed modules into C file (Cross-platform workaround):**
+```bash
+# Works on macOS, Linux, Windows (all binaries)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+# Runs: require('code-utils').shrink() with custom options, then exits
 # Reads: modules_expanded/*.js
 # Updates: microscript/ILibDuktape_Polyfills.c
 # Creates: modules/embedded.info
@@ -436,13 +447,22 @@ The agent binary has special command-line flags that trigger the code-utils modu
 # Export with custom path
 ./meshagent -export --expandedPath=my_modules
 
-# Import with custom paths
+# Import with custom paths (Windows only)
 ./meshagent -import --expandedPath=my_modules --filePath=path/to/Polyfills.c --modulesPath=modules
+
+# Import with custom paths (cross-platform using -exec)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './my_modules', filePath: './path/to/Polyfills.c', modulesPath: './modules'});process.exit();"
 ```
 
 #### Built-in Command Support
 
-The `-import` and `-export` commands are built into the C code:
+**IMPORTANT**: The `-import` command only exists in **Windows MeshService64.exe** (service binary). The console binaries (meshagent, meshconsole) only have `-export`.
+
+The `-export` command exists in all binaries:
+- **meshservice/ServiceMain.c** (lines 595-599): Has `-export` AND `-import`
+- **meshconsole/main.c** (lines 141-145): Has `-export` ONLY
+
+For cross-platform compatibility, use the `-exec` workaround which works in all binaries.
 
 **meshservice/ServiceMain.c:597-602:**
 ```c
@@ -559,7 +579,7 @@ if (argc > 1 && strcmp(argv[1], "-export") == 0)
 
 #### Workflow Comparison
 
-**Original Node.js Workflow (Built-in):**
+**Original Node.js Workflow (Built-in - Windows):**
 ```bash
 # 1. Extract modules from compiled agent
 ./meshagent -export
@@ -567,8 +587,23 @@ if (argc > 1 && strcmp(argv[1], "-export") == 0)
 # 2. Edit modules in modules_expanded/
 vim modules_expanded/some-module.js
 
-# 3. Re-embed modules into C file
+# 3. Re-embed modules into C file (Windows MeshService64.exe only)
 ./meshagent -import
+
+# 4. Rebuild agent
+make linux ARCHID=6
+```
+
+**Cross-Platform Node.js Workflow (Built-in -exec):**
+```bash
+# 1. Extract modules from compiled agent
+./meshagent -export
+
+# 2. Edit modules in modules_expanded/
+vim modules_expanded/some-module.js
+
+# 3. Re-embed modules into C file (works on all platforms)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
 
 # 4. Rebuild agent
 make linux ARCHID=6

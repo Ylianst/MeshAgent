@@ -34,13 +34,13 @@ The MeshAgent embeds 100 JavaScript modules into a C file (`microscript/ILibDukt
   - `compare_modules.py` - Module comparison tool
   - `orig/` - Test data, original files, and verification outputs
 
-## Two Approaches
+## Three Approaches
 
-This project documented two methods for module embedding:
+This project documented three methods for module embedding:
 
-### 1. Built-in Node.js Tooling (Original/Canonical)
+### 1. Built-in -import Command (Windows Only)
 
-The MeshAgent binary includes built-in commands:
+The Windows MeshService64.exe includes the `-import` command:
 
 ```bash
 ./meshagent -export   # Extract modules to modules_expanded/
@@ -49,15 +49,37 @@ The MeshAgent binary includes built-in commands:
 
 **Pros**:
 - Official tooling
-- Works from compiled binary
+- Simple command
 - Used in production builds
 
 **Cons**:
+- **Windows only** (service binary only)
 - Requires compiled agent
 - Limited diagnostics
 - No verification built-in
 
-### 2. Standalone Python Script (New)
+### 2. Built-in -exec Workaround (Cross-Platform)
+
+Works on all platforms using the `-exec` command:
+
+```bash
+./meshagent -export   # Extract modules to modules_expanded/
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+```
+
+**Pros**:
+- **Works on macOS, Linux, Windows**
+- Uses embedded modules (no external dependencies)
+- Official code from code-utils.js
+- Works from compiled binary
+
+**Cons**:
+- Longer command syntax
+- Requires compiled agent
+- Limited diagnostics
+- No verification built-in
+
+### 3. Standalone Python Script (New)
 
 Python script that replicates the Node.js tooling:
 
@@ -79,11 +101,12 @@ python3 regenerate_polyfills_complete.py
 
 1. ✅ **Complete understanding** of embedding format (standard + chunked)
 2. ✅ **Byte-perfect regeneration** - MD5 verified
-3. ✅ **Documented both approaches** - Built-in Node.js + Python script
+3. ✅ **Documented all three approaches** - Built-in -import (Windows), -exec workaround (cross-platform), Python script
 4. ✅ **Handles all 100 modules** - 92 standard format, 8 large chunked format
 5. ✅ **Whitespace precision** - Exact tab/newline formatting
 6. ✅ **Source file selection** - Correct handling of modules/ vs modules_expanded/
 7. ✅ **Comprehensive documentation** - Multiple levels of detail
+8. ✅ **Cross-platform solution** - Discovered -exec workaround for non-Windows systems
 
 ## Technical Highlights
 
@@ -205,12 +228,22 @@ cd /Users/peet/GitHub/MeshAgent_dynamicNames/docs/claude/Pollyfills/polyfills_ge
 python3 extract_modules.py
 ```
 
-### Use Built-in Tooling
+### Use Built-in Tooling (Cross-Platform)
 
 ```bash
 cd /Users/peet/GitHub/MeshAgent_dynamicNames
 ./meshagent -export  # Extract
-./meshagent -import  # Embed
+
+# Embed (cross-platform using -exec)
+./meshagent -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
+```
+
+### Use Built-in Tooling (Windows Only)
+
+```bash
+cd /Users/peet/GitHub/MeshAgent_dynamicNames
+./meshagent -export  # Extract
+./meshagent -import  # Embed (Windows MeshService64.exe only)
 ```
 
 ## Key Insights
@@ -221,6 +254,8 @@ cd /Users/peet/GitHub/MeshAgent_dynamicNames
 4. **Two module sources exist** - modules/ and modules_expanded/ serve different purposes
 5. **zlib compression level 6** - Must match Node.js compressed-stream default
 6. **Legacy code-utils exists** - Old version hardcoded after END marker (not regenerated)
+7. **-import is Windows-only** - Use -exec workaround for cross-platform compatibility
+8. **process.exit() is required** - Without it, -exec commands hang after completion
 
 ## Questions?
 
