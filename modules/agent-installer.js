@@ -804,15 +804,36 @@ function installService(params)
 }
 
 // The last step in uninstalling a service
-function uninstallService3(params)
+function uninstallService3(params, installPath)
 {
-    // macOS has a LaunchAgent, that we need to uninstall
-    if (process.platform == 'darwin')
+    // macOS needs comprehensive cleanup of all plists pointing to the binary
+    if (process.platform == 'darwin' && installPath)
     {
-        process.stdout.write('   -> Uninstalling launch agent...');
+        process.stdout.write('   -> Cleaning up all LaunchAgent/LaunchDaemon plists...');
         try
         {
-            var launchagent = require('service-manager').manager.getLaunchAgent(params.getParameter('meshServiceName', 'meshagent'));
+            // Use cleanupOrphanedPlists to remove ALL plists pointing to this binary
+            // This handles service renames, orphaned plists, and ensures clean reinstall
+            var cleaned = cleanupOrphanedPlists(installPath);
+            if (cleaned.length > 0) {
+                process.stdout.write(' [DONE - Removed ' + cleaned.length + ' plist(s)]\n');
+            } else {
+                process.stdout.write(' [NONE FOUND]\n');
+            }
+        }
+        catch (e)
+        {
+            process.stdout.write(' [ERROR: ' + e.message + ']\n');
+        }
+    }
+    else if (process.platform == 'darwin')
+    {
+        // Fallback to old method if installPath not available (shouldn't happen)
+        process.stdout.write('   -> Uninstalling launch agent (fallback method)...');
+        try
+        {
+            var serviceName = params.getParameter('meshServiceName', 'meshagent');
+            var launchagent = require('service-manager').manager.getLaunchAgent(serviceName + '-agent');
             launchagent.unload();
             require('fs').unlinkSync(launchagent.plist);
             process.stdout.write(' [DONE]\n');
@@ -845,6 +866,15 @@ function uninstallService2(params, msh)
     var uninstallOptions = null;
     var serviceName = params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'); // get the service name, using the provided defaults if not specified
     var companyName = params.getParameter('companyName', null);
+
+    // Extract install path from msh file path for cleanupOrphanedPlists
+    var installPath = null;
+    if (msh) {
+        // msh is like "/opt/tacticalmesh/meshagent.msh", extract directory with trailing slash
+        var parts = msh.split(process.platform == 'win32' ? '\\' : '/');
+        parts.pop(); // Remove filename
+        installPath = parts.join(process.platform == 'win32' ? '\\' : '/') + (process.platform == 'win32' ? '\\' : '/');
+    }
 
     // Build composite service identifier to match installation naming convention
     // Format: meshagent.{serviceName}.{companyName} when companyName provided (macOS only)
@@ -983,19 +1013,20 @@ function uninstallService2(params, msh)
         process.stdout.write('      -> removing secondary agent from task scheduler...');
         var p = require('task-scheduler').delete(diagnosticServiceId + '/periodicStart');
         p._params = params;
+        p._installPath = installPath;
         p.then(function ()
         {
             process.stdout.write(' [DONE]\n');
-            uninstallService3(this._params);
+            uninstallService3(this._params, this._installPath);
         }, function ()
         {
             process.stdout.write(' [ERROR]\n');
-            uninstallService3(this._params);
+            uninstallService3(this._params, this._installPath);
         });
     }
     else
     {
-        uninstallService3(params);
+        uninstallService3(params, installPath);
     }
 }
 
@@ -1206,10 +1237,48 @@ function fullInstallEx(parms, gOptions)
     }
     catch (e)
     {
-        // No previous installation was found, so we can continue with installation
-        process.stdout.write(' [NONE]\n');
-        installService(parms);
-        return;
+        // Service not found with the provided name
+        // On macOS, try to find ANY existing meshagent installation (handles service renames)
+        if (process.platform == 'darwin')
+        {
+            process.stdout.write(' [NOT FOUND]\n');
+            process.stdout.write('...Searching for any existing meshagent installation...');
+            try
+            {
+                loc = findInstallation(null, null, null);
+                if (loc)
+                {
+                    process.stdout.write(' [FOUND: ' + loc + ']\n');
+                    // Determine working directory from location
+                    var parts = loc.split('/');
+                    parts.pop(); // Remove 'meshagent' binary name
+                    global._workingpath = parts.join('/') + '/';
+                    console.info1('Previous Working Path: ' + global._workingpath);
+                    // Continue to serviceExists to properly clean up old installation
+                }
+                else
+                {
+                    // Truly no installation found
+                    process.stdout.write(' [NONE]\n');
+                    installService(parms);
+                    return;
+                }
+            }
+            catch (findErr)
+            {
+                // No installation found, proceed with fresh install
+                process.stdout.write(' [NONE]\n');
+                installService(parms);
+                return;
+            }
+        }
+        else
+        {
+            // On non-macOS platforms, no fallback search - just install fresh
+            process.stdout.write(' [NONE]\n');
+            installService(parms);
+            return;
+        }
     }
     if (process.execPath == loc)
     {
