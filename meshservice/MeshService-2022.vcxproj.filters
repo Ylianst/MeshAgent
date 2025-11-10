@@ -190,6 +190,7 @@
     <ClCompile Include="..\microscript\ILibDuktape_CompressedStream.c">
       <Filter>Microscript</Filter>
     </ClCompile>
+    <ClCompile Include="..\openframe\token_extractor.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\microscript\duk_config.h">
@@ -359,5 +360,6 @@
       <Filter>Microscript</Filter>
     </ClInclude>
     <ClInclude Include="stdafx.h" />
+    <ClInclude Include="..\openframe\token_extractor.h" />
   </ItemGroup>
 </Project>

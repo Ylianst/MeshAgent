@@ -3506,7 +3506,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			MeshCommand_BinaryPacket_CoreModule *rcm = (MeshCommand_BinaryPacket_CoreModule*)ILibScratchPad2;
 			rcm->command = htons(MeshCommand_AgentHash);						// MeshCommand_AgentHash (12), SHA384 hash of the agent executable
 			rcm->request = htons(requestid);									// Request id
-			if (agent->disableUpdate != 0)
+			if (agent->disableUpdate != 0 || agent->openFrameMode)
 			{
 				// Never update
 				memset(rcm->coreModuleHash, 0, UTIL_SHA384_HASHSIZE);
@@ -3530,7 +3530,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_AgentUpdate:
 		{
-			if (agent->disableUpdate != 0) { break; }	 // Ignore if updates are disabled
+			if (agent->disableUpdate != 0 || agent->openFrameMode) { break; }	 // Ignore if updates are disabled
 #ifdef WIN32
 			char* updateFilePath = MeshAgent_MakeAbsolutePath(agent->exePath, ".update.exe");
 #else
@@ -3620,7 +3620,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_AgentUpdateBlock:
 		{
-			if (agent->disableUpdate != 0) { break; }	 // Ignore if updates are disabled
+			if (agent->disableUpdate != 0 || agent->openFrameMode) { break; }	 // Ignore if updates are disabled
 
 			// Write the mesh agent block to file
 			int retryCount = 0;
@@ -5023,6 +5023,9 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			strcmp("-fullinstall", param[ri]) == 0 || strcmp("-fulluninstall", param[ri]) == 0 ||
 			strcmp("-install", param[ri]) == 0 || strcmp("-uninstall", param[ri]) == 0)
 		{
+			// Delete old database file if it exists (for transitioning from regular mode to service mode)
+			remove(MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db"));
+
 			// Create a readonly DB, because we don't need to persist anything
 			agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly();
 			break;
@@ -5098,6 +5101,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				}
 			}
 		}
+	}
+
+	// Now that masterDb is finalized, save OpenFrame parameters if they were specified
+	if (agentHost->openFrameMode)
+	{
+		ILibSimpleDataStore_Cached(agentHost->masterDb, "openframe-mode", (int)sizeof("openframe-mode") - 1, "1", 1);
+	}
+	if (agentHost->openFrameSecret != NULL)
+	{
+		ILibSimpleDataStore_Cached(agentHost->masterDb, "openframe-secret", (int)sizeof("openframe-secret") - 1, agentHost->openFrameSecret, (int)strnlen_s(agentHost->openFrameSecret, 4096));
+	}
+	if (agentHost->openFrameTokenPath != NULL)
+	{
+		ILibSimpleDataStore_Cached(agentHost->masterDb, "openframe-token-path", (int)sizeof("openframe-token-path") - 1, agentHost->openFrameTokenPath, (int)strnlen_s(agentHost->openFrameTokenPath, 4096));
 	}
 
 	if(ILibSimpleDataStore_Get(agentHost->masterDb, "maxLogSize", NULL, 0) != 0)

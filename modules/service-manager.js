@@ -70,6 +70,80 @@ function prepareFolders(folderPath)
     }
 }
 
+function applyOpenFrameParams(options, reg) {
+    if (options.parameters) {
+        try {
+            var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
+            // Expand any --key=value format to separate ['--key', 'value'] tokens
+            var expanded = [];
+            for (var i = 0; i < options.parameters.length; ++i) {
+                var p = options.parameters[i];
+                if (typeof p === 'string' && p.indexOf('=') > 2 && p.startsWith('--')) {
+                    // Split --key=value into --key and "value"
+                    var eq = p.indexOf('=');
+                    var k = p.substring(0, eq);
+                    var v = p.substring(eq + 1).replace(/^\"|\"$/g, '');
+                    expanded.push(k);
+                    expanded.push('"' + v + '"');
+                }
+                else {
+                    expanded.push(p);
+                }
+            }
+            // Build a key-value map for special handling of OpenFrame flags
+            var kv = {};
+            for (var j = 0; j < expanded.length; ++j) {
+                var t = expanded[j];
+                if (typeof t === 'string' && t.startsWith('--')) {
+                    var val = null;
+                    if ((j + 1) < expanded.length && typeof expanded[j + 1] === 'string' && !expanded[j + 1].startsWith('--')) {
+                        val = expanded[j + 1];
+                    }
+                    kv[t.substring(2)] = val;
+                }
+            }
+            // Individual handling for specific OpenFrame flags
+            var finalParams = [];
+            if (kv['openframe-mode'] != null || expanded.indexOf('--openframe-mode') >= 0) {
+                finalParams.push('--openframe-mode');
+            }
+            if (kv['openframe-token-path']) {
+                var v1 = kv['openframe-token-path'];
+                v1 = v1.replace(/^\"|\"$/g, '');
+                finalParams.push('--openframe-token-path');
+                finalParams.push('"' + v1 + '"');
+            }
+            if (kv['openframe-secret']) {
+                var v2 = kv['openframe-secret'];
+                v2 = v2.replace(/^\"|\"$/g, '');
+                finalParams.push('--openframe-secret');
+                finalParams.push('"' + v2 + '"');
+            }
+            // Append all remaining parameters in their original order
+            for (var k2 = 0; k2 < expanded.length; ++k2) {
+                var e = expanded[k2];
+                if (typeof e === 'string' && e.startsWith('--')) {
+                    // Skip the three special OpenFrame flags we already handled
+                    if (e === '--openframe-mode' || e === '--openframe-token-path' || e === '--openframe-secret') {
+                        // Also skip the value token that follows this key
+                        if ((k2 + 1) < expanded.length && !expanded[k2 + 1].startsWith('--')) { k2++; }
+                        continue;
+                    }
+                    finalParams.push(e);
+                }
+                else {
+                    finalParams.push(e);
+                }
+            }
+            imagePath += (' ' + finalParams.join(' '));
+            reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
+        }
+        catch (xxx) {
+            console.info1(xxx);
+        }
+    }
+}
+
 function parseServiceStatus(token)
 {
     var j = {};
@@ -2391,20 +2465,8 @@ function serviceManager()
             this.proxy.CloseServiceHandle(h);
             this.proxy.CloseServiceHandle(handle);
 
-            if (options.parameters)
-            {
-                try
-                {
-                    var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
-                    imagePath += (' ' + options.parameters.join(' '));
-                    reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
-                }
-                catch(xxx)
-                {
-                    console.info1(xxx);
-                }
-            }
-
+            applyOpenFrameParams(options, reg);
+        
             try
             {
                 reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, '_InstalledBy', reg.usernameToUserKey(require('user-sessions').getProcessOwnerName(process.pid).name));
