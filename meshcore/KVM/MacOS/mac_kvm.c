@@ -14,13 +14,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/*
+ * REVERSED ARCHITECTURE for macOS KVM (-kvm1)
+ *
+ * Unlike Windows/Linux where the main daemon spawns a child KVM process,
+ * macOS uses a REVERSED pattern where:
+ *
+ * 1. Main daemon creates a listening socket at /tmp/meshagent-kvm.sock
+ * 2. Main daemon creates a signal file at /var/run/meshagent/session-active
+ * 3. LaunchAgent (/Library/LaunchAgents/meshagent-kvm1.plist) monitors directory via QueueDirectories
+ * 4. When signal file appears, LaunchAgent starts -kvm1 process
+ * 5. -kvm1 process CONNECTS to the daemon socket (not spawned by daemon)
+ * 6. When signal file removed, LaunchAgent exits -kvm1 process
+ *
+ * This design works around Apple's bootstrap namespace restrictions and
+ * ensures -kvm1 runs in the correct user context (LoginWindow or Aqua).
+ *
+ * See commit 8772b02 (Oct 29, 2025) for removal of old spawning architecture.
+ */
+
 #include "mac_kvm.h"
+#include "mac_kvm_auth.h"
 #include "../../meshdefines.h"
 #include "../../meshinfo.h"
 #include "../../../microstack/ILibParsers.h"
 #include "../../../microstack/ILibAsyncSocket.h"
 #include "../../../microstack/ILibAsyncServerSocket.h"
-#include "../../../microstack/ILibProcessPipe.h"
+// DEPRECATED: Process pipe header - no longer used in socket architecture
+// #include "../../../microstack/ILibProcessPipe.h"
 #include <IOKit/IOKitLib.h>
 #include <IOKit/hidsystem/IOHIDLib.h>
 #include <IOKit/hidsystem/IOHIDParameter.h>
@@ -33,9 +54,16 @@ limitations under the License.
 
 #include <string.h>
 #include <pwd.h>
+#include <dirent.h>
+#include <limits.h>
+#include <mach-o/dyld.h>
 
-int KVM_Listener_FD = -1;
-#define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
+static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
+
+// Dynamic paths built from companyName and meshServiceName at runtime
+static char *KVM_Listener_Path = NULL;
+static char *KVM_Queue_Directory = NULL;
+static char *KVM_Session_Signal_File = NULL;
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
 #else
@@ -78,18 +106,21 @@ int TILE_HEIGHT_COUNT = 0;
 int COMPRESSION_RATIO = 0;
 int FRAME_RATE_TIMER = 0;
 struct tileInfo_t **g_tileInfo = NULL;
-int g_remotepause = 0;
-int g_pause = 0;
-int g_shutdown = 0;
-int g_resetipc = 0;
-int kvm_clientProcessId = 0;
-int g_restartcount = 0;
-int g_totalRestartCount = 0;
-int restartKvm = 0;
+int g_remotepause = 0;           // Remote pause signal from daemon
+int g_pause = 0;                 // Local pause state
+int g_shutdown = 0;              // Shutdown signal
+int g_resetipc = 0;              // Signal to reconnect to daemon socket (not restart process)
+int kvm_clientProcessId = 0;     // Client process ID (unused in REVERSED ARCHITECTURE, kept for compatibility)
+int g_restartcount = 0;          // Socket reconnection attempt counter (not process restart)
+int g_totalRestartCount = 0;     // Total socket reconnection attempts
+int restartKvm = 0;              // Flag to trigger socket reconnect (not process restart)
 extern void* tilebuffer;
-pid_t g_slavekvm = 0;
+// DEPRECATED: Process spawning variables - no longer used in socket architecture
+// OLD ARCHITECTURE: Main daemon spawned -kvm1 as a child process (pid_t g_slavekvm = 0)
+// CURRENT REVERSED ARCHITECTURE: -kvm1 is an independent LaunchAgent that connects to daemon socket
+// pid_t g_slavekvm = 0;
 pthread_t kvmthread = (pthread_t)NULL;
-ILibProcessPipe_Process gChildProcess;
+// ILibProcessPipe_Process gChildProcess;
 ILibQueue g_messageQ;
 
 //int logenabled = 1;
@@ -99,10 +130,11 @@ ILibQueue g_messageQ;
 //#define LOGFILE "/dev/null"
 
 
-#define KvmDebugLog(...)
-//#define KvmDebugLog(...) printf(__VA_ARGS__); if (logfile != NULL) fprintf(logfile, __VA_ARGS__);
+#define KvmDebugLog(...) ;
+//#define KvmDebugLog(...) printf(__VA_ARGS__); fflush(stdout);
 //#define KvmDebugLog(x) if (logenabled) printf(x);
-//#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Writing from slave in kvm_send_resolution\n");
+// DEPRECATED: Old debug line used "slave" terminology (incorrect for REVERSED ARCHITECTURE)
+//#define KvmDebugLog(x) if (logenabled) fprintf(logfile, "Processing KVM data in domain socket handler\n");
 
 void senddebug(int val)
 {
@@ -119,15 +151,14 @@ void senddebug(int val)
 
 
 
-void kvm_send_resolution() 
+void kvm_send_resolution()
 {
 	char *buffer = ILibMemory_SmartAllocate(8);
-	
+
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)8);				// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
-
 
 	// Write the reply to the pipe.
 	ILibQueue_Lock(g_messageQ);
@@ -271,11 +302,11 @@ int get_kbd_state()
 
 int kvm_init()
 {
-	ILibCriticalLogFilename = "KVMSlave.log";
+	ILibCriticalLogFilename = "KVMAgent.log";  // -kvm1 is a LaunchAgent, not a slave process
 	int old_height_count = TILE_HEIGHT_COUNT;
-	
+
 	SCREEN_NUM = CGMainDisplayID();
-	
+
 	if (SCREEN_WIDTH > 0)
 	{
 		CGDisplayModeRef mode = CGDisplayCopyDisplayMode(SCREEN_NUM);
@@ -285,20 +316,21 @@ int kvm_init()
 
 	SCREEN_HEIGHT = CGDisplayPixelsHigh(SCREEN_NUM) * SCREEN_SCALE;
 	SCREEN_WIDTH = CGDisplayPixelsWide(SCREEN_NUM) * SCREEN_SCALE;
+
 	// Some magic numbers.
 	TILE_WIDTH = 32;
 	TILE_HEIGHT = 32;
 	COMPRESSION_RATIO = 50;
 	FRAME_RATE_TIMER = 100;
-	
+
 	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
 	TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
 	if (SCREEN_WIDTH % TILE_WIDTH) { TILE_WIDTH_COUNT++; }
 	if (SCREEN_HEIGHT % TILE_HEIGHT) { TILE_HEIGHT_COUNT++; }
-	
+
 	kvm_send_resolution();
 	reset_tile_info(old_height_count);
-	
+
 	unsigned char *buffer = ILibMemory_SmartAllocate(5);
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);		// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)5);					// Write the size
@@ -308,6 +340,7 @@ int kvm_init()
 	ILibQueue_Lock(g_messageQ);
 	ILibQueue_EnQueue(g_messageQ, buffer);
 	ILibQueue_UnLock(g_messageQ);
+
 	return 0;
 }
 
@@ -335,7 +368,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 			break;
 		case MNG_KVM_KEY: // Key
 		{
-			if (size != 6 || KVM_AGENT_FD != -1) { break; }
+			if (size != 6) { break; }
 			KeyAction(block[5], block[4]);
 			break;
 		}
@@ -343,7 +376,6 @@ int kvm_server_inputdata(char* block, int blocklen)
 		{
 			int x, y;
 			short w = 0;
-			if (KVM_AGENT_FD != -1) { break; }
 			if (size == 10 || size == 12)
 			{
 				x = ((int)ntohs(((unsigned short*)(block))[3])) / SCREEN_SCALE;
@@ -365,7 +397,15 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 		case MNG_KVM_REFRESH: // Refresh
 		{
-			kvm_send_resolution();
+			// FIX: Send resolution IMMEDIATELY, not via queue, to ensure it arrives before any tile data
+			// This fixes the race condition where tiles were sent before resolution, causing wrong canvas size
+			char resolution_buffer[8];
+			((unsigned short*)resolution_buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SCREEN);
+			((unsigned short*)resolution_buffer)[1] = (unsigned short)htons((unsigned short)8);
+			((unsigned short*)resolution_buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);
+			((unsigned short*)resolution_buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);
+
+			KVM_SEND(resolution_buffer, 8);
 
 			int row, col;
 			if (size != 4) break;
@@ -381,6 +421,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 					g_tileInfo[row][col].flag = 0;
 				}
 			}
+
 			break;
 		}
 		case MNG_KVM_PAUSE: // Pause
@@ -400,19 +441,188 @@ int kvm_server_inputdata(char* block, int blocklen)
 	return size;
 }
 
-
-int kvm_relay_feeddata(char* buf, int len)
-{
-	ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
-	return(len);
-}
-
 // Set the KVM pause state
 void kvm_pause(int pause)
 {
 	g_pause = pause;
 }
 
+// Sanitize identifier string to match JavaScript sanitizeIdentifier() behavior
+// Replaces spaces with hyphens, removes all non-alphanumeric except hyphens/underscores
+static void sanitize_identifier(char *dest, size_t destSize, const char *src)
+{
+	size_t i, j = 0;
+
+	if (src == NULL || dest == NULL || destSize == 0) {
+		if (dest != NULL && destSize > 0) dest[0] = '\0';
+		return;
+	}
+
+	for (i = 0; src[i] != '\0' && j < destSize - 1; i++) {
+		if (src[i] == ' ') {
+			// Replace spaces with hyphens
+			dest[j++] = '-';
+		} else if ((src[i] >= 'a' && src[i] <= 'z') ||
+		           (src[i] >= 'A' && src[i] <= 'Z') ||
+		           (src[i] >= '0' && src[i] <= '9') ||
+		           src[i] == '-' || src[i] == '_') {
+			// Keep alphanumeric, hyphens, and underscores
+			dest[j++] = src[i];
+		}
+		// Skip all other characters
+	}
+	dest[j] = '\0';
+}
+
+// Read serviceID from LaunchDaemon plist Label field
+// Scans /Library/LaunchDaemons/*.plist files to find the one with matching ProgramArguments:0
+// Returns strdup() of Label field, or NULL if not found (caller must free)
+static char* kvm_read_serviceid_from_plist(const char *exePath)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char plistPath[PATH_MAX];
+	char command[PATH_MAX * 2];
+	FILE *pipe;
+	char binPath[PATH_MAX];
+	char label[512];
+
+	if (exePath == NULL || strlen(exePath) == 0)
+	{
+		printf("KVM: Cannot read serviceID from plist - exePath is NULL\n");
+		return NULL;
+	}
+
+	// Open LaunchDaemons directory
+	dir = opendir("/Library/LaunchDaemons");
+	if (dir == NULL)
+	{
+		printf("KVM: Warning - Could not open /Library/LaunchDaemons: %s\n", strerror(errno));
+		return NULL;
+	}
+
+	// Scan for .plist files
+	while ((entry = readdir(dir)) != NULL)
+	{
+		// Skip non-plist files
+		if (!strstr(entry->d_name, ".plist")) continue;
+
+		snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
+
+		// Use PlistBuddy to check ProgramArguments:0
+		snprintf(command, sizeof(command),
+		         "/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' '%s' 2>/dev/null",
+		         plistPath);
+
+		pipe = popen(command, "r");
+		if (pipe == NULL) continue;
+
+		if (fgets(binPath, sizeof(binPath), pipe) != NULL)
+		{
+			// Remove trailing newline
+			binPath[strcspn(binPath, "\n")] = 0;
+
+			// Check if this matches our binary path
+			if (strcmp(binPath, exePath) == 0)
+			{
+				pclose(pipe);
+
+				// Found matching plist! Now extract Label
+				snprintf(command, sizeof(command),
+				         "/usr/libexec/PlistBuddy -c 'Print :Label' '%s' 2>/dev/null",
+				         plistPath);
+
+				pipe = popen(command, "r");
+				if (pipe != NULL)
+				{
+					if (fgets(label, sizeof(label), pipe) != NULL)
+					{
+						label[strcspn(label, "\n")] = 0;
+						pclose(pipe);
+						closedir(dir);
+
+						printf("KVM: Found serviceID from plist Label: %s (from %s)\n", label, entry->d_name);
+						return strdup(label);
+					}
+					pclose(pipe);
+				}
+
+				// Found matching plist but couldn't read Label - continue searching
+				printf("KVM: Warning - Found matching plist %s but could not read Label\n", entry->d_name);
+			}
+		}
+		pclose(pipe);
+	}
+
+	closedir(dir);
+	printf("KVM: No matching plist found in /Library/LaunchDaemons for %s\n", exePath);
+	return NULL;
+}
+
+// Build dynamic KVM paths using serviceID
+// Priority 1: Database serviceID (from .msh file)
+// Priority 2: LaunchDaemon plist Label (authoritative source)
+// Priority 3: Default "meshagent-agent"
+static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, char *serviceID, char *exePath)
+{
+	char serviceId[512];
+
+	UNREFERENCED_PARAMETER(companyName);
+	UNREFERENCED_PARAMETER(meshServiceName);
+
+	// Free any previously allocated paths
+	if (KVM_Listener_Path != NULL) { free(KVM_Listener_Path); KVM_Listener_Path = NULL; }
+	if (KVM_Queue_Directory != NULL) { free(KVM_Queue_Directory); KVM_Queue_Directory = NULL; }
+	if (KVM_Session_Signal_File != NULL) { free(KVM_Session_Signal_File); KVM_Session_Signal_File = NULL; }
+
+	// Priority 1: Use pre-computed serviceID from database
+	if (serviceID != NULL && strlen(serviceID) > 0)
+	{
+		strncpy(serviceId, serviceID, sizeof(serviceId) - 1);
+		serviceId[sizeof(serviceId) - 1] = '\0';
+		printf("KVM: Using serviceID from database: %s\n", serviceId);
+	}
+	// Priority 2: Read from LaunchDaemon plist Label (authoritative source)
+	else if (exePath != NULL && strlen(exePath) > 0)
+	{
+		char *plistServiceId = kvm_read_serviceid_from_plist(exePath);
+		if (plistServiceId != NULL)
+		{
+			strncpy(serviceId, plistServiceId, sizeof(serviceId) - 1);
+			serviceId[sizeof(serviceId) - 1] = '\0';
+			free(plistServiceId);
+			printf("KVM: Using serviceID from plist fallback: %s\n", serviceId);
+		}
+		else
+		{
+			// Priority 3: Default to "meshagent-agent"
+			strncpy(serviceId, "meshagent-agent", sizeof(serviceId) - 1);
+			serviceId[sizeof(serviceId) - 1] = '\0';
+			printf("KVM: Using default serviceID (plist scan failed): %s\n", serviceId);
+		}
+	}
+	else
+	{
+		// Priority 3: Default to "meshagent-agent" (no exePath available)
+		strncpy(serviceId, "meshagent-agent", sizeof(serviceId) - 1);
+		serviceId[sizeof(serviceId) - 1] = '\0';
+		printf("KVM: Using default serviceID (no exePath): %s\n", serviceId);
+	}
+
+	// Build dynamic paths
+	KVM_Listener_Path = (char*)malloc(PATH_MAX);
+	KVM_Queue_Directory = (char*)malloc(PATH_MAX);
+	KVM_Session_Signal_File = (char*)malloc(PATH_MAX);
+
+	snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s.sock", serviceId);
+	snprintf(KVM_Queue_Directory, PATH_MAX, "/var/run/%s", serviceId);
+	snprintf(KVM_Session_Signal_File, PATH_MAX, "/var/run/%s/session-active", serviceId);
+
+	printf("KVM: Built dynamic paths for serviceId='%s'\n", serviceId);
+	printf("KVM:   Socket: %s\n", KVM_Listener_Path);
+	printf("KVM:   Queue: %s\n", KVM_Queue_Directory);
+	printf("KVM:   Signal: %s\n", KVM_Session_Signal_File);
+}
 
 void* kvm_mainloopinput(void* param)
 {
@@ -434,27 +644,10 @@ void* kvm_mainloopinput(void* param)
 
 	while (!g_shutdown)
 	{
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "About to read from IPC Socket\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-
-		KvmDebugLog("Reading from master in kvm_mainloopinput\n");
 		cbBytesRead = read(KVM_AGENT_FD == -1 ? STDIN_FILENO: KVM_AGENT_FD, pchRequest2 + len, 30000 - len);
-		KvmDebugLog("Read %d bytes from master in kvm_mainloopinput\n", cbBytesRead);
 
-		if (KVM_AGENT_FD != -1)
+		if (cbBytesRead == -1 || cbBytesRead == 0)
 		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "Read %d bytes from IPC-xx-Socket\n", cbBytesRead);
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-
-		if (cbBytesRead == -1 || cbBytesRead == 0) 
-		{ 
-			/*ILIBMESSAGE("KVMBREAK-K1\r\n"); g_shutdown = 1; printf("shutdown\n");*/ 
 			if (KVM_AGENT_FD == -1)
 			{
 				g_shutdown = 1;
@@ -463,25 +656,12 @@ void* kvm_mainloopinput(void* param)
 			{
 				g_resetipc = 1;
 			}
-			break; 
+			break;
 		}
 		len += cbBytesRead;
 		ptr2 = 0;
-		
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "enter while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
-		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
 
-		if (KVM_AGENT_FD != -1)
-		{
-			tmpLen = sprintf_s(tmp, sizeof(tmp), "exited while\n");
-			write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
-		}
+		while ((ptr2 = kvm_server_inputdata((char*)pchRequest2 + ptr, cbBytesRead - ptr)) != 0) { ptr += ptr2; }
 
 		if (ptr == len) { len = 0; ptr = 0; }
 		// TODO: else move the reminder.
@@ -493,17 +673,11 @@ void ExitSink(int s)
 {
 	UNREFERENCED_PARAMETER(s);
 
-	signal(SIGTERM, SIG_IGN);	
-	
-	if (KVM_Listener_FD > 0) 
-	{
-		write(STDOUT_FILENO, "EXITING\n", 8);
-		fsync(STDOUT_FILENO);
-		close(KVM_Listener_FD); 
-	}
+	signal(SIGTERM, SIG_IGN);
+
 	g_shutdown = 1;
 }
-void* kvm_server_mainloop(void* param)
+void* kvm_server_mainloop(void* param, char *serviceID)
 {
 	int x, y, height, width, r, c = 0;
 	long long desktopsize = 0;
@@ -524,64 +698,90 @@ void* kvm_server_mainloop(void* param)
 	}
 	else
 	{
-		// this is doing I/O via a Unix Domain Socket
-		if ((KVM_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+		// REVERSED ARCHITECTURE: -kvm1 now CONNECTS to main agent's listener socket
+		// This fixes the bootstrap namespace issue and null data problem
+
+		// Build dynamic paths using serviceID (passed from command-line parameter)
+		if (KVM_Listener_Path == NULL)
+		{
+			// -kvm1 child process: Get binary path for fallback (backward compatibility)
+			char kvmExePath[1024];
+			uint32_t pathSize = sizeof(kvmExePath);
+			char *exePathToUse = NULL;
+
+			#ifdef __APPLE__
+			if (_NSGetExecutablePath(kvmExePath, &pathSize) == 0)
+			{
+				exePathToUse = kvmExePath;
+			}
+			#endif
+
+			// -kvm1 child process receives serviceID from --serviceId parameter
+			// companyName/meshServiceName no longer needed for -kvm1
+			kvm_build_dynamic_paths(NULL, NULL, serviceID, exePathToUse);
+		}
+
+		written = write(STDOUT_FILENO, "KVM: Connecting to daemon socket...\n", 37);
+		fsync(STDOUT_FILENO);
+
+		// Create socket
+		if ((KVM_AGENT_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 		{
 			char tmp[255];
-			int tmplen = sprintf_s(tmp, sizeof(tmp), "ERROR CREATING DOMAIN SOCKET: %d\n", errno);
-			// Error creating domain socket
+			int tmplen = sprintf_s(tmp, sizeof(tmp), "KVM: Failed to create socket (errno=%d)\n", errno);
 			written = write(STDOUT_FILENO, tmp, tmplen);
 			fsync(STDOUT_FILENO);
 			return(NULL);
 		}
 
-		int flags;
-		flags = fcntl(KVM_Listener_FD, F_GETFL, 0);
-		if (fcntl(KVM_Listener_FD, F_SETFL, (O_NONBLOCK | flags) ^ O_NONBLOCK) == -1) { }
-
-		written = write(STDOUT_FILENO, "Set FCNTL2\n", 11);
-		fsync(STDOUT_FILENO);
-
+		// Set up address to connect to
 		memset(&serveraddr, 0, sizeof(serveraddr));
 		serveraddr.sun_family = AF_UNIX;
 		strcpy(serveraddr.sun_path, KVM_Listener_Path);
-		remove(KVM_Listener_Path);
-		if (bind(KVM_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
-		{
-			char tmp[255];
-			int tmplen = sprintf_s(tmp, sizeof(tmp), "BIND ERROR on DOMAIN SOCKET: %d\n", errno);
-			// Error creating domain socket
-			written = write(STDOUT_FILENO, tmp, tmplen);
-			fsync(STDOUT_FILENO);
-			return(NULL);
-		}
 
-		if (listen(KVM_Listener_FD, 1) < 0)
-		{
-			written = write(STDOUT_FILENO, "LISTEN ERROR ON DOMAIN SOCKET", 29);
-			fsync(STDOUT_FILENO);
-			return(NULL);
-		}
-
-		written = write(STDOUT_FILENO, "LISTENING ON DOMAIN SOCKET\n", 27);
+		// Print socket path we're connecting to
+		char tmp_path[512];
+		int tmp_path_len = sprintf_s(tmp_path, sizeof(tmp_path), "KVM: -kvm1 connecting to socket: %s\n", KVM_Listener_Path);
+		written = write(STDOUT_FILENO, tmp_path, tmp_path_len);
 		fsync(STDOUT_FILENO);
 
-		signal(SIGTERM, ExitSink);
-
-		if ((KVM_AGENT_FD = accept(KVM_Listener_FD, NULL, NULL)) < 0)
+		// Connect to main agent's listener socket
+		// Retry logic for robustness (daemon might not be ready yet)
+		int retry_count = 0;
+		while (retry_count < 30)
 		{
-			written = write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
+			if (connect(KVM_AGENT_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) == 0)
+			{
+				// Success!
+				char tmp[255];
+				int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM: Connected (fd=%d)\n", KVM_AGENT_FD);
+				written = write(STDOUT_FILENO, tmp, tmpLen);
+				fsync(STDOUT_FILENO);
+				break;
+			}
+
+			// Connection failed
+			if (retry_count == 0)
+			{
+				char tmp[255];
+				int tmplen = sprintf_s(tmp, sizeof(tmp), "KVM: Connect failed (errno=%d), retrying...\n", errno);
+				written = write(STDOUT_FILENO, tmp, tmplen);
+				fsync(STDOUT_FILENO);
+			}
+
+			retry_count++;
+			sleep(1);  // Wait 1 second before retry
+		}
+
+		if (retry_count >= 30)
+		{
+			written = write(STDOUT_FILENO, "KVM: Connect failed after 30 retries\n", 38);
 			fsync(STDOUT_FILENO);
+			close(KVM_AGENT_FD);
 			return(NULL);
 		}
-		else
-		{
-			char tmp[255];
-			int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
-			written = write(STDOUT_FILENO, tmp, tmpLen);
-			fsync(STDOUT_FILENO);
 
-		}
+		signal(SIGTERM, ExitSink);
 	}
 	// Init the kvm
 	g_messageQ = ILibQueue_Create();
@@ -590,18 +790,6 @@ void* kvm_server_mainloop(void* param)
 
 	g_shutdown = 0;
 	pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
-
-
-	if (KVM_AGENT_FD != -1)
-	{
-		written = write(STDOUT_FILENO, "Starting Loop []\n", 14);
-		fsync(STDOUT_FILENO);
-
-		char stmp[255];
-		int stmpLen = sprintf_s(stmp, sizeof(stmp), "TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-		written = write(STDOUT_FILENO, stmp, stmpLen);
-		fsync(STDOUT_FILENO);
-	}
 
 	while (!g_shutdown) 
 	{
@@ -612,22 +800,32 @@ void* kvm_server_mainloop(void* param)
 
 			SCREEN_HEIGHT = SCREEN_WIDTH = 0;
 
-			char stmp[255];
-			int stmpLen = sprintf_s(stmp, sizeof(stmp), "Waiting for NEXT DomainSocket, TILE_HEIGHT_COUNT=%d, TILE_WIDTH_COUNT=%d\n", TILE_HEIGHT_COUNT, TILE_WIDTH_COUNT);
-			written = write(STDOUT_FILENO, stmp, stmpLen);
+			written = write(STDOUT_FILENO, "KVM: Reconnecting to daemon socket...\n", 39);
 			fsync(STDOUT_FILENO);
 
-			if ((KVM_AGENT_FD = accept(KVM_Listener_FD, NULL, NULL)) < 0)
+			// REVERSED: Reconnect to daemon socket
+			if ((KVM_AGENT_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 			{
 				g_shutdown = 1;
-				written = write(STDOUT_FILENO, "ACCEPT ERROR ON DOMAIN SOCKET", 29);
+				written = write(STDOUT_FILENO, "KVM: Socket error on reconnect\n", 32);
 				fsync(STDOUT_FILENO);
+				break;
+			}
+
+			if (connect(KVM_AGENT_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
+			{
+				g_shutdown = 1;
+				char tmp[255];
+				int tmplen = sprintf_s(tmp, sizeof(tmp), "KVM: Reconnect failed (errno=%d)\n", errno);
+				written = write(STDOUT_FILENO, tmp, tmplen);
+				fsync(STDOUT_FILENO);
+				close(KVM_AGENT_FD);
 				break;
 			}
 			else
 			{
 				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "ACCEPTed new connection %d on Domain Socket\n", KVM_AGENT_FD);
+				int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM: Reconnected (fd=%d)\n", KVM_AGENT_FD);
 				written = write(STDOUT_FILENO, tmp, tmpLen);
 				fsync(STDOUT_FILENO);
 				pthread_create(&kvmthread, NULL, kvm_mainloopinput, param);
@@ -640,7 +838,8 @@ void* kvm_server_mainloop(void* param)
 		{
 			if ((buf = (char*)ILibQueue_DeQueue(g_messageQ)) != NULL)
 			{
-				KVM_SEND(buf, (int)ILibMemory_Size(buf));
+				int msg_size = (int)ILibMemory_Size(buf);
+				KVM_SEND(buf, msg_size);
 				ILibMemory_Free(buf);
 			}
 		}
@@ -694,69 +893,41 @@ void* kvm_server_mainloop(void* param)
 			//senddebug(100);
 			getScreenBuffer((unsigned char **)&desktop, &desktopsize, image);
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...Enter for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
-
-			for (y = 0; y < TILE_HEIGHT_COUNT; y++) 
+			for (y = 0; y < TILE_HEIGHT_COUNT; y++)
 			{
 				for (x = 0; x < TILE_WIDTH_COUNT; x++) {
 					height = TILE_HEIGHT * y;
 					width = TILE_WIDTH * x;
 					if (!g_shutdown && (g_pause)) { usleep(100000); g_pause = 0; } //HACK: Change this
-					
+
 					if (g_shutdown) { x = TILE_WIDTH_COUNT; y = TILE_HEIGHT_COUNT; break; }
-					
-					if (g_tileInfo[y][x].flag == TILE_SENT || g_tileInfo[y][x].flag == TILE_DONT_SEND) {
-						continue;
-					}
-					
+
+					if (g_tileInfo[y][x].flag == TILE_SENT) continue;
+					if (g_tileInfo[y][x].flag == TILE_DONT_SEND) continue;
+
 					getTileAt(width, height, &buf, &tilesize, desktop, desktopsize, y, x);
-					
+
 					if (buf && !g_shutdown)
-					{	
+					{
 						// Write the reply to the pipe.
-						//KvmDebugLog("Writing to master in kvm_server_mainloop\n");
-
 						written = KVM_SEND(buf, tilesize);
-
-						//KvmDebugLog("Wrote %d bytes to master in kvm_server_mainloop\n", written);
-						if (written == -1) 
-						{ 
-							/*ILIBMESSAGE("KVMBREAK-K2\r\n");*/ 
+						if (written == -1)
+						{
+							/*ILIBMESSAGE("KVMBREAK-K2\r\n");*/
 							if(KVM_AGENT_FD == -1)
 							{
 								// This is a User Session, so if the connection fails, we exit out... We can be spawned again later
 								g_shutdown = 1; height = SCREEN_HEIGHT; width = SCREEN_WIDTH; break;
 							}
 						}
-						//else
-						//{
-						//	char tmp[255];
-						//	int tmpLen = sprintf_s(tmp, sizeof(tmp), "KVM_SEND => tilesize: %d\n", tilesize);
-						//	written = write(STDOUT_FILENO, tmp, tmpLen);
-						//	fsync(STDOUT_FILENO);
-						//}
 						free(buf);
-
 					}
 				}
 			}
 
-			if (KVM_AGENT_FD != -1)
-			{
-				char tmp[255];
-				int tmpLen = sprintf_s(tmp, sizeof(tmp), "...exit for loop\n");
-				written = write(STDOUT_FILENO, tmp, tmpLen);
-				fsync(STDOUT_FILENO);
-			}
-
 		}
 		CGImageRelease(image);
+
 	}
 	
 	pthread_join(kvmthread, NULL);
@@ -771,13 +942,17 @@ void* kvm_server_mainloop(void* param)
 
 	if (KVM_AGENT_FD != -1)
 	{
-		written = write(STDOUT_FILENO, "Exiting...\n", 11);
+		written = write(STDOUT_FILENO, "KVM: Exiting\n", 13);
 		fsync(STDOUT_FILENO);
 	}
 	ILibQueue_Destroy(g_messageQ);
 	return (void*)0;
 }
 
+// DEPRECATED: Process pipe exit handler - no longer used in socket architecture
+// OLD ARCHITECTURE: This handled child process exits and respawned -kvm1
+// CURRENT REVERSED ARCHITECTURE: -kvm1 is LaunchAgent managed by QueueDirectories, not spawned by daemon
+/*
 void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* user)
 {
 	//ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)user)[0];
@@ -788,6 +963,9 @@ void kvm_relay_ExitHandler(ILibProcessPipe_Process sender, int exitCode, void* u
 	UNREFERENCED_PARAMETER(exitCode);
 	UNREFERENCED_PARAMETER(user);
 }
+*/
+// DEPRECATED: Process pipe stdout handler - no longer used in socket architecture
+/*
 void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	unsigned short size = 0;
@@ -826,6 +1004,9 @@ void kvm_relay_StdOutHandler(ILibProcessPipe_Process sender, char *buffer, size_
 	}
 	*bytesConsumed = 0;
 }
+*/
+// DEPRECATED: Process pipe stderr handler - no longer used in socket architecture
+/*
 void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_t bufferLen, size_t* bytesConsumed, void* user)
 {
 	//KVMDebugLog *log = (KVMDebugLog*)buffer;
@@ -839,60 +1020,244 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 	//ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, (ILibRemoteLogging_Flags)log->logFlags, "%s", log->logData);
 	*bytesConsumed = bufferLen;
 }
+*/
 
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
-void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
+// Create KVM session: directory + signal file + socket
+// This triggers QueueDirectories to start -kvm1 LaunchAgent
+// Only called when user clicks "Connect" in MeshCentral
+int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID, char *exePath)
 {
-	char * parms0[] = { "meshagent_osx64", "-kvm0", NULL };
-	void **user = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, NULL, NULL);
-	user[0] = writeHandler;
-	user[1] = reserved;
-	user[2] = processPipeMgr;
-	user[3] = exePath;
+	struct sockaddr_un serveraddr;
+	mode_t old_umask;
+	int signal_fd;
 
-	if (uid != 0)
+	// Build dynamic paths based on companyName and meshServiceName
+	// This must be called before checking if session is already active
+	// because paths might not have been built yet
+	if (KVM_Listener_Path == NULL)
 	{
-		// Spawn child kvm process into a specific user session
-		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
-		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
-		
-		char tmp[255];
-		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
-		ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
-		
-		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
-
-		// Run the relay
-		g_shutdown = 0;
-		return(ILibProcessPipe_Process_GetStdOut(gChildProcess));
+		kvm_build_dynamic_paths(companyName, meshServiceName, serviceID, exePath);
 	}
-	else
+
+	// Check if session already active
+	if (KVM_Daemon_Listener_FD != -1)
 	{
-		// No users are logged in. This is a special case for MacOS
-		//int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		//if (!fd < 0)
-		//{
-		//	struct sockaddr_un serveraddr;
-		//	memset(&serveraddr, 0, sizeof(serveraddr));
-		//	serveraddr.sun_family = AF_UNIX;
-		//	strcpy(serveraddr.sun_path, KVM_Listener_Path);
-		//	if (!connect(fd, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
-		//	{
-		//		return((void*)(uint64_t)fd);
-		//	}
-		//}
-		return((void*)KVM_Listener_Path);
+		printf("KVM: Session already active\n");
+		return 0;  // Already initialized
+	}
+
+	printf("KVM: Creating KVM session (on-demand)\n");
+
+	// 1. Create domain socket FIRST (before directory/signal file)
+	// This prevents race condition where -kvm1 starts before socket is ready
+	if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
+		return -1;
+	}
+
+	// Set socket to allow world-writable (code signature verification provides security)
+	old_umask = umask(0000);
+
+	memset(&serveraddr, 0, sizeof(serveraddr));
+	serveraddr.sun_family = AF_UNIX;
+	strcpy(serveraddr.sun_path, KVM_Listener_Path);
+
+	// Remove old socket file if exists
+	unlink(KVM_Listener_Path);
+
+	if (bind(KVM_Daemon_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		umask(old_umask);
+		return -1;
+	}
+
+	umask(old_umask);
+
+	// Explicitly set permissions (defense in depth)
+	chmod(KVM_Listener_Path, 0777);
+
+	// Listen with backlog of 2 (handles fast-user-switching edge case)
+	if (listen(KVM_Daemon_Listener_FD, 2) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to listen on socket: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		return -1;
+	}
+
+	printf("KVM: Socket ready at %s\n", KVM_Listener_Path);
+
+	// 2. NOW create queue directory for LaunchAgent QueueDirectories monitoring
+	// Socket is guaranteed ready before -kvm1 can start
+	if (mkdir(KVM_Queue_Directory, 0755) < 0 && errno != EEXIST)
+	{
+		fprintf(stderr, "KVM: Failed to create queue directory %s: %s\n", KVM_Queue_Directory, strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		return -1;
+	}
+	printf("KVM: Created queue directory: %s\n", KVM_Queue_Directory);
+
+	// 3. Create signal file to trigger QueueDirectories (directory not empty)
+	signal_fd = open(KVM_Session_Signal_File, O_CREAT | O_WRONLY, 0644);
+	if (signal_fd < 0)
+	{
+		fprintf(stderr, "KVM: Failed to create session signal file: %s\n", strerror(errno));
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+		unlink(KVM_Listener_Path);
+		rmdir(KVM_Queue_Directory);
+		return -1;
+	}
+	write(signal_fd, "1", 1);  // Write something so file is not empty
+	close(signal_fd);
+	printf("KVM: Created signal file: %s\n", KVM_Session_Signal_File);
+
+	printf("KVM: Session ready - QueueDirectories will trigger -kvm1 startup\n");
+	return 0;
+}
+
+// Cleanup KVM session: remove socket, signal file, and clear directory contents
+// This causes -kvm1 to exit (directory empty, avoiding QueueDirectories weirdness)
+void kvm_cleanup_session(void)
+{
+	printf("KVM: Cleaning up KVM session\n");
+
+	// Close and remove socket
+	if (KVM_Daemon_Listener_FD != -1)
+	{
+		close(KVM_Daemon_Listener_FD);
+		KVM_Daemon_Listener_FD = -1;
+	}
+	unlink(KVM_Listener_Path);
+
+	// Remove signal file (makes directory empty)
+	unlink(KVM_Session_Signal_File);
+
+	// Clear all contents from directory (equivalent to rm -rf /var/run/meshagent/*)
+	// Keep the directory itself to avoid QueueDirectories weirdness with folder deletion
+	DIR *dir = opendir(KVM_Queue_Directory);
+	if (dir != NULL)
+	{
+		struct dirent *entry;
+		char filepath[PATH_MAX];
+		
+		while ((entry = readdir(dir)) != NULL)
+		{
+			// Skip . and .. entries
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+				continue;
+				
+			snprintf(filepath, sizeof(filepath), "%s/%s", KVM_Queue_Directory, entry->d_name);
+			
+			if (entry->d_type == DT_DIR)
+			{
+				// Recursively remove subdirectory - this shouldn't happen but handle it
+				char rm_cmd[PATH_MAX + 20];
+				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
+				system(rm_cmd);
+			}
+			else
+			{
+				// Remove regular file
+				unlink(filepath);
+			}
+		}
+		closedir(dir);
+		printf("KVM: Queue directory contents cleared - -kvm1 should exit\n");
+	}
+	else if (errno != ENOENT)
+	{
+		fprintf(stderr, "KVM: Warning - failed to open queue directory: %s\n", strerror(errno));
 	}
 }
 
-// Force a KVM reset & refresh
-void kvm_relay_reset()
+void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *companyName, char *meshServiceName, char *serviceID)
 {
+	// REVERSED ARCHITECTURE: Always use on-demand session with QueueDirectories
+	// The uid parameter is ignored - LaunchAgent runs in correct user context via LimitLoadToSessionType
+	// No child process spawning - -kvm1 LaunchAgent connects to us
+
+	UNREFERENCED_PARAMETER(processPipeMgr);
+	UNREFERENCED_PARAMETER(writeHandler);
+	UNREFERENCED_PARAMETER(reserved);
+	UNREFERENCED_PARAMETER(uid);
+
+	int client_fd;
+
+	// Create KVM session (directory + signal file + socket)
+	// This triggers QueueDirectories to start -kvm1
+	if (kvm_create_session(companyName, meshServiceName, serviceID, exePath) < 0)
+	{
+		fprintf(stderr, "KVM: Failed to create session\n");
+		return NULL;
+	}
+
+	// Accept connection from -kvm1 LaunchAgent (triggered by QueueDirectories)
+	printf("KVM: Waiting for -kvm1 to connect...\n");
+	client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
+
+	if (client_fd < 0)
+	{
+		fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
+		kvm_cleanup_session();  // Clean up on failure
+		return NULL;
+	}
+
+	printf("KVM: Connection accepted (fd=%d), verifying peer...\n", client_fd);
+
+	// Verify connecting process is legitimate meshagent binary
+	if (!verify_peer_codesign(client_fd))
+	{
+		fprintf(stderr, "KVM: Peer verification FAILED - rejecting connection\n");
+		close(client_fd);
+		kvm_cleanup_session();  // Clean up on failure
+		return NULL;
+	}
+
+	printf("KVM: Peer verified successfully - connection established\n");
+
+	// Return FD cast as void* for use with ILibAsyncSocket
+	return (void*)(intptr_t)client_fd;
+}
+
+// Force a KVM reset & refresh
+void kvm_relay_reset(void *reserved)
+{
+	if (reserved == NULL)
+	{
+		return;
+	}
+
+	// Create MNG_KVM_REFRESH message
 	char buffer[4];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_REFRESH);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)4);				// Write the size
-	kvm_relay_feeddata(buffer, 4);
+
+	// Get RemoteDesktop_Ptrs from reserved parameter (same structure as Windows)
+	// On macOS, we need to forward this via ILibAsyncSocket to the -kvm1 domain socket
+	// The reserved pointer is RemoteDesktop_Ptrs*, which contains kvmDomainSocketModule
+
+	// We need to include the agentcore header to access RemoteDesktop_Ptrs structure
+	// For now, just cast to void** and access kvmDomainSocketModule at the correct offset
+	// Structure: ctx, object, MeshAgentObject, kvmPipe, kvmDomainSocket, kvmDomainSocketModule, stream
+	// On 64-bit: 0, 8, 16, 24, 32, 40, 48
+	void **ptrs = (void**)reserved;
+	void *kvmDomainSocketModule = ptrs[5];  // kvmDomainSocketModule is at offset 5 (after ctx, object, MeshAgentObject, kvmPipe, kvmDomainSocket)
+
+	if (kvmDomainSocketModule != NULL)
+	{
+		// Send to -kvm1 via domain socket (same as ILibDuktape_MeshAgent_RemoteDesktop_WriteSink)
+		ILibAsyncSocket_Send(kvmDomainSocketModule, buffer, 4, ILibAsyncSocket_MemoryOwnership_USER);
+	}
 }
 
 // Clean up the KVM session.
@@ -900,11 +1265,18 @@ void kvm_cleanup()
 {
 	KvmDebugLog("kvm_cleanup\n");
 	g_shutdown = 1;
+	// DEPRECATED: Process pipe cleanup - no longer used in socket architecture
+	/*
 	if (gChildProcess != NULL)
 	{
 		ILibProcessPipe_Process_SoftKill(gChildProcess);
 		gChildProcess = NULL;
 	}
+	*/
+
+	// Cleanup session resources (directory, signal file, socket)
+	// This triggers -kvm1 to exit (QueueDirectories detects empty directory)
+	kvm_cleanup_session();
 }
 
 
@@ -993,17 +1365,13 @@ void kvm_check_permission()
         AXIsProcessTrustedWithOptions(options);
     }
 
-    // Request full disk access
+    // Check full disk access status
+    // Note: If not granted, do nothing here. This will be addressed later with a GUI
+    // permission helper that users can launch on-demand to review and grant permissions.
     if(__builtin_available(macOS 10.14, *)) {
         if(_fullDiskAuthorizationStatus() != MPAuthorizationStatusAuthorized) {
-            CFStringRef URL =  CFStringCreateWithCString(NULL, "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", kCFStringEncodingASCII);
-            CFURLRef pathRef = CFURLCreateWithString( NULL, URL, NULL );
-            if( pathRef )
-            {
-                LSOpenCFURLRef(pathRef, NULL);
-                CFRelease(pathRef);
-            }
-            CFRelease(URL);
+            // TODO: Launch permission helper GUI (when implemented)
+            // For now, silently continue - don't auto-open System Settings
         }
     }
 }
