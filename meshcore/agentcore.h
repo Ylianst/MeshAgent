@@ -250,6 +250,8 @@ typedef struct MeshAgentHostContainer
 	int updaterVersion;
 	char **execparams;
 	char *meshServiceName;
+	char *companyName;
+	char *serviceID;
 	char *displayName;
 	int serviceReserved;
 	long consoleText_timeStamp;

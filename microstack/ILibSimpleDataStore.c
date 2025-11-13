@@ -550,6 +550,7 @@ FILE* ILibSimpleDataStore_OpenFileEx3(char* filePath, int forceTruncateIfNonZero
 
 	if (forceTruncateIfNonZero != 0 || (f = fopen(filePath, flag)) == NULL)
 	{
+		if (readonly != 0) { return NULL; }  // Don't create file in readonly mode
 		if (created != NULL) { *created = 1; }
 		f = fopen(filePath, "wb+");
 	}
