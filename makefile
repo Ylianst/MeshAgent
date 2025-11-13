@@ -93,8 +93,9 @@
 #   ARCHID=2                                # Windows Console x86 64 bit
 #   ARCHID=3                                # Windows Service x86 32 bit
 #   ARCHID=4                                # Windows Service x86 64 bit
-#   make macos ARCHID=16					# macOS x86 64 bit
-#	make macos ARCHID=29					# macOS ARM 64 bit
+#   make macos ARCHID=16					# macOS x86 64 bit (Intel)
+#	make macos ARCHID=29					# macOS ARM 64 bit (Apple Silicon)
+#	make macos ARCHID=universal				# macOS Universal (Intel + Apple Silicon)
 #   make linux ARCHID=5						# Linux x86 32 bit
 #   make linux ARCHID=6						# Linux x86 64 bit
 #   make linux ARCHID=7						# Linux MIPSEL
@@ -189,6 +190,11 @@ SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
 MESH_VER = 194
 EXENAME = meshagent
 
+# Build output directories
+BUILD_DIR = build
+OSNAME =
+BUILD_OUTPUT_DIR = .
+
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
 PATH_MIPS24KC = ../ToolChains/toolchain-mips_24kc_gcc-7.3.0_musl/
@@ -217,7 +223,13 @@ INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshcons
 
 # Compiler and linker flags
 CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+# macOS (Darwin) doesn't have separate libutil - functions are in libSystem
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+LDFLAGS ?= -L. -lpthread -lm
+else
 LDFLAGS ?= -L. -lpthread -lutil -lm
+endif
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
@@ -293,6 +305,7 @@ endif
 # Official Linux x86 32bit
 ifeq ($(ARCHID),5)
 ARCHNAME = x86
+OSNAME = linux
 CC = gcc -m32
 KVM = 1
 LMS = 1
@@ -301,6 +314,7 @@ endif
 # Official Linux x86 64bit
 ifeq ($(ARCHID),6)
 ARCHNAME = x86-64
+OSNAME = linux
 KVM = 1
 LMS = 1
 endif
@@ -308,29 +322,44 @@ endif
 # Official macOS x86 64bit
 ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
+LIBARCHNAME = macos-x86-64
+OSNAME = macos
 KVM = 1
 LMS = 0
-MACOSARCH = -mmacosx-version-min=10.5
+MACOSARCH = -mmacosx-version-min=10.13
 CC = gcc -arch x86_64
 endif
 
 # Official macOS ARM 64bit
 ifeq ($(ARCHID),29)
 ARCHNAME = osx-arm-64
+LIBARCHNAME = macos-arm-64
+OSNAME = macos
 KVM = 1
 LMS = 0
-MACOSARCH = -target arm64-apple-macos11
+MACOSARCH = -mmacosx-version-min=11.0
 CC = gcc -arch arm64
+endif
+
+# Official macOS Universal 64bit (Intel + Apple Silicon)
+ifeq ($(ARCHID),10005)
+ARCHNAME = osx-universal-64
+OSNAME = macos
+KVM = 1
+LMS = 0
+MACOSARCH = -mmacosx-version-min=10.13
+# Universal binary uses lipo, no CC needed for this target
 endif
 
 
 # Official Linux MIPSEL
 ifeq ($(ARCHID),7)
 ARCHNAME = mips
+OSNAME = linux
 CC = $(PATH_MIPS)mipsel-linux-gcc
 STRIP = $(PATH_MIPS)mipsel-linux-strip
 CEXTRA = -D_FORTIFY_SOURCE=2 -D_NOILIBSTACKDEBUG -D_NOFSWATCHER -Wformat -Wformat-security -fno-strict-aliasing -DILIBCHAIN_GLOBAL_LOCK
-CFLAGS += -DBADMATH 
+CFLAGS += -DBADMATH
 IPADDR_MONITOR_DISABLE = 1
 IFADDR_DISABLE = 1
 KVM = 0
@@ -414,11 +443,12 @@ endif
 # Official Linux ARM
 ifeq ($(ARCHID),9)
 ARCHNAME = arm
+OSNAME = linux
 CC = $(PATH_ARM5)arm-none-linux-gnueabi-gcc
 STRIP = $(PATH_ARM5)arm-none-linux-gnueabi-strip
 KVM = 0
 LMS = 0
-CFLAGS += -D_NOFSWATCHER 
+CFLAGS += -D_NOFSWATCHER
 CFLAGS += -DILIBCHAIN_GLOBAL_LOCK
 CEXTRA = -fno-strict-aliasing
 endif
@@ -519,6 +549,7 @@ endif
 # Official FreeBSD x86-64
 ifeq ($(ARCHID),30)
 ARCHNAME = freebsd_x86-64
+OSNAME = freebsd
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -528,6 +559,7 @@ endif
 # Official OpenBSD x86-64
 ifeq ($(ARCHID),37)
 ARCHNAME = openbsd_x86-64
+OSNAME = openbsd
 CC = clang
 CFLAGS += -I/usr/local/include
 KVM = 0
@@ -542,7 +574,7 @@ endif
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
 LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
-MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
+MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/MacOS/mac_kvm_auth.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 	ifneq ($(JPEGVER),)
 		ifeq ($(LEGACY_LD),1)
@@ -550,7 +582,7 @@ CFLAGS += -D_LINKVM
 		else
 			LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
 		endif
-		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(LIBARCHNAME)/$(JPEGVER)/libturbojpeg.a
 	else
 		ifeq ($(NOTURBOJPEG),1)
 			LINUXFLAGS = -ljpeg
@@ -560,7 +592,7 @@ CFLAGS += -D_LINKVM
 			else
 				LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
 			endif
-			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
+			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(LIBARCHNAME)/libturbojpeg.a
 		endif
 	endif
 	BSDFLAGS = /usr/local/lib/libjpeg.a
@@ -587,7 +619,7 @@ MACSSL =
 BSDSSL =
 else
 LINUXSSL = -Lopenssl/libstatic/linux/$(ARCHNAME)
-MACSSL = -Lopenssl/libstatic/macos/$(ARCHNAME)
+MACSSL = -Lopenssl/libstatic/macos/$(LIBARCHNAME)
 BSDSSL = -Lopenssl/libstatic/bsd/$(ARCHNAME)
 CFLAGS += -DMICROSTACK_TLS_DETECT
 LDEXTRA += -lssl -lcrypto
@@ -602,13 +634,12 @@ endif
 
 ifeq ($(DEBUG),1)
 # Debug Build, include Symbols
-CFLAGS += -g -D_DEBUG 
+CFLAGS += -g -D_DEBUG
 STRIP = $(NOECHO) $(NOOP)
 SYMBOLCP = $(NOECHO) $(NOOP)
 else
 CFLAGS += -O2
-STRIP += ./$(EXENAME)_$(ARCHNAME)$(EXENAME2)
-SYMBOLCP = cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./DEBUG_$(EXENAME)_$(ARCHNAME)$(EXENAME2)
+# Strip command will be set by build targets
 endif
 
 ifeq ($(SSL_TRACE),1)
@@ -666,9 +697,13 @@ ifeq ($(MEMTRACK),1)
 CFLAGS += -DILIBMEMTRACK
 endif
 
+# Skip -no-pie on macOS (Darwin) as clang warns it's unused during compilation
+UNAME := $(shell uname -s)
+ifneq ($(UNAME),Darwin)
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie
+endif
 endif
 
 GITTEST := $(shell git log -1 > /dev/null 2>&1 ; echo $$? )
@@ -704,6 +739,7 @@ clean:
 	rm -f meshcore/KVM/MacOS/*.o
 	rm -f microlms/lms/*.o
 	rm -f microlms/heci/*.o
+	rm -rf modules_expanded/
 
 cleanbin:
 	rm -f $(EXENAME)_aarch64
@@ -758,6 +794,7 @@ cleanbin:
 	rm -f DEBUG_$(EXENAME)_x86_nokvm
 	rm -f DEBUG_$(EXENAME)_x86-64
 	rm -f DEBUG_$(EXENAME)_x86-64_nokvm
+	rm -rf $(BUILD_DIR)
 
 
 depend: $(SOURCES)
@@ -789,22 +826,76 @@ pi:
 	strip meshagent_pi
 
 linux:
+	@mkdir -p $(BUILD_DIR)/$(OSNAME)
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/DEBUG_$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		strip ./$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/$(OSNAME)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"
 
+# macOS build target
+# Note: -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null enables keyboard/mouse
+# input at loginwindow (pre-login screen). This is required for remote desktop functionality
+# before user login and is used by Chrome Remote Desktop, TeamViewer, etc.
+# Reference: https://stackoverflow.com/questions/41429524/how-to-simulate-keyboard-and-mouse-events-using-cgeventpost-in-login-window-mac
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(ARCHID)" = "universal" ] || [ "$(ARCHID)" = "10005" ]; then \
+		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
+		echo "Building x86-64..."; \
+		$(MAKE) clean; \
+		$(MAKE) macos ARCHID=16; \
+		echo "Building ARM64..."; \
+		$(MAKE) clean; \
+		$(MAKE) macos ARCHID=29; \
+		echo "Creating universal binary..."; \
+		mkdir -p $(BUILD_DIR)/macos; \
+		lipo -create \
+			$(BUILD_DIR)/macos/$(EXENAME)_osx-x86-64 \
+			$(BUILD_DIR)/macos/$(EXENAME)_osx-arm-64 \
+			-output $(BUILD_DIR)/macos/$(EXENAME)_osx-universal-64; \
+		lipo -create \
+			$(BUILD_DIR)/macos/DEBUG_$(EXENAME)_osx-x86-64 \
+			$(BUILD_DIR)/macos/DEBUG_$(EXENAME)_osx-arm-64 \
+			-output $(BUILD_DIR)/macos/DEBUG_$(EXENAME)_osx-universal-64; \
+		echo "Build complete: $(BUILD_DIR)/macos/$(EXENAME)_osx-universal-64"; \
+	else \
+		mkdir -p $(BUILD_DIR)/$(OSNAME); \
+		$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) $(MACSSL) $(MACOSFLAGS) -lz -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
+		if [ "$(DEBUG)" != "1" ]; then \
+			cp ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/DEBUG_$(EXENAME)_$(ARCHNAME); \
+			strip ./$(EXENAME)_$(ARCHNAME); \
+			mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(EXENAME)_$(ARCHNAME); \
+		else \
+			mv ./$(EXENAME)_$(ARCHNAME) ./$(BUILD_DIR)/$(OSNAME)/$(EXENAME)_$(ARCHNAME); \
+		fi; \
+		echo "Build complete: $(BUILD_DIR)/$(OSNAME)/$(EXENAME)_$(ARCHNAME)"; \
+	fi
 
 freebsd:
+	@mkdir -p $(BUILD_DIR)/bsd
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/bsd/DEBUG_$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		strip ./$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/bsd/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/bsd/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/bsd/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"
 
 openbsd:
+	@mkdir -p $(BUILD_DIR)/bsd
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -DILIB_NO_TIMEDJOIN -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/bsd/DEBUG_$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		strip ./$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/bsd/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+	else \
+		mv ./$(EXENAME)_$(ARCHNAME)$(EXENAME2) ./$(BUILD_DIR)/bsd/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+	fi
+	@echo "Build complete: $(BUILD_DIR)/bsd/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"
 

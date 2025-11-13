@@ -29,6 +29,16 @@ Release_NoOpenSSL/
 Library_Debug_NoOpenSSL/
 Library_Release_NoOpenSSL/
 
+# Makefile build output directory (organized by OS and architecture)
+build/
+
+# Auto-generated git commit info (regenerated on every build)
+microscript/ILibDuktape_Commit.h
+
+# JavaScript polyfill working directory (auto-generated from modules/)
+modules_expanded/
+
+
 # Visual Studio 2015/2017 cache/options directory
 .vs/
 # Uncomment if you have tasks that create the project's static files in wwwroot
@@ -333,3 +343,12 @@ ASALocalRun/
 *.o
 ToolChains/
 .DS_Store
+
+# Private files and directories
+private/
+
+# MeshAgent sensitive configuration and database files
+# These files contain production credentials, server URLs, and identity data
+*.db
+*.msh
+*.mshx
