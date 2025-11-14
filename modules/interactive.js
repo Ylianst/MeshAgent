@@ -351,7 +351,7 @@ if (process.argv.includes('-help') || (process.platform == 'linux' && process.en
         }
         else
         {
-            if (!require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
+            if (process.platform != 'darwin' && !require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
             {
                 console.log('\n' + translation[lang].graphicalerror + '.');
                 console.log(translation[lang].zenity + ".\n");
