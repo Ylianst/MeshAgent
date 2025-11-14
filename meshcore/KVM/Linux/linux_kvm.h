@@ -44,7 +44,7 @@ void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char 
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *authToken, char *dispid);
-void kvm_relay_reset();
+void kvm_relay_reset(void *reserved);
 void kvm_cleanup();
 
 #endif /* LINUX_KVM_H_ */
