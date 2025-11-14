@@ -434,10 +434,29 @@ function cleanupOrphanedPlists(installPath) {
                     // This plist points to our binary - unload and delete it
                     try {
                         var serviceName = files[i].replace('.plist', '');
-                        var uid = require('user-sessions').consoleUid();
                         var launchAgent = require('service-manager').manager.getLaunchAgent(serviceName);
-                        if (uid && uid > 0) {
-                            launchAgent.unload(uid);
+
+                        // Unload for ALL logged in users, not just console user
+                        try {
+                            var sessions = require('user-sessions').enumerateUsers();
+                            for (var j = 0; j < sessions.length; j++) {
+                                if (sessions[j].uid && sessions[j].uid > 0) {
+                                    try {
+                                        launchAgent.unload(sessions[j].uid);
+                                    } catch (unloadErr) {
+                                        // Agent might not be loaded for this user - that's OK
+                                        if (unloadErr.message && unloadErr.message.indexOf('not loaded') === -1 && unloadErr.message.indexOf('Could not find') === -1) {
+                                            process.stdout.write('      WARNING: Unload error for ' + serviceName + ' (uid ' + sessions[j].uid + '): ' + unloadErr.message + '\n');
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (enumErr) {
+                            // If we can't enumerate users, fall back to console user
+                            var uid = require('user-sessions').consoleUid();
+                            if (uid && uid > 0) {
+                                launchAgent.unload(uid);
+                            }
                         }
                     } catch (e) {
                         // Log unload errors for diagnostics (except "not loaded")
@@ -1113,6 +1132,27 @@ function installService(params)
                     parameters: ['-kvm1', '--serviceId=' + (options.serviceId || serviceId)]
                 });
             process.stdout.write(' [DONE]\n');
+
+            // Bootstrap the LaunchAgent into launchd for the current console user
+            process.stdout.write('   -> loading launch agent...');
+            try
+            {
+                var uid = require('user-sessions').consoleUid();
+                if (uid && uid > 0)
+                {
+                    var launchAgent = require('service-manager').manager.getLaunchAgent((options.serviceId || serviceId) + '-agent');
+                    launchAgent.load(uid);
+                    process.stdout.write(' [DONE]\n');
+                }
+                else
+                {
+                    process.stdout.write(' [Will start at next user login]\n');
+                }
+            }
+            catch (lae)
+            {
+                process.stdout.write(' [ERROR] ' + lae + '\n');
+            }
         }
         catch (sie)
         {
