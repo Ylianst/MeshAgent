@@ -409,6 +409,11 @@ if (process.platform == 'darwin')
                 {
                     throw ('LaunchDaemon must run as root');
                 }
+                // Use modern bootstrap command for LaunchDaemons on macOS 10.10+
+                if(ver.compareTo('10.10') >= 0)
+                {
+                    command = 'bootstrap system';
+                }
             }
             else
             {
@@ -2248,6 +2253,19 @@ function serviceManager()
     }
     this.installService = function installService(options)
     {
+        // Sanitize companyName and service name for macOS to follow reverse DNS naming conventions
+        // Only allow alphanumeric, hyphens, and underscores
+        if (process.platform == 'darwin' && options.companyName) {
+            options.companyName = options.companyName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+        }
+        if (process.platform == 'darwin' && options.name) {
+            var originalName = options.name;
+            options.name = options.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+            if (!options.name) {
+                throw ('Service name "' + originalName + '" contains no valid characters. Use alphanumeric, hyphens, or underscores only.');
+            }
+        }
+
         if (process.platform == 'linux') { options.name = this.escape(options.name); }
         if (!options.target) { options.target = options.name; }
         if (!options.displayName) { options.displayName = options.name; }
@@ -2831,7 +2849,49 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires root'); }
 
             // Mac OS
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
+            // Sanitize companyName and service name to follow reverse DNS naming conventions
+            // Only allow alphanumeric, hyphens, and underscores (dots will be added between components)
+            function sanitizeIdentifier(str) {
+                if (!str) return null;
+                // Replace spaces with hyphens, remove all non-alphanumeric except hyphens/underscores, convert to lowercase
+                return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+            }
+
+            var sanitizedCompanyName = sanitizeIdentifier(options.companyName);
+            var sanitizedServiceName = sanitizeIdentifier(options.name);
+
+            if (!sanitizedServiceName) {
+                throw ('Service name is required and must contain valid characters (alphanumeric, hyphens, underscores)');
+            }
+
+            // Build composite service identifier from companyName and service name
+            // Format: meshagent.{serviceName}.{companyName} when both provided
+            // Format: meshagent.{serviceName} when only custom service name
+            // Format: meshagent.{companyName} when default service name with company
+            // Format: meshagent when default service name only
+            var serviceId;
+            if (options.serviceId) {
+                // Explicit serviceId provided - use it directly
+                serviceId = options.serviceId;
+            } else if (sanitizedCompanyName) {
+                // Company name present
+                if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
+                    // Custom service name + company: meshagent.ServiceName.CompanyName
+                    serviceId = 'meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName;
+                } else {
+                    // Default service name + company: meshagent.CompanyName
+                    serviceId = 'meshagent.' + sanitizedCompanyName;
+                }
+            } else if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
+                // Only custom service name (no company): meshagent.ServiceName
+                serviceId = 'meshagent.' + sanitizedServiceName;
+            } else {
+                // Default service name only: meshagent
+                serviceId = 'meshagent';
+            }
+
+            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
+            var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
@@ -2849,41 +2909,29 @@ function serviceManager()
             plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
+            plist += '      <key>Disabled</key>\n';
+            plist += '      <false/>\n';
+            plist += '      <key>KeepAlive</key>\n';
+            plist += '      <true/>\n';
             plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '</string>\n');
+            plist += ('     <string>' + serviceId + '</string>\n');
             plist += (params + '\n');
-            plist += '      <key>WorkingDirectory</key>\n';
-            plist += ('     <string>' + options.installPath + '</string>\n');
-            plist += (stdoutpath + '\n');
             plist += '      <key>RunAtLoad</key>\n';
             plist += (autoStart + '\n');
-            plist += '      <key>KeepAlive</key>\n';
-            if(options.failureRestart == null || options.failureRestart > 0)
-            {
-                plist += '      <dict>\n';
-                plist += '         <key>Crashed</key>\n';
-                plist += '         <true/>\n';
-                plist += '      </dict>\n';
-            }
-            else
-            {
-                plist += '      <false/>\n';
-            }
-            if(options.failureRestart != null)
-            {
-                plist += '      <key>ThrottleInterval</key>\n';
-                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
-            }
+            plist += (stderrpath + '\n');
+            plist += (stdoutpath + '\n');
+            plist += '      <key>WorkingDirectory</key>\n';
+            plist += ('     <string>' + options.installPath.replace(/\/$/, '') + '</string>\n');
 
             plist += '  </dict>\n';
             plist += '</plist>';
-            if (!require('fs').existsSync('/Library/LaunchDaemons/' + options.name + '.plist'))
+            if (!require('fs').existsSync('/Library/LaunchDaemons/' + serviceId + '.plist'))
             {
-                require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
+                require('fs').writeFileSync('/Library/LaunchDaemons/' + serviceId + '.plist', plist);
             }
             else
             {
-                throw ('Service: ' + options.name + ' already exists');
+                throw ('Service: ' + serviceId + ' already exists');
             }
         }
 
@@ -2914,13 +2962,55 @@ function serviceManager()
                 throw ('Installing a Global Agent/Daemon, requires admin');
             }
 
+            // Sanitize companyName and service name to follow reverse DNS naming conventions
+            // Only allow alphanumeric, hyphens, and underscores (dots will be added between components)
+            function sanitizeIdentifier(str) {
+                if (!str) return null;
+                // Replace spaces with hyphens, remove all non-alphanumeric except hyphens/underscores, convert to lowercase
+                return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+            }
+
+            var sanitizedCompanyName = sanitizeIdentifier(options.companyName);
+            var sanitizedServiceName = sanitizeIdentifier(options.name);
+
+            if (!sanitizedServiceName) {
+                throw ('Service name is required and must contain valid characters (alphanumeric, hyphens, underscores)');
+            }
+
+            // Build composite service identifier from companyName and service name
+            // Format: meshagent.{serviceName}.{companyName} when both provided
+            // Format: meshagent.{serviceName} when only custom service name
+            // Format: meshagent.{companyName} when default service name with company
+            // Format: meshagent when default service name only
+            var serviceId;
+            if (options.serviceId) {
+                // Explicit serviceId provided - use it directly
+                serviceId = options.serviceId;
+            } else if (sanitizedCompanyName) {
+                // Company name present
+                if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
+                    // Custom service name + company: meshagent.ServiceName.CompanyName
+                    serviceId = 'meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName;
+                } else {
+                    // Default service name + company: meshagent.CompanyName
+                    serviceId = 'meshagent.' + sanitizedCompanyName;
+                }
+            } else if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
+                // Only custom service name (no company): meshagent.ServiceName
+                serviceId = 'meshagent.' + sanitizedServiceName;
+            } else {
+                // Default service name only: meshagent
+                serviceId = 'meshagent';
+            }
+
             var servicePathTokens = options.servicePath.split('/');
             servicePathTokens.pop();
             if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
             options.workingDirectory = servicePathTokens.join('/');
 
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
+            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
+            var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
             var params =         '     <key>ProgramArguments</key>\n';
             params +=            '     <array>\n';
             params +=           ('         <string>' + options.servicePath + '</string>\n');
@@ -2936,14 +3026,15 @@ function serviceManager()
             plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
             plist += '<plist version="1.0">\n';
             plist += '  <dict>\n';
+            plist += '      <key>Disabled</key>\n';
+            plist += '      <false/>\n';
             plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '-launchagent</string>\n');
+            plist += ('     <string>' + serviceId + '-agent</string>\n');
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.workingDirectory + '</string>\n');
+            plist += (stderrpath + '\n');
             plist += (stdoutpath + '\n');
-            plist += '      <key>RunAtLoad</key>\n';
-            plist += (autoStart + '\n');
             if (options.sessionTypes && options.sessionTypes.length > 0)
             {
                 plist += '      <key>LimitLoadToSessionType</key>\n';
@@ -2955,19 +3046,11 @@ function serviceManager()
                 plist += '      </array>\n';
             }
             plist += '      <key>KeepAlive</key>\n';
-            if (options.failureRestart == null || options.failureRestart > 0) {
-                plist += '      <dict>\n';
-                plist += '         <key>Crashed</key>\n';
-                plist += '         <true/>\n';
-                plist += '      </dict>\n';
-            }
-            else {
-                plist += '      <false/>\n';
-            }
-            if (options.failureRestart != null) {
-                plist += '      <key>ThrottleInterval</key>\n';
-                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
-            }
+            plist += '      <false/>\n';
+            plist += '      <key>QueueDirectories</key>\n';
+            plist += '      <array>\n';
+            plist += ('         <string>/var/run/' + serviceId + '</string>\n');
+            plist += '      </array>\n';
 
             plist += '  </dict>\n';
             plist += '</plist>';
@@ -2984,10 +3067,10 @@ function serviceManager()
                 require('fs').mkdirSync(folder);
                 require('fs').chownSync(folder, options.uid, options.gid);
             }
-            require('fs').writeFileSync(folder + options.name + '.plist', plist);
+            require('fs').writeFileSync(folder + serviceId + '-agent.plist', plist);
             if(options.user)
             {
-                require('fs').chownSync(folder + options.name + '.plist', options.uid, options.gid);
+                require('fs').chownSync(folder + serviceId + '-agent.plist', options.uid, options.gid);
             }
         };
     }
