@@ -194,6 +194,22 @@ limitations under the License.
     var s = null, buttons = [translation[lang].cancel], skip = false;
     var serviceName = msh.meshServiceName ? msh.meshServiceName : 'meshagent';
 
+    // Cache message-box capabilities (prevents zenity/kdialog checks on macOS)
+    var messageBoxCapabilities = { hasKdialog: false, hasZenity: false };
+    if (process.platform != 'darwin')
+    {
+        try
+        {
+            var msgBox = require('message-box');
+            messageBoxCapabilities.hasKdialog = !!msgBox.kdialog;
+            messageBoxCapabilities.hasZenity = !!(msgBox.zenity && msgBox.zenity.extra);
+        }
+        catch (e)
+        {
+            // message-box not available
+        }
+    }
+
     try { s = require('service-manager').manager.getService(serviceName); } catch (e) { }
 
     var connectArgs = [process.execPath.split('/').pop(), '--no-embedded=1', '--disableUpdate=1'];
@@ -260,6 +276,23 @@ if (process.argv.includes('-translations'))
     console.log(JSON.stringify(translation));
     process.exit();
 }
+if (process.argv.includes('-upgrade'))
+{
+    var p = [];
+    for (var i = 0; i < process.argv.length; ++i)
+    {
+        if (process.argv[i].startsWith('--installPath='))
+        {
+            p.push('--installPath="' + process.argv[i].split('=').pop() + '"');
+        }
+        else if(process.argv[i].startsWith('--'))
+        {
+            p.push(process.argv[i]);
+        }
+    }
+    _install(p);
+    process.exit();
+}
 if (process.argv.includes('-help') || (process.platform == 'linux' && process.env['XAUTHORITY'] == null && process.env['DISPLAY'] == null && process.argv.length == 1))
 {
     console.log("\n" + translation[lang].commands + ": ");
@@ -311,7 +344,7 @@ if (process.argv.includes('-help') || (process.platform == 'linux' && process.en
         }
         if (s)
         {
-            if ((process.platform == 'darwin') || require('message-box').kdialog)
+            if (process.platform == 'darwin' || messageBoxCapabilities.hasKdialog)
             {
                 buttons.unshift(translation[lang].setup);
             } else
@@ -351,7 +384,7 @@ if (process.argv.includes('-help') || (process.platform == 'linux' && process.en
         }
         else
         {
-            if (process.platform != 'darwin' && !require('message-box').kdialog && ((require('message-box').zenity == null) || (!require('message-box').zenity.extra)))
+            if (process.platform != 'darwin' && !messageBoxCapabilities.hasKdialog && !messageBoxCapabilities.hasZenity)
             {
                 console.log('\n' + translation[lang].graphicalerror + '.');
                 console.log(translation[lang].zenity + ".\n");
@@ -435,7 +468,7 @@ if (process.argv.includes('-help') || (process.platform == 'linux' && process.en
 
                     if (process.platform != 'darwin')
                     {
-                        if (!require('message-box').zenity && require('message-box').kdialog)
+                        if (!messageBoxCapabilities.hasZenity && messageBoxCapabilities.hasKdialog)
                         {
                             msg += ('\n' + translation[lang].pressok);
                         }
