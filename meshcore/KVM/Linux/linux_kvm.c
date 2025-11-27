@@ -1512,8 +1512,12 @@ void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, v
 }
 
 // Force a KVM reset & refresh
-void kvm_relay_reset()
+void kvm_relay_reset(void *reserved)
 {
+	// Linux doesn't need the reserved parameter - it uses pipes
+	// Reserved parameter is for macOS domain socket and Windows write handler
+	(void)reserved;
+
 	char buffer[4];
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_REFRESH);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)4);				// Write the size
