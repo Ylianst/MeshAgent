@@ -510,40 +510,10 @@ function macos_getProxy()
     var child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
     child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-    child.stdin.write("scutil --proxy | tr '\\n' '`' | awk -F'`' '");
-    child.stdin.write('{');
-    child.stdin.write('   pstart=0;')
-    child.stdin.write('   for(i=1;i<NF;++i)');
-    child.stdin.write("   {");
-    child.stdin.write('      if(split($i,dummy,"ExceptionsList ")>1)');
-    child.stdin.write("      {");
-    child.stdin.write('          printf "{ \\"exceptions\\": [";');
-    child.stdin.write('          ++i;');
-    child.stdin.write('          fstart=1; pstart=1;');
-    child.stdin.write('          for(;i<NF;++i)');
-    child.stdin.write('          {');
-    child.stdin.write('             if(split($i,dummy,"}")>1) { break; } ');
-    child.stdin.write('             split($i, val, " : ");');
-    child.stdin.write('             printf "%s\\"%s\\"", (fstart==0?",":""), val[2];');
-    child.stdin.write('             fstart=0;');
-    child.stdin.write('          }');
-    child.stdin.write('          printf "]";');
-    child.stdin.write('          continue;');
-    child.stdin.write("      }");
-    child.stdin.write('      else');
-    child.stdin.write('      {');
-    child.stdin.write('         if(pstart==1 && split($i,dummy,"}")==1)');
-    child.stdin.write('         {');
-    child.stdin.write('            split($i,tok," : ");');
-    child.stdin.write('            split(tok[1],key," ");');
-    child.stdin.write('            printf ",\\"%s\\": \\"%s\\"", key[1], tok[2];');
-    child.stdin.write('         }');
-    child.stdin.write('      }')
-    child.stdin.write("   }");
-    child.stdin.write('   printf "}";');
-    child.stdin.write("}'\nexit\n");
+    child.stdin.write("scutil --proxy | grep -E '(HTTPEnable|HTTPProxy|HTTPPort|HTTPSEnable|HTTPSProxy|HTTPSPort)' | awk -F' : ' '{printf \"%s\\\"%s\\\": \\\"%s\\\"\", (NR>1?\",\":\"{\" ), $1, $2} END {printf \"}\"}'");
+    child.stdin.write("\nexit\n");
     child.waitExit();
-    if(child.stdout.str != '')
+    if(child.stdout.str != '' && child.stdout.str != '{}')
     {
         try
         {
@@ -552,10 +522,14 @@ function macos_getProxy()
             {
                 return('http://' + p.HTTPProxy + ':' + p.HTTPPort);
             }
+            if(p.HTTPSEnable == "1")
+            {
+                return('https://' + p.HTTPSProxy + ':' + p.HTTPSPort);
+            }
         }
         catch(e)
         {
-            console.log(e);
+            // Ignore parsing errors - means no valid proxy configured
         }
     }
     throw ('No Proxies');

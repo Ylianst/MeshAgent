@@ -1,0 +1,86 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="stdafx.cpp" />
+    <ClCompile Include="WebRTC.cpp" />
+    <ClCompile Include="..\..\microstack\ILibAsyncServerSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibAsyncSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibAsyncUDPSocket.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibCrypto.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibParsers.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibRemoteLogging.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibWebClient.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibWebRTC.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibWebServer.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\microstack\ILibWrapperWebRTC.c">
+      <Filter>Microstack</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="WebRTC.h" />
+    <ClInclude Include="..\..\microstack\ILibAsyncServerSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibAsyncSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibAsyncUDPSocket.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibCrypto.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibParsers.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibRemoteLogging.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibWebClient.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibWebRTC.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibWebServer.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\microstack\ILibWrapperWebRTC.h">
+      <Filter>Microstack</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Microstack">
+      <UniqueIdentifier>{6a592a1b-34c3-4c4c-8bd1-72082faa84d2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Core">
+      <UniqueIdentifier>{481014fb-4e91-4ae7-8f41-0a1f05dad9df}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="WebRTC.rc" />
+  </ItemGroup>
+</Project>

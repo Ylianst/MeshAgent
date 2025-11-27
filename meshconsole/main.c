@@ -33,6 +33,20 @@ limitations under the License.
 #include "microstack/ILibCrypto.h"
 #include "microscript/ILibDuktape_Commit.h"
 
+#if defined(__APPLE__) && defined(_LINKVM)
+#include <dirent.h>
+#include <limits.h>
+#include <libgen.h>
+#include <string.h>
+#endif
+
+#ifdef __APPLE__
+#include <mach-o/getsect.h>
+#include <mach-o/ldsyms.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include "meshcore/MacOS/bundle_detection.h"
+#endif
+
 MeshAgentHostContainer *agentHost = NULL;
 #ifdef _OPENBSD
 #include <stdlib.h>
@@ -70,12 +84,247 @@ void BreakSink(int s)
 #endif
 
 #if defined(_LINKVM) && defined(__APPLE__)
-extern void* kvm_server_mainloop(void *parm);
+extern void* kvm_server_mainloop(void *parm, char *serviceID);
 extern void senddebug(int val);
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
 {
 	ignore_result(write(STDOUT_FILENO, (void*)buffer, bufferLen));
 	return ILibTransport_DoneState_COMPLETE;
+}
+
+// Helper function to extract Label from a plist file
+char* extract_plist_label(const char* plistPath)
+{
+	FILE *fp;
+	char cmd[1024];
+	char *result = NULL;
+	char buffer[512];
+
+	// Use awk to extract Label value from plist
+	snprintf(cmd, sizeof(cmd),
+		"cat '%s' | tr '\\n' '.' | awk '{ split($0, a, \"<key>Label</key>\"); "
+		"split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'",
+		plistPath);
+
+	fp = popen(cmd, "r");
+	if (fp != NULL)
+	{
+		if (fgets(buffer, sizeof(buffer), fp) != NULL)
+		{
+			// Remove trailing newline
+			size_t len = strlen(buffer);
+			if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
+			if (strlen(buffer) > 0)
+			{
+				result = strdup(buffer);
+			}
+		}
+		pclose(fp);
+	}
+
+	return result;
+}
+
+// Helper function to extract first ProgramArguments path from plist
+char* extract_plist_program_path(const char* plistPath)
+{
+	FILE *fp;
+	char cmd[1024];
+	char *result = NULL;
+	char buffer[512];
+
+	// Use awk to extract first ProgramArguments string (the binary path)
+	snprintf(cmd, sizeof(cmd),
+		"cat '%s' | tr '\\n' '.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); "
+		"split(a[2], b, \"</array>\"); split(b[1], c, \"<string>\"); "
+		"split(c[2], d, \"</string>\"); print d[1]; }'",
+		plistPath);
+
+	fp = popen(cmd, "r");
+	if (fp != NULL)
+	{
+		if (fgets(buffer, sizeof(buffer), fp) != NULL)
+		{
+			// Remove trailing newline
+			size_t len = strlen(buffer);
+			if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
+			if (strlen(buffer) > 0)
+			{
+				result = strdup(buffer);
+			}
+		}
+		pclose(fp);
+	}
+
+	return result;
+}
+
+// Discover serviceId by finding which LaunchAgent plist references our binary
+char* discover_service_id_from_plist(const char* binaryPath)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char *serviceId = NULL;
+	const char *launchAgentDir = "/Library/LaunchAgents";
+
+	dir = opendir(launchAgentDir);
+	if (dir == NULL)
+	{
+		return NULL;
+	}
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		// Look for .plist files
+		if (strstr(entry->d_name, ".plist") == NULL)
+			continue;
+
+		// Build full plist path
+		char plistPath[PATH_MAX];
+		snprintf(plistPath, sizeof(plistPath), "%s/%s", launchAgentDir, entry->d_name);
+
+		// Extract ProgramArguments path
+		char *programPath = extract_plist_program_path(plistPath);
+		if (programPath != NULL)
+		{
+			// Check if it matches our binary path
+			if (strcmp(programPath, binaryPath) == 0)
+			{
+				// Found it! Extract the Label
+				serviceId = extract_plist_label(plistPath);
+				free(programPath);
+				break;
+			}
+			free(programPath);
+		}
+	}
+
+	closedir(dir);
+	return serviceId;
+}
+
+// Parse serviceId to extract serviceName and companyName
+// Format: meshagent.{serviceName}.{companyName}-agent or {serviceName}-agent
+void parse_service_id(const char* serviceId, char** serviceName, char** companyName)
+{
+	if (serviceId == NULL)
+	{
+		*serviceName = strdup("meshagent");
+		*companyName = NULL;
+		return;
+	}
+
+	// Make a working copy
+	char workingCopy[512];
+	strncpy(workingCopy, serviceId, sizeof(workingCopy) - 1);
+	workingCopy[sizeof(workingCopy) - 1] = '\0';
+
+	// Strip -agent suffix if present
+	char *agentSuffix = strstr(workingCopy, "-agent");
+	if (agentSuffix != NULL)
+	{
+		*agentSuffix = '\0';  // Terminate string before -agent
+	}
+
+	// Check if format is meshagent.{serviceName}.{companyName}
+	if (strncmp(workingCopy, "meshagent.", 10) == 0)
+	{
+		// Skip "meshagent." prefix
+		char *remainder = workingCopy + 10;
+
+		// Find the next dot to separate serviceName and companyName
+		char *dot = strchr(remainder, '.');
+		if (dot != NULL)
+		{
+			*dot = '\0';  // Split at dot
+			*serviceName = strdup(remainder);
+			*companyName = strdup(dot + 1);
+		}
+		else
+		{
+			// Only serviceName, no companyName
+			*serviceName = strdup(remainder);
+			*companyName = NULL;
+		}
+	}
+	else
+	{
+		// Simple format - just serviceName
+		*serviceName = strdup(workingCopy);
+		*companyName = NULL;
+	}
+}
+#endif
+
+#ifdef __APPLE__
+// Helper function to extract CFBundleShortVersionString from embedded Info.plist
+// Returns dynamically allocated string that must be freed by caller, or NULL on failure
+char* get_embedded_version(void)
+{
+	unsigned long plist_size = 0;
+	char *version_string = NULL;
+
+	// Get pointer to embedded __info_plist section
+	const uint8_t *plist_data = getsectiondata(&_mh_execute_header, "__TEXT", "__info_plist", &plist_size);
+
+	if (plist_data == NULL || plist_size == 0)
+	{
+		return NULL;  // No embedded plist found
+	}
+
+	// Create CFData from the plist bytes
+	CFDataRef data = CFDataCreate(kCFAllocatorDefault, plist_data, plist_size);
+	if (data == NULL)
+	{
+		return NULL;
+	}
+
+	// Parse the plist
+	CFErrorRef error = NULL;
+	CFPropertyListRef plist = CFPropertyListCreateWithData(
+		kCFAllocatorDefault,
+		data,
+		kCFPropertyListImmutable,
+		NULL,
+		&error
+	);
+
+	CFRelease(data);
+
+	if (plist == NULL || error != NULL)
+	{
+		if (error) CFRelease(error);
+		return NULL;
+	}
+
+	// Get CFBundleShortVersionString value
+	if (CFGetTypeID(plist) == CFDictionaryGetTypeID())
+	{
+		CFStringRef version_key = CFStringCreateWithCString(kCFAllocatorDefault, "CFBundleShortVersionString", kCFStringEncodingUTF8);
+		CFStringRef version_value = (CFStringRef)CFDictionaryGetValue((CFDictionaryRef)plist, version_key);
+
+		if (version_value != NULL && CFGetTypeID(version_value) == CFStringGetTypeID())
+		{
+			// Convert CFString to C string
+			CFIndex length = CFStringGetLength(version_value);
+			CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
+			version_string = (char*)malloc(maxSize);
+
+			if (version_string != NULL)
+			{
+				if (!CFStringGetCString(version_value, version_string, maxSize, kCFStringEncodingUTF8))
+				{
+					free(version_string);
+					version_string = NULL;
+				}
+			}
+		}
+
+		CFRelease(version_key);
+	}
+
+	CFRelease(plist);
+	return version_string;
 }
 #endif
 
@@ -113,6 +362,14 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 #endif
 
+#ifdef __APPLE__
+	// Adjust working directory if running from application bundle
+	if (adjust_working_directory_for_bundle() != 0)
+	{
+		fprintf(stderr, "MeshAgent: Failed to set working directory for bundle. Exiting.\n");
+		return -1;
+	}
+#endif
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 
@@ -134,6 +391,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	if (argc > 1 && strcmp(argv[1], "-export") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy("require('code-utils').expand({embedded: true});process.exit();",0);
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+	}
+
+	if (argc > 1 && strcmp(argv[1], "-import") == 0 && integratedJavaScriptLen == 0)
+	{
+		integratedJavaScript = ILibString_Copy("require('code-utils').shrink();process.exit();",0);
 		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 
@@ -274,17 +537,151 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 		return(0);
 	}
+	if (argc > 1 && (strcasecmp(argv[1], "-version") == 0 || strcasecmp(argv[1], "--version") == 0))
+	{
+#ifdef __APPLE__
+		char *version = get_embedded_version();
+		if (version != NULL)
+		{
+			printf("%s\n", version);
+			free(version);
+		}
+		else
+		{
+			printf("Version information not available\n");
+		}
+#else
+		printf("--version flag is only supported on macOS builds\n");
+#endif
+#ifdef WIN32
+		wmain_free(argv);
+#endif
+		return(0);
+	}
 #if defined(_LINKVM) && defined(__APPLE__)
+	// -kvm0 DISABLED: macOS now uses REVERSED ARCHITECTURE with -kvm1
+	//
+	// Historical context:
+	// - -kvm0: Original process-spawning architecture (stdin/stdout I/O)
+	// - -kvm1: Apple-required architecture using QueueDirectories + domain sockets
+	//
+	// The -kvm1 REVERSED ARCHITECTURE was required to work within Apple's
+	// LaunchAgent/LaunchDaemon framework and bootstrap namespace restrictions.
+	// -kvm0 is kept commented here for function/feature comparison purposes.
+	//
+	// See commit 8772b02 (Oct 29, 2025) for removal of -kvm0 spawning code.
+	/*
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
 		kvm_server_mainloop(NULL);
 		return 0;
 	}
-	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
+	else
+	*/
+
+	if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
-		kvm_server_mainloop((void*)(uint64_t)getpid());
+		char *serviceId = NULL;
+
+		// Parse command-line arguments for --serviceId parameter
+		for (int i = 2; i < argc; i++)
+		{
+			if (strncmp(argv[i], "--serviceId=", 12) == 0)
+			{
+				serviceId = strdup(argv[i] + 12);
+				printf("KVM: Using serviceID from parameter: %s\n", serviceId);
+				break;
+			}
+		}
+
+		// Discover serviceId by parsing LaunchAgent plist
+		if (serviceId == NULL)
+		{
+			char binaryPath[PATH_MAX];
+
+			printf("KVM: No --serviceId parameter provided, discovering from LaunchAgent plist\n");
+
+			// Get absolute path of our binary
+			if (realpath(argv[0], binaryPath) != NULL)
+			{
+				printf("KVM: Binary path: %s\n", binaryPath);
+				printf("KVM: Scanning /Library/LaunchAgents/ for matching plist...\n");
+
+				// Find which LaunchAgent plist references this binary
+				serviceId = discover_service_id_from_plist(binaryPath);
+
+				if (serviceId != NULL)
+				{
+					printf("KVM: Discovered serviceId from LaunchAgent plist: %s\n", serviceId);
+				}
+				else
+				{
+					printf("KVM: Warning - Could not find LaunchAgent plist for %s\n", binaryPath);
+					printf("KVM: Using default serviceId\n");
+					serviceId = strdup("meshagent");
+				}
+			}
+			else
+			{
+				printf("KVM: Warning - Could not determine binary path (argv[0]=%s)\n", argv[0]);
+				printf("KVM: Using default serviceId\n");
+				serviceId = strdup("meshagent");
+			}
+		}
+
+		kvm_server_mainloop((void*)(uint64_t)getpid(), serviceId);
+
+		// Cleanup
+		if (serviceId != NULL) free(serviceId);
+
 		return 0;
 	}
+#endif
+
+#if defined(__APPLE__) && defined(_LINKVM)
+	// TODO: Clean up stale KVM session files from previous crash/unclean shutdown
+	// Now that paths are dynamic based on companyName.meshServiceName, we need to either:
+	// 1. Read companyName/meshServiceName early to build correct paths for cleanup
+	// 2. Use glob patterns to clean up all matching files (/tmp/*-kvm.sock, /var/run/*/session-active)
+	// 3. Move cleanup to after database is loaded in MeshAgent_Start
+	// For now, skipping cleanup - each serviceId has its own paths and won't conflict
+	/*
+	unlink("/tmp/meshagent-kvm.sock");
+	unlink("/var/run/meshagent/session-active");
+
+	// Clear all contents from /var/run/meshagent but keep the directory itself
+	// This avoids QueueDirectories weirdness while cleaning up stale files
+	DIR *dir = opendir("/var/run/meshagent");
+	if (dir != NULL)
+	{
+		struct dirent *entry;
+		char filepath[PATH_MAX];
+		
+		while ((entry = readdir(dir)) != NULL)
+		{
+			// Skip . and .. entries
+			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+				continue;
+				
+			snprintf(filepath, sizeof(filepath), "/var/run/meshagent/%s", entry->d_name);
+			
+			if (entry->d_type == DT_DIR)
+			{
+				// Recursively remove subdirectory - this shouldn't happen but handle it
+				char rm_cmd[PATH_MAX + 20];
+				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
+				system(rm_cmd);
+			}
+			else
+			{
+				// Remove regular file
+				unlink(filepath);
+			}
+		}
+		closedir(dir);
+	}
+	// Errors are ignored - files might not exist and that's fine
+	*/
 #endif
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
@@ -380,6 +777,10 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	agentHost = MeshAgent_Create(capabilities);
 	agentHost->meshCoreCtx_embeddedScript = integratedJavaScript;
 	agentHost->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
+
+	// Note: KVM socket is now created on-demand when session starts (not at startup)
+	// QueueDirectories triggers -kvm1 only when /var/run/meshagent/ contains session file
+
 	while (MeshAgent_Start(agentHost, argc, argv) != 0);
 	retCode = agentHost->exitCode;
 	MeshAgent_Destroy(agentHost);

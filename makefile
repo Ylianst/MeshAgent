@@ -188,6 +188,8 @@ SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
 # Mesh Agent settings
 MESH_VER = 194
 EXENAME = meshagent
+BUILD_OUTPUT_DIR = build/output
+BUNDLE_ID ?= meshagent
 
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
@@ -217,7 +219,13 @@ INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshcons
 
 # Compiler and linker flags
 CFLAGS ?= -std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DDUK_USE_DEBUGGER_SUPPORT -DDUK_USE_INTERRUPT_COUNTER -DDUK_USE_DEBUGGER_INSPECT -DDUK_USE_DEBUGGER_PAUSE_UNCAUGHT
+# macOS (Darwin) doesn't have separate libutil - functions are in libSystem
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+LDFLAGS ?= -L. -lpthread -lm
+else
 LDFLAGS ?= -L. -lpthread -lutil -lm
+endif
 CEXTRA = -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -fstack-protector -fno-strict-aliasing
 LDEXTRA = 
 
@@ -308,19 +316,30 @@ endif
 # Official macOS x86 64bit
 ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
+LIBARCHNAME = macos-x86-64
 KVM = 1
 LMS = 0
-MACOSARCH = -mmacosx-version-min=10.5
+MACOSARCH = -mmacosx-version-min=10.13
 CC = gcc -arch x86_64
 endif
 
 # Official macOS ARM 64bit
 ifeq ($(ARCHID),29)
 ARCHNAME = osx-arm-64
+LIBARCHNAME = macos-arm-64
 KVM = 1
 LMS = 0
-MACOSARCH = -target arm64-apple-macos11
+MACOSARCH = -mmacosx-version-min=11.0
 CC = gcc -arch arm64
+endif
+
+# Official macOS Universal 64bit (Intel + Apple Silicon)
+ifeq ($(ARCHID),10005)
+ARCHNAME = osx-universal-64
+KVM = 1
+LMS = 0
+MACOSARCH = -mmacosx-version-min=11.0
+# Universal binary uses lipo, no CC needed for this target
 endif
 
 
@@ -539,10 +558,13 @@ ifeq ($(WEBLOG),1)
 CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
 endif
 
+# macOS utility sources (always compiled for macOS builds)
+MACOSUTILSOURCES = meshcore/MacOS/bundle_detection.c
+
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
 LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
-MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
+MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/MacOS/mac_kvm_auth.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 	ifneq ($(JPEGVER),)
 		ifeq ($(LEGACY_LD),1)
@@ -550,7 +572,7 @@ CFLAGS += -D_LINKVM
 		else
 			LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
 		endif
-		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
+		MACOSFLAGS = ./lib-jpeg-turbo/macos/$(LIBARCHNAME)/$(JPEGVER)/libturbojpeg.a
 	else
 		ifeq ($(NOTURBOJPEG),1)
 			LINUXFLAGS = -ljpeg
@@ -560,7 +582,7 @@ CFLAGS += -D_LINKVM
 			else
 				LINUXFLAGS = -l:lib-jpeg-turbo/linux/$(ARCHNAME)/libturbojpeg.a
 			endif
-			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(ARCHNAME)/libturbojpeg.a
+			MACOSFLAGS = ./lib-jpeg-turbo/macos/$(LIBARCHNAME)/libturbojpeg.a
 		endif
 	endif
 	BSDFLAGS = /usr/local/lib/libjpeg.a
@@ -582,12 +604,12 @@ endif
 ifeq ($(NOTLS),1)
 SOURCES += microstack/nossl/sha384-512.c microstack/nossl/sha224-256.c microstack/nossl/md5.c microstack/nossl/sha1.c
 CFLAGS += -DMICROSTACK_NOTLS
-LINUXSSL = 
+LINUXSSL =
 MACSSL =
 BSDSSL =
 else
 LINUXSSL = -Lopenssl/libstatic/linux/$(ARCHNAME)
-MACSSL = -Lopenssl/libstatic/macos/$(ARCHNAME)
+MACSSL = -Lopenssl/libstatic/macos/$(LIBARCHNAME)
 BSDSSL = -Lopenssl/libstatic/bsd/$(ARCHNAME)
 CFLAGS += -DMICROSTACK_TLS_DETECT
 LDEXTRA += -lssl -lcrypto
@@ -666,9 +688,13 @@ ifeq ($(MEMTRACK),1)
 CFLAGS += -DILIBMEMTRACK
 endif
 
+# Skip -no-pie on macOS (Darwin) as clang warns it's unused during compilation
+UNAME := $(shell uname -s)
+ifneq ($(UNAME),Darwin)
 GCCTEST := $(shell $(CC) meshcore/dummy.c -o /dev/null -no-pie > /dev/null 2>&1 ; echo $$? )
 ifeq ($(GCCTEST),0)
 LDFLAGS += -no-pie
+endif
 endif
 
 GITTEST := $(shell git log -1 > /dev/null 2>&1 ; echo $$? )
@@ -702,6 +728,7 @@ clean:
 	rm -f meshcore/zlib/*.o
 	rm -f meshcore/KVM/Linux/*.o
 	rm -f meshcore/KVM/MacOS/*.o
+	rm -f meshcore/MacOS/*.o
 	rm -f microlms/lms/*.o
 	rm -f microlms/heci/*.o
 
@@ -758,6 +785,7 @@ cleanbin:
 	rm -f DEBUG_$(EXENAME)_x86_nokvm
 	rm -f DEBUG_$(EXENAME)_x86-64
 	rm -f DEBUG_$(EXENAME)_x86-64_nokvm
+	rm -rf $(BUILD_OUTPUT_DIR)
 
 
 depend: $(SOURCES)
@@ -785,26 +813,169 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
+	@mkdir -p $(BUILD_OUTPUT_DIR)
 	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
 	strip meshagent_pi
+	@mv meshagent_pi $(BUILD_OUTPUT_DIR)/meshagent_pi
+	@echo "Build complete: $(BUILD_OUTPUT_DIR)/meshagent_pi"
 
 linux:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
-	$(SYMBOLCP)
-	$(STRIP)
+	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
+	$(MAKE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"; \
+	else \
+		echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"; \
+	fi
 
+# macOS build target
+# Note: -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null enables keyboard/mouse
+# input at loginwindow (pre-login screen). This is required for remote desktop functionality
+# before user login and is used by Chrome Remote Desktop, TeamViewer, etc.
+# Reference: https://stackoverflow.com/questions/41429524/how-to-simulate-keyboard-and-mouse-events-using-cgeventpost-in-login-window-mac
+#
+# Info.plist embedding: The binary includes an embedded Info.plist with CFBundleIdentifier,
+# CFBundleName, and CFBundleShortVersionString (build timestamp). For universal builds,
+# the same timestamp is used for both architectures to ensure consistency.
+#
+# App Bundle: After building the binary, automatically creates a .app bundle in
+# $(BUILD_OUTPUT_DIR)/<arch>-app/MeshAgent.app for easy distribution and testing.
 macos:
-	$(MAKE) $(MAKEFILE) EXENAME="$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACSSL) $(MACOSFLAGS) -L. -lpthread -ldl -lz -lutil -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
+	@if [ "$(ARCHID)" = "10005" ]; then \
+		BUILD_TIME=$$(date +%y.%m.%d.%H.%M.%S); \
+		BUILD_DATE=$$(echo $$BUILD_TIME | cut -d. -f1-3); \
+		BUILD_TIME_ONLY=$$(echo $$BUILD_TIME | cut -d. -f4-6); \
+		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
+		echo "Build timestamp: $$BUILD_TIME (date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY)"; \
+		echo "Building x86-64..."; \
+		$(MAKE) clean; \
+		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID); \
+		echo "Building ARM64..."; \
+		$(MAKE) clean; \
+		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID); \
+		echo "Creating universal binary..."; \
+		lipo -create \
+			$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-x86-64 \
+			$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-arm-64 \
+			-output $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-universal-64; \
+		if [ "$(DEBUG)" != "1" ]; then \
+			lipo -create \
+				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-x86-64 \
+				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-arm-64 \
+				-output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
+			echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64"; \
+			echo "Creating application bundle..."; \
+			./build/tools/macos_build/create-app-bundle.sh \
+				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 \
+				$(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app \
+				$(BUNDLE_ID) \
+				$$BUILD_DATE \
+				$$BUILD_TIME_ONLY; \
+			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app"; \
+		else \
+			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-universal-64"; \
+		fi; \
+	else \
+		if [ -z "$(BUILD_TIMESTAMP)" ]; then \
+			BUILD_TIME=$$(date +%y.%m.%d.%H.%M.%S); \
+			BUILD_DATE=$$(echo $$BUILD_TIME | cut -d. -f1-3); \
+			BUILD_TIME_ONLY=$$(echo $$BUILD_TIME | cut -d. -f4-6); \
+		else \
+			BUILD_TIME=$(BUILD_TIMESTAMP); \
+			if [ -z "$(BUILD_DATE)" ]; then \
+				BUILD_DATE=$$(echo $$BUILD_TIME | cut -d. -f1-3); \
+			else \
+				BUILD_DATE=$(BUILD_DATE); \
+			fi; \
+			if [ -z "$(BUILD_TIME_ONLY)" ]; then \
+				BUILD_TIME_ONLY=$$(echo $$BUILD_TIME | cut -d. -f4-6); \
+			else \
+				BUILD_TIME_ONLY=$(BUILD_TIME_ONLY); \
+			fi; \
+		fi; \
+		echo "Generating Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
+		sed -e "s/BUILD_TIMESTAMP_DATE/$$BUILD_DATE/g" -e "s/BUILD_TIMESTAMP_TIME/$$BUILD_TIME_ONLY/g" -e "s/BUNDLE_IDENTIFIER/$(BUNDLE_ID)/g" build/resources/Info/binary/binary_Info.plist > build/output/tmp_binary_Info.plist; \
+		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
+		if [ "$(DEBUG)" != "1" ]; then \
+			cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
+			strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
+			echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)"; \
+			echo "Creating application bundle..."; \
+			./build/tools/macos_build/create-app-bundle.sh \
+				$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) \
+				$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app \
+				$(BUNDLE_ID) \
+				$$BUILD_DATE \
+				$$BUILD_TIME_ONLY; \
+			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app"; \
+		else \
+			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)"; \
+		fi; \
+	fi
+
+# Sign macOS application bundle (works with any .app in output directory)
+# Usage: make macos-sign-bundle BUNDLE_PATH=build/output/osx-arm-64-app/MeshAgent.app
+macos-sign-bundle:
+	@if [ -z "$(MACOS_SIGN_CERT)" ]; then \
+		echo "Error: MACOS_SIGN_CERT environment variable not set"; \
+		echo "Please set it to your Developer ID Application certificate"; \
+		echo "Example: export MACOS_SIGN_CERT=\"Developer ID Application: Name (TEAMID)\""; \
+		exit 1; \
+	fi
+	@if [ -z "$(BUNDLE_PATH)" ]; then \
+		echo "Error: BUNDLE_PATH not specified"; \
+		echo "Usage: make macos-sign-bundle BUNDLE_PATH=build/output/osx-arm-64-app/MeshAgent.app"; \
+		exit 1; \
+	fi
+	@if [ ! -d "$(BUNDLE_PATH)" ]; then \
+		echo "Error: Bundle not found: $(BUNDLE_PATH)"; \
+		exit 1; \
+	fi
+	@echo "Signing bundle: $(BUNDLE_PATH)"
+	@./build/tools/macos_build/sign-app-bundle.sh $(BUNDLE_PATH)
+
+# Notarize macOS application bundle (requires signed bundle)
+# Usage: make macos-notarize-bundle BUNDLE_PATH=build/output/osx-arm-64-app/MeshAgent.app
+macos-notarize-bundle:
+	@if [ -z "$(BUNDLE_PATH)" ]; then \
+		echo "Error: BUNDLE_PATH not specified"; \
+		echo "Usage: make macos-notarize-bundle BUNDLE_PATH=build/output/osx-arm-64-app/MeshAgent.app"; \
+		exit 1; \
+	fi
+	@if [ ! -d "$(BUNDLE_PATH)" ]; then \
+		echo "Error: Bundle not found: $(BUNDLE_PATH)"; \
+		exit 1; \
+	fi
+	@echo "Notarizing bundle: $(BUNDLE_PATH)"
+	@./build/tools/macos_build/notarize-app-bundle.sh $(BUNDLE_PATH)
 
 freebsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
+	$(MAKE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -ldl -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"; \
+	else \
+		echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"; \
+	fi
 
 openbsd:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -DILIB_NO_TIMEDJOIN -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
-	$(SYMBOLCP)
-	$(STRIP)
+	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
+	$(MAKE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -DILIB_NO_TIMEDJOIN -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
+	@if [ "$(DEBUG)" != "1" ]; then \
+		cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2); \
+		echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"; \
+	else \
+		echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)$(EXENAME2)"; \
+	fi
+
+# Organize modules into platform-specific directories
+organize-modules:
+	@echo "Organizing MeshAgent modules into platform-specific directories..."
+	@bash ./bin/organize_modules.sh
 

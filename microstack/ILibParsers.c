@@ -2950,7 +2950,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 			len += sprintf_s(buffer + len, bufferLen - len, "]\n");
 		}
 	}
-#else
+#elif defined(_POSIX) && !defined(__APPLE__)
 	char addrtmp[255];
 	int len = 0;
 	pid_t pid;
@@ -2971,7 +2971,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 
 			dup2(fd[1], STDOUT_FILENO);
 			close(fd[1]);
-			
+
 			execv("/usr/bin/addr2line", (char**)ILib_POSIX_CrashParamBuffer);
 			if (write(STDOUT_FILENO, "??:0", 4)) {}
 			_exit(0);
@@ -2981,7 +2981,7 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 		{
 			char tmp[8192];
 			int rlen;
-			
+
 			rlen = read(fd[0], tmp, 8192);
 			if (rlen > 0 && tmp[0] != '?')
 			{
@@ -3000,6 +3000,9 @@ void ILibChain_DebugOffset(char *buffer, int bufferLen, uint64_t addrOffset)
 
 		buffer[len] = 0;
 	}
+#else
+	// Fallback for macOS and other platforms without addr2line
+	sprintf_s(buffer, bufferLen, "[BaseAddr: 0x%016"PRIx64", Offset: 0x%016"PRIx64"]", (uint64_t)&ILibCreateChain, addrOffset);
 #endif
 #endif
 }

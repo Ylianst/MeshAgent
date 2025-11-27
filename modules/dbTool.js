@@ -32,14 +32,19 @@ if (process.argv.length > 1)
     }
 }
 
+// Determine database path
+var dbPath;
 if (process.platform == 'win32')
 {
-    db = require('SimpleDataStore').Create(process.execPath.replace('.exe', '.db'), { readOnly: readonlyDb });
+    dbPath = process.execPath.replace('.exe', '.db');
 }
 else
 {
-    db = require('SimpleDataStore').Create(process.execPath + '.db', { readOnly: readonlyDb });
+    // Linux/macOS - use path next to executable
+    dbPath = process.execPath + '.db';
 }
+
+db = require('SimpleDataStore').Create(dbPath, { readOnly: readonlyDb });
 
 
 if (process.argv.length > 1)

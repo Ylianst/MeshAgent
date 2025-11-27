@@ -15,6 +15,7 @@ limitations under the License.
 */
 var promise = require('promise');
 var systemd_escape = null;
+var macOSHelpers = process.platform === 'darwin' ? require('./macOSHelpers') : null;
 
 function failureActionToInteger(action)
 {
@@ -2256,11 +2257,11 @@ function serviceManager()
         // Sanitize companyName and service name for macOS to follow reverse DNS naming conventions
         // Only allow alphanumeric, hyphens, and underscores
         if (process.platform == 'darwin' && options.companyName) {
-            options.companyName = options.companyName.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+            options.companyName = macOSHelpers.sanitizeIdentifier(options.companyName);
         }
         if (process.platform == 'darwin' && options.name) {
             var originalName = options.name;
-            options.name = options.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+            options.name = macOSHelpers.sanitizeIdentifier(options.name);
             if (!options.name) {
                 throw ('Service name "' + originalName + '" contains no valid characters. Use alphanumeric, hyphens, or underscores only.');
             }
@@ -2849,53 +2850,21 @@ function serviceManager()
             if (!this.isAdmin()) { throw ('Installing as Service, requires root'); }
 
             // Mac OS
-            // Sanitize companyName and service name to follow reverse DNS naming conventions
-            // Only allow alphanumeric, hyphens, and underscores (dots will be added between components)
-            function sanitizeIdentifier(str) {
-                if (!str) return null;
-                // Replace spaces with hyphens, remove all non-alphanumeric except hyphens/underscores, convert to lowercase
-                return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
-            }
-
-            var sanitizedCompanyName = sanitizeIdentifier(options.companyName);
-            var sanitizedServiceName = sanitizeIdentifier(options.name);
-
+            // Validate service name before proceeding
+            var sanitizedServiceName = macOSHelpers.sanitizeIdentifier(options.name);
             if (!sanitizedServiceName) {
                 throw ('Service name is required and must contain valid characters (alphanumeric, hyphens, underscores)');
             }
 
             // Build composite service identifier from companyName and service name
-            // Format: meshagent.{serviceName}.{companyName} when both provided
-            // Format: meshagent.{serviceName} when only custom service name
-            // Format: meshagent.{companyName} when default service name with company
-            // Format: meshagent when default service name only
-            var serviceId;
-            if (options.serviceId) {
-                // Explicit serviceId provided - use it directly
-                serviceId = options.serviceId;
-            } else if (sanitizedCompanyName) {
-                // Company name present
-                if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
-                    // Custom service name + company: meshagent.ServiceName.CompanyName
-                    serviceId = 'meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName;
-                } else {
-                    // Default service name + company: meshagent.CompanyName
-                    serviceId = 'meshagent.' + sanitizedCompanyName;
-                }
-            } else if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
-                // Only custom service name (no company): meshagent.ServiceName
-                serviceId = 'meshagent.' + sanitizedServiceName;
-            } else {
-                // Default service name only: meshagent
-                serviceId = 'meshagent';
-            }
+            var serviceId = macOSHelpers.buildServiceId(options.name, options.companyName, { explicitServiceId: options.serviceId });
 
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
-            params += ('         <string>' + options.installPath + options.target + '</string>\n');
+            params += ('         <string>' + (options.servicePath || (options.installPath + options.target)) + '</string>\n');
             if(options.parameters)
             {
                 for(var itm in options.parameters)
@@ -2925,9 +2894,10 @@ function serviceManager()
 
             plist += '  </dict>\n';
             plist += '</plist>';
-            if (!require('fs').existsSync('/Library/LaunchDaemons/' + serviceId + '.plist'))
+            var plistPath = macOSHelpers.getPlistPath(serviceId, 'daemon');
+            if (!require('fs').existsSync(plistPath))
             {
-                require('fs').writeFileSync('/Library/LaunchDaemons/' + serviceId + '.plist', plist);
+                require('fs').writeFileSync(plistPath, plist);
             }
             else
             {
@@ -2962,51 +2932,22 @@ function serviceManager()
                 throw ('Installing a Global Agent/Daemon, requires admin');
             }
 
-            // Sanitize companyName and service name to follow reverse DNS naming conventions
-            // Only allow alphanumeric, hyphens, and underscores (dots will be added between components)
-            function sanitizeIdentifier(str) {
-                if (!str) return null;
-                // Replace spaces with hyphens, remove all non-alphanumeric except hyphens/underscores, convert to lowercase
-                return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
-            }
-
-            var sanitizedCompanyName = sanitizeIdentifier(options.companyName);
-            var sanitizedServiceName = sanitizeIdentifier(options.name);
-
+            // Validate service name before proceeding
+            var sanitizedServiceName = macOSHelpers.sanitizeIdentifier(options.name);
             if (!sanitizedServiceName) {
                 throw ('Service name is required and must contain valid characters (alphanumeric, hyphens, underscores)');
             }
 
             // Build composite service identifier from companyName and service name
-            // Format: meshagent.{serviceName}.{companyName} when both provided
-            // Format: meshagent.{serviceName} when only custom service name
-            // Format: meshagent.{companyName} when default service name with company
-            // Format: meshagent when default service name only
-            var serviceId;
-            if (options.serviceId) {
-                // Explicit serviceId provided - use it directly
-                serviceId = options.serviceId;
-            } else if (sanitizedCompanyName) {
-                // Company name present
-                if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
-                    // Custom service name + company: meshagent.ServiceName.CompanyName
-                    serviceId = 'meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName;
-                } else {
-                    // Default service name + company: meshagent.CompanyName
-                    serviceId = 'meshagent.' + sanitizedCompanyName;
-                }
-            } else if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
-                // Only custom service name (no company): meshagent.ServiceName
-                serviceId = 'meshagent.' + sanitizedServiceName;
-            } else {
-                // Default service name only: meshagent
-                serviceId = 'meshagent';
-            }
+            var serviceId = macOSHelpers.buildServiceId(options.name, options.companyName, { explicitServiceId: options.serviceId });
 
-            var servicePathTokens = options.servicePath.split('/');
-            servicePathTokens.pop();
-            if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
-            options.workingDirectory = servicePathTokens.join('/');
+            // Use provided workingDirectory if set (for bundle installations), otherwise derive from servicePath
+            if (!options.workingDirectory) {
+                var servicePathTokens = options.servicePath.split('/');
+                servicePathTokens.pop();
+                if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
+                options.workingDirectory = servicePathTokens.join('/');
+            }
 
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
@@ -3255,7 +3196,18 @@ function serviceManager()
                 require('fs').unlinkSync(service.plist);
                 if (!options || !options.skipDeleteBinary)
                 {
-                    require('fs').unlinkSync(servicePath);
+                    // Check if this is a bundle installation using shared helper
+                    if (macOSHelpers.isRunningFromBundle(servicePath))
+                    {
+                        // Bundle installation - remove entire .app
+                        var bundlePath = macOSHelpers.getBundlePathFromBinaryPath(servicePath);
+                        require('child_process').execSync('rm -rf "' + bundlePath + '"');
+                    }
+                    else
+                    {
+                        // Standalone installation - just remove binary
+                        require('fs').unlinkSync(servicePath);
+                    }
                 }
             }
             catch (e)

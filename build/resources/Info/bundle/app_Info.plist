@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>BUNDLE_IDENTIFIER</string>
+	<key>CFBundleName</key>
+	<string>meshagent</string>
+	<key>CFBundleDisplayName</key>
+	<string>MeshAgent</string>
+	<key>CFBundleExecutable</key>
+	<string>meshagent</string>
+	<key>CFBundleShortVersionString</key>
+	<string>BUILD_TIMESTAMP_DATE</string>
+	<key>CFBundleVersion</key>
+	<string>BUILD_TIMESTAMP_TIME</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleSignature</key>
+	<string>mesh</string>
+	<key>CFBundleIconFile</key>
+	<string>meshagent.icns</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>LSBackgroundOnly</key>
+	<false/>
+</dict>
+</plist>

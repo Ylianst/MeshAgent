@@ -561,7 +561,7 @@ static char* kvm_read_serviceid_from_plist(const char *exePath)
 
 // Build dynamic KVM paths using serviceID
 // Priority 1: Database serviceID (from .msh file)
-// Priority 2: LaunchDaemon plist Label (authoritative source)
+// Priority 2: LaunchDaemon plist Label (when database unavailable)
 // Priority 3: Default "meshagent-agent"
 static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, char *serviceID, char *exePath)
 {
@@ -582,7 +582,7 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 		serviceId[sizeof(serviceId) - 1] = '\0';
 		printf("KVM: Using serviceID from database: %s\n", serviceId);
 	}
-	// Priority 2: Read from LaunchDaemon plist Label (authoritative source)
+	// Priority 2: Read from LaunchDaemon plist Label
 	else if (exePath != NULL && strlen(exePath) > 0)
 	{
 		char *plistServiceId = kvm_read_serviceid_from_plist(exePath);
@@ -591,7 +591,7 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 			strncpy(serviceId, plistServiceId, sizeof(serviceId) - 1);
 			serviceId[sizeof(serviceId) - 1] = '\0';
 			free(plistServiceId);
-			printf("KVM: Using serviceID from plist fallback: %s\n", serviceId);
+			printf("KVM: Using serviceID from LaunchDaemon plist: %s\n", serviceId);
 		}
 		else
 		{
