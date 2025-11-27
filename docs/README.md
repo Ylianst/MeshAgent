@@ -19,6 +19,23 @@ Auto-generated documentation for MeshAgent JavaScript modules. Each `.md` file c
 - `kvm-helper.js` - KVM (Keyboard, Video, Mouse) helpers
 - And many more...
 
+### macOS-Specific Documentation
+
+- **`macos-tcc-permissions.md`** - Comprehensive guide to MeshAgent's TCC (Transparency, Consent, and Control) permissions system on macOS:
+  - Accessibility, Full Disk Access, and Screen Recording permissions
+  - Architecture and process model (-tccCheck child process)
+  - Real-time permission detection methods
+  - TCC permissions window UI implementation
+  - Inter-process communication via pipes
+  - Database storage and preferences
+
+- **`fda-tutorial-window.md`** - Full Disk Access tutorial window specification:
+  - Visual tutorial implementation with draggable app icon
+  - Drag-and-drop to System Settings
+  - Button state machine and UI layout
+  - Helper functions and resource management
+  - Complete implementation guide with code examples
+
 ### `Ylianst_MeshAgent/`
 Original MeshAgent documentation from the Ylianst repository. Contains comprehensive architecture and design documentation.
 
@@ -62,6 +79,8 @@ Testing documentation and guides:
 - **Module APIs**: `modules/*.md` (auto-generated)
 - **Core Libraries**: `Ylianst_MeshAgent/files/*.md`
 - **Testing**: `Ylianst_MeshAgent/testing/*.md`
+- **macOS TCC Permissions**: `macos-tcc-permissions.md` (architecture and implementation)
+- **FDA Tutorial Window**: `fda-tutorial-window.md` (UI specification)
 
 ### For Contributors
 - Review the testing documentation in `Ylianst_MeshAgent/testing/`

@@ -104,9 +104,7 @@ void dump32bit (const XImage * input)
 	rs = 16,
 	gs = 8,
 	bs = 0, *p32 = (unsigned int *) input->data;
-	
-	
-	printf("%x %x %x\n", rm, gm, bm);
+
     sprintf (head, "P6\n%d %d\n%d\n", input->width, input->height, 255);
     size = ((input->bytes_per_line * input->height) / 4) * 3;
     output = malloc (size);

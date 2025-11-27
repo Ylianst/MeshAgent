@@ -110,6 +110,12 @@ catch(x)
 // Import macOS platform helpers (only on macOS)
 var macOSHelpers = process.platform === 'darwin' ? require('./macOSHelpers') : null;
 
+// Import security permissions module
+var securityPermissions = require('./security-permissions');
+
+// Import logger for unified timestamped logging
+var logger = require('./logger');
+
 // Case-insensitive file lookup
 // Returns the actual filename if found, or null if not found
 function findFileCaseInsensitive(directory, targetFilename) {
@@ -407,15 +413,15 @@ function stopLaunchDaemon(serviceId) {
 
         if (svc.isRunning == null || svc.isRunning()) {
             svc.unload();
-            process.stdout.write('   LaunchDaemon stopped\n');
+            logger.info('LaunchDaemon stopped');
         } else {
-            process.stdout.write('   LaunchDaemon already stopped\n');
+            logger.info('LaunchDaemon already stopped');
         }
 
         svc.close();
         return true;
     } catch (e) {
-        process.stdout.write('   WARNING: Could not stop LaunchDaemon: ' + e + '\n');
+        logger.warn('Could not stop LaunchDaemon: ' + e);
         return false;
     }
 }
@@ -431,13 +437,13 @@ function stopLaunchAgent(serviceId) {
 
         if (uid && uid > 0) {
             launchAgent.unload(uid);
-            process.stdout.write('   LaunchAgent stopped\n');
+            logger.info('LaunchAgent stopped');
         } else {
-            process.stdout.write('   No console user logged in, LaunchAgent not running\n');
+            logger.info('No console user logged in, LaunchAgent not running');
         }
         return true;
     } catch (e) {
-        process.stdout.write('   WARNING: Could not stop LaunchAgent: ' + e + '\n');
+        logger.warn('Could not stop LaunchAgent: ' + e);
         return false;
     }
 }
@@ -501,7 +507,7 @@ function cleanupOrphanedPlists(installPath) {
                     } catch (e) {
                         // Log unload errors for diagnostics (except "not loaded")
                         if (e.message && e.message.indexOf('not loaded') === -1 && e.message.indexOf('Could not find') === -1) {
-                            process.stdout.write('      WARNING: Unload error for ' + serviceName + ': ' + e.message + '\n');
+                            logger.warn('Unload error for ' + serviceName + ': ' + e.message);
                         }
                         // Continue - will be verified in safety checks
                     }
@@ -548,7 +554,7 @@ function cleanupOrphanedPlists(installPath) {
                                     } catch (unloadErr) {
                                         // Agent might not be loaded for this user - that's OK
                                         if (unloadErr.message && unloadErr.message.indexOf('not loaded') === -1 && unloadErr.message.indexOf('Could not find') === -1) {
-                                            process.stdout.write('      WARNING: Unload error for ' + serviceName + ' (uid ' + sessions[j].uid + '): ' + unloadErr.message + '\n');
+                                            logger.warn('Unload error for ' + serviceName + ' (uid ' + sessions[j].uid + '): ' + unloadErr.message);
                                         }
                                     }
                                 }
@@ -563,7 +569,7 @@ function cleanupOrphanedPlists(installPath) {
                     } catch (e) {
                         // Log unload errors for diagnostics (except "not loaded")
                         if (e.message && e.message.indexOf('not loaded') === -1 && e.message.indexOf('Could not find') === -1) {
-                            process.stdout.write('      WARNING: Unload error for ' + serviceName + ': ' + e.message + '\n');
+                            logger.warn('Unload error for ' + serviceName + ': ' + e.message);
                         }
                         // Continue - will be verified in safety checks
                     }
@@ -624,6 +630,59 @@ function findInstallationByPlist() {
     }
 
     return null;
+}
+
+// Determine installation mode based on existing installation and user flags
+// Returns: { mode: 'upgrade'|'fresh'|'error', path: string, reason: string, fatal: boolean }
+function determineInstallMode(existingInstallPath, installPath, explicitMshPath, copyMsh, upgradeMode) {
+    // Check if --mshPath or --copy-msh="1" is specified (forces fresh install with new config)
+    var hasMshOverride = (explicitMshPath || copyMsh === '1');
+
+    if (existingInstallPath && !hasMshOverride) {
+        // Existing installation + no msh override → UPGRADE mode
+        return {
+            mode: 'upgrade',
+            path: existingInstallPath,
+            reason: 'UPGRADE (preserve configuration)',
+            fatal: false
+        };
+    } else if (existingInstallPath && hasMshOverride) {
+        // Existing installation + msh override → FRESH INSTALL mode
+        var mshFlag = explicitMshPath ? '--mshPath' : '--copy-msh="1"';
+        return {
+            mode: 'fresh',
+            path: existingInstallPath,
+            reason: 'FRESH INSTALL (' + mshFlag + ' will overwrite configuration)',
+            fatal: false
+        };
+    } else if (!existingInstallPath && installPath) {
+        // No existing installation + explicit installPath → FRESH INSTALL
+        return {
+            mode: 'fresh',
+            path: installPath,
+            reason: 'FRESH INSTALL (no existing installation)',
+            fatal: false
+        };
+    } else {
+        // No existing installation + no installPath
+        if (upgradeMode) {
+            // -upgrade requires existing installation - this is an error
+            return {
+                mode: 'error',
+                path: null,
+                reason: 'No installation found at default location: /usr/local/mesh_services/meshagent/',
+                fatal: true
+            };
+        } else {
+            // -fullinstall: Default to standard location
+            return {
+                mode: 'fresh',
+                path: '/usr/local/mesh_services/meshagent/',
+                reason: 'FRESH INSTALL (default location)',
+                fatal: false
+            };
+        }
+    }
 }
 
 // Helper to recursively remove a directory and all its contents
@@ -762,11 +821,11 @@ function deletePlists(serviceId) {
     try {
         if (require('fs').existsSync(daemonPlist)) {
             require('fs').unlinkSync(daemonPlist);
-            process.stdout.write('   Removed: ' + daemonPlist + '\n');
+            logger.info('Removed: ' + daemonPlist);
             deleted = true;
         }
     } catch (e) {
-        process.stdout.write('   WARNING: Could not delete LaunchDaemon plist: ' + e + '\n');
+        logger.warn('Could not delete LaunchDaemon plist: ' + e);
     }
 
     // LaunchAgent plist
@@ -774,15 +833,15 @@ function deletePlists(serviceId) {
     try {
         if (require('fs').existsSync(agentPlist)) {
             require('fs').unlinkSync(agentPlist);
-            process.stdout.write('   Removed: ' + agentPlist + '\n');
+            logger.info('Removed: ' + agentPlist);
             deleted = true;
         }
     } catch (e) {
-        process.stdout.write('   WARNING: Could not delete LaunchAgent plist: ' + e + '\n');
+        logger.warn('Could not delete LaunchAgent plist: ' + e);
     }
 
     if (!deleted) {
-        process.stdout.write('   No plist files found to delete\n');
+        logger.info('No plist files found to delete');
     }
 }
 
@@ -887,8 +946,8 @@ function replaceInstallation(sourceType, installPath) {
 
             var dittoError = null;
             var child = child_process.execFile('/usr/bin/ditto', ['ditto', sourceType.bundlePath, targetBundlePath]);
-            child.stdout.on('data', function(d) { process.stdout.write(d); });
-            child.stderr.on('data', function(d) { dittoError = d.toString(); process.stderr.write(d); });
+            child.stdout.on('data', function(d) { logger.debug('[DITTO] ' + d.toString().trim()); });
+            child.stderr.on('data', function(d) { dittoError = d.toString(); logger.warn('[DITTO] ' + dittoError.trim()); });
             child.waitExit();
 
             // Check if bundle was actually copied by verifying the binary exists
@@ -897,8 +956,11 @@ function replaceInstallation(sourceType, installPath) {
                 throw new Error('Bundle copy failed. ' + (dittoError || 'Binary not found after copy'));
             }
 
-            // Ensure binary is executable
-            fs.chmodSync(binaryPath, 0o755);
+            // Ensure binary is executable with secure permissions
+            var binaryResult = securityPermissions.setSecurePermissions(binaryPath, 'binary');
+            if (!binaryResult.success) {
+                logger.warn('Could not set binary permissions: ' + binaryResult.errors.join(', '));
+            }
             logger.info('Bundle installed: ' + targetBundlePath);
         } else {
             // Copy standalone binary
@@ -919,8 +981,8 @@ function replaceInstallation(sourceType, installPath) {
             // ditto also automatically creates parent directories if they don't exist
             var dittoError = null;
             var child = child_process.execFile('/usr/bin/ditto', ['ditto', sourceBinaryPath, targetBinaryPath]);
-            child.stdout.on('data', function(d) { process.stdout.write(d); });
-            child.stderr.on('data', function(d) { dittoError = d.toString(); process.stderr.write(d); });
+            child.stdout.on('data', function(d) { logger.debug('[DITTO] ' + d.toString().trim()); });
+            child.stderr.on('data', function(d) { dittoError = d.toString(); logger.warn('[DITTO] ' + dittoError.trim()); });
             child.waitExit();
 
             // Check if binary was actually copied
@@ -928,8 +990,11 @@ function replaceInstallation(sourceType, installPath) {
                 throw new Error('Binary copy failed. ' + (dittoError || 'Binary not found after copy'));
             }
 
-            // Ensure executable permissions
-            fs.chmodSync(targetBinaryPath, 0o755);
+            // Ensure executable permissions with secure ownership
+            var binaryResult = securityPermissions.setSecurePermissions(targetBinaryPath, 'binary');
+            if (!binaryResult.success) {
+                logger.warn('Could not set binary permissions: ' + binaryResult.errors.join(', '));
+            }
 
             logger.info('Binary installed: ' + targetBinaryPath);
         }
@@ -1003,11 +1068,11 @@ function forceBootoutService(serviceId, domain) {
 
     try {
         if (domain === 'system') {
-            process.stdout.write('   Forcing bootout from system domain...\n');
+            logger.info('Forcing bootout from system domain...');
             child_process.execSync('launchctl bootout system/' + serviceId + ' 2>/dev/null', { encoding: 'utf8' });
         } else if (domain && domain.startsWith('gui/')) {
             var agentId = serviceId + '-agent';
-            process.stdout.write('   Forcing bootout from ' + domain + '...\n');
+            logger.info('Forcing bootout from ' + domain + '...');
             child_process.execSync('launchctl bootout ' + domain + '/' + agentId + ' 2>/dev/null', { encoding: 'utf8' });
         }
 
@@ -1016,7 +1081,7 @@ function forceBootoutService(serviceId, domain) {
 
         return true;
     } catch (e) {
-        process.stdout.write('   Bootout failed: ' + e.message + '\n');
+        logger.warn('Bootout failed: ' + e.message);
         return false;
     }
 }
@@ -1107,15 +1172,15 @@ function forceKillProcesses(pids) {
 
     if (pids.length === 0) return true;
 
-    process.stdout.write('   Forcing termination of ' + pids.length + ' process(es): ' + pids.join(', ') + '\n');
+    logger.info('Forcing termination of ' + pids.length + ' process(es): ' + pids.join(', '));
 
     var allKilled = true;
     for (var i = 0; i < pids.length; i++) {
         try {
             process.kill(pids[i], 9); // SIGKILL
-            process.stdout.write('   Killed PID ' + pids[i] + '\n');
+            logger.info('Killed PID ' + pids[i]);
         } catch (e) {
-            process.stdout.write('   Failed to kill PID ' + pids[i] + ': ' + e.message + '\n');
+            logger.warn('Failed to kill PID ' + pids[i] + ': ' + e.message);
             allKilled = false;
         }
     }
@@ -1160,8 +1225,8 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             options.target = 'meshagent';
             // For bundle installations, do NOT copy binary to installPath - binary should stay inside bundle
             options.skipBinaryCopy = true;
-            // Add --configUsesCWD so agent looks for config files in WorkingDirectory
-            options.parameters.push('--configUsesCWD=1');
+            // Add --appBundle so agent looks for config files in WorkingDirectory (bundle parent)
+            options.parameters.push('--appBundle=1');
         } else {
             // For standalone installations, let service-manager copy the binary if needed
             servicePath = installPath + 'meshagent';
@@ -1278,7 +1343,11 @@ function installServiceUnified(params) {
     var logger = require('./logger');
 
     // Verify root permissions
-    if (!require('user-sessions').isRoot()) {
+    var userSessions = require('user-sessions');
+    var effectiveUid = userSessions.Self();
+    logger.info('Installer running as UID: ' + effectiveUid + ' (isRoot: ' + userSessions.isRoot() + ')');
+
+    if (!userSessions.isRoot()) {
         logger.error('Installation/upgrade requires root privileges. Please run with sudo.');
         process.exit(1);
     }
@@ -1312,6 +1381,7 @@ function installServiceUnified(params) {
     var newServiceId = parms.getParameter('serviceId', null);
     var enableDisableUpdate = parms.getParameter('enableDisableUpdate', null);
     var copyMsh = parms.getParameter('copy-msh', null);
+    var explicitMshPath = parms.getParameter('mshPath', null);  // Explicit path to .msh file
     var omitBackup = (parms.indexOf('--omit-backup') >= 0);
     var upgradeMode = (parms.indexOf('--_upgradeMode=1') >= 0);
 
@@ -1363,82 +1433,94 @@ function installServiceUnified(params) {
         }
 
         // Determine operation mode based on existing installation and flags
-        if (existingInstallPath && copyMsh !== '1') {
-            // Existing installation + no --copy-msh="1" → UPGRADE mode
-            isUpgrade = true;
-            installPath = existingInstallPath;
-            logger.info('Existing installation detected at: ' + installPath);
-            logger.info('Mode: UPGRADE (preserve configuration)');
-        } else if (existingInstallPath && copyMsh === '1') {
-            // Existing installation + --copy-msh="1" → FRESH INSTALL mode
-            isFreshInstall = true;
-            installPath = existingInstallPath;
-            logger.info('Existing installation detected at: ' + installPath);
-            logger.info('Mode: FRESH INSTALL (--copy-msh="1" will overwrite configuration)');
-        } else if (!existingInstallPath && installPath) {
-            // No existing installation + explicit installPath → FRESH INSTALL
-            isFreshInstall = true;
+        var installMode = determineInstallMode(existingInstallPath, installPath, explicitMshPath, copyMsh, upgradeMode);
+
+        if (installMode.fatal) {
+            // Fatal error - cannot proceed
+            logger.error(installMode.reason);
+            logger.error('Please specify --installPath, --serviceName, or --companyName');
+            process.exit(1);
+        }
+
+        // Set mode flags and path based on determination
+        isUpgrade = (installMode.mode === 'upgrade');
+        isFreshInstall = (installMode.mode === 'fresh');
+        installPath = installMode.path;
+
+        // Log the determined mode
+        if (existingInstallPath) {
+            logger.info('Existing installation detected at: ' + existingInstallPath);
+        } else if (installPath) {
             logger.info('No existing installation found at: ' + installPath);
-            logger.info('Mode: FRESH INSTALL (no existing installation)');
+        }
+        logger.info('Mode: ' + installMode.reason);
+        if (!existingInstallPath && installPath) {
             logger.info('Target installation path: ' + installPath);
-        } else {
-            // No existing installation + no installPath
-            if (upgradeMode) {
-                // -upgrade requires existing installation
-                logger.error('No installation found at default location: /usr/local/mesh_services/meshagent/');
-                logger.error('Please specify --installPath, --serviceName, or --companyName');
-                process.exit(1);
-            } else {
-                // -fullinstall: Default to standard location
-                isFreshInstall = true;
-                installPath = '/usr/local/mesh_services/meshagent/';
-                logger.info('Mode: FRESH INSTALL (default location)');
-                logger.info('Target installation path: ' + installPath);
-            }
         }
     }
 
-    // EARLY VALIDATION: Check for .msh file if --copy-msh="1" is specified
-    if (copyMsh === '1' && isFreshInstall) {
-        if (sourceType.type === 'bundle') {
-            // For bundle, check for .msh file matching bundle name first (case-insensitive)
-            var bundlePath = sourceType.bundlePath;
-            var bundleDir = bundlePath.substring(0, bundlePath.lastIndexOf('/'));
-            var bundleName = bundlePath.substring(bundlePath.lastIndexOf('/') + 1);
+    // EARLY VALIDATION: Check for .msh file if --mshPath or --copy-msh="1" is specified
+    // Priority: --mshPath (explicit path) takes precedence over --copy-msh="1" (auto-detect)
+    if (isFreshInstall && (explicitMshPath || copyMsh === '1')) {
+        if (explicitMshPath) {
+            // Mode 1: Explicit path provided via --mshPath parameter
+            logger.info('Using explicit .msh file path: ' + explicitMshPath);
 
-            // Strip .app extension and add .msh (e.g., MeshAgent_osx-universal-64.app -> MeshAgent_osx-universal-64.msh)
-            var bundleBaseName = bundleName.replace(/\.app$/, '');
-            sourceMshFile = findFileCaseInsensitive(bundleDir, bundleBaseName + '.msh');
-            if (!sourceMshFile) {
-                // Fallback to generic meshagent.msh (case-insensitive)
-                sourceMshFile = findFileCaseInsensitive(bundleDir, 'meshagent.msh');
+            // Validate the file exists
+            if (!fs.existsSync(explicitMshPath)) {
+                logger.error('Specified .msh file not found: ' + explicitMshPath);
+                logger.error('Please verify the path and try again.');
+                process.exit(1);
             }
-        } else {
-            // For standalone binary, check for .msh file matching binary name first (case-insensitive)
-            var binaryPath = sourceType.binaryPath;
-            var binaryDir = binaryPath.substring(0, binaryPath.lastIndexOf('/'));
-            var binaryName = binaryPath.substring(binaryPath.lastIndexOf('/') + 1);
 
-            // Try binary-specific name first (e.g., meshagent_osx-universal-64.msh)
-            sourceMshFile = findFileCaseInsensitive(binaryDir, binaryName + '.msh');
-            if (!sourceMshFile) {
-                // Fallback to generic meshagent.msh (case-insensitive)
-                sourceMshFile = findFileCaseInsensitive(binaryDir, 'meshagent.msh');
+            // Warn if file doesn't have .msh extension (case-insensitive)
+            if (!explicitMshPath.toLowerCase().endsWith('.msh')) {
+                logger.warn('Warning: Specified file does not have .msh extension: ' + explicitMshPath);
             }
-        }
 
-        if (!sourceMshFile) {
-            logger.error('--copy-msh="1" specified but .msh file not found');
+            sourceMshFile = explicitMshPath;
+        } else if (copyMsh === '1') {
+            // Mode 2: Auto-detect .msh file location (existing behavior)
             if (sourceType.type === 'bundle') {
-                var bundleName = sourceType.bundlePath.substring(sourceType.bundlePath.lastIndexOf('/') + 1);
+                // For bundle, check for .msh file matching bundle name first (case-insensitive)
+                var bundlePath = sourceType.bundlePath;
+                var bundleDir = bundlePath.substring(0, bundlePath.lastIndexOf('/'));
+                var bundleName = bundlePath.substring(bundlePath.lastIndexOf('/') + 1);
+
+                // Strip .app extension and add .msh (e.g., MeshAgent_osx-universal-64.app -> MeshAgent_osx-universal-64.msh)
                 var bundleBaseName = bundleName.replace(/\.app$/, '');
-                logger.error('Expected: ' + bundleBaseName + '.msh or meshagent.msh (case-insensitive)');
+                sourceMshFile = findFileCaseInsensitive(bundleDir, bundleBaseName + '.msh');
+                if (!sourceMshFile) {
+                    // Fallback to generic meshagent.msh (case-insensitive)
+                    sourceMshFile = findFileCaseInsensitive(bundleDir, 'meshagent.msh');
+                }
             } else {
-                var binaryName = sourceType.binaryPath.substring(sourceType.binaryPath.lastIndexOf('/') + 1);
-                logger.error('Expected: ' + binaryName + '.msh or meshagent.msh (case-insensitive)');
+                // For standalone binary, check for .msh file matching binary name first (case-insensitive)
+                var binaryPath = sourceType.binaryPath;
+                var binaryDir = binaryPath.substring(0, binaryPath.lastIndexOf('/'));
+                var binaryName = binaryPath.substring(binaryPath.lastIndexOf('/') + 1);
+
+                // Try binary-specific name first (e.g., meshagent_osx-universal-64.msh)
+                sourceMshFile = findFileCaseInsensitive(binaryDir, binaryName + '.msh');
+                if (!sourceMshFile) {
+                    // Fallback to generic meshagent.msh (case-insensitive)
+                    sourceMshFile = findFileCaseInsensitive(binaryDir, 'meshagent.msh');
+                }
             }
-            logger.error('Please place the .msh file next to the binary/bundle and try again.');
-            process.exit(1);
+
+            if (!sourceMshFile) {
+                logger.error('--copy-msh="1" specified but .msh file not found');
+                if (sourceType.type === 'bundle') {
+                    var bundleName = sourceType.bundlePath.substring(sourceType.bundlePath.lastIndexOf('/') + 1);
+                    var bundleBaseName = bundleName.replace(/\.app$/, '');
+                    logger.error('Expected: ' + bundleBaseName + '.msh or meshagent.msh (case-insensitive)');
+                } else {
+                    var binaryName = sourceType.binaryPath.substring(sourceType.binaryPath.lastIndexOf('/') + 1);
+                    logger.error('Expected: ' + binaryName + '.msh or meshagent.msh (case-insensitive)');
+                }
+                logger.error('Please place the .msh file next to the binary/bundle and try again.');
+                process.exit(1);
+            }
         }
     }
 
@@ -1632,7 +1714,8 @@ function installServiceUnified(params) {
     logger.info('Installation type: ' + (sourceType.type === 'bundle' ? 'bundle' : 'standalone'));
 
     // HANDLE .msh FILE
-    if (isFreshInstall && copyMsh === '1') {
+    // Copy .msh if --mshPath or --copy-msh="1" was specified
+    if (isFreshInstall && (explicitMshPath || copyMsh === '1')) {
         // Copy .msh file from source location (already found and validated during early validation)
         logger.info('Copying .msh configuration file');
 
@@ -1647,6 +1730,12 @@ function installServiceUnified(params) {
         try {
             fs.copyFileSync(sourceMshFile, targetMshFile);
             logger.info('.msh file copied to: ' + targetMshFile);
+
+            // Set secure permissions on .msh file
+            var mshResult = securityPermissions.setSecurePermissions(targetMshFile, '.msh');
+            if (!mshResult.success) {
+                logger.warn('Could not set .msh permissions: ' + mshResult.errors.join(', '));
+            }
         } catch (e) {
             logger.error('Failed to copy .msh file: ' + e);
             process.exit(1);
@@ -1685,6 +1774,90 @@ function installServiceUnified(params) {
         logger.warn('Final verification failed: ' + e);
     }
 
+    // FIX PERMISSIONS ON PRESERVED FILES (before starting services)
+    logger.info('Fixing permissions on preserved files before starting services...');
+    var mshPath = installPath + 'meshagent.msh';
+    var dbPath = installPath + 'meshagent.db';
+    var logPath = installPath + 'meshagent.log';
+
+    // Fix .msh file permissions if it exists
+    if (fs.existsSync(mshPath)) {
+        try {
+            var mshResult = securityPermissions.setSecurePermissions(mshPath, '.msh');
+            if (!mshResult.success) {
+                logger.warn('Could not fix .msh permissions: ' + mshResult.errors.join(', '));
+            } else {
+                logger.debug('Fixed .msh file permissions');
+            }
+        } catch (e) {
+            logger.warn('Error fixing .msh permissions: ' + e.message);
+        }
+    }
+
+    // Fix .db file permissions if it exists
+    if (fs.existsSync(dbPath)) {
+        try {
+            var dbResult = securityPermissions.setSecurePermissions(dbPath, '.db');
+            if (!dbResult.success) {
+                logger.warn('Could not fix .db permissions: ' + dbResult.errors.join(', '));
+            } else {
+                logger.debug('Fixed .db file permissions');
+            }
+        } catch (e) {
+            logger.warn('Error fixing .db permissions: ' + e.message);
+        }
+    }
+
+    // Fix .log file permissions if it exists
+    if (fs.existsSync(logPath)) {
+        try {
+            var logResult = securityPermissions.setSecurePermissions(logPath, '.log');
+            if (!logResult.success) {
+                logger.warn('Could not fix .log permissions: ' + logResult.errors.join(', '));
+            } else {
+                logger.debug('Fixed .log file permissions');
+            }
+        } catch (e) {
+            logger.warn('Error fixing .log permissions: ' + e.message);
+        }
+    }
+
+    // Fix installation directory permissions
+    try {
+        var dirResult = securityPermissions.setSecurePermissions(installPath, 'installDir');
+        if (!dirResult.success) {
+            logger.warn('Could not fix directory permissions: ' + dirResult.errors.join(', '));
+        } else {
+            logger.debug('Fixed installation directory permissions');
+        }
+    } catch (e) {
+        logger.warn('Error fixing directory permissions: ' + e.message);
+    }
+
+    // COMPREHENSIVE PERMISSION VERIFICATION (before starting services)
+    logger.info('Running comprehensive permission verification...');
+    try {
+        var verifyResult = securityPermissions.verifyInstallation(installPath, { autoFix: true });
+
+        if (verifyResult.fixed && verifyResult.fixed.length > 0) {
+            logger.info('Fixed permissions on ' + verifyResult.fixed.length + ' additional file(s)');
+        }
+
+        if (!verifyResult.allValid && verifyResult.failed && verifyResult.failed.length > 0) {
+            logger.error('Could not fix permissions on ' + verifyResult.failed.length + ' file(s):');
+            verifyResult.failed.forEach(function(filePath) {
+                logger.error('  - ' + filePath);
+            });
+            logger.error('Installation cannot proceed with incorrect file permissions');
+            process.exit(1);
+        } else if (verifyResult.allValid) {
+            logger.info('All file permissions verified');
+        }
+    } catch (e) {
+        logger.error('Permission verification failed: ' + e);
+        process.exit(1);
+    }
+
     // START SERVICES
     logger.info('Starting services');
     try {
@@ -1721,7 +1894,7 @@ function installService(params)
     }
 
     // Linux/Windows continue with legacy install code below
-    process.stdout.write('...Installing service');
+    logger.info('Installing service');
     console.info1('');
 
     var target = null;
@@ -1813,9 +1986,9 @@ function installService(params)
 
         // Validate that the .msh file exists before attempting to copy it
         if (!require('fs').existsSync(mshFile)) {
-            process.stdout.write('\nError: Cannot find .msh file at: ' + mshFile + '\n');
-            process.stdout.write('The --copy-msh="1" parameter requires a .msh configuration file.\n');
-            process.stdout.write('Please place the .msh file next to the binary and try again.\n\n');
+            logger.error('Cannot find .msh file at: ' + mshFile);
+            logger.error('The --copy-msh="1" parameter requires a .msh configuration file.');
+            logger.error('Please place the .msh file next to the binary and try again.');
             process.exit(1);
         }
 
@@ -1885,7 +2058,7 @@ function installService(params)
     {
         // Let's actually install the service
         require('service-manager').manager.installService(options);
-        process.stdout.write(' [DONE]\n');
+        logger.info('Service installation completed');
         if(process.platform == 'win32')
         {
             // On Windows, we're going to enable this service to be runnable from SafeModeWithNetworking
@@ -1894,7 +2067,7 @@ function installService(params)
     }
     catch(sie)
     {
-        process.stdout.write(' [ERROR] ' + sie);
+        logger.error('Service installation failed: ' + sie);
         process.exit();
     }
     // Get the service object for starting
@@ -1904,7 +2077,7 @@ function installService(params)
     if(process.platform == 'win32')
     {
         var loc = svc.appLocation();
-        process.stdout.write('   -> Writing firewall rules for ' + options.name + ' Service...');
+        logger.info('Writing firewall rules for ' + options.name + ' Service...');
 
         var rule = 
             {
@@ -1918,19 +2091,19 @@ function installService(params)
                 Enabled: true
             };
         require('win-firewall').addFirewallRule(rule);
-        process.stdout.write(' [DONE]\n');
+        logger.info('Firewall rules added');
     }
 
     // Let's try to start the service that we just installed
-    process.stdout.write('   -> Starting service...');
+    logger.info('Starting service...');
     try
     {
         svc.start();
-        process.stdout.write(' [OK]\n');
+        logger.info('Service started successfully');
     }
     catch(ee)
     {
-        process.stdout.write(' [ERROR]\n');
+        logger.error('Failed to start service');
     }
 
     // On Windows we should explicitly close the service manager when we are done, instead of relying on the Garbage Collection, so the service object isn't unnecessarily locked
@@ -1998,12 +2171,12 @@ function uninstallService2(params, msh)
         appPrefix = params.getParameterEx('_appPrefix', null);
     }
 
-    process.stdout.write('   -> Uninstalling previous installation...');
+    logger.info('Uninstalling previous installation...');
     try
     {
         // Linux/Windows: use service-manager's uninstallService
         require('service-manager').manager.uninstallService(serviceId, uninstallOptions);
-        process.stdout.write(' [DONE]\n');
+        logger.info('Previous installation uninstalled');
         if (process.platform == 'win32')
         {
             // For Windows, we can remove the entry to enable this service to be runnable from SafeModeWithNetworking
@@ -2013,7 +2186,7 @@ function uninstallService2(params, msh)
         // Lets try to cleanup the uninstalled service
         if (dataFolder && appPrefix)
         {
-            process.stdout.write('   -> Deleting agent data...');
+            logger.info('Deleting agent data...');
             if (process.platform != 'win32')
             {
                 // On Non-Windows platforms, we're going to cleanup using the shell
@@ -2062,13 +2235,13 @@ function uninstallService2(params, msh)
                 child.waitExit();
             }
 
-            process.stdout.write(' [DONE]\n');
+            logger.info('Agent data deleted');
         }
     }
     catch (e)
     {
         var errorMsg = e.message || e.toString() || 'Unknown error';
-        process.stdout.write(' [ERROR: ' + errorMsg + ']\n');
+        logger.error('Uninstall error: ' + errorMsg);
         console.log('   Uninstall error details:', e);
     }
 
@@ -2077,42 +2250,42 @@ function uninstallService2(params, msh)
     var diagnosticServiceId = serviceName + 'Diagnostic';
     try
     {
-        process.stdout.write('   -> Checking for secondary agent...');
+        logger.info('Checking for secondary agent...');
         var s = require('service-manager').manager.getService(diagnosticServiceId);
         var loc = s.appLocation();
         s.close();
-        process.stdout.write(' [FOUND]\n');
-        process.stdout.write('      -> Uninstalling secondary agent...');
+        logger.info('Secondary agent found');
+        logger.info('Uninstalling secondary agent...');
         secondaryagent = true;
         try
         {
             require('service-manager').manager.uninstallService(diagnosticServiceId);
-            process.stdout.write(' [DONE]\n');
+            logger.info('Secondary agent uninstalled');
         }
         catch (e)
         {
-            process.stdout.write(' [ERROR]\n');
+            logger.error('Failed to uninstall secondary agent');
         }
     }
     catch (e)
     {
-        process.stdout.write(' [NONE]\n');
+        logger.info('No secondary agent found');
     }
 
     if(secondaryagent)
     {
         // If a secondary agent was found, remove the CRON job for it
-        process.stdout.write('      -> removing secondary agent from task scheduler...');
+        logger.info('Removing secondary agent from task scheduler...');
         var p = require('task-scheduler').delete(diagnosticServiceId + '/periodicStart');
         p._params = params;
         p._installPath = installPath;
         p.then(function ()
         {
-            process.stdout.write(' [DONE]\n');
+            logger.info('Task scheduler entry removed');
             uninstallService3(this._params, this._installPath);
         }, function ()
         {
-            process.stdout.write(' [ERROR]\n');
+            logger.error('Failed to remove task scheduler entry');
             uninstallService3(this._params, this._installPath);
         });
     }
@@ -2148,17 +2321,17 @@ function uninstallService(params)
     // Let's try to stop the service if we think it might be running
     if (svc.isRunning == null || svc.isRunning())
     {
-        process.stdout.write('   -> Stopping Service...');
+        logger.info('Stopping Service...');
         if(process.platform=='win32')
         {
             svc.stop().then(function ()
             {
-                process.stdout.write(' [STOPPED]\n');
+                logger.info('Service stopped');
                 svc.close();
                 uninstallService2(this._params, msh);
             }, function ()
             {
-                process.stdout.write(' [ERROR]\n');
+                logger.error('Failed to stop service');
                 svc.close();
                 uninstallService2(this._params, ms);
             }).parentPromise._params = params;
@@ -2167,7 +2340,7 @@ function uninstallService(params)
         {
             // Linux: stop the service
             svc.stop();
-            process.stdout.write(' [STOPPED]\n');
+            logger.info('Service stopped');
             uninstallService2(params, msh);
         }
     }
@@ -2181,15 +2354,15 @@ function uninstallService(params)
 // A previous service installation was found, so lets do some extra processing
 function serviceExists(loc, params)
 {
-    process.stdout.write(' [FOUND: ' + loc + ']\n');
+    logger.info('Previous installation found: ' + loc);
     if(process.platform == 'win32')
     {
         // On Windows, we need to cleanup the firewall rules associated with our install path
-        process.stdout.write('   -> Checking firewall rules for previous installation... [0%]');
+        logger.info('Checking firewall rules for previous installation...');
         var p = require('win-firewall').getFirewallRulesAsync({ program: loc, noResult: true, minimal: true, timeout: 15000 });
         p.on('progress', function (c)
         {
-            process.stdout.write('\r   -> Checking firewall rules for previous installation... [' + c + ']');
+            logger.debug('Checking firewall rules progress: ' + c);
         });
         p.on('rule', function (r)
         {
@@ -2198,7 +2371,7 @@ function serviceExists(loc, params)
         });
         p.finally(function ()
         {
-            process.stdout.write('\r   -> Checking firewall rules for previous installation... [DONE]\n');
+            logger.info('Firewall rules check completed');
             uninstallService(params);
         });
     }
@@ -2370,15 +2543,15 @@ function uninstallServiceUnified(params) {
         // Keeping commented for reference but not actively checking
         /*
         var diagnosticServiceId = macOSHelpers.buildServiceId(serviceName + 'Diagnostic', companyName);
-        process.stdout.write('   -> Checking for secondary agent...');
+        logger.info('Checking for secondary agent...');
         try {
             var diagSvc = require('service-manager').manager.getService(diagnosticServiceId);
             diagSvc.stop();
             diagSvc.unload();
             diagSvc.close();
-            process.stdout.write(' [REMOVED: ' + diagnosticServiceId + ']\n');
+            logger.info('Secondary agent removed: ' + diagnosticServiceId);
         } catch (e) {
-            process.stdout.write(' [NONE]\n');
+            logger.info('No secondary agent found');
         }
         */
 
@@ -2449,7 +2622,7 @@ function fullUninstall(jsonString)
     // Check for a previous installation of the service
     try
     {
-        process.stdout.write('...Checking for previous installation of "' + serviceId + '"');
+        logger.info('Checking for previous installation of "' + serviceId + '"');
         var s = require('service-manager').manager.getService(serviceId);
         var loc = s.appLocation();
         var appPrefix = loc.split(process.platform == 'win32' ? '\\' : '/').pop();
@@ -2463,8 +2636,8 @@ function fullUninstall(jsonString)
     catch (e)
     {
         // Service lookup failed
-        process.stdout.write(' [NOT FOUND]\n');
-        console.log('ERROR: Could not locate installation');
+        logger.error('Previous installation not found');
+        logger.error('Could not locate installation');
         process.exit(1);
     }
     serviceExists(loc, parms);
@@ -2515,7 +2688,7 @@ function fullInstallEx(parms, gOptions)
     // Check for a previous installation of the service
     try
     {
-        process.stdout.write('...Checking for previous installation of "' + serviceId + '"');
+        logger.info('Checking for previous installation of "' + serviceId + '"');
         var s = require('service-manager').manager.getService(serviceId);
         loc = s.appLocation();
 
@@ -2530,8 +2703,8 @@ function fullInstallEx(parms, gOptions)
         // On macOS, try to find ANY existing meshagent installation (handles service renames)
         if (process.platform == 'darwin')
         {
-            process.stdout.write(' [NOT FOUND]\n');
-            process.stdout.write('...Searching for any existing meshagent installation...');
+            logger.info('Service not found by name');
+            logger.info('Searching for any existing meshagent installation...');
             try
             {
                 // Check if explicit installPath was provided (takes priority over self-upgrade detection)
@@ -2544,7 +2717,7 @@ function fullInstallEx(parms, gOptions)
                 loc = findInstallation(explicitInstallPath, null, null);
                 if (loc)
                 {
-                    process.stdout.write(' [FOUND: ' + loc + ']\n');
+                    logger.info('Found existing installation: ' + loc);
                     // Determine working directory from location
                     var parts = loc.split('/');
                     parts.pop(); // Remove 'meshagent' binary name
@@ -2555,7 +2728,7 @@ function fullInstallEx(parms, gOptions)
                 else
                 {
                     // Truly no installation found
-                    process.stdout.write(' [NONE]\n');
+                    logger.info('No existing installation found');
                     installService(parms);
                     return;
                 }
@@ -2563,7 +2736,7 @@ function fullInstallEx(parms, gOptions)
             catch (findErr)
             {
                 // No installation found, proceed with fresh install
-                process.stdout.write(' [NONE]\n');
+                logger.info('No existing installation found');
                 installService(parms);
                 return;
             }
@@ -2571,7 +2744,7 @@ function fullInstallEx(parms, gOptions)
         else
         {
             // On non-macOS platforms, no fallback search - just install fresh
-            process.stdout.write(' [NONE]\n');
+            logger.info('No existing installation found');
             installService(parms);
             return;
         }
@@ -2837,13 +3010,13 @@ function upgradeAgent(params) {
     // NOTE: We don't pass newServiceName/newCompanyName to findInstallation because
     // those are values from the database, not the current serviceId. The findInstallation
     // function will use self-upgrade detection to find the installation directory.
-    process.stdout.write('Locating existing installation... ');
+    logger.info('Locating existing installation...');
     installPath = findInstallation(installPath, null, null);
 
     if (!installPath) {
         process.exit(1);
     }
-    process.stdout.write('[FOUND: ' + installPath + ']\n');
+    logger.info('Found existing installation: ' + installPath);
 
     // Discover service configuration using 4-tier priority system
     console.log('Discovering current service configuration...');
@@ -3059,14 +3232,14 @@ function upgradeAgent(params) {
     }
 
     // Clean up ALL plists pointing to this binary (handles renames and orphans)
-    process.stdout.write('Cleaning up all service definitions pointing to ' + installPath + 'meshagent...\n');
+    logger.info('Cleaning up all service definitions pointing to ' + installPath + 'meshagent...');
     var cleaned = cleanupOrphanedPlists(installPath);
     if (cleaned.length > 0) {
         for (var i = 0; i < cleaned.length; i++) {
-            process.stdout.write('   Unloaded and removed: ' + cleaned[i] + '\n');
+            logger.info('   Unloaded and removed: ' + cleaned[i]);
         }
     } else {
-        process.stdout.write('   No service definitions found to clean up\n');
+        logger.info('   No service definitions found to clean up');
     }
     console.log('');
 
@@ -3074,21 +3247,21 @@ function upgradeAgent(params) {
     // CRITICAL SAFETY CHECKS: Verify services unloaded and processes terminated
     // ============================================================================
 
-    process.stdout.write('\n');
-    process.stdout.write('========================================\n');
-    process.stdout.write('SAFETY VERIFICATION\n');
-    process.stdout.write('========================================\n');
+    logger.info('');
+    logger.info('========================================');
+    logger.info('SAFETY VERIFICATION');
+    logger.info('========================================');
 
     var binaryPath = installPath + 'meshagent';
 
     // STEP 1: Verify services are unloaded from launchd
     // This is CRITICAL - prevents launchd from auto-restarting killed processes
-    process.stdout.write('Step 1: Verifying services unloaded from launchd...\n');
+    logger.info('Step 1: Verifying services unloaded from launchd...');
     var unloadCheck = verifyServiceUnloaded(currentServiceId, 3);
 
     if (unloadCheck.loaded) {
-        process.stdout.write('   WARNING: Service still loaded in launchd (' + unloadCheck.domain + ')\n');
-        process.stdout.write('   Attempting force bootout...\n');
+        logger.warn('   Service still loaded in launchd (' + unloadCheck.domain + ')');
+        logger.info('   Attempting force bootout...');
 
         var bootoutSuccess = forceBootoutService(currentServiceId, unloadCheck.domain);
 
@@ -3114,18 +3287,19 @@ function upgradeAgent(params) {
             process.exit(1);
         }
     }
-    process.stdout.write('   Services unloaded from launchd [VERIFIED]\n\n');
+    logger.info('   Services unloaded from launchd [VERIFIED]');
+    logger.info('');
 
     // STEP 2: Verify processes terminated
     // Now safe - launchd won't restart them after kill
     // Only targets processes from our specific binaryPath
-    process.stdout.write('Step 2: Verifying processes terminated (path: ' + binaryPath + ')...\n');
+    logger.info('Step 2: Verifying processes terminated (path: ' + binaryPath + ')...');
     var processCheck = verifyProcessesTerminated(binaryPath, 5);
 
     if (!processCheck.success) {
-        process.stdout.write('   WARNING: ' + processCheck.pids.length + ' process(es) still running from this path\n');
-        process.stdout.write('   PIDs: ' + processCheck.pids.join(', ') + '\n');
-        process.stdout.write('   Attempting force kill (safe - launchd unloaded)...\n');
+        logger.warn('   ' + processCheck.pids.length + ' process(es) still running from this path');
+        logger.info('   PIDs: ' + processCheck.pids.join(', '));
+        logger.info('   Attempting force kill (safe - launchd unloaded)...');
 
         var killSuccess = forceKillProcesses(processCheck.pids);
 
@@ -3143,11 +3317,13 @@ function upgradeAgent(params) {
             process.exit(1);
         }
     }
-    process.stdout.write('   All processes terminated [VERIFIED]\n');
-    process.stdout.write('   Other meshagent installations unaffected\n\n');
+    logger.info('   All processes terminated [VERIFIED]');
+    logger.info('   Other meshagent installations unaffected');
+    logger.info('');
 
-    process.stdout.write('Safety verification complete - ready for binary replacement\n');
-    process.stdout.write('========================================\n\n');
+    logger.info('Safety verification complete - ready for binary replacement');
+    logger.info('========================================');
+    logger.info('');
 
     // Ensure .msh file reflects determined configuration (after services stopped)
     // This writes the final determined values to .msh so they'll be in .db on next startup
@@ -3223,10 +3399,13 @@ function upgradeAgent(params) {
                 }
                 fs.writeFileSync(mshPath, mshData);
 
-                // Set ownership and permissions: root:wheel 600
-                child_process.execSync('chown root:wheel "' + mshPath + '"');
-                child_process.execSync('chmod 600 "' + mshPath + '"');
-                console.log('   Created .msh file (root:wheel 600)');
+                // Set secure ownership and permissions
+                var mshResult = securityPermissions.setSecurePermissions(mshPath, '.msh');
+                if (mshResult.success) {
+                    console.log('   Created .msh file with secure permissions (root:wheel 600)');
+                } else {
+                    console.log('   WARNING: Could not set .msh permissions: ' + mshResult.errors.join(', '));
+                }
             } else {
                 // Update existing .msh file
                 console.log('Updating .msh file with determined configuration...');
@@ -3265,7 +3444,7 @@ function upgradeAgent(params) {
     }
 
     // Backup existing installation (bundle or standalone)
-    process.stdout.write('Backing up current installation...\n');
+    logger.info('Backing up current installation...');
     try {
         backupInstallation(installPath);
     } catch (e) {
@@ -3276,7 +3455,7 @@ function upgradeAgent(params) {
     console.log('');
 
     // Install new version (based on source type)
-    process.stdout.write('Installing new version...\n');
+    logger.info('Installing new version...');
     try {
         replaceInstallation(sourceType, installPath);
     } catch (e) {
@@ -3294,7 +3473,7 @@ function upgradeAgent(params) {
     // Recreate LaunchDaemon plist (using discovered/current service configuration)
     // Note: We use currentServiceName/currentCompanyName (not Final values) so that
     // plists are created with the existing configuration, even if user blanked .msh
-    process.stdout.write('Recreating LaunchDaemon...\n');
+    logger.info('Recreating LaunchDaemon...');
     try {
         createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType, disableUpdate);
     } catch (e) {
@@ -3305,7 +3484,7 @@ function upgradeAgent(params) {
     console.log('');
 
     // Recreate LaunchAgent plist (using discovered/current service configuration)
-    process.stdout.write('Recreating LaunchAgent...\n');
+    logger.info('Recreating LaunchAgent...');
     try {
         createLaunchAgent(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType);
     } catch (e) {
@@ -3315,7 +3494,8 @@ function upgradeAgent(params) {
     console.log('');
 
     // Final safety check before starting services
-    process.stdout.write('\nFinal verification before starting services...\n');
+    logger.info('');
+    logger.info('Final verification before starting services...');
 
     var finalLaunchdCheck = verifyServiceUnloaded(currentServiceId, 1);
     if (finalLaunchdCheck.loaded) {
@@ -3330,7 +3510,7 @@ function upgradeAgent(params) {
     }
 
     if (!finalLaunchdCheck.loaded && finalProcessCheck.success) {
-        process.stdout.write('   Clean state verified - ready to start services\n');
+        logger.info('   Clean state verified - ready to start services');
     }
 
     // Small delay for system cleanup
@@ -3340,11 +3520,30 @@ function upgradeAgent(params) {
         // Sleep may fail in some environments, continue anyway
     }
 
-    process.stdout.write('\n');
+    logger.info('');
 
     // Bootstrap services (using current service ID since plists created with current config)
-    process.stdout.write('Starting services...\n');
+    logger.info('Starting services...');
     bootstrapServices(currentServiceId);
+    console.log('');
+
+    // VERIFY AND FIX FILE PERMISSIONS
+    logger.info('Verifying file permissions...');
+    try {
+        var verifyResult = securityPermissions.verifyInstallation(installPath, { autoFix: true });
+
+        if (verifyResult.fixed && verifyResult.fixed.length > 0) {
+            console.log('   Fixed permissions on ' + verifyResult.fixed.length + ' file(s)');
+        }
+
+        if (!verifyResult.allValid && verifyResult.failed && verifyResult.failed.length > 0) {
+            console.log('   WARNING: Could not fix permissions on ' + verifyResult.failed.length + ' file(s)');
+        } else if (verifyResult.allValid) {
+            console.log('   All file permissions verified');
+        }
+    } catch (e) {
+        console.log('   WARNING: Permission verification failed: ' + e.message);
+    }
     console.log('');
 
     console.log('========================================');
@@ -3552,11 +3751,11 @@ function agent_updaterVersion(updatePath)
 // Windows Helper to clear firewall entries
 function win_clearfirewall(passthru)
 {
-    process.stdout.write('Clearing firewall rules... [0%]');
+    logger.info('Clearing firewall rules...');
     var p = require('win-firewall').getFirewallRulesAsync({ program: process.execPath, noResult: true, minimal: true, timeout: 15000 });
     p.on('progress', function (c)
     {
-        process.stdout.write('\rClearing firewall rules... [' + c + ']');
+        logger.debug('Clearing firewall rules progress: ' + c);
     });
     p.on('rule', function (r)
     {
@@ -3564,7 +3763,7 @@ function win_clearfirewall(passthru)
     });
     p.finally(function ()
     {
-        process.stdout.write('\rClearing firewall rules... [DONE]\n');
+        logger.info('Firewall rules cleared');
         if (passthru == null) { process.exit(); }
     });
     if(passthru!=null)
@@ -3576,12 +3775,12 @@ function win_clearfirewall(passthru)
 // Windows Helper for enumerating Firewall Rules associated with our binary
 function win_checkfirewall()
 {
-    process.stdout.write('Checking firewall rules... [0%]');
+    logger.info('Checking firewall rules...');
     var p = require('win-firewall').getFirewallRulesAsync({ program: process.execPath, noResult: true, minimal: true, timeout: 15000 });
     p.foundItems = 0;
     p.on('progress', function (c)
     {
-        process.stdout.write('\rChecking firewall rules... [' + c + ']');
+        logger.debug('Checking firewall rules progress: ' + c);
     });
     p.on('rule', function (r)
     {
@@ -3589,8 +3788,8 @@ function win_checkfirewall()
     });
     p.finally(function ()
     {
-        process.stdout.write('\rChecking firewall rules... [DONE]\n');
-        process.stdout.write('Rules found: ' + this.foundItems + '\n');
+        logger.info('Firewall rules check completed');
+        logger.info('Rules found: ' + this.foundItems);
 
         process.exit();
     });
@@ -3614,7 +3813,7 @@ function win_setfirewall()
                 Enabled: true
             };
         require('win-firewall').addFirewallRule(rule);
-        process.stdout.write('Adding firewall rules..... [DONE]\n');
+        logger.info('Firewall rules added');
         process.exit();
     });
 

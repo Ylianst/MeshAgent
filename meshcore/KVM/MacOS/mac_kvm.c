@@ -57,6 +57,7 @@ limitations under the License.
 #include <dirent.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
+#include <removefile.h>
 
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
 
@@ -489,7 +490,6 @@ static char* kvm_read_serviceid_from_plist(const char *exePath)
 
 	if (exePath == NULL || strlen(exePath) == 0)
 	{
-		printf("KVM: Cannot read serviceID from plist - exePath is NULL\n");
 		return NULL;
 	}
 
@@ -497,7 +497,6 @@ static char* kvm_read_serviceid_from_plist(const char *exePath)
 	dir = opendir("/Library/LaunchDaemons");
 	if (dir == NULL)
 	{
-		printf("KVM: Warning - Could not open /Library/LaunchDaemons: %s\n", strerror(errno));
 		return NULL;
 	}
 
@@ -540,22 +539,16 @@ static char* kvm_read_serviceid_from_plist(const char *exePath)
 						label[strcspn(label, "\n")] = 0;
 						pclose(pipe);
 						closedir(dir);
-
-						printf("KVM: Found serviceID from plist Label: %s (from %s)\n", label, entry->d_name);
 						return strdup(label);
 					}
 					pclose(pipe);
 				}
-
-				// Found matching plist but couldn't read Label - continue searching
-				printf("KVM: Warning - Found matching plist %s but could not read Label\n", entry->d_name);
 			}
 		}
 		pclose(pipe);
 	}
 
 	closedir(dir);
-	printf("KVM: No matching plist found in /Library/LaunchDaemons for %s\n", exePath);
 	return NULL;
 }
 
@@ -580,7 +573,6 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 	{
 		strncpy(serviceId, serviceID, sizeof(serviceId) - 1);
 		serviceId[sizeof(serviceId) - 1] = '\0';
-		printf("KVM: Using serviceID from database: %s\n", serviceId);
 	}
 	// Priority 2: Read from LaunchDaemon plist Label
 	else if (exePath != NULL && strlen(exePath) > 0)
@@ -591,14 +583,12 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 			strncpy(serviceId, plistServiceId, sizeof(serviceId) - 1);
 			serviceId[sizeof(serviceId) - 1] = '\0';
 			free(plistServiceId);
-			printf("KVM: Using serviceID from LaunchDaemon plist: %s\n", serviceId);
 		}
 		else
 		{
 			// Priority 3: Default to "meshagent-agent"
 			strncpy(serviceId, "meshagent-agent", sizeof(serviceId) - 1);
 			serviceId[sizeof(serviceId) - 1] = '\0';
-			printf("KVM: Using default serviceID (plist scan failed): %s\n", serviceId);
 		}
 	}
 	else
@@ -606,7 +596,6 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 		// Priority 3: Default to "meshagent-agent" (no exePath available)
 		strncpy(serviceId, "meshagent-agent", sizeof(serviceId) - 1);
 		serviceId[sizeof(serviceId) - 1] = '\0';
-		printf("KVM: Using default serviceID (no exePath): %s\n", serviceId);
 	}
 
 	// Build dynamic paths
@@ -617,11 +606,6 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 	snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s.sock", serviceId);
 	snprintf(KVM_Queue_Directory, PATH_MAX, "/var/run/%s", serviceId);
 	snprintf(KVM_Session_Signal_File, PATH_MAX, "/var/run/%s/session-active", serviceId);
-
-	printf("KVM: Built dynamic paths for serviceId='%s'\n", serviceId);
-	printf("KVM:   Socket: %s\n", KVM_Listener_Path);
-	printf("KVM:   Queue: %s\n", KVM_Queue_Directory);
-	printf("KVM:   Signal: %s\n", KVM_Session_Signal_File);
 }
 
 void* kvm_mainloopinput(void* param)
@@ -1044,11 +1028,8 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 	// Check if session already active
 	if (KVM_Daemon_Listener_FD != -1)
 	{
-		printf("KVM: Session already active\n");
 		return 0;  // Already initialized
 	}
-
-	printf("KVM: Creating KVM session (on-demand)\n");
 
 	// 1. Create domain socket FIRST (before directory/signal file)
 	// This prevents race condition where -kvm1 starts before socket is ready
@@ -1092,8 +1073,6 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 		return -1;
 	}
 
-	printf("KVM: Socket ready at %s\n", KVM_Listener_Path);
-
 	// 2. NOW create queue directory for LaunchAgent QueueDirectories monitoring
 	// Socket is guaranteed ready before -kvm1 can start
 	if (mkdir(KVM_Queue_Directory, 0755) < 0 && errno != EEXIST)
@@ -1104,7 +1083,6 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 		unlink(KVM_Listener_Path);
 		return -1;
 	}
-	printf("KVM: Created queue directory: %s\n", KVM_Queue_Directory);
 
 	// 3. Create signal file to trigger QueueDirectories (directory not empty)
 	signal_fd = open(KVM_Session_Signal_File, O_CREAT | O_WRONLY, 0644);
@@ -1119,9 +1097,7 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 	}
 	write(signal_fd, "1", 1);  // Write something so file is not empty
 	close(signal_fd);
-	printf("KVM: Created signal file: %s\n", KVM_Session_Signal_File);
 
-	printf("KVM: Session ready - QueueDirectories will trigger -kvm1 startup\n");
 	return 0;
 }
 
@@ -1129,8 +1105,6 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 // This causes -kvm1 to exit (directory empty, avoiding QueueDirectories weirdness)
 void kvm_cleanup_session(void)
 {
-	printf("KVM: Cleaning up KVM session\n");
-
 	// Close and remove socket
 	if (KVM_Daemon_Listener_FD != -1)
 	{
@@ -1142,37 +1116,72 @@ void kvm_cleanup_session(void)
 	// Remove signal file (makes directory empty)
 	unlink(KVM_Session_Signal_File);
 
-	// Clear all contents from directory (equivalent to rm -rf /var/run/meshagent/*)
+	// Clear all contents from directory (CRITICAL: Must be completely empty to stop -kvm1)
 	// Keep the directory itself to avoid QueueDirectories weirdness with folder deletion
+	// Any remaining files will cause LaunchAgent to continuously spawn -kvm1
 	DIR *dir = opendir(KVM_Queue_Directory);
 	if (dir != NULL)
 	{
 		struct dirent *entry;
 		char filepath[PATH_MAX];
-		
+
 		while ((entry = readdir(dir)) != NULL)
 		{
 			// Skip . and .. entries
 			if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
 				continue;
-				
+
 			snprintf(filepath, sizeof(filepath), "%s/%s", KVM_Queue_Directory, entry->d_name);
-			
+
 			if (entry->d_type == DT_DIR)
 			{
 				// Recursively remove subdirectory - this shouldn't happen but handle it
-				char rm_cmd[PATH_MAX + 20];
-				snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", filepath);
-				system(rm_cmd);
+				// Use removefile() instead of system() to prevent command injection
+				if (removefile(filepath, NULL, REMOVEFILE_RECURSIVE) != 0) {
+					// First attempt failed - try with force flag
+					if (removefile(filepath, NULL, REMOVEFILE_RECURSIVE | REMOVEFILE_KEEP_PARENT) != 0) {
+						fprintf(stderr, "KVM: CRITICAL - failed to remove directory %s: %s\n",
+						        filepath, strerror(errno));
+						fprintf(stderr, "KVM: LaunchAgent may continue spawning -kvm1!\n");
+					}
+				}
 			}
 			else
 			{
-				// Remove regular file
-				unlink(filepath);
+				// Remove regular file with retry
+				if (unlink(filepath) != 0) {
+					// Retry with chmod in case of permission issues
+					chmod(filepath, 0644);
+					if (unlink(filepath) != 0) {
+						fprintf(stderr, "KVM: CRITICAL - failed to remove file %s: %s\n",
+						        filepath, strerror(errno));
+						fprintf(stderr, "KVM: LaunchAgent may continue spawning -kvm1!\n");
+					}
+				}
 			}
 		}
 		closedir(dir);
-		printf("KVM: Queue directory contents cleared - -kvm1 should exit\n");
+
+		// VERIFICATION PASS: Ensure directory is actually empty
+		dir = opendir(KVM_Queue_Directory);
+		if (dir != NULL)
+		{
+			int remaining_files = 0;
+			while ((entry = readdir(dir)) != NULL)
+			{
+				if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+					continue;
+				remaining_files++;
+				fprintf(stderr, "KVM: CRITICAL - Stray file remains: %s/%s\n",
+				        KVM_Queue_Directory, entry->d_name);
+			}
+			closedir(dir);
+
+			if (remaining_files > 0) {
+				fprintf(stderr, "KVM: CRITICAL - %d stray file(s) in queue directory!\n", remaining_files);
+				fprintf(stderr, "KVM: LaunchAgent will continue spawning -kvm1 until directory is empty!\n");
+			}
+		}
 	}
 	else if (errno != ENOENT)
 	{
@@ -1202,7 +1211,6 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	}
 
 	// Accept connection from -kvm1 LaunchAgent (triggered by QueueDirectories)
-	printf("KVM: Waiting for -kvm1 to connect...\n");
 	client_fd = accept(KVM_Daemon_Listener_FD, NULL, NULL);
 
 	if (client_fd < 0)
@@ -1212,8 +1220,6 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		return NULL;
 	}
 
-	printf("KVM: Connection accepted (fd=%d), verifying peer...\n", client_fd);
-
 	// Verify connecting process is legitimate meshagent binary
 	if (!verify_peer_codesign(client_fd))
 	{
@@ -1222,8 +1228,6 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		kvm_cleanup_session();  // Clean up on failure
 		return NULL;
 	}
-
-	printf("KVM: Peer verified successfully - connection established\n");
 
 	// Return FD cast as void* for use with ILibAsyncSocket
 	return (void*)(intptr_t)client_fd;

@@ -7,12 +7,15 @@ set -e  # Exit on any error
 BINARY_PATH="$1"
 BUNDLE_NAME="${2:-MeshAgent.app}"
 BUNDLE_ID="${3:-meshagent}"
-BUILD_TIMESTAMP_DATE="${4:-$(date +%y.%m.%d)}"
-BUILD_TIMESTAMP_TIME="${5:-$(date +%H.%M.%S)}"
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+# Generate timestamp atomically (single date call ensures consistency)
+eval $("$PROJECT_ROOT/build/tools/generate-build-timestamp.sh")
+BUILD_TIMESTAMP_DATE="${4:-$BUILD_DATE}"
+BUILD_TIMESTAMP_TIME="${5:-$BUILD_TIME_ONLY}"
 
 if [ -z "$BINARY_PATH" ]; then
     echo "Usage: $0 <binary_path> [bundle_name] [bundle_id] [build_timestamp_date] [build_timestamp_time]"
@@ -61,17 +64,13 @@ cp "$BINARY_PATH" "$BUNDLE_NAME/Contents/MacOS/meshagent"
 chmod +x "$BUNDLE_NAME/Contents/MacOS/meshagent"
 echo "  Copied binary to Contents/MacOS/meshagent"
 
-# Generate Info.plist
-TEMPLATE_PATH="$PROJECT_ROOT/build/resources/Info/bundle/app_Info.plist"
-if [ ! -f "$TEMPLATE_PATH" ]; then
-    echo "Error: Info.plist template not found: $TEMPLATE_PATH"
-    exit 1
-fi
-
-sed -e "s/BUNDLE_IDENTIFIER/$BUNDLE_ID/g" \
-    -e "s/BUILD_TIMESTAMP_DATE/$BUILD_TIMESTAMP_DATE/g" \
-    -e "s/BUILD_TIMESTAMP_TIME/$BUILD_TIMESTAMP_TIME/g" \
-    "$TEMPLATE_PATH" > "$BUNDLE_NAME/Contents/Info.plist"
+# Generate Info.plist using unified generation script
+"$PROJECT_ROOT/build/tools/generate-info-plist.sh" \
+    --output "$BUNDLE_NAME/Contents/Info.plist" \
+    --bundle-id "$BUNDLE_ID" \
+    --build-date "$BUILD_TIMESTAMP_DATE" \
+    --build-time "$BUILD_TIMESTAMP_TIME" \
+    --mode bundle
 echo "  Generated Info.plist (date: $BUILD_TIMESTAMP_DATE, time: $BUILD_TIMESTAMP_TIME)"
 
 # Copy icon

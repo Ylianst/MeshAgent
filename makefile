@@ -559,7 +559,7 @@ CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
 endif
 
 # macOS utility sources (always compiled for macOS builds)
-MACOSUTILSOURCES = meshcore/MacOS/bundle_detection.c meshcore/MacOS/mac_tcc_detection.c meshcore/MacOS/TCC_UI/mac_permissions_window.m
+MACOSUTILSOURCES = meshcore/MacOS/bundle_detection.c meshcore/MacOS/mac_tcc_detection.c meshcore/MacOS/mac_logging_utils.c meshcore/MacOS/mac_plist_utils.c meshcore/MacOS/mac_ui_helpers.m meshcore/MacOS/TCC_UI/mac_permissions_window.m meshcore/MacOS/Install_UI/mac_install_window.m meshcore/MacOS/Install_UI/mac_authorized_install.m
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
@@ -843,26 +843,10 @@ linux:
 # App Bundle: After building the binary, automatically creates a .app bundle in
 # $(BUILD_OUTPUT_DIR)/<arch>-app/MeshAgent.app for easy distribution and testing.
 macos:
-	@echo "Syncing modules to platform-specific directories..."
-	@for module in modules/*.js; do \
-		filename=$$(basename $$module); \
-		echo "  Syncing $$filename..."; \
-		if [ -f "modules_macos/$$filename" ]; then \
-			sudo cp -f "$$module" "modules_macos/$$filename" || cp -f "$$module" "modules_macos/$$filename"; \
-		fi; \
-		if [ -f "modules_linux-bsd/$$filename" ]; then \
-			sudo cp -f "$$module" "modules_linux-bsd/$$filename" || cp -f "$$module" "modules_linux-bsd/$$filename"; \
-		fi; \
-		if [ -f "modules_windows/$$filename" ]; then \
-			sudo cp -f "$$module" "modules_windows/$$filename" || cp -f "$$module" "modules_windows/$$filename"; \
-		fi; \
-	done
-	@echo "Module sync complete."
+	@./build/tools/sync-modules.sh --mode all --verbose
 	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
 	@if [ "$(ARCHID)" = "10005" ]; then \
-		BUILD_TIME=$$(date +%y.%m.%d.%H.%M.%S); \
-		BUILD_DATE=$$(echo $$BUILD_TIME | cut -d. -f1-3); \
-		BUILD_TIME_ONLY=$$(echo $$BUILD_TIME | cut -d. -f4-6); \
+		eval $$(./build/tools/generate-build-timestamp.sh); \
 		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
 		echo "Build timestamp: $$BUILD_TIME (date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY)"; \
 		echo "Building x86-64..."; \
@@ -890,15 +874,20 @@ macos:
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY; \
 			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app"; \
+			echo "Ad-hoc signing universal binary..."; \
+			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
+			echo "Splitting universal binary into architectures..."; \
+			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract arm64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-arm-64; \
+			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract x86_64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-x86-64; \
+			echo "Ad-hoc signing universal bundle..."; \
+			codesign -s - --deep $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app; \
 			echo "To test run: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -version"; \
 		else \
 			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-universal-64"; \
 		fi; \
 	else \
 		if [ -z "$(BUILD_TIMESTAMP)" ]; then \
-			BUILD_TIME=$$(date +%y.%m.%d.%H.%M.%S); \
-			BUILD_DATE=$$(echo $$BUILD_TIME | cut -d. -f1-3); \
-			BUILD_TIME_ONLY=$$(echo $$BUILD_TIME | cut -d. -f4-6); \
+			eval $$(./build/tools/generate-build-timestamp.sh); \
 		else \
 			BUILD_TIME=$(BUILD_TIMESTAMP); \
 			if [ -z "$(BUILD_DATE)" ]; then \
@@ -912,8 +901,8 @@ macos:
 				BUILD_TIME_ONLY=$(BUILD_TIME_ONLY); \
 			fi; \
 		fi; \
-		echo "Generating Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
-		sed -e "s/BUILD_TIMESTAMP_DATE/$$BUILD_DATE/g" -e "s/BUILD_TIMESTAMP_TIME/$$BUILD_TIME_ONLY/g" -e "s/BUNDLE_IDENTIFIER/$(BUNDLE_ID)/g" build/resources/Info/binary/binary_Info.plist > build/output/tmp_binary_Info.plist; \
+		echo "Generating binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
+		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing -fobjc-arc $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -lsqlite3 -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Cocoa -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
 		if [ "$(DEBUG)" != "1" ]; then \
 			cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
@@ -927,6 +916,8 @@ macos:
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY; \
 			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app"; \
+			echo "Ad-hoc signing bundle..."; \
+			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app; \
 			echo "To test run: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app/Contents/MacOS/meshagent -version"; \
 		else \
 			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)"; \

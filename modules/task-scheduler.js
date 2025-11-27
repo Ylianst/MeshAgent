@@ -17,6 +17,7 @@ limitations under the License.
 var promise = require('promise');
 var servicemanager = require('service-manager');
 var mgr = new servicemanager();
+var securityPermissions = process.platform === 'darwin' ? require('./security-permissions') : null;
 
 //attachDebugger({ webport: 9995, wait: 1 }).then(console.log);
 
@@ -426,7 +427,16 @@ function task()
                     {
                         plist = plist.replace('{{{INTERVAL}}}', '      <key>StartCalendarInterval</key>\n      <array><dict>\n' + periodic.join('      </dict>\n      <dict>\n') + '      </dict></array>\n');
                     }
-                    require('fs').writeFileSync('/Library/LaunchDaemons/' + taskname + '.plist', plist);
+                    var taskPlistPath = '/Library/LaunchDaemons/' + taskname + '.plist';
+                    require('fs').writeFileSync(taskPlistPath, plist);
+
+                    // Set secure permissions on LaunchDaemon plist
+                    if (securityPermissions) {
+                        var plistResult = securityPermissions.setSecurePermissions(taskPlistPath, 'plist');
+                        if (!plistResult.success) {
+                            console.log('WARNING: Could not set task plist permissions: ' + plistResult.errors.join(', '));
+                        }
+                    }
 
                     var child = require('child_process').execFile('/bin/sh', ['sh']);
                     child.stdout.on('data', function (chunk) { });

@@ -456,67 +456,10 @@ if [ "$SKIP_POLYFILLS" = "no" ]; then
         # Use minimal module list if code-utils build is enabled
         if [ "$CODE_UTILS_BUILD" = "yes" ]; then
             echo "  Mode: CODE-UTILS macOS modules (NO KVM)"
-            MODULES_LIST="./modules/.modules_macos_minimal"
+            ./build/tools/sync-modules.sh --mode minimal --verbose
         else
             echo "  Mode: macOS-only modules"
-            MODULES_LIST="./modules/.modules_macos"
-        fi
-
-        if [ ! -f "$MODULES_LIST" ]; then
-            echo "  ERROR: Module list not found at $MODULES_LIST"
-            exit 1
-        fi
-
-        echo "  Syncing macOS modules from ./modules to ./modules_macos..."
-
-        # Create modules_macos directory if it doesn't exist
-        sudo -u $SUDO_USER mkdir -p "./modules_macos"
-
-        # Remove any .js files in modules_macos that are NOT in the .modules_macos list
-        deleted_count=0
-        if [ -d "./modules_macos" ]; then
-            shopt -s nullglob  # Make glob expand to nothing if no matches
-            for existing_file in ./modules_macos/*.js; do
-                module_name=$(basename "$existing_file")
-
-                # Check if this module is in the authorized list
-                if ! grep -Fxq "$module_name" "$MODULES_LIST"; then
-                    echo "    Removing unauthorized module: $module_name"
-                    sudo -u $SUDO_USER rm -f "$existing_file"
-                    ((deleted_count++))
-                fi
-            done
-            shopt -u nullglob  # Restore default behavior
-        fi
-
-        if [ $deleted_count -gt 0 ]; then
-            echo "  ✓ Removed $deleted_count unauthorized modules"
-        fi
-
-        # Read module list and copy each module
-        module_count=0
-        missing_count=0
-        while IFS= read -r module || [ -n "$module" ]; do
-            # Skip empty lines
-            [ -z "$module" ] && continue
-
-            source_file="./modules/$module"
-            dest_file="./modules_macos/$module"
-
-            if [ -f "$source_file" ]; then
-                # Copy module (byte-perfect copy)
-                sudo -u $SUDO_USER cp "$source_file" "$dest_file"
-                ((module_count++))
-            else
-                echo "    WARNING: Module not found: $module"
-                ((missing_count++))
-            fi
-        done < "$MODULES_LIST"
-
-        echo "  ✓ Synced $module_count modules to ./modules_macos"
-
-        if [ $missing_count -gt 0 ]; then
-            echo "  ⚠ $missing_count modules not found in ./modules"
+            ./build/tools/sync-modules.sh --mode macos-only --verbose
         fi
     else
         MODULE_DIR="./modules"
@@ -674,6 +617,10 @@ if [ "$SKIP_SIGN" = "no" ]; then
 else
     echo "[3/6] Signing - SKIPPED"
     echo ""
+    echo "Note: Ad-hoc signing is delegated to the Makefile."
+    echo "      The Makefile automatically ad-hoc signs binaries and bundles after building."
+    echo "      See makefile lines 878, 883, 920 for signing implementation."
+    echo ""
 fi
 
 #==============================================================================
@@ -768,11 +715,76 @@ else
 fi
 
 #==============================================================================
+# UPDATE PKG BUILD-INFO AND COPY BUNDLE TO PAYLOAD
+#==============================================================================
+
+echo "[5/6] Updating pkg build-info and copying bundle to payload..."
+echo "[$(date '+%H:%M:%S')] PKG preparation started"
+
+# Extract short version from bundle's Info.plist
+if [ -f "$BUNDLE_PATH/Contents/Info.plist" ]; then
+    SHORT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$BUNDLE_PATH/Contents/Info.plist" 2>/dev/null || echo "0.1")
+    echo "  Bundle version: $SHORT_VERSION"
+
+    # Update build-info.plist version
+    BUILD_INFO_PLIST="$REPO_DIR/build/resources/MeshAgent_pkg/build-info.plist"
+    if [ -f "$BUILD_INFO_PLIST" ]; then
+        /usr/libexec/PlistBuddy -c "Set :version $SHORT_VERSION" "$BUILD_INFO_PLIST" 2>/dev/null || \
+            echo "  Warning: Could not update build-info.plist version"
+        echo "  ✓ Updated build-info.plist version to $SHORT_VERSION"
+    else
+        echo "  Warning: build-info.plist not found at $BUILD_INFO_PLIST"
+    fi
+
+    # Create payload directory and copy bundle
+    PAYLOAD_DIR="$REPO_DIR/build/resources/MeshAgent_pkg/payload/private/tmp"
+    sudo -u $SUDO_USER mkdir -p "$PAYLOAD_DIR"
+
+    # Remove existing bundle if present
+    if [ -d "$PAYLOAD_DIR/MeshAgent.app" ]; then
+        sudo -u $SUDO_USER rm -rf "$PAYLOAD_DIR/MeshAgent.app"
+    fi
+
+    # Copy bundle using ditto (preserves all metadata, permissions, and extended attributes)
+    sudo -u $SUDO_USER ditto "$BUNDLE_PATH" "$PAYLOAD_DIR/MeshAgent.app"
+    echo "  ✓ Copied bundle to $PAYLOAD_DIR/MeshAgent.app"
+
+    # Build the .pkg using munkipkg
+    echo ""
+    echo "  Building installer package..."
+    cd "$REPO_DIR"
+    if command -v munkipkg &> /dev/null; then
+        sudo -u $SUDO_USER munkipkg ./build/resources/MeshAgent_pkg/
+        if [ $? -eq 0 ]; then
+            echo "  ✓ Package built successfully"
+            # Show the built package location
+            PKG_BUILD_DIR="./build/resources/MeshAgent_pkg/build"
+            if [ -d "$PKG_BUILD_DIR" ]; then
+                BUILT_PKG=$(ls -t "$PKG_BUILD_DIR"/*.pkg 2>/dev/null | head -1)
+                if [ -n "$BUILT_PKG" ]; then
+                    echo "  ✓ Package: $BUILT_PKG"
+                fi
+            fi
+        else
+            echo "  ⚠ Package build failed"
+        fi
+    else
+        echo "  ⚠ munkipkg not found - skipping package build"
+        echo "  Install munkipkg from: https://github.com/munki/munki-pkg"
+    fi
+else
+    echo "  Warning: Bundle Info.plist not found, skipping version update"
+fi
+
+echo "[$(date '+%H:%M:%S')] PKG preparation complete"
+echo ""
+
+#==============================================================================
 # COMMAND EXECUTION
 #==============================================================================
 
 if [ "$MSH_EXEC" = "yes" ] && [ -n "$MSH_COMMAND" ]; then
-    echo "[5/6] Executing meshagent command..."
+    echo "[6/7] Executing meshagent command..."
     echo "[$(date '+%H:%M:%S')] Command execution started"
     echo "  Command: -$MSH_COMMAND"
 
@@ -837,7 +849,7 @@ if [ "$MSH_EXEC" = "yes" ] && [ -n "$MSH_COMMAND" ]; then
     echo "✓ Command '-$MSH_COMMAND' executed successfully"
     echo ""
 else
-    echo "[5/6] Command execution - SKIPPED (MSH_EXEC=no or no command specified)"
+    echo "[6/7] Command execution - SKIPPED (MSH_EXEC=no or no command specified)"
     echo ""
 fi
 

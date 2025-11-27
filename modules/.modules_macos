@@ -32,6 +32,7 @@ power-monitor.js
 process-manager.js
 promise.js
 proxy-helper.js
+security-permissions.js
 service-manager.js
 smbios.js
 tar-encoder.js

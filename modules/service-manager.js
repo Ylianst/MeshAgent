@@ -16,6 +16,7 @@ limitations under the License.
 var promise = require('promise');
 var systemd_escape = null;
 var macOSHelpers = process.platform === 'darwin' ? require('./macOSHelpers') : null;
+var securityPermissions = process.platform === 'darwin' ? require('./security-permissions') : null;
 
 function failureActionToInteger(action)
 {
@@ -2905,6 +2906,14 @@ function serviceManager()
             if (!require('fs').existsSync(plistPath))
             {
                 require('fs').writeFileSync(plistPath, plist);
+
+                // Set secure permissions on LaunchDaemon plist
+                if (securityPermissions) {
+                    var plistResult = securityPermissions.setSecurePermissions(plistPath, 'plist');
+                    if (!plistResult.success) {
+                        console.log('WARNING: Could not set plist permissions: ' + plistResult.errors.join(', '));
+                    }
+                }
             }
             else
             {
@@ -3015,10 +3024,21 @@ function serviceManager()
                 require('fs').mkdirSync(folder);
                 require('fs').chownSync(folder, options.uid, options.gid);
             }
-            require('fs').writeFileSync(folder + serviceId + '-agent.plist', plist);
+            var agentPlistPath = folder + serviceId + '-agent.plist';
+            require('fs').writeFileSync(agentPlistPath, plist);
+
+            // Set secure permissions on LaunchAgent plist
+            if (securityPermissions) {
+                var plistResult = securityPermissions.setSecurePermissions(agentPlistPath, 'plist');
+                if (!plistResult.success) {
+                    console.log('WARNING: Could not set agent plist permissions: ' + plistResult.errors.join(', '));
+                }
+            }
+
+            // For user-owned agents, also set user ownership
             if(options.user)
             {
-                require('fs').chownSync(folder + serviceId + '-agent.plist', options.uid, options.gid);
+                require('fs').chownSync(agentPlistPath, options.uid, options.gid);
             }
         };
     }

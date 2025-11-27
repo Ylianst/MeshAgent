@@ -117,7 +117,6 @@ int verify_peer_codesign(int socket_fd) {
 
     // Compare code signatures - must be same binary
     if (codesign_matches(self_code, peer_code)) {
-        printf("KVM Auth: Peer verified - same meshagent binary (PID %d)\n", peer_pid);
         result = 1;
     } else {
         fprintf(stderr, "KVM Auth: Peer code signature mismatch (PID %d)\n", peer_pid);

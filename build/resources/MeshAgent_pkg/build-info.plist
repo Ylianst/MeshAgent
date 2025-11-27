@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>distribution_style</key>
+	<false/>
+	<key>identifier</key>
+	<string>consulting.artichoke.MeshAgent_pkg</string>
+	<key>install_location</key>
+	<string>/</string>
+	<key>name</key>
+	<string>MeshAgent_pkg-${version}.pkg</string>
+	<key>ownership</key>
+	<string>recommended</string>
+	<key>postinstall_action</key>
+	<string>none</string>
+	<key>preserve_xattr</key>
+	<false/>
+	<key>suppress_bundle_relocation</key>
+	<true/>
+	<key>version</key>
+	<string>25.11.25</string>
+</dict>
+</plist>

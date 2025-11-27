@@ -38,16 +38,25 @@ limitations under the License.
 #include <limits.h>
 #include <libgen.h>
 #include <string.h>
+#import <ApplicationServices/ApplicationServices.h>
+#import <CoreGraphics/CoreGraphics.h>
 #endif
 
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
 #include <mach-o/ldsyms.h>
+#include <stdarg.h>
+#include <fcntl.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include "meshcore/MacOS/bundle_detection.h"
 #include "meshcore/MacOS/mac_tcc_detection.h"
 #include "meshcore/MacOS/TCC_UI/mac_permissions_window.h"
-#include "microstack/ILibSimpleDataStore.h"
+#include "meshcore/MacOS/Install_UI/mac_install_window.h"
+#include "meshcore/MacOS/Install_UI/mac_authorized_install.h"
+#include "meshcore/MacOS/mac_logging_utils.h"  // Shared logging utility
+#include "meshcore/MacOS/mac_plist_utils.h"    // Shared plist parsing utility
+#include <CoreGraphics/CoreGraphics.h>  // For CGEventSourceFlagsState()
+
 #endif
 
 MeshAgentHostContainer *agentHost = NULL;
@@ -95,72 +104,7 @@ ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *
 	return ILibTransport_DoneState_COMPLETE;
 }
 
-// Helper function to extract Label from a plist file
-char* extract_plist_label(const char* plistPath)
-{
-	FILE *fp;
-	char cmd[1024];
-	char *result = NULL;
-	char buffer[512];
-
-	// Use awk to extract Label value from plist
-	snprintf(cmd, sizeof(cmd),
-		"cat '%s' | tr '\\n' '.' | awk '{ split($0, a, \"<key>Label</key>\"); "
-		"split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'",
-		plistPath);
-
-	fp = popen(cmd, "r");
-	if (fp != NULL)
-	{
-		if (fgets(buffer, sizeof(buffer), fp) != NULL)
-		{
-			// Remove trailing newline
-			size_t len = strlen(buffer);
-			if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
-			if (strlen(buffer) > 0)
-			{
-				result = strdup(buffer);
-			}
-		}
-		pclose(fp);
-	}
-
-	return result;
-}
-
-// Helper function to extract first ProgramArguments path from plist
-char* extract_plist_program_path(const char* plistPath)
-{
-	FILE *fp;
-	char cmd[1024];
-	char *result = NULL;
-	char buffer[512];
-
-	// Use awk to extract first ProgramArguments string (the binary path)
-	snprintf(cmd, sizeof(cmd),
-		"cat '%s' | tr '\\n' '.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); "
-		"split(a[2], b, \"</array>\"); split(b[1], c, \"<string>\"); "
-		"split(c[2], d, \"</string>\"); print d[1]; }'",
-		plistPath);
-
-	fp = popen(cmd, "r");
-	if (fp != NULL)
-	{
-		if (fgets(buffer, sizeof(buffer), fp) != NULL)
-		{
-			// Remove trailing newline
-			size_t len = strlen(buffer);
-			if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
-			if (strlen(buffer) > 0)
-			{
-				result = strdup(buffer);
-			}
-		}
-		pclose(fp);
-	}
-
-	return result;
-}
+// Legacy functions removed - now using shared plist utilities from mac_plist_utils.h
 
 // Discover serviceId by finding which LaunchAgent plist references our binary
 char* discover_service_id_from_plist(const char* binaryPath)
@@ -186,15 +130,15 @@ char* discover_service_id_from_plist(const char* binaryPath)
 		char plistPath[PATH_MAX];
 		snprintf(plistPath, sizeof(plistPath), "%s/%s", launchAgentDir, entry->d_name);
 
-		// Extract ProgramArguments path
-		char *programPath = extract_plist_program_path(plistPath);
+		// Extract ProgramArguments path using shared utility
+		char *programPath = mesh_plist_get_program_path(plistPath);
 		if (programPath != NULL)
 		{
 			// Check if it matches our binary path
 			if (strcmp(programPath, binaryPath) == 0)
 			{
-				// Found it! Extract the Label
-				serviceId = extract_plist_label(plistPath);
+				// Found it! Extract the Label using shared utility
+				serviceId = mesh_plist_get_label(plistPath);
 				free(programPath);
 				break;
 			}
@@ -371,6 +315,74 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	{
 		fprintf(stderr, "MeshAgent: Failed to set working directory for bundle. Exiting.\n");
 		return -1;
+	}
+
+	// Check if launched from Finder (via Info.plist LSEnvironment variable)
+	// This check MUST happen early, before any command processing that might trigger TCC permission prompts
+	// IMPORTANT: Skip this check if running with install/upgrade/uninstall flags
+	int has_forbidden_flag = 0;
+	const char* forbidden_flags[] = {
+		"-upgrade", "-install", "-fullinstall",
+		"-uninstall", "-fulluninstall", "-update"
+	};
+	for (int i = 1; i < argc; i++) {
+		for (int j = 0; j < 6; j++) {
+			if (strcmp(argv[i], forbidden_flags[j]) == 0) {
+				has_forbidden_flag = 1;
+				fprintf(stderr, "[MAIN] Skipping LAUNCHED_FROM_FINDER check - running with %s flag\n", argv[i]);
+				break;
+			}
+		}
+		if (has_forbidden_flag) break;
+	}
+
+	if (!has_forbidden_flag && getenv("LAUNCHED_FROM_FINDER") != NULL)
+	{
+		// Check which modifier keys are being held
+		CGEventFlags flags = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+		int cmdKeyHeld = (flags & kCGEventFlagMaskCommand) != 0;
+		int shiftKeyHeld = (flags & kCGEventFlagMaskShift) != 0;
+
+		if (cmdKeyHeld)
+		{
+			// CMD + double-click -> show Installation Assistant
+			mesh_log_message("[MAIN] [%ld] MeshAgent launched from Finder with CMD key - showing Installation Assistant\n", time(NULL));
+
+			// Redirect stdout and stderr to log file to capture ALL output including TCC spawn traces
+			int log_fd = open("/tmp/meshagent-install-ui.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
+			if (log_fd >= 0) {
+				dup2(log_fd, STDOUT_FILENO);
+				dup2(log_fd, STDERR_FILENO);
+				close(log_fd);
+				// Make stdout/stderr unbuffered so we see output immediately
+				setvbuf(stdout, NULL, _IONBF, 0);
+				setvbuf(stderr, NULL, _IONBF, 0);
+				printf("[MAIN] [%ld] ===== STDOUT/STDERR NOW REDIRECTED TO LOG FILE =====\n", time(NULL));
+			}
+
+			InstallResult result = show_install_assistant_window();
+			mesh_log_message("[MAIN] [%ld] Installation Assistant returned (cancelled=%d, mode=%d)\n",
+			        time(NULL), result.cancelled, result.mode);
+
+			// Note: The Installation Assistant window handles upgrade/install execution internally
+			// with progress UI, so we don't need to execute anything here. Just exit.
+			mesh_log_message("[MAIN] [%ld] Installation Assistant closed, exiting\n", time(NULL));
+			exit(0);
+		}
+		else if (shiftKeyHeld)
+		{
+			// SHIFT + double-click -> ALWAYS show TCC permissions UI (regardless of current status)
+			fprintf(stderr, "MeshAgent launched from Finder with SHIFT key - showing TCC permissions window\n");
+			int result = show_tcc_permissions_window(0); // 0 = hide "Do not remind me again" checkbox
+			fprintf(stderr, "TCC permissions window closed (do not remind again: %d)\n", result);
+			return 0;
+		}
+		else
+		{
+			// Normal double-click (no modifier keys) -> Exit without showing any UI
+			fprintf(stderr, "MeshAgent launched from Finder without modifier keys - exiting\n");
+			return 0;
+		}
 	}
 #endif
 
@@ -641,40 +653,23 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	}
 
 	// -tccCheck: Check TCC permissions and show UI if needed
+	// Communicates result back to parent via pipe (no database or network access)
 	if (argc > 1 && strcasecmp(argv[1], "-tccCheck") == 0)
 	{
 		printf("[TCC-CHILD] -tccCheck process started (PID: %d)\n", getpid());
 
-		char* db_path = NULL;
+		// Parse pipe file descriptor from argv[2]
+		int pipe_fd = -1;
 		if (argc > 2) {
-			db_path = argv[2]; // Database path passed as second argument
-			printf("[TCC-CHILD] Database path: %s\n", db_path);
+			pipe_fd = atoi(argv[2]);
+			printf("[TCC-CHILD] Pipe write fd: %d\n", pipe_fd);
 		} else {
-			printf("[TCC-CHILD] WARNING: No database path provided\n");
-		}
-
-		// Check "do not remind" flag first
-		if (db_path != NULL) {
-			void* db = ILibSimpleDataStore_Create(db_path);
-			if (db != NULL) {
-				int disabledLen = ILibSimpleDataStore_Get(db, "tccPermissionsUIDisabled", NULL, 0);
-				printf("[TCC-CHILD] Checking tccPermissionsUIDisabled in child, result length: %d\n", disabledLen);
-
-				if (disabledLen != 0) {
-					// User doesn't want to be reminded - exit silently
-					printf("[TCC-CHILD] tccPermissionsUIDisabled IS set - exiting without UI\n");
-					ILibSimpleDataStore_Close(db);
-					return 0;
-				} else {
-					printf("[TCC-CHILD] tccPermissionsUIDisabled NOT set - continuing to check permissions\n");
-				}
-				ILibSimpleDataStore_Close(db);
-			} else {
-				printf("[TCC-CHILD] WARNING: Failed to open database\n");
-			}
+			printf("[TCC-CHILD] ERROR: No pipe fd provided - cannot communicate with parent\n");
+			return 1;
 		}
 
 		// Check all three permissions (fresh check in this new process!)
+		// Permission requests will only happen when user clicks the appropriate buttons
 		printf("[TCC-CHILD] Calling check_accessibility_permission()...\n");
 		TCC_PermissionStatus accessibility = check_accessibility_permission();
 		printf("[TCC-CHILD] Accessibility result: %d\n", accessibility);
@@ -687,7 +682,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		TCC_PermissionStatus screen_recording = check_screen_recording_permission();
 		printf("[TCC-CHILD] Screen Recording result: %d\n", screen_recording);
 
-		// If ALL are granted, exit without showing UI
+		// If ALL are granted, write 0 to pipe and exit without showing UI
 		int all_granted = (accessibility == TCC_PERMISSION_GRANTED_USER || accessibility == TCC_PERMISSION_GRANTED_MDM) &&
 		                  (fda == TCC_PERMISSION_GRANTED_USER || fda == TCC_PERMISSION_GRANTED_MDM) &&
 		                  (screen_recording == TCC_PERMISSION_GRANTED_USER || screen_recording == TCC_PERMISSION_GRANTED_MDM);
@@ -696,27 +691,26 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		       all_granted, accessibility, fda, screen_recording);
 
 		if (all_granted) {
-			printf("[TCC-CHILD] All permissions granted - exiting without UI\n");
-			return 0; // All permissions granted - no UI needed
+			printf("[TCC-CHILD] All permissions granted - writing 0 to pipe and exiting without UI\n");
+			unsigned char result_byte = 0;
+			write(pipe_fd, &result_byte, 1);
+			close(pipe_fd);
+			return 0;
 		}
 
 		// At least one permission missing - show UI
 		printf("[TCC-CHILD] At least one permission missing - showing UI\n");
-		int result = show_tcc_permissions_window();
+		int result = show_tcc_permissions_window(1); // 1 = show "Do not remind me again" checkbox
 		printf("[TCC-CHILD] UI closed with result: %d (1 = do not remind, 0 = remind again)\n", result);
 
-		// If user clicked "Do not remind me again", save to database
-		if (result == 1 && db_path != NULL) {
-			printf("[TCC-CHILD] Saving tccPermissionsUIDisabled = 1 to database\n");
-			void* db = ILibSimpleDataStore_Create(db_path);
-			if (db != NULL) {
-				ILibSimpleDataStore_Put(db, "tccPermissionsUIDisabled", "1");
-				ILibSimpleDataStore_Close(db);
-				printf("[TCC-CHILD] Successfully saved preference\n");
-			} else {
-				printf("[TCC-CHILD] WARNING: Failed to save preference - couldn't open database\n");
-			}
+		// Write result to pipe (parent will read this and save to database if needed)
+		unsigned char result_byte = (result == 1) ? 1 : 0;
+		printf("[TCC-CHILD] Writing result %d to pipe fd %d\n", result_byte, pipe_fd);
+		ssize_t written = write(pipe_fd, &result_byte, 1);
+		if (written != 1) {
+			printf("[TCC-CHILD] ERROR: Failed to write to pipe (wrote %zd bytes)\n", written);
 		}
+		close(pipe_fd);
 
 		printf("[TCC-CHILD] -tccCheck process exiting\n");
 		return 0;

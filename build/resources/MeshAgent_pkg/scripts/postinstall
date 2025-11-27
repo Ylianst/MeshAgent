@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# Path to the .pkg's parent directory (where MeshAgentInstall.plist is located)
+INSTALLER_DIR="$(/usr/bin/dirname "$0")/../../.."
+
+# Path to settings plist (sibling to .pkg in the ZIP)
+SETTINGS_PLIST="$INSTALLER_DIR/MeshAgentInstall.plist"
+
+# Verify settings file exists
+if [ ! -f "$SETTINGS_PLIST" ]; then
+    echo "Error: MeshAgentInstall.plist not found at $SETTINGS_PLIST"
+    exit 1
+fi
+
+# Read settings from plist using PlistBuddy
+INSTALL_PATH=$(/usr/libexec/PlistBuddy -c "Print :installPath" "$SETTINGS_PLIST" 2>/dev/null)
+SERVICE_NAME=$(/usr/libexec/PlistBuddy -c "Print :serviceName" "$SETTINGS_PLIST" 2>/dev/null)
+COMPANY_NAME=$(/usr/libexec/PlistBuddy -c "Print :companyName" "$SETTINGS_PLIST" 2>/dev/null)
+ENABLE_DISABLE_UPDATE=$(/usr/libexec/PlistBuddy -c "Print :enableDisableUpdate" "$SETTINGS_PLIST" 2>/dev/null)
+
+# Validate required settings - check for empty or unset
+if [ -z "$INSTALL_PATH" ] || [ "$INSTALL_PATH" = "" ]; then
+    echo "Error: installPath is empty or not found in MeshAgentInstall.plist"
+    exit 1
+fi
+
+if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "" ]; then
+    echo "Error: serviceName is empty or not found in MeshAgentInstall.plist"
+    exit 1
+fi
+
+if [ -z "$COMPANY_NAME" ] || [ "$COMPANY_NAME" = "" ]; then
+    echo "Error: companyName is empty or not found in MeshAgentInstall.plist"
+    exit 1
+fi
+
+# Path to MeshAgent binary
+MESHAGENT_BIN="/private/tmp/MeshAgent.app/Contents/MacOS/meshagent"
+
+# Verify the binary exists
+if [ ! -f "$MESHAGENT_BIN" ]; then
+    echo "Error: MeshAgent binary not found at $MESHAGENT_BIN"
+    exit 1
+fi
+
+# Verify .msh file exists (sibling to .pkg)
+MSH_FILE="$INSTALLER_DIR/meshagent.msh"
+if [ ! -f "$MSH_FILE" ]; then
+    echo "Error: meshagent.msh not found at $MSH_FILE"
+    exit 1
+fi
+
+# Build install command
+echo "Installing MeshAgent to $INSTALL_PATH..."
+echo "Service Name: $SERVICE_NAME"
+echo "Company Name: $COMPANY_NAME"
+echo "Disable Updates: $ENABLE_DISABLE_UPDATE"
+
+# Run installation with --copy-msh always enabled
+"$MESHAGENT_BIN" -install \
+    --installPath="$INSTALL_PATH" \
+    --serviceName="$SERVICE_NAME" \
+    --companyName="$COMPANY_NAME" \
+    --enableDisableUpdate="$ENABLE_DISABLE_UPDATE" \
+    --copy-msh="1"
+
+# Check if installation succeeded
+if [ $? -ne 0 ]; then
+    echo "Error: MeshAgent installation failed"
+    exit 1
+fi
+
+echo "MeshAgent installation complete!"
+exit 0

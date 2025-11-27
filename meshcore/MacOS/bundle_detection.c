@@ -17,6 +17,7 @@ limitations under the License.
 #ifdef __APPLE__
 
 #include "bundle_detection.h"
+#include "MacOS/mac_logging_utils.h"
 #include <CoreFoundation/CoreFoundation.h>
 #include <unistd.h>
 #include <string.h>
@@ -110,7 +111,7 @@ int adjust_working_directory_for_bundle(void)
         char* bundleRoot = get_bundle_path();
         if (!bundleRoot)
         {
-            fprintf(stderr, "MeshAgent: FATAL: Could not get bundle path\n");
+            mesh_log_message("[BUNDLE] FATAL: Could not get bundle path\n");
             return -1;
         }
 
@@ -119,7 +120,7 @@ int adjust_working_directory_for_bundle(void)
         char* lastSlash = strrchr(bundleRoot, '/');
         if (!lastSlash || lastSlash == bundleRoot)
         {
-            fprintf(stderr, "MeshAgent: FATAL: Invalid bundle path: %s\n", bundleRoot);
+            mesh_log_message("[BUNDLE] FATAL: Invalid bundle path: %s\n", bundleRoot);
             free(bundleRoot);
             return -1;
         }
@@ -129,7 +130,7 @@ int adjust_working_directory_for_bundle(void)
         if (chdir(bundleRoot) != 0)
         {
             *lastSlash = '/';  // Restore for error message
-            fprintf(stderr, "MeshAgent: FATAL: Could not change to install directory: %s\n", bundleRoot);
+            mesh_log_message("[BUNDLE] FATAL: Could not change to install directory: %s\n", bundleRoot);
             free(bundleRoot);
             return -1;
         }
