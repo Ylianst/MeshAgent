@@ -28,5 +28,10 @@
 	<true/>
 	<key>LSBackgroundOnly</key>
 	<false/>
+	<key>LSEnvironment</key>
+	<dict>
+		<key>LAUNCHED_FROM_FINDER</key>
+		<string>1</string>
+	</dict>
 </dict>
 </plist>

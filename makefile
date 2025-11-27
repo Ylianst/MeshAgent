@@ -559,7 +559,7 @@ CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
 endif
 
 # macOS utility sources (always compiled for macOS builds)
-MACOSUTILSOURCES = meshcore/MacOS/bundle_detection.c
+MACOSUTILSOURCES = meshcore/MacOS/bundle_detection.c meshcore/MacOS/mac_tcc_detection.c meshcore/MacOS/TCC_UI/mac_permissions_window.m
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
@@ -843,6 +843,21 @@ linux:
 # App Bundle: After building the binary, automatically creates a .app bundle in
 # $(BUILD_OUTPUT_DIR)/<arch>-app/MeshAgent.app for easy distribution and testing.
 macos:
+	@echo "Syncing modules to platform-specific directories..."
+	@for module in modules/*.js; do \
+		filename=$$(basename $$module); \
+		echo "  Syncing $$filename..."; \
+		if [ -f "modules_macos/$$filename" ]; then \
+			sudo cp -f "$$module" "modules_macos/$$filename" || cp -f "$$module" "modules_macos/$$filename"; \
+		fi; \
+		if [ -f "modules_linux-bsd/$$filename" ]; then \
+			sudo cp -f "$$module" "modules_linux-bsd/$$filename" || cp -f "$$module" "modules_linux-bsd/$$filename"; \
+		fi; \
+		if [ -f "modules_windows/$$filename" ]; then \
+			sudo cp -f "$$module" "modules_windows/$$filename" || cp -f "$$module" "modules_windows/$$filename"; \
+		fi; \
+	done
+	@echo "Module sync complete."
 	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
 	@if [ "$(ARCHID)" = "10005" ]; then \
 		BUILD_TIME=$$(date +%y.%m.%d.%H.%M.%S); \
@@ -875,6 +890,7 @@ macos:
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY; \
 			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app"; \
+			echo "To test run: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -version"; \
 		else \
 			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-universal-64"; \
 		fi; \
@@ -898,7 +914,7 @@ macos:
 		fi; \
 		echo "Generating Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
 		sed -e "s/BUILD_TIMESTAMP_DATE/$$BUILD_DATE/g" -e "s/BUILD_TIMESTAMP_TIME/$$BUILD_TIME_ONLY/g" -e "s/BUNDLE_IDENTIFIER/$(BUNDLE_ID)/g" build/resources/Info/binary/binary_Info.plist > build/output/tmp_binary_Info.plist; \
-		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
+		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing -fobjc-arc $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -lsqlite3 -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Cocoa -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
 		if [ "$(DEBUG)" != "1" ]; then \
 			cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
 			strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
@@ -911,6 +927,7 @@ macos:
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY; \
 			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app"; \
+			echo "To test run: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app/Contents/MacOS/meshagent -version"; \
 		else \
 			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)"; \
 		fi; \
@@ -978,4 +995,19 @@ openbsd:
 organize-modules:
 	@echo "Organizing MeshAgent modules into platform-specific directories..."
 	@bash ./bin/organize_modules.sh
+
+# Build TCC UI test window (macOS only)
+tcc_ui_test:
+	@echo "Building TCC Permissions UI Test..."
+	clang -o meshcore/MacOS/TCC_UI/tcc_ui_test \
+		meshcore/MacOS/TCC_UI/test_window.c \
+		meshcore/MacOS/TCC_UI/mac_permissions_window.m \
+		meshcore/MacOS/mac_tcc_detection.c \
+		-framework Cocoa \
+		-framework CoreFoundation \
+		-framework ApplicationServices \
+		-framework CoreGraphics \
+		-lsqlite3 \
+		-fobjc-arc
+	@echo "Build complete. Run with: ./meshcore/MacOS/TCC_UI/tcc_ui_test"
 

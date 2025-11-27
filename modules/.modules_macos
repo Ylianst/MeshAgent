@@ -18,6 +18,7 @@ http-digest.js
 identifiers.js
 interactive.js
 kvm-helper.js
+logger.js
 mac-powerutil.js
 macOSHelpers.js
 meshcmd.js

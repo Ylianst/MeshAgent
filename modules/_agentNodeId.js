@@ -25,8 +25,18 @@ function _meshNodeId()
     }
     else
     {
-        // Linux/macOS - use path next to executable
-        dbPath = process.execPath + '.db';
+        // Linux/macOS - check if running from bundle
+        // Bundle detection changes cwd to parent of .app, so .db file is in cwd
+        if (process.execPath.indexOf('.app/Contents/MacOS/') !== -1)
+        {
+            // Running from bundle - use current working directory
+            dbPath = process.cwd() + '/meshagent.db';
+        }
+        else
+        {
+            // Standalone binary - use path next to executable
+            dbPath = process.execPath + '.db';
+        }
     }
 
     switch (process.platform)

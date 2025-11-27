@@ -36,7 +36,12 @@ var BUNDLE_STRUCTURE = {
 // Check if a given path is from an app bundle
 function isRunningFromBundle(execPath) {
     if (!execPath) execPath = process.execPath;
-    return process.platform === 'darwin' && execPath.indexOf('.app/Contents/MacOS/') !== -1;
+
+    var indexResult = execPath.indexOf('.app/Contents/MacOS/');
+
+    var result = process.platform === 'darwin' && indexResult !== -1;
+
+    return result;
 }
 
 // Extract the parent directory of a bundle (e.g., /opt/meshagent/ from /opt/meshagent/MeshAgent.app/Contents/MacOS/meshagent)
@@ -54,8 +59,13 @@ function getBundleParentDirectory(execPath) {
 // e.g., /opt/meshagent/MeshAgent.app/Contents/MacOS/meshagent -> /opt/meshagent/MeshAgent.app
 // Returns null if not a bundle path
 function getBundlePathFromBinaryPath(binaryPath) {
-    if (!isRunningFromBundle(binaryPath)) return null;
-    return binaryPath.split('.app/Contents/MacOS/')[0] + '.app';
+
+    if (!isRunningFromBundle(binaryPath)) {
+        return null;
+    }
+
+    var bundlePath = binaryPath.split('.app/Contents/MacOS/')[0] + '.app';
+    return bundlePath;
 }
 
 // ============================================================================

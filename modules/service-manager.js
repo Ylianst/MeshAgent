@@ -2476,15 +2476,22 @@ function serviceManager()
             }
             else
             {
-                if (options.servicePath != (options.installPath + options.target))
-                {
+
+                if (options.skipBinaryCopy) {
+                } else if (options.servicePath != (options.installPath + options.target)) {
                     require('fs').copyFileSync(options.servicePath, options.installPath + options.target);
+                } else {
                 }
             }
             console.info1('Files Copied');
-            var m = require('fs').statSync(options.installPath + options.target).mode;
-            m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
-            require('fs').chmodSync(options.installPath + options.target, m);
+
+            // Only chmod the binary if we copied it (for bundle installations, binary is inside .app)
+            if (!options.skipBinaryCopy) {
+                var m = require('fs').statSync(options.installPath + options.target).mode;
+                m |= (require('fs').CHMOD_MODES.S_IXUSR | require('fs').CHMOD_MODES.S_IXGRP | require('fs').CHMOD_MODES.S_IXOTH);
+                require('fs').chmodSync(options.installPath + options.target, m);
+            } else {
+            }
         }
         if (process.platform == 'freebsd')
         {
@@ -3190,38 +3197,9 @@ function serviceManager()
         }
         else if(process.platform == 'darwin')
         {
-            service.unload();
-            try
-            {
-                require('fs').unlinkSync(service.plist);
-                if (!options || !options.skipDeleteBinary)
-                {
-                    // Check if this is a bundle installation using shared helper
-                    if (macOSHelpers.isRunningFromBundle(servicePath))
-                    {
-                        // Bundle installation - remove entire .app
-                        var bundlePath = macOSHelpers.getBundlePathFromBinaryPath(servicePath);
-                        require('child_process').execSync('rm -rf "' + bundlePath + '"');
-                    }
-                    else
-                    {
-                        // Standalone installation - just remove binary
-                        require('fs').unlinkSync(servicePath);
-                    }
-                }
-            }
-            catch (e)
-            {
-                throw ('Error uninstalling service: ' + name + ' => ' + e);
-            }
-
-            try
-            {
-                require('fs').rmdirSync(workingPath);
-            }
-            catch (e)
-            {
-            }
+            // macOS uninstall is now handled by uninstallServiceUnified() in agent-installer.js
+            // This code path should not be reached for normal agent uninstalls
+            throw ('macOS uninstall should use uninstallServiceUnified() in agent-installer.js');
         }
         else if(process.platform == 'freebsd')
         {

@@ -45,6 +45,9 @@ limitations under the License.
 #include <mach-o/ldsyms.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include "meshcore/MacOS/bundle_detection.h"
+#include "meshcore/MacOS/mac_tcc_detection.h"
+#include "meshcore/MacOS/TCC_UI/mac_permissions_window.h"
+#include "microstack/ILibSimpleDataStore.h"
 #endif
 
 MeshAgentHostContainer *agentHost = NULL;
@@ -537,7 +540,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 		return(0);
 	}
-	if (argc > 1 && (strcasecmp(argv[1], "-version") == 0 || strcasecmp(argv[1], "--version") == 0))
+	if (argc > 1 && strcasecmp(argv[1], "-version") == 0)
 	{
 #ifdef __APPLE__
 		char *version = get_embedded_version();
@@ -551,7 +554,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 			printf("Version information not available\n");
 		}
 #else
-		printf("--version flag is only supported on macOS builds\n");
+		printf("-version flag is only supported on macOS builds\n");
 #endif
 #ifdef WIN32
 		wmain_free(argv);
@@ -634,6 +637,88 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// Cleanup
 		if (serviceId != NULL) free(serviceId);
 
+		return 0;
+	}
+
+	// -tccCheck: Check TCC permissions and show UI if needed
+	if (argc > 1 && strcasecmp(argv[1], "-tccCheck") == 0)
+	{
+		printf("[TCC-CHILD] -tccCheck process started (PID: %d)\n", getpid());
+
+		char* db_path = NULL;
+		if (argc > 2) {
+			db_path = argv[2]; // Database path passed as second argument
+			printf("[TCC-CHILD] Database path: %s\n", db_path);
+		} else {
+			printf("[TCC-CHILD] WARNING: No database path provided\n");
+		}
+
+		// Check "do not remind" flag first
+		if (db_path != NULL) {
+			void* db = ILibSimpleDataStore_Create(db_path);
+			if (db != NULL) {
+				int disabledLen = ILibSimpleDataStore_Get(db, "tccPermissionsUIDisabled", NULL, 0);
+				printf("[TCC-CHILD] Checking tccPermissionsUIDisabled in child, result length: %d\n", disabledLen);
+
+				if (disabledLen != 0) {
+					// User doesn't want to be reminded - exit silently
+					printf("[TCC-CHILD] tccPermissionsUIDisabled IS set - exiting without UI\n");
+					ILibSimpleDataStore_Close(db);
+					return 0;
+				} else {
+					printf("[TCC-CHILD] tccPermissionsUIDisabled NOT set - continuing to check permissions\n");
+				}
+				ILibSimpleDataStore_Close(db);
+			} else {
+				printf("[TCC-CHILD] WARNING: Failed to open database\n");
+			}
+		}
+
+		// Check all three permissions (fresh check in this new process!)
+		printf("[TCC-CHILD] Calling check_accessibility_permission()...\n");
+		TCC_PermissionStatus accessibility = check_accessibility_permission();
+		printf("[TCC-CHILD] Accessibility result: %d\n", accessibility);
+
+		printf("[TCC-CHILD] Calling check_fda_permission()...\n");
+		TCC_PermissionStatus fda = check_fda_permission();
+		printf("[TCC-CHILD] FDA result: %d\n", fda);
+
+		printf("[TCC-CHILD] Calling check_screen_recording_permission()...\n");
+		TCC_PermissionStatus screen_recording = check_screen_recording_permission();
+		printf("[TCC-CHILD] Screen Recording result: %d\n", screen_recording);
+
+		// If ALL are granted, exit without showing UI
+		int all_granted = (accessibility == TCC_PERMISSION_GRANTED_USER || accessibility == TCC_PERMISSION_GRANTED_MDM) &&
+		                  (fda == TCC_PERMISSION_GRANTED_USER || fda == TCC_PERMISSION_GRANTED_MDM) &&
+		                  (screen_recording == TCC_PERMISSION_GRANTED_USER || screen_recording == TCC_PERMISSION_GRANTED_MDM);
+
+		printf("[TCC-CHILD] All granted check: %d (Accessibility: %d, FDA: %d, Screen Recording: %d)\n",
+		       all_granted, accessibility, fda, screen_recording);
+
+		if (all_granted) {
+			printf("[TCC-CHILD] All permissions granted - exiting without UI\n");
+			return 0; // All permissions granted - no UI needed
+		}
+
+		// At least one permission missing - show UI
+		printf("[TCC-CHILD] At least one permission missing - showing UI\n");
+		int result = show_tcc_permissions_window();
+		printf("[TCC-CHILD] UI closed with result: %d (1 = do not remind, 0 = remind again)\n", result);
+
+		// If user clicked "Do not remind me again", save to database
+		if (result == 1 && db_path != NULL) {
+			printf("[TCC-CHILD] Saving tccPermissionsUIDisabled = 1 to database\n");
+			void* db = ILibSimpleDataStore_Create(db_path);
+			if (db != NULL) {
+				ILibSimpleDataStore_Put(db, "tccPermissionsUIDisabled", "1");
+				ILibSimpleDataStore_Close(db);
+				printf("[TCC-CHILD] Successfully saved preference\n");
+			} else {
+				printf("[TCC-CHILD] WARNING: Failed to save preference - couldn't open database\n");
+			}
+		}
+
+		printf("[TCC-CHILD] -tccCheck process exiting\n");
 		return 0;
 	}
 #endif

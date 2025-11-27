@@ -77,6 +77,8 @@ int gRemoteMouseRenderDefault = 0;
 #include <mach-o/dyld.h>
 #include <libproc.h>
 #include "MacOS/bundle_detection.h"
+#include "MacOS/mac_tcc_detection.h"
+#include "MacOS/TCC_UI/mac_permissions_window.h"
 #endif
 
 
@@ -825,6 +827,7 @@ duk_ret_t ILibDuktape_MeshAgent_SendCommand(duk_context *ctx)
 	return 1;
 }
 
+
 void ILibDuktape_MeshAgent_Ready(ILibDuktape_EventEmitter *sender, char *eventName, void *hookedCallback)
 {
 	MeshAgentHostContainer *agent;
@@ -1436,6 +1439,23 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// MacOS - REVERSED ARCHITECTURE with QueueDirectories
 		// Always use domain socket, regardless of console_uid
 		// LaunchAgent handles both LoginWindow (console_uid=0) and Aqua (console_uid!=0) via LimitLoadToSessionType
+
+		// Spawn TCC check before establishing KVM connection (non-blocking)
+		// The -tccCheck process will check permissions and decide whether to show UI
+		// Check "do not remind" preference before spawning
+		int disabledLen = ILibSimpleDataStore_Get(agent->masterDb, "tccPermissionsUIDisabled", NULL, 0);
+		ILIBMESSAGE2("[TCC-REMOTE] Checking tccPermissionsUIDisabled flag, result length", disabledLen);
+
+		if (disabledLen == 0)
+		{
+			ILIBMESSAGE("[TCC-REMOTE] tccPermissionsUIDisabled NOT set - spawning -tccCheck");
+			char* dbPath = MeshAgent_MakeAbsolutePath(agent->exePath, ".db");
+			show_tcc_permissions_window_async(agent->exePath, dbPath);
+		}
+		else
+		{
+			ILIBMESSAGE("[TCC-REMOTE] tccPermissionsUIDisabled IS set - NOT spawning -tccCheck");
+		}
 
 		char msg[128];
 		sprintf_s(msg, sizeof(msg), "Establishing domain socket connection for KVM (console_uid=%d)", console_uid);
@@ -5057,6 +5077,31 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 	}
+
+#ifdef __APPLE__
+	// Spawn TCC check at startup (only if not in install/fetch mode)
+	// The -tccCheck process will check permissions and decide whether to show UI
+	if (fetchstate == 0 && installFlag == 0)
+	{
+		// Check "do not remind" preference before spawning
+		int disabledLen = ILibSimpleDataStore_Get(agentHost->masterDb, "tccPermissionsUIDisabled", NULL, 0);
+		ILIBMESSAGE2("[TCC-STARTUP] Checking tccPermissionsUIDisabled flag, result length", disabledLen);
+
+		if (disabledLen == 0)
+		{
+			ILIBMESSAGE("[TCC-STARTUP] tccPermissionsUIDisabled NOT set - spawning -tccCheck");
+			// Get database path for async UI function
+			char* dbPath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db");
+
+			// Spawn -tccCheck (it will check permissions and decide whether to show UI)
+			show_tcc_permissions_window_async(agentHost->exePath, dbPath);
+		}
+		else
+		{
+			ILIBMESSAGE("[TCC-STARTUP] tccPermissionsUIDisabled IS set - NOT spawning -tccCheck");
+		}
+	}
+#endif
 
 	if(ILibSimpleDataStore_Get(agentHost->masterDb, "maxLogSize", NULL, 0) != 0)
 	{
