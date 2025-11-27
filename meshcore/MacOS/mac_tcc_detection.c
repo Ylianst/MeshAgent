@@ -16,18 +16,24 @@
  */
 TCC_PermissionStatus check_fda_permission(void) {
     sqlite3 *db = NULL;
+    TCC_PermissionStatus result = TCC_PERMISSION_DENIED;
 
     // Try to open TCC.db read-only
     // If this succeeds, we have Full Disk Access
     int rc = sqlite3_open_v2(TCC_DB_PATH, &db, SQLITE_OPEN_READONLY, NULL);
 
-    if (rc == SQLITE_OK) {
-        sqlite3_close(db);
-        return TCC_PERMISSION_GRANTED_USER;
+    if (rc == SQLITE_OK && db != NULL) {
+        result = TCC_PERMISSION_GRANTED_USER;
     }
 
-    // Cannot open TCC.db - no FDA permission
-    return TCC_PERMISSION_DENIED;
+    // ALWAYS close database handle, even on failure
+    // Some sqlite3 versions may allocate internal structures even on open failure
+    // This function is called every 3 seconds by TCC UI - must not leak handles
+    if (db != NULL) {
+        sqlite3_close(db);
+    }
+
+    return result;
 }
 
 /**
@@ -69,8 +75,9 @@ TCC_PermissionStatus check_screen_recording_permission(void) {
     int foundWithName = 0;
     Boolean hasPermission = false;
 
-    // Sample up to 3 windows (skip our own PID, Dock, WindowServer)
-    for (CFIndex i = 0; i < totalWindows && checkedWindows < 3; i++) {
+    // Check windows until we find one with a name (skip our own PID, Dock, WindowServer)
+    // Note: We break immediately on first named window (line 112), so this will be fast
+    for (CFIndex i = 0; i < totalWindows; i++) {
         CFDictionaryRef window = (CFDictionaryRef)CFArrayGetValueAtIndex(windowList, i);
 
         // Get window owner PID
@@ -114,8 +121,12 @@ TCC_PermissionStatus check_screen_recording_permission(void) {
         hasPermission = false;
     } else if (checkedWindows == 0) {
         // No valid windows to check (only our own, Dock, WindowServer)
-        // Return DENIED but note that we couldn't verify
-        hasPermission = false;
+        // Use CGPreflightScreenCaptureAccess as fallback to get actual permission status
+        if (__builtin_available(macOS 10.15, *)) {
+            hasPermission = CGPreflightScreenCaptureAccess();
+        } else {
+            hasPermission = false;
+        }
     }
 
     return hasPermission ? TCC_PERMISSION_GRANTED_USER : TCC_PERMISSION_DENIED;

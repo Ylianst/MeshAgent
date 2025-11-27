@@ -46,7 +46,7 @@ The daemon spawns the `-tccCheck` UI in two scenarios:
 
 1. **Startup** (if permissions missing and not disabled):
    - Location: `meshcore/agentcore.c:5222-5261`
-   - Checks `tccPermissionsUIDisabled` database key
+   - Checks `disableTccCheck` database key
    - Only spawns if value ≠ "1"
 
 2. **Remote Desktop Connection** (if permissions missing):
@@ -60,7 +60,7 @@ The daemon spawns the `-tccCheck` UI in two scenarios:
 // Check "do not remind" preference
 char value_buf[16];
 int disabledLen = ILibSimpleDataStore_Get(agent->masterDb,
-    "tccPermissionsUIDisabled", value_buf, sizeof(value_buf));
+    "disableTccCheck", value_buf, sizeof(value_buf));
 int should_spawn = 1;
 
 if (disabledLen > 0 && disabledLen < sizeof(value_buf)) {
@@ -366,7 +366,7 @@ void TCCPipeMonitor_ReadHandler(TCCPipeMonitor* monitor) {
         if (result == '1') {
             // User checked "Do not remind me again"
             ILibSimpleDataStore_Put(monitor->masterDb,
-                "tccPermissionsUIDisabled", "1", 1);
+                "disableTccCheck", "1", 1);
         }
     }
 
@@ -451,7 +451,7 @@ MeshAgent stores the "Do not remind me again" preference in its database.
 
 **Database Format**: ILibSimpleDataStore (custom binary format, not SQLite)
 
-**Key**: `tccPermissionsUIDisabled`
+**Key**: `disableTccCheck`
 
 **Values**:
 - `"1"` - Don't show TCC UI (user checked "do not remind")
@@ -460,7 +460,7 @@ MeshAgent stores the "Do not remind me again" preference in its database.
 **Reading**:
 ```c
 char value_buf[16];
-int len = ILibSimpleDataStore_Get(db, "tccPermissionsUIDisabled",
+int len = ILibSimpleDataStore_Get(db, "disableTccCheck",
                                   value_buf, sizeof(value_buf));
 if (len > 0) {
     value_buf[len] = '\0';
@@ -472,7 +472,7 @@ if (len > 0) {
 
 **Writing** (from pipe monitor):
 ```c
-ILibSimpleDataStore_Put(db, "tccPermissionsUIDisabled", "1", 1);
+ILibSimpleDataStore_Put(db, "disableTccCheck", "1", 1);
 ```
 
 ## LAUNCHED_FROM_FINDER Protection
@@ -574,19 +574,19 @@ gcc -framework Cocoa -framework ApplicationServices -framework CoreGraphics \
 **Read current preference**:
 ```bash
 ./build/tools/code-utils/macos/meshagent_code-utils -db-get \
-    /opt/tacticalmesh/meshagent.db tccPermissionsUIDisabled
+    /opt/tacticalmesh/meshagent.db disableTccCheck
 ```
 
 **Manually disable UI**:
 ```bash
 ./build/tools/code-utils/macos/meshagent_code-utils -db-put \
-    /opt/tacticalmesh/meshagent.db tccPermissionsUIDisabled "1"
+    /opt/tacticalmesh/meshagent.db disableTccCheck "1"
 ```
 
 **Clear preference**:
 ```bash
 ./build/tools/code-utils/macos/meshagent_code-utils -db-delete \
-    /opt/tacticalmesh/meshagent.db tccPermissionsUIDisabled
+    /opt/tacticalmesh/meshagent.db disableTccCheck
 ```
 
 ## Known Issues and Limitations

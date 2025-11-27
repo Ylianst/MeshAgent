@@ -15,6 +15,7 @@
 #include <execinfo.h>
 #include <crt_externs.h>
 #import "../mac_ui_helpers.h"  // Shared UI helpers
+#include <time.h>
 #include "../mac_logging_utils.h"  // Logging utilities
 
 // Lock file to prevent multiple TCC UI processes
@@ -346,7 +347,8 @@ static void remove_lock_file(void) {
     });
 }
 
-// Check only Screen Recording and FDA (called by timer)
+// Check all permissions (called by timer every 3 seconds)
+// This provides a polling fallback for changes that don't fire notifications (e.g., removing via '-' button)
 - (void)checkScreenRecordingAndFDA {
     // Retain self for block's lifetime to prevent use-after-free
     __block TCCButtonHandler *blockSelf = [self retain];
@@ -359,12 +361,17 @@ static void remove_lock_file(void) {
                 return;
             }
 
+            // Check all three permissions
+            // Accessibility: Catches removal via '-' button (notification doesn't fire for this)
+            // FDA: No notification available, polling required
+            // Screen Recording: No notification available, polling required
+            TCC_PermissionStatus accessibility = check_accessibility_permission();
             TCC_PermissionStatus fda = check_fda_permission();
             TCC_PermissionStatus screen_recording = check_screen_recording_permission();
 
             dispatch_async(dispatch_get_main_queue(), ^{
-                // Update FDA and Screen Recording buttons using shared helper
-                [blockSelf updateButtonsWithAccessibility:TCC_PERMISSION_NOT_DETERMINED
+                // Update all three buttons using shared helper
+                [blockSelf updateButtonsWithAccessibility:accessibility
                                                        fda:fda
                                             screenRecording:screen_recording
                                            updateAllButtons:NO];
@@ -375,15 +382,36 @@ static void remove_lock_file(void) {
 }
 
 - (void)stopPeriodicUpdates {
+    // Prevent double-stop (called from both windowWillClose and dealloc)
+    if (self.cancelled) {
+        return;
+    }
+
+    mesh_log_message("[TCC-UI] [%ld] stopPeriodicUpdates called\n", time(NULL));
+
+    // Signal to all async blocks that we're stopping
+    self.cancelled = YES;
+
+    // CRITICAL: Clear contentView reference to prevent dangling pointer access
+    // After window closes, contentView is deallocated but async blocks might still
+    // be queued on the main thread. By nilling this, the check in
+    // updateButtonsWithAccessibility: will return early instead of accessing freed memory.
+    self.contentView = nil;
+
     // Remove notification observer
     [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
+    mesh_log_message("[TCC-UI] [%ld] Removed notification observer\n", time(NULL));
 
     if (self.updateTimer) {
         [self.updateTimer invalidate];
         self.updateTimer = nil;
-        // No manual release needed - timer uses __unsafe_unretained
-        TCCUI_LOG("Timer invalidated\n");
+        // Balance the retain from startPeriodicUpdates (line ~306)
+        // Timer block retained self but won't release if externally invalidated
+        [self release];
+        mesh_log_message("[TCC-UI] [%ld] Timer invalidated and retain balanced\n", time(NULL));
     }
+
+    mesh_log_message("[TCC-UI] [%ld] stopPeriodicUpdates completed\n", time(NULL));
 }
 
 - (void)openAccessibilitySettings:(id)sender {
@@ -462,9 +490,19 @@ static void remove_lock_file(void) {
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
+    mesh_log_message("[TCC-UI] [%ld] windowWillClose called\n", time(NULL));
     _windowClosed = YES;
+
+    mesh_log_message("[TCC-UI] [%ld] Stopping periodic updates\n", time(NULL));
     [self.buttonHandler stopPeriodicUpdates];
-    [NSApp stopModal];
+
+    // Defer stopModal to next run loop iteration to avoid race conditions
+    // Allows window closing sequence to complete cleanly before exiting modal loop
+    mesh_log_message("[TCC-UI] [%ld] Deferring stopModal to next run loop iteration\n", time(NULL));
+    dispatch_async(dispatch_get_main_queue(), ^{
+        mesh_log_message("[TCC-UI] [%ld] Calling stopModal\n", time(NULL));
+        [NSApp stopModal];
+    });
 }
 
 - (void)checkboxToggled:(NSButton*)sender {
@@ -629,15 +667,19 @@ int show_tcc_permissions_window(int show_reminder_checkbox) {
         [buttonHandler startPeriodicUpdates];
 
         // Show window and run modal
+        mesh_log_message("[TCC-UI] [%ld] Showing window and activating app\n", time(NULL));
         [window makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
+
+        mesh_log_message("[TCC-UI] [%ld] Entering modal loop...\n", time(NULL));
         [NSApp runModalForWindow:window];
+        mesh_log_message("[TCC-UI] [%ld] Modal loop exited - window closed\n", time(NULL));
 
         // Get result
         int result = delegate.doNotRemindAgain ? 1 : 0;
 
-        // Cleanup
-        [window close];
+        // Cleanup - window already closed by Finish button, no need to close again
+        // [window close];  // Removed: duplicate close causes issues
         remove_lock_file();
 
         return result;

@@ -8,6 +8,7 @@
 #ifdef __APPLE__
 
 #include "mac_kvm_auth.h"
+#include "../../MacOS/mac_logging_utils.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -22,7 +23,7 @@ SecCodeRef get_self_code(void) {
     status = SecCodeCopySelf(kSecCSDefaultFlags, &self_code);
 
     if (status != errSecSuccess) {
-        fprintf(stderr, "KVM Auth: Failed to get self code signature: %d\n", status);
+        mesh_log_message("[KVM-AUTH] ERROR: Failed to get self code signature: %d\n", status);
         return NULL;
     }
 
@@ -84,12 +85,12 @@ int verify_peer_codesign(int socket_fd) {
 
     // Get PID of connecting process
     if (getsockopt(socket_fd, SOL_LOCAL, LOCAL_PEERPID, &peer_pid, &len) < 0) {
-        fprintf(stderr, "KVM Auth: Failed to get peer PID: %s\n", strerror(errno));
+        mesh_log_message("[KVM-AUTH] ERROR: Failed to get peer PID: %s\n", strerror(errno));
         return 0;
     }
 
     if (peer_pid <= 0) {
-        fprintf(stderr, "KVM Auth: Invalid peer PID: %d\n", peer_pid);
+        mesh_log_message("[KVM-AUTH] ERROR: Invalid peer PID: %d\n", peer_pid);
         return 0;
     }
 
@@ -102,7 +103,7 @@ int verify_peer_codesign(int socket_fd) {
     // Get peer process code signature
     status = SecCodeCreateWithPID(peer_pid, kSecCSDefaultFlags, &peer_code);
     if (status != errSecSuccess) {
-        fprintf(stderr, "KVM Auth: Failed to get peer code signature (PID %d): %d\n",
+        mesh_log_message("[KVM-AUTH] ERROR: Failed to get peer code signature (PID %d): %d\n",
                 peer_pid, status);
         goto cleanup;
     }
@@ -110,7 +111,7 @@ int verify_peer_codesign(int socket_fd) {
     // Verify peer code is valid (signed, not tampered)
     status = SecCodeCheckValidity(peer_code, kSecCSDefaultFlags, NULL);
     if (status != errSecSuccess) {
-        fprintf(stderr, "KVM Auth: Peer code signature invalid (PID %d): %d\n",
+        mesh_log_message("[KVM-AUTH] ERROR: Peer code signature invalid (PID %d): %d\n",
                 peer_pid, status);
         goto cleanup;
     }
@@ -119,7 +120,7 @@ int verify_peer_codesign(int socket_fd) {
     if (codesign_matches(self_code, peer_code)) {
         result = 1;
     } else {
-        fprintf(stderr, "KVM Auth: Peer code signature mismatch (PID %d)\n", peer_pid);
+        mesh_log_message("[KVM-AUTH] ERROR: Peer code signature mismatch (PID %d)\n", peer_pid);
     }
 
 cleanup:

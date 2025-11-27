@@ -58,6 +58,8 @@ limitations under the License.
 #include <limits.h>
 #include <mach-o/dyld.h>
 #include <removefile.h>
+#include "../../MacOS/mac_plist_utils.h"
+#include "../../MacOS/mac_logging_utils.h"
 
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
 
@@ -70,6 +72,16 @@ static char *KVM_Session_Signal_File = NULL;
 #else
 #define TLSLOG1(...) ;
 #endif
+
+// Screen capture tile dimensions (optimized for JPEG compression blocks)
+#define KVM_TILE_WIDTH 32
+#define KVM_TILE_HEIGHT 32
+
+// JPEG compression quality (1-100, higher = better quality but larger)
+#define KVM_DEFAULT_COMPRESSION 50
+
+// Frame capture interval in milliseconds
+#define KVM_DEFAULT_FRAME_INTERVAL_MS 100
 
 
 int KVM_AGENT_FD = -1;
@@ -91,7 +103,36 @@ int KVM_SEND(char *buffer, int bufferLen)
 	return(retVal);
 }
 
+// Helper to open IOHIDSystem connection (DRY: extracted from set_kbd_state/get_kbd_state)
+// Returns 0 on success, -1 on failure
+static int open_iohid_connection(io_connect_t* ioc_out)
+{
+	kern_return_t kr;
+	io_service_t ios;
+	CFMutableDictionaryRef mdict;
 
+	mdict = IOServiceMatching(kIOHIDSystemClass);
+	ios = IOServiceGetMatchingService(kIOMasterPortDefault, (CFDictionaryRef)mdict);
+	if (!ios)
+	{
+		if (mdict)
+		{
+			CFRelease(mdict);
+		}
+		ILIBLOGMESSAGEX("IOServiceGetMatchingService() failed\n");
+		return -1;
+	}
+
+	kr = IOServiceOpen(ios, mach_task_self(), kIOHIDParamConnectType, ioc_out);
+	IOObjectRelease(ios);
+	if (kr != KERN_SUCCESS)
+	{
+		ILIBLOGMESSAGEX("IOServiceOpen() failed: %x\n", kr);
+		return -1;
+	}
+
+	return 0;
+}
 
 CGDirectDisplayID SCREEN_NUM = 0;
 int SH_HANDLE = 0;
@@ -173,130 +214,90 @@ int set_kbd_state(int input_state)
 {
 	int ret = 0;
 	kern_return_t kr;
-	io_service_t ios;
 	io_connect_t ioc;
-	CFMutableDictionaryRef mdict;
+	bool state;
 
-	while (1)
+	// Use helper function to open IOHIDSystem connection
+	if (open_iohid_connection(&ioc) != 0)
 	{
-		mdict = IOServiceMatching(kIOHIDSystemClass);
-		ios = IOServiceGetMatchingService(kIOMasterPortDefault, (CFDictionaryRef)mdict);
-		if (!ios)
-		{
-			if (mdict)
-			{
-				CFRelease(mdict);
-			}
-			ILIBLOGMESSAGEX("IOServiceGetMatchingService() failed\n");
-			break;
-		}
-
-		kr = IOServiceOpen(ios, mach_task_self(), kIOHIDParamConnectType, &ioc);
-		IOObjectRelease(ios);
-		if (kr != KERN_SUCCESS)
-		{
-			ILIBLOGMESSAGEX("IOServiceOpen() failed: %x\n", kr);
-			break;
-		}
-
-		// Set CAPSLOCK
-		kr = IOHIDSetModifierLockState(ioc, kIOHIDCapsLockState, (input_state & 4) == 4);
-		if (kr != KERN_SUCCESS)
-		{
-			IOServiceClose(ioc);
-			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
-			break;
-		}
-
-		// Set NUMLOCK
-		kr = IOHIDSetModifierLockState(ioc, kIOHIDNumLockState, (input_state & 1) == 1);
-		if (kr != KERN_SUCCESS)
-		{
-			IOServiceClose(ioc);
-			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
-			break;
-		}
-
-		// CAPSLOCK_QUERY
-		bool state;
-		kr = IOHIDGetModifierLockState(ioc, kIOHIDCapsLockState, &state);
-		if (kr != KERN_SUCCESS)
-		{
-			IOServiceClose(ioc);
-			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
-			break;
-		}
-		ret |= (state << 2);
-
-		// NUMLOCK_QUERY
-		kr = IOHIDGetModifierLockState(ioc, kIOHIDNumLockState, &state);
-		if (kr != KERN_SUCCESS)
-		{
-			IOServiceClose(ioc);
-			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
-			break;
-		}
-		ret |= state;
-
-		IOServiceClose(ioc);
-		break;
+		return 0;
 	}
+
+	// Set CAPSLOCK
+	kr = IOHIDSetModifierLockState(ioc, kIOHIDCapsLockState, (input_state & 4) == 4);
+	if (kr != KERN_SUCCESS)
+	{
+		IOServiceClose(ioc);
+		ILIBLOGMESSAGEX("IOHIDSetModifierLockState() failed: %x\n", kr);
+		return 0;
+	}
+
+	// Set NUMLOCK
+	kr = IOHIDSetModifierLockState(ioc, kIOHIDNumLockState, (input_state & 1) == 1);
+	if (kr != KERN_SUCCESS)
+	{
+		IOServiceClose(ioc);
+		ILIBLOGMESSAGEX("IOHIDSetModifierLockState() failed: %x\n", kr);
+		return 0;
+	}
+
+	// CAPSLOCK_QUERY
+	kr = IOHIDGetModifierLockState(ioc, kIOHIDCapsLockState, &state);
+	if (kr != KERN_SUCCESS)
+	{
+		IOServiceClose(ioc);
+		ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+		return 0;
+	}
+	ret |= (state << 2);
+
+	// NUMLOCK_QUERY
+	kr = IOHIDGetModifierLockState(ioc, kIOHIDNumLockState, &state);
+	if (kr != KERN_SUCCESS)
+	{
+		IOServiceClose(ioc);
+		ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+		return 0;
+	}
+	ret |= state;
+
+	IOServiceClose(ioc);
 	return(ret);
 }
 int get_kbd_state()
 {
 	int ret = 0;
 	kern_return_t kr;
-	io_service_t ios;
 	io_connect_t ioc;
-	CFMutableDictionaryRef mdict;
+	bool state;
 
-	while (1)
+	// Use helper function to open IOHIDSystem connection
+	if (open_iohid_connection(&ioc) != 0)
 	{
-		mdict = IOServiceMatching(kIOHIDSystemClass);
-		ios = IOServiceGetMatchingService(kIOMasterPortDefault, (CFDictionaryRef)mdict);
-		if (!ios)
-		{
-			if (mdict)
-			{
-				CFRelease(mdict);
-			}
-			ILIBLOGMESSAGEX("IOServiceGetMatchingService() failed\n");
-			break;
-		}
-
-		kr = IOServiceOpen(ios, mach_task_self(), kIOHIDParamConnectType, &ioc);
-		IOObjectRelease(ios);
-		if (kr != KERN_SUCCESS)
-		{
-			ILIBLOGMESSAGEX("IOServiceOpen() failed: %x\n", kr);
-			break;
-		}
-
-		// CAPSLOCK_QUERY
-		bool state;
-		kr = IOHIDGetModifierLockState(ioc, kIOHIDCapsLockState, &state);
-		if (kr != KERN_SUCCESS)
-		{
-			IOServiceClose(ioc);
-			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
-			break;
-		}
-		ret |= (state << 2);
-
-		// NUMLOCK_QUERY
-		kr = IOHIDGetModifierLockState(ioc, kIOHIDNumLockState, &state);
-		if (kr != KERN_SUCCESS)
-		{
-			IOServiceClose(ioc);
-			ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
-			break;
-		}
-		ret |= state;
-
-		IOServiceClose(ioc);
-		break;
+		return 0;
 	}
+
+	// CAPSLOCK_QUERY
+	kr = IOHIDGetModifierLockState(ioc, kIOHIDCapsLockState, &state);
+	if (kr != KERN_SUCCESS)
+	{
+		IOServiceClose(ioc);
+		ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+		return 0;
+	}
+	ret |= (state << 2);
+
+	// NUMLOCK_QUERY
+	kr = IOHIDGetModifierLockState(ioc, kIOHIDNumLockState, &state);
+	if (kr != KERN_SUCCESS)
+	{
+		IOServiceClose(ioc);
+		ILIBLOGMESSAGEX("IOHIDGetModifierLockState() failed: %x\n", kr);
+		return 0;
+	}
+	ret |= state;
+
+	IOServiceClose(ioc);
 	return(ret);
 }
 
@@ -318,11 +319,11 @@ int kvm_init()
 	SCREEN_HEIGHT = CGDisplayPixelsHigh(SCREEN_NUM) * SCREEN_SCALE;
 	SCREEN_WIDTH = CGDisplayPixelsWide(SCREEN_NUM) * SCREEN_SCALE;
 
-	// Some magic numbers.
-	TILE_WIDTH = 32;
-	TILE_HEIGHT = 32;
-	COMPRESSION_RATIO = 50;
-	FRAME_RATE_TIMER = 100;
+	// Initialize capture parameters with defaults
+	TILE_WIDTH = KVM_TILE_WIDTH;
+	TILE_HEIGHT = KVM_TILE_HEIGHT;
+	COMPRESSION_RATIO = KVM_DEFAULT_COMPRESSION;
+	FRAME_RATE_TIMER = KVM_DEFAULT_FRAME_INTERVAL_MS;
 
 	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
 	TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
@@ -478,15 +479,14 @@ static void sanitize_identifier(char *dest, size_t destSize, const char *src)
 // Read serviceID from LaunchDaemon plist Label field
 // Scans /Library/LaunchDaemons/*.plist files to find the one with matching ProgramArguments:0
 // Returns strdup() of Label field, or NULL if not found (caller must free)
+//
+// SECURITY FIX: Replaced popen() with secure CoreFoundation-based plist parsing
+// Previous implementation was vulnerable to command injection via malicious filenames
 static char* kvm_read_serviceid_from_plist(const char *exePath)
 {
 	DIR *dir;
 	struct dirent *entry;
 	char plistPath[PATH_MAX];
-	char command[PATH_MAX * 2];
-	FILE *pipe;
-	char binPath[PATH_MAX];
-	char label[512];
 
 	if (exePath == NULL || strlen(exePath) == 0)
 	{
@@ -508,44 +508,22 @@ static char* kvm_read_serviceid_from_plist(const char *exePath)
 
 		snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
 
-		// Use PlistBuddy to check ProgramArguments:0
-		snprintf(command, sizeof(command),
-		         "/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' '%s' 2>/dev/null",
-		         plistPath);
-
-		pipe = popen(command, "r");
-		if (pipe == NULL) continue;
-
-		if (fgets(binPath, sizeof(binPath), pipe) != NULL)
+		// Use SECURE CoreFoundation-based plist parser (no shell execution)
+		char* binPath = mesh_plist_get_program_path(plistPath);
+		if (binPath != NULL)
 		{
-			// Remove trailing newline
-			binPath[strcspn(binPath, "\n")] = 0;
-
 			// Check if this matches our binary path
 			if (strcmp(binPath, exePath) == 0)
 			{
-				pclose(pipe);
+				free(binPath);
 
-				// Found matching plist! Now extract Label
-				snprintf(command, sizeof(command),
-				         "/usr/libexec/PlistBuddy -c 'Print :Label' '%s' 2>/dev/null",
-				         plistPath);
-
-				pipe = popen(command, "r");
-				if (pipe != NULL)
-				{
-					if (fgets(label, sizeof(label), pipe) != NULL)
-					{
-						label[strcspn(label, "\n")] = 0;
-						pclose(pipe);
-						closedir(dir);
-						return strdup(label);
-					}
-					pclose(pipe);
-				}
+				// Found matching plist! Extract Label using secure API
+				char* label = mesh_plist_get_label(plistPath);
+				closedir(dir);
+				return label;  // Caller must free
 			}
+			free(binPath);
 		}
-		pclose(pipe);
 	}
 
 	closedir(dir);
@@ -1035,7 +1013,7 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 	// This prevents race condition where -kvm1 starts before socket is ready
 	if ((KVM_Daemon_Listener_FD = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
 	{
-		fprintf(stderr, "KVM: Failed to create listener socket: %s\n", strerror(errno));
+		mesh_log_message("[KVM] ERROR: Failed to create listener socket: %s\n", strerror(errno));
 		return -1;
 	}
 
@@ -1051,7 +1029,7 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 
 	if (bind(KVM_Daemon_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
 	{
-		fprintf(stderr, "KVM: Failed to bind listener socket: %s\n", strerror(errno));
+		mesh_log_message("[KVM] ERROR: Failed to bind listener socket: %s\n", strerror(errno));
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
 		umask(old_umask);
@@ -1066,7 +1044,7 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 	// Listen with backlog of 2 (handles fast-user-switching edge case)
 	if (listen(KVM_Daemon_Listener_FD, 2) < 0)
 	{
-		fprintf(stderr, "KVM: Failed to listen on socket: %s\n", strerror(errno));
+		mesh_log_message("[KVM] ERROR: Failed to listen on socket: %s\n", strerror(errno));
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
 		unlink(KVM_Listener_Path);
@@ -1077,7 +1055,7 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 	// Socket is guaranteed ready before -kvm1 can start
 	if (mkdir(KVM_Queue_Directory, 0755) < 0 && errno != EEXIST)
 	{
-		fprintf(stderr, "KVM: Failed to create queue directory %s: %s\n", KVM_Queue_Directory, strerror(errno));
+		mesh_log_message("[KVM] ERROR: Failed to create queue directory %s: %s\n", KVM_Queue_Directory, strerror(errno));
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
 		unlink(KVM_Listener_Path);
@@ -1088,7 +1066,7 @@ int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID
 	signal_fd = open(KVM_Session_Signal_File, O_CREAT | O_WRONLY, 0644);
 	if (signal_fd < 0)
 	{
-		fprintf(stderr, "KVM: Failed to create session signal file: %s\n", strerror(errno));
+		mesh_log_message("[KVM] ERROR: Failed to create session signal file: %s\n", strerror(errno));
 		close(KVM_Daemon_Listener_FD);
 		KVM_Daemon_Listener_FD = -1;
 		unlink(KVM_Listener_Path);
@@ -1140,9 +1118,9 @@ void kvm_cleanup_session(void)
 				if (removefile(filepath, NULL, REMOVEFILE_RECURSIVE) != 0) {
 					// First attempt failed - try with force flag
 					if (removefile(filepath, NULL, REMOVEFILE_RECURSIVE | REMOVEFILE_KEEP_PARENT) != 0) {
-						fprintf(stderr, "KVM: CRITICAL - failed to remove directory %s: %s\n",
+						mesh_log_message("[KVM] CRITICAL: Failed to remove directory %s: %s\n",
 						        filepath, strerror(errno));
-						fprintf(stderr, "KVM: LaunchAgent may continue spawning -kvm1!\n");
+						mesh_log_message("[KVM] CRITICAL: LaunchAgent may continue spawning -kvm1!\n");
 					}
 				}
 			}
@@ -1153,9 +1131,9 @@ void kvm_cleanup_session(void)
 					// Retry with chmod in case of permission issues
 					chmod(filepath, 0644);
 					if (unlink(filepath) != 0) {
-						fprintf(stderr, "KVM: CRITICAL - failed to remove file %s: %s\n",
+						mesh_log_message("[KVM] CRITICAL: Failed to remove file %s: %s\n",
 						        filepath, strerror(errno));
-						fprintf(stderr, "KVM: LaunchAgent may continue spawning -kvm1!\n");
+						mesh_log_message("[KVM] CRITICAL: LaunchAgent may continue spawning -kvm1!\n");
 					}
 				}
 			}
@@ -1172,20 +1150,20 @@ void kvm_cleanup_session(void)
 				if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
 					continue;
 				remaining_files++;
-				fprintf(stderr, "KVM: CRITICAL - Stray file remains: %s/%s\n",
+				mesh_log_message("[KVM] CRITICAL: Stray file remains: %s/%s\n",
 				        KVM_Queue_Directory, entry->d_name);
 			}
 			closedir(dir);
 
 			if (remaining_files > 0) {
-				fprintf(stderr, "KVM: CRITICAL - %d stray file(s) in queue directory!\n", remaining_files);
-				fprintf(stderr, "KVM: LaunchAgent will continue spawning -kvm1 until directory is empty!\n");
+				mesh_log_message("[KVM] CRITICAL: %d stray file(s) in queue directory!\n", remaining_files);
+				mesh_log_message("[KVM] CRITICAL: LaunchAgent will continue spawning -kvm1 until directory is empty!\n");
 			}
 		}
 	}
 	else if (errno != ENOENT)
 	{
-		fprintf(stderr, "KVM: Warning - failed to open queue directory: %s\n", strerror(errno));
+		mesh_log_message("[KVM] WARN: Failed to open queue directory: %s\n", strerror(errno));
 	}
 }
 
@@ -1206,7 +1184,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	// This triggers QueueDirectories to start -kvm1
 	if (kvm_create_session(companyName, meshServiceName, serviceID, exePath) < 0)
 	{
-		fprintf(stderr, "KVM: Failed to create session\n");
+		mesh_log_message("[KVM] ERROR: Failed to create session\n");
 		return NULL;
 	}
 
@@ -1215,7 +1193,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 
 	if (client_fd < 0)
 	{
-		fprintf(stderr, "KVM: Failed to accept connection: %s\n", strerror(errno));
+		mesh_log_message("[KVM] ERROR: Failed to accept connection: %s\n", strerror(errno));
 		kvm_cleanup_session();  // Clean up on failure
 		return NULL;
 	}
@@ -1223,7 +1201,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	// Verify connecting process is legitimate meshagent binary
 	if (!verify_peer_codesign(client_fd))
 	{
-		fprintf(stderr, "KVM: Peer verification FAILED - rejecting connection\n");
+		mesh_log_message("[KVM] ERROR: Peer verification FAILED - rejecting connection\n");
 		close(client_fd);
 		kvm_cleanup_session();  // Clean up on failure
 		return NULL;
@@ -1319,9 +1297,19 @@ MPAuthorizationStatus _fullDiskAuthorizationStatus() {
         userHomeFolderPath = pw->pw_dir;
     }
 
+    // SECURITY FIX: Use stack allocation instead of malloc to prevent memory leak
+    // Previous implementation leaked 60 bytes per call (30 bytes × 2 paths)
+    char safariCloudTabsPath[PATH_MAX];
+    char safariBookmarksPath[PATH_MAX];
+
+    snprintf(safariCloudTabsPath, sizeof(safariCloudTabsPath),
+             "%s/Library/Safari/CloudTabs.db", userHomeFolderPath);
+    snprintf(safariBookmarksPath, sizeof(safariBookmarksPath),
+             "%s/Library/Safari/Bookmarks.plist", userHomeFolderPath);
+
     const char *testFiles[] = {
-        strcat(strcpy(malloc(strlen(userHomeFolderPath) + 30), userHomeFolderPath), "/Library/Safari/CloudTabs.db"),
-        strcat(strcpy(malloc(strlen(userHomeFolderPath) + 30), userHomeFolderPath), "/Library/Safari/Bookmarks.plist"),
+        safariCloudTabsPath,
+        safariBookmarksPath,
         "/Library/Application Support/com.apple.TCC/TCC.db",
         "/Library/Preferences/com.apple.TimeMachine.plist",
     };

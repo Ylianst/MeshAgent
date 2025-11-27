@@ -48,7 +48,7 @@ limitations under the License.
 #include <stdarg.h>
 #include <fcntl.h>
 #include <CoreFoundation/CoreFoundation.h>
-#include "meshcore/MacOS/bundle_detection.h"
+#include "meshcore/MacOS/mac_bundle_detection.h"
 #include "meshcore/MacOS/mac_tcc_detection.h"
 #include "meshcore/MacOS/TCC_UI/mac_permissions_window.h"
 #include "meshcore/MacOS/Install_UI/mac_install_window.h"
@@ -65,6 +65,64 @@ MeshAgentHostContainer *agentHost = NULL;
 char __agentExecPath[1024] = { 0 };
 #endif
 
+// Validate command-line arguments against known flags
+// Returns 1 if valid, 0 if unknown flag detected
+int validate_argument(const char* arg)
+{
+	// Simple flags (exact match, no value)
+	static const char* simple_flags[] = {
+		"-help", "--help", "-h",
+		"-version", "-info", "-licenses", "-nodeid", "-name",
+		"-agentHash", "-agentFullHash", "-updaterversion",
+		"-daemon", "-export", "-import",
+		"-install", "-upgrade", "-uninstall",
+		"-finstall", "-fullinstall", "-funinstall", "-fulluninstall",
+		"-recovery", "-nocertstore", "-state",
+		"-kvm1", "-tccCheck",
+		"-exec", "-b64exec", "-faddr", "-fdelta",
+		"connect", "--slave", "--netinfo",
+		"--show-install-ui",  // Used by elevation to show Install UI as root
+		NULL
+	};
+
+	// Prefix flags (starts with these, value follows)
+	static const char* prefix_flags[] = {
+		"--installPath=", "--mshPath=", "--copy-msh=",
+		"--meshServiceName=", "--serviceName=", "--companyName=",
+		"--displayName=", "--description=", "--target=", "--fileName=",
+		"--serviceId=", "--disableUpdate=", "--disableTccCheck=",
+		"--readonly=", "--appBundle=", "--resetnodeid",
+		"--script-db", "--script-flags", "--script-timeout", "--script-connect",
+		"--no-embedded=",
+		"--expandedPath=", "--filePath=", "--modulesPath=",
+		"-update:",
+		NULL
+	};
+
+	size_t len = strlen(arg);
+
+	// Check simple flags (exact match)
+	for (int i = 0; simple_flags[i] != NULL; i++)
+	{
+		if (strcmp(arg, simple_flags[i]) == 0) return 1;
+	}
+
+	// Check prefix flags (starts with)
+	for (int i = 0; prefix_flags[i] != NULL; i++)
+	{
+		size_t prefix_len = strlen(prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, prefix_flags[i], prefix_len) == 0) return 1;
+	}
+
+	// Check .js file extension (script execution)
+	if (len > 3 && strcmp(arg + len - 3, ".js") == 0) return 1;
+
+	// Allow positional arguments (don't start with -)
+	// These are values for flags like -exec <code>
+	if (arg[0] != '-') return 1;
+
+	return 0; // Unknown flag
+}
 
 #ifdef WIN32
 BOOL CtrlHandler(DWORD fdwCtrlType)
@@ -336,6 +394,32 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		if (has_forbidden_flag) break;
 	}
 
+	// Check for --show-install-ui flag (passed by elevated relaunch)
+	// This must be checked BEFORE the LAUNCHED_FROM_FINDER check because the elevated
+	// process won't have that environment variable or detect modifier keys
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--show-install-ui") == 0) {
+			mesh_log_message("[MAIN] [%ld] MeshAgent launched with --show-install-ui (elevated relaunch)\n", time(NULL));
+
+			// Redirect stdout and stderr to log file
+			int log_fd = open("/tmp/meshagent-install-ui.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
+			if (log_fd >= 0) {
+				dup2(log_fd, STDOUT_FILENO);
+				dup2(log_fd, STDERR_FILENO);
+				close(log_fd);
+				setvbuf(stdout, NULL, _IONBF, 0);
+				setvbuf(stderr, NULL, _IONBF, 0);
+				printf("[MAIN] [%ld] ===== ELEVATED PROCESS - STDOUT/STDERR REDIRECTED =====\n", time(NULL));
+			}
+
+			InstallResult result = show_install_assistant_window();
+			mesh_log_message("[MAIN] [%ld] Installation Assistant returned (cancelled=%d, mode=%d)\n",
+			        time(NULL), result.cancelled, result.mode);
+			mesh_log_message("[MAIN] [%ld] Installation Assistant closed, exiting\n", time(NULL));
+			exit(0);
+		}
+	}
+
 	if (!has_forbidden_flag && getenv("LAUNCHED_FROM_FINDER") != NULL)
 	{
 		// Check which modifier keys are being held
@@ -347,6 +431,16 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		{
 			// CMD + double-click -> show Installation Assistant
 			mesh_log_message("[MAIN] [%ld] MeshAgent launched from Finder with CMD key - showing Installation Assistant\n", time(NULL));
+
+			// Ensure we're running as root so we can read existing .msh config files (600 root:wheel)
+			// This will prompt for admin credentials and relaunch if needed
+			int elevateResult = ensure_running_as_root();
+			if (elevateResult < 0)
+			{
+				mesh_log_message("[MAIN] [%ld] Failed to elevate privileges, cannot proceed with installation\n", time(NULL));
+				return 1;
+			}
+			// If elevateResult == 0, we're now running as root (either already were, or relaunched)
 
 			// Redirect stdout and stderr to log file to capture ALL output including TCC spawn traces
 			int log_fd = open("/tmp/meshagent-install-ui.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
@@ -385,6 +479,20 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		}
 	}
 #endif
+
+	// Validate all command-line arguments before processing
+	for (int i = 1; i < argc; i++)
+	{
+		if (!validate_argument(argv[i]))
+		{
+			fprintf(stderr, "ERROR: Unknown argument at position %d: '%s'\n", i, argv[i]);
+			fprintf(stderr, "Use -help for available options\n");
+#ifdef WIN32
+			wmain_free(argv);
+#endif
+			return 1;
+		}
+	}
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 
@@ -547,6 +655,70 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #else
 		ignore_result(write(STDOUT_FILENO, "1\n", 2));
 #endif
+#ifdef WIN32
+		wmain_free(argv);
+#endif
+		return(0);
+	}
+	if (argc > 1 && (strcmp(argv[1], "-help") == 0 ||
+	                 strcmp(argv[1], "--help") == 0 ||
+	                 strcmp(argv[1], "-h") == 0))
+	{
+		printf("MeshAgent - MeshCentral remote management agent\n\n");
+		printf("Usage: meshagent [options] [script.js]\n\n");
+		printf("Information:\n");
+		printf("  -help, --help, -h     Show this help message\n");
+		printf("  -version              Show version information\n");
+		printf("  -info                 Show detailed agent information\n");
+		printf("  -licenses             Show open source licenses\n");
+		printf("  -nodeid               Show agent's unique node ID\n");
+		printf("  -name                 Show agent's service name\n");
+		printf("  -agentHash            Show agent hash (short)\n");
+		printf("  -agentFullHash        Show agent hash (full)\n\n");
+		printf("Installation:\n");
+		printf("  -install              Install agent as system service\n");
+		printf("  -upgrade              Upgrade existing installation\n");
+		printf("  -uninstall            Uninstall agent service\n");
+		printf("  -fullinstall          Full install (with recovery)\n");
+		printf("  -fulluninstall        Full uninstall (remove all data)\n\n");
+		printf("Installation Options:\n");
+		printf("  --installPath=PATH    Installation directory\n");
+		printf("  --mshPath=PATH        Path to .msh configuration file\n");
+		printf("  --meshServiceName=N   Service name component\n");
+		printf("  --companyName=NAME    Company name component\n");
+		printf("  --copy-msh=1          Copy .msh file to install location\n");
+		printf("  --disableUpdate=1     Disable automatic updates\n");
+		printf("  --disableTccCheck=1   Disable TCC permission check UI (macOS)\n\n");
+		printf("Service Control:\n");
+		printf("  -daemon               Run in foreground daemon mode\n");
+		printf("  -state                Show agent state\n\n");
+		printf("Script Execution:\n");
+		printf("  script.js             Execute JavaScript file\n");
+		printf("  -exec CODE            Execute JavaScript code string\n");
+		printf("  -b64exec CODE         Execute base64-encoded JavaScript\n");
+		printf("  --script-db PATH      Database path for script mode\n");
+		printf("  --script-timeout SEC  Watchdog timeout (0=unlimited)\n");
+		printf("  --script-connect      Enable MeshCentral connection\n\n");
+		printf("Module Management:\n");
+		printf("  -export               Export embedded JavaScript modules\n");
+		printf("  -import               Import modules from filesystem\n\n");
+		printf("macOS Specific:\n");
+		printf("  -kvm1                 KVM remote desktop subprocess mode\n");
+		printf("  -tccCheck             TCC permissions check subprocess\n");
+		printf("  --show-install-ui     Launch Installation Assistant GUI (with elevation)\n");
+		printf("                        Note: Also auto-launches with CMD+double-click on .app\n");
+		printf("                        SHIFT+double-click shows TCC permissions window\n\n");
+		printf("Update:\n");
+		printf("  -update:URL           Self-update from URL\n\n");
+		printf("Advanced:\n");
+		printf("  --readonly=1          Read-only database mode\n");
+		printf("  --appBundle=1         Running from app bundle\n");
+		printf("  -recovery             Set recovery capabilities\n");
+		printf("  -nocertstore          Disable certificate store (Windows)\n\n");
+		printf("Debug:\n");
+		printf("  -faddr ADDR           Memory address debug tool\n");
+		printf("  -fdelta DELTA         Memory delta debug tool\n");
+		printf("  connect               Development mode connection\n");
 #ifdef WIN32
 		wmain_free(argv);
 #endif

@@ -272,13 +272,6 @@ function checkParameters(parms)
 function normalizeInstallPath(path) {
     if (!path) return '/usr/local/mesh_services/meshagent/';
 
-    // If path ends with 'meshagent' (binary name), extract directory
-    if (path.endsWith('/meshagent') || path.endsWith('meshagent')) {
-        var parts = path.split('/');
-        parts.pop();
-        return parts.join('/') + '/';
-    }
-
     // Ensure trailing slash
     if (!path.endsWith('/')) {
         return path + '/';
@@ -1192,7 +1185,7 @@ function forceKillProcesses(pids) {
 }
 
 // Helper to create LaunchDaemon
-function createLaunchDaemon(serviceName, companyName, installPath, serviceId, installType, disableUpdate) {
+function createLaunchDaemon(serviceName, companyName, installPath, serviceId, installType) {
     var logger = require('./logger');
 
     try {
@@ -1202,14 +1195,9 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             name: serviceName,
             target: 'meshagent',
             startType: 'AUTO_START',
-            parameters: ['--serviceId=' + serviceId],
+            parameters: [],  // serviceId from .msh, appBundle auto-detected
             companyName: companyName
         };
-
-        // Add --disableUpdate flag if requested (for bundle installations)
-        if (disableUpdate) {
-            options.parameters.push('--disableUpdate=1');
-        }
 
         if (installType === 'bundle') {
             // For bundle installations, reference the binary inside the bundle
@@ -1225,8 +1213,7 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             options.target = 'meshagent';
             // For bundle installations, do NOT copy binary to installPath - binary should stay inside bundle
             options.skipBinaryCopy = true;
-            // Add --appBundle so agent looks for config files in WorkingDirectory (bundle parent)
-            options.parameters.push('--appBundle=1');
+            // Note: appBundle mode is auto-detected via is_running_from_bundle() in C code
         } else {
             // For standalone installations, let service-manager copy the binary if needed
             servicePath = installPath + 'meshagent';
@@ -1379,15 +1366,28 @@ function installServiceUnified(params) {
     var newServiceName = parms.getParameter('meshServiceName', null);
     var newCompanyName = parms.getParameter('companyName', null);
     var newServiceId = parms.getParameter('serviceId', null);
-    var enableDisableUpdate = parms.getParameter('enableDisableUpdate', null);
+    var disableUpdateParam = parms.getParameter('disableUpdate', null);
+    var disableTccCheckParam = parms.getParameter('disableTccCheck', null);
     var copyMsh = parms.getParameter('copy-msh', null);
     var explicitMshPath = parms.getParameter('mshPath', null);  // Explicit path to .msh file
     var omitBackup = (parms.indexOf('--omit-backup') >= 0);
     var upgradeMode = (parms.indexOf('--_upgradeMode=1') >= 0);
 
+    // Parse --disableUpdate parameter: null=not specified, true=disable, false=enable
+    var disableUpdate = null;
+    if (disableUpdateParam === '1' || disableUpdateParam === 'true') {
+        disableUpdate = true;
+    } else if (disableUpdateParam === '0' || disableUpdateParam === 'false') {
+        disableUpdate = false;
+    }
 
-    // Convert enableDisableUpdate to boolean
-    var disableUpdate = (enableDisableUpdate === '1' || enableDisableUpdate === 'true');
+    // Parse --disableTccCheck parameter: null=not specified, true=disable, false=enable
+    var disableTccCheck = null;
+    if (disableTccCheckParam === '1' || disableTccCheckParam === 'true') {
+        disableTccCheck = true;
+    } else if (disableTccCheckParam === '0' || disableTccCheckParam === 'false') {
+        disableTccCheck = false;
+    }
 
     // Determine operation mode
     var isFreshInstall = false;
@@ -1742,14 +1742,43 @@ function installServiceUnified(params) {
         }
     }
 
+    // Write disableUpdate to .msh file if specified
+    if (disableUpdate !== null) {
+        var targetMshFile = installPath + 'meshagent.msh';
+        try {
+            updateMshFile(targetMshFile, { disableUpdate: disableUpdate ? '1' : '0' });
+            logger.info('Updated .msh with disableUpdate=' + (disableUpdate ? '1' : '0'));
+        } catch (e) {
+            logger.warn('Could not update .msh with disableUpdate: ' + e.message);
+        }
+    }
+
+    // Write disableTccCheck to .msh file if specified
+    if (disableTccCheck !== null) {
+        var targetMshFile = installPath + 'meshagent.msh';
+        try {
+            updateMshFile(targetMshFile, { disableTccCheck: disableTccCheck ? '1' : '0' });
+            logger.info('Updated .msh with disableTccCheck=' + (disableTccCheck ? '1' : '0'));
+        } catch (e) {
+            logger.warn('Could not update .msh with disableTccCheck: ' + e.message);
+        }
+    }
+
+    // Write ServiceID to .msh file (required since we no longer pass it via ProgramArguments)
+    if (currentServiceId) {
+        var targetMshFile = installPath + 'meshagent.msh';
+        try {
+            updateMshFile(targetMshFile, { ServiceID: currentServiceId });
+            logger.info('Updated .msh with ServiceID=' + currentServiceId);
+        } catch (e) {
+            logger.warn('Could not update .msh with ServiceID: ' + e.message);
+        }
+    }
+
     // CREATE SERVICES
     logger.info('Creating LaunchDaemon');
     try {
-        var daemonParams = parms.slice(); // Copy parameters
-        if (disableUpdate) {
-            daemonParams.push('--disableUpdate=1');
-        }
-        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, sourceType.type, daemonParams);
+        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, sourceType.type);
     } catch (e) {
         logger.error('Failed to create LaunchDaemon: ' + e);
         process.exit(1);
@@ -2041,15 +2070,40 @@ function installService(params)
         // Don't remove from parameters - agent needs it to write to .msh file
     }
 
-    // Check if --enableDisableUpdate flag was passed to enable disableUpdate
-    if ((i = options.parameters.getParameterIndex('enableDisableUpdate')) >= 0) {
-        var enableValue = options.parameters.getParameterValue(i);
-        if (enableValue === '1' || enableValue === 'true') {
-            // Add --disableUpdate=1 to prevent self-updates
-            options.parameters.push('--disableUpdate=1');
-        }
-        // Remove the enableDisableUpdate flag itself (it's only used during installation)
+    // Handle --disableUpdate flag - write to .msh file instead of passing to service
+    if ((i = options.parameters.getParameterIndex('disableUpdate')) >= 0) {
+        var disableValue = options.parameters.getParameterValue(i);
+        // Remove from parameters (it's written to .msh, not passed as service arg)
         options.parameters.splice(i, 1);
+        // Write to .msh file
+        try {
+            var mshFile = (process.platform == 'win32')
+                ? process.execPath.split('.exe').join('.msh')
+                : process.execPath + '.msh';
+            if (require('fs').existsSync(mshFile)) {
+                updateMshFile(mshFile, { disableUpdate: (disableValue === '1' || disableValue === 'true') ? '1' : '0' });
+            }
+        } catch (e) {
+            // Ignore errors writing to .msh
+        }
+    }
+
+    // Handle --disableTccCheck flag - write to .msh file instead of passing to service
+    if ((i = options.parameters.getParameterIndex('disableTccCheck')) >= 0) {
+        var disableValue = options.parameters.getParameterValue(i);
+        // Remove from parameters (it's written to .msh, not passed as service arg)
+        options.parameters.splice(i, 1);
+        // Write to .msh file
+        try {
+            var mshFile = (process.platform == 'win32')
+                ? process.execPath.split('.exe').join('.msh')
+                : process.execPath + '.msh';
+            if (require('fs').existsSync(mshFile)) {
+                updateMshFile(mshFile, { disableTccCheck: (disableValue === '1' || disableValue === 'true') ? '1' : '0' });
+            }
+        } catch (e) {
+            // Ignore errors writing to .msh
+        }
     }
 
     if (global.gOptions != null && global.gOptions.noParams === true) { options.parameters = []; }
@@ -2995,13 +3049,27 @@ function upgradeAgent(params) {
     var newServiceName = parms.getParameter('meshServiceName', null);
     var newCompanyName = parms.getParameter('companyName', null);
     var newServiceId = parms.getParameter('serviceId', null);
-    var enableDisableUpdate = parms.getParameter('enableDisableUpdate', null);
+    var disableUpdateParam = parms.getParameter('disableUpdate', null);
+    var disableTccCheckParam = parms.getParameter('disableTccCheck', null);
 
     // Track if installPath was explicitly provided by user (for path inference logic)
     var installPathWasUserProvided = (installPath !== null);
 
-    // Convert enableDisableUpdate to boolean
-    var disableUpdate = (enableDisableUpdate === '1' || enableDisableUpdate === 'true');
+    // Parse --disableUpdate parameter: null=not specified, true=disable, false=enable
+    var disableUpdate = null;
+    if (disableUpdateParam === '1' || disableUpdateParam === 'true') {
+        disableUpdate = true;
+    } else if (disableUpdateParam === '0' || disableUpdateParam === 'false') {
+        disableUpdate = false;
+    }
+
+    // Parse --disableTccCheck parameter: null=not specified, true=disable, false=enable
+    var disableTccCheck = null;
+    if (disableTccCheckParam === '1' || disableTccCheckParam === 'true') {
+        disableTccCheck = true;
+    } else if (disableTccCheckParam === '0' || disableTccCheckParam === 'false') {
+        disableTccCheck = false;
+    }
 
     // Determine if we should update configuration
     var useProvidedParams = (newServiceName !== null || newCompanyName !== null);
@@ -3470,12 +3538,34 @@ function upgradeAgent(params) {
     console.log('Installation type: ' + newInstallType);
     console.log('');
 
+    // Write disableUpdate to .msh file if specified
+    if (disableUpdate !== null) {
+        var mshPath = installPath + 'meshagent.msh';
+        try {
+            updateMshFile(mshPath, { disableUpdate: disableUpdate ? '1' : '0' });
+            logger.info('Updated .msh with disableUpdate=' + (disableUpdate ? '1' : '0'));
+        } catch (e) {
+            logger.warn('Could not update .msh with disableUpdate: ' + e.message);
+        }
+    }
+
+    // Write disableTccCheck to .msh file if specified
+    if (disableTccCheck !== null) {
+        var mshPath = installPath + 'meshagent.msh';
+        try {
+            updateMshFile(mshPath, { disableTccCheck: disableTccCheck ? '1' : '0' });
+            logger.info('Updated .msh with disableTccCheck=' + (disableTccCheck ? '1' : '0'));
+        } catch (e) {
+            logger.warn('Could not update .msh with disableTccCheck: ' + e.message);
+        }
+    }
+
     // Recreate LaunchDaemon plist (using discovered/current service configuration)
     // Note: We use currentServiceName/currentCompanyName (not Final values) so that
     // plists are created with the existing configuration, even if user blanked .msh
     logger.info('Recreating LaunchDaemon...');
     try {
-        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType, disableUpdate);
+        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType);
     } catch (e) {
         console.log('ERROR: ' + e.message);
         console.log('You may need to manually reinstall the agent.');

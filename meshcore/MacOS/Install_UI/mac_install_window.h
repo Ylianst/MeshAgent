@@ -20,7 +20,8 @@ typedef struct {
     InstallMode mode;
     char installPath[1024];
     char mshFilePath[1024];
-    int enableDisableUpdate;  // 1 to enable, 0 to disable
+    int disableUpdate;    // 1 to disable updates, 0 to enable
+    int disableTccCheck;  // 1 to disable TCC check UI, 0 to enable
     int cancelled;  // 1 if user cancelled, 0 if user clicked Install
 } InstallResult;
 

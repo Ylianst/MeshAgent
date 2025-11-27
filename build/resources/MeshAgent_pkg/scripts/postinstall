@@ -16,7 +16,7 @@ fi
 INSTALL_PATH=$(/usr/libexec/PlistBuddy -c "Print :installPath" "$SETTINGS_PLIST" 2>/dev/null)
 SERVICE_NAME=$(/usr/libexec/PlistBuddy -c "Print :serviceName" "$SETTINGS_PLIST" 2>/dev/null)
 COMPANY_NAME=$(/usr/libexec/PlistBuddy -c "Print :companyName" "$SETTINGS_PLIST" 2>/dev/null)
-ENABLE_DISABLE_UPDATE=$(/usr/libexec/PlistBuddy -c "Print :enableDisableUpdate" "$SETTINGS_PLIST" 2>/dev/null)
+DISABLE_UPDATE=$(/usr/libexec/PlistBuddy -c "Print :disableUpdate" "$SETTINGS_PLIST" 2>/dev/null)
 
 # Validate required settings - check for empty or unset
 if [ -z "$INSTALL_PATH" ] || [ "$INSTALL_PATH" = "" ]; then
@@ -54,14 +54,14 @@ fi
 echo "Installing MeshAgent to $INSTALL_PATH..."
 echo "Service Name: $SERVICE_NAME"
 echo "Company Name: $COMPANY_NAME"
-echo "Disable Updates: $ENABLE_DISABLE_UPDATE"
+echo "Disable Updates: $DISABLE_UPDATE"
 
 # Run installation with --copy-msh always enabled
 "$MESHAGENT_BIN" -install \
     --installPath="$INSTALL_PATH" \
     --serviceName="$SERVICE_NAME" \
     --companyName="$COMPANY_NAME" \
-    --enableDisableUpdate="$ENABLE_DISABLE_UPDATE" \
+    --disableUpdate="$DISABLE_UPDATE" \
     --copy-msh="1"
 
 # Check if installation succeeded

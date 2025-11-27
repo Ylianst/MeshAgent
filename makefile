@@ -559,7 +559,7 @@ CFLAGS += -D_REMOTELOGGINGSERVER -D_REMOTELOGGING
 endif
 
 # macOS utility sources (always compiled for macOS builds)
-MACOSUTILSOURCES = meshcore/MacOS/bundle_detection.c meshcore/MacOS/mac_tcc_detection.c meshcore/MacOS/mac_logging_utils.c meshcore/MacOS/mac_plist_utils.c meshcore/MacOS/mac_ui_helpers.m meshcore/MacOS/TCC_UI/mac_permissions_window.m meshcore/MacOS/Install_UI/mac_install_window.m meshcore/MacOS/Install_UI/mac_authorized_install.m
+MACOSUTILSOURCES = meshcore/MacOS/mac_bundle_detection.c meshcore/MacOS/mac_tcc_detection.c meshcore/MacOS/mac_logging_utils.c meshcore/MacOS/mac_plist_utils.c meshcore/MacOS/mac_ui_helpers.m meshcore/MacOS/TCC_UI/mac_permissions_window.m meshcore/MacOS/Install_UI/mac_install_window.m meshcore/MacOS/Install_UI/mac_authorized_install.m
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
@@ -843,18 +843,24 @@ linux:
 # App Bundle: After building the binary, automatically creates a .app bundle in
 # $(BUILD_OUTPUT_DIR)/<arch>-app/MeshAgent.app for easy distribution and testing.
 macos:
-	@./build/tools/sync-modules.sh --mode all --verbose
+	@if echo "$(BUNDLE_ID)" | grep -q "code-utils"; then \
+		echo "Skipping module sync for code-utils build (using minimal module set from polyfills regeneration)"; \
+	else \
+		./build/tools/sync-modules.sh --mode all --verbose; \
+	fi
 	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
 	@if [ "$(ARCHID)" = "10005" ]; then \
 		eval $$(./build/tools/generate-build-timestamp.sh); \
 		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
 		echo "Build timestamp: $$BUILD_TIME (date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY)"; \
+		echo "Generating shared binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
+		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		echo "Building x86-64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID); \
+		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
 		echo "Building ARM64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID); \
+		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
 		echo "Creating universal binary..."; \
 		lipo -create \
 			$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-x86-64 \
@@ -901,8 +907,10 @@ macos:
 				BUILD_TIME_ONLY=$(BUILD_TIME_ONLY); \
 			fi; \
 		fi; \
-		echo "Generating binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
-		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
+		if [ "$(SKIP_PLIST_GEN)" != "1" ]; then \
+			echo "Generating binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
+			./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
+		fi; \
 		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing -fobjc-arc $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -lsqlite3 -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Cocoa -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
 		if [ "$(DEBUG)" != "1" ]; then \
 			cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \

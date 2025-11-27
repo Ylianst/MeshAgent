@@ -68,7 +68,7 @@ function prepareFolders(folderPath)
     {
         path = (path == null ? tokens.shift() : (path + dlmtr + tokens.shift()));
         if (path.indexOf(process.platform == 'win32' ? '\\' : '/') < 0) { continue; }
-        if (!require('fs').existsSync(path)) { require('fs').mkdirSync(path); }
+        if (!require('fs').existsSync(path)) { require('fs').mkdirSync(path, { recursive: true }); }
     }
 }
 

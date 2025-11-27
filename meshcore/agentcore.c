@@ -77,7 +77,7 @@ int gRemoteMouseRenderDefault = 0;
 #include <mach-o/dyld.h>
 #include <libproc.h>
 #include <SystemConfiguration/SystemConfiguration.h>
-#include "MacOS/bundle_detection.h"
+#include "MacOS/mac_bundle_detection.h"
 #include "MacOS/mac_tcc_detection.h"
 #include "MacOS/TCC_UI/mac_permissions_window.h"
 #endif
@@ -491,7 +491,7 @@ void TCCPipeMonitor_PostSelect(void* object, int slct, fd_set *readset, fd_set *
 			// If result is 1, user clicked "Do not remind me again"
 			if (result_byte == 1)
 			{
-				ILibSimpleDataStore_Put(monitor->masterDb, "tccPermissionsUIDisabled", "1");
+				ILibSimpleDataStore_Put(monitor->masterDb, "disableTccCheck", "1");
 			}
 
 			// Close pipe and mark inactive
@@ -1550,7 +1550,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		int should_spawn = 1;  // Default: spawn TCC check
 
 		// Check if user previously selected "Do not remind me again"
-		int len = ILibSimpleDataStore_Get(agent->masterDb, "tccPermissionsUIDisabled", ILibScratchPad, sizeof(ILibScratchPad));
+		int len = ILibSimpleDataStore_Get(agent->masterDb, "disableTccCheck", ILibScratchPad, sizeof(ILibScratchPad));
 		if (len > 0 && len < sizeof(ILibScratchPad))
 		{
 			ILibScratchPad[len] = 0;  // Null-terminate
@@ -5200,7 +5200,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		int should_spawn = 1;  // Default: spawn TCC check
 
 		// Check if user previously selected "Do not remind me again"
-		int len = ILibSimpleDataStore_Get(agentHost->masterDb, "tccPermissionsUIDisabled", ILibScratchPad, sizeof(ILibScratchPad));
+		int len = ILibSimpleDataStore_Get(agentHost->masterDb, "disableTccCheck", ILibScratchPad, sizeof(ILibScratchPad));
 		if (len > 0 && len < sizeof(ILibScratchPad))
 		{
 			ILibScratchPad[len] = 0;  // Null-terminate

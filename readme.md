@@ -2,11 +2,12 @@
 
 ## Table of Contents
 
-[About](#about)  
-[Social Media](#social-media)  
-[MSH format](#msh-format)  
-[Self Test](#self-test)  
-[Feedback](#feedback)  
+[About](#about)
+[Social Media](#social-media)
+[MSH format](#msh-format)
+[macOS Installation](#macos-installation)
+[Self Test](#self-test)
+[Feedback](#feedback)
 [License](#license)
 ## About
 
@@ -58,6 +59,52 @@ WebProxy                     Manually specify proxy configuration
 ```
 
 Many of these values are used by developers and are not typically used in normal use.
+
+## macOS Installation
+
+The MeshAgent for macOS includes an **Installation Assistant** that provides an interactive GUI for installing or upgrading the agent.
+
+### Interactive Installation (Recommended)
+
+1. Download the MeshAgent `.app` bundle from your MeshCentral server
+2. **CMD + Double-click** the .app to launch the Installation Assistant
+   - Choose "Upgrade Existing Installation" (if upgrading) or "New Installation"
+   - Select installation path (default: `/usr/local/mesh_services/meshagent`)
+   - Browse for your `.msh` configuration file
+   - Configure automatic updates and TCC permissions check options
+3. The assistant handles admin elevation and installation automatically
+
+### Keyboard Shortcuts
+
+- **CMD + Double-click** `.app` - Launch Installation Assistant
+- **SHIFT + Double-click** `.app` - Open TCC Permissions Window
+
+### Command-Line Installation
+
+You can also launch the Installation Assistant from the command line:
+
+```bash
+sudo ./meshagent --show-install-ui
+```
+
+Or use traditional command-line installation:
+
+```bash
+sudo ./meshagent -install --installPath=/path/to/install --mshPath=/path/to/config.msh
+```
+
+### Installation Log
+
+During GUI installation, detailed logs are written to `/tmp/meshagent-install-ui.log` for troubleshooting.
+
+### TCC Permissions (Privacy & Security)
+
+macOS requires specific privacy permissions for full agent functionality:
+- **Full Disk Access** - Required for file access and management
+- **Accessibility** - Required for remote desktop/KVM features
+- **Screen Recording** - Required for remote desktop/KVM features
+
+The Installation Assistant can optionally check and guide you through granting these permissions after installation.
 
 ## Special notes for BSD systems
 You'll need to mount procfs, which isn't mounted by default on FreeBSD. Add the following line to /etc/fstab
