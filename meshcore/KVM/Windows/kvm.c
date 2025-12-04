@@ -1059,7 +1059,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	if (g_desktop_switch_pending) {
 		Sleep(500);
 	}
-	} while (g_desktop_switch_pending);
+	} while (g_desktop_switch_pending && !g_shutdown);
 
 	KVMDEBUG("kvm_server_mainloop / end", (int)GetCurrentThreadId());
 
