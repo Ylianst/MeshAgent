@@ -110,6 +110,7 @@ int SCALING_FACTOR_NEW = 1024;	// Desired scaling factor, 1024 = 100%
 int FRAME_RATE_TIMER = 0;
 HANDLE kvmthread = NULL;
 int g_shutdown = 999;
+int g_desktop_switch_pending = 0;
 int g_pause = 0;
 int g_remotepause = 1;
 int g_restartcount = 0;
@@ -346,7 +347,7 @@ void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *r
 			{
 				KVMDEBUG("DESKTOP NAME CHANGE DETECTED, triggering shutdown", 0);
 				ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: kvm_server_currentDesktop: NAME CHANGE DETECTED...");
-				g_shutdown = 1;
+				g_desktop_switch_pending = 1;
 			}
 		}
 	}
@@ -835,6 +836,19 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 
 	KVMDEBUG("kvm_server_mainloop / start2", (int)GetCurrentThreadId());
 
+#ifdef _WINSERVICE
+	if (!kvmConsoleMode)
+	{
+		g_shutdown = 0;
+		kvmthread = CreateThread(NULL, 0, kvm_mainloopinput, parm, 0, 0);
+		CloseHandle(kvmthread);
+	}
+#endif
+
+	do {
+		g_desktop_switch_pending = 0;
+		g_shutdown = 0;
+
 	if (!initialize_gdiplus())
 	{
 #ifdef _WINSERVICE
@@ -853,16 +867,6 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 #endif
 	kvm_server_SetResolution(writeHandler, reserved);
 
-
-#ifdef _WINSERVICE
-	if (!kvmConsoleMode)
-	{
-		g_shutdown = 0;
-		kvmthread = CreateThread(NULL, 0, kvm_mainloopinput, parm, 0, 0);
-		CloseHandle(kvmthread);
-	}
-#endif
-
 	// Set all CRCs to 0xFF
 	for (row = 0; row < TILE_HEIGHT_COUNT; row++) {
 		for (col = 0; col < TILE_WIDTH_COUNT; col++) {
@@ -877,7 +881,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	KVMDEBUG("kvm_server_mainloop / start3", (int)GetCurrentThreadId());
 
 	// Loop and send only when a tile changes.
-	while (!g_shutdown)
+	while (!g_shutdown && !g_desktop_switch_pending)
 	{
 		KVMDEBUG("kvm_server_mainloop / loop1", (int)GetCurrentThreadId());
 
@@ -982,8 +986,8 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 				ILibRemoteLogging_printf(gKVMRemoteLogging, ILibRemoteLogging_Modules_Agent_KVM, ILibRemoteLogging_Flags_VerbosityLevel_1, "KVM [SLAVE]: get_desktop_buffer() failed");
 			}
 #endif
-			KVMDEBUG("get_desktop_buffer() failed, shutting down", (int)GetCurrentThreadId());
-			g_shutdown = 1;
+			KVMDEBUG("get_desktop_buffer() failed, restarting...", (int)GetCurrentThreadId());
+			g_desktop_switch_pending = 1;
 		}
 		else 
 		{
@@ -1051,6 +1055,11 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	}
 	KVMDEBUG("kvm_server_mainloop / end1", (int)GetCurrentThreadId());
 	teardown_gdiplus();
+
+	if (g_desktop_switch_pending) {
+		Sleep(500);
+	}
+	} while (g_desktop_switch_pending);
 
 	KVMDEBUG("kvm_server_mainloop / end", (int)GetCurrentThreadId());
 
