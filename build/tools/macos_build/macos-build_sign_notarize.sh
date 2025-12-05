@@ -481,6 +481,26 @@ if [ "$SKIP_SIGN" = "no" ]; then
             else
                 echo "    ⚠ Failed to extract x86_64 binary"
             fi
+
+            echo ""
+            echo "  Signing ARM64 bundle..."
+            ARM_BUNDLE="build/output/osx-arm-64-app/MeshAgent.app"
+            if [ -d "$ARM_BUNDLE" ]; then
+                sudo -u $SUDO_USER MACOS_SIGN_CERT="$MACOS_SIGN_CERT" ./build/tools/macos_build/sign-app-bundle.sh "$ARM_BUNDLE"
+                echo "    ✓ ARM64 bundle signed: $ARM_BUNDLE"
+            else
+                echo "    ⚠ ARM64 bundle not found: $ARM_BUNDLE"
+            fi
+
+            echo ""
+            echo "  Signing x86_64 bundle..."
+            X86_BUNDLE="build/output/osx-x86-64-app/MeshAgent.app"
+            if [ -d "$X86_BUNDLE" ]; then
+                sudo -u $SUDO_USER MACOS_SIGN_CERT="$MACOS_SIGN_CERT" ./build/tools/macos_build/sign-app-bundle.sh "$X86_BUNDLE"
+                echo "    ✓ x86_64 bundle signed: $X86_BUNDLE"
+            else
+                echo "    ⚠ x86_64 bundle not found: $X86_BUNDLE"
+            fi
         fi
         echo ""
         echo "[$(date '+%H:%M:%S')] Signing complete"
@@ -575,6 +595,34 @@ elif [ "$SKIP_NOTARY" = "no" ]; then
             echo "  ✓ Universal binary notarized"
             echo ""
             echo "Note: Standalone binaries cannot be stapled. The notarization is stored in Apple's servers."
+
+            echo ""
+            echo "  Notarizing ARM64 bundle..."
+            ARM_BUNDLE="build/output/osx-arm-64-app/MeshAgent.app"
+            if [ -d "$ARM_BUNDLE" ]; then
+                if sudo -u $SUDO_USER codesign --verify --deep --strict "$ARM_BUNDLE" 2>/dev/null; then
+                    sudo -u $SUDO_USER SKIP_STAPLE="$SKIP_STAPLE" ./build/tools/macos_build/notarize-app-bundle.sh "$ARM_BUNDLE"
+                    echo "    ✓ ARM64 bundle notarized"
+                else
+                    echo "    ⚠ ARM64 bundle not signed, skipping notarization"
+                fi
+            else
+                echo "    ⚠ ARM64 bundle not found"
+            fi
+
+            echo ""
+            echo "  Notarizing x86_64 bundle..."
+            X86_BUNDLE="build/output/osx-x86-64-app/MeshAgent.app"
+            if [ -d "$X86_BUNDLE" ]; then
+                if sudo -u $SUDO_USER codesign --verify --deep --strict "$X86_BUNDLE" 2>/dev/null; then
+                    sudo -u $SUDO_USER SKIP_STAPLE="$SKIP_STAPLE" ./build/tools/macos_build/notarize-app-bundle.sh "$X86_BUNDLE"
+                    echo "    ✓ x86_64 bundle notarized"
+                else
+                    echo "    ⚠ x86_64 bundle not signed, skipping notarization"
+                fi
+            else
+                echo "    ⚠ x86_64 bundle not found"
+            fi
         fi
         echo ""
     elif [ "$CODE_SIGN" = "binary" ]; then
@@ -680,6 +728,99 @@ else
 fi
 
 echo "[$(date '+%H:%M:%S')] PKG preparation complete"
+echo "✓ PKG preparation complete"
+echo ""
+
+#==============================================================================
+# ZIP APP BUNDLES
+#==============================================================================
+
+echo "[6/6] Creating app bundle zip archive..."
+echo "[$(date '+%H:%M:%S')] Zip creation started"
+
+if [ -d "$BUNDLE_PATH" ]; then
+    # Determine output zip filename based on architecture
+    if [ "$ARCHID" = "16" ]; then
+        ZIP_NAME="${BINARY_PREFIX}_osx-x86-64-app.zip"
+    elif [ "$ARCHID" = "29" ]; then
+        ZIP_NAME="${BINARY_PREFIX}_osx-arm-64-app.zip"
+    elif [ "$ARCHID" = "10005" ]; then
+        ZIP_NAME="${BINARY_PREFIX}_osx-universal-64-app.zip"
+    fi
+
+    ZIP_PATH="build/output/$ZIP_NAME"
+
+    # Remove existing zip if present
+    if [ -f "$ZIP_PATH" ]; then
+        sudo -u $SUDO_USER rm -f "$ZIP_PATH"
+        echo "  Removed existing: $ZIP_NAME"
+    fi
+
+    # Create zip from bundle directory
+    # cd into the bundle's parent directory so the zip contains MeshAgent.app/ at root
+    BUNDLE_DIR=$(dirname "$BUNDLE_PATH")
+    BUNDLE_NAME=$(basename "$BUNDLE_PATH")
+
+    echo "  Creating: $ZIP_NAME"
+    echo "  Source:   $BUNDLE_PATH"
+
+    # Use ditto to create zip (preserves all metadata, permissions, code signatures)
+    # Run as actual user to preserve ownership
+    (cd "$BUNDLE_DIR" && sudo -u $SUDO_USER ditto -c -k --keepParent "$BUNDLE_NAME" "../$ZIP_NAME")
+
+    if [ -f "$ZIP_PATH" ]; then
+        ZIP_SIZE=$(du -h "$ZIP_PATH" | cut -f1)
+        echo "  ✓ Created: $ZIP_NAME ($ZIP_SIZE)"
+    else
+        echo "  ⚠ Failed to create zip archive"
+    fi
+
+    # For universal builds, also create zips for ARM and x86 bundles
+    if [ "$BUILD_ARCHID" = "10005" ]; then
+        echo ""
+        echo "  Creating ARM64 bundle zip..."
+        ARM_BUNDLE="build/output/osx-arm-64-app/MeshAgent.app"
+        ARM_ZIP_NAME="${BINARY_PREFIX}_osx-arm-64-app.zip"
+        ARM_ZIP_PATH="build/output/$ARM_ZIP_NAME"
+
+        if [ -d "$ARM_BUNDLE" ]; then
+            [ -f "$ARM_ZIP_PATH" ] && sudo -u $SUDO_USER rm -f "$ARM_ZIP_PATH"
+            (cd "build/output/osx-arm-64-app" && sudo -u $SUDO_USER ditto -c -k --keepParent "MeshAgent.app" "../$ARM_ZIP_NAME")
+            if [ -f "$ARM_ZIP_PATH" ]; then
+                ARM_ZIP_SIZE=$(du -h "$ARM_ZIP_PATH" | cut -f1)
+                echo "    ✓ Created: $ARM_ZIP_NAME ($ARM_ZIP_SIZE)"
+            else
+                echo "    ⚠ Failed to create ARM64 zip"
+            fi
+        else
+            echo "    ⚠ ARM64 bundle not found"
+        fi
+
+        echo ""
+        echo "  Creating x86_64 bundle zip..."
+        X86_BUNDLE="build/output/osx-x86-64-app/MeshAgent.app"
+        X86_ZIP_NAME="${BINARY_PREFIX}_osx-x86-64-app.zip"
+        X86_ZIP_PATH="build/output/$X86_ZIP_NAME"
+
+        if [ -d "$X86_BUNDLE" ]; then
+            [ -f "$X86_ZIP_PATH" ] && sudo -u $SUDO_USER rm -f "$X86_ZIP_PATH"
+            (cd "build/output/osx-x86-64-app" && sudo -u $SUDO_USER ditto -c -k --keepParent "MeshAgent.app" "../$X86_ZIP_NAME")
+            if [ -f "$X86_ZIP_PATH" ]; then
+                X86_ZIP_SIZE=$(du -h "$X86_ZIP_PATH" | cut -f1)
+                echo "    ✓ Created: $X86_ZIP_NAME ($X86_ZIP_SIZE)"
+            else
+                echo "    ⚠ Failed to create x86_64 zip"
+            fi
+        else
+            echo "    ⚠ x86_64 bundle not found"
+        fi
+    fi
+else
+    echo "  Warning: Bundle not found at $BUNDLE_PATH, skipping zip creation"
+fi
+
+echo "[$(date '+%H:%M:%S')] Zip creation complete"
+echo "✓ Zip creation complete"
 echo ""
 
 #==============================================================================

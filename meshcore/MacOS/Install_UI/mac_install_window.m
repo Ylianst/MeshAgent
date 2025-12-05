@@ -326,33 +326,182 @@
     self.mshViewerWindow = nil;
 }
 
+// Helper to run meshagent with an argument and return output
+- (NSString*)runMeshagent:(NSString*)binaryPath withArg:(NSString*)arg {
+    NSTask* task = [[NSTask alloc] init];
+    [task setLaunchPath:binaryPath];
+    [task setArguments:@[arg]];
+
+    NSPipe* pipe = [NSPipe pipe];
+    [task setStandardOutput:pipe];
+    [task setStandardError:[NSPipe pipe]];  // Suppress stderr
+
+    @try {
+        [task launch];
+        [task waitUntilExit];
+
+        if ([task terminationStatus] != 0) {
+            return nil;
+        }
+
+        NSData* data = [[pipe fileHandleForReading] readDataToEndOfFile];
+        NSString* output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        return [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    } @catch (NSException* e) {
+        mesh_log_message("[INSTALL-UI] Failed to run meshagent %s: %s\n", [arg UTF8String], [[e reason] UTF8String]);
+        return nil;
+    }
+}
+
+// Parse "Compiled on: HH:MM:SS, Mon DD YYYY" to "YY.MM.DD (HH.MM.SS)"
+- (NSString*)parseCompiledOnLine:(NSString*)line {
+    // Expected format: "Compiled on: 10:48:25, Dec 10 2025"
+    NSRange colonRange = [line rangeOfString:@": "];
+    if (colonRange.location == NSNotFound) return nil;
+
+    NSString* dateStr = [line substringFromIndex:colonRange.location + 2];
+    // dateStr is now "10:48:25, Dec 10 2025"
+
+    // Parse time
+    NSRange commaRange = [dateStr rangeOfString:@", "];
+    if (commaRange.location == NSNotFound) return nil;
+
+    NSString* timeStr = [dateStr substringToIndex:commaRange.location];  // "10:48:25"
+    NSString* restStr = [dateStr substringFromIndex:commaRange.location + 2];  // "Dec 10 2025"
+
+    // Parse date parts
+    NSArray* dateParts = [restStr componentsSeparatedByString:@" "];
+    if ([dateParts count] < 3) return nil;
+
+    NSString* monthStr = dateParts[0];
+    NSString* dayStr = dateParts[1];
+    NSString* yearStr = dateParts[2];
+
+    // Convert month name to number
+    NSDictionary* months = @{
+        @"Jan": @"01", @"Feb": @"02", @"Mar": @"03", @"Apr": @"04",
+        @"May": @"05", @"Jun": @"06", @"Jul": @"07", @"Aug": @"08",
+        @"Sep": @"09", @"Oct": @"10", @"Nov": @"11", @"Dec": @"12"
+    };
+    NSString* monthNum = months[monthStr];
+    if (monthNum == nil) return nil;
+
+    // Format day with leading zero
+    int day = [dayStr intValue];
+    NSString* dayNum = [NSString stringWithFormat:@"%02d", day];
+
+    // Get 2-digit year
+    NSString* yearShort = [yearStr substringFromIndex:[yearStr length] - 2];
+
+    // Convert time HH:MM:SS to HH.MM.SS
+    NSString* timeDotted = [timeStr stringByReplacingOccurrencesOfString:@":" withString:@"."];
+
+    return [NSString stringWithFormat:@"%@.%@.%@ (%@)", yearShort, monthNum, dayNum, timeDotted];
+}
+
+// Find meshagent binary path from install directory
+// Checks: LaunchDaemon plist programPath, .app bundles, bare binary
+- (NSString*)findMeshagentBinary:(NSString*)installPath {
+    if (installPath == nil || [installPath length] == 0) {
+        return nil;
+    }
+
+    NSFileManager* fm = [NSFileManager defaultManager];
+
+    // First: scan LaunchDaemons to find the actual program path
+    DIR* dir = opendir("/Library/LaunchDaemons");
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strstr(entry->d_name, ".plist") == NULL) continue;
+
+            char plistPath[1024];
+            snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
+
+            MeshPlistInfo info;
+            if (mesh_parse_launchdaemon_plist(plistPath, &info)) {
+                // Check if this plist's program path is under our install path
+                NSString* programPath = [NSString stringWithUTF8String:info.programPath];
+                if ([programPath hasPrefix:installPath] && [fm isExecutableFileAtPath:programPath]) {
+                    closedir(dir);
+                    return programPath;
+                }
+            }
+        }
+        closedir(dir);
+    }
+
+    // Second: look for any .app bundle containing meshagent
+    NSError* error = nil;
+    NSArray* contents = [fm contentsOfDirectoryAtPath:installPath error:&error];
+    if (contents != nil) {
+        for (NSString* item in contents) {
+            if ([item hasSuffix:@".app"]) {
+                NSString* candidate = [NSString stringWithFormat:@"%@/%@/Contents/MacOS/meshagent", installPath, item];
+                if ([fm isExecutableFileAtPath:candidate]) {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    // Third: look for bare meshagent binary in install path
+    NSString* bareBinary = [NSString stringWithFormat:@"%@/meshagent", installPath];
+    if ([fm isExecutableFileAtPath:bareBinary]) {
+        return bareBinary;
+    }
+
+    return nil;
+}
+
 - (void)updateInstalledVersionLabel:(NSString*)installPath {
     if (installPath == nil || [installPath length] == 0) {
         [self.installedVersionLabel setStringValue:@""];
         return;
     }
 
-    // Try to read Info.plist from the app bundle
-    NSString* plistPath = [NSString stringWithFormat:@"%@/MeshAgent.app/Contents/Info.plist", installPath];
-    NSDictionary* plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    // Find the meshagent binary (from plist, .app bundle, or bare binary)
+    NSString* binaryPath = [self findMeshagentBinary:installPath];
 
-    if (plist == nil) {
+    if (binaryPath == nil) {
         [self.installedVersionLabel setStringValue:@"Installed: Version unknown"];
         return;
     }
 
-    NSString* version = plist[@"CFBundleShortVersionString"];
-    NSString* build = plist[@"CFBundleVersion"];
+    // Try -fullversion first (output: "XX.XX.XX XX.XX.XX")
+    NSString* output = [self runMeshagent:binaryPath withArg:@"-fullversion"];
 
-    if (version != nil && build != nil) {
-        [self.installedVersionLabel setStringValue:
-            [NSString stringWithFormat:@"Installed: Version %@ (Build %@)", version, build]];
-    } else if (version != nil) {
-        [self.installedVersionLabel setStringValue:
-            [NSString stringWithFormat:@"Installed: Version %@", version]];
-    } else {
-        [self.installedVersionLabel setStringValue:@"Installed: Version unknown"];
+    if (output != nil && [output length] > 0) {
+        NSArray* parts = [output componentsSeparatedByString:@" "];
+        if ([parts count] >= 2) {
+            [self.installedVersionLabel setStringValue:
+                [NSString stringWithFormat:@"Installed: %@ (%@)", parts[0], parts[1]]];
+            return;
+        } else if ([parts count] == 1 && [parts[0] length] > 0) {
+            [self.installedVersionLabel setStringValue:
+                [NSString stringWithFormat:@"Installed: %@", parts[0]]];
+            return;
+        }
     }
+
+    // Fallback: try -info and parse "Compiled on:" line
+    output = [self runMeshagent:binaryPath withArg:@"-info"];
+
+    if (output != nil) {
+        NSArray* lines = [output componentsSeparatedByString:@"\n"];
+        for (NSString* line in lines) {
+            if ([line hasPrefix:@"Compiled on:"]) {
+                NSString* parsed = [self parseCompiledOnLine:line];
+                if (parsed != nil) {
+                    [self.installedVersionLabel setStringValue:
+                        [NSString stringWithFormat:@"Installed: %@", parsed]];
+                    return;
+                }
+            }
+        }
+    }
+
+    [self.installedVersionLabel setStringValue:@"Installed: Version unknown"];
 }
 
 - (void)showProgressWindow {

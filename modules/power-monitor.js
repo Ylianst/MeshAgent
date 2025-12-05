@@ -135,11 +135,10 @@ function powerMonitor()
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
             child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write("pmset -g batt | awk 'NR==2 {");
-            child.stdin.write('   power=index($0,\"AC\")>0?\"1\":\"0\";');
-            child.stdin.write('   for(i=1;i<=NF;i++) { if(index($i,\"%\")>0) { split($i,chg,\";\"); split(chg[1],pct,\"%\"); level=pct[1]; break; } }');
-            child.stdin.write('   printf \"{\\\"ac\\\": %s,\\\"level\\\": %s}\",power, (level==\"\"?\"0\":level); ');
-            child.stdin.write("}'");
+            child.stdin.write("pmset -g batt | awk 'NR==1 { power=index($0,\"AC\")>0?\"1\":\"0\" } ");
+            child.stdin.write('NR==2 { for(i=1;i<=NF;i++) { if(index($i,\"%\")>0) { split($i,chg,\";\"); split(chg[1],pct,\"%\"); level=pct[1]; break; } } } ');
+            child.stdin.write('END { printf \"{\\\"ac\\\": %s,\\\"level\\\": %s}\",power, (level==\"\"?\"0\":level); }');
+            child.stdin.write("'");
             child.stdin.write("\nexit\n");
             child.waitExit();
             try {

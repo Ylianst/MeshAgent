@@ -17,6 +17,8 @@ var promise = require('promise');
 var systemd_escape = null;
 var macOSHelpers = process.platform === 'darwin' ? require('./macOSHelpers') : null;
 var securityPermissions = process.platform === 'darwin' ? require('./security-permissions') : null;
+var logger = null;
+try { logger = require('./logger'); } catch (e) { }
 
 function failureActionToInteger(action)
 {
@@ -35,6 +37,18 @@ function failureActionToInteger(action)
             break;
     }
     return(ret);
+}
+
+// Prettify/normalize a plist file using plutil (macOS only)
+// This is best-effort and async - plist is valid either way
+function prettifyPlist(plistPath) {
+    if (process.platform !== 'darwin') { return; }
+    try {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.on('data', function() {});
+        child.stderr.on('data', function() {});
+        child.stdin.write('plutil -convert xml1 "' + plistPath + '"\nexit\n');
+    } catch (e) { }
 }
 
 function extractFileName(filePath)
@@ -2253,6 +2267,123 @@ function serviceManager()
             return (results);
         };
     }
+
+    function getExtraProgramArguments(plistPath, standardArgs) {
+        // Read existing ProgramArguments and extract any "extra" args beyond standard ones
+        // Returns array of extra arguments to preserve
+        try {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.on('data', function (chunk) { });
+
+            // Get the count of ProgramArguments
+            child.stdin.write('/usr/libexec/PlistBuddy -c "Print :ProgramArguments" "' + plistPath + '" 2>/dev/null | grep -c "Dict"\n');
+            child.stdin.write('exit\n');
+            child.waitExit();
+
+            var count = parseInt(child.stdout.str.trim()) || 0;
+            if (count === 0) return [];
+
+            // Read each argument
+            var existingArgs = [];
+            for (var i = 0; i < count; i++) {
+                var argChild = require('child_process').execFile('/bin/sh', ['sh']);
+                argChild.stdout.str = '';
+                argChild.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                argChild.stderr.on('data', function (chunk) { });
+                argChild.stdin.write('/usr/libexec/PlistBuddy -c "Print :ProgramArguments:' + i + '" "' + plistPath + '" 2>/dev/null\n');
+                argChild.stdin.write('exit\n');
+                argChild.waitExit();
+                var arg = argChild.stdout.str.trim();
+                if (arg) existingArgs.push(arg);
+            }
+
+            // Filter out standard arguments to find extras
+            var extras = [];
+            for (var j = 0; j < existingArgs.length; j++) {
+                var isStandard = false;
+                for (var k = 0; k < standardArgs.length; k++) {
+                    if (existingArgs[j] === standardArgs[k]) {
+                        isStandard = true;
+                        break;
+                    }
+                }
+                if (!isStandard) {
+                    extras.push(existingArgs[j]);
+                }
+            }
+
+            return extras;
+        } catch (e) {
+            if (logger) { logger.warn('Could not read existing ProgramArguments: ' + e); }
+            return [];
+        }
+    }
+
+    function plistHasMeshAgentVer(plistPath) {
+        // Check if plist has meshagent_ver key
+        // Returns true if key exists, false otherwise
+        try {
+            var child = require('child_process').execFile('/bin/sh', ['sh']);
+            child.stdout.str = '';
+            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            child.stderr.on('data', function (chunk) { });
+            child.stdin.write('/usr/libexec/PlistBuddy -c "Print :meshagent_ver" "' + plistPath + '" 2>/dev/null\n');
+            child.stdin.write('exit\n');
+            child.waitExit();
+
+            var result = child.stdout.str.trim();
+            return (result.length > 0 && result !== 'Does Not Exist');
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function getNonStandardKeys(plistPath, standardKeys) {
+        // Extract non-standard keys from existing plist as raw XML fragments
+        // Returns array of XML strings (key + value pairs)
+        try {
+            // Read the entire plist as XML
+            var plistXml = require('fs').readFileSync(plistPath).toString();
+
+            // Extract the dict content (between <dict> and </dict>)
+            var dictMatch = plistXml.match(/<dict>([\s\S]*)<\/dict>/);
+            if (!dictMatch) return [];
+
+            var dictContent = dictMatch[1];
+
+            // Parse key-value pairs using a simple regex approach
+            // This matches: <key>KeyName</key> followed by <type>value</type>
+            var keyValuePattern = /\s*<key>([^<]+)<\/key>\s*((?:<[^>]+>(?:(?!<key>)[\s\S])*?<\/[^>]+>)|(?:<[^\/]+\/>))/g;
+            var match;
+            var nonStandardXml = [];
+
+            while ((match = keyValuePattern.exec(dictContent)) !== null) {
+                var keyName = match[1];
+                var keyValueXml = match[0]; // Full XML fragment including key and value
+
+                // Check if this is a standard key
+                var isStandard = false;
+                for (var i = 0; i < standardKeys.length; i++) {
+                    if (keyName === standardKeys[i]) {
+                        isStandard = true;
+                        break;
+                    }
+                }
+
+                if (!isStandard) {
+                    nonStandardXml.push(keyValueXml);
+                }
+            }
+
+            return nonStandardXml;
+        } catch (e) {
+            if (logger) { logger.warn('Could not read non-standard keys: ' + e); }
+            return [];
+        }
+    }
+
     this.installService = function installService(options)
     {
         // Sanitize companyName and service name for macOS to follow reverse DNS naming conventions
@@ -2867,8 +2998,6 @@ function serviceManager()
             // Build composite service identifier from companyName and service name
             var serviceId = macOSHelpers.buildServiceId(options.name, options.companyName, { explicitServiceId: options.serviceId });
 
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
-            var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
@@ -2895,29 +3024,173 @@ function serviceManager()
             plist += (params + '\n');
             plist += '      <key>RunAtLoad</key>\n';
             plist += (autoStart + '\n');
-            plist += (stderrpath + '\n');
-            plist += (stdoutpath + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.installPath.replace(/\/$/, '') + '</string>\n');
+            if (options.meshAgentLogging) {
+                plist += '      <key>StandardOutPath</key>\n';
+                plist += '      <string>/tmp/meshagent-daemon.log</string>\n';
+                plist += '      <key>StandardErrorPath</key>\n';
+                plist += '      <string>/tmp/meshagent-daemon.log</string>\n';
+            }
+            plist += '      <key>meshagent_ver</key>\n';
+            plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
 
             plist += '  </dict>\n';
             plist += '</plist>';
             var plistPath = macOSHelpers.getPlistPath(serviceId, 'daemon');
-            if (!require('fs').existsSync(plistPath))
-            {
-                require('fs').writeFileSync(plistPath, plist);
+            var plistExists = require('fs').existsSync(plistPath);
 
-                // Set secure permissions on LaunchDaemon plist
-                if (securityPermissions) {
-                    var plistResult = securityPermissions.setSecurePermissions(plistPath, 'plist');
-                    if (!plistResult.success) {
-                        console.log('WARNING: Could not set plist permissions: ' + plistResult.errors.join(', '));
+            // Surgical update mode: Two-tier approach based on meshagent_ver presence
+            if (options.surgicalUpdate && (plistExists || options.cachedCustomizations)) {
+                var hasMeshAgentVer = false;
+                if (plistExists) {
+                    hasMeshAgentVer = plistHasMeshAgentVer(plistPath);
+                } else if (options.cachedCustomizations) {
+                    // Check if cached plist had meshagent_ver key
+                    for (var i = 0; i < options.cachedCustomizations.allKeys.length; i++) {
+                        if (options.cachedCustomizations.allKeys[i].key === 'meshagent_ver') {
+                            hasMeshAgentVer = true;
+                            break;
+                        }
+                    }
+                    if (logger) {
+                        logger.info('LaunchDaemon using cached customizations (plist deleted during cleanup)');
+                        logger.info('Cached plist had meshagent_ver: ' + hasMeshAgentVer);
                     }
                 }
+
+                if (!hasMeshAgentVer) {
+                    // NO meshagent_ver → Force atomic replacement (fresh plist)
+                    if (logger) { logger.info('LaunchDaemon plist exists but has no meshagent_ver - performing atomic replacement'); }
+                    require('fs').writeFileSync(plistPath, plist);
+                    prettifyPlist(plistPath);
+                    if (logger) { logger.info('LaunchDaemon plist replaced atomically (no version tracking found)'); }
+                } else {
+                    // HAS meshagent_ver → True surgical update (preserve extras + non-standard keys)
+                    if (logger) { logger.info('LaunchDaemon performing surgical update'); }
+
+                    // Extract or use cached customizations
+                    var standardArgs = [options.servicePath || (options.installPath + options.target)];
+                    if (options.parameters) {
+                        standardArgs = standardArgs.concat(options.parameters);
+                    }
+
+                    var extraArgs, nonStandardKeyXml;
+                    var standardKeys = ['Disabled', 'KeepAlive', 'Label', 'ProgramArguments', 'RunAtLoad', 'WorkingDirectory', 'meshagent_ver'];
+
+                    if (options.cachedCustomizations) {
+                        // Use cached data (plist was deleted during cleanup)
+                        if (logger) { logger.info('Using cached customizations from deleted plist'); }
+
+                        // Filter cached args to extract extras
+                        extraArgs = [];
+                        for (var i = 0; i < options.cachedCustomizations.allArgs.length; i++) {
+                            var arg = options.cachedCustomizations.allArgs[i];
+                            var isStandard = false;
+                            for (var j = 0; j < standardArgs.length; j++) {
+                                if (arg === standardArgs[j]) {
+                                    isStandard = true;
+                                    break;
+                                }
+                            }
+                            if (!isStandard) {
+                                extraArgs.push(arg);
+                            }
+                        }
+
+                        // Filter cached keys to extract non-standard ones
+                        nonStandardKeyXml = [];
+                        for (var k = 0; k < options.cachedCustomizations.allKeys.length; k++) {
+                            var keyObj = options.cachedCustomizations.allKeys[k];
+                            var isStandard = false;
+                            for (var m = 0; m < standardKeys.length; m++) {
+                                if (keyObj.key === standardKeys[m]) {
+                                    isStandard = true;
+                                    break;
+                                }
+                            }
+                            if (!isStandard) {
+                                nonStandardKeyXml.push(keyObj.xml);
+                            }
+                        }
+                    } else {
+                        // Read from plist (original behavior)
+                        extraArgs = getExtraProgramArguments(plistPath, standardArgs);
+                        nonStandardKeyXml = getNonStandardKeys(plistPath, standardKeys);
+                    }
+
+                    if (extraArgs.length > 0) {
+                        if (logger) { logger.info('Preserving ' + extraArgs.length + ' extra ProgramArguments: ' + JSON.stringify(extraArgs)); }
+                    }
+                    if (nonStandardKeyXml.length > 0) {
+                        if (logger) { logger.info('Preserving ' + nonStandardKeyXml.length + ' non-standard keys'); }
+                    }
+
+                    // Rebuild params with extras appended
+                    params = '     <key>ProgramArguments</key>\n';
+                    params += '     <array>\n';
+                    params += ('         <string>' + (options.servicePath || (options.installPath + options.target)) + '</string>\n');
+                    if (options.parameters) {
+                        for (var itm in options.parameters) {
+                            params += ('         <string>' + options.parameters[itm] + '</string>\n');
+                        }
+                    }
+                    // Append extra arguments
+                    for (var e in extraArgs) {
+                        params += ('         <string>' + extraArgs[e] + '</string>\n');
+                    }
+                    params += '     </array>\n';
+
+                    // Rebuild complete plist with updated standard keys
+                    plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                    plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
+                    plist += '<plist version="1.0">\n';
+                    plist += '  <dict>\n';
+                    plist += '      <key>Disabled</key>\n';
+                    plist += '      <false/>\n';
+                    plist += '      <key>KeepAlive</key>\n';
+                    plist += '      <true/>\n';
+                    plist += '      <key>Label</key>\n';
+                    plist += ('     <string>' + serviceId + '</string>\n');
+                    plist += (params + '\n');
+                    plist += '      <key>RunAtLoad</key>\n';
+                    plist += (autoStart + '\n');
+                    plist += '      <key>WorkingDirectory</key>\n';
+                    plist += ('     <string>' + options.installPath.replace(/\/$/, '') + '</string>\n');
+                    plist += '      <key>meshagent_ver</key>\n';
+                    plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
+
+                    // Append non-standard keys
+                    for (var ns = 0; ns < nonStandardKeyXml.length; ns++) {
+                        plist += (nonStandardKeyXml[ns] + '\n');
+                    }
+
+                    plist += '  </dict>\n';
+                    plist += '</plist>';
+
+                    require('fs').writeFileSync(plistPath, plist);
+                    prettifyPlist(plistPath);
+
+                    if (logger) { logger.info('LaunchDaemon plist updated surgically (preserved extra args + non-standard keys)'); }
+                }
             }
-            else
-            {
-                throw ('Service: ' + serviceId + ' already exists');
+            // Atomic replacement mode: Create new plist from scratch
+            else if (!plistExists) {
+                require('fs').writeFileSync(plistPath, plist);
+                prettifyPlist(plistPath);
+
+                if (logger) { logger.info('LaunchDaemon plist created (atomic replacement)'); }
+            }
+            else {
+                throw ('Service: ' + serviceId + ' already exists (use surgical mode to update)');
+            }
+
+            // Set secure permissions on LaunchDaemon plist (both modes)
+            if (securityPermissions) {
+                var plistResult = securityPermissions.setSecurePermissions(plistPath, 'plist');
+                if (!plistResult.success) {
+                    if (logger) { logger.warn('Could not set plist permissions: ' + plistResult.errors.join(', ')); }
+                }
             }
         }
 
@@ -2966,8 +3239,6 @@ function serviceManager()
             }
 
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
-            var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-agent.log</string>'));
             var params =         '     <key>ProgramArguments</key>\n';
             params +=            '     <array>\n';
             params +=           ('         <string>' + options.servicePath + '</string>\n');
@@ -2990,8 +3261,8 @@ function serviceManager()
             plist += (params + '\n');
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.workingDirectory + '</string>\n');
-            plist += (stderrpath + '\n');
-            plist += (stdoutpath + '\n');
+            plist += '      <key>Umask</key>\n';
+            plist += '      <integer>0</integer>\n';
             if (options.sessionTypes && options.sessionTypes.length > 0)
             {
                 plist += '      <key>LimitLoadToSessionType</key>\n';
@@ -3008,6 +3279,14 @@ function serviceManager()
             plist += '      <array>\n';
             plist += ('         <string>/var/run/' + serviceId + '</string>\n');
             plist += '      </array>\n';
+            if (options.meshAgentLogging) {
+                plist += '      <key>StandardOutPath</key>\n';
+                plist += '      <string>/tmp/meshagent-agent.log</string>\n';
+                plist += '      <key>StandardErrorPath</key>\n';
+                plist += '      <string>/tmp/meshagent-agent.log</string>\n';
+            }
+            plist += '      <key>meshagent_ver</key>\n';
+            plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
 
             plist += '  </dict>\n';
             plist += '</plist>';
@@ -3025,13 +3304,167 @@ function serviceManager()
                 require('fs').chownSync(folder, options.uid, options.gid);
             }
             var agentPlistPath = folder + serviceId + '-agent.plist';
-            require('fs').writeFileSync(agentPlistPath, plist);
+            var agentPlistExists = require('fs').existsSync(agentPlistPath);
+
+            // Surgical update mode: Two-tier approach based on meshagent_ver presence
+            if (options.surgicalUpdate && (agentPlistExists || options.cachedCustomizations)) {
+                var hasMeshAgentVer = false;
+                if (agentPlistExists) {
+                    hasMeshAgentVer = plistHasMeshAgentVer(agentPlistPath);
+                } else if (options.cachedCustomizations) {
+                    // Check if cached plist had meshagent_ver key
+                    for (var i = 0; i < options.cachedCustomizations.allKeys.length; i++) {
+                        if (options.cachedCustomizations.allKeys[i].key === 'meshagent_ver') {
+                            hasMeshAgentVer = true;
+                            break;
+                        }
+                    }
+                    if (logger) {
+                        logger.info('LaunchAgent using cached customizations (plist deleted during cleanup)');
+                        logger.info('Cached plist had meshagent_ver: ' + hasMeshAgentVer);
+                    }
+                }
+
+                if (!hasMeshAgentVer) {
+                    // NO meshagent_ver → Force atomic replacement (fresh plist)
+                    if (logger) { logger.info('LaunchAgent plist exists but has no meshagent_ver - performing atomic replacement'); }
+                    require('fs').writeFileSync(agentPlistPath, plist);
+                    prettifyPlist(agentPlistPath);
+                    if (logger) { logger.info('LaunchAgent plist replaced atomically (no version tracking found)'); }
+                } else {
+                    // HAS meshagent_ver → True surgical update (preserve extras + non-standard keys)
+                    if (logger) { logger.info('LaunchAgent performing surgical update'); }
+
+                    // Extract or use cached customizations
+                    var standardArgs = [options.servicePath];
+                    if (options.parameters) {
+                        standardArgs = standardArgs.concat(options.parameters);
+                    }
+
+                    var extraArgs, nonStandardKeyXml;
+                    var standardKeys = ['Disabled', 'Label', 'ProgramArguments', 'WorkingDirectory', 'Umask', 'LimitLoadToSessionType', 'KeepAlive', 'QueueDirectories', 'meshagent_ver'];
+
+                    if (options.cachedCustomizations) {
+                        // Use cached data (plist was deleted during cleanup)
+                        if (logger) { logger.info('Using cached customizations from deleted plist'); }
+
+                        // Filter cached args to extract extras
+                        extraArgs = [];
+                        for (var i = 0; i < options.cachedCustomizations.allArgs.length; i++) {
+                            var arg = options.cachedCustomizations.allArgs[i];
+                            var isStandard = false;
+                            for (var j = 0; j < standardArgs.length; j++) {
+                                if (arg === standardArgs[j]) {
+                                    isStandard = true;
+                                    break;
+                                }
+                            }
+                            if (!isStandard) {
+                                extraArgs.push(arg);
+                            }
+                        }
+
+                        // Filter cached keys to extract non-standard ones
+                        nonStandardKeyXml = [];
+                        for (var k = 0; k < options.cachedCustomizations.allKeys.length; k++) {
+                            var keyObj = options.cachedCustomizations.allKeys[k];
+                            var isStandard = false;
+                            for (var m = 0; m < standardKeys.length; m++) {
+                                if (keyObj.key === standardKeys[m]) {
+                                    isStandard = true;
+                                    break;
+                                }
+                            }
+                            if (!isStandard) {
+                                nonStandardKeyXml.push(keyObj.xml);
+                            }
+                        }
+                    } else {
+                        // Read from plist (original behavior)
+                        extraArgs = getExtraProgramArguments(agentPlistPath, standardArgs);
+                        nonStandardKeyXml = getNonStandardKeys(agentPlistPath, standardKeys);
+                    }
+
+                    if (extraArgs.length > 0) {
+                        if (logger) { logger.info('Preserving ' + extraArgs.length + ' extra ProgramArguments: ' + JSON.stringify(extraArgs)); }
+                    }
+                    if (nonStandardKeyXml.length > 0) {
+                        if (logger) { logger.info('Preserving ' + nonStandardKeyXml.length + ' non-standard keys'); }
+                    }
+
+                    // Rebuild params with extras appended
+                    params = '     <key>ProgramArguments</key>\n';
+                    params += '     <array>\n';
+                    params += ('         <string>' + options.servicePath + '</string>\n');
+                    if (options.parameters) {
+                        for (var itm in options.parameters) {
+                            params += ('         <string>' + options.parameters[itm] + '</string>\n');
+                        }
+                    }
+                    // Append extra arguments
+                    for (var e in extraArgs) {
+                        params += ('         <string>' + extraArgs[e] + '</string>\n');
+                    }
+                    params += '     </array>\n';
+
+                    // Rebuild complete plist with updated standard keys
+                    plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                    plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
+                    plist += '<plist version="1.0">\n';
+                    plist += '  <dict>\n';
+                    plist += '      <key>Disabled</key>\n';
+                    plist += '      <false/>\n';
+                    plist += '      <key>Label</key>\n';
+                    plist += ('     <string>' + serviceId + '-agent</string>\n');
+                    plist += (params + '\n');
+                    plist += '      <key>WorkingDirectory</key>\n';
+                    plist += ('     <string>' + options.workingDirectory + '</string>\n');
+                    plist += '      <key>Umask</key>\n';
+                    plist += '      <integer>0</integer>\n';
+                    if (options.sessionTypes && options.sessionTypes.length > 0) {
+                        plist += '      <key>LimitLoadToSessionType</key>\n';
+                        plist += '      <array>\n';
+                        for (var stype in options.sessionTypes) {
+                            plist += ('          <string>' + options.sessionTypes[stype] + '</string>\n');
+                        }
+                        plist += '      </array>\n';
+                    }
+                    plist += '      <key>KeepAlive</key>\n';
+                    plist += '      <false/>\n';
+                    plist += '      <key>QueueDirectories</key>\n';
+                    plist += '      <array>\n';
+                    plist += ('         <string>/var/run/' + serviceId + '</string>\n');
+                    plist += '      </array>\n';
+                    plist += '      <key>meshagent_ver</key>\n';
+                    plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
+
+                    // Append non-standard keys
+                    for (var ns = 0; ns < nonStandardKeyXml.length; ns++) {
+                        plist += (nonStandardKeyXml[ns] + '\n');
+                    }
+
+                    plist += '  </dict>\n';
+                    plist += '</plist>';
+
+                    require('fs').writeFileSync(agentPlistPath, plist);
+                    prettifyPlist(agentPlistPath);
+
+                    if (logger) { logger.info('LaunchAgent plist updated surgically (preserved extra args + non-standard keys)'); }
+                }
+            }
+            // Atomic replacement mode: Create new plist from scratch
+            else {
+                require('fs').writeFileSync(agentPlistPath, plist);
+                prettifyPlist(agentPlistPath);
+
+                if (logger) { logger.info('LaunchAgent plist created (atomic replacement)'); }
+            }
 
             // Set secure permissions on LaunchAgent plist
             if (securityPermissions) {
                 var plistResult = securityPermissions.setSecurePermissions(agentPlistPath, 'plist');
                 if (!plistResult.success) {
-                    console.log('WARNING: Could not set agent plist permissions: ' + plistResult.errors.join(', '));
+                    if (logger) { logger.warn('Could not set agent plist permissions: ' + plistResult.errors.join(', ')); }
                 }
             }
 
@@ -3039,6 +3472,27 @@ function serviceManager()
             if(options.user)
             {
                 require('fs').chownSync(agentPlistPath, options.uid, options.gid);
+            }
+
+            // Ensure LaunchAgent log file has 666 permissions if it already exists
+            // (Umask in plist handles new file creation, but existing logs need fixing)
+            var agentLogPath = options.stdout || ('/tmp/' + serviceId + '-agent.log');
+            if (require('fs').existsSync(agentLogPath)) {
+                try {
+                    require('fs').chmodSync(agentLogPath, 0o666);
+                    if (logger) { logger.info('Set LaunchAgent log permissions to 666: ' + agentLogPath); }
+                } catch (e) {
+                    if (logger) { logger.warn('Could not set agent log permissions: ' + e.message); }
+                }
+            }
+            // Also fix stderr if it's different
+            if (options.stderr && options.stderr !== agentLogPath && require('fs').existsSync(options.stderr)) {
+                try {
+                    require('fs').chmodSync(options.stderr, 0o666);
+                    if (logger) { logger.info('Set LaunchAgent stderr log permissions to 666: ' + options.stderr); }
+                } catch (e) {
+                    if (logger) { logger.warn('Could not set agent stderr log permissions: ' + e.message); }
+                }
             }
         };
     }

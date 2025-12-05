@@ -94,18 +94,3 @@ fi
 # Create PkgInfo file (optional but recommended for compatibility)
 echo -n "APPLMESH" > "$BUNDLE_NAME/Contents/PkgInfo"
 echo "  Created PkgInfo"
-
-echo ""
-echo "Bundle created successfully: $BUNDLE_NAME"
-echo ""
-echo "Bundle structure:"
-ls -lR "$BUNDLE_NAME" | head -20
-echo ""
-echo "To test:"
-echo "  $BUNDLE_NAME/Contents/MacOS/meshagent --version"
-echo ""
-echo "To launch:"
-echo "  open $BUNDLE_NAME"
-echo ""
-echo "To install:"
-echo "  cp -R $BUNDLE_NAME /Applications/"

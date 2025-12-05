@@ -472,8 +472,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     if [ -n "$CUSTOM_BINARY" ]; then
         echo "Binary locations:"
         echo "  - $CUSTOM_BINARY (universal, notarized)"
-        local base_name=$(basename "$CUSTOM_BINARY" | sed 's/-universal-64$//')
-        local custom_dir=$(dirname "$CUSTOM_BINARY")
+        base_name=$(basename "$CUSTOM_BINARY" | sed 's/-universal-64$//')
+        custom_dir=$(dirname "$CUSTOM_BINARY")
         echo "  - ${custom_dir}/${base_name}-arm-64 (arm64, inherits notarization)"
         echo "  - ${custom_dir}/${base_name}-x86-64 (x86_64, inherits notarization)"
     else

@@ -282,6 +282,7 @@ sudo ./meshagent -install \
 - `--serviceName="Name"` - Service name component
 - `--companyName="Company"` - Company name component
 - `--copy-msh="1"` - Copy .msh configuration file to install location
+- `--meshAgentLogging="1"` - Configure meshagent launchd logging to /tmp (macOS only)
 
 **Behavior**:
 - **Fresh install**: Installs new agent instance
@@ -298,6 +299,11 @@ sudo ./meshagent -install \
 - Service ID format on macOS: `meshagent.ServiceName.CompanyName`
 - Creates LaunchDaemon at `/Library/LaunchDaemons/meshagent.ServiceName.CompanyName.plist`
 - May create LaunchAgent for user-level features
+- When `--meshAgentLogging="1"` is enabled:
+  - LaunchDaemon logs to: `/tmp/meshagent-daemon.log` (stdout and stderr)
+  - LaunchAgent logs to: `/tmp/meshagent-agent.log` (stdout and stderr)
+  - Logging is NOT preserved during upgrades (must re-enable each installation)
+  - Useful for debugging installation or runtime issues
 
 ---
 
@@ -317,6 +323,7 @@ sudo meshagent -upgrade
 **Notes**:
 - `-upgrade` and `-install` are interchangeable
 - Can be run from installed location (self-upgrade)
+- Supports all `-install` options including `--meshAgentLogging="1"`
 
 ---
 
@@ -684,7 +691,18 @@ sudo /opt/tacticalmesh/meshagent -upgrade
 sudo /opt/tacticalmesh/MeshAgent.app/Contents/MacOS/meshagent -nodeid
 ```
 
-### Example 7: Complete Removal
+### Example 7: Installation with Debug Logging
+
+```bash
+# Install with logging enabled for debugging
+sudo ./meshagent -install --installPath="/opt/tacticalmesh/" --copy-msh="1" --meshAgentLogging="1"
+
+# After installation, check logs:
+tail -f /tmp/meshagent-daemon.log
+tail -f /tmp/meshagent-agent.log
+```
+
+### Example 8: Complete Removal
 
 ```bash
 sudo meshagent -fulluninstall

@@ -68,7 +68,7 @@ typedef enum MeshCommand_AuthInfo_CapabilitiesMask
 	MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT = 0x10,
 	MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY = 0x20,
 	MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY = 0x40,
-	MeshCommand_AuthInfo_CapabilitiesMask_RESERVED = 0x80,
+	MeshCommand_AuthInfo_CapabilitiesMask_APPBUNDLE = 0x80,
 	MeshCommand_AuthInfo_CapabilitiesMask_COMPRESSION = 0x100
 }MeshCommand_AuthInfo_CapabilitiesMask;
 
@@ -244,6 +244,7 @@ typedef struct MeshAgentHostContainer
 	int serverConnectionState;
 	int exitCode;
 	int dbRetryCount;
+	int waitingForConfig;  // Set when no .msh/.db found - retry forever instead of giving up
 	MeshAgent_Posix_PlatformTypes platformType;
 	int JSRunningAsService;
 	int JSRunningWithAdmin;

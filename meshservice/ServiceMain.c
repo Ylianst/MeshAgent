@@ -791,6 +791,16 @@ int wmain(int argc, char* wargv[])
 		{
 			int capabilities = 0;
 			if (argc > 1 && ((strcasecmp(argv[1], "connect") == 0))) { capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY; }
+#if defined(__APPLE__)
+			// Detect if running in macOS app bundle mode
+			char exePath[PATH_MAX];
+			uint32_t len = sizeof(exePath);
+			if (_NSGetExecutablePath(exePath, &len) == 0) {
+				if (strstr(exePath, ".app/Contents/MacOS/") != NULL) {
+					capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_APPBUNDLE;
+				}
+			}
+#endif
 			agent = MeshAgent_Create(capabilities);
 			agent->meshCoreCtx_embeddedScript = integratedJavaScript;
 			agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;

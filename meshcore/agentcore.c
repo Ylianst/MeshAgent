@@ -43,6 +43,7 @@ limitations under the License.
 #include "microstack/ILibMulticastSocket.h"
 #include "microscript/ILibDuktape_ScriptContainer.h"
 #include "../microstack/ILibIPAddressMonitor.h"
+#include "version_info.h"
 
 #ifdef _POSIX
 #include <sys/stat.h>
@@ -74,8 +75,14 @@ int gRemoteMouseRenderDefault = 0;
 #endif
 
 #ifdef __APPLE__
+#include <stdbool.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <mach-o/dyld.h>
+#include <mach-o/fat.h>
+#include <mach-o/loader.h>
 #include <libproc.h>
+#include <libkern/OSByteOrder.h>
 #include <SystemConfiguration/SystemConfiguration.h>
 #include "MacOS/mac_bundle_detection.h"
 #include "MacOS/mac_tcc_detection.h"
@@ -2225,6 +2232,130 @@ duk_ret_t ILibDuktape_MeshAgent_Disconnect(duk_context *ctx)
 	return(0);
 }
 
+#ifdef __APPLE__
+// Check if the binary at the given path is a universal (FAT) binary
+static bool is_universal_binary_at_path(const char *path, uint32_t *out_nfat)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd < 0) return false;
+
+	uint32_t magic;
+	ssize_t n = read(fd, &magic, sizeof(magic));
+	if (n != sizeof(magic))
+	{
+		close(fd);
+		return false;
+	}
+
+	// Check for any of the FAT magic values
+	bool is_fat =
+		(magic == FAT_MAGIC)     ||
+		(magic == FAT_CIGAM)     ||
+		(magic == FAT_MAGIC_64)  ||
+		(magic == FAT_CIGAM_64);
+
+	if (!is_fat)
+	{
+		close(fd);
+		return false; // thin Mach-O, not universal
+	}
+
+	struct fat_header fh;
+	lseek(fd, 0, SEEK_SET);
+	if (read(fd, &fh, sizeof(fh)) != sizeof(fh))
+	{
+		close(fd);
+		return false;
+	}
+	close(fd);
+
+	// fat_header fields are big-endian
+	uint32_t nfat = OSSwapBigToHostInt32(fh.nfat_arch);
+	if (out_nfat) *out_nfat = nfat;
+
+	// "Universal" usually means >1 slices
+	return nfat > 1;
+}
+
+// Check if the current executable is a universal binary
+// Returns 10005 for universal binaries, otherwise returns MESH_AGENTID
+static int GetEffectiveARCHID()
+{
+	char exePath[PATH_MAX];
+	uint32_t len = sizeof(exePath);
+	uint32_t nfat = 0;
+
+	// Get the executable path
+	if (_NSGetExecutablePath(exePath, &len) != 0)
+	{
+		return MESH_AGENTID; // Fallback to compile-time ARCHID
+	}
+
+	// Check if it's a universal binary with multiple slices
+	if (is_universal_binary_at_path(exePath, &nfat))
+	{
+		return 10005; // Universal binary ARCHID
+	}
+
+	return MESH_AGENTID; // Single-arch binary
+}
+#endif
+
+#ifdef __APPLE__
+// Duktape binding to expose version info from embedded Info.plist
+// Returns: { version: "YY.MM.DD", buildver: "HH.MM.SS", fullversion: "YY.MM.DD HH.MM.SS" }
+duk_ret_t ILibDuktape_MeshAgent_getVersion(duk_context *ctx)
+{
+	char *version = get_embedded_version();
+	char *buildver = get_embedded_build_version();
+	char *fullversion = get_embedded_full_version();
+
+	// Create return object
+	duk_push_object(ctx);  // [obj]
+
+	// Add version property
+	if (version != NULL)
+	{
+		duk_push_string(ctx, version);  // [obj][version]
+		duk_put_prop_string(ctx, -2, "version");  // [obj]
+		free(version);
+	}
+	else
+	{
+		duk_push_null(ctx);  // [obj][null]
+		duk_put_prop_string(ctx, -2, "version");  // [obj]
+	}
+
+	// Add buildver property
+	if (buildver != NULL)
+	{
+		duk_push_string(ctx, buildver);  // [obj][buildver]
+		duk_put_prop_string(ctx, -2, "buildver");  // [obj]
+		free(buildver);
+	}
+	else
+	{
+		duk_push_null(ctx);  // [obj][null]
+		duk_put_prop_string(ctx, -2, "buildver");  // [obj]
+	}
+
+	// Add fullversion property
+	if (fullversion != NULL)
+	{
+		duk_push_string(ctx, fullversion);  // [obj][fullversion]
+		duk_put_prop_string(ctx, -2, "fullversion");  // [obj]
+		free(fullversion);
+	}
+	else
+	{
+		duk_push_null(ctx);  // [obj][null]
+		duk_put_prop_string(ctx, -2, "fullversion");  // [obj]
+	}
+
+	return 1;  // Return the object
+}
+#endif
+
 void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 {
 	MeshAgentHostContainer *agent;
@@ -2307,7 +2438,12 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 		ILibDuktape_CreateInstanceMethod(ctx, "log", ILibDuktape_MeshAgent_log, 1);
 		ILibDuktape_CreateEventWithGetter(ctx, "controlChannelDebug", ILibDuktape_MeshAgent_controlChannelDebug);
 		ILibDuktape_CreateInstanceMethod(ctx, "DataPing", ILibDuktape_MeshAgent_DataPing, DUK_VARARGS);
+#ifdef __APPLE__
+		ILibDuktape_CreateReadonlyProperty_int(ctx, "ARCHID", GetEffectiveARCHID());
+		ILibDuktape_CreateInstanceMethod(ctx, "getVersion", ILibDuktape_MeshAgent_getVersion, 0);
+#else
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "ARCHID", MESH_AGENTID);
+#endif
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "ConsoleTextMaxRate", agent->consoleText_maxRate);
 #ifdef _LINKVM 
 		ILibDuktape_CreateReadonlyProperty_int(ctx, "hasKVM", 1);
@@ -2349,7 +2485,12 @@ void ILibDuktape_MeshAgent_PUSH(duk_context *ctx, void *chain)
 			duk_push_string(ctx, agent->meshServiceName);
 			ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "serviceName", 1);
 		}
-		
+		// Expose serviceId for service lookups (on macOS/launchd this is the Label, e.g., "meshagent.company.service")
+		if (agent->serviceID != NULL)
+		{
+			duk_push_string(ctx, agent->serviceID);
+			ILibDuktape_CreateReadonlyProperty_SetEnumerable(ctx, "serviceId", 1);
+		}
 
 #ifdef WIN32
 	#ifdef _WINSERVICE
@@ -2944,7 +3085,11 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 	memset(info, 0, sizeof(MeshCommand_BinaryPacket_AuthInfo)); // Required because if hash are SHA384, they will not fully fill the struct.
 	info->command = htons(MeshCommand_AuthInfo);
 	info->infoVersion = htonl(1);
+#ifdef __APPLE__
+	info->agentId = htonl(GetEffectiveARCHID());
+#else
 	info->agentId = htonl(MESH_AGENTID);
+#endif
 	info->agentVersion = htonl(agent->version);
 	info->platformType = htonl(((agent->batteryState != MeshAgentHost_BatteryInfo_NONE) && (agent->batteryState != MeshAgentHost_BatteryInfo_UNKNOWN)) ? MeshCommand_AuthInfo_PlatformType_LAPTOP : MeshCommand_AuthInfo_PlatformType_DESKTOP);
 	memcpy_s(info->MeshID, sizeof(info->MeshID), agent->meshId, sizeof(agent->meshId));
@@ -3014,6 +3159,20 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
 	if (len > 0 && len < sizeof(ILibScratchPad)) { ILib_atoi_int32(&(agent->performSelfUpdate), ILibScratchPad, (size_t)len); }
 	if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
+
+#ifdef __APPLE__
+	// DEBUG: Log when performSelfUpdate is set
+	{
+		FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
+		if (debugFile != NULL) {
+			fprintf(debugFile, "=== MeshServer_selfupdate_continue() called ===\n");
+			fprintf(debugFile, "performSelfUpdate set to: %d\n", agent->performSelfUpdate);
+			fprintf(debugFile, "StartupType from DB: %s\n", (len > 0) ? ILibScratchPad : "(not found)");
+			fprintf(debugFile, "================================================\n\n");
+			fclose(debugFile);
+		}
+	}
+#endif
 #endif
 
 
@@ -3660,10 +3819,19 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			char updateFileHash[UTIL_SHA384_HASHSIZE];
 			MeshCommand_BinaryPacket_CoreModule *cm = (MeshCommand_BinaryPacket_CoreModule*)cmd;
 
-			if (cmdLen == 4) 
+			if (cmdLen == 4)
 			{
 				// Indicates the start of the agent update transfer
 				if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Starting download..."); }
+#ifdef __APPLE__
+				{
+					FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
+					if (debugFile != NULL) {
+						fprintf(debugFile, ">>> UPDATE DOWNLOAD STARTED <<<\n");
+						fclose(debugFile);
+					}
+				}
+#endif
 				util_deletefile(updateFilePath);
 			} else if (cmdLen == sizeof(MeshCommand_BinaryPacket_CoreModule)) 
 			{
@@ -3674,6 +3842,15 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					//printf("UPDATE: End OK\r\n");
 					int updateTop = duk_get_top(agent->meshCoreCtx);
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified"); }
+#ifdef __APPLE__
+					{
+						FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
+						if (debugFile != NULL) {
+							fprintf(debugFile, ">>> HASH VERIFIED - Processing update <<<\n");
+							fclose(debugFile);
+						}
+					}
+#endif
 					if (agent->fakeUpdate != 0)
 					{
 						int fsz;
@@ -3727,12 +3904,30 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						break; // Break out here, and continue when finished unzipping (or in the case of error, abort)
 					}
 					duk_set_top(agent->meshCoreCtx, updateTop);								// ...
+#ifdef __APPLE__
+					{
+						FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
+						if (debugFile != NULL) {
+							fprintf(debugFile, ">>> CALLING MeshServer_selfupdate_continue() <<<\n");
+							fclose(debugFile);
+						}
+					}
+#endif
 					MeshServer_selfupdate_continue(agent);
 				} 
-				else 
+				else
 				{
 					// Hash check failed, delete the file and do nothing. On next server reconnect, we will try again.
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash FAILED, aborting update..."); }
+#ifdef __APPLE__
+					{
+						FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
+						if (debugFile != NULL) {
+							fprintf(debugFile, ">>> HASH VERIFICATION FAILED - Aborting <<<\n");
+							fclose(debugFile);
+						}
+					}
+#endif
 					util_deletefile(updateFilePath);
 				}
 			}
@@ -4712,9 +4907,14 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 	parser_result *pr;
 	parser_result_field *f;
 
+	printf("DEBUG: importSettings() called with fileName: %s\n", fileName);
 	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
-	if (importFileLen == 0) { return(0); }
-	//printf("Importing settings file: %s\n", fileName);
+	printf("DEBUG: ILibReadFileFromDiskEx() returned %d bytes\n", importFileLen);
+	if (importFileLen == 0) {
+		printf("DEBUG: importSettings() failed - file not found or empty\n");
+		return(0);
+	}
+	printf("DEBUG: Importing settings file: %s (%d bytes)\n", fileName, importFileLen);
 
 	pr = ILibParseString(importFile, 0, importFileLen, "\n", 1);
 	f = pr->FirstResult;
@@ -4808,7 +5008,11 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	}
 #endif
 
+#ifdef __APPLE__
+	retVal->agentID = (AgentIdentifiers)GetEffectiveARCHID();
+#else
 	retVal->agentID = (AgentIdentifiers)MESH_AGENTID;
+#endif
 	retVal->chain = ILibCreateChainEx(3 * sizeof(void*));
 	retVal->pipeManager = ILibProcessPipe_Manager_Create(retVal->chain);
 	retVal->capabilities = capabilities | MeshCommand_AuthInfo_CapabilitiesMask_CONSOLE | MeshCommand_AuthInfo_CapabilitiesMask_JAVASCRIPT | MeshCommand_AuthInfo_CapabilitiesMask_COMPRESSION;
@@ -5109,10 +5313,70 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 
-	// We are a Mesh Agent
+	// Check if running as daemon (for waitingForConfig behavior)
+	int isDaemon = 0;
+	for (ri = 0; ri < paramLen; ++ri) {
+		if (strcmp("-daemon", param[ri]) == 0) {
+			isDaemon = 1;
+			break;
+		}
+	}
+
+	// We are a Mesh Agent - Create/open database only if settings source exists
 	if (agentHost->masterDb == NULL) {
-		char* dbPath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db");
-		agentHost->masterDb = ILibSimpleDataStore_Create(dbPath);
+		// CRITICAL: Copy dbPath to local buffer before any other MeshAgent_MakeAbsolutePath() calls
+		// MeshAgent_MakeAbsolutePath() returns pointer to ILibScratchPad2 which gets overwritten!
+		char dbPathBuffer[4096];
+		char* dbPathTemp = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".db");
+		strncpy(dbPathBuffer, dbPathTemp, sizeof(dbPathBuffer) - 1);
+		dbPathBuffer[sizeof(dbPathBuffer) - 1] = '\0';
+
+		// Check if .db file already exists - always open existing database
+		if (ILibSimpleDataStore_Exists(dbPathBuffer)) {
+			agentHost->masterDb = ILibSimpleDataStore_Create(dbPathBuffer);
+		} else {
+			// No existing .db - only create if a settings source exists
+			int hasSettingsSource = 0;
+
+			// Check for .mshx file first (secure version has priority)
+			// Note: MeshAgent_MakeAbsolutePath reuses scratch buffer - check sequentially!
+			char* testPath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx");
+			printf("DEBUG: Checking for .mshx file at: %s\n", testPath);
+
+			if (ILibSimpleDataStore_Exists(testPath)) {
+				hasSettingsSource = 1;
+				printf("DEBUG: Settings source found (.mshx)!\n");
+			} else {
+				// Fall back to .msh file
+				testPath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh");
+				printf("DEBUG: Checking for .msh file at: %s\n", testPath);
+
+				if (ILibSimpleDataStore_Exists(testPath)) {
+					hasSettingsSource = 1;
+					printf("DEBUG: Settings source found (.msh)!\n");
+				} else {
+					printf("DEBUG: No .msh or .mshx file found\n");
+				}
+			}
+
+			if (hasSettingsSource) {
+				// Settings source found - create .db to store imported settings
+				printf("DEBUG: Creating .db at: %s\n", dbPathBuffer);
+				agentHost->masterDb = ILibSimpleDataStore_Create(dbPathBuffer);
+			} else if (isDaemon) {
+				// No settings source, running as daemon - wait indefinitely for config
+				agentHost->waitingForConfig = 1;
+				// Only print on first attempt (dbRetryCount == 0)
+				if (agentHost->dbRetryCount == 0) {
+					printf("No .msh or .db file found. Daemon will wait for configuration...\n");
+				}
+			} else {
+				// No settings source, running interactively - will fail after retries
+				if (agentHost->dbRetryCount == 0) {
+					printf("No .msh or .db file found. Cannot start agent.\n");
+				}
+			}
+		}
 	}
 
 	int ixr = 0;
@@ -5191,9 +5455,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	}
 
 #ifdef __APPLE__
-	// Spawn TCC check at startup (only if not in install/fetch mode)
+	// Spawn TCC check at startup (only if not in install/fetch mode, has real config, and not waiting for config)
+	// Skip TCC if: installing, fetching state, no real DB (cache-only), or waiting for config
 	// The -tccCheck process will check permissions and decide whether to show UI
-	if (fetchstate == 0 && installFlag == 0)
+	if (fetchstate == 0 && installFlag == 0 && agentHost->masterDb != NULL &&
+		ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb) == 0 && agentHost->waitingForConfig == 0)
 	{
 		// Check "do not remind" preference before spawning
 		// Only skip TCC check if the value is specifically "1"
@@ -5342,6 +5608,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				agentHost->masterDb = NULL;
 			}
 
+			if (agentHost->waitingForConfig)
+			{
+				// Waiting for .msh file - retry forever with longer interval
+				if (agentHost->dbRetryCount == 0 || (agentHost->dbRetryCount % 30) == 0) {
+					// Print status every 30 retries (60 seconds) after initial message
+					if (agentHost->dbRetryCount > 0) {
+						printf("Still waiting for .msh configuration file...\r\n");
+					}
+				}
+				agentHost->dbRetryCount++;
+				ILibLifeTime_AddEx(ILibGetBaseTimer(agentHost->chain), data, 2000, MeshAgent_AgentMost_dbRetryCallback, MeshAgent_AgentMost_dbRetryAbort);
+				return 1;
+			}
+
 			switch (agentHost->dbRetryCount)
 			{
 			case 10:
@@ -5447,7 +5727,10 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		agentHost->displayName = "MeshCentral";
 	}
 
-	duk_push_sprintf(tmpCtx, "require('service-manager').manager.getService('%s').isMe();", agentHost->meshServiceName);
+	// Use serviceID for service lookup if available (needed on macOS/launchd where the service
+	// is identified by Label like "meshagent.company.service"), otherwise use meshServiceName
+	char *serviceNameForLookup = (agentHost->serviceID != NULL) ? agentHost->serviceID : agentHost->meshServiceName;
+	duk_push_sprintf(tmpCtx, "require('service-manager').manager.getService('%s').isMe();", serviceNameForLookup);
 	tmpString = (char*)duk_get_string(tmpCtx, -1);
 
 	if (duk_peval_string(tmpCtx, "(function foo() { var f = require('service-manager').manager.getServiceType(); switch(f){case 'procd': return(7); case 'windows': return(10); case 'launchd': return(3); case 'freebsd': return(5); case 'systemd': return(1); case 'init': return(2); case 'upstart': return(4); default: return(0);}})()") == 0)
@@ -5556,6 +5839,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			}
 		}
 	}
+
 	Duktape_SafeDestroyHeap(tmpCtx);
 
 	// Load the mesh agent certificates
@@ -6545,6 +6829,12 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	{
 		agentHost->appBundleMode = 1;
 	}
+	printf("DEBUG: appBundleMode = %d\n", agentHost->appBundleMode);
+	printf("DEBUG: exePath = %s\n", agentHost->exePath);
+	char cwdBuffer[4096];
+	if (getcwd(cwdBuffer, sizeof(cwdBuffer)) != NULL) {
+		printf("DEBUG: cwd = %s\n", cwdBuffer);
+	}
 
 	// Check if launched from Finder (via Info.plist LSEnvironment variable)
 	if (getenv("LAUNCHED_FROM_FINDER") != NULL && !skipConfigValidation)
@@ -6645,6 +6935,42 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		}
 
 #ifndef WIN32
+		// DEBUG: Write self-update state to file
+#ifdef __APPLE__
+		{
+			FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
+			if (debugFile != NULL) {
+				// Get version info if JS context available
+				char versionStr[256] = "N/A";
+				if (agentHost->meshCoreCtx != NULL) {
+					if (duk_peval_string(agentHost->meshCoreCtx, "require('MeshAgent').getVersion().version") == 0) {
+						const char* ver = duk_safe_to_string(agentHost->meshCoreCtx, -1);
+						if (ver != NULL) { sprintf_s(versionStr, sizeof(versionStr), "%s", ver); }
+						duk_pop(agentHost->meshCoreCtx);
+					} else {
+						duk_pop(agentHost->meshCoreCtx);
+					}
+				}
+
+				fprintf(debugFile, "=== Self-Update Debug ===\n");
+				fprintf(debugFile, "agentVersion=%s\n", versionStr);
+				fprintf(debugFile, "performSelfUpdate=%d\n", agentHost->performSelfUpdate);
+				fprintf(debugFile, "JSRunningAsService=%d\n", agentHost->JSRunningAsService);
+				fprintf(debugFile, "platformType=%d (LAUNCHD=%d)\n", agentHost->platformType, MeshAgent_Posix_PlatformTypes_LAUNCHD);
+				fprintf(debugFile, "exePath=%s\n", agentHost->exePath);
+
+				// Check if .update file exists
+				char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update");
+				struct stat st;
+				int updateExists = (stat(updateFilePath, &st) == 0);
+				fprintf(debugFile, "updateFile=%s (exists=%d)\n", updateFilePath, updateExists);
+
+				fprintf(debugFile, "========================\n\n");
+				fclose(debugFile);
+			}
+		}
+#endif
+
 		// Check if we need to perform self-update (performSelfUpdate should indicate startup type on Liunx: 1 = systemd, 2 = upstart, 3 = sysv-init)
 		if (agentHost->performSelfUpdate != 0)
 		{

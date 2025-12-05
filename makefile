@@ -183,13 +183,14 @@ SOURCES += microscript/ILibDuktape_CompressedStream.c meshcore/zlib/adler32.c me
 SOURCES += $(ADDITIONALSOURCES)
 
 # Mesh Agent core
-SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
+SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c meshcore/version_info.c
 
 # Mesh Agent settings
 MESH_VER = 194
 EXENAME = meshagent
 BUILD_OUTPUT_DIR = build/output
 BUNDLE_ID ?= meshagent
+MODULESYNC_MODE ?= macos-only
 
 # Cross-compiler paths
 PATH_MIPS = ../ToolChains/ddwrt/3.4.6-uclibc-0.9.28/bin/
@@ -846,7 +847,7 @@ macos:
 	@if echo "$(BUNDLE_ID)" | grep -q "code-utils"; then \
 		echo "Skipping module sync for code-utils build (using minimal module set from polyfills regeneration)"; \
 	else \
-		./build/tools/sync-modules.sh --mode all --verbose; \
+		./build/tools/sync-modules.sh --mode $(MODULESYNC_MODE) --verbose; \
 	fi
 	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
 	@if [ "$(ARCHID)" = "10005" ]; then \
@@ -871,23 +872,37 @@ macos:
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-x86-64 \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-arm-64 \
 				-output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
-			echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64"; \
-			echo "Creating application bundle..."; \
 			./build/tools/macos_build/create-app-bundle.sh \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 \
 				$(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app \
 				$(BUNDLE_ID) \
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY; \
-			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app"; \
-			echo "Ad-hoc signing universal binary..."; \
 			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
-			echo "Splitting universal binary into architectures..."; \
 			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract arm64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-arm-64; \
 			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract x86_64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-x86-64; \
-			echo "Ad-hoc signing universal bundle..."; \
 			codesign -s - --deep $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app; \
-			echo "To test run: $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -version"; \
+			echo "Creating app bundle zip archive..."; \
+			(cd $(BUILD_OUTPUT_DIR)/osx-universal-64-app && ditto -c -k --keepParent MeshAgent.app ../$(EXENAME)_osx-universal-64-app.zip); \
+			echo "  Created: $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64-app.zip"; \
+			echo ""; \
+			echo "---"; \
+			EXPECTED_VERSION="$$BUILD_DATE $$BUILD_TIME_ONLY"; \
+			STANDALONE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -fullversion 2>/dev/null || echo "ERROR"); \
+			BUNDLE_VERSION=$$($(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -fullversion 2>/dev/null || echo "ERROR"); \
+			if [ "$$STANDALONE_VERSION" = "$$EXPECTED_VERSION" ] && [ "$$BUNDLE_VERSION" = "$$EXPECTED_VERSION" ]; then \
+				echo "$$(date '+%Y-%m-%d %H:%M:%S') INFO: Successfully built version $$EXPECTED_VERSION"; \
+				echo ""; \
+				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64"; \
+				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app"; \
+				echo ""; \
+			else \
+				echo "$$(date '+%Y-%m-%d %H:%M:%S') ERROR: Build failed - version verification mismatch"; \
+				echo "Expected version: $$EXPECTED_VERSION"; \
+				echo "Standalone binary version: $$STANDALONE_VERSION"; \
+				echo "Bundle binary version: $$BUNDLE_VERSION"; \
+				exit 1; \
+			fi; \
 		else \
 			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-universal-64"; \
 		fi; \
@@ -915,18 +930,34 @@ macos:
 		if [ "$(DEBUG)" != "1" ]; then \
 			cp $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME) $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
 			strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
-			echo "Build complete: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)"; \
-			echo "Creating application bundle..."; \
 			./build/tools/macos_build/create-app-bundle.sh \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) \
 				$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app \
 				$(BUNDLE_ID) \
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY; \
-			echo "Bundle complete: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app"; \
-			echo "Ad-hoc signing bundle..."; \
 			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app; \
-			echo "To test run: $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app/Contents/MacOS/meshagent -version"; \
+			echo "Creating app bundle zip archive..."; \
+			(cd $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app && ditto -c -k --keepParent MeshAgent.app ../$(EXENAME)_$(ARCHNAME)-app.zip); \
+			echo "  Created: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)-app.zip"; \
+			echo ""; \
+			echo "---"; \
+			EXPECTED_VERSION="$$BUILD_DATE $$BUILD_TIME_ONLY"; \
+			STANDALONE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) -fullversion 2>/dev/null || echo "ERROR"); \
+			BUNDLE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app/Contents/MacOS/meshagent -fullversion 2>/dev/null || echo "ERROR"); \
+			if [ "$$STANDALONE_VERSION" = "$$EXPECTED_VERSION" ] && [ "$$BUNDLE_VERSION" = "$$EXPECTED_VERSION" ]; then \
+				echo "$$(date '+%Y-%m-%d %H:%M:%S') INFO: Successfully built version $$EXPECTED_VERSION"; \
+				echo ""; \
+				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)"; \
+				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app"; \
+				echo ""; \
+			else \
+				echo "$$(date '+%Y-%m-%d %H:%M:%S') ERROR: Build failed - version verification mismatch"; \
+				echo "Expected version: $$EXPECTED_VERSION"; \
+				echo "Standalone binary version: $$STANDALONE_VERSION"; \
+				echo "Bundle binary version: $$BUNDLE_VERSION"; \
+				exit 1; \
+			fi; \
 		else \
 			echo "Debug build complete: $(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)"; \
 		fi; \

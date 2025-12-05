@@ -23,6 +23,7 @@ limitations under the License.
 #endif
 
 #include "meshcore/agentcore.h"
+#include "meshcore/version_info.h"
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
 #define _CRTDBG_MAP_ALLOC
@@ -45,6 +46,8 @@ limitations under the License.
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
 #include <mach-o/ldsyms.h>
+#include <mach-o/fat.h>
+#include <mach-o/dyld.h>
 #include <stdarg.h>
 #include <fcntl.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -65,63 +68,419 @@ MeshAgentHostContainer *agentHost = NULL;
 char __agentExecPath[1024] = { 0 };
 #endif
 
+#ifdef __APPLE__
+#include <stdbool.h>
+#include <unistd.h>
+#include <mach-o/loader.h>
+#include <libkern/OSByteOrder.h>
+
+// Check if the binary at the given path is a universal (FAT) binary
+static bool is_universal_binary_at_path(const char *path, uint32_t *out_nfat)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd < 0) return false;
+
+	uint32_t magic;
+	ssize_t n = read(fd, &magic, sizeof(magic));
+	if (n != sizeof(magic))
+	{
+		close(fd);
+		return false;
+	}
+
+	// Check for any of the FAT magic values
+	bool is_fat =
+		(magic == FAT_MAGIC)     ||
+		(magic == FAT_CIGAM)     ||
+		(magic == FAT_MAGIC_64)  ||
+		(magic == FAT_CIGAM_64);
+
+	if (!is_fat)
+	{
+		close(fd);
+		return false; // thin Mach-O, not universal
+	}
+
+	struct fat_header fh;
+	lseek(fd, 0, SEEK_SET);
+	if (read(fd, &fh, sizeof(fh)) != sizeof(fh))
+	{
+		close(fd);
+		return false;
+	}
+	close(fd);
+
+	// fat_header fields are big-endian
+	uint32_t nfat = OSSwapBigToHostInt32(fh.nfat_arch);
+	if (out_nfat) *out_nfat = nfat;
+
+	// "Universal" usually means >1 slices
+	return nfat > 1;
+}
+
+// Check if the current executable is a universal binary
+// Returns 10005 for universal binaries, otherwise returns MESH_AGENTID
+static int GetEffectiveARCHID()
+{
+	char exePath[PATH_MAX];
+	uint32_t len = sizeof(exePath);
+	uint32_t nfat = 0;
+
+	// Get the executable path
+	if (_NSGetExecutablePath(exePath, &len) != 0)
+	{
+		return MESH_AGENTID; // Fallback to compile-time ARCHID
+	}
+
+	// Check if it's a universal binary with multiple slices
+	if (is_universal_binary_at_path(exePath, &nfat))
+	{
+		return 10005; // Universal binary ARCHID
+	}
+
+	return MESH_AGENTID; // Single-arch binary
+}
+#endif
+
+//
+// ╔════════════════════════════════════════════════════════════════════════════╗
+// ║                    MASTER ARGUMENT LIST                                    ║
+// ║                  (Single Source of Truth)                                  ║
+// ╚════════════════════════════════════════════════════════════════════════════╝
+//
+// This is the AUTHORITATIVE list of ALL command-line arguments supported by
+// MeshAgent across ALL platforms. When adding new arguments:
+//
+// 1. Add to appropriate section below (ALL PLATFORMS or platform-specific)
+// 2. Update modules/agent-installer.js if JavaScript needs to parse it
+// 3. Update help text in print_help() function (line 650+)
+// 4. Update documentation in docs/ if user-facing
+//
+// VALIDATION STATUS:
+// - macOS: ACTIVE (enforced via validate_argument())
+// - Other platforms: DOCUMENTATION ONLY (validation disabled)
+//
+// To enable validation on other platforms:
+// - Change ENABLE_ARGUMENT_VALIDATION macro for that platform
+// - Test thoroughly to ensure no legitimate use cases are blocked
+//
+
+// Control validation per platform
+#if defined(__APPLE__)
+	#define ENABLE_ARGUMENT_VALIDATION 1
+#else
+	#define ENABLE_ARGUMENT_VALIDATION 0
+#endif
+
+// ═══════════════════════════════════════════════════════════════════════
+// ARGUMENT ARRAYS - Shared by validate_argument() and detect_argument_platform()
+// ═══════════════════════════════════════════════════════════════════════
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ ALL PLATFORMS - Arguments used on Windows, Linux, macOS, BSD        │
+// └─────────────────────────────────────────────────────────────────────┘
+
+// Simple flags (exact match, no value)
+static const char* ALL_PLATFORMS_simple_flags[] = {
+		// Help & Information
+		"-help", "--help", "-h",
+		"-version",           // Print version number (YY.MM.DD format)
+		"-buildver",          // Print build version (HH.MM.SS format)
+		"-buildversion",      // Alias for -buildver
+		"-fullversion",       // Print full version (YY.MM.DD HH.MM.SS)
+		"-info",              // Print agent information
+		"-licenses",          // Print license information
+		"-nodeid",            // Print node ID
+		"-name",              // Print agent name
+		"-agentHash",         // Print agent executable hash (SHA384, truncated)
+		"-agentFullHash",     // Print agent executable hash (SHA384, full)
+		"-updaterversion",    // Print updater version
+		"-state",             // Fetch and display agent state
+
+		// Installation & Service Management
+		"-install",           // Install as service (simple mode)
+		"-finstall",          // Full install with all options
+		"-fullinstall",       // Alias for -finstall
+		"-uninstall",         // Uninstall service
+		"-funinstall",        // Full uninstall (remove data)
+		"-fulluninstall",     // Alias for -funinstall
+		"-upgrade",           // Upgrade existing installation
+
+		// Connection & Network
+		"connect",            // Connect to server (interactive mode)
+		"--slave",            // Run as slave agent
+		"--netinfo",          // Display network information
+
+		// Execution & Scripting
+		"-exec",              // Execute JavaScript code
+		"-b64exec",           // Execute base64-encoded JavaScript
+		"-faddr",             // Force address
+		"-fdelta",            // Force delta
+
+		// Backup Control
+		"--omit-backup",      // Skip backup during upgrade (flag format)
+		"--skip-backup",      // Alias for --omit-backup
+
+		// Development & Testing
+		"-export",            // Export configuration
+		"-import",            // Import configuration
+
+		NULL
+	};
+
+// Prefix flags (starts with these, value follows)
+static const char* ALL_PLATFORMS_prefix_flags[] = {
+		// Installation Paths & Files
+		"--installPath=",     // Installation directory path
+		"--mshPath=",         // Path to .msh configuration file
+		"--target=",          // Target binary path
+		"--fileName=",        // Binary file name
+
+		// Service Configuration
+		"--meshServiceName=", // Service name (primary)
+		"--serviceName=",     // Service name (backward compat alias)
+		"--companyName=",     // Company name for service identification
+		"--displayName=",     // Service display name
+		"--description=",     // Service description
+		"--serviceId=",       // Unique service identifier (for multiple instances)
+
+		// Feature Control
+		"--disableUpdate=",   // Disable auto-updates (0=enable, 1=disable)
+		"--allowNoMsh=",      // Allow operation without .msh file
+
+		// Logging & Output Control
+		"--verbose=",         // Verbose logging level
+		"--info=",            // Info logging level
+		"--quiet=",           // Quiet mode (minimal output)
+		"--silent=",          // Silent mode (no output)
+		"--log=",             // Log level (0-3)
+		"--readonly=",        // Read-only filesystem mode
+
+		// Backup Control (value format)
+		"--omit-backup=",     // Skip backup during upgrade (value format)
+		"--skip-backup=",     // Alias for --omit-backup=
+
+		// Advanced Options
+		"--script-db",        // Script database path
+		"--script-flags",     // Script execution flags
+		"--script-timeout",   // Script timeout
+		"--script-connect",   // Script connection mode
+		"--no-embedded=",     // Disable embedded resources
+		"--expandedPath=",    // Expanded path
+		"--filePath=",        // File path
+		"--modulesPath=",     // Modules path
+		"--resetnodeid",      // Reset node ID
+
+		NULL
+	};
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ WINDOWS ONLY                                                         │
+// └─────────────────────────────────────────────────────────────────────┘
+
+static const char* WINDOWS_simple_flags[] = {
+		"-nocertstore",       // Don't use Windows Certificate Store
+		"-recovery",          // Windows recovery mode
+		"-kvm1",              // Windows KVM mode 1
+		NULL
+	};
+
+static const char* WINDOWS_prefix_flags[] = {
+	"--installedByUser=", // Windows: User registry key who installed
+	"-update:",           // Windows: Update path
+	NULL
+};
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ LINUX ONLY                                                           │
+// └─────────────────────────────────────────────────────────────────────┘
+
+static const char* LINUX_simple_flags[] = {
+	"-daemon",            // Run as daemon (Linux daemon mode)
+	NULL
+};
+
+static const char* LINUX_prefix_flags[] = {
+	"--installedByUser=", // Linux: UID of user who installed
+	NULL
+};
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ macOS ONLY                                                           │
+// └─────────────────────────────────────────────────────────────────────┘
+
+static const char* MACOS_simple_flags[] = {
+	"-tccCheck",          // Check TCC (Transparency Consent Control) permissions
+	"--show-install-ui",  // Show installation UI (used by privilege elevation)
+	"-kvm1",              // macOS KVM mode (LaunchAgent via QueueDirectories)
+	NULL
+};
+
+static const char* MACOS_prefix_flags[] = {
+	"--disableTccCheck=", // Disable TCC check (0=check, 1=skip)
+	"--copy-msh=",        // Copy .msh file during install (0=no, 1=yes)
+	"--meshAgentLogging=",// Configure meshagent launchd logging to /tmp (0=no, 1=yes)
+	"--appBundle=",       // macOS app bundle path
+	"--installedByUser=", // macOS: UID of user who installed
+	NULL
+};
+
+// ┌─────────────────────────────────────────────────────────────────────┐
+// │ BSD ONLY                                                             │
+// └─────────────────────────────────────────────────────────────────────┘
+
+static const char* BSD_simple_flags[] = {
+	"-daemon",            // Run as daemon (BSD daemon mode - shared with Linux)
+	NULL
+};
+
+static const char* BSD_prefix_flags[] = {
+	// TODO: Audit BSD-specific arguments if any
+	NULL
+};
+
+// ═══════════════════════════════════════════════════════════════════════
+// VALIDATION FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════
+
 // Validate command-line arguments against known flags
 // Returns 1 if valid, 0 if unknown flag detected
 int validate_argument(const char* arg)
 {
-	// Simple flags (exact match, no value)
-	static const char* simple_flags[] = {
-		"-help", "--help", "-h",
-		"-version", "-info", "-licenses", "-nodeid", "-name",
-		"-agentHash", "-agentFullHash", "-updaterversion",
-		"-daemon", "-export", "-import",
-		"-install", "-upgrade", "-uninstall",
-		"-finstall", "-fullinstall", "-funinstall", "-fulluninstall",
-		"-recovery", "-nocertstore", "-state",
-		"-kvm1", "-tccCheck",
-		"-exec", "-b64exec", "-faddr", "-fdelta",
-		"connect", "--slave", "--netinfo",
-		"--show-install-ui",  // Used by elevation to show Install UI as root
-		NULL
-	};
-
-	// Prefix flags (starts with these, value follows)
-	static const char* prefix_flags[] = {
-		"--installPath=", "--mshPath=", "--copy-msh=",
-		"--meshServiceName=", "--serviceName=", "--companyName=",
-		"--displayName=", "--description=", "--target=", "--fileName=",
-		"--serviceId=", "--disableUpdate=", "--disableTccCheck=",
-		"--readonly=", "--appBundle=", "--resetnodeid",
-		"--script-db", "--script-flags", "--script-timeout", "--script-connect",
-		"--no-embedded=",
-		"--expandedPath=", "--filePath=", "--modulesPath=",
-		"-update:",
-		NULL
-	};
-
 	size_t len = strlen(arg);
 
-	// Check simple flags (exact match)
-	for (int i = 0; simple_flags[i] != NULL; i++)
-	{
-		if (strcmp(arg, simple_flags[i]) == 0) return 1;
+	// Check ALL PLATFORMS simple flags
+	for (int i = 0; ALL_PLATFORMS_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, ALL_PLATFORMS_simple_flags[i]) == 0) return 1;
 	}
 
-	// Check prefix flags (starts with)
-	for (int i = 0; prefix_flags[i] != NULL; i++)
-	{
-		size_t prefix_len = strlen(prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, prefix_flags[i], prefix_len) == 0) return 1;
+	// Check ALL PLATFORMS prefix flags
+	for (int i = 0; ALL_PLATFORMS_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(ALL_PLATFORMS_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, ALL_PLATFORMS_prefix_flags[i], prefix_len) == 0) {
+			return 1;
+		}
 	}
+
+	// Check PLATFORM-SPECIFIC flags
+#ifdef _WIN32
+	// Windows-specific
+	for (int i = 0; WINDOWS_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, WINDOWS_simple_flags[i]) == 0) return 1;
+	}
+	for (int i = 0; WINDOWS_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(WINDOWS_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, WINDOWS_prefix_flags[i], prefix_len) == 0) {
+			return 1;
+		}
+	}
+#endif
+
+#ifdef __linux__
+	// Linux-specific
+	for (int i = 0; LINUX_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, LINUX_simple_flags[i]) == 0) return 1;
+	}
+	for (int i = 0; LINUX_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(LINUX_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, LINUX_prefix_flags[i], prefix_len) == 0) {
+			return 1;
+		}
+	}
+#endif
+
+#ifdef __APPLE__
+	// macOS-specific
+	for (int i = 0; MACOS_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, MACOS_simple_flags[i]) == 0) return 1;
+	}
+	for (int i = 0; MACOS_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(MACOS_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, MACOS_prefix_flags[i], prefix_len) == 0) {
+			return 1;
+		}
+	}
+#endif
+
+#if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+	// BSD-specific
+	for (int i = 0; BSD_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, BSD_simple_flags[i]) == 0) return 1;
+	}
+	for (int i = 0; BSD_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(BSD_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, BSD_prefix_flags[i], prefix_len) == 0) {
+			return 1;
+		}
+	}
+#endif
 
 	// Check .js file extension (script execution)
 	if (len > 3 && strcmp(arg + len - 3, ".js") == 0) return 1;
 
 	// Allow positional arguments (don't start with -)
 	// These are values for flags like -exec <code>
-	if (arg[0] != '-') return 1;
+	// But reject KEY=VALUE patterns without -- prefix (likely typos like LOG=3 instead of --log=3)
+	if (arg[0] != '-') {
+		// If it contains '=' it's probably a malformed flag
+		if (strchr(arg, '=') != NULL) return 0;
+		return 1;
+	}
 
 	return 0; // Unknown flag
+}
+
+// Helper function to detect which platform(s) an argument belongs to
+// Returns platform name string, or NULL if not found anywhere
+const char* detect_argument_platform(const char* arg)
+{
+	size_t len = strlen(arg);
+
+	// Check Windows
+	for (int i = 0; WINDOWS_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, WINDOWS_simple_flags[i]) == 0) return "Windows";
+	}
+	for (int i = 0; WINDOWS_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(WINDOWS_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, WINDOWS_prefix_flags[i], prefix_len) == 0) {
+			return "Windows";
+		}
+	}
+
+	// Check Linux
+	for (int i = 0; LINUX_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, LINUX_simple_flags[i]) == 0) return "Linux";
+	}
+	for (int i = 0; LINUX_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(LINUX_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, LINUX_prefix_flags[i], prefix_len) == 0) {
+			return "Linux";
+		}
+	}
+
+	// Check macOS
+	for (int i = 0; MACOS_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, MACOS_simple_flags[i]) == 0) return "macOS";
+	}
+	for (int i = 0; MACOS_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(MACOS_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, MACOS_prefix_flags[i], prefix_len) == 0) {
+			return "macOS";
+		}
+	}
+
+	// Check BSD
+	for (int i = 0; BSD_simple_flags[i] != NULL; i++) {
+		if (strcmp(arg, BSD_simple_flags[i]) == 0) return "BSD";
+	}
+	for (int i = 0; BSD_prefix_flags[i] != NULL; i++) {
+		size_t prefix_len = strlen(BSD_prefix_flags[i]);
+		if (len >= prefix_len && strncmp(arg, BSD_prefix_flags[i], prefix_len) == 0) {
+			return "BSD";
+		}
+	}
+
+	return NULL; // Not found in any platform list
 }
 
 #ifdef WIN32
@@ -261,77 +620,8 @@ void parse_service_id(const char* serviceId, char** serviceName, char** companyN
 }
 #endif
 
-#ifdef __APPLE__
-// Helper function to extract CFBundleShortVersionString from embedded Info.plist
-// Returns dynamically allocated string that must be freed by caller, or NULL on failure
-char* get_embedded_version(void)
-{
-	unsigned long plist_size = 0;
-	char *version_string = NULL;
-
-	// Get pointer to embedded __info_plist section
-	const uint8_t *plist_data = getsectiondata(&_mh_execute_header, "__TEXT", "__info_plist", &plist_size);
-
-	if (plist_data == NULL || plist_size == 0)
-	{
-		return NULL;  // No embedded plist found
-	}
-
-	// Create CFData from the plist bytes
-	CFDataRef data = CFDataCreate(kCFAllocatorDefault, plist_data, plist_size);
-	if (data == NULL)
-	{
-		return NULL;
-	}
-
-	// Parse the plist
-	CFErrorRef error = NULL;
-	CFPropertyListRef plist = CFPropertyListCreateWithData(
-		kCFAllocatorDefault,
-		data,
-		kCFPropertyListImmutable,
-		NULL,
-		&error
-	);
-
-	CFRelease(data);
-
-	if (plist == NULL || error != NULL)
-	{
-		if (error) CFRelease(error);
-		return NULL;
-	}
-
-	// Get CFBundleShortVersionString value
-	if (CFGetTypeID(plist) == CFDictionaryGetTypeID())
-	{
-		CFStringRef version_key = CFStringCreateWithCString(kCFAllocatorDefault, "CFBundleShortVersionString", kCFStringEncodingUTF8);
-		CFStringRef version_value = (CFStringRef)CFDictionaryGetValue((CFDictionaryRef)plist, version_key);
-
-		if (version_value != NULL && CFGetTypeID(version_value) == CFStringGetTypeID())
-		{
-			// Convert CFString to C string
-			CFIndex length = CFStringGetLength(version_value);
-			CFIndex maxSize = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
-			version_string = (char*)malloc(maxSize);
-
-			if (version_string != NULL)
-			{
-				if (!CFStringGetCString(version_value, version_string, maxSize, kCFStringEncodingUTF8))
-				{
-					free(version_string);
-					version_string = NULL;
-				}
-			}
-		}
-
-		CFRelease(version_key);
-	}
-
-	CFRelease(plist);
-	return version_string;
-}
-#endif
+// Version info functions moved to meshcore/version_info.c for DRY compliance
+// Include meshcore/version_info.h to use get_embedded_version(), get_embedded_build_version(), get_embedded_full_version()
 
 #ifdef WIN32
 #define wmain_free(argv) for(argvi=0;argvi<(int)(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
@@ -387,7 +677,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		for (int j = 0; j < 6; j++) {
 			if (strcmp(argv[i], forbidden_flags[j]) == 0) {
 				has_forbidden_flag = 1;
-				fprintf(stderr, "[MAIN] Skipping LAUNCHED_FROM_FINDER check - running with %s flag\n", argv[i]);
 				break;
 			}
 		}
@@ -481,18 +770,52 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #endif
 
 	// Validate all command-line arguments before processing
+#if ENABLE_ARGUMENT_VALIDATION
 	for (int i = 1; i < argc; i++)
 	{
 		if (!validate_argument(argv[i]))
 		{
-			fprintf(stderr, "ERROR: Unknown argument at position %d: '%s'\n", i, argv[i]);
+			// Check if this is a platform-specific argument
+			const char* platform = detect_argument_platform(argv[i]);
+
+			if (platform != NULL)
+			{
+				// Argument exists but is for a different platform
+				fprintf(stderr, "ERROR: Platform-specific argument at position %d: '%s'\n", i, argv[i]);
+#ifdef __APPLE__
+				fprintf(stderr, "This is a %s-only argument and cannot be used on macOS.\n", platform);
+#elif defined(_WIN32)
+				fprintf(stderr, "This is a %s-only argument and cannot be used on Windows.\n", platform);
+#elif defined(__linux__)
+				fprintf(stderr, "This is a %s-only argument and cannot be used on Linux.\n", platform);
+#else
+				fprintf(stderr, "This is a %s-only argument and cannot be used on this platform.\n", platform);
+#endif
+			}
+			else
+			{
+				// Argument not found in any platform list - truly unknown
+				fprintf(stderr, "ERROR: Unknown argument at position %d: '%s'\n", i, argv[i]);
+			}
+
 			fprintf(stderr, "Use -help for available options\n");
+			fprintf(stderr, "\n");
+#ifdef __APPLE__
+			fprintf(stderr, "Note: Argument validation is ACTIVE on this platform (macOS).\n");
+#else
+			fprintf(stderr, "Note: Argument validation is ACTIVE on this platform.\n");
+#endif
+			fprintf(stderr, "For more info, see the master argument list in meshconsole/main.c (line ~145)\n");
 #ifdef WIN32
 			wmain_free(argv);
 #endif
 			return 1;
 		}
 	}
+#else
+	// Validation disabled on this platform - arguments pass through without checking
+	// (Master argument list in main.c still serves as documentation reference)
+#endif
 
 	ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 
@@ -642,7 +965,11 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("Using %s\n", SSLeay_version(SSLEAY_VERSION));
 #endif
 
+#ifdef __APPLE__
+		printf("Agent ARCHID: %d\n", GetEffectiveARCHID());
+#else
 		printf("Agent ARCHID: %d\n", MESH_AGENTID);
+#endif
 		char script[] = "var _tmp = 'Detected OS: ' + require('os').Name; try{_tmp += (' - ' + require('os').arch());}catch(x){}console.log(_tmp);if(process.platform=='win32'){ _tmp=require('win-authenticode-opus')(process.execPath); if(_tmp!=null && _tmp.url!=null){ _tmp=require('win-authenticode-opus').locked(_tmp.url); if(_tmp!=null) { console.log('LOCKED to: ' + _tmp.dns); console.log(' => ' + _tmp.id); } } } process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
 		integratedJavaScriptLen = (int)sizeof(script) - 1;
@@ -668,7 +995,10 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("Usage: meshagent [options] [script.js]\n\n");
 		printf("Information:\n");
 		printf("  -help, --help, -h     Show this help message\n");
-		printf("  -version              Show version information\n");
+		printf("  -version              Show version (CFBundleShortVersionString)\n");
+		printf("  -buildver             Show build version (CFBundleVersion)\n");
+		printf("  -buildversion         Alias for -buildver\n");
+		printf("  -fullversion          Show complete version (version + build)\n");
 		printf("  -info                 Show detailed agent information\n");
 		printf("  -licenses             Show open source licenses\n");
 		printf("  -nodeid               Show agent's unique node ID\n");
@@ -688,7 +1018,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("  --companyName=NAME    Company name component\n");
 		printf("  --copy-msh=1          Copy .msh file to install location\n");
 		printf("  --disableUpdate=1     Disable automatic updates\n");
-		printf("  --disableTccCheck=1   Disable TCC permission check UI (macOS)\n\n");
+		printf("  --disableTccCheck=1   Disable TCC permission check UI (macOS)\n");
+		printf("  --meshAgentLogging=1  Configure meshagent launchd logging to /tmp (macOS)\n\n");
 		printf("Service Control:\n");
 		printf("  -daemon               Run in foreground daemon mode\n");
 		printf("  -state                Show agent state\n\n");
@@ -739,6 +1070,48 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		}
 #else
 		printf("-version flag is only supported on macOS builds\n");
+#endif
+#ifdef WIN32
+		wmain_free(argv);
+#endif
+		return(0);
+	}
+	if (argc > 1 && (strcasecmp(argv[1], "-buildver") == 0 || strcasecmp(argv[1], "-buildversion") == 0))
+	{
+#ifdef __APPLE__
+		char *build = get_embedded_build_version();
+		if (build != NULL)
+		{
+			printf("%s\n", build);
+			free(build);
+		}
+		else
+		{
+			printf("Build version information not available\n");
+		}
+#else
+		printf("-buildver flag is only supported on macOS builds\n");
+#endif
+#ifdef WIN32
+		wmain_free(argv);
+#endif
+		return(0);
+	}
+	if (argc > 1 && strcasecmp(argv[1], "-fullversion") == 0)
+	{
+#ifdef __APPLE__
+		char *full_version = get_embedded_full_version();
+		if (full_version != NULL)
+		{
+			printf("%s\n", full_version);
+			free(full_version);
+		}
+		else
+		{
+			printf("Full version information not available\n");
+		}
+#else
+		printf("-fullversion flag is only supported on macOS builds\n");
 #endif
 #ifdef WIN32
 		wmain_free(argv);
@@ -973,6 +1346,17 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	}
 
 	if (argc > 1 && strcasecmp(argv[1], "connect") == 0) { capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY; }
+
+#if defined(__APPLE__)
+	// Detect if running in macOS app bundle mode
+	char exePath[PATH_MAX];
+	uint32_t len = sizeof(exePath);
+	if (_NSGetExecutablePath(exePath, &len) == 0) {
+		if (strstr(exePath, ".app/Contents/MacOS/") != NULL) {
+			capabilities |= MeshCommand_AuthInfo_CapabilitiesMask_APPBUNDLE;
+		}
+	}
+#endif
 
 	if (integratedJavaScriptLen == 0)
 	{

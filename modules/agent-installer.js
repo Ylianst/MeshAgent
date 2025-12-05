@@ -34,7 +34,10 @@ try
                     if (this[i].startsWith(name + '='))
                     {
                         ret = this[i].substring(name.length + 1);
-                        if (ret.startsWith('"')) { ret = ret.substring(1, ret.length - 1); }
+                        // Strip surrounding quotes (double or single)
+                        if ((ret.startsWith('"') && ret.endsWith('"')) || (ret.startsWith("'") && ret.endsWith("'"))) {
+                            ret = ret.substring(1, ret.length - 1);
+                        }
                         return (ret);
                     }
                 }
@@ -115,6 +118,54 @@ var securityPermissions = require('./security-permissions');
 
 // Import logger for unified timestamped logging
 var logger = require('./logger');
+
+// Configure logger output mode from command line parameters
+// Default for install/uninstall is QUIET; user can override with flags
+function configureLoggerFromParams(parms) {
+    // Set install/uninstall default to QUIET (overrides logger's INFO default)
+    logger.forceOutputMode('QUIET');
+
+    // Parse --log=0,1,2,3 (0=silent, 1=quiet, 2=info, 3=verbose)
+    var logParam = parms.getParameter('log', null);
+    if (logParam !== null) {
+        switch (logParam) {
+            case '0': logger.forceOutputMode('SILENT'); break;
+            case '1': logger.forceOutputMode('QUIET'); break;
+            case '2': logger.forceOutputMode('INFO'); break;
+            case '3':
+                logger.forceOutputMode('VERBOSE');
+                logger.setLevel('DEBUG');
+                break;
+        }
+        return;  // --log takes precedence, skip other flags
+    }
+
+    // Parse --verbose, --info, --quiet, --silent parameters
+    var verboseParam = parms.getParameter('verbose', null);
+    var infoParam = parms.getParameter('info', null);
+    var quietParam = parms.getParameter('quiet', null);
+    var silentParam = parms.getParameter('silent', null);
+
+    // Apply output modes - most verbose wins (order doesn't matter due to setOutputMode logic)
+    // Order from least to most verbose: SILENT < QUIET < INFO < VERBOSE
+    if (silentParam === '1' || silentParam === 'true') {
+        logger.setOutputMode('SILENT');
+    }
+    if (quietParam === '1' || quietParam === 'true') {
+        logger.setOutputMode('QUIET');
+    }
+    if (infoParam === '1' || infoParam === 'true') {
+        logger.setOutputMode('INFO');
+    }
+    if (verboseParam === '1' || verboseParam === 'true') {
+        logger.setOutputMode('VERBOSE');
+        logger.setLevel('DEBUG');  // Enable debug logging in verbose mode
+    }
+    // If --verbose=0 or --quiet=0 explicitly, use INFO mode
+    if (verboseParam === '0' || verboseParam === 'false' || quietParam === '0' || quietParam === 'false') {
+        logger.setOutputMode('INFO');
+    }
+}
 
 // Case-insensitive file lookup
 // Returns the actual filename if found, or null if not found
@@ -222,6 +273,36 @@ function checkParameters(parms)
         }
     }
 
+    // Normalize --skip-backup to --omit-backup (alias) - both simple flag and value formats
+    if (parms.indexOf('--skip-backup') >= 0)
+    {
+        parms.splice(parms.indexOf('--skip-backup'), 1);
+        if (parms.indexOf('--omit-backup') < 0)
+        {
+            parms.push('--omit-backup');
+        }
+    }
+    // Also normalize --skip-backup=VALUE to --omit-backup=VALUE
+    for (var i = 0; i < parms.length; i++)
+    {
+        if (parms[i].startsWith('--skip-backup='))
+        {
+            var value = parms[i].substring('--skip-backup='.length);
+            parms.splice(i, 1);
+            // Only add if --omit-backup=VALUE not already present
+            var hasOmitBackup = false;
+            for (var j = 0; j < parms.length; j++)
+            {
+                if (parms[j].startsWith('--omit-backup=')) { hasOmitBackup = true; break; }
+            }
+            if (!hasOmitBackup)
+            {
+                parms.push('--omit-backup=' + value);
+            }
+            break;
+        }
+    }
+
     var msh = _MSH();
     if (parms.getParameter('description', null) == null && msh.description != null) { parms.push('--description="' + msh.description + '"'); }
     if (parms.getParameter('displayName', null) == null && msh.displayName != null) { parms.push('--displayName="' + msh.displayName + '"'); }
@@ -297,6 +378,39 @@ function parseMshFile(mshPath) {
         return msh;
     } catch (e) {
         throw new Error('Could not read .msh file: ' + e.message);
+    }
+}
+
+// Validate .msh file has minimum required settings for agent to connect
+// Required: MeshServer, MeshID, ServerID
+// Returns: { valid: boolean, missing: string[] }
+function validateMshConfig(mshPath) {
+    var result = { valid: false, missing: [] };
+
+    if (!require('fs').existsSync(mshPath)) {
+        result.missing.push('file not found');
+        return result;
+    }
+
+    try {
+        var msh = parseMshFile(mshPath);
+
+        // Check required settings
+        if (!msh.MeshServer || msh.MeshServer.trim() === '') {
+            result.missing.push('MeshServer');
+        }
+        if (!msh.MeshID || msh.MeshID.trim() === '') {
+            result.missing.push('MeshID');
+        }
+        if (!msh.ServerID || msh.ServerID.trim() === '') {
+            result.missing.push('ServerID');
+        }
+
+        result.valid = (result.missing.length === 0);
+        return result;
+    } catch (e) {
+        result.missing.push('parse error: ' + e.message);
+        return result;
     }
 }
 
@@ -379,14 +493,36 @@ function findInstallation(installPath, serviceName, companyName) {
         }
     }
 
-    // Check if we're running from an installed location (self-upgrade scenario)
-    // Look for .msh file alongside process.execPath
-    var selfDir = process.execPath.substring(0, process.execPath.lastIndexOf('/') + 1);
-    var selfMshPath = selfDir + 'meshagent.msh';
+    // Check if current binary is registered in any LaunchDaemon/LaunchAgent
+    // This handles upgrade/install from an already-installed location
+    var currentBinary = process.execPath;
+    var dirs = ['/Library/LaunchDaemons', '/Library/LaunchAgents'];
 
-    if (require('fs').existsSync(selfMshPath)) {
-        // Self-upgrade detected - return path (caller will log)
-        return selfDir;
+    for (var d = 0; d < dirs.length; d++) {
+        try {
+            var files = require('fs').readdirSync(dirs[d]);
+            for (var i = 0; i < files.length; i++) {
+                if (files[i].endsWith('.plist')) {
+                    var plistPath = dirs[d] + '/' + files[i];
+                    var binaryPath = getProgramPathFromPlist(plistPath);
+
+                    // Check if this plist points to the CURRENT binary
+                    if (binaryPath === currentBinary) {
+                        // Extract installation path
+                        var bundleParent = macOSHelpers.getBundleParentDirectory(binaryPath);
+                        if (bundleParent) {
+                            return bundleParent;
+                        } else {
+                            var parts = binaryPath.split('/');
+                            parts.pop();
+                            return parts.join('/') + '/';
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // Continue to next directory
+        }
     }
 
     // Try default location
@@ -450,10 +586,117 @@ function getProgramPathFromPlist(plistPath) {
         // Extract first ProgramArguments string (the binary path)
         child.stdin.write("cat '" + plistPath + "' | tr '\\n' '.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</array>\"); split(b[1], c, \"<string>\"); split(c[2], d, \"</string>\"); print d[1]; }'\nexit\n");
         child.waitExit();
-        return child.stdout.str.trim();
+        var result = child.stdout.str.trim();
+        return result || '';  // Return empty string instead of null/undefined
     } catch (e) {
-        return null;
+        logger.warn('Failed to parse plist: ' + plistPath + ' - ' + e.message);
+        return '';  // Return empty string on error, never null
     }
+}
+
+// Helper to extract extra ProgramArguments from plist (returns all args for filtering later)
+function extractExtraProgramArguments(plistPath) {
+    try {
+        var child = require('child_process').execFile('/bin/sh', ['sh']);
+        child.stdout.str = '';
+        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+        child.stderr.on('data', function (chunk) { });
+
+        // Count ProgramArguments array elements
+        child.stdin.write('/usr/libexec/PlistBuddy -c "Print :ProgramArguments" "' + plistPath + '" 2>/dev/null | grep -c "    "\n');
+        child.stdin.write('exit\n');
+        child.waitExit();
+
+        var count = parseInt(child.stdout.str.trim()) || 0;
+        if (count === 0) return [];
+
+        // Read each argument
+        var allArgs = [];
+        for (var i = 0; i < count; i++) {
+            var argChild = require('child_process').execFile('/bin/sh', ['sh']);
+            argChild.stdout.str = '';
+            argChild.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+            argChild.stderr.on('data', function (chunk) { });
+            argChild.stdin.write('/usr/libexec/PlistBuddy -c "Print :ProgramArguments:' + i + '" "' + plistPath + '" 2>/dev/null\n');
+            argChild.stdin.write('exit\n');
+            argChild.waitExit();
+            var arg = argChild.stdout.str.trim();
+            if (arg) allArgs.push(arg);
+        }
+
+        return allArgs;
+    } catch (e) {
+        logger.warn('Could not extract ProgramArguments: ' + e);
+        return [];
+    }
+}
+
+// Helper to extract all keys from plist as key-value objects
+function extractNonStandardKeys(plistPath) {
+    try {
+        var plistXml = require('fs').readFileSync(plistPath).toString();
+        var dictMatch = plistXml.match(/<dict>([\s\S]*)<\/dict>/);
+        if (!dictMatch) return [];
+
+        var dictContent = dictMatch[1];
+        var keyValuePattern = /\s*<key>([^<]+)<\/key>\s*((?:<[^>]+>(?:(?!<key>)[\s\S])*?<\/[^>]+>)|(?:<[^\/]+\/>))/g;
+        var match;
+        var allKeyValueXml = [];
+
+        while ((match = keyValuePattern.exec(dictContent)) !== null) {
+            allKeyValueXml.push({
+                key: match[1],
+                xml: match[0]
+            });
+        }
+
+        return allKeyValueXml;
+    } catch (e) {
+        logger.warn('Could not extract keys from plist: ' + e);
+        return [];
+    }
+}
+
+// Helper to cache plist customizations before cleanup (for surgical updates)
+function cachePlistCustomizations(serviceId) {
+    var daemonPlistPath = '/Library/LaunchDaemons/' + serviceId + '.plist';
+    var agentPlistPath = '/Library/LaunchAgents/' + serviceId + '.plist';
+    var fs = require('fs');
+
+    var cached = {
+        daemon: { allArgs: [], allKeys: [] },
+        agent: { allArgs: [], allKeys: [] }
+    };
+
+    // Cache LaunchDaemon customizations
+    if (fs.existsSync(daemonPlistPath)) {
+        try {
+            cached.daemon.allArgs = extractExtraProgramArguments(daemonPlistPath);
+            cached.daemon.allKeys = extractNonStandardKeys(daemonPlistPath);
+            if (cached.daemon.allArgs.length > 0 || cached.daemon.allKeys.length > 0) {
+                logger.info('Cached LaunchDaemon: ' + cached.daemon.allArgs.length + ' args, ' +
+                           cached.daemon.allKeys.length + ' keys');
+            }
+        } catch (e) {
+            logger.warn('Could not cache LaunchDaemon customizations: ' + e);
+        }
+    }
+
+    // Cache LaunchAgent customizations
+    if (fs.existsSync(agentPlistPath)) {
+        try {
+            cached.agent.allArgs = extractExtraProgramArguments(agentPlistPath);
+            cached.agent.allKeys = extractNonStandardKeys(agentPlistPath);
+            if (cached.agent.allArgs.length > 0 || cached.agent.allKeys.length > 0) {
+                logger.info('Cached LaunchAgent: ' + cached.agent.allArgs.length + ' args, ' +
+                           cached.agent.allKeys.length + ' keys');
+            }
+        } catch (e) {
+            logger.warn('Could not cache LaunchAgent customizations: ' + e);
+        }
+    }
+
+    return cached;
 }
 
 // Helper to find and clean up all plists pointing to the same binary
@@ -474,7 +717,8 @@ function cleanupOrphanedPlists(installPath) {
         var daemonDir = '/Library/LaunchDaemons';
         var files = require('fs').readdirSync(daemonDir);
         for (var i = 0; i < files.length; i++) {
-            if (files[i].endsWith('.plist')) {
+            // SAFETY GUARD #1: Only process plists with "meshagent" in filename
+            if (files[i].endsWith('.plist') && files[i].indexOf('meshagent') !== -1) {
                 var plistPath = daemonDir + '/' + files[i];
                 var plistBinary = getProgramPathFromPlist(plistPath);
 
@@ -483,30 +727,53 @@ function cleanupOrphanedPlists(installPath) {
                 // 2. Exact match for current bundle binary
                 // 3. Any bundle in the install directory (e.g., /opt/tacticalmesh/*.app/Contents/MacOS/meshagent)
                 var matchesInstallPath = false;
-                if (plistBinary === binaryPath || plistBinary === bundleBinaryPath) {
-                    matchesInstallPath = true;
-                } else if (plistBinary && plistBinary.indexOf(installPath) === 0 && plistBinary.indexOf('.app/Contents/MacOS/meshagent') > 0) {
-                    // Plist points to a bundle in our install directory
-                    matchesInstallPath = true;
+
+                // CRITICAL: Only match if plistBinary is a valid non-empty string
+                // Prevents matching null===null when parse fails and no bundle exists
+                if (plistBinary && plistBinary.length > 0) {
+                    if (plistBinary === binaryPath || (bundleBinaryPath && plistBinary === bundleBinaryPath)) {
+                        matchesInstallPath = true;
+                    } else if (plistBinary.indexOf(installPath) === 0 && plistBinary.indexOf('.app/Contents/MacOS/meshagent') > 0) {
+                        // Plist points to a bundle in our install directory
+                        matchesInstallPath = true;
+                    }
                 }
 
                 if (matchesInstallPath) {
+                    // SAFETY GUARD #2: Abort if we're about to delete more than 3 plists
+                    if (cleaned.length > 3) {
+                        logger.error('SAFETY ABORT: Attempted to delete more than 3 LaunchDaemon plists');
+                        logger.error('Already deleted: ' + cleaned.join(', '));
+                        logger.error('Attempted to delete: ' + plistPath);
+                        logger.error('This may indicate a bug. Stopping cleanup to prevent data loss.');
+                        process.exit(1);
+                    }
+
+                    // SAFETY GUARD #6: Log what will be deleted
+                    logger.warn('WILL DELETE LaunchDaemon: ' + files[i] + ' (points to ' + plistBinary + ')');
+
                     // This plist points to our installation - unload and delete it
                     try {
                         var serviceName = files[i].replace('.plist', '');
                         var svc = require('service-manager').manager.getService(serviceName);
+
+                        logger.info('Unloading LaunchDaemon: ' + serviceName);
                         svc.unload();
                         svc.close();
+                        logger.info('Successfully unloaded LaunchDaemon: ' + serviceName);
                     } catch (e) {
                         // Log unload errors for diagnostics (except "not loaded")
                         if (e.message && e.message.indexOf('not loaded') === -1 && e.message.indexOf('Could not find') === -1) {
                             logger.warn('Unload error for ' + serviceName + ': ' + e.message);
+                        } else {
+                            logger.info('LaunchDaemon not loaded: ' + serviceName + ' (OK)');
                         }
                         // Continue - will be verified in safety checks
                     }
 
                     require('fs').unlinkSync(plistPath);
                     cleaned.push(plistPath);
+                    logger.info('Deleted: ' + plistPath);
                 }
             }
         }
@@ -519,45 +786,127 @@ function cleanupOrphanedPlists(installPath) {
         var agentDir = '/Library/LaunchAgents';
         var files = require('fs').readdirSync(agentDir);
         for (var i = 0; i < files.length; i++) {
-            if (files[i].endsWith('.plist')) {
+            // SAFETY GUARD #1: Only process plists with "meshagent" in filename
+            if (files[i].endsWith('.plist') && files[i].indexOf('meshagent') !== -1) {
                 var plistPath = agentDir + '/' + files[i];
                 var plistBinary = getProgramPathFromPlist(plistPath);
 
                 // Check if plist points to our installation (same logic as LaunchDaemons)
                 var matchesInstallPath = false;
-                if (plistBinary === binaryPath || plistBinary === bundleBinaryPath) {
-                    matchesInstallPath = true;
-                } else if (plistBinary && plistBinary.indexOf(installPath) === 0 && plistBinary.indexOf('.app/Contents/MacOS/meshagent') > 0) {
-                    matchesInstallPath = true;
+
+                // CRITICAL: Only match if plistBinary is a valid non-empty string
+                // Prevents matching null===null when parse fails and no bundle exists
+                if (plistBinary && plistBinary.length > 0) {
+                    if (plistBinary === binaryPath || (bundleBinaryPath && plistBinary === bundleBinaryPath)) {
+                        matchesInstallPath = true;
+                    } else if (plistBinary.indexOf(installPath) === 0 && plistBinary.indexOf('.app/Contents/MacOS/meshagent') > 0) {
+                        // Plist points to a bundle in our install directory
+                        matchesInstallPath = true;
+                    }
                 }
 
                 if (matchesInstallPath) {
+                    // SAFETY GUARD #2: Abort if we're about to delete more than 3 plists
+                    if (cleaned.length > 3) {
+                        logger.error('SAFETY ABORT: Attempted to delete more than 3 LaunchAgent plists');
+                        logger.error('Already deleted: ' + cleaned.join(', '));
+                        logger.error('Attempted to delete: ' + plistPath);
+                        logger.error('This may indicate a bug. Stopping cleanup to prevent data loss.');
+                        process.exit(1);
+                    }
+
+                    // SAFETY GUARD #6: Log what will be deleted
+                    logger.warn('WILL DELETE LaunchAgent: ' + files[i] + ' (points to ' + plistBinary + ')');
+
                     // This plist points to our installation - unload and delete it
                     try {
                         var serviceName = files[i].replace('.plist', '');
                         var launchAgent = require('service-manager').manager.getLaunchAgent(serviceName);
 
+                        logger.info('Unloading LaunchAgent: ' + serviceName);
+
                         // Unload for ALL logged in users, not just console user
+                        var unloadedCount = 0;
+                        var foundValidSessions = false;
                         try {
-                            var sessions = require('user-sessions').enumerateUsers();
-                            for (var j = 0; j < sessions.length; j++) {
-                                if (sessions[j].uid && sessions[j].uid > 0) {
+                            // Get logged-in users using 'users' command - returns space-separated unique usernames
+                            var userSessions = require('user-sessions');
+                            var child = require('child_process').execFile('/usr/bin/users', ['users']);
+                            child.stdout.str = '';
+                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
+                            child.waitExit();
+
+                            // Parse space-separated usernames
+                            var usernames = child.stdout.str.trim().split(/\s+/).filter(function(u) { return u.length > 0; });
+                            var activeUids = [];
+
+                            // Convert usernames to UIDs
+                            for (var i = 0; i < usernames.length; i++) {
+                                try {
+                                    var uid = userSessions.getUid(usernames[i]);
+                                    if (uid && uid > 0) {
+                                        activeUids.push(uid);
+                                    }
+                                } catch (e) {
+                                    logger.warn('Could not get UID for user "' + usernames[i] + '": ' + e.message);
+                                }
+                            }
+
+                            logger.info('Found ' + activeUids.length + ' active user(s)' +
+                                       (usernames.length > 0 ? ' (' + usernames.join(', ') + ')' : ''));
+
+                            // Unload LaunchAgent for each active user
+                            if (activeUids.length > 0) {
+                                for (var j = 0; j < activeUids.length; j++) {
+                                    var uid = activeUids[j];
+                                    foundValidSessions = true;
                                     try {
-                                        launchAgent.unload(sessions[j].uid);
+                                        logger.info('Attempting bootout for uid ' + uid);
+                                        launchAgent.unload(uid);
+                                        unloadedCount++;
+                                        logger.info('Successfully booted out LaunchAgent for uid ' + uid);
                                     } catch (unloadErr) {
                                         // Agent might not be loaded for this user - that's OK
                                         if (unloadErr.message && unloadErr.message.indexOf('not loaded') === -1 && unloadErr.message.indexOf('Could not find') === -1) {
-                                            logger.warn('Unload error for ' + serviceName + ' (uid ' + sessions[j].uid + '): ' + unloadErr.message);
+                                            logger.warn('Unload error for ' + serviceName + ' (uid ' + uid + '): ' + unloadErr.message);
+                                        } else {
+                                            logger.info('LaunchAgent not loaded for uid ' + uid + ' (OK)');
                                         }
                                     }
                                 }
                             }
+
+                            if (!foundValidSessions) {
+                                logger.warn('No active users found, falling back to console user');
+                                throw new Error('No active users');
+                            }
                         } catch (enumErr) {
+                            logger.warn('User enumeration failed: ' + (enumErr.message || 'unknown error') + ', falling back to console user');
                             // If we can't enumerate users, fall back to console user
                             var uid = require('user-sessions').consoleUid();
+                            logger.info('Console UID: ' + uid);
                             if (uid && uid > 0) {
-                                launchAgent.unload(uid);
+                                logger.info('Attempting bootout for console uid ' + uid);
+                                try {
+                                    launchAgent.unload(uid);
+                                    unloadedCount++;
+                                    logger.info('Successfully booted out LaunchAgent for console uid ' + uid);
+                                } catch (consoleUnloadErr) {
+                                    if (consoleUnloadErr.message && consoleUnloadErr.message.indexOf('not loaded') === -1 && consoleUnloadErr.message.indexOf('Could not find') === -1) {
+                                        logger.warn('Console unload error: ' + consoleUnloadErr.message);
+                                    } else {
+                                        logger.info('LaunchAgent not loaded for console user (OK)');
+                                    }
+                                }
+                            } else {
+                                logger.warn('No console user found (uid: ' + uid + ')');
                             }
+                        }
+
+                        if (unloadedCount > 0) {
+                            logger.info('Unloaded LaunchAgent for ' + unloadedCount + ' user(s)');
+                        } else {
+                            logger.warn('LaunchAgent was not unloaded for any users - may still be running!');
                         }
                     } catch (e) {
                         // Log unload errors for diagnostics (except "not loaded")
@@ -569,6 +918,7 @@ function cleanupOrphanedPlists(installPath) {
 
                     require('fs').unlinkSync(plistPath);
                     cleaned.push(plistPath);
+                    logger.info('Deleted: ' + plistPath);
                 }
             }
         }
@@ -881,7 +1231,6 @@ function backupInstallation(installPath) {
 // Helper to recursively copy a directory
 function copyDirectoryRecursive(source, target) {
     var fs = require('fs');
-    var path = require('path');
 
     // Create target directory
     if (!fs.existsSync(target)) {
@@ -921,14 +1270,58 @@ function replaceInstallation(sourceType, installPath) {
     var logger = require('./logger');
 
     try {
+        // Ensure installation directory exists (create if needed)
+        if (!fs.existsSync(installPath)) {
+            logger.info('Creating installation directory structure:');
+            logger.info('  Target: ' + installPath);
+
+            // Show which parent directories need to be created
+            var pathParts = installPath.split('/').filter(function(p) { return p.length > 0; });
+            var buildPath = '/';
+            var newDirs = [];
+
+            for (var i = 0; i < pathParts.length; i++) {
+                buildPath += pathParts[i] + '/';
+                if (!fs.existsSync(buildPath)) {
+                    newDirs.push(buildPath);
+                }
+            }
+
+            if (newDirs.length > 0) {
+                logger.info('  Creating ' + newDirs.length + ' director' + (newDirs.length === 1 ? 'y' : 'ies') + ':');
+                for (var j = 0; j < newDirs.length; j++) {
+                    logger.info('    ' + newDirs[j]);
+                }
+            }
+
+            // Create directories one at a time (recursive option doesn't work in embedded JS engine)
+            for (var k = 0; k < newDirs.length; k++) {
+                try {
+                    fs.mkdirSync(newDirs[k]);
+                    fs.chmodSync(newDirs[k], 0o755);
+                } catch (mkdirErr) {
+                    // If directory already exists, that's OK (race condition)
+                    if (mkdirErr.code !== 'EEXIST') {
+                        throw new Error('Could not create directory ' + newDirs[k] + ': ' + mkdirErr.message);
+                    }
+                }
+            }
+
+            logger.info('Installation directory created successfully');
+        } else {
+            logger.info('Installation directory already exists: ' + installPath);
+        }
+
         if (sourceType.type === 'bundle') {
 
-            // Copy entire bundle - get bundle name from source
+            // Copy entire bundle - always install as MeshAgent.app
             var sourceBundlePath = sourceType.bundlePath;
+            var sourceBundleName = sourceBundlePath.substring(sourceBundlePath.lastIndexOf('/') + 1);
 
-            var bundleName = sourceBundlePath.substring(sourceBundlePath.lastIndexOf('/') + 1);
+            // Always use standard bundle name regardless of source name
+            var targetBundlePath = installPath + 'MeshAgent.app';
 
-            var targetBundlePath = installPath + bundleName;
+            logger.info('Installing bundle: ' + sourceBundleName + ' → MeshAgent.app');
 
             // Source bundle should already be backed up by backupInstallation()
             // Just copy the new bundle
@@ -1185,8 +1578,11 @@ function forceKillProcesses(pids) {
 }
 
 // Helper to create LaunchDaemon
-function createLaunchDaemon(serviceName, companyName, installPath, serviceId, installType) {
+function createLaunchDaemon(serviceName, companyName, installPath, serviceId, installType, surgical, cachedCustomizations, meshAgentLogging) {
     var logger = require('./logger');
+
+    logger.info('[CREATE-DAEMON] Starting LaunchDaemon creation');
+    logger.info('[CREATE-DAEMON] serviceName=' + serviceName + ', serviceId=' + serviceId + ', installType=' + installType + ', surgical=' + surgical);
 
     try {
         // Determine binary path based on installation type
@@ -1196,8 +1592,16 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             target: 'meshagent',
             startType: 'AUTO_START',
             parameters: [],  // serviceId from .msh, appBundle auto-detected
-            companyName: companyName
+            companyName: companyName,
+            surgicalUpdate: surgical,  // Enable surgical plist updates (preserve customizations)
+            meshAgentLogging: meshAgentLogging  // Enable launchd logging to /tmp
         };
+
+        // Pass cached customizations if available (for surgical updates)
+        if (cachedCustomizations && cachedCustomizations.daemon) {
+            options.cachedCustomizations = cachedCustomizations.daemon;
+            logger.info('[CREATE-DAEMON] Passing cached customizations to service-manager');
+        }
 
         if (installType === 'bundle') {
             // For bundle installations, reference the binary inside the bundle
@@ -1221,8 +1625,9 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             options.installPath = installPath;
         }
 
+        logger.info('[CREATE-DAEMON] Calling service-manager.installService with options: ' + JSON.stringify(options));
         require('service-manager').manager.installService(options);
-        logger.info('LaunchDaemon created');
+        logger.info('[CREATE-DAEMON] LaunchDaemon created successfully');
     } catch (e) {
         var errorMsg = 'Could not create LaunchDaemon: ';
         if (e && e.message) {
@@ -1237,7 +1642,7 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
 }
 
 // Helper to create LaunchAgent
-function createLaunchAgent(serviceName, companyName, installPath, serviceId, installType) {
+function createLaunchAgent(serviceName, companyName, installPath, serviceId, installType, surgical, cachedCustomizations, meshAgentLogging) {
     var logger = require('./logger');
 
     try {
@@ -1248,8 +1653,16 @@ function createLaunchAgent(serviceName, companyName, installPath, serviceId, ins
             companyName: companyName,
             startType: 'AUTO_START',
             sessionTypes: ['Aqua', 'LoginWindow'],
-            parameters: ['-kvm1', '--serviceId=' + serviceId]
+            parameters: ['-kvm1', '--serviceId=' + serviceId],
+            surgicalUpdate: surgical,  // Enable surgical plist updates (preserve customizations)
+            meshAgentLogging: meshAgentLogging  // Enable launchd logging to /tmp
         };
+
+        // Pass cached customizations if available (for surgical updates)
+        if (cachedCustomizations && cachedCustomizations.agent) {
+            options.cachedCustomizations = cachedCustomizations.agent;
+            logger.info('[CREATE-AGENT] Passing cached customizations to service-manager');
+        }
 
         if (installType === 'bundle') {
             // Dynamically discover bundle name instead of hard-coding
@@ -1322,12 +1735,28 @@ function bootstrapServices(serviceId) {
 // Future: Will be migrated to Linux, then Windows
 function installServiceUnified(params) {
 
+    // Register cleanup handler for launchctl job (runs on ANY exit)
+    // This removes the meshagent.upgrade job and terminates the process cleanly
+    var cleanupRegistered = false;
+    process.once('exit', function() {
+        if (!cleanupRegistered) {
+            cleanupRegistered = true;
+            try {
+                require('child_process').execFile('/bin/launchctl', ['launchctl', 'remove', 'meshagent.upgrade']);
+            } catch (ex) {
+                // Ignore errors
+            }
+        }
+    });
+
     // Parse JSON string from C code (same as fullInstall)
     var parms = JSON.parse(params);
 
     var child_process = require('child_process');
     var fs = require('fs');
-    var logger = require('./logger');
+
+    // Configure logger output mode from command line flags
+    configureLoggerFromParams(parms);
 
     // Verify root permissions
     var userSessions = require('user-sessions');
@@ -1336,6 +1765,7 @@ function installServiceUnified(params) {
 
     if (!userSessions.isRoot()) {
         logger.error('Installation/upgrade requires root privileges. Please run with sudo.');
+        logger.result(false, 'Installation failed - root privileges required');
         process.exit(1);
     }
 
@@ -1356,11 +1786,15 @@ function installServiceUnified(params) {
 
     // Parse key parameters
     var installPath = parms.getParameter('installPath', null);
+    var explicitInstallPathProvided = (installPath !== null);
 
     // Normalize installPath (ensure trailing slash)
     if (installPath) {
         installPath = normalizeInstallPath(installPath);
+        logger.info('Using explicit --installPath: ' + installPath);
     } else {
+        // No explicit installPath - will construct from serviceName/companyName if provided
+        logger.info('No --installPath specified, will use default or construct from service/company names');
     }
 
     var newServiceName = parms.getParameter('meshServiceName', null);
@@ -1368,26 +1802,46 @@ function installServiceUnified(params) {
     var newServiceId = parms.getParameter('serviceId', null);
     var disableUpdateParam = parms.getParameter('disableUpdate', null);
     var disableTccCheckParam = parms.getParameter('disableTccCheck', null);
+    var meshAgentLoggingParam = parms.getParameter('meshAgentLogging', null);
     var copyMsh = parms.getParameter('copy-msh', null);
     var explicitMshPath = parms.getParameter('mshPath', null);  // Explicit path to .msh file
-    var omitBackup = (parms.indexOf('--omit-backup') >= 0);
+    // Check for --omit-backup in both formats:
+    // - Simple flag: --omit-backup (not passed from C, but check anyway)
+    // - Value format: --omit-backup=1 or --omit-backup=true (passed from C)
+    var omitBackupParam = parms.getParameter('omit-backup', null);
+    var skipBackupParam = parms.getParameter('skip-backup', null);
+    var omitBackup = (parms.indexOf('--omit-backup') >= 0) ||
+                     (omitBackupParam === '1' || omitBackupParam === 'true') ||
+                     (skipBackupParam === '1' || skipBackupParam === 'true');
     var upgradeMode = (parms.indexOf('--_upgradeMode=1') >= 0);
 
-    // Parse --disableUpdate parameter: null=not specified, true=disable, false=enable
+    // Parse --allowNoMsh flag: allows install without valid .msh configuration (agent will wait for config)
+    var allowNoMshParam = parms.getParameter('allowNoMsh', null);
+    var allowNoMsh = (parms.indexOf('--allowNoMsh') >= 0) ||
+                     (allowNoMshParam === '1' || allowNoMshParam === 'true');
+
+    // Parse --disableUpdate parameter: null=not specified, true=disable, false=enable, 'clear'=write blank
     var disableUpdate = null;
     if (disableUpdateParam === '1' || disableUpdateParam === 'true') {
         disableUpdate = true;
     } else if (disableUpdateParam === '0' || disableUpdateParam === 'false') {
         disableUpdate = false;
+    } else if (disableUpdateParam === '') {
+        disableUpdate = 'clear';  // Explicitly provided with blank value - write blank to .msh
     }
 
-    // Parse --disableTccCheck parameter: null=not specified, true=disable, false=enable
+    // Parse --disableTccCheck parameter: null=not specified, true=disable, false=enable, 'clear'=write blank
     var disableTccCheck = null;
     if (disableTccCheckParam === '1' || disableTccCheckParam === 'true') {
         disableTccCheck = true;
     } else if (disableTccCheckParam === '0' || disableTccCheckParam === 'false') {
         disableTccCheck = false;
+    } else if (disableTccCheckParam === '') {
+        disableTccCheck = 'clear';  // Explicitly provided with blank value - write blank to .msh
     }
+
+    // Parse --meshAgentLogging parameter: enable launchd logging to /tmp for debugging
+    var meshAgentLogging = (meshAgentLoggingParam === '1' || meshAgentLoggingParam === 'true');
 
     // Determine operation mode
     var isFreshInstall = false;
@@ -1423,10 +1877,37 @@ function installServiceUnified(params) {
             // No .msh file - fallback to findInstallation()
             logger.error('.msh file not found at: ' + sourceMshFile);
             logger.error('For -install without --installPath, place meshagent.msh next to the binary');
+            logger.result(false, 'Installation failed - .msh file not found');
             process.exit(1);
         }
     } else {
-        // Not an in-place install scenario - try to find existing installation
+        // Not an in-place install scenario - construct installPath from service/company names if not provided
+        if (!installPath && (newServiceName || newCompanyName)) {
+            // Construct path following pattern: /usr/local/mesh_services/{company}/{service}/
+            var sanitizedServiceName = macOSHelpers.sanitizeIdentifier(newServiceName || 'meshagent');
+            var sanitizedCompanyName = macOSHelpers.sanitizeIdentifier(newCompanyName);
+
+            if (sanitizedCompanyName) {
+                // Company provided: /usr/local/mesh_services/{company}/{service}/
+                installPath = '/usr/local/mesh_services/' + sanitizedCompanyName + '/' + sanitizedServiceName + '/';
+                logger.info('Constructed installPath from company and service names:');
+                logger.info('  Company: "' + newCompanyName + '" → "' + sanitizedCompanyName + '"');
+                logger.info('  Service: "' + (newServiceName || 'meshagent') + '" → "' + sanitizedServiceName + '"');
+                logger.info('  Path: ' + installPath);
+            } else if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
+                // No company, custom service: /usr/local/mesh_services/{service}/
+                installPath = '/usr/local/mesh_services/' + sanitizedServiceName + '/';
+                logger.info('Constructed installPath from service name:');
+                logger.info('  Service: "' + newServiceName + '" → "' + sanitizedServiceName + '"');
+                logger.info('  Path: ' + installPath);
+            } else {
+                // Default path for standard meshagent installation
+                installPath = '/usr/local/mesh_services/meshagent/';
+                logger.info('Using default installPath: ' + installPath);
+            }
+        }
+
+        // Try to find existing installation
         try {
             existingInstallPath = findInstallation(installPath, newServiceName, newCompanyName);
         } catch (e) {
@@ -1439,6 +1920,7 @@ function installServiceUnified(params) {
             // Fatal error - cannot proceed
             logger.error(installMode.reason);
             logger.error('Please specify --installPath, --serviceName, or --companyName');
+            logger.result(false, 'Installation failed - cannot determine target location');
             process.exit(1);
         }
 
@@ -1461,67 +1943,208 @@ function installServiceUnified(params) {
 
     // EARLY VALIDATION: Check for .msh file if --mshPath or --copy-msh="1" is specified
     // Priority: --mshPath (explicit path) takes precedence over --copy-msh="1" (auto-detect)
-    if (isFreshInstall && (explicitMshPath || copyMsh === '1')) {
-        if (explicitMshPath) {
-            // Mode 1: Explicit path provided via --mshPath parameter
-            logger.info('Using explicit .msh file path: ' + explicitMshPath);
+    if (explicitMshPath) {
+        // Mode 1: Explicit path provided via --mshPath parameter
+        logger.info('Using explicit .msh file path: ' + explicitMshPath);
 
-            // Validate the file exists
-            if (!fs.existsSync(explicitMshPath)) {
-                logger.error('Specified .msh file not found: ' + explicitMshPath);
-                logger.error('Please verify the path and try again.');
+        // Validate the file exists
+        if (!fs.existsSync(explicitMshPath)) {
+            logger.error('Specified .msh file not found: ' + explicitMshPath);
+            logger.error('Please verify the path and try again.');
+            process.exit(1);
+        }
+
+        // Warn if file doesn't have .msh extension (case-insensitive)
+        if (!explicitMshPath.toLowerCase().endsWith('.msh')) {
+            logger.warn('Warning: Specified file does not have .msh extension: ' + explicitMshPath);
+        }
+
+        sourceMshFile = explicitMshPath;
+    } else if (copyMsh === '1') {
+        // Mode 2: Auto-detect .msh file in binary's directory
+        // Determine search directory based on bundle vs standalone:
+        //   - Bundle mode (.app): Parent directory of the .app bundle
+        //   - Standalone mode: Directory containing the binary
+        var searchDir;
+        var searchName;
+        var bundleMarker = '.app/Contents/MacOS/';
+        var appIndex = process.execPath.indexOf(bundleMarker);
+        if (appIndex !== -1) {
+            // Running from bundle - extract parent directory of .app
+            // E.g., /Applications/MeshAgent.app/Contents/MacOS/meshagent -> /Applications/
+            var bundlePath = process.execPath.substring(0, appIndex + 4); // Include '.app'
+            searchDir = bundlePath.substring(0, bundlePath.lastIndexOf('/'));
+
+            // Extract bundle name (without .app extension) for .msh file matching
+            // E.g., /Applications/MeshAgent67.app -> MeshAgent67
+            var bundleName = bundlePath.substring(bundlePath.lastIndexOf('/') + 1);
+            searchName = bundleName.substring(0, bundleName.length - 4); // Remove '.app'
+
+            logger.info('Bundle mode: searching for .msh based on bundle name: ' + bundleName);
+        } else {
+            // Standalone binary - use binary's directory and name
+            searchDir = process.execPath.substring(0, process.execPath.lastIndexOf('/'));
+            searchName = process.execPath.substring(process.execPath.lastIndexOf('/') + 1);
+
+            logger.info('Standalone mode: searching for .msh based on binary name: ' + searchName);
+        }
+
+        // Step 1: Try bundle/binary-specific name first
+        //   - Bundle: {BundleName}.msh (e.g., MeshAgent67.msh for MeshAgent67.app)
+        //   - Standalone: {BinaryName}.msh (e.g., meshagent_osx-universal-64.msh)
+        sourceMshFile = findFileCaseInsensitive(searchDir, searchName + '.msh');
+
+        // Step 2: Try generic meshagent.msh (case-insensitive)
+        if (!sourceMshFile) {
+            sourceMshFile = findFileCaseInsensitive(searchDir, 'meshagent.msh');
+        }
+
+        // Step 3: Look for any .msh file (if steps 1 & 2 failed)
+        if (!sourceMshFile) {
+            var files = fs.readdirSync(searchDir);
+            var mshFiles = files.filter(function(f) {
+                return f.toLowerCase().endsWith('.msh');
+            });
+
+            if (mshFiles.length === 1) {
+                // Exactly one .msh file - use it
+                sourceMshFile = searchDir + '/' + mshFiles[0];
+                logger.info('Using discovered .msh file: ' + mshFiles[0]);
+            } else if (mshFiles.length > 1) {
+                // Multiple .msh files and none match preferred names
+                logger.error('Multiple .msh files found: ' + mshFiles.join(', '));
+                logger.error('Please rename one to:');
+                logger.error('  - ' + searchName + '.msh (preferred)');
+                logger.error('  - meshagent.msh (generic)');
+                logger.error('Or use --mshPath=/path/to/specific.msh');
                 process.exit(1);
-            }
-
-            // Warn if file doesn't have .msh extension (case-insensitive)
-            if (!explicitMshPath.toLowerCase().endsWith('.msh')) {
-                logger.warn('Warning: Specified file does not have .msh extension: ' + explicitMshPath);
-            }
-
-            sourceMshFile = explicitMshPath;
-        } else if (copyMsh === '1') {
-            // Mode 2: Auto-detect .msh file location (existing behavior)
-            if (sourceType.type === 'bundle') {
-                // For bundle, check for .msh file matching bundle name first (case-insensitive)
-                var bundlePath = sourceType.bundlePath;
-                var bundleDir = bundlePath.substring(0, bundlePath.lastIndexOf('/'));
-                var bundleName = bundlePath.substring(bundlePath.lastIndexOf('/') + 1);
-
-                // Strip .app extension and add .msh (e.g., MeshAgent_osx-universal-64.app -> MeshAgent_osx-universal-64.msh)
-                var bundleBaseName = bundleName.replace(/\.app$/, '');
-                sourceMshFile = findFileCaseInsensitive(bundleDir, bundleBaseName + '.msh');
-                if (!sourceMshFile) {
-                    // Fallback to generic meshagent.msh (case-insensitive)
-                    sourceMshFile = findFileCaseInsensitive(bundleDir, 'meshagent.msh');
-                }
             } else {
-                // For standalone binary, check for .msh file matching binary name first (case-insensitive)
-                var binaryPath = sourceType.binaryPath;
-                var binaryDir = binaryPath.substring(0, binaryPath.lastIndexOf('/'));
-                var binaryName = binaryPath.substring(binaryPath.lastIndexOf('/') + 1);
-
-                // Try binary-specific name first (e.g., meshagent_osx-universal-64.msh)
-                sourceMshFile = findFileCaseInsensitive(binaryDir, binaryName + '.msh');
-                if (!sourceMshFile) {
-                    // Fallback to generic meshagent.msh (case-insensitive)
-                    sourceMshFile = findFileCaseInsensitive(binaryDir, 'meshagent.msh');
-                }
-            }
-
-            if (!sourceMshFile) {
-                logger.error('--copy-msh="1" specified but .msh file not found');
-                if (sourceType.type === 'bundle') {
-                    var bundleName = sourceType.bundlePath.substring(sourceType.bundlePath.lastIndexOf('/') + 1);
-                    var bundleBaseName = bundleName.replace(/\.app$/, '');
-                    logger.error('Expected: ' + bundleBaseName + '.msh or meshagent.msh (case-insensitive)');
-                } else {
-                    var binaryName = sourceType.binaryPath.substring(sourceType.binaryPath.lastIndexOf('/') + 1);
-                    logger.error('Expected: ' + binaryName + '.msh or meshagent.msh (case-insensitive)');
-                }
-                logger.error('Please place the .msh file next to the binary/bundle and try again.');
+                // No .msh files found at all
+                logger.error('No .msh file found in: ' + searchDir);
+                logger.error('Expected: ' + searchName + '.msh or meshagent.msh');
+                logger.error('Please place the .msh file next to the bundle/binary and try again.');
                 process.exit(1);
             }
         }
+
+        logger.info('Found source .msh file: ' + sourceMshFile);
+    }
+
+
+    // MSH CONFIGURATION VALIDATION (unless --allowNoMsh is specified)
+    // For fresh installs: require sourceMshFile with valid settings
+    // For upgrades: validate existing .db has required settings
+    if (!allowNoMsh) {
+        var hasValidConfig = false;
+        var validationResult = { valid: false, missing: [] };
+
+        if (isFreshInstall) {
+            // Fresh install: MUST have a source .msh file with valid settings
+            if (!sourceMshFile) {
+                logger.error('Fresh install requires a .msh configuration file');
+                logger.error('Options:');
+                logger.error('  1. Use --copy-msh=1 and place .msh file next to the binary');
+                logger.error('  2. Use --mshPath=/path/to/file.msh to specify explicit location');
+                logger.error('  3. Use --allowNoMsh=1 to install without config (agent will wait for .msh)');
+                logger.result(false, 'Installation failed - no .msh configuration file');
+                process.exit(1);
+            }
+
+            // Validate the source .msh file has required settings
+            validationResult = validateMshConfig(sourceMshFile);
+            hasValidConfig = validationResult.valid;
+
+            if (!hasValidConfig) {
+                logger.error('Invalid .msh configuration: ' + sourceMshFile);
+                logger.error('Missing required settings: ' + validationResult.missing.join(', '));
+                logger.error('Required: MeshServer, MeshID, ServerID');
+                logger.error('Use --allowNoMsh=1 to install without configuration (agent will wait for .msh)');
+                logger.result(false, 'Installation failed - invalid configuration');
+                process.exit(1);
+            }
+            logger.info('MSH configuration validated: MeshServer, MeshID, ServerID present');
+        } else if (isUpgrade) {
+            // Upgrade: check existing .db file for required settings
+            logger.info('=== UPGRADE VALIDATION START ===');
+            logger.info('installPath: ' + installPath);
+            logger.info('sourceMshFile: ' + (sourceMshFile || 'NOT SET'));
+
+            var dbPath = installPath + 'meshagent.db';
+            logger.info('Checking for existing .db at: ' + dbPath);
+
+            if (fs.existsSync(dbPath)) {
+                logger.info('.db file EXISTS, attempting to read settings...');
+                try {
+                    var db = require('SimpleDataStore').Create(dbPath);
+                    var meshServer = db.Get('MeshServer');
+                    var meshId = db.Get('MeshID');
+                    var serverId = db.Get('ServerID');
+
+                    logger.info('DB read results: MeshServer=' + (meshServer ? 'PRESENT' : 'MISSING') +
+                                ', MeshID=' + (meshId ? 'PRESENT' : 'MISSING') +
+                                ', ServerID=' + (serverId ? 'PRESENT' : 'MISSING'));
+
+                    if (meshServer && meshId && serverId) {
+                        hasValidConfig = true;
+                        logger.info('Existing .db configuration validated - VALID');
+                    } else {
+                        logger.warn('Existing .db configuration INCOMPLETE');
+                        if (!meshServer) validationResult.missing.push('MeshServer');
+                        if (!meshId) validationResult.missing.push('MeshID');
+                        if (!serverId) validationResult.missing.push('ServerID');
+                    }
+                } catch (e) {
+                    logger.warn('Could not read existing .db: ' + e);
+                }
+            } else {
+                logger.info('.db file does NOT exist');
+            }
+
+            // For upgrade, also check if a new .msh file is being provided
+            if (!hasValidConfig && sourceMshFile) {
+                logger.info('Checking sourceMshFile: ' + sourceMshFile);
+                validationResult = validateMshConfig(sourceMshFile);
+                hasValidConfig = validationResult.valid;
+                logger.info('sourceMshFile validation result: ' + (hasValidConfig ? 'VALID' : 'INVALID'));
+            }
+
+            // If still no valid config, check for existing .msh at installation location
+            // (mirrors install mode logic - lines 1851-1862)
+            if (!hasValidConfig) {
+                var mshPath = installPath + 'meshagent.msh';
+                logger.info('Checking for existing .msh at installation location: ' + mshPath);
+
+                if (fs.existsSync(mshPath)) {
+                    logger.info('Existing .msh file found, validating...');
+                    validationResult = validateMshConfig(mshPath);
+                    hasValidConfig = validationResult.valid;
+
+                    if (hasValidConfig) {
+                        logger.info('Existing .msh configuration validated - VALID');
+                    } else {
+                        logger.warn('Existing .msh configuration INVALID');
+                        logger.warn('Missing settings: ' + validationResult.missing.join(', '));
+                    }
+                } else {
+                    logger.info('No .msh file exists at installation location');
+                }
+            }
+
+            logger.info('Final hasValidConfig: ' + hasValidConfig);
+            logger.info('=== UPGRADE VALIDATION END ===');
+
+            if (!hasValidConfig) {
+                logger.error('Cannot upgrade: no valid configuration found');
+                if (validationResult.missing.length > 0) {
+                    logger.error('Missing required settings: ' + validationResult.missing.join(', '));
+                }
+                logger.error('Provide a valid .msh file or use --allowNoMsh=1 to proceed');
+                logger.result(false, 'Upgrade failed - invalid configuration');
+                process.exit(1);
+            }
+        }
+    } else {
+        logger.info('--allowNoMsh specified: skipping configuration validation (agent will wait for .msh)');
     }
 
     // For UPGRADE mode: Discover current configuration
@@ -1612,7 +2235,20 @@ function installServiceUnified(params) {
         logger.warn('Agent will need to re-register with server after upgrade');
     }
 
-    // Cleanup orphaned plists
+    // CACHE PLIST CUSTOMIZATIONS (before cleanup, for surgical updates)
+    var cachedCustomizations = null;
+    var shouldCacheCustomizations = (isLocalService || isUpgrade || upgradeMode);
+
+    if (shouldCacheCustomizations) {
+        logger.info('Caching plist customizations for surgical update');
+        try {
+            cachedCustomizations = cachePlistCustomizations(currentServiceId);
+        } catch (e) {
+            logger.warn('Could not cache plist customizations: ' + e);
+        }
+    }
+
+    // Cleanup orphaned plists (always deletes - customizations already cached if needed)
     logger.info('Cleaning up service definitions pointing to ' + installPath + 'meshagent');
     try {
         var cleanedCount = cleanupOrphanedPlists(installPath);
@@ -1708,6 +2344,7 @@ function installServiceUnified(params) {
         replaceInstallation(sourceType, installPath);
     } catch (e) {
         logger.error('Installation failed: ' + e);
+        logger.result(false, 'Installation failed - could not copy files');
         process.exit(1);
     }
 
@@ -1728,8 +2365,18 @@ function installServiceUnified(params) {
 
         var targetMshFile = installPath + 'meshagent.msh';
         try {
-            fs.copyFileSync(sourceMshFile, targetMshFile);
-            logger.info('.msh file copied to: ' + targetMshFile);
+            // Check if source and target are the same file (prevent self-copy)
+            // Normalize paths by removing any duplicate slashes for comparison
+            var normalizedSource = sourceMshFile.split('//').join('/');
+            var normalizedTarget = targetMshFile.split('//').join('/');
+
+            if (normalizedSource === normalizedTarget) {
+                logger.info('.msh file already at target location');
+            } else {
+                fs.copyFileSync(sourceMshFile, targetMshFile);
+                logger.info('Copied .msh file from: ' + sourceMshFile);
+                logger.info('                   to: ' + targetMshFile);
+            }
 
             // Set secure permissions on .msh file
             var mshResult = securityPermissions.setSecurePermissions(targetMshFile, '.msh');
@@ -1743,29 +2390,56 @@ function installServiceUnified(params) {
     }
 
     // Write disableUpdate to .msh file if specified
+    // null = not provided, true/false = write value, 'clear' = write blank
     if (disableUpdate !== null) {
         var targetMshFile = installPath + 'meshagent.msh';
         try {
-            updateMshFile(targetMshFile, { disableUpdate: disableUpdate ? '1' : '0' });
-            logger.info('Updated .msh with disableUpdate=' + (disableUpdate ? '1' : '0'));
+            if (disableUpdate === 'clear') {
+                updateMshFile(targetMshFile, { disableUpdate: null });
+                logger.info('Updated .msh with disableUpdate= (blank)');
+            } else {
+                updateMshFile(targetMshFile, { disableUpdate: disableUpdate ? '1' : '0' });
+                logger.info('Updated .msh with disableUpdate=' + (disableUpdate ? '1' : '0'));
+            }
         } catch (e) {
             logger.warn('Could not update .msh with disableUpdate: ' + e.message);
         }
     }
 
     // Write disableTccCheck to .msh file if specified
+    // null = not provided, true/false = write value, 'clear' = write blank
     if (disableTccCheck !== null) {
         var targetMshFile = installPath + 'meshagent.msh';
         try {
-            updateMshFile(targetMshFile, { disableTccCheck: disableTccCheck ? '1' : '0' });
-            logger.info('Updated .msh with disableTccCheck=' + (disableTccCheck ? '1' : '0'));
+            if (disableTccCheck === 'clear') {
+                updateMshFile(targetMshFile, { disableTccCheck: null });
+                logger.info('Updated .msh with disableTccCheck= (blank)');
+            } else {
+                updateMshFile(targetMshFile, { disableTccCheck: disableTccCheck ? '1' : '0' });
+                logger.info('Updated .msh with disableTccCheck=' + (disableTccCheck ? '1' : '0'));
+            }
         } catch (e) {
             logger.warn('Could not update .msh with disableTccCheck: ' + e.message);
         }
     }
 
-    // Write ServiceID to .msh file (required since we no longer pass it via ProgramArguments)
-    if (currentServiceId) {
+    // Write ServiceID to .msh file if explicitly provided via command line
+    // null = not provided, '' = write blank, 'value' = write value
+    // Note: currentServiceId is auto-calculated, but newServiceId tracks explicit --serviceId parameter
+    if (newServiceId !== null) {
+        var targetMshFile = installPath + 'meshagent.msh';
+        try {
+            updateMshFile(targetMshFile, { ServiceID: newServiceId || null });
+            if (newServiceId) {
+                logger.info('Updated .msh with ServiceID=' + newServiceId);
+            } else {
+                logger.info('Updated .msh with ServiceID= (blank)');
+            }
+        } catch (e) {
+            logger.warn('Could not update .msh with ServiceID: ' + e.message);
+        }
+    } else if (currentServiceId) {
+        // Auto-write calculated ServiceID (not explicitly provided)
         var targetMshFile = installPath + 'meshagent.msh';
         try {
             updateMshFile(targetMshFile, { ServiceID: currentServiceId });
@@ -1775,20 +2449,62 @@ function installServiceUnified(params) {
         }
     }
 
+    // Write MeshServiceName to .msh file if explicitly provided via command line
+    // null = not provided (don't change), '' = explicitly set to empty (write blank), 'value' = write value
+    if (newServiceName !== null) {
+        var targetMshFile = installPath + 'meshagent.msh';
+        try {
+            // Empty string writes blank entry (clears value), non-empty writes the value
+            updateMshFile(targetMshFile, { MeshServiceName: newServiceName || null });
+            if (newServiceName) {
+                logger.info('Updated .msh with MeshServiceName=' + newServiceName);
+            } else {
+                logger.info('Updated .msh with MeshServiceName= (blank - will clear from DB on import)');
+            }
+        } catch (e) {
+            logger.warn('Could not update .msh with MeshServiceName: ' + e.message);
+        }
+    }
+
+    // Write CompanyName to .msh file if explicitly provided via command line
+    // null = not provided (don't change), '' = explicitly set to empty (write blank), 'value' = write value
+    if (newCompanyName !== null) {
+        var targetMshFile = installPath + 'meshagent.msh';
+        try {
+            // Empty string writes blank entry (clears value), non-empty writes the value
+            updateMshFile(targetMshFile, { CompanyName: newCompanyName || null });
+            if (newCompanyName) {
+                logger.info('Updated .msh with CompanyName=' + newCompanyName);
+            } else {
+                logger.info('Updated .msh with CompanyName= (blank - will clear from DB on import)');
+            }
+        } catch (e) {
+            logger.warn('Could not update .msh with CompanyName: ' + e.message);
+        }
+    }
+
     // CREATE SERVICES
+    // Determine if we should use surgical update (preserve customizations)
+    // Surgical mode: -install (isLocalService), -upgrade (isUpgrade/upgradeMode)
+    // Atomic mode: -finstall (neither flag set)
+    var surgicalUpdate = (isLocalService || isUpgrade || upgradeMode);
+    logger.info('Plist mode: ' + (surgicalUpdate ? 'surgical (preserve customizations)' : 'atomic (full replacement)'));
+
     logger.info('Creating LaunchDaemon');
     try {
-        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, sourceType.type);
+        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, sourceType.type, surgicalUpdate, cachedCustomizations, meshAgentLogging);
     } catch (e) {
         logger.error('Failed to create LaunchDaemon: ' + e);
+        logger.result(false, 'Installation failed - could not create LaunchDaemon');
         process.exit(1);
     }
 
     logger.info('Creating LaunchAgent');
     try {
-        createLaunchAgent(currentServiceName, currentCompanyName, installPath, currentServiceId, sourceType.type);
+        createLaunchAgent(currentServiceName, currentCompanyName, installPath, currentServiceId, sourceType.type, surgicalUpdate, cachedCustomizations, meshAgentLogging);
     } catch (e) {
         logger.error('Failed to create LaunchAgent: ' + e);
+        logger.result(false, 'Installation failed - could not create LaunchAgent');
         process.exit(1);
     }
 
@@ -1893,16 +2609,13 @@ function installServiceUnified(params) {
         bootstrapServices(currentServiceId);
     } catch (e) {
         logger.error('Failed to start services: ' + e);
+        logger.result(false, (isUpgrade ? 'Upgrade' : 'Installation') + ' failed - could not start services');
         process.exit(1);
     }
 
-    // SUCCESS MESSAGE
-    if (isUpgrade) {
-        logger.info('Upgrade complete');
-    } else {
-        logger.info('Installation complete');
-    }
-    logger.info('Installation path: ' + installPath);
+    // SUCCESS MESSAGE (shown even in quiet mode)
+    var operation = isUpgrade ? 'Upgrade' : 'Installation';
+    logger.result(true, operation + ' complete - ' + currentServiceId + ' at ' + installPath);
     logger.info('Service ID: ' + currentServiceId);
     if (isUpgrade && (mshExists || dbExists)) {
         logger.info('Configuration (.msh) and identity (.db) files preserved');
@@ -2440,7 +3153,9 @@ function uninstallServiceUnified(params) {
     var parms = JSON.parse(params);
     var fs = require('fs');
     var child_process = require('child_process');
-    var logger = require('./logger');
+
+    // Configure logger output mode from command line flags
+    configureLoggerFromParams(parms);
 
     // Verify root permissions
     if (!require('user-sessions').isRoot()) {
@@ -2811,7 +3526,7 @@ function fullInstallEx(parms, gOptions)
 }
 
 // Parse serviceId from LaunchDaemon plist Label
-// Label format: "meshagent.ServiceName.CompanyName" or "meshagent"
+// Label format: "meshagent.CompanyName.ServiceName" or "meshagent"
 function parseServiceIdFromLabel(label) {
     if (!label) return null;
 
@@ -2831,11 +3546,11 @@ function parseServiceIdFromLabel(label) {
         };
     }
 
-    // Standard format: "meshagent.ServiceName.CompanyName"
+    // Standard format: "meshagent.CompanyName.ServiceName"
     if (parts.length === 3 && parts[0] === 'meshagent') {
         return {
-            serviceName: parts[1],
-            companyName: parts[2],
+            companyName: parts[1],
+            serviceName: parts[2],
             source: 'label-standard'
         };
     }
@@ -3004,6 +3719,16 @@ function getServiceConfigFromPlist(binaryPath) {
 // Entry point for -upgrade (macOS only)
 function upgradeAgent(params) {
 
+    // LOG: -upgrade command received
+    var timestamp = new Date().toISOString();
+    try {
+        process.stderr.write('=== -UPGRADE COMMAND RECEIVED === ' + timestamp + '\n');
+        process.stderr.write('Process PID: ' + process.pid + '\n');
+        process.stderr.write('Parent PID: ' + (process.ppid || 'unknown') + '\n');
+    } catch (ex) {
+        console.log('=== -UPGRADE COMMAND RECEIVED === ' + timestamp);
+    }
+
     // Route macOS to unified install/upgrade function
     if (process.platform == 'darwin') {
         // Parse and add upgrade mode flag
@@ -3051,6 +3776,7 @@ function upgradeAgent(params) {
     var newServiceId = parms.getParameter('serviceId', null);
     var disableUpdateParam = parms.getParameter('disableUpdate', null);
     var disableTccCheckParam = parms.getParameter('disableTccCheck', null);
+    var meshAgentLoggingParam = parms.getParameter('meshAgentLogging', null);
 
     // Track if installPath was explicitly provided by user (for path inference logic)
     var installPathWasUserProvided = (installPath !== null);
@@ -3070,6 +3796,9 @@ function upgradeAgent(params) {
     } else if (disableTccCheckParam === '0' || disableTccCheckParam === 'false') {
         disableTccCheck = false;
     }
+
+    // Parse --meshAgentLogging parameter: enable launchd logging to /tmp for debugging
+    var meshAgentLogging = (meshAgentLoggingParam === '1' || meshAgentLoggingParam === 'true');
 
     // Determine if we should update configuration
     var useProvidedParams = (newServiceName !== null || newCompanyName !== null);
@@ -3565,7 +4294,7 @@ function upgradeAgent(params) {
     // plists are created with the existing configuration, even if user blanked .msh
     logger.info('Recreating LaunchDaemon...');
     try {
-        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType);
+        createLaunchDaemon(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType, false, null, meshAgentLogging);
     } catch (e) {
         console.log('ERROR: ' + e.message);
         console.log('You may need to manually reinstall the agent.');
@@ -3576,7 +4305,7 @@ function upgradeAgent(params) {
     // Recreate LaunchAgent plist (using discovered/current service configuration)
     logger.info('Recreating LaunchAgent...');
     try {
-        createLaunchAgent(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType);
+        createLaunchAgent(currentServiceName, currentCompanyName, installPath, currentServiceId, newInstallType, false, null, meshAgentLogging);
     } catch (e) {
         console.log('ERROR: ' + e.message);
         console.log('LaunchDaemon should still work, but KVM functionality may be limited.');
