@@ -41,7 +41,7 @@ jobs:
       matrix:
         include:
           - name: "macOS x86-64"
-            os: macos-13
+            os: macos-15-intel
             os_arch: x86-64
             archid: 16
             artifact_name: meshagent_osx-x86-64

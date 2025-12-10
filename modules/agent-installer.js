@@ -205,8 +205,8 @@ function installService(params)
     // values that were passed into the installer, using default values for the ones that aren't specified.
     var options =
         {
-            name: params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : 'meshagent'),
-            target: target==null?(process.platform == 'win32' ? 'MeshAgent' : 'meshagent'):target,
+            name: params.getParameter('meshServiceName', process.platform == 'win32' ? 'Mesh Agent' : process.execPath.split('/').pop()),
+            target: target==null?(process.platform == 'win32' ? 'MeshAgent' : process.execPath.split('/').pop()):target,
             servicePath: process.execPath,
             startType: 'AUTO_START',
             parameters: params,

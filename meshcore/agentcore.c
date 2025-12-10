@@ -945,12 +945,19 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 }
 void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *stream, void *ptr_user)
 {
+	fprintf(stderr, "[KVM] EndSink() called, ptr_user=%p\n", ptr_user);
+	fflush(stderr);
 
 	// Peer disconnected the data channel
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)ptr_user;
+	fprintf(stderr, "[KVM] EndSink() ptrs=%p, ptrs->ctx=%p\n", (void*)ptrs, ptrs ? (void*)ptrs->ctx : NULL);
+	fflush(stderr);
+
 	if (ptrs->ctx != NULL)
 	{
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "KVM Session Ending");
+		fprintf(stderr, "[KVM] EndSink() processing cleanup for ctx=%p\n", (void*)ptrs->ctx);
+		fflush(stderr);
 
 		duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
 		duk_get_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);	// [MeshAgent][RD]
@@ -980,9 +987,17 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
 #endif
+		fprintf(stderr, "[KVM] EndSink() about to memset ptrs to 0\n");
+		fflush(stderr);
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
+		fprintf(stderr, "[KVM] EndSink() memset completed\n");
+		fflush(stderr);
 	}
+	fprintf(stderr, "[KVM] EndSink() calling kvm_cleanup()\n");
+	fflush(stderr);
 	kvm_cleanup();
+	fprintf(stderr, "[KVM] EndSink() kvm_cleanup() returned, EndSink completed\n");
+	fflush(stderr);
 }
 
 void ILibDuktape_MeshAgent_RemoteDesktop_PauseSink(ILibDuktape_DuplexStream *sender, void *user)
@@ -1030,11 +1045,19 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 {
 	RemoteDesktop_Ptrs *ptrs;
 
+	fprintf(stderr, "[KVM] Finalizer() called\n");
+	fflush(stderr);
+
 	duk_get_prop_string(ctx, 0, REMOTE_DESKTOP_ptrs);
 	ptrs = (RemoteDesktop_Ptrs*)Duktape_GetBuffer(ctx, -1, NULL);
 
+	fprintf(stderr, "[KVM] Finalizer() ptrs=%p, ptrs->ctx=%p\n", (void*)ptrs, ptrs ? (void*)ptrs->ctx : NULL);
+	fflush(stderr);
+
 	if (ptrs->ctx != NULL)
 	{
+		fprintf(stderr, "[KVM] Finalizer() ptrs->ctx is not NULL, cleaning up\n");
+		fflush(stderr);
 		duk_push_heapptr(ptrs->ctx, ptrs->MeshAgentObject);			// [MeshAgent]
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
@@ -1042,9 +1065,20 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 #if defined(_POSIX) && !defined(__APPLE__)
 		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
 #endif
+		fprintf(stderr, "[KVM] Finalizer() calling kvm_cleanup()\n");
+		fflush(stderr);
 		kvm_cleanup();
+		fprintf(stderr, "[KVM] Finalizer() kvm_cleanup() returned\n");
+		fflush(stderr);
 #endif
 	}
+	else
+	{
+		fprintf(stderr, "[KVM] Finalizer() ptrs->ctx is NULL, skipping cleanup\n");
+		fflush(stderr);
+	}
+	fprintf(stderr, "[KVM] Finalizer() completed\n");
+	fflush(stderr);
 	return 0;
 }
 void ILibDuktape_MeshAgent_RemoteDesktop_PipeHook(ILibDuktape_readableStream *stream, void *wstream, void *user)
@@ -1071,10 +1105,14 @@ int ILibDuktape_MeshAgent_remoteDesktop_unshiftSink(ILibDuktape_DuplexStream *se
 #ifdef __APPLE__
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *ctx)
 {
+	fprintf(stderr, "[KVM] IPC_EndSink() called - IPC Connection closing\n");
+	fflush(stderr);
 	MeshAgent_sendConsoleText(ctx, "IPC Connection Closed...");
 
 	duk_push_this(ctx);
 	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)Duktape_GetPointerProperty(ctx, -1, KVM_IPC_SOCKET);
+	fprintf(stderr, "[KVM] IPC_EndSink() ptrs=%p\n", (void*)ptrs);
+	fflush(stderr);
 
 	// Check to see if there is a user logged in
 	if (duk_peval_string(ctx, "require('user-sessions').consoleUid()") == 0)
@@ -1083,6 +1121,8 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *
 		char tmp[255];
 		sprintf_s(tmp, sizeof(tmp), "User id: %d has logged in", console_uid);
 		MeshAgent_sendConsoleText(ctx, tmp);
+		fprintf(stderr, "[KVM] IPC_EndSink() console_uid=%d, restarting KVM relay\n", console_uid);
+		fflush(stderr);
 
 		duk_push_heapptr(ctx, ptrs->MeshAgentObject);
 		duk_get_prop_string(ctx, -1, MESH_AGENT_PTR);
@@ -1090,18 +1130,29 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_EndSink(duk_context *
 
 		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
 		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			fprintf(stderr, "[KVM] IPC_EndSink() calling kvm_relay_setup()\n");
+			fflush(stderr);
+			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, agent->openFrameMode);
+			fprintf(stderr, "[KVM] IPC_EndSink() kvm_relay_setup() returned\n");
+			fflush(stderr);
 		}
 	}
 	else
 	{
+		fprintf(stderr, "[KVM] IPC_EndSink() no user logged in, calling WriteEnd to trigger EndSink\n");
+		fflush(stderr);
 		if (ptrs != NULL && ptrs->ctx != NULL && ptrs->stream != NULL)
 		{
+			fprintf(stderr, "[KVM] IPC_EndSink() calling ILibDuktape_DuplexStream_WriteEnd()\n");
+			fflush(stderr);
 			ILibDuktape_DuplexStream_WriteEnd(ptrs->stream);
+			fprintf(stderr, "[KVM] IPC_EndSink() WriteEnd returned\n");
+			fflush(stderr);
 		}
 	}
 
-
+	fprintf(stderr, "[KVM] IPC_EndSink() completed\n");
+	fflush(stderr);
 	return(0);
 }
 duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop_DomainIPC_DataSink(duk_context *ctx)
@@ -1294,7 +1345,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		if (console_uid == 0)
 		{
 			MeshAgent_sendConsoleText(ctx, "Establishing IPC-x-Connection to LoginWindow for KVM");
-			char *ipc = (char*)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			char *ipc = (char*)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, agent->openFrameMode);
 			duk_eval_string(ctx, "require('net');");														// [rd][net]
 			duk_get_prop_string(ctx, -1, "createConnection");												// [rd][net][createConnection]
 			duk_swap_top(ctx, -2);																			// [rd][createConnection][this]
@@ -1308,7 +1359,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 		else
 		{
-			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid);
+			ptrs->kvmPipe = kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, agent->openFrameMode);
 		}
 	#else
 		if (TSID != -1) 
@@ -5107,6 +5158,15 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 	if (agentHost->openFrameMode)
 	{
 		ILibSimpleDataStore_Cached(agentHost->masterDb, "openframe-mode", (int)sizeof("openframe-mode") - 1, "1", 1);
+	}
+	else
+	{
+		// Check if openframe-mode was previously saved in the database (service restart case)
+		if (ILibSimpleDataStore_Get(agentHost->masterDb, "openframe-mode", NULL, 0) > 0)
+		{
+			agentHost->openFrameMode = true;
+			printf("OpenFrame Mode loaded from database: %d\n", agentHost->openFrameMode);
+		}
 	}
 	if (agentHost->openFrameSecret != NULL)
 	{

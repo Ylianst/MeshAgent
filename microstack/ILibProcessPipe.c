@@ -493,8 +493,25 @@ void ILibProcessPipe_Process_SoftKill(ILibProcessPipe_Process p)
 	TerminateProcess(j->hProcess, 1067);
 #else
 	int code;
-	kill((pid_t)j->PID, SIGKILL);
-	waitpid((pid_t)j->PID, &code, 0);
+	pid_t pid = (pid_t)j->PID;
+
+	// Send SIGTERM first to allow graceful shutdown
+	// This is critical for macOS screen recording - SIGKILL corrupts TCC permission state
+	kill(pid, SIGTERM);
+
+	// Wait up to 500ms for graceful termination
+	for (int i = 0; i < 10; i++) {
+		usleep(50000); // 50ms
+		int result = waitpid(pid, &code, WNOHANG);
+		if (result != 0) {
+			// Process exited (result == pid) or error (result == -1)
+			return;
+		}
+	}
+
+	// If still running after 500ms, force kill
+	kill(pid, SIGKILL);
+	waitpid(pid, &code, 0);
 #endif
 }
 

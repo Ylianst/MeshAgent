@@ -70,78 +70,123 @@ function prepareFolders(folderPath)
     }
 }
 
+function formatOpenFrameParams(parameters, stripQuotes) {
+    if (!parameters || parameters.length === 0) {
+        return parameters;
+    }
+
+    try {
+        // Expand any --key=value format to separate ['--key', 'value'] tokens
+        var expanded = [];
+        for (var i = 0; i < parameters.length; ++i) {
+            var p = parameters[i];
+            if (typeof p === 'string' && p.indexOf('=') > 2 && p.startsWith('--')) {
+                // Split --key=value into --key and value
+                var eq = p.indexOf('=');
+                var k = p.substring(0, eq);
+                var v = p.substring(eq + 1);
+                // Strip surrounding quotes on macOS for openframe params (plist handles spaces correctly)
+                if (stripQuotes && v.startsWith('"') && v.endsWith('"')) {
+                    v = v.substring(1, v.length - 1);
+                }
+                expanded.push(k);
+                expanded.push(v);
+            }
+            else {
+                expanded.push(p);
+            }
+        }
+
+        // Build a key-value map for special handling of OpenFrame flags
+        var kv = {};
+        for (var j = 0; j < expanded.length; ++j) {
+            var t = expanded[j];
+            if (typeof t === 'string' && t.startsWith('--')) {
+                var val = null;
+                if ((j + 1) < expanded.length && typeof expanded[j + 1] === 'string' && !expanded[j + 1].startsWith('--')) {
+                    val = expanded[j + 1];
+                }
+                kv[t.substring(2)] = val;
+            }
+        }
+
+        // Individual handling for specific OpenFrame flags - order matters!
+        var finalParams = [];
+
+        // 1. First add --openframe-mode if present
+        if (kv['openframe-mode'] != null || expanded.indexOf('--openframe-mode') >= 0) {
+            finalParams.push('--openframe-mode');
+        }
+
+        // 2. Then add --openframe-token-path with its value
+        if (kv['openframe-token-path']) {
+            finalParams.push('--openframe-token-path');
+            finalParams.push(kv['openframe-token-path']);
+        }
+
+        // 3. Then add --openframe-secret with its value
+        if (kv['openframe-secret']) {
+            finalParams.push('--openframe-secret');
+            finalParams.push(kv['openframe-secret']);
+        }
+
+        // 4. Append all remaining parameters in their original order
+        for (var k2 = 0; k2 < expanded.length; ++k2) {
+            var e = expanded[k2];
+            if (typeof e === 'string' && e.startsWith('--')) {
+                // Skip the three special OpenFrame flags we already handled
+                if (e === '--openframe-mode' || e === '--openframe-token-path' || e === '--openframe-secret') {
+                    // Also skip the value token that follows this key
+                    if ((k2 + 1) < expanded.length && !expanded[k2 + 1].startsWith('--')) { k2++; }
+                    continue;
+                }
+                finalParams.push(e);
+            }
+            else {
+                finalParams.push(e);
+            }
+        }
+
+        return finalParams;
+    }
+    catch (xxx) {
+        console.info1('Error processing OpenFrame parameters: ' + xxx);
+        return parameters;
+    }
+}
+
 function applyOpenFrameParams(options, reg) {
     if (options.parameters) {
         try {
             var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath');
-            // Expand any --key=value format to separate ['--key', 'value'] tokens
-            var expanded = [];
-            for (var i = 0; i < options.parameters.length; ++i) {
-                var p = options.parameters[i];
-                if (typeof p === 'string' && p.indexOf('=') > 2 && p.startsWith('--')) {
-                    // Split --key=value into --key and "value"
-                    var eq = p.indexOf('=');
-                    var k = p.substring(0, eq);
-                    var v = p.substring(eq + 1).replace(/^\"|\"$/g, '');
-                    expanded.push(k);
-                    expanded.push('"' + v + '"');
-                }
-                else {
-                    expanded.push(p);
-                }
-            }
-            // Build a key-value map for special handling of OpenFrame flags
-            var kv = {};
-            for (var j = 0; j < expanded.length; ++j) {
-                var t = expanded[j];
-                if (typeof t === 'string' && t.startsWith('--')) {
-                    var val = null;
-                    if ((j + 1) < expanded.length && typeof expanded[j + 1] === 'string' && !expanded[j + 1].startsWith('--')) {
-                        val = expanded[j + 1];
-                    }
-                    kv[t.substring(2)] = val;
+
+            // Use common formatting function - don't strip quotes on Windows
+            var finalParams = formatOpenFrameParams(options.parameters, false);
+
+            // For Windows, add quotes around values for registry
+            var windowsParams = [];
+            for (var i = 0; i < finalParams.length; ++i) {
+                var param = finalParams[i];
+                if (typeof param === 'string' && !param.startsWith('--')) {
+                    // This is a value, add quotes
+                    windowsParams.push('"' + param.replace(/^\"|\"$/g, '') + '"');
+                } else {
+                    windowsParams.push(param);
                 }
             }
-            // Individual handling for specific OpenFrame flags
-            var finalParams = [];
-            if (kv['openframe-mode'] != null || expanded.indexOf('--openframe-mode') >= 0) {
-                finalParams.push('--openframe-mode');
-            }
-            if (kv['openframe-token-path']) {
-                var v1 = kv['openframe-token-path'];
-                v1 = v1.replace(/^\"|\"$/g, '');
-                finalParams.push('--openframe-token-path');
-                finalParams.push('"' + v1 + '"');
-            }
-            if (kv['openframe-secret']) {
-                var v2 = kv['openframe-secret'];
-                v2 = v2.replace(/^\"|\"$/g, '');
-                finalParams.push('--openframe-secret');
-                finalParams.push('"' + v2 + '"');
-            }
-            // Append all remaining parameters in their original order
-            for (var k2 = 0; k2 < expanded.length; ++k2) {
-                var e = expanded[k2];
-                if (typeof e === 'string' && e.startsWith('--')) {
-                    // Skip the three special OpenFrame flags we already handled
-                    if (e === '--openframe-mode' || e === '--openframe-token-path' || e === '--openframe-secret') {
-                        // Also skip the value token that follows this key
-                        if ((k2 + 1) < expanded.length && !expanded[k2 + 1].startsWith('--')) { k2++; }
-                        continue;
-                    }
-                    finalParams.push(e);
-                }
-                else {
-                    finalParams.push(e);
-                }
-            }
-            imagePath += (' ' + finalParams.join(' '));
+
+            imagePath += (' ' + windowsParams.join(' '));
             reg.WriteKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + options.name, 'ImagePath', imagePath);
         }
         catch (xxx) {
             console.info1(xxx);
         }
     }
+}
+
+function applyOpenFrameParamsDarwin(parameters) {
+    // Use common formatting function - strip quotes on macOS for plist
+    return formatOpenFrameParams(parameters, true);
 }
 
 function parseServiceStatus(token)
@@ -2895,16 +2940,20 @@ function serviceManager()
             // Mac OS
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
+
+            // Apply OpenFrame parameters formatting for macOS
+            var processedParams = options.parameters ? applyOpenFrameParamsDarwin(options.parameters) : null;
+
             var params =  '     <key>ProgramArguments</key>\n';
             params += '     <array>\n';
             params += ('         <string>' + options.installPath + options.target + '</string>\n');
-            if(options.parameters)
+            if(processedParams)
             {
-                for(var itm in options.parameters)
+                for(var itm in processedParams)
                 {
-                    params += ('         <string>' + options.parameters[itm] + '</string>\n');
+                    params += ('         <string>' + processedParams[itm] + '</string>\n');
                 }
-            }        
+            }
             params += '     </array>\n';
             
             var plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
@@ -2983,13 +3032,17 @@ function serviceManager()
 
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
+
+            // Apply OpenFrame parameters formatting for macOS
+            var processedParams = options.parameters ? applyOpenFrameParamsDarwin(options.parameters) : null;
+
             var params =         '     <key>ProgramArguments</key>\n';
             params +=            '     <array>\n';
             params +=           ('         <string>' + options.servicePath + '</string>\n');
-            if (options.parameters) {
-                for (var itm in options.parameters)
+            if (processedParams) {
+                for (var itm in processedParams)
                 {
-                    params +=   ('         <string>' + options.parameters[itm] + '</string>\n');
+                    params +=   ('         <string>' + processedParams[itm] + '</string>\n');
                 }
             }
             params +=            '     </array>\n';
