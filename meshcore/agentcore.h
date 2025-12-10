@@ -234,6 +234,8 @@ typedef struct MeshAgentHostContainer
 	int retryTimerSet;
 	int controlChannel_idleTimeout_seconds;
 	int controlChannel_idleTimeout_dataMode;
+	int controlChannelMaxMissedPongs;
+	int controlChannelPongMisses;
 	char g_selfid[UTIL_SHA384_HASHSIZE];
 	void *microLMS;
 	void *multicastDiscovery;
@@ -280,6 +282,7 @@ compactDirtyMinimum			Minimum dirty bytes threshold for db.compact() operation
 consoleTextMaxRate:			Sets rate limit for sendConsoleText. Default is 10 messages per second.
 controlChannelDebug:		If set, will log/display controlChannel messages (Except for JSON messages)
 controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
+controlChannelMaxMissedPongs: Number of consecutive missed Pong responses before forcing a reconnect (default is 3)
 coreDumpEnabled:			If set, a dump file will be written when the agent crashes
 disableUpdate:				If set, will prevent the agent from self-updating
 noUpdateCoreModule:			If set, will prevent the agent from taking a new meshcore from the server

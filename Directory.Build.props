@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Force a known-installed Windows SDK across all projects -->
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
+    <WindowsSdkDir>C:\Program Files (x86)\Windows Kits\10\</WindowsSdkDir>
+  </PropertyGroup>
+</Project>

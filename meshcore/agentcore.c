@@ -97,6 +97,8 @@ char exeMeshPolicyGuid[] = {0xB9, 0x96, 0x01, 0x58, 0x80, 0x54, 0x4A, 0x19, 0xB7
 #define REMOTE_DESKTOP_STREAM "\xFF_RemoteDesktopStream"
 #define REMOTE_DESKTOP_ptrs "\xFF_RemoteDesktopPTRS"
 #define DEFAULT_IDLE_TIMEOUT 120
+#define DEFAULT_MAX_MISSED_PONGS 3
+#define CONTROL_CHANNEL_PONG_GRACE_SECONDS 5
 #define MESH_USER_CHANGED_CB "\xFF_MeshAgent_UserChangedCallback"
 #define REMOTE_DESKTOP_UID "\xFF_RemoteDesktopUID"
 #define REMOTE_DESKTOP_VIRTUAL_SESSION_USERNAME "\xFF_RemoteDesktopUSERNAME"
@@ -2941,7 +2943,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 
 			swprintf_s(cmd, MAX_PATH, L"%s\\system32\\cmd.exe", env);
 			// get-ciminstance win32_service -filter "Name='this.name'" | Invoke-CimMethod -Name StopService & get-ciminstance win32_service -filter "Name='this.name'" | Invoke-CimMethod -Name StartService
-			swprintf_s(parms, 65535, L"/C net stop \"%s\" & \"%s\" -b64exec %s \"%s\" & copy \"%s\" \"%s\" & net stort \"%s\" & erase \"%s\"",
+			swprintf_s(parms, 65535, L"/C net stop \"%s\" & \"%s\" -b64exec %s \"%s\" & copy \"%s\" \"%s\" & net start \"%s\" & erase \"%s\"",
 					   w_meshservicename,
 					   w_updatefile, L"dHJ5CnsKICAgIHZhciBzZXJ2aWNlTG9jYXRpb24gPSBwcm9jZXNzLmFyZ3YucG9wKCkudG9Mb3dlckNhc2UoKTsKICAgIHJlcXVpcmUoJ3Byb2Nlc3MtbWFuYWdlcicpLmVudW1lcmF0ZVByb2Nlc3NlcygpLnRoZW4oZnVuY3Rpb24gKHByb2MpCiAgICB7CiAgICAgICAgZm9yICh2YXIgcCBpbiBwcm9jKQogICAgICAgIHsKICAgICAgICAgICAgaWYgKHByb2NbcF0ucGF0aCAmJiAocHJvY1twXS5wYXRoLnRvTG93ZXJDYXNlKCkgPT0gc2VydmljZUxvY2F0aW9uKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcHJvY2Vzcy5raWxsKHByb2NbcF0ucGlkKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBwcm9jZXNzLmV4aXQoKTsKICAgIH0pOwp9CmNhdGNoIChlKQp7CiAgICBwcm9jZXNzLmV4aXQoKTsKfQ==", w_exepath,
 					   w_updatefile, w_exepath, w_meshservicename, w_updatefile);
@@ -3784,18 +3786,33 @@ static void MeshAgent_SendSessionNotice(MeshAgentHostContainer *agent, const cha
 
 void MeshServer_ControlChannel_IdleTimeout_PongTimeout(void *object)
 {
-	// We didn't receive a timely PONG response, so we must disconnect the control channel, and reconnect
+	// We didn't receive a timely PONG response; retry a limited number of times before reconnecting
 	MeshAgentHostContainer *agent = PingData2Agent(object);
 
+	if (agent->controlChannel == NULL)
+	{
+		return;
+	}
+
+	agent->controlChannelPongMisses++;
 	if (agent->controlChannelDebug != 0)
 	{
-		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
+		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT (%d/%d)\n", agent->controlChannelPongMisses, agent->controlChannelMaxMissedPongs);
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT (%d/%d)", agent->controlChannelPongMisses, agent->controlChannelMaxMissedPongs);
 	}
-	MeshAgent_SetDisconnectReason(agent, "Control channel PONG timeout");
-	MeshAgent_SendSessionNotice(agent, "Agent reconnecting: control-channel ping timeout.", 2);
-	ILibWebClient_Disconnect(agent->controlChannel);
-	agent->controlChannel = NULL;
+
+	if (agent->controlChannelPongMisses >= agent->controlChannelMaxMissedPongs)
+	{
+		MeshAgent_SetDisconnectReason(agent, "Control channel PONG timeout");
+		MeshAgent_SendSessionNotice(agent, "Agent reconnecting: control-channel ping timeout.", 2);
+		ILibWebClient_Disconnect(agent->controlChannel);
+		agent->controlChannel = NULL;
+		agent->controlChannelPongMisses = 0;
+		return;
+	}
+
+	ILibWebClient_WebSocket_Ping(agent->controlChannel);
+	ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), Agent2PingData(agent), CONTROL_CHANNEL_PONG_GRACE_SECONDS, MeshServer_ControlChannel_IdleTimeout_PongTimeout, NULL);
 }
 void MeshServer_ControlChannel_IdleTimeout(ILibWebClient_StateObject WebStateObject, void *user)
 {
@@ -3814,7 +3831,7 @@ void MeshServer_ControlChannel_IdleTimeout(ILibWebClient_StateObject WebStateObj
 		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
 	}
 
-	ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), Agent2PingData(agent), 5, MeshServer_ControlChannel_IdleTimeout_PongTimeout, NULL);
+	ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), Agent2PingData(agent), CONTROL_CHANNEL_PONG_GRACE_SECONDS, MeshServer_ControlChannel_IdleTimeout_PongTimeout, NULL);
 	ILibWebClient_WebSocket_Ping(WebStateObject);
 	ILibWebClient_SetTimeout(WebStateObject, agent->controlChannel_idleTimeout_seconds, MeshServer_ControlChannel_IdleTimeout, user);
 	ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping");
@@ -3826,6 +3843,7 @@ ILibWebClient_WebSocket_PingResponse MeshServer_ControlChannel_PingSink(ILibWebC
 void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer *)user;
+	agent->controlChannelPongMisses = 0;
 	ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), Agent2PingData(agent));
 	if (agent->controlChannelDebug != 0)
 	{
@@ -3888,6 +3906,17 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		{
 			agent->controlChannel_idleTimeout_seconds = DEFAULT_IDLE_TIMEOUT;
 		}
+
+		agent->controlChannelMaxMissedPongs = ILibSimpleDataStore_GetInt(agent->masterDb, "controlChannelMaxMissedPongs", DEFAULT_MAX_MISSED_PONGS);
+		if (agent->controlChannelMaxMissedPongs < 1)
+		{
+			agent->controlChannelMaxMissedPongs = DEFAULT_MAX_MISSED_PONGS;
+		}
+		else if (agent->controlChannelMaxMissedPongs > 10)
+		{
+			agent->controlChannelMaxMissedPongs = 10;
+		}
+		agent->controlChannelPongMisses = 0;
 
 		agent->controlChannel = WebStateObject; // Set the agent MeshCentral server control channel
 		ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Control Channel Idle Timeout = %d seconds", agent->controlChannel_idleTimeout_seconds);
@@ -4888,6 +4917,8 @@ MeshAgentHostContainer *MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	MeshAgentHostContainer *retVal = (MeshAgentHostContainer *)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 	retVal->lastDisconnectReason[0] = 0;
 	retVal->updateInProgress = 0;
+	retVal->controlChannelMaxMissedPongs = DEFAULT_MAX_MISSED_PONGS;
+	retVal->controlChannelPongMisses = 0;
 #ifdef WIN32
 	SYSTEM_POWER_STATUS stats;
 
