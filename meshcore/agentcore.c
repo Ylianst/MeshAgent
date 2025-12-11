@@ -3600,6 +3600,33 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 		if (cmdLen == 4)
 		{
+			long now = ILibGetTimeStamp();
+			if (agent->updateInProgress != 0)
+			{
+				if (agent->logUpdate != 0)
+				{
+					ILIBLOGMESSSAGE("SelfUpdate -> Update already in progress, ignoring duplicate start signal");
+				}
+				break;
+			}
+			long delta = (agent->updateLastStart == 0 || now < agent->updateLastStart) ? 0 : (now - agent->updateLastStart);
+			if (delta > 300000)
+			{
+				agent->updateAttemptCount = 0;
+			}
+			if (agent->updateAttemptCount >= 3 && delta < 120000)
+			{
+				agent->disableUpdate = 1;
+				ILibSimpleDataStore_Put(agent->masterDb, "disableUpdate", "1");
+				MeshAgent_SendSessionNotice(agent, "Self-Update paused: too many rapid retries.", 2);
+				if (agent->logUpdate != 0)
+				{
+					ILIBLOGMESSSAGE("SelfUpdate -> Throttling updates due to rapid retries; set disableUpdate=0 to re-enable");
+				}
+				break;
+			}
+			agent->updateAttemptCount++;
+			agent->updateLastStart = now;
 			// Indicates the start of the agent update transfer
 			if (agent->logUpdate != 0)
 			{
@@ -3626,6 +3653,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified");
 				}
 				agent->updateInProgress = 0;
+				agent->updateAttemptCount = 0;
 				if (duk_ctx_is_alive(agent->meshCoreCtx))
 				{
 					// Notify the server that the update payload has been verified; helps surface status in the UI.
@@ -4916,6 +4944,8 @@ MeshAgentHostContainer *MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 	MeshAgentHostContainer *retVal = (MeshAgentHostContainer *)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 	retVal->lastDisconnectReason[0] = 0;
 	retVal->updateInProgress = 0;
+	retVal->updateAttemptCount = 0;
+	retVal->updateLastStart = 0;
 	retVal->controlChannelMaxMissedPongs = DEFAULT_MAX_MISSED_PONGS;
 	retVal->controlChannelPongMisses = 0;
 #ifdef WIN32
