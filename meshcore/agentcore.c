@@ -369,6 +369,7 @@ char ContainerContextGUID[sizeof(JS_ENGINE_CONTEXT) + 1];
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent);
 int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent);
 void MeshServer_SendJSON(MeshAgentHostContainer *agent, ILibWebClient_StateObject WebStateObject, char *JSON, int JSONLength);
+static void MeshAgent_SendSessionNotice(MeshAgentHostContainer *agent, const char *msg, int icon);
 
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
 extern void ILibProcessPipe_FreePipe(ILibProcessPipe_Pipe pipeObject);
