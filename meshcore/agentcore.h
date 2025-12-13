@@ -17,6 +17,7 @@ limitations under the License.
 #ifndef __AGENTCORE__
 #define __AGENTCORE__
 
+
 typedef char JS_ENGINE_CONTEXT[16];
 
 #ifdef WIN32
@@ -44,7 +45,7 @@ typedef char JS_ENGINE_CONTEXT[16];
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibCrypto.h"
 
-#define ILibDuktape_MeshAgent_LoggedOnUsers "\xFF_MeshAgent_LoggedOnUsers"
+#define ILibDuktape_MeshAgent_LoggedOnUsers	"\xFF_MeshAgent_LoggedOnUsers"
 
 typedef enum MeshAgent_Posix_PlatformTypes
 {
@@ -56,7 +57,7 @@ typedef enum MeshAgent_Posix_PlatformTypes
 	MeshAgent_Posix_PlatformTypes_BSD = 5,
 	MeshAgent_Posix_PlatformTypes_WINDOWS = 10,
 	MeshAgent_Posix_PlatformTypes_PROCD = 7
-} MeshAgent_Posix_PlatformTypes;
+}MeshAgent_Posix_PlatformTypes;
 
 typedef enum MeshCommand_AuthInfo_CapabilitiesMask
 {
@@ -69,35 +70,35 @@ typedef enum MeshCommand_AuthInfo_CapabilitiesMask
 	MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY = 0x40,
 	MeshCommand_AuthInfo_CapabilitiesMask_RESERVED = 0x80,
 	MeshCommand_AuthInfo_CapabilitiesMask_COMPRESSION = 0x100
-} MeshCommand_AuthInfo_CapabilitiesMask;
+}MeshCommand_AuthInfo_CapabilitiesMask;
 
 typedef enum AgentIdentifiers
 {
-	AGENTID_UNKNOWN = 0,			//!< Self-update not supported
-	AGENTID_WIN32_CONSOLE = 1,		//!< Windows x86 console app
-	AGENTID_WIN64_CONSOLE = 2,		//!< Windows x86-64 console app
-	AGENTID_WIN32_SERVICE = 3,		//!< Windows x86 service
-	AGENTID_WIN64_SERVICE = 4,		//!< Windows x86-64 service
-	AGENTID_LINUX32 = 5,			//!< Linux x86
-	AGENTID_LINUX64 = 6,			//!< Linux x64
-	AGENTID_MIPS = 7,				//!< MIPS (used for home routers)
-	AGENTID_XEN_x86 = 8,			//!< XEN Virtualization
-	AGENTID_ANDROID_ARM = 9,		//!< Android ARM devices
-	AGENTID_LINUX_ARM = 10,			//!< Linux/ARM, used for PlugPC
-	AGENTID_MAC_OSX = 11,			//!< Apple MAC OS X
-	AGENTID_ANDROID_x86 = 12,		//!< Android/x86
-	AGENTID_POGOPLUG_ARM = 13,		//!< PogoPlug/ARM
-	AGENTID_ANDROID_APK = 14,		//!< Android Market
-	AGENTID_LINUX_POKY_X86 = 15,	//!< Intel Galileo
-	AGENTID_MAC_OSX64 = 16,			//!< Apple MAC OSX (64 bit)
-	AGENTID_CHROMEOS = 17,			//!< ChromeOS
-	AGENTID_LINUXPOKY64 = 18,		//!< Linux Poky (64 bit)
-	AGENTID_LINUX_NOKVM_X86 = 19,	//!< Linux NOKVM (32 bit)
-	AGENTID_LINUX_NOKVM_X64 = 20,	//!< Linux NOKVM (64 bit)
+	AGENTID_UNKNOWN = 0,  //!< Self-update not supported
+	AGENTID_WIN32_CONSOLE = 1,  //!< Windows x86 console app
+	AGENTID_WIN64_CONSOLE = 2,  //!< Windows x86-64 console app
+	AGENTID_WIN32_SERVICE = 3,  //!< Windows x86 service
+	AGENTID_WIN64_SERVICE = 4,  //!< Windows x86-64 service
+	AGENTID_LINUX32 = 5,  //!< Linux x86
+	AGENTID_LINUX64 = 6,  //!< Linux x64
+	AGENTID_MIPS = 7,  //!< MIPS (used for home routers)
+	AGENTID_XEN_x86 = 8,  //!< XEN Virtualization
+	AGENTID_ANDROID_ARM = 9,  //!< Android ARM devices
+	AGENTID_LINUX_ARM = 10, //!< Linux/ARM, used for PlugPC
+	AGENTID_MAC_OSX = 11, //!< Apple MAC OS X
+	AGENTID_ANDROID_x86 = 12, //!< Android/x86
+	AGENTID_POGOPLUG_ARM = 13, //!< PogoPlug/ARM
+	AGENTID_ANDROID_APK = 14, //!< Android Market
+	AGENTID_LINUX_POKY_X86 = 15, //!< Intel Galileo
+	AGENTID_MAC_OSX64 = 16, //!< Apple MAC OSX (64 bit)
+	AGENTID_CHROMEOS = 17, //!< ChromeOS
+	AGENTID_LINUXPOKY64 = 18, //!< Linux Poky (64 bit)
+	AGENTID_LINUX_NOKVM_X86 = 19, //!< Linux NOKVM (32 bit)
+	AGENTID_LINUX_NOKVM_X64 = 20, //!< Linux NOKVM (64 bit)
 	AGENTID_WIN32_MIN_CONSOLE = 21, //!< Windows MinCore Console (32 bit)
-	AGENTID_WIN32_MIN_SERVICE = 22, //!< Windows MinCore Service (32 bit)
-	AGENTID_NODEJS = 23				//!< NodeJS agent
-} AgentIdentifiers;
+	AGENTID_WIN32_MIN_SERVICE = 22,				//!< Windows MinCore Service (32 bit)
+	AGENTID_NODEJS = 23							//!< NodeJS agent
+}AgentIdentifiers;
 
 // MeshServer to/from MeshAgent commands.
 // Commands 0 to 9 are reserved for client/server authentication, once authenticated they can't be used and must not be processed.
@@ -105,65 +106,65 @@ typedef enum AgentIdentifiers
 // Commands with an id that starts with '{' (123, 0x7B) are reserved for JSON commands, that is commands 31488 (0x7B00) to 31743 (0x7BFF)
 typedef enum MeshCommands_Binary
 {
-	MeshCommand_AuthRequest = 1, // Server web certificate public key sha384 hash + agent or server nonce
-	MeshCommand_AuthVerify = 2,	 // Agent or server signature
-	MeshCommand_AuthInfo = 3,	 // Agent information
-	MeshCommand_AuthConfirm = 4, // Server confirm to the agent that is it authenticated
-	MeshCommand_ServerId = 5,	 // Optional, agent sends the expected serverid to the server. Useful if the server has many server certificates.
-	MeshCommand_CoreModule = 10, // New core modules to be used instead of the old one, if empty, remove the core module
-	MeshCommand_CompressedCoreModule = 20,
-	MeshCommand_CoreModuleHash = 11,   // Request/return the SHA384 hash of the core module
-	MeshCommand_AgentCommitDate = 30,  // Commit Date that the agent was built with
-	MeshCommand_AgentHash = 12,		   // Request/return the SHA384 hash of the agent executable
-	MeshCommand_AgentUpdate = 13,	   // Indicate the start and end of the mesh agent binary transfer
-	MeshCommand_AgentUpdateBlock = 14, // Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server
-	MeshCommand_AgentTag = 15,		   // Send the mesh agent tag to the server
-	MeshCommand_CoreOk = 16,		   // Sent by the server to indicate the meshcore is ok
-	MeshCommand_HostInfo = 31,		   // Host OS and CPU Architecture
+	MeshCommand_AuthRequest				= 1,    // Server web certificate public key sha384 hash + agent or server nonce
+	MeshCommand_AuthVerify				= 2,    // Agent or server signature
+	MeshCommand_AuthInfo				= 3,	// Agent information
+	MeshCommand_AuthConfirm             = 4,	// Server confirm to the agent that is it authenticated
+	MeshCommand_ServerId				= 5,	// Optional, agent sends the expected serverid to the server. Useful if the server has many server certificates.
+	MeshCommand_CoreModule				= 10,	// New core modules to be used instead of the old one, if empty, remove the core module
+	MeshCommand_CompressedCoreModule	= 20,
+	MeshCommand_CoreModuleHash			= 11,	// Request/return the SHA384 hash of the core module
+	MeshCommand_AgentCommitDate			= 30,	// Commit Date that the agent was built with
+	MeshCommand_AgentHash				= 12,	// Request/return the SHA384 hash of the agent executable
+	MeshCommand_AgentUpdate				= 13,   // Indicate the start and end of the mesh agent binary transfer
+	MeshCommand_AgentUpdateBlock		= 14,   // Part of the mesh agent sent from the server to the agent, confirmation/flowcontrol from agent to server
+	MeshCommand_AgentTag				= 15,	// Send the mesh agent tag to the server
+	MeshCommand_CoreOk					= 16,	// Sent by the server to indicate the meshcore is ok
+	MeshCommand_HostInfo				= 31,	// Host OS and CPU Architecture
 
 } MeshCommands_Binary;
 
-#pragma pack(push, 1)
+#pragma pack(push,1)
 typedef struct MeshAgent_Commands_SCRIPT_CreateContext
 {
 	unsigned short CommandType;
 	JS_ENGINE_CONTEXT ContextGUID;
 	unsigned int SecurityFlags;
 	unsigned int ExecutionTimeout;
-} MeshAgent_Commands_SCRIPT_CreateContext;
+}MeshAgent_Commands_SCRIPT_CreateContext;
 typedef struct MeshAgent_Commands_SCRIPT_DeleteContext
 {
 	unsigned short CommandType;
 	JS_ENGINE_CONTEXT ContextGUID;
-} MeshAgent_Commands_SCRIPT_DeleteContext;
+}MeshAgent_Commands_SCRIPT_DeleteContext;
 typedef struct MeshAgent_Commands_SCRIPT_ExecuteString
 {
 	unsigned short CommandType;
 	JS_ENGINE_CONTEXT ContextGUID;
 	char script[];
-} MeshAgent_Commands_SCRIPT_ExecuteString;
+}MeshAgent_Commands_SCRIPT_ExecuteString;
 #pragma pack(pop)
 
 typedef enum MeshAgentHost_BatteryInfo
 {
-	MeshAgentHost_BatteryInfo_HIGH = 1,
-	MeshAgentHost_BatteryInfo_LOW = 2,
-	MeshAgentHost_BatteryInfo_CRITICAL = 4,
-	MeshAgentHost_BatteryInfo_CHARGING = 8,
-	MeshAgentHost_BatteryInfo_NONE = 3,
-	MeshAgentHost_BatteryInfo_UNKNOWN = 0,
-} MeshAgentHost_BatteryInfo;
+	MeshAgentHost_BatteryInfo_HIGH			= 1,
+	MeshAgentHost_BatteryInfo_LOW			= 2,
+	MeshAgentHost_BatteryInfo_CRITICAL		= 4,
+	MeshAgentHost_BatteryInfo_CHARGING		= 8,
+	MeshAgentHost_BatteryInfo_NONE			= 3,
+	MeshAgentHost_BatteryInfo_UNKNOWN		= 0,
+}MeshAgentHost_BatteryInfo;
 
-extern char *MeshAgentHost_BatteryInfo_STRINGS[];
+extern char* MeshAgentHost_BatteryInfo_STRINGS[];
 
 #ifdef WIN32
-typedef HRESULT(__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
-typedef int(WSAAPI *GetHostNameWFunc)(PWSTR name, int namelen);
+typedef HRESULT (__stdcall *DpiAwarenessFunc)(PROCESS_DPI_AWARENESS);
+typedef int (WSAAPI *GetHostNameWFunc)(PWSTR name, int namelen);
 #endif
 
 typedef struct MeshAgentHostContainer
 {
-	void *chain;
+	void* chain;
 	int slaveMode;
 
 	duk_context *meshCoreCtx;
@@ -172,12 +173,12 @@ typedef struct MeshAgentHostContainer
 	int meshCoreCtx_embeddedScriptLen;
 	ILibProcessPipe_Manager *pipeManager;
 
-	char *exePath;
+	char* exePath;
 	ILibWebClient_RequestManager httpClientManager;
 	ILibSimpleDataStore masterDb;
 	int configPathUsesCWD;
 	ILibWebClient_StateObject controlChannel;
-	struct sockaddr_in6 *proxyServer;
+	struct sockaddr_in6* proxyServer;
 	int proxyFailed;
 	void *controlChannelRequest;
 
@@ -219,7 +220,7 @@ typedef struct MeshAgentHostContainer
 #ifndef MICROSTACK_NOTLS
 #ifdef WIN32
 	int noCertStore;
-	void *certObject;
+	void* certObject;
 #endif
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
@@ -234,14 +235,12 @@ typedef struct MeshAgentHostContainer
 	int retryTimerSet;
 	int controlChannel_idleTimeout_seconds;
 	int controlChannel_idleTimeout_dataMode;
-	int controlChannelMaxMissedPongs;
-	int controlChannelPongMisses;
 	char g_selfid[UTIL_SHA384_HASHSIZE];
-	void *microLMS;
-	void *multicastDiscovery;
-	void *multicastDiscovery2;
-	void *multicastDiscoveryKey;
-	char *multicastServerUrl;
+	void* microLMS;
+	void* multicastDiscovery;
+	void* multicastDiscovery2;
+	void* multicastDiscoveryKey;
+	char* multicastServerUrl;
 	int serverConnectionState;
 	int exitCode;
 	int dbRetryCount;
@@ -260,28 +259,28 @@ typedef struct MeshAgentHostContainer
 #if defined(_WINSERVICE)
 	int runningAsConsole;
 #endif
-	char lastDisconnectReason[128];
-} MeshAgentHostContainer;
+}MeshAgentHostContainer;
 
-MeshAgentHostContainer *MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities);
-void MeshAgent_Destroy(MeshAgentHostContainer *agent);
+MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities);
+void MeshAgent_Destroy(MeshAgentHostContainer* agent);
 
 int MeshAgent_Start(MeshAgentHostContainer *agent, int argc, char **argv);
 void MeshAgent_Stop(MeshAgentHostContainer *agent);
-void MeshAgent_PerformSelfUpdate(char *selfpath, char *exepath, int argc, char **argv);
-char *MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBackSlash);
+void MeshAgent_PerformSelfUpdate(char* selfpath, char* exepath, int argc, char **argv);
+char* MeshAgent_MakeAbsolutePathEx(char *basePath, char *localPath, int escapeBackSlash);
 #define MeshAgent_MakeAbsolutePath(basePath, localPath) MeshAgent_MakeAbsolutePathEx(basePath, localPath, 0)
+
+
 
 /* List of DB Keys that can be set, to alter behavior of the Mesh Agent
 *
 *
-AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities
+AgentCapabilities:			Integer Mask, specifying supported Agent Capabilities	
 agentName					If set, this will be sent to the server instead of the hostname
 compactDirtyMinimum			Minimum dirty bytes threshold for db.compact() operation
 consoleTextMaxRate:			Sets rate limit for sendConsoleText. Default is 10 messages per second.
 controlChannelDebug:		If set, will log/display controlChannel messages (Except for JSON messages)
 controlChannelIdleTimeout:  Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
-controlChannelMaxMissedPongs: Number of consecutive missed Pong responses before forcing a reconnect (default is 3)
 coreDumpEnabled:			If set, a dump file will be written when the agent crashes
 disableUpdate:				If set, will prevent the agent from self-updating
 noUpdateCoreModule:			If set, will prevent the agent from taking a new meshcore from the server
@@ -291,7 +290,7 @@ forceUpdate:				If set, will cause the agent to perform a self-update on next st
 ignoreProxyFile:			If set, will cause the agent to ignore any proxy settings
 logUpdate:					If set, will cause the agent to log self-update status
 jsDebugPort:				Specify a JS Debugger Port
-maxLogSize:					Specifies the maximum size of the error log file.
+maxLogSize:					Specifies the maximum size of the error log file. 
 nocertstore:				If set on Windows, will force the Agent to use OpenSSL instead of WinCrypto for cert generation/storage.
 readonly:					If set, forces the agent to open the database in readonly mode
 readmsh:					If set while db is in readonly mode, it will cache the local msh file in the readonly db
