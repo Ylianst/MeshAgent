@@ -5968,8 +5968,30 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		char *filePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update");
 #endif
 
-		// Delete the mesh agent update file if there is one
-		util_deletefile(filePath);
+		// Delete the mesh agent update file ONLY if it matches our current version (prevents false update loops)
+		if (ILibSimpleDataStore_Exists(filePath))
+		{
+			char updateFileHash[UTIL_SHA384_HASHSIZE];
+			if (GenerateSHA384FileHash(filePath, updateFileHash) == 0)
+			{
+				// Compare hash with current agent hash
+				if (memcmp(updateFileHash, agentHost->agentHash, UTIL_SHA384_HASHSIZE) == 0)
+				{
+					// Update file is same version as current - delete it to prevent false update detection
+					util_deletefile(filePath);
+					if (agentHost->logUpdate != 0)
+					{
+						ILIBLOGMESSSAGE("Removed stale .update file (same version as current agent)");
+					}
+				}
+				// If hashes differ, it's a legitimate pending update - keep the file
+			}
+			else
+			{
+				// If we can't hash the file, delete it to be safe
+				util_deletefile(filePath);
+			}
+		}
 
 		// If there is a ".corereset" file, delete the core and remove the file.
 		filePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".corereset");
@@ -6883,6 +6905,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				if (system(ILibScratchPad))
 				{
 				}
+				// Ensure update file is deleted (mv should have done it, but be explicit for safety)
+				util_deletefile(updateFilePath);
 				switch (agentHost->platformType)
 				{
 				case MeshAgent_Posix_PlatformTypes_BSD:
@@ -6954,6 +6978,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 				if (system(ILibScratchPad))
 				{
 				}
+				// Delete the update file after successful copy to prevent false update detection on reconnection
+				util_deletefile(updateFilePath);
 				ignore_result(write(STDOUT_FILENO, "SelfUpdate -> Restarting Agent...\n", 34));
 
 				execv(agentHost->exePath, agentHost->execparams);
