@@ -211,7 +211,15 @@ BOOL CALLBACK DisplayInfoEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprc
 		return TRUE;
 	if (sscanf_s(mi.szDevice, "\\\\.\\DISPLAY%d", &deviceid) != 1)
 		return TRUE;
-	if (--selection[0] > 0)
+
+	// Check if this is the Windows primary display (not just physical order)
+	// If selection is 1 and this is the primary display, use it regardless of enumeration order
+	if (selection[0] == 1 && (mi.dwFlags & MONITORINFOF_PRIMARY))
+	{
+		// This is the Windows default/primary monitor - use it immediately
+		selection[0] = 0; // Mark as found
+	}
+	else if (--selection[0] > 0)
 	{
 		return TRUE;
 	}
