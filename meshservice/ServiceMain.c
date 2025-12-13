@@ -38,15 +38,15 @@ limitations under the License.
 #include "microscript/ILibDuktape_Commit.h"
 #include <shellscalingapi.h>
 
-#if defined(WIN32) && defined (_DEBUG) && !defined(_MINCORE)
+#if defined(WIN32) && defined(_DEBUG) && !defined(_MINCORE)
 #include <crtdbg.h>
 #define _CRTDBG_MAP_ALLOC
 #endif
 
 #include <WtsApi32.h>
 
-TCHAR* serviceFile = TEXT("Mesh Agent");
-TCHAR* serviceName = TEXT("Mesh Agent background service");
+TCHAR *serviceFile = TEXT("Mesh Agent");
+TCHAR *serviceName = TEXT("Mesh Agent background service");
 
 SERVICE_STATUS serviceStatus;
 SERVICE_STATUS_HANDLE serviceStatusHandle = 0;
@@ -76,7 +76,6 @@ extern char* g_ServiceProxyHost;
 extern int g_ServiceConnectFlags;
 */
 
-
 #if defined(_LINKVM)
 extern DWORD WINAPI kvm_server_mainloop(LPVOID Param);
 #endif
@@ -85,19 +84,18 @@ extern DWORD WINAPI kvm_server_mainloop(LPVOID Param);
 #define SmoothingModeAntiAlias 5
 #define InterpolationModeBicubic 8
 
-
 HMODULE _gdip = NULL;
 HMODULE _shm = NULL;
 typedef int(__stdcall *_GdipCreateBitmapFromStream)(void *stream, void **bitmap);
 typedef int(__stdcall *_GdiplusStartup)(void **token, void *input, void *obj);
 typedef int(__stdcall *_GdiplusShutdown)(void *token);
-typedef IStream*(__stdcall *_SHCreateMemStream)(void *buffer, uint32_t bufferLen);
+typedef IStream *(__stdcall *_SHCreateMemStream)(void *buffer, uint32_t bufferLen);
 typedef int(__stdcall *_GdipCreateHBITMAPFromBitmap)(void *bitmap, HBITMAP *hbReturn, int background);
 typedef int(__stdcall *_GdipGetImagePixelFormat)(void *image, int *format);
-typedef int(__stdcall *_GdipCreateBitmapFromScan0)(int width, int height, int stride, int format, BYTE* scan0, void** bitmap);
+typedef int(__stdcall *_GdipCreateBitmapFromScan0)(int width, int height, int stride, int format, BYTE *scan0, void **bitmap);
 typedef int(__stdcall *_GdipGetImageHorizontalResolution)(void *image, float *resolution);
 typedef int(__stdcall *_GdipGetImageVerticalResolution)(void *image, float *resolution);
-typedef int(__stdcall *_GdipBitmapSetResolution)(void* bitmap, float xdpi, float ydpi);
+typedef int(__stdcall *_GdipBitmapSetResolution)(void *bitmap, float xdpi, float ydpi);
 typedef int(__stdcall *_GdipGetImageGraphicsContext)(void *image, void **graphics);
 typedef int(__stdcall *_GdipSetSmoothingMode)(void *graphics, int smoothingMode);
 typedef int(__stdcall *_GdipSetInterpolationMode)(void *graphics, int interpolationMode);
@@ -135,43 +133,69 @@ void *GdiPlusToken = NULL;
 
 void GdiPlusFlat_Init()
 {
-	INITCOMMONCONTROLSEX icex;		// declare an INITCOMMONCONTROLSEX Structure
+	INITCOMMONCONTROLSEX icex; // declare an INITCOMMONCONTROLSEX Structure
 	icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
-	icex.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_PROGRESS_CLASS;   // This is needed for tooltips  									
+	icex.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_PROGRESS_CLASS; // This is needed for tooltips
 	BOOL _ok = InitCommonControlsEx(&icex);
 
-	char input[24] = { 0 };
+	char input[24] = {0};
 	_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
-	if (_gdip == NULL) { _gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0); }
-	if (_gdip == NULL) { return; }
+	if (_gdip == NULL)
+	{
+		_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0);
+	}
+	if (_gdip == NULL)
+	{
+		return;
+	}
 	_shm = LoadLibraryExW(L"Shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
-	if (_shm == NULL) { _gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0); }
-	if (_shm == NULL) { FreeLibrary(_gdip); _gdip = NULL; return; }
+	if (_shm == NULL)
+	{
+		_gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0);
+	}
+	if (_shm == NULL)
+	{
+		FreeLibrary(_gdip);
+		_gdip = NULL;
+		return;
+	}
 
-	__GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromStream");
-	__GdiplusStartup = (_GdiplusStartup)GetProcAddress(_gdip, (LPCSTR)"GdiplusStartup");
-	__SHCreateMemStream2 = (_SHCreateMemStream)GetProcAddress(_shm, (LPCSTR)"SHCreateMemStream");
-	__GdipCreateHBITMAPFromBitmap = (_GdipCreateHBITMAPFromBitmap)GetProcAddress(_gdip, (LPCSTR)"GdipCreateHBITMAPFromBitmap");
-	__GdipGetImagePixelFormat = (_GdipGetImagePixelFormat)GetProcAddress(_gdip, (LPCSTR)"GdipGetImagePixelFormat");
-	__GdipCreateBitmapFromScan0 = (_GdipCreateBitmapFromScan0)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromScan0");
-	__GdipGetImageHorizontalResolution = (_GdipGetImageHorizontalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageHorizontalResolution");
-	__GdipGetImageVerticalResolution = (_GdipGetImageVerticalResolution)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageVerticalResolution");
-	__GdipBitmapSetResolution = (_GdipBitmapSetResolution)GetProcAddress(_gdip, (LPCSTR)"GdipBitmapSetResolution");
-	__GdipGetImageGraphicsContext = (_GdipGetImageGraphicsContext)GetProcAddress(_gdip, (LPCSTR)"GdipGetImageGraphicsContext");
-	__GdipSetSmoothingMode = (_GdipSetSmoothingMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetSmoothingMode");
-	__GdipSetInterpolationMode = (_GdipSetInterpolationMode)GetProcAddress(_gdip, (LPCSTR)"GdipSetInterpolationMode");
-	__GdipDrawImageRectI = (_GdipDrawImageRectI)GetProcAddress(_gdip, (LPCSTR)"GdipDrawImageRectI");
-	__GdipDisposeImage = (_GdipDisposeImage)GetProcAddress(_gdip, (LPCSTR)"GdipDisposeImage");
-	__GdiplusShutdown = (_GdiplusShutdown)GetProcAddress(_gdip, (LPCSTR)"GdiplusShutdown");
+	__GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR) "GdipCreateBitmapFromStream");
+	__GdiplusStartup = (_GdiplusStartup)GetProcAddress(_gdip, (LPCSTR) "GdiplusStartup");
+	__SHCreateMemStream2 = (_SHCreateMemStream)GetProcAddress(_shm, (LPCSTR) "SHCreateMemStream");
+	__GdipCreateHBITMAPFromBitmap = (_GdipCreateHBITMAPFromBitmap)GetProcAddress(_gdip, (LPCSTR) "GdipCreateHBITMAPFromBitmap");
+	__GdipGetImagePixelFormat = (_GdipGetImagePixelFormat)GetProcAddress(_gdip, (LPCSTR) "GdipGetImagePixelFormat");
+	__GdipCreateBitmapFromScan0 = (_GdipCreateBitmapFromScan0)GetProcAddress(_gdip, (LPCSTR) "GdipCreateBitmapFromScan0");
+	__GdipGetImageHorizontalResolution = (_GdipGetImageHorizontalResolution)GetProcAddress(_gdip, (LPCSTR) "GdipGetImageHorizontalResolution");
+	__GdipGetImageVerticalResolution = (_GdipGetImageVerticalResolution)GetProcAddress(_gdip, (LPCSTR) "GdipGetImageVerticalResolution");
+	__GdipBitmapSetResolution = (_GdipBitmapSetResolution)GetProcAddress(_gdip, (LPCSTR) "GdipBitmapSetResolution");
+	__GdipGetImageGraphicsContext = (_GdipGetImageGraphicsContext)GetProcAddress(_gdip, (LPCSTR) "GdipGetImageGraphicsContext");
+	__GdipSetSmoothingMode = (_GdipSetSmoothingMode)GetProcAddress(_gdip, (LPCSTR) "GdipSetSmoothingMode");
+	__GdipSetInterpolationMode = (_GdipSetInterpolationMode)GetProcAddress(_gdip, (LPCSTR) "GdipSetInterpolationMode");
+	__GdipDrawImageRectI = (_GdipDrawImageRectI)GetProcAddress(_gdip, (LPCSTR) "GdipDrawImageRectI");
+	__GdipDisposeImage = (_GdipDisposeImage)GetProcAddress(_gdip, (LPCSTR) "GdipDisposeImage");
+	__GdiplusShutdown = (_GdiplusShutdown)GetProcAddress(_gdip, (LPCSTR) "GdiplusShutdown");
 
-	((uint32_t*)input)[0] = 1;
+	((uint32_t *)input)[0] = 1;
 	__GdiplusStartup(&GdiPlusToken, input, NULL);
 }
 void GdiPlusFlat_Release()
 {
-	if (GdiPlusToken != NULL) { __GdiplusShutdown(GdiPlusToken); GdiPlusToken = NULL; }
-	if (_gdip != NULL) { FreeLibrary(_gdip); _gdip = NULL; }
-	if (_shm != NULL) { FreeLibrary(_shm); _shm = NULL; }
+	if (GdiPlusToken != NULL)
+	{
+		__GdiplusShutdown(GdiPlusToken);
+		GdiPlusToken = NULL;
+	}
+	if (_gdip != NULL)
+	{
+		FreeLibrary(_gdip);
+		_gdip = NULL;
+	}
+	if (_shm != NULL)
+	{
+		FreeLibrary(_shm);
+		_shm = NULL;
+	}
 }
 
 BOOL IsAdmin()
@@ -182,18 +206,19 @@ BOOL IsAdmin()
 
 	if ((admin = AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &AdministratorsGroup)) != 0)
 	{
-		if (!CheckTokenMembership(NULL, AdministratorsGroup, &admin)) admin = FALSE;
+		if (!CheckTokenMembership(NULL, AdministratorsGroup, &admin))
+			admin = FALSE;
 		FreeSid(AdministratorsGroup);
 	}
 	return admin;
 }
 
-BOOL RunAsAdmin(char* args, int isAdmin)
+BOOL RunAsAdmin(char *args, int isAdmin)
 {
 	WCHAR szPath[_MAX_PATH + 100];
 	if (GetModuleFileNameW(NULL, szPath, sizeof(szPath) / 2))
 	{
-		SHELLEXECUTEINFOW sei = { sizeof(sei) };
+		SHELLEXECUTEINFOW sei = {sizeof(sei)};
 		sei.hwnd = NULL;
 		sei.nShow = SW_NORMAL;
 		sei.lpVerb = isAdmin ? L"open" : L"runas";
@@ -204,7 +229,7 @@ BOOL RunAsAdmin(char* args, int isAdmin)
 	return FALSE;
 }
 
-DWORD WINAPI ServiceControlHandler(DWORD controlCode, DWORD eventType, void *eventData, void* eventContext)
+DWORD WINAPI ServiceControlHandler(DWORD controlCode, DWORD eventType, void *eventData, void *eventContext)
 {
 	switch (controlCode)
 	{
@@ -214,20 +239,23 @@ DWORD WINAPI ServiceControlHandler(DWORD controlCode, DWORD eventType, void *eve
 	case SERVICE_CONTROL_STOP:
 		serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
 		SetServiceStatus(serviceStatusHandle, &serviceStatus);
-		if (agent != NULL) { MeshAgent_Stop(agent); }
-		return(0);
+		if (agent != NULL)
+		{
+			MeshAgent_Stop(agent);
+		}
+		return (0);
 	case SERVICE_CONTROL_POWEREVENT:
 		switch (eventType)
 		{
-		case PBT_APMPOWERSTATUSCHANGE:	// Power status has changed.
+		case PBT_APMPOWERSTATUSCHANGE: // Power status has changed.
 			break;
-		case PBT_APMRESUMEAUTOMATIC:	// Operation is resuming automatically from a low - power state.This message is sent every time the system resumes.
+		case PBT_APMRESUMEAUTOMATIC: // Operation is resuming automatically from a low - power state.This message is sent every time the system resumes.
 			break;
-		case PBT_APMRESUMESUSPEND:		// Operation is resuming from a low - power state.This message is sent after PBT_APMRESUMEAUTOMATIC if the resume is triggered by user input, such as pressing a key.
+		case PBT_APMRESUMESUSPEND: // Operation is resuming from a low - power state.This message is sent after PBT_APMRESUMEAUTOMATIC if the resume is triggered by user input, such as pressing a key.
 			break;
-		case PBT_APMSUSPEND:			// System is suspending operation.
+		case PBT_APMSUSPEND: // System is suspending operation.
 			break;
-		case PBT_POWERSETTINGCHANGE:	// Power setting change event has been received.
+		case PBT_POWERSETTINGCHANGE: // Power setting change event has been received.
 			break;
 		}
 		break;
@@ -239,25 +267,25 @@ DWORD WINAPI ServiceControlHandler(DWORD controlCode, DWORD eventType, void *eve
 
 		switch (eventType)
 		{
-		case WTS_CONSOLE_CONNECT:		// The session identified by lParam was connected to the console terminal or RemoteFX session.
+		case WTS_CONSOLE_CONNECT: // The session identified by lParam was connected to the console terminal or RemoteFX session.
 			break;
-		case WTS_CONSOLE_DISCONNECT:	// The session identified by lParam was disconnected from the console terminal or RemoteFX session.
+		case WTS_CONSOLE_DISCONNECT: // The session identified by lParam was disconnected from the console terminal or RemoteFX session.
 			break;
-		case WTS_REMOTE_CONNECT:		// The session identified by lParam was connected to the remote terminal.
+		case WTS_REMOTE_CONNECT: // The session identified by lParam was connected to the remote terminal.
 			break;
-		case WTS_REMOTE_DISCONNECT:		// The session identified by lParam was disconnected from the remote terminal.
+		case WTS_REMOTE_DISCONNECT: // The session identified by lParam was disconnected from the remote terminal.
 			break;
-		case WTS_SESSION_LOGON:			// A user has logged on to the session identified by lParam.
-		case WTS_SESSION_LOGOFF:		// A user has logged off the session identified by lParam.					
+		case WTS_SESSION_LOGON:	 // A user has logged on to the session identified by lParam.
+		case WTS_SESSION_LOGOFF: // A user has logged off the session identified by lParam.
 			break;
-		case WTS_SESSION_LOCK:			// The session identified by lParam has been locked.
+		case WTS_SESSION_LOCK: // The session identified by lParam has been locked.
 			break;
-		case WTS_SESSION_UNLOCK:		// The session identified by lParam has been unlocked.
+		case WTS_SESSION_UNLOCK: // The session identified by lParam has been unlocked.
 			break;
-		case WTS_SESSION_REMOTE_CONTROL:// The session identified by lParam has changed its remote controlled status.To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
+		case WTS_SESSION_REMOTE_CONTROL: // The session identified by lParam has changed its remote controlled status.To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
 			break;
-		case WTS_SESSION_CREATE:		// Reserved for future use.
-		case WTS_SESSION_TERMINATE:		// Reserved for future use.
+		case WTS_SESSION_CREATE:	// Reserved for future use.
+		case WTS_SESSION_TERMINATE: // Reserved for future use.
 			break;
 		}
 		break;
@@ -266,16 +294,14 @@ DWORD WINAPI ServiceControlHandler(DWORD controlCode, DWORD eventType, void *eve
 	}
 
 	SetServiceStatus(serviceStatusHandle, &serviceStatus);
-	return(0);
+	return (0);
 }
-
 
 void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 {
 	ILib_DumpEnabledContext winException;
 	size_t len = 0;
 	WCHAR str[_MAX_PATH];
-
 
 	UNREFERENCED_PARAMETER(argc);
 	UNREFERENCED_PARAMETER(argv);
@@ -304,7 +330,6 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 		// Get our own executable name
 		GetModuleFileNameW(NULL, str, _MAX_PATH);
 
-
 		// Run the mesh agent
 		CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -332,7 +357,7 @@ void WINAPI ServiceMain(DWORD argc, LPTSTR *argv)
 	}
 }
 
-int RunService(int argc, char* argv[])
+int RunService(int argc, char *argv[])
 {
 	SERVICE_TABLE_ENTRY serviceTable[2];
 	serviceTable[0].lpServiceName = serviceName;
@@ -379,7 +404,6 @@ int GetServiceState(LPCSTR servicename)
 	return r;
 }
 
-
 /*
 int APIENTRY _tWinMain(HINSTANCE hInstance,
 					 HINSTANCE hPrevInstance,
@@ -393,7 +417,6 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 }
 */
 
-
 ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *reserved)
 {
 	DWORD len;
@@ -404,11 +427,14 @@ BOOL CtrlHandler(DWORD fdwCtrlType)
 {
 	switch (fdwCtrlType)
 	{
-		// Handle the CTRL-C signal. 
+		// Handle the CTRL-C signal.
 	case CTRL_C_EVENT:
 	case CTRL_BREAK_EVENT:
 	{
-		if (agent != NULL) { MeshAgent_Stop(agent); }
+		if (agent != NULL)
+		{
+			MeshAgent_Stop(agent);
+		}
 		return TRUE;
 	}
 	default:
@@ -416,7 +442,12 @@ BOOL CtrlHandler(DWORD fdwCtrlType)
 	}
 }
 
-#define wmain_free(argv) for(argvi=0;argvi<(int)(ILibMemory_Size(argv)/sizeof(void*));++argvi){ILibMemory_Free(argv[argvi]);}ILibMemory_Free(argv);
+#define wmain_free(argv)                                                            \
+	for (argvi = 0; argvi < (int)(ILibMemory_Size(argv) / sizeof(void *)); ++argvi) \
+	{                                                                               \
+		ILibMemory_Free(argv[argvi]);                                               \
+	}                                                                               \
+	ILibMemory_Free(argv);
 
 void need_stop_chain(duk_context *ctx, void *user)
 {
@@ -437,31 +468,31 @@ duk_ret_t _start(duk_context *ctx)
 	}
 	duk_eval_string_noresult(ctx, "process._exit();");
 
-	return(0);
+	return (0);
 }
 
-int wmain(int argc, char* wargv[])
+int wmain(int argc, char *wargv[])
 {
-	size_t str2len = 0;// , proxylen = 0, taglen = 0;
+	size_t str2len = 0; // , proxylen = 0, taglen = 0;
 	ILib_DumpEnabledContext winException;
 	int retCode = 0;
 
 	int argvi, argvsz;
-	char **argv = (char**)ILibMemory_SmartAllocate((argc + 1) * sizeof(void*));
+	char **argv = (char **)ILibMemory_SmartAllocate((argc + 1) * sizeof(void *));
 	for (argvi = 0; argvi < argc; ++argvi)
 	{
 		argvsz = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, NULL, 0, NULL, NULL);
-		argv[argvi] = (char*)ILibMemory_SmartAllocate(argvsz);
+		argv[argvi] = (char *)ILibMemory_SmartAllocate(argvsz);
 		WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)wargv[argvi], -1, argv[argvi], argvsz, NULL, NULL);
 	}
 
 	if (argc > 1 && (strcasecmp(argv[1], "-finstall") == 0 || strcasecmp(argv[1], "-funinstall") == 0 ||
-		strcasecmp(argv[1], "-fulluninstall") == 0 || strcasecmp(argv[1], "-fullinstall") == 0 ||
-		strcasecmp(argv[1], "-install") == 0 || strcasecmp(argv[1], "-uninstall") == 0 ||
-		strcasecmp(argv[1], "-state") == 0))
+					 strcasecmp(argv[1], "-fulluninstall") == 0 || strcasecmp(argv[1], "-fullinstall") == 0 ||
+					 strcasecmp(argv[1], "-install") == 0 || strcasecmp(argv[1], "-uninstall") == 0 ||
+					 strcasecmp(argv[1], "-state") == 0))
 	{
 		argv[argc] = argv[1];
-		argv[1] = (char*)ILibMemory_SmartAllocate(4);
+		argv[1] = (char *)ILibMemory_SmartAllocate(4);
 		sprintf_s(argv[1], ILibMemory_Size(argv[1]), "run");
 		argc += 1;
 	}
@@ -474,7 +505,7 @@ int wmain(int argc, char* wargv[])
 #endif
 	*/
 
-	//CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	// CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (argc > 1 && strcasecmp(argv[1], "-licenses") == 0)
 	{
 		printf("========================================================================================\n");
@@ -540,7 +571,7 @@ int wmain(int argc, char* wargv[])
 #ifdef WIN32
 		wmain_free(argv);
 #endif
-		return(0);
+		return (0);
 	}
 	char *integratedJavaScript = NULL;
 	int integragedJavaScriptLen = 0;
@@ -574,7 +605,7 @@ int wmain(int argc, char* wargv[])
 		ILibChain_DebugOffset(ILibScratchPad, sizeof(ILibScratchPad), (uint64_t)addrOffset);
 		printf("%s", ILibScratchPad);
 		wmain_free(argv);
-		return(0);
+		return (0);
 	}
 
 	if (argc > 2 && strcasecmp(argv[1], "-fdelta") == 0)
@@ -584,7 +615,7 @@ int wmain(int argc, char* wargv[])
 		ILibChain_DebugDelta(ILibScratchPad, sizeof(ILibScratchPad), delta);
 		printf("%s", ILibScratchPad);
 		wmain_free(argv);
-		return(0);
+		return (0);
 	}
 
 	if (integratedJavaScript == NULL || integragedJavaScriptLen == 0)
@@ -610,7 +641,7 @@ int wmain(int argc, char* wargv[])
 	}
 	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integragedJavaScriptLen == 0)
 	{
-		integragedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char**)&integratedJavaScript);
+		integragedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char **)&integratedJavaScript);
 	}
 	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
 	{
@@ -701,15 +732,15 @@ int wmain(int argc, char* wargv[])
 		DWORD dummy;
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "1\n", 2, &dummy, NULL);
 		wmain_free(argv);
-		return(0);
+		return (0);
 	}
 #if defined(_LINKVM)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
-		void **parm = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, 0, NULL);
+		void **parm = (void **)ILibMemory_Allocate(4 * sizeof(void *), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
-		((int*)&(parm[2]))[0] = 0;
-		((int*)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
+		((int *)&(parm[2]))[0] = 0;
+		((int *)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
 		if ((argc > 2 && strcasecmp(argv[2], "-remotecursor") == 0) ||
 			(argc > 3 && strcasecmp(argv[3], "-remotecursor") == 0))
 		{
@@ -717,11 +748,11 @@ int wmain(int argc, char* wargv[])
 		}
 
 		// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
-		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+		HMODULE shCORE = LoadLibraryExA((LPCSTR) "Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
 		if (shCORE != NULL)
 		{
-			if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+			if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR) "SetProcessDpiAwareness")) == NULL)
 			{
 				FreeLibrary(shCORE);
 				shCORE = NULL;
@@ -738,16 +769,16 @@ int wmain(int argc, char* wargv[])
 			SetProcessDPIAware();
 		}
 
-		kvm_server_mainloop((void*)parm);
+		kvm_server_mainloop((void *)parm);
 		wmain_free(argv);
 		return 0;
 	}
 	else if (argc > 1 && strcasecmp(argv[1], "-kvm1") == 0)
 	{
-		void **parm = (void**)ILibMemory_Allocate(4 * sizeof(void*), 0, 0, NULL);
+		void **parm = (void **)ILibMemory_Allocate(4 * sizeof(void *), 0, 0, NULL);
 		parm[0] = kvm_serviceWriteSink;
-		((int*)&(parm[2]))[0] = 1;
-		((int*)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
+		((int *)&(parm[2]))[0] = 1;
+		((int *)&(parm[3]))[0] = (argc > 2 && strcasecmp(argv[2], "-coredump") == 0) ? 1 : 0;
 		if ((argc > 2 && strcasecmp(argv[2], "-remotecursor") == 0) ||
 			(argc > 3 && strcasecmp(argv[3], "-remotecursor") == 0))
 		{
@@ -755,11 +786,11 @@ int wmain(int argc, char* wargv[])
 		}
 
 		// This is only supported on Windows 8 / Windows Server 2012 R2 and newer
-		HMODULE shCORE = LoadLibraryExA((LPCSTR)"Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+		HMODULE shCORE = LoadLibraryExA((LPCSTR) "Shcore.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 		DpiAwarenessFunc dpiAwareness = NULL;
 		if (shCORE != NULL)
 		{
-			if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR)"SetProcessDpiAwareness")) == NULL)
+			if ((dpiAwareness = (DpiAwarenessFunc)GetProcAddress(shCORE, (LPCSTR) "SetProcessDpiAwareness")) == NULL)
 			{
 				FreeLibrary(shCORE);
 				shCORE = NULL;
@@ -776,12 +807,11 @@ int wmain(int argc, char* wargv[])
 			SetProcessDPIAware();
 		}
 
-
-		kvm_server_mainloop((void*)parm);
+		kvm_server_mainloop((void *)parm);
 		wmain_free(argv);
 		return 0;
 	}
-#endif	
+#endif
 	if (integratedJavaScript != NULL || (argc > 0 && strcasecmp(argv[0], "--slave") == 0) || (argc > 1 && ((strcasecmp(argv[1], "run") == 0) || (strcasecmp(argv[1], "connect") == 0) || (strcasecmp(argv[1], "--slave") == 0))))
 	{
 		// Run the mesh agent in console mode, since the agent is compiled for windows service, the KVM will not work right. This is only good for testing.
@@ -790,11 +820,17 @@ int wmain(int argc, char* wargv[])
 		__try
 		{
 			int capabilities = 0;
-			if (argc > 1 && ((strcasecmp(argv[1], "connect") == 0))) { capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY; }
+			if (argc > 1 && ((strcasecmp(argv[1], "connect") == 0)))
+			{
+				capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY;
+			}
 			agent = MeshAgent_Create(capabilities);
 			agent->meshCoreCtx_embeddedScript = integratedJavaScript;
 			agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
-			if (integratedJavaScript != NULL || (argc > 1 && (strcasecmp(argv[1], "run") == 0 || strcasecmp(argv[1], "connect") == 0))) { agent->runningAsConsole = 1; }
+			if (integratedJavaScript != NULL || (argc > 1 && (strcasecmp(argv[1], "run") == 0 || strcasecmp(argv[1], "connect") == 0)))
+			{
+				agent->runningAsConsole = 1;
+			}
 			MeshAgent_Start(agent, argc, argv);
 			retCode = agent->exitCode;
 			MeshAgent_Destroy(agent);
@@ -805,7 +841,7 @@ int wmain(int argc, char* wargv[])
 			ILib_WindowsExceptionDebugEx(&winException);
 		}
 		wmain_free(argv);
-		return(retCode);
+		return (retCode);
 	}
 	else if (argc > 1 && memcmp(argv[1], "-update:", 8) == 0)
 	{
@@ -847,14 +883,17 @@ int wmain(int argc, char* wargv[])
 			ILib_WindowsExceptionDebugEx(&winException);
 		}
 		wmain_free(argv);
-		return(retCode);
+		return (retCode);
 	}
 #ifndef _MINCORE
 	else if (argc > 1 && (strcasecmp(argv[1], "-netinfo") == 0))
 	{
-		char* data;
+		char *data;
 		int len = MeshInfo_GetSystemInformation(&data);
-		if (len > 0) { printf_s(data); }
+		if (len > 0)
+		{
+			printf_s(data);
+		}
 	}
 #endif
 	else
@@ -892,13 +931,12 @@ int wmain(int argc, char* wargv[])
 					GetModuleFileNameW(NULL, wselfexe, sizeof(wselfexe) / 2);
 					ILibWideToUTF8Ex(wselfexe, -1, selfexe, (int)sizeof(selfexe));
 
-
 					void *dialogchain = ILibCreateChain();
 					ILibChain_PartialStart(dialogchain);
 					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, NULL, dialogchain);
 					if (duk_peval_string(ctx, "require('util-language').current.toUpperCase().split('-').join('_');") == 0)
 					{
-						lang = (char*)duk_safe_to_string(ctx, -1);
+						lang = (char *)duk_safe_to_string(ctx, -1);
 						printf("Current Language: %s\n", lang);
 					}
 
@@ -953,30 +991,44 @@ int wmain(int argc, char* wargv[])
 					duk_context *ctx = ILibDuktape_ScriptContainer_InitializeJavaScriptEngineEx(0, 0, dialogchain, NULL, NULL, selfexe, NULL, need_stop_chain, dialogchain);
 					if (duk_peval_string(ctx, "require('win-authenticode-opus').checkMSH();") == 0)
 					{
-						if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0) { lang = (char*)duk_safe_to_string(ctx, -1); }
+						if (duk_peval_string(ctx, "require('util-language').current.toLowerCase().split('_').join('-');") == 0)
+						{
+							lang = (char *)duk_safe_to_string(ctx, -1);
+						}
 						if (duk_peval_string(ctx, "(function foo(){return(JSON.parse(_MSH().translation));})()") != 0 || !duk_has_prop_string(ctx, -1, "en"))
 						{
-							duk_push_object(ctx);															// [translation][en]
-							duk_push_string(ctx, "Install"); duk_put_prop_string(ctx, -2, "install");
-							duk_push_string(ctx, "Uninstall"); duk_put_prop_string(ctx, -2, "uninstall");
-							duk_push_string(ctx, "Connect"); duk_put_prop_string(ctx, -2, "connect");
-							duk_push_string(ctx, "Disconnect"); duk_put_prop_string(ctx, -2, "disconnect");
-							duk_push_string(ctx, "Update"); duk_put_prop_string(ctx, -2, "update");
+							duk_push_object(ctx); // [translation][en]
+							duk_push_string(ctx, "Install");
+							duk_put_prop_string(ctx, -2, "install");
+							duk_push_string(ctx, "Uninstall");
+							duk_put_prop_string(ctx, -2, "uninstall");
+							duk_push_string(ctx, "Connect");
+							duk_put_prop_string(ctx, -2, "connect");
+							duk_push_string(ctx, "Disconnect");
+							duk_put_prop_string(ctx, -2, "disconnect");
+							duk_push_string(ctx, "Update");
+							duk_put_prop_string(ctx, -2, "update");
 							duk_push_array(ctx);
-							duk_push_string(ctx, "NOT INSTALLED"); duk_array_push(ctx, -2);
-							duk_push_string(ctx, "RUNNING"); duk_array_push(ctx, -2);
-							duk_push_string(ctx, "NOT RUNNING"); duk_array_push(ctx, -2);
+							duk_push_string(ctx, "NOT INSTALLED");
+							duk_array_push(ctx, -2);
+							duk_push_string(ctx, "RUNNING");
+							duk_array_push(ctx, -2);
+							duk_push_string(ctx, "NOT RUNNING");
+							duk_array_push(ctx, -2);
 							duk_put_prop_string(ctx, -2, "status");
-							duk_put_prop_string(ctx, -2, "en");												// [translation]
+							duk_put_prop_string(ctx, -2, "en"); // [translation]
 						}
-						if (DIALOG_LANG != NULL) { lang = DIALOG_LANG; }
+						if (DIALOG_LANG != NULL)
+						{
+							lang = DIALOG_LANG;
+						}
 						if (!duk_has_prop_string(ctx, -1, lang))
 						{
-							duk_push_string(ctx, lang);					// [obj][string]
-							duk_string_split(ctx, -1, "-");				// [obj][string][array]
-							duk_array_shift(ctx, -1);					// [obj][string][array][string]
-							lang = (char*)duk_safe_to_string(ctx, -1);
-							duk_dup(ctx, -4);							// [obj][string][array][string][obj]
+							duk_push_string(ctx, lang);		// [obj][string]
+							duk_string_split(ctx, -1, "-"); // [obj][string][array]
+							duk_array_shift(ctx, -1);		// [obj][string][array][string]
+							lang = (char *)duk_safe_to_string(ctx, -1);
+							duk_dup(ctx, -4); // [obj][string][array][string][obj]
 						}
 						if (!duk_has_prop_string(ctx, -1, lang))
 						{
@@ -986,28 +1038,29 @@ int wmain(int argc, char* wargv[])
 						if (strcmp("en", lang) != 0)
 						{
 							// Not English, so check the minimum set is present
-							duk_get_prop_string(ctx, -1, "en");				// [en]
-							duk_get_prop_string(ctx, -2, lang);				// [en][lang]
-							duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY);// [en][lang][enum]
-							while (duk_next(ctx, -1, 1))					// [en][lang][enum][key][val]
+							duk_get_prop_string(ctx, -1, "en");				 // [en]
+							duk_get_prop_string(ctx, -2, lang);				 // [en][lang]
+							duk_enum(ctx, -2, DUK_ENUM_OWN_PROPERTIES_ONLY); // [en][lang][enum]
+							while (duk_next(ctx, -1, 1))					 // [en][lang][enum][key][val]
 							{
 								if (!duk_has_prop_string(ctx, -4, duk_get_string(ctx, -2)))
 								{
-									duk_put_prop(ctx, -4);					// [en][lang][enum]
+									duk_put_prop(ctx, -4); // [en][lang][enum]
 								}
 								else
 								{
-									duk_pop_2(ctx);							// [en][lang][enum]
+									duk_pop_2(ctx); // [en][lang][enum]
 								}
 							}
-							duk_pop_3(ctx);									// ...
+							duk_pop_3(ctx); // ...
 						}
 						g_dialogTranslationObject = duk_get_heapptr(ctx, -1);
 						g_dialogCtx = ctx;
 						g_dialogLanguage = lang;
 
 						duk_push_global_object(ctx);
-						duk_dup(ctx, -2); duk_put_prop_string(ctx, -2, "_start_data");
+						duk_dup(ctx, -2);
+						duk_put_prop_string(ctx, -2, "_start_data");
 						duk_push_c_function(ctx, _start, 0);
 						duk_put_prop_string(ctx, -2, "_start");
 
@@ -1050,7 +1103,6 @@ int wmain(int argc, char* wargv[])
 	return 0;
 }
 
-
 int autoproxy_checked = 0;
 char *configured_autoproxy_value = NULL;
 
@@ -1065,7 +1117,6 @@ COLORREF GDIP_RGB(COLORREF c)
 	return (RGB(_b, _g, _r));
 }
 
-
 uint32_t ColorFromMSH(char *c)
 {
 	uint32_t ret = RGB(0, 54, 105);
@@ -1076,10 +1127,8 @@ uint32_t ColorFromMSH(char *c)
 		{
 			parser_result *pr = ILibParseString(c, 0, len, ",", 1);
 			if (pr->NumResults == 3)
-			{				
-				if (atoi(pr->FirstResult->data) >= 0 && atoi(pr->FirstResult->data) <= UINT8_MAX 
-					&& atoi(pr->FirstResult->NextResult->data) >= 0 && atoi(pr->FirstResult->NextResult->data) <= UINT8_MAX
-					&& atoi(pr->LastResult->data) >= 0 && atoi(pr->LastResult->data) <= UINT8_MAX)
+			{
+				if (atoi(pr->FirstResult->data) >= 0 && atoi(pr->FirstResult->data) <= UINT8_MAX && atoi(pr->FirstResult->NextResult->data) >= 0 && atoi(pr->FirstResult->NextResult->data) <= UINT8_MAX && atoi(pr->LastResult->data) >= 0 && atoi(pr->LastResult->data) <= UINT8_MAX)
 				{
 					ret = RGB(atoi(pr->FirstResult->data), atoi(pr->FirstResult->NextResult->data), atoi(pr->LastResult->data));
 				}
@@ -1087,7 +1136,7 @@ uint32_t ColorFromMSH(char *c)
 			ILibDestructParserResults(pr);
 		}
 	}
-	return(ret);
+	return (ret);
 }
 
 WCHAR *Dialog_GetTranslationEx(void *ctx, char *utf8)
@@ -1096,11 +1145,11 @@ WCHAR *Dialog_GetTranslationEx(void *ctx, char *utf8)
 	if (utf8 != NULL)
 	{
 		int wlen = ILibUTF8ToWideCount(utf8);
-		ret = (WCHAR*)Duktape_PushBuffer(ctx, sizeof(WCHAR)*wlen + 1);
+		ret = (WCHAR *)Duktape_PushBuffer(ctx, sizeof(WCHAR) * wlen + 1);
 		duk_swap_top(ctx, -2);
 		ILibUTF8ToWideEx(utf8, -1, ret, wlen);
 	}
-	return(ret);
+	return (ret);
 }
 WCHAR *Dialog_GetTranslation(void *ctx, char *property)
 {
@@ -1109,21 +1158,21 @@ WCHAR *Dialog_GetTranslation(void *ctx, char *property)
 	if (utf8 != NULL)
 	{
 		int wlen = ILibUTF8ToWideCount(utf8);
-		ret = (WCHAR*)Duktape_PushBuffer(ctx, sizeof(WCHAR)*wlen + 1);
+		ret = (WCHAR *)Duktape_PushBuffer(ctx, sizeof(WCHAR) * wlen + 1);
 		duk_swap_top(ctx, -2);
 		ILibUTF8ToWideEx(utf8, -1, ret, wlen);
 	}
-	return(ret);
+	return (ret);
 }
 
-WCHAR closeButtonText[255] = { 0 };
+WCHAR closeButtonText[255] = {0};
 int closeButtonTextSet = 0;
 
 HBITMAP GetScaledImage(char *raw, size_t rawLen, int w, int h)
 {
 	size_t newLen = ILibBase64DecodeLength(rawLen);
-	char *decoded = (char*)ILibMemory_SmartAllocate(newLen);
-	newLen = ILibBase64Decode(raw, (int)rawLen, (unsigned char**)&decoded);
+	char *decoded = (char *)ILibMemory_SmartAllocate(newLen);
+	newLen = ILibBase64Decode(raw, (int)rawLen, (unsigned char **)&decoded);
 
 	IStream *instream = __SHCreateMemStream2(decoded, (uint32_t)newLen);
 	void *bm = NULL;
@@ -1132,7 +1181,7 @@ HBITMAP GetScaledImage(char *raw, size_t rawLen, int w, int h)
 	HBITMAP hbm;
 	int format;
 	float REAL_w, REAL_h;
-	int s = __GdipCreateBitmapFromStream((void*)instream, &bm);
+	int s = __GdipCreateBitmapFromStream((void *)instream, &bm);
 	s = __GdipGetImagePixelFormat(bm, &format);
 	s = __GdipCreateBitmapFromScan0(w, h, 0, format, NULL, &nb);
 	s = __GdipGetImageHorizontalResolution(bm, &REAL_w);
@@ -1145,7 +1194,7 @@ HBITMAP GetScaledImage(char *raw, size_t rawLen, int w, int h)
 	s = __GdipCreateHBITMAPFromBitmap(nb, &hbm, GDIP_RGB(gBKCOLOR));
 	s = __GdipDisposeImage(bm);
 	ILibMemory_Free(decoded);
-	return(hbm);
+	return (hbm);
 }
 
 // Message handler for dialog box.
@@ -1158,14 +1207,17 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
-	case WM_CTLCOLORDLG: {
+	case WM_CTLCOLORDLG:
+	{
 		// Set the background of the dialog box to blue
-		if (DialogBackgroundBrush == NULL) {
+		if (DialogBackgroundBrush == NULL)
+		{
 			DialogBackgroundBrush = CreateSolidBrush(gBKCOLOR);
 		}
 		return (INT_PTR)DialogBackgroundBrush;
 	}
-	case WM_CTLCOLORSTATIC: {
+	case WM_CTLCOLORSTATIC:
+	{
 		// Set the left text to white over transparent
 		if ((HWND)lParam == GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT))
 		{
@@ -1208,29 +1260,55 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		duk_context *ctx = g_dialogCtx;
 		char *lang = g_dialogLanguage;
 
-
 		if (duk_has_prop_string(ctx, -1, lang))
 		{
 			duk_get_prop_string(ctx, -1, lang);
 
 			agentstatus = Dialog_GetTranslation(ctx, "statusDescription");
-			if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
+			if (agentstatus != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus);
+			}
 			agentversion = Dialog_GetTranslation(ctx, "agentVersion");
-			if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
+			if (agentversion != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion);
+			}
 			serverlocation = Dialog_GetTranslation(ctx, "url");
-			if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
+			if (serverlocation != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation);
+			}
 			meshname = Dialog_GetTranslation(ctx, "meshName");
-			if (meshname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname); }
+			if (meshname != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), meshname);
+			}
 			meshidentitifer = Dialog_GetTranslation(ctx, "meshId");
-			if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
+			if (meshidentitifer != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer);
+			}
 			serveridentifier = Dialog_GetTranslation(ctx, "serverId");
-			if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
+			if (serveridentifier != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier);
+			}
 			dialogdescription = Dialog_GetTranslation(ctx, "description");
-			if (dialogdescription != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT), dialogdescription); }
+			if (dialogdescription != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_STATIC_LEFTTEXT), dialogdescription);
+			}
 			connectiondetailsbutton = Dialog_GetTranslation(ctx, "connectionDetailsButton");
-			if (connectiondetailsbutton != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_DETAILSBUTTON), connectiondetailsbutton); }
+			if (connectiondetailsbutton != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_DETAILSBUTTON), connectiondetailsbutton);
+			}
 			closetext = Dialog_GetTranslation(ctx, "close");
-			if (closetext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closetext); }
+			if (closetext != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closetext);
+			}
 
 			install_buttontext = Dialog_GetTranslation(ctx, "install");
 			update_buttontext = Dialog_GetTranslation(ctx, "update");
@@ -1243,12 +1321,21 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				closeButtonTextSet = 1;
 			}
 
-			if (uninstall_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext); }
+			if (uninstall_buttontext != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), uninstall_buttontext);
+			}
 			connect_buttontext = Dialog_GetTranslation(ctx, "connect");
-			if (connect_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext); }
-			if (close_buttontext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), close_buttontext); }
+			if (connect_buttontext != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDC_CONNECTBUTTON), connect_buttontext);
+			}
+			if (close_buttontext != NULL)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), close_buttontext);
+			}
 
-			duk_get_prop_string(ctx, -1, "status");	// [Array]
+			duk_get_prop_string(ctx, -1, "status"); // [Array]
 			state_notinstalled = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 0, NULL));
 			state_running = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 1, NULL));
 			state_notrunning = Dialog_GetTranslationEx(ctx, Duktape_GetStringPropertyIndexValue(ctx, -1, 2, NULL));
@@ -1270,10 +1357,10 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			char *imageraw = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "image", NULL);
 			if (imageraw != NULL)
 			{
-				duk_push_sprintf(g_dialogCtx, "('%s').split(',').pop()", imageraw);					// [msh][str]
-				duk_eval(g_dialogCtx);																// [msh][str]
-				duk_swap_top(g_dialogCtx, -2);														// [str][msh]
-				imageraw = (char*)duk_get_lstring(g_dialogCtx, -2, &rawLen);
+				duk_push_sprintf(g_dialogCtx, "('%s').split(',').pop()", imageraw); // [msh][str]
+				duk_eval(g_dialogCtx);												// [msh][str]
+				duk_swap_top(g_dialogCtx, -2);										// [str][msh]
+				imageraw = (char *)duk_get_lstring(g_dialogCtx, -2, &rawLen);
 				HBITMAP scaled = GetScaledImage(imageraw, rawLen, 162, 162);
 				SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
 			}
@@ -1283,7 +1370,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				SendMessageW(GetDlgItem(hDlg, IDC_IMAGE), STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)scaled);
 			}
 			installFlags = Duktape_GetStringPropertyValue(ctx, -1, "InstallFlags", NULL);
-			meshname = (WCHAR*)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
+			meshname = (WCHAR *)Duktape_GetStringPropertyValue(ctx, -1, "MeshName", NULL);
 			meshid = Duktape_GetStringPropertyValue(ctx, -1, "MeshID", NULL);
 			serverid = Duktape_GetStringPropertyValue(ctx, -1, "ServerID", NULL);
 			serverurl = Duktape_GetStringPropertyValue(ctx, -1, "MeshServer", NULL);
@@ -1294,16 +1381,33 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 			autoproxy_checked = configured_autoproxy_value != NULL;
 
 			// Set text in the dialog box
-			if (installFlags != NULL) { installFlagsInt = ILib_atoi2_int32(installFlags, 255); }
-			if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
-			if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
-			if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
-			SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? (char*)meshname : "(None)", -1));
+			if (installFlags != NULL)
+			{
+				installFlagsInt = ILib_atoi2_int32(installFlags, 255);
+			}
+			if (strnlen_s(meshid, 255) > 50)
+			{
+				meshid += 2;
+				meshid[42] = 0;
+			}
+			if (strnlen_s(serverid, 255) > 50)
+			{
+				serverid[42] = 0;
+			}
+			if (displayName != NULL)
+			{
+				SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1));
+			}
+			SetWindowTextW(GetDlgItem(hDlg, IDC_POLICYTEXT), ILibUTF8ToWide((meshname != NULL) ? (char *)meshname : "(None)", -1));
 			SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
 			SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
 			SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
-			if (meshid == NULL) { EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE); }
-			if ((installFlagsInt & 3) == 1) {
+			if (meshid == NULL)
+			{
+				EnableWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), FALSE);
+			}
+			if ((installFlagsInt & 3) == 1)
+			{
 				// Temporary Agent Only
 				hiddenButtons |= 6; // Both install and uninstall buttons are hidden
 				ShowWindow(GetDlgItem(hDlg, IDC_INSTALLBUTTON), SW_HIDE);
@@ -1311,12 +1415,14 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 				GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
 				SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
 			}
-			else if ((installFlagsInt & 3) == 2) {
+			else if ((installFlagsInt & 3) == 2)
+			{
 				// Background Only
 				hiddenButtons |= 1; // Connect button is hidden hidden
 				ShowWindow(GetDlgItem(hDlg, IDC_CONNECTBUTTON), SW_HIDE);
 			}
-			else if ((installFlagsInt & 3) == 3) {
+			else if ((installFlagsInt & 3) == 3)
+			{
 				// Uninstall only
 				GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
 				SetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
@@ -1354,18 +1460,23 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 		}
 
 		// Correct the placement of buttons, push them to the left side if some of them are hidden.
-		if (hiddenButtons == 2) { // Uninstall button is the only one hidden. Place connect button at uninstall position
+		if (hiddenButtons == 2)
+		{ // Uninstall button is the only one hidden. Place connect button at uninstall position
 			WINDOWPLACEMENT lpwndpl;
 			GetWindowPlacement(GetDlgItem(hDlg, IDC_UNINSTALLBUTTON), &lpwndpl);
 			SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
 		}
-		else if (hiddenButtons == 6) { // Only connect button is showing, place it in the install button location
+		else if (hiddenButtons == 6)
+		{ // Only connect button is showing, place it in the install button location
 			WINDOWPLACEMENT lpwndpl;
 			GetWindowPlacement(GetDlgItem(hDlg, IDC_INSTALLBUTTON), &lpwndpl);
 			SetWindowPlacement(GetDlgItem(hDlg, IDC_CONNECTBUTTON), &lpwndpl);
 		}
 
-		if (mshfile != NULL) { free(mshfile); }
+		if (mshfile != NULL)
+		{
+			free(mshfile);
+		}
 		return (INT_PTR)TRUE;
 	}
 	case WM_COMMAND:
@@ -1380,7 +1491,7 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			return (INT_PTR)TRUE;
 		}
-		else if (LOWORD(wParam) == IDC_DETAILSBUTTON) 
+		else if (LOWORD(wParam) == IDC_DETAILSBUTTON)
 		{
 			DialogBoxW(NULL, MAKEINTRESOURCEW(IDD_DETAILSDIALOG), hDlg, DialogHandler2);
 			return (INT_PTR)TRUE;
@@ -1426,9 +1537,15 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 
 			DWORD pid = GetCurrentProcessId();
 			sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "connect --disableUpdate=1 --hideConsole=1 --exitPID=%u %s%s", pid, autoproxy_checked != 0 ? "--autoproxy=" : "", autoproxy_checked != 0 ? (configured_autoproxy_value != NULL ? configured_autoproxy_value : "1") : "");
-			if (RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE) == 0) { RunAsAdmin(ILibScratchPad, 1); }
+			if (RunAsAdmin(ILibScratchPad, IsAdmin() == TRUE) == 0)
+			{
+				RunAsAdmin(ILibScratchPad, 1);
+			}
 
-			if (closeButtonTextSet != 0) { SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closeButtonText); }
+			if (closeButtonTextSet != 0)
+			{
+				SetWindowTextW(GetDlgItem(hDlg, IDCLOSE), closeButtonText);
+			}
 			return (INT_PTR)TRUE;
 		}
 		break;
@@ -1437,7 +1554,6 @@ INT_PTR CALLBACK DialogHandler(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
 }
 
 #endif
-
 
 // Message handler for details dialog box.
 INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
@@ -1448,24 +1564,26 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	UNREFERENCED_PARAMETER(lParam);
 	switch (message)
 	{
-		case WM_CLOSE:
-			autoproxy_checked = IsDlgButtonChecked(hDlg, IDC_AUTOPROXY_CHECK);
-			break;
-	case WM_CTLCOLORDLG: {
+	case WM_CLOSE:
+		autoproxy_checked = IsDlgButtonChecked(hDlg, IDC_AUTOPROXY_CHECK);
+		break;
+	case WM_CTLCOLORDLG:
+	{
 		// Set the background of the dialog box to blue
-		if (DialogBackgroundBrush == NULL) {
+		if (DialogBackgroundBrush == NULL)
+		{
 			DialogBackgroundBrush = CreateSolidBrush(gBKCOLOR);
 		}
 		return (INT_PTR)DialogBackgroundBrush;
 	}
-	case WM_CTLCOLORSTATIC: 
+	case WM_CTLCOLORSTATIC:
 	{
 		if (GetDlgCtrlID((HWND)lParam) == IDC_AUTOPROXY_CHECK)
 		{
-			HBRUSH h=CreateSolidBrush(gBKCOLOR);
+			HBRUSH h = CreateSolidBrush(gBKCOLOR);
 			SetBkColor((HDC)wParam, gBKCOLOR);
 			SetTextColor((HDC)wParam, gFGCOLOR);
-			return((INT_PTR)h);
+			return ((INT_PTR)h);
 		}
 		// Set the left text to white over transparent
 		SetBkMode((HDC)wParam, TRANSPARENT);
@@ -1476,7 +1594,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	case WM_CTLCOLORBTN:
 	{
 		DWORD ID = GetDlgCtrlID((HWND)lParam);
-		if(ID == IDC_AUTOPROXY_CHECK)
+		if (ID == IDC_AUTOPROXY_CHECK)
 		{
 			SetBkMode((HDC)wParam, TRANSPARENT);
 			SetTextColor((HDC)wParam, gFGCOLOR);
@@ -1515,9 +1633,19 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			}
 
 			// Set text in the dialog box
-			if (strnlen_s(meshid, 255) > 50) { meshid += 2; meshid[42] = 0; }
-			if (strnlen_s(serverid, 255) > 50) { serverid[42] = 0; }
-			if (displayName != NULL) { SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1)); }
+			if (strnlen_s(meshid, 255) > 50)
+			{
+				meshid += 2;
+				meshid[42] = 0;
+			}
+			if (strnlen_s(serverid, 255) > 50)
+			{
+				serverid[42] = 0;
+			}
+			if (displayName != NULL)
+			{
+				SetWindowTextW(hDlg, ILibUTF8ToWide(displayName, -1));
+			}
 			SetWindowTextA(GetDlgItem(hDlg, IDC_HASHTEXT), (meshid != NULL) ? meshid : "(None)");
 			SetWindowTextW(GetDlgItem(hDlg, IDC_SERVERLOCATION), ILibUTF8ToWide((serverurl != NULL) ? serverurl : "(None)", -1));
 			SetWindowTextA(GetDlgItem(hDlg, IDC_SERVERID), (serverid != NULL) ? serverid : "(None)");
@@ -1532,7 +1660,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 			if (hToolTip != NULL && hServerLocationHWND != NULL)
 			{
 				// Associate the tooltip
-				TOOLINFOW toolInfo = { 0 };
+				TOOLINFOW toolInfo = {0};
 				toolInfo.cbSize = sizeof(TOOLINFOW);
 				toolInfo.hwnd = hDlg;
 				toolInfo.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
@@ -1543,29 +1671,52 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				SendMessageW(hToolTip, TTM_ADDTOOLW, 0, (LPARAM)&toolInfo);
 			}
 
-
 			duk_push_heapptr(g_dialogCtx, g_dialogTranslationObject); // [obj]
 			if (duk_has_prop_string(g_dialogCtx, -1, g_dialogLanguage))
 			{
 				duk_get_prop_string(g_dialogCtx, -1, g_dialogLanguage);
 				agentstatus = Dialog_GetTranslation(g_dialogCtx, "statusDescription");
-				if (agentstatus != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus); }
+				if (agentstatus != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDC_AGENTSTATUS_TEXT), agentstatus);
+				}
 				agentversion = Dialog_GetTranslation(g_dialogCtx, "agentVersion");
-				if (agentversion != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion); }
+				if (agentversion != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDC_AGENT_VERSION), agentversion);
+				}
 				serverlocation = Dialog_GetTranslation(g_dialogCtx, "url");
-				if (serverlocation != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation); }
+				if (serverlocation != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_LOCATION), serverlocation);
+				}
 				serveridentifier = Dialog_GetTranslation(g_dialogCtx, "serverId");
-				if (serveridentifier != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier); }
+				if (serveridentifier != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDC_SERVER_IDENTIFIER), serveridentifier);
+				}
 				groupname = Dialog_GetTranslation(g_dialogCtx, "meshName");
-				if (groupname != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), groupname); }
+				if (groupname != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_NAME), groupname);
+				}
 				meshidentitifer = Dialog_GetTranslation(g_dialogCtx, "meshId");
-				if (meshidentitifer != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer); }
+				if (meshidentitifer != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDC_MESH_IDENTIFIER), meshidentitifer);
+				}
 				oktext = Dialog_GetTranslation(g_dialogCtx, "ok");
-				if (oktext != NULL) { SetWindowTextW(GetDlgItem(hDlg, IDOK), oktext); }
+				if (oktext != NULL)
+				{
+					SetWindowTextW(GetDlgItem(hDlg, IDOK), oktext);
+				}
 				dialogtitle = Dialog_GetTranslation(g_dialogCtx, "connectionDetailsTitle");
-				if (dialogtitle != NULL) { SetWindowTextW(hDlg, dialogtitle); }
+				if (dialogtitle != NULL)
+				{
+					SetWindowTextW(hDlg, dialogtitle);
+				}
 
-				duk_get_prop_string(g_dialogCtx, -1, "status");	// [Array]
+				duk_get_prop_string(g_dialogCtx, -1, "status"); // [Array]
 				state_notinstalled = Dialog_GetTranslationEx(g_dialogCtx, Duktape_GetStringPropertyIndexValue(g_dialogCtx, -1, 0, NULL));
 				state_running = Dialog_GetTranslationEx(g_dialogCtx, Duktape_GetStringPropertyIndexValue(g_dialogCtx, -1, 1, NULL));
 				state_notrunning = Dialog_GetTranslationEx(g_dialogCtx, Duktape_GetStringPropertyIndexValue(g_dialogCtx, -1, 2, NULL));
@@ -1586,45 +1737,45 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 					break;
 				}
 				char osnametmp[255];
-				#ifdef WIN32
-					// This is only supported on Windows 8 and above
-					HMODULE wsCORE = LoadLibraryExA((LPCSTR)"Ws2_32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-					GetHostNameWFunc ghnw = NULL;
-					if (wsCORE != NULL)
-					{
-						if ((ghnw = (GetHostNameWFunc)GetProcAddress(wsCORE, (LPCSTR)"GetHostNameW")) == NULL)
-						{
-							FreeLibrary(wsCORE);
-							wsCORE = NULL;
-						}
-					}
-					if (ghnw != NULL)
-					{
-						WCHAR whostname[MAX_PATH];
-						if (ghnw(whostname, MAX_PATH) == 0)
-						{
-							WideCharToMultiByte(CP_UTF8, 0, whostname, -1, osnametmp, (int)sizeof(osnametmp), NULL, NULL);
-						}
-					}
-					else
-					{
-						gethostname(osnametmp, (int)sizeof(osnametmp));
-					}
-					if (wsCORE != NULL)
+#ifdef WIN32
+				// This is only supported on Windows 8 and above
+				HMODULE wsCORE = LoadLibraryExA((LPCSTR) "Ws2_32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+				GetHostNameWFunc ghnw = NULL;
+				if (wsCORE != NULL)
+				{
+					if ((ghnw = (GetHostNameWFunc)GetProcAddress(wsCORE, (LPCSTR) "GetHostNameW")) == NULL)
 					{
 						FreeLibrary(wsCORE);
 						wsCORE = NULL;
 					}
-				#else
+				}
+				if (ghnw != NULL)
+				{
+					WCHAR whostname[MAX_PATH];
+					if (ghnw(whostname, MAX_PATH) == 0)
+					{
+						WideCharToMultiByte(CP_UTF8, 0, whostname, -1, osnametmp, (int)sizeof(osnametmp), NULL, NULL);
+					}
+				}
+				else
+				{
 					gethostname(osnametmp, (int)sizeof(osnametmp));
-				#endif
+				}
+				if (wsCORE != NULL)
+				{
+					FreeLibrary(wsCORE);
+					wsCORE = NULL;
+				}
+#else
+				gethostname(osnametmp, (int)sizeof(osnametmp));
+#endif
 				osname = Dialog_GetTranslationEx(g_dialogCtx, osnametmp);
 				SetWindowTextW(GetDlgItem(hDlg, IDC_OSNAME), osname);
 			}
 		}
 		break;
 	}
-	case WM_COMMAND: 
+	case WM_COMMAND:
 	{
 		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCLOSE || LOWORD(wParam) == IDCANCEL)
 		{
@@ -1638,11 +1789,10 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 	return (INT_PTR)FALSE;
 }
 
-
 #ifdef _MINCORE
 BOOL WINAPI AreFileApisANSI(void) { return FALSE; }
 VOID WINAPI FatalAppExitA(_In_ UINT uAction, _In_ LPCSTR lpMessageText) {}
-HANDLE WINAPI CreateSemaphoreW(_In_opt_  LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, _In_ LONG lInitialCount, _In_ LONG lMaximumCount, _In_opt_ LPCWSTR lpName)
+HANDLE WINAPI CreateSemaphoreW(_In_opt_ LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, _In_ LONG lInitialCount, _In_ LONG lMaximumCount, _In_opt_ LPCWSTR lpName)
 {
 	return 0;
 }

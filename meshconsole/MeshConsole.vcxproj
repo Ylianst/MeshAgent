@@ -171,7 +171,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E377F156-BAED-4086-B534-3CC43164607A}</ProjectGuid>
     <RootNamespace>MicrostackDuktape</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
