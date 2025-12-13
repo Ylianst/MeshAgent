@@ -3011,7 +3011,6 @@ duk_ret_t MeshServer_selfupdate_unzip_complete(duk_context *ctx)
 	{
 		ILIBLOGMESSSAGE("SelfUpdate -> Update successfully unzipped...");
 	}
-	agent->updateInProgress = 0;
 	MeshServer_selfupdate_continue(agent);
 	return (0);
 }
@@ -3024,7 +3023,6 @@ duk_ret_t MeshServer_selfupdate_unzip_error(duk_context *ctx)
 	{
 		ILIBLOGMESSSAGE(duk_safe_to_string(ctx, -1));
 	}
-	agent->updateInProgress = 0;
 	return (0);
 }
 
@@ -3601,43 +3599,10 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 		if (cmdLen == 4)
 		{
-			long now = ILibGetTimeStamp();
-			if (agent->updateInProgress != 0)
-			{
-				if (agent->logUpdate != 0)
-				{
-					ILIBLOGMESSSAGE("SelfUpdate -> Update already in progress, ignoring duplicate start signal");
-				}
-				break;
-			}
-			long delta = (agent->updateLastStart == 0 || now < agent->updateLastStart) ? 0 : (now - agent->updateLastStart);
-			if (delta > 300000)
-			{
-				agent->updateAttemptCount = 0;
-			}
-			if (agent->updateAttemptCount >= 3 && delta < 120000)
-			{
-				agent->disableUpdate = 1;
-				ILibSimpleDataStore_Put(agent->masterDb, "disableUpdate", "1");
-				MeshAgent_SendSessionNotice(agent, "Self-Update paused: too many rapid retries.", 2);
-				if (agent->logUpdate != 0)
-				{
-					ILIBLOGMESSSAGE("SelfUpdate -> Throttling updates due to rapid retries; set disableUpdate=0 to re-enable");
-				}
-				break;
-			}
-			agent->updateAttemptCount++;
-			agent->updateLastStart = now;
 			// Indicates the start of the agent update transfer
 			if (agent->logUpdate != 0)
 			{
 				ILIBLOGMESSSAGE("SelfUpdate -> Starting download...");
-			}
-			agent->updateInProgress = 1;
-			if (duk_ctx_is_alive(agent->meshCoreCtx))
-			{
-				// Inform server-side UI that an update is starting so the device shows a desktop notification entry.
-				duk_eval_string_noresult(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { msg: 'Self-Update started: downloading agent...', icon: 1 } } });");
 			}
 			util_deletefile(updateFilePath);
 		}
@@ -3652,13 +3617,6 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				if (agent->logUpdate != 0)
 				{
 					ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified");
-				}
-				agent->updateInProgress = 0;
-				agent->updateAttemptCount = 0;
-				if (duk_ctx_is_alive(agent->meshCoreCtx))
-				{
-					// Notify the server that the update payload has been verified; helps surface status in the UI.
-					duk_eval_string_noresult(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { msg: 'Self-Update download verified.', icon: 1 } } });");
 				}
 				if (agent->fakeUpdate != 0)
 				{
@@ -3733,12 +3691,6 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 				if (agent->logUpdate != 0)
 				{
 					ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash FAILED, aborting update...");
-				}
-				agent->updateInProgress = 0;
-				if (duk_ctx_is_alive(agent->meshCoreCtx))
-				{
-					// Surface failure so operators know why update was abandoned.
-					duk_eval_string_noresult(agent->meshCoreCtx, "require('MeshAgent').SendCommand({ action: 'sessions', type : 'msg', value : { 1: { msg: 'Self-Update failed: hash mismatch. Aborting update.', icon: 3 } } });");
 				}
 				util_deletefile(updateFilePath);
 			}
@@ -3846,13 +3798,6 @@ void MeshServer_ControlChannel_IdleTimeout_PongTimeout(void *object)
 void MeshServer_ControlChannel_IdleTimeout(ILibWebClient_StateObject WebStateObject, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer *)user;
-
-	if (agent->updateInProgress != 0)
-	{
-		// During self-update, avoid aggressive ping/pong so we don't churn connections while disk/CPU is busy.
-		ILibWebClient_SetTimeout(WebStateObject, agent->controlChannel_idleTimeout_seconds, MeshServer_ControlChannel_IdleTimeout, user);
-		return;
-	}
 
 	if (agent->controlChannelDebug != 0)
 	{
@@ -4944,9 +4889,6 @@ MeshAgentHostContainer *MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 
 	MeshAgentHostContainer *retVal = (MeshAgentHostContainer *)ILibMemory_Allocate(sizeof(MeshAgentHostContainer), 0, NULL, NULL);
 	retVal->lastDisconnectReason[0] = 0;
-	retVal->updateInProgress = 0;
-	retVal->updateAttemptCount = 0;
-	retVal->updateLastStart = 0;
 	retVal->controlChannelMaxMissedPongs = DEFAULT_MAX_MISSED_PONGS;
 	retVal->controlChannelPongMisses = 0;
 #ifdef WIN32

@@ -261,9 +261,6 @@ typedef struct MeshAgentHostContainer
 	int runningAsConsole;
 #endif
 	char lastDisconnectReason[128];
-	int updateInProgress;
-	int updateAttemptCount;
-	long updateLastStart;
 } MeshAgentHostContainer;
 
 MeshAgentHostContainer *MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask capabilities);
