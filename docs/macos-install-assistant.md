@@ -36,7 +36,7 @@ The MeshAgent Installation Assistant is a native macOS GUI application that prov
 Launch directly from terminal:
 
 ```bash
-sudo ./meshagent --show-install-ui
+sudo ./meshagent -show-install-ui
 ```
 
 ### Method 3: Programmatic
@@ -44,7 +44,7 @@ sudo ./meshagent --show-install-ui
 From code or scripts:
 
 ```bash
-./meshagent --show-install-ui
+./meshagent -show-install-ui
 # Will automatically elevate if not root
 ```
 
@@ -187,7 +187,7 @@ Implementation:
 │  Elevation: ensure_running_as_root()                     │
 │  - Checks if euid == 0                                   │
 │  - If not root: AuthorizationExecuteWithPrivileges       │
-│  - Relaunches with --show-install-ui flag              │
+│  - Relaunches with -show-install-ui flag              │
 │  - Original process exits                               │
 └────────────────────┬─────────────────────────────────────┘
                      │
@@ -261,7 +261,7 @@ status = AuthorizationCopyRights(auth, &rights, NULL,
                                 NULL);
 
 // 3. Execute with privileges
-char* args[] = {"--show-install-ui", NULL};
+char* args[] = {"-show-install-ui", NULL};
 status = AuthorizationExecuteWithPrivileges(auth, exePath,
                                            kAuthorizationFlagDefaults,
                                            args, NULL);
@@ -330,7 +330,7 @@ During GUI installation, detailed logging is written to:
 
 **Log Format:**
 ```
-[MAIN] [1732661537] MeshAgent launched with --show-install-ui (elevated relaunch)
+[MAIN] [1732661537] MeshAgent launched with -show-install-ui (elevated relaunch)
 [MAIN] [1732661537] ===== STDOUT/STDERR NOW REDIRECTED TO LOG FILE =====
 [INSTALL-UI] Opening Installation Assistant
 [AUTH-INSTALL] Validating installation path: /usr/local/mesh_services/meshagent
@@ -360,7 +360,7 @@ During GUI installation, detailed logging is written to:
 - Ensure CMD key is held BEFORE and DURING double-click
 - Launch from Finder, not terminal
 - Check `/tmp/meshagent-install-ui.log` for errors
-- Try command-line: `sudo ./meshagent --show-install-ui`
+- Try command-line: `sudo ./meshagent -show-install-ui`
 
 ### "Installation Path Required" Error
 
@@ -478,7 +478,7 @@ During GUI installation, detailed logging is written to:
 make
 
 # 2. Launch GUI (will prompt for elevation)
-./meshagent --show-install-ui
+./meshagent -show-install-ui
 
 # 3. Check logs
 tail -f /tmp/meshagent-install-ui.log

@@ -84,7 +84,7 @@ The MeshAgent for macOS includes an **Installation Assistant** that provides an 
 You can also launch the Installation Assistant from the command line:
 
 ```bash
-sudo ./meshagent --show-install-ui
+sudo ./meshagent -show-install-ui
 ```
 
 Or use traditional command-line installation:

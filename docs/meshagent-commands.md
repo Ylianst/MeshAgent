@@ -208,12 +208,12 @@ These commands manage the installation, upgrade, and removal of the MeshAgent.
 ```bash
 # Double-click MeshAgent.app while holding CMD key
 # OR
-open -a MeshAgent.app --args --show-install-ui
+open -a MeshAgent.app --args -show-install-ui
 ```
 
 **Launch from command line**:
 ```bash
-sudo /path/to/MeshAgent.app/Contents/MacOS/meshagent --show-install-ui
+sudo /path/to/MeshAgent.app/Contents/MacOS/meshagent -show-install-ui
 ```
 
 **Privileges**: Requires root/sudo (will prompt for elevation if needed)
@@ -651,7 +651,7 @@ Log levels:
 # Follow the graphical Installation Assistant
 
 # OR from command line:
-sudo /path/to/MeshAgent.app/Contents/MacOS/meshagent --show-install-ui
+sudo /path/to/MeshAgent.app/Contents/MacOS/meshagent -show-install-ui
 ```
 
 ### Example 2: Fresh Installation (Command-line)
@@ -815,7 +815,7 @@ meshagent -install --copy-msh="1"
 ### Platform-Specific Commands
 
 **macOS-Specific**:
-- Installation Assistant GUI (`--show-install-ui`)
+- Installation Assistant GUI (`-show-install-ui`)
 - TCC permission checking and validation
 - LaunchDaemon/LaunchAgent service management
 

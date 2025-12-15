@@ -1,36 +1,39 @@
 /*
 Shared logging utility for macOS components
 
-Provides centralized logging to both stderr and a file for troubleshooting
-installation, upgrade, and TCC permission issues.
+Routes log messages to stdout or stderr based on severity level.
 */
 
 #include "mac_logging_utils.h"
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 
 /**
- * Log a message to both stderr and the log file
+ * Log a message to stdout or stderr based on severity
  *
- * This function duplicates the output to both destinations to ensure:
- * 1. Real-time visibility in console/terminal (stderr)
- * 2. Persistent record for post-mortem debugging (log file)
+ * Auto-detects severity from message content:
+ * - ERROR/WARN/FATAL/CRITICAL → stderr
+ * - Everything else → stdout
  */
 void mesh_log_message(const char* format, ...) {
-    va_list args1, args2;
-    va_start(args1, format);
-    va_copy(args2, args1);
+    va_list args;
+    va_start(args, format);
 
-    // Log to stderr for real-time monitoring
-    vfprintf(stderr, format, args1);
-    va_end(args1);
+    // Determine output stream based on message content
+    FILE* output = stdout;  // Default to stdout
 
-    // Log to file for persistent troubleshooting
-    FILE* logFile = fopen(MESH_LOG_FILE, "a");
-    if (logFile) {
-        vfprintf(logFile, format, args2);
-        fflush(logFile);  // Ensure immediate write (important for crash debugging)
-        fclose(logFile);
+    // Check if message contains error/warning keywords
+    if (strstr(format, "ERROR") != NULL ||
+        strstr(format, "WARN") != NULL ||
+        strstr(format, "FATAL") != NULL ||
+        strstr(format, "CRITICAL") != NULL) {
+        output = stderr;
     }
-    va_end(args2);
+
+    // Write to appropriate stream
+    vfprintf(output, format, args);
+    fflush(output);  // Ensure immediate output
+
+    va_end(args);
 }

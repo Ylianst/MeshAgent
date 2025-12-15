@@ -26,21 +26,24 @@ int show_tcc_permissions_window(int show_reminder_checkbox);
 /**
  * Display the TCC permissions window asynchronously (non-blocking)
  *
- * Spawns a child process with "-tccCheck" flag to show the permissions UI.
- * Returns immediately (non-blocking). The child process will write the
- * "Do not remind me again" preference (0 or 1) to stdout when the window is closed.
+ * Spawns a child process with "-check-tcc" flag to show the permissions UI.
+ * Uses fire-and-forget spawning via launchctl asuser - no pipe monitoring.
+ * The child process reads/writes the "Do not remind me again" preference
+ * directly from/to meshagent.db.
  *
- * Uses ILibProcessPipe_Manager_SpawnProcessEx3 to spawn the child process
- * as the specified user (same approach as old -kvm0 implementation).
+ * Uses posix_spawn() to launch: launchctl asuser <uid> <exe_path> -check-tcc
+ * This ensures the process runs with:
+ *   - euid=0 (root) for database access
+ *   - auid=<uid> (user) for TCC permission attribution
+ *   - Proper GUI session registration
  *
  * Parameters:
  *   exe_path     - Path to the meshagent executable (for re-execing self)
- *   pipeManager  - ILibProcessPipe manager for spawning child process
- *   uid          - User ID to run the child process as (0 = keep as root)
+ *   pipeManager  - Unused (kept for API compatibility)
+ *   uid          - User ID to register the process in (for TCC attribution)
  *
  * Returns:
- *   File descriptor for reading result from child (stdout pipe read end)
- *   -1 on error (e.g., spawn failed, TCC UI already running)
+ *   Always -1 (fire-and-forget, no pipe to monitor)
  */
 int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, int uid);
 

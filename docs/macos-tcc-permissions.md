@@ -1,5 +1,15 @@
 # macOS TCC Permissions System
 
+> **⚠️ DOCUMENTATION STATUS:** This document describes the OLD `-tccCheck` implementation with IPC pipes.
+> **NEW IMPLEMENTATION (December 2025):** See `/Users/peet/GitHub/dev_notes/MeshAgent/TCC/` for current implementation:
+> - `tccCheck-new-implementation.md` - Current `-check-tcc` with `launchctl asuser`
+> - `launchctl-asuser-analysis.md` - Technical analysis of new approach
+> - `tccCheck-old-implementation.md` - Historical documentation (this implementation)
+>
+> This document is kept for historical reference only.
+
+---
+
 ## Overview
 
 MeshAgent on macOS requires three critical system permissions to provide full remote access functionality:

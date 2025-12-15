@@ -311,7 +311,9 @@ static const char* LINUX_prefix_flags[] = {
 
 static const char* MACOS_simple_flags[] = {
 	"-tccCheck",          // Check TCC (Transparency Consent Control) permissions
-	"--show-install-ui",  // Show installation UI (used by privilege elevation)
+	"-show-install-ui",   // Show installation UI (used by privilege elevation)
+	"-show-tcc-ui",       // Show TCC permissions window (standalone, same as SHIFT+double-click)
+	"-check-tcc",         // Check TCC permissions, show UI if needed (no pipe, fire-and-forget)
 	"-kvm1",              // macOS KVM mode (LaunchAgent via QueueDirectories)
 	NULL
 };
@@ -683,29 +685,30 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		if (has_forbidden_flag) break;
 	}
 
-	// Check for --show-install-ui flag (passed by elevated relaunch)
+	// Check for -show-install-ui flag (passed by elevated relaunch)
 	// This must be checked BEFORE the LAUNCHED_FROM_FINDER check because the elevated
 	// process won't have that environment variable or detect modifier keys
 	for (int i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "--show-install-ui") == 0) {
-			mesh_log_message("[MAIN] [%ld] MeshAgent launched with --show-install-ui (elevated relaunch)\n", time(NULL));
-
-			// Redirect stdout and stderr to log file
-			int log_fd = open("/tmp/meshagent-install-ui.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
-			if (log_fd >= 0) {
-				dup2(log_fd, STDOUT_FILENO);
-				dup2(log_fd, STDERR_FILENO);
-				close(log_fd);
-				setvbuf(stdout, NULL, _IONBF, 0);
-				setvbuf(stderr, NULL, _IONBF, 0);
-				printf("[MAIN] [%ld] ===== ELEVATED PROCESS - STDOUT/STDERR REDIRECTED =====\n", time(NULL));
-			}
+		if (strcmp(argv[i], "-show-install-ui") == 0) {
+			mesh_log_message("[MAIN] [%ld] MeshAgent launched with -show-install-ui (elevated relaunch)\n", time(NULL));
 
 			InstallResult result = show_install_assistant_window();
 			mesh_log_message("[MAIN] [%ld] Installation Assistant returned (cancelled=%d, mode=%d)\n",
 			        time(NULL), result.cancelled, result.mode);
 			mesh_log_message("[MAIN] [%ld] Installation Assistant closed, exiting\n", time(NULL));
 			exit(0);
+		}
+	}
+
+	// Check for -show-tcc-ui flag (standalone TCC permissions window)
+	// This allows end-users to manually check TCC permissions from command line
+	// Functions identically to SHIFT+double-click on app bundle
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "-show-tcc-ui") == 0) {
+			fprintf(stderr, "[MAIN] MeshAgent launched with -show-tcc-ui - showing TCC permissions window\n");
+			int result = show_tcc_permissions_window(0); // 0 = hide "Do not remind me again" checkbox
+			fprintf(stderr, "[MAIN] TCC permissions window closed (do not remind again: %d)\n", result);
+			return 0;
 		}
 	}
 
@@ -730,18 +733,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 				return 1;
 			}
 			// If elevateResult == 0, we're now running as root (either already were, or relaunched)
-
-			// Redirect stdout and stderr to log file to capture ALL output including TCC spawn traces
-			int log_fd = open("/tmp/meshagent-install-ui.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
-			if (log_fd >= 0) {
-				dup2(log_fd, STDOUT_FILENO);
-				dup2(log_fd, STDERR_FILENO);
-				close(log_fd);
-				// Make stdout/stderr unbuffered so we see output immediately
-				setvbuf(stdout, NULL, _IONBF, 0);
-				setvbuf(stderr, NULL, _IONBF, 0);
-				printf("[MAIN] [%ld] ===== STDOUT/STDERR NOW REDIRECTED TO LOG FILE =====\n", time(NULL));
-			}
 
 			InstallResult result = show_install_assistant_window();
 			mesh_log_message("[MAIN] [%ld] Installation Assistant returned (cancelled=%d, mode=%d)\n",
@@ -1035,10 +1026,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("  -import               Import modules from filesystem\n\n");
 		printf("macOS Specific:\n");
 		printf("  -kvm1                 KVM remote desktop subprocess mode\n");
-		printf("  -tccCheck             TCC permissions check subprocess\n");
-		printf("  --show-install-ui     Launch Installation Assistant GUI (with elevation)\n");
+		printf("  -tccCheck             TCC permissions check subprocess (with pipe)\n");
+		printf("  -check-tcc            Check TCC permissions, show UI if needed (fire-and-forget)\n");
+		printf("  -show-install-ui      Launch Installation Assistant GUI (with elevation)\n");
 		printf("                        Note: Also auto-launches with CMD+double-click on .app\n");
-		printf("                        SHIFT+double-click shows TCC permissions window\n\n");
+		printf("  -show-tcc-ui          Show TCC permissions window (Accessibility, FDA, Screen Recording)\n");
+		printf("                        Note: Also auto-launches with SHIFT+double-click on .app\n\n");
 		printf("Update:\n");
 		printf("  -update:URL           Self-update from URL\n\n");
 		printf("Advanced:\n");
@@ -1197,67 +1190,103 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return 0;
 	}
 
-	// -tccCheck: Check TCC permissions and show UI if needed
-	// Communicates result back to parent via pipe (no database or network access)
-	if (argc > 1 && strcasecmp(argv[1], "-tccCheck") == 0)
+	// -check-tcc: Check TCC permissions and show UI if needed (fire-and-forget, no pipe)
+	// Reads/writes disableTccCheck directly from/to meshagent.db
+	if (argc > 1 && strcasecmp(argv[1], "-check-tcc") == 0)
 	{
-		printf("[TCC-CHILD] -tccCheck process started (PID: %d)\n", getpid());
+		// Get executable path and build bundle-aware database path
+		char exePath[PATH_MAX];
+		char dbPath[PATH_MAX];
+		char mshPath[PATH_MAX];
+		uint32_t len = sizeof(exePath);
 
-		// Parse pipe file descriptor from argv[2]
-		int pipe_fd = -1;
-		if (argc > 2) {
-			pipe_fd = atoi(argv[2]);
-			printf("[TCC-CHILD] Pipe write fd: %d\n", pipe_fd);
-		} else {
-			printf("[TCC-CHILD] ERROR: No pipe fd provided - cannot communicate with parent\n");
+		if (_NSGetExecutablePath(exePath, &len) != 0) {
 			return 1;
 		}
 
+		// Check if running from bundle and adjust paths accordingly
+		if (is_running_from_bundle()) {
+			char* bundlePath = get_bundle_path();
+			if (bundlePath == NULL) {
+				return 1;
+			}
+
+			// Database and .msh are in parent directory of bundle
+			// e.g., /usr/local/mesh_services/meshagent/meshagent.db
+			// Strip .app/Contents/MacOS/meshagent to get bundle parent
+			char* lastSlash = strrchr(bundlePath, '/');
+			if (lastSlash != NULL) {
+				*lastSlash = '\0'; // Truncate to parent directory
+			}
+			snprintf(dbPath, sizeof(dbPath), "%s/meshagent.db", bundlePath);
+			snprintf(mshPath, sizeof(mshPath), "%s/meshagent.msh", bundlePath);
+			free(bundlePath);
+		} else {
+			// Standalone binary - database is next to executable
+			snprintf(dbPath, sizeof(dbPath), "%s.db", exePath);
+			snprintf(mshPath, sizeof(mshPath), "%s.msh", exePath);
+		}
+
+		// Open database READ-ONLY (no exclusive lock - allows concurrent access with daemon)
+		ILibSimpleDataStore db = ILibSimpleDataStore_CreateEx2(dbPath, 0, 1); // 1 = readonly
+		if (db == NULL) {
+			return 1;
+		}
+
+		// Check if TCC check is disabled in database
+		char buffer[32];
+		int dbLen = ILibSimpleDataStore_Get(db, "disableTccCheck", buffer, sizeof(buffer));
+		if (dbLen > 0) {
+			buffer[dbLen] = '\0';
+			if (strcmp(buffer, "1") == 0) {
+				ILibSimpleDataStore_Close(db);
+				return 0;
+			}
+		}
+
 		// Check all three permissions (fresh check in this new process!)
-		// Permission requests will only happen when user clicks the appropriate buttons
-		printf("[TCC-CHILD] Calling check_accessibility_permission()...\n");
 		TCC_PermissionStatus accessibility = check_accessibility_permission();
-		printf("[TCC-CHILD] Accessibility result: %d\n", accessibility);
-
-		printf("[TCC-CHILD] Calling check_fda_permission()...\n");
 		TCC_PermissionStatus fda = check_fda_permission();
-		printf("[TCC-CHILD] FDA result: %d\n", fda);
-
-		printf("[TCC-CHILD] Calling check_screen_recording_permission()...\n");
 		TCC_PermissionStatus screen_recording = check_screen_recording_permission();
-		printf("[TCC-CHILD] Screen Recording result: %d\n", screen_recording);
 
-		// If ALL are granted, write 0 to pipe and exit without showing UI
+		// If ALL are granted, exit without showing UI
 		int all_granted = (accessibility == TCC_PERMISSION_GRANTED_USER || accessibility == TCC_PERMISSION_GRANTED_MDM) &&
 		                  (fda == TCC_PERMISSION_GRANTED_USER || fda == TCC_PERMISSION_GRANTED_MDM) &&
 		                  (screen_recording == TCC_PERMISSION_GRANTED_USER || screen_recording == TCC_PERMISSION_GRANTED_MDM);
 
-		printf("[TCC-CHILD] All granted check: %d (Accessibility: %d, FDA: %d, Screen Recording: %d)\n",
-		       all_granted, accessibility, fda, screen_recording);
-
 		if (all_granted) {
-			printf("[TCC-CHILD] All permissions granted - writing 0 to pipe and exiting without UI\n");
-			unsigned char result_byte = 0;
-			write(pipe_fd, &result_byte, 1);
-			close(pipe_fd);
+			ILibSimpleDataStore_Close(db);
 			return 0;
 		}
 
 		// At least one permission missing - show UI
-		printf("[TCC-CHILD] At least one permission missing - showing UI\n");
 		int result = show_tcc_permissions_window(1); // 1 = show "Do not remind me again" checkbox
-		printf("[TCC-CHILD] UI closed with result: %d (1 = do not remind, 0 = remind again)\n", result);
 
-		// Write result to pipe (parent will read this and save to database if needed)
-		unsigned char result_byte = (result == 1) ? 1 : 0;
-		printf("[TCC-CHILD] Writing result %d to pipe fd %d\n", result_byte, pipe_fd);
-		ssize_t written = write(pipe_fd, &result_byte, 1);
-		if (written != 1) {
-			printf("[TCC-CHILD] ERROR: Failed to write to pipe (wrote %zd bytes)\n", written);
+		// If user clicked "Do not remind me again", write to .msh file
+		if (result == 1) {
+			// Append disableTccCheck=1 to .msh file
+			FILE* mshFile = fopen(mshPath, "a");
+			if (mshFile != NULL) {
+				fprintf(mshFile, "\ndisableTccCheck=1\n");
+				fclose(mshFile);
+
+				// Get serviceId from database to build launchctl command
+				char serviceId[256] = "meshagent"; // default
+				int serviceIdLen = ILibSimpleDataStore_Get(db, "ServiceID", serviceId, sizeof(serviceId));
+				if (serviceIdLen > 0) {
+					serviceId[serviceIdLen] = '\0';
+				}
+
+				// Trigger daemon restart using launchctl kickstart
+				// This will cause daemon to re-import .msh file on restart
+				char kickstartCmd[512];
+				snprintf(kickstartCmd, sizeof(kickstartCmd), "launchctl kickstart -k system/%s", serviceId);
+				system(kickstartCmd);
+			}
 		}
-		close(pipe_fd);
 
-		printf("[TCC-CHILD] -tccCheck process exiting\n");
+		// Close database
+		ILibSimpleDataStore_Close(db);
 		return 0;
 	}
 #endif

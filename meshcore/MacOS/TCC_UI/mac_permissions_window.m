@@ -14,15 +14,13 @@
 #include <errno.h>
 #include <execinfo.h>
 #include <crt_externs.h>
+#include <spawn.h>
 #import "../mac_ui_helpers.h"  // Shared UI helpers
 #include <time.h>
 #include "../mac_logging_utils.h"  // Logging utilities
 
 // Lock file to prevent multiple TCC UI processes
 #define TCC_LOCK_FILE "/tmp/meshagent_tcccheck.lock"
-
-// Logging macro with automatic timestamp for consistency
-#define TCCUI_LOG(fmt, ...) mesh_log_message("[TCC-UI] [%ld] " fmt, time(NULL), ##__VA_ARGS__)
 
 // Button tags for identification
 #define BUTTON_TAG_ACCESSIBILITY 1
@@ -387,8 +385,6 @@ static void remove_lock_file(void) {
         return;
     }
 
-    mesh_log_message("[TCC-UI] [%ld] stopPeriodicUpdates called\n", time(NULL));
-
     // Signal to all async blocks that we're stopping
     self.cancelled = YES;
 
@@ -400,7 +396,6 @@ static void remove_lock_file(void) {
 
     // Remove notification observer
     [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
-    mesh_log_message("[TCC-UI] [%ld] Removed notification observer\n", time(NULL));
 
     if (self.updateTimer) {
         [self.updateTimer invalidate];
@@ -408,10 +403,7 @@ static void remove_lock_file(void) {
         // Balance the retain from startPeriodicUpdates (line ~306)
         // Timer block retained self but won't release if externally invalidated
         [self release];
-        mesh_log_message("[TCC-UI] [%ld] Timer invalidated and retain balanced\n", time(NULL));
     }
-
-    mesh_log_message("[TCC-UI] [%ld] stopPeriodicUpdates completed\n", time(NULL));
 }
 
 - (void)openAccessibilitySettings:(id)sender {
@@ -490,17 +482,13 @@ static void remove_lock_file(void) {
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
-    mesh_log_message("[TCC-UI] [%ld] windowWillClose called\n", time(NULL));
     _windowClosed = YES;
 
-    mesh_log_message("[TCC-UI] [%ld] Stopping periodic updates\n", time(NULL));
     [self.buttonHandler stopPeriodicUpdates];
 
     // Defer stopModal to next run loop iteration to avoid race conditions
     // Allows window closing sequence to complete cleanly before exiting modal loop
-    mesh_log_message("[TCC-UI] [%ld] Deferring stopModal to next run loop iteration\n", time(NULL));
     dispatch_async(dispatch_get_main_queue(), ^{
-        mesh_log_message("[TCC-UI] [%ld] Calling stopModal\n", time(NULL));
         [NSApp stopModal];
     });
 }
@@ -667,13 +655,10 @@ int show_tcc_permissions_window(int show_reminder_checkbox) {
         [buttonHandler startPeriodicUpdates];
 
         // Show window and run modal
-        mesh_log_message("[TCC-UI] [%ld] Showing window and activating app\n", time(NULL));
         [window makeKeyAndOrderFront:nil];
         [NSApp activateIgnoringOtherApps:YES];
 
-        mesh_log_message("[TCC-UI] [%ld] Entering modal loop...\n", time(NULL));
         [NSApp runModalForWindow:window];
-        mesh_log_message("[TCC-UI] [%ld] Modal loop exited - window closed\n", time(NULL));
 
         // Get result
         int result = delegate.doNotRemindAgain ? 1 : 0;
@@ -686,9 +671,9 @@ int show_tcc_permissions_window(int show_reminder_checkbox) {
     }
 }
 
-// Async wrapper implementation using ILibProcessPipe for spawning as user
-// This spawns a child process with "-tccCheck" flag to show the UI
-// Returns file descriptor for reading result from child, or -1 on error
+// Async wrapper using posix_spawn() to launch via launchctl asuser
+// Spawns: launchctl asuser <uid> <exe_path> -check-tcc
+// Fire-and-forget: child handles DB read/write, returns -1 (no pipe)
 int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, int uid) {
     // CRITICAL SAFETY CHECK: NEVER spawn TCC UI during install/upgrade/uninstall operations
     // Check command line arguments for forbidden flags
@@ -719,6 +704,7 @@ int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, i
     }
 
     // Create pipe for IPC (child writes result, parent reads)
+    // NOTE: Currently unused (fire-and-forget mode), but kept for future temp file approach
     int pipefd[2];
     if (pipe(pipefd) != 0) {
         return -1;
@@ -731,40 +717,37 @@ int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, i
     char fd_str[16];
     snprintf(fd_str, sizeof(fd_str), "%d", pipefd[1]);
 
-    // Build argv for child process
+    // Build argv for launchctl asuser to spawn TCC check
+    // Format: launchctl asuser <uid> <exe_path> -check-tcc
+    char uid_str[16];
+    snprintf(uid_str, sizeof(uid_str), "%d", uid);
+
     char* const argv[] = {
-        "meshagent",     // argv[0] (program name)
-        "-tccCheck",     // argv[1] (flag)
-        fd_str,          // argv[2] (pipe write-end fd)
-        NULL             // argv terminator
+        "launchctl",        // argv[0]
+        "asuser",           // argv[1]
+        uid_str,            // argv[2] (user ID)
+        (char*)exe_path,    // argv[3] (path to meshagent)
+        "-check-tcc",       // argv[4] (flag)
+        NULL                // argv terminator
     };
 
-    if (pipeManager == NULL) {
+    // Fire-and-forget spawn using posix_spawn
+    // This avoids responsible process attribution issues on macOS 15 and earlier
+    pid_t pid;
+    extern char **environ;
+    int spawn_result = posix_spawn(&pid, "/bin/launchctl", NULL, NULL, argv, environ);
+
+    if (spawn_result != 0) {
         close(pipefd[0]);
         close(pipefd[1]);
         return -1;
     }
 
-    // Spawn child process as specified user (same approach as old -kvm0)
-    // Note: Uses DEFAULT spawn type - ILibProcessPipe internally calls setuid() when uid != 0
-    ILibProcessPipe_Process childProcess = ILibProcessPipe_Manager_SpawnProcessEx3(
-        pipeManager,
-        (char*)exe_path,
-        argv,
-        ILibProcessPipe_SpawnTypes_DEFAULT,  // Same as original -kvm0 code
-        (void*)(intptr_t)uid,                // User ID to run as
-        0                                    // No extra memory
-    );
-
-    if (childProcess == NULL) {
-        close(pipefd[0]);
-        close(pipefd[1]);
-        return -1;
-    }
-
-    // Parent process: close write end (parent only reads)
+    // Close both pipe ends (fire-and-forget mode - no IPC)
+    close(pipefd[0]);
     close(pipefd[1]);
 
-    // Return read-end file descriptor for parent to monitor
-    return pipefd[0];
+    // Return -1 to indicate fire-and-forget (no fd to monitor)
+    // TODO: Could return 0 for success, but -1 maintains existing error-checking behavior
+    return -1;
 }

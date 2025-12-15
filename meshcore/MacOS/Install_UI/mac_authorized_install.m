@@ -174,9 +174,9 @@ int ensure_running_as_root(void) {
     }
 
     // Relaunch ourselves with privileges
-    // Pass --show-install-ui flag so elevated process knows to show the Install UI
+    // Pass -show-install-ui flag so elevated process knows to show the Install UI
     // (it won't have LAUNCHED_FROM_FINDER env var or detect CMD key)
-    char* argv[] = { "--show-install-ui", NULL };
+    char* argv[] = { "-show-install-ui", NULL };
 
     mesh_log_message("[AUTH-ELEVATE] Relaunching as root: %s\n", exePath);
 

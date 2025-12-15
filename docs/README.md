@@ -45,7 +45,7 @@ See `meshagent-modules/__Index_Modules__.md` for complete module index.
 Complete reference for all MeshAgent command-line options:
 - **Information Commands**: `-nodeid`, `-version`, `-info`, `-agentHash`, `-lang`
 - **Installation Commands**:
-  - Installation Assistant GUI (`--show-install-ui`)
+  - Installation Assistant GUI (`-show-install-ui`)
   - Command-line installation (`-install`, `-upgrade`, `-uninstall`, `-fulluninstall`)
 - **Execution Commands**: `-exec`, `-b64exec`, `-daemon`
 - **Configuration Commands**: `-export`, `-import`, `-update`
@@ -71,10 +71,10 @@ Complete reference for all MeshAgent command-line options:
 
 - **`macos-tcc-permissions.md`** - TCC (Transparency, Consent, and Control) permissions system:
   - Accessibility, Full Disk Access, and Screen Recording permissions
-  - Architecture and process model (`-tccCheck` child process)
+  - Architecture and process model (`-check-tcc` child process via `launchctl asuser`)
   - Real-time permission detection methods
   - TCC permissions window UI implementation
-  - Inter-process communication via pipes
+  - Fire-and-forget spawning with direct database access
   - Database storage and preferences
   - Permission verification strategies
 

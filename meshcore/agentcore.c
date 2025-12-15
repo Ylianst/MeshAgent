@@ -152,17 +152,6 @@ typedef struct RemoteDesktop_Ptrs
 	ILibDuktape_DuplexStream *stream;
 }RemoteDesktop_Ptrs;
 
-#ifdef __APPLE__
-// TCC Pipe Monitor - Async handler for reading results from -tccCheck child process
-typedef struct TCCPipeMonitor
-{
-	void *chain;                      // ILibChain for event loop
-	ILibSimpleDataStore masterDb;     // Database for saving preference
-	int pipe_fd;                      // File descriptor for reading from child
-	int active;                       // 1 if monitoring, 0 if closed
-}TCCPipeMonitor;
-#endif
-
 typedef struct ScriptContainerSettings
 {
 	SCRIPT_ENGINE_SECURITY_FLAGS permissions;
@@ -467,100 +456,6 @@ size_t MeshAgent_Linux_ReadMemFile(char *path, char **buffer)
 	}
 	return(i);
 }
-
-#ifdef __APPLE__
-// ============================================================================
-// TCC Pipe Monitor - Async event loop handlers for reading -tccCheck results
-// ============================================================================
-
-// PreSelect: Add pipe fd to readset for monitoring
-void TCCPipeMonitor_PreSelect(void* object, fd_set *readset, fd_set *writeset, fd_set *errorset, int* blocktime)
-{
-	TCCPipeMonitor *monitor = (TCCPipeMonitor*)((ILibChain_Link*)object)->ExtraMemoryPtr;
-	if (monitor->active && monitor->pipe_fd >= 0)
-	{
-		FD_SET(monitor->pipe_fd, readset);
-	}
-}
-
-// PostSelect: Check if pipe has data, read it, and update database
-void TCCPipeMonitor_PostSelect(void* object, int slct, fd_set *readset, fd_set *writeset, fd_set *errorset)
-{
-	TCCPipeMonitor *monitor = (TCCPipeMonitor*)((ILibChain_Link*)object)->ExtraMemoryPtr;
-
-	if (monitor->active && monitor->pipe_fd >= 0 && FD_ISSET(monitor->pipe_fd, readset))
-	{
-		unsigned char result_byte;
-		ssize_t bytes_read = read(monitor->pipe_fd, &result_byte, 1);
-
-		if (bytes_read == 1)
-		{
-			// If result is 1, user clicked "Do not remind me again"
-			if (result_byte == 1)
-			{
-				ILibSimpleDataStore_Put(monitor->masterDb, "disableTccCheck", "1");
-			}
-
-			// Close pipe and mark inactive
-			close(monitor->pipe_fd);
-			monitor->pipe_fd = -1;
-			monitor->active = 0;
-		}
-		else if (bytes_read == 0)
-		{
-			// EOF - child closed pipe without writing (shouldn't happen)
-			ILIBMESSAGE("[TCC-PIPE] WARNING: Child closed pipe without sending result");
-			close(monitor->pipe_fd);
-			monitor->pipe_fd = -1;
-			monitor->active = 0;
-		}
-		else if (bytes_read < 0)
-		{
-			// Error reading
-			ILIBMESSAGE2("[TCC-PIPE] ERROR reading from pipe, errno:", errno);
-			close(monitor->pipe_fd);
-			monitor->pipe_fd = -1;
-			monitor->active = 0;
-		}
-	}
-}
-
-// Destroy: Cleanup when chain is destroyed
-void TCCPipeMonitor_Destroy(void* object)
-{
-	TCCPipeMonitor *monitor = (TCCPipeMonitor*)((ILibChain_Link*)object)->ExtraMemoryPtr;
-	if (monitor->pipe_fd >= 0)
-	{
-		close(monitor->pipe_fd);
-		monitor->pipe_fd = -1;
-	}
-	monitor->active = 0;
-}
-
-// Create and initialize TCC pipe monitor
-void* TCCPipeMonitor_Create(void *chain, ILibSimpleDataStore masterDb, int pipe_fd)
-{
-	ILibChain_Link *link = ILibChain_Link_Allocate(sizeof(ILibChain_Link), sizeof(TCCPipeMonitor));
-	TCCPipeMonitor *monitor = (TCCPipeMonitor*)link->ExtraMemoryPtr;
-
-	// Initialize monitor structure
-	monitor->chain = chain;
-	monitor->masterDb = masterDb;
-	monitor->pipe_fd = pipe_fd;
-	monitor->active = 1;
-
-	// Set up event loop handlers
-	link->PreSelectHandler = TCCPipeMonitor_PreSelect;
-	link->PostSelectHandler = TCCPipeMonitor_PostSelect;
-	link->DestroyHandler = TCCPipeMonitor_Destroy;
-	link->MetaData = "TCC Pipe Monitor";
-
-	// Add to chain
-	ILibChain_SafeAdd(chain, link);
-
-	return link;
-}
-#endif
 
 int MeshAgent_Helper_CommandLine(char **commands, char **result, int *resultLen)
 {
@@ -1542,18 +1437,19 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		kvm_relay_setup(agent->exePath, agent->runningAsConsole ? NULL : agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
 	#else
 		kvm_relay_setup(agent->exePath, NULL, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, TSID);
-	#endif	
+	#endif
 #else
 	int console_uid = 0;
 	if (duk_peval_string(ctx, "require('user-sessions').consoleUid();") == 0) { console_uid = duk_get_int(ctx, -1); }
 	duk_pop(ctx);
+
 	#ifdef __APPLE__
 		// MacOS - REVERSED ARCHITECTURE with QueueDirectories
 		// Always use domain socket, regardless of console_uid
 		// LaunchAgent handles both LoginWindow (console_uid=0) and Aqua (console_uid!=0) via LimitLoadToSessionType
 
-		// Spawn TCC check before establishing KVM connection (non-blocking)
-		// The -tccCheck process will check permissions and decide whether to show UI
+		// Spawn TCC check before establishing KVM connection (fire-and-forget)
+		// The -check-tcc process will check permissions and decide whether to show UI
 		int should_spawn = 1;  // Default: spawn TCC check
 
 		// Check if user previously selected "Do not remind me again"
@@ -1569,11 +1465,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 
 		if (should_spawn)
 		{
-			int tcc_pipe_fd = show_tcc_permissions_window_async(agent->exePath, agent->pipeManager, console_uid);
-			if (tcc_pipe_fd >= 0) {
-				// Create async monitor to read result from pipe
-				TCCPipeMonitor_Create(agent->chain, agent->masterDb, tcc_pipe_fd);
-			}
+			show_tcc_permissions_window_async(agent->exePath, agent->pipeManager, console_uid);
 		}
 
 		// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
@@ -3159,20 +3051,6 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "StartupType", ILibScratchPad, sizeof(ILibScratchPad));
 	if (len > 0 && len < sizeof(ILibScratchPad)) { ILib_atoi_int32(&(agent->performSelfUpdate), ILibScratchPad, (size_t)len); }
 	if (agent->performSelfUpdate == 0) { agent->performSelfUpdate = 999; } // Never allow this value to be zero.
-
-#ifdef __APPLE__
-	// DEBUG: Log when performSelfUpdate is set
-	{
-		FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
-		if (debugFile != NULL) {
-			fprintf(debugFile, "=== MeshServer_selfupdate_continue() called ===\n");
-			fprintf(debugFile, "performSelfUpdate set to: %d\n", agent->performSelfUpdate);
-			fprintf(debugFile, "StartupType from DB: %s\n", (len > 0) ? ILibScratchPad : "(not found)");
-			fprintf(debugFile, "================================================\n\n");
-			fclose(debugFile);
-		}
-	}
-#endif
 #endif
 
 
@@ -3823,15 +3701,6 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 			{
 				// Indicates the start of the agent update transfer
 				if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Starting download..."); }
-#ifdef __APPLE__
-				{
-					FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
-					if (debugFile != NULL) {
-						fprintf(debugFile, ">>> UPDATE DOWNLOAD STARTED <<<\n");
-						fclose(debugFile);
-					}
-				}
-#endif
 				util_deletefile(updateFilePath);
 			} else if (cmdLen == sizeof(MeshCommand_BinaryPacket_CoreModule)) 
 			{
@@ -3842,15 +3711,6 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 					//printf("UPDATE: End OK\r\n");
 					int updateTop = duk_get_top(agent->meshCoreCtx);
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash verified"); }
-#ifdef __APPLE__
-					{
-						FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
-						if (debugFile != NULL) {
-							fprintf(debugFile, ">>> HASH VERIFIED - Processing update <<<\n");
-							fclose(debugFile);
-						}
-					}
-#endif
 					if (agent->fakeUpdate != 0)
 					{
 						int fsz;
@@ -3904,30 +3764,12 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						break; // Break out here, and continue when finished unzipping (or in the case of error, abort)
 					}
 					duk_set_top(agent->meshCoreCtx, updateTop);								// ...
-#ifdef __APPLE__
-					{
-						FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
-						if (debugFile != NULL) {
-							fprintf(debugFile, ">>> CALLING MeshServer_selfupdate_continue() <<<\n");
-							fclose(debugFile);
-						}
-					}
-#endif
 					MeshServer_selfupdate_continue(agent);
 				} 
 				else
 				{
 					// Hash check failed, delete the file and do nothing. On next server reconnect, we will try again.
 					if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("SelfUpdate -> Download Complete... Hash FAILED, aborting update..."); }
-#ifdef __APPLE__
-					{
-						FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
-						if (debugFile != NULL) {
-							fprintf(debugFile, ">>> HASH VERIFICATION FAILED - Aborting <<<\n");
-							fclose(debugFile);
-						}
-					}
-#endif
 					util_deletefile(updateFilePath);
 				}
 			}
@@ -4907,14 +4749,10 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 	parser_result *pr;
 	parser_result_field *f;
 
-	printf("DEBUG: importSettings() called with fileName: %s\n", fileName);
 	importFileLen = ILibReadFileFromDiskEx(&importFile, fileName);
-	printf("DEBUG: ILibReadFileFromDiskEx() returned %d bytes\n", importFileLen);
 	if (importFileLen == 0) {
-		printf("DEBUG: importSettings() failed - file not found or empty\n");
 		return(0);
 	}
-	printf("DEBUG: Importing settings file: %s (%d bytes)\n", fileName, importFileLen);
 
 	pr = ILibParseString(importFile, 0, importFileLen, "\n", 1);
 	f = pr->FirstResult;
@@ -4984,11 +4822,11 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 {
 
 #if defined(_LINKVM) && defined(__APPLE__)
-    // DISABLED: TCC permission prompting now handled by -tccCheck child process with custom UI
+    // DISABLED: TCC permission prompting now handled by -check-tcc child process with custom UI
     // The old approach (kvm_check_permission) showed jarring system prompts at startup.
-    // New approach: Daemon spawns -tccCheck which shows a nice custom window with all three
-    // permissions (Accessibility, FDA, Screen Recording) explained in one place, with direct
-    // "Open Settings" buttons. Users can also dismiss it permanently.
+    // New approach: Daemon spawns -check-tcc via launchctl asuser, which shows a custom window
+    // with all three permissions (Accessibility, FDA, Screen Recording) explained in one place,
+    // with direct "Open Settings" buttons. Users can also dismiss it permanently.
     // kvm_check_permission();
 #endif
 
@@ -5341,27 +5179,20 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			// Check for .mshx file first (secure version has priority)
 			// Note: MeshAgent_MakeAbsolutePath reuses scratch buffer - check sequentially!
 			char* testPath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".mshx");
-			printf("DEBUG: Checking for .mshx file at: %s\n", testPath);
 
 			if (ILibSimpleDataStore_Exists(testPath)) {
 				hasSettingsSource = 1;
-				printf("DEBUG: Settings source found (.mshx)!\n");
 			} else {
 				// Fall back to .msh file
 				testPath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".msh");
-				printf("DEBUG: Checking for .msh file at: %s\n", testPath);
 
 				if (ILibSimpleDataStore_Exists(testPath)) {
 					hasSettingsSource = 1;
-					printf("DEBUG: Settings source found (.msh)!\n");
-				} else {
-					printf("DEBUG: No .msh or .mshx file found\n");
 				}
 			}
 
 			if (hasSettingsSource) {
 				// Settings source found - create .db to store imported settings
-				printf("DEBUG: Creating .db at: %s\n", dbPathBuffer);
 				agentHost->masterDb = ILibSimpleDataStore_Create(dbPathBuffer);
 			} else if (isDaemon) {
 				// No settings source, running as daemon - wait indefinitely for config
@@ -5457,7 +5288,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #ifdef __APPLE__
 	// Spawn TCC check at startup (only if not in install/fetch mode, has real config, and not waiting for config)
 	// Skip TCC if: installing, fetching state, no real DB (cache-only), or waiting for config
-	// The -tccCheck process will check permissions and decide whether to show UI
+	// The -check-tcc process will check permissions and decide whether to show UI
 	if (fetchstate == 0 && installFlag == 0 && agentHost->masterDb != NULL &&
 		ILibSimpleDataStore_IsCacheOnly(agentHost->masterDb) == 0 && agentHost->waitingForConfig == 0)
 	{
@@ -5493,11 +5324,7 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				CFRelease(store);
 			}
 
-			int tcc_pipe_fd = show_tcc_permissions_window_async(agentHost->exePath, agentHost->pipeManager, console_uid);
-			if (tcc_pipe_fd >= 0) {
-				// Create async monitor to read result from pipe
-				TCCPipeMonitor_Create(agentHost->chain, agentHost->masterDb, tcc_pipe_fd);
-			}
+			show_tcc_permissions_window_async(agentHost->exePath, agentHost->pipeManager, console_uid);
 		}
 	}
 #endif
@@ -6829,12 +6656,8 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 	{
 		agentHost->appBundleMode = 1;
 	}
-	printf("DEBUG: appBundleMode = %d\n", agentHost->appBundleMode);
-	printf("DEBUG: exePath = %s\n", agentHost->exePath);
 	char cwdBuffer[4096];
-	if (getcwd(cwdBuffer, sizeof(cwdBuffer)) != NULL) {
-		printf("DEBUG: cwd = %s\n", cwdBuffer);
-	}
+	getcwd(cwdBuffer, sizeof(cwdBuffer));
 
 	// Check if launched from Finder (via Info.plist LSEnvironment variable)
 	if (getenv("LAUNCHED_FROM_FINDER") != NULL && !skipConfigValidation)
@@ -6935,42 +6758,6 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 		}
 
 #ifndef WIN32
-		// DEBUG: Write self-update state to file
-#ifdef __APPLE__
-		{
-			FILE* debugFile = fopen("/tmp/meshagent-selfupdate-debug.txt", "a");
-			if (debugFile != NULL) {
-				// Get version info if JS context available
-				char versionStr[256] = "N/A";
-				if (agentHost->meshCoreCtx != NULL) {
-					if (duk_peval_string(agentHost->meshCoreCtx, "require('MeshAgent').getVersion().version") == 0) {
-						const char* ver = duk_safe_to_string(agentHost->meshCoreCtx, -1);
-						if (ver != NULL) { sprintf_s(versionStr, sizeof(versionStr), "%s", ver); }
-						duk_pop(agentHost->meshCoreCtx);
-					} else {
-						duk_pop(agentHost->meshCoreCtx);
-					}
-				}
-
-				fprintf(debugFile, "=== Self-Update Debug ===\n");
-				fprintf(debugFile, "agentVersion=%s\n", versionStr);
-				fprintf(debugFile, "performSelfUpdate=%d\n", agentHost->performSelfUpdate);
-				fprintf(debugFile, "JSRunningAsService=%d\n", agentHost->JSRunningAsService);
-				fprintf(debugFile, "platformType=%d (LAUNCHD=%d)\n", agentHost->platformType, MeshAgent_Posix_PlatformTypes_LAUNCHD);
-				fprintf(debugFile, "exePath=%s\n", agentHost->exePath);
-
-				// Check if .update file exists
-				char* updateFilePath = MeshAgent_MakeAbsolutePath(agentHost->exePath, ".update");
-				struct stat st;
-				int updateExists = (stat(updateFilePath, &st) == 0);
-				fprintf(debugFile, "updateFile=%s (exists=%d)\n", updateFilePath, updateExists);
-
-				fprintf(debugFile, "========================\n\n");
-				fclose(debugFile);
-			}
-		}
-#endif
-
 		// Check if we need to perform self-update (performSelfUpdate should indicate startup type on Liunx: 1 = systemd, 2 = upstart, 3 = sysv-init)
 		if (agentHost->performSelfUpdate != 0)
 		{
