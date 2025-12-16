@@ -18,6 +18,8 @@
 #import "../mac_ui_helpers.h"  // Shared UI helpers
 #include <time.h>
 #include "../mac_logging_utils.h"  // Logging utilities
+#include <sqlite3.h>
+#include <pwd.h>  // For getpwuid
 
 // Lock file to prevent multiple TCC UI processes
 #define TCC_LOCK_FILE "/tmp/meshagent_tcccheck.lock"
@@ -99,8 +101,10 @@ static void remove_lock_file(void) {
 @property (nonatomic, assign) NSView *contentView;
 @property (nonatomic, strong) NSTimer *updateTimer;
 @property (nonatomic, assign) BOOL cancelled;  // Flag to indicate handler is being deallocated
+@property (nonatomic, copy) NSString *exePath;  // Path to meshagent executable
+@property (nonatomic, assign) uid_t consoleUID;  // Console user ID
 
-- (instancetype)initWithContentView:(NSView*)view;
+- (instancetype)initWithContentView:(NSView*)view exePath:(const char*)path uid:(uid_t)uid;
 - (void)openAccessibilitySettings:(id)sender;
 - (void)openFullDiskAccessSettings:(id)sender;
 - (void)openScreenRecordingSettings:(id)sender;
@@ -115,12 +119,14 @@ static void remove_lock_file(void) {
 
 @implementation TCCButtonHandler
 
-- (instancetype)initWithContentView:(NSView*)view {
+- (instancetype)initWithContentView:(NSView*)view exePath:(const char*)path uid:(uid_t)uid {
     self = [super init];
     if (self) {
         _contentView = view;
         _updateTimer = nil;
         _cancelled = NO;
+        _exePath = path ? [NSString stringWithUTF8String:path] : nil;
+        _consoleUID = uid;
     }
     return self;
 }
@@ -407,29 +413,39 @@ static void remove_lock_file(void) {
 }
 
 - (void)openAccessibilitySettings:(id)sender {
-    // Trigger the system permission prompt to add MeshAgent to the Accessibility list
-    if (__builtin_available(macOS 10.9, *)) {
-        // Call on background thread to avoid blocking UI (API blocks until user responds)
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            @autoreleasepool {
-                const void *keys[] = { kAXTrustedCheckOptionPrompt };
-                const void *values[] = { kCFBooleanTrue };
-                CFDictionaryRef options = CFDictionaryCreate(
-                    kCFAllocatorDefault,
-                    keys,
-                    values,
-                    1,
-                    &kCFCopyStringDictionaryKeyCallBacks,
-                    &kCFTypeDictionaryValueCallBacks);
+    // Spawn meshagent -request-accessibility as the console user to trigger system prompt
+    // Use su to actually run the process as the user (not just audit session)
+    if (self.exePath && self.consoleUID > 0) {
+        pid_t pid;
 
-                // This will show the system dialog: "MeshAgent.app would like to control this computer using accessibility features"
-                AXIsProcessTrustedWithOptions(options);
-                CFRelease(options);
-            }
-        });
+        // Get username from UID
+        struct passwd *pw = getpwuid(self.consoleUID);
+        if (!pw) {
+            NSLog(@"[TCC_UI] ERROR: Could not get username for UID %d", self.consoleUID);
+            return;
+        }
+
+        const char* username = pw->pw_name;
+        const char* exePathCStr = [self.exePath UTF8String];
+
+        // Build command string for su -c flag (needs to be single string)
+        char commandStr[2048];
+        snprintf(commandStr, sizeof(commandStr), "%s -request-accessibility", exePathCStr);
+
+        char* argv[] = {
+            "/usr/bin/su",
+            "-l",
+            (char*)username,
+            "-c",
+            commandStr,
+            NULL
+        };
+
+        // Spawn via su (actually changes to user credentials)
+        posix_spawn(&pid, "/usr/bin/su", NULL, NULL, argv, NULL);
     }
 
-    // Also open System Settings so user can see MeshAgent was added to the list
+    // Also open System Settings so user can see MeshAgent in the Accessibility list
     NSURL* url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"];
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
@@ -521,7 +537,7 @@ static void createPermissionSection(NSView* contentView, NSString* title, NSStri
     [contentView addSubview:settingsButton];
 }
 
-int show_tcc_permissions_window(int show_reminder_checkbox) {
+int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path, int uid) {
     @autoreleasepool {
         // Create lock file to prevent multiple instances
         create_lock_file();
@@ -558,8 +574,8 @@ int show_tcc_permissions_window(int show_reminder_checkbox) {
         // Get content view
         NSView* contentView = [window contentView];
 
-        // Create button handler
-        TCCButtonHandler* buttonHandler = [[TCCButtonHandler alloc] initWithContentView:contentView];
+        // Create button handler with exe_path and uid for spawning permission requests
+        TCCButtonHandler* buttonHandler = [[TCCButtonHandler alloc] initWithContentView:contentView exePath:exe_path uid:uid];
 
         // Create delegate and link button handler
         TCCPermissionsWindowDelegate* delegate = [[TCCPermissionsWindowDelegate alloc] init];
@@ -750,4 +766,352 @@ int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, i
     // Return -1 to indicate fire-and-forget (no fd to monitor)
     // TODO: Could return 0 for success, but -1 maintains existing error-checking behavior
     return -1;
+}
+
+/**
+ * Request Accessibility permission (called by -request-accessibility flag)
+ *
+ * Calls AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt to
+ * trigger the macOS system dialog:
+ * "MeshAgent.app would like to control this computer using accessibility features"
+ *
+ * This function should be called from a process running as the console user
+ * (spawned via posix_spawn with setuid).
+ *
+ * Returns:
+ *   0 on success
+ */
+int request_accessibility_permission(void) {
+    // Check for --log=3 debug mode
+    int debug = 0;
+    char*** argvPtr = _NSGetArgv();
+    int* argcPtr = _NSGetArgc();
+    if (argvPtr && argcPtr) {
+        for (int i = 0; i < *argcPtr; i++) {
+            if (strcmp((*argvPtr)[i], "--log=3") == 0) {
+                debug = 1;
+                break;
+            }
+        }
+    }
+
+    if (debug) {
+        printf("[DEBUG] request_accessibility_permission: Starting\n");
+        printf("[DEBUG] request_accessibility_permission: macOS version check...\n");
+    }
+
+    if (__builtin_available(macOS 10.9, *)) {
+        if (debug) printf("[DEBUG] request_accessibility_permission: macOS 10.9+ detected\n");
+
+        const void *keys[] = { kAXTrustedCheckOptionPrompt };
+        const void *values[] = { kCFBooleanTrue };
+
+        if (debug) printf("[DEBUG] request_accessibility_permission: Creating options dictionary\n");
+        CFDictionaryRef options = CFDictionaryCreate(
+            kCFAllocatorDefault,
+            keys,
+            values,
+            1,
+            &kCFCopyStringDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks
+        );
+
+        if (debug) printf("[DEBUG] request_accessibility_permission: Calling AXIsProcessTrustedWithOptions\n");
+        AXIsProcessTrustedWithOptions(options);
+
+        if (debug) printf("[DEBUG] request_accessibility_permission: Releasing options\n");
+        CFRelease(options);
+
+        if (debug) printf("[DEBUG] request_accessibility_permission: Success\n");
+    } else {
+        if (debug) printf("[DEBUG] request_accessibility_permission: macOS version < 10.9, skipping\n");
+    }
+
+    return 0;
+}
+
+/**
+ * Request Screen Recording permission (called by -request-screenrecording flag)
+ *
+ * Checks if Screen Recording permission is already granted via CGPreflightScreenCaptureAccess.
+ * If not granted, calls CGRequestScreenCaptureAccess to trigger the macOS system dialog.
+ *
+ * This function should be called from a process running as the console user
+ * (spawned via posix_spawn with setuid).
+ *
+ * Returns:
+ *   0 on success
+ */
+int request_screen_recording_permission(void) {
+    // Check for --log=3 debug mode
+    int debug = 0;
+    char*** argvPtr = _NSGetArgv();
+    int* argcPtr = _NSGetArgc();
+    if (argvPtr && argcPtr) {
+        for (int i = 0; i < *argcPtr; i++) {
+            if (strcmp((*argvPtr)[i], "--log=3") == 0) {
+                debug = 1;
+                break;
+            }
+        }
+    }
+
+    if (debug) {
+        printf("[DEBUG] request_screen_recording_permission: Starting\n");
+        printf("[DEBUG] request_screen_recording_permission: macOS version check...\n");
+    }
+
+    if (__builtin_available(macOS 10.15, *)) {
+        if (debug) printf("[DEBUG] request_screen_recording_permission: macOS 10.15+ detected\n");
+
+        if (debug) printf("[DEBUG] request_screen_recording_permission: Checking current permission status\n");
+        Boolean hasPermission = CGPreflightScreenCaptureAccess();
+
+        if (debug) printf("[DEBUG] request_screen_recording_permission: Current status = %s\n",
+                          hasPermission ? "granted" : "not granted");
+
+        if (!hasPermission) {
+            if (debug) printf("[DEBUG] request_screen_recording_permission: Requesting permission via CGRequestScreenCaptureAccess\n");
+            CGRequestScreenCaptureAccess();
+            if (debug) printf("[DEBUG] request_screen_recording_permission: Request completed\n");
+        } else {
+            if (debug) printf("[DEBUG] request_screen_recording_permission: Permission already granted, no dialog needed\n");
+        }
+
+        if (debug) printf("[DEBUG] request_screen_recording_permission: Success\n");
+    } else {
+        if (debug) printf("[DEBUG] request_screen_recording_permission: macOS version < 10.15, skipping\n");
+    }
+
+    return 0;
+}
+
+/**
+ * Request Full Disk Access permission (called by -request-fulldiskaccess flag)
+ *
+ * Checks if FDA is already granted by attempting to open TCC.db read-only.
+ * If not granted, shows a custom NSAlert dialog with buttons:
+ * - "Open System Settings" - Opens System Settings to FDA pane
+ * - "Deny" (default) - Closes dialog
+ *
+ * Features a composite icon (lock + FDA drive icon).
+ * Includes fallback for macOS < 11.0.
+ *
+ * Returns:
+ *   0 on success (dialog shown or FDA already granted)
+ */
+int request_fda_permission(void) {
+    // Check for --log=3 debug mode
+    int debug = 0;
+    char*** argvPtr = _NSGetArgv();
+    int* argcPtr = _NSGetArgc();
+    if (argvPtr && argcPtr) {
+        for (int i = 0; i < *argcPtr; i++) {
+            if (strcmp((*argvPtr)[i], "--log=3") == 0) {
+                debug = 1;
+                break;
+            }
+        }
+    }
+
+    if (debug) {
+        printf("[DEBUG] request_fda_permission: Starting\n");
+        printf("[DEBUG] request_fda_permission: Checking current FDA status via TCC.db access test\n");
+    }
+
+    // Check if we already have FDA by trying to open TCC.db read-only
+    sqlite3 *db = NULL;
+    int rc = sqlite3_open_v2(
+        "/Library/Application Support/com.apple.TCC/TCC.db",
+        &db,
+        SQLITE_OPEN_READONLY,
+        NULL
+    );
+
+    if (debug) printf("[DEBUG] request_fda_permission: sqlite3_open_v2 result = %d\n", rc);
+
+    if (rc == SQLITE_OK && db != NULL) {
+        if (debug) printf("[DEBUG] request_fda_permission: FDA already granted (TCC.db accessible)\n");
+        sqlite3_close(db);
+        return 0;  // Already have FDA
+    }
+
+    if (debug) printf("[DEBUG] request_fda_permission: FDA not granted, will show dialog\n");
+
+    if (db != NULL) {
+        sqlite3_close(db);
+    }
+
+    // Show custom FDA dialog
+    if (debug) printf("[DEBUG] request_fda_permission: Creating NSApplication\n");
+
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+
+        if (debug) printf("[DEBUG] request_fda_permission: Creating custom window\n");
+
+        if (debug) printf("[DEBUG] request_fda_permission: Creating composite icon\n");
+        // Create composite icon: Lock with FDA icon inset
+        NSImage *compositeIcon = [[NSImage alloc] initWithSize:NSMakeSize(64, 64)];
+        [compositeIcon lockFocus];
+
+        if (@available(macOS 11.0, *)) {
+            if (debug) printf("[DEBUG] request_fda_permission: macOS 11.0+ - using SF Symbols icons\n");
+
+            // Draw orange lock icon (main)
+            NSImage *lockIcon = [NSImage imageWithSystemSymbolName:@"lock.fill" accessibilityDescription:nil];
+            if (lockIcon) {
+                if (debug) printf("[DEBUG] request_fda_permission: Drawing lock icon\n");
+                NSImageSymbolConfiguration *lockConfig = [NSImageSymbolConfiguration configurationWithPointSize:64 weight:NSFontWeightRegular];
+                lockIcon = [lockIcon imageWithSymbolConfiguration:lockConfig];
+
+                // Tint orange
+                [lockIcon lockFocus];
+                [[NSColor colorWithRed:1.0 green:0.6 blue:0.0 alpha:1.0] set];
+                NSRect lockRect = NSMakeRect(0, 0, lockIcon.size.width, lockIcon.size.height);
+                NSRectFillUsingOperation(lockRect, NSCompositingOperationSourceAtop);
+                [lockIcon unlockFocus];
+
+                [lockIcon drawInRect:NSMakeRect(0, 0, 64, 64)];
+            }
+
+            // Draw blue FDA icon (inset in bottom-right)
+            NSImage *fdaIcon = [NSImage imageWithSystemSymbolName:@"internaldrive.fill" accessibilityDescription:nil];
+            if (fdaIcon) {
+                if (debug) printf("[DEBUG] request_fda_permission: Drawing FDA icon\n");
+                // Shrunk to 16pt (20% smaller than original 20pt)
+                NSImageSymbolConfiguration *fdaConfig = [NSImageSymbolConfiguration configurationWithPointSize:16 weight:NSFontWeightRegular];
+                fdaIcon = [fdaIcon imageWithSymbolConfiguration:fdaConfig];
+
+                // Tint gray
+                [fdaIcon lockFocus];
+                [[NSColor colorWithRed:0.5 green:0.5 blue:0.5 alpha:1.0] set];
+                NSRect fdaRect = NSMakeRect(0, 0, fdaIcon.size.width, fdaIcon.size.height);
+                NSRectFillUsingOperation(fdaRect, NSCompositingOperationSourceAtop);
+                [fdaIcon unlockFocus];
+
+                // Draw squircle background with light gray fill and subtle border (sized for 16pt icon)
+                // Positioned lower to hang below the lock
+                NSRect squircleRect = NSMakeRect(36, 0, 24, 24);
+                NSBezierPath *squirclePath = [NSBezierPath bezierPathWithRoundedRect:squircleRect
+                                                                             xRadius:5.0
+                                                                             yRadius:5.0];
+
+                // Fill with medium gray for better contrast
+                [[NSColor colorWithWhite:0.85 alpha:1.0] setFill];
+                [squirclePath fill];
+
+                // Add subtle border
+                [[NSColor colorWithWhite:0.65 alpha:1.0] setStroke];
+                [squirclePath setLineWidth:0.5];
+                [squirclePath stroke];
+
+                // Draw FDA icon on top of squircle (centered in 24x24 squircle)
+                [fdaIcon drawInRect:NSMakeRect(40, 4, 16, 16)];
+            }
+        } else {
+            if (debug) printf("[DEBUG] request_fda_permission: macOS < 11.0 - using fallback caution icon\n");
+            // Fallback for macOS < 11.0
+            NSImage *cautionIcon = [NSImage imageNamed:NSImageNameCaution];
+            if (cautionIcon) {
+                [cautionIcon drawInRect:NSMakeRect(0, 0, 64, 64)];
+            }
+        }
+
+        [compositeIcon unlockFocus];
+
+        if (debug) printf("[DEBUG] request_fda_permission: Creating window with custom layout\n");
+
+        // Create custom panel (styled like system dialog)
+        NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 450, 150)
+                                                     styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO];
+        [panel setTitle:@"Full Disk Access"];
+        [panel setLevel:NSFloatingWindowLevel];
+        [panel center];
+
+        // Create content view with manual layout
+        NSView *contentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 450, 150)];
+
+        // Icon on the left (20px from left, centered vertically in upper area)
+        NSImageView *iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(20, 75, 64, 64)];
+        [iconView setImage:compositeIcon];
+        [contentView addSubview:iconView];
+
+        // Text on the right (with bold first line, positioned lower to add top padding)
+        NSTextField *messageField = [[NSTextField alloc] initWithFrame:NSMakeRect(100, 52, 330, 85)];
+
+        // Create attributed string with bold first line and controlled spacing
+        NSMutableAttributedString *attrString = [[NSMutableAttributedString alloc] init];
+
+        // First line (bold) with paragraph spacing
+        NSFont *boldFont = [NSFont boldSystemFontOfSize:13];
+        NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+        [paragraphStyle setParagraphSpacing:8.0];  // 8pt space after first line
+        NSAttributedString *boldText = [[NSAttributedString alloc] initWithString:@"\"MeshAgent.app\" would like full disk access to this computer's storage.\n"
+                                                                        attributes:@{NSFontAttributeName: boldFont,
+                                                                                    NSParagraphStyleAttributeName: paragraphStyle}];
+        [attrString appendAttributedString:boldText];
+
+        // Second line (regular)
+        NSFont *regularFont = [NSFont systemFontOfSize:13];
+        NSAttributedString *regularText = [[NSAttributedString alloc] initWithString:@"Grant access to this application in Privacy & Security settings, located in System Settings."
+                                                                          attributes:@{NSFontAttributeName: regularFont}];
+        [attrString appendAttributedString:regularText];
+
+        [messageField setAttributedStringValue:attrString];
+        [messageField setBezeled:NO];
+        [messageField setDrawsBackground:NO];
+        [messageField setEditable:NO];
+        [messageField setSelectable:NO];
+        [[messageField cell] setWraps:YES];
+        [contentView addSubview:messageField];
+
+        // Buttons at bottom right
+        __block BOOL openSettings = NO;
+
+        NSButton *denyButton = [[NSButton alloc] initWithFrame:NSMakeRect(350, 20, 80, 32)];
+        [denyButton setTitle:@"Deny"];
+        [denyButton setBezelStyle:NSBezelStyleRounded];
+        [denyButton setKeyEquivalent:@"\r"];  // Return key
+        [denyButton setTarget:nil];
+        [denyButton setAction:@selector(stopModalWithCode:)];
+        [denyButton setTag:NSModalResponseCancel];
+        [contentView addSubview:denyButton];
+
+        NSButton *openButton = [[NSButton alloc] initWithFrame:NSMakeRect(180, 20, 160, 32)];
+        [openButton setTitle:@"Open System Settings"];
+        [openButton setBezelStyle:NSBezelStyleRounded];
+        [openButton setKeyEquivalent:@""];
+        [openButton setTarget:nil];
+        [openButton setAction:@selector(stopModalWithCode:)];
+        [openButton setTag:NSModalResponseOK];
+        [contentView addSubview:openButton];
+
+        [panel setContentView:contentView];
+
+        // Activate app and show window
+        [NSApp activateIgnoringOtherApps:YES];
+
+        if (debug) printf("[DEBUG] request_fda_permission: Showing modal dialog (blocking)\n");
+        NSModalResponse response = [NSApp runModalForWindow:panel];
+        [panel orderOut:nil];
+
+        if (debug) printf("[DEBUG] request_fda_permission: User response = %ld (OK=Open Settings, Cancel=Deny)\n", (long)response);
+
+        if (response == NSModalResponseOK) {
+            if (debug) printf("[DEBUG] request_fda_permission: Opening System Settings to FDA pane\n");
+            // Open System Settings to FDA pane
+            NSURL* url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"];
+            [[NSWorkspace sharedWorkspace] openURL:url];
+            if (debug) printf("[DEBUG] request_fda_permission: System Settings opened\n");
+        } else {
+            if (debug) printf("[DEBUG] request_fda_permission: User clicked Deny\n");
+        }
+    }
+
+    if (debug) printf("[DEBUG] request_fda_permission: Completed\n");
+    return 0;
 }

@@ -48,6 +48,7 @@ limitations under the License.
 #include <mach-o/ldsyms.h>
 #include <mach-o/fat.h>
 #include <mach-o/dyld.h>
+#include <SystemConfiguration/SystemConfiguration.h>
 #include <stdarg.h>
 #include <fcntl.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -73,6 +74,8 @@ char __agentExecPath[1024] = { 0 };
 #include <unistd.h>
 #include <mach-o/loader.h>
 #include <libkern/OSByteOrder.h>
+
+char __agentExecPath[1024] = { 0 };
 
 // Check if the binary at the given path is a universal (FAT) binary
 static bool is_universal_binary_at_path(const char *path, uint32_t *out_nfat)
@@ -139,6 +142,20 @@ static int GetEffectiveARCHID()
 	}
 
 	return MESH_AGENTID; // Single-arch binary
+}
+
+// Get the console user UID for spawning TCC permission requests
+static uid_t get_console_user_uid() {
+	uid_t uid = 0;
+	SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("MeshAgent"), NULL, NULL);
+	if (store) {
+		CFStringRef userName = SCDynamicStoreCopyConsoleUser(store, &uid, NULL);
+		if (userName) {
+			CFRelease(userName);
+		}
+		CFRelease(store);
+	}
+	return uid;
 }
 #endif
 
@@ -314,6 +331,9 @@ static const char* MACOS_simple_flags[] = {
 	"-show-install-ui",   // Show installation UI (used by privilege elevation)
 	"-show-tcc-ui",       // Show TCC permissions window (standalone, same as SHIFT+double-click)
 	"-check-tcc",         // Check TCC permissions, show UI if needed (no pipe, fire-and-forget)
+	"-request-accessibility",   // Request Accessibility permission (spawned as user)
+	"-request-screenrecording", // Request Screen Recording permission (spawned as user)
+	"-request-fulldiskaccess",  // Request Full Disk Access (shows custom dialog)
 	"-kvm1",              // macOS KVM mode (LaunchAgent via QueueDirectories)
 	NULL
 };
@@ -632,7 +652,7 @@ int wmain(int argc, char **wargv)
 int main(int argc, char **argv)
 #endif
 {
-#ifdef _OPENBSD
+#if defined(_OPENBSD) || defined(__APPLE__)
 	realpath(argv[0], __agentExecPath);
 #endif
 
@@ -706,7 +726,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-show-tcc-ui") == 0) {
 			fprintf(stderr, "[MAIN] MeshAgent launched with -show-tcc-ui - showing TCC permissions window\n");
-			int result = show_tcc_permissions_window(0); // 0 = hide "Do not remind me again" checkbox
+			uid_t consoleUID = get_console_user_uid();
+			int result = show_tcc_permissions_window(0, __agentExecPath, consoleUID); // 0 = hide "Do not remind me again" checkbox
 			fprintf(stderr, "[MAIN] TCC permissions window closed (do not remind again: %d)\n", result);
 			return 0;
 		}
@@ -747,7 +768,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		{
 			// SHIFT + double-click -> ALWAYS show TCC permissions UI (regardless of current status)
 			fprintf(stderr, "MeshAgent launched from Finder with SHIFT key - showing TCC permissions window\n");
-			int result = show_tcc_permissions_window(0); // 0 = hide "Do not remind me again" checkbox
+			uid_t consoleUID = get_console_user_uid();
+			int result = show_tcc_permissions_window(0, __agentExecPath, consoleUID); // 0 = hide "Do not remind me again" checkbox
 			fprintf(stderr, "TCC permissions window closed (do not remind again: %d)\n", result);
 			return 0;
 		}
@@ -1028,6 +1050,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("  -kvm1                 KVM remote desktop subprocess mode\n");
 		printf("  -tccCheck             TCC permissions check subprocess (with pipe)\n");
 		printf("  -check-tcc            Check TCC permissions, show UI if needed (fire-and-forget)\n");
+		printf("  -request-accessibility        Request Accessibility permission (spawned as user)\n");
+		printf("  -request-screenrecording      Request Screen Recording permission (spawned as user)\n");
+		printf("  -request-fulldiskaccess       Request Full Disk Access (shows custom dialog)\n");
+		printf("                        WARNING: Running -request-* arguments from a terminal requests\n");
+		printf("                        permissions for the terminal app, not MeshAgent. These flags\n");
+		printf("                        are intended to be spawned by the TCC permissions UI, not run manually.\n");
 		printf("  -show-install-ui      Launch Installation Assistant GUI (with elevation)\n");
 		printf("                        Note: Also auto-launches with CMD+double-click on .app\n");
 		printf("  -show-tcc-ui          Show TCC permissions window (Accessibility, FDA, Screen Recording)\n");
@@ -1260,7 +1288,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		}
 
 		// At least one permission missing - show UI
-		int result = show_tcc_permissions_window(1); // 1 = show "Do not remind me again" checkbox
+		uid_t consoleUID = get_console_user_uid();
+		int result = show_tcc_permissions_window(1, __agentExecPath, consoleUID); // 1 = show "Do not remind me again" checkbox
 
 		// If user clicked "Do not remind me again", write to .msh file
 		if (result == 1) {
@@ -1288,6 +1317,39 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		// Close database
 		ILibSimpleDataStore_Close(db);
 		return 0;
+	}
+
+	// -request-accessibility: Request Accessibility permission (spawned as console user)
+	if (argc > 1 && strcasecmp(argv[1], "-request-accessibility") == 0)
+	{
+		// If running as root, drop privileges to the actual user
+		// (needed if spawned via launchctl asuser instead of su)
+		if (geteuid() == 0 && getuid() != 0) {
+			uid_t uid = getuid();
+			gid_t gid = getgid();
+
+			if (setgid(gid) != 0) {
+				return 1;
+			}
+
+			if (setuid(uid) != 0) {
+				return 1;
+			}
+		}
+
+		return request_accessibility_permission();
+	}
+
+	// -request-screenrecording: Request Screen Recording permission (spawned as console user)
+	if (argc > 1 && strcasecmp(argv[1], "-request-screenrecording") == 0)
+	{
+		return request_screen_recording_permission();
+	}
+
+	// -request-fulldiskaccess: Request Full Disk Access (shows custom dialog)
+	if (argc > 1 && strcasecmp(argv[1], "-request-fulldiskaccess") == 0)
+	{
+		return request_fda_permission();
 	}
 #endif
 

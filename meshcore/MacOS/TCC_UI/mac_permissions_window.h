@@ -16,12 +16,14 @@ extern "C" {
  * Parameters:
  *   show_reminder_checkbox - If 1, show "Do not remind me again" checkbox
  *                            If 0, hide the checkbox (for explicit SHIFT+click)
+ *   exe_path               - Path to meshagent executable (for spawning permission requests)
+ *   uid                    - Console user ID (for spawning permission requests as user)
  *
  * Returns:
  *   0 if user clicked "Finish"
  *   1 if user wants "Do not remind me again" (only if checkbox was shown)
  */
-int show_tcc_permissions_window(int show_reminder_checkbox);
+int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path, int uid);
 
 /**
  * Display the TCC permissions window asynchronously (non-blocking)
@@ -46,6 +48,51 @@ int show_tcc_permissions_window(int show_reminder_checkbox);
  *   Always -1 (fire-and-forget, no pipe to monitor)
  */
 int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, int uid);
+
+/**
+ * Request Accessibility permission (called by -request-accessibility flag)
+ *
+ * Calls AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt to
+ * trigger the macOS system dialog:
+ * "MeshAgent.app would like to control this computer using accessibility features"
+ *
+ * This function should be called from a process running as the console user
+ * (spawned via posix_spawn with setuid).
+ *
+ * Returns:
+ *   0 on success
+ */
+int request_accessibility_permission(void);
+
+/**
+ * Request Screen Recording permission (called by -request-screenrecording flag)
+ *
+ * Checks if Screen Recording permission is already granted via CGPreflightScreenCaptureAccess.
+ * If not granted, calls CGRequestScreenCaptureAccess to trigger the macOS system dialog.
+ *
+ * This function should be called from a process running as the console user
+ * (spawned via posix_spawn with setuid).
+ *
+ * Returns:
+ *   0 on success
+ */
+int request_screen_recording_permission(void);
+
+/**
+ * Request Full Disk Access permission (called by -request-fulldiskaccess flag)
+ *
+ * Checks if FDA is already granted by attempting to open TCC.db read-only.
+ * If not granted, shows a custom NSAlert dialog with buttons:
+ * - "Open System Settings" - Opens System Settings to FDA pane
+ * - "Deny" (default) - Closes dialog
+ *
+ * Features a composite icon (lock + FDA drive icon).
+ * Includes fallback for macOS < 11.0.
+ *
+ * Returns:
+ *   0 on success (dialog shown or FDA already granted)
+ */
+int request_fda_permission(void);
 
 #ifdef __cplusplus
 }
