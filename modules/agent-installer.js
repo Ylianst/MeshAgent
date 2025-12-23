@@ -463,8 +463,11 @@ function updateMshFile(mshPath, updates) {
 
 // Helper to find existing installation
 function findInstallation(installPath, serviceName, companyName) {
+    logger.debug('[findInstallation] Called with installPath=' + installPath + ', serviceName=' + serviceName + ', companyName=' + companyName);
+
     // If explicit path provided
     if (installPath) {
+        logger.debug('[findInstallation] Checking explicit path: ' + installPath);
         installPath = normalizeInstallPath(installPath);
         // Check for bundle first using dynamic discovery, then standalone binary
         var bundleName = findBundleInDirectory(installPath);
@@ -480,19 +483,23 @@ function findInstallation(installPath, serviceName, companyName) {
 
     // Try to find service by name
     if (serviceName || companyName) {
+        logger.debug('[findInstallation] Trying to find service by name');
         try {
             var serviceId = macOSHelpers.buildServiceId(serviceName || 'meshagent', companyName);
 
             var svc = require('service-manager').manager.getService(serviceId);
             var path = svc.appWorkingDirectory();
             svc.close();
+            logger.debug('[findInstallation] Found service at: ' + path);
             return path;
         } catch (e) {
+            logger.debug('[findInstallation] Service not found by name');
             // Service not found - return null (caller will log appropriately)
             return null;
         }
     }
 
+    logger.debug('[findInstallation] Scanning plists for current binary: ' + process.execPath);
     // Check if current binary is registered in any LaunchDaemon/LaunchAgent
     // This handles upgrade/install from an already-installed location
     var currentBinary = process.execPath;
@@ -508,14 +515,18 @@ function findInstallation(installPath, serviceName, companyName) {
 
                     // Check if this plist points to the CURRENT binary
                     if (binaryPath === currentBinary) {
+                        logger.debug('[findInstallation] Found plist pointing to current binary: ' + plistPath);
                         // Extract installation path
                         var bundleParent = macOSHelpers.getBundleParentDirectory(binaryPath);
                         if (bundleParent) {
+                            logger.debug('[findInstallation] Returning bundle parent: ' + bundleParent);
                             return bundleParent;
                         } else {
                             var parts = binaryPath.split('/');
                             parts.pop();
-                            return parts.join('/') + '/';
+                            var result = parts.join('/') + '/';
+                            logger.debug('[findInstallation] Returning binary directory: ' + result);
+                            return result;
                         }
                     }
                 }
@@ -525,13 +536,16 @@ function findInstallation(installPath, serviceName, companyName) {
         }
     }
 
+    logger.debug('[findInstallation] No plist found, checking default location');
     // Try default location
     var defaultPath = '/usr/local/mesh_services/meshagent/';
     if (require('fs').existsSync(defaultPath + 'meshagent')) {
+        logger.debug('[findInstallation] Found installation at default path: ' + defaultPath);
         return defaultPath;
     }
 
     // Not found anywhere - return null (caller will log appropriately)
+    logger.debug('[findInstallation] No installation found, returning null');
     return null;
 }
 
@@ -1911,6 +1925,29 @@ function installServiceUnified(params) {
         try {
             existingInstallPath = findInstallation(installPath, newServiceName, newCompanyName);
         } catch (e) {
+        }
+
+        // IMPORTANT: Don't treat the source binary's location as an "existing installation"
+        // This prevents the installer from doing a "self-upgrade" when running -fullinstall
+        // from a distribution bundle (e.g., downloaded to /Downloads) that happens to have
+        // a leftover plist from a previous test installation pointing to the same location.
+        // For fresh installs, we want to install to the DEFAULT location, not the source location.
+        if (existingInstallPath) {
+            var sourceParent;
+            if (sourceType.type === 'bundle') {
+                sourceParent = macOSHelpers.getBundleParentDirectory(sourceType.binaryPath);
+            } else {
+                sourceParent = sourceType.binaryPath.substring(0, sourceType.binaryPath.lastIndexOf('/') + 1);
+            }
+
+            logger.debug('[SOURCE-CHECK] existingInstallPath=' + existingInstallPath);
+            logger.debug('[SOURCE-CHECK] sourceParent=' + sourceParent);
+            logger.debug('[SOURCE-CHECK] match=' + (existingInstallPath === sourceParent));
+
+            if (existingInstallPath === sourceParent) {
+                logger.info('Ignoring source location as existing installation (use --installPath to override)');
+                existingInstallPath = null;
+            }
         }
 
         // Determine operation mode based on existing installation and flags

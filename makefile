@@ -849,6 +849,8 @@ macos:
 	else \
 		./build/tools/sync-modules.sh --mode $(MODULESYNC_MODE) --verbose; \
 	fi
+	@echo "Regenerating polyfills from modules_macos..."
+	@./build/tools/code-utils/macos/meshagent_code-utils -import --expandedPath="./modules_macos" --filePath="./microscript/ILibDuktape_Polyfills.c"
 	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
 	@if [ "$(ARCHID)" = "10005" ]; then \
 		eval $$(./build/tools/generate-build-timestamp.sh); \
