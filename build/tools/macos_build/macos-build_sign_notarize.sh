@@ -26,7 +26,7 @@ cd "$REPO_DIR"
 #==============================================================================
 
 ARCHID="10005"                      # Default: 10005=Universal (16=Intel x86-64, 29=ARM64, 10005=Universal)
-SKIP_POLYFILLS="no"                 # Skip polyfills regeneration (use existing ILibDuktape_Polyfills.c)
+SKIP_POLYFILLS="yes"                # Skip polyfills regeneration (Makefile handles this automatically)
 MACOS_ONLY_POLYFILLS="yes"          # Generate polyfills from modules_macos only
 CODE_UTILS_BUILD="no"               # Code-utils build: KVM=0, minimal module set (8 modules vs 50) for polyfill generation
 SKIP_BUILD="no"                     # Skip build step (use existing binary)

@@ -364,3 +364,4 @@ modules_windows/
 .claude/
 .claudrc
 /build/tools/macos_build/Info.plist
+modules/embedded.info

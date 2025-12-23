@@ -844,13 +844,15 @@ linux:
 # App Bundle: After building the binary, automatically creates a .app bundle in
 # $(BUILD_OUTPUT_DIR)/<arch>-app/MeshAgent.app for easy distribution and testing.
 macos:
-	@if echo "$(BUNDLE_ID)" | grep -q "code-utils"; then \
-		echo "Skipping module sync for code-utils build (using minimal module set from polyfills regeneration)"; \
-	else \
-		./build/tools/sync-modules.sh --mode $(MODULESYNC_MODE) --verbose; \
+	@if [ -z "$(BUILD_TIMESTAMP)" ]; then \
+		if echo "$(BUNDLE_ID)" | grep -q "code-utils"; then \
+			echo "Skipping module sync for code-utils build (using minimal module set from polyfills regeneration)"; \
+		else \
+			./build/tools/sync-modules.sh --mode $(MODULESYNC_MODE) --verbose; \
+		fi; \
+		echo "Regenerating polyfills from modules_macos..."; \
+		./build/tools/code-utils/macos/meshagent_code-utils -import --expandedPath="./modules_macos" --filePath="./microscript/ILibDuktape_Polyfills.c"; \
 	fi
-	@echo "Regenerating polyfills from modules_macos..."
-	@./build/tools/code-utils/macos/meshagent_code-utils -import --expandedPath="./modules_macos" --filePath="./microscript/ILibDuktape_Polyfills.c"
 	@mkdir -p $(BUILD_OUTPUT_DIR)/DEBUG
 	@if [ "$(ARCHID)" = "10005" ]; then \
 		eval $$(./build/tools/generate-build-timestamp.sh); \
@@ -860,10 +862,10 @@ macos:
 		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		echo "Building x86-64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
+		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
 		echo "Building ARM64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIME BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
+		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
 		echo "Creating universal binary..."; \
 		lipo -create \
 			$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-x86-64 \
@@ -889,10 +891,16 @@ macos:
 			echo "  Created: $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64-app.zip"; \
 			echo ""; \
 			echo "---"; \
-			EXPECTED_VERSION="$$BUILD_DATE $$BUILD_TIME_ONLY"; \
+			EXPECTED_VERSION="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/output/tmp_binary_Info.plist) $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/output/tmp_binary_Info.plist)"; \
 			STANDALONE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -fullversion 2>/dev/null || echo "ERROR"); \
 			BUNDLE_VERSION=$$($(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -fullversion 2>/dev/null || echo "ERROR"); \
 			if [ "$$STANDALONE_VERSION" = "$$EXPECTED_VERSION" ] && [ "$$BUNDLE_VERSION" = "$$EXPECTED_VERSION" ]; then \
+				echo ""; \
+				echo "Regenerating FULL polyfills (all modules) for non-macOS builds..."; \
+				./build/tools/code-utils/macos/meshagent_code-utils -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"; \
+				echo "Full polyfills regenerated (commit ILibDuktape_Polyfills.c for Linux/BSD builds)"; \
+				echo ""; \
+				echo "---"; \
 				echo "$$(date '+%Y-%m-%d %H:%M:%S') INFO: Successfully built version $$EXPECTED_VERSION"; \
 				echo ""; \
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64"; \
@@ -944,7 +952,7 @@ macos:
 			echo "  Created: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)-app.zip"; \
 			echo ""; \
 			echo "---"; \
-			EXPECTED_VERSION="$$BUILD_DATE $$BUILD_TIME_ONLY"; \
+			EXPECTED_VERSION="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/output/tmp_binary_Info.plist) $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/output/tmp_binary_Info.plist)"; \
 			STANDALONE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) -fullversion 2>/dev/null || echo "ERROR"); \
 			BUNDLE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app/Contents/MacOS/meshagent -fullversion 2>/dev/null || echo "ERROR"); \
 			if [ "$$STANDALONE_VERSION" = "$$EXPECTED_VERSION" ] && [ "$$BUNDLE_VERSION" = "$$EXPECTED_VERSION" ]; then \
