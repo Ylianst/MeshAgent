@@ -20,7 +20,7 @@ This PR transforms the macOS MeshAgent into a first-class macOS application with
 
 ## Commit Structure
 
-This PR is organized into **6 chronological commits** following the actual development timeline:
+This PR is organized into **7 chronological commits** following the actual development timeline:
 
 ### 1. **macOS: Implement KVM1 reversed socket architecture with LaunchD integration**
    - Complete rewrite of macOS KVM (remote desktop) architecture
@@ -72,6 +72,17 @@ This PR is organized into **6 chronological commits** following the actual devel
    - macOS helper functions module (`macOSHelpers.js`)
    - Security permissions management module (`security-permissions.js`)
 
+### 7. **macOS: Post-release polish and Installation UI fix**
+   - **Installation UI Launch Fix:** Resolved CMD+double-click Installation Assistant not displaying
+     - Implemented launchctl asuser for GUI session access with root privileges
+     - Fixed Authorization Services integration to spawn UI in user's session
+   - **Version Race Condition:** Fixed build reproducibility issue in version detection
+   - **Polyfill Handling:** Streamlined with auto-regeneration support
+   - **TCC Accessibility Enhancement:** Button now spawns permission request at user level
+   - **Install Location Detection:** Improved path detection accuracy
+   - **Debug Logging Cleanup:** Removed verbose logging, refactored mesh_log_message
+   - **PublicTestBuild Cleanup:** Removed obsolete test build folder
+
 ---
 
 ## Key Features
@@ -90,6 +101,7 @@ This PR is organized into **6 chronological commits** following the actual devel
 
 ### 📦 Installation Experience
 - **GUI Installation Assistant:** Native Cocoa interface for install/upgrade
+- **GUI Session Fix:** Installation Assistant now properly launches with both root privileges and GUI access
 - **Auto-Discovery:** Automatic .msh file detection
 - **Multi-Tenancy:** ServiceID system enables multiple installations
 - **Recursive Path Creation:** Supports complex installation paths
@@ -175,6 +187,7 @@ Security permissions management:
 - ✅ Recursive directory creation
 - ✅ Bundle detection and operations
 - ✅ Code signing and notarization workflow
+- ✅ CMD+double-click Installation Assistant (with launchctl asuser fix)
 
 ### Security Testing
 - ✅ Path validation (injection prevention)
@@ -258,7 +271,7 @@ make macos ARCHID=29  # Universal binary (ARM64 + x86_64)
 ### Modified Files
 - `modules/agent-installer.js` - Fixed path normalization bugs
 - `modules/service-manager.js` - Added recursive directory creation
-- `meshcore/MacOS/Install_UI/mac_authorized_install.m` - Fixed path validation
+- `meshcore/MacOS/Install_UI/mac_authorized_install.m` - Fixed path validation and GUI launch via launchctl asuser
 - `Makefile` - macOS build improvements
 - Build scripts and configuration files
 
