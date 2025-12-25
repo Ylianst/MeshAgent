@@ -173,15 +173,28 @@ int ensure_running_as_root(void) {
         return -2;  // User cancelled or auth failed
     }
 
-    // Relaunch ourselves with privileges
+    // Relaunch ourselves with privileges via launchctl asuser
+    // This ensures the process runs with root privileges BUT in the user's GUI session
+    // (so it can display windows), unlike AuthorizationExecuteWithPrivileges alone
     // Pass -show-install-ui flag so elevated process knows to show the Install UI
     // (it won't have LAUNCHED_FROM_FINDER env var or detect CMD key)
-    char* argv[] = { "-show-install-ui", NULL };
 
-    mesh_log_message("[AUTH-ELEVATE] Relaunching as root: %s\n", exePath);
+    // Get the user's UID to pass to launchctl asuser
+    uid_t userUID = getuid();
+
+    // Build shell command: launchctl asuser <uid> <exePath> -show-install-ui
+    char shellCommand[2048];
+    snprintf(shellCommand, sizeof(shellCommand),
+             "launchctl asuser %d '%s' -show-install-ui",
+             userUID, exePath);
+
+    mesh_log_message("[AUTH-ELEVATE] Relaunching via shell command: %s\n", shellCommand);
+
+    // Use /bin/sh -c to execute the launchctl command
+    char* argv[] = { "-c", shellCommand, NULL };
 
     FILE* pipe = NULL;
-    status = AuthorizationExecuteWithPrivileges(authRef, exePath,
+    status = AuthorizationExecuteWithPrivileges(authRef, "/bin/sh",
                                                  kAuthorizationFlagDefaults,
                                                  argv, &pipe);
 
@@ -189,6 +202,16 @@ int ensure_running_as_root(void) {
         mesh_log_message("[AUTH-ELEVATE] Error: Failed to relaunch with privileges (status: %d)\n", status);
         AuthorizationFree(authRef, kAuthorizationFlagDefaults);
         return -3;
+    }
+
+    mesh_log_message("[AUTH-ELEVATE] AuthorizationExecuteWithPrivileges succeeded (status: %d)\n", status);
+
+    // Read any output from the pipe to see if there were errors
+    if (pipe) {
+        char buffer[1024];
+        while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+            mesh_log_message("[AUTH-ELEVATE] shell output: %s", buffer);
+        }
     }
 
     // Close pipe if we got one
