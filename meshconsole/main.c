@@ -235,8 +235,7 @@ static const char* ALL_PLATFORMS_simple_flags[] = {
 		"-fdelta",            // Force delta
 
 		// Backup Control
-		"--omit-backup",      // Skip backup during upgrade (flag format)
-		"--skip-backup",      // Alias for --omit-backup
+		"--backup",           // Create backup during install/upgrade (flag format)
 
 		// Development & Testing
 		"-export",            // Export configuration
@@ -274,8 +273,7 @@ static const char* ALL_PLATFORMS_prefix_flags[] = {
 		"--readonly=",        // Read-only filesystem mode
 
 		// Backup Control (value format)
-		"--omit-backup=",     // Skip backup during upgrade (value format)
-		"--skip-backup=",     // Alias for --omit-backup=
+		"--backup=",          // Create backup during install/upgrade (value format)
 
 		// Advanced Options
 		"--script-db",        // Script database path

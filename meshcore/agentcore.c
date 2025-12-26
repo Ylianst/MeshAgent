@@ -5261,6 +5261,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, ix - 2, param[ri] + ix + 1, len - (ix + 1));
 			++ixr;
 		}
+		else if (len > 2 && strncmp(param[ri], "--", 2) == 0)
+		{
+			// Simple flag without value (e.g., --backup)
+			// Store it with value "1" so JavaScript can detect it
+			if (agentHost->masterDb == NULL) { agentHost->masterDb = ILibSimpleDataStore_CreateCachedOnly(); }
+			ILibSimpleDataStore_Cached(agentHost->masterDb, param[ri] + 2, len - 2, "1", 1);
+			++ixr;
+		}
 	}
 	paramLen -= ixr;
 

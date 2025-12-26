@@ -273,35 +273,6 @@ function checkParameters(parms)
         }
     }
 
-    // Normalize --skip-backup to --omit-backup (alias) - both simple flag and value formats
-    if (parms.indexOf('--skip-backup') >= 0)
-    {
-        parms.splice(parms.indexOf('--skip-backup'), 1);
-        if (parms.indexOf('--omit-backup') < 0)
-        {
-            parms.push('--omit-backup');
-        }
-    }
-    // Also normalize --skip-backup=VALUE to --omit-backup=VALUE
-    for (var i = 0; i < parms.length; i++)
-    {
-        if (parms[i].startsWith('--skip-backup='))
-        {
-            var value = parms[i].substring('--skip-backup='.length);
-            parms.splice(i, 1);
-            // Only add if --omit-backup=VALUE not already present
-            var hasOmitBackup = false;
-            for (var j = 0; j < parms.length; j++)
-            {
-                if (parms[j].startsWith('--omit-backup=')) { hasOmitBackup = true; break; }
-            }
-            if (!hasOmitBackup)
-            {
-                parms.push('--omit-backup=' + value);
-            }
-            break;
-        }
-    }
 
     var msh = _MSH();
     if (parms.getParameter('description', null) == null && msh.description != null) { parms.push('--description="' + msh.description + '"'); }
@@ -1207,6 +1178,7 @@ function backupInstallation(installPath) {
     var fs = require('fs');
     var timestamp = Date.now().toString();
     var backupName = null;
+    var backedUpFiles = [];
 
     try {
         // Check for bundle and back it up using dynamic discovery
@@ -1217,6 +1189,7 @@ function backupInstallation(installPath) {
             var backupPath = installPath + bundleName + '.' + timestamp;
             fs.renameSync(bundlePath, backupPath);
             backupName = bundleName + '.' + timestamp;
+            backedUpFiles.push(backupName);
         }
 
         // Check for standalone binary and back it up (handles edge case where both exist)
@@ -1226,9 +1199,26 @@ function backupInstallation(installPath) {
             fs.copyFileSync(binaryPath, backupPath);
             fs.unlinkSync(binaryPath);
             backupName = 'meshagent.' + timestamp;
+            backedUpFiles.push(backupName);
         }
 
-        return backupName;
+        // Backup .msh configuration file (if exists)
+        if (fs.existsSync(installPath + 'meshagent.msh')) {
+            var mshPath = installPath + 'meshagent.msh';
+            var mshBackupPath = installPath + 'meshagent.msh.' + timestamp;
+            fs.copyFileSync(mshPath, mshBackupPath);
+            backedUpFiles.push('meshagent.msh.' + timestamp);
+        }
+
+        // Backup .db database file (if exists)
+        if (fs.existsSync(installPath + 'meshagent.db')) {
+            var dbPath = installPath + 'meshagent.db';
+            var dbBackupPath = installPath + 'meshagent.db.' + timestamp;
+            fs.copyFileSync(dbPath, dbBackupPath);
+            backedUpFiles.push('meshagent.db.' + timestamp);
+        }
+
+        return { primary: backupName, files: backedUpFiles };
     } catch (e) {
         var errorMsg = 'Could not backup installation: ';
         if (e && e.message) {
@@ -1819,14 +1809,11 @@ function installServiceUnified(params) {
     var meshAgentLoggingParam = parms.getParameter('meshAgentLogging', null);
     var copyMsh = parms.getParameter('copy-msh', null);
     var explicitMshPath = parms.getParameter('mshPath', null);  // Explicit path to .msh file
-    // Check for --omit-backup in both formats:
-    // - Simple flag: --omit-backup (not passed from C, but check anyway)
-    // - Value format: --omit-backup=1 or --omit-backup=true (passed from C)
-    var omitBackupParam = parms.getParameter('omit-backup', null);
-    var skipBackupParam = parms.getParameter('skip-backup', null);
-    var omitBackup = (parms.indexOf('--omit-backup') >= 0) ||
-                     (omitBackupParam === '1' || omitBackupParam === 'true') ||
-                     (skipBackupParam === '1' || skipBackupParam === 'true');
+    // Check for --backup flag to enable backup of existing installation
+    // Default behavior: NO backup (for speed and simplicity)
+    // C code converts simple flag --backup to --backup=1 when passing to JavaScript
+    var backupParam = parms.getParameter('backup', null);
+    var createBackup = (backupParam === '1' || backupParam === 'true');
     var upgradeMode = (parms.indexOf('--_upgradeMode=1') >= 0);
 
     // Parse --allowNoMsh flag: allows install without valid .msh configuration (agent will wait for config)
@@ -2354,16 +2341,19 @@ function installServiceUnified(params) {
 
     if (isSelfUpgrade) {
         logger.info('Self-upgrade detected (running from install location)');
-        logger.info('Skipping backup and binary copy, will update service configuration');
+        logger.info('Will skip binary copy (service configuration will be updated)');
     }
 
-    // BACKUP (Unless --omit-backup specified or self-upgrade)
-    if (!omitBackup && existingInstallPath && !isSelfUpgrade) {
-        logger.info('Backing up current installation');
+    // BACKUP (Only if --backup flag explicitly specified)
+    if (createBackup && existingInstallPath) {
+        logger.info('Backing up current installation (--backup specified)');
         try {
-            var backupName = backupInstallation(installPath);
-            if (backupName) {
-                logger.info('Created backup: ' + backupName);
+            var backupResult = backupInstallation(installPath);
+            if (backupResult && backupResult.files && backupResult.files.length > 0) {
+                logger.info('Created backup (' + backupResult.files.length + ' file(s)):');
+                for (var i = 0; i < backupResult.files.length; i++) {
+                    logger.info('  - ' + backupResult.files[i]);
+                }
             } else {
                 logger.warn('No files found to backup (installation may be incomplete)');
             }
@@ -2371,8 +2361,8 @@ function installServiceUnified(params) {
             logger.error('Backup failed: ' + e);
             process.exit(1);
         }
-    } else if (omitBackup) {
-        logger.info('Skipping backup (--omit-backup specified)');
+    } else if (existingInstallPath) {
+        logger.info('Skipping backup (not requested, use --backup to enable)');
     }
 
     // INSTALL/REPLACE BINARY
@@ -3301,14 +3291,17 @@ function uninstallServiceUnified(params) {
                     }
                 }
 
-                // Clean up backup files (meshagent.TIMESTAMP or BundleName.app.TIMESTAMP)
+                // Clean up backup files (meshagent.TIMESTAMP, BundleName.app.TIMESTAMP, meshagent.msh.TIMESTAMP, meshagent.db.TIMESTAMP)
                 try {
                     var files = fs.readdirSync(installPath);
                     var backupCount = 0;
                     for (var i = 0; i < files.length; i++) {
                         var file = files[i];
-                        // Match backup pattern: meshagent.DIGITS or *.app.DIGITS
-                        if ((file.match(/^meshagent\.\d+$/) || file.match(/\.app\.\d+$/))) {
+                        // Match backup pattern: meshagent.DIGITS, *.app.DIGITS, meshagent.msh.DIGITS, meshagent.db.DIGITS
+                        if ((file.match(/^meshagent\.\d+$/) ||
+                             file.match(/\.app\.\d+$/) ||
+                             file.match(/^meshagent\.msh\.\d+$/) ||
+                             file.match(/^meshagent\.db\.\d+$/))) {
                             var backupPath = installPath + file;
                             var stats = fs.statSync(backupPath);
                             if (stats.isDirectory()) {
@@ -4280,7 +4273,12 @@ function upgradeAgent(params) {
     // Backup existing installation (bundle or standalone)
     logger.info('Backing up current installation...');
     try {
-        backupInstallation(installPath);
+        var backupResult = backupInstallation(installPath);
+        if (backupResult && backupResult.files && backupResult.files.length > 0) {
+            for (var i = 0; i < backupResult.files.length; i++) {
+                console.log('Backed up: ' + backupResult.files[i]);
+            }
+        }
     } catch (e) {
         console.log('ERROR: ' + e.message);
         console.log('Upgrade aborted.');
