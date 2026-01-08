@@ -202,9 +202,49 @@ jobs:
           compression-level: 9
   
 
+  sign_windows:
+    name: "Sign Windows Executable"
+    needs: [build_client]
+    runs-on: windows-latest
+    if: |
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      !failure() && !cancelled()
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download Windows Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: meshagent-windows-amd64
+          path: artifacts/
+
+      - name: Sign Windows package
+        uses: ./.github/steps/sign-windows-package
+        with:
+          azure_tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          azure_client_id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          signing_endpoint: ${{ secrets.SIGNING_ENDPOINT }}
+          code_signing_account_name: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT_NAME }}
+          certificate_profile_name: ${{ secrets.CERTIFICATE_PROFILE_NAME }}
+          binary_path: artifacts/${{ env.BINARY_NAME }}.exe
+
+      - name: Upload Signed Windows Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: meshagent-windows-amd64-signed
+          path: artifacts/
+          retention-days: 30
+          compression-level: 9
+
+
   release:
     name: "Create Release"
-    needs: [build_client, create_universal_macos]
+    needs: [build_client, create_universal_macos, sign_windows]
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' && 
@@ -229,8 +269,12 @@ jobs:
             tar -czf "final-artifacts/clients/meshagent-macos-universal.tar.gz" \
               -C "release-artifacts/meshagent-mac-universal" ${{ env.BINARY_NAME }}
           fi
-          # Windows
-          if [ -d "release-artifacts/meshagent-windows-amd64" ]; then
+          # Windows (use signed binary if available, fallback to unsigned)
+          if [ -d "release-artifacts/meshagent-windows-amd64-signed" ]; then
+            (cd "release-artifacts/meshagent-windows-amd64-signed" && \
+              zip "${GITHUB_WORKSPACE}/final-artifacts/clients/meshagent-windows-amd64.zip" ${{ env.BINARY_NAME }}.exe)
+          elif [ -d "release-artifacts/meshagent-windows-amd64" ]; then
+            echo "Warning: Using unsigned Windows binary"
             (cd "release-artifacts/meshagent-windows-amd64" && \
               zip "${GITHUB_WORKSPACE}/final-artifacts/clients/meshagent-windows-amd64.zip" ${{ env.BINARY_NAME }}.exe)
           fi
