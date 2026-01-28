@@ -427,6 +427,7 @@ function verifyPermissions(filePath, fileType) {
  */
 function verifyInstallation(installPath, options) {
     options = options || {};
+    var agentPaths = require('agent-paths');
     var results = {
         allValid: true,
         files: {},
@@ -442,11 +443,11 @@ function verifyInstallation(installPath, options) {
         installPath = installPath + '/';
     }
 
-    // Critical files to check
+    // Critical files to check - use agent-derived filenames
     var criticalFiles = [
-        { path: installPath + 'meshagent.msh', type: '.msh' },
-        { path: installPath + 'meshagent.db', type: '.db' },
-        { path: installPath + 'meshagent', type: 'binary' }
+        { path: installPath + agentPaths.getAgentMshName(), type: '.msh' },
+        { path: installPath + agentPaths.getAgentDbName(), type: '.db' },
+        { path: installPath + agentPaths.getAgentBaseName(), type: 'binary' }
     ];
 
     // Check for bundle installation (macOS)

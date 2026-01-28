@@ -17,6 +17,7 @@ limitations under the License.
 function _meshNodeId()
 {
     var ret = '';
+    var agentPaths = require('agent-paths');
     // Determine database path
     var dbPath;
     if (process.platform == 'win32')
@@ -30,7 +31,7 @@ function _meshNodeId()
         if (process.execPath.indexOf('.app/Contents/MacOS/') !== -1)
         {
             // Running from bundle - use current working directory
-            dbPath = process.cwd() + '/meshagent.db';
+            dbPath = process.cwd() + '/' + agentPaths.getAgentDbName();
         }
         else
         {

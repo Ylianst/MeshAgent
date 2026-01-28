@@ -1,6 +1,7 @@
 _agentNodeId.js
 _agentStatus.js
 agent-installer.js
+agent-paths.js
 agent-selftest.js
 AgentHashTool.js
 child-container.js

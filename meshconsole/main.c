@@ -1237,15 +1237,42 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 				return 1;
 			}
 
-			// Database and .msh are in parent directory of bundle
-			// e.g., /usr/local/mesh_services/meshagent/meshagent.db
-			// Strip .app/Contents/MacOS/meshagent to get bundle parent
+			// Database and .msh are in parent directory of bundle, named after the executable
+			// e.g., /usr/local/mesh_services/lithium-remote/lithium-remote.db
+			// bundlePath is like: /path/to/LithiumRemote.app/Contents/MacOS/lithium-remote
+
+			// Extract executable name from bundlePath
+			char* exeName = strrchr(bundlePath, '/');
+			char exeNameCopy[256];
+			if (exeName != NULL) {
+				exeName++; // Skip the '/'
+				strncpy(exeNameCopy, exeName, sizeof(exeNameCopy) - 1);
+				exeNameCopy[sizeof(exeNameCopy) - 1] = '\0';
+			} else {
+				strncpy(exeNameCopy, "meshagent", sizeof(exeNameCopy) - 1);
+				exeNameCopy[sizeof(exeNameCopy) - 1] = '\0';
+			}
+
+			// Strip to parent directory (remove /Contents/MacOS/executable)
 			char* lastSlash = strrchr(bundlePath, '/');
 			if (lastSlash != NULL) {
-				*lastSlash = '\0'; // Truncate to parent directory
+				*lastSlash = '\0'; // Remove executable name
 			}
-			snprintf(dbPath, sizeof(dbPath), "%s/meshagent.db", bundlePath);
-			snprintf(mshPath, sizeof(mshPath), "%s/meshagent.msh", bundlePath);
+			lastSlash = strrchr(bundlePath, '/');
+			if (lastSlash != NULL) {
+				*lastSlash = '\0'; // Remove /MacOS
+			}
+			lastSlash = strrchr(bundlePath, '/');
+			if (lastSlash != NULL) {
+				*lastSlash = '\0'; // Remove /Contents
+			}
+			lastSlash = strrchr(bundlePath, '/');
+			if (lastSlash != NULL) {
+				*lastSlash = '\0'; // Remove .app bundle name
+			}
+
+			snprintf(dbPath, sizeof(dbPath), "%s/%s.db", bundlePath, exeNameCopy);
+			snprintf(mshPath, sizeof(mshPath), "%s/%s.msh", bundlePath, exeNameCopy);
 			free(bundlePath);
 		} else {
 			// Standalone binary - database is next to executable
