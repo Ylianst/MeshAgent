@@ -135,7 +135,8 @@ if echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
     fi
 
     # Check if bundle is universal and notarize extracted slices
-    EXECUTABLE="$BUNDLE_PATH/Contents/MacOS/meshagent"
+    EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUNDLE_PATH/Contents/Info.plist" 2>/dev/null || echo "meshagent")
+    EXECUTABLE="$BUNDLE_PATH/Contents/MacOS/$EXE_NAME"
     if [ -f "$EXECUTABLE" ]; then
         if lipo -info "$EXECUTABLE" 2>/dev/null | grep -q "Architectures in the fat file"; then
             echo ""

@@ -9,7 +9,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Defaults
 OUTPUT=""
-BUNDLE_ID="consulting.artichoke.MeshAgent"
+BUNDLE_ID=""
+EXE_NAME="meshagent"
+DISPLAY_NAME="MeshAgent"
 BUILD_DATE=""
 BUILD_TIME=""
 MODE="bundle"  # bundle or binary
@@ -23,6 +25,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --bundle-id)
             BUNDLE_ID="$2"
+            shift 2
+            ;;
+        --exe-name)
+            EXE_NAME="$2"
+            shift 2
+            ;;
+        --display-name)
+            DISPLAY_NAME="$2"
             shift 2
             ;;
         --build-date)
@@ -39,11 +49,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 --output FILE --bundle-id ID --build-date DATE --build-time TIME --mode [binary|bundle]"
+            echo "Usage: $0 --output FILE [--bundle-id ID] [--exe-name NAME] [--display-name NAME] --build-date DATE --build-time TIME --mode [binary|bundle]"
             exit 1
             ;;
     esac
 done
+
+# Default BUNDLE_ID to EXE_NAME if not specified
+if [ -z "$BUNDLE_ID" ]; then
+    BUNDLE_ID="$EXE_NAME"
+fi
 
 # Validate required arguments
 if [ -z "$OUTPUT" ]; then
@@ -82,8 +97,10 @@ fi
 
 # Generate Info.plist by substituting placeholders
 sed -e "s/BUNDLE_IDENTIFIER/$BUNDLE_ID/g" \
+    -e "s/BUNDLE_EXE_NAME/$EXE_NAME/g" \
+    -e "s/BUNDLE_DISPLAY_NAME/$DISPLAY_NAME/g" \
     -e "s/BUILD_TIMESTAMP_DATE/$BUILD_DATE/g" \
     -e "s/BUILD_TIMESTAMP_TIME/$BUILD_TIME/g" \
     "$TEMPLATE" > "$OUTPUT"
 
-echo "Generated $MODE Info.plist: $OUTPUT"
+echo "Generated $MODE Info.plist: $OUTPUT (exe=$EXE_NAME, display=$DISPLAY_NAME)"

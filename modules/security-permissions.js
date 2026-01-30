@@ -67,11 +67,11 @@ function getEffectiveUid() {
 var SECURE_FILE_PERMISSIONS = {
     /**
      * .msh configuration files
-     * Contains server URLs, credentials, MeshID
-     * CRITICAL: Must be readable only by root
+     * Contains server URLs, MeshID, and configuration
+     * Readable by all for tooling; root-owned for integrity
      */
     '.msh': {
-        mode: 0o600,        // rw-------
+        mode: 0o644,        // rw-r--r--
         owner: 'root',
         group: 'wheel',     // macOS
         groupLinux: 'root', // Linux

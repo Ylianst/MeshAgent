@@ -16,19 +16,23 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 eval $("$PROJECT_ROOT/build/tools/generate-build-timestamp.sh")
 BUILD_TIMESTAMP_DATE="${4:-$BUILD_DATE}"
 BUILD_TIMESTAMP_TIME="${5:-$BUILD_TIME_ONLY}"
+EXE_NAME="${6:-meshagent}"
+DISPLAY_NAME="${7:-MeshAgent}"
 
 if [ -z "$BINARY_PATH" ]; then
-    echo "Usage: $0 <binary_path> [bundle_name] [bundle_id] [build_timestamp_date] [build_timestamp_time]"
+    echo "Usage: $0 <binary_path> [bundle_name] [bundle_id] [build_timestamp_date] [build_timestamp_time] [exe_name] [display_name]"
     echo ""
     echo "Arguments:"
-    echo "  binary_path           Path to the compiled meshagent binary (required)"
+    echo "  binary_path           Path to the compiled binary (required)"
     echo "  bundle_name           Name of the .app bundle (default: MeshAgent.app)"
     echo "  bundle_id             Bundle identifier (default: meshagent)"
     echo "  build_timestamp_date  Version date (default: current date as yy.mm.dd)"
     echo "  build_timestamp_time  Version time (default: current time as HH.MM.SS)"
+    echo "  exe_name              Executable name inside bundle (default: meshagent)"
+    echo "  display_name          Display name for CFBundleDisplayName (default: MeshAgent)"
     echo ""
     echo "Example:"
-    echo "  $0 build/output/meshagent_osx-arm-64 MeshAgent.app com.meshcentral.meshagent 25.11.19 14.30.45"
+    echo "  $0 build/output/meshagent_osx-arm-64 MeshAgent.app meshagent 25.11.19 14.30.45 meshagent MeshAgent"
     exit 1
 fi
 
@@ -40,6 +44,8 @@ fi
 echo "Creating app bundle: $BUNDLE_NAME"
 echo "  Binary: $BINARY_PATH"
 echo "  Bundle ID: $BUNDLE_ID"
+echo "  Exe Name: $EXE_NAME"
+echo "  Display Name: $DISPLAY_NAME"
 echo "  Version Date: $BUILD_TIMESTAMP_DATE"
 echo "  Version Time: $BUILD_TIMESTAMP_TIME"
 echo "  Project root: $PROJECT_ROOT"
@@ -60,24 +66,26 @@ mkdir -p "$BUNDLE_NAME/Contents/MacOS"
 mkdir -p "$BUNDLE_NAME/Contents/Resources"
 
 # Copy binary
-cp "$BINARY_PATH" "$BUNDLE_NAME/Contents/MacOS/meshagent"
-chmod +x "$BUNDLE_NAME/Contents/MacOS/meshagent"
-echo "  Copied binary to Contents/MacOS/meshagent"
+cp "$BINARY_PATH" "$BUNDLE_NAME/Contents/MacOS/$EXE_NAME"
+chmod +x "$BUNDLE_NAME/Contents/MacOS/$EXE_NAME"
+echo "  Copied binary to Contents/MacOS/$EXE_NAME"
 
 # Generate Info.plist using unified generation script
 "$PROJECT_ROOT/build/tools/generate-info-plist.sh" \
     --output "$BUNDLE_NAME/Contents/Info.plist" \
     --bundle-id "$BUNDLE_ID" \
+    --exe-name "$EXE_NAME" \
+    --display-name "$DISPLAY_NAME" \
     --build-date "$BUILD_TIMESTAMP_DATE" \
     --build-time "$BUILD_TIMESTAMP_TIME" \
     --mode bundle
-echo "  Generated Info.plist (date: $BUILD_TIMESTAMP_DATE, time: $BUILD_TIMESTAMP_TIME)"
+echo "  Generated Info.plist (date: $BUILD_TIMESTAMP_DATE, time: $BUILD_TIMESTAMP_TIME, exe: $EXE_NAME)"
 
 # Copy icon
-ICON_PATH="$PROJECT_ROOT/build/resources/icon/meshagent.icns"
+ICON_PATH="$PROJECT_ROOT/build/resources/icon/AppIcon.icns"
 if [ -f "$ICON_PATH" ]; then
-    cp "$ICON_PATH" "$BUNDLE_NAME/Contents/Resources/meshagent.icns"
-    echo "  Copied icon: meshagent.icns"
+    cp "$ICON_PATH" "$BUNDLE_NAME/Contents/Resources/AppIcon.icns"
+    echo "  Copied icon: AppIcon.icns"
 else
     echo "  Warning: Icon not found at $ICON_PATH"
     echo "  Bundle will be created without icon"

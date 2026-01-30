@@ -1,11 +1,10 @@
 #include "mac_authorized_install.h"
-#include <Security/Authorization.h>
-#include <Security/AuthorizationTags.h>
 #include <mach-o/dyld.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -13,13 +12,41 @@
 #include <time.h>
 #include <errno.h>
 #include <pthread.h>
+#include <Block.h>
+#include <Security/Authorization.h>
 #include "../../../microstack/ILibSimpleDataStore.h"
 #include "../mac_logging_utils.h"  // Shared logging utility
 #include "../mac_plist_utils.h"    // Shared plist parsing utility
 
+extern char **environ;
+
+// Global authorization reference (acquired on main thread, used by execute functions)
+static AuthorizationRef g_authRef = NULL;
+static pthread_mutex_t g_authRef_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // Global progress callback with thread safety
 static ProgressCallback g_progressCallback = NULL;
 static pthread_mutex_t g_progressCallback_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Get base filename from executable path for dynamic .msh/.db naming
+static void getAgentBaseName(char *baseName, size_t baseNameSize) {
+    char execPath[PATH_MAX];
+    uint32_t size = sizeof(execPath);
+
+    if (_NSGetExecutablePath(execPath, &size) != 0) {
+        baseName[0] = '\0';  // Empty on failure - caller must handle
+        return;
+    }
+
+    char *lastSlash = strrchr(execPath, '/');
+    const char *filename = lastSlash ? lastSlash + 1 : execPath;
+
+    strncpy(baseName, filename, baseNameSize - 1);
+    baseName[baseNameSize - 1] = '\0';
+
+    char *dot = strrchr(baseName, '.');
+    if (dot) *dot = '\0';
+}
 
 // Cleanup function called when library/executable unloads
 __attribute__((destructor))
@@ -121,113 +148,53 @@ static int validate_installation_path(const char* path, char* errorBuf, size_t e
     return 1;
 }
 
-/**
- * Ensure the process is running as root. If not, relaunch with admin privileges.
- * This function will not return if elevation is needed - it relaunches and exits.
- *
- * @return 0 if already root, does not return if elevation needed
- */
-int ensure_running_as_root(void) {
-    // Already running as root?
-    if (getuid() == 0) {
-        mesh_log_message("[AUTH-ELEVATE] Already running as root\n");
-        return 0;
+int acquire_admin_authorization(void) {
+    pthread_mutex_lock(&g_authRef_mutex);
+
+    // Release any existing ref
+    if (g_authRef != NULL) {
+        AuthorizationFree(g_authRef, kAuthorizationFlagDefaults);
+        g_authRef = NULL;
     }
 
-    mesh_log_message("[AUTH-ELEVATE] Not running as root (uid=%d), requesting elevation\n", getuid());
-
-    // Get path to current executable
-    char exePath[1024];
-    uint32_t size = sizeof(exePath);
-    if (_NSGetExecutablePath(exePath, &size) != 0) {
-        mesh_log_message("[AUTH-ELEVATE] Error: Failed to get executable path\n");
-        return -1;
-    }
-
-    // Create authorization reference
-    OSStatus status;
-    AuthorizationRef authRef;
-
-    status = AuthorizationCreate(NULL, kAuthorizationEmptyEnvironment,
-                                  kAuthorizationFlagDefaults, &authRef);
+    OSStatus status = AuthorizationCreate(NULL, kAuthorizationEmptyEnvironment,
+                                          kAuthorizationFlagDefaults, &g_authRef);
     if (status != errAuthorizationSuccess) {
-        mesh_log_message("[AUTH-ELEVATE] Error: Failed to create authorization reference (status: %d)\n", status);
+        mesh_log_message("[AUTH-INSTALL] Error: Failed to create authorization reference (status=%d)\n", status);
+        g_authRef = NULL;
+        pthread_mutex_unlock(&g_authRef_mutex);
         return -1;
     }
 
-    // Request admin rights - this shows the password dialog
-    AuthorizationItem items = {kAuthorizationRightExecute, 0, NULL, 0};
-    AuthorizationRights rights = {1, &items};
+    AuthorizationItem right = { "system.privilege.admin", 0, NULL, 0 };
+    AuthorizationRights rights = { 1, &right };
     AuthorizationFlags flags = kAuthorizationFlagDefaults |
                                kAuthorizationFlagInteractionAllowed |
                                kAuthorizationFlagPreAuthorize |
                                kAuthorizationFlagExtendRights;
 
-    status = AuthorizationCopyRights(authRef, &rights, NULL, flags, NULL);
+    status = AuthorizationCopyRights(g_authRef, &rights, NULL, flags, NULL);
     if (status != errAuthorizationSuccess) {
-        mesh_log_message("[AUTH-ELEVATE] Error: Failed to obtain authorization (status: %d)\n", status);
-        if (status == errAuthorizationCanceled) {
-            mesh_log_message("[AUTH-ELEVATE] User cancelled authentication\n");
-        }
-        AuthorizationFree(authRef, kAuthorizationFlagDefaults);
-        return -2;  // User cancelled or auth failed
+        mesh_log_message("[AUTH-INSTALL] Admin authorization denied or failed (status=%d)\n", status);
+        AuthorizationFree(g_authRef, kAuthorizationFlagDefaults);
+        g_authRef = NULL;
+        pthread_mutex_unlock(&g_authRef_mutex);
+        return -1;
     }
 
-    // Relaunch ourselves with privileges via launchctl asuser
-    // This ensures the process runs with root privileges BUT in the user's GUI session
-    // (so it can display windows), unlike AuthorizationExecuteWithPrivileges alone
-    // Pass -show-install-ui flag so elevated process knows to show the Install UI
-    // (it won't have LAUNCHED_FROM_FINDER env var or detect CMD key)
-
-    // Get the user's UID to pass to launchctl asuser
-    uid_t userUID = getuid();
-
-    // Build shell command: launchctl asuser <uid> <exePath> -show-install-ui
-    char shellCommand[2048];
-    snprintf(shellCommand, sizeof(shellCommand),
-             "launchctl asuser %d '%s' -show-install-ui",
-             userUID, exePath);
-
-    mesh_log_message("[AUTH-ELEVATE] Relaunching via shell command: %s\n", shellCommand);
-
-    // Use /bin/sh -c to execute the launchctl command
-    char* argv[] = { "-c", shellCommand, NULL };
-
-    FILE* pipe = NULL;
-    status = AuthorizationExecuteWithPrivileges(authRef, "/bin/sh",
-                                                 kAuthorizationFlagDefaults,
-                                                 argv, &pipe);
-
-    if (status != errAuthorizationSuccess) {
-        mesh_log_message("[AUTH-ELEVATE] Error: Failed to relaunch with privileges (status: %d)\n", status);
-        AuthorizationFree(authRef, kAuthorizationFlagDefaults);
-        return -3;
-    }
-
-    mesh_log_message("[AUTH-ELEVATE] AuthorizationExecuteWithPrivileges succeeded (status: %d)\n", status);
-
-    // Read any output from the pipe to see if there were errors
-    if (pipe) {
-        char buffer[1024];
-        while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-            mesh_log_message("[AUTH-ELEVATE] shell output: %s", buffer);
-        }
-    }
-
-    // Close pipe if we got one
-    if (pipe) {
-        fclose(pipe);
-    }
-
-    AuthorizationFree(authRef, kAuthorizationFlagDefaults);
-
-    mesh_log_message("[AUTH-ELEVATE] Elevated process launched, exiting parent\n");
-
-    // Exit this (non-elevated) process - the elevated one will take over
-    exit(0);
-
-    // Never reached
+    mesh_log_message("[AUTH-INSTALL] Admin authorization acquired\n");
+    pthread_mutex_unlock(&g_authRef_mutex);
     return 0;
+}
+
+void release_admin_authorization(void) {
+    pthread_mutex_lock(&g_authRef_mutex);
+    if (g_authRef != NULL) {
+        AuthorizationFree(g_authRef, kAuthorizationFlagDefaults);
+        g_authRef = NULL;
+        mesh_log_message("[AUTH-INSTALL] Admin authorization released\n");
+    }
+    pthread_mutex_unlock(&g_authRef_mutex);
 }
 
 /**
@@ -250,152 +217,115 @@ static char* get_executable_path(void) {
 }
 
 /**
- * Execute a command with admin privileges using Authorization Services
+ * Execute a command with admin privileges using the previously acquired authorization.
+ * Uses AuthorizationExecuteWithPrivileges to run as root.
+ * Reads stdout via the FILE* returned by the API and sends lines to the progress callback.
  */
-static int execute_with_authorization(const char* executable, char* const argv[]) {
-    OSStatus status;
-    AuthorizationRef authRef;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static int execute_command(const char* executable, char* const argv[]) {
+    // Build full command string for logging
+    char cmdLine[4096];
+    int cmdLen = snprintf(cmdLine, sizeof(cmdLine), "%s", executable);
+    int hasVerbose = 0;
+    for (int i = 0; argv[i] != NULL; i++) {
+        if (cmdLen < (int)sizeof(cmdLine) - 1) {
+            cmdLen += snprintf(cmdLine + cmdLen, sizeof(cmdLine) - cmdLen, " %s", argv[i]);
+        }
+        if (strcmp(argv[i], "--log=3") == 0) hasVerbose = 1;
+    }
 
-    // Create authorization reference
-    status = AuthorizationCreate(NULL, kAuthorizationEmptyEnvironment,
-                                  kAuthorizationFlagDefaults, &authRef);
-    if (status != errAuthorizationSuccess) {
-        mesh_log_message("[AUTH-INSTALL] Error: Failed to create authorization reference (status: %d)\n", status);
+    mesh_log_message("[AUTH-INSTALL] Executing: %s\n", cmdLine);
+
+    // When verbose logging is enabled, send full command to progress UI
+    if (hasVerbose) {
+        pthread_mutex_lock(&g_progressCallback_mutex);
+        ProgressCallback cb = g_progressCallback;
+        pthread_mutex_unlock(&g_progressCallback_mutex);
+        if (cb) {
+            char cbLine[4200];
+            snprintf(cbLine, sizeof(cbLine), "Command: %s\n\n", cmdLine);
+            cb(cbLine);
+        }
+    }
+
+    pthread_mutex_lock(&g_authRef_mutex);
+    AuthorizationRef authRef = g_authRef;
+    pthread_mutex_unlock(&g_authRef_mutex);
+
+    if (authRef == NULL) {
+        mesh_log_message("[AUTH-INSTALL] Error: No admin authorization available. Call acquire_admin_authorization() first.\n");
         return -1;
     }
 
-    // Request admin rights
-    AuthorizationItem items = {kAuthorizationRightExecute, 0, NULL, 0};
-    AuthorizationRights rights = {1, &items};
-    AuthorizationFlags flags = kAuthorizationFlagDefaults |
-                               kAuthorizationFlagInteractionAllowed |
-                               kAuthorizationFlagPreAuthorize |
-                               kAuthorizationFlagExtendRights;
-
-    status = AuthorizationCopyRights(authRef, &rights, NULL, flags, NULL);
-    if (status != errAuthorizationSuccess) {
-        mesh_log_message("[AUTH-INSTALL] Error: Failed to obtain authorization (status: %d)\n", status);
-        if (status == errAuthorizationCanceled) {
-            mesh_log_message("[AUTH-INSTALL] User cancelled authentication\n");
-        }
-        AuthorizationFree(authRef, kAuthorizationFlagDefaults);
-        return -2;
+    // Strip LAUNCHED_FROM_FINDER so the child process doesn't try to show
+    // the install UI instead of processing command-line arguments
+    char* savedLFF = NULL;
+    const char* lffVal = getenv("LAUNCHED_FROM_FINDER");
+    if (lffVal != NULL) {
+        savedLFF = strdup(lffVal);
+        unsetenv("LAUNCHED_FROM_FINDER");
     }
 
-    // Execute the command with privileges
-    mesh_log_message("[AUTH-INSTALL] Executing: %s", executable);
-    for (int i = 0; argv[i] != NULL; i++) {
-        mesh_log_message(" %s", argv[i]);
-    }
-    mesh_log_message("\n");
+    FILE* pipeFile = NULL;
+    OSStatus status = AuthorizationExecuteWithPrivileges(
+        authRef,
+        executable,
+        kAuthorizationFlagDefaults,
+        argv,
+        &pipeFile
+    );
 
-    FILE* pipe = NULL;
-    status = AuthorizationExecuteWithPrivileges(authRef, executable,
-                                                 kAuthorizationFlagDefaults,
-                                                 argv, &pipe);
+    // Restore LAUNCHED_FROM_FINDER (child already spawned)
+    if (savedLFF != NULL) {
+        setenv("LAUNCHED_FROM_FINDER", savedLFF, 1);
+        free(savedLFF);
+        savedLFF = NULL;
+    }
 
     if (status != errAuthorizationSuccess) {
-        mesh_log_message("[AUTH-INSTALL] Error: Failed to execute command (status: %d)\n", status);
-        AuthorizationFree(authRef, kAuthorizationFlagDefaults);
+        mesh_log_message("[AUTH-INSTALL] Error: AuthorizationExecuteWithPrivileges failed (status=%d)\n", status);
         return -3;
     }
 
-    // Wait for process and read output simultaneously
-    mesh_log_message("[AUTH-INSTALL] [%ld] Starting upgrade process...\n", time(NULL));
+    mesh_log_message("[AUTH-INSTALL] [%ld] Privileged process launched\n", time(NULL));
 
-    // Set pipe to non-blocking mode if we have one
-    int fd = -1;
-    if (pipe) {
-        fd = fileno(pipe);
-        int flags = fcntl(fd, F_GETFL, 0);
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    // Read output from pipe
+    if (pipeFile != NULL) {
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipeFile) != NULL) {
+            pthread_mutex_lock(&g_progressCallback_mutex);
+            ProgressCallback callback = g_progressCallback;
+            pthread_mutex_unlock(&g_progressCallback_mutex);
+
+            if (callback) {
+                callback(buffer);
+            }
+        }
+        fclose(pipeFile);
     }
 
+    // AuthorizationExecuteWithPrivileges doesn't give us the child PID directly,
+    // so we wait for any child to collect the exit status
     int waitStatus;
-    time_t startWait = time(NULL);
-    int waitTimeoutSeconds = 120;  // 2 minute timeout total
-    pid_t result;
-    char buffer[256];
+    pid_t childPid = wait(&waitStatus);
 
-    // Read from pipe and wait for process simultaneously
-    while (difftime(time(NULL), startWait) < waitTimeoutSeconds) {
-        // Try to read from pipe if available
-        if (pipe) {
-            while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-                // Send to progress callback if set (thread-safe)
-                pthread_mutex_lock(&g_progressCallback_mutex);
-                ProgressCallback callback = g_progressCallback;
-                pthread_mutex_unlock(&g_progressCallback_mutex);
-
-                if (callback) {
-                    callback(buffer);
-                }
-            }
-        }
-
-        // Check if process has exited
-        result = waitpid(-1, &waitStatus, WNOHANG);
-
-        if (result > 0) {
-            // Process exited - read any remaining output
-            mesh_log_message("[AUTH-INSTALL] [%ld] Process exited (PID=%d), reading remaining output...\n", time(NULL), result);
-            if (pipe) {
-                while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-                    // Send to progress callback if set (thread-safe)
-                    pthread_mutex_lock(&g_progressCallback_mutex);
-                    ProgressCallback callback = g_progressCallback;
-                    pthread_mutex_unlock(&g_progressCallback_mutex);
-
-                    if (callback) {
-                        callback(buffer);
-                    }
-                }
-                fclose(pipe);
-            }
-            break;
-        } else if (result < 0) {
-            // Error or no child processes
-            mesh_log_message("[AUTH-INSTALL] [%ld] ✗ No child process found (errno=%d)\n", time(NULL), errno);
-            if (pipe) fclose(pipe);
-            break;
-        }
-
-        // result == 0 means child is still running
-        usleep(100000);  // Sleep 100ms before next check
-    }
-
-    // Handle timeout case
-    if (result == 0) {
-        mesh_log_message("[AUTH-INSTALL] [%ld] ⏱ Process timed out after %d seconds\n", time(NULL), waitTimeoutSeconds);
-        if (pipe) fclose(pipe);
-    }
-
-    // Clean up
-    AuthorizationFree(authRef, kAuthorizationFlagDefaults);
-
-    mesh_log_message("[AUTH-INSTALL] [%ld] Wait loop exited: result=%d, WIFEXITED=%d\n",
-            time(NULL), result, result > 0 ? WIFEXITED(waitStatus) : 0);
-
-    if (result > 0 && WIFEXITED(waitStatus)) {
+    if (childPid > 0 && WIFEXITED(waitStatus)) {
         int exitCode = WEXITSTATUS(waitStatus);
-        mesh_log_message("[AUTH-INSTALL] [%ld] ✓ Command completed with exit code: %d\n", time(NULL), exitCode);
+        mesh_log_message("[AUTH-INSTALL] [%ld] Command completed with exit code: %d\n", time(NULL), exitCode);
         return exitCode;
-    } else if (result > 0 && WIFSIGNALED(waitStatus)) {
-        // Process was killed by a signal
-        int signal = WTERMSIG(waitStatus);
-        mesh_log_message("[AUTH-INSTALL] [%ld] ✗ Command was killed by signal %d\n", time(NULL), signal);
+    } else if (childPid > 0 && WIFSIGNALED(waitStatus)) {
+        int sig = WTERMSIG(waitStatus);
+        mesh_log_message("[AUTH-INSTALL] [%ld] Command was killed by signal %d\n", time(NULL), sig);
         return -4;
-    } else if (result == 0) {
-        // Timeout - process is still running
-        mesh_log_message("[AUTH-INSTALL] [%ld] ⏱ Command timed out but may be running in background\n", time(NULL));
-        return 0;  // Return success - the command was launched
     } else {
-        mesh_log_message("[AUTH-INSTALL] [%ld] ✗ Command did not exit normally (result=%d)\n", time(NULL), result);
+        mesh_log_message("[AUTH-INSTALL] [%ld] Command did not exit normally (childPid=%d, errno=%d)\n", time(NULL), childPid, errno);
         return -4;
     }
 }
+#pragma clang diagnostic pop
 
-int execute_meshagent_install(const char* installPath, const char* mshFilePath, int disableUpdate, int disableTccCheck) {
+int execute_meshagent_install(const char* installPath, const char* mshFilePath, int disableUpdate, int disableTccCheck, int verboseLogging, int meshAgentLogging) {
     if (!installPath || !mshFilePath) {
         mesh_log_message("[AUTH-INSTALL] Error: Invalid parameters\n");
         return -1;
@@ -422,33 +352,41 @@ int execute_meshagent_install(const char* installPath, const char* mshFilePath, 
     mesh_log_message("[AUTH-INSTALL] Using config file: %s\n", mshFilePath);
     mesh_log_message("[AUTH-INSTALL] Automatic updates: %s\n", disableUpdate ? "disabled" : "enabled");
     mesh_log_message("[AUTH-INSTALL] TCC Check UI: %s\n", disableTccCheck ? "disabled" : "enabled");
+    mesh_log_message("[AUTH-INSTALL] Verbose logging: %s\n", verboseLogging ? "enabled" : "disabled");
+    mesh_log_message("[AUTH-INSTALL] MeshAgent logging: %s\n", meshAgentLogging ? "enabled" : "disabled");
 
     // Build command arguments
     char installPathArg[2048];
     char mshFileArg[2048];
     char updateArg[64];
     char tccCheckArg[64];
+    char logArg[64];
+    char meshAgentLogArg[64];
     snprintf(installPathArg, sizeof(installPathArg), "--installPath=%s", installPath);
     snprintf(mshFileArg, sizeof(mshFileArg), "--mshPath=%s", mshFilePath);
     snprintf(updateArg, sizeof(updateArg), "--disableUpdate=%d", disableUpdate);
     snprintf(tccCheckArg, sizeof(tccCheckArg), "--disableTccCheck=%d", disableTccCheck);
+    snprintf(logArg, sizeof(logArg), "--log=3");
+    snprintf(meshAgentLogArg, sizeof(meshAgentLogArg), "--meshAgentLogging=1");
 
-    char* argv[] = {
-        "-install",
-        installPathArg,
-        mshFileArg,
-        updateArg,
-        tccCheckArg,
-        NULL
-    };
+    char* argv[9]; // max: command + path + msh + update + tcc + log + meshlog + NULL
+    int argc = 0;
+    argv[argc++] = "-install";
+    argv[argc++] = installPathArg;
+    argv[argc++] = mshFileArg;
+    argv[argc++] = updateArg;
+    argv[argc++] = tccCheckArg;
+    if (verboseLogging) { argv[argc++] = logArg; }
+    if (meshAgentLogging) { argv[argc++] = meshAgentLogArg; }
+    argv[argc] = NULL;
 
-    int result = execute_with_authorization(exePath, argv);
+    int result = execute_command(exePath, argv);
     free(exePath);
 
     return result;
 }
 
-int execute_meshagent_upgrade(const char* installPath, int disableUpdate, int disableTccCheck) {
+int execute_meshagent_upgrade(const char* installPath, int disableUpdate, int disableTccCheck, int verboseLogging, int meshAgentLogging) {
     if (!installPath) {
         mesh_log_message("[AUTH-INSTALL] Error: Invalid parameter\n");
         return -1;
@@ -470,24 +408,74 @@ int execute_meshagent_upgrade(const char* installPath, int disableUpdate, int di
     mesh_log_message("[AUTH-INSTALL] Upgrading MeshAgent at: %s\n", installPath);
     mesh_log_message("[AUTH-INSTALL] Automatic updates: %s\n", disableUpdate ? "disabled" : "enabled");
     mesh_log_message("[AUTH-INSTALL] TCC Check UI: %s\n", disableTccCheck ? "disabled" : "enabled");
+    mesh_log_message("[AUTH-INSTALL] Verbose logging: %s\n", verboseLogging ? "enabled" : "disabled");
+    mesh_log_message("[AUTH-INSTALL] MeshAgent logging: %s\n", meshAgentLogging ? "enabled" : "disabled");
 
     // Build command arguments
     char installPathArg[2048];
     char updateArg[64];
     char tccCheckArg[64];
+    char logArg[64];
+    char meshAgentLogArg[64];
     snprintf(installPathArg, sizeof(installPathArg), "--installPath=%s", installPath);
     snprintf(updateArg, sizeof(updateArg), "--disableUpdate=%d", disableUpdate);
     snprintf(tccCheckArg, sizeof(tccCheckArg), "--disableTccCheck=%d", disableTccCheck);
+    snprintf(logArg, sizeof(logArg), "--log=3");
+    snprintf(meshAgentLogArg, sizeof(meshAgentLogArg), "--meshAgentLogging=1");
 
-    char* argv[] = {
-        "-upgrade",
-        installPathArg,
-        updateArg,
-        tccCheckArg,
-        NULL
-    };
+    char* argv[8]; // max: command + path + update + tcc + log + meshlog + NULL
+    int argc = 0;
+    argv[argc++] = "-upgrade";
+    argv[argc++] = installPathArg;
+    argv[argc++] = updateArg;
+    argv[argc++] = tccCheckArg;
+    if (verboseLogging) { argv[argc++] = logArg; }
+    if (meshAgentLogging) { argv[argc++] = meshAgentLogArg; }
+    argv[argc] = NULL;
 
-    int result = execute_with_authorization(exePath, argv);
+    int result = execute_command(exePath, argv);
+    free(exePath);
+
+    return result;
+}
+
+int execute_meshagent_uninstall(const char* installPath, int fullUninstall, int verboseLogging) {
+    if (!installPath) {
+        mesh_log_message("[AUTH-INSTALL] Error: Invalid parameter\n");
+        return -1;
+    }
+
+    // Validate path to prevent command injection and path traversal attacks
+    char errorBuf[256];
+    if (!validate_installation_path(installPath, errorBuf, sizeof(errorBuf))) {
+        mesh_log_message("[AUTH-INSTALL] ERROR: Invalid install path: %s\n", errorBuf);
+        return -1;
+    }
+
+    // Get path to current executable
+    char* exePath = get_executable_path();
+    if (!exePath) {
+        return -1;
+    }
+
+    mesh_log_message("[AUTH-INSTALL] %s MeshAgent at: %s\n",
+                     fullUninstall ? "Fully uninstalling" : "Uninstalling", installPath);
+    mesh_log_message("[AUTH-INSTALL] Verbose logging: %s\n", verboseLogging ? "enabled" : "disabled");
+
+    // Build command arguments
+    char installPathArg[2048];
+    char logArg[64];
+    snprintf(installPathArg, sizeof(installPathArg), "--installPath=%s", installPath);
+    snprintf(logArg, sizeof(logArg), "--log=3");
+
+    char* argv[5]; // max: command + path + log + NULL
+    int argc = 0;
+    argv[argc++] = fullUninstall ? "-funinstall" : "-uninstall";
+    argv[argc++] = installPathArg;
+    if (verboseLogging) { argv[argc++] = logArg; }
+    argv[argc] = NULL;
+
+    int result = execute_command(exePath, argv);
     free(exePath);
 
     return result;
@@ -501,6 +489,15 @@ static int read_update_setting_from_launchdaemon(const char* installPath) {
     DIR* dir = opendir("/Library/LaunchDaemons");
     if (!dir) return -1;
 
+    // Derive agent base name from current executable
+    char exePath[1024];
+    uint32_t exeSize = sizeof(exePath);
+    const char* baseName = "meshagent";
+    if (_NSGetExecutablePath(exePath, &exeSize) == 0) {
+        const char* slash = strrchr(exePath, '/');
+        if (slash) baseName = slash + 1;
+    }
+
     MeshPlistInfo plists[100];
     int plistCount = 0;
 
@@ -512,7 +509,7 @@ static int read_update_setting_from_launchdaemon(const char* installPath) {
         snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
 
         MeshPlistInfo info;
-        if (mesh_parse_launchdaemon_plist(plistPath, &info)) {
+        if (mesh_parse_launchdaemon_plist(plistPath, &info, baseName)) {
             // Check if this plist contains a path matching our install path
             if (strstr(info.programPath, installPath) != NULL) {
                 plists[plistCount++] = info;
@@ -556,9 +553,17 @@ int read_existing_update_setting(const char* installPath) {
     FILE* mshFile = NULL;
     ILibSimpleDataStore db = NULL;
 
-    // Construct paths
-    snprintf(mshPath, sizeof(mshPath), "%smeshagent.msh", installPath);
-    snprintf(dbPath, sizeof(dbPath), "%smeshagent.db", installPath);
+    // Get agent base name for dynamic file naming
+    char agentBaseName[256];
+    getAgentBaseName(agentBaseName, sizeof(agentBaseName));
+    if (agentBaseName[0] == '\0') {
+        mesh_log_message("[READ-SETTING] ERROR: Failed to get agent base name\n");
+        return -1;
+    }
+
+    // Construct paths using dynamic base name
+    snprintf(mshPath, sizeof(mshPath), "%s%s.msh", installPath, agentBaseName);
+    snprintf(dbPath, sizeof(dbPath), "%s%s.db", installPath, agentBaseName);
 
     mesh_log_message("[READ-SETTING] Checking for update settings in: %s\n", installPath);
 
@@ -632,9 +637,17 @@ int read_existing_tcc_check_setting(const char* installPath) {
     FILE* mshFile = NULL;
     ILibSimpleDataStore db = NULL;
 
-    // Construct paths
-    snprintf(mshPath, sizeof(mshPath), "%smeshagent.msh", installPath);
-    snprintf(dbPath, sizeof(dbPath), "%smeshagent.db", installPath);
+    // Get agent base name for dynamic file naming
+    char agentBaseName[256];
+    getAgentBaseName(agentBaseName, sizeof(agentBaseName));
+    if (agentBaseName[0] == '\0') {
+        mesh_log_message("[READ-SETTING] ERROR: Failed to get agent base name\n");
+        return -1;
+    }
+
+    // Construct paths using dynamic base name
+    snprintf(mshPath, sizeof(mshPath), "%s%s.msh", installPath, agentBaseName);
+    snprintf(dbPath, sizeof(dbPath), "%s%s.db", installPath, agentBaseName);
 
     mesh_log_message("[READ-SETTING] Checking for TCC check settings in: %s\n", installPath);
 

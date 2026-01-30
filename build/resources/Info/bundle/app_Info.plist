@@ -5,11 +5,11 @@
 	<key>CFBundleIdentifier</key>
 	<string>BUNDLE_IDENTIFIER</string>
 	<key>CFBundleName</key>
-	<string>meshagent</string>
+	<string>BUNDLE_EXE_NAME</string>
 	<key>CFBundleDisplayName</key>
-	<string>MeshAgent</string>
+	<string>BUNDLE_DISPLAY_NAME</string>
 	<key>CFBundleExecutable</key>
-	<string>meshagent</string>
+	<string>BUNDLE_EXE_NAME</string>
 	<key>CFBundleShortVersionString</key>
 	<string>BUILD_TIMESTAMP_DATE</string>
 	<key>CFBundleVersion</key>
@@ -19,7 +19,7 @@
 	<key>CFBundleSignature</key>
 	<string>mesh</string>
 	<key>CFBundleIconFile</key>
-	<string>meshagent.icns</string>
+	<string>AppIcon.icns</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>10.13</string>
 	<key>LSApplicationCategoryType</key>

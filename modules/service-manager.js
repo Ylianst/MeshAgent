@@ -2322,14 +2322,14 @@ function serviceManager()
     }
 
     function plistHasMeshAgentVer(plistPath) {
-        // Check if plist has meshagent_ver key
-        // Returns true if key exists, false otherwise
+        // Check if plist has version key (or legacy meshagent_ver)
+        // Returns true if either key exists, false otherwise
         try {
             var child = require('child_process').execFile('/bin/sh', ['sh']);
             child.stdout.str = '';
             child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
             child.stderr.on('data', function (chunk) { });
-            child.stdin.write('/usr/libexec/PlistBuddy -c "Print :meshagent_ver" "' + plistPath + '" 2>/dev/null\n');
+            child.stdin.write('/usr/libexec/PlistBuddy -c "Print :version" "' + plistPath + '" 2>/dev/null || /usr/libexec/PlistBuddy -c "Print :meshagent_ver" "' + plistPath + '" 2>/dev/null\n');
             child.stdin.write('exit\n');
             child.waitExit();
 
@@ -3027,12 +3027,13 @@ function serviceManager()
             plist += '      <key>WorkingDirectory</key>\n';
             plist += ('     <string>' + options.installPath.replace(/\/$/, '') + '</string>\n');
             if (options.meshAgentLogging) {
+                var logBaseName = require('agent-paths').getAgentBaseName();
                 plist += '      <key>StandardOutPath</key>\n';
-                plist += '      <string>/tmp/meshagent-daemon.log</string>\n';
+                plist += '      <string>/tmp/' + logBaseName + '-daemon.log</string>\n';
                 plist += '      <key>StandardErrorPath</key>\n';
-                plist += '      <string>/tmp/meshagent-daemon.log</string>\n';
+                plist += '      <string>/tmp/' + logBaseName + '-daemon.log</string>\n';
             }
-            plist += '      <key>meshagent_ver</key>\n';
+            plist += '      <key>version</key>\n';
             plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
 
             plist += '  </dict>\n';
@@ -3040,33 +3041,33 @@ function serviceManager()
             var plistPath = macOSHelpers.getPlistPath(serviceId, 'daemon');
             var plistExists = require('fs').existsSync(plistPath);
 
-            // Surgical update mode: Two-tier approach based on meshagent_ver presence
+            // Surgical update mode: Two-tier approach based on version key presence
             if (options.surgicalUpdate && (plistExists || options.cachedCustomizations)) {
                 var hasMeshAgentVer = false;
                 if (plistExists) {
                     hasMeshAgentVer = plistHasMeshAgentVer(plistPath);
                 } else if (options.cachedCustomizations) {
-                    // Check if cached plist had meshagent_ver key
+                    // Check if cached plist had version key (or legacy meshagent_ver)
                     for (var i = 0; i < options.cachedCustomizations.allKeys.length; i++) {
-                        if (options.cachedCustomizations.allKeys[i].key === 'meshagent_ver') {
+                        if (options.cachedCustomizations.allKeys[i].key === 'version' || options.cachedCustomizations.allKeys[i].key === 'meshagent_ver') {
                             hasMeshAgentVer = true;
                             break;
                         }
                     }
                     if (logger) {
                         logger.info('LaunchDaemon using cached customizations (plist deleted during cleanup)');
-                        logger.info('Cached plist had meshagent_ver: ' + hasMeshAgentVer);
+                        logger.info('Cached plist had version key:' + hasMeshAgentVer);
                     }
                 }
 
                 if (!hasMeshAgentVer) {
-                    // NO meshagent_ver → Force atomic replacement (fresh plist)
-                    if (logger) { logger.info('LaunchDaemon plist exists but has no meshagent_ver - performing atomic replacement'); }
+                    // NO version key → Force atomic replacement (fresh plist)
+                    if (logger) { logger.info('LaunchDaemon plist exists but has no version key - performing atomic replacement'); }
                     require('fs').writeFileSync(plistPath, plist);
                     prettifyPlist(plistPath);
-                    if (logger) { logger.info('LaunchDaemon plist replaced atomically (no version tracking found)'); }
+                    if (logger) { logger.info('LaunchDaemon plist replaced atomically (no version key found)'); }
                 } else {
-                    // HAS meshagent_ver → True surgical update (preserve extras + non-standard keys)
+                    // HAS version key → True surgical update (preserve extras + non-standard keys)
                     if (logger) { logger.info('LaunchDaemon performing surgical update'); }
 
                     // Extract or use cached customizations
@@ -3076,7 +3077,7 @@ function serviceManager()
                     }
 
                     var extraArgs, nonStandardKeyXml;
-                    var standardKeys = ['Disabled', 'KeepAlive', 'Label', 'ProgramArguments', 'RunAtLoad', 'WorkingDirectory', 'meshagent_ver'];
+                    var standardKeys = ['Disabled', 'KeepAlive', 'Label', 'ProgramArguments', 'RunAtLoad', 'WorkingDirectory', 'version', 'meshagent_ver'];
 
                     if (options.cachedCustomizations) {
                         // Use cached data (plist was deleted during cleanup)
@@ -3157,7 +3158,7 @@ function serviceManager()
                     plist += (autoStart + '\n');
                     plist += '      <key>WorkingDirectory</key>\n';
                     plist += ('     <string>' + options.installPath.replace(/\/$/, '') + '</string>\n');
-                    plist += '      <key>meshagent_ver</key>\n';
+                    plist += '      <key>version</key>\n';
                     plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
 
                     // Append non-standard keys
@@ -3280,12 +3281,13 @@ function serviceManager()
             plist += ('         <string>/var/run/' + serviceId + '</string>\n');
             plist += '      </array>\n';
             if (options.meshAgentLogging) {
+                var logBaseName = require('agent-paths').getAgentBaseName();
                 plist += '      <key>StandardOutPath</key>\n';
-                plist += '      <string>/tmp/meshagent-agent.log</string>\n';
+                plist += '      <string>/tmp/' + logBaseName + '-agent.log</string>\n';
                 plist += '      <key>StandardErrorPath</key>\n';
-                plist += '      <string>/tmp/meshagent-agent.log</string>\n';
+                plist += '      <string>/tmp/' + logBaseName + '-agent.log</string>\n';
             }
-            plist += '      <key>meshagent_ver</key>\n';
+            plist += '      <key>version</key>\n';
             plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
 
             plist += '  </dict>\n';
@@ -3306,33 +3308,33 @@ function serviceManager()
             var agentPlistPath = folder + serviceId + '-agent.plist';
             var agentPlistExists = require('fs').existsSync(agentPlistPath);
 
-            // Surgical update mode: Two-tier approach based on meshagent_ver presence
+            // Surgical update mode: Two-tier approach based on version key presence
             if (options.surgicalUpdate && (agentPlistExists || options.cachedCustomizations)) {
                 var hasMeshAgentVer = false;
                 if (agentPlistExists) {
                     hasMeshAgentVer = plistHasMeshAgentVer(agentPlistPath);
                 } else if (options.cachedCustomizations) {
-                    // Check if cached plist had meshagent_ver key
+                    // Check if cached plist had version key (or legacy meshagent_ver)
                     for (var i = 0; i < options.cachedCustomizations.allKeys.length; i++) {
-                        if (options.cachedCustomizations.allKeys[i].key === 'meshagent_ver') {
+                        if (options.cachedCustomizations.allKeys[i].key === 'version' || options.cachedCustomizations.allKeys[i].key === 'meshagent_ver') {
                             hasMeshAgentVer = true;
                             break;
                         }
                     }
                     if (logger) {
                         logger.info('LaunchAgent using cached customizations (plist deleted during cleanup)');
-                        logger.info('Cached plist had meshagent_ver: ' + hasMeshAgentVer);
+                        logger.info('Cached plist had version key:' + hasMeshAgentVer);
                     }
                 }
 
                 if (!hasMeshAgentVer) {
-                    // NO meshagent_ver → Force atomic replacement (fresh plist)
-                    if (logger) { logger.info('LaunchAgent plist exists but has no meshagent_ver - performing atomic replacement'); }
+                    // NO version key → Force atomic replacement (fresh plist)
+                    if (logger) { logger.info('LaunchAgent plist exists but has no version key - performing atomic replacement'); }
                     require('fs').writeFileSync(agentPlistPath, plist);
                     prettifyPlist(agentPlistPath);
-                    if (logger) { logger.info('LaunchAgent plist replaced atomically (no version tracking found)'); }
+                    if (logger) { logger.info('LaunchAgent plist replaced atomically (no version key found)'); }
                 } else {
-                    // HAS meshagent_ver → True surgical update (preserve extras + non-standard keys)
+                    // HAS version key → True surgical update (preserve extras + non-standard keys)
                     if (logger) { logger.info('LaunchAgent performing surgical update'); }
 
                     // Extract or use cached customizations
@@ -3435,7 +3437,7 @@ function serviceManager()
                     plist += '      <array>\n';
                     plist += ('         <string>/var/run/' + serviceId + '</string>\n');
                     plist += '      </array>\n';
-                    plist += '      <key>meshagent_ver</key>\n';
+                    plist += '      <key>version</key>\n';
                     plist += ('     <string>' + require('MeshAgent').getVersion().version + '</string>\n');
 
                     // Append non-standard keys

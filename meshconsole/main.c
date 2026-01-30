@@ -183,6 +183,10 @@ static uid_t get_console_user_uid() {
 //
 
 // Control validation per platform
+// NOTE: The allow lists below include arguments for ALL platforms (Windows, Linux,
+// macOS, BSD), not just macOS. Validation is currently only enforced on macOS, but
+// the lists are maintained as a complete cross-platform reference. Arguments for
+// other platforms are included but have not been tested on those platforms.
 #if defined(__APPLE__)
 	#define ENABLE_ARGUMENT_VALIDATION 1
 #else
@@ -200,7 +204,7 @@ static uid_t get_console_user_uid() {
 // Simple flags (exact match, no value)
 static const char* ALL_PLATFORMS_simple_flags[] = {
 		// Help & Information
-		"-help", "--help", "-h",
+		"-help", "--help", "-h", "--all",
 		"-version",           // Print version number (YY.MM.DD format)
 		"-buildver",          // Print build version (HH.MM.SS format)
 		"-buildversion",      // Alias for -buildver
@@ -240,6 +244,17 @@ static const char* ALL_PLATFORMS_simple_flags[] = {
 		// Development & Testing
 		"-export",            // Export configuration
 		"-import",            // Import configuration
+
+		// Service Control (non-macOS)
+		"run",                // Run as console agent (foreground)
+		"start",              // Start as daemon/service
+		"stop",               // Stop daemon/service
+
+		// Interactive Mode
+		"-mesh",              // Print mesh configuration info
+		"-translations",      // Print translation strings
+		"-connect",           // Connect to server (dash form)
+		"-update",            // Update/install (interactive mode)
 
 		NULL
 	};
@@ -286,6 +301,26 @@ static const char* ALL_PLATFORMS_prefix_flags[] = {
 		"--modulesPath=",     // Modules path
 		"--resetnodeid",      // Reset node ID
 
+		// KVM Options
+		"--allowedUIDs=",     // Allowed user IDs for KVM sessions
+		"--virtualDM=",       // Virtual display manager mode
+
+		// Proxy
+		"--autoproxy=",       // Auto-proxy configuration domain
+
+		// Localization
+		"--lang=",            // Language selection
+
+		// Self-Test & Diagnostics
+		"--debugMode=",       // Enable debug mode (self-test)
+		"--dumpOnly=",        // Dump-only mode (self-test)
+		"--cycleCount=",      // Cycle count (self-test)
+		"--showCoreInfo=",    // Show core info (self-test)
+		"--smbios=",          // Show SMBIOS information (self-test)
+
+		// Testing
+		"--fakeUpdate=",      // Simulate update (testing)
+
 		NULL
 	};
 
@@ -296,13 +331,31 @@ static const char* ALL_PLATFORMS_prefix_flags[] = {
 static const char* WINDOWS_simple_flags[] = {
 		"-nocertstore",       // Don't use Windows Certificate Store
 		"-recovery",          // Windows recovery mode
+		"-kvm0",              // Windows KVM mode 0
 		"-kvm1",              // Windows KVM mode 1
+		"-coredump",          // Enable core dump (with -kvm0/-kvm1)
+		"-remotecursor",      // Enable remote cursor (with -kvm0/-kvm1)
+		"-lang",              // Show current language (simple flag)
+		"exstate",            // Extended service state
+		"state",              // Service state (without dash)
+		"-start",             // Start service
+		"-stop",              // Stop service
+		"restart",            // Restart service
+		"-restart",           // Restart service (dash form)
+		"-resetnodeid",       // Reset node ID
+		"-setfirewall",       // Set Windows firewall rules
+		"-clearfirewall",     // Clear Windows firewall rules
+		"-checkfirewall",     // Check Windows firewall rules
+		"meshcmd",            // MeshCmd mode
+		"-netinfo",           // Network information (single-dash form)
 		NULL
 	};
 
 static const char* WINDOWS_prefix_flags[] = {
 	"--installedByUser=", // Windows: User registry key who installed
 	"-update:",           // Windows: Update path
+	"--hideConsole=",     // Hide console window
+	"--exitPID=",         // Exit when PID dies
 	NULL
 };
 
@@ -312,6 +365,8 @@ static const char* WINDOWS_prefix_flags[] = {
 
 static const char* LINUX_simple_flags[] = {
 	"-daemon",            // Run as daemon (Linux daemon mode)
+	"-d",                 // Start as daemon (alias for start)
+	"-s",                 // Stop daemon (alias for stop)
 	NULL
 };
 
@@ -326,13 +381,14 @@ static const char* LINUX_prefix_flags[] = {
 
 static const char* MACOS_simple_flags[] = {
 	"-tccCheck",          // Check TCC (Transparency Consent Control) permissions
-	"-show-install-ui",   // Show installation UI (used by privilege elevation)
+	"-show-install-ui",   // Show installation UI
 	"-show-tcc-ui",       // Show TCC permissions window (standalone, same as SHIFT+double-click)
 	"-check-tcc",         // Check TCC permissions, show UI if needed (no pipe, fire-and-forget)
 	"-request-accessibility",   // Request Accessibility permission (spawned as user)
 	"-request-screenrecording", // Request Screen Recording permission (spawned as user)
 	"-request-fulldiskaccess",  // Request Full Disk Access (shows custom dialog)
 	"-kvm1",              // macOS KVM mode (LaunchAgent via QueueDirectories)
+	"-config",            // Configure/update launchd scripts for existing installation
 	NULL
 };
 
@@ -340,6 +396,7 @@ static const char* MACOS_prefix_flags[] = {
 	"--disableTccCheck=", // Disable TCC check (0=check, 1=skip)
 	"--copy-msh=",        // Copy .msh file during install (0=no, 1=yes)
 	"--meshAgentLogging=",// Configure meshagent launchd logging to /tmp (0=no, 1=yes)
+	"--setServiceID=",    // Set service identifier for fresh install (e.g., com.company.service)
 	"--appBundle=",       // macOS app bundle path
 	"--installedByUser=", // macOS: UID of user who installed
 	NULL
@@ -351,6 +408,8 @@ static const char* MACOS_prefix_flags[] = {
 
 static const char* BSD_simple_flags[] = {
 	"-daemon",            // Run as daemon (BSD daemon mode - shared with Linux)
+	"-d",                 // Start as daemon (alias for start)
+	"-s",                 // Stop daemon (alias for stop)
 	NULL
 };
 
@@ -364,6 +423,7 @@ static const char* BSD_prefix_flags[] = {
 // ═══════════════════════════════════════════════════════════════════════
 
 // Validate command-line arguments against known flags
+// Uses case-insensitive matching to match the processing code (strcasecmp)
 // Returns 1 if valid, 0 if unknown flag detected
 int validate_argument(const char* arg)
 {
@@ -371,13 +431,13 @@ int validate_argument(const char* arg)
 
 	// Check ALL PLATFORMS simple flags
 	for (int i = 0; ALL_PLATFORMS_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, ALL_PLATFORMS_simple_flags[i]) == 0) return 1;
+		if (strcasecmp(arg, ALL_PLATFORMS_simple_flags[i]) == 0) return 1;
 	}
 
 	// Check ALL PLATFORMS prefix flags
 	for (int i = 0; ALL_PLATFORMS_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(ALL_PLATFORMS_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, ALL_PLATFORMS_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, ALL_PLATFORMS_prefix_flags[i], prefix_len) == 0) {
 			return 1;
 		}
 	}
@@ -386,11 +446,11 @@ int validate_argument(const char* arg)
 #ifdef _WIN32
 	// Windows-specific
 	for (int i = 0; WINDOWS_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, WINDOWS_simple_flags[i]) == 0) return 1;
+		if (strcasecmp(arg, WINDOWS_simple_flags[i]) == 0) return 1;
 	}
 	for (int i = 0; WINDOWS_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(WINDOWS_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, WINDOWS_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, WINDOWS_prefix_flags[i], prefix_len) == 0) {
 			return 1;
 		}
 	}
@@ -399,11 +459,11 @@ int validate_argument(const char* arg)
 #ifdef __linux__
 	// Linux-specific
 	for (int i = 0; LINUX_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, LINUX_simple_flags[i]) == 0) return 1;
+		if (strcasecmp(arg, LINUX_simple_flags[i]) == 0) return 1;
 	}
 	for (int i = 0; LINUX_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(LINUX_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, LINUX_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, LINUX_prefix_flags[i], prefix_len) == 0) {
 			return 1;
 		}
 	}
@@ -412,11 +472,11 @@ int validate_argument(const char* arg)
 #ifdef __APPLE__
 	// macOS-specific
 	for (int i = 0; MACOS_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, MACOS_simple_flags[i]) == 0) return 1;
+		if (strcasecmp(arg, MACOS_simple_flags[i]) == 0) return 1;
 	}
 	for (int i = 0; MACOS_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(MACOS_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, MACOS_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, MACOS_prefix_flags[i], prefix_len) == 0) {
 			return 1;
 		}
 	}
@@ -425,18 +485,18 @@ int validate_argument(const char* arg)
 #if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 	// BSD-specific
 	for (int i = 0; BSD_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, BSD_simple_flags[i]) == 0) return 1;
+		if (strcasecmp(arg, BSD_simple_flags[i]) == 0) return 1;
 	}
 	for (int i = 0; BSD_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(BSD_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, BSD_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, BSD_prefix_flags[i], prefix_len) == 0) {
 			return 1;
 		}
 	}
 #endif
 
 	// Check .js file extension (script execution)
-	if (len > 3 && strcmp(arg + len - 3, ".js") == 0) return 1;
+	if (len >= 3 && strcasecmp(arg + len - 3, ".js") == 0) return 1;
 
 	// Allow positional arguments (don't start with -)
 	// These are values for flags like -exec <code>
@@ -451,6 +511,7 @@ int validate_argument(const char* arg)
 }
 
 // Helper function to detect which platform(s) an argument belongs to
+// Uses case-insensitive matching to match validate_argument() and processing code
 // Returns platform name string, or NULL if not found anywhere
 const char* detect_argument_platform(const char* arg)
 {
@@ -458,44 +519,44 @@ const char* detect_argument_platform(const char* arg)
 
 	// Check Windows
 	for (int i = 0; WINDOWS_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, WINDOWS_simple_flags[i]) == 0) return "Windows";
+		if (strcasecmp(arg, WINDOWS_simple_flags[i]) == 0) return "Windows";
 	}
 	for (int i = 0; WINDOWS_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(WINDOWS_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, WINDOWS_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, WINDOWS_prefix_flags[i], prefix_len) == 0) {
 			return "Windows";
 		}
 	}
 
 	// Check Linux
 	for (int i = 0; LINUX_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, LINUX_simple_flags[i]) == 0) return "Linux";
+		if (strcasecmp(arg, LINUX_simple_flags[i]) == 0) return "Linux";
 	}
 	for (int i = 0; LINUX_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(LINUX_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, LINUX_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, LINUX_prefix_flags[i], prefix_len) == 0) {
 			return "Linux";
 		}
 	}
 
 	// Check macOS
 	for (int i = 0; MACOS_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, MACOS_simple_flags[i]) == 0) return "macOS";
+		if (strcasecmp(arg, MACOS_simple_flags[i]) == 0) return "macOS";
 	}
 	for (int i = 0; MACOS_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(MACOS_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, MACOS_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, MACOS_prefix_flags[i], prefix_len) == 0) {
 			return "macOS";
 		}
 	}
 
 	// Check BSD
 	for (int i = 0; BSD_simple_flags[i] != NULL; i++) {
-		if (strcmp(arg, BSD_simple_flags[i]) == 0) return "BSD";
+		if (strcasecmp(arg, BSD_simple_flags[i]) == 0) return "BSD";
 	}
 	for (int i = 0; BSD_prefix_flags[i] != NULL; i++) {
 		size_t prefix_len = strlen(BSD_prefix_flags[i]);
-		if (len >= prefix_len && strncmp(arg, BSD_prefix_flags[i], prefix_len) == 0) {
+		if (len >= prefix_len && strncasecmp(arg, BSD_prefix_flags[i], prefix_len) == 0) {
 			return "BSD";
 		}
 	}
@@ -541,103 +602,8 @@ ILibTransport_DoneState kvm_serviceWriteSink(char *buffer, int bufferLen, void *
 	return ILibTransport_DoneState_COMPLETE;
 }
 
-// Legacy functions removed - now using shared plist utilities from mac_plist_utils.h
-
-// Discover serviceId by finding which LaunchAgent plist references our binary
-char* discover_service_id_from_plist(const char* binaryPath)
-{
-	DIR *dir;
-	struct dirent *entry;
-	char *serviceId = NULL;
-	const char *launchAgentDir = "/Library/LaunchAgents";
-
-	dir = opendir(launchAgentDir);
-	if (dir == NULL)
-	{
-		return NULL;
-	}
-
-	while ((entry = readdir(dir)) != NULL)
-	{
-		// Look for .plist files
-		if (strstr(entry->d_name, ".plist") == NULL)
-			continue;
-
-		// Build full plist path
-		char plistPath[PATH_MAX];
-		snprintf(plistPath, sizeof(plistPath), "%s/%s", launchAgentDir, entry->d_name);
-
-		// Extract ProgramArguments path using shared utility
-		char *programPath = mesh_plist_get_program_path(plistPath);
-		if (programPath != NULL)
-		{
-			// Check if it matches our binary path
-			if (strcmp(programPath, binaryPath) == 0)
-			{
-				// Found it! Extract the Label using shared utility
-				serviceId = mesh_plist_get_label(plistPath);
-				free(programPath);
-				break;
-			}
-			free(programPath);
-		}
-	}
-
-	closedir(dir);
-	return serviceId;
-}
-
-// Parse serviceId to extract serviceName and companyName
-// Format: meshagent.{serviceName}.{companyName}-agent or {serviceName}-agent
-void parse_service_id(const char* serviceId, char** serviceName, char** companyName)
-{
-	if (serviceId == NULL)
-	{
-		*serviceName = strdup("meshagent");
-		*companyName = NULL;
-		return;
-	}
-
-	// Make a working copy
-	char workingCopy[512];
-	strncpy(workingCopy, serviceId, sizeof(workingCopy) - 1);
-	workingCopy[sizeof(workingCopy) - 1] = '\0';
-
-	// Strip -agent suffix if present
-	char *agentSuffix = strstr(workingCopy, "-agent");
-	if (agentSuffix != NULL)
-	{
-		*agentSuffix = '\0';  // Terminate string before -agent
-	}
-
-	// Check if format is meshagent.{serviceName}.{companyName}
-	if (strncmp(workingCopy, "meshagent.", 10) == 0)
-	{
-		// Skip "meshagent." prefix
-		char *remainder = workingCopy + 10;
-
-		// Find the next dot to separate serviceName and companyName
-		char *dot = strchr(remainder, '.');
-		if (dot != NULL)
-		{
-			*dot = '\0';  // Split at dot
-			*serviceName = strdup(remainder);
-			*companyName = strdup(dot + 1);
-		}
-		else
-		{
-			// Only serviceName, no companyName
-			*serviceName = strdup(remainder);
-			*companyName = NULL;
-		}
-	}
-	else
-	{
-		// Simple format - just serviceName
-		*serviceName = strdup(workingCopy);
-		*companyName = NULL;
-	}
-}
+// Removed: discover_service_id_from_plist() — now using shared mesh_plist_find_service_id()
+// Removed: parse_service_id() — dead code, never called
 #endif
 
 // Version info functions moved to meshcore/version_info.c for DRY compliance
@@ -703,12 +669,10 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		if (has_forbidden_flag) break;
 	}
 
-	// Check for -show-install-ui flag (passed by elevated relaunch)
-	// This must be checked BEFORE the LAUNCHED_FROM_FINDER check because the elevated
-	// process won't have that environment variable or detect modifier keys
+	// Check for -show-install-ui flag (direct launch of Installation Assistant)
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-show-install-ui") == 0) {
-			mesh_log_message("[MAIN] [%ld] MeshAgent launched with -show-install-ui (elevated relaunch)\n", time(NULL));
+			mesh_log_message("[MAIN] [%ld] MeshAgent launched with -show-install-ui\n", time(NULL));
 
 			InstallResult result = show_install_assistant_window();
 			mesh_log_message("[MAIN] [%ld] Installation Assistant returned (cancelled=%d, mode=%d)\n",
@@ -741,18 +705,16 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		if (cmdKeyHeld)
 		{
 			// CMD + double-click -> show Installation Assistant
+			{
+				char debugPath[1024];
+				uint32_t debugPathSize = sizeof(debugPath);
+				_NSGetExecutablePath(debugPath, &debugPathSize);
+				fprintf(stderr, "[DEBUG] Binary path: %s\n", debugPath);
+				fprintf(stderr, "[DEBUG] PID: %d, UID: %d, EUID: %d\n", getpid(), getuid(), geteuid());
+			}
 			mesh_log_message("[MAIN] [%ld] MeshAgent launched from Finder with CMD key - showing Installation Assistant\n", time(NULL));
 
-			// Ensure we're running as root so we can read existing .msh config files (600 root:wheel)
-			// This will prompt for admin credentials and relaunch if needed
-			int elevateResult = ensure_running_as_root();
-			if (elevateResult < 0)
-			{
-				mesh_log_message("[MAIN] [%ld] Failed to elevate privileges, cannot proceed with installation\n", time(NULL));
-				return 1;
-			}
-			// If elevateResult == 0, we're now running as root (either already were, or relaunched)
-
+			// UI launches unprivileged; install/upgrade runs via execute_command() in mac_authorized_install.m
 			InstallResult result = show_install_assistant_window();
 			mesh_log_message("[MAIN] [%ld] Installation Assistant returned (cancelled=%d, mode=%d)\n",
 			        time(NULL), result.cancelled, result.mode);
@@ -784,6 +746,18 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #if ENABLE_ARGUMENT_VALIDATION
 	for (int i = 1; i < argc; i++)
 	{
+		// Skip validation of arguments that follow flags expecting arbitrary values
+		// -exec and -b64exec take JavaScript code as the next argument
+		// -faddr and -fdelta take memory address/delta values
+		// --script-db, --script-flags, --script-timeout take space-separated values
+		if (i > 1 && (strcasecmp(argv[i-1], "-exec") == 0 || strcasecmp(argv[i-1], "-b64exec") == 0 ||
+		              strcasecmp(argv[i-1], "-faddr") == 0 || strcasecmp(argv[i-1], "-fdelta") == 0 ||
+		              strcasecmp(argv[i-1], "--script-db") == 0 || strcasecmp(argv[i-1], "--script-flags") == 0 ||
+		              strcasecmp(argv[i-1], "--script-timeout") == 0))
+		{
+			continue; // Skip validation - next argument is a value, not a flag
+		}
+
 		if (!validate_argument(argv[i]))
 		{
 			// Check if this is a platform-specific argument
@@ -1002,13 +976,19 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	                 strcmp(argv[1], "--help") == 0 ||
 	                 strcmp(argv[1], "-h") == 0))
 	{
+		// Check for --all flag to show full help
+		int showAll = 0;
+		for (int j = 2; j < argc; j++)
+		{
+			if (strcmp(argv[j], "--all") == 0) { showAll = 1; break; }
+		}
+
 		printf("MeshAgent - MeshCentral remote management agent\n\n");
 		printf("Usage: meshagent [options] [script.js]\n\n");
 		printf("Information:\n");
 		printf("  -help, --help, -h     Show this help message\n");
-		printf("  -version              Show version (CFBundleShortVersionString)\n");
-		printf("  -buildver             Show build version (CFBundleVersion)\n");
-		printf("  -buildversion         Alias for -buildver\n");
+		printf("  -help --all           Show all arguments (including platform-specific)\n");
+		printf("  -version              Show version\n");
 		printf("  -fullversion          Show complete version (version + build)\n");
 		printf("  -info                 Show detailed agent information\n");
 		printf("  -licenses             Show open source licenses\n");
@@ -1018,57 +998,146 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		printf("  -agentFullHash        Show agent hash (full)\n\n");
 		printf("Installation:\n");
 		printf("  -install              Install agent as system service\n");
+		printf("  -finstall             Full install (with recovery)\n");
 		printf("  -upgrade              Upgrade existing installation\n");
 		printf("  -uninstall            Uninstall agent service\n");
-		printf("  -fullinstall          Full install (with recovery)\n");
-		printf("  -fulluninstall        Full uninstall (remove all data)\n\n");
+		printf("  -funinstall           Full uninstall (remove all data)\n\n");
 		printf("Installation Options:\n");
 		printf("  --installPath=PATH    Installation directory\n");
 		printf("  --mshPath=PATH        Path to .msh configuration file\n");
 		printf("  --meshServiceName=N   Service name component\n");
 		printf("  --companyName=NAME    Company name component\n");
+		printf("  --serviceId=ID        Unique service identifier (for multiple instances)\n");
 		printf("  --copy-msh=1          Copy .msh file to install location\n");
 		printf("  --disableUpdate=1     Disable automatic updates\n");
-		printf("  --disableTccCheck=1   Disable TCC permission check UI (macOS)\n");
-		printf("  --meshAgentLogging=1  Configure meshagent launchd logging to /tmp (macOS)\n\n");
+		printf("  --backup=1            Create backup during install/upgrade\n\n");
 		printf("Service Control:\n");
+		printf("  run                   Run as console agent (foreground)\n");
+		printf("  start, -d             Start as background daemon\n");
+		printf("  stop, -s              Stop background daemon\n");
 		printf("  -daemon               Run in foreground daemon mode\n");
 		printf("  -state                Show agent state\n\n");
 		printf("Script Execution:\n");
 		printf("  script.js             Execute JavaScript file\n");
 		printf("  -exec CODE            Execute JavaScript code string\n");
-		printf("  -b64exec CODE         Execute base64-encoded JavaScript\n");
-		printf("  --script-db PATH      Database path for script mode\n");
-		printf("  --script-timeout SEC  Watchdog timeout (0=unlimited)\n");
-		printf("  --script-connect      Enable MeshCentral connection\n\n");
+		printf("  -b64exec CODE         Execute base64-encoded JavaScript\n\n");
 		printf("Module Management:\n");
 		printf("  -export               Export embedded JavaScript modules\n");
 		printf("  -import               Import modules from filesystem\n\n");
-		printf("macOS Specific:\n");
-		printf("  -kvm1                 KVM remote desktop subprocess mode\n");
-		printf("  -tccCheck             TCC permissions check subprocess (with pipe)\n");
-		printf("  -check-tcc            Check TCC permissions, show UI if needed (fire-and-forget)\n");
-		printf("  -request-accessibility        Request Accessibility permission (spawned as user)\n");
-		printf("  -request-screenrecording      Request Screen Recording permission (spawned as user)\n");
-		printf("  -request-fulldiskaccess       Request Full Disk Access (shows custom dialog)\n");
-		printf("                        WARNING: Running -request-* arguments from a terminal requests\n");
-		printf("                        permissions for the terminal app, not MeshAgent. These flags\n");
-		printf("                        are intended to be spawned by the TCC permissions UI, not run manually.\n");
-		printf("  -show-install-ui      Launch Installation Assistant GUI (with elevation)\n");
-		printf("                        Note: Also auto-launches with CMD+double-click on .app\n");
-		printf("  -show-tcc-ui          Show TCC permissions window (Accessibility, FDA, Screen Recording)\n");
-		printf("                        Note: Also auto-launches with SHIFT+double-click on .app\n\n");
 		printf("Update:\n");
 		printf("  -update:URL           Self-update from URL\n\n");
-		printf("Advanced:\n");
-		printf("  --readonly=1          Read-only database mode\n");
-		printf("  --appBundle=1         Running from app bundle\n");
-		printf("  -recovery             Set recovery capabilities\n");
-		printf("  -nocertstore          Disable certificate store (Windows)\n\n");
-		printf("Debug:\n");
-		printf("  -faddr ADDR           Memory address debug tool\n");
-		printf("  -fdelta DELTA         Memory delta debug tool\n");
-		printf("  connect               Development mode connection\n");
+
+		if (showAll)
+		{
+			printf("─── Extended Reference (all platforms) ─────────────────────────────\n\n");
+			printf("Information (additional):\n");
+			printf("  -buildver             Show build version\n");
+			printf("  -buildversion         Alias for -buildver\n");
+			printf("  -updaterversion       Show updater version\n\n");
+			printf("Installation (aliases):\n");
+			printf("  -fullinstall          Alias for -finstall\n");
+			printf("  -fulluninstall        Alias for -funinstall\n\n");
+			printf("Installation Options (additional):\n");
+			printf("  --serviceName=NAME    Alias for --meshServiceName\n");
+			printf("  --displayName=NAME    Service display name\n");
+			printf("  --description=TEXT    Service description\n");
+			printf("  --setServiceID=ID     Set service identifier during fresh install (macOS)\n");
+			printf("  --fileName=NAME       Binary file name\n");
+			printf("  --target=PATH         Target binary path\n");
+			printf("  --allowNoMsh=1        Allow operation without .msh file\n");
+			printf("  --backup              Create backup (flag form, same as --backup=1)\n");
+			printf("  --installedByUser=UID User who performed the installation\n\n");
+			printf("Interactive Mode:\n");
+			printf("  -mesh                 Print mesh configuration info\n");
+			printf("  -translations         Print translation strings\n");
+			printf("  -connect              Connect to server (interactive mode)\n");
+			printf("  -update               Update/install (interactive mode)\n");
+			printf("  --lang=CODE           Set language (e.g., --lang=en)\n\n");
+			printf("Script Execution (additional):\n");
+			printf("  --script-db PATH      Database path for script mode\n");
+			printf("  --script-flags FLAGS  Script execution flags\n");
+			printf("  --script-timeout SEC  Watchdog timeout (0=unlimited)\n");
+			printf("  --script-connect      Enable MeshCentral connection\n\n");
+			printf("Module Management (additional):\n");
+			printf("  --no-embedded=1       Disable embedded JavaScript resources\n");
+			printf("  --expandedPath=PATH   Expanded path for module export\n");
+			printf("  --filePath=PATH       File path for polyfills output\n");
+			printf("  --modulesPath=PATH    Modules directory path\n\n");
+			printf("KVM Options:\n");
+			printf("  --allowedUIDs=LIST    Allowed user IDs for KVM sessions\n");
+			printf("  --virtualDM=1         Enable virtual display manager mode\n\n");
+			printf("Network & Proxy:\n");
+			printf("  --slave               Run as slave agent\n");
+			printf("  --netinfo             Display network information\n");
+			printf("  connect               Development mode connection\n");
+			printf("  --autoproxy=DOMAIN    Auto-proxy configuration domain\n\n");
+			printf("Advanced:\n");
+			printf("  --readonly=1          Read-only database mode\n");
+			printf("  --resetnodeid         Reset node ID\n");
+			printf("  --verbose=LEVEL       Verbose logging level\n");
+			printf("  --info=LEVEL          Info logging level\n");
+			printf("  --quiet=1             Quiet mode (minimal output)\n");
+			printf("  --silent=1            Silent mode (no output)\n");
+			printf("  --log=LEVEL           Log level (0-3)\n\n");
+			printf("Self-Test & Diagnostics:\n");
+			printf("  --debugMode=1         Enable debug mode (self-test)\n");
+			printf("  --dumpOnly=1          Dump-only mode (self-test)\n");
+			printf("  --cycleCount=N        Cycle count (self-test)\n");
+			printf("  --showCoreInfo=1      Show core info (self-test)\n");
+			printf("  --smbios=1            Show SMBIOS information (self-test)\n");
+			printf("  --fakeUpdate=1        Simulate update (testing)\n\n");
+			printf("Debug:\n");
+			printf("  -faddr ADDR           Memory address debug tool\n");
+			printf("  -fdelta DELTA         Memory delta debug tool\n\n");
+			printf("─── macOS Specific ─────────────────────────────────────────────────\n\n");
+			printf("  -kvm1                 KVM remote desktop subprocess mode\n");
+			printf("  -config               Update launchd scripts for existing install\n");
+			printf("  -tccCheck             TCC permissions check subprocess (with pipe)\n");
+			printf("  -check-tcc            Check TCC permissions, show UI if needed\n");
+			printf("  -show-install-ui      Launch Installation Assistant GUI\n");
+			printf("                        Note: Also auto-launches with CMD+double-click on .app\n");
+			printf("  -show-tcc-ui          Show TCC permissions window\n");
+			printf("                        Note: Also auto-launches with SHIFT+double-click on .app\n");
+			printf("  -request-accessibility        Request Accessibility permission\n");
+			printf("  -request-screenrecording      Request Screen Recording permission\n");
+			printf("  -request-fulldiskaccess       Request Full Disk Access\n");
+			printf("                        WARNING: -request-* flags request permissions for the\n");
+			printf("                        calling process. From a terminal, that means the terminal\n");
+			printf("                        app, not MeshAgent. These are spawned by the TCC UI.\n");
+			printf("  --appBundle=1         Running from app bundle\n");
+			printf("  --disableTccCheck=1   Disable TCC permission check UI\n");
+			printf("  --meshAgentLogging=1  Enable launchd logging to /tmp\n");
+			printf("  --setServiceID=ID     Set service identifier during fresh install\n\n");
+			printf("─── Windows Specific ───────────────────────────────────────────────\n\n");
+			printf("  -kvm0                 KVM mode 0\n");
+			printf("  -kvm1                 KVM mode 1\n");
+			printf("  -coredump             Enable core dump (with -kvm0/-kvm1)\n");
+			printf("  -remotecursor         Enable remote cursor (with -kvm0/-kvm1)\n");
+			printf("  -nocertstore          Disable Windows Certificate Store\n");
+			printf("  -recovery             Set recovery capabilities\n");
+			printf("  -resetnodeid          Reset agent node ID\n");
+			printf("  -lang                 Show current language\n");
+			printf("  --hideConsole=1       Hide console window\n");
+			printf("  --exitPID=PID         Exit when specified PID terminates\n");
+			printf("  start, -start         Start Windows service\n");
+			printf("  stop, -stop           Stop Windows service\n");
+			printf("  restart, -restart     Restart Windows service\n");
+			printf("  state, exstate        Show service state / extended state\n");
+			printf("  -setfirewall          Set Windows firewall rules\n");
+			printf("  -clearfirewall        Clear Windows firewall rules\n");
+			printf("  -checkfirewall        Check Windows firewall rules\n");
+			printf("  meshcmd               Enter MeshCmd mode\n");
+			printf("  -netinfo              Display network information\n\n");
+			printf("─── Linux/BSD Specific ─────────────────────────────────────────────\n\n");
+			printf("  -daemon               Run as foreground daemon\n");
+			printf("  -d                    Start daemon (alias for start)\n");
+			printf("  -s                    Stop daemon (alias for stop)\n");
+		}
+		else
+		{
+			printf("Use -help --all for the full argument reference including\n");
+			printf("platform-specific, advanced, and diagnostic options.\n");
+		}
 #ifdef WIN32
 		wmain_free(argv);
 #endif
@@ -1187,7 +1256,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 				printf("KVM: Scanning /Library/LaunchAgents/ for matching plist...\n");
 
 				// Find which LaunchAgent plist references this binary
-				serviceId = discover_service_id_from_plist(binaryPath);
+				serviceId = mesh_plist_find_service_id("/Library/LaunchAgents", binaryPath);
 
 				if (serviceId != NULL)
 				{
@@ -1197,14 +1266,24 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 				{
 					printf("KVM: Warning - Could not find LaunchAgent plist for %s\n", binaryPath);
 					printf("KVM: Using default serviceId\n");
-					serviceId = strdup("meshagent");
+					serviceId = strdup("unknown-agent");
 				}
 			}
 			else
 			{
 				printf("KVM: Warning - Could not determine binary path (argv[0]=%s)\n", argv[0]);
 				printf("KVM: Using default serviceId\n");
-				serviceId = strdup("meshagent");
+				serviceId = strdup("unknown-agent");
+			}
+		}
+
+		// Strip -agent suffix if present (LaunchAgent label is {serviceId}-agent, paths use base serviceId)
+		if (serviceId != NULL)
+		{
+			size_t len = strlen(serviceId);
+			if (len > 6 && strcmp(serviceId + len - 6, "-agent") == 0)
+			{
+				serviceId[len - 6] = '\0';
 			}
 		}
 
@@ -1220,6 +1299,7 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 	// Reads/writes disableTccCheck directly from/to meshagent.db
 	if (argc > 1 && strcasecmp(argv[1], "-check-tcc") == 0)
 	{
+
 		// Get executable path and build bundle-aware database path
 		char exePath[PATH_MAX];
 		char dbPath[PATH_MAX];
@@ -1237,38 +1317,24 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 				return 1;
 			}
 
-			// Database and .msh are in parent directory of bundle, named after the executable
-			// e.g., /usr/local/mesh_services/lithium-remote/lithium-remote.db
-			// bundlePath is like: /path/to/LithiumRemote.app/Contents/MacOS/lithium-remote
+			// get_bundle_path() returns the .app path, e.g. /opt/meshagent/MeshAgent.app
+			// We need the parent directory (/opt/meshagent/) and the exe name (meshagent)
 
-			// Extract executable name from bundlePath
-			char* exeName = strrchr(bundlePath, '/');
+			// Extract exe name from exePath (already resolved above)
+			char* exeSlash = strrchr(exePath, '/');
 			char exeNameCopy[256];
-			if (exeName != NULL) {
-				exeName++; // Skip the '/'
-				strncpy(exeNameCopy, exeName, sizeof(exeNameCopy) - 1);
+			if (exeSlash != NULL) {
+				strncpy(exeNameCopy, exeSlash + 1, sizeof(exeNameCopy) - 1);
 				exeNameCopy[sizeof(exeNameCopy) - 1] = '\0';
 			} else {
 				strncpy(exeNameCopy, "meshagent", sizeof(exeNameCopy) - 1);
 				exeNameCopy[sizeof(exeNameCopy) - 1] = '\0';
 			}
 
-			// Strip to parent directory (remove /Contents/MacOS/executable)
+			// Strip .app bundle name to get parent directory
 			char* lastSlash = strrchr(bundlePath, '/');
-			if (lastSlash != NULL) {
-				*lastSlash = '\0'; // Remove executable name
-			}
-			lastSlash = strrchr(bundlePath, '/');
-			if (lastSlash != NULL) {
-				*lastSlash = '\0'; // Remove /MacOS
-			}
-			lastSlash = strrchr(bundlePath, '/');
-			if (lastSlash != NULL) {
-				*lastSlash = '\0'; // Remove /Contents
-			}
-			lastSlash = strrchr(bundlePath, '/');
-			if (lastSlash != NULL) {
-				*lastSlash = '\0'; // Remove .app bundle name
+			if (lastSlash != NULL && lastSlash != bundlePath) {
+				*lastSlash = '\0'; // /opt/meshagent/MeshAgent.app -> /opt/meshagent
 			}
 
 			snprintf(dbPath, sizeof(dbPath), "%s/%s.db", bundlePath, exeNameCopy);
@@ -1295,9 +1361,12 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 				ILibSimpleDataStore_Close(db);
 				return 0;
 			}
+		} else {
 		}
 
 		// Check all three permissions (fresh check in this new process!)
+		uid_t consoleUID = get_console_user_uid();
+
 		TCC_PermissionStatus accessibility = check_accessibility_permission();
 		TCC_PermissionStatus fda = check_fda_permission();
 		TCC_PermissionStatus screen_recording = check_screen_recording_permission();
@@ -1312,8 +1381,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 			return 0;
 		}
 
+
 		// At least one permission missing - show UI
-		uid_t consoleUID = get_console_user_uid();
 		int result = show_tcc_permissions_window(1, __agentExecPath, consoleUID); // 1 = show "Do not remind me again" checkbox
 
 		// If user clicked "Do not remind me again", write to .msh file

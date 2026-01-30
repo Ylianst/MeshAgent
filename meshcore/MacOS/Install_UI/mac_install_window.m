@@ -47,10 +47,14 @@
 }
 @end
 
+// Forward declarations
+// Agent display name provided by mesh_getAgentDisplayName() in mac_ui_helpers
+
 // Button tag constants for view lookup
 #define BUTTON_TAG_BROWSE_UPGRADE 100
 #define BUTTON_TAG_BROWSE_INSTALL 101
 #define BUTTON_TAG_BROWSE_MSH 102
+#define BUTTON_TAG_BROWSE_UNINSTALL 103
 
 // Button handler class
 @interface InstallButtonHandler : NSObject
@@ -64,6 +68,15 @@
 @property (nonatomic, strong) NSWindow *mshViewerWindow;
 @property (nonatomic, strong) NSButton *enableUpdateCheckbox;
 @property (nonatomic, strong) NSButton *disableTccCheckCheckbox;
+@property (nonatomic, strong) NSButton *verboseLoggingCheckbox;
+@property (nonatomic, strong) NSButton *meshAgentLoggingCheckbox;
+@property (nonatomic, strong) NSTextField *uninstallPathField;
+@property (nonatomic, strong) NSButton *standardUninstallRadio;
+@property (nonatomic, strong) NSButton *fullUninstallRadio;
+@property (nonatomic, strong) NSButton *installButton;
+@property (nonatomic, strong) NSImageView *installIcon;
+@property (nonatomic, strong) NSImageView *upgradeIcon;
+@property (nonatomic, strong) NSImageView *uninstallIcon;
 @property (nonatomic, assign) InstallResult *result;
 @property (nonatomic, strong) NSWindow *progressWindow;
 @property (nonatomic, strong) NSTextView *progressTextView;
@@ -76,6 +89,8 @@
 - (void)browseUpgradePath:(id)sender;
 - (void)browseInstallPath:(id)sender;
 - (void)browseMshFile:(id)sender;
+- (void)browseUninstallPath:(id)sender;
+- (void)uninstallTypeChanged:(NSButton*)sender;
 - (void)editMshFile:(id)sender;
 - (void)closeViewerSheet:(id)sender;
 - (void)updateInstalledVersionLabel:(NSString*)installPath;
@@ -98,36 +113,97 @@
     return self;
 }
 
+// Get the base name of the agent executable (e.g., "meshagent" or "acmemesh")
+- (NSString *)getAgentBaseName {
+    NSString *execPath = [[NSBundle mainBundle] executablePath];
+    if (!execPath) {
+        char path[PATH_MAX];
+        uint32_t size = sizeof(path);
+        if (_NSGetExecutablePath(path, &size) == 0) {
+            execPath = [NSString stringWithUTF8String:path];
+        } else {
+            return nil;  // Caller must handle failure
+        }
+    }
+    return [[execPath lastPathComponent] stringByDeletingPathExtension];
+}
+
+// Get the display name for the agent (e.g., "MeshAgent" or "AcmeMesh")
+// Priority: 1. CFBundleDisplayName  2. CFBundleName  3. .app bundle name  4. Binary name
+- (NSString *)getAgentDisplayName {
+    return mesh_getAgentDisplayName();
+}
+
+// Get the .msh filename based on executable name (e.g., "meshagent.msh" or "acmemesh.msh")
+- (NSString *)getAgentMshName {
+    NSString *base = [self getAgentBaseName];
+    return base ? [base stringByAppendingString:@".msh"] : nil;
+}
+
+// Get the .db filename based on executable name (e.g., "meshagent.db" or "acmemesh.db")
+- (NSString *)getAgentDbName {
+    NSString *base = [self getAgentBaseName];
+    return base ? [base stringByAppendingString:@".db"] : nil;
+}
+
 - (void)modeChanged:(NSButton*)sender {
     NSInteger tag = [sender tag];
 
     // Validate tag before casting to enum
-    if (tag != INSTALL_MODE_UPGRADE && tag != INSTALL_MODE_NEW) {
+    if (tag != INSTALL_MODE_UPGRADE && tag != INSTALL_MODE_NEW && tag != INSTALL_MODE_UNINSTALL) {
         mesh_log_message("[INSTALL-UI] ERROR: Invalid mode tag: %ld\n", (long)tag);
         return;
     }
 
     self.selectedMode = (InstallMode)tag;
 
-    // Enable/disable appropriate fields based on selection
     BOOL isUpgrade = (tag == INSTALL_MODE_UPGRADE);
+    BOOL isInstall = (tag == INSTALL_MODE_NEW);
+    BOOL isUninstall = (tag == INSTALL_MODE_UNINSTALL);
 
+    // Upgrade fields
     [self.upgradePathField setEnabled:isUpgrade];
-    [[self.upgradePathField.superview viewWithTag:BUTTON_TAG_BROWSE_UPGRADE] setEnabled:isUpgrade]; // Browse button
+    [[self.upgradePathField.superview viewWithTag:BUTTON_TAG_BROWSE_UPGRADE] setEnabled:isUpgrade];
 
-    [self.installPathField setEnabled:!isUpgrade];
-    [[self.installPathField.superview viewWithTag:BUTTON_TAG_BROWSE_INSTALL] setEnabled:!isUpgrade]; // Browse button
-    [self.mshFileField setEnabled:!isUpgrade];
-    [[self.mshFileField.superview viewWithTag:BUTTON_TAG_BROWSE_MSH] setEnabled:!isUpgrade]; // Browse button
+    // Install fields
+    [self.installPathField setEnabled:isInstall];
+    [[self.installPathField.superview viewWithTag:BUTTON_TAG_BROWSE_INSTALL] setEnabled:isInstall];
+    [self.mshFileField setEnabled:isInstall];
+    [[self.mshFileField.superview viewWithTag:BUTTON_TAG_BROWSE_MSH] setEnabled:isInstall];
 
-    // Edit button: only enabled if not upgrade mode AND a file is selected
+    // Edit button: only enabled if install mode AND a file is selected
     BOOL hasFile = [[self.mshFileField stringValue] length] > 0;
-    [self.editMshButton setEnabled:(!isUpgrade && hasFile)];
+    [self.editMshButton setEnabled:(isInstall && hasFile)];
+
+    // Uninstall fields
+    [self.uninstallPathField setEnabled:isUninstall];
+    [[self.uninstallPathField.superview viewWithTag:BUTTON_TAG_BROWSE_UNINSTALL] setEnabled:isUninstall];
+    [self.standardUninstallRadio setEnabled:isUninstall];
+    [self.fullUninstallRadio setEnabled:isUninstall];
+
+    // Disable install/upgrade-specific checkboxes when uninstall selected (verbose logging stays)
+    [self.enableUpdateCheckbox setEnabled:!isUninstall];
+    [self.disableTccCheckCheckbox setEnabled:!isUninstall];
+    [self.meshAgentLoggingCheckbox setEnabled:!isUninstall];
+
+    // Update radio icon tints: selected mode gets black, others get secondaryLabelColor
+    [self.installIcon setContentTintColor:isInstall ? [NSColor blackColor] : [NSColor secondaryLabelColor]];
+    [self.upgradeIcon setContentTintColor:isUpgrade ? [NSColor blackColor] : [NSColor secondaryLabelColor]];
+    [self.uninstallIcon setContentTintColor:isUninstall ? [NSColor blackColor] : [NSColor secondaryLabelColor]];
+
+    // Dynamic button text
+    if (isUninstall) {
+        [self.installButton setTitle:@"Uninstall"];
+    } else if (isUpgrade) {
+        [self.installButton setTitle:@"Upgrade"];
+    } else {
+        [self.installButton setTitle:@"Install"];
+    }
 }
 
 - (void)browseUpgradePath:(id)sender {
     NSString* selectedPath = mesh_showFileDialog(NO, YES,
-        @"Select the existing MeshAgent installation directory", nil);
+        [NSString stringWithFormat:@"Select the existing %@ installation directory", [self getAgentDisplayName]], nil);
 
     if (selectedPath != nil) {
         [self.upgradePathField setStringValue:selectedPath];
@@ -157,9 +233,23 @@
     }
 }
 
+- (void)browseUninstallPath:(id)sender {
+    NSString* selectedPath = mesh_showFileDialog(NO, YES,
+        [NSString stringWithFormat:@"Select the %@ installation directory to uninstall", [self getAgentDisplayName]], nil);
+
+    if (selectedPath != nil) {
+        [self.uninstallPathField setStringValue:selectedPath];
+    }
+}
+
+- (void)uninstallTypeChanged:(NSButton*)sender {
+    [self.standardUninstallRadio setState:(sender == self.standardUninstallRadio) ? NSControlStateValueOn : NSControlStateValueOff];
+    [self.fullUninstallRadio setState:(sender == self.fullUninstallRadio) ? NSControlStateValueOn : NSControlStateValueOff];
+}
+
 - (void)browseInstallPath:(id)sender {
     NSString* path = mesh_showFileDialog(NO, YES,
-        @"Select the directory where MeshAgent will be installed", nil);
+        [NSString stringWithFormat:@"Select the directory where %@ will be installed", [self getAgentDisplayName]], nil);
     if (path != nil) {
         [self.installPathField setStringValue:path];
     }
@@ -286,11 +376,8 @@
     [contentView addSubview:scrollView];
 
     // Close button
-    NSButton* closeButton = [[NSButton alloc] initWithFrame:NSMakeRect(390, 20, 90, 30)];
-    [closeButton setTitle:@"Close"];
-    [closeButton setBezelStyle:NSBezelStyleRounded];
-    [closeButton setTarget:self];
-    [closeButton setAction:@selector(closeViewerSheet:)];
+    NSButton* closeButton = mesh_createRoundedButton(@"Close", NSMakeRect(390, 20, 90, 30),
+        self, @selector(closeViewerSheet:), 0);
     [closeButton setKeyEquivalent:@"\r"];
     [contentView addSubview:closeButton];
 
@@ -331,6 +418,12 @@
     NSTask* task = [[NSTask alloc] init];
     [task setLaunchPath:binaryPath];
     [task setArguments:@[arg]];
+
+    // Strip LAUNCHED_FROM_FINDER from environment so the child process
+    // doesn't think it was launched from Finder and show its own install UI
+    NSMutableDictionary* env = [[[NSProcessInfo processInfo] environment] mutableCopy];
+    [env removeObjectForKey:@"LAUNCHED_FROM_FINDER"];
+    [task setEnvironment:env];
 
     NSPipe* pipe = [NSPipe pipe];
     [task setStandardOutput:pipe];
@@ -419,7 +512,7 @@
             snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
 
             MeshPlistInfo info;
-            if (mesh_parse_launchdaemon_plist(plistPath, &info)) {
+            if (mesh_parse_launchdaemon_plist(plistPath, &info, [[self getAgentBaseName] UTF8String])) {
                 // Check if this plist's program path is under our install path
                 NSString* programPath = [NSString stringWithUTF8String:info.programPath];
                 if ([programPath hasPrefix:installPath] && [fm isExecutableFileAtPath:programPath]) {
@@ -431,13 +524,16 @@
         closedir(dir);
     }
 
-    // Second: look for any .app bundle containing meshagent
+    // Second: look for any .app bundle containing our agent binary
+    NSString* baseName = [self getAgentBaseName];
+    if (!baseName) baseName = @"meshagent";
+
     NSError* error = nil;
     NSArray* contents = [fm contentsOfDirectoryAtPath:installPath error:&error];
     if (contents != nil) {
         for (NSString* item in contents) {
             if ([item hasSuffix:@".app"]) {
-                NSString* candidate = [NSString stringWithFormat:@"%@/%@/Contents/MacOS/meshagent", installPath, item];
+                NSString* candidate = [NSString stringWithFormat:@"%@/%@/Contents/MacOS/%@", installPath, item, baseName];
                 if ([fm isExecutableFileAtPath:candidate]) {
                     return candidate;
                 }
@@ -445,8 +541,8 @@
         }
     }
 
-    // Third: look for bare meshagent binary in install path
-    NSString* bareBinary = [NSString stringWithFormat:@"%@/meshagent", installPath];
+    // Third: look for bare agent binary in install path
+    NSString* bareBinary = [NSString stringWithFormat:@"%@/%@", installPath, baseName];
     if ([fm isExecutableFileAtPath:bareBinary]) {
         return bareBinary;
     }
@@ -505,8 +601,9 @@
 }
 
 - (void)showProgressWindow {
-    mesh_log_message("[INSTALL-UI] Showing progress window for %s mode\n",
-                     (self.selectedMode == INSTALL_MODE_UPGRADE ? "UPGRADE" : "INSTALL"));
+    const char* modeStr = (self.selectedMode == INSTALL_MODE_UPGRADE ? "UPGRADE" :
+                           (self.selectedMode == INSTALL_MODE_UNINSTALL ? "UNINSTALL" : "INSTALL"));
+    mesh_log_message("[INSTALL-UI] Showing progress window for %s mode\n", modeStr);
 
     NSWindow* mainWindow = (NSWindow*)[self.contentView window];
 
@@ -518,7 +615,11 @@
         backing:NSBackingStoreBuffered
         defer:NO];
 
-    [self.progressWindow setTitle:(self.selectedMode == INSTALL_MODE_UPGRADE ? @"Upgrading MeshAgent" : @"Installing MeshAgent")];
+    NSString* displayName = [self getAgentDisplayName];
+    NSString* actionVerb = (self.selectedMode == INSTALL_MODE_UPGRADE ? @"Upgrading" :
+                            (self.selectedMode == INSTALL_MODE_UNINSTALL ?
+                             (self.result->fullUninstall ? @"Fully Uninstalling" : @"Uninstalling") : @"Installing"));
+    [self.progressWindow setTitle:[NSString stringWithFormat:@"%@ %@", actionVerb, displayName]];
     [self.progressWindow center];
     [self.progressWindow setLevel:NSFloatingWindowLevel];
 
@@ -526,7 +627,7 @@
 
     // Add title label
     NSTextField* titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(20, 380, 460, 24)];
-    [titleLabel setStringValue:(self.selectedMode == INSTALL_MODE_UPGRADE ? @"Upgrading MeshAgent..." : @"Installing MeshAgent...")];
+    [titleLabel setStringValue:[NSString stringWithFormat:@"%@ %@...", actionVerb, displayName]];
     [titleLabel setBezeled:NO];
     [titleLabel setDrawsBackground:NO];
     [titleLabel setEditable:NO];
@@ -605,9 +706,12 @@
 
         // Show status message
         if (success) {
-            NSString* message = (self.selectedMode == INSTALL_MODE_UPGRADE ?
-                @"✓ MeshAgent has been upgraded successfully." :
-                @"✓ MeshAgent has been installed successfully.");
+            NSString* dName = [self getAgentDisplayName];
+            NSString* actionPast = (self.selectedMode == INSTALL_MODE_UPGRADE ? @"upgraded" :
+                                    (self.selectedMode == INSTALL_MODE_UNINSTALL ?
+                                     (self.result->fullUninstall ? @"fully uninstalled" : @"uninstalled") : @"installed"));
+            NSString* message = [NSString stringWithFormat:@"✓ %@ has been %@ successfully.",
+                dName, actionPast];
             [self.statusLabel setStringValue:message];
             [self.statusLabel setTextColor:[NSColor colorWithRed:0.0 green:0.6 blue:0.0 alpha:1.0]];
         } else {
@@ -636,7 +740,7 @@
         NSString* path = [self.upgradePathField stringValue];
         if (path == nil || [path length] == 0) {
             mesh_showAlert(@"Installation Path Required",
-                          @"Please select the existing MeshAgent installation directory.",
+                          [NSString stringWithFormat:@"Please select the existing %@ installation directory.", [self getAgentDisplayName]],
                           NSAlertStyleWarning);
             return;
         }
@@ -645,20 +749,28 @@
         BOOL isDir;
         if (![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] || !isDir) {
             mesh_showAlert(@"Installation Not Found",
-                          [NSString stringWithFormat:@"No MeshAgent installation found at:\n%@\n\nPlease select a valid installation directory.", path],
+                          [NSString stringWithFormat:@"No %@ installation found at:\n%@\n\nPlease select a valid installation directory.", [self getAgentDisplayName], path],
                           NSAlertStyleWarning);
             return;
         }
 
-        // Check for valid installation: minimum is meshagent.db OR meshagent.msh
-        NSString* dbPath = [path stringByAppendingPathComponent:@"meshagent.db"];
-        NSString* mshPathCheck = [path stringByAppendingPathComponent:@"meshagent.msh"];
+        // Check for valid installation: minimum is <agent>.db OR <agent>.msh
+        NSString* agentDbName = [self getAgentDbName];
+        NSString* agentMshName = [self getAgentMshName];
+        if (!agentDbName || !agentMshName) {
+            mesh_showAlert(@"Internal Error",
+                          @"Failed to determine agent configuration file names.",
+                          NSAlertStyleCritical);
+            return;
+        }
+        NSString* dbPath = [path stringByAppendingPathComponent:agentDbName];
+        NSString* mshPathCheck = [path stringByAppendingPathComponent:agentMshName];
         BOOL hasDb = [[NSFileManager defaultManager] fileExistsAtPath:dbPath];
         BOOL hasMsh = [[NSFileManager defaultManager] fileExistsAtPath:mshPathCheck];
 
         if (!hasDb && !hasMsh) {
             mesh_showAlert(@"Invalid Installation Directory",
-                          [NSString stringWithFormat:@"The directory does not contain a valid MeshAgent installation:\n%@\n\nExpected meshagent.db or meshagent.msh", path],
+                          [NSString stringWithFormat:@"The directory does not contain a valid %@ installation:\n%@\n\nExpected %@ or %@", [self getAgentDisplayName], path, agentDbName, agentMshName],
                           NSAlertStyleWarning);
             return;
         }
@@ -678,13 +790,67 @@
         self.result->installPath[sizeof(self.result->installPath) - 1] = '\0';
         self.result->mshFilePath[0] = '\0';
 
+    } else if (self.selectedMode == INSTALL_MODE_UNINSTALL) {
+        NSString* path = [self.uninstallPathField stringValue];
+        if (path == nil || [path length] == 0) {
+            mesh_showAlert(@"Installation Path Required",
+                          [NSString stringWithFormat:@"Please select the %@ installation directory to uninstall.", [self getAgentDisplayName]],
+                          NSAlertStyleWarning);
+            return;
+        }
+
+        // Validate the path exists and is a directory
+        BOOL isDir;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] || !isDir) {
+            mesh_showAlert(@"Installation Not Found",
+                          [NSString stringWithFormat:@"No %@ installation found at:\n%@\n\nPlease select a valid installation directory.", [self getAgentDisplayName], path],
+                          NSAlertStyleWarning);
+            return;
+        }
+
+        // Validate path length before copying
+        const char* pathCStr = [path UTF8String];
+        if (strlen(pathCStr) >= sizeof(self.result->installPath)) {
+            mesh_showAlert(@"Path Too Long",
+                          [NSString stringWithFormat:@"Installation path exceeds maximum length of %lu characters:\n%@",
+                           (unsigned long)(sizeof(self.result->installPath) - 1), path],
+                          NSAlertStyleWarning);
+            return;
+        }
+
+        // Set fullUninstall from sub-radio state
+        self.result->fullUninstall = ([self.fullUninstallRadio state] == NSControlStateValueOn) ? 1 : 0;
+
+        // Confirmation dialog
+        NSAlert* alert = [[NSAlert alloc] init];
+        if (self.result->fullUninstall) {
+            [alert setMessageText:@"Confirm Full Uninstall"];
+            [alert setInformativeText:[NSString stringWithFormat:@"This will fully uninstall %@ and remove all associated data from:\n%@\n\nThis action cannot be undone.", [self getAgentDisplayName], path]];
+            [alert setAlertStyle:NSAlertStyleCritical];
+        } else {
+            [alert setMessageText:@"Confirm Uninstall"];
+            [alert setInformativeText:[NSString stringWithFormat:@"This will uninstall %@ from:\n%@\n\nThis action cannot be undone.", [self getAgentDisplayName], path]];
+            [alert setAlertStyle:NSAlertStyleWarning];
+        }
+        [alert addButtonWithTitle:self.result->fullUninstall ? @"Full Uninstall" : @"Uninstall"];
+        [alert addButtonWithTitle:@"Cancel"];
+
+        if ([alert runModal] != NSAlertFirstButtonReturn) {
+            return;  // User cancelled
+        }
+
+        // Copy to result
+        strncpy(self.result->installPath, pathCStr, sizeof(self.result->installPath) - 1);
+        self.result->installPath[sizeof(self.result->installPath) - 1] = '\0';
+        self.result->mshFilePath[0] = '\0';
+
     } else {
         NSString* installPath = [self.installPathField stringValue];
         NSString* mshPath = [self.mshFileField stringValue];
 
         if (installPath == nil || [installPath length] == 0) {
             mesh_showAlert(@"Installation Path Required",
-                          @"Please select where to install MeshAgent.",
+                          [NSString stringWithFormat:@"Please select where to install %@.", [self getAgentDisplayName]],
                           NSAlertStyleWarning);
             return;
         }
@@ -713,7 +879,7 @@
 
         if (mshPath == nil || [mshPath length] == 0) {
             mesh_showAlert(@"Configuration File Required",
-                          @"Please select the meshagent.msh configuration file.",
+                          [NSString stringWithFormat:@"Please select the %@ configuration file.", [self getAgentMshName] ?: @".msh"],
                           NSAlertStyleWarning);
             return;
         }
@@ -757,13 +923,29 @@
     self.result->mode = self.selectedMode;
     self.result->disableUpdate = ([self.enableUpdateCheckbox state] == NSControlStateValueOn) ? 1 : 0;
     self.result->disableTccCheck = ([self.disableTccCheckCheckbox state] == NSControlStateValueOn) ? 1 : 0;
+    self.result->verboseLogging = ([self.verboseLoggingCheckbox state] == NSControlStateValueOn) ? 1 : 0;
+    self.result->meshAgentLogging = ([self.meshAgentLoggingCheckbox state] == NSControlStateValueOn) ? 1 : 0;
     self.result->cancelled = 0;
 
-    mesh_log_message("[INSTALL-UI] Starting %s: path=%s, updates=%s, tccCheck=%s\n",
-                     (self.selectedMode == INSTALL_MODE_UPGRADE ? "UPGRADE" : "INSTALL"),
+    mesh_log_message("[INSTALL-UI] Starting %s: path=%s, updates=%s, tccCheck=%s, verboseLog=%s, meshAgentLog=%s\n",
+                     (self.selectedMode == INSTALL_MODE_UPGRADE ? "UPGRADE" :
+                      (self.selectedMode == INSTALL_MODE_UNINSTALL ? "UNINSTALL" : "INSTALL")),
                      self.result->installPath,
                      (self.result->disableUpdate ? "disabled" : "enabled"),
-                     (self.result->disableTccCheck ? "disabled" : "enabled"));
+                     (self.result->disableTccCheck ? "disabled" : "enabled"),
+                     (self.result->verboseLogging ? "enabled" : "disabled"),
+                     (self.result->meshAgentLogging ? "enabled" : "disabled"));
+
+    // Request admin authorization (shows system password dialog)
+    if (acquire_admin_authorization() != 0) {
+        mesh_log_message("[INSTALL-UI] Admin authorization denied or cancelled\n");
+        mesh_showAlert(@"Authorization Required",
+                      [NSString stringWithFormat:@"Administrator privileges are required to %@.",
+                       (self.selectedMode == INSTALL_MODE_UPGRADE ? @"upgrade" :
+                        (self.selectedMode == INSTALL_MODE_UNINSTALL ? @"uninstall" : @"install"))],
+                      NSAlertStyleWarning);
+        return;
+    }
 
     // Show progress window
     [self showProgressWindow];
@@ -783,27 +965,44 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         int exitCode = 0;
 
-        if (self.selectedMode == INSTALL_MODE_UPGRADE) {
-            [self appendProgressText:[NSString stringWithFormat:@"Upgrading MeshAgent at: %s\n", self.result->installPath]];
+        if (self.selectedMode == INSTALL_MODE_UNINSTALL) {
+            [self appendProgressText:[NSString stringWithFormat:@"%@ %@ at: %s\n",
+                (self.result->fullUninstall ? @"Fully uninstalling" : @"Uninstalling"),
+                [self getAgentDisplayName], self.result->installPath]];
+            [self appendProgressText:[NSString stringWithFormat:@"Verbose installer logging: %s\n\n",
+                self.result->verboseLogging ? "enabled" : "disabled"]];
+
+            exitCode = execute_meshagent_uninstall(self.result->installPath, self.result->fullUninstall, self.result->verboseLogging);
+        } else if (self.selectedMode == INSTALL_MODE_UPGRADE) {
+            [self appendProgressText:[NSString stringWithFormat:@"Upgrading %@ at: %s\n", [self getAgentDisplayName], self.result->installPath]];
             [self appendProgressText:[NSString stringWithFormat:@"Automatic updates: %s\n",
                 self.result->disableUpdate ? "disabled" : "enabled"]];
-            [self appendProgressText:[NSString stringWithFormat:@"TCC Check UI: %s\n\n",
+            [self appendProgressText:[NSString stringWithFormat:@"TCC Check UI: %s\n",
                 self.result->disableTccCheck ? "disabled" : "enabled"]];
+            [self appendProgressText:[NSString stringWithFormat:@"Verbose installer logging: %s\n",
+                self.result->verboseLogging ? "enabled" : "disabled"]];
+            [self appendProgressText:[NSString stringWithFormat:@"Agent logging: %s\n\n",
+                self.result->meshAgentLogging ? "enabled" : "disabled"]];
 
-            exitCode = execute_meshagent_upgrade(self.result->installPath, self.result->disableUpdate, self.result->disableTccCheck);
+            exitCode = execute_meshagent_upgrade(self.result->installPath, self.result->disableUpdate, self.result->disableTccCheck, self.result->verboseLogging, self.result->meshAgentLogging);
         } else {
-            [self appendProgressText:[NSString stringWithFormat:@"Installing MeshAgent to: %s\n", self.result->installPath]];
+            [self appendProgressText:[NSString stringWithFormat:@"Installing %@ to: %s\n", [self getAgentDisplayName], self.result->installPath]];
             [self appendProgressText:[NSString stringWithFormat:@"Configuration file: %s\n", self.result->mshFilePath]];
             [self appendProgressText:[NSString stringWithFormat:@"Automatic updates: %s\n",
                 self.result->disableUpdate ? "disabled" : "enabled"]];
-            [self appendProgressText:[NSString stringWithFormat:@"TCC Check UI: %s\n\n",
+            [self appendProgressText:[NSString stringWithFormat:@"TCC Check UI: %s\n",
                 self.result->disableTccCheck ? "disabled" : "enabled"]];
+            [self appendProgressText:[NSString stringWithFormat:@"Verbose installer logging: %s\n",
+                self.result->verboseLogging ? "enabled" : "disabled"]];
+            [self appendProgressText:[NSString stringWithFormat:@"Agent logging: %s\n\n",
+                self.result->meshAgentLogging ? "enabled" : "disabled"]];
 
-            exitCode = execute_meshagent_install(self.result->installPath, self.result->mshFilePath, self.result->disableUpdate, self.result->disableTccCheck);
+            exitCode = execute_meshagent_install(self.result->installPath, self.result->mshFilePath, self.result->disableUpdate, self.result->disableTccCheck, self.result->verboseLogging, self.result->meshAgentLogging);
         }
 
-        // Clear callback
+        // Clear callback and release admin authorization
         set_progress_callback(NULL);
+        release_admin_authorization();
 
         [self appendProgressText:[NSString stringWithFormat:@"\nOperation completed with exit code: %d\n", exitCode]];
         [self completeWithSuccess:(exitCode == 0) exitCode:exitCode];
@@ -842,6 +1041,26 @@ static BOOL fileExists(const char* path) {
     return (stat(path, &st) == 0);
 }
 
+// Get base filename from executable path for dynamic .msh/.db naming (C function)
+static void getAgentBaseNameC(char *baseName, size_t baseNameSize) {
+    char execPath[PATH_MAX];
+    uint32_t size = sizeof(execPath);
+
+    if (_NSGetExecutablePath(execPath, &size) != 0) {
+        baseName[0] = '\0';  // Empty on failure - caller must handle
+        return;
+    }
+
+    char *lastSlash = strrchr(execPath, '/');
+    const char *filename = lastSlash ? lastSlash + 1 : execPath;
+
+    strncpy(baseName, filename, baseNameSize - 1);
+    baseName[baseNameSize - 1] = '\0';
+
+    char *dot = strrchr(baseName, '.');
+    if (dot) *dot = '\0';
+}
+
 // Legacy parsing function removed - now using shared mac_plist_utils.h
 
 // Helper function to find existing MeshAgent installation by scanning LaunchDaemons
@@ -852,6 +1071,10 @@ static char* findExistingInstallation(void) {
         mesh_log_message("[INSTALL-UI] Failed to open /Library/LaunchDaemons: %s\n", strerror(errno));
         return NULL;
     }
+
+    // Get agent base name for plist matching
+    char agentBaseName[256];
+    getAgentBaseNameC(agentBaseName, sizeof(agentBaseName));
 
     MeshPlistInfo plists[100];
     int plistCount = 0;
@@ -865,8 +1088,8 @@ static char* findExistingInstallation(void) {
         snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
 
         MeshPlistInfo info;
-        if (mesh_parse_launchdaemon_plist(plistPath, &info)) {
-            mesh_log_message("[INSTALL-UI] Found MeshAgent plist: %s (program: %s)\n",
+        if (mesh_parse_launchdaemon_plist(plistPath, &info, agentBaseName)) {
+            mesh_log_message("[INSTALL-UI] Found agent plist: %s (program: %s)\n",
                              entry->d_name, info.programPath);
             plists[plistCount++] = info;
         }
@@ -929,13 +1152,23 @@ static char* findExistingInstallation(void) {
 
 // Helper function to get default installation path
 static const char* getDefaultInstallPath(void) {
-    // Check if TacticalAgent is installed
-    if (fileExists("/opt/tacticalagent/tacticalagent")) {
-        return "/opt/tacticalmesh";
+    // Check if ACMEAgent is installed
+    if (fileExists("/opt/acmeagent/acmeagent")) {
+        return "/opt/acmemesh";
     }
 
-    // Otherwise use standard location
-    return "/usr/local/mesh_services/meshagent";
+    // Build path from executable name
+    static char defaultPath[PATH_MAX];
+    char exePath[PATH_MAX];
+    uint32_t size = sizeof(exePath);
+    if (_NSGetExecutablePath(exePath, &size) == 0) {
+        char *base = basename(exePath);
+        if (base != NULL && strlen(base) > 0 && strcmp(base, ".") != 0 && strcmp(base, "/") != 0) {
+            snprintf(defaultPath, sizeof(defaultPath), "/usr/local/mesh_services/%s", base);
+            return defaultPath;
+        }
+    }
+    return "/usr/local/mesh_services/agent";
 }
 
 // Helper function to find .msh file in same directory as current binary
@@ -950,25 +1183,48 @@ static char* findMshFile(void) {
         return NULL;
     }
 
-    // Get directory containing executable
-    char* dir = dirname(exePath);
+    // Get directory to search for .msh file
+    // If running from inside an .app bundle (path contains ".app/Contents/MacOS/"),
+    // search the directory containing the .app bundle, not the MacOS directory inside it
+    char searchDir[1024];
+    char* appPos = strstr(exePath, ".app/Contents/MacOS/");
+    if (appPos != NULL) {
+        // Truncate at .app to get bundle path, then strip bundle name to get parent dir
+        *appPos = '\0'; // exePath is now e.g. "/path/to/ACMEmesh"
+        char* lastSlash = strrchr(exePath, '/');
+        if (lastSlash != NULL && lastSlash != exePath) {
+            *lastSlash = '\0';
+            strlcpy(searchDir, exePath, sizeof(searchDir));
+        } else {
+            strlcpy(searchDir, ".", sizeof(searchDir));
+        }
+    } else {
+        strlcpy(searchDir, dirname(exePath), sizeof(searchDir));
+    }
+    char* dir = searchDir;
     mesh_log_message("[INSTALL-UI] Searching for .msh file in directory: %s\n", dir);
 
     // Look for .msh files in the same directory
     char mshPath[2048];
 
-    // First try meshagent.msh
-    snprintf(mshPath, sizeof(mshPath), "%s/meshagent.msh", dir);
-    if (fileExists(mshPath)) {
-        // .msh file validation is performed by meshagent binary during install execution
-        // UI-level check for file existence and readability is sufficient
-        // File format validation happens in the install/upgrade process with proper error handling
-        mesh_log_message("[INSTALL-UI] Found .msh file: %s\n", mshPath);
-        char* result = strdup(mshPath);
-        if (result == NULL) {
-            mesh_log_message("[INSTALL-UI] ERROR: Memory allocation failed in findMshFile\n");
+    // Get agent base name for dynamic file naming
+    char agentBaseName[256];
+    getAgentBaseNameC(agentBaseName, sizeof(agentBaseName));
+
+    // First try <agentname>.msh (e.g., meshagent.msh or acmemesh.msh)
+    if (agentBaseName[0] != '\0') {
+        snprintf(mshPath, sizeof(mshPath), "%s/%s.msh", dir, agentBaseName);
+        if (fileExists(mshPath)) {
+            // .msh file validation is performed by meshagent binary during install execution
+            // UI-level check for file existence and readability is sufficient
+            // File format validation happens in the install/upgrade process with proper error handling
+            mesh_log_message("[INSTALL-UI] Found .msh file: %s\n", mshPath);
+            char* result = strdup(mshPath);
+            if (result == NULL) {
+                mesh_log_message("[INSTALL-UI] ERROR: Memory allocation failed in findMshFile\n");
+            }
+            return result;
         }
-        return result;
     }
 
     // Try any .msh file in the directory
@@ -1015,15 +1271,18 @@ InstallResult show_install_assistant_window(void) {
         [mainMenu addItem:editMenuItem];
         [NSApp setMainMenu:mainMenu];
 
+        // Get display name for dynamic UI labels
+        NSString* agentName = mesh_getAgentDisplayName();
+
         // Create window
-        NSRect frame = NSMakeRect(0, 0, 600, 430);
+        NSRect frame = NSMakeRect(0, 0, 600, 620);
         NSWindow* window = [[NSWindow alloc]
             initWithContentRect:frame
             styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
             backing:NSBackingStoreBuffered
             defer:NO];
 
-        [window setTitle:@"MeshAgent Deployment Assistant"];
+        [window setTitle:[NSString stringWithFormat:@"%@ Deployment Assistant", agentName]];
 
         // Center window
         [window center];
@@ -1050,22 +1309,19 @@ InstallResult show_install_assistant_window(void) {
         delegate.result = &result;
         [window setDelegate:delegate];
 
-        // Add icon (macOS 11+)
-        if (@available(macOS 11.0, *)) {
-            NSImageView* iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(40, 360, 40, 40)];
-            NSImage* icon = [NSImage imageWithSystemSymbolName:@"arrow.down.circle" accessibilityDescription:@"Install"];
-            [iconView setImage:icon];
-            [iconView setSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:32 weight:NSFontWeightRegular]];
-            [contentView addSubview:iconView];
-        }
+        // Add header icon (Lucide "network")
+        NSImageView* headerIcon = [[NSImageView alloc] initWithFrame:NSMakeRect(40, 550, 40, 40)];
+        [headerIcon setImage:mesh_lucideNetworkIcon(40)];
+        [headerIcon setContentTintColor:[NSColor blackColor]];
+        [contentView addSubview:headerIcon];
 
         // Add title
-        NSTextField* titleLabel = mesh_createLabel(@"MeshAgent Deployment Assistant", NSMakeRect(90, 380, 490, 24), YES);
+        NSTextField* titleLabel = mesh_createLabel([NSString stringWithFormat:@"%@ Deployment Assistant", agentName], NSMakeRect(90, 570, 490, 24), YES);
         [titleLabel setFont:[NSFont systemFontOfSize:16 weight:NSFontWeightBold]];
         [contentView addSubview:titleLabel];
 
         // Add description (tight spacing below title)
-        NSTextField* descLabel = mesh_createLabel(@"Install or upgrade MeshAgent", NSMakeRect(90, 364, 490, 20), NO);
+        NSTextField* descLabel = mesh_createLabel([NSString stringWithFormat:@"Install, upgrade, or uninstall %@", agentName], NSMakeRect(90, 554, 490, 20), NO);
         [contentView addSubview:descLabel];
 
         // Add version info (prominently displayed)
@@ -1073,49 +1329,45 @@ InstallResult show_install_assistant_window(void) {
         NSString* build = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString* versionString = [NSString stringWithFormat:@"Version %@ (Build %@)",
             version ?: @"Unknown", build ?: @"Unknown"];
-        NSTextField* versionLabel = mesh_createLabel(versionString, NSMakeRect(90, 348, 490, 20), NO);
+        NSTextField* versionLabel = mesh_createLabel(versionString, NSMakeRect(90, 538, 490, 20), NO);
         [versionLabel setFont:[NSFont systemFontOfSize:14 weight:NSFontWeightRegular]];
         [versionLabel setTextColor:[NSColor secondaryLabelColor]];
         [contentView addSubview:versionLabel];
 
         // Radio buttons for mode selection - Install first, then Upgrade
-        NSButton* newInstallRadio = [[NSButton alloc] initWithFrame:NSMakeRect(40, 303, 300, 20)];
+        NSButton* newInstallRadio = [[NSButton alloc] initWithFrame:NSMakeRect(40, 493, 300, 20)];
         [newInstallRadio setButtonType:NSButtonTypeRadio];
-        [newInstallRadio setTitle:@"Install MeshAgent"];
+        [newInstallRadio setTitle:[NSString stringWithFormat:@"Install %@", agentName]];
         [newInstallRadio setState:(initialMode == INSTALL_MODE_NEW) ? NSControlStateValueOn : NSControlStateValueOff];
         [newInstallRadio setTag:INSTALL_MODE_NEW];
         [newInstallRadio setTarget:buttonHandler];
         [newInstallRadio setAction:@selector(modeChanged:)];
         [contentView addSubview:newInstallRadio];
+        buttonHandler.installIcon = mesh_addRadioIcon(mesh_lucideImportIcon(20), newInstallRadio, contentView);
+        [buttonHandler.installIcon setContentTintColor:(initialMode == INSTALL_MODE_NEW) ? [NSColor blackColor] : [NSColor secondaryLabelColor]];
 
         // Install path field
-        NSTextField* installPathLabel = mesh_createLabel(@"Install path:", NSMakeRect(60, 270, 520, 20), NO);
+        NSTextField* installPathLabel = mesh_createLabel(@"Install path:", NSMakeRect(60, 460, 520, 20), NO);
         [contentView addSubview:installPathLabel];
 
-        NSTextField* installPathField = [[NSTextField alloc] initWithFrame:NSMakeRect(60, 245, 380, 24)];
-        [installPathField setPlaceholderString:@"/usr/local/mesh_services/meshagent"];
+        NSTextField* installPathField = mesh_createPathField(NSMakeRect(60, 435, 380, 24),
+            [NSString stringWithUTF8String:getDefaultInstallPath()]);
         [installPathField setEnabled:(initialMode == INSTALL_MODE_NEW)];
-        if (initialMode == INSTALL_MODE_NEW) {
-            [installPathField setStringValue:[NSString stringWithUTF8String:defaultInstallPath]];
-        }
+        [installPathField setStringValue:[NSString stringWithUTF8String:defaultInstallPath]];
         buttonHandler.installPathField = installPathField;
         [contentView addSubview:installPathField];
 
-        NSButton* browseInstall = [[NSButton alloc] initWithFrame:NSMakeRect(450, 245, 100, 24)];
-        [browseInstall setTitle:@"Browse..."];
-        [browseInstall setBezelStyle:NSBezelStyleRounded];
-        [browseInstall setTarget:buttonHandler];
-        [browseInstall setAction:@selector(browseInstallPath:)];
-        [browseInstall setTag:BUTTON_TAG_BROWSE_INSTALL];
+        NSButton* browseInstall = mesh_createRoundedButton(@"Browse...", NSMakeRect(450, 435, 100, 24),
+            buttonHandler, @selector(browseInstallPath:), BUTTON_TAG_BROWSE_INSTALL);
         [browseInstall setEnabled:(initialMode == INSTALL_MODE_NEW)];
         [contentView addSubview:browseInstall];
 
         // MSH file field (grouped with Install)
-        NSTextField* mshFileLabel = mesh_createLabel(@"Configuration file (.msh):", NSMakeRect(60, 215, 520, 20), NO);
+        NSTextField* mshFileLabel = mesh_createLabel(@"Configuration file (.msh):", NSMakeRect(60, 405, 520, 20), NO);
         [contentView addSubview:mshFileLabel];
 
         // View button (left of field) - initially disabled, enabled when file selected
-        NSButton* editMsh = [[NSButton alloc] initWithFrame:NSMakeRect(20, 190, 36, 24)];
+        NSButton* editMsh = [[NSButton alloc] initWithFrame:NSMakeRect(20, 380, 36, 24)];
         [editMsh setTitle:@"View"];
         [editMsh setBezelStyle:NSBezelStyleRounded];
         [editMsh setTarget:buttonHandler];
@@ -1125,41 +1377,41 @@ InstallResult show_install_assistant_window(void) {
         buttonHandler.editMshButton = editMsh;
         [contentView addSubview:editMsh];
 
-        NSTextField* mshFileField = [[NSTextField alloc] initWithFrame:NSMakeRect(60, 190, 380, 24)];
-        [mshFileField setPlaceholderString:@"meshagent.msh"];
+        NSTextField* mshFileField = mesh_createPathField(NSMakeRect(60, 380, 380, 24),
+            [buttonHandler getAgentMshName] ?: @"agent.msh");
         [mshFileField setEnabled:(initialMode == INSTALL_MODE_NEW)];
-        if (mshFile != NULL && initialMode == INSTALL_MODE_NEW) {
+        if (mshFile != NULL) {
             [mshFileField setStringValue:[NSString stringWithUTF8String:mshFile]];
-            [editMsh setEnabled:YES];  // Enable if file already provided
+            if (initialMode == INSTALL_MODE_NEW) {
+                [editMsh setEnabled:YES];  // Enable if file already provided and in install mode
+            }
         }
         buttonHandler.mshFileField = mshFileField;
         [contentView addSubview:mshFileField];
 
-        NSButton* browseMsh = [[NSButton alloc] initWithFrame:NSMakeRect(450, 190, 100, 24)];
-        [browseMsh setTitle:@"Browse..."];
-        [browseMsh setBezelStyle:NSBezelStyleRounded];
-        [browseMsh setTarget:buttonHandler];
-        [browseMsh setAction:@selector(browseMshFile:)];
-        [browseMsh setTag:BUTTON_TAG_BROWSE_MSH];
+        NSButton* browseMsh = mesh_createRoundedButton(@"Browse...", NSMakeRect(450, 380, 100, 24),
+            buttonHandler, @selector(browseMshFile:), BUTTON_TAG_BROWSE_MSH);
         [browseMsh setEnabled:(initialMode == INSTALL_MODE_NEW)];
         [contentView addSubview:browseMsh];
 
         // Upgrade radio
-        NSButton* upgradeRadio = [[NSButton alloc] initWithFrame:NSMakeRect(40, 145, 300, 20)];
+        NSButton* upgradeRadio = [[NSButton alloc] initWithFrame:NSMakeRect(40, 335, 300, 20)];
         [upgradeRadio setButtonType:NSButtonTypeRadio];
-        [upgradeRadio setTitle:@"Upgrade MeshAgent"];
+        [upgradeRadio setTitle:[NSString stringWithFormat:@"Upgrade %@", agentName]];
         [upgradeRadio setState:(initialMode == INSTALL_MODE_UPGRADE) ? NSControlStateValueOn : NSControlStateValueOff];
         [upgradeRadio setTag:INSTALL_MODE_UPGRADE];
         [upgradeRadio setTarget:buttonHandler];
         [upgradeRadio setAction:@selector(modeChanged:)];
         [contentView addSubview:upgradeRadio];
+        buttonHandler.upgradeIcon = mesh_addRadioIcon(mesh_lucideUploadIcon(20), upgradeRadio, contentView);
+        [buttonHandler.upgradeIcon setContentTintColor:(initialMode == INSTALL_MODE_UPGRADE) ? [NSColor blackColor] : [NSColor secondaryLabelColor]];
 
         // Upgrade path field
-        NSTextField* upgradePathLabel = mesh_createLabel(@"Current install path:", NSMakeRect(60, 115, 520, 20), NO);
+        NSTextField* upgradePathLabel = mesh_createLabel(@"Current install path:", NSMakeRect(60, 305, 520, 20), NO);
         [contentView addSubview:upgradePathLabel];
 
-        NSTextField* upgradePathField = [[NSTextField alloc] initWithFrame:NSMakeRect(60, 90, 380, 24)];
-        [upgradePathField setPlaceholderString:@"/usr/local/mesh_services/meshagent"];
+        NSTextField* upgradePathField = mesh_createPathField(NSMakeRect(60, 280, 380, 24),
+            [NSString stringWithUTF8String:getDefaultInstallPath()]);
         [upgradePathField setEnabled:(initialMode == INSTALL_MODE_UPGRADE)];
         int existingEnableUpdate = 1;  // Default to updates enabled
         int existingEnableTccCheck = 1;  // Default to TCC check enabled
@@ -1183,17 +1435,13 @@ InstallResult show_install_assistant_window(void) {
         buttonHandler.upgradePathField = upgradePathField;
         [contentView addSubview:upgradePathField];
 
-        NSButton* browseUpgrade = [[NSButton alloc] initWithFrame:NSMakeRect(450, 90, 100, 24)];
-        [browseUpgrade setTitle:@"Browse..."];
-        [browseUpgrade setBezelStyle:NSBezelStyleRounded];
-        [browseUpgrade setTarget:buttonHandler];
-        [browseUpgrade setAction:@selector(browseUpgradePath:)];
-        [browseUpgrade setTag:BUTTON_TAG_BROWSE_UPGRADE];
+        NSButton* browseUpgrade = mesh_createRoundedButton(@"Browse...", NSMakeRect(450, 280, 100, 24),
+            buttonHandler, @selector(browseUpgradePath:), BUTTON_TAG_BROWSE_UPGRADE);
         [browseUpgrade setEnabled:(initialMode == INSTALL_MODE_UPGRADE)];
         [contentView addSubview:browseUpgrade];
 
         // Installed version label (updated dynamically when path changes)
-        NSTextField* installedVersionLabel = mesh_createLabel(@"", NSMakeRect(60, 76, 490, 14), NO);
+        NSTextField* installedVersionLabel = mesh_createLabel(@"", NSMakeRect(60, 266, 490, 14), NO);
         [installedVersionLabel setFont:[NSFont systemFontOfSize:11]];
         [installedVersionLabel setTextColor:[NSColor secondaryLabelColor]];
         buttonHandler.installedVersionLabel = installedVersionLabel;
@@ -1204,47 +1452,111 @@ InstallResult show_install_assistant_window(void) {
             [buttonHandler updateInstalledVersionLabel:[NSString stringWithUTF8String:existingInstall]];
         }
 
-        // Enable/Disable Update checkbox
-        NSButton* enableUpdateCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(40, 48, 520, 20)];
-        [enableUpdateCheckbox setButtonType:NSButtonTypeSwitch];
-        [enableUpdateCheckbox setTitle:@"Disable automatic updates"];
-        // For upgrade mode: use existing setting; For new install: default to enabled (unchecked)
-        if (initialMode == INSTALL_MODE_UPGRADE) {
-            [enableUpdateCheckbox setState:(existingEnableUpdate == 0) ? NSControlStateValueOn : NSControlStateValueOff];
-        } else {
-            [enableUpdateCheckbox setState:NSControlStateValueOff];  // Default to unchecked (updates enabled)
-        }
-        buttonHandler.enableUpdateCheckbox = enableUpdateCheckbox;
-        [contentView addSubview:enableUpdateCheckbox];
+        // Settings card (very light grey NSBox with 2x2 checkbox grid)
+        NSBox* settingsCard = [[NSBox alloc] initWithFrame:NSMakeRect(20, 190, 560, 70)];
+        [settingsCard setBoxType:NSBoxCustom];
+        [settingsCard setBorderType:NSLineBorder];
+        [settingsCard setCornerRadius:8.0];
+        [settingsCard setFillColor:[NSColor colorWithWhite:0.95 alpha:1.0]];
+        [settingsCard setBorderColor:[NSColor colorWithWhite:0.88 alpha:1.0]];
+        [settingsCard setContentViewMargins:NSMakeSize(8, 6)];
+        [settingsCard setTitlePosition:NSNoTitle];
+        [contentView addSubview:settingsCard];
+        NSView* cardContent = [settingsCard contentView];
 
-        // Disable TCC Check UI checkbox
-        NSButton* disableTccCheckCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(40, 25, 520, 20)];
-        [disableTccCheckCheckbox setButtonType:NSButtonTypeSwitch];
-        [disableTccCheckCheckbox setTitle:@"Disable TCC permission check UI"];
-        // For upgrade mode: use existing setting; For new install: default to enabled (unchecked)
-        if (initialMode == INSTALL_MODE_UPGRADE) {
-            [disableTccCheckCheckbox setState:(existingEnableTccCheck == 0) ? NSControlStateValueOn : NSControlStateValueOff];
-        } else {
-            [disableTccCheckCheckbox setState:NSControlStateValueOff];  // Default to unchecked (TCC check enabled)
-        }
+        // Row 1 (top row inside card)
+        NSControlStateValue updateState = (initialMode == INSTALL_MODE_UPGRADE && existingEnableUpdate == 0) ? NSControlStateValueOn : NSControlStateValueOff;
+        NSButton* enableUpdateCheckbox = mesh_createCheckbox(@"Disable automatic updates",
+            NSMakeRect(12, 28, 250, 20), updateState, nil, NULL);
+        buttonHandler.enableUpdateCheckbox = enableUpdateCheckbox;
+        [cardContent addSubview:enableUpdateCheckbox];
+
+        NSButton* meshAgentLoggingCheckbox = mesh_createCheckbox(
+            [NSString stringWithFormat:@"Enable %@ logging", [buttonHandler getAgentBaseName] ?: @"agent"],
+            NSMakeRect(272, 28, 260, 20), NSControlStateValueOff, nil, NULL);
+        buttonHandler.meshAgentLoggingCheckbox = meshAgentLoggingCheckbox;
+        [cardContent addSubview:meshAgentLoggingCheckbox];
+
+        // Row 2 (bottom row inside card)
+        NSControlStateValue tccState = (initialMode == INSTALL_MODE_UPGRADE && existingEnableTccCheck == 0) ? NSControlStateValueOn : NSControlStateValueOff;
+        NSButton* disableTccCheckCheckbox = mesh_createCheckbox(@"Disable TCC permission check UI",
+            NSMakeRect(12, 4, 250, 20), tccState, nil, NULL);
         buttonHandler.disableTccCheckCheckbox = disableTccCheckCheckbox;
-        [contentView addSubview:disableTccCheckCheckbox];
+        [cardContent addSubview:disableTccCheckCheckbox];
+
+        NSButton* verboseLoggingCheckbox = mesh_createCheckbox(@"Enable verbose installer logging",
+            NSMakeRect(272, 4, 260, 20), NSControlStateValueOff, nil, NULL);
+        buttonHandler.verboseLoggingCheckbox = verboseLoggingCheckbox;
+        [cardContent addSubview:verboseLoggingCheckbox];
+
+        // Uninstall radio
+        NSButton* uninstallRadio = [[NSButton alloc] initWithFrame:NSMakeRect(40, 155, 300, 20)];
+        [uninstallRadio setButtonType:NSButtonTypeRadio];
+        [uninstallRadio setTitle:[NSString stringWithFormat:@"Uninstall %@", agentName]];
+        [uninstallRadio setState:NSControlStateValueOff];
+        [uninstallRadio setTag:INSTALL_MODE_UNINSTALL];
+        [uninstallRadio setTarget:buttonHandler];
+        [uninstallRadio setAction:@selector(modeChanged:)];
+        [contentView addSubview:uninstallRadio];
+        buttonHandler.uninstallIcon = mesh_addRadioIcon(mesh_lucideTrashIcon(20), uninstallRadio, contentView);
+        [buttonHandler.uninstallIcon setContentTintColor:[NSColor secondaryLabelColor]];
+
+        // Uninstall path label
+        NSTextField* uninstallPathLabel = mesh_createLabel(@"Current install path:", NSMakeRect(60, 127, 520, 20), NO);
+        [contentView addSubview:uninstallPathLabel];
+
+        // Uninstall path field
+        NSTextField* uninstallPathField = mesh_createPathField(NSMakeRect(60, 102, 380, 24),
+            [NSString stringWithUTF8String:getDefaultInstallPath()]);
+        [uninstallPathField setEnabled:NO];
+        if (existingInstall != NULL) {
+            [uninstallPathField setStringValue:[NSString stringWithUTF8String:existingInstall]];
+        }
+        buttonHandler.uninstallPathField = uninstallPathField;
+        [contentView addSubview:uninstallPathField];
+
+        // Uninstall browse button
+        NSButton* browseUninstall = mesh_createRoundedButton(@"Browse...", NSMakeRect(450, 102, 100, 24),
+            buttonHandler, @selector(browseUninstallPath:), BUTTON_TAG_BROWSE_UNINSTALL);
+        [browseUninstall setEnabled:NO];
+        [contentView addSubview:browseUninstall];
+
+        // Sub-radios for uninstall type (in separate NSView to form their own radio group)
+        NSView* uninstallTypeContainer = [[NSView alloc] initWithFrame:NSMakeRect(60, 75, 300, 24)];
+
+        NSButton* standardUninstallRadio = [[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 120, 20)];
+        [standardUninstallRadio setButtonType:NSButtonTypeRadio];
+        [standardUninstallRadio setTitle:@"Uninstall"];
+        [standardUninstallRadio setState:NSControlStateValueOn];
+        [standardUninstallRadio setEnabled:NO];
+        [standardUninstallRadio setTarget:buttonHandler];
+        [standardUninstallRadio setAction:@selector(uninstallTypeChanged:)];
+        buttonHandler.standardUninstallRadio = standardUninstallRadio;
+        [uninstallTypeContainer addSubview:standardUninstallRadio];
+
+        NSButton* fullUninstallRadio = [[NSButton alloc] initWithFrame:NSMakeRect(130, 0, 150, 20)];
+        [fullUninstallRadio setButtonType:NSButtonTypeRadio];
+        [fullUninstallRadio setTitle:@"Full Uninstall"];
+        [fullUninstallRadio setState:NSControlStateValueOff];
+        [fullUninstallRadio setEnabled:NO];
+        [fullUninstallRadio setTarget:buttonHandler];
+        [fullUninstallRadio setAction:@selector(uninstallTypeChanged:)];
+        buttonHandler.fullUninstallRadio = fullUninstallRadio;
+        [uninstallTypeContainer addSubview:fullUninstallRadio];
+
+        [contentView addSubview:uninstallTypeContainer];
 
         // Bottom buttons
-        NSButton* cancelButton = [[NSButton alloc] initWithFrame:NSMakeRect(390, 15, 90, 32)];
-        [cancelButton setTitle:@"Cancel"];
-        [cancelButton setBezelStyle:NSBezelStyleRounded];
+        NSButton* cancelButton = mesh_createRoundedButton(@"Cancel", NSMakeRect(390, 15, 90, 32),
+            delegate, @selector(cancelClicked:), 0);
         [cancelButton setKeyEquivalent:@"\033"]; // ESC key
-        [cancelButton setTarget:delegate];
-        [cancelButton setAction:@selector(cancelClicked:)];
         [contentView addSubview:cancelButton];
 
-        NSButton* installButton = [[NSButton alloc] initWithFrame:NSMakeRect(490, 15, 90, 32)];
-        [installButton setTitle:@"Install"];
-        [installButton setBezelStyle:NSBezelStyleRounded];
+        NSButton* installButton = mesh_createRoundedButton(
+            (initialMode == INSTALL_MODE_UPGRADE ? @"Upgrade" : @"Install"),
+            NSMakeRect(490, 15, 90, 32), buttonHandler, @selector(installClicked:), 0);
         [installButton setKeyEquivalent:@"\r"]; // Enter key
-        [installButton setTarget:buttonHandler];
-        [installButton setAction:@selector(installClicked:)];
+        buttonHandler.installButton = installButton;
         [contentView addSubview:installButton];
 
         // Show window and run modal

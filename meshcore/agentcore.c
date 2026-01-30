@@ -85,6 +85,7 @@ int gRemoteMouseRenderDefault = 0;
 #include <libkern/OSByteOrder.h>
 #include <SystemConfiguration/SystemConfiguration.h>
 #include "MacOS/mac_bundle_detection.h"
+#include "MacOS/mac_plist_utils.h"
 #include "MacOS/mac_tcc_detection.h"
 #include "MacOS/TCC_UI/mac_permissions_window.h"
 #endif
@@ -1469,7 +1470,7 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		}
 
 		// Get the connected FD from kvm_relay_setup (daemon accepts connection from -kvm1)
-		int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, agent->companyName, agent->meshServiceName, agent->serviceID);
+		int client_fd = (int)(intptr_t)kvm_relay_setup(agent->exePath, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, console_uid, agent->serviceID);
 
 		if (client_fd > 0)
 		{
@@ -5067,6 +5068,19 @@ void MeshAgent_DB_WriteError(ILibSimpleDataStore sender, void *user)
 	}
 }
 
+#ifdef _POSIX
+static void get_pid_file_paths(MeshAgentHostContainer *agent, char *primaryPath, char *fallbackPath, size_t pathSize)
+{
+	const char *name = "meshagent";
+	if (agent != NULL && agent->meshServiceName != NULL && strlen(agent->meshServiceName) > 0)
+	{
+		name = agent->meshServiceName;
+	}
+	snprintf(primaryPath, pathSize, "/var/run/%s.pid", name);
+	snprintf(fallbackPath, pathSize, ".%s.pid", name);
+}
+#endif
+
 int MeshAgent_Agent_SemaphoreTrack_Counter = 0;
 void MeshAgent_Agent_SemaphoreTrack_Sink(char *source, void *user, int init)
 {
@@ -5094,9 +5108,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 			char str[15];
 			pid_t pid = 0;
 			size_t len;
+			char pidPrimary[256], pidFallback[256];
+			get_pid_file_paths(agentHost, pidPrimary, pidFallback, sizeof(pidPrimary));
 
-			fd = fopen("/var/run/meshagent.pid", "r");
-			if (fd == NULL) fd = fopen(".meshagent.pid", "r");
+			fd = fopen(pidPrimary, "r");
+			if (fd == NULL) fd = fopen(pidFallback, "r");
 			if (fd != NULL)
 			{
 				len = fread(str, sizeof(char), 15, fd);
@@ -5104,8 +5120,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				{
 					sscanf(str, "%d\r\n", &pid);
 					if (pid > 0 && kill(pid, SIGKILL) == 0) printf("Mesh agent stopped.\r\n"); else printf("Mesh agent not running.\r\n");
-					remove("/var/run/meshagent.pid");
-					remove(".meshagent.pid");
+					remove(pidPrimary);
+					remove(pidFallback);
 				}
 				fclose(fd);
 				exit(EXIT_SUCCESS); 
@@ -5314,6 +5330,9 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				should_spawn = 0;
 			}
 		}
+		else
+		{
+		}
 
 		if (should_spawn)
 		{
@@ -5332,8 +5351,14 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 				CFRelease(store);
 			}
 
-			show_tcc_permissions_window_async(agentHost->exePath, agentHost->pipeManager, console_uid);
+			int tcc_result = show_tcc_permissions_window_async(agentHost->exePath, agentHost->pipeManager, console_uid);
 		}
+		else
+		{
+		}
+	}
+	else
+	{
 	}
 #endif
 
@@ -5542,15 +5567,45 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		agentHost->companyName = NULL;
 	}
 
-	if ((msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "ServiceID", NULL, 0)) != 0)
+	// Resolve serviceID with priority: 1) --serviceId= arg, 2) .db, 3) LaunchDaemon plist Label
+	agentHost->serviceID = NULL;
+
+	// Priority 1: --serviceId= command-line argument (highest priority)
+	for (int si = 0; si < paramLen; ++si)
 	{
-		agentHost->serviceID = (char*)ILibMemory_SmartAllocate(msnlen+1);
+		if (strncmp(param[si], "--serviceId=", 12) == 0)
+		{
+			char *cmdServiceId = param[si] + 12;
+			if (cmdServiceId[0] != '\0')
+			{
+				agentHost->serviceID = (char*)ILibMemory_SmartAllocate(strlen(cmdServiceId) + 1);
+				strcpy(agentHost->serviceID, cmdServiceId);
+			}
+			break;
+		}
+	}
+
+	// Priority 2: .db database ServiceID
+	if (agentHost->serviceID == NULL && (msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "ServiceID", NULL, 0)) != 0)
+	{
+		agentHost->serviceID = (char*)ILibMemory_SmartAllocate(msnlen + 1);
 		ILibSimpleDataStore_Get(agentHost->masterDb, "ServiceID", agentHost->serviceID, msnlen);
 	}
-	else
+
+#ifdef __APPLE__
+	// Priority 3: Scan LaunchDaemon plists for one whose ProgramArguments[0] matches our
+	// binary path — the plist's Label IS the serviceId (keeps daemon and -kvm1 in sync)
+	if (agentHost->serviceID == NULL && agentHost->exePath != NULL)
 	{
-		agentHost->serviceID = NULL;
+		char *plistServiceId = mesh_plist_find_service_id("/Library/LaunchDaemons", agentHost->exePath);
+		if (plistServiceId != NULL)
+		{
+			agentHost->serviceID = (char*)ILibMemory_SmartAllocate(strlen(plistServiceId) + 1);
+			strcpy(agentHost->serviceID, plistServiceId);
+			free(plistServiceId);
+		}
 	}
+#endif
 
 	if ((msnlen = ILibSimpleDataStore_Get(agentHost->masterDb, "displayName", NULL, 0)) != 0)
 	{
@@ -5854,6 +5909,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		char str[15];
 		pid_t pid, sid;
 		size_t len;
+		char pidPrimary[256], pidFallback[256];
+		get_pid_file_paths(agentHost, pidPrimary, pidFallback, sizeof(pidPrimary));
 
 		ILibSimpleDataStore_Close(agentHost->masterDb);
 		agentHost->masterDb = NULL;
@@ -5863,8 +5920,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			len = sprintf_s(str, 15, "%d\r\n", pid);
 
-			fd = fopen("/var/run/meshagent.pid", "w");
-			if (fd == NULL) fd = fopen(".meshagent.pid", "w");
+			fd = fopen(pidPrimary, "w");
+			if (fd == NULL) fd = fopen(pidFallback, "w");
 			if (fd != NULL)
 			{
 				if (fwrite(str, sizeof(char), len, fd)) {}

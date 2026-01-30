@@ -122,7 +122,7 @@ function _meshName()
                 break;
             default:
                 var service = require('service-manager').manager.enumerateService();
-                name = 'meshagent';
+                name = require('agent-paths').getAgentBaseName();
                 for (var i = 0; i < service.length; ++i)
                 {
                     if(service[i].appLocation()==process.execPath)

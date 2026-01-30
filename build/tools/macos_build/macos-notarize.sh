@@ -215,9 +215,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     OUTPUT_DIR="$REPO_DIR/build/output"
     DEBUG_DIR="$OUTPUT_DIR/DEBUG"
 
-    # Binary names
-    RELEASE_BINARY="meshagent_osx-universal-64"
-    DEBUG_BINARY="DEBUG_meshagent_osx-universal-64"
+    # Binary names (EXENAME env var allows override, default: meshagent)
+    BINARY_BASE="${EXENAME:-meshagent}"
+    RELEASE_BINARY="${BINARY_BASE}_osx-universal-64"
+    DEBUG_BINARY="DEBUG_${BINARY_BASE}_osx-universal-64"
 
     # Keychain profile name
     KEYCHAIN_PROFILE="${MACOS_NOTARY_PROFILE:-meshagent-notary}"

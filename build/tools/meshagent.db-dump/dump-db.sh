@@ -17,7 +17,7 @@ REPO_DIR="$( cd "$SCRIPT_DIR/../../.." && pwd )"
 
 # Default paths
 MESHAGENT_BINARY="$REPO_DIR/build/tools/code-utils/macos/meshagent_code-utils"
-DEFAULT_DB_PATH="/opt/tacticalmesh/meshagent.db"
+DEFAULT_DB_PATH="/opt/acmemesh/meshagent.db"
 
 # Parse arguments
 INPUT_PATH="${1:-$DEFAULT_DB_PATH}"
@@ -50,9 +50,9 @@ else
     echo ""
     echo "Examples:"
     echo "  $0"
-    echo "  $0 /opt/tacticalmesh/meshagent.db"
-    echo "  $0 /opt/tacticalmesh/"
-    echo "  $0 /opt/tacticalmesh/meshagent.db dump.txt"
+    echo "  $0 /opt/acmemesh/meshagent.db"
+    echo "  $0 /opt/acmemesh/"
+    echo "  $0 /opt/acmemesh/meshagent.db dump.txt"
     exit 1
 fi
 

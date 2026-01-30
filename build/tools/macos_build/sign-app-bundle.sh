@@ -75,7 +75,8 @@ else
 fi
 
 # Display architecture information
-EXECUTABLE="$BUNDLE_PATH/Contents/MacOS/meshagent"
+EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUNDLE_PATH/Contents/Info.plist" 2>/dev/null || echo "meshagent")
+EXECUTABLE="$BUNDLE_PATH/Contents/MacOS/$EXE_NAME"
 if [ -f "$EXECUTABLE" ]; then
     echo ""
     echo "Bundle architecture:"

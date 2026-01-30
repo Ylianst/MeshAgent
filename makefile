@@ -187,9 +187,9 @@ SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c meshcore/
 
 # Mesh Agent settings
 MESH_VER = 194
-EXENAME = meshagent
+EXENAME ?= meshagent
 BUILD_OUTPUT_DIR = build/output
-BUNDLE_ID ?= meshagent
+BUNDLE_DISPLAY_NAME ?= MeshAgent
 MODULESYNC_MODE ?= macos-only
 
 # Cross-compiler paths
@@ -842,10 +842,10 @@ linux:
 # the same timestamp is used for both architectures to ensure consistency.
 #
 # App Bundle: After building the binary, automatically creates a .app bundle in
-# $(BUILD_OUTPUT_DIR)/<arch>-app/MeshAgent.app for easy distribution and testing.
+# $(BUILD_OUTPUT_DIR)/<arch>-app/$(BUNDLE_DISPLAY_NAME).app for easy distribution and testing.
 macos:
 	@if [ -z "$(BUILD_TIMESTAMP)" ]; then \
-		if echo "$(BUNDLE_ID)" | grep -q "code-utils"; then \
+		if echo "$(EXENAME)" | grep -q "code-utils"; then \
 			echo "Skipping module sync for code-utils build (using minimal module set from polyfills regeneration)"; \
 		else \
 			./build/tools/sync-modules.sh --mode $(MODULESYNC_MODE) --verbose; \
@@ -858,14 +858,14 @@ macos:
 		eval $$(./build/tools/generate-build-timestamp.sh); \
 		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
 		echo "Build timestamp: $$BUILD_TIME (date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY)"; \
-		echo "Generating shared binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
-		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
+		echo "Generating shared binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and exe name: $(EXENAME)"; \
+		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --exe-name $(EXENAME) --display-name "$(BUNDLE_DISPLAY_NAME)" --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		echo "Building x86-64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
+		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY EXENAME=$(EXENAME) BUNDLE_DISPLAY_NAME="$(BUNDLE_DISPLAY_NAME)" SKIP_PLIST_GEN=1; \
 		echo "Building ARM64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY BUNDLE_ID=$(BUNDLE_ID) SKIP_PLIST_GEN=1; \
+		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY EXENAME=$(EXENAME) BUNDLE_DISPLAY_NAME="$(BUNDLE_DISPLAY_NAME)" SKIP_PLIST_GEN=1; \
 		echo "Creating universal binary..."; \
 		lipo -create \
 			$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-x86-64 \
@@ -878,22 +878,24 @@ macos:
 				-output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
 			./build/tools/macos_build/create-app-bundle.sh \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 \
-				$(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app \
-				$(BUNDLE_ID) \
+				"$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app" \
+				$(EXENAME) \
 				$$BUILD_DATE \
-				$$BUILD_TIME_ONLY; \
+				$$BUILD_TIME_ONLY \
+				$(EXENAME) \
+				"$(BUNDLE_DISPLAY_NAME)"; \
 			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
 			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract arm64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-arm-64; \
 			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract x86_64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-x86-64; \
-			codesign -s - --deep $(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app; \
+			codesign -s - --deep "$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
 			echo "Creating app bundle zip archive..."; \
-			(cd $(BUILD_OUTPUT_DIR)/osx-universal-64-app && ditto -c -k --keepParent MeshAgent.app ../$(EXENAME)_osx-universal-64-app.zip); \
+			(cd $(BUILD_OUTPUT_DIR)/osx-universal-64-app && ditto -c -k --keepParent "$(BUNDLE_DISPLAY_NAME).app" ../$(EXENAME)_osx-universal-64-app.zip); \
 			echo "  Created: $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64-app.zip"; \
 			echo ""; \
 			echo "---"; \
 			EXPECTED_VERSION="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/output/tmp_binary_Info.plist) $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/output/tmp_binary_Info.plist)"; \
 			STANDALONE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -fullversion 2>/dev/null || echo "ERROR"); \
-			BUNDLE_VERSION=$$($(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -fullversion 2>/dev/null || echo "ERROR"); \
+			BUNDLE_VERSION=$$("$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app/Contents/MacOS/$(EXENAME)" -fullversion 2>/dev/null || echo "ERROR"); \
 			if [ "$$STANDALONE_VERSION" = "$$EXPECTED_VERSION" ] && [ "$$BUNDLE_VERSION" = "$$EXPECTED_VERSION" ]; then \
 				echo ""; \
 				echo "Regenerating FULL polyfills (all modules) for non-macOS builds..."; \
@@ -904,8 +906,10 @@ macos:
 				echo "$$(date '+%Y-%m-%d %H:%M:%S') INFO: Successfully built version $$EXPECTED_VERSION"; \
 				echo ""; \
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64"; \
-				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/osx-universal-64-app/MeshAgent.app"; \
+				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
 				echo ""; \
+				echo "Cleaning up build artifact: modules_macos/"; \
+				rm -rf ./modules_macos; \
 			else \
 				echo "$$(date '+%Y-%m-%d %H:%M:%S') ERROR: Build failed - version verification mismatch"; \
 				echo "Expected version: $$EXPECTED_VERSION"; \
@@ -933,8 +937,8 @@ macos:
 			fi; \
 		fi; \
 		if [ "$(SKIP_PLIST_GEN)" != "1" ]; then \
-			echo "Generating binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and bundle ID: $(BUNDLE_ID)"; \
-			./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id $(BUNDLE_ID) --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
+			echo "Generating binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and exe name: $(EXENAME)"; \
+			./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --exe-name $(EXENAME) --display-name "$(BUNDLE_DISPLAY_NAME)" --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		fi; \
 		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing -fobjc-arc $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -lsqlite3 -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Cocoa -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
 		if [ "$(DEBUG)" != "1" ]; then \
@@ -942,25 +946,34 @@ macos:
 			strip $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
 			./build/tools/macos_build/create-app-bundle.sh \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) \
-				$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app \
-				$(BUNDLE_ID) \
+				"$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app" \
+				$(EXENAME) \
 				$$BUILD_DATE \
-				$$BUILD_TIME_ONLY; \
-			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app; \
+				$$BUILD_TIME_ONLY \
+				$(EXENAME) \
+				"$(BUNDLE_DISPLAY_NAME)"; \
+			codesign -s - --deep "$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app"; \
 			echo "Creating app bundle zip archive..."; \
-			(cd $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app && ditto -c -k --keepParent MeshAgent.app ../$(EXENAME)_$(ARCHNAME)-app.zip); \
+			(cd $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app && ditto -c -k --keepParent "$(BUNDLE_DISPLAY_NAME).app" ../$(EXENAME)_$(ARCHNAME)-app.zip); \
 			echo "  Created: $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)-app.zip"; \
 			echo ""; \
 			echo "---"; \
 			EXPECTED_VERSION="$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/output/tmp_binary_Info.plist) $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/output/tmp_binary_Info.plist)"; \
 			STANDALONE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) -fullversion 2>/dev/null || echo "ERROR"); \
-			BUNDLE_VERSION=$$($(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app/Contents/MacOS/meshagent -fullversion 2>/dev/null || echo "ERROR"); \
+			BUNDLE_VERSION=$$("$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app/Contents/MacOS/$(EXENAME)" -fullversion 2>/dev/null || echo "ERROR"); \
 			if [ "$$STANDALONE_VERSION" = "$$EXPECTED_VERSION" ] && [ "$$BUNDLE_VERSION" = "$$EXPECTED_VERSION" ]; then \
+				echo ""; \
+				echo "Regenerating FULL polyfills (all modules) for non-macOS builds..."; \
+				./build/tools/code-utils/macos/meshagent_code-utils -import --expandedPath="./modules" --filePath="./microscript/ILibDuktape_Polyfills.c"; \
+				echo "Full polyfills regenerated (commit ILibDuktape_Polyfills.c for Linux/BSD builds)"; \
+				echo ""; \
 				echo "$$(date '+%Y-%m-%d %H:%M:%S') INFO: Successfully built version $$EXPECTED_VERSION"; \
 				echo ""; \
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)"; \
-				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/MeshAgent.app"; \
+				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app"; \
 				echo ""; \
+				echo "Cleaning up build artifact: modules_macos/"; \
+				rm -rf ./modules_macos; \
 			else \
 				echo "$$(date '+%Y-%m-%d %H:%M:%S') ERROR: Build failed - version verification mismatch"; \
 				echo "Expected version: $$EXPECTED_VERSION"; \

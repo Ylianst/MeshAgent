@@ -5,7 +5,7 @@
     <key>CFBundleIdentifier</key>
     <string>BUNDLE_IDENTIFIER</string>
     <key>CFBundleName</key>
-    <string>meshagent</string>
+    <string>BUNDLE_EXE_NAME</string>
     <key>CFBundleShortVersionString</key>
     <string>BUILD_TIMESTAMP_DATE</string>
     <key>CFBundleVersion</key>

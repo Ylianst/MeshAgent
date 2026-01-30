@@ -258,26 +258,30 @@ fi
 # DETERMINE BINARY PATH, BUNDLE PATH, AND BUILD ARCHID
 #==============================================================================
 
+# Naming variables (override via env: EXENAME, BUNDLE_DISPLAY_NAME)
+EXE_BASE="${EXENAME:-meshagent}"
+DISPLAY_NAME="${BUNDLE_DISPLAY_NAME:-MeshAgent}"
+
 # Determine binary name prefix based on build type
 if [ "$CODE_UTILS_BUILD" = "yes" ]; then
-    BINARY_PREFIX="meshagent_code-utils"
+    BINARY_PREFIX="${EXE_BASE}_code-utils"
 else
-    BINARY_PREFIX="meshagent"
+    BINARY_PREFIX="$EXE_BASE"
 fi
 
 if [ "$ARCHID" = "16" ]; then
     BINARY_PATH="build/output/${BINARY_PREFIX}_osx-x86-64"
-    BUNDLE_PATH="build/output/osx-x86-64-app/MeshAgent.app"
+    BUNDLE_PATH="build/output/osx-x86-64-app/${DISPLAY_NAME}.app"
     ARCH_DESC="Intel x86-64"
     BUILD_ARCHID="16"
 elif [ "$ARCHID" = "29" ]; then
     BINARY_PATH="build/output/${BINARY_PREFIX}_osx-arm-64"
-    BUNDLE_PATH="build/output/osx-arm-64-app/MeshAgent.app"
+    BUNDLE_PATH="build/output/osx-arm-64-app/${DISPLAY_NAME}.app"
     ARCH_DESC="Apple Silicon ARM64"
     BUILD_ARCHID="29"
 elif [ "$ARCHID" = "10005" ]; then
     BINARY_PATH="build/output/${BINARY_PREFIX}_osx-universal-64"
-    BUNDLE_PATH="build/output/osx-universal-64-app/MeshAgent.app"
+    BUNDLE_PATH="build/output/osx-universal-64-app/${DISPLAY_NAME}.app"
     ARCH_DESC="Universal (Intel + ARM)"
     BUILD_ARCHID="10005"  # Universal binary ARCHID
 fi
@@ -400,30 +404,30 @@ if [ "$SKIP_BUILD" = "no" ]; then
     # Add KVM=0 for code-utils builds
     if [ "$CODE_UTILS_BUILD" = "yes" ]; then
         echo "  Building with KVM=0 (no remote desktop support)"
-        echo "  Building with BUNDLE_ID=meshagent.code-utils"
-        sudo -u $SUDO_USER make macos ARCHID=$BUILD_ARCHID KVM=0 BUNDLE_ID=meshagent.code-utils
+        echo "  Building with EXENAME=${EXE_BASE}_code-utils"
+        sudo -u $SUDO_USER make macos ARCHID=$BUILD_ARCHID KVM=0 EXENAME="${EXE_BASE}_code-utils" BUNDLE_DISPLAY_NAME="$DISPLAY_NAME"
 
         # Rename binaries to include "code-utils" in the filename
         echo "  Renaming binaries to include 'code-utils'..."
         if [ "$BUILD_ARCHID" = "10005" ]; then
             # Universal binary - rename all three
-            [ -f "build/output/meshagent_osx-universal-64" ] && sudo -u $SUDO_USER mv "build/output/meshagent_osx-universal-64" "build/output/meshagent_code-utils_osx-universal-64"
-            [ -f "build/output/meshagent_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/meshagent_osx-x86-64" "build/output/meshagent_code-utils_osx-x86-64"
-            [ -f "build/output/meshagent_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/meshagent_osx-arm-64" "build/output/meshagent_code-utils_osx-arm-64"
-            [ -f "build/output/DEBUG/meshagent_osx-universal-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/meshagent_osx-universal-64" "build/output/DEBUG/meshagent_code-utils_osx-universal-64"
-            [ -f "build/output/DEBUG/meshagent_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/meshagent_osx-x86-64" "build/output/DEBUG/meshagent_code-utils_osx-x86-64"
-            [ -f "build/output/DEBUG/meshagent_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/meshagent_osx-arm-64" "build/output/DEBUG/meshagent_code-utils_osx-arm-64"
+            [ -f "build/output/${EXE_BASE}_osx-universal-64" ] && sudo -u $SUDO_USER mv "build/output/${EXE_BASE}_osx-universal-64" "build/output/${EXE_BASE}_code-utils_osx-universal-64"
+            [ -f "build/output/${EXE_BASE}_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/${EXE_BASE}_osx-x86-64" "build/output/${EXE_BASE}_code-utils_osx-x86-64"
+            [ -f "build/output/${EXE_BASE}_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/${EXE_BASE}_osx-arm-64" "build/output/${EXE_BASE}_code-utils_osx-arm-64"
+            [ -f "build/output/DEBUG/${EXE_BASE}_osx-universal-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/${EXE_BASE}_osx-universal-64" "build/output/DEBUG/${EXE_BASE}_code-utils_osx-universal-64"
+            [ -f "build/output/DEBUG/${EXE_BASE}_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/${EXE_BASE}_osx-x86-64" "build/output/DEBUG/${EXE_BASE}_code-utils_osx-x86-64"
+            [ -f "build/output/DEBUG/${EXE_BASE}_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/${EXE_BASE}_osx-arm-64" "build/output/DEBUG/${EXE_BASE}_code-utils_osx-arm-64"
         elif [ "$BUILD_ARCHID" = "16" ]; then
             # Intel only
-            [ -f "build/output/meshagent_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/meshagent_osx-x86-64" "build/output/meshagent_code-utils_osx-x86-64"
-            [ -f "build/output/DEBUG/meshagent_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/meshagent_osx-x86-64" "build/output/DEBUG/meshagent_code-utils_osx-x86-64"
+            [ -f "build/output/${EXE_BASE}_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/${EXE_BASE}_osx-x86-64" "build/output/${EXE_BASE}_code-utils_osx-x86-64"
+            [ -f "build/output/DEBUG/${EXE_BASE}_osx-x86-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/${EXE_BASE}_osx-x86-64" "build/output/DEBUG/${EXE_BASE}_code-utils_osx-x86-64"
         elif [ "$BUILD_ARCHID" = "29" ]; then
             # ARM only
-            [ -f "build/output/meshagent_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/meshagent_osx-arm-64" "build/output/meshagent_code-utils_osx-arm-64"
-            [ -f "build/output/DEBUG/meshagent_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/meshagent_osx-arm-64" "build/output/DEBUG/meshagent_code-utils_osx-arm-64"
+            [ -f "build/output/${EXE_BASE}_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/${EXE_BASE}_osx-arm-64" "build/output/${EXE_BASE}_code-utils_osx-arm-64"
+            [ -f "build/output/DEBUG/${EXE_BASE}_osx-arm-64" ] && sudo -u $SUDO_USER mv "build/output/DEBUG/${EXE_BASE}_osx-arm-64" "build/output/DEBUG/${EXE_BASE}_code-utils_osx-arm-64"
         fi
     else
-        sudo -u $SUDO_USER make macos ARCHID=$BUILD_ARCHID
+        sudo -u $SUDO_USER make macos ARCHID=$BUILD_ARCHID EXENAME="$EXE_BASE" BUNDLE_DISPLAY_NAME="$DISPLAY_NAME"
     fi
 
     echo "[$(date '+%H:%M:%S')] Build complete"
@@ -484,7 +488,7 @@ if [ "$SKIP_SIGN" = "no" ]; then
 
             echo ""
             echo "  Signing ARM64 bundle..."
-            ARM_BUNDLE="build/output/osx-arm-64-app/MeshAgent.app"
+            ARM_BUNDLE="build/output/osx-arm-64-app/${DISPLAY_NAME}.app"
             if [ -d "$ARM_BUNDLE" ]; then
                 sudo -u $SUDO_USER MACOS_SIGN_CERT="$MACOS_SIGN_CERT" ./build/tools/macos_build/sign-app-bundle.sh "$ARM_BUNDLE"
                 echo "    ✓ ARM64 bundle signed: $ARM_BUNDLE"
@@ -494,7 +498,7 @@ if [ "$SKIP_SIGN" = "no" ]; then
 
             echo ""
             echo "  Signing x86_64 bundle..."
-            X86_BUNDLE="build/output/osx-x86-64-app/MeshAgent.app"
+            X86_BUNDLE="build/output/osx-x86-64-app/${DISPLAY_NAME}.app"
             if [ -d "$X86_BUNDLE" ]; then
                 sudo -u $SUDO_USER MACOS_SIGN_CERT="$MACOS_SIGN_CERT" ./build/tools/macos_build/sign-app-bundle.sh "$X86_BUNDLE"
                 echo "    ✓ x86_64 bundle signed: $X86_BUNDLE"
@@ -598,7 +602,7 @@ elif [ "$SKIP_NOTARY" = "no" ]; then
 
             echo ""
             echo "  Notarizing ARM64 bundle..."
-            ARM_BUNDLE="build/output/osx-arm-64-app/MeshAgent.app"
+            ARM_BUNDLE="build/output/osx-arm-64-app/${DISPLAY_NAME}.app"
             if [ -d "$ARM_BUNDLE" ]; then
                 if sudo -u $SUDO_USER codesign --verify --deep --strict "$ARM_BUNDLE" 2>/dev/null; then
                     sudo -u $SUDO_USER SKIP_STAPLE="$SKIP_STAPLE" ./build/tools/macos_build/notarize-app-bundle.sh "$ARM_BUNDLE"
@@ -612,7 +616,7 @@ elif [ "$SKIP_NOTARY" = "no" ]; then
 
             echo ""
             echo "  Notarizing x86_64 bundle..."
-            X86_BUNDLE="build/output/osx-x86-64-app/MeshAgent.app"
+            X86_BUNDLE="build/output/osx-x86-64-app/${DISPLAY_NAME}.app"
             if [ -d "$X86_BUNDLE" ]; then
                 if sudo -u $SUDO_USER codesign --verify --deep --strict "$X86_BUNDLE" 2>/dev/null; then
                     sudo -u $SUDO_USER SKIP_STAPLE="$SKIP_STAPLE" ./build/tools/macos_build/notarize-app-bundle.sh "$X86_BUNDLE"
@@ -687,13 +691,13 @@ if [ -f "$BUNDLE_PATH/Contents/Info.plist" ]; then
     sudo -u $SUDO_USER mkdir -p "$PAYLOAD_DIR"
 
     # Remove existing bundle if present
-    if [ -d "$PAYLOAD_DIR/MeshAgent.app" ]; then
-        sudo -u $SUDO_USER rm -rf "$PAYLOAD_DIR/MeshAgent.app"
+    if [ -d "$PAYLOAD_DIR/${DISPLAY_NAME}.app" ]; then
+        sudo -u $SUDO_USER rm -rf "$PAYLOAD_DIR/${DISPLAY_NAME}.app"
     fi
 
     # Copy bundle using ditto (preserves all metadata, permissions, and extended attributes)
-    sudo -u $SUDO_USER ditto "$BUNDLE_PATH" "$PAYLOAD_DIR/MeshAgent.app"
-    echo "  ✓ Copied bundle to $PAYLOAD_DIR/MeshAgent.app"
+    sudo -u $SUDO_USER ditto "$BUNDLE_PATH" "$PAYLOAD_DIR/${DISPLAY_NAME}.app"
+    echo "  ✓ Copied bundle to $PAYLOAD_DIR/${DISPLAY_NAME}.app"
 
     # Build the .pkg using munkipkg (only if --build-pkg flag is set)
     if [ "$BUILD_PKG" = "yes" ]; then
@@ -779,13 +783,13 @@ if [ -d "$BUNDLE_PATH" ]; then
     if [ "$BUILD_ARCHID" = "10005" ]; then
         echo ""
         echo "  Creating ARM64 bundle zip..."
-        ARM_BUNDLE="build/output/osx-arm-64-app/MeshAgent.app"
+        ARM_BUNDLE="build/output/osx-arm-64-app/${DISPLAY_NAME}.app"
         ARM_ZIP_NAME="${BINARY_PREFIX}_osx-arm-64-app.zip"
         ARM_ZIP_PATH="build/output/$ARM_ZIP_NAME"
 
         if [ -d "$ARM_BUNDLE" ]; then
             [ -f "$ARM_ZIP_PATH" ] && sudo -u $SUDO_USER rm -f "$ARM_ZIP_PATH"
-            (cd "build/output/osx-arm-64-app" && sudo -u $SUDO_USER ditto -c -k --keepParent "MeshAgent.app" "../$ARM_ZIP_NAME")
+            (cd "build/output/osx-arm-64-app" && sudo -u $SUDO_USER ditto -c -k --keepParent "${DISPLAY_NAME}.app" "../$ARM_ZIP_NAME")
             if [ -f "$ARM_ZIP_PATH" ]; then
                 ARM_ZIP_SIZE=$(du -h "$ARM_ZIP_PATH" | cut -f1)
                 echo "    ✓ Created: $ARM_ZIP_NAME ($ARM_ZIP_SIZE)"
@@ -798,13 +802,13 @@ if [ -d "$BUNDLE_PATH" ]; then
 
         echo ""
         echo "  Creating x86_64 bundle zip..."
-        X86_BUNDLE="build/output/osx-x86-64-app/MeshAgent.app"
+        X86_BUNDLE="build/output/osx-x86-64-app/${DISPLAY_NAME}.app"
         X86_ZIP_NAME="${BINARY_PREFIX}_osx-x86-64-app.zip"
         X86_ZIP_PATH="build/output/$X86_ZIP_NAME"
 
         if [ -d "$X86_BUNDLE" ]; then
             [ -f "$X86_ZIP_PATH" ] && sudo -u $SUDO_USER rm -f "$X86_ZIP_PATH"
-            (cd "build/output/osx-x86-64-app" && sudo -u $SUDO_USER ditto -c -k --keepParent "MeshAgent.app" "../$X86_ZIP_NAME")
+            (cd "build/output/osx-x86-64-app" && sudo -u $SUDO_USER ditto -c -k --keepParent "${DISPLAY_NAME}.app" "../$X86_ZIP_NAME")
             if [ -f "$X86_ZIP_PATH" ]; then
                 X86_ZIP_SIZE=$(du -h "$X86_ZIP_PATH" | cut -f1)
                 echo "    ✓ Created: $X86_ZIP_NAME ($X86_ZIP_SIZE)"
@@ -832,17 +836,17 @@ echo "Script Complete!"
 echo "=========================================="
 echo "Architecture:     $ARCH_DESC"
 echo "Application bundle: $BUNDLE_PATH"
-echo "Binary:           $BUNDLE_PATH/Contents/MacOS/meshagent"
+echo "Binary:           $BUNDLE_PATH/Contents/MacOS/$EXE_BASE"
 echo ""
 
 # Display version information
 echo "Version:"
-$BUNDLE_PATH/Contents/MacOS/meshagent -version
+"$BUNDLE_PATH/Contents/MacOS/$EXE_BASE" -version
 
 echo ""
 echo "To launch Install UI:"
 echo "  1. Navigate to: open $REPO_DIR/$(dirname "$BUNDLE_PATH")/"
-echo "  2. Hold CMD and double-click MeshAgent.app (or select it and press CMD+O)"
+echo "  2. Hold CMD and double-click ${DISPLAY_NAME}.app (or select it and press CMD+O)"
 echo "  3. Keep holding CMD until prompted to authenticate"
 
 echo ""

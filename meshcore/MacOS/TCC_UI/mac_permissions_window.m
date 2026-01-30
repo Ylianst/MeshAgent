@@ -21,8 +21,30 @@
 #include <sqlite3.h>
 #include <pwd.h>  // For getpwuid
 
-// Lock file to prevent multiple TCC UI processes
-#define TCC_LOCK_FILE "/tmp/meshagent_tcccheck.lock"
+// Lock file to prevent multiple TCC UI processes (built dynamically from executable name)
+#include <libgen.h>
+#include <mach-o/dyld.h>
+
+static const char* getTCCLockFilePath(void) {
+    static char lockPath[PATH_MAX];
+    static int initialized = 0;
+    if (!initialized) {
+        char exePath[PATH_MAX];
+        uint32_t size = sizeof(exePath);
+        if (_NSGetExecutablePath(exePath, &size) == 0) {
+            char *base = basename(exePath);
+            if (base != NULL && strlen(base) > 0 && strcmp(base, ".") != 0) {
+                snprintf(lockPath, sizeof(lockPath), "/tmp/%s_tcccheck.lock", base);
+            } else {
+                snprintf(lockPath, sizeof(lockPath), "/tmp/agent_tcccheck.lock");
+            }
+        } else {
+            snprintf(lockPath, sizeof(lockPath), "/tmp/agent_tcccheck.lock");
+        }
+        initialized = 1;
+    }
+    return lockPath;
+}
 
 // Button tags for identification
 #define BUTTON_TAG_ACCESSIBILITY 1
@@ -63,7 +85,7 @@ static int is_process_running(pid_t pid) {
 }
 
 static int is_tcc_ui_running(void) {
-    FILE* f = fopen(TCC_LOCK_FILE, "r");
+    FILE* f = fopen(getTCCLockFilePath(), "r");
     if (f == NULL) {
         return 0; // No lock file
     }
@@ -75,7 +97,7 @@ static int is_tcc_ui_running(void) {
             return 1; // Process is running
         } else {
             // Stale lock, remove it
-            unlink(TCC_LOCK_FILE);
+            unlink(getTCCLockFilePath());
             return 0;
         }
     }
@@ -85,7 +107,7 @@ static int is_tcc_ui_running(void) {
 }
 
 static void create_lock_file(void) {
-    FILE* f = fopen(TCC_LOCK_FILE, "w");
+    FILE* f = fopen(getTCCLockFilePath(), "w");
     if (f != NULL) {
         fprintf(f, "%d", getpid());
         fclose(f);
@@ -93,7 +115,7 @@ static void create_lock_file(void) {
 }
 
 static void remove_lock_file(void) {
-    unlink(TCC_LOCK_FILE);
+    unlink(getTCCLockFilePath());
 }
 
 // Button action handler class
@@ -194,41 +216,31 @@ static void remove_lock_file(void) {
         return; // Already converted to checkmark
     }
 
-    if (@available(macOS 11.0, *)) {
-        // Get button's tag to determine original position
-        NSInteger tag = [button tag];
-        CGFloat yPos;
-        if (tag == BUTTON_TAG_ACCESSIBILITY) {
-            yPos = BUTTON_YPOS_ACCESSIBILITY;
-        } else if (tag == BUTTON_TAG_FDA) {
-            yPos = BUTTON_YPOS_FDA;
-        } else if (tag == BUTTON_TAG_SCREEN_RECORDING) {
-            yPos = BUTTON_YPOS_SCREEN_RECORDING;
-        } else {
-            return;
-        }
-
-        // Create checkmark icon (32×32 with 28pt icon)
-        NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:28 weight:NSFontWeightRegular];
-        NSImage* icon = [NSImage imageWithSystemSymbolName:@"checkmark.circle.fill" accessibilityDescription:@"Permission Granted"];
-        NSImage* configuredIcon = [icon imageWithSymbolConfiguration:config];
-
-        // Change button to show checkmark icon instead of text
-        [button setImage:configuredIcon];
-        [button setImagePosition:NSImageOnly];
-        [button setContentTintColor:[NSColor systemGreenColor]];
-        [button setTitle:@""];
-        [button setBordered:NO];
-        [button setBezelStyle:NSBezelStyleRegularSquare];
-
-        // Center checkmark where the button used to be (shifted down 12px)
-        // Button was at x=BUTTON_FRAME_X with width=BUTTON_FRAME_WIDTH, so center is at BUTTON_FRAME_X + 70 = 510
-        // Checkmark is CHECKMARK_SIZE wide, so center it: 510 - 16 = CHECKMARK_X_OFFSET
-        [button setFrame:NSMakeRect(CHECKMARK_X_OFFSET, yPos - 20 + (BUTTON_FRAME_HEIGHT - CHECKMARK_SIZE) / 2, CHECKMARK_SIZE, CHECKMARK_SIZE)];
+    // Get button's tag to determine original position
+    NSInteger tag = [button tag];
+    CGFloat yPos;
+    if (tag == BUTTON_TAG_ACCESSIBILITY) {
+        yPos = BUTTON_YPOS_ACCESSIBILITY;
+    } else if (tag == BUTTON_TAG_FDA) {
+        yPos = BUTTON_YPOS_FDA;
+    } else if (tag == BUTTON_TAG_SCREEN_RECORDING) {
+        yPos = BUTTON_YPOS_SCREEN_RECORDING;
     } else {
-        // Fallback for older macOS
-        [button setTitle:@"✓ Granted"];
+        return;
     }
+
+    // Create filled circle-check icon
+    NSImage* icon = mesh_lucideCircleCheckFillIcon(CHECKMARK_SIZE, [NSColor systemGreenColor]);
+
+    // Change button to show checkmark icon instead of text
+    [button setImage:icon];
+    [button setImagePosition:NSImageOnly];
+    [button setTitle:@""];
+    [button setBordered:NO];
+    [button setBezelStyle:NSBezelStyleRegularSquare];
+
+    // Center checkmark where the button used to be
+    [button setFrame:NSMakeRect(CHECKMARK_X_OFFSET, yPos - 20 + (BUTTON_FRAME_HEIGHT - CHECKMARK_SIZE) / 2, CHECKMARK_SIZE, CHECKMARK_SIZE)];
 }
 
 - (void)showButton:(NSButton*)button {
@@ -528,12 +540,9 @@ static void createPermissionSection(NSView* contentView, NSString* title, NSStri
     [contentView addSubview:descLabel];
 
     // "Open Settings" button (shifted down 12px from text)
-    NSButton* settingsButton = [[NSButton alloc] initWithFrame:NSMakeRect(BUTTON_FRAME_X, yPos - 20, BUTTON_FRAME_WIDTH, BUTTON_FRAME_HEIGHT)];
-    [settingsButton setTitle:@"Open Settings"];
-    [settingsButton setBezelStyle:NSBezelStyleRounded];
-    [settingsButton setTarget:target];
-    [settingsButton setAction:action];
-    [settingsButton setTag:buttonTag];
+    NSButton* settingsButton = mesh_createRoundedButton(@"Open Settings",
+        NSMakeRect(BUTTON_FRAME_X, yPos - 20, BUTTON_FRAME_WIDTH, BUTTON_FRAME_HEIGHT),
+        target, action, buttonTag);
     [contentView addSubview:settingsButton];
 }
 
@@ -548,28 +557,11 @@ int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path
         // Set activation policy to allow window to show
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
-        // Create window
+        // Create window (upper-right floating)
         NSRect frame = NSMakeRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
-        NSWindow* window = [[NSWindow alloc]
-            initWithContentRect:frame
-            styleMask:(NSWindowStyleMaskTitled |
-                      NSWindowStyleMaskClosable)
-            backing:NSBackingStoreBuffered
-            defer:NO];
-
-        [window setTitle:@"MeshAgent - Security & Privacy Settings"];
-
-        // Position in upper-right area to stay out of the way
-        NSScreen* mainScreen = [NSScreen mainScreen];
-        NSRect screenFrame = [mainScreen visibleFrame];
-        NSRect windowFrame = [window frame];
-
-        // Position WINDOW_MARGIN pixels from right edge and WINDOW_MARGIN pixels from top
-        CGFloat xPos = screenFrame.origin.x + screenFrame.size.width - windowFrame.size.width - WINDOW_MARGIN;
-        CGFloat yPos = screenFrame.origin.y + screenFrame.size.height - windowFrame.size.height - WINDOW_MARGIN;
-
-        [window setFrameOrigin:NSMakePoint(xPos, yPos)];
-        [window setLevel:NSFloatingWindowLevel];
+        NSWindow* window = mesh_createFloatingWindow(frame,
+            [NSString stringWithFormat:@"%@ - Security & Privacy Settings", mesh_getAgentDisplayName()],
+            NSWindowStyleMaskTitled | NSWindowStyleMaskClosable, NO);
 
         // Get content view
         NSView* contentView = [window contentView];
@@ -582,14 +574,11 @@ int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path
         delegate.buttonHandler = buttonHandler;
         [window setDelegate:delegate];
 
-        // Add icon using SF Symbols (macOS 11+)
-        if (@available(macOS 11.0, *)) {
-            NSImageView* iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(ICON_X, ICON_Y, ICON_SIZE, ICON_SIZE)];
-            NSImage* icon = [NSImage imageWithSystemSymbolName:@"checkmark.shield" accessibilityDescription:@"Security"];
-            [iconView setImage:icon];
-            [iconView setSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:32 weight:NSFontWeightRegular]];
-            [contentView addSubview:iconView];
-        }
+        // Add shield-check icon (Lucide "shield-check")
+        NSImageView* iconView = [[NSImageView alloc] initWithFrame:NSMakeRect(ICON_X, ICON_Y, ICON_SIZE, ICON_SIZE)];
+        [iconView setImage:mesh_lucideShieldCheckIcon(ICON_SIZE)];
+        [iconView setContentTintColor:[NSColor colorWithWhite:0.2 alpha:1.0]];
+        [contentView addSubview:iconView];
 
         // Add header title
         NSTextField* titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(TITLE_LABEL_X, TITLE_LABEL_Y, TITLE_LABEL_WIDTH, TITLE_LABEL_HEIGHT)];
@@ -604,7 +593,7 @@ int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path
 
         // Add header description
         NSTextField* headerLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(90, 280, 490, 32)];
-        [headerLabel setStringValue:@"Please grant MeshAgent all the required permissions for complete access functionality."];
+        [headerLabel setStringValue:[NSString stringWithFormat:@"Please grant %@ all the required permissions for complete access functionality.", mesh_getAgentDisplayName()]];
         [headerLabel setBezeled:NO];
         [headerLabel setDrawsBackground:NO];
         [headerLabel setEditable:NO];
@@ -648,21 +637,15 @@ int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path
 
         // Add "Do not remind me again" checkbox (only if requested)
         if (show_reminder_checkbox) {
-            NSButton* checkbox = [[NSButton alloc] initWithFrame:NSMakeRect(20, 15, 250, 20)];
-            [checkbox setButtonType:NSButtonTypeSwitch];
-            [checkbox setTitle:@"Do not remind me again"];
-            [checkbox setTarget:delegate];
-            [checkbox setAction:@selector(checkboxToggled:)];
+            NSButton* checkbox = mesh_createCheckbox(@"Do not remind me again",
+                NSMakeRect(20, 15, 250, 20), NSControlStateValueOff, delegate, @selector(checkboxToggled:));
             [contentView addSubview:checkbox];
         }
 
         // Add "Finish" button
-        NSButton* finishButton = [[NSButton alloc] initWithFrame:NSMakeRect(490, 15, 90, 32)];
-        [finishButton setTitle:@"Finish"];
-        [finishButton setBezelStyle:NSBezelStyleRounded];
+        NSButton* finishButton = mesh_createRoundedButton(@"Finish", NSMakeRect(490, 15, 90, 32),
+            window, @selector(close), 0);
         [finishButton setKeyEquivalent:@"\r"]; // Enter key
-        [finishButton setTarget:window];
-        [finishButton setAction:@selector(close)];
         [contentView addSubview:finishButton];
 
         // Start real-time monitoring using notifications + light polling
@@ -691,6 +674,7 @@ int show_tcc_permissions_window(int show_reminder_checkbox, const char* exe_path
 // Spawns: launchctl asuser <uid> <exe_path> -check-tcc
 // Fire-and-forget: child handles DB read/write, returns -1 (no pipe)
 int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, int uid) {
+
     // CRITICAL SAFETY CHECK: NEVER spawn TCC UI during install/upgrade/uninstall operations
     // Check command line arguments for forbidden flags
     char*** argvPtr = _NSGetArgv();
@@ -747,6 +731,7 @@ int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, i
         NULL                // argv terminator
     };
 
+
     // Fire-and-forget spawn using posix_spawn
     // This avoids responsible process attribution issues on macOS 15 and earlier
     pid_t pid;
@@ -759,13 +744,12 @@ int show_tcc_permissions_window_async(const char* exe_path, void* pipeManager, i
         return -1;
     }
 
+
     // Close both pipe ends (fire-and-forget mode - no IPC)
     close(pipefd[0]);
     close(pipefd[1]);
 
-    // Return -1 to indicate fire-and-forget (no fd to monitor)
-    // TODO: Could return 0 for success, but -1 maintains existing error-checking behavior
-    return -1;
+    return 0;
 }
 
 /**

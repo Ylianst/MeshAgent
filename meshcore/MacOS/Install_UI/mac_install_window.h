@@ -10,7 +10,8 @@ extern "C" {
  */
 typedef enum {
     INSTALL_MODE_UPGRADE = 0,
-    INSTALL_MODE_NEW = 1
+    INSTALL_MODE_NEW = 1,
+    INSTALL_MODE_UNINSTALL = 2
 } InstallMode;
 
 /**
@@ -22,6 +23,9 @@ typedef struct {
     char mshFilePath[1024];
     int disableUpdate;    // 1 to disable updates, 0 to enable
     int disableTccCheck;  // 1 to disable TCC check UI, 0 to enable
+    int verboseLogging;   // 1 to enable --log=3, 0 to disable
+    int meshAgentLogging; // 1 to enable --meshAgentLogging=1, 0 to disable
+    int fullUninstall;    // 1 for full uninstall (-funinstall), 0 for standard (-uninstall)
     int cancelled;  // 1 if user cancelled, 0 if user clicked Install
 } InstallResult;
 

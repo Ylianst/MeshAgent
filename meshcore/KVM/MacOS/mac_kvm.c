@@ -63,7 +63,7 @@ limitations under the License.
 
 static int KVM_Daemon_Listener_FD = -1;  // Main daemon's listener socket
 
-// Dynamic paths built from companyName and meshServiceName at runtime
+// Dynamic paths built from serviceId at runtime
 static char *KVM_Listener_Path = NULL;
 static char *KVM_Queue_Directory = NULL;
 static char *KVM_Session_Signal_File = NULL;
@@ -449,104 +449,24 @@ void kvm_pause(int pause)
 	g_pause = pause;
 }
 
-// Sanitize identifier string to match JavaScript sanitizeIdentifier() behavior
-// Replaces spaces with hyphens, removes all non-alphanumeric except hyphens/underscores
-static void sanitize_identifier(char *dest, size_t destSize, const char *src)
-{
-	size_t i, j = 0;
-
-	if (src == NULL || dest == NULL || destSize == 0) {
-		if (dest != NULL && destSize > 0) dest[0] = '\0';
-		return;
-	}
-
-	for (i = 0; src[i] != '\0' && j < destSize - 1; i++) {
-		if (src[i] == ' ') {
-			// Replace spaces with hyphens
-			dest[j++] = '-';
-		} else if ((src[i] >= 'a' && src[i] <= 'z') ||
-		           (src[i] >= 'A' && src[i] <= 'Z') ||
-		           (src[i] >= '0' && src[i] <= '9') ||
-		           src[i] == '-' || src[i] == '_') {
-			// Keep alphanumeric, hyphens, and underscores
-			dest[j++] = src[i];
-		}
-		// Skip all other characters
-	}
-	dest[j] = '\0';
-}
-
-// Read serviceID from LaunchDaemon plist Label field
-// Scans /Library/LaunchDaemons/*.plist files to find the one with matching ProgramArguments:0
-// Returns strdup() of Label field, or NULL if not found (caller must free)
-//
-// SECURITY FIX: Replaced popen() with secure CoreFoundation-based plist parsing
-// Previous implementation was vulnerable to command injection via malicious filenames
-static char* kvm_read_serviceid_from_plist(const char *exePath)
-{
-	DIR *dir;
-	struct dirent *entry;
-	char plistPath[PATH_MAX];
-
-	if (exePath == NULL || strlen(exePath) == 0)
-	{
-		return NULL;
-	}
-
-	// Open LaunchDaemons directory
-	dir = opendir("/Library/LaunchDaemons");
-	if (dir == NULL)
-	{
-		return NULL;
-	}
-
-	// Scan for .plist files
-	while ((entry = readdir(dir)) != NULL)
-	{
-		// Skip non-plist files
-		if (!strstr(entry->d_name, ".plist")) continue;
-
-		snprintf(plistPath, sizeof(plistPath), "/Library/LaunchDaemons/%s", entry->d_name);
-
-		// Use SECURE CoreFoundation-based plist parser (no shell execution)
-		char* binPath = mesh_plist_get_program_path(plistPath);
-		if (binPath != NULL)
-		{
-			// Check if this matches our binary path
-			if (strcmp(binPath, exePath) == 0)
-			{
-				free(binPath);
-
-				// Found matching plist! Extract Label using secure API
-				char* label = mesh_plist_get_label(plistPath);
-				closedir(dir);
-				return label;  // Caller must free
-			}
-			free(binPath);
-		}
-	}
-
-	closedir(dir);
-	return NULL;
-}
+// Removed dead code: sanitize_identifier() — all sanitization happens in JavaScript at install time
+// Removed duplicate: kvm_read_serviceid_from_plist() — now using shared mesh_plist_find_service_id()
 
 // Build dynamic KVM paths using serviceID
-// Priority 1: Database serviceID (from .msh file)
-// Priority 2: LaunchDaemon plist Label (when database unavailable)
-// Priority 3: Default "meshagent-agent"
-static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, char *serviceID, char *exePath)
+// Priority 1: Explicit serviceID (from --serviceId= or database)
+// Priority 2: LaunchDaemon plist Label (when explicit ID unavailable)
+static void kvm_build_dynamic_paths(char *serviceID, char *exePath)
 {
 	char serviceId[512];
 
-	UNREFERENCED_PARAMETER(companyName);
-	UNREFERENCED_PARAMETER(meshServiceName);
+	// companyName/meshServiceName parameters removed — paths derived from serviceID/exePath
 
 	// Free any previously allocated paths
 	if (KVM_Listener_Path != NULL) { free(KVM_Listener_Path); KVM_Listener_Path = NULL; }
 	if (KVM_Queue_Directory != NULL) { free(KVM_Queue_Directory); KVM_Queue_Directory = NULL; }
 	if (KVM_Session_Signal_File != NULL) { free(KVM_Session_Signal_File); KVM_Session_Signal_File = NULL; }
 
-	// Priority 1: Use pre-computed serviceID from database
+	// Priority 1: Explicit serviceID (from --serviceId= or database)
 	if (serviceID != NULL && strlen(serviceID) > 0)
 	{
 		strncpy(serviceId, serviceID, sizeof(serviceId) - 1);
@@ -555,7 +475,7 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 	// Priority 2: Read from LaunchDaemon plist Label
 	else if (exePath != NULL && strlen(exePath) > 0)
 	{
-		char *plistServiceId = kvm_read_serviceid_from_plist(exePath);
+		char *plistServiceId = mesh_plist_find_service_id("/Library/LaunchDaemons", exePath);
 		if (plistServiceId != NULL)
 		{
 			strncpy(serviceId, plistServiceId, sizeof(serviceId) - 1);
@@ -564,15 +484,14 @@ static void kvm_build_dynamic_paths(char *companyName, char *meshServiceName, ch
 		}
 		else
 		{
-			// Priority 3: Default to "meshagent-agent"
-			strncpy(serviceId, "meshagent-agent", sizeof(serviceId) - 1);
+			strncpy(serviceId, "unknown-agent", sizeof(serviceId) - 1);
 			serviceId[sizeof(serviceId) - 1] = '\0';
 		}
 	}
 	else
 	{
-		// Priority 3: Default to "meshagent-agent" (no exePath available)
-		strncpy(serviceId, "meshagent-agent", sizeof(serviceId) - 1);
+		// Priority 3: Default fallback (no exePath available)
+		strncpy(serviceId, "unknown-agent", sizeof(serviceId) - 1);
 		serviceId[sizeof(serviceId) - 1] = '\0';
 	}
 
@@ -679,8 +598,7 @@ void* kvm_server_mainloop(void* param, char *serviceID)
 			#endif
 
 			// -kvm1 child process receives serviceID from --serviceId parameter
-			// companyName/meshServiceName no longer needed for -kvm1
-			kvm_build_dynamic_paths(NULL, NULL, serviceID, exePathToUse);
+			kvm_build_dynamic_paths(serviceID, exePathToUse);
 		}
 
 		written = write(STDOUT_FILENO, "KVM: Connecting to daemon socket...\n", 37);
@@ -989,18 +907,18 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 // Create KVM session: directory + signal file + socket
 // This triggers QueueDirectories to start -kvm1 LaunchAgent
 // Only called when user clicks "Connect" in MeshCentral
-int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID, char *exePath)
+int kvm_create_session(char *serviceID, char *exePath)
 {
 	struct sockaddr_un serveraddr;
 	mode_t old_umask;
 	int signal_fd;
 
-	// Build dynamic paths based on companyName and meshServiceName
+	// Build dynamic paths using serviceID
 	// This must be called before checking if session is already active
 	// because paths might not have been built yet
 	if (KVM_Listener_Path == NULL)
 	{
-		kvm_build_dynamic_paths(companyName, meshServiceName, serviceID, exePath);
+		kvm_build_dynamic_paths(serviceID, exePath);
 	}
 
 	// Check if session already active
@@ -1167,7 +1085,7 @@ void kvm_cleanup_session(void)
 	}
 }
 
-void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *companyName, char *meshServiceName, char *serviceID)
+void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *serviceID)
 {
 	// REVERSED ARCHITECTURE: Always use on-demand session with QueueDirectories
 	// The uid parameter is ignored - LaunchAgent runs in correct user context via LimitLoadToSessionType
@@ -1182,7 +1100,7 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 
 	// Create KVM session (directory + signal file + socket)
 	// This triggers QueueDirectories to start -kvm1
-	if (kvm_create_session(companyName, meshServiceName, serviceID, exePath) < 0)
+	if (kvm_create_session(serviceID, exePath) < 0)
 	{
 		mesh_log_message("[KVM] ERROR: Failed to create session\n");
 		return NULL;

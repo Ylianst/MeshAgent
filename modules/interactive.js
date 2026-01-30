@@ -192,7 +192,7 @@ limitations under the License.
 
     var displayName = msh.displayName ? msh.displayName : 'MeshCentral Agent';
     var s = null, buttons = [translation[lang].cancel], skip = false;
-    var serviceName = msh.meshServiceName ? msh.meshServiceName : 'meshagent';
+    var serviceName = msh.meshServiceName ? msh.meshServiceName : require('agent-paths').getAgentBaseName();
 
     // Cache message-box capabilities (prevents zenity/kdialog checks on macOS)
     var messageBoxCapabilities = { hasKdialog: false, hasZenity: false };

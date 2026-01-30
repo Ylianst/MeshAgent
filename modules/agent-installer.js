@@ -201,8 +201,8 @@ function findBundleInDirectory(installPath) {
         var files = fs.readdirSync(installPath);
         for (var i = 0; i < files.length; i++) {
             if (files[i].endsWith('.app')) {
-                // Check if this bundle contains a meshagent binary
-                var binaryPath = installPath + files[i] + '/Contents/MacOS/meshagent';
+                // Check if this bundle contains the agent binary (use dynamic name, not hardcoded)
+                var binaryPath = installPath + files[i] + '/Contents/MacOS/' + agentPaths.getAgentBaseName();
                 if (fs.existsSync(binaryPath)) {
                     return files[i];
                 }
@@ -281,6 +281,16 @@ function checkParameters(parms)
     if (parms.getParameter('description', null) == null && msh.description != null) { parms.push('--description="' + msh.description + '"'); }
     if (parms.getParameter('displayName', null) == null && msh.displayName != null) { parms.push('--displayName="' + msh.displayName + '"'); }
     if (parms.getParameter('companyName', null) == null && msh.companyName != null) { parms.push('--companyName="' + msh.companyName + '"'); }
+    // --setServiceID is the user-facing flag for fresh install/finstall.
+    // Map to --serviceId so downstream code picks it up (before .msh injection so it takes priority).
+    var setServiceID = parms.getParameter('setServiceID', null);
+    if (setServiceID && parms.getParameter('serviceId', null) == null) {
+        parms.push('--serviceId="' + setServiceID + '"');
+    }
+
+    // Inject ServiceID from embedded .msh if not provided on command line (support both cases)
+    var mshServiceId = msh.ServiceID || msh.serviceId;
+    if (parms.getParameter('serviceId', null) == null && mshServiceId != null) { parms.push('--serviceId="' + mshServiceId + '"'); }
 
     if (msh.fileName != null)
     {
@@ -326,7 +336,7 @@ function checkParameters(parms)
 
 // Helper to normalize install paths - handles both directory and binary paths
 function normalizeInstallPath(path) {
-    if (!path) return '/usr/local/mesh_services/meshagent/';
+    if (!path) return '/usr/local/mesh_services/' + agentPaths.getAgentBaseName() + '/';
 
     // Ensure trailing slash
     if (!path.endsWith('/')) {
@@ -444,12 +454,18 @@ function findInstallation(installPath, serviceName, companyName) {
     if (installPath) {
         logger.debug('[findInstallation] Checking explicit path: ' + installPath);
         installPath = normalizeInstallPath(installPath);
+        var fs = require('fs');
         // Check for bundle first using dynamic discovery, then standalone binary
         var bundleName = findBundleInDirectory(installPath);
         if (bundleName) {
             return installPath;
         }
-        if (require('fs').existsSync(installPath + agentPaths.getAgentBaseName())) {
+        if (fs.existsSync(installPath + agentPaths.getAgentBaseName())) {
+            return installPath;
+        }
+        // Check for config files (.msh or .db) — the binary may be missing during upgrade
+        if (fs.existsSync(installPath + agentPaths.getAgentMshName()) || fs.existsSync(installPath + agentPaths.getAgentDbName())) {
+            logger.debug('[findInstallation] Found config files at explicit path (no binary): ' + installPath);
             return installPath;
         }
         // Not found - return null (caller will log appropriately based on context)
@@ -584,6 +600,27 @@ function getProgramPathFromPlist(plistPath) {
     }
 }
 
+// Discover existing plist serviceId by scanning LaunchDaemons for any plist
+// whose ProgramArguments[0] starts with installPath.
+// Returns the plist filename stem (= Label = serviceId), or null if not found.
+function discoverExistingPlistServiceId(installPath) {
+    var fs = require('fs');
+    var daemonDir = '/Library/LaunchDaemons';
+    try {
+        var files = fs.readdirSync(daemonDir);
+        for (var i = 0; i < files.length; i++) {
+            if (!files[i].endsWith('.plist')) continue;
+            var plistPath = daemonDir + '/' + files[i];
+            var progPath = getProgramPathFromPlist(plistPath);
+            if (progPath && progPath.indexOf(installPath) === 0) {
+                var serviceId = files[i].replace('.plist', '');
+                return serviceId;
+            }
+        }
+    } catch (e) { /* directory doesn't exist */ }
+    return null;
+}
+
 // Helper to extract extra ProgramArguments from plist (returns all args for filtering later)
 function extractExtraProgramArguments(plistPath) {
     try {
@@ -650,7 +687,7 @@ function extractNonStandardKeys(plistPath) {
 // Helper to cache plist customizations before cleanup (for surgical updates)
 function cachePlistCustomizations(serviceId) {
     var daemonPlistPath = '/Library/LaunchDaemons/' + serviceId + '.plist';
-    var agentPlistPath = '/Library/LaunchAgents/' + serviceId + '.plist';
+    var agentPlistPath = '/Library/LaunchAgents/' + serviceId + '-agent.plist';
     var fs = require('fs');
 
     var cached = {
@@ -708,15 +745,15 @@ function cleanupOrphanedPlists(installPath) {
         var daemonDir = '/Library/LaunchDaemons';
         var files = require('fs').readdirSync(daemonDir);
         for (var i = 0; i < files.length; i++) {
-            // SAFETY GUARD #1: Only process plists with agent name in filename
-            if (files[i].endsWith('.plist') && files[i].indexOf(agentBaseName) !== -1) {
+            // Process all plists — path matching below ensures we only touch ours
+            if (files[i].endsWith('.plist')) {
                 var plistPath = daemonDir + '/' + files[i];
                 var plistBinary = getProgramPathFromPlist(plistPath);
 
                 // Check if plist points to our installation:
                 // 1. Exact match for standalone binary
                 // 2. Exact match for current bundle binary
-                // 3. Any bundle in the install directory (e.g., /opt/tacticalmesh/*.app/Contents/MacOS/*)
+                // 3. Any bundle in the install directory (e.g., /opt/acmemesh/*.app/Contents/MacOS/*)
                 var matchesInstallPath = false;
 
                 // CRITICAL: Only match if plistBinary is a valid non-empty string
@@ -777,8 +814,8 @@ function cleanupOrphanedPlists(installPath) {
         var agentDir = '/Library/LaunchAgents';
         var files = require('fs').readdirSync(agentDir);
         for (var i = 0; i < files.length; i++) {
-            // SAFETY GUARD #1: Only process plists with agent name in filename
-            if (files[i].endsWith('.plist') && files[i].indexOf(agentBaseName) !== -1) {
+            // Process all plists — path matching below ensures we only touch ours
+            if (files[i].endsWith('.plist')) {
                 var plistPath = agentDir + '/' + files[i];
                 var plistBinary = getProgramPathFromPlist(plistPath);
 
@@ -1005,14 +1042,14 @@ function determineInstallMode(existingInstallPath, installPath, explicitMshPath,
             return {
                 mode: 'error',
                 path: null,
-                reason: 'No installation found at default location: /usr/local/mesh_services/meshagent/',
+                reason: 'No installation found at default location: /usr/local/mesh_services/' + agentPaths.getAgentBaseName() + '/',
                 fatal: true
             };
         } else {
             // -fullinstall: Default to standard location
             return {
                 mode: 'fresh',
-                path: '/usr/local/mesh_services/meshagent/',
+                path: '/usr/local/mesh_services/' + agentPaths.getAgentBaseName() + '/',
                 reason: 'FRESH INSTALL (default location)',
                 fatal: false
             };
@@ -1327,14 +1364,14 @@ function replaceInstallation(sourceType, installPath) {
 
         if (sourceType.type === 'bundle') {
 
-            // Copy entire bundle - always install as MeshAgent.app
+            // Copy entire bundle - preserve source bundle name
             var sourceBundlePath = sourceType.bundlePath;
             var sourceBundleName = sourceBundlePath.substring(sourceBundlePath.lastIndexOf('/') + 1);
 
-            // Always use standard bundle name regardless of source name
-            var targetBundlePath = installPath + 'MeshAgent.app';
+            // Use the same bundle name as source (e.g., AcmeMesh.app stays AcmeMesh.app)
+            var targetBundlePath = installPath + sourceBundleName;
 
-            logger.info('Installing bundle: ' + sourceBundleName + ' → MeshAgent.app');
+            logger.info('Installing bundle: ' + sourceBundleName);
 
             // Source bundle should already be backed up by backupInstallation()
             // Just copy the new bundle
@@ -1349,8 +1386,8 @@ function replaceInstallation(sourceType, installPath) {
             child.stderr.on('data', function(d) { dittoError = d.toString(); logger.warn('[DITTO] ' + dittoError.trim()); });
             child.waitExit();
 
-            // Check if bundle was actually copied by verifying the binary exists
-            var binaryPath = targetBundlePath + '/Contents/MacOS/meshagent';
+            // Check if bundle was actually copied by verifying the binary exists (use dynamic name)
+            var binaryPath = targetBundlePath + '/Contents/MacOS/' + agentPaths.getAgentBaseName();
             if (!fs.existsSync(binaryPath)) {
                 throw new Error('Bundle copy failed. ' + (dittoError || 'Binary not found after copy'));
             }
@@ -1485,7 +1522,7 @@ function forceBootoutService(serviceId, domain) {
     }
 }
 
-// Verify no meshagent processes are running from specific path
+// Verify no agent processes are running from specific path
 // Uses lsof to verify actual executable path (won't touch other installations)
 // Returns: { success: true/false, pids: [array of PIDs from binaryPath] }
 function verifyProcessesTerminated(binaryPath, maxWaitSeconds) {
@@ -1495,8 +1532,8 @@ function verifyProcessesTerminated(binaryPath, maxWaitSeconds) {
 
     while (Date.now() - startTime < timeout) {
         try {
-            // Step 1: Get ALL meshagent PIDs
-            var output = child_process.execSync('pgrep -x meshagent 2>/dev/null', { encoding: 'utf8' });
+            // Step 1: Get ALL agent PIDs by executable name
+            var output = child_process.execSync('pgrep -x ' + agentPaths.getAgentBaseName() + ' 2>/dev/null', { encoding: 'utf8' });
             var allPids = output.trim().split('\n').map(function(p) {
                 return parseInt(p);
             }).filter(function(p) {
@@ -1533,14 +1570,14 @@ function verifyProcessesTerminated(binaryPath, maxWaitSeconds) {
             child_process.execSync('sleep 0.5');
 
         } catch (e) {
-            // pgrep failed (no meshagent processes at all)
+            // pgrep failed (no agent processes at all)
             return { success: true, pids: [] };
         }
     }
 
     // Timeout reached - get final list of matching PIDs
     try {
-        var output = child_process.execSync('pgrep -x meshagent 2>/dev/null', { encoding: 'utf8' });
+        var output = child_process.execSync('pgrep -x ' + agentPaths.getAgentBaseName() + ' 2>/dev/null', { encoding: 'utf8' });
         var allPids = output.trim().split('\n').map(function(p) {
             return parseInt(p);
         }).filter(function(p) {
@@ -1565,7 +1602,7 @@ function verifyProcessesTerminated(binaryPath, maxWaitSeconds) {
     }
 }
 
-// Force kill meshagent processes (ONLY safe after launchd unload verified)
+// Force kill agent processes (ONLY safe after launchd unload verified)
 function forceKillProcesses(pids) {
     var child_process = require('child_process');
 
@@ -1606,6 +1643,7 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             startType: 'AUTO_START',
             parameters: [],  // serviceId from .msh, appBundle auto-detected
             companyName: companyName,
+            serviceId: serviceId,  // Explicit serviceId for plist filename
             surgicalUpdate: surgical,  // Enable surgical plist updates (preserve customizations)
             meshAgentLogging: meshAgentLogging  // Enable launchd logging to /tmp
         };
@@ -1623,7 +1661,7 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             if (!bundleName) {
                 throw new Error('Bundle installation type specified but no bundle found at: ' + installPath);
             }
-            servicePath = installPath + bundleName + '/Contents/MacOS/meshagent';
+            servicePath = installPath + bundleName + '/Contents/MacOS/' + agentPaths.getAgentBaseName();
             options.servicePath = servicePath;
             // WorkingDirectory must be parent of bundle, not inside it
             options.installPath = installPath;
@@ -1664,9 +1702,10 @@ function createLaunchAgent(serviceName, companyName, installPath, serviceId, ins
         var options = {
             name: serviceName,
             companyName: companyName,
+            serviceId: serviceId,  // Explicit serviceId for plist filename
             startType: 'AUTO_START',
             sessionTypes: ['Aqua', 'LoginWindow'],
-            parameters: ['-kvm1', '--serviceId=' + serviceId],
+            parameters: ['-kvm1'],  // serviceId resolved at runtime via plist Label lookup
             surgicalUpdate: surgical,  // Enable surgical plist updates (preserve customizations)
             meshAgentLogging: meshAgentLogging  // Enable launchd logging to /tmp
         };
@@ -1749,13 +1788,13 @@ function bootstrapServices(serviceId) {
 function installServiceUnified(params) {
 
     // Register cleanup handler for launchctl job (runs on ANY exit)
-    // This removes the meshagent.upgrade job and terminates the process cleanly
+    // This removes the {agentname}.upgrade job and terminates the process cleanly
     var cleanupRegistered = false;
     process.once('exit', function() {
         if (!cleanupRegistered) {
             cleanupRegistered = true;
             try {
-                require('child_process').execFile('/bin/launchctl', ['launchctl', 'remove', 'meshagent.upgrade']);
+                require('child_process').execFile('/bin/launchctl', ['launchctl', 'remove', agentPaths.getAgentBaseName() + '.upgrade']);
             } catch (ex) {
                 // Ignore errors
             }
@@ -1928,7 +1967,8 @@ function installServiceUnified(params) {
         // from a distribution bundle (e.g., downloaded to /Downloads) that happens to have
         // a leftover plist from a previous test installation pointing to the same location.
         // For fresh installs, we want to install to the DEFAULT location, not the source location.
-        if (existingInstallPath) {
+        // EXCEPTION: If --installPath is explicitly provided, respect the user's intent.
+        if (existingInstallPath && !installPath) {
             var sourceParent;
             if (sourceType.type === 'bundle') {
                 sourceParent = macOSHelpers.getBundleParentDirectory(sourceType.binaryPath);
@@ -2027,7 +2067,7 @@ function installServiceUnified(params) {
         //   - Standalone: {BinaryName}.msh (e.g., meshagent_osx-universal-64.msh)
         sourceMshFile = findFileCaseInsensitive(searchDir, searchName + '.msh');
 
-        // Step 2: Try agent-derived name (e.g., lithium-remote.msh)
+        // Step 2: Try agent-derived name (e.g., acmemesh.msh)
         if (!sourceMshFile) {
             sourceMshFile = findFileCaseInsensitive(searchDir, agentPaths.getAgentMshName());
         }
@@ -2211,12 +2251,18 @@ function installServiceUnified(params) {
             else if (fs.existsSync(mshPath)) {
                 try {
                     var config = parseMshFile(mshPath);
-                    if (config.meshServiceName || config.companyName) {
+                    // Check for serviceId (case-insensitive: ServiceID or serviceId)
+                    var mshServiceId = config.ServiceID || config.serviceId || null;
+                    if (config.meshServiceName || config.companyName || mshServiceId) {
                         currentServiceName = config.meshServiceName || currentServiceName;
                         currentCompanyName = config.companyName || null;
+                        if (mshServiceId) {
+                            currentServiceId = mshServiceId;
+                        }
                         configSource = 'msh-file';
                         logger.info('Found in .msh file: Service=' + currentServiceName +
-                                   (currentCompanyName ? ', Company=' + currentCompanyName : ''));
+                                   (currentCompanyName ? ', Company=' + currentCompanyName : '') +
+                                   (mshServiceId ? ', ServiceID=' + mshServiceId : ''));
                     }
                 } catch (e) {
                     logger.warn('Could not parse .msh file: ' + e);
@@ -2250,11 +2296,54 @@ function installServiceUnified(params) {
         if (!currentServiceId) {
             currentServiceId = macOSHelpers.buildServiceId(currentServiceName, currentCompanyName);
         }
+
+        // Discover existing plist serviceId from disk — if an existing LaunchDaemon plist
+        // points to our installPath, reuse its filename stem as serviceId to avoid creating
+        // duplicate plists during upgrade (e.g., meshagent.plist -> acmemesh.plist)
+        if (!newServiceId) {
+            var discoveredPlistServiceId = discoverExistingPlistServiceId(installPath);
+            if (discoveredPlistServiceId && discoveredPlistServiceId !== currentServiceId) {
+                logger.info('Discovered existing LaunchDaemon plist serviceId: ' + discoveredPlistServiceId +
+                           ' (overrides computed: ' + currentServiceId + ')');
+                currentServiceId = discoveredPlistServiceId;
+            }
+        }
     } else {
         // FRESH INSTALL mode: Use provided params or defaults
         currentServiceName = newServiceName || currentServiceName;
         currentCompanyName = newCompanyName || null;
-        currentServiceId = newServiceId || macOSHelpers.buildServiceId(currentServiceName, currentCompanyName);
+
+        // Check source .msh for explicit ServiceID (if not provided via command line)
+        // Support both ServiceID and serviceId (case-insensitive)
+        var mshServiceId = null;
+        if (!newServiceId && sourceMshFile) {
+            try {
+                var mshConfig = parseMshFile(sourceMshFile);
+                mshServiceId = mshConfig.ServiceID || mshConfig.serviceId || null;
+                if (mshServiceId) {
+                    logger.info('Found ServiceID in .msh file: ' + mshServiceId);
+                }
+            } catch (e) {
+                // Ignore parse errors, fall through to buildServiceId
+            }
+        }
+        // Fresh install priority: --setServiceID > discovered plist > .msh ServiceID > baseName
+        var discoveredPlistServiceId = null;
+        if (!newServiceId && (upgradeMode || isLocalService)) {
+            discoveredPlistServiceId = discoverExistingPlistServiceId(installPath);
+            if (discoveredPlistServiceId) {
+                logger.info('Discovered existing LaunchDaemon plist serviceId: ' + discoveredPlistServiceId);
+            }
+        }
+        currentServiceId = newServiceId || discoveredPlistServiceId || mshServiceId || macOSHelpers.buildServiceId(currentServiceName, currentCompanyName);
+    }
+
+    // During upgrade with --setServiceID: old plists use discovered serviceId, new plists use the new one
+    var oldServiceId = currentServiceId;
+
+    if (isUpgrade && newServiceId && newServiceId !== currentServiceId) {
+        logger.info('ServiceID rename: ' + currentServiceId + ' -> ' + newServiceId);
+        currentServiceId = newServiceId;
     }
 
     logger.info('Current Service ID: ' + currentServiceId);
@@ -2275,7 +2364,7 @@ function installServiceUnified(params) {
     if (shouldCacheCustomizations) {
         logger.info('Caching plist customizations for surgical update');
         try {
-            cachedCustomizations = cachePlistCustomizations(currentServiceId);
+            cachedCustomizations = cachePlistCustomizations(oldServiceId);
         } catch (e) {
             logger.warn('Could not cache plist customizations: ' + e);
         }
@@ -2295,9 +2384,10 @@ function installServiceUnified(params) {
     }
 
     // SAFETY VERIFICATION (Always mandatory)
+    // Use oldServiceId to unload the services that are actually running
     logger.info('Verifying services unloaded from launchd');
     try {
-        var unloadSuccess = verifyServiceUnloaded(currentServiceId, 3);
+        var unloadSuccess = verifyServiceUnloaded(oldServiceId, 3);
         if (unloadSuccess) {
             logger.info('Services verified unloaded from launchd');
         } else {
@@ -2323,7 +2413,7 @@ function installServiceUnified(params) {
     try {
         var terminateSuccess = verifyProcessesTerminated(binaryPath, 10);
         if (terminateSuccess) {
-            logger.info('All processes terminated, other meshagent installations unaffected');
+            logger.info('All processes terminated, other ' + agentPaths.getAgentBaseName() + ' installations unaffected');
         } else {
             logger.error('Could not verify process termination');
             process.exit(1);
@@ -2950,7 +3040,7 @@ function uninstallService2(params, msh)
     // Extract install path from msh file path for cleanupOrphanedPlists
     var installPath = null;
     if (msh) {
-        // msh is like "/opt/tacticalmesh/meshagent.msh", extract directory with trailing slash
+        // msh is like "/opt/acmemesh/meshagent.msh", extract directory with trailing slash
         var parts = msh.split(process.platform == 'win32' ? '\\' : '/');
         parts.pop(); // Remove filename
         installPath = parts.join(process.platform == 'win32' ? '\\' : '/') + (process.platform == 'win32' ? '\\' : '/');
@@ -3516,11 +3606,11 @@ function fullInstallEx(parms, gOptions)
     catch (e)
     {
         // Service not found with the provided name
-        // On macOS, try to find ANY existing meshagent installation (handles service renames)
+        // On macOS, try to find ANY existing agent installation (handles service renames)
         if (process.platform == 'darwin')
         {
             logger.info('Service not found by name');
-            logger.info('Searching for any existing meshagent installation...');
+            logger.info('Searching for any existing ' + agentPaths.getAgentBaseName() + ' installation...');
             try
             {
                 // Check if explicit installPath was provided (takes priority over self-upgrade detection)
@@ -3584,7 +3674,7 @@ function parseServiceIdFromLabel(label) {
 
     var parts = label.split('.');
 
-    // Simple format: "{agentname}" or "TacticalMesh"
+    // Simple format: "{agentname}" or "ACMEremoteMESH"
     if (parts.length === 1) {
         return {
             serviceName: parts[0],
@@ -3627,7 +3717,7 @@ function getLabelFromLaunchDaemon(binaryPath) {
             try {
                 // Check if this plist references our binary
                 var progArray = child_process.execSync('/usr/libexec/PlistBuddy -c "Print :ProgramArguments:0" "' + plistPath + '"', { encoding: 'utf8' }).trim();
-                if (progArray === binaryPath || progArray === binaryPath + '/meshagent') {
+                if (progArray === binaryPath || progArray === binaryPath + '/' + agentPaths.getAgentBaseName()) {
                     // This is our plist, get the Label
                     var label = child_process.execSync('/usr/libexec/PlistBuddy -c "Print :Label" "' + plistPath + '"', { encoding: 'utf8' }).trim();
                     return label;
@@ -3805,7 +3895,7 @@ function upgradeAgent(params) {
         process.exit(1);
     }
 
-    console.log('Starting MeshAgent upgrade...\n');
+    console.log('Starting ' + agentPaths.getAgentBaseName() + ' upgrade...\n');
 
     // Detect source type (bundle or standalone binary)
     var sourceType = detectSourceType();
@@ -3871,6 +3961,7 @@ function upgradeAgent(params) {
     var mshPath = installPath + agentPaths.getAgentMshName();
     var currentServiceName = agentPaths.getAgentBaseName();
     var currentCompanyName = null;
+    var mshServiceId = null;  // ServiceID from .msh file (if present)
     var configSource = 'default';
     var fs = require('fs');
 
@@ -3905,14 +3996,22 @@ function upgradeAgent(params) {
         else if (fs.existsSync(mshPath)) {
             try {
                 var config = parseMshFile(mshPath);
-                if (config.meshServiceName || config.companyName) {
+                // Check for serviceId (case-insensitive: ServiceID or serviceId)
+                var configServiceId = config.ServiceID || config.serviceId || null;
+                if (config.meshServiceName || config.companyName || configServiceId) {
                     currentServiceName = config.meshServiceName || currentServiceName;
                     currentCompanyName = config.companyName || null;
+                    if (configServiceId) {
+                        mshServiceId = configServiceId;
+                    }
                     configSource = 'msh-file';
                     console.log('   Found in .msh file:');
                     console.log('      Service: ' + currentServiceName);
                     if (currentCompanyName) {
                         console.log('      Company: ' + currentCompanyName);
+                    }
+                    if (mshServiceId) {
+                        console.log('      ServiceID: ' + mshServiceId);
                     }
                 }
                 // If no values in .msh, leave configSource='default' to try Priority 4
@@ -4030,8 +4129,8 @@ function upgradeAgent(params) {
         }
     }
 
-    // Build CURRENT service identifier (for stopping old services)
-    var currentServiceId = macOSHelpers.buildServiceId(currentServiceName, currentCompanyName, { explicitServiceId: newServiceId });
+    // Build CURRENT service identifier
+    var currentServiceId = macOSHelpers.buildServiceId(currentServiceName, currentCompanyName, { explicitServiceId: newServiceId || mshServiceId });
 
     console.log('Current Service ID: ' + currentServiceId);
     console.log('');
@@ -4155,7 +4254,7 @@ function upgradeAgent(params) {
         processCheck = verifyProcessesTerminated(binaryPath, 2);
 
         if (!processCheck.success) {
-            console.log('\nERROR: Could not terminate all meshagent processes');
+            console.log('\nERROR: Could not terminate all ' + agentPaths.getAgentBaseName() + ' processes');
             console.log('PIDs still running from ' + binaryPath + ': ' + processCheck.pids.join(', '));
             console.log('\nPlease manually kill these processes:');
             for (var i = 0; i < processCheck.pids.length; i++) {
@@ -4166,7 +4265,7 @@ function upgradeAgent(params) {
         }
     }
     logger.info('   All processes terminated [VERIFIED]');
-    logger.info('   Other meshagent installations unaffected');
+    logger.info('   Other ' + agentPaths.getAgentBaseName() + ' installations unaffected');
     logger.info('');
 
     logger.info('Safety verification complete - ready for binary replacement');

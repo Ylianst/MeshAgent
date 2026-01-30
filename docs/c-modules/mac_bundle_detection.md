@@ -45,7 +45,7 @@ Bundle detection enables MeshAgent to automatically adapt to two deployment mode
 - Used for installations from .pkg installer or manual .app deployment
 
 **Mode 2: Standalone Binary**
-- Agent runs as bare binary `/opt/tacticalmesh/meshagent`
+- Agent runs as bare binary `/opt/acmemesh/meshagent`
 - Working directory remains current directory
 - Traditional Unix daemon behavior
 - Used for scripted deployments and legacy installations
@@ -260,7 +260,7 @@ MeshAgent.app/              ← Bundle root (get_bundle_path returns this)
 | Deployment Mode | Execution Path | Initial Working Dir | After Adjustment |
 |-----------------|----------------|---------------------|------------------|
 | Bundle | `/Applications/MeshAgent.app/Contents/MacOS/meshagent` | `Contents/MacOS/` | `/Applications/` |
-| Standalone | `/opt/tacticalmesh/meshagent` | `/opt/tacticalmesh/` | `/opt/tacticalmesh/` (unchanged) |
+| Standalone | `/opt/acmemesh/meshagent` | `/opt/acmemesh/` | `/opt/acmemesh/` (unchanged) |
 
 This ensures config files live alongside the bundle/binary in both modes.
 
@@ -359,7 +359,7 @@ int safe_bundle_detection(void) {
 
 **Why Dual Deployment Modes?**
 - **User-Friendly Bundles:** .app bundles provide macOS-native experience (double-click, Finder integration, Install UI)
-- **Automation-Friendly Standalone:** Bare binaries work better for RMM tools (Tactical RMM) that copy binaries directly
+- **Automation-Friendly Standalone:** Bare binaries work better for RMM tools (ACME RMM) that copy binaries directly
 - **Backward Compatibility:** Legacy installations use standalone binaries
 
 **Why Adjust Working Directory?**
@@ -404,7 +404,7 @@ int safe_bundle_detection(void) {
 
 **Bundle Path Locations:**
 - `/Applications/MeshAgent.app` - User installations
-- `/Library/Application Support/TacticalAgent/MeshAgent.app` - RMM installations
+- `/Library/Application Support/ACMEAgent/MeshAgent.app` - RMM installations
 - Any custom path - Bundle detection works regardless of location
 
 **Symlink Handling:**

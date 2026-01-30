@@ -80,49 +80,21 @@ function sanitizeIdentifier(str) {
     return str.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
 }
 
-// Build composite service identifier from service name and company name
-// Handles all macOS service ID patterns consistently across the codebase
-// Format examples:
-//   - meshagent.ServiceName.CompanyName (custom service name + company)
-//   - meshagent.CompanyName (default service name + company)
-//   - meshagent.ServiceName (custom service name only)
-//   - meshagent (default service name only)
-//   - ServiceName (non-macOS platforms)
+// Build service identifier.
+// Default: executable base name (e.g., 'acmemesh').
+// If options.explicitServiceId is provided, returns it verbatim.
+// serviceName and companyName parameters are accepted for API compatibility but ignored.
 function buildServiceId(serviceName, companyName, options) {
     options = options || {};
-    var platform = options.platform || process.platform;
     var explicitServiceId = options.explicitServiceId || null;
 
-    // If an explicit serviceId is provided, use it directly
     if (explicitServiceId !== null) {
         return explicitServiceId;
     }
 
-    // Non-macOS platforms use simple sanitized identifier
-    if (platform !== 'darwin') {
-        return sanitizeIdentifier(serviceName);
-    }
-
-    // macOS composite identifier logic
-    var sanitizedServiceName = sanitizeIdentifier(serviceName);
-    var sanitizedCompanyName = sanitizeIdentifier(companyName);
-
-    if (sanitizedCompanyName) {
-        // Company name present
-        if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
-            // Custom service name + company: meshagent.ServiceName.CompanyName
-            return 'meshagent.' + sanitizedServiceName + '.' + sanitizedCompanyName;
-        } else {
-            // Default service name + company: meshagent.CompanyName
-            return 'meshagent.' + sanitizedCompanyName;
-        }
-    } else if (sanitizedServiceName && sanitizedServiceName !== 'meshagent') {
-        // Only custom service name (no company): meshagent.ServiceName
-        return 'meshagent.' + sanitizedServiceName;
-    } else {
-        // Default service name only: meshagent
-        return 'meshagent';
-    }
+    var agentPaths = require('agent-paths');
+    var baseName = options.baseName || agentPaths.getAgentBaseName();
+    return sanitizeIdentifier(baseName);
 }
 
 // ============================================================================

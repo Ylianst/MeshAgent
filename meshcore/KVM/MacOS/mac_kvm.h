@@ -28,10 +28,10 @@ typedef ILibTransport_DoneState(*ILibKVM_WriteHandler)(char *buffer, int bufferL
 
 void kvm_check_permission();
 
-int kvm_create_session(char *companyName, char *meshServiceName, char *serviceID, char *exePath);      // Create KVM session on-demand (directory + signal file + socket)
+int kvm_create_session(char *serviceID, char *exePath);      // Create KVM session on-demand (directory + signal file + socket)
 void kvm_cleanup_session(void);    // Cleanup KVM session (triggers -kvm1 exit)
 void kvm_pause(int pause);
-void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *companyName, char *meshServiceName, char *serviceID);
+void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *serviceID);
 void kvm_relay_reset(void *reserved);
 void kvm_cleanup();
 

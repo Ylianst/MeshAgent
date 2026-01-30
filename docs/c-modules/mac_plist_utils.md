@@ -40,7 +40,7 @@ Other platforms use different service configuration formats:
 ### Purpose
 
 Enables MeshAgent to discover and upgrade existing installations by parsing LaunchDaemon plist files to extract:
-- **Service Label:** Unique launchd service identifier (e.g., `meshagent.tacticalmesh`)
+- **Service Label:** Unique launchd service identifier (e.g., `meshagent.acmemesh`)
 - **Program Path:** Location of meshagent binary (bundle or standalone)
 - **Arguments:** Command-line flags like `--disableUpdate=1`
 - **Modification Time:** When plist was last modified (for conflict resolution)
@@ -54,7 +54,7 @@ Enables MeshAgent to discover and upgrade existing installations by parsing Laun
 
 **2. Multi-Installation Discovery:**
 - Identify all installed meshagent services on system
-- Distinguish between different service variants (tactical, standard, custom)
+- Distinguish between different service variants (acmeremote, standard, custom)
 - Prevent installation conflicts
 
 **3. Configuration Migration:**
@@ -135,7 +135,7 @@ typedef struct {
 
 **Fields:**
 - `plistPath` - Full path to plist file (e.g., `/Library/LaunchDaemons/meshagent.plist`)
-- `label` - LaunchDaemon Label value (e.g., `meshagent.tacticalmesh`)
+- `label` - LaunchDaemon Label value (e.g., `meshagent.acmemesh`)
 - `programPath` - Path to meshagent binary from first ProgramArguments entry
 - `hasDisableUpdate` - Boolean flag (1=true, 0=false) indicating `--disableUpdate=1` present
 - `modTime` - Unix timestamp of plist file modification (for choosing newest)
@@ -270,9 +270,9 @@ char* mesh_plist_get_label(const char* plistPath);
 
 **Example:**
 ```c
-char* label = mesh_plist_get_label("/Library/LaunchDaemons/meshagent.tactical.plist");
+char* label = mesh_plist_get_label("/Library/LaunchDaemons/meshagent.acmeremote.plist");
 if (label) {
-    printf("Service label: %s\n", label);  // "meshagent.tactical"
+    printf("Service label: %s\n", label);  // "meshagent.acmeremote"
     free(label);
 }
 ```
@@ -433,7 +433,7 @@ int mesh_parse_launchdaemon_plist(const char* plistPath, MeshPlistInfo* info);
 **Example:**
 ```c
 MeshPlistInfo info;
-if (mesh_parse_launchdaemon_plist("/Library/LaunchDaemons/meshagent.tactical.plist", &info)) {
+if (mesh_parse_launchdaemon_plist("/Library/LaunchDaemons/meshagent.acmeremote.plist", &info)) {
     printf("Label: %s\n", info.label);
     printf("Binary: %s\n", info.programPath);
     printf("Disable updates: %s\n", info.hasDisableUpdate ? "yes" : "no");
@@ -470,11 +470,11 @@ if (mesh_parse_launchdaemon_plist("/Library/LaunchDaemons/meshagent.tactical.pli
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>meshagent.tacticalmesh</string>
+    <string>meshagent.acmemesh</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/tacticalmesh/meshagent</string>
+        <string>/opt/acmemesh/meshagent</string>
         <string>-foreground</string>
         <string>--disableUpdate=1</string>
     </array>
@@ -503,7 +503,7 @@ if (mesh_parse_launchdaemon_plist("/Library/LaunchDaemons/meshagent.tactical.pli
 
 **Typical meshagent plist paths:**
 - `/Library/LaunchDaemons/meshagent.plist` - Default installation
-- `/Library/LaunchDaemons/meshagent.tactical.plist` - Tactical RMM
+- `/Library/LaunchDaemons/meshagent.acmeremote.plist` - ACME RMM
 - `/Library/LaunchDaemons/meshagent.company.service.plist` - Custom ServiceID
 
 ### Plist File Permissions
@@ -551,8 +551,8 @@ void find_all_meshagent_services(void) {
 int detect_existing_installation(char* outPath, size_t pathSize) {
     const char* possiblePaths[] = {
         "/Library/LaunchDaemons/meshagent.plist",
-        "/Library/LaunchDaemons/meshagent.tactical.plist",
-        "/Library/LaunchDaemons/meshagent.tacticalmesh.plist",
+        "/Library/LaunchDaemons/meshagent.acmeremote.plist",
+        "/Library/LaunchDaemons/meshagent.acmemesh.plist",
         NULL
     };
 

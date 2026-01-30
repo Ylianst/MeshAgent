@@ -11,6 +11,7 @@ to extract meshagent configuration information.
 #include <string.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <dirent.h>
 
 /**
  * Helper to load plist from file path
@@ -162,11 +163,56 @@ int mesh_plist_has_argument(const char* plistPath, const char* argument) {
 }
 
 /**
+ * Find the serviceId (plist Label) by scanning a directory for a plist whose
+ * ProgramArguments[0] matches the given binary path.
+ */
+char* mesh_plist_find_service_id(const char* directory, const char* binaryPath) {
+    DIR *dir;
+    struct dirent *entry;
+
+    if (directory == NULL || binaryPath == NULL || strlen(binaryPath) == 0) {
+        return NULL;
+    }
+
+    dir = opendir(directory);
+    if (dir == NULL) {
+        return NULL;
+    }
+
+    char *serviceId = NULL;
+    char plistPath[1024];
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strstr(entry->d_name, ".plist") == NULL) continue;
+
+        snprintf(plistPath, sizeof(plistPath), "%s/%s", directory, entry->d_name);
+
+        char *programPath = mesh_plist_get_program_path(plistPath);
+        if (programPath != NULL) {
+            if (strcmp(programPath, binaryPath) == 0) {
+                serviceId = mesh_plist_get_label(plistPath);
+                free(programPath);
+                break;
+            }
+            free(programPath);
+        }
+    }
+
+    closedir(dir);
+    return serviceId;
+}
+
+/**
  * Parse a LaunchDaemon plist file and extract meshagent information
  */
-int mesh_parse_launchdaemon_plist(const char* plistPath, MeshPlistInfo* info) {
+int mesh_parse_launchdaemon_plist(const char* plistPath, MeshPlistInfo* info, const char* agentName) {
     if (!plistPath || !info) {
         return 0;
+    }
+
+    // Default to "meshagent" if no agent name specified
+    if (!agentName || agentName[0] == '\0') {
+        agentName = "meshagent";
     }
 
     // Initialize info structure
@@ -202,8 +248,8 @@ int mesh_parse_launchdaemon_plist(const char* plistPath, MeshPlistInfo* info) {
                 continue;
             }
 
-            // Check if this is the meshagent path (first argument containing "meshagent")
-            if (!foundMeshagent && strstr(argStr, "meshagent") != NULL) {
+            // Check if this is the agent path (first argument containing the agent name)
+            if (!foundMeshagent && strstr(argStr, agentName) != NULL) {
                 strncpy(info->programPath, argStr, sizeof(info->programPath) - 1);
                 foundMeshagent = 1;
             }

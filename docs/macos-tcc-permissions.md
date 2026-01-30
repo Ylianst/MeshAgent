@@ -584,19 +584,19 @@ gcc -framework Cocoa -framework ApplicationServices -framework CoreGraphics \
 **Read current preference**:
 ```bash
 ./build/tools/code-utils/macos/meshagent_code-utils -db-get \
-    /opt/tacticalmesh/meshagent.db disableTccCheck
+    /opt/acmemesh/meshagent.db disableTccCheck
 ```
 
 **Manually disable UI**:
 ```bash
 ./build/tools/code-utils/macos/meshagent_code-utils -db-put \
-    /opt/tacticalmesh/meshagent.db disableTccCheck "1"
+    /opt/acmemesh/meshagent.db disableTccCheck "1"
 ```
 
 **Clear preference**:
 ```bash
 ./build/tools/code-utils/macos/meshagent_code-utils -db-delete \
-    /opt/tacticalmesh/meshagent.db disableTccCheck
+    /opt/acmemesh/meshagent.db disableTccCheck
 ```
 
 ## Known Issues and Limitations

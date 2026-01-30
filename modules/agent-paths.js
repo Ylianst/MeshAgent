@@ -15,7 +15,7 @@ limitations under the License.
 
 //
 // Helper module to derive configuration filenames from executable name.
-// This allows binaries with different names (e.g., 'lithium-remote' vs 'meshagent')
+// This allows binaries with different names (e.g., 'acmemesh' vs 'meshagent')
 // to use matching configuration files (.msh, .db).
 //
 
@@ -23,8 +23,8 @@ var cachedBaseName = null;
 
 // Get the base name of the agent executable (without path or extension)
 // Examples:
-//   /usr/local/bin/lithium-remote -> "lithium-remote"
-//   /path/to/LithiumRemote.app/Contents/MacOS/lithium-remote -> "lithium-remote"
+//   /usr/local/bin/acmemesh -> "acmemesh"
+//   /path/to/AcmeMesh.app/Contents/MacOS/acmemesh -> "acmemesh"
 //   C:\Program Files\meshagent.exe -> "meshagent"
 function getAgentBaseName() {
     if (cachedBaseName !== null) {
@@ -53,7 +53,7 @@ function getAgentBaseName() {
 
 // Get the .db filename matching the agent executable
 // Examples:
-//   lithium-remote -> "lithium-remote.db"
+//   acmemesh -> "acmemesh.db"
 //   meshagent -> "meshagent.db"
 function getAgentDbName() {
     return getAgentBaseName() + '.db';
@@ -61,7 +61,7 @@ function getAgentDbName() {
 
 // Get the .msh filename matching the agent executable
 // Examples:
-//   lithium-remote -> "lithium-remote.msh"
+//   acmemesh -> "acmemesh.msh"
 //   meshagent -> "meshagent.msh"
 function getAgentMshName() {
     return getAgentBaseName() + '.msh';

@@ -2,16 +2,17 @@
 
 ## Table of Contents
 1. [Introduction](#introduction)
-2. [ServiceID Composition](#serviceid-composition)
-3. [Creation Algorithm](#creation-algorithm)
+2. [ServiceID Values](#serviceid-values)
+3. [How ServiceID is Determined](#how-serviceid-is-determined)
 4. [Input Sanitization](#input-sanitization)
 5. [Storage Mechanisms](#storage-mechanisms)
-6. [Resolution Priority](#resolution-priority)
-7. [Usage in File Paths](#usage-in-file-paths)
-8. [Validation Rules](#validation-rules)
-9. [Creation Flow Visualizations](#creation-flow-visualizations)
-10. [Real-World Examples](#real-world-examples)
-11. [Implementation Reference](#implementation-reference)
+6. [Usage in File Paths](#usage-in-file-paths)
+7. [KVM Path Resolution](#kvm-path-resolution)
+8. [Runtime Loading](#runtime-loading)
+9. [Installation Flow](#installation-flow)
+10. [Command-Line Parameters](#command-line-parameters)
+11. [Real-World Examples](#real-world-examples)
+12. [Implementation Reference](#implementation-reference)
 
 ---
 
@@ -20,141 +21,108 @@
 The **serviceID** is a unique identifier that distinguishes different MeshAgent installations on the same macOS system. It enables multiple independent agents to coexist by providing namespace separation for:
 
 - LaunchDaemon/LaunchAgent plist files
-- Installation directories
-- Configuration files
 - Runtime sockets and directories
+- Service lookup via `launchctl`
 - Logging paths
 
 The serviceID system supports:
-- **Multi-tenancy**: Multiple companies can run separate agents
-- **Service variants**: Different service configurations (tactical, standard, custom)
-- **Clean upgrades**: Proper identification during version transitions
+- **Multi-tenancy**: Multiple agents with different identities on one machine
+- **Clean upgrades**: Correct identification of existing services during version transitions
 - **Name collision prevention**: Unique identifiers in system directories
 
----
-
-## ServiceID Composition
-
-### macOS Composite Format
-
-On macOS, the serviceID follows a **reverse DNS-style composite pattern**:
-
-```
-meshagent[.serviceName][.companyName]
-```
-
-**Components:**
-- **Base**: `meshagent` (fixed prefix, always present)
-- **serviceName**: Optional custom service identifier
-- **companyName**: Optional company/organization identifier
-
-### Component Combinations
-
-| serviceName | companyName | Resulting ServiceID | Use Case |
-|-------------|-------------|---------------------|----------|
-| (default) | (none) | `meshagent` | Standard installation |
-| (default) | `acme-corp` | `meshagent.acme-corp` | Company-specific, default service |
-| `tactical` | (none) | `meshagent.tactical` | Custom service, no company branding |
-| `tactical` | `acme-corp` | `meshagent.tactical.acme-corp` | Company-specific custom service |
-
-### Non-macOS Platforms
-
-On Windows and Linux, serviceID is simplified:
-
-```
-serviceName (sanitized)
-```
-
-Example: `meshagent` or `customservice`
+Note: The serviceID controls **plist naming and runtime paths**. The **installation directory structure** is determined separately by `serviceName` and `companyName` (see [Installation Flow](#installation-flow)).
 
 ---
 
-## Creation Algorithm
+## ServiceID Values
 
-### Decision Tree
+A serviceID is a **flat string** — not a dotted composite or reverse-DNS format. It is the sanitized executable basename by default, or an explicit override.
+
+**Examples of real serviceID values:**
+
+| Scenario | ServiceID |
+|----------|-----------|
+| Default (binary named `meshagent`) | `meshagent` |
+| Binary renamed to `acmemesh` | `acmemesh` |
+| Explicit `--serviceId=com.acme.remote` | `com.acme.remote` |
+| Explicit `--setServiceID=acmemesh` | `acmemesh` |
+| `.msh` contains `ServiceID=acmemesh` | `acmemesh` |
+
+The `buildServiceId()` function accepts `serviceName` and `companyName` parameters for API compatibility, but **ignores them both**. It returns the sanitized executable basename (or an explicit override if provided).
+
+---
+
+## How ServiceID is Determined
+
+### JavaScript-Level Priority (agent-installer.js checkParameters)
+
+During installation, `checkParameters()` resolves the serviceID in this order:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ buildServiceId(serviceName, companyName, options)           │
-└──────────────────────┬──────────────────────────────────────┘
-                       ↓
-        ┌──────────────────────────────┐
-        │ explicitServiceId provided?  │
-        └───────────┬──────────────────┘
-                    │
-         ┌──────────┴──────────┐
-         │ YES                 │ NO
-         ↓                     ↓
-    ┌─────────┐          ┌──────────────┐
-    │ Return  │          │ Platform =   │
-    │ as-is   │          │ darwin?      │
-    └─────────┘          └──────┬───────┘
-                                │
-                     ┌──────────┴──────────┐
-                     │ YES (macOS)         │ NO (Win/Linux)
-                     ↓                     ↓
-         ┌───────────────────────┐    ┌────────────────┐
-         │ Sanitize inputs:      │    │ Return         │
-         │ - serviceName         │    │ sanitized      │
-         │ - companyName         │    │ serviceName    │
-         └──────────┬────────────┘    └────────────────┘
-                    ↓
-         ┌──────────────────────┐
-         │ companyName present? │
-         └──────────┬───────────┘
-                    │
-         ┌──────────┴──────────┐
-         │ YES                 │ NO
-         ↓                     ↓
-    ┌────────────────┐    ┌─────────────────┐
-    │ serviceName =  │    │ serviceName =   │
-    │ 'meshagent'?   │    │ 'meshagent'?    │
-    └────┬───────────┘    └────┬────────────┘
-         │                     │
-    ┌────┴────┐           ┌────┴────┐
-    │YES   NO │           │YES   NO │
-    ↓         ↓           ↓         ↓
-┌───────┐ ┌───────────┐ ┌─────┐ ┌──────────┐
-│meshag-│ │meshagent. │ │mesh-│ │meshagent.│
-│ent.   │ │serviceName│ │agent│ │serviceName
-│company│ │.company   │ └─────┘ └──────────┘
-└───────┘ └───────────┘
+Priority 1: --setServiceID command-line flag
+             (mapped to --serviceId before .msh injection)
+
+Priority 2: --serviceId command-line flag (direct)
+
+Priority 3: ServiceID field from embedded .msh file
+
+Priority 4: buildServiceId() → sanitized executable basename
 ```
 
-### Pseudocode
+**Code Location:** `modules/agent-installer.js` lines 263-333
 
 ```javascript
-function buildServiceId(serviceName, companyName, options) {
-    // Priority 1: Explicit override
-    if (options.explicitServiceId) {
-        return options.explicitServiceId;
-    }
+// --setServiceID is the user-facing flag for fresh install/finstall.
+// Map to --serviceId so downstream code picks it up (before .msh injection).
+var setServiceID = parms.getParameter('setServiceID', null);
+if (setServiceID && parms.getParameter('serviceId', null) == null) {
+    parms.push('--serviceId="' + setServiceID + '"');
+}
 
-    // Priority 2: Platform check
-    if (platform !== 'darwin') {
-        return sanitize(serviceName);
-    }
-
-    // Priority 3: macOS composite logic
-    serviceName = sanitize(serviceName);
-    companyName = sanitize(companyName);
-
-    if (companyName) {
-        if (serviceName && serviceName !== 'meshagent') {
-            return 'meshagent.' + serviceName + '.' + companyName;
-        }
-        return 'meshagent.' + companyName;
-    }
-
-    if (serviceName && serviceName !== 'meshagent') {
-        return 'meshagent.' + serviceName;
-    }
-
-    return 'meshagent';
+// Inject ServiceID from embedded .msh if not provided on command line
+var mshServiceId = msh.ServiceID || msh.serviceId;
+if (parms.getParameter('serviceId', null) == null && mshServiceId != null) {
+    parms.push('--serviceId="' + mshServiceId + '"');
 }
 ```
 
-**Code Location:** `modules/macOSHelpers.js` lines 91-126
+### C-Level Priority (agentcore.c runtime)
+
+At runtime, `agentcore.c` loads the serviceID:
+
+```
+Priority 1: --serviceId= command-line parameter (overrides database)
+
+Priority 2: ServiceID key from .db database file
+
+Priority 3: NULL (no serviceID set — meshServiceName used for service lookup)
+```
+
+**Code Location:** `meshcore/agentcore.c` lines 5616-5641
+
+### buildServiceId() Implementation
+
+```javascript
+// modules/macOSHelpers.js lines 87-98
+function buildServiceId(serviceName, companyName, options) {
+    options = options || {};
+    var explicitServiceId = options.explicitServiceId || null;
+
+    if (explicitServiceId !== null) {
+        return explicitServiceId;
+    }
+
+    var agentPaths = require('agent-paths');
+    var baseName = options.baseName || agentPaths.getAgentBaseName();
+    return sanitizeIdentifier(baseName);
+}
+```
+
+Key points:
+- `serviceName` and `companyName` are **accepted but ignored** (vestigial parameters)
+- No platform branching — identical behavior on all platforms
+- Returns explicit override if provided via `options.explicitServiceId`
+- Otherwise returns the sanitized executable basename
 
 ---
 
@@ -162,12 +130,12 @@ function buildServiceId(serviceName, companyName, options) {
 
 ### Sanitization Rules
 
-The `sanitizeIdentifier()` function transforms user input into valid identifiers:
+The `sanitizeIdentifier()` function transforms input into valid identifiers:
 
 ```javascript
+// modules/macOSHelpers.js lines 77-81
 function sanitizeIdentifier(str) {
     if (!str) return null;
-
     return str
         .replace(/\s+/g, '-')           // Spaces → hyphens
         .replace(/[^a-zA-Z0-9_-]/g, '') // Remove special chars
@@ -175,18 +143,15 @@ function sanitizeIdentifier(str) {
 }
 ```
 
-**Code Location:** `modules/macOSHelpers.js` lines 77-81
-
 ### Transformation Examples
 
 | Input | After Space→Hyphen | After Special Char Removal | After Lowercase | Final Result |
 |-------|-------------------|---------------------------|----------------|--------------|
-| `ACME Corp` | `ACME-Corp` | `ACME-Corp` | `acme-corp` | `acme-corp` |
-| `Tactical RMM` | `Tactical-RMM` | `Tactical-RMM` | `tactical-rmm` | `tactical-rmm` |
-| `My Service!@#` | `My-Service!@#` | `My-Service` | `my-service` | `my-service` |
-| `Company_Name` | `Company_Name` | `Company_Name` | `company_name` | `company_name` |
+| `ACME, Inc.` | `ACME,-Inc.` | `ACME-Inc` | `acme-inc` | `acme-inc` |
+| `ACME Mesh` | `ACME-Mesh` | `ACME-Mesh` | `acme-mesh` | `acme-mesh` |
+| `ACMEmesh` | `ACMEmesh` | `ACMEmesh` | `acmemesh` | `acmemesh` |
+| `ACME_Remote` | `ACME_Remote` | `ACME_Remote` | `acme_remote` | `acme_remote` |
 | `@#$%^&*()` | `@#$%^&*()` | (empty) | (empty) | `null` |
-| ` ` (spaces only) | `-` | `-` | `-` | `-` |
 
 ### Character Allowlist
 
@@ -198,45 +163,42 @@ function sanitizeIdentifier(str) {
 - Underscore: `_`
 
 **Converted Characters:**
-- Spaces ` ` → Hyphens `-`
+- Spaces → Hyphens
 
 **Removed Characters:**
-- All special characters: `!@#$%^&*()+={}[]|\\:;"'<>,.?/~`
+- All other special characters: `!@#$%^&*()+={}[]|\\:;"'<>,.?/~`
 
 ---
 
 ## Storage Mechanisms
 
-### 5 Storage Locations
+### Where ServiceID is Stored
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    ServiceID Storage                        │
-└─────────────────────────────────────────────────────────────┘
-
 1. Command-Line Flags (Transient)
-   └─ --meshServiceName=Tactical --companyName="ACME Corp"
+   └─ --serviceId=acmemesh  or  --setServiceID=acmemesh
 
-2. LaunchDaemon Plist (Persistent, Authoritative)
+2. LaunchDaemon Plist (Persistent)
    └─ /Library/LaunchDaemons/{serviceId}.plist
       ├─ Label: {serviceId}
-      └─ ProgramArguments: [binary, --meshServiceName=..., --companyName=...]
+      └─ ProgramArguments: [binary, --serviceId={serviceId}, ...]
 
 3. LaunchAgent Plist (Persistent)
    └─ ~/Library/LaunchAgents/{serviceId}-agent.plist
       ├─ Label: {serviceId}-agent
-      └─ ProgramArguments: [binary, -kvm1]
+      └─ ProgramArguments: [binary, -kvm1, --serviceId={serviceId}]
 
 4. .msh Configuration File (Persistent)
    └─ {installPath}/meshagent.msh
-      ├─ MeshServiceName=Tactical
-      ├─ CompanyName=ACME Corp
-      └─ ServiceID=meshagent.tactical.acme-corp
+      ├─ ServiceID=acmemesh
+      ├─ MeshServiceName=ACME Mesh
+      └─ CompanyName=ACME, Inc.
 
 5. .db Database File (Persistent)
    └─ {installPath}/meshagent.db
-      ├─ MeshServiceName=Tactical
-      └─ CompanyName=ACME Corp
+      ├─ ServiceID (key-value)
+      ├─ meshServiceName (key-value)
+      └─ companyName (key-value)
 ```
 
 ### Storage Details
@@ -245,215 +207,85 @@ function sanitizeIdentifier(str) {
 
 **Path:** `/Library/LaunchDaemons/{serviceId}.plist`
 
-**Key Fields:**
+**Example (default agent):**
 ```xml
 <key>Label</key>
-<string>meshagent.tactical.acme-corp</string>
+<string>meshagent</string>
 
 <key>ProgramArguments</key>
 <array>
-    <string>/usr/local/mesh_services/acme-corp/tactical/meshagent</string>
-    <string>--meshServiceName=Tactical</string>
-    <string>--companyName=ACME Corp</string>
+    <string>/usr/local/mesh_services/meshagent/meshagent</string>
+    <string>--serviceId=meshagent</string>
 </array>
 ```
 
-**Why Authoritative:** This plist reflects the **actual running service** configuration. If the service is loaded, this is the ground truth.
+**Example (custom serviceID):**
+```xml
+<key>Label</key>
+<string>acmemesh</string>
 
-#### 2. .msh Configuration File
+<key>ProgramArguments</key>
+<array>
+    <string>/opt/acmemesh/meshagent</string>
+    <string>--meshServiceName=ACME Mesh</string>
+    <string>--companyName=ACME, Inc.</string>
+    <string>--serviceId=acmemesh</string>
+</array>
+```
+
+#### 2. LaunchAgent Plist
+
+**Path:** `~/Library/LaunchAgents/{serviceId}-agent.plist`
+
+The LaunchAgent is used for the `-kvm1` (KVM child) process. It receives the serviceID via `--serviceId=` so it can connect to the correct daemon socket.
+
+```xml
+<key>Label</key>
+<string>acmemesh-agent</string>
+
+<key>ProgramArguments</key>
+<array>
+    <string>/opt/acmemesh/meshagent</string>
+    <string>-kvm1</string>
+    <string>--serviceId=acmemesh</string>
+</array>
+
+<key>QueueDirectories</key>
+<array>
+    <string>/var/run/acmemesh</string>
+</array>
+```
+
+#### 3. .msh Configuration File
 
 **Path:** `{installPath}/meshagent.msh`
 
-**Format:** Key=Value pairs (one per line)
-
 **Example:**
 ```
-MeshName=MyMesh
+MeshName=ACMEnet
 MeshType=2
 MeshID=0x1234567890ABCDEF
 ServerID=server1
-MeshServer=wss://meshcentral.example.com:443/agent.ashx
-MeshServiceName=Tactical
-CompanyName=ACME Corp
-ServiceID=meshagent.tactical.acme-corp
-disableUpdate=0
-disableTccCheck=0
+MeshServer=wss://mesh.acme.example.com:443/agent.ashx
+MeshServiceName=ACME Mesh
+CompanyName=ACME, Inc.
+ServiceID=acmemesh
 ```
 
-**Created by:** Installer during fresh installation or upgrade
+The `ServiceID` field in the .msh is used during `checkParameters()` as a fallback when no `--serviceId` is provided on the command line.
 
-**Code Location:** `modules/agent-installer.js` lines 3214-3224
-
-#### 3. .db Database File
+#### 4. .db Database File
 
 **Path:** `{installPath}/meshagent.db`
 
-**Type:** SimpleDataStore (SQLite-like key-value store)
+**Type:** SimpleDataStore (key-value store)
 
 **Relevant Keys:**
-- `MeshServiceName` (String)
-- `CompanyName` (String)
-- `SelfNodeCert` (Buffer)
-- `NodeID` (Buffer)
+- `ServiceID` — the serviceID string
+- `meshServiceName` — service display name
+- `companyName` — company name
 
-**Access Pattern:**
-```javascript
-var db = require('SimpleDataStore').Create(dbPath, { readOnly: true });
-var serviceName = db.Get('MeshServiceName');
-var companyName = db.Get('CompanyName');
-```
-
-**Code Location:** `modules/agent-installer.js` lines 3154-3168
-
-#### 4. Installation Directory Structure
-
-**Pattern:** `/usr/local/mesh_services/{companyName?}/{serviceName}/`
-
-**Encoding:** Directory hierarchy encodes serviceName and companyName
-
-**Examples:**
-```
-/usr/local/mesh_services/meshagent/
-  → serviceName='meshagent', companyName=null
-
-/usr/local/mesh_services/tactical/
-  → serviceName='tactical', companyName=null
-
-/usr/local/mesh_services/acme-corp/tactical/
-  → serviceName='tactical', companyName='acme-corp'
-```
-
----
-
-## Resolution Priority
-
-### 5-Tier Priority System
-
-When the agent needs to determine its serviceID at runtime, it follows this priority order:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              ServiceID Resolution Priority                  │
-│                (Highest → Lowest)                           │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│ PRIORITY 1: User-Provided Command-Line Flags               │
-│ ──────────────────────────────────────────────────────────  │
-│ Source: --meshServiceName=, --companyName=, --serviceId=    │
-│ Reliability: HIGHEST (explicit user intent)                 │
-│ Use Case: Fresh install, upgrade, manual override           │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ (if not provided)
-┌─────────────────────────────────────────────────────────────┐
-│ PRIORITY 2: LaunchDaemon Plist ProgramArguments            │
-│ ──────────────────────────────────────────────────────────  │
-│ Source: /Library/LaunchDaemons/{serviceId}.plist            │
-│ Extracts: --meshServiceName=, --companyName= from args      │
-│ Reliability: HIGHEST (reflects running service)             │
-│ Use Case: Runtime resolution, upgrade detection             │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ (if not found)
-┌─────────────────────────────────────────────────────────────┐
-│ PRIORITY 3: .msh Configuration File                         │
-│ ──────────────────────────────────────────────────────────  │
-│ Source: {installPath}/meshagent.msh                         │
-│ Extracts: MeshServiceName=, CompanyName=                    │
-│ Reliability: HIGH (installer-managed)                       │
-│ Use Case: First-run, configuration persistence              │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ (if not found)
-┌─────────────────────────────────────────────────────────────┐
-│ PRIORITY 4: .db Database File                               │
-│ ──────────────────────────────────────────────────────────  │
-│ Source: {installPath}/meshagent.db                          │
-│ Extracts: MeshServiceName, CompanyName keys                 │
-│ Reliability: MEDIUM (may be stale)                          │
-│ Use Case: Legacy installations, fallback                    │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ (if not found)
-┌─────────────────────────────────────────────────────────────┐
-│ PRIORITY 5: Installation Path or Plist Label               │
-│ ──────────────────────────────────────────────────────────  │
-│ Source: Path pattern parsing, plist Label field             │
-│ Parses: /usr/local/mesh_services/{company}/{service}/       │
-│ Reliability: LOWEST (ambiguous, assumes conventions)        │
-│ Use Case: Last resort, path-based inference                 │
-└─────────────────────────────────────────────────────────────┘
-                            ↓ (if all fail)
-┌─────────────────────────────────────────────────────────────┐
-│ DEFAULT FALLBACK                                            │
-│ ──────────────────────────────────────────────────────────  │
-│ serviceName = 'meshagent'                                   │
-│ companyName = null                                          │
-│ serviceID = 'meshagent'                                     │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Resolution Algorithm
-
-**Code Location:** `modules/agent-installer.js` lines 1104-1595
-
-```javascript
-function resolveServiceId() {
-    var serviceName, companyName, source;
-
-    // Priority 1: Command-line flags
-    if (process.argv.includes('--meshServiceName') ||
-        process.argv.includes('--companyName')) {
-        serviceName = parseFlag('--meshServiceName') || 'meshagent';
-        companyName = parseFlag('--companyName') || null;
-        source = 'user-flags';
-        return { serviceName, companyName, source };
-    }
-
-    // Priority 2: Plist ProgramArguments
-    var plistConfig = getServiceConfigFromPlist(binaryPath);
-    if (plistConfig) {
-        serviceName = plistConfig.serviceName;
-        companyName = plistConfig.companyName;
-        source = 'plist-args';
-        return { serviceName, companyName, source };
-    }
-
-    // Priority 3: .msh file
-    var mshPath = installPath + 'meshagent.msh';
-    if (fs.existsSync(mshPath)) {
-        var config = parseMshFile(mshPath);
-        if (config.meshServiceName || config.companyName) {
-            serviceName = config.meshServiceName || 'meshagent';
-            companyName = config.companyName || null;
-            source = 'msh-file';
-            return { serviceName, companyName, source };
-        }
-    }
-
-    // Priority 4: .db file
-    var dbPath = installPath + 'meshagent.db';
-    if (fs.existsSync(dbPath)) {
-        var db = require('SimpleDataStore').Create(dbPath, { readOnly: true });
-        serviceName = db.Get('MeshServiceName');
-        companyName = db.Get('CompanyName');
-        if (serviceName || companyName) {
-            serviceName = serviceName || 'meshagent';
-            source = 'db-file';
-            return { serviceName, companyName, source };
-        }
-    }
-
-    // Priority 5: Path parsing
-    var pathConfig = parseServiceIdFromInstallPath(installPath);
-    if (pathConfig) {
-        serviceName = pathConfig.serviceName;
-        companyName = pathConfig.companyName;
-        source = 'install-path';
-        return { serviceName, companyName, source };
-    }
-
-    // Default fallback
-    return { serviceName: 'meshagent', companyName: null, source: 'default' };
-}
-```
+Loaded by `agentcore.c` at startup (lines 5592-5624). The `--serviceId` command-line flag overrides the database value (lines 5626-5641).
 
 ---
 
@@ -461,24 +293,30 @@ function resolveServiceId() {
 
 ### Path Template Matrix
 
-| Component | Template | Example (default) | Example (custom) |
-|-----------|----------|-------------------|------------------|
-| **LaunchDaemon plist** | `/Library/LaunchDaemons/{serviceId}.plist` | `meshagent.plist` | `meshagent.tactical.acme-corp.plist` |
-| **LaunchAgent plist** | `~/Library/LaunchAgents/{serviceId}-agent.plist` | `meshagent-agent.plist` | `meshagent.tactical.acme-corp-agent.plist` |
-| **Install directory** | `/usr/local/mesh_services/{company?}/{service}/` | `/usr/local/mesh_services/meshagent/` | `/usr/local/mesh_services/acme-corp/tactical/` |
-| **Binary** | `{installPath}meshagent` | Same | Same |
-| **Config (.msh)** | `{installPath}meshagent.msh` | Same | Same |
-| **Database (.db)** | `{installPath}meshagent.db` | Same | Same |
-| **Socket** | `/tmp/{serviceId}.sock` | `/tmp/meshagent.sock` | `/tmp/meshagent.tactical.acme-corp.sock` |
-| **Queue directory** | `/var/run/{serviceId}` | `/var/run/meshagent` | `/var/run/meshagent.tactical.acme-corp` |
-| **Daemon log** | `/tmp/{serviceId}-daemon.log` | `/tmp/meshagent-daemon.log` | `/tmp/meshagent.tactical.acme-corp-daemon.log` |
-| **Agent log** | `/tmp/{serviceId}-agent.log` | `/tmp/meshagent-agent.log` | `/tmp/meshagent.tactical.acme-corp-agent.log` |
+| Component | Template | Default Example | Custom Example (`--serviceId=acmemesh`) |
+|-----------|----------|-----------------|------------------------------------------|
+| **LaunchDaemon plist** | `/Library/LaunchDaemons/{serviceId}.plist` | `meshagent.plist` | `acmemesh.plist` |
+| **LaunchAgent plist** | `~/Library/LaunchAgents/{serviceId}-agent.plist` | `meshagent-agent.plist` | `acmemesh-agent.plist` |
+| **Socket** | `/tmp/{serviceId}.sock` | `/tmp/meshagent.sock` | `/tmp/acmemesh.sock` |
+| **Queue directory** | `/var/run/{serviceId}/` | `/var/run/meshagent/` | `/var/run/acmemesh/` |
+| **Session signal** | `/var/run/{serviceId}/session-active` | `/var/run/meshagent/session-active` | `/var/run/acmemesh/session-active` |
+
+### Install Directory (Separate from ServiceID)
+
+The install directory is constructed from `serviceName` and `companyName`, **not** from the serviceID. It can also be overridden explicitly with `--installPath`:
+
+| Scenario | Install Path |
+|----------|-------------|
+| Default | `/usr/local/mesh_services/meshagent/` |
+| Custom service only (`ACME Mesh`) | `/usr/local/mesh_services/acme-mesh/` |
+| Company + service (`ACME, Inc.` + `ACME Mesh`) | `/usr/local/mesh_services/acme-inc/acme-mesh/` |
+| Explicit `--installPath=/opt/acmemesh` | `/opt/acmemesh/` |
+
+**Code Location:** `modules/agent-installer.js` lines 1906-1930
 
 ### Launchd Service Paths
 
-**Domain:** `system` (daemon) or `gui/{uid}` (agent)
-
-**Full Service Path Format:**
+**Format:**
 ```
 {domain}/{serviceId}
 {domain}/{serviceId}-agent
@@ -486,554 +324,355 @@ function resolveServiceId() {
 
 **Examples:**
 ```
-system/meshagent                              # Default daemon
-system/meshagent.tactical.acme-corp          # Custom daemon
+system/meshagent                    # Default daemon
+system/acmemesh                     # Custom daemon
 
-gui/502/meshagent-agent                       # Default agent (uid 502)
-gui/502/meshagent.tactical.acme-corp-agent   # Custom agent (uid 502)
+gui/502/meshagent-agent             # Default agent (uid 502)
+gui/502/acmemesh-agent              # Custom agent (uid 502)
 ```
-
-**Code Location:** `modules/macOSHelpers.js` lines 148-160
 
 ---
 
-## Validation Rules
+## KVM Path Resolution
 
-### Character Restrictions
+The C-level KVM code in `mac_kvm.c` resolves the serviceID independently to build socket and directory paths.
 
-**Allowlist:**
-- Alphanumeric: `a-z A-Z 0-9`
-- Hyphens: `-`
-- Underscores: `_`
+### `kvm_build_dynamic_paths()` (mac_kvm.c lines 458-519)
 
-**Transformations:**
-- Spaces ` ` → `-`
-- Mixed case → `lowercase`
+```c
+static void kvm_build_dynamic_paths(char *serviceID, char *exePath)
+{
+    // Priority 1: Explicit serviceID (from --serviceId or database)
+    if (serviceID != NULL && strlen(serviceID) > 0)
+    {
+        strncpy(serviceId, serviceID, sizeof(serviceId) - 1);
+    }
+    // Priority 2: Discover from LaunchDaemon plist Label
+    else if (exePath != NULL && strlen(exePath) > 0)
+    {
+        char *plistServiceId = mesh_plist_find_service_id(
+            "/Library/LaunchDaemons", exePath);
+        if (plistServiceId != NULL) {
+            strncpy(serviceId, plistServiceId, sizeof(serviceId) - 1);
+            free(plistServiceId);
+        }
+    }
+    // Priority 3: Fallback
+    // serviceId defaults to "unknown-agent"
 
-**Removed:**
-- All other special characters
+    // Build paths
+    snprintf(KVM_Listener_Path, PATH_MAX, "/tmp/%s.sock", serviceId);
+    snprintf(KVM_Queue_Directory, PATH_MAX, "/var/run/%s", serviceId);
+    snprintf(KVM_Session_Signal_File, PATH_MAX, "/var/run/%s/session-active", serviceId);
+}
+```
 
-### Length Limits
+### Plist Discovery (`mesh_plist_find_service_id`)
 
-**Practical Limits:**
-- Minimum: 1 character (after sanitization)
-- Maximum (recommended): 63 characters per component (DNS label limit)
-- Maximum (filesystem): 255 characters total (macOS filename limit)
+**Code Location:** `meshcore/MacOS/mac_plist_utils.c` lines 169-203
 
-**Recommended Total Length:** ≤ 100 characters for plist filenames
+This function scans `/Library/LaunchDaemons/` for a plist whose `ProgramArguments[0]` matches the current binary path. If found, it returns the plist's `Label` field as the serviceID.
 
-### Invalid Inputs
+This is the fallback discovery mechanism used when no explicit `--serviceId` is passed to the C layer.
 
-| Input | Sanitized Result | Valid? |
-|-------|------------------|--------|
-| `""` (empty string) | `null` | ❌ No |
-| `"   "` (spaces only) | `null` or `-` | ❌ No |
-| `"@#$%"` (special chars only) | `""` → `null` | ❌ No |
-| `"Service_Name"` | `service_name` | ✅ Yes |
-| `"Service Name"` | `service-name` | ✅ Yes |
-| `"Valid-123"` | `valid-123` | ✅ Yes |
-| `"ACME Corp!"` | `acme-corp` | ✅ Yes |
+### KVM Session Flow
+
+1. **Daemon** (`kvm_create_session`): Calls `kvm_build_dynamic_paths(serviceID, exePath)` to determine the socket path, then creates a Unix domain socket at `/tmp/{serviceId}.sock` and a signal file at `/var/run/{serviceId}/session-active`.
+
+2. **Agent** (`kvm_server_mainloop`): The `-kvm1` child process receives `--serviceId=` on its command line, calls `kvm_build_dynamic_paths()`, and connects to the daemon's socket at `/tmp/{serviceId}.sock`.
 
 ---
 
-## Creation Flow Visualizations
+## Runtime Loading
 
-### Flow 1: Fresh Installation with Custom Service and Company
+### agentcore.c Database Loading (lines 5592-5641)
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│ USER ACTION: Install with custom parameters                  │
-│ $ ./meshagent -install                                        │
-│     --installPath=/opt/services                               │
-│     --meshServiceName="Tactical RMM"                          │
-│     --companyName="ACME Corporation"                          │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 1: Parse and Normalize Parameters                       │
-│ ────────────────────────────────────────────────────────────  │
-│ serviceName = "Tactical RMM"                                  │
-│ companyName = "ACME Corporation"                              │
-│ installPath = "/opt/services"                                 │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 2: Sanitize Inputs                                      │
-│ ────────────────────────────────────────────────────────────  │
-│ "Tactical RMM" → "tactical-rmm"                               │
-│   • Spaces → hyphens                                          │
-│   • Convert to lowercase                                      │
-│                                                               │
-│ "ACME Corporation" → "acme-corporation"                       │
-│   • Spaces → hyphens                                          │
-│   • Convert to lowercase                                      │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 3: Build ServiceID                                      │
-│ ────────────────────────────────────────────────────────────  │
-│ Call: buildServiceId('tactical-rmm', 'acme-corporation')      │
-│                                                               │
-│ Logic:                                                        │
-│   • companyName exists? YES                                   │
-│   • serviceName != 'meshagent'? YES                           │
-│   • Result = 'meshagent.' + 'tactical-rmm' + '.' +            │
-│              'acme-corporation'                               │
-│                                                               │
-│ ServiceID: "meshagent.tactical-rmm.acme-corporation"          │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 4: Create Directory Structure                           │
-│ ────────────────────────────────────────────────────────────  │
-│ Install path pattern:                                         │
-│   /usr/local/mesh_services/{companyName}/{serviceName}/       │
-│                                                               │
-│ Creates:                                                      │
-│   /opt/services/acme-corporation/tactical-rmm/                │
-│                                                               │
-│ Copies binary to:                                             │
-│   /opt/services/acme-corporation/tactical-rmm/meshagent       │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 5: Create .msh Configuration File                       │
-│ ────────────────────────────────────────────────────────────  │
-│ Path: /opt/services/acme-corporation/tactical-rmm/           │
-│       meshagent.msh                                           │
-│                                                               │
-│ Contents:                                                     │
-│   MeshName=MyMesh                                             │
-│   MeshServiceName=Tactical RMM                                │
-│   CompanyName=ACME Corporation                                │
-│   ServiceID=meshagent.tactical-rmm.acme-corporation           │
-│   MeshServer=wss://example.com/agent.ashx                     │
-│   ...                                                         │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 6: Generate LaunchDaemon Plist                          │
-│ ────────────────────────────────────────────────────────────  │
-│ Path: /Library/LaunchDaemons/                                 │
-│       meshagent.tactical-rmm.acme-corporation.plist           │
-│                                                               │
-│ Key Fields:                                                   │
-│   <key>Label</key>                                            │
-│   <string>meshagent.tactical-rmm.acme-corporation</string>    │
-│                                                               │
-│   <key>ProgramArguments</key>                                 │
-│   <array>                                                     │
-│     <string>/opt/services/acme-corporation/tactical-rmm/      │
-│             meshagent</string>                                │
-│     <string>--meshServiceName=Tactical RMM</string>           │
-│     <string>--companyName=ACME Corporation</string>           │
-│   </array>                                                    │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 7: Generate LaunchAgent Plist                           │
-│ ────────────────────────────────────────────────────────────  │
-│ Path: ~/Library/LaunchAgents/                                 │
-│       meshagent.tactical-rmm.acme-corporation-agent.plist     │
-│                                                               │
-│ Key Fields:                                                   │
-│   <key>Label</key>                                            │
-│   <string>meshagent.tactical-rmm.acme-corporation-agent       │
-│   </string>                                                   │
-│                                                               │
-│   <key>QueueDirectories</key>                                 │
-│   <array>                                                     │
-│     <string>/var/run/meshagent.tactical-rmm.acme-corporation  │
-│     </string>                                                 │
-│   </array>                                                    │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 8: Bootstrap Services                                   │
-│ ────────────────────────────────────────────────────────────  │
-│ Load LaunchDaemon:                                            │
-│   $ launchctl bootstrap system \                              │
-│       /Library/LaunchDaemons/                                 │
-│       meshagent.tactical-rmm.acme-corporation.plist           │
-│                                                               │
-│ Load LaunchAgent:                                             │
-│   $ launchctl bootstrap gui/502 \                             │
-│       ~/Library/LaunchAgents/                                 │
-│       meshagent.tactical-rmm.acme-corporation-agent.plist     │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ RESULT: Services Running                                     │
-│ ────────────────────────────────────────────────────────────  │
-│ Daemon Service:                                               │
-│   system/meshagent.tactical-rmm.acme-corporation              │
-│                                                               │
-│ Agent Service:                                                │
-│   gui/502/meshagent.tactical-rmm.acme-corporation-agent       │
-│                                                               │
-│ Socket (when KVM active):                                     │
-│   /tmp/meshagent.tactical-rmm.acme-corporation.sock           │
-│                                                               │
-│ Queue Directory:                                              │
-│   /var/run/meshagent.tactical-rmm.acme-corporation/           │
-└───────────────────────────────────────────────────────────────┘
+At startup, the C agent loads three identity values from the `.db` file:
+
+```c
+// Load meshServiceName (default: "meshagent" on Unix, "Mesh Agent" on Windows)
+agentHost->meshServiceName = db.Get("meshServiceName") || "meshagent";
+
+// Load companyName (default: NULL)
+agentHost->companyName = db.Get("companyName") || NULL;
+
+// Load ServiceID (default: NULL)
+agentHost->serviceID = db.Get("ServiceID") || NULL;
 ```
 
-### Flow 2: Upgrade with Service Name Change
+Then the `--serviceId=` command-line flag is checked and overrides the database value if present:
+
+```c
+for (int si = 0; si < paramLen; ++si) {
+    if (strncmp(param[si], "--serviceId=", 12) == 0) {
+        agentHost->serviceID = param[si] + 12;  // Override database value
+        break;
+    }
+}
+```
+
+### Service Lookup (lines 5653-5656)
+
+The agent uses `serviceID` for service-manager lookups when available, falling back to `meshServiceName`:
+
+```c
+char *serviceNameForLookup = (agentHost->serviceID != NULL)
+    ? agentHost->serviceID
+    : agentHost->meshServiceName;
+```
+
+### KVM Relay Setup (line 1519-1520)
+
+When starting a KVM session, the C layer passes `serviceID` to `kvm_relay_setup()`, which forwards it to `kvm_create_session()`:
+
+```c
+kvm_relay_setup(agent->exePath, agent->pipeManager,
+    ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink,
+    ptrs, console_uid, agent->serviceID);
+```
+
+---
+
+## Installation Flow
+
+### Fresh Install
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│ INITIAL STATE: Running with old serviceID                    │
-│ ────────────────────────────────────────────────────────────  │
-│ ServiceID: meshagent.old-service.acme-corp                    │
-│ Plist: /Library/LaunchDaemons/                                │
-│        meshagent.old-service.acme-corp.plist                  │
-│ InstallPath: /usr/local/mesh_services/acme-corp/old-service/  │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ USER ACTION: Upgrade with new service name                   │
-│ $ ./meshagent -upgrade                                        │
-│     --meshServiceName="New Service"                           │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 1: Detect Existing Installation                         │
-│ ────────────────────────────────────────────────────────────  │
-│ Priority 2: Read existing plist ProgramArguments              │
-│   Found: --companyName="ACME Corp"                            │
-│                                                               │
-│ Current state:                                                │
-│   serviceName = "old-service" (from plist)                    │
-│   companyName = "acme-corp" (from plist)                      │
-│   oldServiceId = "meshagent.old-service.acme-corp"            │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 2: Apply New Parameters                                 │
-│ ────────────────────────────────────────────────────────────  │
-│ Priority 1: User-provided flags override                      │
-│   New serviceName = "New Service" → "new-service"             │
-│   Keep companyName = "acme-corp" (from existing)              │
-│                                                               │
-│ Build new serviceID:                                          │
-│   newServiceId = "meshagent.new-service.acme-corp"            │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 3: Unload Old Services                                  │
-│ ────────────────────────────────────────────────────────────  │
-│ $ launchctl bootout system/meshagent.old-service.acme-corp   │
-│ $ launchctl bootout gui/502/                                  │
-│     meshagent.old-service.acme-corp-agent                     │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 4: Remove Old Plists                                    │
-│ ────────────────────────────────────────────────────────────  │
-│ Delete:                                                       │
-│   /Library/LaunchDaemons/                                     │
-│     meshagent.old-service.acme-corp.plist                     │
-│                                                               │
-│   ~/Library/LaunchAgents/                                     │
-│     meshagent.old-service.acme-corp-agent.plist               │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 5: Update Binary and Config                             │
-│ ────────────────────────────────────────────────────────────  │
-│ Replace binary (same location):                               │
-│   /usr/local/mesh_services/acme-corp/old-service/meshagent   │
-│                                                               │
-│ Update .msh file:                                             │
-│   MeshServiceName=New Service                                 │
-│   ServiceID=meshagent.new-service.acme-corp                   │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 6: Create New Plists with New ServiceID                 │
-│ ────────────────────────────────────────────────────────────  │
-│ Create:                                                       │
-│   /Library/LaunchDaemons/                                     │
-│     meshagent.new-service.acme-corp.plist                     │
-│     • Label: meshagent.new-service.acme-corp                  │
-│     • ProgramArguments includes --meshServiceName=New Service │
-│                                                               │
-│   ~/Library/LaunchAgents/                                     │
-│     meshagent.new-service.acme-corp-agent.plist               │
-│     • Label: meshagent.new-service.acme-corp-agent            │
-│     • QueueDirectories: /var/run/                             │
-│                          meshagent.new-service.acme-corp      │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ STEP 7: Bootstrap New Services                               │
-│ ────────────────────────────────────────────────────────────  │
-│ $ launchctl bootstrap system \                                │
-│     /Library/LaunchDaemons/                                   │
-│     meshagent.new-service.acme-corp.plist                     │
-│                                                               │
-│ $ launchctl bootstrap gui/502 \                               │
-│     ~/Library/LaunchAgents/                                   │
-│     meshagent.new-service.acme-corp-agent.plist               │
-└──────────────────────┬────────────────────────────────────────┘
-                       ↓
-┌───────────────────────────────────────────────────────────────┐
-│ RESULT: Services Running with New ServiceID                  │
-│ ────────────────────────────────────────────────────────────  │
-│ Old ServiceID: meshagent.old-service.acme-corp (removed)      │
-│ New ServiceID: meshagent.new-service.acme-corp (active)       │
-│                                                               │
-│ New Daemon: system/meshagent.new-service.acme-corp            │
-│ New Agent: gui/502/meshagent.new-service.acme-corp-agent      │
-│ New Socket: /tmp/meshagent.new-service.acme-corp.sock         │
-└───────────────────────────────────────────────────────────────┘
+User runs: ./meshagent -install --setServiceID=acmemesh \
+             --meshServiceName="ACME Mesh" --companyName="ACME, Inc." \
+             --installPath=/opt/acmemesh
+
+Step 1: checkParameters()
+  • --setServiceID=acmemesh → mapped to --serviceId=acmemesh
+  • serviceId = "acmemesh"
+
+Step 2: Determine install path
+  • --installPath=/opt/acmemesh provided explicitly
+  • installPath = /opt/acmemesh/
+
+Step 3: Copy binary
+  • /opt/acmemesh/meshagent
+
+Step 4: Write .msh file
+  • ServiceID=acmemesh
+  • MeshServiceName=ACME Mesh
+  • CompanyName=ACME, Inc.
+
+Step 5: Create LaunchDaemon plist
+  • Path: /Library/LaunchDaemons/acmemesh.plist
+  • Label: acmemesh
+  • ProgramArguments includes --serviceId=acmemesh
+
+Step 6: Create LaunchAgent plist
+  • Path: ~/Library/LaunchAgents/acmemesh-agent.plist
+  • Label: acmemesh-agent
+  • ProgramArguments: [-kvm1, --serviceId=acmemesh]
+  • QueueDirectories: /var/run/acmemesh/
+
+Step 7: Bootstrap services
+  • launchctl bootstrap system /Library/LaunchDaemons/acmemesh.plist
+  • launchctl bootstrap gui/502 ~/Library/LaunchAgents/acmemesh-agent.plist
 ```
+
+### Upgrade
+
+During upgrade, the installer discovers the existing service by looking up the serviceID in the existing plist or database. The `--setServiceID` flag can change the serviceID during an upgrade, which causes old plists to be removed and new ones created with the new serviceID.
+
+### Default Install (No Custom Parameters)
+
+```
+User runs: ./meshagent -install
+
+Step 1: checkParameters()
+  • No --setServiceID, no --serviceId, no .msh ServiceID
+  • Falls through to buildServiceId()
+  • buildServiceId() returns sanitized basename: "meshagent"
+
+Step 2: Install path
+  • /usr/local/mesh_services/meshagent/
+
+Step 3: Plist
+  • /Library/LaunchDaemons/meshagent.plist (Label: meshagent)
+
+Step 4: Runtime paths
+  • Socket: /tmp/meshagent.sock
+  • Queue: /var/run/meshagent/
+```
+
+---
+
+## Command-Line Parameters
+
+| Flag | Effect | Priority |
+|------|--------|----------|
+| `--setServiceID=<value>` | Sets serviceID (mapped to `--serviceId` in `checkParameters`) | Highest — mapped before .msh injection |
+| `--serviceId=<value>` | Sets serviceID directly | High — overrides .msh and database |
+| `--meshServiceName=<value>` | Sets display/service name (used for install path, NOT serviceID) | N/A for serviceID |
+| `--companyName=<value>` | Sets company name (used for install path, NOT serviceID) | N/A for serviceID |
+| `--installPath=<value>` | Explicit install directory (overrides company/service path construction) | N/A for serviceID |
+
+**Important distinctions:**
+- `--setServiceID` and `--serviceId` control the **serviceID** (plist Label, socket paths, runtime identity)
+- `--meshServiceName` and `--companyName` control the **install directory structure** but do NOT affect serviceID
+- `buildServiceId()` ignores both `meshServiceName` and `companyName`
 
 ---
 
 ## Real-World Examples
 
-### Example 1: Default Installation (No Custom Parameters)
+### Example 1: Default Installation
 
 **Command:**
 ```bash
-./meshagent -install --installPath=/usr/local/mesh_services/
+./meshagent -install
 ```
 
-**Parameters:**
-- `serviceName`: Not provided → defaults to `'meshagent'`
-- `companyName`: Not provided → `null`
-
-**Sanitization:** (none needed)
-
-**ServiceID Construction:**
-```javascript
-buildServiceId('meshagent', null)
-  → companyName is null
-  → serviceName === 'meshagent'
-  → return 'meshagent'
-```
-
-**Result:** `meshagent`
+**ServiceID:** `meshagent` (from executable basename)
 
 **Files Created:**
 ```
-✓ /Library/LaunchDaemons/meshagent.plist
-✓ ~/Library/LaunchAgents/meshagent-agent.plist
-✓ /usr/local/mesh_services/meshagent/meshagent (binary)
-✓ /usr/local/mesh_services/meshagent/meshagent.msh
-✓ /usr/local/mesh_services/meshagent/meshagent.db
-```
-
-**Plist Label:**
-```xml
-<key>Label</key>
-<string>meshagent</string>
+/Library/LaunchDaemons/meshagent.plist
+~/Library/LaunchAgents/meshagent-agent.plist
+/usr/local/mesh_services/meshagent/meshagent
+/usr/local/mesh_services/meshagent/meshagent.msh
+/usr/local/mesh_services/meshagent/meshagent.db
 ```
 
 **Runtime Paths:**
 ```
 Socket: /tmp/meshagent.sock
-Queue: /var/run/meshagent/
-Logs: /tmp/meshagent-daemon.log, /tmp/meshagent-agent.log
+Queue:  /var/run/meshagent/
+Signal: /var/run/meshagent/session-active
 ```
 
 ---
 
-### Example 2: Company-Branded Installation
+### Example 2: Full ACME Deployment with Custom ServiceID
 
 **Command:**
 ```bash
 ./meshagent -install \
-  --companyName="ACME Corporation"
+  --setServiceID=acmemesh \
+  --meshServiceName="ACME Mesh" \
+  --companyName="ACME, Inc." \
+  --installPath=/opt/acmemesh
 ```
-
-**Parameters:**
-- `serviceName`: Not provided → defaults to `'meshagent'`
-- `companyName`: `'ACME Corporation'`
 
 **Sanitization:**
 ```javascript
-sanitize('ACME Corporation')
-  → 'ACME-Corporation'          // Spaces → hyphens
-  → 'ACMECorporation'            // Special chars removed
-  → 'acmecorporation'            // Lowercase
+sanitize("ACME Mesh")  → "acme-mesh"    // Used for install path (overridden here)
+sanitize("ACME, Inc.")  → "acme-inc"     // Comma and period stripped; path overridden here
+// --installPath=/opt/acmemesh overrides the computed path
 ```
 
-**ServiceID Construction:**
-```javascript
-buildServiceId('meshagent', 'acmecorporation')
-  → companyName exists
-  → serviceName === 'meshagent'
-  → return 'meshagent.' + companyName
-  → 'meshagent.acmecorporation'
+**ServiceID:** `acmemesh` (from `--setServiceID`)
+
+**Install path:** `/opt/acmemesh/` (explicit `--installPath`)
+
+**Plists:**
 ```
-
-**Result:** `meshagent.acmecorporation`
-
-**Files Created:**
-```
-✓ /Library/LaunchDaemons/meshagent.acmecorporation.plist
-✓ ~/Library/LaunchAgents/meshagent.acmecorporation-agent.plist
-✓ /usr/local/mesh_services/acmecorporation/meshagent/meshagent
-✓ /usr/local/mesh_services/acmecorporation/meshagent/meshagent.msh
-```
-
-**Plist ProgramArguments:**
-```xml
-<array>
-    <string>/usr/local/mesh_services/acmecorporation/meshagent/meshagent</string>
-    <string>--companyName=ACME Corporation</string>
-</array>
-```
-
----
-
-### Example 3: Custom Service (Tactical RMM)
-
-**Command:**
-```bash
-./meshagent -install \
-  --meshServiceName="Tactical RMM"
-```
-
-**Parameters:**
-- `serviceName`: `'Tactical RMM'`
-- `companyName`: Not provided → `null`
-
-**Sanitization:**
-```javascript
-sanitize('Tactical RMM')
-  → 'Tactical-RMM'               // Spaces → hyphens
-  → 'Tactical-RMM'               // No special chars
-  → 'tactical-rmm'               // Lowercase
-```
-
-**ServiceID Construction:**
-```javascript
-buildServiceId('tactical-rmm', null)
-  → companyName is null
-  → serviceName !== 'meshagent'
-  → return 'meshagent.' + serviceName
-  → 'meshagent.tactical-rmm'
-```
-
-**Result:** `meshagent.tactical-rmm`
-
-**Files Created:**
-```
-✓ /Library/LaunchDaemons/meshagent.tactical-rmm.plist
-✓ ~/Library/LaunchAgents/meshagent.tactical-rmm-agent.plist
-✓ /usr/local/mesh_services/tactical-rmm/meshagent
-✓ /usr/local/mesh_services/tactical-rmm/meshagent.msh
-```
-
-**Plist Label:**
-```xml
-<key>Label</key>
-<string>meshagent.tactical-rmm</string>
-```
-
----
-
-### Example 4: Full Custom Service + Company
-
-**Command:**
-```bash
-./meshagent -install \
-  --meshServiceName="Tactical RMM" \
-  --companyName="MSP Solutions Inc"
-```
-
-**Parameters:**
-- `serviceName`: `'Tactical RMM'`
-- `companyName`: `'MSP Solutions Inc'`
-
-**Sanitization:**
-```javascript
-sanitize('Tactical RMM')
-  → 'tactical-rmm'
-
-sanitize('MSP Solutions Inc')
-  → 'MSP-Solutions-Inc'          // Spaces → hyphens
-  → 'MSP-Solutions-Inc'          // No special chars
-  → 'msp-solutions-inc'          // Lowercase
-```
-
-**ServiceID Construction:**
-```javascript
-buildServiceId('tactical-rmm', 'msp-solutions-inc')
-  → companyName exists
-  → serviceName !== 'meshagent'
-  → return 'meshagent.' + serviceName + '.' + companyName
-  → 'meshagent.tactical-rmm.msp-solutions-inc'
-```
-
-**Result:** `meshagent.tactical-rmm.msp-solutions-inc`
-
-**Files Created:**
-```
-✓ /Library/LaunchDaemons/meshagent.tactical-rmm.msp-solutions-inc.plist
-✓ ~/Library/LaunchAgents/meshagent.tactical-rmm.msp-solutions-inc-agent.plist
-✓ /usr/local/mesh_services/msp-solutions-inc/tactical-rmm/meshagent
-✓ /usr/local/mesh_services/msp-solutions-inc/tactical-rmm/meshagent.msh
-```
-
-**Plist ProgramArguments:**
-```xml
-<array>
-    <string>/usr/local/mesh_services/msp-solutions-inc/tactical-rmm/meshagent</string>
-    <string>--meshServiceName=Tactical RMM</string>
-    <string>--companyName=MSP Solutions Inc</string>
-</array>
+/Library/LaunchDaemons/acmemesh.plist  (Label: acmemesh)
+~/Library/LaunchAgents/acmemesh-agent.plist  (Label: acmemesh-agent)
 ```
 
 **Runtime Paths:**
 ```
-Socket: /tmp/meshagent.tactical-rmm.msp-solutions-inc.sock
-Queue: /var/run/meshagent.tactical-rmm.msp-solutions-inc/
-Daemon Log: /tmp/meshagent.tactical-rmm.msp-solutions-inc-daemon.log
-Agent Log: /tmp/meshagent.tactical-rmm.msp-solutions-inc-agent.log
+Socket: /tmp/acmemesh.sock
+Queue:  /var/run/acmemesh/
+Signal: /var/run/acmemesh/session-active
+```
+
+**Plist ProgramArguments:**
+```xml
+<array>
+    <string>/opt/acmemesh/meshagent</string>
+    <string>--meshServiceName=ACME Mesh</string>
+    <string>--companyName=ACME, Inc.</string>
+    <string>--serviceId=acmemesh</string>
+</array>
 ```
 
 ---
 
-### Example 5: Special Characters in Input
+### Example 3: ServiceID from .msh File (No Command-Line Override)
+
+**Setup:** Binary has an embedded `.msh` file containing:
+```
+ServiceID=acmemesh
+MeshServiceName=ACME Mesh
+CompanyName=ACME, Inc.
+```
+
+**Command:**
+```bash
+./meshagent -install
+```
+
+**ServiceID:** `acmemesh` (from .msh `ServiceID` field, injected by `checkParameters()`)
+
+**Install path:** `/usr/local/mesh_services/acme-inc/acme-mesh/` (computed from company + service)
+
+**Plists:**
+```
+/Library/LaunchDaemons/acmemesh.plist  (Label: acmemesh)
+~/Library/LaunchAgents/acmemesh-agent.plist  (Label: acmemesh-agent)
+```
+
+---
+
+### Example 4: Renamed Binary, No Other Configuration
+
+**Setup:** Binary renamed from `meshagent` to `acmemesh`.
+
+**Command:**
+```bash
+./acmemesh -install
+```
+
+**ServiceID:** `acmemesh` (sanitized executable basename, via `buildServiceId()`)
+
+**Install path:** `/usr/local/mesh_services/acmemesh/`
+
+**Plists:**
+```
+/Library/LaunchDaemons/acmemesh.plist  (Label: acmemesh)
+~/Library/LaunchAgents/acmemesh-agent.plist  (Label: acmemesh-agent)
+```
+
+---
+
+### Example 5: ACME Service + Company, No Explicit ServiceID
 
 **Command:**
 ```bash
 ./meshagent -install \
-  --meshServiceName="My Service!@#" \
-  --companyName="Company & Co., Ltd."
+  --meshServiceName="ACME Mesh" \
+  --companyName="ACME, Inc."
 ```
-
-**Parameters:**
-- `serviceName`: `'My Service!@#'`
-- `companyName`: `'Company & Co., Ltd.'`
 
 **Sanitization:**
 ```javascript
-sanitize('My Service!@#')
-  → 'My-Service!@#'              // Spaces → hyphens
-  → 'My-Service'                 // Remove !@#
-  → 'my-service'                 // Lowercase
-
-sanitize('Company & Co., Ltd.')
-  → 'Company-&-Co.,-Ltd.'        // Spaces → hyphens
-  → 'Company--Co-Ltd'            // Remove &, ., commas
-  → 'company--co-ltd'            // Lowercase
+sanitize("ACME Mesh")  → "acme-mesh"
+sanitize("ACME, Inc.")  → "acme-inc"    // Comma and period removed by special char strip
 ```
 
-**ServiceID Construction:**
-```javascript
-buildServiceId('my-service', 'company--co-ltd')
-  → 'meshagent.my-service.company--co-ltd'
+**ServiceID:** `meshagent` (from executable basename — `buildServiceId()` ignores both parameters)
+
+**Install path:** `/usr/local/mesh_services/acme-inc/acme-mesh/` (company + service directory structure)
+
+**Plists:**
+```
+/Library/LaunchDaemons/meshagent.plist  (Label: meshagent)
+~/Library/LaunchAgents/meshagent-agent.plist  (Label: meshagent-agent)
 ```
 
-**Result:** `meshagent.my-service.company--co-ltd`
+**Runtime Paths:**
+```
+Socket: /tmp/meshagent.sock
+Queue:  /var/run/meshagent/
+```
 
-**Note:** Double hyphens are allowed (not removed during sanitization).
+Note: Despite the custom service and company names, the serviceID is still `meshagent` because `buildServiceId()` only looks at the executable basename. To get a custom serviceID, use `--setServiceID` or embed `ServiceID=` in the .msh file.
 
 ---
 
@@ -1043,14 +682,13 @@ buildServiceId('my-service', 'company--co-ltd')
 
 | Function | File | Lines | Purpose |
 |----------|------|-------|---------|
-| `buildServiceId()` | `modules/macOSHelpers.js` | 91-126 | Constructs serviceID from components |
-| `sanitizeIdentifier()` | `modules/macOSHelpers.js` | 77-81 | Sanitizes user input |
-| `getPlistPath()` | `modules/macOSHelpers.js` | 134-141 | Returns plist file path |
-| `installService()` | `modules/service-manager.js` | 2856-2922 | Creates LaunchDaemon plist |
-| `installLaunchAgent()` | `modules/service-manager.js` | 2944-3043 | Creates LaunchAgent plist |
-| `installServiceUnified()` | `modules/agent-installer.js` | 1104-1798 | Orchestrates installation |
-| `getServiceConfigFromPlist()` | `modules/agent-installer.js` | 2947-3009 | Reads plist ProgramArguments |
-| `parseMshFile()` | `modules/agent-installer.js` | 1561-1575 | Parses .msh config file |
+| `buildServiceId()` | `modules/macOSHelpers.js` | 87-98 | Returns sanitized basename or explicit override (ignores serviceName/companyName) |
+| `sanitizeIdentifier()` | `modules/macOSHelpers.js` | 77-81 | Sanitizes input: spaces→hyphens, strip special chars, lowercase |
+| `getPlistPath()` | `modules/macOSHelpers.js` | 106-113 | Returns plist file path for a serviceID |
+| `checkParameters()` | `modules/agent-installer.js` | 263-333 | Maps `--setServiceID` → `--serviceId`, injects .msh ServiceID |
+| `kvm_build_dynamic_paths()` | `meshcore/KVM/MacOS/mac_kvm.c` | 458-519 | Builds socket/queue paths from serviceID |
+| `mesh_plist_find_service_id()` | `meshcore/MacOS/mac_plist_utils.c` | 169-203 | Discovers serviceID from plist Label by matching binary path |
+| `kvm_create_session()` | `meshcore/KVM/MacOS/mac_kvm.c` | 965-1086 | Creates KVM socket and signal file using resolved paths |
 
 ### Key Constants
 
@@ -1058,11 +696,12 @@ buildServiceId('my-service', 'company--co-ltd')
 |----------|-------|------|
 | `MACOS_PATHS.LAUNCH_DAEMONS` | `/Library/LaunchDaemons/` | `modules/macOSHelpers.js` |
 | `MACOS_PATHS.LAUNCH_AGENTS` | `/Library/LaunchAgents/` | `modules/macOSHelpers.js` |
-| Default service name | `'meshagent'` | Various |
+| Default service name | `'meshagent'` | `meshcore/agentcore.c` |
 | Default install path | `/usr/local/mesh_services/` | `modules/agent-installer.js` |
+| KVM fallback serviceId | `"unknown-agent"` | `meshcore/KVM/MacOS/mac_kvm.c` |
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** 2025-01-27
+**Document Version:** 2.0
+**Last Updated:** 2026-01-29
 **Applies to:** Current macOS MeshAgent implementation

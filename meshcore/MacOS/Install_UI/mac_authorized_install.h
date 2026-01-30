@@ -18,39 +18,60 @@ typedef void (^ProgressCallback)(const char* line);
 void set_progress_callback(ProgressCallback callback);
 
 /**
- * Ensure the process is running as root. If not, relaunch with admin privileges.
- * This function will not return if elevation is needed - it relaunches and exits.
+ * Request admin authorization from the user (shows system auth dialog).
+ * Must be called on the main thread before install/upgrade.
  *
- * @return 0 if already root, negative on error, does not return if elevation succeeds
+ * @return 0 on success (user authorized), -1 on failure or user cancelled
  */
-int ensure_running_as_root(void);
+int acquire_admin_authorization(void);
 
 /**
- * Execute meshagent install command with admin privileges
+ * Release previously acquired admin authorization.
+ * Safe to call even if no authorization was acquired.
+ */
+void release_admin_authorization(void);
+
+/**
+ * Execute meshagent install command
  *
- * Uses macOS Authorization Services to show native authentication dialog
- * and execute: meshagent -install --installPath="<installPath>" --mshPath="<mshFilePath>" --disableUpdate=<0|1> --disableTccCheck=<0|1>
+ * Executes: meshagent -install --installPath="<installPath>" --mshPath="<mshFilePath>" --disableUpdate=<0|1> --disableTccCheck=<0|1> [--log=3] [--meshAgentLogging=1]
  *
  * @param installPath The directory where MeshAgent should be installed
  * @param mshFilePath The path to the .msh configuration file
  * @param disableUpdate 1 to disable updates, 0 to enable
  * @param disableTccCheck 1 to disable TCC check UI, 0 to enable
+ * @param verboseLogging 1 to enable --log=3, 0 to disable
+ * @param meshAgentLogging 1 to enable --meshAgentLogging=1, 0 to disable
  * @return 0 on success, non-zero on failure
  */
-int execute_meshagent_install(const char* installPath, const char* mshFilePath, int disableUpdate, int disableTccCheck);
+int execute_meshagent_install(const char* installPath, const char* mshFilePath, int disableUpdate, int disableTccCheck, int verboseLogging, int meshAgentLogging);
 
 /**
- * Execute meshagent upgrade command with admin privileges
+ * Execute meshagent upgrade command
  *
- * Uses macOS Authorization Services to show native authentication dialog
- * and execute: meshagent -upgrade --installPath="<installPath>" --disableUpdate=<0|1> --disableTccCheck=<0|1>
+ * Executes: meshagent -upgrade --installPath="<installPath>" --disableUpdate=<0|1> --disableTccCheck=<0|1> [--log=3] [--meshAgentLogging=1]
  *
  * @param installPath The directory where the existing MeshAgent is installed
  * @param disableUpdate 1 to disable updates, 0 to enable
  * @param disableTccCheck 1 to disable TCC check UI, 0 to enable
+ * @param verboseLogging 1 to enable --log=3, 0 to disable
+ * @param meshAgentLogging 1 to enable --meshAgentLogging=1, 0 to disable
  * @return 0 on success, non-zero on failure
  */
-int execute_meshagent_upgrade(const char* installPath, int disableUpdate, int disableTccCheck);
+int execute_meshagent_upgrade(const char* installPath, int disableUpdate, int disableTccCheck, int verboseLogging, int meshAgentLogging);
+
+/**
+ * Execute meshagent uninstall command
+ *
+ * Executes: meshagent -uninstall --installPath="<installPath>" [--log=3]
+ * or:       meshagent -funinstall --installPath="<installPath>" [--log=3]
+ *
+ * @param installPath The directory where the existing MeshAgent is installed
+ * @param fullUninstall 1 for full uninstall (-funinstall), 0 for standard (-uninstall)
+ * @param verboseLogging 1 to enable --log=3, 0 to disable
+ * @return 0 on success, non-zero on failure
+ */
+int execute_meshagent_uninstall(const char* installPath, int fullUninstall, int verboseLogging);
 
 /**
  * Read the current disableUpdate setting from an existing installation
