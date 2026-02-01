@@ -4,8 +4,14 @@
 
 set -e
 
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # Defaults
 OUTPUT=""
@@ -48,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         *)
-            echo "Unknown option: $1"
+            echo -e "${RED}Error: Unknown option: $1${NC}"
             echo "Usage: $0 --output FILE [--bundle-id ID] [--exe-name NAME] [--display-name NAME] --build-date DATE --build-time TIME --mode [binary|bundle]"
             exit 1
             ;;
@@ -62,17 +68,17 @@ fi
 
 # Validate required arguments
 if [ -z "$OUTPUT" ]; then
-    echo "Error: --output is required"
+    echo -e "${RED}Error: --output is required${NC}"
     exit 1
 fi
 
 if [ -z "$BUILD_DATE" ]; then
-    echo "Error: --build-date is required"
+    echo -e "${RED}Error: --build-date is required${NC}"
     exit 1
 fi
 
 if [ -z "$BUILD_TIME" ]; then
-    echo "Error: --build-time is required"
+    echo -e "${RED}Error: --build-time is required${NC}"
     exit 1
 fi
 
@@ -85,13 +91,13 @@ case "$MODE" in
         TEMPLATE="$PROJECT_ROOT/build/resources/Info/bundle/app_Info.plist"
         ;;
     *)
-        echo "Error: Invalid mode '$MODE'. Use 'binary' or 'bundle'"
+        echo -e "${RED}Error: Invalid mode '$MODE'. Use 'binary' or 'bundle'${NC}"
         exit 1
         ;;
 esac
 
 if [ ! -f "$TEMPLATE" ]; then
-    echo "Error: Template not found: $TEMPLATE"
+    echo -e "${RED}Error: Template not found: $TEMPLATE${NC}"
     exit 1
 fi
 
@@ -103,4 +109,4 @@ sed -e "s/BUNDLE_IDENTIFIER/$BUNDLE_ID/g" \
     -e "s/BUILD_TIMESTAMP_TIME/$BUILD_TIME/g" \
     "$TEMPLATE" > "$OUTPUT"
 
-echo "Generated $MODE Info.plist: $OUTPUT (exe=$EXE_NAME, display=$DISPLAY_NAME)"
+echo -e "  ${GREEN}Generated $MODE Info.plist: $OUTPUT${NC}"

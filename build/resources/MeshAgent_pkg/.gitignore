@@ -1,8 +1,0 @@
-# .DS_Store files!
-.DS_Store
-
-# our build directory
-build/
-
-# MeshAgent.app is copied here during build - don't commit it
-payload/private/tmp/MeshAgent.app/

@@ -443,9 +443,9 @@ Location: No dedicated unit tests (tested via integration)
 ### Manual Testing
 
 **Test Bundle Mode:**
-1. Build: `make ARCHID=29`
-2. Create bundle: `build/tools/macos_build/macos-build_sign_notarize.sh --skip-sign --skip-notary`
-3. Run: `build/output/osx-universal-64-app/MeshAgent.app/Contents/MacOS/meshagent -show-install-ui`
+1. Build: `make macos ARCHID=29`
+2. Create bundle: `build/tools/macos_build/create-app-bundle.sh build/output/meshagent_osx-arm-64`
+3. Run: `MeshAgent.app/Contents/MacOS/meshagent -show-install-ui`
 4. Verify console shows: "Running from bundle: /path/to/MeshAgent.app"
 5. Verify working directory is bundle parent: `pwd` should show bundle directory
 

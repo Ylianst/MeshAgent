@@ -386,7 +386,6 @@ static const char* MACOS_simple_flags[] = {
 	"-check-tcc",         // Check TCC permissions, show UI if needed (no pipe, fire-and-forget)
 	"-request-accessibility",   // Request Accessibility permission (spawned as user)
 	"-request-screenrecording", // Request Screen Recording permission (spawned as user)
-	"-request-fulldiskaccess",  // Request Full Disk Access (shows custom dialog)
 	"-kvm1",              // macOS KVM mode (LaunchAgent via QueueDirectories)
 	"-config",            // Configure/update launchd scripts for existing installation
 	NULL
@@ -1100,7 +1099,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 			printf("                        Note: Also auto-launches with SHIFT+double-click on .app\n");
 			printf("  -request-accessibility        Request Accessibility permission\n");
 			printf("  -request-screenrecording      Request Screen Recording permission\n");
-			printf("  -request-fulldiskaccess       Request Full Disk Access\n");
 			printf("                        WARNING: -request-* flags request permissions for the\n");
 			printf("                        calling process. From a terminal, that means the terminal\n");
 			printf("                        app, not MeshAgent. These are spawned by the TCC UI.\n");
@@ -1440,11 +1438,6 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		return request_screen_recording_permission();
 	}
 
-	// -request-fulldiskaccess: Request Full Disk Access (shows custom dialog)
-	if (argc > 1 && strcasecmp(argv[1], "-request-fulldiskaccess") == 0)
-	{
-		return request_fda_permission();
-	}
 #endif
 
 #if defined(__APPLE__) && defined(_LINKVM)

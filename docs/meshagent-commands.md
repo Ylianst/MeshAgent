@@ -271,7 +271,6 @@ These are typically set by the daemon process when launching the KVM LaunchAgent
 | `-show-tcc-ui` | Show TCC permissions window (Accessibility, FDA, Screen Recording). Also auto-launches with SHIFT+double-click on `.app` |
 | `-request-accessibility` | Request Accessibility permission (spawned as user) |
 | `-request-screenrecording` | Request Screen Recording permission (spawned as user) |
-| `-request-fulldiskaccess` | Request Full Disk Access (shows custom dialog) |
 
 **WARNING**: Running `-request-*` arguments from a terminal requests permissions for the **terminal app**, not MeshAgent. These flags are intended to be spawned by the TCC permissions UI, not run manually.
 

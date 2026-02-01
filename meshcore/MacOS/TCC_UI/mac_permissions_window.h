@@ -78,22 +78,6 @@ int request_accessibility_permission(void);
  */
 int request_screen_recording_permission(void);
 
-/**
- * Request Full Disk Access permission (called by -request-fulldiskaccess flag)
- *
- * Checks if FDA is already granted by attempting to open TCC.db read-only.
- * If not granted, shows a custom NSAlert dialog with buttons:
- * - "Open System Settings" - Opens System Settings to FDA pane
- * - "Deny" (default) - Closes dialog
- *
- * Features a composite icon (lock + FDA drive icon).
- * Includes fallback for macOS < 11.0.
- *
- * Returns:
- *   0 on success (dialog shown or FDA already granted)
- */
-int request_fda_permission(void);
-
 #ifdef __cplusplus
 }
 #endif

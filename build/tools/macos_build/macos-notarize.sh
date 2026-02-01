@@ -1,441 +1,294 @@
 #!/bin/bash
-# Notarize macOS universal binaries with Apple
+# Notarize macOS targets (binaries and/or .app bundles)
 #
-# This script can be sourced or executed:
-#   source ./macos-notarize.sh && macos_notarize_binary /path/to/binary
-#   ./macos-notarize.sh /path/to/binary
+# Usage: macos-notarize.sh <target> [target2] [target3] ...
 #
-# Functions provided when sourced:
-#   macos_notarize_binary <binary_path> [--verbose]  - Notarize a specific binary
-#   macos_notarize_extract_architectures <binary_path> - Extract arch slices
+# Each target is auto-detected:
+#   - Directory ending in .app  → bundle (zip, submit, staple, Gatekeeper verify)
+#   - Regular file              → binary (zip, submit, extract arch slices via lipo)
+#
+# 1 target  → sequential (submit --wait, then post-process)
+# 2+ targets → parallel  (submit all, wait all in parallel, then post-process all)
 #
 # Environment Variables:
 #   MACOS_NOTARY_PROFILE - Keychain profile name (default: meshagent-notary)
-#   DEBUG=yes - Also notarize DEBUG binaries in default mode
+#   SKIP_STAPLE          - Set to "yes" to skip stapling bundles (default: no)
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+PROFILE="${MACOS_NOTARY_PROFILE:-meshagent-notary}"
+SKIP_STAPLE="${SKIP_STAPLE:-no}"
 
 #==============================================================================
-# HELPER FUNCTIONS (available when sourced)
+# USAGE
 #==============================================================================
 
-macos_notarize_extract_architectures() {
-    local universal_path="$1"
-    local output_dir=$(dirname "$universal_path")
-    local base_name=$(basename "$universal_path" | sed 's/-universal-64$//')
-
-    local GREEN='\033[0;32m'
-    local YELLOW='\033[0;33m'
-    local RED='\033[0;31m'
-    local NC='\033[0m'
-
-    if [ ! -f "$universal_path" ]; then
-        echo -e "${RED}Error: Universal binary not found: $universal_path${NC}"
-        return 1
-    fi
-
-    # Verify it's a universal binary before extracting
-    if lipo -info "$universal_path" 2>/dev/null | grep -q "Non-fat file"; then
-        echo "  Skipping extraction: Not a universal binary"
-        echo ""
-        return 0
-    fi
-
-    echo "  Extracting architecture slices..."
-
-    # Extract arm64 slice
-    local arm64_path="$output_dir/${base_name}-arm-64"
-    if lipo "$universal_path" -thin arm64 -output "$arm64_path" 2>/dev/null; then
-        echo "    arm64:  $arm64_path"
-        if codesign -vvv "$arm64_path" &>/dev/null; then
-            echo -e "    ${GREEN}arm64 signature verified (inherited)${NC}"
-        else
-            echo -e "    ${YELLOW}Warning: arm64 signature could not be verified${NC}"
-        fi
-    else
-        echo -e "    ${YELLOW}Warning: Could not extract arm64 slice${NC}"
-    fi
-
-    # Extract x86_64 slice
-    local x86_path="$output_dir/${base_name}-x86-64"
-    if lipo "$universal_path" -thin x86_64 -output "$x86_path" 2>/dev/null; then
-        echo "    x86_64: $x86_path"
-        if codesign -vvv "$x86_path" &>/dev/null; then
-            echo -e "    ${GREEN}x86_64 signature verified (inherited)${NC}"
-        else
-            echo -e "    ${YELLOW}Warning: x86_64 signature could not be verified${NC}"
-        fi
-    else
-        echo -e "    ${YELLOW}Warning: Could not extract x86_64 slice${NC}"
-    fi
-
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <target> [target2] [target3] ..."
     echo ""
-    return 0
+    echo "Targets can be any mix of .app bundles and bare Mach-O binaries."
+    echo ""
+    echo "Environment Variables:"
+    echo "  MACOS_NOTARY_PROFILE   Keychain profile name (default: meshagent-notary)"
+    echo "  SKIP_STAPLE            Set to \"yes\" to skip stapling (default: no)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 build/output/meshagent_osx-universal-64"
+    echo "  $0 build/output/osx-universal-64-app/MeshAgent.app"
+    echo "  $0 binary.bin Bundle1.app Bundle2.app Bundle3.app"
+    exit 1
+fi
+
+#==============================================================================
+# VALIDATION
+#==============================================================================
+
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf $TEMP_DIR" EXIT
+
+echo -e "${CYAN}macOS notarization${NC}"
+echo "  Notary profile: $PROFILE"
+echo "  Targets:        $#"
+echo ""
+
+# Validate all targets exist and are signed
+echo "Validating targets..."
+for target in "$@"; do
+    if [ -d "$target" ] && [[ "$target" == *.app ]]; then
+        if ! codesign --verify --deep --strict "$target" 2>/dev/null; then
+            echo -e "${RED}Error: Bundle is not properly signed: $target${NC}"
+            exit 1
+        fi
+        echo -e "  ${GREEN}OK (bundle): $target${NC}"
+    elif [ -f "$target" ]; then
+        if ! codesign -vvv "$target" &>/dev/null; then
+            echo -e "${RED}Error: Binary is not signed: $target${NC}"
+            exit 1
+        fi
+        echo -e "  ${GREEN}OK (binary): $target${NC}"
+    else
+        echo -e "${RED}Error: Target not found: $target${NC}"
+        exit 1
+    fi
+done
+
+# Verify notary credentials
+if ! xcrun notarytool history --keychain-profile "$PROFILE" &>/dev/null; then
+    echo -e "${RED}Error: Notary profile not found: $PROFILE${NC}"
+    echo ""
+    echo "Set up credentials with:"
+    echo "  xcrun notarytool store-credentials $PROFILE \\"
+    echo "    --apple-id \"developer@example.com\" \\"
+    echo "    --team-id \"TEAMID\" \\"
+    echo "    --password \"app-specific-password\""
+    exit 1
+fi
+
+echo ""
+
+#==============================================================================
+# POST-PROCESSING FUNCTIONS
+#==============================================================================
+
+postprocess_bundle() {
+    local bundle="$1"
+    local name
+    name=$(basename "$bundle")
+
+    # Staple
+    if [ "$SKIP_STAPLE" = "yes" ]; then
+        echo -e "  ${YELLOW}Stapling skipped (SKIP_STAPLE=yes): $name${NC}"
+    else
+        if xcrun stapler staple "$bundle" >/dev/null 2>&1; then
+            echo -e "  ${GREEN}Stapled: $name${NC}"
+        else
+            echo -e "  ${YELLOW}Warning: Failed to staple $name${NC}"
+        fi
+    fi
+
+    # Gatekeeper verify
+    if spctl -a -vvv -t install "$bundle" 2>&1 >/dev/null; then
+        echo -e "  ${GREEN}Gatekeeper verified: $name${NC}"
+    else
+        echo -e "  ${YELLOW}Warning: Gatekeeper verification failed for $name${NC}"
+    fi
 }
 
-# Main notarization function (can be called when sourced)
-macos_notarize_binary() {
-    local binary_path="$1"
-    local verbose=false
+postprocess_binary() {
+    local binary="$1"
+    local name
+    name=$(basename "$binary")
 
-    # Check for --verbose flag
-    if [ "$2" = "--verbose" ]; then
-        verbose=true
-    fi
+    # Binaries cannot be stapled — extract arch slices instead
+    if ! lipo -info "$binary" 2>/dev/null | grep -q "Non-fat file"; then
+        echo "  Extracting architecture slices from $name..."
 
-    local RED='\033[0;31m'
-    local GREEN='\033[0;32m'
-    local NC='\033[0m'
+        local output_dir
+        output_dir=$(dirname "$binary")
+        local base_name
+        base_name=$(basename "$binary" | sed 's/-universal-64$//')
 
-    # Keychain profile
-    local KEYCHAIN_PROFILE="${MACOS_NOTARY_PROFILE:-meshagent-notary}"
-
-    # Validate binary exists
-    if [ ! -f "$binary_path" ]; then
-        echo -e "${RED}Error: Binary not found: $binary_path${NC}"
-        return 1
-    fi
-
-    # Verify it's a universal binary
-    if lipo -info "$binary_path" 2>/dev/null | grep -q "Non-fat file"; then
-        echo -e "${RED}Error: Not a universal binary: $binary_path${NC}"
-        return 1
-    fi
-
-    # Verify binary is signed
-    if ! codesign -vvv "$binary_path" &>/dev/null; then
-        echo -e "${RED}Error: Binary is not signed: $binary_path${NC}"
-        echo "  Sign binaries first with macos-sign.sh"
-        return 1
-    fi
-
-    # Verify keychain profile exists
-    if ! xcrun notarytool history --keychain-profile "$KEYCHAIN_PROFILE" &>/dev/null; then
-        echo -e "${RED}Error: Keychain profile not found: $KEYCHAIN_PROFILE${NC}"
-        echo ""
-        echo "Set up the keychain profile once with:"
-        echo "  xcrun notarytool store-credentials \"$KEYCHAIN_PROFILE\" \\"
-        echo "    --apple-id \"developer@example.com\" \\"
-        echo "    --team-id \"TEAMID\" \\"
-        echo "    --password \"xxxx-xxxx-xxxx-xxxx\""
-        return 1
-    fi
-
-    # Create temporary directory for ZIP
-    local TEMP_DIR=$(mktemp -d)
-    local binary_name=$(basename "$binary_path")
-    local zip_path="$TEMP_DIR/${binary_name}.zip"
-
-    echo "  Notarizing: $binary_name"
-
-    # Create ZIP
-    local binary_dir=$(dirname "$binary_path")
-    local binary_file=$(basename "$binary_path")
-    (cd "$binary_dir" && ditto -c -k "$binary_file" "$zip_path")
-
-    # Submit to Apple and wait for completion
-    local submit_args=(
-        "$zip_path"
-        --keychain-profile "$KEYCHAIN_PROFILE"
-        --wait
-        --timeout 30m
-    )
-
-    local notarize_result=0
-    if [ "$verbose" = false ]; then
-        if ! xcrun notarytool submit "${submit_args[@]}" &>/dev/null; then
-            notarize_result=1
+        # Extract arm64 slice
+        local arm64_path="$output_dir/${base_name}-arm-64"
+        if lipo "$binary" -thin arm64 -output "$arm64_path" 2>/dev/null; then
+            echo "    arm64:  $arm64_path"
+            if codesign -vvv "$arm64_path" &>/dev/null; then
+                echo -e "    ${GREEN}arm64 signature verified (inherited)${NC}"
+            else
+                echo -e "    ${YELLOW}Warning: arm64 signature could not be verified${NC}"
+            fi
+        else
+            echo -e "    ${YELLOW}Warning: Could not extract arm64 slice${NC}"
         fi
-    else
-        if ! xcrun notarytool submit "${submit_args[@]}"; then
-            notarize_result=1
+
+        # Extract x86_64 slice
+        local x86_path="$output_dir/${base_name}-x86-64"
+        if lipo "$binary" -thin x86_64 -output "$x86_path" 2>/dev/null; then
+            echo "    x86_64: $x86_path"
+            if codesign -vvv "$x86_path" &>/dev/null; then
+                echo -e "    ${GREEN}x86_64 signature verified (inherited)${NC}"
+            else
+                echo -e "    ${YELLOW}Warning: x86_64 signature could not be verified${NC}"
+            fi
+        else
+            echo -e "    ${YELLOW}Warning: Could not extract x86_64 slice${NC}"
         fi
     fi
-
-    # Cleanup ZIP
-    rm -f "$zip_path"
-    rm -rf "$TEMP_DIR"
-
-    if [ $notarize_result -ne 0 ]; then
-        echo -e "${RED}Error: Notarization failed for $binary_name${NC}"
-        if [ "$verbose" = false ]; then
-            echo "  Run with --verbose for detailed output"
-        fi
-        echo ""
-        return 1
-    fi
-
-    echo -e "  ${GREEN}Accepted: $binary_name${NC}"
-    echo ""
-
-    # Extract architecture slices
-    if ! macos_notarize_extract_architectures "$binary_path"; then
-        return 1
-    fi
-
-    echo -e "  ${GREEN}Notarization and extraction complete${NC}"
-    return 0
 }
 
 #==============================================================================
-# STANDALONE EXECUTION (only runs if not sourced)
+# CREATE ZIPS
 #==============================================================================
 
-# Detect if script is being sourced
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Script is being executed, not sourced
+TARGETS=("$@")
+ZIP_PATHS=()
 
-    # Colors
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    CYAN='\033[0;36m'
-    NC='\033[0m'
+echo "Zipping targets..."
+for i in "${!TARGETS[@]}"; do
+    target="${TARGETS[$i]}"
+    if [ -d "$target" ] && [[ "$target" == *.app ]]; then
+        zip_path="$TEMP_DIR/bundle-${i}.zip"
+        ditto -c -k --keepParent "$target" "$zip_path"
+    else
+        zip_path="$TEMP_DIR/binary-${i}.zip"
+        local_dir=$(dirname "$target")
+        local_file=$(basename "$target")
+        (cd "$local_dir" && ditto -c -k "$local_file" "$zip_path")
+    fi
+    ZIP_PATHS+=("$zip_path")
+    echo "  Zipped: $(basename "$target")"
+done
 
-    # Get script directory and repository root
-    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-    REPO_DIR="$( cd "$SCRIPT_DIR/../../.." && pwd )"
+echo ""
 
-    # Build output directories
-    OUTPUT_DIR="$REPO_DIR/build/output"
-    DEBUG_DIR="$OUTPUT_DIR/DEBUG"
+#==============================================================================
+# SUBMIT & WAIT
+#==============================================================================
 
-    # Binary names (EXENAME env var allows override, default: meshagent)
-    BINARY_BASE="${EXENAME:-meshagent}"
-    RELEASE_BINARY="${BINARY_BASE}_osx-universal-64"
-    DEBUG_BINARY="DEBUG_${BINARY_BASE}_osx-universal-64"
+NOTARIZED=0
+FAILED=0
 
-    # Keychain profile name
-    KEYCHAIN_PROFILE="${MACOS_NOTARY_PROFILE:-meshagent-notary}"
+if [ ${#TARGETS[@]} -eq 1 ]; then
+    # Single target: sequential submit --wait
+    echo "Submitting to Apple notary service..."
+    target="${TARGETS[0]}"
+    name=$(basename "$target")
 
-    # Check if DEBUG binaries should be notarized
-    NOTARIZE_DEBUG="${DEBUG:-no}"
+    if xcrun notarytool submit "${ZIP_PATHS[0]}" \
+        --keychain-profile "$PROFILE" \
+        --wait \
+        --timeout 30m 2>&1 | tee "$TEMP_DIR/submit-0.log" | grep -q "status: Accepted"; then
+        echo -e "  ${GREEN}Accepted: $name${NC}"
+        NOTARIZED=1
+    else
+        echo -e "${RED}Error: Notarization failed for $name${NC}"
+        cat "$TEMP_DIR/submit-0.log"
+        FAILED=1
+    fi
+else
+    # Multiple targets: parallel submit, then parallel wait
+    echo "Submitting ${#TARGETS[@]} targets to Apple notary service..."
+    SUBMISSION_IDS=()
 
-    # Custom binary path (if provided)
-    CUSTOM_BINARY=""
+    for i in "${!TARGETS[@]}"; do
+        name=$(basename "${TARGETS[$i]}")
+        SUBMIT_OUTPUT=$(xcrun notarytool submit "${ZIP_PATHS[$i]}" \
+            --keychain-profile "$PROFILE" \
+            2>&1)
 
-    # Processing options
-    VERBOSE=false
+        id=$(echo "$SUBMIT_OUTPUT" | grep '  id:' | head -1 | awk '{print $2}')
+        if [ -z "$id" ]; then
+            echo -e "${RED}Error: Failed to get submission ID for $name${NC}"
+            echo "$SUBMIT_OUTPUT"
+            exit 1
+        fi
 
-    #==============================================================================
-    # PARSE COMMAND LINE ARGUMENTS
-    #==============================================================================
-
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --verbose)
-                VERBOSE=true
-                shift
-                ;;
-            --help|-h)
-                echo "Usage: $0 [OPTIONS] [BINARY_PATH]"
-                echo ""
-                echo "Notarize macOS universal binaries with Apple's notarization service"
-                echo ""
-                echo "Arguments:"
-                echo "  BINARY_PATH   Path to a universal binary to notarize (optional)"
-                echo "                If not provided, notarizes binaries in build/output/"
-                echo ""
-                echo "Options:"
-                echo "  --verbose     Show detailed notarytool output"
-                echo "  --help        Show this help message"
-                echo ""
-                echo "Environment Variables:"
-                echo "  DEBUG=yes              Also notarize DEBUG binaries (ignored with BINARY_PATH)"
-                echo "  MACOS_NOTARY_PROFILE   Keychain profile name (default: meshagent-notary)"
-                echo ""
-                echo "One-time setup:"
-                echo "  xcrun notarytool store-credentials \"$KEYCHAIN_PROFILE\" \\"
-                echo "    --apple-id \"developer@example.com\" \\"
-                echo "    --team-id \"TEAMID\" \\"
-                echo "    --password \"xxxx-xxxx-xxxx-xxxx\""
-                echo ""
-                echo "Examples:"
-                echo "  ./macos-notarize.sh                              # Notarize default binaries"
-                echo "  ./macos-notarize.sh /path/to/meshagent_universal # Notarize specific binary"
-                echo "  DEBUG=yes ./macos-notarize.sh                    # Notarize release + DEBUG"
-                echo "  ./macos-notarize.sh --verbose                    # Show detailed output"
-                echo ""
-                echo "As a sourceable script:"
-                echo "  source ./macos-notarize.sh"
-                echo "  macos_notarize_binary /path/to/binary"
-                echo "  macos_notarize_binary /path/to/binary --verbose"
-                exit 0
-                ;;
-            -*)
-                echo "Error: Unknown option $1"
-                echo "Run with --help for usage information"
-                exit 1
-                ;;
-            *)
-                if [ -n "$CUSTOM_BINARY" ]; then
-                    echo "Error: Multiple binary paths provided"
-                    echo "Run with --help for usage information"
-                    exit 1
-                fi
-                CUSTOM_BINARY="$1"
-                shift
-                ;;
-        esac
+        SUBMISSION_IDS+=("$id")
+        echo -e "  ${GREEN}Submitted: $name${NC} (ID: $id)"
     done
 
-    #==============================================================================
-    # VALIDATION
-    #==============================================================================
-
-    echo -e "${CYAN}macOS universal binary notarization${NC}"
     echo ""
+    echo "Waiting for notarization results (parallel)..."
+    WAIT_PIDS=()
+    for i in "${!SUBMISSION_IDS[@]}"; do
+        log_file="$TEMP_DIR/wait-${i}.log"
+        xcrun notarytool wait "${SUBMISSION_IDS[$i]}" \
+            --keychain-profile "$PROFILE" \
+            --timeout 30m > "$log_file" 2>&1 &
+        WAIT_PIDS+=($!)
+        echo "  Waiting: $(basename "${TARGETS[$i]}") (ID: ${SUBMISSION_IDS[$i]})"
+    done
 
-    # Validate custom binary if provided
-    if [ -n "$CUSTOM_BINARY" ]; then
-        # Resolve to absolute path
-        CUSTOM_BINARY=$(cd "$(dirname "$CUSTOM_BINARY")" && pwd)/$(basename "$CUSTOM_BINARY")
-
-        if [ ! -f "$CUSTOM_BINARY" ]; then
-            echo -e "${RED}Error: Binary not found: $CUSTOM_BINARY${NC}"
-            exit 1
-        fi
-
-        # Verify it's a universal binary
-        if lipo -info "$CUSTOM_BINARY" 2>/dev/null | grep -q "Non-fat file"; then
-            echo -e "${RED}Error: Not a universal binary: $CUSTOM_BINARY${NC}"
-            exit 1
-        fi
-
-        echo "  Binary: $CUSTOM_BINARY"
-        echo "  Mode: custom binary"
-    else
-        echo "  Notarize DEBUG: $NOTARIZE_DEBUG"
-        echo "  Mode: default (build/output/)"
-
-        # Check if output directory exists (only needed for default mode)
-        if [ ! -d "$OUTPUT_DIR" ]; then
-            echo -e "${RED}Error: Output directory not found: $OUTPUT_DIR${NC}"
-            echo "  Build and sign binaries first"
-            exit 1
-        fi
-    fi
-
-    echo ""
-
-    # Verify keychain profile exists
-    if ! xcrun notarytool history --keychain-profile "$KEYCHAIN_PROFILE" &>/dev/null; then
-        echo -e "${RED}Error: Keychain profile not found: $KEYCHAIN_PROFILE${NC}"
-        echo ""
-        echo "Set up the keychain profile once with:"
-        echo "  xcrun notarytool store-credentials \"$KEYCHAIN_PROFILE\" \\"
-        echo "    --apple-id \"developer@example.com\" \\"
-        echo "    --team-id \"TEAMID\" \\"
-        echo "    --password \"xxxx-xxxx-xxxx-xxxx\""
-        exit 1
-    fi
-
-    echo -e "  ${GREEN}Keychain profile OK: $KEYCHAIN_PROFILE${NC}"
-    echo ""
-
-    #==============================================================================
-    # PROCESS BINARIES
-    #==============================================================================
-
-    NOTARIZED_COUNT=0
-    FAILED_COUNT=0
-
-    # Prepare verbose flag for function calls
-    VERBOSE_FLAG=""
-    if [ "$VERBOSE" = true ]; then
-        VERBOSE_FLAG="--verbose"
-    fi
-
-    if [ -n "$CUSTOM_BINARY" ]; then
-        echo "Notarizing custom binary..."
-        echo ""
-
-        if macos_notarize_binary "$CUSTOM_BINARY" $VERBOSE_FLAG; then
-            NOTARIZED_COUNT=$((NOTARIZED_COUNT + 1))
+    for i in "${!WAIT_PIDS[@]}"; do
+        name=$(basename "${TARGETS[$i]}")
+        if wait "${WAIT_PIDS[$i]}"; then
+            echo -e "  ${GREEN}Accepted: $name${NC}"
+            NOTARIZED=$((NOTARIZED + 1))
         else
-            FAILED_COUNT=$((FAILED_COUNT + 1))
-        fi
-    else
-        echo "Step 1: Notarize release universal binary"
-        echo ""
-
-        RELEASE_PATH="$OUTPUT_DIR/$RELEASE_BINARY"
-
-        if [ -f "$RELEASE_PATH" ]; then
-            if macos_notarize_binary "$RELEASE_PATH" $VERBOSE_FLAG; then
-                NOTARIZED_COUNT=$((NOTARIZED_COUNT + 1))
-            else
-                FAILED_COUNT=$((FAILED_COUNT + 1))
-            fi
-        else
-            echo -e "${RED}Error: Release binary not found: $RELEASE_PATH${NC}"
-            echo "  Build and sign the universal binary first"
-            exit 1
-        fi
-
-        if [ "$NOTARIZE_DEBUG" = "yes" ]; then
-            echo "Step 2: Notarize DEBUG universal binary"
+            echo -e "${RED}FAILED: $name (ID: ${SUBMISSION_IDS[$i]})${NC}"
+            cat "$TEMP_DIR/wait-${i}.log"
             echo ""
-
-            DEBUG_PATH="$DEBUG_DIR/$DEBUG_BINARY"
-
-            if [ -f "$DEBUG_PATH" ]; then
-                if macos_notarize_binary "$DEBUG_PATH" $VERBOSE_FLAG; then
-                    NOTARIZED_COUNT=$((NOTARIZED_COUNT + 1))
-                else
-                    FAILED_COUNT=$((FAILED_COUNT + 1))
-                fi
-            else
-                echo -e "  ${YELLOW}Warning: DEBUG binary not found: $DEBUG_PATH${NC}"
-                echo ""
-            fi
+            echo "Fetching notarization log..."
+            xcrun notarytool log "${SUBMISSION_IDS[$i]}" \
+                --keychain-profile "$PROFILE" 2>&1 || true
+            FAILED=$((FAILED + 1))
         fi
-    fi
-
-    #==============================================================================
-    # SUMMARY
-    #==============================================================================
-
-    echo ""
-    echo -e "${GREEN}Notarization complete${NC}"
-    echo "  Successful: $NOTARIZED_COUNT"
-    echo "  Failed:     $FAILED_COUNT"
-
-    if [ $FAILED_COUNT -gt 0 ]; then
-        echo ""
-        echo -e "${RED}Error: Some binaries failed notarization${NC}"
-        echo "  Run with --verbose for detailed output"
-        exit 1
-    fi
-
-    if [ $NOTARIZED_COUNT -eq 0 ]; then
-        echo ""
-        echo -e "${YELLOW}Warning: No binaries were notarized${NC}"
-        exit 0
-    fi
-
-    echo ""
-
-    if [ -n "$CUSTOM_BINARY" ]; then
-        echo "Binary locations:"
-        echo "  $CUSTOM_BINARY (universal, notarized)"
-        base_name=$(basename "$CUSTOM_BINARY" | sed 's/-universal-64$//')
-        custom_dir=$(dirname "$CUSTOM_BINARY")
-        echo "  ${custom_dir}/${base_name}-arm-64 (arm64, inherits notarization)"
-        echo "  ${custom_dir}/${base_name}-x86-64 (x86_64, inherits notarization)"
-    else
-        echo "Binary locations:"
-        if [ -f "$RELEASE_PATH" ]; then
-            echo "  Release:"
-            echo "    $RELEASE_PATH (universal, notarized)"
-            echo "    ${RELEASE_PATH/-universal-64/-arm-64} (arm64, inherits notarization)"
-            echo "    ${RELEASE_PATH/-universal-64/-x86-64} (x86_64, inherits notarization)"
-        fi
-        if [ "$NOTARIZE_DEBUG" = "yes" ] && [ -f "$DEBUG_PATH" ]; then
-            echo "  DEBUG:"
-            echo "    $DEBUG_PATH (universal, notarized)"
-            echo "    ${DEBUG_PATH/-universal-64/-arm-64} (arm64, inherits notarization)"
-            echo "    ${DEBUG_PATH/-universal-64/-x86-64} (x86_64, inherits notarization)"
-        fi
-    fi
-
-    echo ""
+    done
 fi
+
+if [ $FAILED -gt 0 ]; then
+    echo ""
+    echo -e "${RED}Error: $FAILED target(s) failed notarization${NC}"
+    exit 1
+fi
+
+#==============================================================================
+# POST-PROCESS
+#==============================================================================
+
+echo ""
+echo "Post-processing..."
+for target in "${TARGETS[@]}"; do
+    if [ -d "$target" ] && [[ "$target" == *.app ]]; then
+        postprocess_bundle "$target"
+    else
+        postprocess_binary "$target"
+    fi
+done
+
+#==============================================================================
+# SUMMARY
+#==============================================================================
+
+echo ""
+echo -e "${GREEN}Notarization complete: ${#TARGETS[@]} target(s)${NC}"
+for target in "${TARGETS[@]}"; do
+    echo "  OK: $target"
+done

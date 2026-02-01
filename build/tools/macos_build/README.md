@@ -1,244 +1,124 @@
 # macOS Build Tools for MeshAgent
 
-This directory contains the complete build toolchain for creating macOS MeshAgent binaries with signing, notarization, and testing capabilities.
+This directory contains the macOS-specific build toolchain for signing, notarization, and app bundle creation.
 
 ## Directory Contents
 
 ```
 build/tools/macos_build/
-├── README.md                      # This file
-├── Info.plist/
-│   ├── Info.plist.template        # Template for embedded plist (with BUILD_TIMESTAMP placeholder)
-│   └── Info.plist                 # Generated plist (created during build with actual timestamp)
-├── macos-build_with_test.sh       # Main development/testing build script
-├── macos-sign.sh                  # Code signing script (can be sourced or executed)
-└── macos-notarize.sh              # Apple notarization script (can be sourced or executed)
+├── README.md                        # This file
+├── macos-sign.sh                    # User-facing: sign targets (multi-target)
+├── macos-notarize.sh                # User-facing: notarize targets (multi-target)
+├── create-app-bundle.sh             # Internal: package binary into .app bundle
+├── generate-info-plist.sh           # Internal: generate Info.plist from template
+├── generate-build-timestamp.sh      # Internal: emit build timestamp variables
+└── macos-build_icns/                # Icon assets and .icns build script
 ```
 
 ---
 
 ## Quick Start
 
-### Basic Build (No Signing)
-```bash
-cd /Users/peet/GitHub/MeshAgent_installer
-sudo ./build/tools/macos_build/macos-build_with_test.sh --skip-sign --skip-notary
-```
+### Build via Makefile (Recommended)
 
-### Full Build (Signed + Notarized)
 ```bash
+# Build universal binary (no signing)
+make macos ARCHID=10005
+
+# Build with signing
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh
+make macos ARCHID=10005 SIGN=1
+
+# Build with signing + notarization
+export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
+make macos ARCHID=10005 SIGN=1 NOTARIZE=1
+
+# Build code-utils binary (minimal, for polyfill generation)
+make macos ARCHID=10005 KVM=0
 ```
 
-### Code-Utils Build (Minimal for Polyfill Generation)
+### Sign/Notarize Standalone
+
 ```bash
-sudo ./build/tools/macos_build/macos-build_with_test.sh --code-utils --skip-sign --skip-notary
+# Sign after building
+export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
+./build/tools/macos_build/macos-sign.sh build/output/meshagent_osx-universal-64
+
+# Notarize after signing
+./build/tools/macos_build/macos-notarize.sh build/output/meshagent_osx-universal-64
 ```
 
 ---
 
 ## Scripts Overview
 
-### 1. `macos-build_with_test.sh`
+### 1. `macos-sign.sh`
 
-**Purpose:** Main development and testing script that orchestrates the complete build workflow.
+**Purpose:** Sign any mix of macOS binaries and `.app` bundles.
 
-**Features:**
-- Polyfill regeneration from JavaScript modules
-- Build for Intel (x86-64), ARM64, or Universal binaries
-- Code signing with hardened runtime
-- Apple notarization
-- Built-in meshagent installation/testing commands
-- Support for code-utils minimal builds
-
-**Default Configuration:**
-```bash
-ARCHID="10005"                      # Universal binary (Intel + ARM)
-SKIP_POLYFILLS="no"                 # Regenerate polyfills
-MACOS_ONLY_POLYFILLS="yes"          # Use macOS-specific modules only
-CODE_UTILS_BUILD="no"               # Full build (not code-utils)
-SKIP_BUILD="no"                     # Perform build
-SKIP_SIGN="no"                      # Sign binary
-SKIP_NOTARY="no"                    # Notarize binary
-SKIP_GIT_PULL="yes"                 # Don't pull git updates
-```
-
-**Command-Line Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--archid <16\|29\|10005>` | Architecture: 16=Intel, 29=ARM, 10005=Universal |
-| `--skip-polyfills` | Skip polyfill regeneration |
-| `--macos-only-polyfills` | Use modules_macos (50 modules) - default |
-| `--all-polyfills` | Use all modules/ directory |
-| `--code-utils` | Build minimal binary (8 modules, KVM=0) for polyfill generation |
-| `--skip-build` | Skip build step |
-| `--skip-sign` | Skip code signing |
-| `--skip-notary` | Skip notarization |
-| `--git-pull` | Pull latest git changes before building |
-| `--msh-command <cmd>` | Execute meshagent command after build (install, fullinstall, upgrade, etc.) |
-| `--msh-installPath <path>` | Installation path for meshagent |
-| `--msh-companyName <name>` | Company name for installation |
-| `--msh-meshServiceName <name>` | Service name for installation |
-
-**Build Workflow (6 Steps):**
-
-1. **Polyfill Generation** (if not skipped)
-   - Syncs modules from `modules/` to `modules_macos/`
-   - Runs `build/tools/meshagent/macos/meshagent -import` to generate polyfills
-   - Updates `microscript/ILibDuktape_Polyfills.c`
-
-2. **Build**
-   - Runs `make clean`
-   - Builds with `make macos ARCHID=<archid> [KVM=0]`
-   - For code-utils builds: renames output to `meshagent_code-utils_*`
-
-3. **Signing** (if not skipped)
-   - Calls `macos-sign.sh` with `$MACOS_SIGN_CERT`
-   - Signs with hardened runtime (`--options runtime`)
-   - Extracts architecture slices from universal binary
-
-4. **Notarization** (if not skipped)
-   - Calls `macos-notarize.sh`
-   - Submits to Apple's notary service
-   - Waits for approval
-   - Extracts architecture slices from notarized universal binary
-
-5. **Installation/Testing** (if `--msh-command` specified)
-   - Executes meshagent with specified command
-   - Example: `-install`, `-fullinstall`, `-upgrade`, `-uninstall`
-
-6. **Completion**
-   - Displays build summary
-   - Shows binary locations
-
-**Output Locations:**
-
-| Build Type | Universal | Intel | ARM |
-|------------|-----------|-------|-----|
-| **Regular** | `build/output/meshagent_osx-universal-64` | `build/output/meshagent_osx-x86-64` | `build/output/meshagent_osx-arm-64` |
-| **Code-Utils** | `build/output/meshagent_code-utils_osx-universal-64` | `build/output/meshagent_code-utils_osx-x86-64` | `build/output/meshagent_code-utils_osx-arm-64` |
-| **Debug** | `build/output/DEBUG/meshagent_*` | `build/output/DEBUG/meshagent_*` | `build/output/DEBUG/meshagent_*` |
-
-**Environment Variables Required:**
-
-For signing:
+**Usage:**
 ```bash
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
+./build/tools/macos_build/macos-sign.sh <target> [target2] [target3] ...
 ```
 
-For notarization (must be configured once):
-```bash
-xcrun notarytool store-credentials meshagent-notary \
-  --apple-id "your-email@example.com" \
-  --team-id "TEAMID" \
-  --password "app-specific-password"
-```
-
-**Usage Examples:**
-
-```bash
-# Build universal binary, skip signing/notarization
-sudo ./build/tools/macos_build/macos-build_with_test.sh --skip-sign --skip-notary
-
-# Build Intel only, with signing and notarization
-export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh --archid 16
-
-# Build and install to custom location
-export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh \
-  --msh-command fullinstall \
-  --msh-installPath /opt/meshagent \
-  --msh-companyName "MyCompany"
-
-# Build code-utils binary for polyfill generation
-sudo ./build/tools/macos_build/macos-build_with_test.sh --code-utils --skip-sign --skip-notary
-```
-
----
-
-### 2. `macos-sign.sh`
-
-**Purpose:** Sign macOS universal binaries with Apple Developer ID and extract architecture slices.
-
-**Features:**
-- Can be executed standalone or sourced for function use
-- Signs universal binaries with hardened runtime
-- Automatically extracts x86-64 and ARM64 slices using `lipo`
-- Validates certificate before signing
-
-**Standalone Execution:**
-```bash
-export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-./build/tools/macos_build/macos-sign.sh /path/to/universal-binary
-```
-
-**Sourced Usage:**
-```bash
-source ./build/tools/macos_build/macos-sign.sh
-macos_sign_binary "/path/to/universal-binary"
-macos_sign_extract_architectures "/path/to/signed-universal-binary"
-```
-
-**Functions Provided:**
-- `macos_sign_binary <path>` - Sign binary and extract slices
-- `macos_sign_universal_binary <path>` - Sign only (no extraction)
-- `macos_sign_extract_architectures <path>` - Extract slices only
+**Auto-detection:**
+- Directory ending in `.app` → bundle signing (`codesign --deep`)
+- Regular file → binary signing (`codesign`, plus lipo slice extraction if universal)
 
 **What It Does:**
 1. Validates `$MACOS_SIGN_CERT` is set
-2. Verifies certificate exists in keychain
-3. Checks binary is universal (`lipo -info`)
-4. Signs with: `codesign --force --options runtime --sign "$MACOS_SIGN_CERT"`
-5. Verifies signature: `codesign --verify --deep --strict`
-6. Extracts slices:
-   - `lipo -thin x86_64 -output <path>_osx-x86-64`
-   - `lipo -thin arm64 -output <path>_osx-arm-64`
+2. For each target:
+   - **Bundle**: Signs with `codesign --sign CERT --options runtime --timestamp --deep --force`, verifies
+   - **Binary**: Signs with `codesign --sign CERT --options runtime --timestamp --force`, verifies
+     - If universal: extracts arm64 and x86_64 slices via `lipo -thin`, verifies each
+
+**Examples:**
+```bash
+# Sign a single binary
+./macos-sign.sh build/output/meshagent_osx-universal-64
+
+# Sign a single bundle
+./macos-sign.sh build/output/osx-universal-64-app/MeshAgent.app
+
+# Sign everything at once
+./macos-sign.sh build/output/meshagent_osx-universal-64 \
+  build/output/osx-universal-64-app/MeshAgent.app \
+  build/output/osx-arm-64-app/MeshAgent.app \
+  build/output/osx-x86-64-app/MeshAgent.app
+```
 
 **Requirements:**
-- Binary must be universal (contains both x86_64 and arm64)
 - `MACOS_SIGN_CERT` environment variable must be set
 - Certificate must exist in keychain
 - Must run as actual user (not root) to access keychain
 
 ---
 
-### 3. `macos-notarize.sh`
+### 2. `macos-notarize.sh`
 
-**Purpose:** Submit universal binaries to Apple's notary service and extract architecture slices.
+**Purpose:** Submit any mix of macOS binaries and `.app` bundles to Apple's notary service.
 
-**Features:**
-- Can be executed standalone or sourced for function use
-- Creates ZIP, submits to Apple notarization
-- Waits for approval (can take 5-30 minutes)
-- Extracts architecture slices after notarization
-- Optional verbose output
-
-**Standalone Execution:**
+**Usage:**
 ```bash
-./build/tools/macos_build/macos-notarize.sh /path/to/signed-universal-binary [--verbose]
+./build/tools/macos_build/macos-notarize.sh <target> [target2] [target3] ...
 ```
 
-**Sourced Usage:**
-```bash
-source ./build/tools/macos_build/macos-notarize.sh
-macos_notarize_binary "/path/to/signed-universal-binary" [--verbose]
-macos_notarize_extract_architectures "/path/to/notarized-universal-binary"
-```
+**Auto-detection:**
+- Directory ending in `.app` → bundle (zip, submit, staple, Gatekeeper verify)
+- Regular file → binary (zip, submit, extract arch slices via lipo)
 
-**Functions Provided:**
-- `macos_notarize_binary <path> [--verbose]` - Notarize and extract slices
-- `macos_notarize_extract_architectures <path>` - Extract slices only
+**Parallelism:**
+- 1 target → sequential (`submit --wait`, then post-process)
+- 2+ targets → parallel (submit all, wait all in parallel, then post-process all)
 
-**What It Does:**
-1. Verifies `meshagent-notary` keychain profile exists
-2. Checks binary is universal
-3. Creates temporary ZIP: `ditto -c -k --keepParent`
-4. Submits to Apple: `xcrun notarytool submit --keychain-profile meshagent-notary --wait`
-5. Waits for approval (polls Apple's service)
-6. Extracts slices using `lipo`
+**Post-processing:**
+- **Bundles**: Staple notarization ticket (unless `SKIP_STAPLE=yes`), Gatekeeper verify
+- **Binaries**: Extract architecture slices via lipo (binaries cannot be stapled)
+
+**Environment Variables:**
+- `MACOS_NOTARY_PROFILE` — Keychain profile name (default: `meshagent-notary`)
+- `SKIP_STAPLE` — Set to `yes` to skip stapling (default: `no`)
 
 **Keychain Profile Setup (One-Time):**
 ```bash
@@ -248,69 +128,43 @@ xcrun notarytool store-credentials meshagent-notary \
   --password "app-specific-password"
 ```
 
+**Examples:**
+```bash
+# Notarize a single binary
+./macos-notarize.sh build/output/meshagent_osx-universal-64
+
+# Notarize a single bundle
+./macos-notarize.sh build/output/osx-universal-64-app/MeshAgent.app
+
+# Notarize everything in parallel
+./macos-notarize.sh build/output/meshagent_osx-universal-64 \
+  build/output/osx-universal-64-app/MeshAgent.app \
+  build/output/osx-arm-64-app/MeshAgent.app \
+  build/output/osx-x86-64-app/MeshAgent.app
+```
+
 **Requirements:**
-- Binary must be signed first (with `macos-sign.sh`)
-- Binary must be universal
+- All targets must be signed first (with `macos-sign.sh`)
 - `meshagent-notary` keychain profile must be configured
 - Internet connection (submits to Apple servers)
 
-**Note:** Notarization can take 5-30 minutes depending on Apple's service load.
-
 ---
 
-## Info.plist Directory
+## Info.plist Generation
 
-### `Info.plist/Info.plist.template`
+Info.plist files are generated at build time by `generate-info-plist.sh` from templates in `build/resources/Info/`:
 
-**Purpose:** Template for embedding bundle information in the macOS binary.
-
-**Contents:**
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleIdentifier</key>
-    <string>meshagent</string>
-    <key>CFBundleName</key>
-    <string>meshagent</string>
-    <key>CFBundleShortVersionString</key>
-    <string>BUILD_TIMESTAMP</string>
-</dict>
-</plist>
-```
-
-**Why It Exists:**
-
-macOS binaries benefit from embedded bundle information for:
-1. **System Integration** - Better macOS system compatibility
-2. **Version Tracking** - Embedded build timestamp in `--version` output
-3. **Bundle Identification** - Unique CFBundleIdentifier for the agent
+| Template | Mode | Used for |
+|----------|------|----------|
+| `build/resources/Info/binary/binary_Info.plist` | `--mode binary` | Embedded in standalone Mach-O binary via `-sectcreate` |
+| `build/resources/Info/bundle/app_Info.plist` | `--mode bundle` | Placed in `.app/Contents/Info.plist` by `create-app-bundle.sh` |
 
 **How It Works:**
 
-During the build process (in `makefile`):
-
-1. **Timestamp Generation:**
-   - For universal builds: timestamp generated once, shared between both architectures
-   - For single-arch builds: timestamp generated at build time
-   - Format: `YY.MM.DD.HH.MM.SS` (e.g., `25.11.13.17.27.44`)
-
-2. **Plist Creation:**
-   ```bash
-   sed "s/BUILD_TIMESTAMP/$$BUILD_TIME/g" \
-     build/tools/macos_build/Info.plist/Info.plist.template \
-     > build/tools/macos_build/Info.plist/Info.plist
-   ```
-
-3. **Embedding:**
-   - Linker flag: `-sectcreate __TEXT __info_plist build/tools/macos_build/Info.plist/Info.plist`
-   - Creates `__TEXT` segment, `__info_plist` section in Mach-O binary
-
-4. **Runtime Access:**
-   - `meshagent --version` reads embedded plist using `getsectiondata()`
-   - Parses XML using CoreFoundation
-   - Displays `CFBundleShortVersionString` value
+1. **Timestamp generation** — `generate-build-timestamp.sh` emits `BUILD_DATE` and `BUILD_TIME_ONLY` variables (format: `YY.MM.DD` / `HH.MM.SS`)
+2. **Plist generation** — `generate-info-plist.sh` substitutes placeholders (`BUNDLE_IDENTIFIER`, `BUNDLE_EXE_NAME`, `BUNDLE_DISPLAY_NAME`, `BUILD_TIMESTAMP_DATE`, `BUILD_TIMESTAMP_TIME`) in the template
+3. **Binary embedding** — Linker flag `-sectcreate __TEXT __info_plist` embeds the generated plist in the Mach-O binary
+4. **Runtime access** — `meshagent --version` reads the embedded plist via `getsectiondata()` and displays `CFBundleShortVersionString`
 
 **Verification:**
 ```bash
@@ -321,12 +175,6 @@ otool -X -s __TEXT __info_plist build/output/meshagent_osx-universal-64 | xxd -r
 ./build/output/meshagent_osx-universal-64 --version
 # Output: 25.11.13.17.27.44
 ```
-
-### `Info.plist/Info.plist`
-
-**Purpose:** Generated plist file with actual build timestamp (created during build).
-
-**Note:** This file is regenerated on every build and should **not** be committed to git. The `.template` file is the source of truth.
 
 ---
 
@@ -352,7 +200,7 @@ The code-utils build includes only:
 - `_agentNodeId.js` - Core agent identification
 - `_agentStatus.js` - Core status reporting
 - `AgentHashTool.js` - Hash utilities
-- `code-utils.js` - Polyfill compression/decompression ⭐
+- `code-utils.js` - Polyfill compression/decompression
 - `daemon.js` - Agent daemon functionality
 - `identifiers.js` - System identification
 - `promise.js` - Promise/A+ implementation
@@ -361,56 +209,27 @@ The code-utils build includes only:
 ### Building Code-Utils Binary
 
 ```bash
-cd /Users/peet/GitHub/MeshAgent_installer
-sudo ./build/tools/macos_build/macos-build_with_test.sh --code-utils --skip-sign --skip-notary
+cd /path/to/MeshAgent
+make macos ARCHID=10005 KVM=0
 ```
 
 **Output:**
-- `build/output/meshagent_code-utils_osx-universal-64`
-- `build/output/meshagent_code-utils_osx-x86-64`
-- `build/output/meshagent_code-utils_osx-arm-64`
+- `build/output/meshagent_osx-universal-64`
+- `build/output/meshagent_osx-x86-64`
+- `build/output/meshagent_osx-arm-64`
 
 ### Using Code-Utils Binary
 
-**For Polyfill Generation:**
-```bash
-./build/output/meshagent_code-utils_osx-universal-64 -exec "require('code-utils').shrink({expandedPath: './modules_expanded', filePath: './microscript/ILibDuktape_Polyfills.c'});process.exit();"
-```
+See `build/tools/code-utils/example-populate-polyfills.sh` for a working example.
 
 **Storage Location:**
 
 Code-utils binaries can be stored at:
 ```
-build/tools/code-utils/macos/meshagent_code-utils_osx-universal-64
+build/tools/code-utils/macos/meshagent_code-utils
 ```
 
-This allows them to be version-controlled and reused across builds without rebuilding.
-
-### Build Workflow with Code-Utils
-
-**Option 1: Using Pre-Built Code-Utils Binary**
-```bash
-# 1. Use existing code-utils binary to regenerate polyfills
-./build/tools/code-utils/macos/meshagent_code-utils_osx-universal-64 -exec "require('code-utils').shrink(...);"
-
-# 2. Build production agent
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh
-```
-
-**Option 2: Building Fresh Code-Utils**
-```bash
-# 1. Build code-utils binary
-sudo ./build/tools/macos_build/macos-build_with_test.sh --code-utils --skip-sign --skip-notary
-
-# 2. Copy to tools directory (optional, for reuse)
-cp build/output/meshagent_code-utils_osx-universal-64 build/tools/code-utils/macos/
-
-# 3. Use it to regenerate polyfills
-./build/output/meshagent_code-utils_osx-universal-64 -exec "require('code-utils').shrink(...);"
-
-# 4. Build production agent
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh
-```
+This allows them to be reused across builds without rebuilding.
 
 ---
 
@@ -418,36 +237,32 @@ sudo -E ./build/tools/macos_build/macos-build_with_test.sh
 
 ### Development Build (Quick Iteration)
 ```bash
-# Skip polyfills, signing, notarization for fast builds
-sudo ./build/tools/macos_build/macos-build_with_test.sh \
-  --skip-polyfills \
-  --skip-sign \
-  --skip-notary
+# No signing or notarization
+make macos ARCHID=10005
 ```
 
 ### Production Build (Full Signing + Notarization)
 ```bash
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh
+make macos ARCHID=10005 SIGN=1 NOTARIZE=1
 ```
 
 ### Architecture-Specific Builds
 ```bash
 # Intel only
-sudo ./build/tools/macos_build/macos-build_with_test.sh --archid 16 --skip-sign --skip-notary
+make macos ARCHID=16
 
 # ARM only
-sudo ./build/tools/macos_build/macos-build_with_test.sh --archid 29 --skip-sign --skip-notary
+make macos ARCHID=29
 ```
 
-### Build with Installation
+### Skip Signing for Bundles or Binaries
 ```bash
-export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh \
-  --msh-command fullinstall \
-  --msh-installPath /opt/meshagent \
-  --msh-companyName "MyCompany" \
-  --msh-meshServiceName "meshagent"
+# Sign only bundles (skip binary signing)
+make macos ARCHID=10005 SIGN=1 SKIPSIGNNOTARY=binary
+
+# Sign only binaries (skip bundle signing)
+make macos ARCHID=10005 SIGN=1 SKIPSIGNNOTARY=bundle
 ```
 
 ---
@@ -459,7 +274,7 @@ sudo -E ./build/tools/macos_build/macos-build_with_test.sh \
 **Error: "MACOS_SIGN_CERT environment variable not set"**
 ```bash
 export MACOS_SIGN_CERT="Developer ID Application: Your Name (TEAMID)"
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh
+sudo -E make macos ARCHID=10005 SIGN=1
 ```
 **Note:** The `-E` flag preserves environment variables through sudo.
 
@@ -482,29 +297,16 @@ xcrun notarytool store-credentials meshagent-notary \
 
 **Notarization Taking Too Long**
 
-Apple's notary service can take 5-30 minutes. To skip during development:
-```bash
-sudo -E ./build/tools/macos_build/macos-build_with_test.sh --skip-notary
-```
-
-### Build Issues
-
-**Error: "Code-utils meshagent not found"**
-
-Build a code-utils binary first:
-```bash
-sudo ./build/tools/macos_build/macos-build_with_test.sh --code-utils --skip-sign --skip-notary
-cp build/output/meshagent_code-utils_osx-universal-64 build/tools/meshagent/macos/meshagent
-```
+Apple's notary service can take 5-30 minutes. To skip during development, omit `NOTARIZE=1`.
 
 ---
 
 ## Additional Resources
 
-- **Main Build Script:** `/Users/peet/GitHub/MeshAgent_installer/build/tools/macos_build/macos-build_with_test.sh`
-- **Signing Script:** `/Users/peet/GitHub/MeshAgent_installer/build/tools/macos_build/macos-sign.sh`
-- **Notarization Script:** `/Users/peet/GitHub/MeshAgent_installer/build/tools/macos_build/macos-notarize.sh`
-- **Makefile:** `/Users/peet/GitHub/MeshAgent_installer/makefile`
+- **Signing Script:** `build/tools/macos_build/macos-sign.sh`
+- **Notarization Script:** `build/tools/macos_build/macos-notarize.sh`
+- **Plist Templates:** `build/resources/Info/binary/` and `build/resources/Info/bundle/`
+- **Makefile:** `makefile`
 - **Module Lists:**
-  - Full macOS modules: `/Users/peet/GitHub/MeshAgent_installer/modules/.modules_macos` (50 modules)
-  - Minimal modules: `/Users/peet/GitHub/MeshAgent_installer/modules/.modules_macos_minimal` (8 modules)
+  - Full macOS modules: `modules/.modules_macos` (50 modules)
+  - Minimal modules: `modules/.modules_macos_minimal` (8 modules)

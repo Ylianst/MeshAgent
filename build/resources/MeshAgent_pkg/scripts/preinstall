@@ -1,9 +1,0 @@
-#!/bin/bash
-
-# Remove existing MeshAgent.app from temp if it exists
-if [ -d "/private/tmp/MeshAgent.app" ]; then
-    echo "Removing existing /private/tmp/MeshAgent.app..."
-    rm -rf "/private/tmp/MeshAgent.app"
-fi
-
-exit 0
