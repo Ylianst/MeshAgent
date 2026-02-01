@@ -190,6 +190,10 @@ MESH_VER = 194
 EXENAME ?= meshagent
 BUILD_OUTPUT_DIR = build/output
 BUNDLE_DISPLAY_NAME ?= MeshAgent
+BUNDLE_ID ?= $(EXENAME)
+BUNDLE_ICON ?=
+SIGN ?= 0
+NOTARIZE ?= 0
 MODULESYNC_MODE ?= macos-only
 
 # Cross-compiler paths
@@ -859,13 +863,13 @@ macos:
 		echo "Building macOS Universal (Intel + Apple Silicon)..."; \
 		echo "Build timestamp: $$BUILD_TIME (date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY)"; \
 		echo "Generating shared binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and exe name: $(EXENAME)"; \
-		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --exe-name $(EXENAME) --display-name "$(BUNDLE_DISPLAY_NAME)" --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
+		./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id "$(BUNDLE_ID)" --exe-name $(EXENAME) --display-name "$(BUNDLE_DISPLAY_NAME)" --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		echo "Building x86-64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY EXENAME=$(EXENAME) BUNDLE_DISPLAY_NAME="$(BUNDLE_DISPLAY_NAME)" SKIP_PLIST_GEN=1; \
+		$(MAKE) macos ARCHID=16 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY EXENAME=$(EXENAME) BUNDLE_DISPLAY_NAME="$(BUNDLE_DISPLAY_NAME)" BUNDLE_ID="$(BUNDLE_ID)" BUNDLE_ICON="$(BUNDLE_ICON)" SIGN=0 NOTARIZE=0 SKIP_PLIST_GEN=1; \
 		echo "Building ARM64..."; \
 		$(MAKE) clean; \
-		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY EXENAME=$(EXENAME) BUNDLE_DISPLAY_NAME="$(BUNDLE_DISPLAY_NAME)" SKIP_PLIST_GEN=1; \
+		$(MAKE) macos ARCHID=29 BUILD_TIMESTAMP=$$BUILD_TIMESTAMP BUILD_DATE=$$BUILD_DATE BUILD_TIME_ONLY=$$BUILD_TIME_ONLY EXENAME=$(EXENAME) BUNDLE_DISPLAY_NAME="$(BUNDLE_DISPLAY_NAME)" BUNDLE_ID="$(BUNDLE_ID)" BUNDLE_ICON="$(BUNDLE_ICON)" SIGN=0 NOTARIZE=0 SKIP_PLIST_GEN=1; \
 		echo "Creating universal binary..."; \
 		lipo -create \
 			$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_osx-x86-64 \
@@ -879,11 +883,12 @@ macos:
 			./build/tools/macos_build/create-app-bundle.sh \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 \
 				"$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app" \
-				$(EXENAME) \
+				$(BUNDLE_ID) \
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY \
 				$(EXENAME) \
-				"$(BUNDLE_DISPLAY_NAME)"; \
+				"$(BUNDLE_DISPLAY_NAME)" \
+				"$(BUNDLE_ICON)"; \
 			codesign -s - --deep $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
 			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract arm64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-arm-64; \
 			lipo $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64 -extract x86_64 -output $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-x86-64; \
@@ -908,6 +913,39 @@ macos:
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64"; \
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
 				echo ""; \
+				if [ "$(SIGN)" = "1" ]; then \
+					if [ "$(SKIPSIGNNOTARY)" != "binary" ]; then \
+						echo "Signing universal binary..."; \
+						./build/tools/macos_build/macos-sign.sh $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
+					fi; \
+					if [ "$(SKIPSIGNNOTARY)" != "bundle" ]; then \
+						echo "Signing app bundles..."; \
+						./build/tools/macos_build/sign-app-bundle.sh "$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
+						./build/tools/macos_build/sign-app-bundle.sh "$(BUILD_OUTPUT_DIR)/osx-arm-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
+						./build/tools/macos_build/sign-app-bundle.sh "$(BUILD_OUTPUT_DIR)/osx-x86-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
+					fi; \
+				fi; \
+				if [ "$(NOTARIZE)" = "1" ]; then \
+					if [ "$(SKIPSIGNNOTARY)" != "binary" ]; then \
+						echo "Notarizing universal binary..."; \
+						./build/tools/macos_build/macos-notarize.sh $(BUILD_OUTPUT_DIR)/$(EXENAME)_osx-universal-64; \
+					fi; \
+					if [ "$(SKIPSIGNNOTARY)" != "bundle" ]; then \
+						echo "Notarizing app bundles (parallel)..."; \
+						./build/tools/macos_build/notarize-app-bundles.sh \
+							"$(BUILD_OUTPUT_DIR)/osx-universal-64-app/$(BUNDLE_DISPLAY_NAME).app" \
+							"$(BUILD_OUTPUT_DIR)/osx-arm-64-app/$(BUNDLE_DISPLAY_NAME).app" \
+							"$(BUILD_OUTPUT_DIR)/osx-x86-64-app/$(BUNDLE_DISPLAY_NAME).app"; \
+					fi; \
+				fi; \
+				if [ "$(SIGN)" = "1" ] || [ "$(NOTARIZE)" = "1" ]; then \
+					if [ "$(SKIPSIGNNOTARY)" != "bundle" ]; then \
+						echo "Regenerating app bundle zip archives..."; \
+						(cd $(BUILD_OUTPUT_DIR)/osx-universal-64-app && ditto -c -k --keepParent "$(BUNDLE_DISPLAY_NAME).app" ../$(EXENAME)_osx-universal-64-app.zip); \
+						(cd $(BUILD_OUTPUT_DIR)/osx-arm-64-app && ditto -c -k --keepParent "$(BUNDLE_DISPLAY_NAME).app" ../$(EXENAME)_osx-arm-64-app.zip); \
+						(cd $(BUILD_OUTPUT_DIR)/osx-x86-64-app && ditto -c -k --keepParent "$(BUNDLE_DISPLAY_NAME).app" ../$(EXENAME)_osx-x86-64-app.zip); \
+					fi; \
+				fi; \
 				echo "Cleaning up build artifact: modules_macos/"; \
 				rm -rf ./modules_macos; \
 			else \
@@ -938,7 +976,7 @@ macos:
 		fi; \
 		if [ "$(SKIP_PLIST_GEN)" != "1" ]; then \
 			echo "Generating binary Info.plist with date: $$BUILD_DATE, time: $$BUILD_TIME_ONLY and exe name: $(EXENAME)"; \
-			./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --exe-name $(EXENAME) --display-name "$(BUNDLE_DISPLAY_NAME)" --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
+			./build/tools/generate-info-plist.sh --output build/output/tmp_binary_Info.plist --bundle-id "$(BUNDLE_ID)" --exe-name $(EXENAME) --display-name "$(BUNDLE_DISPLAY_NAME)" --build-date $$BUILD_DATE --build-time $$BUILD_TIME_ONLY --mode binary; \
 		fi; \
 		$(MAKE) $(MAKEFILE) EXENAME="$(BUILD_OUTPUT_DIR)/DEBUG/$(EXENAME)_$(ARCHNAME)" ADDITIONALSOURCES="$(MACOSKVMSOURCES) $(MACOSUTILSOURCES)" CFLAGS="$(MACOSARCH) -std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_NOILIBSTACKDEBUG -D_NOHECI -DMICROSTACK_PROXY -D__APPLE__ $(CWEBLOG) -fno-strict-aliasing -fobjc-arc $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(MACOSARCH) -Wl,-w $(MACSSL) $(MACOSFLAGS) -lz -lsqlite3 -sectcreate __CGPreLoginApp __cgpreloginapp /dev/null -sectcreate __TEXT __info_plist build/output/tmp_binary_Info.plist -framework IOKit -framework ApplicationServices -framework SystemConfiguration -framework CoreServices -framework CoreGraphics -framework CoreFoundation -framework Security -framework Cocoa -fconstant-cfstrings $(LDFLAGS) $(LDEXTRA)"; \
 		if [ "$(DEBUG)" != "1" ]; then \
@@ -947,11 +985,12 @@ macos:
 			./build/tools/macos_build/create-app-bundle.sh \
 				$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) \
 				"$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app" \
-				$(EXENAME) \
+				$(BUNDLE_ID) \
 				$$BUILD_DATE \
 				$$BUILD_TIME_ONLY \
 				$(EXENAME) \
-				"$(BUNDLE_DISPLAY_NAME)"; \
+				"$(BUNDLE_DISPLAY_NAME)" \
+				"$(BUNDLE_ICON)"; \
 			codesign -s - --deep "$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app"; \
 			echo "Creating app bundle zip archive..."; \
 			(cd $(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app && ditto -c -k --keepParent "$(BUNDLE_DISPLAY_NAME).app" ../$(EXENAME)_$(ARCHNAME)-app.zip); \
@@ -972,6 +1011,29 @@ macos:
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)"; \
 				echo "$$(pwd)/$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app"; \
 				echo ""; \
+				if [ "$(SIGN)" = "1" ]; then \
+					if [ "$(SKIPSIGNNOTARY)" != "binary" ]; then \
+						echo "Signing binary..."; \
+						codesign --sign "$$MACOS_SIGN_CERT" --options runtime --timestamp --force $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME); \
+					fi; \
+					if [ "$(SKIPSIGNNOTARY)" != "bundle" ]; then \
+						echo "Signing bundle..."; \
+						./build/tools/macos_build/sign-app-bundle.sh "$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app"; \
+					fi; \
+				fi; \
+				if [ "$(NOTARIZE)" = "1" ]; then \
+					if [ "$(SKIPSIGNNOTARY)" != "binary" ]; then \
+						echo "Notarizing binary..."; \
+						NOTARIZE_ZIP="$(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME)_notarize.zip"; \
+						ditto -c -k --keepParent $(BUILD_OUTPUT_DIR)/$(EXENAME)_$(ARCHNAME) "$$NOTARIZE_ZIP"; \
+						xcrun notarytool submit "$$NOTARIZE_ZIP" --keychain-profile "$${MACOS_NOTARY_PROFILE:-meshagent-notary}" --wait; \
+						rm -f "$$NOTARIZE_ZIP"; \
+					fi; \
+					if [ "$(SKIPSIGNNOTARY)" != "bundle" ]; then \
+						echo "Notarizing bundle..."; \
+						./build/tools/macos_build/notarize-app-bundle.sh "$(BUILD_OUTPUT_DIR)/$(ARCHNAME)-app/$(BUNDLE_DISPLAY_NAME).app"; \
+					fi; \
+				fi; \
 				echo "Cleaning up build artifact: modules_macos/"; \
 				rm -rf ./modules_macos; \
 			else \
