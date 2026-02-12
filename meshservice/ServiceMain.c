@@ -143,7 +143,7 @@ void GdiPlusFlat_Init()
 	char input[24] = { 0 };
 	_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0);
 	if (_gdip == NULL) { return; }
-	_gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0);
+	_shm = LoadLibraryExW(L"Shlwapi.dll", NULL, 0);
 	if (_shm == NULL) { FreeLibrary(_gdip); _gdip = NULL; return; }
 
 	__GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromStream");
