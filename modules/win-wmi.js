@@ -247,9 +247,11 @@ function enumerateProperties(j, fields)
         OleAut32.SafeArrayAccessData(nme.Deref(), nn);
 
 
-        for (var i = 0; i < len - 1; ++i)
+        for (var i = 0; i < len; ++i)
         {
-            properties.push(nn.Deref().increment(i * GM.PointerSize).Deref().Wide2UTF8);
+            var propName = nn.Deref().increment(i * GM.PointerSize).Deref().Wide2UTF8;
+            if (propName.length === 0) { continue; }
+            properties.push(propName);
         }
     }
 
@@ -264,47 +266,98 @@ function enumerateProperties(j, fields)
             // https://learn.microsoft.com/en-us/windows/win32/api/wbemcli/nf-wbemcli-iwbemclassobject-get
             //
 
-            switch (tmp1.toBuffer().readUInt16LE())
+            var vartype = tmp1.toBuffer().readUInt16LE();
+            var isArray = (vartype & 0x2000) != 0;  // VT_ARRAY flag
+            var baseType = vartype & 0x0FFF;
+
+            if (isArray)
             {
-                case 0x0000:    // VT_EMPTY
-                case 0x0001:    // VT_NULL
-                    values[properties[i]] = null;
-                    break;
-                case 0x0002:    // VT_I2
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt16LE();
-                    break;
-                case 0x0003:    // VT_I4
-                case 0x0016:    // VT_INT
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt32LE();
-                    break;
-                case 0x000B:    // VT_BOOL
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt32LE() != 0;
-                    break;
-                case 0x000E:    // VT_DECIMAL
-                    break;
-                case 0x0010:    // VT_I1
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt8();
-                    break;
-                case 0x0011:    // VT_UI1
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt8();
-                    break;
-                case 0x0012:    // VT_UI2
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt16LE();
-                    break;
-                case 0x0013:    // VT_UI4
-                case 0x0017:    // VT_UINT
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt32LE();
-                    break;
-                //case 0x0014:    // VT_I8
-                //    break;
-                //case 0x0015:    // VT_UI8
-                //    break;
-                case 0x0008:    // VT_BSTR
-                    values[properties[i]] = tmp1.Deref(8, GM.PointerSize).Deref().Wide2UTF8;
-                    break;
-                default:
-                    console.info1('VARTYPE: ' + tmp1.toBuffer().readUInt16LE());
-                    break;
+                // Handle array types (VT_ARRAY | base type)
+                var safeArray = tmp1.Deref(8, GM.PointerSize).Deref();
+                var arrayLength = safeArray.Deref(GM.PointerSize == 8 ? 24 : 16, 4).toBuffer().readUInt32LE();
+                var arrayData = GM.CreatePointer();
+                OleAut32.SafeArrayAccessData(safeArray, arrayData);
+                
+                var arrayValues = [];
+                for (var k = 0; k < arrayLength; ++k)
+                {
+                    switch (baseType)
+                    {
+                        case 0x0002:    // VT_I2
+                            arrayValues.push(arrayData.Deref().Deref(k * 2, 2).toBuffer().readInt16LE());
+                            break;
+                        case 0x0003:    // VT_I4
+                        case 0x0016:    // VT_INT
+                            arrayValues.push(arrayData.Deref().Deref(k * 4, 4).toBuffer().readInt32LE());
+                            break;
+                        case 0x000B:    // VT_BOOL
+                            arrayValues.push(arrayData.Deref().Deref(k * 2, 2).toBuffer().readInt16LE() != 0);
+                            break;
+                        case 0x0010:    // VT_I1
+                            arrayValues.push(arrayData.Deref().Deref(k, 1).toBuffer().readInt8());
+                            break;
+                        case 0x0011:    // VT_UI1
+                            arrayValues.push(arrayData.Deref().Deref(k, 1).toBuffer().readUInt8());
+                            break;
+                        case 0x0012:    // VT_UI2
+                            arrayValues.push(arrayData.Deref().Deref(k * 2, 2).toBuffer().readUInt16LE());
+                            break;
+                        case 0x0013:    // VT_UI4
+                        case 0x0017:    // VT_UINT
+                            arrayValues.push(arrayData.Deref().Deref(k * 4, 4).toBuffer().readUInt32LE());
+                            break;
+                        case 0x0008:    // VT_BSTR
+                            arrayValues.push(arrayData.Deref().Deref(k * GM.PointerSize, GM.PointerSize).Deref().Wide2UTF8);
+                            break;
+                    }
+                }
+                values[properties[i]] = arrayValues;
+            }
+            else
+            {
+                // Handle scalar types
+                switch (vartype)
+                {
+                    case 0x0000:    // VT_EMPTY
+                    case 0x0001:    // VT_NULL
+                        values[properties[i]] = null;
+                        break;
+                    case 0x0002:    // VT_I2
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt16LE();
+                        break;
+                    case 0x0003:    // VT_I4
+                    case 0x0016:    // VT_INT
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt32LE();
+                        break;
+                    case 0x000B:    // VT_BOOL
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt32LE() != 0;
+                        break;
+                    case 0x000E:    // VT_DECIMAL
+                        break;
+                    case 0x0010:    // VT_I1
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readInt8();
+                        break;
+                    case 0x0011:    // VT_UI1
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt8();
+                        break;
+                    case 0x0012:    // VT_UI2
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt16LE();
+                        break;
+                    case 0x0013:    // VT_UI4
+                    case 0x0017:    // VT_UINT
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).toBuffer().readUInt32LE();
+                        break;
+                    //case 0x0014:    // VT_I8
+                    //    break;
+                    //case 0x0015:    // VT_UI8
+                    //    break;
+                    case 0x0008:    // VT_BSTR
+                        values[properties[i]] = tmp1.Deref(8, GM.PointerSize).Deref().Wide2UTF8;
+                        break;
+                    default:
+                        console.info1('VARTYPE: ' + vartype);
+                        break;
+                }
             }
         }
     }
