@@ -141,11 +141,9 @@ void GdiPlusFlat_Init()
 	BOOL _ok = InitCommonControlsEx(&icex);
 
 	char input[24] = { 0 };
-	_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
-	if (_gdip == NULL) { _gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0); }
+	_gdip = LoadLibraryExW(L"Gdiplus.dll", NULL, 0);
 	if (_gdip == NULL) { return; }
-	_shm = LoadLibraryExW(L"Shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
-	if (_shm == NULL) { _gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0); }
+	_gdip = LoadLibraryExW(L"Shlwapi.dll", NULL, 0);
 	if (_shm == NULL) { FreeLibrary(_gdip); _gdip = NULL; return; }
 
 	__GdipCreateBitmapFromStream = (_GdipCreateBitmapFromStream)GetProcAddress(_gdip, (LPCSTR)"GdipCreateBitmapFromStream");
