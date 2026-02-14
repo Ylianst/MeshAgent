@@ -127,6 +127,7 @@ function windows_monitorborder()
             }, 450);
         });
     }
+	this.Start();
 }
 
 function linux_monitorborder()
@@ -313,6 +314,7 @@ function linux_monitorborder()
         }
         self._timeout = setTimeout(self._isUnity ? self.unity_drawBorder : self.timeoutHandler, 400);
     }
+	this.Start();
 }
 
 switch(process.platform)
