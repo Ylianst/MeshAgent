@@ -216,7 +216,7 @@ function windows_notifybar_system(title, tsid, options)
     var ret = {};
     if (!options) { options = {}; }
 
-    var script = Buffer.from("require('notifybar-desktop').DefaultPinned=" + require('notifybar-desktop').DefaultPinned + ";require('notifybar-desktop')('" + title + "', " + JSON.stringify(options) + ").on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
+    var script = Buffer.from("require('notifybar-desktop').DefaultPinned=" + require('notifybar-desktop').DefaultPinned + ";require('notifybar-desktop').MaxWidth=" + require('notifybar-desktop').MaxWidth + ";require('notifybar-desktop')('" + title + "', " + JSON.stringify(options) + ").on('close', function(){process._exit();});require('DescriptorEvents').addDescriptor(require('util-descriptors').getProcessHandle(" + process.pid + ")).on('signaled', function(){process._exit();});").toString('base64');
 
     require('events').EventEmitter.call(ret, true)
         .createEvent('close')
@@ -267,15 +267,28 @@ function windows_notifybar_local(title, bar_options)
         {
             monWidth = (m[i].right - m[i].left);
             monHeight = (m[i].bottom - m[i].top);
-            barWidth = Math.floor(monWidth * 0.30);
-            barHeight = Math.floor(monHeight * 0.035);
-            if (m[i].dpi != null)
-            {
+			
+            if (m[i].dpi == null) {
+                barWidth = Math.floor(monWidth * 0.30);
+                barHeight = Math.floor(monHeight * 0.035);
+            } else {
                 barHeight = Math.floor(m[i].dpi / 3);
                 barWidth = Math.floor(m[i].dpi * 9);
                 if (barWidth > monWidth) { barWidth = monWidth; }
                 if (barWidth > (monWidth * 0.45)) { barWidth = monWidth * 0.45; }
             }
+
+			// Maximum bar width override
+            if (module.exports.MaxWidth > 0) {
+                if (barWidth > module.exports.MaxWidth) {
+                    if (m[i].dpi != null) {
+                        barWidth = Math.floor(module.exports.MaxWidth * m[i].dpi / 96);
+                    } else {
+                        barWidth = module.exports.MaxWidth;
+                    }
+                }
+            }
+
             console.info1('Monitor: ' + i + ' = Width[' + (m[i].right - m[i].left) + '] BarHeight[' + barHeight + '] BarWidth[' + barWidth + ']');
 
             offset = Math.floor(monWidth * 0.50) - Math.floor(barWidth * 0.50);
@@ -678,6 +691,7 @@ switch(process.platform)
         module.exports.system = windows_notifybar_system;
         module.exports.RGB = RGB;
         module.exports.DefaultPinned = true;
+        module.exports.MaxWidth = 0;
         break;
     case 'linux':
     case 'freebsd':
