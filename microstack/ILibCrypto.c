@@ -34,6 +34,9 @@ limitations under the License.
 #include <openssl/rand.h>
 #include <openssl/err.h>
 #include <openssl/hmac.h>
+#ifdef _POSIX
+#include <sys/stat.h>
+#endif
 #else
 #ifdef WIN32
 void BCRYPT_INIT(BCRYPT_CTX* ctx, void* alg)
