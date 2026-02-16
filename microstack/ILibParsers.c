@@ -1036,8 +1036,7 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 		size_t originalRawSize = ILibMemory_Init_Size(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
 		size_t originalSize = ILibMemory_Size(ptr);
 		size_t originalExtraSize = ILibMemory_ExtraSize(ptr);
-		if (originalExtraSize)
-			len = (len + sizeof(void *) - 1) & -sizeof(void *);
+		if (originalExtraSize) { len = (len + sizeof(void *) - 1) & ~(sizeof(void *) - 1); }
 		size_t newRawSize = ILibMemory_Init_Size(len, originalExtraSize);
 
 		if (newRawSize < originalRawSize && originalExtraSize > 0)
@@ -1097,7 +1096,7 @@ void* ILibMemory_SmartAllocateEx_ResizeExtra(void *ptr, size_t newExtraSize)
 void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType)
 {
 	if (ptr == NULL) { ILIBCRITICALEXIT(254); }
-	if (extraSize) primarySize = (primarySize + sizeof(void *) - 1) & -sizeof(void *);
+	if (extraSize) primarySize = (primarySize + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
 	memset(ptr, 0, primarySize + extraSize + sizeof(ILibMemory_Header) + (extraSize > 0 ? sizeof(ILibMemory_Header) : 0));
 
 	void *primary = ILibMemory_FromRaw(ptr);
