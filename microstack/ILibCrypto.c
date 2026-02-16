@@ -550,6 +550,8 @@ int __fastcall util_load_system_certs(SSL_CTX *ctx)
     		char dest[1024] = {0};
 
     		FILE *output;
+			// Running "openssl version -d" should give us the directory of the locally installed openssl. We can then use that directory to load the certs from that distribution.
+			// However, this could be a security risk as we are running "openssl" as root.
     		if ((output = popen("openssl version -d", "r")) == NULL) {
 		        return -1;
 		    }
@@ -580,7 +582,6 @@ int __fastcall util_load_system_certs(SSL_CTX *ctx)
 		}
 	#endif
 	return 0;
-
 }
 
 // Add extension using V3 code: we can set the config file as NULL because we wont reference any other sections.
