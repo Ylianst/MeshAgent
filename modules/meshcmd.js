@@ -133,6 +133,7 @@ function run(argv) {
     if (args.nocommander) { settings.noconsole = true; }
     if (args.lmsdebug) { settings.lmsdebug = true; }
     if (args.tls) { settings.tls = true; }
+    if (args.validatewebcert) { settings.validatewebcert = true; }
     if ((argv.length > 1) && (actions.indexOf(argv[1].toUpperCase()) >= 0)) { settings.action = argv[1]; }
 
     // Validate meshaction.txt
@@ -623,7 +624,7 @@ function startMeshCommander() {
                 } else {
                     // If TLS is going to be used, setup a TLS socket
                     var tls = require('tls');
-                    var tlsoptions = { host: webargs.host, port: webargs.port, secureProtocol: ((webargs.tls1only == 1) ? 'TLSv1_method' : 'SSLv23_method'), rejectUnauthorized: false };
+                    var tlsoptions = { host: webargs.host, port: webargs.port, secureProtocol: ((webargs.tls1only == 1) ? 'TLSv1_method' : 'SSLv23_method'), rejectUnauthorized: settings.validatewebcert == true };
                     ws.forwardclient = tls.connect(tlsoptions, function () { this.pipe(this.ws, { end: false }); this.ws.pipe(this, { end: false }); });
                     ws.forwardclient.ws = ws;
                 }
@@ -1394,7 +1395,7 @@ function OnTcpClientConnected(c) {
             options = http.parseUri(settings.serverurl + '?user=' + settings.username + '&pass=' + settings.password + '&nodeid=' + settings.remotenodeid + '&tcpport=' + settings.remoteport);
         } catch (e) { console.log('Unable to parse \"serverUrl\".'); process.exit(1); return; }
         options.checkServerIdentity = onVerifyServer;
-        options.rejectUnauthorized = false;
+        options.rejectUnauthorized = settings.validatewebcert == true;
         c.websocket = http.request(options);
         c.websocket.tcp = c;
         c.websocket.tunneling = false;

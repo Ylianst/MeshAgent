@@ -153,7 +153,7 @@ require('MeshAgent').AddCommandHandler(function (data)
                             var xurl = getServerTargetUrlEx(data.value);
                             if (xurl != null) {
                                 var woptions = http.parseUri(xurl);
-                                woptions.rejectUnauthorized = 0;
+                                woptions.rejectUnauthorized = global._MSH && (global._MSH().validateWebCert === "true");
                                 //sendConsoleText(JSON.stringify(woptions));
                                 var tunnel = http.request(woptions);
                                 tunnel.on('upgrade', function (response, s, head)

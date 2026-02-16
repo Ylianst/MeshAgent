@@ -145,7 +145,7 @@ typedef void(*ILibWebClient_OnDisconnect)(ILibWebClient_StateObject sender, ILib
 
 #ifndef MICROSTACK_NOTLS
 typedef int(*ILibWebClient_OnSslConnection)(ILibWebClient_StateObject sender, STACK_OF(X509) *certs, struct sockaddr_in6 *address, void *user);
-typedef int(*ILibWebClient_OnHttpsConnection)(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address);
+typedef int(*ILibWebClient_OnHttpsConnection)(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address, void *data);
 #endif
 
 //
@@ -273,7 +273,7 @@ typedef enum ILibWebClient_RequestToken_HTTPS
 
 #ifndef MICROSTACK_NOTLS
 void ILibWebClient_SetTLS(ILibWebClient_RequestManager manager, void *ssl_ctx, ILibWebClient_OnSslConnection OnSslConnection);
-int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_cert* leafCert, X509* nonLeafCert, ILibWebClient_OnHttpsConnection OnHttpsConnection);
+int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_cert* leafCert, X509* nonLeafCert, ILibWebClient_OnHttpsConnection OnHttpsConnection, void* OnHttpsConnectionData);
 void ILibWebClient_Request_SetHTTPS(ILibWebClient_RequestToken reqToken, ILibWebClient_RequestToken_HTTPS requestMode);
 void ILibWebClient_Request_SetSNI(ILibWebClient_RequestToken reqToken, char *host, int hostLen);
 #endif

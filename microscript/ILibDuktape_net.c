@@ -2107,7 +2107,7 @@ int ILibDuktape_TLS_verify(int preverify_ok, X509_STORE_CTX *storectx)
 
 	duk_push_heapptr(data->ctx, data->object);												// [Socket]
 	duk_get_prop_string(data->ctx, -1, ILibDuktape_SOCKET2OPTIONS);							// [Socket][Options]
-	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1)) { duk_pop_2(data->ctx); return(preverify_ok); }
+	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1) && preverify_ok != 1) { duk_pop_2(data->ctx); return(preverify_ok); }
 	void *OnVerify = Duktape_GetHeapptrProperty(data->ctx, -1, "checkServerIdentity");
 	if (OnVerify == NULL) { duk_pop_2(data->ctx); return(1); }
 
@@ -2137,7 +2137,7 @@ int ILibDuktape_TLS_server_verify(int preverify_ok, X509_STORE_CTX *storectx)
 
 	duk_push_heapptr(data->ctx, data->self);													// [Server]
 	duk_get_prop_string(data->ctx, -1, ILibDuktape_SERVER2OPTIONS);								// [Server][Options]
-	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1)) { duk_pop_2(data->ctx); return(preverify_ok); }
+	if (Duktape_GetBooleanProperty(data->ctx, -1, "rejectUnauthorized", 1) && preverify_ok != 1) { duk_pop_2(data->ctx); return(preverify_ok); }
 	void *OnVerify = Duktape_GetHeapptrProperty(data->ctx, -1, "checkClientIdentity");
 
 	if (OnVerify == NULL) { return(1); }
@@ -2701,6 +2701,8 @@ duk_ret_t ILibDuktape_TLS_createSecureContext(duk_context *ctx)
 		SSL_CTX_use_certificate(ssl_ctx, cert->x509);
 		SSL_CTX_use_PrivateKey(ssl_ctx, cert->pkey);
 	}
+
+	util_load_system_certs(ssl_ctx);
 
 	return(1);
 }
