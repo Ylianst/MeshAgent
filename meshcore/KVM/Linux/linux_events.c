@@ -137,6 +137,12 @@ static struct keymap_t g_keymap[] = {
 
 void MouseAction(double absX, double absY, int button, short wheel, Display *display)
 {
+	if (kvm_events_evdev_is_active())
+	{
+		kvm_events_evdev_mouse_action(absX, absY, button, wheel);
+		return;
+	}
+
 	if (change_display) {
 		return;
 	}
@@ -204,6 +210,11 @@ void KeyAction(unsigned char vk, int up, Display *display)
 	unsigned int keycode = 0;
 	if (up == 4) { up = 0; }
 
+	if (kvm_events_evdev_is_active())
+	{
+		kvm_events_evdev_key_action(vk, up);
+		return;
+	}
 
 	if (up && (vk == 0x14 || vk == 0x90 || vk == 0x91))
 	{
@@ -265,6 +276,12 @@ void KeyAction(unsigned char vk, int up, Display *display)
 }
 void KeyActionUnicode_UNMAP_ALL(Display *display)
 {
+	if (kvm_events_evdev_is_active())
+	{
+		UNREFERENCED_PARAMETER(display);
+		return;
+	}
+
 	int i;
 	for (i = 0; i < g_keyboardMapCount; ++i)
 	{
@@ -278,6 +295,13 @@ void KeyActionUnicode_UNMAP_ALL(Display *display)
 }
 void KeyActionUnicode(uint16_t unicode, int up, Display *display)
 {
+	if (kvm_events_evdev_is_active())
+	{
+		UNREFERENCED_PARAMETER(display);
+		kvm_events_evdev_key_action_unicode(unicode, up);
+		return;
+	}
+
 	if (change_display) { return; }
 
 	if (up == 0)
