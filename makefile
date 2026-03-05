@@ -7,12 +7,12 @@
 # Then do "make -j8" and get the resulting file /.libs/libturbojpeg.a
 #
 #
-# To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext and jpeg. To install, do this:
+# To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext, egl, drm and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libegl1-mesa-dev libdrm-dev pkg-config
 #
 #	Using YUM:
-#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel
+#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel mesa-libEGL-devel libdrm-devel pkgconf
 #
 #	NOTE: If you install headers for jpeg8, you need to put the compiled .a in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
 #		eg: make linux ARCHID=6 JPEGVER=v80
