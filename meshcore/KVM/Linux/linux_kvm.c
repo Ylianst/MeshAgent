@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 #include "linux_kvm.h"
+#include "linux_kvm_wayland.h"
+#include "linux_kvm_drm.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibAsyncSocket.h"
@@ -22,6 +24,7 @@ limitations under the License.
 #include "microstack/ILibProcessPipe.h"
 #include <sys/wait.h>
 #include <limits.h>
+#include <stdint.h>
 #include <time.h>
 
 #include <sys/ipc.h>
@@ -447,6 +450,13 @@ int lockfileCheckFn(const struct dirent *ent) {
 void getAvailableDisplays(unsigned short **array, int *len) 
 {
 	int i;
+	if (g_kvmBackendDRM != 0)
+	{
+		*len = 1;
+		if ((*array = (unsigned short*)malloc(sizeof(unsigned short))) == NULL) ILIBCRITICALEXIT(254);
+		(*array)[0] = 0;
+		return;
+	}
 	*len = x11_exports->XScreenCount(eventdisplay);
 	if ((*array = (unsigned short *)malloc((*len) * sizeof(unsigned short))) == NULL) ILIBCRITICALEXIT(254);
 	for (i = 0; i < (*len); ++i)
@@ -648,6 +658,9 @@ int kvm_init(int displayNo)
 
 void CheckDesktopSwitch(int checkres)
 {
+	UNREFERENCED_PARAMETER(checkres);
+	if (g_kvmBackendDRM != 0) { return; }
+
 	if (change_display) 
 	{
 		if (logFile) { fprintf(logFile, "kvm_init(%d) checkDesktopSwitch\n", CURRENT_DISPLAY_ID);  fflush(logFile); }
@@ -768,6 +781,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_SET_DISPLAY:
 		{
+			if (g_kvmBackendDRM != 0)
+			{
+				CURRENT_DISPLAY_ID = 0;
+				change_display = 0;
+				break;
+			}
 			if (ntohs(((unsigned short*)(block))[2]) == CURRENT_DISPLAY_ID) { break; } // Don't do anything
 			CURRENT_DISPLAY_ID = ntohs(((unsigned short*)(block))[2]);
 			change_display = 1;
@@ -948,8 +967,10 @@ void kvm_server_sighandler(int signum, siginfo_t *info, void *context)
 {
 	g_shutdown = 1;
 }
-void* kvm_server_mainloop(void* parm)
+
+void* kvm_server_mainloop_x11(void* parm)
 {
+	int sessionUid = (int)(intptr_t)parm;
 	int maxsleep;
 	Window rr, cr;
 	int rx, ry, wx, wy, rs;
@@ -979,6 +1000,8 @@ void* kvm_server_mainloop(void* parm)
 	XEvent XE;
 
 	unsigned short currentDisplayId = 0;
+
+	if (sessionUid != 0) { ignore_result(setuid((uid_t)sessionUid)); }
 
 	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)
@@ -1357,6 +1380,18 @@ void* kvm_server_mainloop(void* parm)
 	return (void*)0;
 }
 
+void* kvm_server_mainloop(void* parm)
+{
+	int sessionUid = (int)(intptr_t)parm;
+	kvm_screenreader_mode_t screenreaderMode = kvm_screenreader_mode_for_uid(sessionUid);
+	if (screenreaderMode == KVM_SCREENREADER_MODE_DRM)
+	{
+		if (logFile) { fprintf(logFile, "Using DRM KVM backend\n"); fflush(logFile); }
+		return kvm_server_mainloop_drm(parm);
+	}
+	return kvm_server_mainloop_x11(parm);
+}
+
 void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t bufferLen, size_t* bytesConsumed)
 {
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
@@ -1463,7 +1498,6 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		close(master2slave[1]);
 
 		if (SLAVELOG != 0) { logFile = fopen("/tmp/slave", "w"); }
-		if (uid != 0) { ignore_result(setuid(uid)); }
 
 		if (g_ILibCrashDump_path != NULL)
 		{
@@ -1482,7 +1516,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
-		kvm_server_mainloop((void*)0);
+		kvm_server_mainloop((void*)(intptr_t)uid);
 		exit(0);
 		return(NULL);
 	}

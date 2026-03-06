@@ -46,6 +46,7 @@ limitations under the License.
 #ifdef _POSIX
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #ifdef _OPENBSD
@@ -58,13 +59,14 @@ int gRemoteMouseRenderDefault = 0;
 	#ifdef WIN32
 		#include "KVM/Windows/kvm.h"
 	#endif
-	#ifdef _POSIX
-		#ifndef __APPLE__
-			#include "KVM/Linux/linux_kvm.h"
-		#else
-			#include "KVM/MacOS/mac_kvm.h"
+		#ifdef _POSIX
+			#ifndef __APPLE__
+				#include "KVM/Linux/linux_kvm.h"
+				#include "KVM/Linux/linux_kvm_wayland.h"
+			#else
+				#include "KVM/MacOS/mac_kvm.h"
+			#endif
 		#endif
-	#endif
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -1350,12 +1352,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
-		char *xdm = NULL;
+		int waylandSession = kvm_is_wayland_session_for_uid(console_uid);
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);
 
-		if (self==0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
+		if (!waylandSession && (self == 0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL))
 		{
 			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
@@ -1366,15 +1368,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
-						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", "");
-
-						if (strcmp(xdm, "xwayland") == 0)
-						{
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This platform is configured to use Xwayland");
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "please modify config to use Xorg");
-							duk_pop(ctx);
-							return(1);
-						}
 
 						if (console_uid != 0 && updateXAuth == NULL)
 						{
@@ -4351,8 +4344,10 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 }
 
 #ifndef MICROSTACK_NOTLS
-int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address, MeshAgentHostContainer *agent)
+int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address, void *user)
 {
+	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
+
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "validateWebCert", ILibScratchPad, sizeof(ILibScratchPad));
 	// Values here are 0 terminated, but the 0 is counted in size, so add one to the length check.
 	if ((len == 2 && strncmp("1", ILibScratchPad, 1) == 0) ||
