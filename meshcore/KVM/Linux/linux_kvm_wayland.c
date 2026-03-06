@@ -19,6 +19,7 @@ limitations under the License.
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -27,6 +28,62 @@ limitations under the License.
 // meshagent is usually running as a root daemon. If simply running in the context of a
 // regular user in a desktop session, then you could just check one or two environment
 // variables.
+
+// Once the agent has positively identified a Wayland-backed console, keep using the
+// DRM/libevdev path for the remainder of the process lifetime.
+//
+// Without this stickyness, the following sequence ends up erroneously switching us back to X11:
+// 1. Login as userX
+// 2. Connect mesh remote desktop
+// 3. Logout from userX (switching back to greeter)
+// 4. Disconnect mesh, and reconnect mesh remote desktop.
+// 5. Agent is now in X11 mode...
+// The above sequence was reproducible on Ubuntu 25.10
+static int g_kvmWaylandSticky = 0;
+
+static int kvm_read_systemd_value(const char *path, const char *key, char *value, size_t valueLen)
+{
+	FILE *f = NULL;
+	char line[512];
+	size_t keyLen = 0;
+
+	if (path == NULL || key == NULL || value == NULL || valueLen == 0) { return 0; }
+	f = fopen(path, "r");
+	if (f == NULL) { return 0; }
+	keyLen = strlen(key);
+	while (fgets(line, sizeof(line), f) != NULL)
+	{
+		if (strncmp(line, key, keyLen) == 0)
+		{
+			char *tmp = line + keyLen;
+			tmp[strcspn(tmp, "\r\n")] = 0;
+			snprintf(value, valueLen, "%s", tmp);
+			fclose(f);
+			return 1;
+		}
+	}
+	fclose(f);
+	return 0;
+}
+
+static int kvm_active_seat0_session_is_wayland(void)
+{
+	char activeSession[64];
+	char type[64];
+	char seatPath[PATH_MAX];
+	int len = 0;
+
+	memset(activeSession, 0, sizeof(activeSession));
+	memset(type, 0, sizeof(type));
+	if (!kvm_read_systemd_value("/run/systemd/seats/seat0", "ACTIVE=", activeSession, sizeof(activeSession))) { return 0; }
+	if (activeSession[0] == 0) { return 0; }
+
+	len = snprintf(seatPath, sizeof(seatPath), "/run/systemd/sessions/%s", activeSession);
+	if (len <= 0 || len >= (int)sizeof(seatPath)) { return 0; }
+	if (!kvm_read_systemd_value(seatPath, "TYPE=", type, sizeof(type))) { return 0; }
+
+	return strcasecmp(type, "wayland") == 0 ? 1 : 0;
+}
 
 static int kvm_wayland_socket_exists(const char *runtimeDir, const char *socketName)
 {
@@ -55,23 +112,35 @@ int kvm_is_wayland_session_for_uid(int uid)
 		fallbackUid = (int)getuid();
 	}
 
+	if (g_kvmWaylandSticky != 0)
+	{
+		return 1;
+	}
+
 	if ((sessionType != NULL && strcasecmp(sessionType, "wayland") == 0) ||
 		(waylandDisplay != NULL && waylandDisplay[0] != 0))
 	{
+		g_kvmWaylandSticky = 1;
+		return 1;
+	}
+
+	if (kvm_active_seat0_session_is_wayland())
+	{
+		g_kvmWaylandSticky = 1;
 		return 1;
 	}
 
 	if (runtimeDir != NULL)
 	{
-		if (waylandDisplay != NULL && kvm_wayland_socket_exists(runtimeDir, waylandDisplay)) { return 1; }
-		if (kvm_wayland_socket_exists(runtimeDir, "wayland-0") || kvm_wayland_socket_exists(runtimeDir, "wayland-1")) { return 1; }
+		if (waylandDisplay != NULL && kvm_wayland_socket_exists(runtimeDir, waylandDisplay)) { g_kvmWaylandSticky = 1; return 1; }
+		if (kvm_wayland_socket_exists(runtimeDir, "wayland-0") || kvm_wayland_socket_exists(runtimeDir, "wayland-1")) { g_kvmWaylandSticky = 1; return 1; }
 	}
 
 	len = snprintf(fallbackRuntimeDir, sizeof(fallbackRuntimeDir), "/run/user/%d", fallbackUid);
 	if (len > 0 && len < (int)sizeof(fallbackRuntimeDir))
 	{
-		if (waylandDisplay != NULL && kvm_wayland_socket_exists(fallbackRuntimeDir, waylandDisplay)) { return 1; }
-		if (kvm_wayland_socket_exists(fallbackRuntimeDir, "wayland-0") || kvm_wayland_socket_exists(fallbackRuntimeDir, "wayland-1")) { return 1; }
+		if (waylandDisplay != NULL && kvm_wayland_socket_exists(fallbackRuntimeDir, waylandDisplay)) { g_kvmWaylandSticky = 1; return 1; }
+		if (kvm_wayland_socket_exists(fallbackRuntimeDir, "wayland-0") || kvm_wayland_socket_exists(fallbackRuntimeDir, "wayland-1")) { g_kvmWaylandSticky = 1; return 1; }
 	}
 
 	return 0;
