@@ -17,6 +17,7 @@ limitations under the License.
 #include "linux_kvm_drm.h"
 #include "linux_kvm_drm_egl.h"
 #include "linux_kvm.h"
+#include "linux_kvm_rotated.h"
 #include "linux_compression.h"
 #include "linux_tile.h"
 #include "meshcore/meshdefines.h"
@@ -250,6 +251,7 @@ typedef struct kvm_drm_scanout_frame
 	uint32_t format;
 	uint32_t handle;
 	uint64_t modifier;
+	kvm_drm_rotation rotation;
 } kvm_drm_scanout_frame;
 
 static uint32_t kvm_drm_get_plane_fb_id(int fd, uint32_t crtc_id, int crtc_index);
@@ -302,7 +304,7 @@ static void kvm_drm_debug_log_scanout_frame(const char *prefix, const kvm_drm_sc
 
 	kvm_drm_format_fourcc(format, sizeof(format), frame->format);
 	fprintf(stderr,
-		"DRM: %s fb_id=%u size=%ux%u pitch=%u offset=%u format=%s modifier=0x%016" PRIx64 " handle=%u\n",
+		"DRM: %s fb_id=%u size=%ux%u pitch=%u offset=%u format=%s modifier=0x%016" PRIx64 " handle=%u rotation=%s\n",
 		(prefix != NULL) ? prefix : "scanout",
 		frame->fb_id,
 		frame->width,
@@ -311,7 +313,8 @@ static void kvm_drm_debug_log_scanout_frame(const char *prefix, const kvm_drm_sc
 		frame->offset,
 		format,
 		frame->modifier,
-		frame->handle);
+		frame->handle,
+		kvm_drm_rotation_name(frame->rotation));
 }
 
 static void kvm_drm_close_gem_handle(int fd, uint32_t handle)
@@ -693,6 +696,7 @@ static bool kvm_drm_refresh_output_on_fd(int fd, kvm_drm_output *current, bool r
 static bool kvm_drm_open_device_with_output(const char *explicit_device, int *out_fd, kvm_drm_output *out, char *out_error, size_t out_error_size)
 {
 	int i;
+
 	if (explicit_device != NULL && explicit_device[0] != 0)
 	{
 		int fd = open(explicit_device, O_RDWR | KVM_DRM_O_CLOEXEC | O_NONBLOCK);
@@ -789,6 +793,16 @@ static uint32_t kvm_drm_get_plane_fb_id(int fd, uint32_t crtc_id, int crtc_index
 	return best_fb_id;
 }
 
+static kvm_drm_rotation kvm_drm_get_scanout_rotation()
+{
+	kvm_drm_rotation forced = KVM_DRM_ROTATION_0;
+	if (kvm_drm_get_forced_rotation(&forced, drm_debug))
+	{
+		return forced;
+	}
+	return KVM_DRM_ROTATION_0;
+}
+
 static uint32_t kvm_drm_get_scanout_fb_id(int fd, uint32_t crtc_id, int crtc_index, bool *out_have_crtc, bool *out_used_plane_fb)
 {
 	drmModeCrtc *crtc = drmModeGetCrtc(fd, crtc_id);
@@ -824,6 +838,8 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 	bool have_crtc = false;
 	bool used_plane_fb = false;
 	uint32_t fb_id = kvm_drm_get_scanout_fb_id(fd, crtc_id, crtc_index, &have_crtc, &used_plane_fb);
+
+	out->rotation = KVM_DRM_ROTATION_0;
 
 	if (!have_crtc)
 	{
@@ -894,6 +910,7 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 			{
 				out->fb_id = fb_id;
 				out->handle = fb2->handles[0];
+				out->rotation = kvm_drm_get_scanout_rotation();
 				drmModeFreeFB2(fb2);
 				return true;
 			}
@@ -920,6 +937,7 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 		out->modifier = DRM_FORMAT_MOD_LINEAR;
 	}
 	out->handle = fb->handle;
+	out->rotation = kvm_drm_get_scanout_rotation();
 	drmModeFreeFB(fb);
 	return true;
 }
@@ -1251,6 +1269,17 @@ static bool kvm_drm_convert_to_rgb24(const kvm_drm_scanout_frame *f, const uint8
 	return true;
 }
 
+static void kvm_drm_get_rotated_dimensions(const kvm_drm_scanout_frame *frame, uint32_t *out_width, uint32_t *out_height)
+{
+	*out_width = frame->width;
+	*out_height = frame->height;
+	if (frame->rotation == KVM_DRM_ROTATION_90 || frame->rotation == KVM_DRM_ROTATION_270)
+	{
+		*out_width = frame->height;
+		*out_height = frame->width;
+	}
+}
+
 static uint64_t kvm_drm_now_ms()
 {
 	struct timespec tsNow;
@@ -1405,6 +1434,8 @@ void *kvm_server_mainloop_drm(void *parm)
 	kvm_drm_egl_context eglCtx;
 	unsigned char *rgbBuffer = NULL;
 	size_t rgbBufferSize = 0;
+	unsigned char *rgbRotatedBuffer = NULL;
+	size_t rgbRotatedBufferSize = 0;
 	char *desktopBuffer = NULL;
 	long long desktopBufferSize = 0;
 	uint32_t lastLoggedFbId = 0;
@@ -1416,6 +1447,7 @@ void *kvm_server_mainloop_drm(void *parm)
 	uint32_t lastLoggedHandle = 0;
 	uint64_t lastLoggedModifier = UINT64_MAX;
 	int lastLoggedPath = -1;
+	int lastLoggedRotation = -1;
 	memset(&output, 0, sizeof(output));
 	memset(&map, 0, sizeof(map));
 	memset(&eglCtx, 0, sizeof(eglCtx));
@@ -1539,6 +1571,7 @@ void *kvm_server_mainloop_drm(void *parm)
 					kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
 						&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
 						&lastLoggedModifier, &lastLoggedPath);
+					lastLoggedRotation = -1;
 					if (drm_debug)
 					{
 						fprintf(stderr, "DRM: Scanout unavailable on %s, waiting for the display to resume\n", output.connector_name);
@@ -1605,7 +1638,8 @@ void *kvm_server_mainloop_drm(void *parm)
 			 frame.pitch != lastLoggedPitch ||
 			 frame.offset != lastLoggedOffset ||
 			 frame.format != lastLoggedFormat ||
-			 frame.modifier != lastLoggedModifier))
+			 frame.modifier != lastLoggedModifier ||
+			 (int)frame.rotation != lastLoggedRotation))
 		{
 			kvm_drm_debug_log_scanout_frame("Using scanout framebuffer", &frame);
 			lastLoggedWidth = frame.width;
@@ -1614,27 +1648,33 @@ void *kvm_server_mainloop_drm(void *parm)
 			lastLoggedOffset = frame.offset;
 			lastLoggedFormat = frame.format;
 			lastLoggedModifier = frame.modifier;
+			lastLoggedRotation = (int)frame.rotation;
 		}
 
-		if (SCREEN_WIDTH != (int)frame.width || SCREEN_HEIGHT != (int)frame.height)
 		{
-			int oldTileHeightCount = TILE_HEIGHT_COUNT;
-			SCREEN_WIDTH = (int)frame.width;
-			SCREEN_HEIGHT = (int)frame.height;
-			TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
-			TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
-			if (SCREEN_WIDTH % TILE_WIDTH)
+			uint32_t effectiveWidth = 0;
+			uint32_t effectiveHeight = 0;
+			kvm_drm_get_rotated_dimensions(&frame, &effectiveWidth, &effectiveHeight);
+			if (SCREEN_WIDTH != (int)effectiveWidth || SCREEN_HEIGHT != (int)effectiveHeight)
 			{
-				TILE_WIDTH_COUNT++;
+				int oldTileHeightCount = TILE_HEIGHT_COUNT;
+				SCREEN_WIDTH = (int)effectiveWidth;
+				SCREEN_HEIGHT = (int)effectiveHeight;
+				TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
+				TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
+				if (SCREEN_WIDTH % TILE_WIDTH)
+				{
+					TILE_WIDTH_COUNT++;
+				}
+				if (SCREEN_HEIGHT % TILE_HEIGHT)
+				{
+					TILE_HEIGHT_COUNT++;
+				}
+				kvm_send_resolution();
+				kvm_send_display();
+				reset_tile_info(oldTileHeightCount);
+				forceTileReset = 0;
 			}
-			if (SCREEN_HEIGHT % TILE_HEIGHT)
-			{
-				TILE_HEIGHT_COUNT++;
-			}
-			kvm_send_resolution();
-			kvm_send_display();
-			reset_tile_info(oldTileHeightCount);
-			forceTileReset = 0;
 		}
 
 		if (!displayListSent)
@@ -1702,20 +1742,38 @@ void *kvm_server_mainloop_drm(void *parm)
 		lastCaptureError = 0;
 		nFramesConverted++;
 
-		if (g_tileInfo == NULL)
 		{
-			reset_tile_info(0);
-			forceTileReset = 0;
-		}
-		else if (forceTileReset)
-		{
-			reset_tile_info(TILE_HEIGHT_COUNT);
-			forceTileReset = 0;
-		}
+			const unsigned char *rgbFrame = rgbBuffer;
+			size_t rgbFrameSize = rgbSize;
 
-		if (kvm_drm_send_dirty_tiles(rgbBuffer, rgbSize, &desktopBuffer, &desktopBufferSize) != 0)
-		{
-			g_shutdown = 1;
+			if (frame.rotation != KVM_DRM_ROTATION_0)
+			{
+				if (rgbRotatedBufferSize < rgbSize)
+				{
+					unsigned char *tmp = (unsigned char *)realloc(rgbRotatedBuffer, rgbSize);
+					if (tmp == NULL) ILIBCRITICALEXIT(254);
+					rgbRotatedBuffer = tmp;
+					rgbRotatedBufferSize = rgbSize;
+				}
+				kvm_drm_rotate_rgb24(rgbBuffer, frame.width, frame.height, frame.rotation, rgbRotatedBuffer);
+				rgbFrame = rgbRotatedBuffer;
+			}
+
+			if (g_tileInfo == NULL)
+			{
+				reset_tile_info(0);
+				forceTileReset = 0;
+			}
+			else if (forceTileReset)
+			{
+				reset_tile_info(TILE_HEIGHT_COUNT);
+				forceTileReset = 0;
+			}
+
+			if (kvm_drm_send_dirty_tiles(rgbFrame, rgbFrameSize, &desktopBuffer, &desktopBufferSize) != 0)
+			{
+				g_shutdown = 1;
+			}
 		}
 	}
 
@@ -1736,6 +1794,11 @@ void *kvm_server_mainloop_drm(void *parm)
 	{
 		free(rgbBuffer);
 		rgbBuffer = NULL;
+	}
+	if (rgbRotatedBuffer != NULL)
+	{
+		free(rgbRotatedBuffer);
+		rgbRotatedBuffer = NULL;
 	}
 	kvm_drm_destroy_map(&map);
 	kvm_drm_egl_destroy_context(&eglCtx);
