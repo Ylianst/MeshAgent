@@ -1353,6 +1353,8 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
 		int waylandSession = kvm_is_wayland_session_for_uid(console_uid);
+		//printf("ILibDuktape_MeshAgent_getRemoteDesktop: waylandSession = %d, console_uid = %d\n", waylandSession, console_uid);
+		//fflush(stdout);
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);

@@ -237,6 +237,7 @@ typedef struct kvm_drm_frame_map
 	uint8_t *addr;
 	size_t size;
 	int dma_fd;
+	int drm_fd;
 } kvm_drm_frame_map;
 
 typedef struct kvm_drm_scanout_frame
@@ -250,6 +251,9 @@ typedef struct kvm_drm_scanout_frame
 	uint32_t handle;
 	uint64_t modifier;
 } kvm_drm_scanout_frame;
+
+static uint32_t kvm_drm_get_plane_fb_id(int fd, uint32_t crtc_id, int crtc_index);
+static uint32_t kvm_drm_get_scanout_fb_id(int fd, uint32_t crtc_id, int crtc_index, bool *out_have_crtc, bool *out_used_plane_fb);
 
 static void kvm_drm_copy_error_message(char *dst, size_t dst_size, const char *src)
 {
@@ -310,6 +314,81 @@ static void kvm_drm_debug_log_scanout_frame(const char *prefix, const kvm_drm_sc
 		frame->handle);
 }
 
+static void kvm_drm_close_gem_handle(int fd, uint32_t handle)
+{
+	struct drm_gem_close closeReq;
+
+	if (fd < 0 || handle == 0)
+	{
+		return;
+	}
+
+	memset(&closeReq, 0, sizeof(closeReq));
+	closeReq.handle = handle;
+	if (drmIoctl(fd, DRM_IOCTL_GEM_CLOSE, &closeReq) != 0 && drm_debug)
+	{
+		fprintf(stderr, "DRM: DRM_IOCTL_GEM_CLOSE failed for handle=%u (errno=%d)\n", handle, errno);
+	}
+}
+
+static void kvm_drm_reset_logged_scanout_state(uint32_t *lastLoggedFbId,
+	uint32_t *lastLoggedWidth,
+	uint32_t *lastLoggedHeight,
+	uint32_t *lastLoggedPitch,
+	uint32_t *lastLoggedOffset,
+	uint32_t *lastLoggedFormat,
+	uint32_t *lastLoggedHandle,
+	uint64_t *lastLoggedModifier,
+	int *lastLoggedPath)
+{
+	if (lastLoggedFbId != NULL) { *lastLoggedFbId = 0; }
+	if (lastLoggedWidth != NULL) { *lastLoggedWidth = 0; }
+	if (lastLoggedHeight != NULL) { *lastLoggedHeight = 0; }
+	if (lastLoggedPitch != NULL) { *lastLoggedPitch = 0; }
+	if (lastLoggedOffset != NULL) { *lastLoggedOffset = 0; }
+	if (lastLoggedFormat != NULL) { *lastLoggedFormat = 0; }
+	if (lastLoggedHandle != NULL) { *lastLoggedHandle = 0; }
+	if (lastLoggedModifier != NULL) { *lastLoggedModifier = UINT64_MAX; }
+	if (lastLoggedPath != NULL) { *lastLoggedPath = -1; }
+}
+
+static bool kvm_drm_same_output(const kvm_drm_output *a, const kvm_drm_output *b)
+{
+	if (a == NULL || b == NULL)
+	{
+		return false;
+	}
+
+	return a->connector_id == b->connector_id &&
+		a->crtc_id == b->crtc_id &&
+		a->crtc_index == b->crtc_index &&
+		strcmp(a->device_path, b->device_path) == 0;
+}
+
+static bool kvm_drm_is_transient_scanout_error(const char *err)
+{
+	if (err == NULL)
+	{
+		return false;
+	}
+
+	return strcmp(err, "Active CRTC has no framebuffer") == 0 ||
+		strcmp(err, "drmModeGetCrtc failed") == 0;
+}
+
+static bool kvm_drm_is_expected_suspended_refresh_error(const char *err)
+{
+	static const char *noOutputPrefix = "No connected display with active CRTC on ";
+
+	if (err == NULL)
+	{
+		return false;
+	}
+
+	return strcmp(err, "No active DRM framebuffer available yet") == 0 ||
+		strncmp(err, noOutputPrefix, strlen(noOutputPrefix)) == 0;
+}
+
 static const char *kvm_drm_connector_type_name(uint32_t t)
 {
 	switch (t)
@@ -363,10 +442,15 @@ static void kvm_drm_destroy_map(kvm_drm_frame_map *map)
 	{
 		close(map->dma_fd);
 	}
+	if (map->handle != 0)
+	{
+		kvm_drm_close_gem_handle(map->drm_fd, map->handle);
+	}
 	map->handle = 0;
 	map->addr = NULL;
 	map->size = 0;
 	map->dma_fd = -1;
+	map->drm_fd = -1;
 }
 
 static bool kvm_drm_map_framebuffer_handle(int fd, uint32_t handle, size_t min_size, kvm_drm_frame_map *map, char *out_error, size_t out_error_size)
@@ -389,6 +473,7 @@ static bool kvm_drm_map_framebuffer_handle(int fd, uint32_t handle, size_t min_s
 			map->handle = handle;
 			map->addr = (uint8_t *)ptr;
 			map->size = min_size;
+			map->drm_fd = fd;
 			return true;
 		}
 	}
@@ -403,6 +488,7 @@ static bool kvm_drm_map_framebuffer_handle(int fd, uint32_t handle, size_t min_s
 			map->addr = (uint8_t *)ptr;
 			map->size = min_size;
 			map->dma_fd = dma_fd;
+			map->drm_fd = fd;
 			return true;
 		}
 		close(dma_fd);
@@ -462,7 +548,7 @@ static uint32_t kvm_drm_pick_crtc_for_connector(int fd, const drmModeRes *res, c
 	return 0;
 }
 
-static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_output *out, char *out_error, size_t out_error_size)
+static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_output *out, bool logSelection, char *out_error, size_t out_error_size)
 {
 	drmModeRes *res = drmModeGetResources(fd);
 	if (res == NULL)
@@ -472,6 +558,9 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 	}
 
 	bool found = false;
+	bool foundWithScanout = false;
+	kvm_drm_output fallback;
+	memset(&fallback, 0, sizeof(fallback));
 	int i;
 	for (i = 0; i < res->count_connectors; ++i)
 	{
@@ -510,31 +599,95 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 			continue;
 		}
 
-		snprintf(out->device_path, sizeof(out->device_path), "%s", path);
-		snprintf(out->connector_name, sizeof(out->connector_name), "%s-%u", kvm_drm_connector_type_name(conn->connector_type), conn->connector_type_id);
-		out->connector_id = conn->connector_id;
-		out->crtc_id = crtc_id;
-		out->crtc_index = crtc_index;
-		if (drm_debug)
+		kvm_drm_output candidate;
+		memset(&candidate, 0, sizeof(candidate));
+		snprintf(candidate.device_path, sizeof(candidate.device_path), "%s", path);
+		snprintf(candidate.connector_name, sizeof(candidate.connector_name), "%s-%u", kvm_drm_connector_type_name(conn->connector_type), conn->connector_type_id);
+		candidate.connector_id = conn->connector_id;
+		candidate.crtc_id = crtc_id;
+		candidate.crtc_index = crtc_index;
+
+		if (!found)
 		{
-			fprintf(stderr, "DRM: Selected output %s on %s (connector=%u crtc=%u index=%d)\n",
-				out->connector_name, out->device_path, out->connector_id, out->crtc_id, out->crtc_index);
+			fallback = candidate;
+			found = true;
 		}
 
-		found = true;
+		if (kvm_drm_get_scanout_fb_id(fd, crtc_id, crtc_index, NULL, NULL) != 0)
+		{
+			*out = candidate;
+			foundWithScanout = true;
+			drmModeFreeConnector(conn);
+			break;
+		}
+
 		drmModeFreeConnector(conn);
-		break;
 	}
 
 	drmModeFreeResources(res);
 
-	if (!found)
+	if (foundWithScanout)
+	{
+		if (drm_debug && logSelection)
+		{
+			fprintf(stderr, "DRM: Selected output %s on %s (connector=%u crtc=%u index=%d)\n",
+				out->connector_name, out->device_path, out->connector_id, out->crtc_id, out->crtc_index);
+		}
+		return true;
+	}
+
+	if (found)
+	{
+		*out = fallback;
+		if (drm_debug && logSelection)
+		{
+			fprintf(stderr, "DRM: Selected output %s on %s (connector=%u crtc=%u index=%d, waiting for scanout)\n",
+				out->connector_name, out->device_path, out->connector_id, out->crtc_id, out->crtc_index);
+		}
+		return true;
+	}
+
 	{
 		char err[KVM_DRM_MAX_ERROR];
 		snprintf(err, sizeof(err), "No connected display with active CRTC on %s", path);
 		kvm_drm_copy_error_message(out_error, out_error_size, err);
 	}
-	return found;
+	return false;
+}
+
+static bool kvm_drm_refresh_output_on_fd(int fd, kvm_drm_output *current, bool require_scanout, char *out_error, size_t out_error_size)
+{
+	kvm_drm_output refreshed;
+	memset(&refreshed, 0, sizeof(refreshed));
+	if (current == NULL)
+	{
+		kvm_drm_copy_error_message(out_error, out_error_size, "Current DRM output is null");
+		return false;
+	}
+
+	if (!kvm_drm_find_active_output_on_fd(fd, current->device_path, &refreshed, false, out_error, out_error_size))
+	{
+		return false;
+	}
+
+	if (require_scanout && kvm_drm_get_scanout_fb_id(fd, refreshed.crtc_id, refreshed.crtc_index, NULL, NULL) == 0)
+	{
+		kvm_drm_copy_error_message(out_error, out_error_size, "No active DRM framebuffer available yet");
+		return false;
+	}
+
+	if (drm_debug && !kvm_drm_same_output(current, &refreshed))
+	{
+		fprintf(stderr, "DRM: Switched output from %s/%u to %s/%u on %s\n",
+			current->connector_name,
+			current->crtc_id,
+			refreshed.connector_name,
+			refreshed.crtc_id,
+			refreshed.device_path);
+	}
+
+	*current = refreshed;
+	return true;
 }
 
 static bool kvm_drm_open_device_with_output(const char *explicit_device, int *out_fd, kvm_drm_output *out, char *out_error, size_t out_error_size)
@@ -550,7 +703,7 @@ static bool kvm_drm_open_device_with_output(const char *explicit_device, int *ou
 			kvm_drm_copy_error_message(out_error, out_error_size, err);
 			return false;
 		}
-		if (kvm_drm_find_active_output_on_fd(fd, explicit_device, out, out_error, out_error_size))
+		if (kvm_drm_find_active_output_on_fd(fd, explicit_device, out, true, out_error, out_error_size))
 		{
 			*out_fd = fd;
 			return true;
@@ -568,7 +721,7 @@ static bool kvm_drm_open_device_with_output(const char *explicit_device, int *ou
 		{
 			continue;
 		}
-		if (kvm_drm_find_active_output_on_fd(fd, path, out, out_error, out_error_size))
+		if (kvm_drm_find_active_output_on_fd(fd, path, out, true, out_error, out_error_size))
 		{
 			*out_fd = fd;
 			return true;
@@ -636,30 +789,55 @@ static uint32_t kvm_drm_get_plane_fb_id(int fd, uint32_t crtc_id, int crtc_index
 	return best_fb_id;
 }
 
-static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, kvm_drm_scanout_frame *out, char *out_error, size_t out_error_size)
+static uint32_t kvm_drm_get_scanout_fb_id(int fd, uint32_t crtc_id, int crtc_index, bool *out_have_crtc, bool *out_used_plane_fb)
 {
 	drmModeCrtc *crtc = drmModeGetCrtc(fd, crtc_id);
+	uint32_t fb_id = 0;
+
+	if (out_have_crtc != NULL) { *out_have_crtc = false; }
+	if (out_used_plane_fb != NULL) { *out_used_plane_fb = false; }
+
 	if (crtc == NULL)
 	{
-		kvm_drm_copy_error_message(out_error, out_error_size, "drmModeGetCrtc failed");
-		return false;
+		return 0;
 	}
 
-	uint32_t fb_id = crtc->buffer_id;
+	if (out_have_crtc != NULL) { *out_have_crtc = true; }
+
+	fb_id = crtc->buffer_id;
 	drmModeFreeCrtc(crtc);
 
 	if (fb_id == 0)
 	{
 		fb_id = kvm_drm_get_plane_fb_id(fd, crtc_id, crtc_index);
-		if (drm_debug && fb_id != 0)
+		if (fb_id != 0 && out_used_plane_fb != NULL)
 		{
-			fprintf(stderr, "DRM: CRTC %u has no direct buffer_id, using plane framebuffer %u\n", crtc_id, fb_id);
+			*out_used_plane_fb = true;
 		}
+	}
+
+	return fb_id;
+}
+
+static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, kvm_drm_scanout_frame *out, char *out_error, size_t out_error_size)
+{
+	bool have_crtc = false;
+	bool used_plane_fb = false;
+	uint32_t fb_id = kvm_drm_get_scanout_fb_id(fd, crtc_id, crtc_index, &have_crtc, &used_plane_fb);
+
+	if (!have_crtc)
+	{
+		kvm_drm_copy_error_message(out_error, out_error_size, "drmModeGetCrtc failed");
+		return false;
 	}
 	if (fb_id == 0)
 	{
 		kvm_drm_copy_error_message(out_error, out_error_size, "Active CRTC has no framebuffer");
 		return false;
+	}
+	if (drm_debug && used_plane_fb)
+	{
+		fprintf(stderr, "DRM: CRTC %u has no direct buffer_id, using plane framebuffer %u\n", crtc_id, fb_id);
 	}
 
 	bool have_fb2_meta = false;
@@ -673,7 +851,7 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 			++planeCount;
 		}
 
-		if (drm_debug)
+		if (drm_debug >= 2)
 		{
 			char format[32];
 			kvm_drm_format_fourcc(format, sizeof(format), fb2->pixel_format);
@@ -1186,6 +1364,11 @@ void *kvm_server_mainloop_drm(void *parm)
 	uint64_t lastFrameTimeMs = 0;
 	int lastCaptureError = 0;
 	int64_t nFramesConverted = 0;
+	int scanoutSuspended = 0;
+	int forceTileReset = 0;
+	uint64_t lastOutputRefreshMs = 0;
+	uint64_t lastRefreshFailureLogMs = 0;
+	char lastRefreshFailure[KVM_DRM_MAX_ERROR];
 
 	g_kvmBackendDRM = 1;
 	g_enableEvents = kvm_events_evdev_init();
@@ -1236,7 +1419,9 @@ void *kvm_server_mainloop_drm(void *parm)
 	memset(&output, 0, sizeof(output));
 	memset(&map, 0, sizeof(map));
 	memset(&eglCtx, 0, sizeof(eglCtx));
+	memset(lastRefreshFailure, 0, sizeof(lastRefreshFailure));
 	map.dma_fd = -1;
+	map.drm_fd = -1;
 
 	char *explicitDevice = getenv("MESH_KVM_DRM_DEVICE");
 	if (!kvm_drm_open_device_with_output(explicitDevice, &fd, &output, err, sizeof(err)))
@@ -1343,12 +1528,65 @@ void *kvm_server_mainloop_drm(void *parm)
 
 		if (!kvm_drm_get_scanout_frame(fd, output.crtc_id, output.crtc_index, &frame, err, sizeof(err)))
 		{
+			if (kvm_drm_is_transient_scanout_error(err))
+			{
+				if (!scanoutSuspended)
+				{
+					scanoutSuspended = 1;
+					forceTileReset = 1;
+					kvm_drm_destroy_map(&map);
+					kvm_drm_egl_destroy_context(&eglCtx);
+					kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
+						&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
+						&lastLoggedModifier, &lastLoggedPath);
+					if (drm_debug)
+					{
+						fprintf(stderr, "DRM: Scanout unavailable on %s, waiting for the display to resume\n", output.connector_name);
+					}
+					lastRefreshFailure[0] = 0;
+					lastRefreshFailureLogMs = 0;
+				}
+
+				if (lastOutputRefreshMs == 0 || nowMs - lastOutputRefreshMs >= 250)
+				{
+					char refreshErr[KVM_DRM_MAX_ERROR];
+					if (kvm_drm_refresh_output_on_fd(fd, &output, true, refreshErr, sizeof(refreshErr)))
+					{
+						lastRefreshFailure[0] = 0;
+						lastRefreshFailureLogMs = 0;
+					}
+					else if (drm_debug && !kvm_drm_is_expected_suspended_refresh_error(refreshErr) &&
+						(lastRefreshFailure[0] == 0 ||
+						 strcmp(lastRefreshFailure, refreshErr) != 0 ||
+						 nowMs - lastRefreshFailureLogMs >= 5000))
+					{
+						fprintf(stderr, "DRM: Output refresh while scanout is suspended failed: %s\n", refreshErr);
+						kvm_drm_copy_error_message(lastRefreshFailure, sizeof(lastRefreshFailure), refreshErr);
+						lastRefreshFailureLogMs = nowMs;
+					}
+					lastOutputRefreshMs = nowMs;
+				}
+				continue;
+			}
+
 			if (lastCaptureError == 0)
 			{
 				kvm_send_error(err);
 				lastCaptureError = 1;
 			}
 			continue;
+		}
+
+		if (scanoutSuspended)
+		{
+			scanoutSuspended = 0;
+			lastOutputRefreshMs = 0;
+			lastRefreshFailure[0] = 0;
+			lastRefreshFailureLogMs = 0;
+			if (drm_debug)
+			{
+				fprintf(stderr, "DRM: Scanout resumed on %s\n", output.connector_name);
+			}
 		}
 
 		if (frame.handle == 0 || frame.width == 0 || frame.height == 0)
@@ -1362,23 +1600,19 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 
 		if (drm_debug &&
-			(frame.fb_id != lastLoggedFbId ||
-			 frame.width != lastLoggedWidth ||
+			(frame.width != lastLoggedWidth ||
 			 frame.height != lastLoggedHeight ||
 			 frame.pitch != lastLoggedPitch ||
 			 frame.offset != lastLoggedOffset ||
 			 frame.format != lastLoggedFormat ||
-			 frame.handle != lastLoggedHandle ||
 			 frame.modifier != lastLoggedModifier))
 		{
 			kvm_drm_debug_log_scanout_frame("Using scanout framebuffer", &frame);
-			lastLoggedFbId = frame.fb_id;
 			lastLoggedWidth = frame.width;
 			lastLoggedHeight = frame.height;
 			lastLoggedPitch = frame.pitch;
 			lastLoggedOffset = frame.offset;
 			lastLoggedFormat = frame.format;
-			lastLoggedHandle = frame.handle;
 			lastLoggedModifier = frame.modifier;
 		}
 
@@ -1400,6 +1634,7 @@ void *kvm_server_mainloop_drm(void *parm)
 			kvm_send_resolution();
 			kvm_send_display();
 			reset_tile_info(oldTileHeightCount);
+			forceTileReset = 0;
 		}
 
 		if (!displayListSent)
@@ -1429,12 +1664,15 @@ void *kvm_server_mainloop_drm(void *parm)
 			converted = kvm_drm_egl_convert_to_rgb24_gpu(&eglCtx, fd, frame.width, frame.height, frame.pitch,
 														 frame.offset, frame.format, frame.handle, frame.modifier,
 														 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+			kvm_drm_close_gem_handle(fd, frame.handle);
+			frame.handle = 0;
 		}
 		else
 		{
 			size_t required_bytes = (size_t)frame.offset + ((size_t)frame.pitch * (size_t)frame.height);
 			if (!kvm_drm_map_framebuffer_handle(fd, frame.handle, required_bytes, &map, err, sizeof(err)))
 			{
+				kvm_drm_close_gem_handle(fd, frame.handle);
 				converted = false;
 			}
 			else
@@ -1467,6 +1705,12 @@ void *kvm_server_mainloop_drm(void *parm)
 		if (g_tileInfo == NULL)
 		{
 			reset_tile_info(0);
+			forceTileReset = 0;
+		}
+		else if (forceTileReset)
+		{
+			reset_tile_info(TILE_HEIGHT_COUNT);
+			forceTileReset = 0;
 		}
 
 		if (kvm_drm_send_dirty_tiles(rgbBuffer, rgbSize, &desktopBuffer, &desktopBufferSize) != 0)

@@ -1461,6 +1461,10 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	int r;
 	int count = 0;
 	ILibProcessPipe_Pipe slave_out;
+	//printf("KVM: Restarting the KVM session for uid %d...\n", uid);
+	//if (authToken != NULL) { printf("KVM: Using XAuthToken: %s\n", authToken); }
+	//if (dispid != NULL) { printf("KVM: Using DisplayId: %s\n", dispid); }
+	//fflush(stdout);
 
 	if (g_slavekvm != 0) 
 	{
