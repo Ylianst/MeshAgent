@@ -17,12 +17,14 @@ limitations under the License.
 #include "linux_kvm_drm_egl.h"
 #include "meshcore/meshdefines.h"
 
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #if defined(__linux__)
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <drm_fourcc.h>
@@ -54,9 +56,63 @@ static void kvm_drm_egl_copy_error_message(char *dst, size_t dst_size, const cha
 
 #if defined(__linux__)
 
+static void kvm_drm_egl_format_fourcc(char *dst, size_t dst_size, uint32_t format)
+{
+	char code[5];
+	int i;
+
+	if (dst == NULL || dst_size == 0)
+	{
+		return;
+	}
+
+	for (i = 0; i < 4; ++i)
+	{
+		unsigned char ch = (unsigned char)((format >> (i * 8)) & 0xFFu);
+		code[i] = (char)((ch >= 32 && ch <= 126) ? ch : '.');
+	}
+	code[4] = '\0';
+	snprintf(dst, dst_size, "%s/0x%08X", code, format);
+}
+
 static void kvm_drm_egl_format_egl_error(char *dst, size_t dst_size, const char *prefix, EGLint err)
 {
 	snprintf(dst, dst_size, "%s: 0x%04x", prefix, (unsigned int)err);
+}
+
+static const char *kvm_drm_egl_gl_error_name(GLenum err)
+{
+	switch (err)
+	{
+	case GL_INVALID_ENUM:
+		return "GL_INVALID_ENUM";
+	case GL_INVALID_VALUE:
+		return "GL_INVALID_VALUE";
+	case GL_INVALID_OPERATION:
+		return "GL_INVALID_OPERATION";
+	case GL_INVALID_FRAMEBUFFER_OPERATION:
+		return "GL_INVALID_FRAMEBUFFER_OPERATION";
+	case GL_OUT_OF_MEMORY:
+		return "GL_OUT_OF_MEMORY";
+	default:
+		return "GL_UNKNOWN_ERROR";
+	}
+}
+
+static bool kvm_drm_egl_check_gl_error(const char *stage, char *out_error, size_t out_error_size)
+{
+	GLenum err = glGetError();
+	if (err == GL_NO_ERROR)
+	{
+		return true;
+	}
+
+	snprintf(out_error, out_error_size, "%s failed: %s (0x%04x)",
+		stage,
+		kvm_drm_egl_gl_error_name(err),
+		(unsigned int)err);
+	while (glGetError() != GL_NO_ERROR) {}
+	return false;
 }
 
 static bool kvm_drm_egl_fail_with_persistent_error(kvm_drm_egl_context *g, char *out_error, size_t out_error_size, const char *msg)
@@ -135,6 +191,11 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, char *out_erro
 		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglInitialize failed", eglGetError());
 		return kvm_drm_egl_fail_with_persistent_error(g, out_error, out_error_size, err);
 	}
+	fprintf(stderr, "DRM EGL: Initialized EGL %d.%d vendor=%s version=%s\n",
+		(int)major,
+		(int)minor,
+		eglQueryString(g->dpy, EGL_VENDOR) != NULL ? eglQueryString(g->dpy, EGL_VENDOR) : "unknown",
+		eglQueryString(g->dpy, EGL_VERSION) != NULL ? eglQueryString(g->dpy, EGL_VERSION) : "unknown");
 
 	if (!eglBindAPI(EGL_OPENGL_ES_API))
 	{
@@ -369,7 +430,9 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	int dmabuf_fd = -1;
 	if (drmPrimeHandleToFD(drm_fd, handle, KVM_DRM_EGL_CLOEXEC | DRM_RDWR, &dmabuf_fd) != 0 || dmabuf_fd < 0)
 	{
-		kvm_drm_egl_copy_error_message(out_error, out_error_size, "drmPrimeHandleToFD failed for GPU path");
+		char msg[KVM_DRM_EGL_MAX_ERROR];
+		snprintf(msg, sizeof(msg), "drmPrimeHandleToFD failed for GPU path (handle=%u errno=%d)", handle, errno);
+		kvm_drm_egl_copy_error_message(out_error, out_error_size, msg);
 		return false;
 	}
 
@@ -401,7 +464,13 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	if (image == EGL_NO_IMAGE_KHR)
 	{
 		char err[KVM_DRM_EGL_MAX_ERROR];
-		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglCreateImageKHR(dma-buf) failed", eglGetError());
+		char formatName[32];
+		kvm_drm_egl_format_fourcc(formatName, sizeof(formatName), format);
+		snprintf(err, sizeof(err),
+			"eglCreateImageKHR(dma-buf) failed for %s modifier=0x%016" PRIx64 ": 0x%04x",
+			formatName,
+			modifier,
+			(unsigned int)eglGetError());
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
 		return false;
 	}
@@ -414,8 +483,21 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	ctx->glEGLImageTargetTexture2DOESFn(GL_TEXTURE_2D, (GLeglImageOES)image);
+	if (!kvm_drm_egl_check_gl_error("glEGLImageTargetTexture2DOES", out_error, out_error_size))
+	{
+		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
+		glDeleteTextures(1, &src_tex);
+		return false;
+	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, ctx->fbo);
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
+		glDeleteTextures(1, &src_tex);
+		kvm_drm_egl_copy_error_message(out_error, out_error_size, "GPU readback framebuffer became incomplete");
+		return false;
+	}
 	glViewport(0, 0, (GLsizei)width, (GLsizei)height);
 	glUseProgram(ctx->program);
 	glActiveTexture(GL_TEXTURE0);
@@ -430,6 +512,12 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	glDisableVertexAttribArray((GLuint)ctx->attr_pos);
 	glDisableVertexAttribArray((GLuint)ctx->attr_tex);
 	glFinish();
+	if (!kvm_drm_egl_check_gl_error("GPU draw/readback pass", out_error, out_error_size))
+	{
+		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
+		glDeleteTextures(1, &src_tex);
+		return false;
+	}
 
 	const size_t rgba_size = (size_t)width * (size_t)height * 4u;
 	if (ctx->rgba_readback_cap < rgba_size)
@@ -447,6 +535,12 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	}
 
 	glReadPixels(0, 0, (GLsizei)width, (GLsizei)height, GL_RGBA, GL_UNSIGNED_BYTE, ctx->rgba_readback);
+	if (!kvm_drm_egl_check_gl_error("glReadPixels", out_error, out_error_size))
+	{
+		ctx->eglDestroyImageKHRFn(ctx->dpy, image);
+		glDeleteTextures(1, &src_tex);
+		return false;
+	}
 
 	ctx->eglDestroyImageKHRFn(ctx->dpy, image);
 	glDeleteTextures(1, &src_tex);

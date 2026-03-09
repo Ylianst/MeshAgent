@@ -268,6 +268,48 @@ static void kvm_drm_copy_error_message(char *dst, size_t dst_size, const char *s
 	dst[n] = 0;
 }
 
+static void kvm_drm_format_fourcc(char *dst, size_t dst_size, uint32_t format)
+{
+	char code[5];
+	int i;
+
+	if (dst == NULL || dst_size == 0)
+	{
+		return;
+	}
+
+	for (i = 0; i < 4; ++i)
+	{
+		unsigned char ch = (unsigned char)((format >> (i * 8)) & 0xFFu);
+		code[i] = (char)((ch >= 32 && ch <= 126) ? ch : '.');
+	}
+	code[4] = 0;
+	snprintf(dst, dst_size, "%s/0x%08X", code, format);
+}
+
+static void kvm_drm_debug_log_scanout_frame(const char *prefix, const kvm_drm_scanout_frame *frame)
+{
+	char format[32];
+
+	if (!drm_debug || frame == NULL)
+	{
+		return;
+	}
+
+	kvm_drm_format_fourcc(format, sizeof(format), frame->format);
+	fprintf(stderr,
+		"DRM: %s fb_id=%u size=%ux%u pitch=%u offset=%u format=%s modifier=0x%016" PRIx64 " handle=%u\n",
+		(prefix != NULL) ? prefix : "scanout",
+		frame->fb_id,
+		frame->width,
+		frame->height,
+		frame->pitch,
+		frame->offset,
+		format,
+		frame->modifier,
+		frame->handle);
+}
+
 static const char *kvm_drm_connector_type_name(uint32_t t)
 {
 	switch (t)
@@ -473,6 +515,11 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 		out->connector_id = conn->connector_id;
 		out->crtc_id = crtc_id;
 		out->crtc_index = crtc_index;
+		if (drm_debug)
+		{
+			fprintf(stderr, "DRM: Selected output %s on %s (connector=%u crtc=%u index=%d)\n",
+				out->connector_name, out->device_path, out->connector_id, out->crtc_id, out->crtc_index);
+		}
 
 		found = true;
 		drmModeFreeConnector(conn);
@@ -604,6 +651,10 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 	if (fb_id == 0)
 	{
 		fb_id = kvm_drm_get_plane_fb_id(fd, crtc_id, crtc_index);
+		if (drm_debug && fb_id != 0)
+		{
+			fprintf(stderr, "DRM: CRTC %u has no direct buffer_id, using plane framebuffer %u\n", crtc_id, fb_id);
+		}
 	}
 	if (fb_id == 0)
 	{
@@ -615,6 +666,44 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 	drmModeFB2 *fb2 = drmModeGetFB2(fd, fb_id);
 	if (fb2 != NULL)
 	{
+		int planeCount = 1;
+		while (planeCount < 4 &&
+			(fb2->handles[planeCount] != 0 || fb2->pitches[planeCount] != 0 || fb2->offsets[planeCount] != 0))
+		{
+			++planeCount;
+		}
+
+		if (drm_debug)
+		{
+			char format[32];
+			kvm_drm_format_fourcc(format, sizeof(format), fb2->pixel_format);
+			fprintf(stderr,
+				"DRM: FB2 fb_id=%u planes=%d size=%ux%u format=%s modifier=0x%016" PRIx64
+				" handles=[%u,%u,%u,%u] pitches=[%u,%u,%u,%u] offsets=[%u,%u,%u,%u]\n",
+				fb_id,
+				planeCount,
+				fb2->width,
+				fb2->height,
+				format,
+				fb2->modifier,
+				fb2->handles[0], fb2->handles[1], fb2->handles[2], fb2->handles[3],
+				fb2->pitches[0], fb2->pitches[1], fb2->pitches[2], fb2->pitches[3],
+				fb2->offsets[0], fb2->offsets[1], fb2->offsets[2], fb2->offsets[3]);
+		}
+
+		if (planeCount > 1)
+		{
+			char err[KVM_DRM_MAX_ERROR];
+			char format[32];
+			kvm_drm_format_fourcc(format, sizeof(format), fb2->pixel_format);
+			snprintf(err, sizeof(err),
+				"Framebuffer %u uses %d DRM planes (%s, modifier=0x%016" PRIx64 "); multi-plane scanout is not supported by this capture path",
+				fb_id, planeCount, format, fb2->modifier);
+			drmModeFreeFB2(fb2);
+			kvm_drm_copy_error_message(out_error, out_error_size, err);
+			return false;
+		}
+
 		if (fb2->handles[1] == 0 && fb2->handles[2] == 0 && fb2->handles[3] == 0)
 		{
 			out->width = fb2->width;
@@ -1135,6 +1224,15 @@ void *kvm_server_mainloop_drm(void *parm)
 	size_t rgbBufferSize = 0;
 	char *desktopBuffer = NULL;
 	long long desktopBufferSize = 0;
+	uint32_t lastLoggedFbId = 0;
+	uint32_t lastLoggedWidth = 0;
+	uint32_t lastLoggedHeight = 0;
+	uint32_t lastLoggedPitch = 0;
+	uint32_t lastLoggedOffset = 0;
+	uint32_t lastLoggedFormat = 0;
+	uint32_t lastLoggedHandle = 0;
+	uint64_t lastLoggedModifier = UINT64_MAX;
+	int lastLoggedPath = -1;
 	memset(&output, 0, sizeof(output));
 	memset(&map, 0, sizeof(map));
 	memset(&eglCtx, 0, sizeof(eglCtx));
@@ -1263,6 +1361,27 @@ void *kvm_server_mainloop_drm(void *parm)
 			continue;
 		}
 
+		if (drm_debug &&
+			(frame.fb_id != lastLoggedFbId ||
+			 frame.width != lastLoggedWidth ||
+			 frame.height != lastLoggedHeight ||
+			 frame.pitch != lastLoggedPitch ||
+			 frame.offset != lastLoggedOffset ||
+			 frame.format != lastLoggedFormat ||
+			 frame.handle != lastLoggedHandle ||
+			 frame.modifier != lastLoggedModifier))
+		{
+			kvm_drm_debug_log_scanout_frame("Using scanout framebuffer", &frame);
+			lastLoggedFbId = frame.fb_id;
+			lastLoggedWidth = frame.width;
+			lastLoggedHeight = frame.height;
+			lastLoggedPitch = frame.pitch;
+			lastLoggedOffset = frame.offset;
+			lastLoggedFormat = frame.format;
+			lastLoggedHandle = frame.handle;
+			lastLoggedModifier = frame.modifier;
+		}
+
 		if (SCREEN_WIDTH != (int)frame.width || SCREEN_HEIGHT != (int)frame.height)
 		{
 			int oldTileHeightCount = TILE_HEIGHT_COUNT;
@@ -1301,8 +1420,11 @@ void *kvm_server_mainloop_drm(void *parm)
 
 		if (frame.modifier != DRM_FORMAT_MOD_INVALID && frame.modifier != DRM_FORMAT_MOD_LINEAR)
 		{
-			if (drm_debug && nFramesConverted == 0)
-				printf("Attempting GPU-assisted conversion for modifier 0x%016" PRIx64 "\n", frame.modifier);
+			if (drm_debug && lastLoggedPath != 1)
+			{
+				fprintf(stderr, "DRM: Using GPU-assisted conversion for modifier 0x%016" PRIx64 "\n", frame.modifier);
+				lastLoggedPath = 1;
+			}
 
 			converted = kvm_drm_egl_convert_to_rgb24_gpu(&eglCtx, fd, frame.width, frame.height, frame.pitch,
 														 frame.offset, frame.format, frame.handle, frame.modifier,
@@ -1317,8 +1439,13 @@ void *kvm_server_mainloop_drm(void *parm)
 			}
 			else
 			{
-				if (drm_debug && nFramesConverted == 0)
-					printf("Performing CPU readback conversion for format 0x%08X\n", frame.format);
+				if (drm_debug && lastLoggedPath != 0)
+				{
+					char format[32];
+					kvm_drm_format_fourcc(format, sizeof(format), frame.format);
+					fprintf(stderr, "DRM: Using CPU readback conversion for format %s\n", format);
+					lastLoggedPath = 0;
+				}
 
 				const uint8_t *src = map.addr + frame.offset;
 				converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
