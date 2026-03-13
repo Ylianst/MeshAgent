@@ -8,7 +8,7 @@ AGENT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OPUS_VERSION=1.6.1
 OPUS_URL="https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz"
 ARCHID=26
-ARCHNAME=aarch64
+ARCHNAME=arm64
 OUT_BIN="${AGENT_DIR}/meshagent_arm64"
 
 echo "==> Building Linux ARM64 meshagent with _KVM_AUDIO via dockcross"
@@ -37,8 +37,8 @@ make -j$(nproc)
 make install
 
 # Copy built static lib into the source tree
-mkdir -p /src/lib-opus/linux/aarch64
-cp /tmp/opus-install/lib/libopus.a /src/lib-opus/linux/aarch64/libopus.a
+mkdir -p /src/lib-opus/linux/arm64
+cp /tmp/opus-install/lib/libopus.a /src/lib-opus/linux/arm64/libopus.a
 
 # ── 2. Stub out commit info if missing ────────────────────────────────────
 [ -f /src/microscript/ILibDuktape_Commit.h ] || cat > /src/microscript/ILibDuktape_Commit.h <<HEOF
@@ -48,7 +48,7 @@ HEOF
 
 # ── 3. Build the agent ────────────────────────────────────────────────────
 cd /src
-make linux ARCHID=26 KVM=1 JPEGVER=v80
+make linux ARCHID=26 KVM=1
 
 echo "==> Linux ARM64 build complete"
 '

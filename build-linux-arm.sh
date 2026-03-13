@@ -48,7 +48,7 @@ HEOF
 
 # ── 3. Build the agent ────────────────────────────────────────────────────
 cd /src
-make linux ARCHID=25 KVM=1 JPEGVER=v80
+make linux ARCHID=25 KVM=1
 
 echo "==> Linux ARM HF build complete"
 '
