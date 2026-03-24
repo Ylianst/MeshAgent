@@ -436,6 +436,13 @@ struct keymap_t {
   unsigned char vk;
 };
 
+extern int kvm_events_evdev_init();
+extern void kvm_events_evdev_shutdown();
+extern int kvm_events_evdev_is_active();
+extern void kvm_events_evdev_mouse_action(double absX, double absY, int button, short wheel);
+extern void kvm_events_evdev_key_action(unsigned char vk, int up);
+extern void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up);
+
 extern void MouseAction(double absX, double absY, int button, short wheel, Display *display);
 extern void KeyAction(unsigned char vk, int up, Display *display);
 extern void KeyActionUnicode(uint16_t unicode, int up, Display *display);
