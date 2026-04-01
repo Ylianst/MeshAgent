@@ -3777,6 +3777,10 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)((void**)j)[0];
 	void *request = ((void**)j)[1];
 	ILibMemory_Free(j);
+	// Nullify immediately to prevent double-free: ILibWebClient_CancelRequest runs
+	// synchronously on the chain thread and triggers MeshServer_OnResponse, which would
+	// otherwise call ILibMemory_Free on this already-freed pointer a second time.
+	agent->controlChannelRequest = NULL;
 
 	if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Network Timeout Occurred..."); }
 	agent->serverConnectionState = 0; // We are cancelling connection request
