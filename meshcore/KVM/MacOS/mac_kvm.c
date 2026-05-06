@@ -350,7 +350,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 			break;
 		case MNG_KVM_KEY: // Key
 		{
-			if (size != 6 || KVM_AGENT_FD != -1) { break; }
+			// Removed `KVM_AGENT_FD != -1` skip — in our user-LaunchAgent
+			// architecture (-kvmagent) the agent IS the process that
+			// should handle keystrokes locally via KeyAction, since it's
+			// the one in the user's GUI session with TCC permission to
+			// post CGEvents.
+			if (size != 6) { break; }
 			KeyAction(block[5], block[4]);
 			break;
 		}
@@ -358,7 +363,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 		{
 			int x, y;
 			short w = 0;
-			if (KVM_AGENT_FD != -1) { break; }
+			// Same as above — process mouse locally in -kvmagent mode.
 			if (size == 10 || size == 12)
 			{
 				x = ((int)ntohs(((unsigned short*)(block))[3])) / SCREEN_SCALE;
