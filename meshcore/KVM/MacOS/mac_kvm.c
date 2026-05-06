@@ -35,7 +35,22 @@ limitations under the License.
 #include <pwd.h>
 
 int KVM_Listener_FD = -1;
-#define KVM_Listener_Path "/usr/local/mesh_services/meshagent/kvm"
+// Socket path used when kvm_server_mainloop runs in socket-listener
+// mode. Default is the system-owned path used by the legacy -kvm1
+// mode (root daemon spawn case). The new user-LaunchAgent flow
+// (-kvmagent) overrides this via kvm_set_listener_path() before
+// entering the loop, since the user agent can't bind under
+// /usr/local/mesh_services/.
+static char kvm_listener_path[256] = "/usr/local/mesh_services/meshagent/kvm";
+
+void kvm_set_listener_path(const char *path)
+{
+	if (path == NULL || *path == '\0') return;
+	size_t len = strlen(path);
+	if (len >= sizeof(kvm_listener_path)) return;
+	memcpy(kvm_listener_path, path, len);
+	kvm_listener_path[len] = '\0';
+}
 #if defined(_TLSLOG)
 #define TLSLOG1 printf
 #else
@@ -544,8 +559,8 @@ void* kvm_server_mainloop(void* param)
 
 		memset(&serveraddr, 0, sizeof(serveraddr));
 		serveraddr.sun_family = AF_UNIX;
-		strcpy(serveraddr.sun_path, KVM_Listener_Path);
-		remove(KVM_Listener_Path);
+		strcpy(serveraddr.sun_path, kvm_listener_path);
+		remove(kvm_listener_path);
 		if (bind(KVM_Listener_FD, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
 		{
 			char tmp[255];
@@ -876,13 +891,13 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 		//	struct sockaddr_un serveraddr;
 		//	memset(&serveraddr, 0, sizeof(serveraddr));
 		//	serveraddr.sun_family = AF_UNIX;
-		//	strcpy(serveraddr.sun_path, KVM_Listener_Path);
+		//	strcpy(serveraddr.sun_path, kvm_listener_path);
 		//	if (!connect(fd, (struct sockaddr *)&serveraddr, SUN_LEN(&serveraddr)) < 0)
 		//	{
 		//		return((void*)(uint64_t)fd);
 		//	}
 		//}
-		return((void*)KVM_Listener_Path);
+		return((void*)kvm_listener_path);
 	}
 }
 
