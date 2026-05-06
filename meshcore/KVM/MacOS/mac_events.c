@@ -185,7 +185,21 @@ void MouseAction(double absX, double absY, int button, short wheel)
 		CFRelease(e);
 	}
 	else {
-		CGWarpMouseCursorPosition (curPos);
+		// Post a synthetic mouse-moved event instead of CGWarpMouseCursorPosition.
+		// On macOS Tahoe, CGWarpMouseCursorPosition appears to register as a
+		// genuine cursor presence at the destination — when the browser-side
+		// initial cursor sits over the upper-right corner of the video pane on
+		// connect, the warped OS cursor lingers in the screen's top-right hot-
+		// corner zone long enough for the system to fire Notification Center
+		// (Calendar / Weather widgets) and Mission Control. Posting a
+		// mouseMoved CGEvent goes through the normal HID-event path, which
+		// behaves like real mouse movement: the cursor passes through
+		// coordinates rather than being teleported to + held at them, and
+		// hot-corner watchers don't trigger on transient passage.
+		e = CGEventCreateMouseEvent(source, kCGEventMouseMoved, curPos, 0);
+		CGEventPost(kCGHIDEventTap, e);
+		CGEventPost(kCGSessionEventTap, e);
+		CFRelease(e);
 	}
 	
 	if (button != 0) {
