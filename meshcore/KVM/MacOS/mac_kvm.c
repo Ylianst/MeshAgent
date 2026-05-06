@@ -416,9 +416,30 @@ int kvm_server_inputdata(char* block, int blocklen)
 }
 
 
+// Socket-mode (user-LaunchAgent) state. When the daemon successfully
+// connects to /tmp/meshagent-kvm-<uid>.sock at session-init time,
+// kvm_relay_setup() leaves these populated and the write/read paths
+// fall through to the socket pipe instead of the legacy fork-exec
+// helper's stdio.
+static ILibProcessPipe_Pipe g_kvmSocketPipe = NULL;
+static int                   g_kvmSocketFD   = -1;
+static ILibKVM_WriteHandler  g_kvmSocketWriteHandler = NULL;
+static void                 *g_kvmSocketReserved     = NULL;
+
 int kvm_relay_feeddata(char* buf, int len)
 {
-	ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
+	if (g_kvmSocketPipe != NULL)
+	{
+		// Socket-mode: forward bytes to the user-context LaunchAgent
+		// over the connected Unix domain socket. Same TLV protocol
+		// that flowed over the helper's stdin in fork-exec mode.
+		ILibProcessPipe_Pipe_Write(g_kvmSocketPipe, buf, len, ILibTransport_MemoryOwnership_USER);
+		return(len);
+	}
+	if (gChildProcess != NULL)
+	{
+		ILibProcessPipe_Process_WriteStdIn(gChildProcess, buf, len, ILibTransport_MemoryOwnership_USER);
+	}
 	return(len);
 }
 
@@ -856,6 +877,59 @@ void kvm_relay_StdErrHandler(ILibProcessPipe_Process sender, char *buffer, size_
 }
 
 
+// macOS Tahoe: socket-mode read handler. Same TLV-frame parser as
+// kvm_relay_StdOutHandler but with the (sender, buf, len, consumed)
+// signature ILibProcessPipe_Pipe_AddPipeReadHandler expects (no user
+// arg). User context is fetched from g_kvmSocket* statics, set in
+// kvm_relay_setup.
+static void kvm_relay_socket_ReadHandler(ILibProcessPipe_Pipe sender, char *buffer, size_t bufferLen, size_t* bytesConsumed)
+{
+	unsigned short size = 0;
+	UNREFERENCED_PARAMETER(sender);
+	ILibKVM_WriteHandler writeHandler = g_kvmSocketWriteHandler;
+	void *reserved = g_kvmSocketReserved;
+	if (writeHandler == NULL) { *bytesConsumed = bufferLen; return; }
+
+	if (bufferLen > 4)
+	{
+		if (ntohs(((unsigned short*)(buffer))[0]) == (unsigned short)MNG_JUMBO)
+		{
+			if (bufferLen > 8)
+			{
+				if (bufferLen >= (8 + (int)ntohl(((unsigned int*)(buffer))[1])))
+				{
+					*bytesConsumed = 8 + (int)ntohl(((unsigned int*)(buffer))[1]);
+					writeHandler(buffer, *bytesConsumed, reserved);
+					return;
+				}
+			}
+		}
+		else
+		{
+			size = ntohs(((unsigned short*)(buffer))[1]);
+			if (size <= bufferLen)
+			{
+				*bytesConsumed = size;
+				writeHandler(buffer, size, reserved);
+				return;
+			}
+		}
+	}
+	*bytesConsumed = 0;
+}
+
+// macOS Tahoe: socket-mode broken-pipe handler. Clears state so
+// kvm_relay_feeddata() falls through cleanly and a future Desktop
+// session re-runs kvm_relay_setup() (which reconnects).
+static void kvm_relay_socket_BrokenHandler(ILibProcessPipe_Pipe sender)
+{
+	UNREFERENCED_PARAMETER(sender);
+	g_kvmSocketPipe = NULL;
+	g_kvmSocketFD = -1;
+	g_kvmSocketWriteHandler = NULL;
+	g_kvmSocketReserved = NULL;
+}
+
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
 void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid)
 {
@@ -868,14 +942,51 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 
 	if (uid != 0)
 	{
-		// Spawn child kvm process into a specific user session
+		// macOS Tahoe path: try the user-LaunchAgent socket first.
+		// The agent registers in gui/<uid> natively, so its audit
+		// session has com.apple.replayd reachable. If the agent is
+		// up and accepting, use it; otherwise fall through to the
+		// legacy fork-exec spawn so we don't strand existing fixtures
+		// that don't have the LaunchAgent installed yet.
+		char socketPath[128];
+		snprintf(socketPath, sizeof(socketPath), "/tmp/meshagent-kvm-%d.sock", uid);
+		int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (fd >= 0)
+		{
+			struct sockaddr_un addr;
+			memset(&addr, 0, sizeof(addr));
+			addr.sun_family = AF_UNIX;
+			strncpy(addr.sun_path, socketPath, sizeof(addr.sun_path) - 1);
+			if (connect(fd, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0)
+			{
+				// Agent is up. Wrap the connected socket in a Pipe so
+				// the daemon's existing Pipe_Write / read-handler paths
+				// work without changes elsewhere in the codebase.
+				g_kvmSocketFD            = fd;
+				g_kvmSocketWriteHandler  = writeHandler;
+				g_kvmSocketReserved      = reserved;
+				g_kvmSocketPipe          = ILibProcessPipe_Pipe_CreateFromExisting((ILibProcessPipe_Manager)processPipeMgr, fd);
+				ILibProcessPipe_Pipe_AddPipeReadHandler(g_kvmSocketPipe, 65535, &kvm_relay_socket_ReadHandler);
+				ILibProcessPipe_Pipe_SetBrokenPipeHandler(g_kvmSocketPipe, &kvm_relay_socket_BrokenHandler);
+				ILibProcessPipe_Pipe_ResetMetadata(g_kvmSocketPipe, "KVM user-LaunchAgent socket");
+				g_shutdown = 0;
+				ILibMemory_Free(user); // not used in socket mode
+				return(g_kvmSocketPipe);
+			}
+			close(fd);
+		}
+
+		// Fallback: legacy fork-exec helper (still subject to the
+		// audit-session-isolation problem on Tahoe; the fix is to
+		// install the LaunchAgent so we hit the socket-mode path
+		// above).
 		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
 		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
-		
+
 		char tmp[255];
 		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid: %d)", g_slavekvm);
 		ILibProcessPipe_Process_ResetMetadata(gChildProcess, tmp);
-		
+
 		ILibProcessPipe_Process_AddHandlers(gChildProcess, 65535, &kvm_relay_ExitHandler, &kvm_relay_StdOutHandler, &kvm_relay_StdErrHandler, NULL, user);
 
 		// Run the relay
