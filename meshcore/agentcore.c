@@ -418,6 +418,8 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *inBuffer, size
 		}
 	}
 	duk_pop(agent->meshCoreCtx);															// ...
+	// Proxy detection can create short-lived EventEmitter/ChildProcess object graphs. Run GC here so repeated reconnects do not retain them until a later heap cycle.
+	duk_gc(agent->meshCoreCtx, 0);
 	return((int)bufferLen);
 }
 #ifdef _POSIX
