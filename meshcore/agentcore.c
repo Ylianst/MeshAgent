@@ -4280,30 +4280,34 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	}
 
 #ifdef WIN32
-	duk_idx_t top = duk_get_top(agent->meshCoreCtx);
-	if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
+	if (agent->authenticodeChecked == 0)
 	{
-		if (!duk_is_null_or_undefined(agent->meshCoreCtx, -1))
+		duk_idx_t top = duk_get_top(agent->meshCoreCtx);
+		if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
 		{
-			char *url = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "url", NULL);
-			if (url != NULL)
+			if (!duk_is_null_or_undefined(agent->meshCoreCtx, -1))
 			{
-				duk_push_sprintf(agent->meshCoreCtx, "require('win-authenticode-opus').locked('%s');", url);						// [obj][str]
-				if (duk_peval(agent->meshCoreCtx) == 0 && !duk_is_null_or_undefined(agent->meshCoreCtx, -1))						// [obj][obj]
+				char *url = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "url", NULL);
+				if (url != NULL)
 				{
-					char *dns = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "dns", NULL);
-					char *id = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "id", NULL);
-					if (dns != NULL && id != NULL)
+					duk_push_sprintf(agent->meshCoreCtx, "require('win-authenticode-opus').locked('%s');", url);						// [obj][str]
+					if (duk_peval(agent->meshCoreCtx) == 0 && !duk_is_null_or_undefined(agent->meshCoreCtx, -1))						// [obj][obj]
 					{
-						strcpy_s(agent->DNS_LOCK, sizeof(agent->DNS_LOCK), dns);
-						strcpy_s(agent->ID_LOCK, sizeof(agent->ID_LOCK), id);
+						char *dns = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "dns", NULL);
+						char *id = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "id", NULL);
+						if (dns != NULL && id != NULL)
+						{
+							strcpy_s(agent->DNS_LOCK, sizeof(agent->DNS_LOCK), dns);
+							strcpy_s(agent->ID_LOCK, sizeof(agent->ID_LOCK), id);
+						}
 					}
 				}
 			}
 		}
+		duk_set_top(agent->meshCoreCtx, top);																							// ...
+		duk_gc(agent->meshCoreCtx, 0);
+		agent->authenticodeChecked = 1;
 	}
-	duk_set_top(agent->meshCoreCtx, top);		
-	duk_gc(agent->meshCoreCtx, 0);																					// ...
 #endif
 
 	util_random(sizeof(int), (char*)&timeout);
@@ -4529,6 +4533,7 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 			retVal->shCore = NULL;
 		}
 	}
+	retVal->authenticodeChecked = 0;
 #endif
 
 	retVal->agentID = (AgentIdentifiers)MESH_AGENTID;
