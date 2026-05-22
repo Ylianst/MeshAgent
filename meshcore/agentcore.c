@@ -4302,7 +4302,8 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 			}
 		}
 	}
-	duk_set_top(agent->meshCoreCtx, top);																							// ...
+	duk_set_top(agent->meshCoreCtx, top);		
+	duk_gc(agent->meshCoreCtx, 0);																					// ...
 #endif
 
 	util_random(sizeof(int), (char*)&timeout);
