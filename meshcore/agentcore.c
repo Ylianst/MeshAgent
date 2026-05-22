@@ -4266,6 +4266,39 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	duk_pop(agent->meshCoreCtx);
 }
 
+#ifdef WIN32
+static void MeshServer_CheckAuthenticode(MeshAgentHostContainer *agent)
+{
+	if (agent->authenticodeChecked != 0) return;
+
+	duk_idx_t top = duk_get_top(agent->meshCoreCtx);
+	if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
+	{
+		if (!duk_is_null_or_undefined(agent->meshCoreCtx, -1))
+		{
+			char *url = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "url", NULL);
+			if (url != NULL)
+			{
+				duk_push_sprintf(agent->meshCoreCtx, "require('win-authenticode-opus').locked('%s');", url);						// [obj][str]
+				if (duk_peval(agent->meshCoreCtx) == 0 && !duk_is_null_or_undefined(agent->meshCoreCtx, -1))						// [obj][obj]
+				{
+					char *dns = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "dns", NULL);
+					char *id = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "id", NULL);
+					if (dns != NULL && id != NULL)
+					{
+						strcpy_s(agent->DNS_LOCK, sizeof(agent->DNS_LOCK), dns);
+						strcpy_s(agent->ID_LOCK, sizeof(agent->ID_LOCK), id);
+					}
+				}
+			}
+		}
+	}
+	duk_set_top(agent->meshCoreCtx, top);																							// ...
+	duk_gc(agent->meshCoreCtx, 0);
+	agent->authenticodeChecked = 1;
+}
+#endif
+
 void MeshServer_Connect(MeshAgentHostContainer *agent)
 {
 	unsigned int timeout;
@@ -4280,34 +4313,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	}
 
 #ifdef WIN32
-	if (agent->authenticodeChecked == 0)
-	{
-		duk_idx_t top = duk_get_top(agent->meshCoreCtx);
-		if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
-		{
-			if (!duk_is_null_or_undefined(agent->meshCoreCtx, -1))
-			{
-				char *url = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "url", NULL);
-				if (url != NULL)
-				{
-					duk_push_sprintf(agent->meshCoreCtx, "require('win-authenticode-opus').locked('%s');", url);						// [obj][str]
-					if (duk_peval(agent->meshCoreCtx) == 0 && !duk_is_null_or_undefined(agent->meshCoreCtx, -1))						// [obj][obj]
-					{
-						char *dns = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "dns", NULL);
-						char *id = Duktape_GetStringPropertyValue(agent->meshCoreCtx, -1, "id", NULL);
-						if (dns != NULL && id != NULL)
-						{
-							strcpy_s(agent->DNS_LOCK, sizeof(agent->DNS_LOCK), dns);
-							strcpy_s(agent->ID_LOCK, sizeof(agent->ID_LOCK), id);
-						}
-					}
-				}
-			}
-		}
-		duk_set_top(agent->meshCoreCtx, top);																							// ...
-		duk_gc(agent->meshCoreCtx, 0);
-		agent->authenticodeChecked = 1;
-	}
+	MeshServer_CheckAuthenticode(agent);
 #endif
 
 	util_random(sizeof(int), (char*)&timeout);
