@@ -29,6 +29,7 @@ limitations under the License.
 #include <CoreServices/CoreServices.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 
 #include <string.h>
@@ -947,44 +948,71 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 
 	if (uid != 0)
 	{
-		// macOS Tahoe path: try the user-LaunchAgent socket first.
-		// The agent registers in gui/<uid> natively, so its audit
-		// session has com.apple.replayd reachable. If the agent is
-		// up and accepting, use it; otherwise fall through to the
-		// legacy fork-exec spawn so we don't strand existing fixtures
-		// that don't have the LaunchAgent installed yet.
+		// macOS Tahoe path: prefer the user-LaunchAgent socket. Agent
+		// registers in gui/<uid> natively → com.apple.replayd reachable
+		// → ScreenCaptureKit works without audit_session_join. Daemon
+		// just proxies bytes here.
+		//
+		// Fallback policy: only fall through to the legacy fork-exec
+		// helper if the LaunchAgent is genuinely NOT installed (no
+		// socket file on disk). If the socket exists but connect()
+		// transiently fails — e.g. agent is between sessions and
+		// hasn't re-accept()ed yet — we retry briefly with backoff
+		// rather than firing the broken fork-exec path that lands
+		// the helper in the wrong audit session and produces black
+		// frames.
 		char socketPath[128];
 		snprintf(socketPath, sizeof(socketPath), "/tmp/meshagent-kvm-%d.sock", uid);
-		int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (fd >= 0)
+		struct stat sockStat;
+		int agentInstalled = (stat(socketPath, &sockStat) == 0 && S_ISSOCK(sockStat.st_mode));
+
+		if (agentInstalled)
 		{
-			struct sockaddr_un addr;
-			memset(&addr, 0, sizeof(addr));
-			addr.sun_family = AF_UNIX;
-			strncpy(addr.sun_path, socketPath, sizeof(addr.sun_path) - 1);
-			if (connect(fd, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0)
+			int fd = -1;
+			int attempt;
+			for (attempt = 0; attempt < 5; attempt++)
 			{
-				// Agent is up. Wrap the connected socket in a Pipe so
-				// the daemon's existing Pipe_Write / read-handler paths
-				// work without changes elsewhere in the codebase.
-				g_kvmSocketFD            = fd;
-				g_kvmSocketWriteHandler  = writeHandler;
-				g_kvmSocketReserved      = reserved;
-				g_kvmSocketPipe          = ILibProcessPipe_Pipe_CreateFromExisting((ILibProcessPipe_Manager)processPipeMgr, fd);
-				ILibProcessPipe_Pipe_AddPipeReadHandler(g_kvmSocketPipe, 65535, &kvm_relay_socket_ReadHandler);
-				ILibProcessPipe_Pipe_SetBrokenPipeHandler(g_kvmSocketPipe, &kvm_relay_socket_BrokenHandler);
-				ILibProcessPipe_Pipe_ResetMetadata(g_kvmSocketPipe, "KVM user-LaunchAgent socket");
-				g_shutdown = 0;
-				ILibMemory_Free(user); // not used in socket mode
-				return(g_kvmSocketPipe);
+				fd = socket(AF_UNIX, SOCK_STREAM, 0);
+				if (fd < 0) break;
+				struct sockaddr_un addr;
+				memset(&addr, 0, sizeof(addr));
+				addr.sun_family = AF_UNIX;
+				strncpy(addr.sun_path, socketPath, sizeof(addr.sun_path) - 1);
+				if (connect(fd, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0)
+				{
+					// Agent is up. Wrap the connected socket in a Pipe so
+					// the daemon's existing Pipe_Write / read-handler paths
+					// work without changes elsewhere in the codebase.
+					g_kvmSocketFD            = fd;
+					g_kvmSocketWriteHandler  = writeHandler;
+					g_kvmSocketReserved      = reserved;
+					g_kvmSocketPipe          = ILibProcessPipe_Pipe_CreateFromExisting((ILibProcessPipe_Manager)processPipeMgr, fd);
+					ILibProcessPipe_Pipe_AddPipeReadHandler(g_kvmSocketPipe, 65535, &kvm_relay_socket_ReadHandler);
+					ILibProcessPipe_Pipe_SetBrokenPipeHandler(g_kvmSocketPipe, &kvm_relay_socket_BrokenHandler);
+					ILibProcessPipe_Pipe_ResetMetadata(g_kvmSocketPipe, "KVM user-LaunchAgent socket");
+					g_shutdown = 0;
+					ILibMemory_Free(user); // not used in socket mode
+					return(g_kvmSocketPipe);
+				}
+				close(fd);
+				fd = -1;
+				// Transient failure (ECONNREFUSED on agent re-accept,
+				// or similar). Back off briefly: 50ms, 100ms, 200ms,
+				// 400ms, 800ms — total ~1.55s before giving up.
+				usleep(50000 << attempt);
 			}
-			close(fd);
+			// Socket exists but unreachable after retries. Don't fall
+			// back to fork-exec — that path is broken on Tahoe and
+			// would produce black-screen / dead-input. Return NULL
+			// to let the caller surface the error to MeshCentral.
+			ILibMemory_Free(user);
+			return(NULL);
 		}
 
-		// Fallback: legacy fork-exec helper (still subject to the
-		// audit-session-isolation problem on Tahoe; the fix is to
-		// install the LaunchAgent so we hit the socket-mode path
-		// above).
+		// Agent not installed (no socket file) — legacy fork-exec
+		// helper. Still subject to the audit-session-isolation
+		// problem on Tahoe; install the LaunchAgent (-fullinstall
+		// in agent-installer.js) to upgrade to the working path.
 		gChildProcess = ILibProcessPipe_Manager_SpawnProcessEx3(processPipeMgr, exePath, parms0, ILibProcessPipe_SpawnTypes_DEFAULT, (void*)(uint64_t)uid, 0);
 		g_slavekvm = ILibProcessPipe_Process_GetPID(gChildProcess);
 
