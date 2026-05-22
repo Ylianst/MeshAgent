@@ -4026,6 +4026,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			printf("agentcore: DNS Lock[%s]: Unauthorized to connect to: %s\n", agent->DNS_LOCK, host);
 			free(host); free(path);
+			ILibDestructParserResults(rs);
 			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
 			return;
 		}
@@ -4103,6 +4104,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			printf("agentcore: ServerID Lock: ServerID MISMATCH for: %s\n", host);
 			free(host); free(path);
+			ILibDestructParserResults(rs);
 			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
 			return;
 		}
