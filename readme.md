@@ -34,28 +34,32 @@ MeshServer=wss://example.com:443/agent.ashx
 
 Here is a list of the possible keys that are currently supported by the agent. Note that the key name must have the exact capitalization:
 
-```
-AgentCapabilities            Integer Mask, specifying supported Agent Capabilities	
-agentName                    If set, this will be sent to the server instead of the hostname
-compactDirtyMinimum          Minimum dirty bytes threshold for db.compact() operation
-controlChannelDebug          If set, will log/display controlChannel messages (Except for JSON messages)
-controlChannelIdleTimeout    Integer value specifying the idle timeout in seconds, to send Ping/Pong to server, to keep connection alive
-coreDumpEnabled              If set, a dump file will be written when the agent crashes
-disableUpdate                If set, will prevent the agent from self-updating
-noUpdateCoreModule           If set, will prevent the agent from taking a new meshcore from the server
-enableILibRemoteLogging      Integer value specifying the port number to enable Web Logging. Disabled otherwise
-fakeUpdate                   If set, when the agent self-updates, it will update to the same version. Will set disableUpdate upon completion
-forceUpdate                  If set, will cause the agent to perform a self-update on next start.
-ignoreProxyFile              If set, will cause the agent to ignore any proxy settings
-logUpdate                    If set, will cause the agent to log self-update status
-jsDebugPort                  Specify a JS Debugger Port
-nocertstore                  If set on Windows, will force the Agent to use OpenSSL instead of WinCrypto for cert generation/storage.
-remoteMouseRender            If set, will always render the remote mouse cursor for KVM
-skipmaccheck                 If set, the agent will not change NodeID on local mac address changes.
-showModuleNames              If set, will display the name of modules when they are loaded for the first time
-slaveKvmLog                  [Linux] If set, will enable logging inside the Child KVM Process.
-WebProxy                     Manually specify proxy configuration
-```
+| Option | Description |
+|---|---|
+| `AgentCapabilities` | Bitmask specifying supported agent capabilities. |
+| `agentName` | If set, sent to the server instead of the hostname. |
+| `compactDirtyMinimum` | Minimum dirty bytes threshold for the `db.compact()` operation. |
+| `consoleTextMaxRate` | Rate limit for `sendConsoleText`. Default is 10 messages per second. |
+| `controlChannelDebug` | If set, logs/displays control channel messages (except JSON messages). |
+| `controlChannelIdleTimeout` | Idle timeout in seconds; sends Ping/Pong to server to keep connection alive. |
+| `coreDumpEnabled` | If set, writes a dump file when the agent crashes. |
+| `disableUpdate` | If set, prevents the agent from self-updating. |
+| `noUpdateCoreModule` | If set, prevents the agent from accepting a new meshcore from the server. |
+| `enableILibRemoteLogging` | Port number to enable web logging. Disabled if not set. |
+| `fakeUpdate` | If set, agent self-updates to the same version. Sets `disableUpdate` on completion. |
+| `forceUpdate` | If set, causes the agent to perform a self-update on next start. |
+| `ignoreProxyFile` | If set, causes the agent to ignore any proxy settings. |
+| `logUpdate` | If set, causes the agent to log self-update status. |
+| `jsDebugPort` | Specifies a JS debugger port. |
+| `maxLogSize` | Maximum size of the error log file. |
+| `nocertstore` | Windows only. Forces the agent to use OpenSSL instead of WinCrypto for cert generation/storage. |
+| `readonly` | If set, forces the agent to open the database in read-only mode. |
+| `readmsh` | If set while db is in read-only mode, caches the local `.msh` file in the read-only db. |
+| `remoteMouseRender` | If set, always renders the remote mouse cursor for KVM. |
+| `showModuleNames` | If set, displays module names when loaded for the first time. |
+| `skipmaccheck` | If set, the agent will not change NodeID on local MAC address changes. |
+| `slaveKvmLog` | Linux only. Enables logging inside the child KVM process. |
+| `WebProxy` | Manually specifies proxy configuration. |
 
 Many of these values are used by developers and are not typically used in normal use.
 

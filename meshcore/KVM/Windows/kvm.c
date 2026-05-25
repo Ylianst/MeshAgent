@@ -321,7 +321,6 @@ void kvm_send_display_list(ILibKVM_WriteHandler writeHandler, void *reserved)
 	}
 }
 
-void kvm_server_SetResolution();
 int kvm_server_currentDesktopname = 0;
 void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *reserved)
 {
@@ -386,7 +385,7 @@ void CheckDesktopSwitch(int checkres, ILibKVM_WriteHandler writeHandler, void *r
 				// Force screen refresh after desktop switch
 				if (checkres != 0)
 				{
-					kvm_server_SetResolution();
+					kvm_server_SetResolution(writeHandler, reserved);
 				}
 			}
 		}

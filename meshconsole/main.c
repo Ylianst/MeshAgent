@@ -39,6 +39,12 @@ MeshAgentHostContainer *agentHost = NULL;
 char __agentExecPath[1024] = { 0 };
 #endif
 
+#if defined(__APPLE__)
+#include <bsm/audit.h>
+#include <bsm/audit_session.h>
+#include <unistd.h>
+#endif
+
 
 #ifdef WIN32
 BOOL CtrlHandler(DWORD fdwCtrlType)
@@ -277,6 +283,18 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 #if defined(_LINKVM) && defined(__APPLE__)
 	if (argc > 1 && strcasecmp(argv[1], "-kvm0") == 0)
 	{
+		// Tahoe audit-session join: pre-exec in SpawnProcessEx4 (as
+		// root) is what discovers and joins the user's gui session;
+		// post-exec call here as uid 501 inherits enough visibility
+		// from that to re-join cleanly and ensures the helper's
+		// kernel-tracked asid lands on the user's gui session before
+		// kvm_server_mainloop opens its XPC connection to
+		// com.apple.replayd. Both calls together are needed: the
+		// pre-exec join doesn't survive exec on its own, and
+		// post-exec alone is denied (uid 501 can't audit_session_port
+		// arbitrary asids on Tahoe).
+		extern int ILibProcessPipe_JoinUserAuditSession_OSX_PostExec(uid_t uid);
+		ILibProcessPipe_JoinUserAuditSession_OSX_PostExec(getuid());
 		kvm_server_mainloop(NULL);
 		return 0;
 	}
