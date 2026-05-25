@@ -191,11 +191,14 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, char *out_erro
 		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglInitialize failed", eglGetError());
 		return kvm_drm_egl_fail_with_persistent_error(g, out_error, out_error_size, err);
 	}
-	fprintf(stderr, "DRM EGL: Initialized EGL %d.%d vendor=%s version=%s\n",
-		(int)major,
-		(int)minor,
-		eglQueryString(g->dpy, EGL_VENDOR) != NULL ? eglQueryString(g->dpy, EGL_VENDOR) : "unknown",
-		eglQueryString(g->dpy, EGL_VERSION) != NULL ? eglQueryString(g->dpy, EGL_VERSION) : "unknown");
+	if (getenv("MESH_KVM_DRM_DEBUG") != NULL && atoi(getenv("MESH_KVM_DRM_DEBUG")) > 0)
+	{
+		fprintf(stderr, "DRM EGL: Initialized EGL %d.%d vendor=%s version=%s\n",
+			(int)major,
+			(int)minor,
+			eglQueryString(g->dpy, EGL_VENDOR) != NULL ? eglQueryString(g->dpy, EGL_VENDOR) : "unknown",
+			eglQueryString(g->dpy, EGL_VERSION) != NULL ? eglQueryString(g->dpy, EGL_VERSION) : "unknown");
+	}
 
 	if (!eglBindAPI(EGL_OPENGL_ES_API))
 	{

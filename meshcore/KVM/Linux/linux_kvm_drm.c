@@ -58,9 +58,10 @@ limitations under the License.
 #endif
 
 #define KVM_DRM_MAX_ERROR 256
+#define KVM_DRM_MAX_OUTPUTS 16
 
 int g_kvmBackendDRM = 0;
-static int drm_debug = 1;
+static int drm_debug = 0;
 
 extern int SCREEN_NUM;
 extern int SCREEN_WIDTH;
@@ -230,7 +231,21 @@ typedef struct kvm_drm_output
 	uint32_t connector_id;
 	uint32_t crtc_id;
 	int crtc_index;
+	int x;
+	int y;
+	uint32_t width;
+	uint32_t height;
 } kvm_drm_output;
+
+typedef struct kvm_drm_desktop_layout
+{
+	int min_x;
+	int min_y;
+	int max_x;
+	int max_y;
+	uint32_t width;
+	uint32_t height;
+} kvm_drm_desktop_layout;
 
 typedef struct kvm_drm_frame_map
 {
@@ -272,6 +287,18 @@ static void kvm_drm_copy_error_message(char *dst, size_t dst_size, const char *s
 	size_t n = strnlen_s(src, dst_size - 1);
 	memcpy_s(dst, dst_size, src, n);
 	dst[n] = 0;
+}
+
+static void kvm_drm_init_debug()
+{
+	const char *value = getenv("MESH_KVM_DRM_DEBUG");
+	if (value == NULL || value[0] == 0)
+	{
+		drm_debug = 0;
+		return;
+	}
+	drm_debug = atoi(value);
+	if (drm_debug < 0) { drm_debug = 0; }
 }
 
 static void kvm_drm_format_fourcc(char *dst, size_t dst_size, uint32_t format)
@@ -353,19 +380,6 @@ static void kvm_drm_reset_logged_scanout_state(uint32_t *lastLoggedFbId,
 	if (lastLoggedHandle != NULL) { *lastLoggedHandle = 0; }
 	if (lastLoggedModifier != NULL) { *lastLoggedModifier = UINT64_MAX; }
 	if (lastLoggedPath != NULL) { *lastLoggedPath = -1; }
-}
-
-static bool kvm_drm_same_output(const kvm_drm_output *a, const kvm_drm_output *b)
-{
-	if (a == NULL || b == NULL)
-	{
-		return false;
-	}
-
-	return a->connector_id == b->connector_id &&
-		a->crtc_id == b->crtc_id &&
-		a->crtc_index == b->crtc_index &&
-		strcmp(a->device_path, b->device_path) == 0;
 }
 
 static bool kvm_drm_is_transient_scanout_error(const char *err)
@@ -551,7 +565,30 @@ static uint32_t kvm_drm_pick_crtc_for_connector(int fd, const drmModeRes *res, c
 	return 0;
 }
 
-static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_output *out, bool logSelection, char *out_error, size_t out_error_size)
+static int kvm_drm_output_index_by_crtc(kvm_drm_output *outputs, int output_count, uint32_t crtc_id)
+{
+	int i;
+	for (i = 0; i < output_count; ++i)
+	{
+		if (outputs[i].crtc_id == crtc_id)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int kvm_drm_compare_outputs(const void *a, const void *b)
+{
+	const kvm_drm_output *oa = (const kvm_drm_output *)a;
+	const kvm_drm_output *ob = (const kvm_drm_output *)b;
+	if (oa->y != ob->y) { return oa->y < ob->y ? -1 : 1; }
+	if (oa->x != ob->x) { return oa->x < ob->x ? -1 : 1; }
+	if (oa->connector_id != ob->connector_id) { return oa->connector_id < ob->connector_id ? -1 : 1; }
+	return 0;
+}
+
+static bool kvm_drm_collect_active_outputs_on_fd(int fd, const char *path, kvm_drm_output *outputs, int max_outputs, int *out_count, bool require_scanout, bool logSelection, char *out_error, size_t out_error_size)
 {
 	drmModeRes *res = drmModeGetResources(fd);
 	if (res == NULL)
@@ -560,12 +597,10 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 		return false;
 	}
 
-	bool found = false;
-	bool foundWithScanout = false;
-	kvm_drm_output fallback;
-	memset(&fallback, 0, sizeof(fallback));
+	int count = 0;
+	int connected = 0;
 	int i;
-	for (i = 0; i < res->count_connectors; ++i)
+	for (i = 0; i < res->count_connectors && count < max_outputs; ++i)
 	{
 		drmModeConnector *conn = drmModeGetConnector(fd, res->connectors[i]);
 		if (conn == NULL)
@@ -578,6 +613,7 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 			drmModeFreeConnector(conn);
 			continue;
 		}
+		connected++;
 
 		uint32_t crtc_id = kvm_drm_pick_crtc_for_connector(fd, res, conn);
 		if (crtc_id == 0)
@@ -596,8 +632,23 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 				break;
 			}
 		}
-		if (crtc_index < 0)
+		if (crtc_index < 0 || kvm_drm_output_index_by_crtc(outputs, count, crtc_id) >= 0)
 		{
+			drmModeFreeConnector(conn);
+			continue;
+		}
+
+		drmModeCrtc *crtc = drmModeGetCrtc(fd, crtc_id);
+		if (crtc == NULL)
+		{
+			drmModeFreeConnector(conn);
+			continue;
+		}
+
+		uint32_t fb_id = kvm_drm_get_scanout_fb_id(fd, crtc_id, crtc_index, NULL, NULL);
+		if (require_scanout && fb_id == 0)
+		{
+			drmModeFreeCrtc(crtc);
 			drmModeFreeConnector(conn);
 			continue;
 		}
@@ -609,91 +660,45 @@ static bool kvm_drm_find_active_output_on_fd(int fd, const char *path, kvm_drm_o
 		candidate.connector_id = conn->connector_id;
 		candidate.crtc_id = crtc_id;
 		candidate.crtc_index = crtc_index;
+		candidate.x = crtc->x;
+		candidate.y = crtc->y;
+		candidate.width = crtc->width;
+		candidate.height = crtc->height;
+		outputs[count++] = candidate;
 
-		if (!found)
-		{
-			fallback = candidate;
-			found = true;
-		}
-
-		if (kvm_drm_get_scanout_fb_id(fd, crtc_id, crtc_index, NULL, NULL) != 0)
-		{
-			*out = candidate;
-			foundWithScanout = true;
-			drmModeFreeConnector(conn);
-			break;
-		}
-
+		drmModeFreeCrtc(crtc);
 		drmModeFreeConnector(conn);
 	}
 
 	drmModeFreeResources(res);
 
-	if (foundWithScanout)
-	{
-		if (drm_debug && logSelection)
-		{
-			fprintf(stderr, "DRM: Selected output %s on %s (connector=%u crtc=%u index=%d)\n",
-				out->connector_name, out->device_path, out->connector_id, out->crtc_id, out->crtc_index);
-		}
-		return true;
-	}
-
-	if (found)
-	{
-		*out = fallback;
-		if (drm_debug && logSelection)
-		{
-			fprintf(stderr, "DRM: Selected output %s on %s (connector=%u crtc=%u index=%d, waiting for scanout)\n",
-				out->connector_name, out->device_path, out->connector_id, out->crtc_id, out->crtc_index);
-		}
-		return true;
-	}
-
+	if (count <= 0)
 	{
 		char err[KVM_DRM_MAX_ERROR];
-		snprintf(err, sizeof(err), "No connected display with active CRTC on %s", path);
+		snprintf(err, sizeof(err), "%s on %s",
+			connected > 0 ? "No connected display with active scanout" : "No connected display with active CRTC",
+			path);
 		kvm_drm_copy_error_message(out_error, out_error_size, err);
-	}
-	return false;
-}
-
-static bool kvm_drm_refresh_output_on_fd(int fd, kvm_drm_output *current, bool require_scanout, char *out_error, size_t out_error_size)
-{
-	kvm_drm_output refreshed;
-	memset(&refreshed, 0, sizeof(refreshed));
-	if (current == NULL)
-	{
-		kvm_drm_copy_error_message(out_error, out_error_size, "Current DRM output is null");
 		return false;
 	}
 
-	if (!kvm_drm_find_active_output_on_fd(fd, current->device_path, &refreshed, false, out_error, out_error_size))
-	{
-		return false;
-	}
+	qsort(outputs, (size_t)count, sizeof(kvm_drm_output), kvm_drm_compare_outputs);
+	*out_count = count;
 
-	if (require_scanout && kvm_drm_get_scanout_fb_id(fd, refreshed.crtc_id, refreshed.crtc_index, NULL, NULL) == 0)
+	if (drm_debug && logSelection)
 	{
-		kvm_drm_copy_error_message(out_error, out_error_size, "No active DRM framebuffer available yet");
-		return false;
+		fprintf(stderr, "DRM: Selected %d output(s) on %s\n", count, path);
+		for (i = 0; i < count; ++i)
+		{
+			fprintf(stderr, "DRM:   output[%d] %s connector=%u crtc=%u index=%d pos=%d,%d size=%ux%u\n",
+				i, outputs[i].connector_name, outputs[i].connector_id, outputs[i].crtc_id,
+				outputs[i].crtc_index, outputs[i].x, outputs[i].y, outputs[i].width, outputs[i].height);
+		}
 	}
-
-	if (drm_debug && !kvm_drm_same_output(current, &refreshed))
-	{
-		fprintf(stderr, "DRM: Switched output from %s/%u to %s/%u on %s\n",
-			current->connector_name,
-			current->crtc_id,
-			refreshed.connector_name,
-			refreshed.crtc_id,
-			refreshed.device_path);
-	}
-
-	*current = refreshed;
 	return true;
 }
 
-static bool kvm_drm_open_device_with_output(const char *explicit_device, int *out_fd, kvm_drm_output *out, char *out_error, size_t out_error_size)
+static bool kvm_drm_open_device_with_outputs(const char *explicit_device, int *out_fd, kvm_drm_output *outputs, int max_outputs, int *out_count, char *out_error, size_t out_error_size)
 {
 	int i;
 
@@ -707,7 +712,7 @@ static bool kvm_drm_open_device_with_output(const char *explicit_device, int *ou
 			kvm_drm_copy_error_message(out_error, out_error_size, err);
 			return false;
 		}
-		if (kvm_drm_find_active_output_on_fd(fd, explicit_device, out, true, out_error, out_error_size))
+		if (kvm_drm_collect_active_outputs_on_fd(fd, explicit_device, outputs, max_outputs, out_count, true, true, out_error, out_error_size))
 		{
 			*out_fd = fd;
 			return true;
@@ -725,7 +730,7 @@ static bool kvm_drm_open_device_with_output(const char *explicit_device, int *ou
 		{
 			continue;
 		}
-		if (kvm_drm_find_active_output_on_fd(fd, path, out, true, out_error, out_error_size))
+		if (kvm_drm_collect_active_outputs_on_fd(fd, path, outputs, max_outputs, out_count, true, true, out_error, out_error_size))
 		{
 			*out_fd = fd;
 			return true;
@@ -733,7 +738,7 @@ static bool kvm_drm_open_device_with_output(const char *explicit_device, int *ou
 		close(fd);
 	}
 
-	kvm_drm_copy_error_message(out_error, out_error_size, "No usable /dev/dri/card* device with an active connector/CRTC");
+	kvm_drm_copy_error_message(out_error, out_error_size, "No usable /dev/dri/card* device with active connector/CRTC scanout");
 	return false;
 }
 
@@ -1280,6 +1285,270 @@ static void kvm_drm_get_rotated_dimensions(const kvm_drm_scanout_frame *frame, u
 	}
 }
 
+static bool kvm_drm_compute_desktop_layout(const kvm_drm_output *outputs, int output_count, kvm_drm_desktop_layout *layout)
+{
+	int i;
+	int min_x = INT_MAX;
+	int min_y = INT_MAX;
+	int max_x = INT_MIN;
+	int max_y = INT_MIN;
+
+	if (outputs == NULL || output_count <= 0 || layout == NULL)
+	{
+		return false;
+	}
+
+	for (i = 0; i < output_count; ++i)
+	{
+		int right = outputs[i].x + (int)outputs[i].width;
+		int bottom = outputs[i].y + (int)outputs[i].height;
+		if (outputs[i].width == 0 || outputs[i].height == 0)
+		{
+			continue;
+		}
+		if (outputs[i].x < min_x) { min_x = outputs[i].x; }
+		if (outputs[i].y < min_y) { min_y = outputs[i].y; }
+		if (right > max_x) { max_x = right; }
+		if (bottom > max_y) { max_y = bottom; }
+	}
+
+	if (min_x == INT_MAX || min_y == INT_MAX || max_x <= min_x || max_y <= min_y)
+	{
+		return false;
+	}
+
+	layout->min_x = min_x;
+	layout->min_y = min_y;
+	layout->max_x = max_x;
+	layout->max_y = max_y;
+	layout->width = (uint32_t)(max_x - min_x);
+	layout->height = (uint32_t)(max_y - min_y);
+	return true;
+}
+
+static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output_count, const char *name)
+{
+	int i;
+	if (outputs == NULL || name == NULL || name[0] == 0)
+	{
+		return -1;
+	}
+	for (i = 0; i < output_count; ++i)
+	{
+		if (strcmp(outputs[i].connector_name, name) == 0)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, const char *name, int enabled, int x, int y, uint32_t width, uint32_t height, int *matched)
+{
+	int index;
+	if (enabled != 1 || width == 0 || height == 0)
+	{
+		return 0;
+	}
+	index = kvm_drm_find_output_by_name(outputs, output_count, name);
+	if (index < 0)
+	{
+		return 0;
+	}
+
+	outputs[index].x = x;
+	outputs[index].y = y;
+	outputs[index].width = width;
+	outputs[index].height = height;
+	if (matched != NULL) { (*matched)++; }
+	return 1;
+}
+
+static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count, bool logSelection)
+{
+	FILE *pipe;
+	char line[256];
+	kvm_drm_output tmp[KVM_DRM_MAX_OUTPUTS];
+	int in_screens = 0;
+	int have_screen = 0;
+	char name[32];
+	int enabled = -1;
+	int x = 0;
+	int y = 0;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	int matched = 0;
+	int i;
+
+	if (outputs == NULL || output_count <= 0 || output_count > KVM_DRM_MAX_OUTPUTS)
+	{
+		return false;
+	}
+
+	memcpy_s(tmp, sizeof(tmp), outputs, sizeof(kvm_drm_output) * (size_t)output_count);
+	memset(name, 0, sizeof(name));
+
+	pipe = popen("(qdbus6 org.kde.KWin /KWin org.kde.KWin.supportInformation 2>/dev/null || qdbus org.kde.KWin /KWin org.kde.KWin.supportInformation 2>/dev/null)", "r");
+	if (pipe == NULL)
+	{
+		return false;
+	}
+
+	while (fgets(line, sizeof(line), pipe) != NULL)
+	{
+		if (!in_screens)
+		{
+			if (strncmp(line, "Screens", 7) == 0)
+			{
+				in_screens = 1;
+			}
+			continue;
+		}
+		if (strncmp(line, "Compositing", 11) == 0)
+		{
+			break;
+		}
+		if (strncmp(line, "Screen ", 7) == 0)
+		{
+			if (have_screen)
+			{
+				kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched);
+			}
+			have_screen = 1;
+			name[0] = 0;
+			enabled = -1;
+			x = y = 0;
+			width = height = 0;
+			continue;
+		}
+		if (!have_screen)
+		{
+			continue;
+		}
+		if (sscanf(line, "Name: %31s", name) == 1)
+		{
+			continue;
+		}
+		if (sscanf(line, "Enabled: %d", &enabled) == 1)
+		{
+			continue;
+		}
+		if (sscanf(line, "Geometry: %d,%d,%ux%u", &x, &y, &width, &height) == 4)
+		{
+			continue;
+		}
+	}
+	if (have_screen)
+	{
+		kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched);
+	}
+	pclose(pipe);
+
+	if (matched != output_count)
+	{
+		return false;
+	}
+
+	memcpy_s(outputs, sizeof(kvm_drm_output) * (size_t)output_count, tmp, sizeof(kvm_drm_output) * (size_t)output_count);
+	qsort(outputs, (size_t)output_count, sizeof(kvm_drm_output), kvm_drm_compare_outputs);
+	if (drm_debug && logSelection)
+	{
+		fprintf(stderr, "DRM: Using KWin logical output layout\n");
+		for (i = 0; i < output_count; ++i)
+		{
+			fprintf(stderr, "DRM:   kwin[%d] %s pos=%d,%d size=%ux%u\n",
+				i, outputs[i].connector_name, outputs[i].x, outputs[i].y, outputs[i].width, outputs[i].height);
+		}
+	}
+	return true;
+}
+
+static void kvm_drm_prepare_session_environment(int sessionUid)
+{
+	char runtimeDir[64];
+	char busAddress[96];
+	if (sessionUid <= 0)
+	{
+		return;
+	}
+	snprintf(runtimeDir, sizeof(runtimeDir), "/run/user/%d", sessionUid);
+	snprintf(busAddress, sizeof(busAddress), "unix:path=/run/user/%d/bus", sessionUid);
+	if (getenv("XDG_RUNTIME_DIR") == NULL) { setenv("XDG_RUNTIME_DIR", runtimeDir, 1); }
+	if (getenv("DBUS_SESSION_BUS_ADDRESS") == NULL) { setenv("DBUS_SESSION_BUS_ADDRESS", busAddress, 1); }
+}
+
+static void kvm_drm_copy_frame_to_desktop(const unsigned char *src, uint32_t src_width, uint32_t src_height, unsigned char *dst, uint32_t dst_width, uint32_t dst_height, int dst_x, int dst_y, uint32_t output_width, uint32_t output_height)
+{
+	uint32_t y;
+	if (src == NULL || dst == NULL || src_width == 0 || src_height == 0 || dst_width == 0 || dst_height == 0 || output_width == 0 || output_height == 0)
+	{
+		return;
+	}
+
+	if (src_width == output_width && src_height == output_height)
+	{
+		for (y = 0; y < src_height; ++y)
+		{
+			int target_y = dst_y + (int)y;
+			if (target_y < 0 || target_y >= (int)dst_height)
+			{
+				continue;
+			}
+
+			int copy_x = dst_x;
+			uint32_t src_x = 0;
+			uint32_t copy_width = src_width;
+			if (copy_x < 0)
+			{
+				src_x = (uint32_t)(-copy_x);
+				if (src_x >= copy_width) { continue; }
+				copy_width -= src_x;
+				copy_x = 0;
+			}
+			if (copy_x >= (int)dst_width)
+			{
+				continue;
+			}
+			if (copy_width > dst_width - (uint32_t)copy_x)
+			{
+				copy_width = dst_width - (uint32_t)copy_x;
+			}
+
+			memcpy_s(dst + ((((size_t)target_y * (size_t)dst_width) + (size_t)copy_x) * 3u),
+				((size_t)(dst_width - (uint32_t)copy_x)) * 3u,
+				src + ((((size_t)y * (size_t)src_width) + (size_t)src_x) * 3u),
+				((size_t)copy_width) * 3u);
+		}
+		return;
+	}
+
+	for (y = 0; y < output_height; ++y)
+	{
+		int target_y = dst_y + (int)y;
+		if (target_y < 0 || target_y >= (int)dst_height)
+		{
+			continue;
+		}
+
+		uint32_t x;
+		uint32_t src_y = (uint32_t)(((uint64_t)y * (uint64_t)src_height) / (uint64_t)output_height);
+		for (x = 0; x < output_width; ++x)
+		{
+			int target_x = dst_x + (int)x;
+			if (target_x < 0 || target_x >= (int)dst_width)
+			{
+				continue;
+			}
+			uint32_t src_x = (uint32_t)(((uint64_t)x * (uint64_t)src_width) / (uint64_t)output_width);
+			const unsigned char *s = src + ((((size_t)src_y * (size_t)src_width) + (size_t)src_x) * 3u);
+			unsigned char *d = dst + ((((size_t)target_y * (size_t)dst_width) + (size_t)target_x) * 3u);
+			d[0] = s[0];
+			d[1] = s[1];
+			d[2] = s[2];
+		}
+	}
+}
+
 static uint64_t kvm_drm_now_ms()
 {
 	struct timespec tsNow;
@@ -1392,13 +1661,13 @@ void *kvm_server_mainloop_drm(void *parm)
 	int displayListSent = 0;
 	uint64_t lastFrameTimeMs = 0;
 	int lastCaptureError = 0;
-	int64_t nFramesConverted = 0;
 	int scanoutSuspended = 0;
 	int forceTileReset = 0;
 	uint64_t lastOutputRefreshMs = 0;
 	uint64_t lastRefreshFailureLogMs = 0;
 	char lastRefreshFailure[KVM_DRM_MAX_ERROR];
 
+	kvm_drm_init_debug();
 	g_kvmBackendDRM = 1;
 	g_enableEvents = kvm_events_evdev_init();
 	if (!g_enableEvents)
@@ -1429,13 +1698,17 @@ void *kvm_server_mainloop_drm(void *parm)
 #else
 	int fd = -1;
 	char err[KVM_DRM_MAX_ERROR];
-	kvm_drm_output output;
+	kvm_drm_output outputs[KVM_DRM_MAX_OUTPUTS];
+	int outputCount = 0;
+	kvm_drm_desktop_layout layout;
 	kvm_drm_frame_map map;
 	kvm_drm_egl_context eglCtx;
 	unsigned char *rgbBuffer = NULL;
 	size_t rgbBufferSize = 0;
 	unsigned char *rgbRotatedBuffer = NULL;
 	size_t rgbRotatedBufferSize = 0;
+	unsigned char *desktopRgbBuffer = NULL;
+	size_t desktopRgbBufferSize = 0;
 	char *desktopBuffer = NULL;
 	long long desktopBufferSize = 0;
 	uint32_t lastLoggedFbId = 0;
@@ -1448,7 +1721,8 @@ void *kvm_server_mainloop_drm(void *parm)
 	uint64_t lastLoggedModifier = UINT64_MAX;
 	int lastLoggedPath = -1;
 	int lastLoggedRotation = -1;
-	memset(&output, 0, sizeof(output));
+	memset(outputs, 0, sizeof(outputs));
+	memset(&layout, 0, sizeof(layout));
 	memset(&map, 0, sizeof(map));
 	memset(&eglCtx, 0, sizeof(eglCtx));
 	memset(lastRefreshFailure, 0, sizeof(lastRefreshFailure));
@@ -1456,9 +1730,10 @@ void *kvm_server_mainloop_drm(void *parm)
 	map.drm_fd = -1;
 
 	char *explicitDevice = getenv("MESH_KVM_DRM_DEVICE");
-	if (!kvm_drm_open_device_with_output(explicitDevice, &fd, &output, err, sizeof(err)))
+	if (!kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) ||
+		!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
 	{
-		kvm_send_error(err);
+		kvm_send_error(err[0] ? err : "Unable to compute DRM desktop layout");
 		kvm_events_evdev_shutdown();
 		g_enableEvents = 0;
 		g_kvmBackendDRM = 0;
@@ -1484,6 +1759,19 @@ void *kvm_server_mainloop_drm(void *parm)
 		g_kvmBackendDRM = 0;
 		close(fd);
 		return (void *)-1;
+	}
+	kvm_drm_prepare_session_environment(sessionUid);
+	if (kvm_drm_apply_kwin_layout(outputs, outputCount, true))
+	{
+		if (!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
+		{
+			kvm_send_error("Unable to compute KWin DRM desktop layout");
+			kvm_events_evdev_shutdown();
+			g_enableEvents = 0;
+			g_kvmBackendDRM = 0;
+			close(fd);
+			return (void *)-1;
+		}
 	}
 
 	while (!g_shutdown)
@@ -1553,199 +1841,180 @@ void *kvm_server_mainloop_drm(void *parm)
 			continue;
 		}
 
-		kvm_drm_scanout_frame frame;
-		size_t rgbSize = 0;
-		bool converted = false;
-		memset(&frame, 0, sizeof(frame));
-
-		if (!kvm_drm_get_scanout_frame(fd, output.crtc_id, output.crtc_index, &frame, err, sizeof(err)))
+		if (lastOutputRefreshMs == 0 || nowMs - lastOutputRefreshMs >= 1000)
 		{
-			if (kvm_drm_is_transient_scanout_error(err))
+			kvm_drm_output refreshed[KVM_DRM_MAX_OUTPUTS];
+			kvm_drm_desktop_layout refreshedLayout;
+			int refreshedCount = 0;
+			char refreshErr[KVM_DRM_MAX_ERROR];
+			memset(refreshed, 0, sizeof(refreshed));
+			memset(&refreshedLayout, 0, sizeof(refreshedLayout));
+			if (kvm_drm_collect_active_outputs_on_fd(fd, outputs[0].device_path, refreshed, KVM_DRM_MAX_OUTPUTS, &refreshedCount, true, false, refreshErr, sizeof(refreshErr)))
 			{
-				if (!scanoutSuspended)
+				ignore_result(kvm_drm_apply_kwin_layout(refreshed, refreshedCount, false));
+				if (kvm_drm_compute_desktop_layout(refreshed, refreshedCount, &refreshedLayout))
 				{
-					scanoutSuspended = 1;
-					forceTileReset = 1;
-					kvm_drm_destroy_map(&map);
-					kvm_drm_egl_destroy_context(&eglCtx);
-					kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
-						&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
-						&lastLoggedModifier, &lastLoggedPath);
-					lastLoggedRotation = -1;
-					if (drm_debug)
+					if (refreshedCount != outputCount ||
+						memcmp(outputs, refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount) != 0 ||
+						memcmp(&layout, &refreshedLayout, sizeof(layout)) != 0)
 					{
-						fprintf(stderr, "DRM: Scanout unavailable on %s, waiting for the display to resume\n", output.connector_name);
+						memcpy_s(outputs, sizeof(outputs), refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount);
+						outputCount = refreshedCount;
+						layout = refreshedLayout;
+						forceTileReset = 1;
+						kvm_drm_destroy_map(&map);
+						kvm_drm_egl_destroy_context(&eglCtx);
+						kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
+							&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
+							&lastLoggedModifier, &lastLoggedPath);
+						lastLoggedRotation = -1;
+						if (drm_debug)
+						{
+							fprintf(stderr, "DRM: Refreshed desktop layout: %d output(s), origin=%d,%d size=%ux%u\n",
+								outputCount, layout.min_x, layout.min_y, layout.width, layout.height);
+						}
 					}
 					lastRefreshFailure[0] = 0;
 					lastRefreshFailureLogMs = 0;
 				}
+			}
+			else if (drm_debug && !kvm_drm_is_expected_suspended_refresh_error(refreshErr) &&
+				(lastRefreshFailure[0] == 0 ||
+				 strcmp(lastRefreshFailure, refreshErr) != 0 ||
+				 nowMs - lastRefreshFailureLogMs >= 5000))
+			{
+				fprintf(stderr, "DRM: Output refresh failed: %s\n", refreshErr);
+				kvm_drm_copy_error_message(lastRefreshFailure, sizeof(lastRefreshFailure), refreshErr);
+				lastRefreshFailureLogMs = nowMs;
+			}
+			lastOutputRefreshMs = nowMs;
+		}
 
-				if (lastOutputRefreshMs == 0 || nowMs - lastOutputRefreshMs >= 250)
+		size_t desktopRgbSize = (size_t)layout.width * (size_t)layout.height * 3u;
+		if (desktopRgbBufferSize < desktopRgbSize)
+		{
+			unsigned char *tmp = (unsigned char *)realloc(desktopRgbBuffer, desktopRgbSize);
+			if (tmp == NULL) ILIBCRITICALEXIT(254);
+			desktopRgbBuffer = tmp;
+			desktopRgbBufferSize = desktopRgbSize;
+		}
+		memset(desktopRgbBuffer, 0, desktopRgbSize);
+
+		int capturedOutputs = 0;
+		int outputIndex = 0;
+		for (outputIndex = 0; outputIndex < outputCount; ++outputIndex)
+		{
+			kvm_drm_scanout_frame frame;
+			size_t rgbSize = 0;
+			bool converted = false;
+			uint32_t effectiveWidth = 0;
+			uint32_t effectiveHeight = 0;
+			memset(&frame, 0, sizeof(frame));
+
+			if (!kvm_drm_get_scanout_frame(fd, outputs[outputIndex].crtc_id, outputs[outputIndex].crtc_index, &frame, err, sizeof(err)))
+			{
+				if (kvm_drm_is_transient_scanout_error(err))
 				{
-					char refreshErr[KVM_DRM_MAX_ERROR];
-					if (kvm_drm_refresh_output_on_fd(fd, &output, true, refreshErr, sizeof(refreshErr)))
-					{
-						lastRefreshFailure[0] = 0;
-						lastRefreshFailureLogMs = 0;
-					}
-					else if (drm_debug && !kvm_drm_is_expected_suspended_refresh_error(refreshErr) &&
-						(lastRefreshFailure[0] == 0 ||
-						 strcmp(lastRefreshFailure, refreshErr) != 0 ||
-						 nowMs - lastRefreshFailureLogMs >= 5000))
-					{
-						fprintf(stderr, "DRM: Output refresh while scanout is suspended failed: %s\n", refreshErr);
-						kvm_drm_copy_error_message(lastRefreshFailure, sizeof(lastRefreshFailure), refreshErr);
-						lastRefreshFailureLogMs = nowMs;
-					}
-					lastOutputRefreshMs = nowMs;
+					scanoutSuspended = 1;
+					forceTileReset = 1;
+					continue;
+				}
+				if (lastCaptureError == 0)
+				{
+					kvm_send_error(err);
+					lastCaptureError = 1;
 				}
 				continue;
 			}
 
-			if (lastCaptureError == 0)
+			if (frame.handle == 0 || frame.width == 0 || frame.height == 0)
 			{
-				kvm_send_error(err);
-				lastCaptureError = 1;
-			}
-			continue;
-		}
-
-		if (scanoutSuspended)
-		{
-			scanoutSuspended = 0;
-			lastOutputRefreshMs = 0;
-			lastRefreshFailure[0] = 0;
-			lastRefreshFailureLogMs = 0;
-			if (drm_debug)
-			{
-				fprintf(stderr, "DRM: Scanout resumed on %s\n", output.connector_name);
-			}
-		}
-
-		if (frame.handle == 0 || frame.width == 0 || frame.height == 0)
-		{
-			if (lastCaptureError == 0)
-			{
-				kvm_send_error("DRM framebuffer is not readable (missing handle)");
-				lastCaptureError = 1;
-			}
-			continue;
-		}
-
-		if (drm_debug &&
-			(frame.width != lastLoggedWidth ||
-			 frame.height != lastLoggedHeight ||
-			 frame.pitch != lastLoggedPitch ||
-			 frame.offset != lastLoggedOffset ||
-			 frame.format != lastLoggedFormat ||
-			 frame.modifier != lastLoggedModifier ||
-			 (int)frame.rotation != lastLoggedRotation))
-		{
-			kvm_drm_debug_log_scanout_frame("Using scanout framebuffer", &frame);
-			lastLoggedWidth = frame.width;
-			lastLoggedHeight = frame.height;
-			lastLoggedPitch = frame.pitch;
-			lastLoggedOffset = frame.offset;
-			lastLoggedFormat = frame.format;
-			lastLoggedModifier = frame.modifier;
-			lastLoggedRotation = (int)frame.rotation;
-		}
-
-		{
-			uint32_t effectiveWidth = 0;
-			uint32_t effectiveHeight = 0;
-			kvm_drm_get_rotated_dimensions(&frame, &effectiveWidth, &effectiveHeight);
-			if (SCREEN_WIDTH != (int)effectiveWidth || SCREEN_HEIGHT != (int)effectiveHeight)
-			{
-				int oldTileHeightCount = TILE_HEIGHT_COUNT;
-				SCREEN_WIDTH = (int)effectiveWidth;
-				SCREEN_HEIGHT = (int)effectiveHeight;
-				TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
-				TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
-				if (SCREEN_WIDTH % TILE_WIDTH)
+				if (lastCaptureError == 0)
 				{
-					TILE_WIDTH_COUNT++;
+					kvm_send_error("DRM framebuffer is not readable (missing handle)");
+					lastCaptureError = 1;
 				}
-				if (SCREEN_HEIGHT % TILE_HEIGHT)
+				continue;
+			}
+
+			if (drm_debug >= 2 &&
+				(frame.width != lastLoggedWidth ||
+				 frame.height != lastLoggedHeight ||
+				 frame.pitch != lastLoggedPitch ||
+				 frame.offset != lastLoggedOffset ||
+				 frame.format != lastLoggedFormat ||
+				 frame.modifier != lastLoggedModifier ||
+				 (int)frame.rotation != lastLoggedRotation))
+			{
+				fprintf(stderr, "DRM: Output %s at %d,%d\n", outputs[outputIndex].connector_name, outputs[outputIndex].x, outputs[outputIndex].y);
+				kvm_drm_debug_log_scanout_frame("Using scanout framebuffer", &frame);
+				lastLoggedWidth = frame.width;
+				lastLoggedHeight = frame.height;
+				lastLoggedPitch = frame.pitch;
+				lastLoggedOffset = frame.offset;
+				lastLoggedFormat = frame.format;
+				lastLoggedModifier = frame.modifier;
+				lastLoggedRotation = (int)frame.rotation;
+			}
+
+			rgbSize = (size_t)frame.width * (size_t)frame.height * 3u;
+			if (rgbBufferSize < rgbSize)
+			{
+				unsigned char *tmp = (unsigned char *)realloc(rgbBuffer, rgbSize);
+				if (tmp == NULL) ILIBCRITICALEXIT(254);
+				rgbBuffer = tmp;
+				rgbBufferSize = rgbSize;
+			}
+
+			if (frame.modifier != DRM_FORMAT_MOD_INVALID && frame.modifier != DRM_FORMAT_MOD_LINEAR)
+			{
+				if (drm_debug >= 2 && lastLoggedPath != 1)
 				{
-					TILE_HEIGHT_COUNT++;
+					fprintf(stderr, "DRM: Using GPU-assisted conversion for modifier 0x%016" PRIx64 "\n", frame.modifier);
+					lastLoggedPath = 1;
 				}
-				kvm_send_resolution();
-				kvm_send_display();
-				reset_tile_info(oldTileHeightCount);
-				forceTileReset = 0;
-			}
-		}
 
-		if (!displayListSent)
-		{
-			kvm_send_display_list();
-			displayListSent = 1;
-		}
-
-		rgbSize = (size_t)frame.width * (size_t)frame.height * 3u;
-		if (rgbBufferSize < rgbSize)
-		{
-			unsigned char *tmp = (unsigned char *)realloc(rgbBuffer, rgbSize);
-			if (tmp == NULL)
-				ILIBCRITICALEXIT(254);
-			rgbBuffer = tmp;
-			rgbBufferSize = rgbSize;
-		}
-
-		if (frame.modifier != DRM_FORMAT_MOD_INVALID && frame.modifier != DRM_FORMAT_MOD_LINEAR)
-		{
-			if (drm_debug && lastLoggedPath != 1)
-			{
-				fprintf(stderr, "DRM: Using GPU-assisted conversion for modifier 0x%016" PRIx64 "\n", frame.modifier);
-				lastLoggedPath = 1;
-			}
-
-			converted = kvm_drm_egl_convert_to_rgb24_gpu(&eglCtx, fd, frame.width, frame.height, frame.pitch,
-														 frame.offset, frame.format, frame.handle, frame.modifier,
-														 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
-			kvm_drm_close_gem_handle(fd, frame.handle);
-			frame.handle = 0;
-		}
-		else
-		{
-			size_t required_bytes = (size_t)frame.offset + ((size_t)frame.pitch * (size_t)frame.height);
-			if (!kvm_drm_map_framebuffer_handle(fd, frame.handle, required_bytes, &map, err, sizeof(err)))
-			{
+				converted = kvm_drm_egl_convert_to_rgb24_gpu(&eglCtx, fd, frame.width, frame.height, frame.pitch,
+															 frame.offset, frame.format, frame.handle, frame.modifier,
+															 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
 				kvm_drm_close_gem_handle(fd, frame.handle);
-				converted = false;
+				frame.handle = 0;
 			}
 			else
 			{
-				if (drm_debug && lastLoggedPath != 0)
+				size_t required_bytes = (size_t)frame.offset + ((size_t)frame.pitch * (size_t)frame.height);
+				if (!kvm_drm_map_framebuffer_handle(fd, frame.handle, required_bytes, &map, err, sizeof(err)))
 				{
-					char format[32];
-					kvm_drm_format_fourcc(format, sizeof(format), frame.format);
-					fprintf(stderr, "DRM: Using CPU readback conversion for format %s\n", format);
-					lastLoggedPath = 0;
+					kvm_drm_close_gem_handle(fd, frame.handle);
+					converted = false;
 				}
+				else
+				{
+					if (drm_debug >= 2 && lastLoggedPath != 0)
+					{
+						char format[32];
+						kvm_drm_format_fourcc(format, sizeof(format), frame.format);
+						fprintf(stderr, "DRM: Using CPU readback conversion for format %s\n", format);
+						lastLoggedPath = 0;
+					}
 
-				const uint8_t *src = map.addr + frame.offset;
-				converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+					const uint8_t *src = map.addr + frame.offset;
+					converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
+				}
 			}
-		}
 
-		if (!converted)
-		{
-			if (lastCaptureError == 0)
+			if (!converted)
 			{
-				kvm_send_error(err);
-				lastCaptureError = 1;
+				if (lastCaptureError == 0)
+				{
+					kvm_send_error(err);
+					lastCaptureError = 1;
+				}
+				continue;
 			}
-			continue;
-		}
-		lastCaptureError = 0;
-		nFramesConverted++;
 
-		{
 			const unsigned char *rgbFrame = rgbBuffer;
-			size_t rgbFrameSize = rgbSize;
-
+			kvm_drm_get_rotated_dimensions(&frame, &effectiveWidth, &effectiveHeight);
 			if (frame.rotation != KVM_DRM_ROTATION_0)
 			{
 				if (rgbRotatedBufferSize < rgbSize)
@@ -1759,21 +2028,64 @@ void *kvm_server_mainloop_drm(void *parm)
 				rgbFrame = rgbRotatedBuffer;
 			}
 
-			if (g_tileInfo == NULL)
-			{
-				reset_tile_info(0);
-				forceTileReset = 0;
-			}
-			else if (forceTileReset)
-			{
-				reset_tile_info(TILE_HEIGHT_COUNT);
-				forceTileReset = 0;
-			}
+			kvm_drm_copy_frame_to_desktop(rgbFrame, effectiveWidth, effectiveHeight, desktopRgbBuffer, layout.width, layout.height,
+				outputs[outputIndex].x - layout.min_x, outputs[outputIndex].y - layout.min_y,
+				outputs[outputIndex].width, outputs[outputIndex].height);
+			capturedOutputs++;
+		}
 
-			if (kvm_drm_send_dirty_tiles(rgbFrame, rgbFrameSize, &desktopBuffer, &desktopBufferSize) != 0)
+		if (capturedOutputs <= 0)
+		{
+			if (scanoutSuspended && drm_debug)
 			{
-				g_shutdown = 1;
+				fprintf(stderr, "DRM: Scanout unavailable on all outputs, waiting for display resume\n");
 			}
+			continue;
+		}
+		scanoutSuspended = 0;
+		lastCaptureError = 0;
+
+		if (SCREEN_WIDTH != (int)layout.width || SCREEN_HEIGHT != (int)layout.height)
+		{
+			int oldTileHeightCount = TILE_HEIGHT_COUNT;
+			SCREEN_WIDTH = (int)layout.width;
+			SCREEN_HEIGHT = (int)layout.height;
+			TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
+			TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
+			if (SCREEN_WIDTH % TILE_WIDTH)
+			{
+				TILE_WIDTH_COUNT++;
+			}
+			if (SCREEN_HEIGHT % TILE_HEIGHT)
+			{
+				TILE_HEIGHT_COUNT++;
+			}
+			kvm_send_resolution();
+			kvm_send_display();
+			reset_tile_info(oldTileHeightCount);
+			forceTileReset = 0;
+		}
+
+		if (!displayListSent)
+		{
+			kvm_send_display_list();
+			displayListSent = 1;
+		}
+
+		if (g_tileInfo == NULL)
+		{
+			reset_tile_info(0);
+			forceTileReset = 0;
+		}
+		else if (forceTileReset)
+		{
+			reset_tile_info(TILE_HEIGHT_COUNT);
+			forceTileReset = 0;
+		}
+
+		if (kvm_drm_send_dirty_tiles(desktopRgbBuffer, desktopRgbSize, &desktopBuffer, &desktopBufferSize) != 0)
+		{
+			g_shutdown = 1;
 		}
 	}
 
@@ -1799,6 +2111,11 @@ void *kvm_server_mainloop_drm(void *parm)
 	{
 		free(rgbRotatedBuffer);
 		rgbRotatedBuffer = NULL;
+	}
+	if (desktopRgbBuffer != NULL)
+	{
+		free(desktopRgbBuffer);
+		desktopRgbBuffer = NULL;
 	}
 	kvm_drm_destroy_map(&map);
 	kvm_drm_egl_destroy_context(&eglCtx);
