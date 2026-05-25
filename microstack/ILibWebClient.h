@@ -276,6 +276,7 @@ void ILibWebClient_SetTLS(ILibWebClient_RequestManager manager, void *ssl_ctx, I
 int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_cert* leafCert, X509* nonLeafCert, ILibWebClient_OnHttpsConnection OnHttpsConnection);
 void ILibWebClient_Request_SetHTTPS(ILibWebClient_RequestToken reqToken, ILibWebClient_RequestToken_HTTPS requestMode);
 void ILibWebClient_Request_SetSNI(ILibWebClient_RequestToken reqToken, char *host, int hostLen);
+void ILibWebClient_EnableSystemCACerts(ILibWebClient_RequestManager manager);
 #endif
 
 // Added methods
