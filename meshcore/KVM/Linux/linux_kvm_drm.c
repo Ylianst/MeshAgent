@@ -39,6 +39,7 @@ limitations under the License.
 
 #if defined(__linux__)
 #include <fcntl.h>
+#include <dirent.h>
 #include <grp.h>
 #include <linux/capability.h>
 #include <pwd.h>
@@ -49,6 +50,8 @@ limitations under the License.
 #include <drm_fourcc.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+
+#include <wayland-client.h>
 
 #ifndef O_CLOEXEC
 #define KVM_DRM_O_CLOEXEC 0
@@ -1364,6 +1367,364 @@ static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, 
 	return 1;
 }
 
+struct zxdg_output_manager_v1;
+struct zxdg_output_v1;
+
+struct zxdg_output_v1_listener
+{
+	void (*logical_position)(void *data, struct zxdg_output_v1 *zxdg_output_v1, int32_t x, int32_t y);
+	void (*logical_size)(void *data, struct zxdg_output_v1 *zxdg_output_v1, int32_t width, int32_t height);
+	void (*done)(void *data, struct zxdg_output_v1 *zxdg_output_v1);
+	void (*name)(void *data, struct zxdg_output_v1 *zxdg_output_v1, const char *name);
+	void (*description)(void *data, struct zxdg_output_v1 *zxdg_output_v1, const char *description);
+};
+
+extern const struct wl_interface wl_output_interface;
+static const struct wl_interface zxdg_output_v1_interface;
+
+static const struct wl_interface *kvm_xdg_output_types[] =
+{
+	NULL,
+	NULL,
+	&zxdg_output_v1_interface,
+	&wl_output_interface,
+};
+
+static const struct wl_message zxdg_output_manager_v1_requests[] =
+{
+	{ "destroy", "", kvm_xdg_output_types + 0 },
+	{ "get_xdg_output", "no", kvm_xdg_output_types + 2 },
+};
+
+static const struct wl_interface zxdg_output_manager_v1_interface =
+{
+	"zxdg_output_manager_v1", 3,
+	2, zxdg_output_manager_v1_requests,
+	0, NULL,
+};
+
+static const struct wl_message zxdg_output_v1_requests[] =
+{
+	{ "destroy", "", kvm_xdg_output_types + 0 },
+};
+
+static const struct wl_message zxdg_output_v1_events[] =
+{
+	{ "logical_position", "ii", kvm_xdg_output_types + 0 },
+	{ "logical_size", "ii", kvm_xdg_output_types + 0 },
+	{ "done", "", kvm_xdg_output_types + 0 },
+	{ "name", "2s", kvm_xdg_output_types + 0 },
+	{ "description", "2s", kvm_xdg_output_types + 0 },
+};
+
+static const struct wl_interface zxdg_output_v1_interface =
+{
+	"zxdg_output_v1", 3,
+	1, zxdg_output_v1_requests,
+	5, zxdg_output_v1_events,
+};
+
+static struct zxdg_output_v1 *zxdg_output_manager_v1_get_xdg_output(struct zxdg_output_manager_v1 *manager, struct wl_output *output)
+{
+	struct wl_proxy *id = wl_proxy_marshal_flags((struct wl_proxy *)manager, 1, &zxdg_output_v1_interface, wl_proxy_get_version((struct wl_proxy *)manager), 0, NULL, output);
+	return (struct zxdg_output_v1 *)id;
+}
+
+static void zxdg_output_manager_v1_destroy(struct zxdg_output_manager_v1 *manager)
+{
+	wl_proxy_marshal_flags((struct wl_proxy *)manager, 0, NULL, wl_proxy_get_version((struct wl_proxy *)manager), WL_MARSHAL_FLAG_DESTROY);
+}
+
+static int zxdg_output_v1_add_listener(struct zxdg_output_v1 *output, const struct zxdg_output_v1_listener *listener, void *data)
+{
+	return wl_proxy_add_listener((struct wl_proxy *)output, (void (**)(void))listener, data);
+}
+
+static void zxdg_output_v1_destroy(struct zxdg_output_v1 *output)
+{
+	wl_proxy_marshal_flags((struct wl_proxy *)output, 0, NULL, wl_proxy_get_version((struct wl_proxy *)output), WL_MARSHAL_FLAG_DESTROY);
+}
+
+typedef struct kvm_drm_wayland_output
+{
+	struct wl_output *wl_output;
+	struct zxdg_output_v1 *xdg_output;
+	uint32_t global_name;
+	uint32_t version;
+	char name[64];
+	int have_name;
+	int have_position;
+	int have_size;
+	int x;
+	int y;
+	uint32_t width;
+	uint32_t height;
+} kvm_drm_wayland_output;
+
+typedef struct kvm_drm_wayland_layout_context
+{
+	struct wl_display *display;
+	struct wl_registry *registry;
+	struct zxdg_output_manager_v1 *xdg_output_manager;
+	kvm_drm_wayland_output outputs[KVM_DRM_MAX_OUTPUTS];
+	int output_count;
+} kvm_drm_wayland_layout_context;
+
+static void kvm_drm_wl_output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width, int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform)
+{
+	(void)data; (void)wl_output; (void)x; (void)y; (void)physical_width; (void)physical_height; (void)subpixel; (void)make; (void)model; (void)transform;
+}
+
+static void kvm_drm_wl_output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height, int32_t refresh)
+{
+	(void)data; (void)wl_output; (void)flags; (void)width; (void)height; (void)refresh;
+}
+
+static void kvm_drm_wl_output_done(void *data, struct wl_output *wl_output)
+{
+	(void)data; (void)wl_output;
+}
+
+static void kvm_drm_wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor)
+{
+	(void)data; (void)wl_output; (void)factor;
+}
+
+static void kvm_drm_wl_output_name(void *data, struct wl_output *wl_output, const char *name)
+{
+	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
+	(void)wl_output;
+	if (output != NULL && name != NULL && output->have_name == 0)
+	{
+		snprintf(output->name, sizeof(output->name), "%s", name);
+		output->have_name = 1;
+	}
+}
+
+static void kvm_drm_wl_output_description(void *data, struct wl_output *wl_output, const char *description)
+{
+	(void)data; (void)wl_output; (void)description;
+}
+
+static const struct wl_output_listener kvm_drm_wl_output_listener =
+{
+	kvm_drm_wl_output_geometry,
+	kvm_drm_wl_output_mode,
+	kvm_drm_wl_output_done,
+	kvm_drm_wl_output_scale,
+	kvm_drm_wl_output_name,
+	kvm_drm_wl_output_description,
+};
+
+static void kvm_drm_xdg_output_position(void *data, struct zxdg_output_v1 *xdg_output, int32_t x, int32_t y)
+{
+	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
+	(void)xdg_output;
+	if (output == NULL) { return; }
+	output->x = x;
+	output->y = y;
+	output->have_position = 1;
+}
+
+static void kvm_drm_xdg_output_size(void *data, struct zxdg_output_v1 *xdg_output, int32_t width, int32_t height)
+{
+	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
+	(void)xdg_output;
+	if (output == NULL || width <= 0 || height <= 0) { return; }
+	output->width = (uint32_t)width;
+	output->height = (uint32_t)height;
+	output->have_size = 1;
+}
+
+static void kvm_drm_xdg_output_done(void *data, struct zxdg_output_v1 *xdg_output)
+{
+	(void)data; (void)xdg_output;
+}
+
+static void kvm_drm_xdg_output_name(void *data, struct zxdg_output_v1 *xdg_output, const char *name)
+{
+	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
+	(void)xdg_output;
+	if (output != NULL && name != NULL)
+	{
+		snprintf(output->name, sizeof(output->name), "%s", name);
+		output->have_name = 1;
+	}
+}
+
+static void kvm_drm_xdg_output_description(void *data, struct zxdg_output_v1 *xdg_output, const char *description)
+{
+	(void)data; (void)xdg_output; (void)description;
+}
+
+static const struct zxdg_output_v1_listener kvm_drm_xdg_output_listener =
+{
+	kvm_drm_xdg_output_position,
+	kvm_drm_xdg_output_size,
+	kvm_drm_xdg_output_done,
+	kvm_drm_xdg_output_name,
+	kvm_drm_xdg_output_description,
+};
+
+static void kvm_drm_registry_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version)
+{
+	kvm_drm_wayland_layout_context *ctx = (kvm_drm_wayland_layout_context *)data;
+	if (ctx == NULL || interface == NULL) { return; }
+
+	if (strcmp(interface, "wl_output") == 0)
+	{
+		kvm_drm_wayland_output *output;
+		uint32_t bind_version;
+		if (ctx->output_count >= KVM_DRM_MAX_OUTPUTS) { return; }
+		output = &ctx->outputs[ctx->output_count++];
+		memset(output, 0, sizeof(*output));
+		output->global_name = name;
+		output->version = version;
+		bind_version = version >= 4 ? 4 : version;
+		if (bind_version < 2) { bind_version = 2; }
+		output->wl_output = (struct wl_output *)wl_registry_bind(registry, name, &wl_output_interface, bind_version);
+		if (output->wl_output != NULL)
+		{
+			wl_output_add_listener(output->wl_output, &kvm_drm_wl_output_listener, output);
+		}
+		return;
+	}
+
+	if (strcmp(interface, "zxdg_output_manager_v1") == 0)
+	{
+		uint32_t bind_version = version >= 3 ? 3 : version;
+		ctx->xdg_output_manager = (struct zxdg_output_manager_v1 *)wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, bind_version);
+	}
+}
+
+static void kvm_drm_registry_global_remove(void *data, struct wl_registry *registry, uint32_t name)
+{
+	(void)data; (void)registry; (void)name;
+}
+
+static const struct wl_registry_listener kvm_drm_registry_listener =
+{
+	kvm_drm_registry_global,
+	kvm_drm_registry_global_remove,
+};
+
+static void kvm_drm_wayland_layout_context_cleanup(kvm_drm_wayland_layout_context *ctx)
+{
+	int i;
+	if (ctx == NULL) { return; }
+	for (i = 0; i < ctx->output_count; ++i)
+	{
+		if (ctx->outputs[i].xdg_output != NULL)
+		{
+			zxdg_output_v1_destroy(ctx->outputs[i].xdg_output);
+			ctx->outputs[i].xdg_output = NULL;
+		}
+		if (ctx->outputs[i].wl_output != NULL)
+		{
+			wl_proxy_destroy((struct wl_proxy *)ctx->outputs[i].wl_output);
+			ctx->outputs[i].wl_output = NULL;
+		}
+	}
+	if (ctx->xdg_output_manager != NULL)
+	{
+		zxdg_output_manager_v1_destroy(ctx->xdg_output_manager);
+		ctx->xdg_output_manager = NULL;
+	}
+	if (ctx->registry != NULL)
+	{
+		wl_registry_destroy(ctx->registry);
+		ctx->registry = NULL;
+	}
+	if (ctx->display != NULL)
+	{
+		wl_display_disconnect(ctx->display);
+		ctx->display = NULL;
+	}
+}
+
+static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_count, bool logSelection)
+{
+	kvm_drm_wayland_layout_context ctx;
+	kvm_drm_output tmp[KVM_DRM_MAX_OUTPUTS];
+	int matched = 0;
+	int i;
+
+	if (outputs == NULL || output_count <= 0 || output_count > KVM_DRM_MAX_OUTPUTS)
+	{
+		return false;
+	}
+
+	memset(&ctx, 0, sizeof(ctx));
+	memcpy_s(tmp, sizeof(tmp), outputs, sizeof(kvm_drm_output) * (size_t)output_count);
+
+	ctx.display = wl_display_connect(NULL);
+	if (ctx.display == NULL)
+	{
+		return false;
+	}
+	ctx.registry = wl_display_get_registry(ctx.display);
+	if (ctx.registry == NULL)
+	{
+		kvm_drm_wayland_layout_context_cleanup(&ctx);
+		return false;
+	}
+	wl_registry_add_listener(ctx.registry, &kvm_drm_registry_listener, &ctx);
+	if (wl_display_roundtrip(ctx.display) < 0 || ctx.xdg_output_manager == NULL || ctx.output_count <= 0)
+	{
+		kvm_drm_wayland_layout_context_cleanup(&ctx);
+		return false;
+	}
+
+	for (i = 0; i < ctx.output_count; ++i)
+	{
+		if (ctx.outputs[i].wl_output == NULL) { continue; }
+		ctx.outputs[i].xdg_output = zxdg_output_manager_v1_get_xdg_output(ctx.xdg_output_manager, ctx.outputs[i].wl_output);
+		if (ctx.outputs[i].xdg_output != NULL)
+		{
+			zxdg_output_v1_add_listener(ctx.outputs[i].xdg_output, &kvm_drm_xdg_output_listener, &ctx.outputs[i]);
+		}
+	}
+
+	for (i = 0; i < 3; ++i)
+	{
+		if (wl_display_roundtrip(ctx.display) < 0)
+		{
+			kvm_drm_wayland_layout_context_cleanup(&ctx);
+			return false;
+		}
+	}
+
+	for (i = 0; i < ctx.output_count; ++i)
+	{
+		if (ctx.outputs[i].have_name == 0 || ctx.outputs[i].have_position == 0 || ctx.outputs[i].have_size == 0)
+		{
+			continue;
+		}
+		kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height, &matched);
+	}
+
+	if (matched != output_count)
+	{
+		kvm_drm_wayland_layout_context_cleanup(&ctx);
+		return false;
+	}
+
+	memcpy_s(outputs, sizeof(kvm_drm_output) * (size_t)output_count, tmp, sizeof(kvm_drm_output) * (size_t)output_count);
+	qsort(outputs, (size_t)output_count, sizeof(kvm_drm_output), kvm_drm_compare_outputs);
+	if (drm_debug && logSelection)
+	{
+		fprintf(stderr, "DRM: Using Wayland xdg-output logical layout\n");
+		for (i = 0; i < output_count; ++i)
+		{
+			fprintf(stderr, "DRM:   xdg-output[%d] %s pos=%d,%d size=%ux%u\n",
+				i, outputs[i].connector_name, outputs[i].x, outputs[i].y, outputs[i].width, outputs[i].height);
+		}
+	}
+
+	kvm_drm_wayland_layout_context_cleanup(&ctx);
+	return true;
+}
+
 static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count, bool logSelection)
 {
 	FILE *pipe;
@@ -1467,6 +1828,8 @@ static void kvm_drm_prepare_session_environment(int sessionUid)
 {
 	char runtimeDir[64];
 	char busAddress[96];
+	DIR *dir = NULL;
+	struct dirent *ent = NULL;
 	if (sessionUid <= 0)
 	{
 		return;
@@ -1475,6 +1838,22 @@ static void kvm_drm_prepare_session_environment(int sessionUid)
 	snprintf(busAddress, sizeof(busAddress), "unix:path=/run/user/%d/bus", sessionUid);
 	if (getenv("XDG_RUNTIME_DIR") == NULL) { setenv("XDG_RUNTIME_DIR", runtimeDir, 1); }
 	if (getenv("DBUS_SESSION_BUS_ADDRESS") == NULL) { setenv("DBUS_SESSION_BUS_ADDRESS", busAddress, 1); }
+	if (getenv("WAYLAND_DISPLAY") == NULL)
+	{
+		dir = opendir(runtimeDir);
+		if (dir != NULL)
+		{
+			while ((ent = readdir(dir)) != NULL)
+			{
+				if (strncmp(ent->d_name, "wayland-", 8) == 0 && strstr(ent->d_name, ".lock") == NULL)
+				{
+					setenv("WAYLAND_DISPLAY", ent->d_name, 1);
+					break;
+				}
+			}
+			closedir(dir);
+		}
+	}
 }
 
 static void kvm_drm_copy_frame_to_desktop(const unsigned char *src, uint32_t src_width, uint32_t src_height, unsigned char *dst, uint32_t dst_width, uint32_t dst_height, int dst_x, int dst_y, uint32_t output_width, uint32_t output_height)
@@ -1761,11 +2140,11 @@ void *kvm_server_mainloop_drm(void *parm)
 		return (void *)-1;
 	}
 	kvm_drm_prepare_session_environment(sessionUid);
-	if (kvm_drm_apply_kwin_layout(outputs, outputCount, true))
+	if (kvm_drm_apply_xdg_output_layout(outputs, outputCount, true) || kvm_drm_apply_kwin_layout(outputs, outputCount, true))
 	{
 		if (!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
 		{
-			kvm_send_error("Unable to compute KWin DRM desktop layout");
+			kvm_send_error("Unable to compute Wayland DRM desktop layout");
 			kvm_events_evdev_shutdown();
 			g_enableEvents = 0;
 			g_kvmBackendDRM = 0;
@@ -1851,7 +2230,10 @@ void *kvm_server_mainloop_drm(void *parm)
 			memset(&refreshedLayout, 0, sizeof(refreshedLayout));
 			if (kvm_drm_collect_active_outputs_on_fd(fd, outputs[0].device_path, refreshed, KVM_DRM_MAX_OUTPUTS, &refreshedCount, true, false, refreshErr, sizeof(refreshErr)))
 			{
-				ignore_result(kvm_drm_apply_kwin_layout(refreshed, refreshedCount, false));
+				if (!kvm_drm_apply_xdg_output_layout(refreshed, refreshedCount, false))
+				{
+					ignore_result(kvm_drm_apply_kwin_layout(refreshed, refreshedCount, false));
+				}
 				if (kvm_drm_compute_desktop_layout(refreshed, refreshedCount, &refreshedLayout))
 				{
 					if (refreshedCount != outputCount ||

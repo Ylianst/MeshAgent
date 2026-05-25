@@ -546,9 +546,15 @@ MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c m
 CFLAGS += -D_LINKVM
 	DRMCFLAGS = $(shell pkg-config --cflags libdrm egl glesv2 2>/dev/null)
 	DRMLIBS = $(shell pkg-config --libs libdrm egl glesv2 2>/dev/null)
+	WAYLANDCLIENT = $(shell pkg-config --exists wayland-client 2>/dev/null && echo 1)
 	ifneq ($(strip $(DRMCFLAGS)),)
 		CFLAGS += $(DRMCFLAGS)
 	endif
+	ifneq ($(WAYLANDCLIENT),1)
+		$(error Linux KVM builds require the wayland-client development package)
+	endif
+	CFLAGS += -DHAVE_WAYLAND_CLIENT $(shell pkg-config --cflags wayland-client)
+	DRMLIBS += $(shell pkg-config --libs wayland-client)
 	ifneq ($(JPEGVER),)
 		ifeq ($(LEGACY_LD),1)
 			LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
