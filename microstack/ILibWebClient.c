@@ -3596,14 +3596,6 @@ int ILibWebClient_EnableHTTPS(ILibWebClient_RequestManager manager, struct util_
 	SSL_TRACE2("ILibWebClient_EnableHTTPS()");
 	return 0;
 }
-void ILibWebClient_EnableSystemCACerts(ILibWebClient_RequestManager manager)
-{
-	struct ILibWebClientManager *wcm = (struct ILibWebClientManager *)manager;
-	if (wcm->ssl_ctx != NULL)
-	{
-		SSL_CTX_set_default_verify_paths(wcm->ssl_ctx);
-	}
-}
 void ILibWebClient_Request_SetHTTPS(ILibWebClient_RequestToken reqToken, ILibWebClient_RequestToken_HTTPS requestMode)
 {
 	((struct ILibWebClientDataObject*)ILibWebClient_GetStateObjectFromRequestToken(reqToken))->requestMode = requestMode;
