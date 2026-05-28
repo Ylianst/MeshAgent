@@ -195,7 +195,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E377F156-BAED-4086-B534-3CC43164607A}</ProjectGuid>
     <RootNamespace>MicrostackDuktape</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <ProjectName>MeshConsole-2022</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

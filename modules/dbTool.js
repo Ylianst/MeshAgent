@@ -62,10 +62,9 @@ if (process.argv.length > 1)
             process.exit();
             break;
         case 'get':
-            console.log('GET ' + process.argv[2] + ' = ');
             var val = db.Get(process.argv[2]);
             if (process.argv[2] == 'CoreModule') { val = val.slice(4); }
-            console.log(val);
+            console.log('GET ' + process.argv[2] + ' = ' + val);
             process.exit();
             break;
         case 'getx':
@@ -148,7 +147,8 @@ else
     console.log('usage: ');
     console.log('   [get/getx/delete/export/import] [KEY]');
     console.log('   [put/putx] [KEY] [value]');
-    console.log('   [list]');
+    console.log('   [list/keys]');
+    console.log('   [keynum] [n]');
     console.log('   Commonly used keys are: disableUpdate and noUpdateCoreModule');
     process.exit();
 }
