@@ -432,6 +432,29 @@ static int                   g_kvmSocketFD   = -1;
 static ILibKVM_WriteHandler  g_kvmSocketWriteHandler = NULL;
 static void                 *g_kvmSocketReserved     = NULL;
 
+// Not currently exported in ILibProcessPipe.h, but available from
+// ILibProcessPipe.c. We use it here so socket-mode sessions are fully
+// detached from the manager on KVM disconnect.
+extern void ILibProcessPipe_FreePipe(void *pipeObject);
+
+static void kvm_relay_socket_ResetState(int closePipe)
+{
+	if (closePipe != 0 && g_kvmSocketPipe != NULL)
+	{
+		ILibProcessPipe_Pipe_SetBrokenPipeHandler(g_kvmSocketPipe, NULL);
+		ILibProcessPipe_FreePipe(g_kvmSocketPipe);
+	}
+	else if (closePipe != 0 && g_kvmSocketFD != -1)
+	{
+		close(g_kvmSocketFD);
+	}
+
+	g_kvmSocketPipe = NULL;
+	g_kvmSocketFD = -1;
+	g_kvmSocketWriteHandler = NULL;
+	g_kvmSocketReserved = NULL;
+}
+
 int kvm_relay_feeddata(char* buf, int len)
 {
 	if (g_kvmSocketPipe != NULL)
@@ -930,10 +953,7 @@ static void kvm_relay_socket_ReadHandler(ILibProcessPipe_Pipe sender, char *buff
 static void kvm_relay_socket_BrokenHandler(ILibProcessPipe_Pipe sender)
 {
 	UNREFERENCED_PARAMETER(sender);
-	g_kvmSocketPipe = NULL;
-	g_kvmSocketFD = -1;
-	g_kvmSocketWriteHandler = NULL;
-	g_kvmSocketReserved = NULL;
+	kvm_relay_socket_ResetState(0);
 }
 
 // Setup the KVM session. Return 1 if ok, 0 if it could not be setup.
@@ -945,6 +965,10 @@ void* kvm_relay_setup(char *exePath, void *processPipeMgr, ILibKVM_WriteHandler 
 	user[1] = reserved;
 	user[2] = processPipeMgr;
 	user[3] = exePath;
+
+	// Ensure stale socket-mode state from a prior Desktop session is gone
+	// before attempting a new connection.
+	kvm_relay_socket_ResetState(1);
 
 	if (uid != 0)
 	{
@@ -1059,6 +1083,7 @@ void kvm_cleanup()
 {
 	KvmDebugLog("kvm_cleanup\n");
 	g_shutdown = 1;
+	kvm_relay_socket_ResetState(1);
 	if (gChildProcess != NULL)
 	{
 		ILibProcessPipe_Process_SoftKill(gChildProcess);
