@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.meshagent.kvm</string>
+
+    <!--
+        Launchd loads this LaunchAgent into gui/<console-uid> (and
+        LoginWindow), so the kvm process runs natively in the user's
+        GUI audit session. com.apple.replayd is reachable from this
+        session, which is what makes ScreenCaptureKit / ReplayKit
+        screen-capture work on macOS Tahoe without the
+        audit_session_join workaround the daemon-spawn path needs.
+    -->
+    <key>LimitLoadToSessionType</key>
+    <array>
+        <string>Aqua</string>
+        <string>LoginWindow</string>
+    </array>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/mesh_services/meshagent/meshagent/meshagent</string>
+        <string>-kvmagent</string>
+    </array>
+
+    <!--
+        Always restart unless we exited cleanly. ThrottleInterval keeps
+        us from hammering on a persistent failure (e.g., replayd genuinely
+        unreachable).
+    -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/meshagent-kvm.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/meshagent-kvm.stderr.log</string>
+</dict>
+</plist>

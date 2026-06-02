@@ -302,8 +302,15 @@ function installService(params)
     }
     var svc = require('service-manager').manager.getService(options.name);
 
-    // macOS needs a LaunchAgent to help with some usages that need to run from within the user session, 
-    // so we can setup ourselves to accomplish that.
+    // macOS LaunchAgent: required for screen capture + input on Tahoe.
+    // The system-side LaunchDaemon (this service) lives in the system audit
+    // session (asid≈100001), where com.apple.replayd is unreachable. We
+    // also install a per-user LaunchAgent that runs the same binary with
+    // -kvmagent — launchd loads it into gui/<uid> natively, so it shares
+    // an audit session with replayd and ScreenCaptureKit works without
+    // the audit_session_join workaround the daemon-spawn path needs.
+    // The daemon's kvm_relay_setup() connects to this agent over a Unix
+    // socket when MeshCentral initiates a Desktop session.
     if (process.platform == 'darwin')
     {
         svc.load();
@@ -315,10 +322,30 @@ function installService(params)
                     name: options.name,
                     servicePath: svc.appLocation(),
                     startType: 'AUTO_START',
-                    sessionTypes: ['LoginWindow'],
-                    parameters: ['-kvm1']
+                    sessionTypes: ['LoginWindow', 'Aqua'],
+                    parameters: ['-kvmagent']
                 });
             process.stdout.write(' [DONE]\n');
+
+            // Immediately bootstrap the LaunchAgent into the active console
+            // user's domain so the agent comes up without needing a logout/
+            // login cycle. Best-effort: skip silently if no console user.
+            try
+            {
+                var consoleUid = require('user-sessions').consoleUid();
+                if (consoleUid && consoleUid !== 0)
+                {
+                    process.stdout.write('   -> bootstrapping launch agent into gui/' + consoleUid + '...');
+                    var plistPath = '/Library/LaunchAgents/' + options.name + '-launchagent.plist';
+                    require('child_process').execFile('/bin/launchctl',
+                        ['bootstrap', 'gui/' + consoleUid, plistPath]);
+                    process.stdout.write(' [DONE]\n');
+                }
+            }
+            catch (be)
+            {
+                process.stdout.write(' [SKIP — bootstrap on next login]\n');
+            }
         }
         catch (sie)
         {

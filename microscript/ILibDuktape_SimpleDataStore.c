@@ -191,12 +191,20 @@ duk_ret_t ILibDuktape_SimpleDataStore_Keys(duk_context *ctx)
 }
 duk_ret_t ILibDuktape_SimpleDataStore_Delete(duk_context *ctx)
 {
+	duk_size_t keyLen;
+	char *key = (char*)duk_get_lstring(ctx, 0, &keyLen);
+
 	duk_push_this(ctx);																				// [DataStore]
 	duk_get_prop_string(ctx, -1, ILibDuktape_DataStore_PTR);										// [DataStore][ptr]
 	ILibSimpleDataStore ds = (ILibSimpleDataStore)duk_get_pointer(ctx, -1);
-	duk_size_t keyLen;
-	char *key = (char*)duk_get_lstring(ctx, 0, &keyLen);
-	
+	char *cguid = Duktape_GetContextGuidHex(ctx, ds);
+
+	if (cguid != NULL)
+	{
+		keyLen = sprintf_s(ILibScratchPad2, sizeof(ILibScratchPad2), "%s/%s", cguid, key);
+		key = ILibScratchPad2;
+	}
+
 	ILibSimpleDataStore_DeleteEx(ds, key, (int)keyLen);
 	return(0);
 }

@@ -4355,7 +4355,6 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 int ValidateMeshServer(ILibWebClient_RequestToken sender, int preverify_ok, STACK_OF(X509) *certs, struct sockaddr_in6 *address, void *user)
 {
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)user;
-
 	int len = ILibSimpleDataStore_Get(agent->masterDb, "validateWebCert", ILibScratchPad, sizeof(ILibScratchPad));
 	// Values here are 0 terminated, but the 0 is counted in size, so add one to the length check.
 	if ((len == 2 && strncmp("1", ILibScratchPad, 1) == 0) ||

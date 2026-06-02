@@ -303,6 +303,33 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 		kvm_server_mainloop((void*)(uint64_t)getpid());
 		return 0;
 	}
+	else if (argc > 1 && strcasecmp(argv[1], "-kvmagent") == 0)
+	{
+		// User-context LaunchAgent mode: long-running KVM server that
+		// listens on a Unix domain socket in the console user's session.
+		// Loaded by launchd into gui/<uid> via a LaunchAgent plist; runs
+		// natively in the user's GUI audit session, so com.apple.replayd
+		// (which only registers in gui/<uid>) is reachable without the
+		// audit_session_join workaround the daemon-spawn path needs.
+		// Daemon connects to this socket when MeshCentral's Desktop tab
+		// opens, instead of fork+exec'ing a -kvm0 helper.
+		// Optional argv[2] = socket path; defaults to a tmp-dir path
+		// keyed by uid so the agent can bind it as a non-root user.
+		extern void kvm_set_listener_path(const char *path);
+		char defaultPath[128];
+		if (argc > 2 && argv[2] != NULL && argv[2][0] != '\0')
+		{
+			kvm_set_listener_path(argv[2]);
+		}
+		else
+		{
+			snprintf(defaultPath, sizeof(defaultPath),
+				"/tmp/meshagent-kvm-%u.sock", (unsigned)getuid());
+			kvm_set_listener_path(defaultPath);
+		}
+		kvm_server_mainloop((void*)(uint64_t)getpid());
+		return 0;
+	}
 #endif
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
