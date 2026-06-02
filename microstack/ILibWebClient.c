@@ -1616,9 +1616,13 @@ ILibWebClient_DataResults ILibWebClient_OnData(ILibAsyncSocket_SocketModule sock
 								//
 								// We can simplify this, because it's an absolute path pointing to this server
 								//
-								memcpy(wcdo->header->DirectiveObj,tempPath,(int)strlen(tempPath));
-								wcdo->header->DirectiveObjLength = (int)strlen(tempPath);
+								int tempPathLen = (int)strlen(tempPath);
+							if (tempPathLen <= wcdo->header->DirectiveObjLength)
+							{
+								memcpy(wcdo->header->DirectiveObj,tempPath,tempPathLen);
+								wcdo->header->DirectiveObjLength = tempPathLen;
 								wcdo->header->DirectiveObj[wcdo->header->DirectiveObjLength]=0;
+							}
 							}
 							free(tempIP);
 							free(tempPath);
@@ -2518,7 +2522,8 @@ ILibWebClient_RequestManager ILibCreateWebClient(int PoolSize, void *Chain)
 	//RetVal->PostSelect = &ILibWebClient_PreProcess;
 
 	RetVal->socksLength = PoolSize;
-	RetVal->socks = (void**)malloc(PoolSize * sizeof(void*));
+	if (PoolSize <= 0) ILIBCRITICALEXIT(254);
+	RetVal->socks = (void**)calloc((size_t)PoolSize, sizeof(void*));
 	if (RetVal->socks == NULL) ILIBCRITICALEXIT(254);
 	ILibSpinLock_Init(&(RetVal->QLock));
 	RetVal->ChainLink.ParentChain = Chain;
