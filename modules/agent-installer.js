@@ -336,7 +336,7 @@ function installService(params)
                 if (consoleUid && consoleUid !== 0)
                 {
                     process.stdout.write('   -> bootstrapping launch agent into gui/' + consoleUid + '...');
-                    var plistPath = '/Library/LaunchAgents/' + options.name + '.plist';
+                    var plistPath = '/Library/LaunchAgents/' + options.name + '-launchagent.plist';
                     require('child_process').execFile('/bin/launchctl',
                         ['bootstrap', 'gui/' + consoleUid, plistPath]);
                     process.stdout.write(' [DONE]\n');
