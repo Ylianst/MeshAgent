@@ -66,6 +66,11 @@ static kvm_evdev_state g_kvm_evdev_state = {0};
 
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
+extern int CAPTURE_X;
+extern int CAPTURE_Y;
+extern int VSCREEN_WIDTH;
+extern int VSCREEN_HEIGHT;
+extern int g_kvmBackendDRM;
 
 static const unsigned int g_kvm_evdev_alpha_keycodes[26] = {
 	KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M,
@@ -735,6 +740,8 @@ void kvm_events_evdev_mouse_action(double absX, double absY, int button, short w
 {
 	int x = (int)absX;
 	int y = (int)absY;
+	int maxX = SCREEN_WIDTH;
+	int maxY = SCREEN_HEIGHT;
 	unsigned int mouseCode = 0;
 	int mouseValue = 0;
 
@@ -747,11 +754,19 @@ void kvm_events_evdev_mouse_action(double absX, double absY, int button, short w
 		return;
 	}
 
-	if (kvm_events_evdev_write(EV_ABS, ABS_X, kvm_events_evdev_scale_axis(x, SCREEN_WIDTH)) != 0)
+	if (g_kvmBackendDRM != 0 && VSCREEN_WIDTH > 0 && VSCREEN_HEIGHT > 0)
+	{
+		x += CAPTURE_X;
+		y += CAPTURE_Y;
+		maxX = VSCREEN_WIDTH;
+		maxY = VSCREEN_HEIGHT;
+	}
+
+	if (kvm_events_evdev_write(EV_ABS, ABS_X, kvm_events_evdev_scale_axis(x, maxX)) != 0)
 	{
 		return;
 	}
-	if (kvm_events_evdev_write(EV_ABS, ABS_Y, kvm_events_evdev_scale_axis(y, SCREEN_HEIGHT)) != 0)
+	if (kvm_events_evdev_write(EV_ABS, ABS_Y, kvm_events_evdev_scale_axis(y, maxY)) != 0)
 	{
 		return;
 	}

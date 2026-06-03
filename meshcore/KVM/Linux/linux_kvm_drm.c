@@ -80,6 +80,7 @@ extern struct tileInfo_t **g_tileInfo;
 extern int g_remotepause;
 extern int g_pause;
 extern int g_shutdown;
+extern int change_display;
 extern int master2slave[2];
 extern int slave2master[2];
 extern int CURRENT_DISPLAY_ID;
@@ -1329,6 +1330,45 @@ static bool kvm_drm_compute_desktop_layout(const kvm_drm_output *outputs, int ou
 	return true;
 }
 
+static void kvm_drm_publish_monitor_layout(const kvm_drm_output *outputs, int output_count, const kvm_drm_desktop_layout *layout)
+{
+	kvm_monitor_info monitors[KVM_MAX_MONITORS];
+	int i;
+	int monitorCount = output_count;
+
+	if (outputs == NULL || layout == NULL)
+	{
+		kvm_update_monitor_layout(NULL, 0, 0, 0);
+		return;
+	}
+	if (monitorCount > KVM_MAX_MONITORS) { monitorCount = KVM_MAX_MONITORS; }
+
+	memset(monitors, 0, sizeof(monitors));
+	for (i = 0; i < monitorCount; ++i)
+	{
+		monitors[i].id = i + 1;
+		monitors[i].x = outputs[i].x - layout->min_x;
+		monitors[i].y = outputs[i].y - layout->min_y;
+		monitors[i].width = (int)outputs[i].width;
+		monitors[i].height = (int)outputs[i].height;
+	}
+	kvm_update_monitor_layout(monitors, monitorCount, (int)layout->width, (int)layout->height);
+}
+
+static void kvm_drm_update_tile_geometry()
+{
+	TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
+	TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
+	if (SCREEN_WIDTH % TILE_WIDTH)
+	{
+		TILE_WIDTH_COUNT++;
+	}
+	if (SCREEN_HEIGHT % TILE_HEIGHT)
+	{
+		TILE_HEIGHT_COUNT++;
+	}
+}
+
 static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output_count, const char *name)
 {
 	int i;
@@ -2042,6 +2082,9 @@ void *kvm_server_mainloop_drm(void *parm)
 	int lastCaptureError = 0;
 	int scanoutSuspended = 0;
 	int forceTileReset = 0;
+	int reportedScreenWidth = 0;
+	int reportedScreenHeight = 0;
+	int reportedScreenSel = -1;
 	uint64_t lastOutputRefreshMs = 0;
 	uint64_t lastRefreshFailureLogMs = 0;
 	char lastRefreshFailure[KVM_DRM_MAX_ERROR];
@@ -2152,6 +2195,8 @@ void *kvm_server_mainloop_drm(void *parm)
 			return (void *)-1;
 		}
 	}
+	kvm_drm_publish_monitor_layout(outputs, outputCount, &layout);
+	kvm_drm_update_tile_geometry();
 
 	while (!g_shutdown)
 	{
@@ -2207,6 +2252,15 @@ void *kvm_server_mainloop_drm(void *parm)
 			}
 		}
 
+		if (change_display)
+		{
+			SCREEN_SEL = SCREEN_SEL_TARGET;
+			kvm_apply_monitor_selection();
+			change_display = 0;
+			forceTileReset = 1;
+			displayListSent = 0;
+		}
+
 		uint64_t nowMs = kvm_drm_now_ms();
 		uint64_t frameInterval = FRAME_RATE_TIMER < 20 ? 20 : (uint64_t)FRAME_RATE_TIMER;
 		if (nowMs == 0 || (lastFrameTimeMs != 0 && nowMs - lastFrameTimeMs < frameInterval))
@@ -2243,7 +2297,9 @@ void *kvm_server_mainloop_drm(void *parm)
 						memcpy_s(outputs, sizeof(outputs), refreshed, sizeof(kvm_drm_output) * (size_t)refreshedCount);
 						outputCount = refreshedCount;
 						layout = refreshedLayout;
+						kvm_drm_publish_monitor_layout(outputs, outputCount, &layout);
 						forceTileReset = 1;
+						displayListSent = 0;
 						kvm_drm_destroy_map(&map);
 						kvm_drm_egl_destroy_context(&eglCtx);
 						kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
@@ -2272,7 +2328,7 @@ void *kvm_server_mainloop_drm(void *parm)
 			lastOutputRefreshMs = nowMs;
 		}
 
-		size_t desktopRgbSize = (size_t)layout.width * (size_t)layout.height * 3u;
+		size_t desktopRgbSize = (size_t)SCREEN_WIDTH * (size_t)SCREEN_HEIGHT * 3u;
 		if (desktopRgbBufferSize < desktopRgbSize)
 		{
 			unsigned char *tmp = (unsigned char *)realloc(desktopRgbBuffer, desktopRgbSize);
@@ -2410,8 +2466,8 @@ void *kvm_server_mainloop_drm(void *parm)
 				rgbFrame = rgbRotatedBuffer;
 			}
 
-			kvm_drm_copy_frame_to_desktop(rgbFrame, effectiveWidth, effectiveHeight, desktopRgbBuffer, layout.width, layout.height,
-				outputs[outputIndex].x - layout.min_x, outputs[outputIndex].y - layout.min_y,
+			kvm_drm_copy_frame_to_desktop(rgbFrame, effectiveWidth, effectiveHeight, desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT,
+				outputs[outputIndex].x - layout.min_x - CAPTURE_X, outputs[outputIndex].y - layout.min_y - CAPTURE_Y,
 				outputs[outputIndex].width, outputs[outputIndex].height);
 			capturedOutputs++;
 		}
@@ -2427,25 +2483,17 @@ void *kvm_server_mainloop_drm(void *parm)
 		scanoutSuspended = 0;
 		lastCaptureError = 0;
 
-		if (SCREEN_WIDTH != (int)layout.width || SCREEN_HEIGHT != (int)layout.height)
+		if (SCREEN_WIDTH != reportedScreenWidth || SCREEN_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
 		{
 			int oldTileHeightCount = TILE_HEIGHT_COUNT;
-			SCREEN_WIDTH = (int)layout.width;
-			SCREEN_HEIGHT = (int)layout.height;
-			TILE_HEIGHT_COUNT = SCREEN_HEIGHT / TILE_HEIGHT;
-			TILE_WIDTH_COUNT = SCREEN_WIDTH / TILE_WIDTH;
-			if (SCREEN_WIDTH % TILE_WIDTH)
-			{
-				TILE_WIDTH_COUNT++;
-			}
-			if (SCREEN_HEIGHT % TILE_HEIGHT)
-			{
-				TILE_HEIGHT_COUNT++;
-			}
+			kvm_drm_update_tile_geometry();
 			kvm_send_resolution();
 			kvm_send_display();
 			reset_tile_info(oldTileHeightCount);
 			forceTileReset = 0;
+			reportedScreenWidth = SCREEN_WIDTH;
+			reportedScreenHeight = SCREEN_HEIGHT;
+			reportedScreenSel = SCREEN_SEL;
 		}
 
 		if (!displayListSent)

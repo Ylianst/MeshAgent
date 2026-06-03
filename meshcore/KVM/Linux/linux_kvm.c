@@ -135,8 +135,6 @@ int slave2master[2];
 char CURRENT_XDISPLAY[256];
 int CURRENT_DISPLAY_ID = -1;
 
-typedef struct kvm_monitor_info { int id, x, y, width, height; } kvm_monitor_info;
-#define KVM_MAX_MONITORS 16
 kvm_monitor_info g_monitors[KVM_MAX_MONITORS];
 int g_monitor_count = 0;
 int SCREEN_SEL = 0;         // 0 = all monitors, 1..N = specific physical monitor
@@ -446,8 +444,7 @@ void kvm_send_resolution()
 void kvm_send_display()
 {
 	char buffer[6];
-	unsigned short sel = (g_kvmBackendDRM != 0) ? 0 :
-		((g_monitor_count > 0) ? ((SCREEN_SEL == 0) ? (unsigned short)65535 : (unsigned short)SCREEN_SEL) : (unsigned short)CURRENT_DISPLAY_ID);
+	unsigned short sel = (g_monitor_count > 0) ? ((SCREEN_SEL == 0) ? (unsigned short)65535 : (unsigned short)SCREEN_SEL) : (unsigned short)CURRENT_DISPLAY_ID;
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SET_DISPLAY);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)6);					// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons(sel);									// Display selection
@@ -469,6 +466,53 @@ int lockfileCheckFn(const struct dirent *ent) {
 	}
 
 	return 0;
+}
+
+void kvm_apply_monitor_selection()
+{
+	if (SCREEN_SEL > 0 && (SCREEN_SEL - 1) < g_monitor_count)
+	{
+		int idx = SCREEN_SEL - 1;
+		CAPTURE_X    = g_monitors[idx].x;
+		CAPTURE_Y    = g_monitors[idx].y;
+		SCREEN_WIDTH  = g_monitors[idx].width;
+		SCREEN_HEIGHT = g_monitors[idx].height;
+	}
+	else
+	{
+		SCREEN_SEL   = 0;
+		SCREEN_SEL_TARGET = 0;
+		CAPTURE_X    = 0;
+		CAPTURE_Y    = 0;
+		SCREEN_WIDTH  = VSCREEN_WIDTH;
+		SCREEN_HEIGHT = VSCREEN_HEIGHT;
+	}
+}
+
+void kvm_update_monitor_layout(kvm_monitor_info *monitors, int monitorCount, int virtualWidth, int virtualHeight)
+{
+	int i;
+	if (monitorCount < 0) { monitorCount = 0; }
+	if (monitorCount > KVM_MAX_MONITORS) { monitorCount = KVM_MAX_MONITORS; }
+
+	g_monitor_count = 0;
+	for (i = 0; i < monitorCount; ++i)
+	{
+		if (monitors[i].width <= 0 || monitors[i].height <= 0) { continue; }
+		g_monitors[g_monitor_count] = monitors[i];
+		g_monitors[g_monitor_count].id = g_monitor_count + 1;
+		g_monitor_count++;
+	}
+
+	VSCREEN_WIDTH = virtualWidth;
+	VSCREEN_HEIGHT = virtualHeight;
+	if (g_monitor_count == 0 && (VSCREEN_WIDTH <= 0 || VSCREEN_HEIGHT <= 0))
+	{
+		VSCREEN_WIDTH = SCREEN_WIDTH;
+		VSCREEN_HEIGHT = SCREEN_HEIGHT;
+	}
+
+	kvm_apply_monitor_selection();
 }
 
 // Enumerate physical monitors via XRandR into g_monitors[] and update capture region.
@@ -503,23 +547,7 @@ static void kvm_enumerate_monitors()
 			xrandr_exports->XRRFreeScreenResources(res);
 		}
 	}
-	// Update the capture region based on current SCREEN_SEL
-	if (SCREEN_SEL > 0 && (SCREEN_SEL - 1) < g_monitor_count)
-	{
-		int idx = SCREEN_SEL - 1;
-		CAPTURE_X    = g_monitors[idx].x;
-		CAPTURE_Y    = g_monitors[idx].y;
-		SCREEN_WIDTH  = g_monitors[idx].width;
-		SCREEN_HEIGHT = g_monitors[idx].height;
-	}
-	else
-	{
-		SCREEN_SEL   = 0;
-		CAPTURE_X    = 0;
-		CAPTURE_Y    = 0;
-		SCREEN_WIDTH  = VSCREEN_WIDTH;
-		SCREEN_HEIGHT = VSCREEN_HEIGHT;
-	}
+	kvm_apply_monitor_selection();
 }
 
 // Send MNG_KVM_DISPLAY_INFO: per-monitor geometry (ID, X, Y, W, H) matching Windows format.
@@ -528,7 +556,6 @@ void kvm_send_display_info()
 	int i;
 	int totalSize;
 	char *buffer;
-	if (g_kvmBackendDRM != 0) { return; }
 	if (g_monitor_count == 0) { return; }
 	totalSize = 4 + (g_monitor_count * 10); // 4-byte header + 10 bytes (5 shorts) per monitor
 	buffer = (char*)ILibMemory_SmartAllocate(totalSize);
@@ -550,13 +577,6 @@ void kvm_send_display_info()
 void getAvailableDisplays(unsigned short **array, int *len)
 {
 	int i;
-	if (g_kvmBackendDRM != 0)
-	{
-		*len = 1;
-		if ((*array = (unsigned short*)malloc(sizeof(unsigned short))) == NULL) ILIBCRITICALEXIT(254);
-		(*array)[0] = 0;
-		return;
-	}
 	if (g_monitor_count > 0)
 	{
 		// XRandR mode: expose 65535 ("all") + 1-based physical monitor IDs
@@ -946,12 +966,6 @@ int kvm_server_inputdata(char* block, int blocklen)
 		}
 	case MNG_KVM_SET_DISPLAY:
 		{
-			if (g_kvmBackendDRM != 0)
-			{
-				CURRENT_DISPLAY_ID = 0;
-				change_display = 0;
-				break;
-			}
 			unsigned short newval = ntohs(((unsigned short*)(block))[2]);
 			if (g_monitor_count > 0)
 			{
