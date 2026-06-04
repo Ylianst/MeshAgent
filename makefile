@@ -9,21 +9,27 @@
 #
 # To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev
 #
 #	Using YUM:
-#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel
+#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel
 #
 #	NOTE: If you install headers for jpeg8, you need to put the compiled .a in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
 #		eg: make linux ARCHID=6 JPEGVER=v80
 #
 #
 # To build for 32 bit on 64 bit linux 
-#  sudo apt-get install linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386
+#  sudo apt-get install linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 libxrandr-dev:i386
 #
 # To install ARM Cross Compiler for Raspberry PI
 #  sudo apt-get install libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf
 #
+# To build universal binaries for macOS, you need to install the Xcode command line tools,
+# and then use the following commands to build x86_64 and arm64 binaries, then combine them into a universal binary with lipo:
+#   make macos ARCHID=16   																		# macOS x86 64 bit
+#   make macos ARCHID=29																		# macOS ARM 64 bit
+#   lipo -create -output meshagent_osx-universal-64 meshagent_osx-x86-64 meshagent_osx-arm-64	# Combine the two binaries into a universal binary
+# 
 # Special builds:
 #
 #   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
