@@ -438,6 +438,7 @@ int MeshAgent_GetSystemProxy(MeshAgentHostContainer *agent, char *inBuffer, size
 		}
 	}
 	duk_pop(agent->meshCoreCtx);															// ...
+	duk_gc(agent->meshCoreCtx, 0);
 	return((int)bufferLen);
 }
 #ifdef _POSIX
@@ -4339,6 +4340,7 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 	MeshAgentHostContainer *agent = (MeshAgentHostContainer*)((void**)j)[0];
 	void *request = ((void**)j)[1];
 	ILibMemory_Free(j);
+	agent->controlChannelRequest = NULL;
 
 	if (agent->controlChannelDebug != 0) { printf("Network Timeout Occurred...\n"); }
 	printf("Connection FAILED: Network timeout - server unreachable or gateway blocking\n");
@@ -4690,11 +4692,9 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	}
 
 	// Set User-Agent for proxies to identify agents and versions
-	const char* FieldData = "MeshAgent ";
-	char combined[40];
-	strcpy(combined, FieldData);
-	strcat(combined, SOURCE_COMMIT_DATE);
-	ILibAddHeaderLine(req, "User-Agent", 10, combined, (int)strnlen_s(combined, 50));
+	char combined[sizeof("MeshAgent ") + sizeof(SOURCE_COMMIT_DATE)];
+	int combinedLen = sprintf_s(combined, sizeof(combined), "MeshAgent %s", SOURCE_COMMIT_DATE);
+	ILibAddHeaderLine(req, "User-Agent", 10, combined, combinedLen);
 
 	// Add custom JWT for openframe mode
 	if (agent->openFrameMode && agent->openFrameSecret != NULL)
