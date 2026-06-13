@@ -25,4 +25,7 @@ extern int g_kvmBackendDRM;
 
 void* kvm_server_mainloop_drm(void* parm);
 
+// Reaches libdrm's drmPrimeHandleToFD via the single dlopen in linux_kvm_drm.c.
+int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd);
+
 #endif

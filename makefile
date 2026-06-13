@@ -551,7 +551,9 @@ LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wa
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
 	DRMCFLAGS = $(shell pkg-config --cflags libdrm egl glesv2 2>/dev/null)
-	DRMLIBS = $(shell pkg-config --libs libdrm egl glesv2 2>/dev/null)
+	# libdrm/libEGL/libGLESv2 are dlopen'd at runtime (linux_kvm_drm*.c), not linked, so they stay
+	# out of NEEDED and the agent runs without a DRM/GL stack. Headers still needed (DRMCFLAGS).
+	DRMLIBS =
 	WAYLANDCLIENT = $(shell pkg-config --exists wayland-client 2>/dev/null && echo 1)
 	ifneq ($(strip $(DRMCFLAGS)),)
 		CFLAGS += $(DRMCFLAGS)
@@ -560,7 +562,19 @@ CFLAGS += -D_LINKVM
 		$(error Linux KVM builds require the wayland-client development package)
 	endif
 	CFLAGS += -DHAVE_WAYLAND_CLIENT $(shell pkg-config --cflags wayland-client)
-	DRMLIBS += $(shell pkg-config --libs wayland-client)
+	# libwayland-client is dlopen'd at runtime (linux_kvm_drm.c), not linked — headers only.
+	# If the system headers are jpeg8 (JPEG_LIB_VERSION >= 80) and a v80 lib exists, default to it
+	# so the linked lib matches the headers, else libjpeg aborts at runtime ("Wrong JPEG library
+	# version"). Skipped when JPEGVER is set explicitly or NOTURBOJPEG=1.
+	ifeq ($(JPEGVER),)
+		ifneq ($(NOTURBOJPEG),1)
+			JPEG_HDR_VERSION := $(shell $(CC) -include jpeglib.h -E -dM -xc - </dev/null 2>/dev/null | sed -n 's/.*JPEG_LIB_VERSION \([0-9][0-9]*\).*/\1/p' | head -n1)
+			ifeq ($(shell test "$(JPEG_HDR_VERSION)" -ge 80 2>/dev/null && test -f lib-jpeg-turbo/linux/$(ARCHNAME)/v80/libturbojpeg.a && echo yes),yes)
+				JPEGVER = v80
+$(info MeshAgent: system libjpeg is v$(JPEG_HDR_VERSION) (jpeg8); auto-selecting JPEGVER=v80)
+			endif
+		endif
+	endif
 	ifneq ($(JPEGVER),)
 		ifeq ($(LEGACY_LD),1)
 			LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a

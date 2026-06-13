@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "linux_kvm_drm_egl.h"
+#include "linux_kvm_drm.h"
 #include "meshcore/meshdefines.h"
 
 #include <inttypes.h>
@@ -38,6 +39,102 @@ limitations under the License.
 #define KVM_DRM_EGL_CLOEXEC O_CLOEXEC
 #endif
 #endif
+
+#if defined(__linux__)
+#include <dlfcn.h>
+
+// libEGL/libGLESv2 are dlopen'd rather than linked, so the agent runs without a GL stack.
+// The *KHR/*OES extension entry points come from eglGetProcAddress, not this list.
+#define KVM_DRM_EGL_SYMBOLS(_) \
+	_(eglGetProcAddress) _(eglGetDisplay) _(eglGetError) _(eglInitialize) _(eglTerminate) \
+	_(eglChooseConfig) _(eglCreateContext) _(eglDestroyContext) _(eglCreatePbufferSurface) \
+	_(eglDestroySurface) _(eglMakeCurrent) _(eglBindAPI) _(eglQueryString)
+#define KVM_DRM_GLES_SYMBOLS(_) \
+	_(glActiveTexture) _(glAttachShader) _(glBindBuffer) _(glBindFramebuffer) _(glBindTexture) \
+	_(glBufferData) _(glCheckFramebufferStatus) _(glCompileShader) _(glCreateProgram) _(glCreateShader) \
+	_(glDeleteBuffers) _(glDeleteFramebuffers) _(glDeleteProgram) _(glDeleteShader) _(glDeleteTextures) \
+	_(glDisableVertexAttribArray) _(glDrawArrays) _(glEnableVertexAttribArray) _(glFinish) \
+	_(glFramebufferTexture2D) _(glGenBuffers) _(glGenFramebuffers) _(glGenTextures) _(glGetAttribLocation) \
+	_(glGetError) _(glGetProgramiv) _(glGetShaderInfoLog) _(glGetShaderiv) _(glGetUniformLocation) \
+	_(glLinkProgram) _(glReadPixels) _(glShaderSource) _(glTexImage2D) _(glTexParameteri) \
+	_(glUniform1i) _(glUseProgram) _(glVertexAttribPointer) _(glViewport)
+
+#define KVM_DRM_EGL_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
+KVM_DRM_EGL_SYMBOLS(KVM_DRM_EGL_DECL_PTR)
+KVM_DRM_GLES_SYMBOLS(KVM_DRM_EGL_DECL_PTR)
+#undef KVM_DRM_EGL_DECL_PTR
+
+static void *g_libEGL_handle = NULL;
+static void *g_libGLES_handle = NULL;
+static int kvm_drm_egl_load_libs(void)
+{
+	void *e, *g;
+	if (g_libEGL_handle != NULL && g_libGLES_handle != NULL) { return 1; }
+	if ((e = dlopen("libEGL.so.1", RTLD_NOW)) == NULL && (e = dlopen("libEGL.so", RTLD_NOW)) == NULL) { return 0; }
+	if ((g = dlopen("libGLESv2.so.2", RTLD_NOW)) == NULL && (g = dlopen("libGLESv2.so", RTLD_NOW)) == NULL) { dlclose(e); return 0; }
+#define KVM_DRM_EGL_LOAD_PTR(s) p_##s = (__typeof__(p_##s))dlsym(e, #s); if (p_##s == NULL) { dlclose(e); dlclose(g); return 0; }
+	KVM_DRM_EGL_SYMBOLS(KVM_DRM_EGL_LOAD_PTR)
+#undef KVM_DRM_EGL_LOAD_PTR
+#define KVM_DRM_GLES_LOAD_PTR(s) p_##s = (__typeof__(p_##s))dlsym(g, #s); if (p_##s == NULL) { dlclose(e); dlclose(g); return 0; }
+	KVM_DRM_GLES_SYMBOLS(KVM_DRM_GLES_LOAD_PTR)
+#undef KVM_DRM_GLES_LOAD_PTR
+	g_libEGL_handle = e;
+	g_libGLES_handle = g;
+	return 1;
+}
+
+#define eglGetProcAddress p_eglGetProcAddress
+#define eglGetDisplay p_eglGetDisplay
+#define eglGetError p_eglGetError
+#define eglInitialize p_eglInitialize
+#define eglTerminate p_eglTerminate
+#define eglChooseConfig p_eglChooseConfig
+#define eglCreateContext p_eglCreateContext
+#define eglDestroyContext p_eglDestroyContext
+#define eglCreatePbufferSurface p_eglCreatePbufferSurface
+#define eglDestroySurface p_eglDestroySurface
+#define eglMakeCurrent p_eglMakeCurrent
+#define eglBindAPI p_eglBindAPI
+#define eglQueryString p_eglQueryString
+#define glActiveTexture p_glActiveTexture
+#define glAttachShader p_glAttachShader
+#define glBindBuffer p_glBindBuffer
+#define glBindFramebuffer p_glBindFramebuffer
+#define glBindTexture p_glBindTexture
+#define glBufferData p_glBufferData
+#define glCheckFramebufferStatus p_glCheckFramebufferStatus
+#define glCompileShader p_glCompileShader
+#define glCreateProgram p_glCreateProgram
+#define glCreateShader p_glCreateShader
+#define glDeleteBuffers p_glDeleteBuffers
+#define glDeleteFramebuffers p_glDeleteFramebuffers
+#define glDeleteProgram p_glDeleteProgram
+#define glDeleteShader p_glDeleteShader
+#define glDeleteTextures p_glDeleteTextures
+#define glDisableVertexAttribArray p_glDisableVertexAttribArray
+#define glDrawArrays p_glDrawArrays
+#define glEnableVertexAttribArray p_glEnableVertexAttribArray
+#define glFinish p_glFinish
+#define glFramebufferTexture2D p_glFramebufferTexture2D
+#define glGenBuffers p_glGenBuffers
+#define glGenFramebuffers p_glGenFramebuffers
+#define glGenTextures p_glGenTextures
+#define glGetAttribLocation p_glGetAttribLocation
+#define glGetError p_glGetError
+#define glGetProgramiv p_glGetProgramiv
+#define glGetShaderInfoLog p_glGetShaderInfoLog
+#define glGetShaderiv p_glGetShaderiv
+#define glGetUniformLocation p_glGetUniformLocation
+#define glLinkProgram p_glLinkProgram
+#define glReadPixels p_glReadPixels
+#define glShaderSource p_glShaderSource
+#define glTexImage2D p_glTexImage2D
+#define glTexParameteri p_glTexParameteri
+#define glUniform1i p_glUniform1i
+#define glUseProgram p_glUseProgram
+#define glVertexAttribPointer p_glVertexAttribPointer
+#define glViewport p_glViewport
+#endif // __linux__
 
 static void kvm_drm_egl_copy_error_message(char *dst, size_t dst_size, const char *src)
 {
@@ -166,6 +263,12 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, char *out_erro
 	{
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, g->fail_reason);
 		return false;
+	}
+
+	if (!kvm_drm_egl_load_libs())
+	{
+		return kvm_drm_egl_fail_with_persistent_error(g, out_error, out_error_size,
+			"libEGL/libGLESv2 not installed; GPU-assisted DRM conversion unavailable");
 	}
 
 	PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXTFn =
@@ -431,7 +534,7 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	if (!kvm_drm_egl_ensure_gpu_target_size(ctx, (int)width, (int)height, out_error, out_error_size)) { return false; }
 
 	int dmabuf_fd = -1;
-	if (drmPrimeHandleToFD(drm_fd, handle, KVM_DRM_EGL_CLOEXEC | DRM_RDWR, &dmabuf_fd) != 0 || dmabuf_fd < 0)
+	if (kvm_drm_prime_handle_to_fd(drm_fd, handle, KVM_DRM_EGL_CLOEXEC | DRM_RDWR, &dmabuf_fd) != 0 || dmabuf_fd < 0)
 	{
 		char msg[KVM_DRM_EGL_MAX_ERROR];
 		snprintf(msg, sizeof(msg), "drmPrimeHandleToFD failed for GPU path (handle=%u errno=%d)", handle, errno);

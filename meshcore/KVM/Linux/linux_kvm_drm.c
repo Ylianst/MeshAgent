@@ -47,11 +47,134 @@ limitations under the License.
 #include <sys/syscall.h>
 #include <sys/mman.h>
 
+#include <dlfcn.h>
 #include <drm_fourcc.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
 #include <wayland-client.h>
+
+// libdrm is dlopen'd rather than linked, so the agent still runs where it's absent (like libX11).
+#define KVM_DRM_LIBDRM_SYMBOLS(_) \
+	_(drmModeGetResources) _(drmModeFreeResources) \
+	_(drmModeGetConnector) _(drmModeFreeConnector) \
+	_(drmModeGetEncoder) _(drmModeFreeEncoder) \
+	_(drmModeGetCrtc) _(drmModeFreeCrtc) \
+	_(drmModeGetPlane) _(drmModeFreePlane) \
+	_(drmModeGetPlaneResources) _(drmModeFreePlaneResources) \
+	_(drmModeGetFB) _(drmModeFreeFB) \
+	_(drmModeGetFB2) _(drmModeFreeFB2) \
+	_(drmIoctl) _(drmPrimeHandleToFD) _(drmDropMaster)
+
+#define KVM_DRM_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
+KVM_DRM_LIBDRM_SYMBOLS(KVM_DRM_DECL_PTR)
+#undef KVM_DRM_DECL_PTR
+
+static void *g_libdrm_handle = NULL;
+static int kvm_drm_load_libdrm(void)
+{
+	void *h;
+	if (g_libdrm_handle != NULL) { return 1; }
+	if ((h = dlopen("libdrm.so.2", RTLD_NOW)) == NULL && (h = dlopen("libdrm.so", RTLD_NOW)) == NULL)
+	{
+		return 0;
+	}
+#define KVM_DRM_LOAD_PTR(s) p_##s = (__typeof__(p_##s))dlsym(h, #s); if (p_##s == NULL) { dlclose(h); return 0; }
+	KVM_DRM_LIBDRM_SYMBOLS(KVM_DRM_LOAD_PTR)
+#undef KVM_DRM_LOAD_PTR
+	g_libdrm_handle = h;
+	return 1;
+}
+
+// Must follow the __typeof__ declarations above (they need the real prototypes).
+#define drmModeGetResources p_drmModeGetResources
+#define drmModeFreeResources p_drmModeFreeResources
+#define drmModeGetConnector p_drmModeGetConnector
+#define drmModeFreeConnector p_drmModeFreeConnector
+#define drmModeGetEncoder p_drmModeGetEncoder
+#define drmModeFreeEncoder p_drmModeFreeEncoder
+#define drmModeGetCrtc p_drmModeGetCrtc
+#define drmModeFreeCrtc p_drmModeFreeCrtc
+#define drmModeGetPlane p_drmModeGetPlane
+#define drmModeFreePlane p_drmModeFreePlane
+#define drmModeGetPlaneResources p_drmModeGetPlaneResources
+#define drmModeFreePlaneResources p_drmModeFreePlaneResources
+#define drmModeGetFB p_drmModeGetFB
+#define drmModeFreeFB p_drmModeFreeFB
+#define drmModeGetFB2 p_drmModeGetFB2
+#define drmModeFreeFB2 p_drmModeFreeFB2
+#define drmIoctl p_drmIoctl
+#define drmPrimeHandleToFD p_drmPrimeHandleToFD
+#define drmDropMaster p_drmDropMaster
+
+// Lets linux_kvm_drm_egl.c reach libdrm through the single dlopen here.
+int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd)
+{
+	return drmPrimeHandleToFD(fd, (uint32_t)handle, (uint32_t)flags, prime_fd);
+}
+
+// libwayland-client is dlopen'd rather than linked, so the agent runs where it's absent. It's
+// used only for the xdg-output layout query, which falls back to KWin/raw DRM positions.
+#define KVM_DRM_WAYLAND_SYMBOLS(_) \
+	_(wl_display_connect) _(wl_display_disconnect) _(wl_display_roundtrip) \
+	_(wl_proxy_marshal_flags) _(wl_proxy_get_version) _(wl_proxy_add_listener) _(wl_proxy_destroy)
+
+#define KVM_DRM_WL_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
+KVM_DRM_WAYLAND_SYMBOLS(KVM_DRM_WL_DECL_PTR)
+#undef KVM_DRM_WL_DECL_PTR
+
+static const struct wl_interface *p_wl_registry_interface = NULL;
+static const struct wl_interface *p_wl_output_interface = NULL;
+static void *g_libwayland_handle = NULL;
+
+#define wl_display_connect p_wl_display_connect
+#define wl_display_disconnect p_wl_display_disconnect
+#define wl_display_roundtrip p_wl_display_roundtrip
+#define wl_proxy_marshal_flags p_wl_proxy_marshal_flags
+#define wl_proxy_get_version p_wl_proxy_get_version
+#define wl_proxy_add_listener p_wl_proxy_add_listener
+#define wl_proxy_destroy p_wl_proxy_destroy
+
+// Hand-rolled versions of the <wayland-client-protocol.h> inline wrappers; the originals bake in
+// link-time wl_proxy_*/wl_registry_interface references that would keep libwayland in NEEDED.
+static struct wl_registry *kvm_wl_display_get_registry(struct wl_display *display)
+{
+	return (struct wl_registry *)wl_proxy_marshal_flags((struct wl_proxy *)display, 1 /*WL_DISPLAY_GET_REGISTRY*/,
+		p_wl_registry_interface, wl_proxy_get_version((struct wl_proxy *)display), 0, NULL);
+}
+static int kvm_wl_registry_add_listener(struct wl_registry *registry, const struct wl_registry_listener *listener, void *data)
+{
+	return wl_proxy_add_listener((struct wl_proxy *)registry, (void (**)(void))listener, data);
+}
+static void *kvm_wl_registry_bind(struct wl_registry *registry, uint32_t name, const struct wl_interface *interface, uint32_t version)
+{
+	return (void *)wl_proxy_marshal_flags((struct wl_proxy *)registry, 0 /*WL_REGISTRY_BIND*/, interface, version, 0,
+		name, interface->name, version, NULL);
+}
+static int kvm_wl_output_add_listener(struct wl_output *output, const struct wl_output_listener *listener, void *data)
+{
+	return wl_proxy_add_listener((struct wl_proxy *)output, (void (**)(void))listener, data);
+}
+
+static const struct wl_interface *kvm_xdg_output_types[]; // defined below; slot [3] patched at load
+static int kvm_drm_load_wayland(void)
+{
+	void *h;
+	if (g_libwayland_handle != NULL) { return 1; }
+	if ((h = dlopen("libwayland-client.so.0", RTLD_NOW)) == NULL && (h = dlopen("libwayland-client.so", RTLD_NOW)) == NULL)
+	{
+		return 0;
+	}
+#define KVM_DRM_WL_LOAD_PTR(s) p_##s = (__typeof__(p_##s))dlsym(h, #s); if (p_##s == NULL) { dlclose(h); return 0; }
+	KVM_DRM_WAYLAND_SYMBOLS(KVM_DRM_WL_LOAD_PTR)
+#undef KVM_DRM_WL_LOAD_PTR
+	p_wl_registry_interface = (const struct wl_interface *)dlsym(h, "wl_registry_interface");
+	p_wl_output_interface = (const struct wl_interface *)dlsym(h, "wl_output_interface");
+	if (p_wl_registry_interface == NULL || p_wl_output_interface == NULL) { dlclose(h); return 0; }
+	kvm_xdg_output_types[3] = p_wl_output_interface; // get_xdg_output's wl_output arg type
+	g_libwayland_handle = h;
+	return 1;
+}
 
 #ifndef O_CLOEXEC
 #define KVM_DRM_O_CLOEXEC 0
@@ -1419,7 +1542,6 @@ struct zxdg_output_v1_listener
 	void (*description)(void *data, struct zxdg_output_v1 *zxdg_output_v1, const char *description);
 };
 
-extern const struct wl_interface wl_output_interface;
 static const struct wl_interface zxdg_output_v1_interface;
 
 static const struct wl_interface *kvm_xdg_output_types[] =
@@ -1427,7 +1549,7 @@ static const struct wl_interface *kvm_xdg_output_types[] =
 	NULL,
 	NULL,
 	&zxdg_output_v1_interface,
-	&wl_output_interface,
+	NULL, /* wl_output_interface — patched in at load */
 };
 
 static const struct wl_message zxdg_output_manager_v1_requests[] =
@@ -1622,10 +1744,10 @@ static void kvm_drm_registry_global(void *data, struct wl_registry *registry, ui
 		output->version = version;
 		bind_version = version >= 4 ? 4 : version;
 		if (bind_version < 2) { bind_version = 2; }
-		output->wl_output = (struct wl_output *)wl_registry_bind(registry, name, &wl_output_interface, bind_version);
+		output->wl_output = (struct wl_output *)kvm_wl_registry_bind(registry, name, p_wl_output_interface, bind_version);
 		if (output->wl_output != NULL)
 		{
-			wl_output_add_listener(output->wl_output, &kvm_drm_wl_output_listener, output);
+			kvm_wl_output_add_listener(output->wl_output, &kvm_drm_wl_output_listener, output);
 		}
 		return;
 	}
@@ -1633,7 +1755,7 @@ static void kvm_drm_registry_global(void *data, struct wl_registry *registry, ui
 	if (strcmp(interface, "zxdg_output_manager_v1") == 0)
 	{
 		uint32_t bind_version = version >= 3 ? 3 : version;
-		ctx->xdg_output_manager = (struct zxdg_output_manager_v1 *)wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, bind_version);
+		ctx->xdg_output_manager = (struct zxdg_output_manager_v1 *)kvm_wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, bind_version);
 	}
 }
 
@@ -1672,7 +1794,7 @@ static void kvm_drm_wayland_layout_context_cleanup(kvm_drm_wayland_layout_contex
 	}
 	if (ctx->registry != NULL)
 	{
-		wl_registry_destroy(ctx->registry);
+		wl_proxy_destroy((struct wl_proxy *)ctx->registry);
 		ctx->registry = NULL;
 	}
 	if (ctx->display != NULL)
@@ -1694,6 +1816,11 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 		return false;
 	}
 
+	if (!kvm_drm_load_wayland())
+	{
+		return false; // no libwayland → caller falls back to KWin/raw positions
+	}
+
 	memset(&ctx, 0, sizeof(ctx));
 	memcpy_s(tmp, sizeof(tmp), outputs, sizeof(kvm_drm_output) * (size_t)output_count);
 
@@ -1702,13 +1829,13 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	{
 		return false;
 	}
-	ctx.registry = wl_display_get_registry(ctx.display);
+	ctx.registry = kvm_wl_display_get_registry(ctx.display);
 	if (ctx.registry == NULL)
 	{
 		kvm_drm_wayland_layout_context_cleanup(&ctx);
 		return false;
 	}
-	wl_registry_add_listener(ctx.registry, &kvm_drm_registry_listener, &ctx);
+	kvm_wl_registry_add_listener(ctx.registry, &kvm_drm_registry_listener, &ctx);
 	if (wl_display_roundtrip(ctx.display) < 0 || ctx.xdg_output_manager == NULL || ctx.output_count <= 0)
 	{
 		kvm_drm_wayland_layout_context_cleanup(&ctx);
@@ -2150,6 +2277,15 @@ void *kvm_server_mainloop_drm(void *parm)
 	memset(lastRefreshFailure, 0, sizeof(lastRefreshFailure));
 	map.dma_fd = -1;
 	map.drm_fd = -1;
+
+	if (!kvm_drm_load_libdrm())
+	{
+		kvm_send_error("libdrm is not installed; DRM capture backend unavailable");
+		kvm_events_evdev_shutdown();
+		g_enableEvents = 0;
+		g_kvmBackendDRM = 0;
+		return (void *)-1;
+	}
 
 	char *explicitDevice = getenv("MESH_KVM_DRM_DEVICE");
 	if (!kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) ||
