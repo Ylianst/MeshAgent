@@ -980,7 +980,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
@@ -1042,7 +1048,13 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 		duk_pop(ptrs->ctx);											// ...
 #ifdef _LINKVM
 #if defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		kvm_cleanup();
 #endif

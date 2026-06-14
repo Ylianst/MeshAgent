@@ -822,6 +822,16 @@ void kvm_events_evdev_mouse_action(double absX, double absY, int button, short w
 	ignore_result(kvm_events_evdev_sync());
 }
 
+// Net-zero scroll: pointer activity that wakes the displays (DPMS) without side effects.
+void kvm_events_evdev_wake()
+{
+	if (g_kvm_evdev_state.active == 0) { return; }
+	if (kvm_events_evdev_write(EV_REL, REL_WHEEL, 1) != 0) { return; }
+	ignore_result(kvm_events_evdev_sync());
+	if (kvm_events_evdev_write(EV_REL, REL_WHEEL, -1) != 0) { return; }
+	ignore_result(kvm_events_evdev_sync());
+}
+
 void kvm_events_evdev_key_action(unsigned char vk, int up)
 {
 	unsigned int keycode = kvm_events_evdev_vk_to_keycode(vk);
@@ -912,6 +922,10 @@ void kvm_events_evdev_mouse_action(double absX, double absY, int button, short w
 	UNREFERENCED_PARAMETER(absY);
 	UNREFERENCED_PARAMETER(button);
 	UNREFERENCED_PARAMETER(wheel);
+}
+
+void kvm_events_evdev_wake()
+{
 }
 
 void kvm_events_evdev_key_action(unsigned char vk, int up)

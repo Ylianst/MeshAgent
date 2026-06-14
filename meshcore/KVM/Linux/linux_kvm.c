@@ -1633,6 +1633,7 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 
 void kvm_relay_brokenPipeSink_2(void *sender)
 {
+	if (!ILibMemory_CanaryOK(sender)) { return; } // pipe was freed before this 4s timer fired
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
 	void *reserved = ((void**)ILibMemory_Extra(sender))[1];
 	char msg[] = "KVM Child process has unexpectedly exited";

@@ -185,6 +185,7 @@ static int kvm_drm_load_wayland(void)
 
 #define KVM_DRM_MAX_ERROR 256
 #define KVM_DRM_MAX_OUTPUTS 16
+#define KVM_DRM_DISPLAY_WAKE_TIMEOUT_MS 10000
 
 int g_kvmBackendDRM = 0;
 static int drm_debug = 0;
@@ -2288,8 +2289,22 @@ void *kvm_server_mainloop_drm(void *parm)
 	}
 
 	char *explicitDevice = getenv("MESH_KVM_DRM_DEVICE");
-	if (!kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) ||
-		!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
+	int haveLayout = kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
+		kvm_drm_compute_desktop_layout(outputs, outputCount, &layout);
+	if (!haveLayout)
+	{
+		// No scanout usually means the displays are in DPMS sleep; nudge them awake and retry.
+		uint64_t wakeStartMs = kvm_drm_now_ms();
+		if (drm_debug) { fprintf(stderr, "DRM: no active scanout (%s); nudging displays awake and retrying\n", err[0] ? err : "displays asleep?"); }
+		while (!haveLayout && !g_shutdown && (kvm_drm_now_ms() - wakeStartMs) < KVM_DRM_DISPLAY_WAKE_TIMEOUT_MS)
+		{
+			if (g_enableEvents) { kvm_events_evdev_wake(); }
+			usleep(500 * 1000);
+			haveLayout = kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
+				kvm_drm_compute_desktop_layout(outputs, outputCount, &layout);
+		}
+	}
+	if (!haveLayout)
 	{
 		kvm_send_error(err[0] ? err : "Unable to compute DRM desktop layout");
 		kvm_events_evdev_shutdown();
