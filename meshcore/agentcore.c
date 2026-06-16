@@ -4673,6 +4673,24 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	memset(agent->meshId, 0, sizeof(agent->meshId)); // Clear the meshid first in case we copy SHA256
 	memcpy_s(agent->meshId, sizeof(agent->meshId), ILibScratchPad, len); // Copy the correct length
 
+	// Diagnostic: log the MeshID (device group) this agent presents, in the server's base64 form. Once per process.
+	{
+		static int orphanProofLogged = 0;
+		if (orphanProofLogged == 0)
+		{
+			unsigned char *b64mesh = NULL;
+			int b64len = ILibBase64Encode((unsigned char*)agent->meshId, (int)len, &b64mesh);
+			orphanProofLogged = 1;
+			if (b64mesh != NULL)
+			{
+				int _opi;
+				for (_opi = 0; _opi < b64len; ++_opi) { if (b64mesh[_opi] == '+') { b64mesh[_opi] = '@'; } else if (b64mesh[_opi] == '/') { b64mesh[_opi] = '$'; } }
+				printf("OrphanProof: presenting MeshID=%s (rawlen=%d) to server=%s\n", (char*)b64mesh, (int)len, agent->serveruri != NULL ? agent->serveruri : "?");
+				free(b64mesh);
+			}
+		}
+	}
+
 #ifndef MICROSTACK_NOTLS
 	util_keyhash(agent->selfcert, agent->g_selfid); // Compute our own identifier using our certificate
 #endif
@@ -5034,6 +5052,30 @@ int importSettings(MeshAgentHostContainer *agent, char* fileName)
 				valLen = f->datalength - keyLen - 1;
 				if (val[valLen - 1] == 13) { --valLen; }
 				valLen = ILibTrimString(&val, valLen);
+
+				// Diagnostic: log when an .msh import delivers a MeshID (INITIAL / UNCHANGED / ADOPTING NEW old->new), read before the Put below.
+				if (keyLen == 6 && strncmp("MeshID", key, 6) == 0 && valLen > 2 &&
+					ntohs(((unsigned short*)val)[0]) == HEX_IDENTIFIER &&
+					((valLen - 2) == 64 || (valLen - 2) == 96))
+				{
+					char opNewRaw[48]; char opOldRaw[64];
+					int opNewLen = util_hexToBuf(val + 2, (int)(valLen - 2), opNewRaw);
+					int opOldLen = ILibSimpleDataStore_Get(agent->masterDb, "MeshID", opOldRaw, sizeof(opOldRaw));
+					unsigned char *opB64New = NULL, *opB64Old = NULL;
+					int _opj, opNl = ILibBase64Encode((unsigned char*)opNewRaw, opNewLen, &opB64New);
+					if (opB64New != NULL) { for (_opj = 0; _opj < opNl; ++_opj) { if (opB64New[_opj] == '+') { opB64New[_opj] = '@'; } else if (opB64New[_opj] == '/') { opB64New[_opj] = '$'; } } }
+					if (opOldLen <= 0) {
+						printf("OrphanProof: importing INITIAL MeshID=%s from %s\n", opB64New != NULL ? (char*)opB64New : "?", fileName);
+					} else if ((opOldLen == opNewLen) && (memcmp(opOldRaw, opNewRaw, opNewLen) == 0)) {
+						printf("OrphanProof: importing MeshID=%s from %s (UNCHANGED)\n", opB64New != NULL ? (char*)opB64New : "?", fileName);
+					} else {
+						int opOl = ILibBase64Encode((unsigned char*)opOldRaw, opOldLen, &opB64Old);
+						if (opB64Old != NULL) { for (_opj = 0; _opj < opOl; ++_opj) { if (opB64Old[_opj] == '+') { opB64Old[_opj] = '@'; } else if (opB64Old[_opj] == '/') { opB64Old[_opj] = '$'; } } }
+						printf("OrphanProof: ADOPTING NEW MeshID old=%s new=%s from %s (re-key delivered a new device group)\n", opB64Old != NULL ? (char*)opB64Old : "?", opB64New != NULL ? (char*)opB64New : "?", fileName);
+					}
+					if (opB64New != NULL) { free(opB64New); }
+					if (opB64Old != NULL) { free(opB64Old); }
+				}
 
 				if (!(keyLen == 10 && strncmp("CoreModule", key, 10) == 0))
 				{
