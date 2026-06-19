@@ -17,6 +17,8 @@ limitations under the License.
 #ifndef LINUX_KVM_DRM_H_
 #define LINUX_KVM_DRM_H_
 
+#include <stddef.h>
+
 // The DRM screen capture system uses the Linux DRM (Direct Rendering Manager) subsystem to capture the screen.
 // This is used when running under Wayland, as a catch-all mechanism that operates at a lower level than
 // the screen compositor.
@@ -27,5 +29,8 @@ void* kvm_server_mainloop_drm(void* parm);
 
 // Reaches libdrm's drmPrimeHandleToFD via the single dlopen in linux_kvm_drm.c.
 int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd);
+
+// Render-node path for a card fd (libdrm via the same dlopen). Returns 0 if unavailable.
+int kvm_drm_render_node_for_fd(int fd, char *out, size_t out_len);
 
 #endif

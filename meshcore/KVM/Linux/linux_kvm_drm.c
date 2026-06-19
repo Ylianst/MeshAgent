@@ -64,7 +64,7 @@ limitations under the License.
 	_(drmModeGetPlaneResources) _(drmModeFreePlaneResources) \
 	_(drmModeGetFB) _(drmModeFreeFB) \
 	_(drmModeGetFB2) _(drmModeFreeFB2) \
-	_(drmIoctl) _(drmPrimeHandleToFD) _(drmDropMaster)
+	_(drmIoctl) _(drmPrimeHandleToFD) _(drmDropMaster) _(drmGetRenderDeviceNameFromFd)
 
 #define KVM_DRM_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
 KVM_DRM_LIBDRM_SYMBOLS(KVM_DRM_DECL_PTR)
@@ -106,11 +106,23 @@ static int kvm_drm_load_libdrm(void)
 #define drmIoctl p_drmIoctl
 #define drmPrimeHandleToFD p_drmPrimeHandleToFD
 #define drmDropMaster p_drmDropMaster
+#define drmGetRenderDeviceNameFromFd p_drmGetRenderDeviceNameFromFd
 
 // Lets linux_kvm_drm_egl.c reach libdrm through the single dlopen here.
 int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd)
 {
 	return drmPrimeHandleToFD(fd, (uint32_t)handle, (uint32_t)flags, prime_fd);
+}
+
+// Render-node path for a card fd, so the EGL layer can match an EGL device that only reports its
+// render node (e.g. NVIDIA). Returns 0 if unavailable.
+int kvm_drm_render_node_for_fd(int fd, char *out, size_t out_len)
+{
+	char *name = drmGetRenderDeviceNameFromFd(fd);
+	if (name == NULL) { return 0; }
+	snprintf(out, out_len, "%s", name);
+	free(name);
+	return 1;
 }
 
 // libwayland-client is dlopen'd rather than linked, so the agent runs where it's absent. It's
@@ -363,6 +375,7 @@ typedef struct kvm_drm_output
 	int y;
 	uint32_t width;
 	uint32_t height;
+	int device_index;
 } kvm_drm_output;
 
 typedef struct kvm_drm_desktop_layout
@@ -383,6 +396,19 @@ typedef struct kvm_drm_frame_map
 	int dma_fd;
 	int drm_fd;
 } kvm_drm_frame_map;
+
+#define KVM_DRM_MAX_DEVICES 8
+
+// One open GPU. A multi-GPU desktop spans several of these; every output carries the
+// device_index it belongs to. EGL and the CPU-readback map are per-device because a card's
+// scanout buffers can only be imported/mapped through that same card's fd.
+typedef struct kvm_drm_device
+{
+	int fd;
+	char path[64];
+	kvm_drm_egl_context eglCtx;
+	kvm_drm_frame_map map;
+} kvm_drm_device;
 
 typedef struct kvm_drm_scanout_frame
 {
@@ -713,6 +739,8 @@ static int kvm_drm_compare_outputs(const void *a, const void *b)
 	if (oa->y != ob->y) { return oa->y < ob->y ? -1 : 1; }
 	if (oa->x != ob->x) { return oa->x < ob->x ? -1 : 1; }
 	if (oa->connector_id != ob->connector_id) { return oa->connector_id < ob->connector_id ? -1 : 1; }
+	// connector_id is per-card, so two GPUs can collide; device_index keeps the sort stable.
+	if (oa->device_index != ob->device_index) { return oa->device_index < ob->device_index ? -1 : 1; }
 	return 0;
 }
 
@@ -826,48 +854,112 @@ static bool kvm_drm_collect_active_outputs_on_fd(int fd, const char *path, kvm_d
 	return true;
 }
 
-static bool kvm_drm_open_device_with_outputs(const char *explicit_device, int *out_fd, kvm_drm_output *outputs, int max_outputs, int *out_count, char *out_error, size_t out_error_size)
+static void kvm_drm_close_all_devices(kvm_drm_device *devices, int count)
 {
-	int i;
-
-	if (explicit_device != NULL && explicit_device[0] != 0)
+	int i, j;
+	// A default-display fallback can hand the same EGLDisplay to multiple devices; EGL doesn't
+	// refcount eglTerminate, so detach duplicates and let only the first owner tear the display down.
+	for (i = 0; i < count; ++i)
 	{
-		int fd = open(explicit_device, O_RDWR | KVM_DRM_O_CLOEXEC | O_NONBLOCK);
-		if (fd < 0)
+		for (j = 0; j < i; ++j)
 		{
-			char err[KVM_DRM_MAX_ERROR];
-			snprintf(err, sizeof(err), "Unable to open DRM device: %s", explicit_device);
-			kvm_drm_copy_error_message(out_error, out_error_size, err);
-			return false;
+			if (devices[i].eglCtx.dpy != EGL_NO_DISPLAY && devices[i].eglCtx.dpy == devices[j].eglCtx.dpy)
+			{
+				devices[i].eglCtx.dpy = EGL_NO_DISPLAY;
+				break;
+			}
 		}
-		if (kvm_drm_collect_active_outputs_on_fd(fd, explicit_device, outputs, max_outputs, out_count, true, true, out_error, out_error_size))
-		{
-			*out_fd = fd;
-			return true;
-		}
+	}
+	for (i = 0; i < count; ++i)
+	{
+		kvm_drm_egl_destroy_context(&devices[i].eglCtx);
+		kvm_drm_destroy_map(&devices[i].map);
+		if (devices[i].fd >= 0) { close(devices[i].fd); devices[i].fd = -1; }
+	}
+}
+
+// Returns true only if the card contributed active outputs (not merely that it opened).
+static bool kvm_drm_try_device(const char *path, kvm_drm_device *devices, int max_devices, int *device_count,
+	kvm_drm_output *outputs, int max_outputs, int *out_count, char *out_error, size_t out_error_size)
+{
+	int fd, collected = 0, base = *out_count, k;
+
+	if (*device_count >= max_devices || base >= max_outputs) { return false; }
+	if ((fd = open(path, O_RDWR | KVM_DRM_O_CLOEXEC | O_NONBLOCK)) < 0) { return false; }
+	if (!kvm_drm_collect_active_outputs_on_fd(fd, path, &outputs[base], max_outputs - base, &collected, true, true, out_error, out_error_size))
+	{
 		close(fd);
 		return false;
 	}
 
-	for (i = 0; i < 16; ++i)
+	for (k = 0; k < collected; ++k) { outputs[base + k].device_index = *device_count; }
+	memset(&devices[*device_count], 0, sizeof(devices[*device_count]));
+	devices[*device_count].fd = fd;
+	devices[*device_count].map.dma_fd = -1;
+	devices[*device_count].map.drm_fd = -1;
+	snprintf(devices[*device_count].path, sizeof(devices[*device_count].path), "%s", path);
+	*out_count += collected;
+	(*device_count)++;
+	return true;
+}
+
+// Merge every GPU's outputs so a multi-card desktop is one capture; sort by position for stable monitor numbering.
+static bool kvm_drm_open_all_devices(const char *explicit_device, kvm_drm_device *devices, int max_devices,
+	int *out_device_count, kvm_drm_output *outputs, int max_outputs, int *out_count, char *out_error, size_t out_error_size)
+{
+	*out_device_count = 0;
+	*out_count = 0;
+
+	if (explicit_device != NULL && explicit_device[0] != 0)
 	{
-		char path[64];
-		snprintf(path, sizeof(path), "/dev/dri/card%d", i);
-		int fd = open(path, O_RDWR | KVM_DRM_O_CLOEXEC | O_NONBLOCK);
-		if (fd < 0)
+		kvm_drm_try_device(explicit_device, devices, max_devices, out_device_count, outputs, max_outputs, out_count, out_error, out_error_size);
+	}
+	else
+	{
+		int i;
+		for (i = 0; i < 16; ++i)
+		{
+			char path[64];
+			snprintf(path, sizeof(path), "/dev/dri/card%d", i);
+			kvm_drm_try_device(path, devices, max_devices, out_device_count, outputs, max_outputs, out_count, out_error, out_error_size);
+		}
+	}
+
+	if (*out_device_count == 0)
+	{
+		kvm_drm_copy_error_message(out_error, out_error_size, "No usable /dev/dri/card* device with active connector/CRTC scanout");
+		return false;
+	}
+
+	qsort(outputs, (size_t)*out_count, sizeof(kvm_drm_output), kvm_drm_compare_outputs);
+	return true;
+}
+
+// 1s refresh path: picks up resolution/hotplug changes without reopening; a card with no scanout is skipped, not fatal.
+static bool kvm_drm_refresh_all_devices(kvm_drm_device *devices, int deviceCount, kvm_drm_output *outputs,
+	int max_outputs, int *out_count, char *out_error, size_t out_error_size)
+{
+	int di, k;
+	*out_count = 0;
+	out_error[0] = 0; // collect only writes this on failure; clear it so the empty-result check below is reliable
+	for (di = 0; di < deviceCount; ++di)
+	{
+		int collected = 0, base = *out_count;
+		if (base >= max_outputs) { break; }
+		if (!kvm_drm_collect_active_outputs_on_fd(devices[di].fd, devices[di].path, &outputs[base], max_outputs - base, &collected, true, false, out_error, out_error_size))
 		{
 			continue;
 		}
-		if (kvm_drm_collect_active_outputs_on_fd(fd, path, outputs, max_outputs, out_count, true, true, out_error, out_error_size))
-		{
-			*out_fd = fd;
-			return true;
-		}
-		close(fd);
+		for (k = 0; k < collected; ++k) { outputs[base + k].device_index = di; }
+		*out_count += collected;
 	}
-
-	kvm_drm_copy_error_message(out_error, out_error_size, "No usable /dev/dri/card* device with active connector/CRTC scanout");
-	return false;
+	if (*out_count == 0)
+	{
+		if (out_error[0] == 0) { kvm_drm_copy_error_message(out_error, out_error_size, "No active scanout on any device"); }
+		return false;
+	}
+	qsort(outputs, (size_t)*out_count, sizeof(kvm_drm_output), kvm_drm_compare_outputs);
+	return true;
 }
 
 // We only read scanout state; holding DRM master can block the compositor from
@@ -1493,7 +1585,7 @@ static void kvm_drm_update_tile_geometry()
 	}
 }
 
-static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output_count, const char *name)
+static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output_count, const char *name, const bool *claimed)
 {
 	int i;
 	if (outputs == NULL || name == NULL || name[0] == 0)
@@ -1502,6 +1594,7 @@ static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output
 	}
 	for (i = 0; i < output_count; ++i)
 	{
+		if (claimed != NULL && claimed[i]) { continue; } // a prior compositor entry already took this output
 		if (strcmp(outputs[i].connector_name, name) == 0)
 		{
 			return i;
@@ -1510,14 +1603,16 @@ static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output
 	return -1;
 }
 
-static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, const char *name, int enabled, int x, int y, uint32_t width, uint32_t height, int *matched)
+static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, const char *name, int enabled, int x, int y, uint32_t width, uint32_t height, int *matched, bool *claimed)
 {
 	int index;
 	if (enabled != 1 || width == 0 || height == 0)
 	{
 		return 0;
 	}
-	index = kvm_drm_find_output_by_name(outputs, output_count, name);
+	// connector_name is per-card, so two GPUs can both report e.g. "DP-1"; claimed[] stops two
+	// compositor entries from both landing on the same output (and leaving the other unplaced).
+	index = kvm_drm_find_output_by_name(outputs, output_count, name, claimed);
 	if (index < 0)
 	{
 		return 0;
@@ -1527,6 +1622,7 @@ static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, 
 	outputs[index].y = y;
 	outputs[index].width = width;
 	outputs[index].height = height;
+	if (claimed != NULL) { claimed[index] = true; }
 	if (matched != NULL) { (*matched)++; }
 	return 1;
 }
@@ -1809,6 +1905,7 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 {
 	kvm_drm_wayland_layout_context ctx;
 	kvm_drm_output tmp[KVM_DRM_MAX_OUTPUTS];
+	bool claimed[KVM_DRM_MAX_OUTPUTS] = { false };
 	int matched = 0;
 	int i;
 
@@ -1868,7 +1965,7 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 		{
 			continue;
 		}
-		kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height, &matched);
+		kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height, &matched, claimed);
 	}
 
 	if (matched != output_count)
@@ -1898,6 +1995,7 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 	FILE *pipe;
 	char line[256];
 	kvm_drm_output tmp[KVM_DRM_MAX_OUTPUTS];
+	bool claimed[KVM_DRM_MAX_OUTPUTS] = { false };
 	int in_screens = 0;
 	int have_screen = 0;
 	char name[32];
@@ -1941,7 +2039,7 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 		{
 			if (have_screen)
 			{
-				kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched);
+				kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched, claimed);
 			}
 			have_screen = 1;
 			name[0] = 0;
@@ -1969,7 +2067,7 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 	}
 	if (have_screen)
 	{
-		kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched);
+		kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched, claimed);
 	}
 	pclose(pipe);
 
@@ -2246,13 +2344,12 @@ void *kvm_server_mainloop_drm(void *parm)
 	g_kvmBackendDRM = 0;
 	return (void *)-1;
 #else
-	int fd = -1;
+	kvm_drm_device devices[KVM_DRM_MAX_DEVICES];
+	int deviceCount = 0;
 	char err[KVM_DRM_MAX_ERROR];
 	kvm_drm_output outputs[KVM_DRM_MAX_OUTPUTS];
 	int outputCount = 0;
 	kvm_drm_desktop_layout layout;
-	kvm_drm_frame_map map;
-	kvm_drm_egl_context eglCtx;
 	unsigned char *rgbBuffer = NULL;
 	size_t rgbBufferSize = 0;
 	unsigned char *rgbRotatedBuffer = NULL;
@@ -2273,11 +2370,8 @@ void *kvm_server_mainloop_drm(void *parm)
 	int lastLoggedRotation = -1;
 	memset(outputs, 0, sizeof(outputs));
 	memset(&layout, 0, sizeof(layout));
-	memset(&map, 0, sizeof(map));
-	memset(&eglCtx, 0, sizeof(eglCtx));
+	memset(devices, 0, sizeof(devices));
 	memset(lastRefreshFailure, 0, sizeof(lastRefreshFailure));
-	map.dma_fd = -1;
-	map.drm_fd = -1;
 
 	if (!kvm_drm_load_libdrm())
 	{
@@ -2289,7 +2383,7 @@ void *kvm_server_mainloop_drm(void *parm)
 	}
 
 	char *explicitDevice = getenv("MESH_KVM_DRM_DEVICE");
-	int haveLayout = kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
+	int haveLayout = kvm_drm_open_all_devices(explicitDevice, devices, KVM_DRM_MAX_DEVICES, &deviceCount, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
 		kvm_drm_compute_desktop_layout(outputs, outputCount, &layout);
 	if (!haveLayout)
 	{
@@ -2300,37 +2394,43 @@ void *kvm_server_mainloop_drm(void *parm)
 		{
 			if (g_enableEvents) { kvm_events_evdev_wake(); }
 			usleep(500 * 1000);
-			haveLayout = kvm_drm_open_device_with_outputs(explicitDevice, &fd, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
+			kvm_drm_close_all_devices(devices, deviceCount);
+			deviceCount = 0;
+			haveLayout = kvm_drm_open_all_devices(explicitDevice, devices, KVM_DRM_MAX_DEVICES, &deviceCount, outputs, KVM_DRM_MAX_OUTPUTS, &outputCount, err, sizeof(err)) &&
 				kvm_drm_compute_desktop_layout(outputs, outputCount, &layout);
 		}
 	}
 	if (!haveLayout)
 	{
 		kvm_send_error(err[0] ? err : "Unable to compute DRM desktop layout");
+		kvm_drm_close_all_devices(devices, deviceCount);
 		kvm_events_evdev_shutdown();
 		g_enableEvents = 0;
 		g_kvmBackendDRM = 0;
 		return (void *)-1;
 	}
-	if (kvm_drm_drop_master_if_held(fd) != 0)
+	for (int di = 0; di < deviceCount; ++di)
 	{
-		snprintf(err, sizeof(err), "drmDropMaster failed (errno=%d)", errno);
-		kvm_send_error(err);
-		kvm_events_evdev_shutdown();
-		g_enableEvents = 0;
-		g_kvmBackendDRM = 0;
-		close(fd);
-		return (void *)-1;
+		if (kvm_drm_drop_master_if_held(devices[di].fd) != 0)
+		{
+			snprintf(err, sizeof(err), "drmDropMaster failed on %s (errno=%d)", devices[di].path, errno);
+			kvm_send_error(err);
+			kvm_drm_close_all_devices(devices, deviceCount);
+			kvm_events_evdev_shutdown();
+			g_enableEvents = 0;
+			g_kvmBackendDRM = 0;
+			return (void *)-1;
+		}
 	}
 
 	if (kvm_drm_drop_to_session_uid_with_caps(sessionUid, err, sizeof(err)) != 0)
 	{
 		fprintf(stderr, "DRM privilege setup failed: %s\n", err);
 		kvm_send_error(err);
+		kvm_drm_close_all_devices(devices, deviceCount);
 		kvm_events_evdev_shutdown();
 		g_enableEvents = 0;
 		g_kvmBackendDRM = 0;
-		close(fd);
 		return (void *)-1;
 	}
 	kvm_drm_prepare_session_environment(sessionUid);
@@ -2339,10 +2439,10 @@ void *kvm_server_mainloop_drm(void *parm)
 		if (!kvm_drm_compute_desktop_layout(outputs, outputCount, &layout))
 		{
 			kvm_send_error("Unable to compute Wayland DRM desktop layout");
+			kvm_drm_close_all_devices(devices, deviceCount);
 			kvm_events_evdev_shutdown();
 			g_enableEvents = 0;
 			g_kvmBackendDRM = 0;
-			close(fd);
 			return (void *)-1;
 		}
 	}
@@ -2433,7 +2533,7 @@ void *kvm_server_mainloop_drm(void *parm)
 			char refreshErr[KVM_DRM_MAX_ERROR];
 			memset(refreshed, 0, sizeof(refreshed));
 			memset(&refreshedLayout, 0, sizeof(refreshedLayout));
-			if (kvm_drm_collect_active_outputs_on_fd(fd, outputs[0].device_path, refreshed, KVM_DRM_MAX_OUTPUTS, &refreshedCount, true, false, refreshErr, sizeof(refreshErr)))
+			if (kvm_drm_refresh_all_devices(devices, deviceCount, refreshed, KVM_DRM_MAX_OUTPUTS, &refreshedCount, refreshErr, sizeof(refreshErr)))
 			{
 				if (!kvm_drm_apply_xdg_output_layout(refreshed, refreshedCount, false))
 				{
@@ -2451,8 +2551,12 @@ void *kvm_server_mainloop_drm(void *parm)
 						kvm_drm_publish_monitor_layout(outputs, outputCount, &layout);
 						forceTileReset = 1;
 						displayListSent = 0;
-						kvm_drm_destroy_map(&map);
-						kvm_drm_egl_destroy_context(&eglCtx);
+						// Keep each device's EGL context across a layout change (same GPU; the convert
+						// resizes its own readback target). Only the framebuffer maps need resetting.
+						for (int di = 0; di < deviceCount; ++di)
+						{
+							kvm_drm_destroy_map(&devices[di].map);
+						}
 						kvm_drm_reset_logged_scanout_state(&lastLoggedFbId, &lastLoggedWidth, &lastLoggedHeight,
 							&lastLoggedPitch, &lastLoggedOffset, &lastLoggedFormat, &lastLoggedHandle,
 							&lastLoggedModifier, &lastLoggedPath);
@@ -2498,9 +2602,10 @@ void *kvm_server_mainloop_drm(void *parm)
 			bool converted = false;
 			uint32_t effectiveWidth = 0;
 			uint32_t effectiveHeight = 0;
+			kvm_drm_device *dev = &devices[outputs[outputIndex].device_index];
 			memset(&frame, 0, sizeof(frame));
 
-			if (!kvm_drm_get_scanout_frame(fd, outputs[outputIndex].crtc_id, outputs[outputIndex].crtc_index, &frame, err, sizeof(err)))
+			if (!kvm_drm_get_scanout_frame(dev->fd, outputs[outputIndex].crtc_id, outputs[outputIndex].crtc_index, &frame, err, sizeof(err)))
 			{
 				if (kvm_drm_is_transient_scanout_error(err))
 				{
@@ -2563,18 +2668,18 @@ void *kvm_server_mainloop_drm(void *parm)
 					lastLoggedPath = 1;
 				}
 
-				converted = kvm_drm_egl_convert_to_rgb24_gpu(&eglCtx, fd, frame.width, frame.height, frame.pitch,
+				converted = kvm_drm_egl_convert_to_rgb24_gpu(&dev->eglCtx, dev->fd, frame.width, frame.height, frame.pitch,
 															 frame.offset, frame.format, frame.handle, frame.modifier,
 															 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
-				kvm_drm_close_gem_handle(fd, frame.handle);
+				kvm_drm_close_gem_handle(dev->fd, frame.handle);
 				frame.handle = 0;
 			}
 			else
 			{
 				size_t required_bytes = (size_t)frame.offset + ((size_t)frame.pitch * (size_t)frame.height);
-				if (!kvm_drm_map_framebuffer_handle(fd, frame.handle, required_bytes, &map, err, sizeof(err)))
+				if (!kvm_drm_map_framebuffer_handle(dev->fd, frame.handle, required_bytes, &dev->map, err, sizeof(err)))
 				{
-					kvm_drm_close_gem_handle(fd, frame.handle);
+					kvm_drm_close_gem_handle(dev->fd, frame.handle);
 					converted = false;
 				}
 				else
@@ -2587,7 +2692,7 @@ void *kvm_server_mainloop_drm(void *parm)
 						lastLoggedPath = 0;
 					}
 
-					const uint8_t *src = map.addr + frame.offset;
+					const uint8_t *src = dev->map.addr + frame.offset;
 					converted = kvm_drm_convert_to_rgb24(&frame, src, rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
 				}
 			}
@@ -2698,13 +2803,7 @@ void *kvm_server_mainloop_drm(void *parm)
 		free(desktopRgbBuffer);
 		desktopRgbBuffer = NULL;
 	}
-	kvm_drm_destroy_map(&map);
-	kvm_drm_egl_destroy_context(&eglCtx);
-	if (fd >= 0)
-	{
-		close(fd);
-		fd = -1;
-	}
+	kvm_drm_close_all_devices(devices, deviceCount);
 
 	close(slave2master[1]);
 	close(master2slave[0]);

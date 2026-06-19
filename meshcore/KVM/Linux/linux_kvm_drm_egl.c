@@ -27,6 +27,7 @@ limitations under the License.
 #if defined(__linux__)
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <drm_fourcc.h>
 #include <xf86drm.h>
@@ -256,7 +257,60 @@ static GLuint kvm_drm_egl_compile_shader(GLenum type, const char *src, char *log
 	return shader;
 }
 
-static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, char *out_error, size_t out_error_size)
+// Pin EGL to the GPU we capture from (by DRM node) so the loader uses the vendor that can import
+// its buffers (NVIDIA) instead of falling back to Mesa/swrast, which imports the tiles as black.
+// Sets *out_gpu_mismatch when our GPU exists but isn't an EGL device while others are, so the caller
+// fails instead of routing this card through a foreign vendor.
+static EGLDisplay kvm_drm_egl_open_device_display(int drm_fd, bool *out_gpu_mismatch)
+{
+	PFNEGLQUERYDEVICESEXTPROC queryDevices = (PFNEGLQUERYDEVICESEXTPROC)eglGetProcAddress("eglQueryDevicesEXT");
+	PFNEGLQUERYDEVICESTRINGEXTPROC queryDeviceString = (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress("eglQueryDeviceStringEXT");
+	PFNEGLGETPLATFORMDISPLAYEXTPROC getPlatformDisplay = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	EGLDeviceEXT devices[16];
+	EGLDeviceEXT chosen = EGL_NO_DEVICE_EXT;
+	EGLDeviceEXT firstHardware = EGL_NO_DEVICE_EXT;
+	EGLint count = 0;
+	struct stat cardSt, renderSt;
+	char renderPath[64];
+	int haveCard, haveRender;
+	int i;
+
+	if (out_gpu_mismatch != NULL) { *out_gpu_mismatch = false; }
+	if (queryDevices == NULL || queryDeviceString == NULL || getPlatformDisplay == NULL) { return EGL_NO_DISPLAY; }
+	if (!queryDevices((EGLint)(sizeof(devices) / sizeof(devices[0])), devices, &count) || count <= 0) { return EGL_NO_DISPLAY; }
+
+	// The capture fd is a card node; an EGL device may report only its card node (Mesa) or only its
+	// render node (NVIDIA), so match against either by device-number.
+	haveCard = (drm_fd >= 0 && fstat(drm_fd, &cardSt) == 0) ? 1 : 0;
+	haveRender = (drm_fd >= 0 && kvm_drm_render_node_for_fd(drm_fd, renderPath, sizeof(renderPath)) && stat(renderPath, &renderSt) == 0) ? 1 : 0;
+	for (i = 0; i < count; ++i)
+	{
+		const char *cardNode = queryDeviceString(devices[i], EGL_DRM_DEVICE_FILE_EXT);
+		const char *renderNode = queryDeviceString(devices[i], EGL_DRM_RENDER_NODE_FILE_EXT);
+		struct stat st;
+		if (cardNode == NULL && renderNode == NULL) { continue; } // software device: no DRM node
+		if (firstHardware == EGL_NO_DEVICE_EXT) { firstHardware = devices[i]; }
+		if (haveCard && cardNode != NULL && stat(cardNode, &st) == 0 && st.st_rdev == cardSt.st_rdev) { chosen = devices[i]; break; }
+		if (haveRender && renderNode != NULL && stat(renderNode, &st) == 0 && st.st_rdev == renderSt.st_rdev) { chosen = devices[i]; break; }
+	}
+	if (chosen == EGL_NO_DEVICE_EXT)
+	{
+		// Identified our GPU but no EGL device matched it. If another hardware EGL device exists, the
+		// default display would import this card's buffers through the wrong vendor (black) — flag it
+		// so the caller fails. Only guess firstHardware when our GPU was never identified at all.
+		if (haveCard || haveRender)
+		{
+			if (firstHardware != EGL_NO_DEVICE_EXT && out_gpu_mismatch != NULL) { *out_gpu_mismatch = true; }
+			if (getenv("MESH_KVM_DRM_DEBUG") != NULL && atoi(getenv("MESH_KVM_DRM_DEBUG")) > 0) { fprintf(stderr, "DRM EGL: no EGL device matched the capture GPU's DRM node\n"); }
+			return EGL_NO_DISPLAY;
+		}
+		chosen = firstHardware;
+	}
+	if (chosen == EGL_NO_DEVICE_EXT) { return EGL_NO_DISPLAY; }
+	return getPlatformDisplay(EGL_PLATFORM_DEVICE_EXT, chosen, NULL);
+}
+
+static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, int drm_fd, char *out_error, size_t out_error_size)
 {
 	if (g->initialized) { return true; }
 	if (g->permanently_failed)
@@ -271,11 +325,23 @@ static bool kvm_drm_egl_init_gpu_readback(kvm_drm_egl_context *g, char *out_erro
 			"libEGL/libGLESv2 not installed; GPU-assisted DRM conversion unavailable");
 	}
 
-	PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXTFn =
-		(PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
-	if (eglGetPlatformDisplayEXTFn != NULL)
+	bool gpuMismatch = false;
+	g->dpy = kvm_drm_egl_open_device_display(drm_fd, &gpuMismatch);
+	if (g->dpy == EGL_NO_DISPLAY && gpuMismatch)
 	{
-		g->dpy = eglGetPlatformDisplayEXTFn(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+		// This card's tiled buffers would read back black through another GPU's vendor; fail cleanly
+		// (its outputs can't be GPU-converted) rather than corrupting a multi-GPU desktop.
+		return kvm_drm_egl_fail_with_persistent_error(g, out_error, out_error_size,
+			"capture GPU has no matching EGL device on a multi-GPU system");
+	}
+	if (g->dpy == EGL_NO_DISPLAY)
+	{
+		PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXTFn =
+			(PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
+		if (eglGetPlatformDisplayEXTFn != NULL)
+		{
+			g->dpy = eglGetPlatformDisplayEXTFn(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+		}
 	}
 	if (g->dpy == EGL_NO_DISPLAY)
 	{
@@ -530,7 +596,14 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 		return false;
 	}
 
-	if (!kvm_drm_egl_init_gpu_readback(ctx, out_error, out_error_size)) { return false; }
+	if (!kvm_drm_egl_init_gpu_readback(ctx, drm_fd, out_error, out_error_size)) { return false; }
+	// Each GPU has its own context; bind this one before any GL/EGL for this frame so a
+	// multi-GPU desktop doesn't issue card B's work against card A's still-current context.
+	if (!eglMakeCurrent(ctx->dpy, ctx->surf, ctx->surf, ctx->ctx))
+	{
+		kvm_drm_egl_format_egl_error(out_error, out_error_size, "eglMakeCurrent failed", eglGetError());
+		return false;
+	}
 	if (!kvm_drm_egl_ensure_gpu_target_size(ctx, (int)width, (int)height, out_error, out_error_size)) { return false; }
 
 	int dmabuf_fd = -1;
@@ -694,40 +767,19 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 	ctx->rgba_readback_cap = 0;
 
 #if defined(__linux__)
-	if (ctx->program != 0)
-	{
-		glDeleteProgram(ctx->program);
-		ctx->program = 0;
-	}
-	if (ctx->vbo != 0)
-	{
-		glDeleteBuffers(1, &ctx->vbo);
-		ctx->vbo = 0;
-	}
-	if (ctx->fbo != 0)
-	{
-		glDeleteFramebuffers(1, &ctx->fbo);
-		ctx->fbo = 0;
-	}
-	if (ctx->out_tex != 0)
-	{
-		glDeleteTextures(1, &ctx->out_tex);
-		ctx->out_tex = 0;
-	}
-
+	// dpy is nulled on a device sharing another's EGLDisplay, so only the owner terminates it (and
+	// frees the GL objects, which live on dpy); bind this context first since multi-GPU teardown can
+	// leave another card's context current.
 	if (ctx->dpy != EGL_NO_DISPLAY)
 	{
-		if (ctx->ctx != EGL_NO_CONTEXT)
-		{
-			eglMakeCurrent(ctx->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-			eglDestroyContext(ctx->dpy, ctx->ctx);
-			ctx->ctx = EGL_NO_CONTEXT;
-		}
-		if (ctx->surf != EGL_NO_SURFACE)
-		{
-			eglDestroySurface(ctx->dpy, ctx->surf);
-			ctx->surf = EGL_NO_SURFACE;
-		}
+		if (ctx->ctx != EGL_NO_CONTEXT) { eglMakeCurrent(ctx->dpy, ctx->surf, ctx->surf, ctx->ctx); }
+		if (ctx->program != 0) { glDeleteProgram(ctx->program); ctx->program = 0; }
+		if (ctx->vbo != 0) { glDeleteBuffers(1, &ctx->vbo); ctx->vbo = 0; }
+		if (ctx->fbo != 0) { glDeleteFramebuffers(1, &ctx->fbo); ctx->fbo = 0; }
+		if (ctx->out_tex != 0) { glDeleteTextures(1, &ctx->out_tex); ctx->out_tex = 0; }
+		eglMakeCurrent(ctx->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+		if (ctx->ctx != EGL_NO_CONTEXT) { eglDestroyContext(ctx->dpy, ctx->ctx); ctx->ctx = EGL_NO_CONTEXT; }
+		if (ctx->surf != EGL_NO_SURFACE) { eglDestroySurface(ctx->dpy, ctx->surf); ctx->surf = EGL_NO_SURFACE; }
 		eglTerminate(ctx->dpy);
 		ctx->dpy = EGL_NO_DISPLAY;
 	}
@@ -744,6 +796,4 @@ void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx)
 #endif
 
 	ctx->initialized = false;
-	ctx->permanently_failed = false;
-	ctx->fail_reason[0] = '\0';
 }
