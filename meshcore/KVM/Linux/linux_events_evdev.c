@@ -756,8 +756,6 @@ void kvm_events_evdev_mouse_action(double absX, double absY, int button, short w
 
 	if (g_kvmBackendDRM != 0 && VSCREEN_WIDTH > 0 && VSCREEN_HEIGHT > 0)
 	{
-		x += CAPTURE_X;
-		y += CAPTURE_Y;
 		maxX = VSCREEN_WIDTH;
 		maxY = VSCREEN_HEIGHT;
 	}
