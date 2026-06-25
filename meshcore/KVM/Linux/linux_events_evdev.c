@@ -22,6 +22,7 @@ limitations under the License.
 #include <string.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <poll.h>
 
 #if defined(__linux__)
 
@@ -38,6 +39,7 @@ typedef int (*kvm_libevdev_enable_event_code_fn)(struct libevdev *dev, unsigned 
 typedef int (*kvm_libevdev_uinput_create_from_device_fn)(const struct libevdev *dev, int uinput_fd, struct libevdev_uinput **uinput_dev);
 typedef void (*kvm_libevdev_uinput_destroy_fn)(struct libevdev_uinput *uinput_dev);
 typedef int (*kvm_libevdev_uinput_write_event_fn)(const struct libevdev_uinput *uinput_dev, unsigned int type, unsigned int code, int value);
+typedef int (*kvm_libevdev_uinput_get_fd_fn)(const struct libevdev_uinput *uinput_dev);
 typedef const char *(*kvm_libevdev_strerror_fn)(int errcode);
 
 typedef struct kvm_evdev_exports
@@ -51,6 +53,7 @@ typedef struct kvm_evdev_exports
 	kvm_libevdev_uinput_create_from_device_fn libevdev_uinput_create_from_device;
 	kvm_libevdev_uinput_destroy_fn libevdev_uinput_destroy;
 	kvm_libevdev_uinput_write_event_fn libevdev_uinput_write_event;
+	kvm_libevdev_uinput_get_fd_fn libevdev_uinput_get_fd;
 	kvm_libevdev_strerror_fn libevdev_strerror;
 } kvm_evdev_exports;
 
@@ -63,6 +66,7 @@ typedef struct kvm_evdev_state
 
 static kvm_evdev_exports g_kvm_evdev_exports = {0};
 static kvm_evdev_state g_kvm_evdev_state = {0};
+static int g_kvm_evdev_capslock = 0;
 
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
@@ -153,6 +157,7 @@ static int kvm_events_evdev_load_exports()
 	KVM_DLSYM_REQ(libevdev_uinput_destroy);
 	KVM_DLSYM_REQ(libevdev_uinput_write_event);
 	g_kvm_evdev_exports.libevdev_strerror = (kvm_libevdev_strerror_fn)dlsym(g_kvm_evdev_exports.library, "libevdev_strerror");
+	g_kvm_evdev_exports.libevdev_uinput_get_fd = (kvm_libevdev_uinput_get_fd_fn)dlsym(g_kvm_evdev_exports.library, "libevdev_uinput_get_fd");
 
 #undef KVM_DLSYM_REQ
 	return 1;
@@ -548,6 +553,30 @@ static int kvm_events_evdev_sync()
 	return kvm_events_evdev_write(EV_SYN, SYN_REPORT, 0);
 }
 
+// The compositor mirrors the keyboard CapsLock lock onto every keyboard device, including ours, as EV_LED.
+// Drain those updates so synthesized letters can honor the requested case instead of inverting under a
+// remote CapsLock. Stays at 0 (no effect) if libevdev_uinput_get_fd is unavailable or no LED is delivered.
+static void kvm_events_evdev_poll_capslock()
+{
+	struct input_event ev;
+	struct pollfd pfd;
+	int fd;
+
+	if (g_kvm_evdev_exports.libevdev_uinput_get_fd == NULL || g_kvm_evdev_state.uinput == NULL) { return; }
+	fd = g_kvm_evdev_exports.libevdev_uinput_get_fd(g_kvm_evdev_state.uinput);
+	if (fd < 0) { return; }
+
+	pfd.fd = fd;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	while (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN))
+	{
+		if (read(fd, &ev, sizeof(ev)) != (ssize_t)sizeof(ev)) { break; }
+		if (ev.type == EV_LED && ev.code == LED_CAPSL) { g_kvm_evdev_capslock = ev.value ? 1 : 0; }
+		pfd.revents = 0;
+	}
+}
+
 static int kvm_events_evdev_scale_axis(int value, int maxPixels)
 {
 	if (maxPixels <= 1)
@@ -652,6 +681,11 @@ int kvm_events_evdev_init()
 		goto error;
 	}
 	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_REL, REL_HWHEEL, NULL));
+
+	// LED capability lets the compositor report the live CapsLock lock state back to us (see poll_capslock).
+	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_type(g_kvm_evdev_state.dev, EV_LED));
+	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_LED, LED_CAPSL, NULL));
+	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_LED, LED_NUML, NULL));
 
 	memset(keyEnabled, 0, sizeof(keyEnabled));
 	keyEnabled[BTN_LEFT] = g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_KEY, BTN_LEFT, NULL) == 0;
@@ -859,6 +893,7 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 {
 	unsigned int keycode = KEY_RESERVED;
 	int needsShift = 0;
+	int isAlpha = (unicode >= 'a' && unicode <= 'z') || (unicode >= 'A' && unicode <= 'Z');
 
 	if (!kvm_events_evdev_is_active())
 	{
@@ -873,29 +908,29 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 		return;
 	}
 
+	// An active CapsLock already swaps letter case, so flip the Shift decision to land on the requested case.
+	kvm_events_evdev_poll_capslock();
+	if (g_kvm_evdev_capslock && isAlpha)
+	{
+		needsShift = !needsShift;
+	}
+
+	// Each transition is its own SYN frame so the compositor observes Shift as held while the key is
+	// processed; batching all four into one frame left the modifier ignored (shifted symbols and case lost).
 	if (needsShift)
 	{
-		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 1) != 0)
-		{
-			return;
-		}
+		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 1) != 0) { return; }
+		ignore_result(kvm_events_evdev_sync());
 	}
-	if (kvm_events_evdev_write(EV_KEY, keycode, 1) != 0)
-	{
-		return;
-	}
-	if (kvm_events_evdev_write(EV_KEY, keycode, 0) != 0)
-	{
-		return;
-	}
-	if (needsShift)
-	{
-		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 0) != 0)
-		{
-			return;
-		}
-	}
+	if (kvm_events_evdev_write(EV_KEY, keycode, 1) != 0) { return; }
 	ignore_result(kvm_events_evdev_sync());
+	if (kvm_events_evdev_write(EV_KEY, keycode, 0) != 0) { return; }
+	ignore_result(kvm_events_evdev_sync());
+	if (needsShift)
+	{
+		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 0) != 0) { return; }
+		ignore_result(kvm_events_evdev_sync());
+	}
 }
 
 #else
