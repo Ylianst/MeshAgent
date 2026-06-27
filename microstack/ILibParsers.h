@@ -936,6 +936,10 @@ int ILibIsRunningOnChainThread(void* chain);
 	void ILibWriteStringToDisk(char *FileName, char *data);
 	void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t maxSize);
 	void ILibWriteStringToDiskEx(char *FileName, char *data, int dataLen);
+	#define ILibAppendStringToDisk_Cap_Stop		0
+	#define ILibAppendStringToDisk_Cap_Truncate	1
+	#define ILibAppendStringToDisk_Cap_Rotate	2
+	void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t maxSize, int capMode, int maxCount);
 	void ILibDeleteFileFromDisk(char *FileName);
 	void ILibGetDiskFreeSpace(void *i64FreeBytesToCaller, void *i64TotalBytes);
 	int ILibFile_CopyTo(char *source, char *destination);
@@ -1603,6 +1607,8 @@ int ILibIsRunningOnChainThread(void* chain);
 
 #define ILIBCRITICALLOG_DEFAULT_MAXSIZE 524288
 	extern uint64_t ILibCriticalLog_MaxSize;
+	extern int ILibCriticalLog_CapMode;
+	extern int ILibCriticalLog_RotateCount;
 #define ILIBCRITICALEXITMSG(code, msg) {printf("%s", ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)); exit(code);}
 #define ILIBLOGMESSSAGE(msg) ILibCriticalLog(msg, __FILE__, __LINE__, 0, 0)
 	void ILIBLOGMESSAGEX(char *format, ...);
