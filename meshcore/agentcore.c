@@ -4737,6 +4737,29 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		if (useproxy == 0) { strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer)); }
 
+		// Diag: log where each control-channel attempt dials (IP/family/proxy) so a failed attempt is self-describing; these die before any server-side log.
+		// Redact user:pass@ credentials from the proxy URI before logging (keep scheme://host:port).
+		char proxyredacted[1024];
+		const char *proxylog = "DIRECT";
+		if (useproxy != 0)
+		{
+			char *afterscheme = strstr(webproxy, "://");
+			afterscheme = (afterscheme != NULL) ? afterscheme + 3 : webproxy;
+			char *at = strstr(afterscheme, "@");
+			if (at != NULL)
+			{
+				snprintf(proxyredacted, sizeof(proxyredacted), "%.*s***@%s", (int)(afterscheme - webproxy), webproxy, at + 1);
+				proxylog = proxyredacted;
+			}
+			else { proxylog = webproxy; }
+		}
+		printf("Connection: dialing uri=%s host=%s port=%u family=%s ip=%s useproxy=%d proxy=%s\n",
+			agent->serveruri, host, port,
+			(meshServer.sin6_family == AF_INET6 ? "IPv6" : (meshServer.sin6_family == AF_INET ? "IPv4" : "UNSPEC")),
+			(useproxy == 0 ? agent->serverip : "(via-proxy)"),
+			(int)useproxy,
+			proxylog);
+
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 
 		void **tmp = ILibMemory_SmartAllocate(2 * sizeof(void*));

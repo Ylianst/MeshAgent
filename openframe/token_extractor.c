@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 #include <openssl/rand.h>
@@ -53,6 +54,20 @@ char* extract_token(const char* secret, const char* token_path) {
     size_t plaintext_len;
     char* decrypted_token = decrypt_aes_gcm((const unsigned char*)encrypted_data, ciphertext_len, (const unsigned char*)secret, &plaintext_len);
     free(encrypted_data);
+
+    // Diag: log every JWT read+decrypted from disk with a UTC timestamp, to correlate token reads with connects and check iat/exp.
+    if (decrypted_token != NULL) {
+        time_t now = time(NULL);
+        struct tm tmv;
+        char ts[32] = "";
+#ifdef WIN32
+        gmtime_s(&tmv, &now);
+#else
+        gmtime_r(&now, &tmv);
+#endif
+        strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tmv);
+        printf("Openframe token: read JWT from %s at %s: %s\n", filename, ts, decrypted_token);
+    }
 
     return decrypted_token;
 }
