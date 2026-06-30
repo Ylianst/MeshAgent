@@ -4304,9 +4304,16 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 		}
 		ILibRemoteLogging_printf(ILibChainGetLogger(ILibWebClient_GetChainFromWebStateObject(WebStateObject)), ILibRemoteLogging_Modules_Agent_GuardPost, ILibRemoteLogging_Flags_VerbosityLevel_1, "Agent Host Container: Mesh Server Connection Error, trying again later.");
 
-		printf("Connection FAILED: No HTTP response (fd=%d, status=%s, authState=%d, connState=%d)\n",
-			ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject),
-			recvStatusStr, agent->serverAuthState, agent->serverConnectionState);
+		if (agent->controlChannelLogThisAttempt != 0)
+		{
+			long long elapsedMs = ILibGetUptime() - agent->controlChannelDialTick;
+			// tls is only meaningful for wss; the ConnectSink flag tracks plain TCP connect on ws.
+			const char *tlsState = (strncmp("wss:", agent->serveruri, 4) != 0) ? "n/a" : (agent->controlChannelTlsUp != 0 ? "up" : "down");
+			printf("Connection FAILED: No HTTP response (fd=%d, status=%s, authState=%d, connState=%d, tls=%s, elapsedMs=%lld, attempt=%s)\n",
+				ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject),
+				recvStatusStr, agent->serverAuthState, agent->serverConnectionState,
+				tlsState, elapsedMs, agent->connectAttemptId);
+		}
 
 		agent->autoproxy_status = 0;
 
@@ -4343,7 +4350,14 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 	agent->controlChannelRequest = NULL;
 
 	if (agent->controlChannelDebug != 0) { printf("Network Timeout Occurred...\n"); }
-	printf("Connection FAILED: Network timeout - server unreachable or gateway blocking\n");
+	if (agent->controlChannelLogThisAttempt != 0)
+	{
+		long long elapsedMs = ILibGetUptime() - agent->controlChannelDialTick;
+		// tls is only meaningful for wss; the ConnectSink flag tracks plain TCP connect on ws.
+		const char *tlsState = (strncmp("wss:", agent->serveruri, 4) != 0) ? "n/a" : (agent->controlChannelTlsUp != 0 ? "up" : "down");
+		printf("Connection FAILED: Network timeout - server unreachable or gateway blocking (tls=%s, elapsedMs=%lld, attempt=%s)\n",
+			tlsState, elapsedMs, agent->connectAttemptId);
+	}
 	agent->serverConnectionState = 0;
 
 	ILibWebClient_CancelRequest(request);
@@ -4389,6 +4403,14 @@ duk_ret_t MeshServer_ConnectEx_AutoProxy(duk_context *ctx)
 
 	MeshServer_ConnectEx(agent);
 	return(0);
+}
+
+void MeshServer_ControlChannel_ConnectSink(ILibWebClient_RequestToken sender)
+{
+	// Fires after TCP connect (and TLS handshake for wss), before the HTTP upgrade is sent.
+	void **uo = ILibWebClient_RequestToken_GetUserObjects(sender);
+	MeshAgentHostContainer *agent = (uo != NULL) ? (MeshAgentHostContainer*)uo[0] : NULL;
+	if (agent != NULL && strncmp("wss:", agent->serveruri, 4) == 0) { agent->controlChannelTlsUp = 1; }
 }
 
 void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
@@ -4737,6 +4759,15 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	{
 		if (useproxy == 0) { strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer)); }
 
+		// Per-attempt diag state: reset TLS-reached flag, stamp dial time, and mint a correlation id matchable in gateway/server logs.
+		unsigned int attemptRand;
+		util_random(sizeof(attemptRand), (char*)&attemptRand);
+		agent->connectAttemptSeq++;
+		agent->controlChannelTlsUp = 0;
+		agent->controlChannelDialTick = ILibGetUptime();
+		sprintf_s(agent->connectAttemptId, sizeof(agent->connectAttemptId), "%08X-%u", attemptRand, agent->connectAttemptSeq);
+		ILibAddHeaderLine(req, "X-Agent-Attempt", 15, agent->connectAttemptId, (int)strnlen_s(agent->connectAttemptId, sizeof(agent->connectAttemptId)));
+
 		// Diag: log where each control-channel attempt dials (IP/family/proxy) so a failed attempt is self-describing; these die before any server-side log.
 		// Redact user:pass@ credentials from the proxy URI before logging (keep scheme://host:port).
 		char proxyredacted[1024];
@@ -4753,12 +4784,23 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			}
 			else { proxylog = webproxy; }
 		}
-		printf("Connection: dialing uri=%s host=%s port=%u family=%s ip=%s useproxy=%d proxy=%s\n",
-			agent->serveruri, host, port,
-			(meshServer.sin6_family == AF_INET6 ? "IPv6" : (meshServer.sin6_family == AF_INET ? "IPv4" : "UNSPEC")),
-			(useproxy == 0 ? agent->serverip : "(via-proxy)"),
-			(int)useproxy,
-			proxylog);
+		// Throttle repeated identical attempts: log the dial/failure pair only on target change or once per 60s, counting the rest.
+		char dialSig[160];
+		snprintf(dialSig, sizeof(dialSig), "%s|%s|%d", agent->serveruri, (useproxy == 0 ? agent->serverip : "proxy"), (int)useproxy);
+		agent->controlChannelLogThisAttempt = (agent->controlChannelLastLogTick == 0 || strcmp(dialSig, agent->controlChannelDialSig) != 0 || (agent->controlChannelDialTick - agent->controlChannelLastLogTick) >= 60000) ? 1 : 0;
+		if (agent->controlChannelLogThisAttempt != 0)
+		{
+			agent->controlChannelLastLogTick = agent->controlChannelDialTick;
+			strcpy_s(agent->controlChannelDialSig, sizeof(agent->controlChannelDialSig), dialSig);
+			printf("Connection: dialing uri=%s host=%s port=%u family=%s ip=%s useproxy=%d proxy=%s attempt=%s suppressed=%u\n",
+				agent->serveruri, host, port,
+				(meshServer.sin6_family == AF_INET6 ? "IPv6" : (meshServer.sin6_family == AF_INET ? "IPv4" : "UNSPEC")),
+				(useproxy == 0 ? agent->serverip : "(via-proxy)"),
+				(int)useproxy,
+				proxylog, agent->connectAttemptId, agent->controlChannelSuppressed);
+			agent->controlChannelSuppressed = 0;
+		}
+		else { agent->controlChannelSuppressed++; }
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 
@@ -4766,6 +4808,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		agent->controlChannelRequest = tmp;
 		tmp[0] = agent;
 		tmp[1] = reqToken = ILibWebClient_PipelineRequest(agent->httpClientManager, (struct sockaddr*)&meshServer, req, MeshServer_OnResponse, agent, NULL);
+		ILibWebClient_RequestToken_ConnectionHandler_Set(reqToken, MeshServer_ControlChannel_ConnectSink, NULL);
 		ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), tmp, 20, MeshServer_ConnectEx_NetworkError, MeshServer_ConnectEx_NetworkError_Cleanup);
 
 #ifndef MICROSTACK_NOTLS
