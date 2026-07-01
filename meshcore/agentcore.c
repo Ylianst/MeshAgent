@@ -4437,7 +4437,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	}
 
 	// If this is called while we are in any connection state, just leave now.
-
+	if (agent->serverConnectionState != 0         // established (=2) or connecting (=1) - same core as MeshServer_Connect
+		|| agent->controlChannel != NULL          // covers the pong-timeout window (controlChannel NULLed before state clears)
+		|| agent->controlChannelRequest != NULL)  // covers the in-flight-request window before state is set to 1
+	{ return; }
 
 	len = ILibSimpleDataStore_Get(agent->masterDb, "MeshServer", ILibScratchPad2, sizeof(ILibScratchPad2));
 
