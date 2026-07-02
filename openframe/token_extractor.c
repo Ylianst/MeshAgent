@@ -66,7 +66,7 @@ char* extract_token(const char* secret, const char* token_path) {
         gmtime_r(&now, &tmv);
 #endif
         strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tmv);
-        printf("Openframe token: read JWT from %s at %s: %s\n", filename, ts, decrypted_token);
+        printf("%s INFO Openframe token: read JWT from %s: %s tool_id=meshcentral-agent\n", ts, filename, decrypted_token);
     }
 
     return decrypted_token;
