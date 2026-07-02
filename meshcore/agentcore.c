@@ -4807,6 +4807,9 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 
+		// Evict any stale pooled connection to this address so every dial performs a fresh TCP+TLS connect instead of riding a dead kept-alive socket.
+		ILibWebClient_DeleteRequests(agent->httpClientManager, (struct sockaddr*)&meshServer);
+
 		void **tmp = ILibMemory_SmartAllocate(2 * sizeof(void*));
 		agent->controlChannelRequest = tmp;
 		tmp[0] = agent;
