@@ -9646,6 +9646,109 @@ void ILibAppendStringToDiskEx2(char *FileName, char *data, int dataLen, uint64_t
 		fclose(SourceFile);
 	}
 }
+static int ILibRenameFileOnDisk(char *source, char *destination)
+{
+#ifdef WIN32
+	WCHAR SourceW[4096];
+	WCHAR DestW[4096];
+	ILibUTF8ToWideEx(source, -1, SourceW, (int)sizeof(SourceW) / 2);
+	ILibUTF8ToWideEx(destination, -1, DestW, (int)sizeof(DestW) / 2);
+	DeleteFileW(DestW); // MoveFileW fails if the destination already exists; POSIX rename() replaces it
+	return(MoveFileW(SourceW, DestW) ? 0 : 1);
+#else
+	return(rename(source, destination));
+#endif
+}
+void ILibAppendStringToDiskEx3(char *FileName, char *data, int dataLen, uint64_t maxSize, int capMode, int maxCount)
+{
+	FILE *SourceFile = NULL;
+	uint64_t curSize;
+
+	if (maxSize == 0) { ILibAppendStringToDiskEx2(FileName, data, dataLen, 0); return; } // 0 == unbounded, no cap policy to apply
+
+#ifdef WIN32
+	_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
+#else
+	SourceFile = fopen(FileName, "ab");
+#endif
+	if (SourceFile == NULL) { return; }
+
+	fseek(SourceFile, 0, SEEK_END);
+#ifdef WIN32
+	curSize = (uint64_t)_ftelli64(SourceFile);
+#else
+	curSize = (uint64_t)ftell(SourceFile);
+#endif
+
+	if (curSize < maxSize)
+	{
+		if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+		if (capMode == ILibAppendStringToDisk_Cap_Stop)
+		{
+			// Stop mode goes silent once capped; leave a one-time marker on the entry that crosses the limit.
+			fseek(SourceFile, 0, SEEK_END);
+#ifdef WIN32
+			if ((uint64_t)_ftelli64(SourceFile) >= maxSize)
+#else
+			if ((uint64_t)ftell(SourceFile) >= maxSize)
+#endif
+			{
+				char *capMsg = "\r\n[log size limit reached - logging suspended until the file is rotated or removed]";
+				if (fwrite(capMsg, sizeof(char), (int)strnlen_s(capMsg, 128), SourceFile)) {}
+			}
+		}
+		fclose(SourceFile);
+		return;
+	}
+
+	if (capMode == ILibAppendStringToDisk_Cap_Truncate)
+	{
+		fclose(SourceFile);
+#ifdef WIN32
+		_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"wb");
+#else
+		SourceFile = fopen(FileName, "wb");
+#endif
+		if (SourceFile != NULL)
+		{
+			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+			fclose(SourceFile);
+		}
+	}
+	else if (capMode == ILibAppendStringToDisk_Cap_Rotate)
+	{
+		int i;
+		char rotateFrom[4096];
+		char rotateTo[4096];
+		fclose(SourceFile);
+		if (maxCount < 1) { maxCount = 1; }
+
+		// Shift .1 .. .(maxCount-1) up one (oldest .maxCount is overwritten), then current file becomes .1
+		for (i = maxCount - 1; i >= 1; --i)
+		{
+			sprintf_s(rotateFrom, sizeof(rotateFrom), "%s.%d", FileName, i);
+			sprintf_s(rotateTo, sizeof(rotateTo), "%s.%d", FileName, i + 1);
+			ILibRenameFileOnDisk(rotateFrom, rotateTo);
+		}
+		sprintf_s(rotateTo, sizeof(rotateTo), "%s.1", FileName);
+		ILibRenameFileOnDisk(FileName, rotateTo);
+
+#ifdef WIN32
+		_wfopen_s(&SourceFile, ILibUTF8ToWide(FileName, -1), L"ab");
+#else
+		SourceFile = fopen(FileName, "ab");
+#endif
+		if (SourceFile != NULL)
+		{
+			if (fwrite(data, sizeof(char), dataLen, SourceFile)) {}
+			fclose(SourceFile);
+		}
+	}
+	else
+	{
+		fclose(SourceFile);
+	}
+}
 void ILibDeleteFileFromDisk(char *FileName)
 {
 #if defined(WIN32) || defined(_WIN32_WCE)
@@ -10959,6 +11062,8 @@ void ILib6to4(struct sockaddr* addr)
 // Log a critical error to file
 char ILibCriticalLogBuffer[sizeof(ILibScratchPad)];
 uint64_t ILibCriticalLog_MaxSize = ILIBCRITICALLOG_DEFAULT_MAXSIZE;
+int ILibCriticalLog_CapMode = ILibAppendStringToDisk_Cap_Stop;
+int ILibCriticalLog_RotateCount = 1;
 
 char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, int user2)
 {
@@ -10972,7 +11077,7 @@ char* ILibCriticalLog (const char* msg, const char* file, int line, int user1, i
 	{
 		len = sprintf_s(ILibCriticalLogBuffer, sizeof(ILibCriticalLogBuffer), "\r\n[%s] [%s] %s", timeStamp, g_ILibCrashID_HASH != NULL ? g_ILibCrashID_HASH : "", msg);
 	}
-	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx2(ILibCriticalLogFilename, ILibCriticalLogBuffer, len, ILibCriticalLog_MaxSize);
+	if (len > 0 && len < (int)sizeof(ILibCriticalLogBuffer) && ILibCriticalLogFilename != NULL) ILibAppendStringToDiskEx3(ILibCriticalLogFilename, ILibCriticalLogBuffer, len, ILibCriticalLog_MaxSize, ILibCriticalLog_CapMode, ILibCriticalLog_RotateCount);
 	if (file != NULL)
 	{
 		ILibRemoteLogging_printf(ILibChainGetLogger(gILibChain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "%s:%d (%d,%d) %s", file, line, user1, user2, msg);

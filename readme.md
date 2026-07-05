@@ -50,8 +50,10 @@ Here is a list of the possible keys that are currently supported by the agent. N
 | `forceUpdate` | If set, causes the agent to perform a self-update on next start. |
 | `ignoreProxyFile` | If set, causes the agent to ignore any proxy settings. |
 | `logUpdate` | If set, causes the agent to log self-update status. |
+| `logRotate` | If set to N (greater than 0), rotates the log file when it reaches `maxLogSize`, keeping N older copies (`meshagent.log.1` … `meshagent.log.N`). |
+| `logTruncate` | If set, clears the log file and continues when it reaches `maxLogSize` instead of stopping. Ignored if `logRotate` is set. |
 | `jsDebugPort` | Specifies a JS debugger port. |
-| `maxLogSize` | Maximum size of the error log file. |
+| `maxLogSize` | Maximum size in bytes of the log file (`meshagent.log`). Default 524288 (512 KiB). When reached, logging stops by default unless `logRotate` or `logTruncate` is set. |
 | `nocertstore` | Windows only. Forces the agent to use OpenSSL instead of WinCrypto for cert generation/storage. |
 | `readonly` | If set, forces the agent to open the database in read-only mode. |
 | `readmsh` | If set while db is in read-only mode, caches the local `.msh` file in the read-only db. |
