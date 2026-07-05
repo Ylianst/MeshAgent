@@ -9,8 +9,7 @@ jobs:
         uses: actions/checkout@v7.0.0
       - name: Install Packages
         run: |
-          dpkg --add-architecture i386 && 
-          apt clean all && apt update && 
+          apt update && 
           apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
           apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
           apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf && 
@@ -32,7 +31,7 @@ jobs:
           path: ${{ github.workspace }}/meshagent_*
 
   linux-build-arm:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7.0.0
