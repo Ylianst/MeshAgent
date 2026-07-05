@@ -9,11 +9,12 @@ jobs:
         uses: actions/checkout@v7.0.0
       - name: Install Packages
         run: |
-          apt update && 
-          apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
-          apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
-          apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf && 
-          apt-get install -y libxrandr-dev
+          sudo dpkg --add-architecture i386 &&
+          sudo apt clean all && sudo apt update && 
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
+          sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
+          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf && 
+          sudo apt-get install -y libxrandr-dev
       - name: Build 32 Bit Linux
         run: make -j4 linux ARCHID=5 && make clean
       - name: Build 64 Bit Linux
@@ -37,8 +38,8 @@ jobs:
         uses: actions/checkout@v7.0.0
       - name: Install Packages
         run: |
-          apt clean all && apt update &&
-          apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential
+          sudo apt clean all && sudo apt update &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential
       - name: Build ARM64 Linux
         run: make -j4 linux ARCHID=26 && make clean
       - name: Upload Artifacts
