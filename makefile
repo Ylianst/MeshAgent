@@ -570,6 +570,14 @@ CFLAGS += -D_LINKVM
 		endif
 	endif
 	BSDFLAGS = /usr/local/lib/libjpeg.a
+	ifneq ($(NOAUDIO),1)
+		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_audio.c
+		MACOSKVMSOURCES += meshcore/KVM/MacOS/mac_audio.c
+		CFLAGS += -D_KVM_AUDIO
+		LINUXFLAGS += lib-opus/linux/$(ARCHNAME)/libopus.a
+		MACOSFLAGS += ./lib-opus/macos/$(ARCHNAME)/libopus.a
+		INCDIRS += -Ilib-opus/includes
+	endif
 endif
 
 ifeq ($(LMS),0)
