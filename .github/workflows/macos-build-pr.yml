@@ -1,0 +1,60 @@
+name: macOS Build (PR smoke test for #359)
+
+# Smoke test for the fix of issue #359 (MeshAgent macOS 26 Tahoe KVM
+# relay: agent exit-254 loop and SIGSEGV caused by a stale AF_UNIX
+# socket at /tmp/meshagent-kvm-<uid>.sock being wrapped in an
+# ILibProcessPipe_Pipe before peer-credential validation).
+#
+# This workflow is intentionally narrow: it ONLY verifies that the
+# changes in this branch still build cleanly on Apple silicon and
+# Intel macOS runners. It does NOT attempt to start the agent or to
+# reproduce the runtime crash; the build itself is the evidence
+# that the new kvm_relay_socket_validate_peer() helper, the modified
+# kvm_relay_setup() retry loop, and the B-side ILibDuktape_SafePcallMethod
+# changes compile and link.
+#
+# A maintainer with a real Mac will still need to do a Tahoe
+# session-replay test before merge.
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'meshcore/KVM/MacOS/mac_kvm.c'
+      - 'microscript/ILibDuktape_Helpers.c'
+      - 'microscript/ILibDuktape_Helpers.h'
+      - 'microscript/ILibDuktape_HttpStream.c'
+      - 'microscript/ILibDuktape_ReadableStream.c'
+      - 'makefile'
+      - '.github/workflows/macos-build-pr.yml'
+  push:
+    branches: [fix/359-macos26-kvm-relay-stale-socket]
+
+jobs:
+  macos-build-arm64:
+    name: macOS arm64 (ARCHID=29)
+    runs-on: macos-14
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Build meshagent (arm64, KVM enabled)
+        run: make -j4 macos ARCHID=29
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-macos-arm64
+          path: ${{ github.workspace }}/meshagent_*
+
+  macos-build-x86_64:
+    name: macOS x86_64 (ARCHID=16)
+    runs-on: macos-13
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Build meshagent (x86_64, KVM enabled)
+        run: make -j4 macos ARCHID=16
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-macos-x86_64
+          path: ${{ github.workspace }}/meshagent_*
