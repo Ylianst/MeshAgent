@@ -28,7 +28,6 @@ limitations under the License.
 #include <winhttp.h>
 #include <shlobj.h>
 #include "resource.h"
-#include "meshcore/signcheck.h"
 #include "meshcore/meshdefines.h"
 #include "meshcore/meshinfo.h"
 #include "microstack/ILibParsers.h"
@@ -921,7 +920,6 @@ int wmain(int argc, char* wargv[])
 					printf("  restart           Restart the service.\r\n");
 					printf("  stop              Stop the service.\r\n");
 					printf("  state             Display the running state of the service.\r\n");
-					printf("  -signcheck        Perform self - check.\r\n");
 					printf("  -install          Install the service from this location.\r\n");
 					printf("  -uninstall        Remove the service from this location.\r\n");
 					printf("  -nodeid           Return the current agent identifier.\r\n");
