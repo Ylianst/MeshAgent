@@ -181,6 +181,22 @@ void ILibDuktape_SetNativeUncaughtExceptionHandler(duk_context *ctx, ILibDuktape
 void ILibDuktape_Process_UncaughtException(duk_context *ctx);
 void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...);
 
+// Safe wrapper around duk_pcall_method for invocations where the target method
+// is fetched from a heap-stash pointer that may have become stale (stream was
+// closed, GC moved it, etc.). Verifies the callable is a function before the
+// pcall, and routes any resulting error to Process_UncaughtExceptionEx instead
+// of leaving an unhandled exception on the Duktape stack (which Duktape would
+// then promote to a fatal, triggering ILIBCRITICALEXITMSG(254, ...)).
+//
+// Stack on entry: [..., callable, this, arg1, ..., argN]  (Duktape pcall_method layout)
+// Stack on success:  same depth minus (nargs + 2); return value of callable on top.
+// Stack on missing callable:  same depth minus (nargs + 2); no return value.
+// Stack on pcall error:  same depth as success minus 1 (error is consumed by sink).
+//
+// Returns 0 on success, non-zero if the callable was missing/non-function or
+// the pcall itself threw. The caller does NOT need to pop anything extra.
+int ILibDuktape_SafePcallMethod(duk_context *ctx, int nargs, const char *where);
+
 duk_ret_t ILibDuktape_Error(duk_context *ctx, char *format, ...);
 typedef void(*ILibDuktape_IndependentFinalizerHandler)(duk_context *ctx, void *object);
 int ILibDuktape_Process_GetExitCode(duk_context *ctx);
