@@ -2223,6 +2223,37 @@ static int kvm_drm_set_only_sys_admin_cap()
 	return syscall(SYS_capset, &header, data);
 }
 
+// After the setuid below we lose CAP_DAC_OVERRIDE, so opening /dev/dri/* (root:video/root:render, 0660) needs real
+// group membership. libEGL opens those nodes itself, so add the groups now (root-only) or GPU capture comes out black.
+static void kvm_drm_add_dri_supplementary_groups(void)
+{
+	static const char *names[] = { "video", "render" };
+	long maxGroups = sysconf(_SC_NGROUPS_MAX);
+	gid_t *groups;
+	int count;
+	int changed = 0;
+	size_t ni;
+
+	if (maxGroups < 0 || maxGroups > 65536) { maxGroups = 65536; }
+	groups = (gid_t *)malloc(sizeof(gid_t) * (size_t)(maxGroups + (long)(sizeof(names) / sizeof(names[0]))));
+	if (groups == NULL) { return; }
+
+	count = getgroups((int)maxGroups, groups);
+	if (count < 0) { count = 0; }
+
+	for (ni = 0; ni < sizeof(names) / sizeof(names[0]); ++ni)
+	{
+		struct group *gr = getgrnam(names[ni]);
+		int present = 0, k;
+		if (gr == NULL) { continue; }
+		for (k = 0; k < count; ++k) { if (groups[k] == gr->gr_gid) { present = 1; break; } }
+		if (!present) { groups[count++] = gr->gr_gid; changed = 1; }
+	}
+
+	if (changed) { ignore_result(setgroups((size_t)count, groups)); }
+	free(groups);
+}
+
 // Dropping caps with our DRM screen capture method requires more work than a simple setuid, because we need to
 // retain CAP_SYS_ADMIN in order to scrape the screen.
 static int kvm_drm_drop_to_session_uid_with_caps(int sessionUid, char *err, size_t errLen)
@@ -2271,6 +2302,7 @@ static int kvm_drm_drop_to_session_uid_with_caps(int sessionUid, char *err, size
 		snprintf(err, errLen, "initgroups(%s,%d) failed (errno=%d)", pw->pw_name, (int)pw->pw_gid, errno);
 		return -1;
 	}
+	kvm_drm_add_dri_supplementary_groups(); // initgroups() replaced our set with the user's; re-add video/render for DRI access
 	if (setgid(pw->pw_gid) != 0)
 	{
 		snprintf(err, errLen, "setgid(%d) failed (errno=%d)", (int)pw->pw_gid, errno);

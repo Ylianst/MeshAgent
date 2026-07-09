@@ -621,7 +621,8 @@ int kvm_events_evdev_init()
 	}
 	if (!kvm_events_evdev_load_exports())
 	{
-		printf("MeshAgent: Failed to load libevdev symbols\n");
+		// stderr, not stdout: the systemd service runs with StandardOutput=null, so stdout logging is lost.
+		fprintf(stderr, "MeshAgent: Failed to load libevdev symbols\n"); fflush(stderr);
 		return 0;
 	}
 
@@ -729,12 +730,13 @@ int kvm_events_evdev_init()
 		if (createRc != 0)
 		{
 			int rwAccess = access("/dev/uinput", R_OK | W_OK);
-			printf("MeshAgent: libevdev_uinput_create_from_device failed (managed=%d:%s, fallback=%d:%s, /dev/uinput access=%d errno=%d:%s, open_errno=%d:%s, uid=%d euid=%d)\n",
+			fprintf(stderr, "MeshAgent: libevdev_uinput_create_from_device failed (managed=%d:%s, fallback=%d:%s, /dev/uinput access=%d errno=%d:%s, open_errno=%d:%s, uid=%d euid=%d)\n",
 				createManagedRc, kvm_events_evdev_error_string(createManagedRc),
 				createRc, kvm_events_evdev_error_string(createRc),
 				rwAccess, errno, strerror(errno),
 				uinputErrno, strerror(uinputErrno),
 				(int)getuid(), (int)geteuid());
+			fflush(stderr);
 			goto error;
 		}
 	}
@@ -745,7 +747,7 @@ int kvm_events_evdev_init()
 	return 1;
 
 error:
-	printf("MeshAgent: Failed to create evdev virtual input device\n");
+	fprintf(stderr, "MeshAgent: Failed to create evdev virtual input device\n"); fflush(stderr);
 	kvm_events_evdev_shutdown();
 	return 0;
 }

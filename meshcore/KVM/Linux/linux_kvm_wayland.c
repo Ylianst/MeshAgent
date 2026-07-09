@@ -153,12 +153,13 @@ kvm_screenreader_mode_t kvm_screenreader_mode()
 
 kvm_screenreader_mode_t kvm_screenreader_mode_for_uid(int uid)
 {
+	// stderr, not stdout: the service nulls stdout, and the picked backend is the first clue when a screen comes up black.
 	if (kvm_is_wayland_session_for_uid(uid))
 	{
-		printf("Using DRM/libevdev mode\n");
+		fprintf(stderr, "Using DRM/libevdev mode\n"); fflush(stderr);
 		return KVM_SCREENREADER_MODE_DRM;
 	}
-	
-	printf("Using X11 mode\n");
+
+	fprintf(stderr, "Using X11 mode\n"); fflush(stderr);
 	return KVM_SCREENREADER_MODE_X11;
 }

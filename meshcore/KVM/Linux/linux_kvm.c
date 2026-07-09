@@ -295,6 +295,9 @@ void kvm_send_error(char *msg)
 	int msgLen = strnlen_s(msg, 255);
 	char buffer[512];
 
+	// Otherwise this only reaches the MeshCentral viewer, so the error never shows in the agent's own log.
+	fprintf(stderr, "KVM error: %s\n", msg); fflush(stderr);
+
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
