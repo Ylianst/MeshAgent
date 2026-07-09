@@ -1,0 +1,49 @@
+name: Linux Build
+run-name: Build Linux versions of MeshAgent
+on: [push]
+jobs:
+  linux-build-x86:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Install Packages
+        run: |
+          sudo dpkg --add-architecture i386 &&
+          sudo apt clean all && sudo apt update && 
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
+          sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
+          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf && 
+          sudo apt-get install -y libxrandr-dev
+      - name: Build 32 Bit Linux
+        run: make -j4 linux ARCHID=5 && make clean
+      - name: Build 64 Bit Linux
+        run: make -j4 linux ARCHID=6 && make clean
+      - name: Build 32 Bit NOKVM Linux
+        run: make -j4 linux ARCHID=19 && make clean
+      - name: Build 64 Bit NOKVM Linux
+        run: make -j4 linux ARCHID=20 && make clean
+      - name: Build 64 Bit Alpine Linux
+        run: make -j4 linux ARCHID=33 && make clean
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-binaries-x86
+          path: ${{ github.workspace }}/meshagent_*
+
+  linux-build-arm:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7.0.0
+      - name: Install Packages
+        run: |
+          sudo apt clean all && sudo apt update &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential
+      - name: Build ARM64 Linux
+        run: make -j4 linux ARCHID=26 && make clean
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: meshagent-binaries-arm
+          path: ${{ github.workspace }}/meshagent_*

@@ -1,0 +1,27 @@
+name: Windows Build
+
+run-name: Build Windows versions of MeshAgent
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows-build:
+    runs-on: ${{ matrix.platform == 'ARM64' && 'windows-11-arm' || 'windows-2022' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, x86, ARM64]
+    steps:
+    - uses: actions/checkout@v7
+    - name: Setup Visual Studio
+      uses: microsoft/setup-msbuild@v3
+    - name: Build ${{ matrix.platform }}
+      run: msbuild MeshAgent-2022.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }}
+    - name: Upload ${{ matrix.platform }} artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: meshagent-windows-${{ matrix.platform }}
+        path: Release/*.exe
+
