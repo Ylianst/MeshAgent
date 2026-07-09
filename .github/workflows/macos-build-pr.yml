@@ -47,7 +47,11 @@ jobs:
 
   macos-build-x86_64:
     name: macOS x86_64 (ARCHID=16)
-    runs-on: macos-13
+    # macos-13 is the last Intel-based macOS image. If the standard
+    # macos-13 queue is saturated (which has been observed in practice
+    # for first-time runs on a freshly created fork), fall back to the
+    # larger image which has more capacity.
+    runs-on: macos-13-large
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7.0.0
