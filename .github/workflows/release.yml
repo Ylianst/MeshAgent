@@ -16,9 +16,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to Release (e.g., v1.2.3)"
-        required: true
+        description: "Version to Release (x.y.z). Leave empty for auto patch bump."
+        required: false
         type: string
+        default: ''
 
 env:
   REGISTRY: "ghcr.io"
@@ -31,6 +32,12 @@ env:
 # =============================================================================
 
 jobs:
+  version:
+    name: Resolve Version
+    uses: ./.github/workflows/version.yml
+    with:
+      version: ${{ inputs.version }}
+
   build_client:
     name: "Build C Client (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
@@ -201,11 +208,9 @@ jobs:
 
   release:
     name: "Create Release"
-    needs: [build_client, create_universal_macos]
+    needs: [version, build_client, create_universal_macos]
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' &&
-      inputs.version != ''
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -254,8 +259,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version }}
-          name: "🦩 ${{ inputs.version }}"
+          tag_name: ${{ needs.version.outputs.version }}
+          name: "🦩 ${{ needs.version.outputs.version }}"
           draft: false
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
