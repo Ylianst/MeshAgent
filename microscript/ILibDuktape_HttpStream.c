@@ -2248,7 +2248,7 @@ void ILibDuktape_HttpStream_ServerResponse_WriteImplicitHeaders(void *chain, voi
 			// We can just directly write the data
 			duk_config_buffer(state->ctx, -3, state->buffer, state->bufferLen);
 			duk_push_buffer_object(state->ctx, -3, 0, state->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][write][this][buffer]
-			retVal = duk_pcall_method(state->ctx, 1);
+			retVal = ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.writeImplicitHeaders(): stream.write() ");
 			duk_pop_2(state->ctx);																	// ...
 		}
 		else
@@ -2306,14 +2306,14 @@ void ILibDuktape_HttpStream_ServerResponse_WriteSink_Chain(void *chain, void *us
 		int tmpLen = sprintf_s(tmp, sizeof(tmp), "%X\r\n", (int)state->bufferLen);
 		duk_config_buffer(state->ctx, -4, tmp, tmpLen);
 		duk_push_buffer_object(state->ctx, -4, 0, tmpLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][stream][write][this][buffer]
-		if (duk_pcall_method(state->ctx, 1) != 0) { duk_pop_2(state->ctx); return; }
+		if (ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.WriteSink_Chain: stream.write(chunkHeader) ") != 0) { duk_pop_2(state->ctx); return; }
 		duk_pop(state->ctx);															// [ext][stream]
 		duk_get_prop_string(state->ctx, -1, "write");									// [ext][stream][write]
 		duk_dup(state->ctx, -2);														// [ext][stream][write][this]
 	}
 	duk_config_buffer(state->ctx, -4, state->buffer, state->bufferLen);
 	duk_push_buffer_object(state->ctx, -4, 0, state->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);	// [ext][stream][write][this][buffer]
-	if (duk_pcall_method(state->ctx, 1) != 0) { duk_pop_2(state->ctx); return; }
+	if (ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.WriteSink_Chain: stream.write(body) ") != 0) { duk_pop_2(state->ctx); return; }
 	noDrain = duk_get_int(state->ctx, -1);
 	duk_pop(state->ctx);																// [ext][stream]
 	if (state->chunk)
@@ -2324,7 +2324,7 @@ void ILibDuktape_HttpStream_ServerResponse_WriteSink_Chain(void *chain, void *us
 
 		duk_config_buffer(state->ctx, -4, tmp, 2);
 		duk_push_buffer_object(state->ctx, -4, 0, state->bufferLen, DUK_BUFOBJ_NODEJS_BUFFER);// [ext][stream][write][this][buffer]
-		if (duk_pcall_method(state->ctx, 1) != 0) { duk_pop_2(state->ctx); return; }
+		if (ILibDuktape_SafePcallMethod(state->ctx, 1, "http.serverResponse.WriteSink_Chain: stream.write(chunkTrailer) ") != 0) { duk_pop_2(state->ctx); return; }
 		noDrain = duk_get_int(state->ctx, -1);
 		duk_pop(state->ctx);															// [ext][stream]
 	}

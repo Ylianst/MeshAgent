@@ -762,6 +762,54 @@ void ILibDuktape_Process_UncaughtExceptionEx(duk_context *ctx, char *format, ...
 		duk_pop(emitter->ctx);															// ...
 	}
 }
+// Safe wrapper around duk_pcall_method for callbacks that operate on a
+// heap-stashed object (e.g. state->writeStream). Without this guard, when
+// the object has been closed, GC'd, or replaced since the heapptr was
+// captured, duk_get_prop_string(..., "write") returns undefined, the
+// following duk_pcall_method raises "cannot read property 'write' of
+// undefined", and because the call originates from a native callback the
+// error cannot reach a JS try/catch -> Duktape promotes it to a fatal ->
+// the engine calls Engine_fatal and the process exits with code 254.
+//
+// Usage: replace
+//     duk_get_prop_string(ctx, -1, "write");     // [..., this, write]
+//     if (duk_pcall_method(ctx, N) != 0) { ... }
+// with
+//     duk_get_prop_string(ctx, -1, "write");     // [..., this, write]
+//     if (ILibDuktape_SafePcallMethod(ctx, N, "module.fn() ") != 0) { ... }
+//
+// Stack contract:
+//   - On entry: the top of stack holds the last argument pushed, and below
+//     it, in order, the remaining nargs-1 arguments, then `this`, then the
+//     callable (Duktape pcall_method layout).
+//   - On success: the callable, `this`, and all args are popped; the return
+//     value (if any) is on top of the stack.
+//   - On missing/non-function callable: the callable, `this`, and the args
+//     are popped; no return value is left on the stack.
+//   - On pcall error: the error object is on top; we pop it after routing
+//     to Process_UncaughtExceptionEx.
+int ILibDuktape_SafePcallMethod(duk_context *ctx, int nargs, const char *where)
+{
+	if (ctx == NULL || !duk_ctx_is_alive(ctx) || duk_ctx_shutting_down(ctx)) { return(-1); }
+	// In Duktape's pcall_method layout [..., callable, this, arg1, ..., argN],
+	// `callable` is at index -(nargs + 2) and `this` at -(nargs + 1).
+	if (!duk_is_function(ctx, -(nargs + 2)))
+	{
+		// The "callable" is not a function. This is the bug-shape that used
+		// to crash the engine. Pop the (callable, this, arg1..argN) and
+		// surface a soft error via the normal uncaughtException sink.
+		duk_pop_n(ctx, nargs + 2);
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "SafePcallMethod: target not callable (%s)", where ? where : "?");
+		return(-1);
+	}
+	int rc = duk_pcall_method(ctx, nargs);
+	if (rc != 0)
+	{
+		ILibDuktape_Process_UncaughtExceptionEx(ctx, "%s", where ? where : "SafePcallMethod");
+		duk_pop(ctx);
+	}
+	return(rc);
+}
 // Error MUST be at top of stack when calling this method
 void ILibDuktape_Process_UncaughtException(duk_context *ctx)
 {

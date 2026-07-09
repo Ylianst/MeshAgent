@@ -192,7 +192,7 @@ SOURCES += $(ADDITIONALSOURCES)
 SOURCES += meshcore/agentcore.c meshconsole/main.c meshcore/meshinfo.c
 
 # Mesh Agent settings
-MESH_VER = 194
+MESH_VER = 195
 EXENAME = meshagent
 
 # Cross-compiler paths
