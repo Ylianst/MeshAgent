@@ -5479,6 +5479,8 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		{
 			agentHost->openFrameMode = true; parseCommands = 0;
 			enable_file_logging_simple();
+			// Decorated startup marker parsed by openframe-client
+			openframe_printf("MeshAgent starting (build %s, self-update version %d)\n", SOURCE_COMMIT_DATE, MESH_AGENT_VERSION);
 		}
 		if (strcmp(param[ri], "--openframe-secret") == 0 && ((ri + 1) < paramLen))
 		{

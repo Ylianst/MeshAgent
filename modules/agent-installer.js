@@ -1146,6 +1146,7 @@ function createLaunchDaemon(serviceName, companyName, installPath, serviceId, in
             name: serviceName,
             target: 'meshagent',
             startType: 'AUTO_START',
+            failureRestart: 0, // auto-start on boot, but do not restart on crash/exit
             parameters: ['--serviceId', serviceId],
             companyName: companyName
         };
@@ -1910,6 +1911,7 @@ function installService(params)
             target: target==null?(process.platform == 'win32' ? 'MeshAgent' : 'meshagent'):target,
             servicePath: process.execPath,
             startType: 'AUTO_START',
+            failureRestart: 0, // auto-start on boot, but do not restart on crash/exit
             parameters: params,
             _installer: true
         };

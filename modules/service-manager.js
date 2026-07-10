@@ -2977,6 +2977,7 @@ function serviceManager()
             var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : ('<key>StandardOutPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var stderrpath = (options.stderr ? ('<key>StandardErrorPath</key>\n<string>' + options.stderr + '</string>') : ('<key>StandardErrorPath</key>\n<string>/tmp/' + serviceId + '-daemon.log</string>'));
             var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
+            var keepAlive = ((options.failureRestart == null || options.failureRestart > 0) ? '<true/>' : '<false/>'); // launchd restart-on-exit
 
             // Apply OpenFrame parameters formatting for macOS
             console.log('[DEBUG service-manager] options.parameters before processing: ' + JSON.stringify(options.parameters));
@@ -3002,7 +3003,7 @@ function serviceManager()
             plist += '      <key>Disabled</key>\n';
             plist += '      <false/>\n';
             plist += '      <key>KeepAlive</key>\n';
-            plist += '      <true/>\n';
+            plist += ('      ' + keepAlive + '\n');
             plist += '      <key>Label</key>\n';
             plist += ('     <string>' + serviceId + '</string>\n');
             plist += (params + '\n');
