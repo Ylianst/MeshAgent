@@ -25,7 +25,6 @@ limitations under the License.
 #endif
 
 #include "agentcore.h"
-#include "signcheck.h"
 #include "meshdefines.h"
 #include "meshinfo.h"
 #include "microscript/ILibDuktape_Commit.h"
