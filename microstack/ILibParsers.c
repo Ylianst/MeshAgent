@@ -75,9 +75,17 @@ limitations under the License.
 
 #include <time.h>
 
-#if defined(__APPLE__) || defined (_FREEBSD)
+#if defined(__APPLE__) || defined(_FREEBSD) || defined(_OPENBSD)
 #include <ifaddrs.h>
 #include <sys/sysctl.h>
+	// OpenBSD build also defines _FREEBSD
+	#if defined(_FREEBSD) && !defined(_OPENBSD)
+		// FreeBSD declares pthread_timedjoin_np() in pthread_np.h
+		#include <pthread_np.h>
+	#else
+		// macOS and OpenBSD have no pthread_timedjoin_np()
+		#define ILIB_NO_TIMEDJOIN
+	#endif
 #else
 	#if defined(_POSIX) 
 		// On Linux Platforms, we need to check glibc version of the compiler
@@ -11015,7 +11023,7 @@ void ILIBLOGMESSAGEX2_SetMask(uint32_t m)
 	_g_logMessageX = m;
 }
 
-#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
+#if defined(ILIB_NO_TIMEDJOIN)
 typedef struct ILibThread_AppleThread
 {
 	pthread_t tid;
@@ -11052,7 +11060,7 @@ void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 	void* (*fptr) (void* a);
 	pthread_t newThread;
 	fptr = (void*(*)(void*))method;
-#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
+#if defined(ILIB_NO_TIMEDJOIN)
 	ILibThread_AppleThread *ret = (ILibThread_AppleThread*)ILibMemory_SmartAllocate(sizeof(ILibThread_AppleThread));
 	ret->method = method; ret->arg = arg;
 	if (detached != 0) { sem_init(&(ret->s), 0, 0); ret->joinable = 1; }
@@ -11079,7 +11087,7 @@ void* ILibSpawnNormalThreadEx(voidfp1 method, void* arg, int detached)
 #ifndef WIN32
 int ILibThread_TimedJoinEx(void *thr, struct timespec* timeout)
 {
-#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
+#if defined(ILIB_NO_TIMEDJOIN)
 	int ret = 1;
 	if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable != 0)
 	{
@@ -11129,7 +11137,7 @@ void ILibThread_Join(void *thr)
 	WaitForSingleObject((HANDLE)thr, INFINITE);
 	CloseHandle((HANDLE)thr);
 #else
-	#if defined(__APPLE__) || defined(ILIB_NO_TIMEDJOIN)
+	#if defined(ILIB_NO_TIMEDJOIN)
 		if (ILibMemory_CanaryOK(thr) && ((ILibThread_AppleThread*)thr)->joinable!=0)
 		{
 			pthread_join(((ILibThread_AppleThread*)thr)->tid, NULL);
