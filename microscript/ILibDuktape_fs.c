@@ -2315,19 +2315,130 @@ duk_ret_t ILibDuktape_fs_rmdirSync(duk_context *ctx)
 // fs.mkdirSync() to create a folder
 duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 {
-	//int nargs = duk_get_top(ctx);
-
+	int recursive = 0;
 #ifdef WIN32
-	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
-	ILibDuktape_String_WideToUTF8(ctx, path);
-	if (_wmkdir((const wchar_t*)path) != 0)
-#else
-	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
-	if (mkdir(path, 0777) != 0)
-#endif
+	wchar_t *path = (wchar_t*)ILibDuktape_String_AsWide(ctx, 0, NULL);
+	if (path == NULL) { return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Invalid path")); }
+
+	// only check options object
+	if (duk_is_object(ctx, 1)) { recursive = Duktape_GetBooleanProperty(ctx, 1, "recursive", 0); }
+
+	if (recursive)
 	{
-		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, path)));
+		int firstLen = -1;
+		wchar_t *p = path;
+		// Skip past "C:", "\\server\share" or "//server/share" to get the path part
+		if (((*p >= L'a' && *p <= L'z') || (*p >= L'A' && *p <= L'Z')) && p[1] == L':') { p += 2; }
+		else if ((p[0] == L'\\' || p[0] == L'/') && (p[1] == L'\\' || p[1] == L'/'))
+		{
+			p += 2;
+			for (int skip = 0; *p && skip < 2; ++p)
+			{
+				if (*p == L'\\' || *p == L'/') { ++skip; }
+			}
+		}
+		
+		while (*p == L'/' || *p == L'\\') { ++p; }
+
+		// traverse the path per segment
+		for (wchar_t *seg = p; *seg != 0; )
+		{
+			wchar_t *sep = seg;
+			while (*sep != 0 && *sep != L'/' && *sep != L'\\') { ++sep; }
+			if (sep == seg) { ++seg; continue; }
+			wchar_t saved = *sep;
+			*sep = 0;
+			if (_wmkdir(path) != 0)
+			{
+				int e = errno;
+				// continue if direntry exists, exit any other error
+				if (e != EEXIST) { *sep = saved; return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, (char*)path))); }
+			}
+			else if (firstLen < 0) {
+				firstLen = (int)(sep - path); }	// save first pathsegment
+			*sep = saved;
+			if (saved == 0) break;	// end of string
+			seg = sep + 1;
+		}
+		if (firstLen >= 0)
+		{
+			// Return first directory path created by temp inserting 0 string termination (duk_push_lstring needs a conversion)
+			wchar_t tmp = path[firstLen];
+			path[firstLen] = 0;
+			duk_push_string(ctx, ILibDuktape_String_WideToUTF8(ctx, (char*)path));
+			path[firstLen] = tmp;
+			return 1;
+		}
 	}
+	else if (_wmkdir(path) != 0)
+	{
+		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, (char*)path)));
+	}
+#else
+	int mode = 0777;
+	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
+	if (path == NULL) { return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Path too long")); }
+
+	if (duk_is_object(ctx, 1))
+	{
+		recursive = Duktape_GetBooleanProperty(ctx, 1, "recursive", 0);
+		mode = Duktape_GetIntPropertyValue(ctx, 1, "mode", 0777);
+	}
+	else if (duk_is_number(ctx, 1))
+	{
+		mode = duk_require_int(ctx, 1);
+	}
+
+	if (recursive)
+	{
+		int firstLen = -1;
+		char *p = path;
+
+		if (*p == '/') { ++p; }
+
+		// traverse the path per segment
+		for (char *seg = p; *seg != 0; )
+		{
+			char *sep = seg;
+			while (*sep != 0 && *sep != '/') { ++sep; }
+			if (sep == seg) { ++seg; continue; }
+			char saved = *sep;
+			
+			// Check if last segment
+			int isLast = 1;
+			if (saved != 0)
+			{
+				char *look = sep + 1;
+				while (*look == '/') { ++look; }
+				if (*look != 0) { isLast = 0; }
+			}
+
+			*sep = 0;
+			// only last segment gets the given mode, the rest get 0o777. This replicates node behaviour
+			if (mkdir(path, isLast ? mode : 0777) != 0)
+			{
+				int e = errno;
+				// continue if direntry exists, exit any other error
+				if (e != EEXIST) { *sep = saved; return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", path)); }
+			}
+			else if (firstLen < 0) { firstLen = (int)(sep - path); }	// save first created pathsegment for the return
+			*sep = saved;
+			if (saved == 0) { break; }	// end of pathstring
+			seg = sep + 1;
+		}
+
+		if (firstLen >= 0)
+		{
+			// Return the first directory path that was created
+			duk_push_lstring(ctx, path, (duk_size_t)firstLen);
+			return 1;
+		}
+	}
+	else if (mkdir(path, mode) != 0)
+	{
+		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", path));
+	}
+#endif
 	return 0;
 }
 
@@ -2733,9 +2844,13 @@ public:
 	/*!
 	\brief Synchronously creates the directory specified by path
 	\param path \<String\>
-	\param mode <Integer> Optional. <b>Default:</b> 0o777
+	\param mode \<Integer\> Optional. <b>Default:</b> 0o777
+	\param options \<Object\> Optional with the following values:\n
+	<b>recursive</b> \<boolean\> Indicates whether all intermediate directories should be created. <b>Default:</b> false\n
+	<b>mode</b> \<Integer\> Directory attribute bitmask, applied to the final directory only (Node behaviour). Intermediate directories are created with 0777. Ignored on Windows. <b>Default:</b> 0777\n
+	\return \<Undefined\> on success, throws on error. If recursive, returns first path created.
 	*/
-	void mkdirSync(path[, mode]);
+	void mkdirSync(path[, mode | { recursive, mode }]);
 	/*!
 	\brief File System Statistics
 	*/
