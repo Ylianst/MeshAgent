@@ -3552,7 +3552,6 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 	if (agent->controlChannelRequest != NULL)
 	{
 		ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), agent->controlChannelRequest);
-		ILibMemory_Free(agent->controlChannelRequest);
 		agent->controlChannelRequest = NULL;
 	}
 
@@ -4026,6 +4025,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			printf("agentcore: DNS Lock[%s]: Unauthorized to connect to: %s\n", agent->DNS_LOCK, host);
 			free(host); free(path);
+			ILibDestructParserResults(rs);
 			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
 			return;
 		}
@@ -4103,6 +4103,7 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 		{
 			printf("agentcore: ServerID Lock: ServerID MISMATCH for: %s\n", host);
 			free(host); free(path);
+			ILibDestructParserResults(rs);
 			ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), agent, 5, MeshServer_ConnectEx_Lockout_Retry, NULL);
 			return;
 		}
@@ -4265,20 +4266,11 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 	duk_pop(agent->meshCoreCtx);
 }
 
-void MeshServer_Connect(MeshAgentHostContainer *agent)
-{
-	unsigned int timeout;
-
-	// If this is called while we are in any connection state, just leave now.
-	if (agent->serverConnectionState != 0) return;
-
-	if (ILibSimpleDataStore_Get(agent->masterDb, "selfTest", NULL, 0) != 0)
-	{
-		MeshServer_Agent_SelfTest(agent);
-		return;
-	}
-
 #ifdef WIN32
+static void MeshServer_CheckAuthenticode(MeshAgentHostContainer *agent)
+{
+	if (agent->authenticodeChecked != 0) return;
+
 	duk_idx_t top = duk_get_top(agent->meshCoreCtx);
 	if (duk_peval_string(agent->meshCoreCtx, "require('win-authenticode-opus')(process.execPath);") == 0)							// [obj]
 	{
@@ -4302,6 +4294,26 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 		}
 	}
 	duk_set_top(agent->meshCoreCtx, top);																							// ...
+	duk_gc(agent->meshCoreCtx, 0);
+	agent->authenticodeChecked = 1;
+}
+#endif
+
+void MeshServer_Connect(MeshAgentHostContainer *agent)
+{
+	unsigned int timeout;
+
+	// If this is called while we are in any connection state, just leave now.
+	if (agent->serverConnectionState != 0) return;
+
+	if (ILibSimpleDataStore_Get(agent->masterDb, "selfTest", NULL, 0) != 0)
+	{
+		MeshServer_Agent_SelfTest(agent);
+		return;
+	}
+
+#ifdef WIN32
+	MeshServer_CheckAuthenticode(agent);
 #endif
 
 	util_random(sizeof(int), (char*)&timeout);
@@ -4528,6 +4540,7 @@ MeshAgentHostContainer* MeshAgent_Create(MeshCommand_AuthInfo_CapabilitiesMask c
 			retVal->shCore = NULL;
 		}
 	}
+	retVal->authenticodeChecked = 0;
 #endif
 
 	retVal->agentID = (AgentIdentifiers)MESH_AGENTID;
