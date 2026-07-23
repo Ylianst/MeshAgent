@@ -19,6 +19,7 @@ limitations under the License.
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
 #include <unistd.h>
@@ -891,11 +892,32 @@ void kvm_events_evdev_key_action(unsigned char vk, int up)
 	ignore_result(kvm_events_evdev_sync());
 }
 
+// GNOME/IBus drops Shift when synthesized keys fire back-to-back; holding each key ~20ms (Shift still down) fixes it, same as ydotool.
+static long kvm_events_evdev_key_delay_us()
+{
+	static long cached = -1;
+	if (cached < 0)
+	{
+		long ms = 20;
+		const char *env = getenv("MESH_KVM_KEY_DELAY_MS");
+		if (env != NULL && *env != '\0')
+		{
+			char *end = NULL;
+			long v = strtol(env, &end, 10);
+			if (end != env && v >= 0) { ms = v; }
+		}
+		if (ms > 200) { ms = 200; }
+		cached = ms * 1000;
+	}
+	return cached;
+}
+
 void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 {
 	unsigned int keycode = KEY_RESERVED;
 	int needsShift = 0;
 	int isAlpha = (unicode >= 'a' && unicode <= 'z') || (unicode >= 'A' && unicode <= 'Z');
+	long delayUs = 0;
 
 	if (!kvm_events_evdev_is_active())
 	{
@@ -917,8 +939,7 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 		needsShift = !needsShift;
 	}
 
-	// Each transition is its own SYN frame so the compositor observes Shift as held while the key is
-	// processed; batching all four into one frame left the modifier ignored (shifted symbols and case lost).
+	delayUs = kvm_events_evdev_key_delay_us();
 	if (needsShift)
 	{
 		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 1) != 0) { return; }
@@ -926,6 +947,7 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 	}
 	if (kvm_events_evdev_write(EV_KEY, keycode, 1) != 0) { return; }
 	ignore_result(kvm_events_evdev_sync());
+	if (delayUs > 0) { usleep(delayUs); }
 	if (kvm_events_evdev_write(EV_KEY, keycode, 0) != 0) { return; }
 	ignore_result(kvm_events_evdev_sync());
 	if (needsShift)
@@ -933,6 +955,7 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 0) != 0) { return; }
 		ignore_result(kvm_events_evdev_sync());
 	}
+	if (delayUs > 0) { usleep(delayUs); }
 }
 
 #else
