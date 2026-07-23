@@ -142,7 +142,7 @@ function dispatchRead(sid)
         id = sid;
     }
 
-    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && (require('clipboard').xclip || lin_wayland_active())))
     {
         return (module.exports.read());
     }
@@ -202,7 +202,7 @@ function dispatchWrite(data, sid)
         id = sid;
     }
 
-    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && (require('clipboard').xclip || lin_wayland_active())))
     {
         return(module.exports(data));
     }
@@ -240,6 +240,81 @@ function dispatchWrite(data, sid)
         }
 
     }
+}
+
+function lin_wayland_active()
+{
+    var mi = require('monitor-info');
+    return (mi._kvmcheck_wayland ? mi._kvmcheck_wayland() : false);
+}
+
+function lin_whereis(name)
+{
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("whereis " + name + " | awk '{ print $2; }'\nexit\n");
+    child.waitExit();
+    return (child.stdout.str.trim() != '' ? child.stdout.str.trim() : null);
+}
+
+function lin_wayland_env(uid)
+{
+    var fs = require('fs');
+    var runtimeDir = '/run/user/' + uid;
+    var disp = process.env['WAYLAND_DISPLAY'];
+    if (!(disp && fs.existsSync(runtimeDir + '/' + disp)))
+    {
+        disp = fs.existsSync(runtimeDir + '/wayland-1') ? 'wayland-1' : 'wayland-0';
+    }
+    return ({ WAYLAND_DISPLAY: disp, XDG_RUNTIME_DIR: runtimeDir });
+}
+
+function lin_wl_readtext(ret)
+{
+    var wl = require('clipboard').wlclipboard;
+    if (!wl) { ret._rej('wl-clipboard (wl-paste) required for clipboard on Wayland'); return (ret); }
+
+    var id;
+    try { id = require('user-sessions').consoleUid(); }
+    catch (e) { ret._rej(e); return (ret); }
+
+    ret.child = require('child_process').execFile(wl.paste, ['wl-paste', '--no-newline'], { uid: id, env: lin_wayland_env(id) });
+    ret.child.promise = ret;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    ret.child.on('exit', function ()
+    {
+        // wl-paste reports an empty clipboard on stderr with a non-zero exit; surface that as empty, not an error.
+        if (this.stdout.str.length == 0 && this.stderr.str.trim() != '' && this.stderr.str.indexOf('Nothing is copied') < 0)
+        {
+            this.promise._rej(this.stderr.str.trim());
+        }
+        else
+        {
+            this.promise._res(this.stdout.str);
+        }
+    });
+    return (ret);
+}
+
+function lin_wl_copy(txt)
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    var wl = require('clipboard').wlclipboard;
+    if (!wl) { ret._rej('wl-clipboard (wl-copy) required for clipboard on Wayland'); return (ret); }
+
+    var id;
+    try { id = require('user-sessions').consoleUid(); }
+    catch (e) { ret._rej(e); return (ret); }
+
+    // wl-copy forks a background process to keep owning the selection until another client replaces it,
+    // so the foreground child exits as soon as the text is read; that lingering owner is expected.
+    ret.child = require('child_process').execFile(wl.copy, ['wl-copy'], { uid: id, env: lin_wayland_env(id) });
+    ret.child.promise = ret;
+    ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
+    ret.child.on('exit', function () { this.promise._res(); });
+    ret.child.stdin.write(txt, function () { this.end(); });
+    return (ret);
 }
 
 function lin_xclip_readtext(ret)
@@ -293,6 +368,11 @@ function lin_readtext()
     {
         ret._rej(exc);
         return (ret);
+    }
+
+    if (lin_wayland_active())
+    {
+        return (lin_wl_readtext(ret));
     }
 
     var X11 = require('monitor-info')._X11;
@@ -454,6 +534,11 @@ function lin_xclip_copy(txt)
 
 function lin_copytext(txt)
 {
+    if (lin_wayland_active())
+    {
+        return (lin_wl_copy(txt));
+    }
+
     var X11 = require('monitor-info')._X11;
     if (!X11)
     {
@@ -654,6 +739,17 @@ switch(process.platform)
                     }
 
                     return (child.stdout.str.trim() != "" ? child.stdout.str.trim() : null);
+                }
+            });
+        Object.defineProperty(module.exports, "wlclipboard",
+            {
+                get: function ()
+                {
+                    if (this._wlclipboard !== undefined) { return (this._wlclipboard); }
+                    var copy = lin_whereis('wl-copy');
+                    var paste = lin_whereis('wl-paste');
+                    Object.defineProperty(this, "_wlclipboard", { value: (copy && paste) ? { copy: copy, paste: paste } : null });
+                    return (this._wlclipboard);
                 }
             });
         break;

@@ -40,11 +40,25 @@ limitations under the License.
 
 typedef ILibTransport_DoneState(*ILibKVM_WriteHandler)(char *buffer, int bufferLen, void *reserved);
 
+#define KVM_MAX_MONITORS 16
+typedef struct kvm_monitor_info { int id, x, y, width, height; } kvm_monitor_info;
+
+extern kvm_monitor_info g_monitors[KVM_MAX_MONITORS];
+extern int g_monitor_count;
+extern int SCREEN_SEL;
+extern int SCREEN_SEL_TARGET;
+extern int CAPTURE_X;
+extern int CAPTURE_Y;
+extern int VSCREEN_WIDTH;
+extern int VSCREEN_HEIGHT;
+
 void kvm_set_x11_locations(char *libx11, char *libx11tst, char *libx11ext, char *libxfixes, char *libx11kb);
 int kvm_relay_feeddata(char* buf, int len);
 void kvm_pause(int pause);
 void* kvm_relay_setup(void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char *authToken, char *dispid);
 void kvm_relay_reset();
 void kvm_cleanup();
+void kvm_update_monitor_layout(kvm_monitor_info *monitors, int monitorCount, int virtualWidth, int virtualHeight);
+void kvm_apply_monitor_selection();
 
 #endif /* LINUX_KVM_H_ */

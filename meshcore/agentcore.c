@@ -46,6 +46,7 @@ limitations under the License.
 #ifdef _POSIX
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #ifdef _OPENBSD
@@ -58,13 +59,14 @@ int gRemoteMouseRenderDefault = 0;
 	#ifdef WIN32
 		#include "KVM/Windows/kvm.h"
 	#endif
-	#ifdef _POSIX
-		#ifndef __APPLE__
-			#include "KVM/Linux/linux_kvm.h"
-		#else
-			#include "KVM/MacOS/mac_kvm.h"
+		#ifdef _POSIX
+			#ifndef __APPLE__
+				#include "KVM/Linux/linux_kvm.h"
+				#include "KVM/Linux/linux_kvm_wayland.h"
+			#else
+				#include "KVM/MacOS/mac_kvm.h"
+			#endif
 		#endif
-	#endif
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -978,7 +980,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
@@ -1040,7 +1048,13 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 		duk_pop(ptrs->ctx);											// ...
 #ifdef _LINKVM
 #if defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		kvm_cleanup();
 #endif
@@ -1352,12 +1366,14 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
-		char *xdm = NULL;
+		int waylandSession = kvm_is_wayland_session_for_uid(console_uid);
+		//printf("ILibDuktape_MeshAgent_getRemoteDesktop: waylandSession = %d, console_uid = %d\n", waylandSession, console_uid);
+		//fflush(stdout);
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);
 
-		if (self==0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
+		if (!waylandSession && (self == 0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL))
 		{
 			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
@@ -1368,15 +1384,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
-						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", "");
-
-						if (strcmp(xdm, "xwayland") == 0)
-						{
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This platform is configured to use Xwayland");
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "please modify config to use Xorg");
-							duk_pop(ctx);
-							return(1);
-						}
 
 						if (console_uid != 0 && updateXAuth == NULL)
 						{

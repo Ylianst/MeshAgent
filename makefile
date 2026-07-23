@@ -7,12 +7,12 @@
 # Then do "make -j8" and get the resulting file /.libs/libturbojpeg.a
 #
 #
-# To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, txt, ext and jpeg. To install, do this:
+# To build MeshAgent2 on Linux you first got to download the dev libraries to compile the agent, we need x11, xtst, ext, xrandr, egl, glesv2, drm, wayland-client and jpeg. To install, do this:
 #	Using APT:
-#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev
+#		sudo apt-get install libx11-dev libxtst-dev libxext-dev libjpeg62-dev libxrandr-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev libwayland-dev pkg-config
 #
 #	Using YUM:
-#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel
+#		sudo yum install libX11-devel libXtst-devel libXext-devel libjpeg-devel libXrandr-devel mesa-libEGL-devel mesa-libGLES-devel libdrm-devel wayland-devel pkgconf
 #
 #	NOTE: If you install headers for jpeg8, you need to put the compiled .a in the v80 folder, and specify JPEGVER=v80 when building MeshAgent
 #		eg: make linux ARCHID=6 JPEGVER=v80
@@ -29,7 +29,7 @@
 #   make macos ARCHID=16   																		# macOS x86 64 bit
 #   make macos ARCHID=29																		# macOS ARM 64 bit
 #   lipo -create -output meshagent_osx-universal-64 meshagent_osx-x86-64 meshagent_osx-arm-64	# Combine the two binaries into a universal binary
-# 
+#
 # Special builds:
 #
 #   make linux ARCHID=6 WEBLOG=1 KVM=0      # Linux x86 64 bit, with Web Logging, and KVM disabled
@@ -547,9 +547,34 @@ endif
 
 ifeq ($(KVM),1)
 # Mesh Agent KVM, this is only included in builds that have KVM support
-LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
+LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
+	DRMCFLAGS = $(shell pkg-config --cflags libdrm egl glesv2 2>/dev/null)
+	# libdrm/libEGL/libGLESv2 are dlopen'd at runtime (linux_kvm_drm*.c), not linked, so they stay
+	# out of NEEDED and the agent runs without a DRM/GL stack. Headers still needed (DRMCFLAGS).
+	DRMLIBS =
+	WAYLANDCLIENT = $(shell pkg-config --exists wayland-client 2>/dev/null && echo 1)
+	ifneq ($(strip $(DRMCFLAGS)),)
+		CFLAGS += $(DRMCFLAGS)
+	endif
+	ifneq ($(WAYLANDCLIENT),1)
+		$(error Linux KVM builds require the wayland-client development package)
+	endif
+	CFLAGS += -DHAVE_WAYLAND_CLIENT $(shell pkg-config --cflags wayland-client)
+	# libwayland-client is dlopen'd at runtime (linux_kvm_drm.c), not linked — headers only.
+	# If the system headers are jpeg8 (JPEG_LIB_VERSION >= 80) and a v80 lib exists, default to it
+	# so the linked lib matches the headers, else libjpeg aborts at runtime ("Wrong JPEG library
+	# version"). Skipped when JPEGVER is set explicitly or NOTURBOJPEG=1.
+	ifeq ($(JPEGVER),)
+		ifneq ($(NOTURBOJPEG),1)
+			JPEG_HDR_VERSION := $(shell $(CC) -include jpeglib.h -E -dM -xc - </dev/null 2>/dev/null | sed -n 's/.*JPEG_LIB_VERSION \([0-9][0-9]*\).*/\1/p' | head -n1)
+			ifeq ($(shell test "$(JPEG_HDR_VERSION)" -ge 80 2>/dev/null && test -f lib-jpeg-turbo/linux/$(ARCHNAME)/v80/libturbojpeg.a && echo yes),yes)
+				JPEGVER = v80
+$(info MeshAgent: system libjpeg is v$(JPEG_HDR_VERSION) (jpeg8); auto-selecting JPEGVER=v80)
+			endif
+		endif
+	endif
 	ifneq ($(JPEGVER),)
 		ifeq ($(LEGACY_LD),1)
 			LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
@@ -791,11 +816,11 @@ $(LIBNAME): $(OBJECTS) $(SOURCES)
 
 # Compile on Raspberry Pi 2/3 with KVM
 pi:
-	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
+	$(MAKE) EXENAME="meshagent_pi" CFLAGS="-std=gnu99 -g -Wall -D_POSIX -DMICROSTACK_PROXY -DMICROSTACK_TLS_DETECT -D_LINKVM $(CWEBLOG) $(CWATCHDOG) -fno-strict-aliasing $(INCDIRS) -DMESH_AGENTID=25 -D_NOFSWATCHER -D_NOHECI" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" LDFLAGS="-Lopenssl/libstatic/linux/pi -lrt $(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) $(DRMLIBS) -ldl"
 	strip meshagent_pi
 
 linux:
-	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
+	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" AID="$(ARCHID)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)" ADDITIONALFLAGS="-lrt -z noexecstack -z relro -z now $(DRMLIBS)" CFLAGS="-DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(LINUXSSL) $(LINUXFLAGS) $(LDFLAGS) $(LDEXTRA) -ldl"
 	$(SYMBOLCP)
 	$(STRIP)
 
@@ -813,4 +838,3 @@ openbsd:
 	$(MAKE) EXENAME="$(EXENAME)_$(ARCHNAME)$(EXENAME2)" ADDITIONALSOURCES="$(LINUXKVMSOURCES)"  AID="$(ARCHID)" CFLAGS="-std=gnu99 -Wall -DJPEGMAXBUF=$(KVMMaxTile) -DMESH_AGENTID=$(ARCHID) -D_POSIX -D_FREEBSD -D_OPENBSD -D_NOHECI -D_NOILIBSTACKDEBUG -DMICROSTACK_PROXY -fno-strict-aliasing $(INCDIRS) $(CFLAGS) $(CEXTRA)" LDFLAGS="$(BSDSSL) $(BSDFLAGS) -L. -lpthread -lz -lutil $(LDFLAGS) $(LDEXTRA)"
 	$(SYMBOLCP)
 	$(STRIP)
-
