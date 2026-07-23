@@ -2475,6 +2475,8 @@ function serviceManager()
             if (require('fs').existsSync('/usr/sbin/daemon'))
             {
                 // FreeBSD
+                // Ensure /usr/local/etc/rc.d/ exists, as it does not by default on freebsd 15, current version of mkdirSync doesn't support recursive 
+                if (!(require('fs').existsSync('/usr/local/etc/rc.d/'))) { require('fs').mkdirSync('/usr/local/etc/'); require('fs').mkdirSync('/usr/local/etc/rc.d/'); }
                 var rc = require('fs').createWriteStream('/usr/local/etc/rc.d/' + options.name, { flags: 'wb' });
                 rc.write('#!/bin/sh\n');
                 rc.write('# PROVIDE: ' + options.name + '\n');
