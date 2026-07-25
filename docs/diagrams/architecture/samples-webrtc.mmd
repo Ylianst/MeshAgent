@@ -1,0 +1,13 @@
+flowchart TD
+    Browser["Web Browser"] -->|HTTP / WebSocket| Rendezvous["Simple Rendezvous Server"]
+    Rendezvous -->|SDP Exchange| WebRTCConn["WebRTC Connection"]
+    WebRTCConn --> DataChannel["SCTP Data Channel"]
+
+    subgraph managed["C# Managed Layer"]
+        WinForms["WinForms UI"] --> CSWrapper["WebRTC.cs Wrapper"]
+        CSWrapper --> NativeDLL["WebRTC.dll (C++/CLI)"]
+    end
+
+    NativeDLL --> Microstack["Microstack Chain"]
+    Microstack --> ILibWebRTC["ILibWebRTC / ILibWrapperWebRTC"]
+    ILibWebRTC --> DTLS["DTLS + ICE + STUN"]

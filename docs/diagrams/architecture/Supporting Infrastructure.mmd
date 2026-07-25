@@ -1,0 +1,16 @@
+flowchart TD
+    App["Application"] --> Config["Configuration"]
+    App --> Error["Error Handling"]
+    App --> Rand["Random Method"]
+    App --> Engine["Engine Interface"]
+    App --> Store["Object Store"]
+    App --> UI["User Interface"]
+    App --> Core["Provider Core"]
+
+    Config --> Data["Data Structures"]
+    Error --> Data
+    Engine --> Core
+    Store --> Core
+    Rand --> Core
+    Core --> Data
+    UI --> Error

@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant App
+    participant Manager as ILibWebClientManager
+    participant WCDO as WebClientDataObject
+    participant Socket as AsyncSocket
+
+    App->>Manager: PipelineRequest()
+    Manager->>WCDO: Enqueue Request
+    WCDO->>Socket: ConnectTo()
+    Socket-->>WCDO: OnConnect
+    WCDO->>Socket: Send HTTP Request
+    Socket-->>WCDO: OnData (Headers/Body)
+    WCDO-->>App: OnResponse()
+    WCDO->>Manager: FinishedResponse

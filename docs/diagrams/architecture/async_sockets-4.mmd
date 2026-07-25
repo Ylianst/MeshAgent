@@ -1,0 +1,5 @@
+flowchart LR
+    App["Application Send"] --> Queue["PendingSend List"]
+    Queue --> OS["send()/sendto()"]
+    OS --> Complete["All Sent"]
+    Complete --> Event["OnSendOK"]

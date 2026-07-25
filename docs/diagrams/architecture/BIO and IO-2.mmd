@@ -1,0 +1,13 @@
+flowchart LR
+    Base["BIO Base"] --> Source["Source/Sink"]
+    Base --> Filter["Filter"]
+    Base --> Descriptor["Descriptor"]
+
+    Source --> Mem["Memory BIO"]
+    Source --> File["File BIO"]
+    Source --> Dgram["Datagram BIO"]
+
+    Filter --> Buffer["Buffer BIO"]
+    Filter --> Base64["Base64 BIO"]
+    Filter --> Cipher["Cipher BIO"]
+    Filter --> SSLBio["SSL BIO"]

@@ -1,0 +1,31 @@
+flowchart TD
+    subgraph openssl_include["Openssl Include (openssl/include/openssl/)"]
+        TypeSystem["Type System\n(types.h / ossl_typ.h)"]
+        ASN1["ASN.1 Engine\n(asn1.h / asn1t.h)"]
+        SymCipher["Symmetric Ciphers\n(aes, blowfish, camellia,\ncast, des, idea, rc2/4/5, seed, modes)"]
+        DigestMAC["Digest and MAC\n(md2/4/5, sha, ripemd,\nwhrlpool, cmac, hmac)"]
+        PKI["Public Key Infrastructure\n(rsa, dsa, ec, srp, evp)"]
+        X509Cert["X.509 and Certificate Management\n(x509, x509v3, x509_acert,\nocsp, cms, pkcs7, pkcs12, ts, ess)"]
+        TLS["TLS and SSL\n(ssl, tls1, async)"]
+        BIO["BIO and IO\n(bio, buffer)"]
+        Infra["Supporting Infrastructure\n(conf, err, rand, engine,\nstore, lhash, stack, objects,\ntxt_db, ui, crypto)"]
+        Provider["Provider / Core API\n(core, decoder, encoder,\nhpke, cmp, crmf)"]
+    end
+
+    TypeSystem --> ASN1
+    TypeSystem --> SymCipher
+    TypeSystem --> DigestMAC
+    TypeSystem --> PKI
+    TypeSystem --> X509Cert
+    TypeSystem --> TLS
+    TypeSystem --> BIO
+    TypeSystem --> Infra
+    TypeSystem --> Provider
+
+    ASN1 --> PKI
+    ASN1 --> X509Cert
+    PKI --> X509Cert
+    X509Cert --> TLS
+    BIO --> TLS
+    Infra --> TLS
+    Provider --> TLS

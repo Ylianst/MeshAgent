@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant Client as Remote Client
+    participant Server as ILibAsyncServerSocket
+    participant WS as ILibWebServer
+    participant WC as ILibWebClient (internal)
+    participant App as Application OnReceive
+
+    Client->>Server: TCP SYN / Accept
+    Server->>WS: OnConnect callback
+    WS->>WC: ILibCreateWebClientEx (internal parser)
+    Client->>Server: HTTP Request bytes
+    Server->>WC: ILibWebClient_OnData
+    WC->>WS: ILibWebServer_OnResponse (parsed header + body)
+    WS->>App: session->OnReceive(header, body)
+    App->>WS: ILibWebServer_Send / StreamHeader / StreamBody
+    WS->>Server: ILibAsyncServerSocket_Send
+    Server->>Client: HTTP Response bytes

@@ -1,0 +1,4 @@
+flowchart TD
+    UIProcess["UI_process"] --> Writer["UI Writer"]
+    Writer --> Reader["UI Reader"]
+    Reader --> Result["Result Buffer"]

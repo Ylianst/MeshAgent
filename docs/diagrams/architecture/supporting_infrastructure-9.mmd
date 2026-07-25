@@ -1,0 +1,6 @@
+flowchart TD
+    Create["UI_new()"] --> Add["Add Prompts"]
+    Add --> Process["UI_process()"]
+    Process --> Reader["Reader Callback"]
+    Process --> Writer["Writer Callback"]
+    Process --> Close["UI_free()"]

@@ -1,0 +1,5 @@
+flowchart TD
+    Data["Input Data"] --> EVPInit["EVP_DigestSignInit"]
+    EVPInit --> Update["EVP_DigestSignUpdate"]
+    Update --> Final["EVP_DigestSignFinal"]
+    Final --> Impl["Algorithm Implementation"]

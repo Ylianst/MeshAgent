@@ -1,0 +1,5 @@
+flowchart TD
+    Init["GCM Init"] --> SetIV["Set IV"]
+    SetIV --> AAD["Process AAD"]
+    AAD --> Encrypt["Encrypt Blocks"]
+    Encrypt --> Finish["Finalize and Verify Tag"]

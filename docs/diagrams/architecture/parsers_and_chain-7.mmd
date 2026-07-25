@@ -1,0 +1,5 @@
+flowchart LR
+    Raw["Raw malloc()"] --> Header["ILibMemory_Header\n(canary, size, extraSize)"]
+    Header --> Primary["Primary Data Block"]
+    Primary --> ExtraHeader["Extra Block Header"]
+    ExtraHeader --> Extra["Optional Extra Memory"]

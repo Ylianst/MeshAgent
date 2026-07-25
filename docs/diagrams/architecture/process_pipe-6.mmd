@@ -1,0 +1,6 @@
+flowchart TD
+    ChainLoop["Chain Event Loop"] --> PreSelect["Manager PreSelect"]
+    PreSelect --> Select["select() or Wait Handles"]
+    Select --> PostSelect["Manager PostSelect"]
+    PostSelect --> PipeRead["Process_ReadHandler"]
+    PipeRead --> UserCallback["User Output Handler"]

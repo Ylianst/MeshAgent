@@ -1,0 +1,4 @@
+flowchart TD
+    TCP["TCP Connected"] --> SSLInit["SSL_new()"]
+    SSLInit --> Handshake["SSL_do_handshake()"]
+    Handshake --> EncryptedIO["SSL_read()/SSL_write()"]

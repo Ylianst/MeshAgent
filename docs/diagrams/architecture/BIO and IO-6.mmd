@@ -1,0 +1,6 @@
+flowchart TD
+    ASN1["ASN.1 Engine"] --> BIO
+    X509["X.509 Module"] --> BIO
+    SSL["TLS/SSL Module"] --> BIO
+    Providers["Providers"] --> CoreBIO["Core BIO Bridge"]
+    CoreBIO --> BIO

@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant Agent
+    participant Server
+    participant Browser
+
+    Agent->>Server: WebSocket Upgrade (TLS)
+    Server->>Agent: AuthRequest
+    Agent->>Server: AuthVerify (Cert + Signature)
+    Server->>Agent: AuthConfirm
+
+    Browser->>Server: Start Remote Desktop
+    Server->>Agent: KVM Command
+
+    Agent->>Agent: Capture Screen
+    Agent->>Agent: JPEG Compress Tiles
+    Agent->>Browser: Stream via WebRTC DataChannel

@@ -1,0 +1,4 @@
+flowchart LR
+    Params["p, q, g"] --> KeyGen["Generate x, y"]
+    KeyGen --> Sign["Compute r, s"]
+    Sign --> Verify["Verify using y"]

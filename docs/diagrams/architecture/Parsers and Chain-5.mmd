@@ -1,0 +1,5 @@
+flowchart TD
+    Buffer["XML Buffer"] --> ParseXML["ILibParseXML"]
+    ParseXML --> Process["ILibProcessXMLNodeList"]
+    Process --> BuildNS["Build Namespace Table"]
+    BuildNS --> Traverse["Tree Traversal"]

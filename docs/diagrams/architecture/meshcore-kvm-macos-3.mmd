@@ -1,0 +1,7 @@
+flowchart TD
+    Accept["accept() socket"] --> GetPID["getsockopt(LOCAL_PEERPID)"]
+    GetPID --> SelfCode["SecCodeCopySelf()"]
+    SelfCode --> PeerCode["SecCodeCreateWithPID()"]
+    PeerCode --> Valid["SecCodeCheckValidity()"]
+    Valid --> Compare["Compare cdhash"]
+    Compare --> Result["Allow or Reject"]

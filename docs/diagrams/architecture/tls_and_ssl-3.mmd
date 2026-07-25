@@ -1,0 +1,4 @@
+flowchart TD
+    ClientCiphers["Client Cipher List"] --> Shared["Shared Ciphers"]
+    Shared --> Policy["Security Level and Filters"]
+    Policy --> Selected["Negotiated SSL_CIPHER"]

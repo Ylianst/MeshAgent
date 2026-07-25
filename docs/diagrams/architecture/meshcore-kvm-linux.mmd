@@ -1,0 +1,19 @@
+flowchart LR
+    Agent["Meshcore Agent"] -->|"Pipe IPC"| Relay["KVM Relay"]
+    Relay -->|"fork()"| Child["KVM Child Process"]
+
+    subgraph linux_kvm["Linux KVM Engine"]
+        Capture["X11 Frame Capture"]
+        TileEngine["Tile Engine"]
+        Compression["JPEG Compression"]
+        Input["Input Injection"]
+        Cursor["Cursor Tracking"]
+    end
+
+    Child --> Capture
+    Capture --> TileEngine
+    TileEngine --> Compression
+    Compression --> Relay
+
+    Relay -->|"Keyboard/Mouse Commands"| Input
+    Cursor --> Relay

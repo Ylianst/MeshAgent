@@ -1,0 +1,4 @@
+flowchart LR
+    Network["UDP Packet"] --> Socket["ILibAsyncSocket"]
+    Socket --> UDPLayer["ILibAsyncUDPSocket_OnDataSink"]
+    UDPLayer --> App["OnData Callback"]

@@ -1,0 +1,9 @@
+flowchart TD
+    Get["Get(key)"] --> CacheCheck["Check Cache"]
+    CacheCheck -->|"Hit"| ReturnCache["Return Value"]
+    CacheCheck -->|"Miss"| KeyLookup["Lookup Key Table"]
+    KeyLookup -->|"Not Found"| ReturnNull["Return 0"]
+    KeyLookup -->|"Found"| ReadFile["Read Value From File"]
+    ReadFile --> Validate["Verify SHA384"]
+    Validate -->|"OK"| ReturnFile["Return Value"]
+    Validate -->|"Fail"| ReturnNull

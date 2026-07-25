@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant App as Application
+    participant SCTP as SCTP Engine
+    participant DTLS as DTLS
+    participant Peer as Remote Peer
+
+    App->>SCTP: Send(streamId, data)
+    SCTP->>DTLS: Encrypt + Frame
+    DTLS->>Peer: UDP Packet
+    Peer-->>DTLS: ACK / SACK
+    DTLS-->>SCTP: Decrypt
+    SCTP-->>App: OnData

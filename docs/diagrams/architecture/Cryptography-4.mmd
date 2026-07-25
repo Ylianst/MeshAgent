@@ -1,0 +1,7 @@
+flowchart LR
+    Key["Secret Key"] --> Inner["Inner Pad"]
+    Data["Message"] --> Inner
+    Inner --> Hash1["Hash"]
+    Hash1 --> Outer["Outer Pad"]
+    Key --> Outer
+    Outer --> FinalHash["Final HMAC"]

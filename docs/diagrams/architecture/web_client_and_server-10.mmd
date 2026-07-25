@@ -1,0 +1,3 @@
+flowchart LR
+    Session["Session"] --> IdleTimer["LifeTime Timer"]
+    IdleTimer -->|"Timeout"| Disconnect["Disconnect Socket"]

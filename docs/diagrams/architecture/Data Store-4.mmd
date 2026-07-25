@@ -1,0 +1,4 @@
+flowchart TD
+    PutC["PutCompressed"] --> Deflate["Compress Value"]
+    Deflate --> HashU["Hash Uncompressed Data"]
+    HashU --> AppendC["Append Compressed Record"]

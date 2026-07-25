@@ -1,0 +1,7 @@
+flowchart TD
+    Start["ILibStartChain()"] --> Loop["Event Loop"]
+    Loop --> PrePhase["PreSelect Phase"]
+    PrePhase --> SelectCall["select() or OS Wait"]
+    SelectCall --> PostPhase["PostSelect Phase"]
+    PostPhase --> TimerCheck["Timer Expiration Check"]
+    TimerCheck --> Loop

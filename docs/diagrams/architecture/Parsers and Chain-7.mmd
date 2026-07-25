@@ -1,0 +1,4 @@
+flowchart LR
+    Raw["Raw Allocation"] --> Header["ILibMemory_Header"]
+    Header --> Primary["Primary Data"]
+    Primary --> Extra["Optional Extra Block"]

@@ -1,0 +1,7 @@
+flowchart LR
+    AgentInput["Agent Input Packet"] --> Decoder["kvm_server_inputdata"]
+    Decoder --> KeyAction["KeyAction / KeyActionUnicode"]
+    Decoder --> MouseAction["MouseAction"]
+
+    KeyAction --> XTest["XTestFakeKeyEvent"]
+    MouseAction --> XTestMotion["XTestFakeMotionEvent"]

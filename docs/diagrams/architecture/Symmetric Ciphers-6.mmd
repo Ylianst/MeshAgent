@@ -1,0 +1,4 @@
+flowchart TD
+    KeyExchange["Asymmetric Key Exchange"] --> SessionKey["Symmetric Session Key"]
+    SessionKey --> Symmetric["Symmetric Cipher (AES-GCM)"]
+    Symmetric --> ProtectedData["Confidential + Authenticated Data"]

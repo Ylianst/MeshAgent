@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant App
+    participant GCM as GCM128_CONTEXT
+    participant AES as AES Block
+
+    App->>GCM: CRYPTO_gcm128_init()
+    App->>GCM: CRYPTO_gcm128_setiv()
+    App->>GCM: CRYPTO_gcm128_aad()
+    App->>GCM: CRYPTO_gcm128_encrypt()
+    GCM->>AES: block128_f()
+    App->>GCM: CRYPTO_gcm128_tag()

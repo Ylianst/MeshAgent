@@ -1,0 +1,13 @@
+flowchart LR
+    App["Application Code"]
+    Transport["ILibTransport Interface\n(Send / Close / PendingBytes)"]
+    TCP2["TCP Socket"]
+    TLS["TLS over TCP"]
+    WS["WebSocket"]
+    SCTP["SCTP over DTLS"]
+
+    App --> Transport
+    Transport --> TCP2
+    Transport --> TLS
+    Transport --> WS
+    Transport --> SCTP

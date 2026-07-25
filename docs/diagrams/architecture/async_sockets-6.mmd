@@ -1,0 +1,10 @@
+sequenceDiagram
+    participant OS
+    participant Server as ILibAsyncServerSocket
+    participant AsyncSocket as ILibAsyncSocket
+    participant App as Application
+
+    OS->>Server: Readable Listen Socket
+    Server->>OS: accept()
+    Server->>AsyncSocket: UseThisSocket()
+    Server->>App: OnConnect()

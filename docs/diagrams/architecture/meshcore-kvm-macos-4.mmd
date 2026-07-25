@@ -1,0 +1,4 @@
+flowchart LR
+    InputThread["Input Thread"] -->|"Commands"| Engine
+    Engine["KVM Engine"] -->|"Tiles"| Queue
+    Queue -->|"Socket Write"| Daemon

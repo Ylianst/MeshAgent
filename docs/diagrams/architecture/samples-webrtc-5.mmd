@@ -1,0 +1,10 @@
+flowchart TD
+    User["User Opens Browser"] --> HTTP["HTTP GET /start"]
+    HTTP --> Server["Simple Rendezvous Server"]
+    Server --> Offer["Generate SDP Offer"]
+    Offer --> Browser
+    Browser --> Answer["POST SDP Answer"]
+    Answer --> Server
+    Server --> Connection["SetOffer()"]
+    Connection --> Connected["SCTP Established"]
+    Connected --> Data["DataChannel Communication"]

@@ -1,0 +1,13 @@
+flowchart TD
+    App["Application / MeshAgent"] --> Wrapper["ILibWrapperWebRTC"]
+    Wrapper --> Core["ILibWebRTC Core"]
+
+    Core --> ICE["ICE / STUN"]
+    Core --> DTLS["DTLS Session"]
+    Core --> SCTP["SCTP Engine"]
+    Core --> TURN["TURN Client"]
+
+    ICE --> UDP["Async UDP Socket"]
+    DTLS --> SSL["OpenSSL"]
+    SCTP --> DTLS
+    TURN --> TCP["Async TCP Socket"]

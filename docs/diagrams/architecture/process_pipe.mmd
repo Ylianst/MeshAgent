@@ -1,0 +1,8 @@
+flowchart TD
+    Chain["Microstack Chain"] --> Manager["ILibProcessPipe_Manager_Object"]
+    Manager --> Process["ILibProcessPipe_Process_Object"]
+    Process --> StdIn["PipeObject (stdin)"]
+    Process --> StdOut["PipeObject (stdout)"]
+    Process --> StdErr["PipeObject (stderr)"]
+    StdOut --> ReadHandler["Generic Read Handler"]
+    StdIn --> WriteQueue["Write Buffer Queue"]

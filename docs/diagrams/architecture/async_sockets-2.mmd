@@ -1,0 +1,6 @@
+flowchart LR
+    Pre["PreSelect"] --> Select["select()"]
+    Select --> Post["PostSelect"]
+    Post --> Read["OnData"]
+    Post --> Write["Send Queue Flush"]
+    Post --> Conn["OnConnect/OnDisconnect"]

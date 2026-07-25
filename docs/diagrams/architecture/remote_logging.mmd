@@ -1,0 +1,11 @@
+flowchart TD
+    App["Application / Microstack Modules"] --> Logger["Remote Logging Module"]
+    Logger --> SessionMgr["Session Management"]
+    Logger --> CommandRouter["Command Dispatch"]
+    Logger --> OutputSink["Output Sink Callback"]
+
+    OutputSink --> Transport["ILibTransport"]
+    Transport --> RemoteViewer["Remote Log Viewer"]
+    Transport --> FileTransport["File Transport"]
+
+    FileTransport --> FileStore["File Backed LinkedList"]

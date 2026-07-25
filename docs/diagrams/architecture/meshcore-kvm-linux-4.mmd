@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant Agent
+    participant Parent as "KVM Parent"
+    participant Child as "KVM Child"
+
+    Agent->>Parent: Start KVM
+    Parent->>Child: fork()
+    Child->>Child: kvm_server_mainloop()
+    Child->>Parent: Screen Tiles
+    Parent->>Agent: Forward Tiles
+    Agent->>Parent: Input Packets
+    Parent->>Child: Forward Input

@@ -1,0 +1,6 @@
+flowchart TD
+    New["New ICE State"] --> Gather["Gather Candidates"]
+    Gather --> Check["Connectivity Checks"]
+    Check --> Nominate["Nominate Candidate"]
+    Nominate --> DTLSStart["Start DTLS"]
+    DTLSStart --> Connected["Connected"]

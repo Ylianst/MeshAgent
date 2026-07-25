@@ -1,0 +1,5 @@
+flowchart LR
+    Frame["Captured Frame"] --> Region["Region Detection"]
+    Region --> JPEG["Jpeg Turbo Core"]
+    JPEG --> Network["Encrypted Transport"]
+    Network --> Remote["Remote Viewer"]

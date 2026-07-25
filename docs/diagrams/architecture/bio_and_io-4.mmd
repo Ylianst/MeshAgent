@@ -1,0 +1,4 @@
+flowchart TD
+    Lookup["BIO_lookup()"] --> AddrInfo["BIO_ADDRINFO list"]
+    AddrInfo --> Address["BIO_ADDR"]
+    Address --> Socket["BIO_connect()"]

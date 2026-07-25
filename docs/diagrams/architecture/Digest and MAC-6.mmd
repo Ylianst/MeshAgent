@@ -1,0 +1,5 @@
+flowchart TD
+    Key["AES Key"] --> SubKeys["Generate Subkeys"]
+    MessageBlocks["Message Blocks"] --> CBC["Cipher Block Chaining"]
+    SubKeys --> CBC
+    CBC --> Tag["CMAC Tag"]

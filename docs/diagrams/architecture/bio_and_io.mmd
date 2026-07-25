@@ -1,0 +1,5 @@
+flowchart TD
+    App["Application"] --> TLS["TLS and SSL Layer"]
+    TLS --> FilterBIO["Filter BIOs Cipher and Digest and Buffer"]
+    FilterBIO --> SourceBIO["Source or Sink BIO Socket or File or Memory"]
+    SourceBIO --> OS["Operating System"]

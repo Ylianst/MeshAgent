@@ -1,0 +1,4 @@
+flowchart TD
+    Key["Key1 (pointer) + Key2 (string)"] --> Hash["Hash Function"]
+    Hash --> Bucket["SparseArray Bucket"]
+    Bucket --> ChainNode["Collision Linked List"]

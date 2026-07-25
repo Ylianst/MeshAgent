@@ -1,0 +1,7 @@
+flowchart TD
+    APP["Application"] --> EVPCTX["EVP_PKEY_CTX"]
+    EVPCTX --> ALG["Algorithm Selection"]
+    ALG --> RSAALG["RSA"]
+    ALG --> ECALG["EC"]
+    ALG --> DSAALG["DSA"]
+    ALG --> DHALG["DH"]

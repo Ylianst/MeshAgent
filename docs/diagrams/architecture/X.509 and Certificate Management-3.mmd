@@ -1,0 +1,7 @@
+flowchart TD
+    Leaf["Leaf Certificate"] --> Chain["Chain Builder"]
+    Chain --> Policy["Policy Engine"]
+    Chain --> CRLCheck["CRL Check"]
+    Chain --> SigVerify["Signature Verify"]
+    Chain --> TrustStore["Trusted Roots"]
+    TrustStore --> Result["Verification Result"]

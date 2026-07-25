@@ -1,0 +1,5 @@
+flowchart LR
+    Cipher["EVP_CIPHER"] --> CMAC["CMAC_CTX"]
+    Key["Secret Key"] --> CMAC
+    Data["Input Data"] --> CMAC
+    CMAC --> Tag["Authentication Tag"]

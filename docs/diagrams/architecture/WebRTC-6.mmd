@@ -1,0 +1,7 @@
+sequenceDiagram
+    participant Local
+    participant ICE
+
+    Local->>ICE: GenerateIceOffer()
+    ICE-->>Local: OfferBlock
+    Local->>Remote: SDP Offer

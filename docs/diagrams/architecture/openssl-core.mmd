@@ -1,0 +1,26 @@
+flowchart TD
+    subgraph openssl_core["Openssl Core"]
+        direction TB
+        Types["Type System\n(ossl_typ / types)"]
+        ASN1["ASN.1 Engine\n(asn1 / asn1t)"]
+        Crypto["Cryptographic Primitives\n(Symmetric + Digest + MAC)"]
+        PKI["Public Key Infrastructure\n(RSA / DSA / EC / DH)"]
+        X509["X.509 & PKI\n(x509 / x509v3 / ocsp / cms)"]
+        TLS["TLS / SSL\n(ssl / tls1)"]
+        BIO["I/O Abstraction\n(bio)"]
+        EVP["EVP Envelope\n(evp)"]
+        Misc["Supporting Infrastructure\n(conf / engine / err / rand / store)"]
+    end
+
+    Types --> ASN1
+    Types --> Crypto
+    Types --> PKI
+    ASN1 --> X509
+    Crypto --> EVP
+    PKI --> EVP
+    EVP --> TLS
+    X509 --> TLS
+    BIO --> TLS
+    Misc --> TLS
+
+    TLS -->|"used by"| MeshAgent["MeshAgent / MicroStack / MicroScript"]

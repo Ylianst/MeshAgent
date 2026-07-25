@@ -1,0 +1,7 @@
+flowchart TD
+    Cert["X509"] --> ExtList["STACK_OF(X509_EXTENSION)"]
+    ExtList --> BC["Basic Constraints"]
+    ExtList --> SAN["Subject Alternative Name"]
+    ExtList --> KU["Key Usage"]
+    ExtList --> EKU["Extended Key Usage"]
+    ExtList --> NC["Name Constraints"]

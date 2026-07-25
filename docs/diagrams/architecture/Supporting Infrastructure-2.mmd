@@ -1,0 +1,5 @@
+flowchart TD
+    File["Config File"] --> Parser["CONF_load or NCONF_load"]
+    Parser --> Hash["LHASH of CONF_VALUE"]
+    Hash --> Section["Section Lookup"]
+    Section --> ModuleInit["CONF_modules_load"]

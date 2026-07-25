@@ -1,0 +1,6 @@
+flowchart TD
+    Struct["C Structure"] --> Templates["ASN1_TEMPLATE Array"]
+    Templates --> Item["ASN1_ITEM Descriptor"]
+    Item --> Decoder["ASN1_item_d2i"]
+    Item --> Encoder["ASN1_item_i2d"]
+    Decoder --> PrimitiveHandler["Primitive or Composite Handler"]

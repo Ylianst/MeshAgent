@@ -1,0 +1,7 @@
+flowchart TD
+    Before["TLS_ST_BEFORE"] --> ClientHello["Client Hello"]
+    ClientHello --> ServerHello["Server Hello"]
+    ServerHello --> Cert["Certificate Exchange"]
+    Cert --> KeyEx["Key Exchange"]
+    KeyEx --> Finished["Finished Messages"]
+    Finished --> OK["TLS_ST_OK"]

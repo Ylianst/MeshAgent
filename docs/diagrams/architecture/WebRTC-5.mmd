@@ -1,0 +1,5 @@
+flowchart TD
+    Create["OpenDataChannel"] --> WaitAck["WAITING_FOR_ACK"]
+    WaitAck --> Assigned["ASSIGNED"]
+    Assigned --> Closing["RECONFIG Close"]
+    Closing --> Closed["Channel Closed"]

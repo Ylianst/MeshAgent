@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Module
+    participant Logger
+    participant Sessions
+    participant Output
+
+    Module->>Logger: ILibRemoteLogging_printf()
+    Logger->>Logger: Add timestamp
+    Logger->>Sessions: Check module enabled
+    Sessions-->>Logger: Allowed sessions
+    Logger->>Output: Send formatted frame

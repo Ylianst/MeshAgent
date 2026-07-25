@@ -1,0 +1,11 @@
+flowchart TD
+    Multicast["Multicast Module"]
+    IPv4List["IPv4 Interfaces"]
+    IPv6List["IPv6 Interface Indexes"]
+    UDPv4["UDP Socket per IPv4 IF"]
+    UDPv6["Single IPv6 UDP Socket"]
+
+    Multicast --> IPv4List
+    Multicast --> IPv6List
+    IPv4List --> UDPv4
+    IPv6List --> UDPv6

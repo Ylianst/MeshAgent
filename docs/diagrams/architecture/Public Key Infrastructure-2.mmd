@@ -1,0 +1,6 @@
+flowchart LR
+    MSG["Message Hash"] --> PSSENC["RSA-PSS Encoding"]
+    PSSENC --> MOD["Modular Exponentiation"]
+    MOD --> SIG["Signature"]
+
+    PSSPARAMS["RSA_PSS_PARAMS"] --> PSSENC

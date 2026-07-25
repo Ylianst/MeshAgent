@@ -1,0 +1,10 @@
+flowchart TD
+    ASN1["ASN.1 Engine"] --> X509Core["X.509 Core Structures"]
+    Crypto["EVP / PKI Algorithms"] --> X509Core
+    X509Core --> Extensions["X.509 v3 Extensions"]
+    X509Core --> Validation["Certificate Validation"]
+    X509Core --> OCSP["OCSP"]
+    X509Core --> CMS["CMS / PKCS#7"]
+    X509Core --> PKCS12["PKCS#12"]
+    X509Core --> TS["Timestamp (TS)"]
+    X509Core --> ACERT["Attribute Certificates"]

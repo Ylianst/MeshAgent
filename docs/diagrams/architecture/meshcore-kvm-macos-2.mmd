@@ -1,0 +1,7 @@
+flowchart TD
+    Loop["Main Capture Loop"] --> CheckRes["Check Resolution"]
+    CheckRes --> Capture["CGDisplayCreateImage()"]
+    Capture --> Tiles["Divide into 32x32 tiles"]
+    Tiles --> CRC["Compute CRC per tile"]
+    CRC --> Send["Send changed tiles"]
+    Send --> Loop

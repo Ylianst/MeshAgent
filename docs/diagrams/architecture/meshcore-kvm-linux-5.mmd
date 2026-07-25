@@ -1,0 +1,7 @@
+flowchart TD
+    Capture["Full Screen Buffer"] --> Split["Divide Into 32x32 Tiles"]
+    Split --> CRC["Compute CRC"]
+    CRC --> Compare{"CRC Changed?"}
+    Compare -->|"Yes"| Compress["JPEG Compress Tile"]
+    Compare -->|"No"| Skip["Do Not Send"]
+    Compress --> Send["Send Tile Packet"]

@@ -1,0 +1,17 @@
+flowchart TD
+    Chain["Microstack Chain"]
+    AsyncSocket["ILibAsyncSocket"]
+    AsyncServer["ILibAsyncServerSocket"]
+    AsyncUDP["ILibAsyncUDPSocket"]
+    Multicast["ILibMulticastSocket"]
+    IPMonitor["ILibIPAddressMonitor"]
+
+    Chain --> AsyncSocket
+    Chain --> AsyncServer
+    Chain --> AsyncUDP
+    Chain --> Multicast
+    Chain --> IPMonitor
+
+    AsyncServer --> AsyncSocket
+    AsyncUDP --> AsyncSocket
+    Multicast --> AsyncUDP

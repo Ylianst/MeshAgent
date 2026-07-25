@@ -1,0 +1,21 @@
+flowchart TD
+    Server["Management Server"] --> TLS["TLS WebSocket Control Channel"]
+    TLS --> AgentCore["Meshcore Agent"]
+
+    subgraph Runtime["MeshAgent Runtime"]
+        AgentCore --> Microstack["Microstack Core"]
+        AgentCore --> ScriptEngine["Microscript (Duktape)"]
+        AgentCore --> KVM["Platform KVM Engine"]
+        AgentCore --> DataStore["SimpleDataStore"]
+        AgentCore --> Update["Self-Update Engine"]
+    end
+
+    Microstack --> WebRTC["WebRTC (ICE / DTLS / SCTP)"]
+    Microstack --> HTTP["HTTP / WebSocket"]
+    Microstack --> AsyncSockets["Async TCP / UDP"]
+
+    KVM --> JPEG["Jpeg Turbo Core"]
+    KVM --> OS["OS Graphics & Input APIs"]
+
+    AgentCore --> OpenSSL["OpenSSL Core"]
+    WebRTC --> OpenSSL

@@ -1,0 +1,6 @@
+flowchart TD
+    ImageBuffer["RGB Tile Buffer"] --> Init["jpeg_create_compress"]
+    Init --> Config["Set Quality and Sampling"]
+    Config --> Encode["jpeg_write_scanlines"]
+    Encode --> Finish["jpeg_finish_compress"]
+    Finish --> Output["Compressed JPEG Buffer"]

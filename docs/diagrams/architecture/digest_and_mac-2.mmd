@@ -1,0 +1,6 @@
+flowchart TD
+    Key["Secret Key"] --> Inner["Inner Pad"]
+    Inner --> Hash1["Hash of Key XOR ipad and Message"]
+    Hash1 --> Outer["Outer Pad"]
+    Outer --> Hash2["Hash of Key XOR opad and InnerHash"]
+    Hash2 --> Output["HMAC Output"]

@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Server
+    participant Agent
+
+    Server->>Agent: AgentUpdate (start)
+    Server->>Agent: AgentUpdateBlock (chunks)
+    Agent->>Server: AgentUpdateBlock (ACK)
+    Server->>Agent: AgentUpdate (end + hash)
+    Agent->>Agent: Verify SHA384
+    Agent->>Agent: Replace executable
+    Agent->>Agent: Restart service/process

@@ -1,0 +1,10 @@
+sequenceDiagram
+    participant Client
+    participant Responder
+    participant CA
+
+    Client->>Responder: OCSP_REQUEST
+    Responder->>CA: Lookup revocation status
+    CA-->>Responder: Status
+    Responder-->>Client: OCSP_RESPONSE
+    Client->>Client: Verify signature and nonce

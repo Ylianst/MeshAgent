@@ -1,0 +1,8 @@
+flowchart TD
+    App["Application Code"] --> EVP["EVP Cipher API"]
+    EVP --> CipherImpl["Cipher Implementation"]
+    CipherImpl --> KeySchedule["Algorithm Key Schedule"]
+    CipherImpl --> ModeLayer["Mode of Operation"]
+
+    ModeLayer --> BlockFunc["block128_f / ctr128_f"]
+    KeySchedule --> AlgoStructs["AES_KEY / DES_key_schedule / ..."]

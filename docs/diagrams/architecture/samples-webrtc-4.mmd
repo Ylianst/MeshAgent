@@ -1,0 +1,5 @@
+flowchart LR
+    CSharp["C# Code"] --> PInvoke["P/Invoke"]
+    PInvoke --> WebRTCDLL["WebRTC.dll"]
+    WebRTCDLL --> ILibWrapper["ILibWrapper_WebRTC"]
+    ILibWrapper --> MicrostackChain["Microstack Chain"]

@@ -1,0 +1,5 @@
+flowchart LR
+    Init["*_Init()"] --> Update["*_Update()"]
+    Update --> Update
+    Update --> Final["*_Final()"]
+    Final --> Output["Digest Output"]

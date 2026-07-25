@@ -1,0 +1,6 @@
+flowchart TD
+    Msg2["Message"] --> Hash2["Digest"]
+    Hash2 --> RandK["Generate k"]
+    RandK --> PointMul["k times G"]
+    PointMul --> RS["Compute r, s"]
+    RS --> Sig2["ECDSA Signature"]

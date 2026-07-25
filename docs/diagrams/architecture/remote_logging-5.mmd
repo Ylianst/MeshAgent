@@ -1,0 +1,7 @@
+flowchart TD
+    Connect["Viewer Connects"] --> GetSession["Get/Create Session"]
+    GetSession --> Configure["Enable Modules + Verbosity"]
+    Configure --> ReceiveLogs["Receive Filtered Logs"]
+    ReceiveLogs --> Disconnect["Viewer Disconnects"]
+    Disconnect --> Remove["Remove UserContext"]
+    Remove --> Compact["Compact Session Table"]

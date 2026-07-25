@@ -1,0 +1,4 @@
+flowchart TD
+    X509["X509 Certificate"] --> Store["X509_STORE"]
+    Store --> VerifyCtx["X509_STORE_CTX"]
+    VerifyCtx --> PolicyTree["X509_POLICY_TREE"]

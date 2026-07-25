@@ -1,0 +1,5 @@
+flowchart TD
+    Frame["Incoming Frame"] --> CheckFIN["FIN Flag?"]
+    CheckFIN -->|"No"| Buffer["Append to Fragment Buffer"]
+    CheckFIN -->|"Yes"| Deliver["Deliver to OnReceive"]
+    Buffer --> Deliver

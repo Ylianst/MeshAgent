@@ -1,0 +1,5 @@
+flowchart TD
+    URI["URI"] --> Open["OSSL_STORE_open"]
+    Open --> Loader["OSSL_STORE_LOADER"]
+    Loader --> Info["OSSL_STORE_INFO Objects"]
+    Info --> AppUse["Application Use"]

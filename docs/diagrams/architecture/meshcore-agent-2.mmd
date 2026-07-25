@@ -1,0 +1,7 @@
+flowchart LR
+    Container["MeshAgentHostContainer"] --> Net["HTTP/WebSocket Manager"]
+    Container --> JS["Duktape Context"]
+    Container --> Certs["Certificates"]
+    Container --> DB["SimpleDataStore"]
+    Container --> KVMMod["KVM Subsystem"]
+    Container --> Update["Self Update Logic"]

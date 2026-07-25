@@ -1,0 +1,6 @@
+flowchart TD
+    Input["DER Bytes"] --> Parse["ASN1_get_object()"]
+    Parse --> Item["ASN1_ITEM Descriptor"]
+    Item --> TemplateLoop["Process ASN1_TEMPLATE Entries"]
+    TemplateLoop --> PrimitiveDecode["Primitive Conversion"]
+    PrimitiveDecode --> StructOut["Populated C Structure"]

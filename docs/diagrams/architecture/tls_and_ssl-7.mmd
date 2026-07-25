@@ -1,0 +1,4 @@
+flowchart LR
+    SSL["SSL Operation"] --> Async["ASYNC_JOB"]
+    Async --> WaitCtx["ASYNC_WAIT_CTX"]
+    WaitCtx --> Resume["Resume Handshake or IO"]

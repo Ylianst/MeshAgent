@@ -1,0 +1,13 @@
+flowchart TD
+    Module["ILibMulticastSocket_StateModule"]
+    IPv4["IPv4 Multicast Group"]
+    IPv6["IPv6 Multicast Group"]
+    PerIF["Per-Interface UDP Sockets"]
+    SharedV4["Shared IPv4 Listener"]
+    SharedV6["Shared IPv6 Listener"]
+
+    Module --> IPv4
+    Module --> IPv6
+    IPv4 --> PerIF
+    IPv4 --> SharedV4
+    IPv6 --> SharedV6

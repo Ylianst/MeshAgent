@@ -1,0 +1,6 @@
+flowchart TD
+    Request["HTTP Request"] --> CheckAuth["Authorization Header?"]
+    CheckAuth -->|"No"| Send401["Send 401 + Nonce"]
+    CheckAuth -->|"Yes"| Validate["Recompute MD5 Hash"]
+    Validate -->|"Match"| Allow
+    Validate -->|"Mismatch"| Send401

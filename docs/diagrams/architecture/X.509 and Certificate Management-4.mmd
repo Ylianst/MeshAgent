@@ -1,0 +1,9 @@
+flowchart TD
+    Cert["X509"] --> Verify["X509_STORE_CTX"]
+    Cert --> Extensions
+    Cert --> OCSP
+    Cert --> CMS
+    Cert --> PKCS12
+    Cert --> TS
+    Extensions --> ValidationRules["Policy & Constraints"]
+    Verify --> Trust["Trust Store"]

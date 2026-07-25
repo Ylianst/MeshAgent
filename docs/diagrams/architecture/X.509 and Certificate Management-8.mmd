@@ -1,0 +1,6 @@
+flowchart TD
+    CMS["CMS_ContentInfo"] --> Signers["CMS_SignerInfo"]
+    CMS --> Recipients["CMS_RecipientInfo"]
+    PKCS12["PKCS12"] --> SafeBag["PKCS12_SAFEBAG"]
+    SafeBag --> Cert["X509 Certificate"]
+    SafeBag --> Key["Private Key"]

@@ -1,0 +1,11 @@
+flowchart TD
+    Chain["ILibBaseChain"] --> Links["ILibChain_Link List"]
+    Chain --> Timer["ILibLifeTime Timer"]
+    Chain --> Stash["Base Hashtable"]
+
+    Links --> Pre["PreSelect Handlers"]
+    Links --> Post["PostSelect Handlers"]
+    Links --> Destroy["Destroy Handlers"]
+
+    Pre --> Select["select() / Wait Handles"]
+    Select --> Post

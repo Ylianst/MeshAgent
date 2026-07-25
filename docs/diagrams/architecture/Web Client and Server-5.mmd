@@ -1,0 +1,5 @@
+flowchart LR
+    Request["Incoming HTTP Request"] --> Parse["Parse DirectiveObj"]
+    Parse --> Lookup["VirtualDirectoryTable Lookup"]
+    Lookup -->|"Match"| VDHandler["Virtual Directory Handler"]
+    Lookup -->|"No Match"| DefaultHandler["Session OnReceive"]

@@ -1,0 +1,7 @@
+flowchart LR
+    Data["Plain Data"] --> Hash["Hash"]
+    Hash --> Sign["Private Key Sign"]
+    Sign --> Signature["Signature"]
+
+    Signature --> Verify["Public Key Verify"]
+    Data --> Verify

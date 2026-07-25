@@ -1,0 +1,6 @@
+flowchart TD
+    URI["URI Input"] --> Open["OSSL_STORE_open()"]
+    Open --> Loader["OSSL_STORE_LOADER"]
+    Loader --> Load["OSSL_STORE_load()"]
+    Load --> Info["OSSL_STORE_INFO"]
+    Info --> Extract["Extract Key or Certificate"]

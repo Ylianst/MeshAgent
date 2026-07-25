@@ -1,0 +1,6 @@
+flowchart TD
+    App["Application Code"] --> EVP["EVP Cipher API"]
+    EVP --> CipherImpl["Algorithm Implementation"]
+    CipherImpl --> KeySchedule["Key Schedule Struct"]
+    CipherImpl --> Modes["Block and AEAD Modes"]
+    Modes --> BlockFn["block128_f Function Pointer"]

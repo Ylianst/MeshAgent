@@ -1,0 +1,7 @@
+flowchart TD
+    App["Application Code"] --> X509["X.509 / PKI Modules"]
+    X509 --> ASN1Item["ASN1_ITEM Metadata"]
+    ASN1Item --> Runtime["ASN1_item_d2i / i2d"]
+    Runtime --> Primitive["ASN1_STRING / ASN1_TYPE"]
+    Runtime --> Template["ASN1_TEMPLATE Structures"]
+    Primitive --> DER["DER / BER Encoding"]

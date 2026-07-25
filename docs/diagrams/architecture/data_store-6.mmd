@@ -1,0 +1,7 @@
+flowchart TD
+    CheckDirty["dirtySize >= minimumDirtySize?"] -->|"Yes"| CreateTmp["Create .tmp File"]
+    CreateTmp --> Enumerate["Enumerate Key Table"]
+    Enumerate --> Rewrite["Rewrite Active Records"]
+    Rewrite --> Replace["Replace Original File"]
+    Replace --> Reopen["Reopen Compacted Store"]
+    CheckDirty -->|"No"| Skip["Skip Compaction"]

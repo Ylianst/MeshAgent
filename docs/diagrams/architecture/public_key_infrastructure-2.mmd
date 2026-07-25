@@ -1,0 +1,5 @@
+flowchart TD
+    Msg["Message"] --> Hash["Digest SHA-256"]
+    Hash --> PSS["PSS Encoding"]
+    PSS --> ModExp["Private Key ModExp"]
+    ModExp --> Sig["Signature"]

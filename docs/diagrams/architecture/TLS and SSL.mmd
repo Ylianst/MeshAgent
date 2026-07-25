@@ -1,0 +1,15 @@
+flowchart TD
+    App["Application Layer"] --> SSLObj["SSL Object"]
+    SSLObj --> SSLCTX["SSL Context"]
+    SSLObj --> Session["SSL Session"]
+    SSLObj --> Cipher["SSL Cipher"]
+    SSLObj --> BIO["BIO Transport Layer"]
+
+    SSLCTX --> X509["X509 Certificate Validation"]
+    SSLCTX --> Crypto["Cryptographic Primitives"]
+
+    SSLObj --> Extensions["TLS Extensions"]
+    Extensions --> Tickets["Session Tickets"]
+    Extensions --> ALPN["ALPN"]
+    Extensions --> SRTP["SRTP Profiles"]
+    Extensions --> QUIC["QUIC Integration"]

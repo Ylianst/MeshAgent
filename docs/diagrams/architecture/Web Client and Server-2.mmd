@@ -1,0 +1,9 @@
+flowchart LR
+    Manager["ILibWebClientManager"] --> DataTable["Active Connections"]
+    Manager --> IdleTable["Idle Connections"]
+    Manager --> Backlog["Backlog Queue"]
+    Manager --> SockPool["Async Socket Pool"]
+
+    DataTable --> WCDO["WebClientDataObject"]
+    WCDO --> RequestQueue["Request Queue"]
+    RequestQueue --> WebRequest["ILibWebRequest"]

@@ -1,0 +1,7 @@
+flowchart TD
+    Incoming["Incoming Frame"] --> Parse["Read Module + Flags"]
+    Parse --> VerbosityCheck{"Verbosity Bits Set?"}
+    VerbosityCheck -->|Yes| UpdateSession["Enable/Disable Module"]
+    VerbosityCheck -->|No| CommandCheck{"Module Command?"}
+    CommandCheck -->|Yes| InvokeSink["Invoke Command Sink"]
+    CommandCheck -->|No| Ignore["Ignore"]

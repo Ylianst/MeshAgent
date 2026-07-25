@@ -1,0 +1,9 @@
+flowchart TD
+    Config["Config"] --> Engine["Engine"]
+    Engine --> RAND["RAND"]
+    RAND --> Crypto["Crypto"]
+    Crypto --> Error["Error"]
+    Store["Store"] --> UI["UI"]
+    UI --> Error
+    Crypto --> Memory["Memory"]
+    Memory --> Threading["Threading"]

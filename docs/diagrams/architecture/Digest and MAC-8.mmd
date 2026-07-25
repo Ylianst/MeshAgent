@@ -1,0 +1,6 @@
+flowchart TD
+    Applications["Applications / MeshAgent"] --> TLSLayer["TLS and SSL"]
+    TLSLayer --> PKILayer["Public Key Infrastructure"]
+    TLSLayer --> DigestMacLayer["Digest And Mac"]
+    PKILayer --> DigestMacLayer
+    DigestMacLayer --> SymmetricLayer["Symmetric Ciphers"]

@@ -1,0 +1,8 @@
+flowchart TD
+    Build["Build Configuration"] --> TLS{"MICROSTACK_NOTLS?"}
+
+    TLS -->|No| OpenSSL["Use OpenSSL Backend"]
+    TLS -->|Yes| Windows{"WIN32?"}
+
+    Windows -->|Yes| BCRYPT["Use BCRYPT_CTX"]
+    Windows -->|No| NoSSL["Use Internal SHA/MD5"]

@@ -1,0 +1,7 @@
+flowchart LR
+    App["Application"] --> SSLCTX["SSL_CTX"]
+    SSLCTX --> SSLConn["SSL"]
+    SSLConn --> Handshake["TLS Handshake"]
+    Handshake --> CipherSelect["Cipher Negotiation"]
+    CipherSelect --> Session["Session Established"]
+    Session --> SecureIO["Encrypted Data Exchange"]

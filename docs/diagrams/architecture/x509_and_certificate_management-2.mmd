@@ -1,0 +1,7 @@
+flowchart LR
+    Cert["X509"] --> Cinf["X509_CINF"]
+    Cinf --> Issuer["Issuer Name"]
+    Cinf --> Subject["Subject Name"]
+    Cinf --> Validity["Validity notBefore and notAfter"]
+    Cinf --> PubKey["Subject Public Key"]
+    Cinf --> Exts["X509 Extensions"]

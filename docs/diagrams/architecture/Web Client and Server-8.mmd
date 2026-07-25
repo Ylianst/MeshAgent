@@ -1,0 +1,6 @@
+flowchart LR
+    Client["ILibWebClient"] --> SSLCTX["SSL_CTX"]
+    SSLCTX --> OpenSSL["OpenSSL Engine"]
+
+    Server["ILibWebServer"] --> SSLCTX2["Server SSL_CTX"]
+    SSLCTX2 --> OpenSSL

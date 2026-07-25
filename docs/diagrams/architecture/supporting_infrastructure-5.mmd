@@ -1,0 +1,6 @@
+flowchart LR
+    RAND_bytes["RAND_bytes()"] --> Method["RAND_METHOD"]
+    Method --> Seed["seed()"]
+    Method --> Bytes["bytes()"]
+    Method --> Add["add()"]
+    Method --> Status["status()"]

@@ -1,0 +1,5 @@
+flowchart LR
+    RGB["RGB Frame Buffer"] --> DCT["Forward DCT"]
+    DCT --> Quant["Quantization"]
+    Quant --> Huff["Huffman Encoding"]
+    Huff --> JPEG["JPEG Tile Output"]

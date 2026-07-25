@@ -1,0 +1,4 @@
+flowchart TD
+    Thread["Thread"] --> Lock["CRYPTO_RWLOCK"]
+    Thread --> TLS["Thread Local Storage"]
+    TLS --> ErrorQueue["ERR_STATE"]

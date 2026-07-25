@@ -1,0 +1,19 @@
+flowchart TD
+    App["OpenSSL High Level Modules"] --> X509["X.509 / CMS / PKCS"]
+    X509 --> Engine["ASN.1 Engine"]
+
+    Engine --> Primitive["Primitive Types"]
+    Engine --> Templates["Template System"]
+    Engine --> Codec["DER/BER Codec"]
+    Engine --> Print["Print and Stream Layer"]
+
+    Primitive --> String["ASN1_STRING"]
+    Primitive --> Integer["ASN1_INTEGER"]
+    Primitive --> Object["ASN1_OBJECT"]
+
+    Templates --> Item["ASN1_ITEM"]
+    Templates --> Template["ASN1_TEMPLATE"]
+    Templates --> ADB["ASN1_ADB"]
+
+    Codec --> D2I["d2i Decode"]
+    Codec --> I2D["i2d Encode"]

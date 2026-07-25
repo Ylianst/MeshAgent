@@ -1,0 +1,12 @@
+flowchart TD
+    ASN1["ASN.1 Engine"] --> X509Core["X.509 Core Structures"]
+    X509Core --> Extensions["X.509v3 Extensions"]
+    X509Core --> CRL["CRL Management"]
+    X509Core --> CSR["Certificate Requests"]
+    X509Core --> Trust["Trust and Purpose Engine"]
+    X509Core --> OCSP["OCSP Validation"]
+    X509Core --> CMS["CMS / PKCS7 / PKCS12"]
+    X509Core --> TS["Time Stamp Protocol"]
+    Trust --> TLS["TLS and SSL Layer"]
+    Extensions --> TLS
+    OCSP --> TLS

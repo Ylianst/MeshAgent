@@ -1,0 +1,6 @@
+flowchart TD
+    Event["WinEvent: Cursor Change"] --> GetInfo["GetCursorInfo()"]
+    GetInfo --> Hash["KVM_GetCursorHash()"]
+    Hash --> Map["KVM_CursorHashToMSG()"]
+    Map --> Queue["QueueUserAPC()"]
+    Queue --> Pending["ILibQueue Pending Packets"]

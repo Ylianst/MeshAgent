@@ -1,0 +1,3 @@
+flowchart LR
+    Broadcast["ILibMulticastSocket_Broadcast(data)"] --> IPv6Send["Send on IPv6 Socket"]
+    Broadcast --> IPv4Send["Send on each IPv4 Interface Socket"]

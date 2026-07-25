@@ -1,0 +1,7 @@
+flowchart TD
+    TypeSystem["Type System"] --> BN["BIGNUM Layer"]
+    BN --> Asym["RSA / DSA / DH / EC"]
+    Asym --> EVP["EVP"]
+    EVP --> TLS["TLS"]
+    EVP --> X509["X509"]
+    X509 --> PKI["PKI Validation"]

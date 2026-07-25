@@ -1,0 +1,8 @@
+flowchart TD
+    Start["Open Data Store"] --> Scan["Scan File Sequentially"]
+    Scan --> Validate["Validate SHA384"]
+    Validate -->|"Valid"| Update["Update Key Table"]
+    Validate -->|"Invalid"| CheckLegacy["Try Legacy 32/64"]
+    CheckLegacy -->|"Recovered"| Update
+    CheckLegacy -->|"Fail"| Corrupt["Mark Corrupt / Truncate"]
+    Update --> Next["Next Record"]

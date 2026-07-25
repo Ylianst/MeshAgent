@@ -1,0 +1,10 @@
+flowchart TD
+    Accept["Incoming TCP Session"] --> Parse["Parse HTTP Header"]
+    Parse --> MethodCheck{"GET or POST?"}
+
+    MethodCheck -->|GET| HandleGET["Invoke OnGetHandler"]
+    MethodCheck -->|POST| HandlePOST["Invoke OnPostHandler"]
+    MethodCheck -->|Other| Error["Return 500 Error"]
+
+    HandleGET --> Respond["Stream HTTP Response"]
+    HandlePOST --> Respond

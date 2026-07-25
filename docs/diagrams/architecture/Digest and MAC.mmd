@@ -1,0 +1,25 @@
+flowchart TD
+    App["Application / TLS / PKI"] --> DigestAPI["Digest APIs"]
+    App --> MacAPI["MAC APIs"]
+
+    subgraph HashAlgorithms["Hash Algorithms"]
+        MD2["MD2"]
+        MD4["MD4"]
+        MD5["MD5"]
+        MDC2["MDC2"]
+        SHA1["SHA-1"]
+        SHA256["SHA-224/256"]
+        SHA512["SHA-384/512"]
+        RIPEMD["RIPEMD-160"]
+        WHIRLPOOL["Whirlpool"]
+    end
+
+    subgraph MacAlgorithms["MAC Algorithms"]
+        HMAC["HMAC"]
+        CMAC["CMAC"]
+    end
+
+    DigestAPI --> HashAlgorithms
+    MacAPI --> MacAlgorithms
+
+    MacAlgorithms --> Symmetric["Symmetric Ciphers"]

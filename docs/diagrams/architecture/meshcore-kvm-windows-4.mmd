@@ -1,0 +1,10 @@
+sequenceDiagram
+    participant Master
+    participant Slave
+    participant Client
+
+    Master->>Slave: Spawn Process
+    Client->>Master: KVM Input Command
+    Master->>Slave: Forward Input
+    Slave->>Master: JPEG Tile Data
+    Master->>Client: Forward Tile

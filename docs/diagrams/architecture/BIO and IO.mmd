@@ -1,0 +1,5 @@
+flowchart TD
+    App["Application"] --> SSL["SSL/TLS Layer"]
+    SSL --> Filter["Filter BIOs\nBase64, Cipher, Buffer"]
+    Filter --> Transport["Transport BIO\nSocket, File, Memory"]
+    Transport --> OS["Operating System"]

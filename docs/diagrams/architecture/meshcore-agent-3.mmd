@@ -1,0 +1,9 @@
+sequenceDiagram
+    participant Agent
+    participant Server
+
+    Agent->>Server: WebSocket Upgrade
+    Server->>Agent: AuthRequest (ServerHash + Nonce)
+    Agent->>Server: AuthVerify (Cert + Signature)
+    Server->>Agent: AuthConfirm
+    Agent->>Server: AuthInfo (Capabilities, MeshID, Hostname)

@@ -1,0 +1,4 @@
+flowchart TD
+    Init["EVP_EncryptInit_ex"] --> Update["EVP_EncryptUpdate"]
+    Update --> Final["EVP_EncryptFinal_ex"]
+    Final --> Done["Ciphertext Ready"]

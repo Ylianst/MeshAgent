@@ -1,0 +1,6 @@
+flowchart TD
+    LoggerCommand["Logger Command"] --> CheckType{"FileTransport?"}
+    CheckType -->|Enable| Toggle["Enable/Disable Logging"]
+    CheckType -->|Read| ReadFile["Stream Log Entries"]
+    CheckType -->|Reset File| ResetFile["Clear File"]
+    CheckType -->|Reset Flags| ResetFlags["Update Module Mask"]

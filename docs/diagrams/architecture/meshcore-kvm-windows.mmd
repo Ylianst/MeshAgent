@@ -1,0 +1,20 @@
+flowchart TD
+    Client["Remote KVM Client"] -->|"KVM Commands"| Relay["KVM Relay Layer"]
+    Relay --> Server["KVM Server Core"]
+
+    subgraph input_layer["Input Layer"]
+        InputHandler["kvm_server_inputdata()"] --> MouseAction["MouseAction()"]
+        InputHandler --> KeyAction["KeyAction()"]
+        InputHandler --> TouchAction["TouchAction1() / TouchAction2()"]
+    end
+
+    subgraph capture_layer["Capture Layer"]
+        Server --> DesktopBuffer["get_desktop_buffer()"]
+        DesktopBuffer --> TileEngine["get_tile_at()"]
+        TileEngine --> WriteHandler["ILibKVM_WriteHandler"]
+    end
+
+    subgraph cursor_layer["Cursor & Event Hooks"]
+        WinEventHook["SetWinEventHook"] --> APCQueue["ILibQueue Pending Packets"]
+        APCQueue --> Server
+    end

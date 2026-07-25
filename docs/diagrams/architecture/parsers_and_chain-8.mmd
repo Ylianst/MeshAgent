@@ -1,0 +1,5 @@
+flowchart TD
+    Transport["ILibTransport"] --> Send["SendPtr"]
+    Transport --> Close["ClosePtr"]
+    Transport --> Pending["PendingBytesPtr"]
+    Transport --> SendOK["SendOkPtr"]

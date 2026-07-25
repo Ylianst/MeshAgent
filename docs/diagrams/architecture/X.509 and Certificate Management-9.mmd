@@ -1,0 +1,5 @@
+flowchart TD
+    TSReq["TS_REQ"] --> TSA["Timestamp Authority"]
+    TSA --> TSResp["TS_RESP"]
+    TSResp --> Verify["TS_VERIFY_CTX"]
+    Verify --> CertCheck["X509 Validation"]

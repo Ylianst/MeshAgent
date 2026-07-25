@@ -1,0 +1,13 @@
+flowchart TD
+    App["Application / TLS / X.509"] --> EVP["EVP_PKEY Abstraction"]
+    EVP --> RSA["RSA"]
+    EVP --> DSA["DSA"]
+    EVP --> EC["Elliptic Curve"]
+    EVP --> DH["Diffie-Hellman"]
+    EVP --> SRP["SRP"]
+
+    RSA --> BN["BIGNUM Arithmetic"]
+    DSA --> BN
+    EC --> BN
+    DH --> BN
+    SRP --> BN

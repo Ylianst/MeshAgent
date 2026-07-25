@@ -1,0 +1,6 @@
+flowchart TD
+    Netlink["Netlink Socket"] --> PreSelect["Register FD in readset"]
+    PreSelect --> Select["select()"]
+    Select --> PostSelect["PostSelect: recv()"]
+    PostSelect --> Parse["Parse RTM_NEWADDR / RTM_DELADDR"]
+    Parse --> Callback["onUpdate Handler"]

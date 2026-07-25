@@ -1,0 +1,10 @@
+flowchart TD
+    Start["Initialize"] --> SetupRes["Set Resolution"]
+    SetupRes --> Loop["Main Loop"]
+
+    Loop --> CheckDesk["CheckDesktopSwitch()"]
+    CheckDesk --> Capture["get_desktop_buffer()"]
+    Capture --> Tiles["Process Tiles"]
+    Tiles --> Send["writeHandler()"]
+    Send --> Sleep["Frame Delay"]
+    Sleep --> Loop

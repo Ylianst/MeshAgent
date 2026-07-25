@@ -1,0 +1,5 @@
+flowchart TD
+    StructIn["C Structure"] --> ItemMeta["ASN1_ITEM"]
+    ItemMeta --> FieldWalk["Walk Templates"]
+    FieldWalk --> EncodePrimitive["i2d Functions"]
+    EncodePrimitive --> Output["DER Bytes"]

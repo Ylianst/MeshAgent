@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Module as Microstack Module
+    participant Logger as Remote Logging
+    participant Sessions as Session Table
+    participant Output as Output Sink
+
+    Module->>Logger: ILibRemoteLogging_printf()
+    Logger->>Logger: Add timestamp
+    Logger->>Sessions: Check module enabled
+    Sessions-->>Logger: Allowed sessions
+    Logger->>Output: Send formatted frame

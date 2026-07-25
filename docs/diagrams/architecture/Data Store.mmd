@@ -1,0 +1,17 @@
+flowchart TD
+    App["Application / Agent"] --> API["ILibSimpleDataStore API"]
+
+    subgraph Memory["In-Memory Structures"]
+        Root["ILibSimpleDataStore_Root"]
+        KeyTable["Key Table (Hashtable)"]
+        CacheTable["Cache Table (Optional)"]
+    end
+
+    subgraph FileLayer["Persistent File (.db)"]
+        Log["Append-Only Record Log"]
+    end
+
+    API --> Root
+    Root --> KeyTable
+    Root --> CacheTable
+    Root --> Log

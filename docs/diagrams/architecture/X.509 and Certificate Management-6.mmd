@@ -1,0 +1,4 @@
+flowchart LR
+    CRL["X509_CRL"] --> CRLInfo["X509_CRL_INFO"]
+    CRLInfo --> RevokedList["STACK_OF(X509_REVOKED)"]
+    RevokedList --> Serial["Revoked Serial Number"]

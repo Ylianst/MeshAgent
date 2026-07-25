@@ -1,0 +1,4 @@
+flowchart TD
+    AppRand["RAND_bytes"] --> DRBG["EVP_RAND_CTX"]
+    DRBG --> Provider["Provider Random Implementation"]
+    Provider --> Entropy["OS Entropy Source"]

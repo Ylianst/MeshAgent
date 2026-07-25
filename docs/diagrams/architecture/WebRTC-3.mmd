@@ -1,0 +1,6 @@
+stateDiagram-v2
+    [*] --> Setup
+    Setup --> Handshake
+    Handshake --> Connected
+    Connected --> Disconnecting
+    Disconnecting --> [*]

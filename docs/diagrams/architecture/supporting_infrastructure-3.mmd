@@ -1,0 +1,5 @@
+flowchart TD
+    Component["OpenSSL Component"] --> Put["ERR_put_error()"]
+    Put --> State["Thread ERR_STATE"]
+    State --> Buffer["Error Ring Buffer"]
+    Buffer --> App["Application Reads Error"]

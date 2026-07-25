@@ -1,0 +1,4 @@
+flowchart TD
+    Caller["Application"] --> Ctrl["BIO_ctrl()"]
+    Ctrl --> Method["BIO_METHOD ctrl()"]
+    Method --> Action["Transport or Filter Action"]

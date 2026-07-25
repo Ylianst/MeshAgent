@@ -1,0 +1,10 @@
+sequenceDiagram
+    participant OS
+    participant Server
+    participant AsyncSocket
+    participant App
+
+    OS->>Server: Readable Listen Socket
+    Server->>OS: accept()
+    Server->>AsyncSocket: UseThisSocket()
+    Server->>App: OnConnect()

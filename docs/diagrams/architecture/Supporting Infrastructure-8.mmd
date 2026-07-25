@@ -1,0 +1,4 @@
+flowchart TD
+    Alloc["OPENSSL_malloc"] --> CoreAlloc["CRYPTO_malloc"]
+    CoreAlloc --> Secure["Optional Secure Heap"]
+    Secure --> Free["OPENSSL_free"]

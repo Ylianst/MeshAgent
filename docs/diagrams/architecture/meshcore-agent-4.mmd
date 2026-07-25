@@ -1,0 +1,4 @@
+flowchart LR
+    Server -->|WebRTC/DataChannel| AgentStream["DuplexStream"]
+    AgentStream --> KVMCore["KVM Engine"]
+    KVMCore --> OS["OS Graphics/Input APIs"]

@@ -1,0 +1,9 @@
+flowchart TD
+    Start["MeshAgent_Start()"] --> Init["Initialize DB + Certs"]
+    Init --> JSInit["Initialize Duktape"]
+    JSInit --> Connect["MeshServer_Connect()"]
+    Connect --> Authenticated{Authenticated?}
+    Authenticated -->|Yes| CoreRun["Run CoreModule.js"]
+    CoreRun --> Runtime["Event Loop"]
+    Runtime --> UpdateCheck["Update / Commands / KVM"]
+    UpdateCheck --> Runtime

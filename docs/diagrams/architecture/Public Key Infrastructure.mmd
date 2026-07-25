@@ -1,0 +1,33 @@
+flowchart TD
+    subgraph HighLevel["High-Level Crypto APIs"]
+        EVP["EVP_PKEY"]
+        SIG["EVP Signature APIs"]
+        KEX["EVP Key Exchange APIs"]
+    end
+
+    subgraph PKICore["Public Key Infrastructure Core"]
+        RSA["RSA (rsa_st)"]
+        DSA["DSA (dsa_st)"]
+        EC["EC_KEY (ec_key_st)"]
+        DH["DH (dh_st)"]
+        SRP["SRP Structures"]
+    end
+
+    subgraph Params["Signature & Parameter Structures"]
+        PSS["RSA_PSS_PARAMS"]
+        DSASIG["DSA_SIG"]
+        ECDSASIG["ECDSA_SIG"]
+        ECPARAM["ECPARAMETERS / ECPKPARAMETERS"]
+    end
+
+    EVP --> RSA
+    EVP --> DSA
+    EVP --> EC
+    EVP --> DH
+
+    RSA --> PSS
+    DSA --> DSASIG
+    EC --> ECDSASIG
+    EC --> ECPARAM
+
+    SRP --> DH

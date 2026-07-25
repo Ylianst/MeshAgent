@@ -1,0 +1,6 @@
+flowchart TD
+    Input["Input Data"] --> DecoderCtx["OSSL_DECODER_CTX"]
+    DecoderCtx --> Construct["Construct Callback"]
+    Construct --> Object["Internal Object"]
+    Object --> EncoderCtx["OSSL_ENCODER_CTX"]
+    EncoderCtx --> Output["Output Data"]

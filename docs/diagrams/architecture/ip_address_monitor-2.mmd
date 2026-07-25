@@ -1,0 +1,5 @@
+flowchart TD
+    Create["ILibIPAddressMonitor_Create(chain, handler, user)"] --> Register["Register with Chain"]
+    Register --> Monitor["Monitor Interface Changes"]
+    Monitor --> Change["Interface Added/Removed"]
+    Change --> Callback["handler(sender, user)"]

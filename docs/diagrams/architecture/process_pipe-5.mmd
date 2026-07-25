@@ -1,0 +1,5 @@
+flowchart TD
+    Pause["ILibProcessPipe_Pipe_Pause()"] --> SetFlag["PAUSED = 1"]
+    Resume["ILibProcessPipe_Pipe_Resume()"] --> ClearFlag["PAUSED = 0"]
+    ClearFlag --> ProcessBuffered["Process Remaining Buffer"]
+    ProcessBuffered --> Reattach["Re-register with Chain"]

@@ -1,0 +1,5 @@
+flowchart TD
+    Raise["ERR_raise"] --> Queue["ERR_STATE Queue"]
+    Queue --> Peek["ERR_peek or ERR_get"]
+    Peek --> Stringify["ERR_error_string"]
+    Stringify --> Output["BIO or FILE Output"]

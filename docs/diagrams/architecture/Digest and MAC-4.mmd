@@ -1,0 +1,5 @@
+flowchart TD
+    Input["Message Blocks"] --> Schedule["Message Schedule"]
+    Schedule --> Rounds["Compression Rounds"]
+    Rounds --> State["Updated State h[0..7]"]
+    State --> OutputDigest["Final Digest"]

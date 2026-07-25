@@ -1,0 +1,5 @@
+flowchart TD
+    App["EVP_EncryptInit_ex"] --> Ctx["EVP_CIPHER_CTX"]
+    Ctx --> CipherSel["EVP_aes_256_cbc"]
+    CipherSel --> AESKey["AES_KEY"]
+    AESKey --> CBCMode["CBC Mode"]

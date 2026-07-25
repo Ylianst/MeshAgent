@@ -1,0 +1,20 @@
+flowchart TD
+    App["Microstack Components"] --> CryptoAPI["Cryptography API"]
+
+    subgraph BackendSelection["Backend Selection"]
+        OpenSSL["OpenSSL Backend"]
+        Bcrypt["Windows BCRYPT Backend"]
+        NoSSL["Internal SHA/MD5 Backend"]
+    end
+
+    CryptoAPI --> OpenSSL
+    CryptoAPI --> Bcrypt
+    CryptoAPI --> NoSSL
+
+    OpenSSL --> CertOps["X509 and EVP Operations"]
+    OpenSSL --> TLS["SSL/TLS Integration"]
+
+    Bcrypt --> WinCNG["CNG Hash Providers"]
+
+    NoSSL --> SHAImpl["SHA1/SHA2 Implementations"]
+    NoSSL --> MD5Impl["MD5 Implementation"]

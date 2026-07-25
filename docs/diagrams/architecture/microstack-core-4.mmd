@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant A as Local Peer
+    participant STUN as STUN/TURN Server
+    participant B as Remote Peer
+
+    A->>A: ILibStun_GenerateIceOffer
+    A->>B: ICE Offer Block (out-of-band)
+    B->>B: ILibStun_SetIceOffer
+    B->>A: ICE Answer Block (out-of-band)
+    A->>STUN: STUN Binding Request
+    STUN->>A: STUN Binding Response (public IP)
+    A->>B: ICE Connectivity Check (STUN)
+    B->>A: ICE Connectivity Check Response
+    A->>B: DTLS ClientHello
+    B->>A: DTLS ServerHello + Certificate
+    A->>B: DTLS Finished
+    B->>A: DTLS Finished
+    A->>B: SCTP INIT
+    B->>A: SCTP INIT-ACK + Cookie
+    A->>B: SCTP COOKIE-ECHO
+    B->>A: SCTP COOKIE-ACK
+    A->>B: WebRTC Data Channel OPEN
+    B->>A: WebRTC Data Channel ACK

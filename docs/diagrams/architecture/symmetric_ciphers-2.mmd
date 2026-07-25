@@ -1,0 +1,5 @@
+flowchart LR
+    Plain["Plaintext"] --> Mode["CRYPTO_cbc128_encrypt"]
+    Mode --> Block["block128_f"]
+    Block --> AES["AES_encrypt"]
+    AES --> Cipher["Ciphertext"]

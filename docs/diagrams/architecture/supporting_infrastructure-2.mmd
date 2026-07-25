@@ -1,0 +1,7 @@
+flowchart LR
+    File["Configuration File"] --> Parser["CONF_METHOD"]
+    Parser --> Conf["CONF"]
+    Conf --> Hash["LHASH OF CONF_VALUE"]
+    Hash --> Section["Section Entries"]
+    Section --> Module["CONF_MODULE"]
+    Module --> Instance["CONF_IMODULE"]

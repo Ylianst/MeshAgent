@@ -1,0 +1,6 @@
+flowchart TD
+    Start["Spawn Request"] --> CreatePipes["Create stdin/stdout/stderr Pipes"]
+    CreatePipes --> ForkOrCreate["fork/exec or CreateProcess"]
+    ForkOrCreate --> Parent["Parent Process"]
+    Parent --> AttachHandlers["Attach Read/Exit Handlers"]
+    AttachHandlers --> Running["Process Running"]

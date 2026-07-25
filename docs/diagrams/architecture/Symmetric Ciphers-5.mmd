@@ -1,0 +1,4 @@
+flowchart LR
+    TLSRecord["TLS Record"] --> AEAD["EVP AES GCM"]
+    AEAD --> Ciphertext["Encrypted Record"]
+    AEAD --> AuthTag["16-byte Tag"]

@@ -1,0 +1,6 @@
+flowchart TD
+    Request["Module Requests Memory"] --> MemMgr["Memory Manager"]
+    MemMgr --> Small["Small Object Pool"]
+    MemMgr --> Large["Large Object Pool"]
+    MemMgr --> Virtual["Virtual Arrays"]
+    Virtual --> Backing["Backing Store File"]

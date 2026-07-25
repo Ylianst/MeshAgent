@@ -1,0 +1,7 @@
+flowchart TD
+    Start["Connection Created"] --> CH["ClientHello"]
+    CH --> SH["ServerHello"]
+    SH --> Cert["Certificate"]
+    Cert --> KeyEx["Key Exchange"]
+    KeyEx --> Fin["Finished"]
+    Fin --> OK["TLS_ST_OK"]

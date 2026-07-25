@@ -1,0 +1,13 @@
+flowchart TD
+    CryptoCore["Cryptographic Algorithms"] --> Infra["Supporting Infrastructure"]
+    TLS["TLS and SSL"] --> Infra
+    PKI["X.509 and PKI"] --> Infra
+    Store["Object Store"] --> Infra
+    UI["User Interface"] --> Infra
+
+    Infra --> Config["Configuration System"]
+    Infra --> Error["Error Handling"]
+    Infra --> Engine["Engine Framework"]
+    Infra --> Memory["Memory and Threading"]
+    Infra --> Registry["Object Registry"]
+    Infra --> Containers["Core Containers"]

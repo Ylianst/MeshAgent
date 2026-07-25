@@ -1,0 +1,8 @@
+flowchart TD
+    FDReady["FD/Event Ready"] --> Read["Read OS Pipe"]
+    Read --> Buffer["Append to Internal Buffer"]
+    Buffer --> Handler["Invoke Generic Read Handler"]
+    Handler --> Consumed{"Bytes Consumed?"}
+    Consumed -->|All| Reset["Reset Buffer"]
+    Consumed -->|Partial| Shift["Adjust Offsets"]
+    Consumed -->|None| Compact["memmove to Start"]

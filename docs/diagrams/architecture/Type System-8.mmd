@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant App as Application
+    participant SSL as SSL
+    participant X509 as X509
+    participant Store as X509_STORE_CTX
+    participant EVP as EVP Layer
+
+    App->>SSL: initiate handshake
+    SSL->>X509: parse certificate
+    X509->>Store: build chain
+    Store->>EVP: verify signature
+    EVP-->>Store: verification result
+    Store-->>SSL: trust decision
+    SSL-->>App: secure session established

@@ -1,0 +1,7 @@
+flowchart TD
+    Create["ILibMulticastSocket_Create"] --> GetInterfaces["Get IPv4/IPv6 Interfaces"]
+    GetInterfaces --> JoinGroups["Join Multicast Groups"]
+    JoinGroups --> Active["Active Multicast Listener"]
+    Active --> Change["Interface Change Detected"]
+    Change --> Reset["ILibMulticastSocket_ResetMulticast"]
+    Reset --> GetInterfaces

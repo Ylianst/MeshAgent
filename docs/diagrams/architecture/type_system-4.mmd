@@ -1,0 +1,7 @@
+flowchart TD
+    EVP_PKEY["EVP_PKEY"] --> RSA["RSA"]
+    EVP_PKEY --> DSA["DSA"]
+    EVP_PKEY --> DH["DH"]
+    EVP_PKEY --> EC["EC_KEY"]
+    EVP_CIPHER_CTX["EVP_CIPHER_CTX"] --> CipherImpl["Cipher Implementation"]
+    EVP_MD_CTX["EVP_MD_CTX"] --> DigestImpl["Digest Implementation"]

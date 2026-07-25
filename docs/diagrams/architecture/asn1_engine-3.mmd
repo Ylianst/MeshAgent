@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Caller
+    participant Decoder
+    participant Item
+    participant Template
+
+    Caller->>Decoder: ASN1_item_d2i(input, ASN1_ITEM)
+    Decoder->>Item: Read type descriptor
+    Item->>Template: Iterate fields
+    Template->>Decoder: Decode each field
+    Decoder-->>Caller: Populated C structure

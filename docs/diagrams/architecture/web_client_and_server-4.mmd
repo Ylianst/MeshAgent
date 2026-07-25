@@ -1,0 +1,5 @@
+flowchart TD
+    Server["ILibWebServer_StateModule"] --> ServerSocket["AsyncServerSocket"]
+    ServerSocket --> Session["ILibWebServer_Session"]
+    Session --> WebClientCore["Embedded ILibWebClient"]
+    WebClientCore --> HTTPParser["PacketHeader Parser"]

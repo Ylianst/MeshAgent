@@ -1,0 +1,34 @@
+flowchart TD
+    Chain["ILibChain (Event Loop)"]
+
+    subgraph Transport["Transport Layer"]
+        TCP["ILibAsyncSocket\n(TCP Client)"]
+        Server["ILibAsyncServerSocket\n(TCP Server)"]
+        UDP["ILibAsyncUDPSocket\n(UDP)"]
+        Multicast["ILibMulticastSocket\n(Multicast)"]
+    end
+
+    subgraph Application["Application Layer"]
+        WebClient["ILibWebClient\n(HTTP Client)"]
+        WebServer["ILibWebServer\n(HTTP Server)"]
+        WebRTC["ILibWebRTC\n(WebRTC/DTLS/SCTP)"]
+        WrapperWebRTC["ILibWrapperWebRTC\n(WebRTC Abstraction)"]
+    end
+
+    subgraph Support["Support Layer"]
+        Parsers["ILibParsers\n(Chain, Data Structures, XML, HTTP)"]
+        Crypto["ILibCrypto\n(TLS, Certs, Hashing)"]
+        DataStore["ILibSimpleDataStore\n(Key-Value Store)"]
+        RemoteLog["ILibRemoteLogging\n(Structured Logging)"]
+        ProcessPipe["ILibProcessPipe\n(Child Processes)"]
+        IPMonitor["ILibIPAddressMonitor\n(Interface Changes)"]
+    end
+
+    Chain --> Transport
+    Chain --> Application
+    Chain --> Support
+    Transport --> Application
+    Parsers --> Transport
+    Parsers --> Application
+    Crypto --> Application
+    Crypto --> WebRTC

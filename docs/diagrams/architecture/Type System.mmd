@@ -1,0 +1,20 @@
+flowchart TD
+    TypeSystem["Type System"]
+
+    ASN1["ASN.1 Engine"]
+    Symmetric["Symmetric Ciphers"]
+    Digest["Digest and MAC"]
+    PKI["Public Key Infrastructure"]
+    X509["X.509 and Certificate Management"]
+    TLS["TLS and SSL"]
+    BIO["BIO and IO"]
+    Support["Supporting Infrastructure"]
+
+    ASN1 --> TypeSystem
+    Symmetric --> TypeSystem
+    Digest --> TypeSystem
+    PKI --> TypeSystem
+    X509 --> TypeSystem
+    TLS --> TypeSystem
+    BIO --> TypeSystem
+    Support --> TypeSystem

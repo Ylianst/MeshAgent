@@ -1,0 +1,8 @@
+sequenceDiagram
+    participant Client as Remote Client
+    participant Server as ILibWebServer
+
+    Client->>Server: HTTP GET + Upgrade: websocket
+    Server->>Server: Compute SHA1(key + GUID)
+    Server-->>Client: 101 Switching Protocols
+    Note over Server: Switch transport to WebSocket mode

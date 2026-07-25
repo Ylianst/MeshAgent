@@ -1,0 +1,7 @@
+flowchart LR
+    CSR["X509_REQ"] -->|"Sign"| Cert["X509 Certificate"]
+    Cert -->|"Add Extensions"| CertV3["X.509 v3"]
+    CertV3 -->|"Distribute"| Client
+    CertV3 -->|"Revoke"| CRL["X509_CRL"]
+    CertV3 -->|"Status Check"| OCSPReq["OCSP_REQUEST"]
+    OCSPReq --> OCSPResp["OCSP_RESPONSE"]

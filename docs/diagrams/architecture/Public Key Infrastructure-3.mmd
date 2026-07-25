@@ -1,0 +1,6 @@
+flowchart TD
+    HASH["Message Digest"] --> KGEN["Ephemeral k Generation"]
+    KGEN --> R["Compute r"]
+    KGEN --> S["Compute s"]
+    R --> SIGDSA["DSA_SIG (r, s)"]
+    S --> SIGDSA

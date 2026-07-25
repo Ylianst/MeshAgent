@@ -1,0 +1,7 @@
+flowchart LR
+    APriv["Private a"] --> APub["A = g^a mod p"]
+    BPriv["Private b"] --> BPub["B = g^b mod p"]
+    APub --> Shared1["Compute B^a"]
+    BPub --> Shared2["Compute A^b"]
+    Shared1 --> Secret["Shared Secret"]
+    Shared2 --> Secret

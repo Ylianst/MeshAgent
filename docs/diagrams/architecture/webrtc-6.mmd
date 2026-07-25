@@ -1,0 +1,7 @@
+sequenceDiagram
+    participant Local as Local Peer
+    participant ICE as ICE Engine
+
+    Local->>ICE: ILibStun_GenerateIceOffer()
+    ICE-->>Local: OfferBlock (binary)
+    Local->>Remote: SDP Offer (converted)

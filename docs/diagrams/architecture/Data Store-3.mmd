@@ -1,0 +1,5 @@
+flowchart TD
+    Put["Put(key, value)"] --> Hash["Compute SHA384"]
+    Hash --> Append["Append Record to File"]
+    Append --> UpdateTable["Update Key Table"]
+    UpdateTable --> CheckSize["Check Size Warning"]

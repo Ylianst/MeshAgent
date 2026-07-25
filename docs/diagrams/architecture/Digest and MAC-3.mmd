@@ -1,0 +1,4 @@
+flowchart TD
+    Data["Input Block (64 bytes)"] --> Transform["Compression Function"]
+    Transform --> Registers["A B C D"]
+    Registers --> Digest["128-bit Digest"]

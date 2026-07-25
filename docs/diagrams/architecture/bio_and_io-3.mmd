@@ -1,0 +1,4 @@
+flowchart LR
+    App["Application Write"] --> Base64["BIO_f_base64"]
+    Base64 --> Cipher["BIO_f_cipher"]
+    Cipher --> Socket["BIO_s_socket"]

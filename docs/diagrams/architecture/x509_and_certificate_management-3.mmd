@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Client
+    participant CSR as X509_REQ
+    participant CA
+
+    Client->>CSR: Generate key pair
+    Client->>CSR: Populate subject and public key
+    Client->>CSR: Sign request
+    CSR->>CA: Submit CSR
+    CA->>CA: Validate signature
+    CA->>CA: Issue X509 certificate

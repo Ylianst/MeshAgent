@@ -1,0 +1,5 @@
+flowchart TD
+    PeerCert["Peer Certificate"] --> Chain["Certificate Chain"]
+    Chain --> Store["X509_STORE"]
+    Store --> Verify["Verification Callback"]
+    Verify --> Result["Handshake Continue or Fail"]

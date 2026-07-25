@@ -1,0 +1,9 @@
+flowchart TD
+    Config --> Engine
+    Engine --> RAND
+    RAND --> Crypto
+    Crypto --> Error
+    Store --> UI
+    UI --> Error
+    Crypto --> Memory
+    Memory --> Threading

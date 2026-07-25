@@ -1,0 +1,22 @@
+flowchart LR
+    subgraph Applications["Applications"]
+        TLS["TLS and SSL"]
+        PKI["Public Key Infrastructure"]
+        X509["X.509 and Certificate Management"]
+    end
+
+    subgraph DigestMac["Digest and MAC"]
+        Hash["Hash Algorithms"]
+        Hmac["HMAC"]
+        Cmac["CMAC"]
+    end
+
+    subgraph Symmetric["Symmetric Ciphers"]
+        Ciphers["Block Ciphers"]
+    end
+
+    TLS -->|"Handshake Hashes"| Hash
+    PKI -->|"Signature Digests"| Hash
+    X509 -->|"Certificate Fingerprints"| Hash
+    TLS -->|"Record Authentication"| Hmac
+    Cmac -->|"Uses"| Ciphers

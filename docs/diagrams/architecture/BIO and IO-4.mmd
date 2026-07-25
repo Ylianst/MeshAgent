@@ -1,0 +1,4 @@
+flowchart TD
+    Plain["Plaintext"] --> Base64["Base64 Filter"]
+    Base64 --> Buffer["Buffer Filter"]
+    Buffer --> Socket["Socket BIO"]

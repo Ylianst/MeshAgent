@@ -1,0 +1,16 @@
+flowchart TD
+    MeshcoreAgent["Meshcore Agent"]
+    Microstack["Microstack Core"]
+    Microscript["Microscript Duk"]
+    KVM["Platform KVM"]
+    JPEG["Jpeg Turbo Core"]
+    OpenSSL["OpenSSL"]
+
+    MeshcoreAgent --> Microstack
+    MeshcoreAgent --> Microscript
+    MeshcoreAgent --> KVM
+    MeshcoreAgent --> OpenSSL
+
+    KVM --> JPEG
+    Microstack --> OpenSSL
+    Microscript --> Microstack

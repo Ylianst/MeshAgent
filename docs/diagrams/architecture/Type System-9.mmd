@@ -1,0 +1,11 @@
+flowchart TD
+    CoreTypes["Core Opaque Types"]
+    Crypto["Crypto Algorithms"]
+    PKI["Certificate Systems"]
+    TLS["TLS Engine"]
+    IO["BIO and Transport"]
+
+    CoreTypes --> Crypto
+    CoreTypes --> PKI
+    CoreTypes --> TLS
+    CoreTypes --> IO

@@ -1,0 +1,5 @@
+flowchart TD
+    Add["ILibLifeTime_AddEx"] --> Queue["Sorted Timer List"]
+    Queue --> ExpireCheck["Expiration Check"]
+    ExpireCheck --> Callback["User Callback"]
+    Callback --> Cleanup["Destroy or Reschedule"]

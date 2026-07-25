@@ -1,0 +1,5 @@
+flowchart TD
+    Raw["Raw HTTP Buffer"] --> Parse["ILibParsePacketHeader"]
+    Parse --> StartLine["Directive / Status"]
+    Parse --> Headers["Header Table"]
+    Parse --> Body["Body Pointer"]

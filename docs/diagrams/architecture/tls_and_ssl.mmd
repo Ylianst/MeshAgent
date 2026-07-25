@@ -1,0 +1,11 @@
+flowchart LR
+    App["Application"] --> Ctx["SSL_CTX"]
+    Ctx --> Conn["SSL"]
+    Conn --> Session["SSL_SESSION"]
+    Conn --> Cipher["SSL_CIPHER"]
+    Conn --> Bio["BIO Layer"]
+
+    Conn --> PKI["X.509 and Certificate Management"]
+    Conn --> Crypto["Symmetric Ciphers and Digest and MAC"]
+    Conn --> ASN1["ASN.1 Engine"]
+    Conn --> Types["Type System"]

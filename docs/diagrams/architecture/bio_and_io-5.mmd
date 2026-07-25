@@ -1,0 +1,4 @@
+flowchart LR
+    Caller["Caller"] --> Ctrl["BIO_ctrl()"]
+    Ctrl --> Method["BIO_METHOD ctrl()"]
+    Method --> Implementation["Underlying Transport"]

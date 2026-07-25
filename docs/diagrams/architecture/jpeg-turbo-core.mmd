@@ -1,0 +1,13 @@
+flowchart TD
+    App["Application or MeshAgent"] --> TurboAPI["TurboJPEG API"]
+    App --> JpegAPI["Jpeg API (jpeglib)"]
+
+    TurboAPI --> CorePipeline["JPEG Internal Pipeline"]
+    JpegAPI --> CorePipeline
+
+    CorePipeline --> DCT["Forward and Inverse DCT"]
+    CorePipeline --> Entropy["Huffman Encoder and Decoder"]
+    CorePipeline --> Quant["Quantization Tables"]
+    CorePipeline --> Memory["Memory Manager"]
+
+    CorePipeline --> IO["Source and Destination Managers"]

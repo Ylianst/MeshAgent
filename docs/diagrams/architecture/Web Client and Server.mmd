@@ -1,0 +1,27 @@
+flowchart TD
+    subgraph AppLayer["Application Layer"]
+        AppClient["Client Logic"]
+        AppServer["Server Handlers"]
+    end
+
+    subgraph WebLayer["Web Client And Server"]
+        WebClient["ILibWebClient"]
+        WebServer["ILibWebServer"]
+    end
+
+    subgraph CoreLayer["Microstack Core"]
+        AsyncSockets["Async Sockets"]
+        Parsers["Parsers and PacketHeader"]
+        Crypto["Cryptography and TLS"]
+    end
+
+    AppClient --> WebClient
+    AppServer --> WebServer
+
+    WebClient --> AsyncSockets
+    WebClient --> Parsers
+    WebClient --> Crypto
+
+    WebServer --> AsyncSockets
+    WebServer --> Parsers
+    WebServer --> Crypto

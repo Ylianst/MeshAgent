@@ -1,0 +1,5 @@
+flowchart TD
+    GROUP["EC_GROUP"] --> POINT["EC_POINT"]
+    GROUP --> KEY["EC_KEY"]
+    KEY --> SIGN["ECDSA_SIG"]
+    KEY --> ECDH["ECDH Shared Secret"]

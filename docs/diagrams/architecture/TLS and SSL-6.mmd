@@ -1,0 +1,6 @@
+flowchart TD
+    ClientHello["ClientHello"] --> Ext["Extensions"]
+    Ext --> SNI["SNI"]
+    Ext --> ALPN["ALPN"]
+    Ext --> Ticket["Session Ticket"]
+    Ext --> Custom["Custom Extensions"]

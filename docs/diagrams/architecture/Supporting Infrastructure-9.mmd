@@ -1,0 +1,4 @@
+flowchart TD
+    ProviderInit["OSSL_provider_init"] --> DispatchIn["Core Dispatch Table"]
+    ProviderInit --> DispatchOut["Provider Dispatch Table"]
+    DispatchOut --> Algorithms["OSSL_ALGORITHM Entries"]

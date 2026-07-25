@@ -1,0 +1,9 @@
+flowchart TD
+    Init["Socket Created"] --> Connecting["Connecting"]
+    Connecting --> Connected["Connected"]
+    Connected --> Data["Receiving Data"]
+    Connected --> Sending["Sending Data"]
+    Connected --> Paused["Paused"]
+    Paused --> Connected
+    Connected --> Closed["Disconnected"]
+    Connecting --> Closed

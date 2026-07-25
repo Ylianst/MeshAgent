@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant App as Application
+    participant SSL as SSL Layer
+    participant BIO as Socket BIO
+    participant OS as OS Socket
+
+    App->>SSL: SSL_connect()
+    SSL->>BIO: BIO_write ClientHello
+    BIO->>OS: send()
+    OS-->>BIO: recv ServerHello
+    BIO-->>SSL: BIO_read()
+    SSL-->>App: Handshake progresses

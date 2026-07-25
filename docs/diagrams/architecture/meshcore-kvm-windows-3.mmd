@@ -1,0 +1,7 @@
+flowchart LR
+    Desktop["Desktop Buffer"] --> Split["Tile Grid"]
+    Split --> TileCRC["Compute CRC"]
+    TileCRC --> Compare["Compare with Previous"]
+    Compare -->|"Changed"| Encode["JPEG Encode"]
+    Encode --> Send["writeHandler()"]
+    Compare -->|"Unchanged"| Skip["Skip Tile"]

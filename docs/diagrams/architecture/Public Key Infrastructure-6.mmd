@@ -1,0 +1,7 @@
+flowchart TD
+    USER["User Password"] --> X["Compute x"]
+    X --> V["Verifier v"]
+    V --> SERVER["Server Storage"]
+
+    CLIENT["Client Ephemeral"] --> KEY["Shared Session Key"]
+    SERVER --> KEY

@@ -1,0 +1,8 @@
+flowchart TD
+    Daemon["MeshAgent Daemon (root)"] -->|"Create socket + signal file"| QueueDir["/var/run/<serviceId>/"]
+    QueueDir -->|"QueueDirectories trigger"| LaunchAgent["LaunchAgent (-kvm1)"]
+    LaunchAgent -->|"Connect()"| Socket["Unix Domain Socket /tmp/<serviceId>.sock"]
+    Socket --> Daemon
+
+    LaunchAgent --> Capture["Screen Capture + Input Injection"]
+    Capture -->|"Tile stream"| Daemon

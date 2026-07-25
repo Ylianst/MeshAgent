@@ -1,0 +1,6 @@
+flowchart TD
+    Start["Handshake Operation"] --> AsyncCheck["ASYNC_is_capable?"]
+    AsyncCheck -->|"Yes"| StartJob["ASYNC_start_job"]
+    StartJob --> Pause["ASYNC_PAUSE"]
+    Pause --> Resume["ASYNC_resume"]
+    Resume --> Finish["ASYNC_FINISH"]

@@ -1,0 +1,22 @@
+flowchart TD
+    Main["MeshAgent_Start()"] --> AgentMode["MeshAgent_AgentMode()"]
+    AgentMode --> CoreCtx["Duktape Engine"]
+    AgentMode --> ControlChannel["Control Channel (WebSocket)"]
+    AgentMode --> DataStore["ILibSimpleDataStore"]
+
+    ControlChannel --> Auth["Auth Handshake"]
+    Auth --> Server["MeshCentral Server"]
+
+    CoreCtx --> CoreModule["CoreModule.js"]
+    CoreModule --> AgentAPI["MeshAgent JS API"]
+
+    AgentAPI --> KVM["Remote Desktop (KVM)"]
+    AgentAPI --> FS["File / System Access"]
+    AgentAPI --> Scripts["Isolated Script Containers"]
+
+    subgraph runtime["Meshcore Runtime"]
+        AgentMode
+        CoreCtx
+        ControlChannel
+        DataStore
+    end

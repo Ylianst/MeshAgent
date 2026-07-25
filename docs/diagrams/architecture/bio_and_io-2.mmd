@@ -1,0 +1,5 @@
+flowchart TD
+    Create["BIO_new()"] --> Init["BIO_set_data() and BIO_set_init()"]
+    Init --> Use["BIO_read() and BIO_write()"]
+    Use --> Flush["BIO_flush()"]
+    Flush --> Free["BIO_free() or BIO_free_all()"]

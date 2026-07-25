@@ -1,0 +1,8 @@
+flowchart LR
+    Input["Raw RGB or YUV Data"] --> ColorConv["Color Converter"]
+    ColorConv --> Downsample["Downsampler"]
+    Downsample --> FDCT["Forward DCT"]
+    FDCT --> Quantize["Quantization"]
+    Quantize --> HuffEnc["Huffman Encoder"]
+    HuffEnc --> MarkerWrite["Marker Writer"]
+    MarkerWrite --> Output["JPEG Stream"]

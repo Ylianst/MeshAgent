@@ -1,0 +1,5 @@
+flowchart LR
+    Plain["Plaintext"] --> Mode["Mode Context (GCM/CCM/OCB)"]
+    Mode --> Block["Block Cipher (AES/Camellia)"]
+    Mode --> Tag["Authentication Tag"]
+    Mode --> Ciphertext["Ciphertext"]

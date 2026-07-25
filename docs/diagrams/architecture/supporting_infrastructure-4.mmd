@@ -1,0 +1,8 @@
+flowchart TD
+    App["Application"] --> EngineAPI["ENGINE Interface"]
+    EngineAPI --> Default["Default OpenSSL Implementation"]
+    EngineAPI --> Custom["Custom Hardware Engine"]
+    EngineAPI --> Dynamic["Dynamic Loadable Engine"]
+
+    Dynamic --> Bind["bind_engine()"]
+    Bind --> Init["ENGINE_init()"]

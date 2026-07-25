@@ -1,0 +1,8 @@
+flowchart LR
+    Input["JPEG Stream"] --> MarkerRead["Marker Reader"]
+    MarkerRead --> HuffDec["Huffman Decoder"]
+    HuffDec --> Dequant["Dequantization"]
+    Dequant --> IDCT["Inverse DCT"]
+    IDCT --> Upsample["Upsampler"]
+    Upsample --> ColorDeconv["Color Deconverter"]
+    ColorDeconv --> Output["RGB or YUV Output"]

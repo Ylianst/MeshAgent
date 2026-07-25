@@ -1,0 +1,5 @@
+flowchart LR
+    A["Private a"] --> APUB["g^a mod p"]
+    B["Private b"] --> BPUB["g^b mod p"]
+    APUB --> SECRET["(g^b)^a mod p"]
+    BPUB --> SECRET

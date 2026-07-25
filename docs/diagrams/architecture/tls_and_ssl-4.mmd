@@ -1,0 +1,4 @@
+flowchart LR
+    Handshake["Initial Handshake"] --> Ticket["Session Ticket Issued"]
+    Ticket --> Resume["Resumed Handshake"]
+    Resume --> Reuse["SSL_SESSION Reused"]

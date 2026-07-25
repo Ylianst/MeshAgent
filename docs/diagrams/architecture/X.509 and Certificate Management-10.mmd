@@ -1,0 +1,6 @@
+flowchart LR
+    Cert["X509"] --> TrustCheck["X509_check_trust()"]
+    Cert --> PurposeCheck["X509_check_purpose()"]
+    PurposeCheck --> TLSUse["TLS Server"]
+    PurposeCheck --> SMIME["S/MIME"]
+    PurposeCheck --> OCSPUse["OCSP Signing"]

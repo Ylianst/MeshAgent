@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant App
+    participant Factory
+    participant Connection
+    participant Browser
+
+    App->>Factory: CreateConnection()
+    App->>Connection: GenerateOffer()
+    Connection-->>Browser: SDP Offer
+    Browser-->>Connection: SDP Answer
+    Connection->>App: OnConnected
+    Connection->>App: DataChannel ACK

@@ -1,0 +1,8 @@
+flowchart TD
+    WriteCall["ILibProcessPipe_Pipe_Write()"] --> EmptyQ{"Queue Empty?"}
+    EmptyQ -->|Yes| DirectWrite["Attempt OS Write"]
+    EmptyQ -->|No| Enqueue["Add to Write Queue"]
+    DirectWrite --> Complete{"Completed?"}
+    Complete -->|Yes| Done["DoneState_COMPLETE"]
+    Complete -->|Pending| QueueAndWait["Enqueue + Wait Handle"]
+    Complete -->|Error| Broken["Broken Pipe Handler"]
