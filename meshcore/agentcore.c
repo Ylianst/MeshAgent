@@ -92,6 +92,8 @@ int gRemoteMouseRenderDefault = 0;
 #define SCRIPT_ENGINE_PIPE_BUFFER_SIZE 65535
 #define SERVER_DISCOVERY_BUFFER_SIZE 1024
 #define CONTROL_CHANNEL_LOG_THROTTLE_MS 600000	 //!< Steady-state control-channel dial/failure logging throttle (10 min); target changes still log immediately
+#define MESH_BACKOFF_STABLE_SESSION_MS 60000	 //!< An authenticated session must live this long before its drop resets the reconnect backoff
+#define MESH_BACKOFF_MIN_RETRY_MS 2000			 //!< Floor for the halved backoff after a short-lived authenticated session
 
 #define MESH_AGENT_PORT 16990					 //!< Default Mesh Agent Port
 #define MESH_MCASTv4_GROUP "239.255.255.235"
@@ -3020,6 +3022,7 @@ void MeshServer_ServerAuthenticated(ILibWebClient_StateObject WebStateObject, Me
 	if (agent->serverAuthState == 3)
 	{
 		printf("Server fully authenticated (authState=3)\n");
+		agent->authTick = ILibGetUptime();
 		ILibDuktape_MeshAgent_PUSH(agent->meshCoreCtx, agent->chain);				// [agent]
 		duk_get_prop_string(agent->meshCoreCtx, -1, "emit");						// [agent][emit]
 		duk_swap_top(agent->meshCoreCtx, -2);										// [emit][this]
@@ -3101,7 +3104,6 @@ void MeshServer_SendAgentInfo(MeshAgentHostContainer* agent, ILibWebClient_State
 
 	// Send mesh agent information to the server
 	ILibWebClient_WebSocket_Send(WebStateObject, ILibWebClient_WebSocket_DataType_BINARY, (char*)info, sizeof(MeshCommand_BinaryPacket_AuthInfo) + hostnamelen, ILibAsyncSocket_MemoryOwnership_USER, ILibWebClient_WebSocket_FragmentFlag_Complete);
-	agent->retryTime = 0;
 
 	if ((agent->capabilities & MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY) == MeshCommand_AuthInfo_CapabilitiesMask_RECOVERY)
 	{
@@ -4128,6 +4130,9 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 			}
 
 			agent->controlChannel = WebStateObject; // Set the agent MeshCentral server control channel
+			// A live connection makes any pending retry/lockout timer stale; drop it so a later disconnect schedules against fresh backoff state.
+			ILibLifeTime_Remove(ILibGetBaseTimer(agent->chain), agent);
+			agent->retryTimerPending = 0;
 			printf("Control channel established [fd=%d]\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 			printf("Connection: WebSocket upgrade successful (fd=%d), starting handshake authentication\n", ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
 			ILibRemoteLogging_printf(ILibChainGetLogger(agent->chain), ILibRemoteLogging_Modules_Agent_GuardPost | ILibRemoteLogging_Modules_ConsolePrint, ILibRemoteLogging_Flags_VerbosityLevel_1, "Control Channel Idle Timeout = %d seconds", agent->controlChannel_idleTimeout_seconds);
@@ -4223,6 +4228,10 @@ void MeshServer_OnResponse(ILibWebClient_StateObject WebStateObject, int Interru
 				// Post-auth drop is a rare, meaningful state change (a healthy session closing) - always log it.
 				printf("Connection LOST: Disconnected after authentication (fd=%d) - server closed connection\n",
 					ILibWebClient_GetDescriptorValue_FromStateObject(WebStateObject));
+				// Only a session that stayed authenticated for a while proves the server healthy enough to reset backoff; a short-lived one just halves it.
+				if (agent->authTick != 0 && (ILibGetUptime() - agent->authTick) >= MESH_BACKOFF_STABLE_SESSION_MS) { agent->retryTime = 0; }
+				else if (agent->retryTime > 2 * MESH_BACKOFF_MIN_RETRY_MS) { agent->retryTime /= 2; }
+				agent->authTick = 0;
 			}
 			if (agent->controlChannelDebug != 0)
 			{
@@ -4368,7 +4377,8 @@ void MeshServer_ConnectEx_NetworkError(void *j)
 	agent->serverConnectionState = 0;
 
 	ILibWebClient_CancelRequest(request);
-	MeshServer_ConnectEx(agent);
+	// CancelRequest normally fired OnResponse->MeshServer_Connect synchronously; this fallback coalesces to a no-op but guarantees forward progress.
+	MeshServer_Connect(agent);
 }
 void MeshServer_ConnectEx_NetworkError_Cleanup(void *j)
 {
@@ -4437,6 +4447,8 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 
 
 	memset(&meshServer, 0, sizeof(struct sockaddr_in6));
+	// Must clear before the re-entry guard, or a guard-blocked stale timer would strand the flag and block all future retry scheduling.
+	agent->retryTimerPending = 0;
 	if (agent->timerLogging != 0 && agent->retryTimerSet != 0)
 	{
 		agent->retryTimerSet = 0;
@@ -5010,10 +5022,12 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	else
 	{
 		int delay;
-		if (agent->retryTime >= 240000)
+		// A retry timer is already scheduled (e.g. by the cancel-induced OnResponse); coalesce instead of double-scheduling.
+		if (agent->retryTimerPending != 0) { return; }
+		if (agent->retryTime >= 480000)
 		{
-			// Cap at around 4 minutes
-			delay = 240000 + (timeout % 120000);					// Random value between 4 and 6 minutes
+			// Cap at around 8 minutes
+			delay = 480000 + (timeout % 120000);					// Random value between 8 and 10 minutes
 		}
 		else
 		{
@@ -5022,6 +5036,7 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 		// Throttle the offline-retry-loop spam: only log the retry schedule on cycles the throttle decided to log.
 		if (agent->controlChannelLogThisAttempt != 0) { printf("AutoRetry Connect in %d milliseconds\n", delay); }
 		if (agent->timerLogging != 0) { agent->retryTimerSet = 1; }
+		agent->retryTimerPending = 1;
 		ILibLifeTime_AddEx(ILibGetBaseTimer(agent->chain), agent, delay, (ILibLifeTime_OnCallback)MeshServer_ConnectEx, NULL);
 		agent->retryTime = delay;
 	}

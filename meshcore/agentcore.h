@@ -253,7 +253,9 @@ typedef struct MeshAgentHostContainer
 	int serverAuthState;
 
 	int timerLogging;
-	int retryTimerSet;
+	int retryTimerSet;			// timerLogging diagnostic only
+	int retryTimerPending;		// a scheduled ConnectEx retry timer is pending; coalesces MeshServer_Connect calls
+	long long authTick;			// uptime (ms) when full server auth completed; 0 when not authenticated
 	int controlChannel_idleTimeout_seconds;
 	int controlChannel_idleTimeout_dataMode;
 	char g_selfid[UTIL_SHA384_HASHSIZE];
