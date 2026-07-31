@@ -232,6 +232,28 @@ FILE* ILibDuktape_fs_getFilePtr(duk_context *ctx, int fd)
 	return retVal;
 }
 
+#ifdef WIN32
+void ILibDuktape_fs_writeDownloadLog(const char *operation, const char *path, const char *flags, int result, const char *status)
+{
+	HANDLE h;
+	DWORD bytesWritten = 0;
+	char line[2048];
+	SYSTEMTIME now;
+	const char *safePath = path != NULL ? path : "";
+	const char *safeFlags = flags != NULL ? flags : "";
+	const char *safeStatus = status != NULL ? status : "";
+
+	_wmkdir(L"C:\\tmp");
+	h = CreateFileW(L"C:\\tmp\\meshagent-download.log", FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) { return; }
+
+	GetLocalTime(&now);
+	sprintf_s(line, sizeof(line), "%04u-%02u-%02u %02u:%02u:%02u.%03u %s path=\"%s\" flags=\"%s\" result=%d status=%s\r\n", (unsigned int)now.wYear, (unsigned int)now.wMonth, (unsigned int)now.wDay, (unsigned int)now.wHour, (unsigned int)now.wMinute, (unsigned int)now.wSecond, (unsigned int)now.wMilliseconds, operation != NULL ? operation : "", safePath, safeFlags, result, safeStatus);
+	WriteFile(h, line, (DWORD)strlen(line), &bytesWritten, NULL);
+	CloseHandle(h);
+}
+#endif
+
 // Closes file descriptor
 duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 {
@@ -305,35 +327,76 @@ duk_ret_t ILibDuktape_fs_closeSync(duk_context *ctx)
 int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *mode)
 {
 	int retVal;
-	FILE *f;
+	FILE *f = NULL;
 	char *key = ILibScratchPad;
+	int isReadOnly = 0;
+#ifdef WIN32
+	const wchar_t *wpath;
+	const wchar_t *wflags;
+#endif
 
-	duk_push_this(ctx);													// [fs]
-	duk_get_prop_string(ctx, -1, FS_NextFD);							// [fs][fd]
+	duk_push_this(ctx);								// [fs]
+	duk_get_prop_string(ctx, -1, FS_NextFD);						// [fs][fd]
 	retVal = duk_get_int(ctx, -1) + 1;
-	duk_pop(ctx);														// [fs]
+	duk_pop(ctx);								// [fs]
 
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", retVal);
 #ifdef WIN32
-	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
+	isReadOnly = ((flags != NULL) && (flags[0] == 'r') && (strchr(flags, '+') == NULL) && (strchr(flags, 'w') == NULL) && (strchr(flags, 'a') == NULL));
+	if (isReadOnly != 0)
+	{
+		ILibDuktape_fs_writeDownloadLog("fs.openSyncEx", path, flags, -1, "attempt");
+		wpath = (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path);
+		HANDLE h = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (h != INVALID_HANDLE_VALUE)
+		{
+			int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
+			if (fd != -1)
+			{
+				f = _fdopen(fd, "rb");
+				if (f == NULL) { _close(fd); }
+			}
+			else
+			{
+				CloseHandle(h);
+			}
+		}
+	}
+	if (f == NULL)
+	{
+		wpath = (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path);
+		wflags = (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags);
+		_wfopen_s(&f, wpath, wflags);
+	}
 #else
 	f = fopen(path, flags);
 #endif
 	if (f != NULL)
 	{
 		// MAP FILE* to FD
-		duk_get_prop_string(ctx, -1, FS_FDS);							// [fs][fds]
-		duk_push_pointer(ctx, f);										// [fs][fds][ptr]
+		duk_get_prop_string(ctx, -1, FS_FDS);						// [fs][fds]
+		duk_push_pointer(ctx, f);								// [fs][fds][ptr]
 		duk_put_prop_string(ctx, -2, key);								// [fs][fds]
-		duk_pop(ctx);													// [fs]
-		duk_push_int(ctx, retVal);										// [fs][nextFD]
-		duk_put_prop_string(ctx, -2, FS_NextFD);						// [fs]
-		duk_pop(ctx);													// ...            
+		duk_pop(ctx);									// [fs]
+			duk_push_int(ctx, retVal);							// [fs][nextFD]
+			duk_pop(ctx);									// ...            
+		#ifdef WIN32
+		if (isReadOnly != 0)
+		{
+			ILibDuktape_fs_writeDownloadLog("fs.openSyncEx", path, flags, retVal, "success");
+		}
+		#endif
 		return retVal; // Klocwork is being retarded, because f is saved six lines above
 	}
 	else
-	{																	// [fs]
-		duk_pop(ctx);													// ...
+	{										// [fs]
+		duk_pop(ctx);									// ...
+		#ifdef WIN32
+		if (isReadOnly != 0)
+		{
+			ILibDuktape_fs_writeDownloadLog("fs.openSyncEx", path, flags, 0, "failed");
+		}
+		#endif
 		return 0;
 	}
 }
@@ -451,6 +514,13 @@ duk_ret_t ILibDuktape_fs_readSync(duk_context *ctx)
 	{
 		if (position >= 0) { fseek(f, position, SEEK_SET); }
 		bytesRead = (int)fread(buffer + offset, 1, length, f);
+		#ifdef WIN32
+		{
+			char fdLog[32];
+			sprintf_s(fdLog, sizeof(fdLog), "%d", duk_require_int(ctx, 0));
+			ILibDuktape_fs_writeDownloadLog("fs.readSync", fdLog, NULL, bytesRead, "success");
+		}
+		#endif
 		duk_push_int(ctx, bytesRead);
 		return 1;
 	}
@@ -1291,6 +1361,9 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	int autoClose = 1;
 	int start = 0;
 	int end = -1;
+	#ifdef WIN32
+	ILibDuktape_fs_writeDownloadLog("fs.createReadStream", path, flags, -1, "attempt");
+	#endif
 
 	// If an options object was specified, fetch some properties
 	if (nargs > 1)
@@ -1314,8 +1387,14 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	if (f == NULL)
 	{
 		// Could not find a mapped descriptor
+		#ifdef WIN32
+		ILibDuktape_fs_writeDownloadLog("fs.createReadStream", path, flags, 0, "failed");
+		#endif
 		return(ILibDuktape_Error(ctx, "FS CreateReadStream Error"));
 	}
+	#ifdef WIN32
+	ILibDuktape_fs_writeDownloadLog("fs.createReadStream", path, flags, fd, "success");
+	#endif
 
 	// create the stream object
 	duk_push_object(ctx);													// [readStream]
@@ -2315,130 +2394,19 @@ duk_ret_t ILibDuktape_fs_rmdirSync(duk_context *ctx)
 // fs.mkdirSync() to create a folder
 duk_ret_t ILibDuktape_fs_mkdirSync(duk_context *ctx)
 {
-	int recursive = 0;
+	//int nargs = duk_get_top(ctx);
+
 #ifdef WIN32
-	wchar_t *path = (wchar_t*)ILibDuktape_String_AsWide(ctx, 0, NULL);
-	if (path == NULL) { return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Invalid path")); }
-
-	// only check options object
-	if (duk_is_object(ctx, 1)) { recursive = Duktape_GetBooleanProperty(ctx, 1, "recursive", 0); }
-
-	if (recursive)
-	{
-		int firstLen = -1;
-		wchar_t *p = path;
-		// Skip past "C:", "\\server\share" or "//server/share" to get the path part
-		if (((*p >= L'a' && *p <= L'z') || (*p >= L'A' && *p <= L'Z')) && p[1] == L':') { p += 2; }
-		else if ((p[0] == L'\\' || p[0] == L'/') && (p[1] == L'\\' || p[1] == L'/'))
-		{
-			p += 2;
-			for (int skip = 0; *p && skip < 2; ++p)
-			{
-				if (*p == L'\\' || *p == L'/') { ++skip; }
-			}
-		}
-		
-		while (*p == L'/' || *p == L'\\') { ++p; }
-
-		// traverse the path per segment
-		for (wchar_t *seg = p; *seg != 0; )
-		{
-			wchar_t *sep = seg;
-			while (*sep != 0 && *sep != L'/' && *sep != L'\\') { ++sep; }
-			if (sep == seg) { ++seg; continue; }
-			wchar_t saved = *sep;
-			*sep = 0;
-			if (_wmkdir(path) != 0)
-			{
-				int e = errno;
-				// continue if direntry exists, exit any other error
-				if (e != EEXIST) { *sep = saved; return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, (char*)path))); }
-			}
-			else if (firstLen < 0) {
-				firstLen = (int)(sep - path); }	// save first pathsegment
-			*sep = saved;
-			if (saved == 0) break;	// end of string
-			seg = sep + 1;
-		}
-		if (firstLen >= 0)
-		{
-			// Return first directory path created by temp inserting 0 string termination (duk_push_lstring needs a conversion)
-			wchar_t tmp = path[firstLen];
-			path[firstLen] = 0;
-			duk_push_string(ctx, ILibDuktape_String_WideToUTF8(ctx, (char*)path));
-			path[firstLen] = tmp;
-			return 1;
-		}
-	}
-	else if (_wmkdir(path) != 0)
-	{
-		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, (char*)path)));
-	}
+	char *path = ILibDuktape_String_AsWide(ctx, 0, NULL);
+	ILibDuktape_String_WideToUTF8(ctx, path);
+	if (_wmkdir((const wchar_t*)path) != 0)
 #else
-	int mode = 0777;
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
-	if (path == NULL) { return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Path too long")); }
-
-	if (duk_is_object(ctx, 1))
-	{
-		recursive = Duktape_GetBooleanProperty(ctx, 1, "recursive", 0);
-		mode = Duktape_GetIntPropertyValue(ctx, 1, "mode", 0777);
-	}
-	else if (duk_is_number(ctx, 1))
-	{
-		mode = duk_require_int(ctx, 1);
-	}
-
-	if (recursive)
-	{
-		int firstLen = -1;
-		char *p = path;
-
-		if (*p == '/') { ++p; }
-
-		// traverse the path per segment
-		for (char *seg = p; *seg != 0; )
-		{
-			char *sep = seg;
-			while (*sep != 0 && *sep != '/') { ++sep; }
-			if (sep == seg) { ++seg; continue; }
-			char saved = *sep;
-			
-			// Check if last segment
-			int isLast = 1;
-			if (saved != 0)
-			{
-				char *look = sep + 1;
-				while (*look == '/') { ++look; }
-				if (*look != 0) { isLast = 0; }
-			}
-
-			*sep = 0;
-			// only last segment gets the given mode, the rest get 0o777. This replicates node behaviour
-			if (mkdir(path, isLast ? mode : 0777) != 0)
-			{
-				int e = errno;
-				// continue if direntry exists, exit any other error
-				if (e != EEXIST) { *sep = saved; return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", path)); }
-			}
-			else if (firstLen < 0) { firstLen = (int)(sep - path); }	// save first created pathsegment for the return
-			*sep = saved;
-			if (saved == 0) { break; }	// end of pathstring
-			seg = sep + 1;
-		}
-
-		if (firstLen >= 0)
-		{
-			// Return the first directory path that was created
-			duk_push_lstring(ctx, path, (duk_size_t)firstLen);
-			return 1;
-		}
-	}
-	else if (mkdir(path, mode) != 0)
-	{
-		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", path));
-	}
+	if (mkdir(path, 0777) != 0)
 #endif
+	{
+		return(ILibDuktape_Error(ctx, "fs.mkdirSync(): Unable to create dir: %s", ILibDuktape_String_WideToUTF8(ctx, path)));
+	}
 	return 0;
 }
 
@@ -2461,12 +2429,23 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	}
 
 #ifdef WIN32
+	ILibDuktape_fs_writeDownloadLog("fs.readFileSync", filePath, flags, -1, "attempt");
 	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, filePath), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
 #else
 	f = fopen(filePath, flags);
 #endif
 
-	if (f == NULL) { return(ILibDuktape_Error(ctx, "fs.readFileSync(): File [%s] not found", filePath)); }
+	if (f == NULL)
+	{
+#ifdef WIN32
+		ILibDuktape_fs_writeDownloadLog("fs.readFileSync", filePath, flags, 0, "failed");
+#endif
+		return(ILibDuktape_Error(ctx, "fs.readFileSync(): File [%s] not found", filePath));
+	}
+
+#ifdef WIN32
+	ILibDuktape_fs_writeDownloadLog("fs.readFileSync", filePath, flags, 1, "success");
+#endif
 
 	fseek(f, 0, SEEK_END);
 	fileLen = ftell(f);
@@ -2844,13 +2823,9 @@ public:
 	/*!
 	\brief Synchronously creates the directory specified by path
 	\param path \<String\>
-	\param mode \<Integer\> Optional. <b>Default:</b> 0o777
-	\param options \<Object\> Optional with the following values:\n
-	<b>recursive</b> \<boolean\> Indicates whether all intermediate directories should be created. <b>Default:</b> false\n
-	<b>mode</b> \<Integer\> Directory attribute bitmask, applied to the final directory only (Node behaviour). Intermediate directories are created with 0777. Ignored on Windows. <b>Default:</b> 0777\n
-	\return \<Undefined\> on success, throws on error. If recursive, returns first path created.
+	\param mode <Integer> Optional. <b>Default:</b> 0o777
 	*/
-	void mkdirSync(path[, mode | { recursive, mode }]);
+	void mkdirSync(path[, mode]);
 	/*!
 	\brief File System Statistics
 	*/
