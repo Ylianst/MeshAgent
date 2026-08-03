@@ -23,7 +23,6 @@ limitations under the License.
 #include <wchar.h>
 #include <io.h>
 #include <fcntl.h>
-#include <share.h>
 #define WIN_FAKE_O_NONBLOCK 128
 #endif
 
