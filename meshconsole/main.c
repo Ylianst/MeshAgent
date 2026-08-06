@@ -145,8 +145,8 @@ char* crashMemory = ILib_POSIX_InstallCrashHandler(argv[0]);
 
 	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
-		integratedJavaScript = ILibString_Copy(argv[2], 0);
-		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+		integratedJavaScriptLen = (int)strlen(argv[2]);
+		integratedJavaScript = ILibString_Copy(argv[2], (size_t)integratedJavaScriptLen);
 	} 
 	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0)
 	{
