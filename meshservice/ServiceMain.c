@@ -541,7 +541,7 @@ int wmain(int argc, char* wargv[])
 		return(0);
 	}
 	char *integratedJavaScript = NULL;
-	int integragedJavaScriptLen = 0;
+	int integratedJavaScriptLen = 0;
 
 	if (argc > 1 && strcasecmp(argv[1], "-info") == 0)
 	{
@@ -557,7 +557,7 @@ int wmain(int argc, char* wargv[])
 		printf("Agent ARCHID: %d\n", MESH_AGENTID);
 		char script[] = "var _tmp = 'Detected OS: ' + require('os').Name; try{_tmp += (' - ' + require('os').arch());}catch(x){}console.log(_tmp);if(process.platform=='win32'){ _tmp=require('win-authenticode-opus')(process.execPath); if(_tmp!=null && _tmp.url!=null){ _tmp=require('win-authenticode-opus').locked(_tmp.url); if(_tmp!=null) { console.log('LOCKED to: ' + _tmp.dns); console.log(' => ' + _tmp.id); } } } process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 
 	if (argc > 2 && strcasecmp(argv[1], "-faddr") == 0)
@@ -585,113 +585,113 @@ int wmain(int argc, char* wargv[])
 		return(0);
 	}
 
-	if (integratedJavaScript == NULL || integragedJavaScriptLen == 0)
+	if (integratedJavaScript == NULL || integratedJavaScriptLen == 0)
 	{
-		ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integragedJavaScriptLen);
+		ILibDuktape_ScriptContainer_CheckEmbedded(&integratedJavaScript, &integratedJavaScriptLen);
 	}
 
-	if (argc > 1 && strcmp(argv[1], "-export") == 0 && integragedJavaScriptLen == 0)
+	if (argc > 1 && strcmp(argv[1], "-export") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy("require('code-utils').expand({embedded: true});process.exit();", 0);
-		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
-	if (argc > 1 && strcmp(argv[1], "-import") == 0 && integragedJavaScriptLen == 0)
+	if (argc > 1 && strcmp(argv[1], "-import") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy("require('code-utils').shrink();process.exit();", 0);
-		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
 
-	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integragedJavaScriptLen == 0)
+	if (argc > 2 && strcmp(argv[1], "-exec") == 0 && integratedJavaScriptLen == 0)
 	{
 		integratedJavaScript = ILibString_Copy(argv[2], 0);
-		integragedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
+		integratedJavaScriptLen = (int)strnlen_s(integratedJavaScript, sizeof(ILibScratchPad));
 	}
-	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integragedJavaScriptLen == 0)
+	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integratedJavaScriptLen == 0)
 	{
-		integragedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char**)&integratedJavaScript);
+		integratedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char**)&integratedJavaScript);
 	}
 	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId')());process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && strcasecmp(argv[1], "-name") == 0)
 	{
 		char script[] = "console.log(require('_agentNodeId').serviceName());process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "exstate") == 0))
 	{
 		char script[] = "var r={rawState: -1, state: 'NOT INSTALLED'};try{r=require('service-manager').manager.getService(require('_agentNodeId').serviceName()).status;}catch(z){};console.log(r.state);process.exit(r.rawState);";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "state") == 0))
 	{
 		char script[] = "try{console.log(require('service-manager').manager.getService(require('_agentNodeId').serviceName()).status.state);}catch(z){console.log('NOT INSTALLED');};process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "start") == 0 || strcasecmp(argv[1], "-start") == 0))
 	{
 		char script[] = "try{require('service-manager').manager.getService(require('_agentNodeId').serviceName()).start();console.log('Service Started');}catch(z){console.log('Failed to start service');}process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "stop") == 0 || strcasecmp(argv[1], "-stop") == 0))
 	{
 		char script[] = "try{require('service-manager').manager.getService(require('_agentNodeId').serviceName()).stop().then(function(m){console.log('Service Stopped');process.exit();}, function(m){console.log(m);process.exit();});}catch(z){console.log('Failed to stop service');process.exit();}";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "restart") == 0 || strcasecmp(argv[1], "-restart") == 0))
 	{
 		char script[] = "try{require('service-manager').manager.getService(require('_agentNodeId').serviceName()).restart().then(function(m){console.log('Service Restarted');process.exit();}, function(m){console.log(m);process.exit();});}catch(z){console.log('Failed to restart service');process.exit();}";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 
-	if (argc > 1 && strcasecmp(argv[1], "-agentHash") == 0 && integragedJavaScriptLen == 0)
+	if (argc > 1 && strcasecmp(argv[1], "-agentHash") == 0 && integratedJavaScriptLen == 0)
 	{
 		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex').substring(0,16));process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
-	if (argc > 1 && strcasecmp(argv[1], "-agentFullHash") == 0 && integragedJavaScriptLen == 0)
+	if (argc > 1 && strcasecmp(argv[1], "-agentFullHash") == 0 && integratedJavaScriptLen == 0)
 	{
 		char script[] = "console.log(getSHA384FileHash(process.execPath).toString('hex'));process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc == 2 && (strcasecmp(argv[1], "-resetnodeid") == 0))
 	{
 		// Set "resetnodeid" in registry
 		char script[] = "try{require('_agentNodeId').resetNodeId();}catch(z){console.log('This command requires admin.');}process.exit();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "-setfirewall") == 0))
 	{
 		// Reset the firewall rules
 		char script[] = "require('agent-installer').setfirewall();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "-clearfirewall") == 0))
 	{
 		// Clear the firewall rules
 		char script[] = "require('agent-installer').clearfirewall();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	if (argc > 1 && (strcasecmp(argv[1], "-checkfirewall") == 0))
 	{
 		// Clear the firewall rules
 		char script[] = "require('agent-installer').checkfirewall();";
 		integratedJavaScript = ILibString_Copy(script, sizeof(script) - 1);
-		integragedJavaScriptLen = (int)sizeof(script) - 1;
+		integratedJavaScriptLen = (int)sizeof(script) - 1;
 	}
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (argc > 1 && strcasecmp(argv[1], "-updaterversion") == 0)
@@ -791,7 +791,7 @@ int wmain(int argc, char* wargv[])
 			if (argc > 1 && ((strcasecmp(argv[1], "connect") == 0))) { capabilities = MeshCommand_AuthInfo_CapabilitiesMask_TEMPORARY; }
 			agent = MeshAgent_Create(capabilities);
 			agent->meshCoreCtx_embeddedScript = integratedJavaScript;
-			agent->meshCoreCtx_embeddedScriptLen = integragedJavaScriptLen;
+			agent->meshCoreCtx_embeddedScriptLen = integratedJavaScriptLen;
 			if (integratedJavaScript != NULL || (argc > 1 && (strcasecmp(argv[1], "run") == 0 || strcasecmp(argv[1], "connect") == 0))) { agent->runningAsConsole = 1; }
 			MeshAgent_Start(agent, argc, argv);
 			retCode = agent->exitCode;
