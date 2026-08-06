@@ -608,7 +608,7 @@ int wmain(int argc, char* wargv[])
 	}
 	if (argc > 2 && strcmp(argv[1], "-b64exec") == 0 && integratedJavaScriptLen == 0)
 	{
-		integratedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strnlen_s(argv[2], sizeof(ILibScratchPad2)), (unsigned char**)&integratedJavaScript);
+		integratedJavaScriptLen = ILibBase64Decode((unsigned char *)argv[2], (const int)strlen(argv[2]), (unsigned char**)&integratedJavaScript);
 	}
 	if (argc > 1 && strcasecmp(argv[1], "-nodeid") == 0)
 	{
