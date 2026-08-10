@@ -336,3 +336,11 @@ modules_expanded/
 *.o
 ToolChains/
 .DS_Store
+
+# Build files
+# Regenerated every build
+microscript/ILibDuktape_Commit.h
+
+# compiled builds: meshagent_<arch>, DEBUG_meshagent_<arch>
+/meshagent_*
+/DEBUG_meshagent_*
