@@ -70,8 +70,9 @@ typedef struct kvm_drm_egl_context
 	size_t rgba_readback_cap;
 } kvm_drm_egl_context;
 
-bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint32_t width, uint32_t height, uint32_t pitch,
-	uint32_t offset, uint32_t format, uint32_t handle, uint64_t modifier, uint8_t *rgb,
+bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint32_t width, uint32_t height,
+	int plane_count, const uint32_t *plane_handles, const uint32_t *plane_pitches, const uint32_t *plane_offsets,
+	uint32_t format, uint64_t modifier, uint8_t *rgb,
 	size_t rgb_capacity, size_t *rgb_size_out, char *out_error, size_t out_error_size);
 void kvm_drm_egl_destroy_context(kvm_drm_egl_context *ctx);
 

@@ -557,8 +557,9 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width
 
 #endif
 
-bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint32_t width, uint32_t height, uint32_t pitch,
-	uint32_t offset, uint32_t format, uint32_t handle, uint64_t modifier, uint8_t *rgb,
+bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint32_t width, uint32_t height,
+	int plane_count, const uint32_t *plane_handles, const uint32_t *plane_pitches, const uint32_t *plane_offsets,
+	uint32_t format, uint64_t modifier, uint8_t *rgb,
 	size_t rgb_capacity, size_t *rgb_size_out, char *out_error, size_t out_error_size)
 {
 #if !defined(__linux__)
@@ -566,10 +567,11 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	UNREFERENCED_PARAMETER(drm_fd);
 	UNREFERENCED_PARAMETER(width);
 	UNREFERENCED_PARAMETER(height);
-	UNREFERENCED_PARAMETER(pitch);
-	UNREFERENCED_PARAMETER(offset);
+	UNREFERENCED_PARAMETER(plane_count);
+	UNREFERENCED_PARAMETER(plane_handles);
+	UNREFERENCED_PARAMETER(plane_pitches);
+	UNREFERENCED_PARAMETER(plane_offsets);
 	UNREFERENCED_PARAMETER(format);
-	UNREFERENCED_PARAMETER(handle);
 	UNREFERENCED_PARAMETER(modifier);
 	UNREFERENCED_PARAMETER(rgb);
 	UNREFERENCED_PARAMETER(rgb_capacity);
@@ -606,16 +608,18 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	}
 	if (!kvm_drm_egl_ensure_gpu_target_size(ctx, (int)width, (int)height, out_error, out_error_size)) { return false; }
 
-	int dmabuf_fd = -1;
-	if (kvm_drm_prime_handle_to_fd(drm_fd, handle, KVM_DRM_EGL_CLOEXEC | DRM_RDWR, &dmabuf_fd) != 0 || dmabuf_fd < 0)
-	{
-		char msg[KVM_DRM_EGL_MAX_ERROR];
-		snprintf(msg, sizeof(msg), "drmPrimeHandleToFD failed for GPU path (handle=%u errno=%d)", handle, errno);
-		kvm_drm_egl_copy_error_message(out_error, out_error_size, msg);
-		return false;
-	}
+	static const EGLint planeFdAttr[4]     = { EGL_DMA_BUF_PLANE0_FD_EXT,         EGL_DMA_BUF_PLANE1_FD_EXT,         EGL_DMA_BUF_PLANE2_FD_EXT,         EGL_DMA_BUF_PLANE3_FD_EXT };
+	static const EGLint planeOffsetAttr[4] = { EGL_DMA_BUF_PLANE0_OFFSET_EXT,     EGL_DMA_BUF_PLANE1_OFFSET_EXT,     EGL_DMA_BUF_PLANE2_OFFSET_EXT,     EGL_DMA_BUF_PLANE3_OFFSET_EXT };
+	static const EGLint planePitchAttr[4]  = { EGL_DMA_BUF_PLANE0_PITCH_EXT,      EGL_DMA_BUF_PLANE1_PITCH_EXT,      EGL_DMA_BUF_PLANE2_PITCH_EXT,      EGL_DMA_BUF_PLANE3_PITCH_EXT };
+	static const EGLint planeModLoAttr[4]  = { EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT };
+	static const EGLint planeModHiAttr[4]  = { EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT };
 
-	EGLint attrs[20];
+	int planes = plane_count;
+	if (planes < 1) { planes = 1; }
+	if (planes > 4) { planes = 4; }
+
+	int dmabuf_fd[4] = { -1, -1, -1, -1 };
+	EGLint attrs[48];
 	int a = 0;
 	attrs[a++] = EGL_WIDTH;
 	attrs[a++] = (EGLint)width;
@@ -623,23 +627,38 @@ bool kvm_drm_egl_convert_to_rgb24_gpu(kvm_drm_egl_context *ctx, int drm_fd, uint
 	attrs[a++] = (EGLint)height;
 	attrs[a++] = EGL_LINUX_DRM_FOURCC_EXT;
 	attrs[a++] = (EGLint)format;
-	attrs[a++] = EGL_DMA_BUF_PLANE0_FD_EXT;
-	attrs[a++] = dmabuf_fd;
-	attrs[a++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
-	attrs[a++] = (EGLint)offset;
-	attrs[a++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
-	attrs[a++] = (EGLint)pitch;
-	if (modifier != DRM_FORMAT_MOD_INVALID)
+	for (int p = 0; p < planes; ++p)
 	{
-		attrs[a++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
-		attrs[a++] = (EGLint)(modifier & 0xFFFFFFFFu);
-		attrs[a++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
-		attrs[a++] = (EGLint)((modifier >> 32) & 0xFFFFFFFFu);
+		// Export each plane's GEM handle to its own dma-buf fd. Render-compressed scanout (CCS)
+		// splits the image into a data plane + a metadata plane; every plane carries the same
+		// framebuffer modifier so EGL/Mesa can decompress it while sampling.
+		if (kvm_drm_prime_handle_to_fd(drm_fd, plane_handles[p], KVM_DRM_EGL_CLOEXEC | DRM_RDWR, &dmabuf_fd[p]) != 0 || dmabuf_fd[p] < 0)
+		{
+			char msg[KVM_DRM_EGL_MAX_ERROR];
+			int q;
+			snprintf(msg, sizeof(msg), "drmPrimeHandleToFD failed for GPU path (plane=%d handle=%u errno=%d)", p, plane_handles[p], errno);
+			for (q = 0; q < p; ++q) { if (dmabuf_fd[q] >= 0) { close(dmabuf_fd[q]); } }
+			kvm_drm_egl_copy_error_message(out_error, out_error_size, msg);
+			return false;
+		}
+		attrs[a++] = planeFdAttr[p];
+		attrs[a++] = dmabuf_fd[p];
+		attrs[a++] = planeOffsetAttr[p];
+		attrs[a++] = (EGLint)plane_offsets[p];
+		attrs[a++] = planePitchAttr[p];
+		attrs[a++] = (EGLint)plane_pitches[p];
+		if (modifier != DRM_FORMAT_MOD_INVALID)
+		{
+			attrs[a++] = planeModLoAttr[p];
+			attrs[a++] = (EGLint)(modifier & 0xFFFFFFFFu);
+			attrs[a++] = planeModHiAttr[p];
+			attrs[a++] = (EGLint)((modifier >> 32) & 0xFFFFFFFFu);
+		}
 	}
 	attrs[a++] = EGL_NONE;
 
 	EGLImageKHR image = ctx->eglCreateImageKHRFn(ctx->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attrs);
-	close(dmabuf_fd);
+	for (int p = 0; p < planes; ++p) { if (dmabuf_fd[p] >= 0) { close(dmabuf_fd[p]); } }
 	if (image == EGL_NO_IMAGE_KHR)
 	{
 		char err[KVM_DRM_EGL_MAX_ERROR];

@@ -421,6 +421,13 @@ typedef struct kvm_drm_scanout_frame
 	uint32_t handle;
 	uint64_t modifier;
 	kvm_drm_rotation rotation;
+	// Extra planes for render-compressed scanout (e.g. Intel Y-tiled CCS = data plane + metadata
+	// plane). plane[0] mirrors handle/pitch/offset above; the GPU/EGL path imports every plane so
+	// the driver decompresses during the blit. The CPU/linear path only ever sees plane_count==1.
+	int plane_count;
+	uint32_t plane_handles[4];
+	uint32_t plane_pitches[4];
+	uint32_t plane_offsets[4];
 } kvm_drm_scanout_frame;
 
 static uint32_t kvm_drm_get_plane_fb_id(int fd, uint32_t crtc_id, int crtc_index);
@@ -1110,37 +1117,32 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 				fb2->offsets[0], fb2->offsets[1], fb2->offsets[2], fb2->offsets[3]);
 		}
 
-		if (planeCount > 1)
+		// Capture every plane. Render-compressed scanout (Intel Y-tiled CCS) presents a data plane
+		// plus a metadata plane; the EGL importer hands all planes to eglCreateImageKHR so the GPU
+		// decompresses during the blit. Rejecting planeCount>1 here is what turned CCS scanout black.
+		out->plane_count = planeCount;
+		for (int p = 0; p < planeCount && p < 4; ++p)
 		{
-			char err[KVM_DRM_MAX_ERROR];
-			char format[32];
-			kvm_drm_format_fourcc(format, sizeof(format), fb2->pixel_format);
-			snprintf(err, sizeof(err),
-				"Framebuffer %u uses %d DRM planes (%s, modifier=0x%016" PRIx64 "); multi-plane scanout is not supported by this capture path",
-				fb_id, planeCount, format, fb2->modifier);
-			drmModeFreeFB2(fb2);
-			kvm_drm_copy_error_message(out_error, out_error_size, err);
-			return false;
+			out->plane_handles[p] = fb2->handles[p];
+			out->plane_pitches[p] = fb2->pitches[p];
+			out->plane_offsets[p] = fb2->offsets[p];
 		}
 
-		if (fb2->handles[1] == 0 && fb2->handles[2] == 0 && fb2->handles[3] == 0)
+		out->width = fb2->width;
+		out->height = fb2->height;
+		out->pitch = fb2->pitches[0];
+		out->offset = fb2->offsets[0];
+		out->format = fb2->pixel_format;
+		out->modifier = fb2->modifier;
+		if (fb2->handles[0] != 0)
 		{
-			out->width = fb2->width;
-			out->height = fb2->height;
-			out->pitch = fb2->pitches[0];
-			out->offset = fb2->offsets[0];
-			out->format = fb2->pixel_format;
-			out->modifier = fb2->modifier;
-			if (fb2->handles[0] != 0)
-			{
-				out->fb_id = fb_id;
-				out->handle = fb2->handles[0];
-				out->rotation = kvm_drm_get_scanout_rotation();
-				drmModeFreeFB2(fb2);
-				return true;
-			}
-			have_fb2_meta = true;
+			out->fb_id = fb_id;
+			out->handle = fb2->handles[0];
+			out->rotation = kvm_drm_get_scanout_rotation();
+			drmModeFreeFB2(fb2);
+			return true;
 		}
+		have_fb2_meta = true;
 		drmModeFreeFB2(fb2);
 	}
 
@@ -1162,6 +1164,13 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 		out->modifier = DRM_FORMAT_MOD_LINEAR;
 	}
 	out->handle = fb->handle;
+	if (!have_fb2_meta)
+	{
+		out->plane_count = 1;
+		out->plane_handles[0] = fb->handle;
+		out->plane_pitches[0] = out->pitch;
+		out->plane_offsets[0] = out->offset;
+	}
 	out->rotation = kvm_drm_get_scanout_rotation();
 	drmModeFreeFB(fb);
 	return true;
@@ -1585,6 +1594,21 @@ static void kvm_drm_update_tile_geometry()
 	}
 }
 
+// mutter names an HDMI type-A connector "HDMI-<id>", but the kernel, libdrm, and our own
+// kvm_drm_connector_type_name() call it "HDMI-A-<id>". Without tolerating that the xdg-output name
+// never matches the DRM connector on GNOME, the whole layout is discarded, and every monitor falls
+// back to 0,0. HDMI type-B stays "HDMI-B-<id>" on both sides, so keep it out of the type-A fixup.
+static int kvm_drm_connector_name_equal(const char *drmName, const char *wlName)
+{
+	if (drmName == NULL || wlName == NULL) { return 0; }
+	if (strcmp(drmName, wlName) == 0) { return 1; }
+	if (strncmp(drmName, "HDMI-A-", 7) == 0 && strncmp(wlName, "HDMI-", 5) == 0 && strncmp(wlName, "HDMI-B-", 7) != 0)
+	{
+		return strcmp(drmName + 7, wlName + 5) == 0;
+	}
+	return 0;
+}
+
 static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output_count, const char *name, const bool *claimed)
 {
 	int i;
@@ -1595,7 +1619,7 @@ static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output
 	for (i = 0; i < output_count; ++i)
 	{
 		if (claimed != NULL && claimed[i]) { continue; } // a prior compositor entry already took this output
-		if (strcmp(outputs[i].connector_name, name) == 0)
+		if (kvm_drm_connector_name_equal(outputs[i].connector_name, name))
 		{
 			return i;
 		}
@@ -1925,6 +1949,7 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	ctx.display = wl_display_connect(NULL);
 	if (ctx.display == NULL)
 	{
+		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: wl_display_connect(NULL) failed (WAYLAND_DISPLAY=%s)\n", getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "(unset)"); }
 		return false;
 	}
 	ctx.registry = kvm_wl_display_get_registry(ctx.display);
@@ -1936,6 +1961,7 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	kvm_wl_registry_add_listener(ctx.registry, &kvm_drm_registry_listener, &ctx);
 	if (wl_display_roundtrip(ctx.display) < 0 || ctx.xdg_output_manager == NULL || ctx.output_count <= 0)
 	{
+		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: registry roundtrip failed or missing globals (xdg_manager=%p wl_outputs=%d)\n", (void *)ctx.xdg_output_manager, ctx.output_count); }
 		kvm_drm_wayland_layout_context_cleanup(&ctx);
 		return false;
 	}
@@ -1961,6 +1987,12 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 
 	for (i = 0; i < ctx.output_count; ++i)
 	{
+		if (drm_debug)
+		{
+			fprintf(stderr, "DRM: xdg-output query: wl-output[%d] name='%s' have_name=%d have_pos=%d(%d,%d) have_size=%d(%ux%u)\n",
+				i, ctx.outputs[i].name, ctx.outputs[i].have_name, ctx.outputs[i].have_position,
+				ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].have_size, ctx.outputs[i].width, ctx.outputs[i].height);
+		}
 		if (ctx.outputs[i].have_name == 0 || ctx.outputs[i].have_position == 0 || ctx.outputs[i].have_size == 0)
 		{
 			continue;
@@ -1970,6 +2002,7 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 
 	if (matched != output_count)
 	{
+		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: matched %d of %d DRM output(s) by name -> discarding xdg layout\n", matched, output_count); }
 		kvm_drm_wayland_layout_context_cleanup(&ctx);
 		return false;
 	}
@@ -2692,18 +2725,29 @@ void *kvm_server_mainloop_drm(void *parm)
 				rgbBufferSize = rgbSize;
 			}
 
-			if (frame.modifier != DRM_FORMAT_MOD_INVALID && frame.modifier != DRM_FORMAT_MOD_LINEAR)
+			// Multi-plane framebuffers (CCS) must take the GPU path even if the modifier looked linear;
+			// the CPU readback below only understands a single contiguous plane.
+			if (frame.plane_count > 1 || (frame.modifier != DRM_FORMAT_MOD_INVALID && frame.modifier != DRM_FORMAT_MOD_LINEAR))
 			{
 				if (drm_debug >= 2 && lastLoggedPath != 1)
 				{
-					fprintf(stderr, "DRM: Using GPU-assisted conversion for modifier 0x%016" PRIx64 "\n", frame.modifier);
+					fprintf(stderr, "DRM: Using GPU-assisted conversion for modifier 0x%016" PRIx64 " (%d plane(s))\n", frame.modifier, frame.plane_count);
 					lastLoggedPath = 1;
 				}
 
-				converted = kvm_drm_egl_convert_to_rgb24_gpu(&dev->eglCtx, dev->fd, frame.width, frame.height, frame.pitch,
-															 frame.offset, frame.format, frame.handle, frame.modifier,
+				converted = kvm_drm_egl_convert_to_rgb24_gpu(&dev->eglCtx, dev->fd, frame.width, frame.height,
+															 frame.plane_count, frame.plane_handles, frame.plane_pitches, frame.plane_offsets,
+															 frame.format, frame.modifier,
 															 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
-				kvm_drm_close_gem_handle(dev->fd, frame.handle);
+				// Close each unique plane handle once (CCS data + metadata can share one GEM handle).
+				for (int pi = 0; pi < frame.plane_count && pi < 4; ++pi)
+				{
+					uint32_t h = frame.plane_handles[pi];
+					int dup = 0, pj;
+					if (h == 0) { continue; }
+					for (pj = 0; pj < pi; ++pj) { if (frame.plane_handles[pj] == h) { dup = 1; break; } }
+					if (!dup) { kvm_drm_close_gem_handle(dev->fd, h); }
+				}
 				frame.handle = 0;
 			}
 			else
