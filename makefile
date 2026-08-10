@@ -218,6 +218,20 @@ OBJECTS = $(patsubst %.c,%.o, $(SOURCES))
 CC = gcc
 STRIP = strip
 
+# Compiler for the Alpine / musl x86-64 target (ARCHID 33)
+# Building natively on Alpine it resolves to the host gcc, which is already musl.
+# For cross-compile: apt install musl-tools.
+# musl-gcc drives the host gcc with -nostdinc and musl's own include path, so
+# the kernel headers are not on it and <linux/limits.h> cannot be found.
+# -idirafter appends the system directories AFTER musl's, so musl still wins
+# for everything it provides and only linux/* and asm/* come from the host.
+# Do not use -I here - that would shadow musl's headers with glibc's.
+# On Alpine none of that applies: musl-gcc does not exist there and
+# /usr/include/x86_64-linux-gnu is a Debian path, so detect a musl host
+# compiler and use it as-is. Override with "make MUSL_CC=..." for any other
+# musl toolchain.
+MUSL_CC ?= $(shell gcc -dumpmachine 2>/dev/null | grep -q musl && echo gcc || echo musl-gcc -idirafter /usr/include/x86_64-linux-gnu -idirafter /usr/include)
+
 # Need to be separate for dependency generation	
 INCDIRS = -I. -Iopenssl/include -Imicrostack -Imicroscript -Imeshcore -Imeshconsole
 
@@ -253,6 +267,7 @@ endif
 
 ifeq ($(ARCHID),33)
 ARCHNAME = alpine-x86-64
+CC = $(MUSL_CC)
 KVM=0
 CRASH_HANDLER=0
 endif
