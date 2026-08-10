@@ -316,7 +316,7 @@ ifeq ($(ARCHID),16)
 ARCHNAME = osx-x86-64
 KVM = 1
 LMS = 0
-MACOSARCH = -mmacosx-version-min=10.5
+MACOSARCH = -mmacosx-version-min=10.12
 CC = gcc -arch x86_64
 endif
 
