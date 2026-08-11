@@ -1218,9 +1218,20 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
 		duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
 		duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
-		if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
-		x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
-		d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+		if (duk_pcall_method(ctx, 1) != 0)															//[uid][xinfo|error]
+		{
+			// getXInfo() has no X server to query on a Wayland/greeter session and throws. The DRM
+			// backend does not need XAUTHORITY/DISPLAY, so don't abort the restart (that is what left
+			// the session dead until a manual restart).
+			Duktape_Console_LogEx(ctx, ILibDuktape_LogType_Info1, "userChanged: getXInfo failed (%s); restarting without X env", duk_safe_to_string(ctx, -1));
+			x = NULL;
+			d = NULL;
+		}
+		else
+		{
+			x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+			d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+		}
 
 
 		duk_push_heapptr(ctx, s);							// [stream]
@@ -1231,6 +1242,18 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
 	}
 	return(0);
+}
+
+// Called (deferred, on the microstack thread) by the KVM parent in linux_kvm.c when a capture child
+// exits unexpectedly (logout / user-switch / crash). Re-derives the current console session and
+// re-forks the capture child by reusing the exact same recovery as a live user-sessions 'changed'
+// event, so the DRM/Wayland and X11 backends share one restart path.
+void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reservedPtrs;
+	if (ptrs == NULL || !ILibMemory_CanaryOK(ptrs) || ptrs->ctx == NULL) { return; }		// stream torn down
+	if (!duk_ctx_is_alive(ptrs->ctx)) { return; }
+	duk_peval_string_noresult(ptrs->ctx, "try { require('user-sessions').emit('changed'); } catch (e) {}");
 }
 #endif
 

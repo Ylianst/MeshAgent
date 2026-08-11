@@ -2237,6 +2237,23 @@ static uint64_t kvm_drm_now_ms()
 	return (((uint64_t)tsNow.tv_sec) * 1000ULL) + (((uint64_t)tsNow.tv_nsec) / 1000000ULL);
 }
 
+// How long scanout must stay unavailable before we treat it as a real session teardown rather than
+// a momentary display sleep. The child freezes the last frame (no error to the viewer) during this
+// window, then exits so the root parent can re-fork against the current session.
+#define KVM_DRM_SESSION_LOST_GRACE_MS 3000
+
+// True while the captured session's XDG runtime dir still exists. On logout/user-switch systemd
+// tears down /run/user/<uid> entirely, so its disappearance is our definitive "this session ended"
+// signal. A display merely in DPMS sleep keeps its runtime dir, so we do not mistake sleep for
+// logout. For uid<=0 (greeter/root/unknown) we can't use this signal, so report "present".
+static int kvm_drm_session_runtime_present(int sessionUid)
+{
+	char path[64];
+	if (sessionUid <= 0) { return 1; }
+	if (snprintf(path, sizeof(path), "/run/user/%d", sessionUid) <= 0) { return 1; }
+	return access(path, F_OK) == 0 ? 1 : 0;
+}
+
 static int kvm_drm_set_only_sys_admin_cap()
 {
 	struct __user_cap_header_struct header;
@@ -2373,6 +2390,7 @@ void *kvm_server_mainloop_drm(void *parm)
 	int lastCaptureError = 0;
 	int scanoutSuspended = 0;
 	int forceTileReset = 0;
+	uint64_t captureLostSinceMs = 0;	// when scanout first went unavailable (0 = capturing normally)
 	int reportedScreenWidth = 0;
 	int reportedScreenHeight = 0;
 	int reportedScreenSel = -1;
@@ -2672,27 +2690,26 @@ void *kvm_server_mainloop_drm(void *parm)
 
 			if (!kvm_drm_get_scanout_frame(dev->fd, outputs[outputIndex].crtc_id, outputs[outputIndex].crtc_index, &frame, err, sizeof(err)))
 			{
-				if (kvm_drm_is_transient_scanout_error(err))
+				// Scanout acquisition failing mid-session is the logout / display-sleep symptom. Freeze
+				// the last frame quietly instead of pushing a fatal error to the viewer; the grace +
+				// runtime-dir check in the capturedOutputs<=0 block below distinguishes a transient
+				// display sleep (keep waiting) from a real session teardown (exit so the parent re-forks).
+				if (!kvm_drm_is_transient_scanout_error(err) && drm_debug)
 				{
-					scanoutSuspended = 1;
-					forceTileReset = 1;
-					continue;
+					fprintf(stderr, "DRM: scanout acquisition failed (%s); suspending\n", err);
 				}
-				if (lastCaptureError == 0)
-				{
-					kvm_send_error(err);
-					lastCaptureError = 1;
-				}
+				scanoutSuspended = 1;
+				forceTileReset = 1;
+				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
 				continue;
 			}
 
 			if (frame.handle == 0 || frame.width == 0 || frame.height == 0)
 			{
-				if (lastCaptureError == 0)
-				{
-					kvm_send_error("DRM framebuffer is not readable (missing handle)");
-					lastCaptureError = 1;
-				}
+				// No readable framebuffer handle: same handover/sleep symptom as above, suspend quietly.
+				scanoutSuspended = 1;
+				forceTileReset = 1;
+				if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
 				continue;
 			}
 
@@ -2756,7 +2773,13 @@ void *kvm_server_mainloop_drm(void *parm)
 				if (!kvm_drm_map_framebuffer_handle(dev->fd, frame.handle, required_bytes, &dev->map, err, sizeof(err)))
 				{
 					kvm_drm_close_gem_handle(dev->fd, frame.handle);
-					converted = false;
+					// "Failed to map scanout buffer" is the classic post-logout symptom: the session's
+					// buffers / DRM access are gone. Suspend quietly (freeze last frame) and let the
+					// grace + runtime-dir check decide, rather than spamming a fatal error during handover.
+					scanoutSuspended = 1;
+					forceTileReset = 1;
+					if (captureLostSinceMs == 0) { captureLostSinceMs = nowMs; }
+					continue;
 				}
 				else
 				{
@@ -2806,6 +2829,21 @@ void *kvm_server_mainloop_drm(void *parm)
 
 		if (capturedOutputs <= 0)
 		{
+			// Scanout has been unavailable on every output for longer than the grace period. If the
+			// captured session's runtime dir is also gone, the user has logged out / switched away:
+			// exit cleanly so the (still-root) parent re-forks against the CURRENT active session uid.
+			// If the runtime dir is still present the display is only asleep (DPMS) — keep waiting.
+			if (captureLostSinceMs != 0 &&
+				(kvm_drm_now_ms() - captureLostSinceMs) >= KVM_DRM_SESSION_LOST_GRACE_MS &&
+				!kvm_drm_session_runtime_present(sessionUid))
+			{
+				if (drm_debug)
+				{
+					fprintf(stderr, "DRM: session uid %d runtime dir gone; exiting for re-derive/re-fork\n", sessionUid);
+				}
+				g_shutdown = 1;	// leave the loop; the parent detects the child exit and re-forks
+				break;
+			}
 			if (scanoutSuspended && drm_debug)
 			{
 				fprintf(stderr, "DRM: Scanout unavailable on all outputs, waiting for display resume\n");
@@ -2814,6 +2852,7 @@ void *kvm_server_mainloop_drm(void *parm)
 		}
 		scanoutSuspended = 0;
 		lastCaptureError = 0;
+		captureLostSinceMs = 0;	// captured a frame again; clear the session-loss grace timer
 
 		if (SCREEN_WIDTH != reportedScreenWidth || SCREEN_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
 		{

@@ -1634,6 +1634,52 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 
 #include "../../../microstack/ILibParsers.h"
 
+// --- KVM capture auto-recovery (session handover) -----------------------------------------------
+// When a capture child exits unexpectedly (logout / user-switch / crash) the child's pipe breaks and
+// kvm_relay_brokenPipeSink() runs (a deliberate viewer teardown clears this handler to NULL first, so
+// it never runs then). Instead of only telling the viewer the child died, we ask the agent to
+// re-derive the CURRENT console session uid and re-fork. Rate-limited so a genuinely unrecoverable
+// child cannot storm-fork.
+#define KVM_AUTORECOVER_DELAY_MS   1500		// let the session settle before re-deriving the uid
+#define KVM_AUTORECOVER_MAX_BURST  5		// consecutive quick re-forks before we give up
+#define KVM_AUTORECOVER_RESET_MS   30000	// a child that ran at least this long was healthy: reset the burst
+
+static uint64_t g_lastKvmForkMs = 0;		// monotonic ms when the current child was forked
+
+// Implemented in agentcore.c: re-derive consoleUid()/X env and re-fork the capture child (reuses the
+// same path as a live user-sessions 'changed' event).
+extern void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs);
+
+static uint64_t kvm_relay_now_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
+	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
+}
+
+// Decide whether an unexpected child exit should trigger an automatic re-fork. Reuses g_restartcount
+// as a burst gate, cleared whenever the previous child ran long enough to be considered healthy.
+static int kvm_relay_should_autorecover(void)
+{
+	uint64_t now = kvm_relay_now_ms();
+	if (g_lastKvmForkMs != 0 && (now - g_lastKvmForkMs) >= KVM_AUTORECOVER_RESET_MS)
+	{
+		g_restartcount = 0;
+	}
+	if (g_restartcount >= KVM_AUTORECOVER_MAX_BURST) { return 0; }	// give up; fall back to the viewer notice
+	g_restartcount++;
+	g_totalRestartCount++;
+	return 1;
+}
+
+// Deferred off the broken-pipe callback (so we don't re-enter pipe teardown) to perform the recovery.
+static void kvm_relay_autoRecoverSink(void *sender)
+{
+	if (!ILibMemory_CanaryOK(sender)) { return; }	// pipe freed (deliberate teardown) before the timer fired
+	if (g_shutdown || g_slavekvm != 0) { return; }	// shutting down, or a child is already running again
+	ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(((void**)ILibMemory_Extra(sender))[1]);
+}
+
 void kvm_relay_brokenPipeSink_2(void *sender)
 {
 	if (!ILibMemory_CanaryOK(sender)) { return; } // pipe was freed before this 4s timer fired
@@ -1659,7 +1705,17 @@ void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
 		g_slavekvm = 0;
 	}
 
-	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 4000, kvm_relay_brokenPipeSink_2, NULL);	
+	// The child exited without a deliberate teardown (teardown clears this handler first). Try to
+	// auto-recover the session (logout / user-switch) rather than just reporting the child death.
+	// Gated by g_shutdown and a burst limit so an unrecoverable child can't fork-storm; on giving up
+	// we fall through to the original "child unexpectedly exited" viewer notice.
+	if (!g_shutdown && kvm_relay_should_autorecover())
+	{
+		ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, KVM_AUTORECOVER_DELAY_MS, kvm_relay_autoRecoverSink, NULL);
+		return;
+	}
+
+	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 4000, kvm_relay_brokenPipeSink_2, NULL);
 }
 
 void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
@@ -1730,8 +1786,13 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		exit(0);
 		return(NULL);
 	}
-	else 
+	else
 	{ //master
+		// A child is (re)running now: clear any stale shutdown flag left by kvm_cleanup() on a restart
+		// path, and stamp the fork time so the auto-recovery burst gate can tell a healthy child (ran a
+		// while) from a fork storm (dies immediately).
+		g_shutdown = 0;
+		g_lastKvmForkMs = kvm_relay_now_ms();
 		close(slave2master[1]);
 		close(master2slave[0]);
 		logFile = fopen("/tmp/master", "w");
