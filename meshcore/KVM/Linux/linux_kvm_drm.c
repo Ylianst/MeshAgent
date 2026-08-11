@@ -376,6 +376,9 @@ typedef struct kvm_drm_output
 	uint32_t width;
 	uint32_t height;
 	int device_index;
+	// Un-rotation that maps the panel-native scanout buffer back into this output's logical
+	// orientation (from the wl_output transform); width/height above stay logical.
+	kvm_drm_rotation rotation;
 } kvm_drm_output;
 
 typedef struct kvm_drm_desktop_layout
@@ -1514,6 +1517,23 @@ static void kvm_drm_get_rotated_dimensions(const kvm_drm_scanout_frame *frame, u
 	}
 }
 
+static kvm_drm_rotation kvm_drm_effective_output_rotation(const kvm_drm_output *output, const kvm_drm_scanout_frame *frame)
+{
+	if (output->rotation == KVM_DRM_ROTATION_90 || output->rotation == KVM_DRM_ROTATION_270)
+	{
+		// A 90/270 transform swaps the logical aspect relative to the scanout buffer. If the
+		// buffer orientation already matches the logical rect, the plane hardware is doing the
+		// rotation and the content needs no software pass. Square shapes give no signal; trust
+		// the transform then (compositors pre-rotate in the renderer on virtually all hardware).
+		if (frame->width != frame->height && output->width != output->height &&
+			(frame->width > frame->height) == (output->width > output->height))
+		{
+			return KVM_DRM_ROTATION_0;
+		}
+	}
+	return output->rotation;
+}
+
 static bool kvm_drm_compute_desktop_layout(const kvm_drm_output *outputs, int output_count, kvm_drm_desktop_layout *layout)
 {
 	int i;
@@ -1627,7 +1647,7 @@ static int kvm_drm_find_output_by_name(const kvm_drm_output *outputs, int output
 	return -1;
 }
 
-static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, const char *name, int enabled, int x, int y, uint32_t width, uint32_t height, int *matched, bool *claimed)
+static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, const char *name, int enabled, int x, int y, uint32_t width, uint32_t height, kvm_drm_rotation rotation, int *matched, bool *claimed)
 {
 	int index;
 	if (enabled != 1 || width == 0 || height == 0)
@@ -1646,6 +1666,7 @@ static int kvm_drm_apply_kwin_screen(kvm_drm_output *outputs, int output_count, 
 	outputs[index].y = y;
 	outputs[index].width = width;
 	outputs[index].height = height;
+	outputs[index].rotation = rotation;
 	if (claimed != NULL) { claimed[index] = true; }
 	if (matched != NULL) { (*matched)++; }
 	return 1;
@@ -1742,6 +1763,7 @@ typedef struct kvm_drm_wayland_output
 	int y;
 	uint32_t width;
 	uint32_t height;
+	int32_t transform; // WL_OUTPUT_TRANSFORM_* from wl_output.geometry
 } kvm_drm_wayland_output;
 
 typedef struct kvm_drm_wayland_layout_context
@@ -1755,7 +1777,12 @@ typedef struct kvm_drm_wayland_layout_context
 
 static void kvm_drm_wl_output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width, int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform)
 {
-	(void)data; (void)wl_output; (void)x; (void)y; (void)physical_width; (void)physical_height; (void)subpixel; (void)make; (void)model; (void)transform;
+	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
+	(void)wl_output; (void)x; (void)y; (void)physical_width; (void)physical_height; (void)subpixel; (void)make; (void)model;
+	if (output != NULL)
+	{
+		output->transform = transform;
+	}
 }
 
 static void kvm_drm_wl_output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height, int32_t refresh)
@@ -1925,6 +1952,24 @@ static void kvm_drm_wayland_layout_context_cleanup(kvm_drm_wayland_layout_contex
 	}
 }
 
+// Maps a wl_output transform onto the pass that brings the captured scanout buffer back into
+// logical orientation. The compositor rotates the logical desktop counter-clockwise by the
+// transform angle when rendering into the panel-native buffer (verified on mutter 43: with
+// transform=1 the top bar lands on the buffer's left edge), so the un-rotation is the inverse,
+// and kvm_drm_rotate_rgb24's ROTATION_90 pass is itself counter-clockwise — hence 1->270, 3->90.
+// The flipped variants (4..7) also mirror, which kvm_drm_rotate_rgb24 can't express; use their
+// rotation component so the image is at least oriented correctly.
+static kvm_drm_rotation kvm_drm_rotation_from_wl_transform(int32_t transform)
+{
+	switch (transform & 3)
+	{
+	case 1: return KVM_DRM_ROTATION_270;
+	case 2: return KVM_DRM_ROTATION_180;
+	case 3: return KVM_DRM_ROTATION_90;
+	default: return KVM_DRM_ROTATION_0;
+	}
+}
+
 static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_count, bool logSelection)
 {
 	kvm_drm_wayland_layout_context ctx;
@@ -1989,15 +2034,17 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	{
 		if (drm_debug)
 		{
-			fprintf(stderr, "DRM: xdg-output query: wl-output[%d] name='%s' have_name=%d have_pos=%d(%d,%d) have_size=%d(%ux%u)\n",
+			fprintf(stderr, "DRM: xdg-output query: wl-output[%d] name='%s' have_name=%d have_pos=%d(%d,%d) have_size=%d(%ux%u) transform=%d\n",
 				i, ctx.outputs[i].name, ctx.outputs[i].have_name, ctx.outputs[i].have_position,
-				ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].have_size, ctx.outputs[i].width, ctx.outputs[i].height);
+				ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].have_size, ctx.outputs[i].width, ctx.outputs[i].height,
+				ctx.outputs[i].transform);
 		}
 		if (ctx.outputs[i].have_name == 0 || ctx.outputs[i].have_position == 0 || ctx.outputs[i].have_size == 0)
 		{
 			continue;
 		}
-		kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height, &matched, claimed);
+		kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height,
+			kvm_drm_rotation_from_wl_transform(ctx.outputs[i].transform), &matched, claimed);
 	}
 
 	if (matched != output_count)
@@ -2014,8 +2061,9 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 		fprintf(stderr, "DRM: Using Wayland xdg-output logical layout\n");
 		for (i = 0; i < output_count; ++i)
 		{
-			fprintf(stderr, "DRM:   xdg-output[%d] %s pos=%d,%d size=%ux%u\n",
-				i, outputs[i].connector_name, outputs[i].x, outputs[i].y, outputs[i].width, outputs[i].height);
+			fprintf(stderr, "DRM:   xdg-output[%d] %s pos=%d,%d size=%ux%u rotation=%s\n",
+				i, outputs[i].connector_name, outputs[i].x, outputs[i].y, outputs[i].width, outputs[i].height,
+				kvm_drm_rotation_name(outputs[i].rotation));
 		}
 	}
 
@@ -2072,7 +2120,8 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 		{
 			if (have_screen)
 			{
-				kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched, claimed);
+				// supportInformation exposes no transform; a rotated output keeps rotation 0 here.
+				kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, KVM_DRM_ROTATION_0, &matched, claimed);
 			}
 			have_screen = 1;
 			name[0] = 0;
@@ -2100,7 +2149,7 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 	}
 	if (have_screen)
 	{
-		kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, &matched, claimed);
+		kvm_drm_apply_kwin_screen(tmp, output_count, name, enabled, x, y, width, height, KVM_DRM_ROTATION_0, &matched, claimed);
 	}
 	pclose(pipe);
 
@@ -2235,6 +2284,56 @@ static uint64_t kvm_drm_now_ms()
 		return 0;
 	}
 	return (((uint64_t)tsNow.tv_sec) * 1000ULL) + (((uint64_t)tsNow.tv_nsec) / 1000000ULL);
+}
+
+// MESH_KVM_DRM_DUMP=<path> writes the composed desktop as a PPM (P6) about every 2 seconds, so
+// orientation/layout problems can be inspected without a viewer attached.
+static void kvm_drm_debug_dump_frame(const unsigned char *rgb, uint32_t width, uint32_t height)
+{
+	static const char *path = NULL;
+	static int initialized = 0;
+	static uint64_t lastDumpMs = 0;
+	char tmpPath[512];
+	uint64_t nowMs;
+	int fd;
+	FILE *f;
+
+	if (!initialized)
+	{
+		path = getenv("MESH_KVM_DRM_DUMP");
+		if (path != NULL && path[0] == 0) { path = NULL; }
+		initialized = 1;
+	}
+	if (path == NULL || rgb == NULL || width == 0 || height == 0)
+	{
+		return;
+	}
+	nowMs = kvm_drm_now_ms();
+	if (lastDumpMs != 0 && nowMs - lastDumpMs < 2000)
+	{
+		return;
+	}
+	lastDumpMs = nowMs;
+
+	if (snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path) >= (int)sizeof(tmpPath))
+	{
+		return;
+	}
+	fd = open(tmpPath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0)
+	{
+		return;
+	}
+	f = fdopen(fd, "wb");
+	if (f == NULL)
+	{
+		close(fd);
+		return;
+	}
+	fprintf(f, "P6\n%u %u\n255\n", width, height);
+	fwrite(rgb, 1, (size_t)width * (size_t)height * 3u, f);
+	fclose(f);
+	ignore_result(rename(tmpPath, path));
 }
 
 // How long scanout must stay unavailable before we treat it as a real session teardown rather than
@@ -2713,6 +2812,17 @@ void *kvm_server_mainloop_drm(void *parm)
 				continue;
 			}
 
+			{
+				// On a rotated output the compositor pre-rotates the logical desktop into the
+				// panel-native buffer, so undo that per output. MESH_KVM_ROTATION (already applied
+				// by kvm_drm_get_scanout_frame) stays a global manual override, including "0".
+				kvm_drm_rotation forcedRotation = KVM_DRM_ROTATION_0;
+				if (!kvm_drm_get_forced_rotation(&forcedRotation, 0))
+				{
+					frame.rotation = kvm_drm_effective_output_rotation(&outputs[outputIndex], &frame);
+				}
+			}
+
 			if (drm_debug >= 2 &&
 				(frame.width != lastLoggedWidth ||
 				 frame.height != lastLoggedHeight ||
@@ -2853,6 +2963,7 @@ void *kvm_server_mainloop_drm(void *parm)
 		scanoutSuspended = 0;
 		lastCaptureError = 0;
 		captureLostSinceMs = 0;	// captured a frame again; clear the session-loss grace timer
+		kvm_drm_debug_dump_frame(desktopRgbBuffer, (uint32_t)SCREEN_WIDTH, (uint32_t)SCREEN_HEIGHT);
 
 		if (SCREEN_WIDTH != reportedScreenWidth || SCREEN_HEIGHT != reportedScreenHeight || SCREEN_SEL != reportedScreenSel)
 		{
