@@ -317,12 +317,30 @@ function monitorinfo()
             MWM_FUNC_CLOSE      : (1 << 5) 
         };
         this._xtries = 0;
+        this._kvmcheck_wayland_user = function _kvmcheck_wayland_user(uid)
+        {
+            try
+            {
+                var fs = require('fs');
+                if (uid != null && uid > 0)
+                {
+                    var runtimeDir = '/run/user/' + uid;
+                    var waylandDisplay = process.env['WAYLAND_DISPLAY'];
+
+                    if (waylandDisplay && fs.existsSync(runtimeDir + '/' + waylandDisplay)) { return true; }
+                    if (fs.existsSync(runtimeDir + '/wayland-0') || fs.existsSync(runtimeDir + '/wayland-1')) { return true; }
+                }
+            }
+            catch (e)
+            {
+            }
+            return false;
+        };
         this._kvmcheck_wayland = function _kvmcheck_wayland()
         {
             if (process.platform != 'linux') { return false; }
             try
             {
-                var fs = require('fs');
                 var uid = 0;
 
                 try
@@ -333,14 +351,13 @@ function monitorinfo()
                 catch (z) { }
                 if (uid == null || uid <= 0) { try { uid = require('user-sessions').consoleUid(); } catch (zz) { uid = 0; } }
 
-                if (uid != null && uid > 0)
-                {
-                    var runtimeDir = '/run/user/' + uid;
-                    var waylandDisplay = process.env['WAYLAND_DISPLAY'];
+                if (this._kvmcheck_wayland_user(uid)) { return true; }
 
-                    if (waylandDisplay && fs.existsSync(runtimeDir + '/' + waylandDisplay)) { return true; }
-                    if (fs.existsSync(runtimeDir + '/wayland-0') || fs.existsSync(runtimeDir + '/wayland-1')) { return true; }
-                }
+                // Fall back to the display-manager (greeter) session so the Wayland login screen
+                // is detected before any user logs in (e.g. GDM/LightDM Wayland greeter).
+                var dmUid = 0;
+                try { dmUid = require('user-sessions').gdmUid; } catch (zz) { dmUid = 0; }
+                if (dmUid != null && dmUid > 0 && dmUid != uid && this._kvmcheck_wayland_user(dmUid)) { return true; }
             }
             catch (e)
             {

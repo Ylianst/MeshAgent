@@ -508,7 +508,7 @@ function UserSessions()
                             while(uids.length>0)
                             {
                                 var tst = uids.pop();
-                                if (pwd[tst].desc.indexOf('Display Manager') >= 0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm' || pwd[tst].user == 'sddm')
+                                if (pwd[tst].desc.toLowerCase().indexOf('display manager') >= 0 || pwd[tst].user == 'gdm' || pwd[tst].user == 'lightdm' || pwd[tst].user == 'sddm' || pwd[tst].user == '_ldm')
                                 {
                                     if (parseInt(tst) < min)
                                     {
