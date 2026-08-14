@@ -15,20 +15,13 @@ name: macOS Build (PR smoke test for #359)
 #
 # A maintainer with a real Mac will still need to do a Tahoe
 # session-replay test before merge.
+#
+# It runs on every push to a PR against master (the `pull_request` event
+# re-fires on `synchronize`), so each commit gets a fresh binary to test.
 
 on:
   pull_request:
     branches: [master]
-    paths:
-      - 'meshcore/KVM/MacOS/mac_kvm.c'
-      - 'microscript/ILibDuktape_Helpers.c'
-      - 'microscript/ILibDuktape_Helpers.h'
-      - 'microscript/ILibDuktape_HttpStream.c'
-      - 'microscript/ILibDuktape_ReadableStream.c'
-      - 'makefile'
-      - '.github/workflows/macos-build-pr.yml'
-  push:
-    branches: [fix/359-macos26-kvm-relay-stale-socket]
 
 jobs:
   macos-build-arm64:
@@ -47,12 +40,18 @@ jobs:
 
   macos-build-x86_64:
     name: macOS x86_64 (ARCHID=16)
-    # macos-13 is the last Intel-based macOS image. Note: GitHub-hosted
-    # runners only expose the un-suffixed label; `macos-13-large` is a
-    # self-hosted-only label and jobs requesting it stay queued forever.
-    # If macos-13 is ever saturated in the future, the only valid
-    # alternative for x86_64 is to switch to a self-hosted runner.
-    runs-on: macos-13
+    # Cross-compiled from an Apple silicon runner ON PURPOSE.
+    #
+    # `macos-13` was the last Intel image and GitHub is retiring it: jobs
+    # requesting it are no longer assigned a runner and get cancelled by the
+    # 24h queue timeout, which is why this PR never produced a check run.
+    # A self-hosted runner is NOT the only way out -- the makefile already
+    # builds ARCHID=16 with `CC = gcc -arch x86_64`, and both third-party
+    # dependencies are checked in per architecture
+    # (`lib-jpeg-turbo/macos/osx-x86-64/libturbojpeg.a` and
+    # `openssl/libstatic/macos/osx-x86-64`), so nothing in the build depends
+    # on the runner's own architecture. The macOS SDK is universal.
+    runs-on: macos-14
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7.0.0
