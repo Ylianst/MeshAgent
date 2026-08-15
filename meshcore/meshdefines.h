@@ -65,7 +65,12 @@ typedef enum RemoteManagementCommands
 	MNG_USERCONSENT = 63,					// Used to notify management console of user consent state
 	MNG_DEBUG = 64,							// Debug/Logging Message for ILibRemoteLogging
 	MNG_ERROR = 65,
-	MNG_ENCAPSULATE_AGENT_COMMAND = 70
+	MNG_ENCAPSULATE_AGENT_COMMAND = 70,
+	MNG_AUDIO_DATA = 90,					// Opus-encoded audio chunk
+	MNG_AUDIO_CAPS = 91,					// Agent capability advertisement
+	MNG_AUDIO_START = 92,					// Start audio streaming
+	MNG_AUDIO_STOP = 93,					// Stop audio streaming
+	MNG_AUDIO_QUERY = 94					// Pull CAPS re-send
 }RemoteManagementCommands;
 
 

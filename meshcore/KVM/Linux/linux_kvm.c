@@ -39,6 +39,17 @@ limitations under the License.
 #include "linux_events.h"
 #include "linux_compression.h"
 
+#if defined(_KVM_AUDIO)
+#include "meshcore/KVM/kvm_audio.h"
+extern int slave2master[2];
+static ILibTransport_DoneState kvm_audio_pipe_write(char *buf, int len, void *reserved)
+{
+	(void)reserved;
+	if (slave2master[1] > 0) { write(slave2master[1], buf, len); fsync(slave2master[1]); }
+	return ILibTransport_DoneState_COMPLETE;
+}
+#endif
+
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 extern uint32_t crc32c(uint32_t crc, const unsigned char* buf, uint32_t len);
@@ -952,6 +963,11 @@ int kvm_server_inputdata(char* block, int blocklen)
 			}
 			break;
 		}
+#if defined(_KVM_AUDIO)
+		case MNG_AUDIO_START: kvm_audio_start(); break;
+		case MNG_AUDIO_STOP:  kvm_audio_stop(); break;
+		case MNG_AUDIO_QUERY: kvm_audio_resend_caps(kvm_audio_pipe_write, NULL); break;
+#endif
 	}
 	return size;
 }
@@ -1518,6 +1534,9 @@ void* kvm_server_mainloop(void* parm)
 	}
 
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
+#if defined(_KVM_AUDIO)
+	kvm_audio_cleanup();
+#endif
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
@@ -1624,6 +1643,11 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 
 	r = pipe(slave2master);
 	r = pipe(master2slave);
+
+#if defined(_KVM_AUDIO)
+	kvm_audio_set_slave_fd(slave2master[1]);
+	kvm_audio_init(kvm_audio_pipe_write, NULL);
+#endif
 
 	// Two Phase is ok here, because all our fork/vfork calls always happen on the same thread
 	fcntl(slave2master[0], F_SETFD, FD_CLOEXEC);
