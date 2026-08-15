@@ -78,8 +78,8 @@ char* ILibRemoteLogging_ConvertAddress(struct sockaddr* addr);
 	void ILibRemoteLogging_DeleteUserContext(ILibRemoteLogging logger, void *userContext);
 	void ILibRemoteLogging_RegisterCommandSink(ILibRemoteLogging logger, ILibRemoteLogging_Modules module, ILibRemoteLogging_OnCommand sink);
 	int ILibRemoteLogging_Dispatch(ILibRemoteLogging loggingModule, char* data, int dataLen, void *userContext);
-	#define ILibRemoteLogging_ReadModuleType(data) ((ILibRemoteLogging_Modules)ntohs(((unsigned short*)data)[0]))
-	#define ILibRemoteLogging_ReadFlags(data) ((ILibRemoteLogging_Flags)ntohs(((unsigned short*)data)[1]))
+	#define ILibRemoteLogging_ReadModuleType(data) ((ILibRemoteLogging_Modules)ntohs(ILibUnaligned_Read16((char*)(data))))
+	#define ILibRemoteLogging_ReadFlags(data) ((ILibRemoteLogging_Flags)ntohs(ILibUnaligned_Read16(((char*)(data)) + 2)))
 	int ILibRemoteLogging_IsModuleSet(ILibRemoteLogging loggingModule, ILibRemoteLogging_Modules module);
 	void ILibRemoteLogging_Forward(ILibRemoteLogging loggingModule, char* data, int dataLen);
 #else

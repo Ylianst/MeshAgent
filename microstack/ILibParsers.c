@@ -8597,7 +8597,7 @@ int ILibHashtable_DefaultBucketizer(int value)
 	unsigned char tmp[4];
 	int retVal = 0;
 
-	((unsigned int*)tmp)[0] = value;
+	ILibUnaligned_Write32(tmp, (uint32_t)value);
 	retVal = (int)(tmp[0] ^ tmp[1] ^ tmp[2] ^ tmp[3]); //Klocwork is being retarded, and doesn't realize an unsigned int is 4 bytes
 
 	return retVal;
@@ -8615,32 +8615,32 @@ int ILibHashtable_DefaultHashFunc(void* Key1, char* Key2, int Key2Len)
 	{
 		if (Key2Len < 5)
 		{
-			((int*)tmp)[0] = 0;
+			ILibUnaligned_Write32(tmp, 0);
 			for (i = 0; i < Key2Len; ++i)
 			{
 				tmp[i] = Key2[i];
 			}
-			retVal ^= ((int*)tmp)[0];
+			retVal ^= (int)ILibUnaligned_Read32(tmp);
 		}
-		
+
 		if (Key2Len > 4)
 		{
-			((int*)tmp)[0] = 0;
+			ILibUnaligned_Write32(tmp, 0);
 			for (i = 0; i < 4; ++i)
 			{
 				tmp[i] = Key2[Key2Len - 1 - i];
 			}
-			retVal ^= ((int*)tmp)[0];
-			
+			retVal ^= (int)ILibUnaligned_Read32(tmp);
+
 			if (Key2Len > 12)
 			{
 				int x = Key2Len / 2;
-				((int*)tmp)[0] = 0;
+				ILibUnaligned_Write32(tmp, 0);
 				for (i = 0; i < 4; ++i)
 				{
 					tmp[i] = Key2[i + x];
 				}
-				retVal ^= ((int*)tmp)[0];
+				retVal ^= (int)ILibUnaligned_Read32(tmp);
 			}
 		}
 	}

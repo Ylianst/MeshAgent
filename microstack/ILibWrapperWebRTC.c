@@ -136,11 +136,11 @@ void ILibWrapper_InitializeDataChannel_Transport(ILibWrapper_WebRTC_DataChannel 
 
 short ILibWrapper_ReadShort(char* buffer, int offset)
 {
-	return(ntohs(((short*)(buffer+offset))[0]));
+	return(ntohs((short)ILibUnaligned_Read16(buffer+offset)));
 }
 int ILibWrapper_ReadInt(char* buffer, int offset)
 {
-	return(ntohl(((int*)(buffer+offset))[0]));
+	return(ntohl((int)ILibUnaligned_Read32(buffer+offset)));
 }
 char* ILibWrapper_ReadString(char* buffer, int offset, int length)
 {
@@ -246,7 +246,7 @@ char* ILibWrapper_SdpToBlock(char* sdp, int sdpLen, int *isActive, char **userna
 					pr3->FirstResult->NextResult->NextResult->NextResult->data[pr3->FirstResult->NextResult->NextResult->NextResult->datalength] = 0;
 					candidateData[3] = (char)ILib_atoi2_int16(pr3->FirstResult->NextResult->NextResult->NextResult->data, pr3->FirstResult->NextResult->NextResult->NextResult->datalength);
 
-					((unsigned short*)candidateData)[2] = htons(port);
+					ILibUnaligned_Write16(candidateData + 4, htons(port));
 					candidateData[6] = 0;
 
 					ILibPushStack(&candidates, candidateData);
@@ -277,10 +277,10 @@ char* ILibWrapper_SdpToBlock(char* sdp, int sdpLen, int *isActive, char **userna
 	retVal = (char*)ILibMemory_SmartAllocateEx(blockLen, sizeof(int));
 	ptr = 0;
 
-	((unsigned short*)(retVal+ptr))[0] = htons(1);
+	ILibUnaligned_Write16(retVal + ptr, htons(1));
 	ptr += 2;
 
-	((unsigned int*)(retVal + ptr))[0] = htonl(BlockFlags);
+	ILibUnaligned_Write32(retVal + ptr, htonl(BlockFlags));
 	ptr += 4;
 
 	(retVal)[ptr] = (char)usernameLen;
@@ -399,18 +399,18 @@ int ILibWrapper_BlockToSDPEx(char* block, int blockLen, char** username, char** 
 
 	util_random(4, junk);
 
-	x = sprintf_s(*sdp, sdpLen, sdpTemplate1, ((unsigned int*)junk)[0]%1000000, *username, *password, dtlshash, isActive==0?"passive":"actpass");
+	x = sprintf_s(*sdp, sdpLen, sdpTemplate1, ILibUnaligned_Read32(junk)%1000000, *username, *password, dtlshash, isActive==0?"passive":"actpass");
 
 	for(c = 1; c <= 2; ++c)
 	{
 		for (i = 0; i < candidatecount; i++)
 		{
 			ptr = i*6;
-			x += sprintf_s(*sdp+x, sdpLen-x, sdpTemplateLocalCand, i, c, 2128609535-i, (unsigned char)candidates[ptr], (unsigned char)candidates[ptr+1], (unsigned char)candidates[ptr+2], (unsigned char)candidates[ptr+3], ntohs(((unsigned short*)(candidates+ptr+4))[0]));
+			x += sprintf_s(*sdp+x, sdpLen-x, sdpTemplateLocalCand, i, c, 2128609535-i, (unsigned char)candidates[ptr], (unsigned char)candidates[ptr+1], (unsigned char)candidates[ptr+2], (unsigned char)candidates[ptr+3], ntohs(ILibUnaligned_Read16(candidates+ptr+4)));
 		}
 		if(serverReflexiveCandidateAddress!=NULL)
 		{
-			x += sprintf_s(*sdp+x, sdpLen-x, sdpTemplateSrflxCand, i, c, 2128609535-i, serverReflexiveCandidateAddress, serverReflexiveCandidatePort, (unsigned char)candidates[0], (unsigned char)candidates[1], (unsigned char)candidates[2], (unsigned char)candidates[3], ntohs(((unsigned short*)(candidates+4))[0]));
+			x += sprintf_s(*sdp+x, sdpLen-x, sdpTemplateSrflxCand, i, c, 2128609535-i, serverReflexiveCandidateAddress, serverReflexiveCandidatePort, (unsigned char)candidates[0], (unsigned char)candidates[1], (unsigned char)candidates[2], (unsigned char)candidates[3], ntohs(ILibUnaligned_Read16(candidates+4)));
 			++i;
 		}
 		if(relayEndPoint!=NULL)

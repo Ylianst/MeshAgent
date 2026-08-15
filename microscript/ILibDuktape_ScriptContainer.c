@@ -3089,7 +3089,7 @@ void ILibDuktape_ScriptContainer_Slave_ProcessCommands(ILibDuktape_ScriptContain
 	}
 	
 
-	duk_push_lstring(codec, buffer + 4, ((int*)buffer)[0] - 4);
+	duk_push_lstring(codec, buffer + 4, (int)ILibUnaligned_Read32(buffer) - 4);
 	duk_json_decode(codec, -1);
 	cmd = (SCRIPT_ENGINE_COMMAND)Duktape_GetIntPropertyValue(codec, -1, "command", SCRIPT_ENGINE_COMMAND_UNKNOWN);
 
@@ -3349,7 +3349,7 @@ void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, 
 	if (!ILibMemory_CanaryOK(sender)) { return; }
 
 	ILibDuktape_ScriptContainer_Slave *slave = (ILibDuktape_ScriptContainer_Slave*)((void**)ILibMemory_Extra(sender))[0];
-	if (bufferLen < 4 || bufferLen < (size_t)((int*)buffer)[0]) { return; }
+	if (bufferLen < 4 || bufferLen < (size_t)(int)ILibUnaligned_Read32(buffer)) { return; }
 	ILibRemoteLogging_printf(ILibChainGetLogger(slave->chain), ILibRemoteLogging_Modules_Microstack_Generic, ILibRemoteLogging_Flags_VerbosityLevel_1, "Slave read: %d bytes", bufferLen);
 
 #ifdef WIN32
@@ -3362,7 +3362,7 @@ void ILibDuktape_ScriptContainer_Slave_OnReadStdIn(ILibProcessPipe_Pipe sender, 
 	ILibDuktape_ScriptContainer_Slave_ProcessCommands(slave, buffer, sender);
 #endif
 	
-	*bytesConsumed = ((int*)buffer)[0];
+	*bytesConsumed = (int)ILibUnaligned_Read32(buffer);
 }
 
 int ILibDuktape_ScriptContainer_StartSlave(void *chain, ILibProcessPipe_Manager manager)
@@ -3496,7 +3496,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Exit(duk_context *ctx)
 		duk_json_encode(ctx, -1);
 		buffer = (char*)duk_get_lstring(ctx, -1, &bufferLen);
 
-		((int*)header)[0] = (int)bufferLen + 4;
+		ILibUnaligned_Write32(header, (uint32_t)((int)bufferLen + 4));
 		ILibProcessPipe_Process_WriteStdIn(master->child, header, 4, ILibTransport_MemoryOwnership_USER);
 		ILibProcessPipe_Process_WriteStdIn(master->child, buffer, (int)bufferLen, ILibTransport_MemoryOwnership_USER);
 		//if (master->child != NULL) { ILibProcessPipe_Process_SoftKill(master->child); }
@@ -3640,7 +3640,7 @@ void ILibDuktape_ScriptContainer_StdErrSink_MicrostackThread(void *chain, void *
 {
 	ILibDuktape_ScriptContainer_Master *master = (ILibDuktape_ScriptContainer_Master*)((void**)user)[0];
 	char *buffer = (char*)((void**)user)[1];
-	int bufferLen = ((int*)buffer)[0];
+	int bufferLen = (int)ILibUnaligned_Read32(buffer);
 	void *ptr;
 	int i;
 	duk_context *ctx = master->ctx;
@@ -3737,9 +3737,9 @@ void ILibDuktape_ScriptContainer_StdErrSink(ILibProcessPipe_Process sender, char
 {
 	ILibDuktape_ScriptContainer_Master* master = (ILibDuktape_ScriptContainer_Master*)user;
 	
-	if (bufferLen < 4 || bufferLen < (size_t)((int*)buffer)[0]) { return; }
+	if (bufferLen < 4 || bufferLen < (size_t)(int)ILibUnaligned_Read32(buffer)) { return; }
 	
-	*bytesConsumed = ((int*)buffer)[0];
+	*bytesConsumed = (int)ILibUnaligned_Read32(buffer);
 #ifdef WIN32
 	if (ILibMemory_CanaryOK(sender))
 	{
@@ -4174,7 +4174,7 @@ duk_ret_t ILibDuktape_ScriptContainer_Create(duk_context *ctx)
 
 		duk_swap_top(ctx, -2);										// [json][container]
 
-		((int*)header)[0] = (int)bufferLen + 4;
+		ILibUnaligned_Write32(header, (uint32_t)((int)bufferLen + 4));
 		ILibProcessPipe_Process_AddHandlers(master->child, SCRIPT_ENGINE_PIPE_BUFFER_SIZE, ILibDuktape_ScriptContainer_ExitSink, ILibDuktape_ScriptContainer_StdOutSink, ILibDuktape_ScriptContainer_StdErrSink, ILibDuktape_ScriptContainer_SendOkSink, master);
 		ILibProcessPipe_Process_WriteStdIn(master->child, header, sizeof(header), ILibTransport_MemoryOwnership_USER);
 		ILibProcessPipe_Process_WriteStdIn(master->child, buffer, (int)bufferLen, ILibTransport_MemoryOwnership_USER);
