@@ -2,9 +2,11 @@ name: Deploy Agents to MeshCentral
 
 run-name: Publish built agents to MeshCentral-jugu
 
-# Runs after the Windows and Linux builds finish on the audio branch and
-# commits the resulting binaries into the MeshCentral repository, which is what
-# actually serves them to devices.
+# Runs after a successful Windows or Linux build and commits the resulting
+# binaries into the MeshCentral repository, which is what actually serves them
+# to devices. Without this step the server keeps handing out whatever is
+# already in agents/, so a rebuilt image republishes the previous agent and no
+# agent-side change ever reaches a device.
 #
 # Why here and not in the server's Docker entrypoint: the agents a server hands
 # out decide what every managed device installs, so they belong in git where
@@ -16,7 +18,9 @@ on:
   workflow_run:
     workflows: ["Windows Build", "Linux Build"]
     types: [completed]
-    branches: [feature/audio-stream]
+    # No branch filter: a feature branch should deploy to its own counterpart
+    # in MeshCentral rather than silently doing nothing, which is what a
+    # hard-coded branch list caused.
   workflow_dispatch:
     inputs:
       run_id:
@@ -37,11 +41,25 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     steps:
+      # Publish to the branch of the same name when it exists, so work on a
+      # feature branch lands there instead of on the shared one.
+      - name: Choose target branch
+        id: target
+        run: |
+          branch='${{ github.event.workflow_run.head_branch || github.ref_name }}'
+          if git ls-remote --exit-code --heads \
+               https://github.com/jugurtha114/MeshCentral-jugu.git "$branch" >/dev/null 2>&1; then
+            echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          else
+            echo "No MeshCentral branch named '$branch'; falling back to feature/audio-stream."
+            echo "branch=feature/audio-stream" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check out MeshCentral
         uses: actions/checkout@v7
         with:
           repository: jugurtha114/MeshCentral-jugu
-          ref: feature/audio-stream
+          ref: ${{ steps.target.outputs.branch }}
           token: ${{ secrets.MESHCENTRAL_DEPLOY_TOKEN }}
           path: meshcentral
 
