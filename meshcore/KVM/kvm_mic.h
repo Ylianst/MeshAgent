@@ -22,72 +22,86 @@ limitations under the License.
 #include "microstack/ILibParsers.h"
 
 /*
- * Playback of the operator's microphone on the managed device.
+ * Capture of the managed device's microphone, streamed to the operator.
  *
- * This is the reverse of kvm_audio.h: audio travels browser -> device and is
- * rendered on the device's default output. Because that makes a remote
- * operator audible in the room, playback is gated on explicit local consent,
- * which the agent's JavaScript layer obtains through the same prompt used for
- * desktop, terminal and file sessions.
+ * The sibling of kvm_audio.h, travelling the same way (device -> browser).
+ * kvm_audio captures the machine's audio output, so the operator hears what it
+ * plays; this captures the microphone input, so the operator hears the room -
+ * the user speaking, and noises worth diagnosing such as fans or drives.
  *
- * The gate is enforced here rather than only in the browser or the server: the
- * decoder refuses every frame until kvm_mic_set_consent(1) is called, so a
- * caller that skips the handshake, or a tampered client, still cannot produce
- * sound. Consent is per session and is dropped again on stop and cleanup.
+ * Listening to a room is not something a user should discover afterwards, so
+ * capture is gated on explicit local consent, which the agent's JavaScript
+ * layer obtains through the same prompt used for desktop, terminal and file
+ * sessions.
+ *
+ * The gate is enforced here rather than only in the browser or the server:
+ * capture refuses to start until kvm_mic_set_consent(1) is called and stops as
+ * soon as consent is withdrawn, so a caller that skips the handshake, or a
+ * tampered client, still gets silence. Consent lasts for the session and is
+ * dropped on stop and on cleanup.
  */
 
 /*
- * kvm_mic_init - prepare the Opus decoder and advertise capability.
+ * kvm_mic_init - prepare the Opus encoder and advertise capability.
  *   writeHandler / reserved: the KVM relay's write path, used to send
- *   MNG_MIC_CAPS back to the browser.
- * Does NOT open the audio device and does NOT grant consent.
+ *   MNG_MIC_CAPS and MNG_MIC_DATA to the browser.
+ * Does NOT open the microphone and does NOT grant consent.
  */
 void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved);
 
 /*
  * kvm_mic_set_consent - record the local user's decision for this session.
- *   granted: non-zero to allow playback, zero to revoke it.
- * Revoking also stops playback and flushes any buffered audio, so a user who
- * withdraws consent is not left hearing the tail of the stream.
+ *   granted: non-zero to allow capture, zero to revoke it.
+ * Revoking stops the capture thread promptly, so a user who withdraws consent
+ * is not recorded for the remainder of a buffer.
  */
 void kvm_mic_set_consent(int granted);
 
 /*
- * kvm_mic_has_consent - non-zero when playback is currently permitted.
+ * kvm_mic_has_consent - non-zero when capture is currently permitted.
  */
 int kvm_mic_has_consent(void);
 
 /*
- * kvm_mic_start - open the output device and begin playback.
+ * kvm_mic_start - open the microphone and begin streaming to the browser.
  * Refuses unless consent has been granted.
  */
 void kvm_mic_start(void);
 
 /*
- * kvm_mic_stop - stop playback, drop buffered audio and revoke consent.
+ * kvm_mic_stop - stop capture and revoke this session's consent, so a later
+ * start prompts the user again.
  */
 void kvm_mic_stop(void);
 
 /*
- * kvm_mic_feed - decode and play one MNG_MIC_DATA frame.
- *   buffer / bufferLen: the complete KVM packet, header included.
- * Silently discards the frame when consent is absent or playback is not
- * running. Safe to call from the KVM command thread.
+ * kvm_mic_feed - accepts an inbound MNG_MIC_DATA frame and discards it.
+ * Audio only travels device -> browser here; this exists so the KVM command
+ * switch can stay symmetrical with the audio path.
  */
 void kvm_mic_feed(char *buffer, int bufferLen);
 
 /*
  * kvm_mic_resend_caps - send MNG_MIC_CAPS using the supplied handler, in
- * response to MNG_MIC_QUERY. Reports playback capability and the current
+ * response to MNG_MIC_QUERY. Reports microphone availability and the current
  * consent state without changing either.
  */
 void kvm_mic_resend_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved);
 
 /*
- * kvm_mic_cleanup - stop playback and release the decoder. Call once when the
+ * kvm_mic_cleanup - stop capture and release the encoder. Call once when the
  * KVM session ends.
  */
 void kvm_mic_cleanup(void);
+
+/*
+ * kvm_mic_set_slave_fd - register the slave2master write fd so captured audio
+ * reaches the parent process. Call in the slave immediately after fork,
+ * before the main loop starts. Linux only; Windows and macOS do not fork.
+ */
+#ifdef __linux__
+void kvm_mic_set_slave_fd(int fd);
+#endif
 
 #endif /* _KVM_AUDIO */
 

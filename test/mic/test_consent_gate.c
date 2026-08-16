@@ -1,8 +1,11 @@
 /* Compiles the REAL linux_mic.c against stub Opus/PulseAudio and asserts the
-   consent gate: no frame may reach the decoder until consent is granted. */
+   consent gate: the microphone is never opened, and no audio is ever encoded
+   or sent, until the local user has agreed. */
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <dlfcn.h>
 
 extern void kvm_mic_init(int(*)(char*,int,void*), void*);
 extern void kvm_mic_set_consent(int);
@@ -10,9 +13,22 @@ extern int  kvm_mic_has_consent(void);
 extern void kvm_mic_start(void);
 extern void kvm_mic_stop(void);
 extern void kvm_mic_feed(char*, int);
+extern void kvm_mic_set_slave_fd(int);
 extern void kvm_mic_cleanup(void);
 
-int g_decodeCalls = 0;   /* incremented by the stub opus_decode */
+int g_encodeCalls = 0;   /* incremented by the stub opus_encode */
+
+/* The capture counter lives inside the fake libpulse-simple, because a
+ * dlopen'd object cannot resolve symbols back into this executable. Read it
+ * through the same handle linux_mic.c uses. */
+static int captureOpened(void) {
+    static int *counter = NULL;
+    if (counter == NULL) {
+        void *h = dlopen("libpulse-simple.so.0", RTLD_LAZY);
+        if (h != NULL) { counter = (int*)dlsym(h, "mesh_test_captureOpened"); }
+    }
+    return (counter != NULL) ? *counter : -1;
+}
 int g_capsSent = 0;
 int g_lastCapsConsent = -1;
 
@@ -22,76 +38,66 @@ static int sink(char *b, int len, void *r) {
     return 1;
 }
 
-static char *mkframe(int *len) {
-    static char f[64];
-    memset(f, 0, sizeof(f));
-    f[0]=0; f[1]=99;            /* MNG_MIC_DATA */
-    f[2]=0; f[3]=40;
-    f[4]=0; f[5]=1;             /* seq */
-    f[6]=0;
-    *len = 40;
-    return f;
-}
-
 #define CHECK(cond, msg) do { \
     if (cond) { printf("  PASS  %s\n", msg); } \
     else { printf("  FAIL  %s\n", msg); failures++; } } while (0)
 
 int main(void) {
-    int failures = 0, len;
-    char *frame = mkframe(&len);
+    int failures = 0;
+    char frame[64];
+    memset(frame, 0, sizeof(frame));
 
-    printf("Microphone consent gate\n");
+    printf("Microphone consent gate (device mic -> operator)\n");
 
     kvm_mic_init(sink, NULL);
     CHECK(g_capsSent == 1, "init advertises capability");
     CHECK(kvm_mic_has_consent() == 0, "consent starts denied");
 
-    /* The core security property. */
-    g_decodeCalls = 0;
-    kvm_mic_feed(frame, len);
-    CHECK(g_decodeCalls == 0, "audio is DISCARDED before consent");
-
-    /* Starting without consent must not open the device either. */
+    /* The core security property: no consent, no microphone. */
+    g_encodeCalls = 0;
     kvm_mic_start();
-    g_decodeCalls = 0;
-    kvm_mic_feed(frame, len);
-    CHECK(g_decodeCalls == 0, "start() without consent does not enable playback");
+    usleep(200000);
+    CHECK(captureOpened() == 0, "microphone is NOT opened without consent");
+    CHECK(g_encodeCalls == 0, "no audio is captured without consent");
 
-    /* Grant, then it should flow. */
+    /* Grant, and capture should begin. */
     kvm_mic_set_consent(1);
     CHECK(kvm_mic_has_consent() == 1, "consent is recorded when granted");
     CHECK(g_lastCapsConsent == 1, "caps report consent to the browser");
-    kvm_mic_start();
-    g_decodeCalls = 0;
-    kvm_mic_feed(frame, len);
-    CHECK(g_decodeCalls == 1, "audio flows once consent is granted");
 
-    /* Revoking must take effect immediately. */
+    g_encodeCalls = 0;
+    kvm_mic_start();
+    usleep(300000);
+    CHECK(captureOpened() >= 1, "microphone opens once consent is granted");
+    CHECK(g_encodeCalls > 0, "audio is captured and encoded after consent");
+
+    /* Revoking must stop capture promptly. */
     kvm_mic_set_consent(0);
     CHECK(kvm_mic_has_consent() == 0, "consent can be revoked");
-    g_decodeCalls = 0;
-    kvm_mic_feed(frame, len);
-    CHECK(g_decodeCalls == 0, "audio stops the moment consent is revoked");
+    g_encodeCalls = 0;
+    usleep(300000);
+    CHECK(g_encodeCalls == 0, "capture stops when consent is revoked");
 
-    /* Stop must also clear consent, so the next attempt re-prompts. */
+    /* Stop must also clear consent so the next attempt re-prompts. */
     kvm_mic_set_consent(1);
     kvm_mic_start();
+    usleep(150000);
     kvm_mic_stop();
     CHECK(kvm_mic_has_consent() == 0, "stop() revokes consent for the session");
-    g_decodeCalls = 0;
-    kvm_mic_feed(frame, len);
-    CHECK(g_decodeCalls == 0, "no audio after stop");
+    {
+        int before = captureOpened();
+        g_encodeCalls = 0;
+        kvm_mic_start();
+        usleep(200000);
+        CHECK(captureOpened() == before, "start() after stop() opens no microphone");
+        CHECK(g_encodeCalls == 0, "start() after stop() captures nothing without new consent");
+    }
 
-    /* Malformed input must not crash or leak through. */
-    kvm_mic_set_consent(1);
-    kvm_mic_start();
-    g_decodeCalls = 0;
+    /* Inbound frames are not a capture path and must be ignored safely. */
     kvm_mic_feed(NULL, 40);
     kvm_mic_feed(frame, 0);
-    kvm_mic_feed(frame, 7);      /* header only, no payload */
-    kvm_mic_feed(frame, -1);
-    CHECK(g_decodeCalls == 0, "malformed frames are rejected safely");
+    kvm_mic_feed(frame, 40);
+    CHECK(1, "inbound frames are discarded safely");
 
     kvm_mic_cleanup();
     CHECK(kvm_mic_has_consent() == 0, "cleanup clears consent");

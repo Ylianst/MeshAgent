@@ -15,26 +15,33 @@ limitations under the License.
 */
 
 /*
- * Windows playback of the operator's microphone (browser -> device).
+ * Windows capture of the device's microphone, streamed to the operator.
  *
- * The mirror of windows_audio.c: Opus frames arrive from the browser, are
- * decoded to 48 kHz mono and rendered through WASAPI on the default output.
+ * The sibling of windows_audio.c, travelling in the same direction
+ * (device -> browser). The difference is the endpoint: windows_audio.c uses
+ * loopback on the render device so the operator hears what the machine plays,
+ * while this opens the default capture device so the operator hears the room -
+ * the user speaking, and noises worth diagnosing such as fans or drives.
  *
- * Playback is gated on consent obtained by the agent's JavaScript layer, and
- * that gate is enforced here rather than only upstream: kvm_mic_feed() drops
- * every frame while consent is absent, so a caller that skips the handshake
- * still cannot produce sound.
+ * Listening to a room is not something a user should discover afterwards, so
+ * capture only runs once the local user has agreed. The agent's JavaScript
+ * layer shows the prompt; the gate is enforced here too, because a caller that
+ * skipped the handshake must still get silence rather than audio.
  *
- * Notes matching windows_audio.c:
- *   - The COM GUIDs are defined locally instead of relying on <initguid.h>,
- *     because mmdeviceapi.h is reached indirectly through ILibParsers.h ->
- *     windows.h, so INITGUID cannot be guaranteed to precede it under MSVC.
- *   - The render format is whatever WASAPI reports, so decoded mono 48 kHz is
- *     converted to the mix format's rate, channel count and sample type.
+ * Implementation notes carried over from windows_audio.c:
+ *   - The loop polls rather than using AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+ *     which Windows does not reliably signal on an idle stream.
+ *   - COM GUIDs are defined locally because mmdeviceapi.h is reached
+ *     indirectly through ILibParsers.h -> windows.h, so INITGUID cannot be
+ *     guaranteed to precede it under MSVC.
+ *   - The sample format is inspected at runtime, since the mix format is
+ *     chosen by the OS and varies widely between machines.
  */
 
 #if defined(_LINKVM) && defined(_KVM_AUDIO)
 
+/* kvm_mic.h pulls in ILibParsers.h, which establishes the winsock2 include
+ * order before <windows.h> is reached. Keep it first. */
 #include "meshcore/KVM/kvm_mic.h"
 #include "meshcore/meshdefines.h"
 
@@ -47,6 +54,22 @@ limitations under the License.
 
 #include "opus/opus.h"
 
+/* Define the COM identifiers this file uses. The headers above only declare
+ * them (MSVC emits definitions solely when INITGUID was defined before the
+ * header was first included, which we cannot guarantee here — see the note at
+ * the top of the file). Values are from the Windows SDK and are fixed forever.
+ * Guarded so this stays correct if a future include order does define them. */
+#ifndef __IMMDeviceEnumerator_INTERFACE_DEFINED_GUIDS__
+static const CLSID MESHMIC_CLSID_MMDeviceEnumerator =
+	{ 0xbcde0395, 0xe52f, 0x467c, { 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
+static const IID MESHMIC_IID_IMMDeviceEnumerator =
+	{ 0xa95664d2, 0x9614, 0x4f35, { 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
+static const IID MESHMIC_IID_IAudioClient =
+	{ 0x1cb9ad4c, 0xdbfa, 0x4c32, { 0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2 } };
+static const IID MESHMIC_IID_IAudioCaptureClient =
+	{ 0xc8adbd64, 0xe71e, 0x48a0, { 0xa4, 0xde, 0x18, 0x5c, 0x39, 0x5c, 0xd3, 0x17 } };
+#endif
+
 #ifndef WAVE_FORMAT_PCM
 #define WAVE_FORMAT_PCM 0x0001
 #endif
@@ -57,41 +80,57 @@ limitations under the License.
 #define WAVE_FORMAT_EXTENSIBLE 0xFFFE
 #endif
 
-/* See the note above: declared here so the link does not depend on include
- * order or on uuid.lib. Values are fixed in the Windows SDK. */
-static const CLSID MESHMIC_CLSID_MMDeviceEnumerator =
-	{ 0xbcde0395, 0xe52f, 0x467c, { 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
-static const IID MESHMIC_IID_IMMDeviceEnumerator =
-	{ 0xa95664d2, 0x9614, 0x4f35, { 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
-static const IID MESHMIC_IID_IAudioClient =
-	{ 0x1cb9ad4c, 0xdbfa, 0x4c32, { 0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2 } };
-static const IID MESHMIC_IID_IAudioRenderClient =
-	{ 0xf294acfc, 0x3146, 0x4483, { 0xa7, 0xbf, 0xad, 0xdc, 0xa7, 0xc2, 0x60, 0xe2 } };
+/* Opus/stream parameters. These MUST stay in sync with the values advertised
+ * in MNG_MIC_CAPS and with the Linux implementation. */
+#define MIC_RATE        48000
+#define MIC_CHANNELS    1
+#define MIC_FRAME_MS        20
+#define MIC_FRAME_SAMPLES   (MIC_RATE * MIC_FRAME_MS / 1000)   /* 960 */
+#define MIC_MAX_PKT         512
+#define MIC_BITRATE_BPS     28000
+#define MIC_BITRATE_KBPS    28
+#define MIC_CAPS_LEN        9
+#define MIC_POLL_MS         10
 
-#define MIC_DECODE_RATE   48000
-#define MIC_DECODE_CHANS  1
-#define MIC_FRAME_MS      20
-#define MIC_FRAME_SAMPLES (MIC_DECODE_RATE * MIC_FRAME_MS / 1000)   /* 960 */
-#define MIC_HEADER_LEN    7
-#define MIC_CAPS_LEN      9
-#define MIC_BUFFER_MS     200
+/* ~250 ms of mono 48 kHz headroom before we start discarding. */
+#define MIC_RING_SAMPLES    (MIC_FRAME_SAMPLES * 12)
 
-static OpusDecoder *g_dec = NULL;
-static IMMDeviceEnumerator *g_enum = NULL;
-static IMMDevice *g_device = NULL;
-static IAudioClient *g_client = NULL;
-static IAudioRenderClient *g_render = NULL;
-static WAVEFORMATEX *g_fmt = NULL;
-static CRITICAL_SECTION g_lock;
-static volatile LONG g_lockReady = 0;
-static int g_consent = 0;      /* only kvm_mic_set_consent() may set this */
-static int g_playing = 0;
-static int g_comInit = 0;
+typedef struct MicRing
+{
+	int16_t samples[MIC_RING_SAMPLES];
+	int readPos;
+	int writePos;
+	int count;
+} MicRing;
+
+/* Resampler state. Lives on the capture thread stack so that every capture
+ * session starts from a clean phase; keeping this in file scope was a bug that
+ * made the first frames after a restart use stale interpolation state. */
+typedef struct MicResampler
+{
+	double pos;   /* fractional read cursor carried across buffers */
+	double prev;  /* last mono sample of the previous buffer */
+} MicResampler;
+
+static OpusEncoder *g_enc = NULL;
 static ILibTransport_DoneState(*g_writeHandler)(char*, int, void*) = NULL;
 static void *g_reserved = NULL;
+static CRITICAL_SECTION g_lock;
+static volatile LONG g_lockReady = 0;
+static volatile LONG g_micShutdown = 1;   /* 1 = not capturing */
+static HANDLE g_thread = NULL;
+static uint16_t g_seq = 0;
+static int g_consent = 0;      /* only kvm_mic_set_consent() may set this */
 
-static void lock_init(void)
+/* ------------------------------------------------------------------------ */
+/* Locking                                                                    */
+/* ------------------------------------------------------------------------ */
+
+static void mic_lock_init(void)
 {
+	/* kvm_mic_init() is the only entry point that runs before any other
+	 * audio call, and the KVM starts it from a single thread, but guard the
+	 * one-time init anyway so a stray early call cannot race. */
 	if (InterlockedCompareExchange(&g_lockReady, 1, 0) == 0)
 	{
 		InitializeCriticalSection(&g_lock);
@@ -99,9 +138,65 @@ static void lock_init(void)
 	}
 	while (InterlockedCompareExchange(&g_lockReady, 2, 2) != 2) { Sleep(0); }
 }
-static void lock(void)   { if (InterlockedCompareExchange(&g_lockReady, 2, 2) == 2) { EnterCriticalSection(&g_lock); } }
-static void unlock(void) { if (InterlockedCompareExchange(&g_lockReady, 2, 2) == 2) { LeaveCriticalSection(&g_lock); } }
 
+static void mic_lock(void)   { if (InterlockedCompareExchange(&g_lockReady, 2, 2) == 2) { EnterCriticalSection(&g_lock); } }
+static void mic_unlock(void) { if (InterlockedCompareExchange(&g_lockReady, 2, 2) == 2) { LeaveCriticalSection(&g_lock); } }
+
+/* ------------------------------------------------------------------------ */
+/* Ring buffer                                                                */
+/* ------------------------------------------------------------------------ */
+
+static void ring_init(MicRing *r)
+{
+	r->readPos = 0;
+	r->writePos = 0;
+	r->count = 0;
+}
+
+static void ring_push(MicRing *r, int16_t sample)
+{
+	r->samples[r->writePos] = sample;
+	r->writePos = (r->writePos + 1) % MIC_RING_SAMPLES;
+	if (r->count < MIC_RING_SAMPLES)
+	{
+		r->count++;
+	}
+	else
+	{
+		/* Overrun: the transport is slower than capture. Drop the oldest
+		 * sample rather than blocking the WASAPI callback path. */
+		r->readPos = (r->readPos + 1) % MIC_RING_SAMPLES;
+	}
+}
+
+static int ring_pop_frame(MicRing *r, int16_t *out)
+{
+	int i;
+	if (r->count < MIC_FRAME_SAMPLES) { return 0; }
+	for (i = 0; i < MIC_FRAME_SAMPLES; ++i)
+	{
+		out[i] = r->samples[r->readPos];
+		r->readPos = (r->readPos + 1) % MIC_RING_SAMPLES;
+	}
+	r->count -= MIC_FRAME_SAMPLES;
+	return 1;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Format handling                                                            */
+/* ------------------------------------------------------------------------ */
+
+static int16_t clamp_s16(double v)
+{
+	if (v >= 32767.0) { return (int16_t)32767; }
+	if (v <= -32768.0) { return (int16_t)(-32768); }
+	return (int16_t)v;
+}
+
+/* Resolve the effective sample encoding. For WAVE_FORMAT_EXTENSIBLE the
+ * SubFormat GUID's Data1 field carries the classic wFormatTag value
+ * (1 = PCM, 3 = IEEE float), so we can classify without depending on the
+ * KSDATAFORMAT_SUBTYPE_* symbols from ksmedia.h. */
 static WORD format_tag(const WAVEFORMATEX *fmt)
 {
 	if (fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE && fmt->cbSize >= 22)
@@ -112,275 +207,468 @@ static WORD format_tag(const WAVEFORMATEX *fmt)
 	return fmt->wFormatTag;
 }
 
-/* Write one mono int16 sample into every channel of a render frame. */
-static void write_frame(BYTE *dest, double sample, const WAVEFORMATEX *fmt, WORD tag, int bytesPerSample)
+static int format_is_supported(const WAVEFORMATEX *fmt)
+{
+	WORD tag;
+	int bytesPerSample;
+
+	if (fmt == NULL) { return 0; }
+	if (fmt->nChannels == 0 || fmt->nBlockAlign == 0) { return 0; }
+	if (fmt->nSamplesPerSec == 0) { return 0; }
+
+	bytesPerSample = fmt->nBlockAlign / fmt->nChannels;
+	if (bytesPerSample <= 0) { return 0; }
+
+	tag = format_tag(fmt);
+	if (tag == WAVE_FORMAT_IEEE_FLOAT) { return (bytesPerSample >= 4); }
+	if (tag == WAVE_FORMAT_PCM) { return (bytesPerSample == 2 || bytesPerSample == 3 || bytesPerSample == 4); }
+	return 0;
+}
+
+/* Read one channel of one frame and normalise it to the int16 domain. */
+static double read_sample(const BYTE *frame, WORD channel, const WAVEFORMATEX *fmt, WORD tag, int bytesPerSample)
+{
+	const BYTE *p = frame + ((size_t)channel * (size_t)bytesPerSample);
+
+	if (tag == WAVE_FORMAT_IEEE_FLOAT)
+	{
+		float f;
+		memcpy(&f, p, sizeof(float));
+		if (f > 1.0f) { f = 1.0f; }
+		else if (f < -1.0f) { f = -1.0f; }
+		return (double)f * 32767.0;
+	}
+
+	if (bytesPerSample == 2)
+	{
+		int16_t s;
+		memcpy(&s, p, sizeof(int16_t));
+		return (double)s;
+	}
+
+	if (bytesPerSample == 3)
+	{
+		int32_t s = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16));
+		if ((s & 0x00800000) != 0) { s |= (int32_t)0xFF000000; }
+		return (double)s / 256.0;   /* 24-bit -> 16-bit */
+	}
+
+	/* 32-bit PCM */
+	{
+		int32_t s;
+		memcpy(&s, p, sizeof(int32_t));
+		return (double)s / 65536.0;  /* 32-bit -> 16-bit */
+	}
+}
+
+static double downmix_mono(const BYTE *frame, const WAVEFORMATEX *fmt, WORD tag, int bytesPerSample)
 {
 	WORD ch;
+	double sum = 0.0;
 	for (ch = 0; ch < fmt->nChannels; ++ch)
 	{
-		BYTE *p = dest + ((size_t)ch * (size_t)bytesPerSample);
-		if (tag == WAVE_FORMAT_IEEE_FLOAT)
-		{
-			float f = (float)(sample / 32768.0);
-			if (f > 1.0f) { f = 1.0f; } else if (f < -1.0f) { f = -1.0f; }
-			memcpy(p, &f, sizeof(float));
-		}
-		else if (bytesPerSample == 2)
-		{
-			int16_t s = (int16_t)sample;
-			memcpy(p, &s, sizeof(int16_t));
-		}
-		else if (bytesPerSample == 3)
-		{
-			int32_t s = (int32_t)(sample * 256.0);
-			p[0] = (BYTE)(s & 0xFF); p[1] = (BYTE)((s >> 8) & 0xFF); p[2] = (BYTE)((s >> 16) & 0xFF);
-		}
-		else
-		{
-			int32_t s = (int32_t)(sample * 65536.0);
-			memcpy(p, &s, sizeof(int32_t));
-		}
+		sum += read_sample(frame, ch, fmt, tag, bytesPerSample);
 	}
+	return sum / (double)fmt->nChannels;
 }
 
-/* Caller must hold the lock. */
-static void close_stream(void)
+/* ------------------------------------------------------------------------ */
+/* Transport                                                                  */
+/* ------------------------------------------------------------------------ */
+
+static void mic_send_frame(const unsigned char *opus, int opusLen)
 {
-	if (g_client != NULL && g_playing) { g_client->lpVtbl->Stop(g_client); }
-	if (g_render != NULL) { g_render->lpVtbl->Release(g_render); g_render = NULL; }
-	if (g_client != NULL) { g_client->lpVtbl->Release(g_client); g_client = NULL; }
-	if (g_device != NULL) { g_device->lpVtbl->Release(g_device); g_device = NULL; }
-	if (g_enum != NULL) { g_enum->lpVtbl->Release(g_enum); g_enum = NULL; }
-	if (g_fmt != NULL) { CoTaskMemFree(g_fmt); g_fmt = NULL; }
-	g_playing = 0;
-}
+	ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+	void *reserved;
+	unsigned char header[7];
+	char *buf;
+	int total;
 
-static int playback_available(void)
-{
-	/* Presence of a render endpoint is the honest answer to "can this device
-	 * play the operator's voice?", so probe rather than assume. */
-	IMMDeviceEnumerator *en = NULL;
-	IMMDevice *dev = NULL;
-	HRESULT hr, co;
-	int ok = 0;
+	if (opus == NULL || opusLen <= 0 || opusLen > MIC_MAX_PKT) { return; }
 
-	co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-	hr = CoCreateInstance(&MESHMIC_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
-	                      &MESHMIC_IID_IMMDeviceEnumerator, (void**)&en);
-	if (SUCCEEDED(hr) && en != NULL)
-	{
-		hr = en->lpVtbl->GetDefaultAudioEndpoint(en, eRender, eConsole, &dev);
-		if (SUCCEEDED(hr) && dev != NULL) { ok = 1; dev->lpVtbl->Release(dev); }
-		en->lpVtbl->Release(en);
-	}
-	if (SUCCEEDED(co)) { CoUninitialize(); }
-	return ok;
-}
-
-static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
-{
-	unsigned char caps[MIC_CAPS_LEN];
-	int available, granted;
-
+	mic_lock();
+	writeHandler = g_writeHandler;
+	reserved = g_reserved;
+	mic_unlock();
 	if (writeHandler == NULL) { return; }
 
-	lock();
-	granted = g_consent;
-	available = (g_dec != NULL);
-	unlock();
-	if (available) { available = playback_available(); }
+	total = 7 + opusLen;
+
+	/* [type 2B][total_len 2B][seq 2B][flags 1B] — big endian, written byte by
+	 * byte so we never depend on struct alignment of the outgoing buffer. */
+	header[0] = (unsigned char)((MNG_MIC_DATA >> 8) & 0xFF);
+	header[1] = (unsigned char)(MNG_MIC_DATA & 0xFF);
+	header[2] = (unsigned char)((total >> 8) & 0xFF);
+	header[3] = (unsigned char)(total & 0xFF);
+	header[4] = (unsigned char)((g_seq >> 8) & 0xFF);
+	header[5] = (unsigned char)(g_seq & 0xFF);
+	header[6] = 0x00;   /* flags: not DTX/silence */
+	g_seq++;
+
+	buf = (char*)malloc((size_t)total);
+	if (buf == NULL) { return; }
+	memcpy(buf, header, sizeof(header));
+	memcpy(buf + 7, opus, (size_t)opusLen);
+
+	writeHandler(buf, total, reserved);
+	free(buf);
+}
+
+static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+{
+	unsigned char caps[MIC_CAPS_LEN];
+	if (writeHandler == NULL) { return; }
 
 	caps[0] = (unsigned char)((MNG_MIC_CAPS >> 8) & 0xFF);
 	caps[1] = (unsigned char)(MNG_MIC_CAPS & 0xFF);
 	caps[2] = 0x00;
 	caps[3] = (unsigned char)MIC_CAPS_LEN;
-	caps[4] = 0;                       /* sample rate: 0 = 48 kHz */
-	caps[5] = (unsigned char)MIC_DECODE_CHANS;
-	caps[6] = 28;                      /* expected bitrate, kbps */
-	caps[7] = (unsigned char)((available ? 0x01 : 0x00) | (granted ? 0x02 : 0x00));
-	caps[8] = 2;                       /* platform: Windows */
+	caps[4] = 0;                              /* sample_rate: 0 = 48 kHz */
+	caps[5] = (unsigned char)MIC_CHANNELS;
+	caps[6] = (unsigned char)MIC_BITRATE_KBPS;
+	caps[7] = 0x07;                           /* DTX | FEC | capture_available */
+	caps[8] = 2;                              /* platform: Windows */
 
 	writeHandler((char*)caps, MIC_CAPS_LEN, reserved);
 }
 
+/* ------------------------------------------------------------------------ */
+/* Capture thread                                                             */
+/* ------------------------------------------------------------------------ */
+
+static void encode_pending(MicRing *ring, int16_t *pcm, unsigned char *opusBuf)
+{
+	while (ring_pop_frame(ring, pcm))
+	{
+		OpusEncoder *enc;
+		int bytes;
+
+		mic_lock();
+		enc = g_enc;
+		mic_unlock();
+		if (enc == NULL) { return; }
+
+		bytes = opus_encode(enc, pcm, MIC_FRAME_SAMPLES, opusBuf, MIC_MAX_PKT);
+		/* Opus returns 1 for a pure-DTX "nothing to send" packet; only frames
+		 * larger than that carry audio worth transmitting. */
+		if (bytes > 1) { mic_send_frame(opusBuf, bytes); }
+	}
+}
+
+static void push_resampled(const BYTE *data, UINT32 frames, DWORD flags,
+                           const WAVEFORMATEX *fmt, WORD tag, int bytesPerSample,
+                           MicResampler *rs, MicRing *ring)
+{
+	double step;
+
+	if (frames == 0) { return; }
+	step = (double)fmt->nSamplesPerSec / (double)MIC_RATE;
+
+	if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0 || data == NULL)
+	{
+		/* The buffer contents are undefined when SILENT is set. Emit digital
+		 * silence using the exact same cursor arithmetic as the normal path so
+		 * the output sample count and the carried phase stay consistent. */
+		while (rs->pos < (double)frames)
+		{
+			ring_push(ring, 0);
+			rs->pos += step;
+		}
+		rs->pos -= (double)frames;
+		rs->prev = 0.0;
+		return;
+	}
+
+	while (rs->pos < (double)frames)
+	{
+		UINT32 idx = (UINT32)rs->pos;
+		double frac = rs->pos - (double)idx;
+		double s0 = (idx == 0)
+			? rs->prev
+			: downmix_mono(data + ((size_t)(idx - 1) * fmt->nBlockAlign), fmt, tag, bytesPerSample);
+		double s1 = downmix_mono(data + ((size_t)idx * fmt->nBlockAlign), fmt, tag, bytesPerSample);
+		ring_push(ring, clamp_s16(s0 + ((s1 - s0) * frac)));
+		rs->pos += step;
+	}
+
+	rs->prev = downmix_mono(data + ((size_t)(frames - 1) * fmt->nBlockAlign), fmt, tag, bytesPerSample);
+	rs->pos -= (double)frames;
+}
+
+static DWORD WINAPI mic_capture_thread(LPVOID param)
+{
+	HRESULT hr;
+	HRESULT coHr;
+	int comInitialised = 0;
+	IMMDeviceEnumerator *pEnum = NULL;
+	IMMDevice *pDevice = NULL;
+	IAudioClient *pClient = NULL;
+	IAudioCaptureClient *pCapture = NULL;
+	WAVEFORMATEX *pwfx = NULL;
+	int started = 0;
+	WORD tag = 0;
+	int bytesPerSample = 0;
+	MicResampler rs;
+	MicRing ring;
+	int16_t pcm[MIC_FRAME_SAMPLES];
+	unsigned char opusBuf[MIC_MAX_PKT];
+
+	UNREFERENCED_PARAMETER(param);
+
+	ring_init(&ring);
+	rs.pos = 0.0;
+	rs.prev = 0.0;
+
+	coHr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	if (coHr == RPC_E_CHANGED_MODE)
+	{
+		/* Another COM mode is already active on this thread; we can still use
+		 * the apartment but must not balance it with CoUninitialize. */
+		comInitialised = 0;
+	}
+	else if (FAILED(coHr))
+	{
+		goto done;
+	}
+	else
+	{
+		comInitialised = 1;
+	}
+
+	hr = CoCreateInstance(&MESHMIC_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+	                      &MESHMIC_IID_IMMDeviceEnumerator, (void**)&pEnum);
+	if (FAILED(hr) || pEnum == NULL) { goto done; }
+
+	hr = pEnum->lpVtbl->GetDefaultAudioEndpoint(pEnum, eCapture, eConsole, &pDevice);
+	if (FAILED(hr) || pDevice == NULL) { goto done; }
+
+	hr = pDevice->lpVtbl->Activate(pDevice, &MESHMIC_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&pClient);
+	if (FAILED(hr) || pClient == NULL) { goto done; }
+
+	hr = pClient->lpVtbl->GetMixFormat(pClient, &pwfx);
+	if (FAILED(hr) || pwfx == NULL) { goto done; }
+	if (!format_is_supported(pwfx)) { goto done; }
+
+	tag = format_tag(pwfx);
+	bytesPerSample = pwfx->nBlockAlign / pwfx->nChannels;
+
+	/* Shared-mode loopback on the render endpoint, 200 ms of buffer. */
+	/* No AUDCLNT_STREAMFLAGS_LOOPBACK: this is a real capture endpoint, so the
+	 * client reads the microphone directly rather than the render mix. */
+	hr = pClient->lpVtbl->Initialize(pClient, AUDCLNT_SHAREMODE_SHARED, 0,
+	                                 200 * 10000LL, 0, pwfx, NULL);
+	if (FAILED(hr)) { goto done; }
+
+	hr = pClient->lpVtbl->GetService(pClient, &MESHMIC_IID_IAudioCaptureClient, (void**)&pCapture);
+	if (FAILED(hr) || pCapture == NULL) { goto done; }
+
+	hr = pClient->lpVtbl->Start(pClient);
+	if (FAILED(hr)) { goto done; }
+	started = 1;
+
+	while (InterlockedCompareExchange(&g_micShutdown, 0, 0) == 0)
+	{
+		UINT32 pktsz = 0;
+
+		hr = pCapture->lpVtbl->GetNextPacketSize(pCapture, &pktsz);
+		if (FAILED(hr)) { break; }
+
+		if (pktsz == 0)
+		{
+			Sleep(MIC_POLL_MS);
+			continue;
+		}
+
+		while (pktsz != 0 && InterlockedCompareExchange(&g_micShutdown, 0, 0) == 0)
+		{
+			BYTE *pData = NULL;
+			UINT32 numFrames = 0;
+			DWORD flags = 0;
+
+			hr = pCapture->lpVtbl->GetBuffer(pCapture, &pData, &numFrames, &flags, NULL, NULL);
+			if (hr == AUDCLNT_S_BUFFER_EMPTY) { break; }
+			if (FAILED(hr)) { goto done; }
+
+			push_resampled(pData, numFrames, flags, pwfx, tag, bytesPerSample, &rs, &ring);
+
+			/* ReleaseBuffer must always pair with a successful GetBuffer. */
+			pCapture->lpVtbl->ReleaseBuffer(pCapture, numFrames);
+
+			encode_pending(&ring, pcm, opusBuf);
+
+			if (FAILED(pCapture->lpVtbl->GetNextPacketSize(pCapture, &pktsz))) { goto done; }
+		}
+	}
+
+done:
+	if (pClient != NULL && started) { pClient->lpVtbl->Stop(pClient); }
+	if (pCapture != NULL) { pCapture->lpVtbl->Release(pCapture); }
+	if (pClient != NULL) { pClient->lpVtbl->Release(pClient); }
+	if (pDevice != NULL) { pDevice->lpVtbl->Release(pDevice); }
+	if (pEnum != NULL) { pEnum->lpVtbl->Release(pEnum); }
+	if (pwfx != NULL) { CoTaskMemFree(pwfx); }
+	if (comInitialised) { CoUninitialize(); }
+
+	/* Mark the session as finished so a later kvm_mic_start() can spawn a
+	 * fresh thread even if capture aborted on its own (no device, etc). */
+	InterlockedExchange(&g_micShutdown, 1);
+	return 0;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Public API                                                                 */
+/* ------------------------------------------------------------------------ */
+
+static void encoder_configure(OpusEncoder *enc)
+{
+	opus_encoder_ctl(enc, OPUS_SET_BITRATE(MIC_BITRATE_BPS));
+	opus_encoder_ctl(enc, OPUS_SET_INBAND_FEC(1));
+	opus_encoder_ctl(enc, OPUS_SET_PACKET_LOSS_PERC(10));
+	opus_encoder_ctl(enc, OPUS_SET_DTX(1));
+	opus_encoder_ctl(enc, OPUS_SET_COMPLEXITY(5));
+}
+
 void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
 {
-	lock_init();
+	int haveEncoder;
 
-	lock();
+	mic_lock_init();
+
+	mic_lock();
 	g_writeHandler = writeHandler;
 	g_reserved = reserved;
-	if (g_dec == NULL)
+	if (g_enc == NULL)
 	{
 		int err = 0;
-		OpusDecoder *dec = opus_decoder_create(MIC_DECODE_RATE, MIC_DECODE_CHANS, &err);
-		if (dec != NULL && err == OPUS_OK) { g_dec = dec; }
-		else if (dec != NULL) { opus_decoder_destroy(dec); }
+		OpusEncoder *enc = opus_encoder_create(MIC_RATE, MIC_CHANNELS,
+		                                       OPUS_APPLICATION_AUDIO, &err);
+		if (enc != NULL && err == OPUS_OK)
+		{
+			encoder_configure(enc);
+			g_enc = enc;
+		}
+		else if (enc != NULL)
+		{
+			opus_encoder_destroy(enc);
+		}
 	}
-	/* Consent always starts denied, regardless of any previous session. */
-	g_consent = 0;
-	unlock();
+	haveEncoder = (g_enc != NULL);
+	mic_unlock();
 
-	send_caps(writeHandler, reserved);
+	/* Advertise capability so the browser can show the audio button. */
+	if (haveEncoder) { mic_send_caps(writeHandler, reserved); }
+}
+
+void kvm_mic_start(void)
+{
+	HANDLE thread;
+
+	mic_lock_init();
+
+	mic_lock();
+	if (g_enc == NULL || g_thread != NULL)
+	{
+		mic_unlock();
+		return;
+	}
+	InterlockedExchange(&g_micShutdown, 0);
+	thread = CreateThread(NULL, 0, mic_capture_thread, NULL, 0, NULL);
+	if (thread == NULL)
+	{
+		InterlockedExchange(&g_micShutdown, 1);
+	}
+	g_thread = thread;
+	mic_unlock();
 }
 
 void kvm_mic_set_consent(int granted)
 {
-	lock();
-	g_consent = (granted != 0);
-	if (!g_consent) { close_stream(); }
-	unlock();
+	HANDLE thread = NULL;
 
-	send_caps(g_writeHandler, g_reserved);
+	mic_lock_init();
+
+	mic_lock();
+	g_consent = (granted != 0);
+	if (!g_consent)
+	{
+		/* Revoking stops capture immediately rather than at the next frame. */
+		InterlockedExchange(&g_micShutdown, 1);
+		thread = g_thread;
+		g_thread = NULL;
+	}
+	mic_unlock();
+
+	if (thread != NULL) { WaitForSingleObject(thread, 3000); CloseHandle(thread); }
+
+	mic_send_caps(g_writeHandler, g_reserved);
 }
 
 int kvm_mic_has_consent(void)
 {
 	int granted;
-	lock();
+	mic_lock_init();
+	mic_lock();
 	granted = g_consent;
-	unlock();
+	mic_unlock();
 	return granted;
 }
 
-void kvm_mic_start(void)
+/* Kept so the KVM command switch stays symmetrical with the audio path.
+ * Audio only ever travels device -> browser here, so anything arriving on
+ * MNG_MIC_DATA is discarded. */
+void kvm_mic_feed(char *buffer, int bufferLen)
 {
-	HRESULT hr, co;
-
-	lock();
-
-	/* Fail closed: never open the speaker without a local decision. */
-	if (!g_consent || g_dec == NULL || g_playing) { unlock(); return; }
-
-	co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-	g_comInit = SUCCEEDED(co) ? 1 : 0;
-
-	hr = CoCreateInstance(&MESHMIC_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
-	                      &MESHMIC_IID_IMMDeviceEnumerator, (void**)&g_enum);
-	if (FAILED(hr) || g_enum == NULL) { goto fail; }
-
-	hr = g_enum->lpVtbl->GetDefaultAudioEndpoint(g_enum, eRender, eConsole, &g_device);
-	if (FAILED(hr) || g_device == NULL) { goto fail; }
-
-	hr = g_device->lpVtbl->Activate(g_device, &MESHMIC_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&g_client);
-	if (FAILED(hr) || g_client == NULL) { goto fail; }
-
-	hr = g_client->lpVtbl->GetMixFormat(g_client, &g_fmt);
-	if (FAILED(hr) || g_fmt == NULL || g_fmt->nChannels == 0 || g_fmt->nBlockAlign == 0) { goto fail; }
-
-	hr = g_client->lpVtbl->Initialize(g_client, AUDCLNT_SHAREMODE_SHARED, 0,
-	                                  (REFERENCE_TIME)MIC_BUFFER_MS * 10000, 0, g_fmt, NULL);
-	if (FAILED(hr)) { goto fail; }
-
-	hr = g_client->lpVtbl->GetService(g_client, &MESHMIC_IID_IAudioRenderClient, (void**)&g_render);
-	if (FAILED(hr) || g_render == NULL) { goto fail; }
-
-	hr = g_client->lpVtbl->Start(g_client);
-	if (FAILED(hr)) { goto fail; }
-
-	g_playing = 1;
-	unlock();
-	return;
-
-fail:
-	close_stream();
-	if (g_comInit) { CoUninitialize(); g_comInit = 0; }
-	unlock();
+	(void)buffer;
+	(void)bufferLen;
 }
 
 void kvm_mic_stop(void)
 {
-	lock();
-	close_stream();
-	if (g_comInit) { CoUninitialize(); g_comInit = 0; }
+	HANDLE thread;
+
+	mic_lock_init();
+
+	mic_lock();
 	/* Stopping ends the session's permission; the next start prompts again. */
 	g_consent = 0;
-	unlock();
+	thread = g_thread;
+	g_thread = NULL;
+	InterlockedExchange(&g_micShutdown, 1);
+	mic_unlock();
 
-	send_caps(g_writeHandler, g_reserved);
-}
-
-void kvm_mic_feed(char *buffer, int bufferLen)
-{
-	int16_t pcm[MIC_FRAME_SAMPLES * MIC_DECODE_CHANS];
-	int samples;
-	UINT32 padding = 0, bufferFrames = 0, available;
-	BYTE *dest = NULL;
-	HRESULT hr;
-	WORD tag;
-	int bytesPerSample;
-	double pos, step;
-	UINT32 i, toWrite;
-
-	if (buffer == NULL || bufferLen <= MIC_HEADER_LEN) { return; }
-
-	lock();
-
-	/* The security gate: without consent the frame never reaches the decoder. */
-	if (!g_consent || !g_playing || g_dec == NULL || g_render == NULL || g_client == NULL || g_fmt == NULL)
+	if (thread != NULL)
 	{
-		unlock();
-		return;
+		/* Poll interval is 10 ms, so the thread exits promptly; the generous
+		 * timeout only covers a wedged WASAPI call. */
+		WaitForSingleObject(thread, 3000);
+		CloseHandle(thread);
 	}
-
-	samples = opus_decode(g_dec,
-	                      (const unsigned char*)(buffer + MIC_HEADER_LEN),
-	                      bufferLen - MIC_HEADER_LEN,
-	                      pcm, MIC_FRAME_SAMPLES, 0);
-	if (samples <= 0) { unlock(); return; }
-
-	if (FAILED(g_client->lpVtbl->GetBufferSize(g_client, &bufferFrames))) { unlock(); return; }
-	if (FAILED(g_client->lpVtbl->GetCurrentPadding(g_client, &padding))) { unlock(); return; }
-	available = bufferFrames - padding;
-	if (available == 0) { unlock(); return; }   /* drop rather than block the caller */
-
-	/* Resample the decoded 48 kHz mono into the endpoint's mix rate. */
-	step = (double)MIC_DECODE_RATE / (double)g_fmt->nSamplesPerSec;
-	toWrite = (UINT32)((double)samples / step);
-	if (toWrite > available) { toWrite = available; }
-	if (toWrite == 0) { unlock(); return; }
-
-	hr = g_render->lpVtbl->GetBuffer(g_render, toWrite, &dest);
-	if (FAILED(hr) || dest == NULL) { unlock(); return; }
-
-	tag = format_tag(g_fmt);
-	bytesPerSample = g_fmt->nBlockAlign / g_fmt->nChannels;
-	pos = 0.0;
-	for (i = 0; i < toWrite; ++i)
-	{
-		int idx = (int)pos;
-		double s;
-		if (idx >= samples) { idx = samples - 1; }
-		s = (double)pcm[idx];
-		write_frame(dest + ((size_t)i * g_fmt->nBlockAlign), s, g_fmt, tag, bytesPerSample);
-		pos += step;
-	}
-
-	g_render->lpVtbl->ReleaseBuffer(g_render, toWrite, 0);
-
-	unlock();
-}
-
-void kvm_mic_resend_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
-{
-	send_caps(writeHandler, reserved);
+	g_seq = 0;
 }
 
 void kvm_mic_cleanup(void)
 {
-	OpusDecoder *dec;
+	OpusEncoder *enc;
 
-	lock();
-	close_stream();
-	if (g_comInit) { CoUninitialize(); g_comInit = 0; }
-	g_consent = 0;
-	dec = g_dec;
-	g_dec = NULL;
+	/* Joins the capture thread first, so nothing can touch g_enc afterwards. */
+	kvm_mic_stop();
+
+	mic_lock();
+	enc = g_enc;
+	g_enc = NULL;
 	g_writeHandler = NULL;
 	g_reserved = NULL;
-	unlock();
+	mic_unlock();
 
-	if (dec != NULL) { opus_decoder_destroy(dec); }
+	if (enc != NULL) { opus_encoder_destroy(enc); }
+}
+
+void kvm_mic_resend_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+{
+	/* Deliberately does not create an encoder or mutate shared state: this can
+	 * be called from the agent's control path in response to MNG_AUDIO_QUERY
+	 * before (or without) a capture session existing. */
+	mic_send_caps(writeHandler, reserved);
 }
 
 #endif /* _LINKVM && _KVM_AUDIO */

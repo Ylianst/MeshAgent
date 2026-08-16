@@ -71,14 +71,19 @@ typedef enum RemoteManagementCommands
 	MNG_AUDIO_START = 92,					// Start audio streaming
 	MNG_AUDIO_STOP = 93,					// Stop audio streaming
 	MNG_AUDIO_QUERY = 94,					// Pull CAPS re-send
-	// Microphone: the reverse direction, browser -> device. Because this plays
-	// an operator's voice into the room, the agent requires explicit local
-	// consent and drops MNG_MIC_DATA until it is granted.
-	MNG_MIC_QUERY = 95,						// Ask for playback capability + consent state
-	MNG_MIC_CAPS = 96,						// Playback capability / consent advertisement
-	MNG_MIC_START = 97,						// Request playback; prompts the local user
-	MNG_MIC_STOP = 98,						// Stop playback and revoke the session's consent
-	MNG_MIC_DATA = 99						// Opus-encoded microphone chunk
+	// Microphone: the device's own mic, streamed to the operator so they can
+	// hear the user and any noise worth diagnosing. Same direction as the audio
+	// commands above; the difference is the source. The agent refuses to open
+	// the microphone until the local user has agreed.
+	MNG_MIC_QUERY = 95,						// Ask for mic availability + consent state
+	MNG_MIC_CAPS = 96,						// Mic availability / consent advertisement
+	MNG_MIC_START = 97,						// Request capture; prompts the local user
+	MNG_MIC_STOP = 98,						// Stop capture and revoke the session's consent
+	MNG_MIC_DATA = 99,						// Opus-encoded microphone chunk
+	// Sent only by the agent's own consent flow once the local user accepts.
+	// Kept separate from MNG_MIC_START so that a browser frame can request
+	// capture but can never grant permission for it.
+	MNG_MIC_CONSENT = 100
 }RemoteManagementCommands;
 
 

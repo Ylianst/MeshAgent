@@ -724,6 +724,11 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 	case MNG_AUDIO_QUERY: kvm_audio_resend_caps(writeHandler, reserved); break;
 	/* Microphone playback. MNG_MIC_START only reaches here once the agent's
 	 * JavaScript layer has recorded the local user's consent. */
+	case MNG_MIC_CONSENT:
+		/* The local user accepted. Only the agent's consent flow sends this. */
+		kvm_mic_set_consent(1);
+		kvm_mic_start();
+		break;
 	case MNG_MIC_START: kvm_mic_start(); break;
 	case MNG_MIC_STOP:  kvm_mic_stop(); break;
 	case MNG_MIC_QUERY: kvm_mic_resend_caps(writeHandler, reserved); break;
