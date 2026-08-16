@@ -64,7 +64,11 @@ int kvm_mic_has_consent(void);
 
 /*
  * kvm_mic_start - open the microphone and begin streaming to the browser.
- * Refuses unless consent has been granted.
+ * Refuses unless consent has been granted. When refused for that reason
+ * specifically (a real microphone exists, capture is not already running,
+ * consent alone is missing), also emits MNG_MIC_CONSENT_NEEDED so the
+ * agent's JavaScript layer can prompt the local user; safe to call
+ * speculatively (e.g. once at KVM session start) for exactly this purpose.
  */
 void kvm_mic_start(void);
 

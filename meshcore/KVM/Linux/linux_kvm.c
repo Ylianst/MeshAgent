@@ -1709,6 +1709,15 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
+#if defined(_KVM_AUDIO)
+		/* Offer microphone consent up front rather than waiting for a click.
+		 * kvm_mic_init() above already told the browser whether a microphone
+		 * exists; this speculative start does nothing if it does not (or if
+		 * consent was somehow already granted), and otherwise asks the JS
+		 * layer to prompt now instead of only on MNG_MIC_START. */
+		kvm_mic_start();
+#endif
+
 		kvm_server_mainloop((void*)0);
 		exit(0);
 		return(NULL);

@@ -83,7 +83,14 @@ typedef enum RemoteManagementCommands
 	// Sent only by the agent's own consent flow once the local user accepts.
 	// Kept separate from MNG_MIC_START so that a browser frame can request
 	// capture but can never grant permission for it.
-	MNG_MIC_CONSENT = 100
+	MNG_MIC_CONSENT = 100,
+	// Native -> agent JS only; never sent to the browser. Emitted by
+	// kvm_mic_start() when it refuses to open the microphone specifically
+	// because local consent is missing (device has a microphone, the
+	// operator asked, but nobody has said yes yet), so the JS layer can show
+	// the consent prompt. agentcore.c intercepts this on the way up and
+	// drops it rather than forwarding it, so it never reaches the tunnel.
+	MNG_MIC_CONSENT_NEEDED = 101
 }RemoteManagementCommands;
 
 

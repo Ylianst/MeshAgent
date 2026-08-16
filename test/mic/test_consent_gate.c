@@ -31,10 +31,12 @@ static int captureOpened(void) {
 }
 int g_capsSent = 0;
 int g_lastCapsConsent = -1;
+int g_consentNeededSent = 0;   /* MNG_MIC_CONSENT_NEEDED (101) frames seen */
 
 static int sink(char *b, int len, void *r) {
     unsigned char *u = (unsigned char*)b; (void)r;
     if (len >= 9 && ((u[0]<<8)|u[1]) == 96) { g_capsSent++; g_lastCapsConsent = (u[7] & 0x02) ? 1 : 0; }
+    if (len >= 4 && ((u[0]<<8)|u[1]) == 101) { g_consentNeededSent++; }
     return 1;
 }
 
@@ -59,6 +61,13 @@ int main(void) {
     usleep(200000);
     CHECK(captureOpened() == 0, "microphone is NOT opened without consent");
     CHECK(g_encodeCalls == 0, "no audio is captured without consent");
+    CHECK(g_consentNeededSent == 1, "refusing for lack of consent notifies the JS layer");
+
+    /* A second click before consent is granted must notify again, so a
+     * repeated ask still (re)prompts rather than going silent. */
+    kvm_mic_start();
+    usleep(50000);
+    CHECK(g_consentNeededSent == 2, "a repeated start while still refused notifies again");
 
     /* Grant, and capture should begin. */
     kvm_mic_set_consent(1);
@@ -70,6 +79,18 @@ int main(void) {
     usleep(300000);
     CHECK(captureOpened() >= 1, "microphone opens once consent is granted");
     CHECK(g_encodeCalls > 0, "audio is captured and encoded after consent");
+    CHECK(g_consentNeededSent == 2, "starting successfully does not notify again");
+
+    /* Already capturing: a duplicate start (e.g. a second browser frame)
+     * must not reopen the microphone or notify, since consent is not what
+     * would be blocking it. */
+    {
+        int before = captureOpened();
+        kvm_mic_start();
+        usleep(50000);
+        CHECK(captureOpened() == before, "start() while already capturing is a no-op");
+        CHECK(g_consentNeededSent == 2, "start() while already capturing does not notify");
+    }
 
     /* Revoking must stop capture promptly. */
     kvm_mic_set_consent(0);
@@ -86,11 +107,13 @@ int main(void) {
     CHECK(kvm_mic_has_consent() == 0, "stop() revokes consent for the session");
     {
         int before = captureOpened();
+        int notifiedBefore = g_consentNeededSent;
         g_encodeCalls = 0;
         kvm_mic_start();
         usleep(200000);
         CHECK(captureOpened() == before, "start() after stop() opens no microphone");
         CHECK(g_encodeCalls == 0, "start() after stop() captures nothing without new consent");
+        CHECK(g_consentNeededSent == notifiedBefore + 1, "start() after stop() notifies again, since stop() revoked consent");
     }
 
     /* Inbound frames are not a capture path and must be ignored safely. */

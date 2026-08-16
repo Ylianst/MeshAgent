@@ -366,6 +366,30 @@ static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, voi
 	writeHandler((char*)caps, MIC_CAPS_LEN, reserved);
 }
 
+/* Tell the agent's JS layer a consent prompt is needed. Sent from
+ * kvm_mic_start() instead of opening the microphone, when consent is
+ * specifically the reason it refused. Carries no payload: the plain 4-byte
+ * KVM command frame is all a pure signal needs. */
+static void notify_consent_needed(void)
+{
+	ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+	void *reserved;
+	unsigned char frame[4];
+
+	mic_lock();
+	writeHandler = g_writeHandler;
+	reserved = g_reserved;
+	mic_unlock();
+	if (writeHandler == NULL) { return; }
+
+	frame[0] = (unsigned char)((MNG_MIC_CONSENT_NEEDED >> 8) & 0xFF);
+	frame[1] = (unsigned char)(MNG_MIC_CONSENT_NEEDED & 0xFF);
+	frame[2] = 0x00;
+	frame[3] = 0x04;
+
+	writeHandler((char*)frame, (int)sizeof(frame), reserved);
+}
+
 /* ------------------------------------------------------------------------ */
 /* Capture thread                                                             */
 /* ------------------------------------------------------------------------ */
@@ -603,6 +627,13 @@ void kvm_mic_start(void)
 	if (g_enc == NULL || g_thread != NULL)
 	{
 		mic_unlock();
+		return;
+	}
+	/* Fail closed: never open the microphone without a local decision. */
+	if (!g_consent)
+	{
+		mic_unlock();
+		notify_consent_needed();
 		return;
 	}
 	InterlockedExchange(&g_micShutdown, 0);

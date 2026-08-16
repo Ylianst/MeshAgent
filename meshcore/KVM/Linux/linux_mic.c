@@ -179,6 +179,31 @@ static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*),
     }
 }
 
+/* Tell the agent's JS layer a consent prompt is needed. Sent from
+ * kvm_mic_start() instead of opening the microphone, when consent is
+ * specifically the reason it refused. Carries no payload: the plain 4-byte
+ * KVM command frame is all a pure signal needs. */
+static void notify_consent_needed(void)
+{
+    unsigned char frame[4];
+
+    frame[0] = (unsigned char)((MNG_MIC_CONSENT_NEEDED >> 8) & 0xFF);
+    frame[1] = (unsigned char)(MNG_MIC_CONSENT_NEEDED & 0xFF);
+    frame[2] = 0x00;
+    frame[3] = 0x04;
+
+    if (g_slave_pipe_fd >= 0)
+    {
+        ssize_t written = write(g_slave_pipe_fd, (char*)frame, sizeof(frame));
+        (void)written;
+        fsync(g_slave_pipe_fd);
+    }
+    else if (g_writeHandler != NULL)
+    {
+        g_writeHandler((char*)frame, (int)sizeof(frame), g_reserved);
+    }
+}
+
 static void *capture_thread(void *arg)
 {
     void *lib = NULL;
@@ -306,12 +331,20 @@ int kvm_mic_has_consent(void)
 
 void kvm_mic_start(void)
 {
+    int needConsentPrompt;
+
     pthread_mutex_lock(&g_lock);
 
     /* Fail closed: never open the microphone without a local decision. */
     if (!g_consent || g_enc == NULL || !g_shutdown || g_pa_lib == NULL)
     {
+        /* Only ask the JS layer to prompt when consent is genuinely why this
+         * refused: not when there is no microphone to prompt for, and not
+         * when capture is already running (that would just repeat itself on
+         * every duplicate MNG_MIC_START a browser happens to send). */
+        needConsentPrompt = (!g_consent && g_enc != NULL && g_pa_lib != NULL && g_shutdown);
         pthread_mutex_unlock(&g_lock);
+        if (needConsentPrompt) { notify_consent_needed(); }
         return;
     }
     g_shutdown = 0;

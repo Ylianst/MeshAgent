@@ -1028,6 +1028,13 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// Capture itself stays idle until the browser sends MNG_AUDIO_START.
 	kvm_audio_init(writeHandler, reserved);
 	kvm_mic_init(writeHandler, reserved);
+
+	// Offer microphone consent up front rather than waiting for a click.
+	// kvm_mic_init() above already told the browser whether a microphone
+	// exists; this speculative start does nothing if it does not (or if
+	// consent was somehow already granted), and otherwise asks the JS layer
+	// to prompt now instead of only on MNG_MIC_START.
+	kvm_mic_start();
 #endif
 
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.

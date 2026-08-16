@@ -855,6 +855,22 @@ void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *
 	char *buffer = (char*)user;
 	size_t bufferLen = ILibMemory_Size(user);
 
+#if defined(_KVM_AUDIO)
+	/* Native asked for a consent prompt (see kvm_mic_start()). This is an
+	 * internal signal, not something the browser has any use for, so it is
+	 * consumed here rather than forwarded up the duplex stream. */
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_NEEDED)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onMicConsentNeeded(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+#endif
+
 	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
 	ILibMemory_Free(user);
 }
@@ -904,6 +920,24 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	{
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
+
+#if defined(_KVM_AUDIO)
+	/* Native asked for a consent prompt (see kvm_mic_start()). This is an
+	 * internal signal, not something the browser has any use for, so it is
+	 * consumed here rather than forwarded up the duplex stream. On Windows
+	 * this path only runs when already on the chain thread; the off-thread
+	 * case is handled by the _Chain variant above, which the marshal at the
+	 * top of this function dispatches to. */
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_NEEDED))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onMicConsentNeeded(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+#endif
 
 	if (ptrs->stream != NULL)
 	{
