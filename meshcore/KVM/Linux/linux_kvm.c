@@ -1293,6 +1293,19 @@ void* kvm_server_mainloop(void* parm)
 			if (ptr == len) { len = 0; ptr = 0; }
 		}
 
+		if (g_remotepause)
+		{
+			// Video suppressed (e.g. an audio/mic-only session): skip the
+			// screen capture/cursor-tracking/tile-send below entirely, but
+			// the input read above still ran, so an unpause can still
+			// arrive. imagedisplay was already opened for this iteration
+			// (above, before the input read); close it now the same way
+			// the end of a normal iteration would, so it is not leaked.
+			if (imagedisplay != NULL) { x11_exports->XCloseDisplay(imagedisplay); imagedisplay = NULL; }
+			usleep((FRAME_RATE_TIMER > 0) ? (FRAME_RATE_TIMER * 1000) : 100000);
+			continue;
+		}
+
 		if (cursordisplay == NULL)
 		{
 			if ((cursordisplay = x11_exports->XOpenDisplay(CURRENT_XDISPLAY)))

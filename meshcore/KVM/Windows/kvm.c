@@ -1060,6 +1060,18 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		if (g_shutdown)
 			break;
 
+		if (g_remotepause)
+		{
+			// Video suppressed (e.g. an audio/mic-only session): skip mouse-
+			// cursor tracking and the screen capture/tile-send below
+			// entirely. KVM command handling (including the switch case
+			// that clears g_remotepause) runs on its own thread
+			// (kvm_mainloopinput), so nothing here needs to keep running
+			// for an unpause to arrive.
+			Sleep((FRAME_RATE_TIMER > 0) ? FRAME_RATE_TIMER : 100);
+			continue;
+		}
+
 		// Enter Alertable State, so we can dispatch any packets if necessary.
 		// We are doing it here, in case we need to merge any data with the bitmaps
 		SleepEx(0, TRUE);
