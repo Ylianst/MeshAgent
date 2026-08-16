@@ -32,11 +32,13 @@ static int captureOpened(void) {
 int g_capsSent = 0;
 int g_lastCapsConsent = -1;
 int g_consentNeededSent = 0;   /* MNG_MIC_CONSENT_NEEDED (101) frames seen */
+int g_consentCancelSent = 0;   /* MNG_MIC_CONSENT_CANCEL (102) frames seen */
 
 static int sink(char *b, int len, void *r) {
     unsigned char *u = (unsigned char*)b; (void)r;
     if (len >= 9 && ((u[0]<<8)|u[1]) == 96) { g_capsSent++; g_lastCapsConsent = (u[7] & 0x02) ? 1 : 0; }
     if (len >= 4 && ((u[0]<<8)|u[1]) == 101) { g_consentNeededSent++; }
+    if (len >= 4 && ((u[0]<<8)|u[1]) == 102) { g_consentCancelSent++; }
     return 1;
 }
 
@@ -68,6 +70,17 @@ int main(void) {
     kvm_mic_start();
     usleep(50000);
     CHECK(g_consentNeededSent == 2, "a repeated start while still refused notifies again");
+
+    /* Operator gives up before the user answers (clicked the mic button
+     * again, or by mistake): the prompt must be taken down rather than left
+     * asking about a request nobody is waiting on. */
+    kvm_mic_stop();
+    CHECK(g_consentCancelSent == 1, "stopping while awaiting consent cancels the prompt");
+
+    /* Nothing outstanding now, so a further stop must not cancel again -- a
+     * stray cancel could close an unrelated prompt raised later. */
+    kvm_mic_stop();
+    CHECK(g_consentCancelSent == 1, "stopping with nothing pending does not cancel again");
 
     /* Grant, and capture should begin. */
     kvm_mic_set_consent(1);

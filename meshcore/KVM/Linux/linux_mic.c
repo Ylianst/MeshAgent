@@ -73,6 +73,9 @@ static OpusEncoder *g_enc = NULL;
 static void *g_pa_lib = NULL;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int g_consent = 0;      /* only kvm_mic_set_consent() sets this */
+/* 1 between asking the JS layer to prompt and that prompt being resolved, so
+ * a cancel is only ever sent for a prompt that is actually on screen. */
+static volatile int g_promptOutstanding = 0;
 static volatile int g_shutdown = 1;     /* 1 = capture thread not running */
 static pthread_t g_thread = (pthread_t)0;
 static uint16_t g_seq = 0;
@@ -183,12 +186,12 @@ static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*),
  * kvm_mic_start() instead of opening the microphone, when consent is
  * specifically the reason it refused. Carries no payload: the plain 4-byte
  * KVM command frame is all a pure signal needs. */
-static void notify_consent_needed(void)
+static void notify_js(int command)
 {
     unsigned char frame[4];
 
-    frame[0] = (unsigned char)((MNG_MIC_CONSENT_NEEDED >> 8) & 0xFF);
-    frame[1] = (unsigned char)(MNG_MIC_CONSENT_NEEDED & 0xFF);
+    frame[0] = (unsigned char)((command >> 8) & 0xFF);
+    frame[1] = (unsigned char)(command & 0xFF);
     frame[2] = 0x00;
     frame[3] = 0x04;
 
@@ -306,6 +309,9 @@ void kvm_mic_set_consent(int granted)
 
     pthread_mutex_lock(&g_lock);
     g_consent = (granted != 0);
+    /* The prompt has been answered either way, so there is nothing left to
+     * cancel. */
+    g_promptOutstanding = 0;
     if (!g_consent && !g_shutdown)
     {
         g_shutdown = 1;
@@ -343,8 +349,9 @@ void kvm_mic_start(void)
          * when capture is already running (that would just repeat itself on
          * every duplicate MNG_MIC_START a browser happens to send). */
         needConsentPrompt = (!g_consent && g_enc != NULL && g_pa_lib != NULL && g_shutdown);
+        if (needConsentPrompt) { g_promptOutstanding = 1; }
         pthread_mutex_unlock(&g_lock);
-        if (needConsentPrompt) { notify_consent_needed(); }
+        if (needConsentPrompt) { notify_js(MNG_MIC_CONSENT_NEEDED); }
         return;
     }
     g_shutdown = 0;
@@ -359,8 +366,14 @@ void kvm_mic_start(void)
 void kvm_mic_stop(void)
 {
     pthread_t thread;
+    int wasAwaitingConsent;
 
     pthread_mutex_lock(&g_lock);
+    /* Only when a prompt we raised is still unanswered: stopping when nothing
+     * is outstanding must not emit a stray cancel, which would take down an
+     * unrelated prompt raised later. */
+    wasAwaitingConsent = g_promptOutstanding;
+    g_promptOutstanding = 0;
     g_shutdown = 1;
     /* Stopping ends the session's permission; the next start prompts again. */
     g_consent = 0;
@@ -370,6 +383,9 @@ void kvm_mic_stop(void)
 
     if (thread != (pthread_t)0) { pthread_join(thread, NULL); }
     g_seq = 0;
+
+    /* Take down that stale prompt before reporting the new state. */
+    if (wasAwaitingConsent) { notify_js(MNG_MIC_CONSENT_CANCEL); }
 
     send_caps(g_writeHandler, g_reserved);
 }

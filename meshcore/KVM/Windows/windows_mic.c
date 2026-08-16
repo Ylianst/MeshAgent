@@ -121,6 +121,9 @@ static volatile LONG g_micShutdown = 1;   /* 1 = not capturing */
 static HANDLE g_thread = NULL;
 static uint16_t g_seq = 0;
 static int g_consent = 0;      /* only kvm_mic_set_consent() may set this */
+/* 1 between asking the JS layer to prompt and that prompt being resolved, so
+ * a cancel is only ever sent for a prompt that is actually on screen. */
+static int g_promptOutstanding = 0;
 
 /* ------------------------------------------------------------------------ */
 /* Locking                                                                    */
@@ -370,7 +373,7 @@ static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, voi
  * kvm_mic_start() instead of opening the microphone, when consent is
  * specifically the reason it refused. Carries no payload: the plain 4-byte
  * KVM command frame is all a pure signal needs. */
-static void notify_consent_needed(void)
+static void notify_js(int command)
 {
 	ILibTransport_DoneState(*writeHandler)(char*, int, void*);
 	void *reserved;
@@ -382,8 +385,8 @@ static void notify_consent_needed(void)
 	mic_unlock();
 	if (writeHandler == NULL) { return; }
 
-	frame[0] = (unsigned char)((MNG_MIC_CONSENT_NEEDED >> 8) & 0xFF);
-	frame[1] = (unsigned char)(MNG_MIC_CONSENT_NEEDED & 0xFF);
+	frame[0] = (unsigned char)((command >> 8) & 0xFF);
+	frame[1] = (unsigned char)(command & 0xFF);
 	frame[2] = 0x00;
 	frame[3] = 0x04;
 
@@ -637,7 +640,15 @@ void kvm_mic_start(void)
 	if (!g_consent)
 	{
 		mic_unlock();
-		if (microphone_available()) { notify_consent_needed(); }
+		/* microphone_available() does COM work, so it is called outside the
+		 * lock; re-take it only to record that a prompt is now outstanding. */
+		if (microphone_available())
+		{
+			mic_lock();
+			g_promptOutstanding = 1;
+			mic_unlock();
+			notify_js(MNG_MIC_CONSENT_NEEDED);
+		}
 		return;
 	}
 	InterlockedExchange(&g_micShutdown, 0);
@@ -658,6 +669,9 @@ void kvm_mic_set_consent(int granted)
 
 	mic_lock();
 	g_consent = (granted != 0);
+	/* The prompt has been answered either way, so there is nothing left to
+	 * cancel. */
+	g_promptOutstanding = 0;
 	if (!g_consent)
 	{
 		/* Revoking stops capture immediately rather than at the next frame. */
@@ -694,16 +708,25 @@ void kvm_mic_feed(char *buffer, int bufferLen)
 void kvm_mic_stop(void)
 {
 	HANDLE thread;
+	int wasAwaitingConsent;
 
 	mic_lock_init();
 
 	mic_lock();
+	/* Only when a prompt we raised is still unanswered: stopping when nothing
+	 * is outstanding must not emit a stray cancel, which would take down an
+	 * unrelated prompt raised later. */
+	wasAwaitingConsent = g_promptOutstanding;
+	g_promptOutstanding = 0;
 	/* Stopping ends the session's permission; the next start prompts again. */
 	g_consent = 0;
 	thread = g_thread;
 	g_thread = NULL;
 	InterlockedExchange(&g_micShutdown, 1);
 	mic_unlock();
+
+	/* Take down that stale prompt. */
+	if (wasAwaitingConsent) { notify_js(MNG_MIC_CONSENT_CANCEL); }
 
 	if (thread != NULL)
 	{

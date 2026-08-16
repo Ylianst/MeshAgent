@@ -1029,12 +1029,12 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	kvm_audio_init(writeHandler, reserved);
 	kvm_mic_init(writeHandler, reserved);
 
-	// Offer microphone consent up front rather than waiting for a click.
-	// kvm_mic_init() above already told the browser whether a microphone
-	// exists; this speculative start does nothing if it does not (or if
-	// consent was somehow already granted), and otherwise asks the JS layer
-	// to prompt now instead of only on MNG_MIC_START.
-	kvm_mic_start();
+	// Deliberately no speculative kvm_mic_start() here. Asking at session
+	// open prompted the local user about the microphone whenever anyone
+	// opened a desktop session, including the common case where the operator
+	// only wants the screen and never touches the microphone. The prompt now
+	// happens only when the operator actually asks to listen
+	// (MNG_MIC_START), which is what the local user is being asked about.
 #endif
 
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.

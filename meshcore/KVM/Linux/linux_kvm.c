@@ -1722,14 +1722,13 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
-#if defined(_KVM_AUDIO)
-		/* Offer microphone consent up front rather than waiting for a click.
-		 * kvm_mic_init() above already told the browser whether a microphone
-		 * exists; this speculative start does nothing if it does not (or if
-		 * consent was somehow already granted), and otherwise asks the JS
-		 * layer to prompt now instead of only on MNG_MIC_START. */
-		kvm_mic_start();
-#endif
+		/* Deliberately no speculative kvm_mic_start() here. Asking at session
+		 * open prompted the local user about the microphone whenever anyone
+		 * opened a desktop session, including the common case where the
+		 * operator only wants the screen and never touches the microphone.
+		 * The prompt now happens only when the operator actually asks to
+		 * listen (MNG_MIC_START), which is what the local user is being
+		 * asked about. */
 
 		kvm_server_mainloop((void*)0);
 		exit(0);

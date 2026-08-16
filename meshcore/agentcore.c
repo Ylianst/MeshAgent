@@ -869,6 +869,16 @@ void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *
 		ILibMemory_Free(user);
 		return;
 	}
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_CANCEL)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onMicConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
 #endif
 
 	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
@@ -933,6 +943,15 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 		if (duk_ctx_is_alive(ptrs->ctx))
 		{
 			duk_peval_string(ptrs->ctx, "try { onMicConsentNeeded(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_CANCEL))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onMicConsentCancelled(); } catch (ex) { }");
 			duk_pop(ptrs->ctx);
 		}
 		return ILibTransport_DoneState_COMPLETE;

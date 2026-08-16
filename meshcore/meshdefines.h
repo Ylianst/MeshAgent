@@ -90,7 +90,14 @@ typedef enum RemoteManagementCommands
 	// operator asked, but nobody has said yes yet), so the JS layer can show
 	// the consent prompt. agentcore.c intercepts this on the way up and
 	// drops it rather than forwarding it, so it never reaches the tunnel.
-	MNG_MIC_CONSENT_NEEDED = 101
+	MNG_MIC_CONSENT_NEEDED = 101,
+	// Native -> agent JS only; never sent to the browser. The counterpart of
+	// MNG_MIC_CONSENT_NEEDED: emitted by kvm_mic_stop() when capture is
+	// stopped while consent was still outstanding, so the JS layer can take
+	// down a prompt nobody is waiting on any more (the operator changed
+	// their mind, or clicked by mistake). Leaving it up would ask the local
+	// user to decide about a request that no longer exists.
+	MNG_MIC_CONSENT_CANCEL = 102
 }RemoteManagementCommands;
 
 
