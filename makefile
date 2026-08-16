@@ -572,7 +572,7 @@ CFLAGS += -D_LINKVM
 	BSDFLAGS = /usr/local/lib/libjpeg.a
 	# Mesh Agent KVM Audio: Opus capture/encode for Linux (PulseAudio via dlopen) + macOS
 	ifeq ($(AUDIO),1)
-		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_audio.c
+		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_audio.c meshcore/KVM/Linux/linux_mic.c
 		CFLAGS += -D_KVM_AUDIO
 		LINUXFLAGS += lib-opus/linux/$(ARCHNAME)/libopus.a
 		MACOSFLAGS += ./lib-opus/macos/$(ARCHNAME)/libopus.a

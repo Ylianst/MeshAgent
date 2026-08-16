@@ -64,6 +64,7 @@ int gRemoteMouseRenderDefault = 0;
 			#include "KVM/Linux/linux_kvm.h"
 			#if defined(_KVM_AUDIO)
 				#include "KVM/kvm_audio.h"
+				#include "KVM/kvm_mic.h"
 			#endif
 		#else
 			#include "KVM/MacOS/mac_kvm.h"
@@ -946,6 +947,13 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 			if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_AUDIO_QUERY)
 			{
 				kvm_audio_resend_caps(ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
+				return ILibTransport_DoneState_COMPLETE;
+			}
+			/* Same for MNG_MIC_QUERY (95), so the browser learns the playback
+			 * capability and consent state without starting anything. */
+			if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_QUERY)
+			{
+				kvm_mic_resend_caps(ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
 				return ILibTransport_DoneState_COMPLETE;
 			}
 #endif

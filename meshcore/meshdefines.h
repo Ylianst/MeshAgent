@@ -66,11 +66,19 @@ typedef enum RemoteManagementCommands
 	MNG_DEBUG = 64,							// Debug/Logging Message for ILibRemoteLogging
 	MNG_ERROR = 65,
 	MNG_ENCAPSULATE_AGENT_COMMAND = 70,
-	MNG_AUDIO_DATA = 90,					// Opus-encoded audio chunk
+	MNG_AUDIO_DATA = 90,					// Opus-encoded audio chunk (device -> browser)
 	MNG_AUDIO_CAPS = 91,					// Agent capability advertisement
 	MNG_AUDIO_START = 92,					// Start audio streaming
 	MNG_AUDIO_STOP = 93,					// Stop audio streaming
-	MNG_AUDIO_QUERY = 94					// Pull CAPS re-send
+	MNG_AUDIO_QUERY = 94,					// Pull CAPS re-send
+	// Microphone: the reverse direction, browser -> device. Because this plays
+	// an operator's voice into the room, the agent requires explicit local
+	// consent and drops MNG_MIC_DATA until it is granted.
+	MNG_MIC_QUERY = 95,						// Ask for playback capability + consent state
+	MNG_MIC_CAPS = 96,						// Playback capability / consent advertisement
+	MNG_MIC_START = 97,						// Request playback; prompts the local user
+	MNG_MIC_STOP = 98,						// Stop playback and revoke the session's consent
+	MNG_MIC_DATA = 99						// Opus-encoded microphone chunk
 }RemoteManagementCommands;
 
 

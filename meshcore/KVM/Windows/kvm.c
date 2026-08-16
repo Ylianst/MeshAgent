@@ -31,6 +31,7 @@ limitations under the License.
 #include "microstack/ILibRemoteLogging.h"
 #if defined(_KVM_AUDIO)
 #include "meshcore/KVM/kvm_audio.h"
+#include "meshcore/KVM/kvm_mic.h"
 #endif
 #include <sas.h>
 
@@ -721,6 +722,12 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 	case MNG_AUDIO_START: kvm_audio_start(); break;
 	case MNG_AUDIO_STOP:  kvm_audio_stop(); break;
 	case MNG_AUDIO_QUERY: kvm_audio_resend_caps(writeHandler, reserved); break;
+	/* Microphone playback. MNG_MIC_START only reaches here once the agent's
+	 * JavaScript layer has recorded the local user's consent. */
+	case MNG_MIC_START: kvm_mic_start(); break;
+	case MNG_MIC_STOP:  kvm_mic_stop(); break;
+	case MNG_MIC_QUERY: kvm_mic_resend_caps(writeHandler, reserved); break;
+	case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
 #endif
 	}
 	return size;
@@ -1015,6 +1022,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// otherwise the frame would be written to an invalid handle in slave mode.
 	// Capture itself stays idle until the browser sends MNG_AUDIO_START.
 	kvm_audio_init(writeHandler, reserved);
+	kvm_mic_init(writeHandler, reserved);
 #endif
 
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.
@@ -1225,6 +1233,7 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	KVMDEBUG("kvm_server_mainloop / end1", (int)GetCurrentThreadId());
 #if defined(_KVM_AUDIO)
 	kvm_audio_cleanup();
+	kvm_mic_cleanup();
 #endif
 	teardown_gdiplus();
 

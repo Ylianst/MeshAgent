@@ -41,6 +41,7 @@ limitations under the License.
 
 #if defined(_KVM_AUDIO)
 #include "meshcore/KVM/kvm_audio.h"
+#include "meshcore/KVM/kvm_mic.h"
 extern int slave2master[2];
 static ILibTransport_DoneState kvm_audio_pipe_write(char *buf, int len, void *reserved)
 {
@@ -967,6 +968,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 		case MNG_AUDIO_START: kvm_audio_start(); break;
 		case MNG_AUDIO_STOP:  kvm_audio_stop(); break;
 		case MNG_AUDIO_QUERY: kvm_audio_resend_caps(kvm_audio_pipe_write, NULL); break;
+		/* Microphone playback. MNG_MIC_START only reaches here once the agent's
+		 * JavaScript layer has recorded the local user's consent. */
+		case MNG_MIC_START: kvm_mic_start(); break;
+		case MNG_MIC_STOP:  kvm_mic_stop(); break;
+		case MNG_MIC_QUERY: kvm_mic_resend_caps(kvm_audio_pipe_write, NULL); break;
+		case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
 #endif
 	}
 	return size;
@@ -1536,6 +1543,7 @@ void* kvm_server_mainloop(void* parm)
 	if (desktop != NULL) { free(desktop); desktop = NULL; }
 #if defined(_KVM_AUDIO)
 	kvm_audio_cleanup();
+	kvm_mic_cleanup();
 #endif
 	close(slave2master[1]);
 	close(master2slave[0]);
@@ -1647,6 +1655,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 #if defined(_KVM_AUDIO)
 	kvm_audio_set_slave_fd(slave2master[1]);
 	kvm_audio_init(kvm_audio_pipe_write, NULL);
+	kvm_mic_init(kvm_audio_pipe_write, NULL);
 #endif
 
 	// Two Phase is ok here, because all our fork/vfork calls always happen on the same thread
