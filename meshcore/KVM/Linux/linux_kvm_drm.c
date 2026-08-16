@@ -154,9 +154,14 @@ int kvm_drm_render_node_for_fd(int fd, char *out, size_t out_len)
 
 // libwayland-client is dlopen'd rather than linked, so the agent runs where it's absent. It's
 // used only for the xdg-output layout query, which falls back to KWin/raw DRM positions.
+// Array marshallers instead of wl_proxy_marshal_flags: flags needs libwayland >= 1.20 (2021),
+// which would silently lose the xdg-output layout on Debian 11 / Ubuntu 20.04-era systems.
 #define KVM_DRM_WAYLAND_SYMBOLS(_) \
-	_(wl_display_connect) _(wl_display_disconnect) _(wl_display_roundtrip) \
-	_(wl_proxy_marshal_flags) _(wl_proxy_get_version) _(wl_proxy_add_listener) _(wl_proxy_destroy)
+	_(wl_display_connect) _(wl_display_disconnect) \
+	_(wl_display_flush) _(wl_display_dispatch_pending) _(wl_display_prepare_read) \
+	_(wl_display_read_events) _(wl_display_cancel_read) _(wl_display_get_fd) \
+	_(wl_proxy_marshal_array) _(wl_proxy_marshal_array_constructor) _(wl_proxy_marshal_array_constructor_versioned) \
+	_(wl_proxy_add_listener) _(wl_proxy_destroy)
 
 #define KVM_DRM_WL_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
 KVM_DRM_WAYLAND_SYMBOLS(KVM_DRM_WL_DECL_PTR)
@@ -164,13 +169,20 @@ KVM_DRM_WAYLAND_SYMBOLS(KVM_DRM_WL_DECL_PTR)
 
 static const struct wl_interface *p_wl_registry_interface = NULL;
 static const struct wl_interface *p_wl_output_interface = NULL;
+static const struct wl_interface *p_wl_callback_interface = NULL;
 static void *g_libwayland_handle = NULL;
 
 #define wl_display_connect p_wl_display_connect
 #define wl_display_disconnect p_wl_display_disconnect
-#define wl_display_roundtrip p_wl_display_roundtrip
-#define wl_proxy_marshal_flags p_wl_proxy_marshal_flags
-#define wl_proxy_get_version p_wl_proxy_get_version
+#define wl_display_flush p_wl_display_flush
+#define wl_display_dispatch_pending p_wl_display_dispatch_pending
+#define wl_display_prepare_read p_wl_display_prepare_read
+#define wl_display_read_events p_wl_display_read_events
+#define wl_display_cancel_read p_wl_display_cancel_read
+#define wl_display_get_fd p_wl_display_get_fd
+#define wl_proxy_marshal_array p_wl_proxy_marshal_array
+#define wl_proxy_marshal_array_constructor p_wl_proxy_marshal_array_constructor
+#define wl_proxy_marshal_array_constructor_versioned p_wl_proxy_marshal_array_constructor_versioned
 #define wl_proxy_add_listener p_wl_proxy_add_listener
 #define wl_proxy_destroy p_wl_proxy_destroy
 
@@ -178,8 +190,10 @@ static void *g_libwayland_handle = NULL;
 // link-time wl_proxy_*/wl_registry_interface references that would keep libwayland in NEEDED.
 static struct wl_registry *kvm_wl_display_get_registry(struct wl_display *display)
 {
-	return (struct wl_registry *)wl_proxy_marshal_flags((struct wl_proxy *)display, 1 /*WL_DISPLAY_GET_REGISTRY*/,
-		p_wl_registry_interface, wl_proxy_get_version((struct wl_proxy *)display), 0, NULL);
+	union wl_argument args[1];
+	args[0].o = NULL;
+	return (struct wl_registry *)wl_proxy_marshal_array_constructor((struct wl_proxy *)display,
+		1 /*WL_DISPLAY_GET_REGISTRY*/, args, p_wl_registry_interface);
 }
 static int kvm_wl_registry_add_listener(struct wl_registry *registry, const struct wl_registry_listener *listener, void *data)
 {
@@ -187,8 +201,13 @@ static int kvm_wl_registry_add_listener(struct wl_registry *registry, const stru
 }
 static void *kvm_wl_registry_bind(struct wl_registry *registry, uint32_t name, const struct wl_interface *interface, uint32_t version)
 {
-	return (void *)wl_proxy_marshal_flags((struct wl_proxy *)registry, 0 /*WL_REGISTRY_BIND*/, interface, version, 0,
-		name, interface->name, version, NULL);
+	union wl_argument args[4];
+	args[0].u = name;
+	args[1].s = interface->name;
+	args[2].u = version;
+	args[3].o = NULL;
+	return (void *)wl_proxy_marshal_array_constructor_versioned((struct wl_proxy *)registry,
+		0 /*WL_REGISTRY_BIND*/, args, interface, version);
 }
 static int kvm_wl_output_add_listener(struct wl_output *output, const struct wl_output_listener *listener, void *data)
 {
@@ -209,7 +228,8 @@ static int kvm_drm_load_wayland(void)
 #undef KVM_DRM_WL_LOAD_PTR
 	p_wl_registry_interface = (const struct wl_interface *)dlsym(h, "wl_registry_interface");
 	p_wl_output_interface = (const struct wl_interface *)dlsym(h, "wl_output_interface");
-	if (p_wl_registry_interface == NULL || p_wl_output_interface == NULL) { dlclose(h); return 0; }
+	p_wl_callback_interface = (const struct wl_interface *)dlsym(h, "wl_callback_interface");
+	if (p_wl_registry_interface == NULL || p_wl_output_interface == NULL || p_wl_callback_interface == NULL) { dlclose(h); return 0; }
 	kvm_xdg_output_types[3] = p_wl_output_interface; // get_xdg_output's wl_output arg type
 	g_libwayland_handle = h;
 	return 1;
@@ -228,6 +248,18 @@ static int kvm_drm_load_wayland(void)
 
 int g_kvmBackendDRM = 0;
 static int drm_debug = 0;
+
+static void kvm_drm_init_debug()
+{
+	const char *value = getenv("MESH_KVM_DRM_DEBUG");
+	if (value == NULL || value[0] == 0)
+	{
+		drm_debug = 0;
+		return;
+	}
+	drm_debug = atoi(value);
+	if (drm_debug < 0) { drm_debug = 0; }
+}
 
 extern int SCREEN_NUM;
 extern int SCREEN_WIDTH;
@@ -569,18 +601,6 @@ static void kvm_drm_copy_error_message(char *dst, size_t dst_size, const char *s
 	dst[n] = 0;
 }
 
-static void kvm_drm_init_debug()
-{
-	const char *value = getenv("MESH_KVM_DRM_DEBUG");
-	if (value == NULL || value[0] == 0)
-	{
-		drm_debug = 0;
-		return;
-	}
-	drm_debug = atoi(value);
-	if (drm_debug < 0) { drm_debug = 0; }
-}
-
 static void kvm_drm_format_fourcc(char *dst, size_t dst_size, uint32_t format)
 {
 	char code[5];
@@ -639,6 +659,24 @@ static void kvm_drm_close_gem_handle(int fd, uint32_t handle)
 	{
 		fprintf(stderr, "DRM: DRM_IOCTL_GEM_CLOSE failed for handle=%u (errno=%d)\n", handle, errno);
 	}
+}
+
+// Close each unique plane handle once (CCS data + metadata can share one GEM handle). Every
+// drmModeGetFB/GetFB2 call creates fresh handle references that pin the underlying BO until
+// closed; drmModeFreeFB/FreeFB2 only free the struct.
+static void kvm_drm_close_frame_handles(int fd, kvm_drm_scanout_frame *frame)
+{
+	int pi, pj;
+	for (pi = 0; pi < frame->plane_count && pi < 4; ++pi)
+	{
+		uint32_t h = frame->plane_handles[pi];
+		int dup = 0;
+		if (h == 0) { continue; }
+		for (pj = 0; pj < pi; ++pj) { if (frame->plane_handles[pj] == h) { dup = 1; break; } }
+		if (!dup) { kvm_drm_close_gem_handle(fd, h); }
+	}
+	for (pi = 0; pi < frame->plane_count && pi < 4; ++pi) { frame->plane_handles[pi] = 0; }
+	frame->handle = 0;
 }
 
 static void kvm_drm_reset_logged_scanout_state(uint32_t *lastLoggedFbId,
@@ -1137,6 +1175,9 @@ static uint32_t kvm_drm_get_plane_fb_id(int fd, uint32_t crtc_id, int crtc_index
 					best_area = area;
 					best_fb_id = plane->fb_id;
 				}
+				// Only the fb_id is kept; release the handle reference GETFB just created, or this
+				// leaks one handle per plane per frame whenever the plane-fb fallback is active.
+				kvm_drm_close_gem_handle(fd, fb->handle);
 				drmModeFreeFB(fb);
 			}
 		}
@@ -1271,6 +1312,7 @@ static bool kvm_drm_get_scanout_frame(int fd, uint32_t crtc_id, int crtc_index, 
 	drmModeFB *fb = drmModeGetFB(fd, fb_id);
 	if (fb == NULL)
 	{
+		kvm_drm_close_frame_handles(fd, out);	// fb2 metadata may have carried handle references
 		kvm_drm_copy_error_message(out_error, out_error_size, "drmModeGetFB failed");
 		return false;
 	}
@@ -2051,13 +2093,17 @@ static const struct wl_interface zxdg_output_v1_interface =
 
 static struct zxdg_output_v1 *zxdg_output_manager_v1_get_xdg_output(struct zxdg_output_manager_v1 *manager, struct wl_output *output)
 {
-	struct wl_proxy *id = wl_proxy_marshal_flags((struct wl_proxy *)manager, 1, &zxdg_output_v1_interface, wl_proxy_get_version((struct wl_proxy *)manager), 0, NULL, output);
-	return (struct zxdg_output_v1 *)id;
+	union wl_argument args[2];
+	args[0].o = NULL;
+	args[1].o = (struct wl_object *)output;
+	return (struct zxdg_output_v1 *)wl_proxy_marshal_array_constructor((struct wl_proxy *)manager,
+		1 /*get_xdg_output*/, args, &zxdg_output_v1_interface);
 }
 
 static void zxdg_output_manager_v1_destroy(struct zxdg_output_manager_v1 *manager)
 {
-	wl_proxy_marshal_flags((struct wl_proxy *)manager, 0, NULL, wl_proxy_get_version((struct wl_proxy *)manager), WL_MARSHAL_FLAG_DESTROY);
+	wl_proxy_marshal_array((struct wl_proxy *)manager, 0 /*destroy*/, NULL);
+	wl_proxy_destroy((struct wl_proxy *)manager);
 }
 
 static int zxdg_output_v1_add_listener(struct zxdg_output_v1 *output, const struct zxdg_output_v1_listener *listener, void *data)
@@ -2067,7 +2113,8 @@ static int zxdg_output_v1_add_listener(struct zxdg_output_v1 *output, const stru
 
 static void zxdg_output_v1_destroy(struct zxdg_output_v1 *output)
 {
-	wl_proxy_marshal_flags((struct wl_proxy *)output, 0, NULL, wl_proxy_get_version((struct wl_proxy *)output), WL_MARSHAL_FLAG_DESTROY);
+	wl_proxy_marshal_array((struct wl_proxy *)output, 0 /*destroy*/, NULL);
+	wl_proxy_destroy((struct wl_proxy *)output);
 }
 
 typedef struct kvm_drm_wayland_output
@@ -2291,15 +2338,86 @@ static kvm_drm_rotation kvm_drm_rotation_from_wl_transform(int32_t transform)
 	}
 }
 
+static uint64_t kvm_drm_now_ms();
+
+static void kvm_drm_on_sync_done(void *data, struct wl_callback *callback, uint32_t serial)
+{
+	(void)callback; (void)serial;
+	*(int *)data = 1;
+}
+static const struct wl_callback_listener kvm_drm_sync_listener = { kvm_drm_on_sync_done };
+
+// Deadline-bounded wl_display_roundtrip replacement. The layout query runs on the capture thread
+// (at startup and from the 1 Hz refresh); an unbounded roundtrip against a hung compositor would
+// stop the master2slave input drain and re-arm the agent-wide pipe stall that kvm_drm_write_all
+// exists to prevent. Returns 1 when the sync callback fired, 0 on timeout/error.
+static int kvm_drm_wl_roundtrip_deadline(struct wl_display *display, uint64_t deadlineMs)
+{
+	union wl_argument args[1];
+	struct wl_callback *cb;
+	int done = 0;
+
+	args[0].o = NULL;
+	cb = (struct wl_callback *)wl_proxy_marshal_array_constructor((struct wl_proxy *)display,
+		0 /*WL_DISPLAY_SYNC*/, args, p_wl_callback_interface);
+	if (cb == NULL) { return 0; }
+	wl_proxy_add_listener((struct wl_proxy *)cb, (void (**)(void))&kvm_drm_sync_listener, &done);
+
+	while (!done && !g_shutdown)
+	{
+		struct pollfd pfd;
+		uint64_t now;
+		int pr;
+
+		if (wl_display_dispatch_pending(display) < 0) { break; }
+		if (done) { break; }
+		while (wl_display_prepare_read(display) != 0)
+		{
+			if (wl_display_dispatch_pending(display) < 0) { goto out; }
+		}
+		wl_display_flush(display);
+
+		now = kvm_drm_now_ms();
+		pfd.fd = wl_display_get_fd(display);
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		pr = (now >= deadlineMs) ? 0 : poll(&pfd, 1, (int)(deadlineMs - now));
+		if (pr <= 0)
+		{
+			int savedErrno = errno;
+			wl_display_cancel_read(display);
+			if (pr < 0 && savedErrno == EINTR && kvm_drm_now_ms() < deadlineMs) { continue; }
+			break;
+		}
+		if (wl_display_read_events(display) < 0) { break; }
+	}
+out:
+	// Destroy before returning: the listener writes into this frame's 'done'.
+	wl_proxy_destroy((struct wl_proxy *)cb);
+	return done;
+}
+
+#define KVM_DRM_XDG_QUERY_TIMEOUT_MS 1500
+#define KVM_DRM_XDG_BACKOFF_MS 30000
+
 static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_count, bool logSelection)
 {
+	// After a roundtrip timeout, skip the query for a while: the 1 Hz refresh must not pay the
+	// full timeout every second against a wedged compositor.
+	static uint64_t backoffUntilMs = 0;
 	kvm_drm_wayland_layout_context ctx;
 	kvm_drm_output tmp[KVM_DRM_MAX_OUTPUTS];
 	bool claimed[KVM_DRM_MAX_OUTPUTS] = { false };
+	uint64_t deadline;
+	int rtFailed = 0;
 	int matched = 0;
 	int i;
 
 	if (outputs == NULL || output_count <= 0 || output_count > KVM_DRM_MAX_OUTPUTS)
+	{
+		return false;
+	}
+	if (backoffUntilMs != 0 && kvm_drm_now_ms() < backoffUntilMs)
 	{
 		return false;
 	}
@@ -2325,9 +2443,12 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 		return false;
 	}
 	kvm_wl_registry_add_listener(ctx.registry, &kvm_drm_registry_listener, &ctx);
-	if (wl_display_roundtrip(ctx.display) < 0 || ctx.xdg_output_manager == NULL || ctx.output_count <= 0)
+	deadline = kvm_drm_now_ms() + KVM_DRM_XDG_QUERY_TIMEOUT_MS;
+	rtFailed = !kvm_drm_wl_roundtrip_deadline(ctx.display, deadline);
+	if (rtFailed || ctx.xdg_output_manager == NULL || ctx.output_count <= 0)
 	{
 		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: registry roundtrip failed or missing globals (xdg_manager=%p wl_outputs=%d)\n", (void *)ctx.xdg_output_manager, ctx.output_count); }
+		if (rtFailed) { backoffUntilMs = kvm_drm_now_ms() + KVM_DRM_XDG_BACKOFF_MS; }
 		kvm_drm_wayland_layout_context_cleanup(&ctx);
 		return false;
 	}
@@ -2344,12 +2465,14 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 
 	for (i = 0; i < 3; ++i)
 	{
-		if (wl_display_roundtrip(ctx.display) < 0)
+		if (!kvm_drm_wl_roundtrip_deadline(ctx.display, deadline))
 		{
+			backoffUntilMs = kvm_drm_now_ms() + KVM_DRM_XDG_BACKOFF_MS;
 			kvm_drm_wayland_layout_context_cleanup(&ctx);
 			return false;
 		}
 	}
+	backoffUntilMs = 0;
 
 	for (i = 0; i < ctx.output_count; ++i)
 	{
@@ -3111,6 +3234,7 @@ void *kvm_server_mainloop_drm(void *parm)
 
 			if (frame.handle == 0 || frame.width == 0 || frame.height == 0)
 			{
+				kvm_drm_close_frame_handles(dev->fd, &frame);
 				// No readable framebuffer handle: same handover/sleep symptom as above, suspend quietly.
 				scanoutSuspended = 1;
 				forceTileReset = 1;
@@ -3172,16 +3296,7 @@ void *kvm_server_mainloop_drm(void *parm)
 															 frame.plane_count, frame.plane_handles, frame.plane_pitches, frame.plane_offsets,
 															 frame.format, frame.modifier,
 															 rgbBuffer, rgbBufferSize, &rgbSize, err, sizeof(err));
-				// Close each unique plane handle once (CCS data + metadata can share one GEM handle).
-				for (int pi = 0; pi < frame.plane_count && pi < 4; ++pi)
-				{
-					uint32_t h = frame.plane_handles[pi];
-					int dup = 0, pj;
-					if (h == 0) { continue; }
-					for (pj = 0; pj < pi; ++pj) { if (frame.plane_handles[pj] == h) { dup = 1; break; } }
-					if (!dup) { kvm_drm_close_gem_handle(dev->fd, h); }
-				}
-				frame.handle = 0;
+				kvm_drm_close_frame_handles(dev->fd, &frame);
 			}
 			else
 			{

@@ -31,11 +31,14 @@ limitations under the License.
 // ---- libwayland-client via dlopen (same pattern as linux_kvm_drm.c: the header's inline request
 // wrappers would bake in link-time wl_proxy_* references and keep libwayland in NEEDED) -----------
 
+// The array marshallers instead of wl_proxy_marshal_flags: flags only exists in libwayland >= 1.20
+// (2021), which would silently disable this whole path on Debian 11 / Ubuntu 20.04-era systems.
 #define KVM_XKB_WAYLAND_SYMBOLS(_) \
-	_(wl_display_connect) _(wl_display_disconnect) _(wl_display_roundtrip) \
+	_(wl_display_connect) _(wl_display_disconnect) \
 	_(wl_display_flush) _(wl_display_dispatch_pending) _(wl_display_prepare_read) \
 	_(wl_display_read_events) _(wl_display_cancel_read) _(wl_display_get_error) _(wl_display_get_fd) \
-	_(wl_proxy_marshal_flags) _(wl_proxy_get_version) _(wl_proxy_add_listener) _(wl_proxy_destroy)
+	_(wl_proxy_marshal_array_constructor) _(wl_proxy_marshal_array_constructor_versioned) \
+	_(wl_proxy_add_listener) _(wl_proxy_destroy)
 
 #define KVM_XKB_WL_DECL_PTR(s) static __typeof__(s) *x_##s = NULL;
 KVM_XKB_WAYLAND_SYMBOLS(KVM_XKB_WL_DECL_PTR)
@@ -44,6 +47,7 @@ KVM_XKB_WAYLAND_SYMBOLS(KVM_XKB_WL_DECL_PTR)
 static const struct wl_interface *x_wl_registry_interface = NULL;
 static const struct wl_interface *x_wl_seat_interface = NULL;
 static const struct wl_interface *x_wl_keyboard_interface = NULL;
+static const struct wl_interface *x_wl_callback_interface = NULL;
 static void *g_xkb_libwayland = NULL;
 
 static int kvm_xkb_load_wayland(void)
@@ -60,7 +64,8 @@ static int kvm_xkb_load_wayland(void)
 	x_wl_registry_interface = (const struct wl_interface *)dlsym(h, "wl_registry_interface");
 	x_wl_seat_interface = (const struct wl_interface *)dlsym(h, "wl_seat_interface");
 	x_wl_keyboard_interface = (const struct wl_interface *)dlsym(h, "wl_keyboard_interface");
-	if (x_wl_registry_interface == NULL || x_wl_seat_interface == NULL || x_wl_keyboard_interface == NULL)
+	x_wl_callback_interface = (const struct wl_interface *)dlsym(h, "wl_callback_interface");
+	if (x_wl_registry_interface == NULL || x_wl_seat_interface == NULL || x_wl_keyboard_interface == NULL || x_wl_callback_interface == NULL)
 	{
 		dlclose(h);
 		return 0;
@@ -71,18 +76,27 @@ static int kvm_xkb_load_wayland(void)
 
 static struct wl_registry *kvm_xkb_wl_display_get_registry(struct wl_display *display)
 {
-	return (struct wl_registry *)x_wl_proxy_marshal_flags((struct wl_proxy *)display, 1 /*WL_DISPLAY_GET_REGISTRY*/,
-		x_wl_registry_interface, x_wl_proxy_get_version((struct wl_proxy *)display), 0, NULL);
+	union wl_argument args[1];
+	args[0].o = NULL;
+	return (struct wl_registry *)x_wl_proxy_marshal_array_constructor((struct wl_proxy *)display,
+		1 /*WL_DISPLAY_GET_REGISTRY*/, args, x_wl_registry_interface);
 }
 static void *kvm_xkb_wl_registry_bind(struct wl_registry *registry, uint32_t name, const struct wl_interface *interface, uint32_t version)
 {
-	return (void *)x_wl_proxy_marshal_flags((struct wl_proxy *)registry, 0 /*WL_REGISTRY_BIND*/, interface, version, 0,
-		name, interface->name, version, NULL);
+	union wl_argument args[4];
+	args[0].u = name;
+	args[1].s = interface->name;
+	args[2].u = version;
+	args[3].o = NULL;
+	return (void *)x_wl_proxy_marshal_array_constructor_versioned((struct wl_proxy *)registry,
+		0 /*WL_REGISTRY_BIND*/, args, interface, version);
 }
 static struct wl_keyboard *kvm_xkb_wl_seat_get_keyboard(struct wl_seat *seat)
 {
-	return (struct wl_keyboard *)x_wl_proxy_marshal_flags((struct wl_proxy *)seat, 1 /*WL_SEAT_GET_KEYBOARD*/,
-		x_wl_keyboard_interface, x_wl_proxy_get_version((struct wl_proxy *)seat), 0, NULL);
+	union wl_argument args[1];
+	args[0].o = NULL;
+	return (struct wl_keyboard *)x_wl_proxy_marshal_array_constructor((struct wl_proxy *)seat,
+		1 /*WL_SEAT_GET_KEYBOARD*/, args, x_wl_keyboard_interface);
 }
 
 // ---- libxkbcommon via dlopen (hand-declared API: build hosts need no libxkbcommon-dev) ----------
@@ -453,8 +467,70 @@ static void kvm_xkb_pump(void)
 	}
 }
 
+static void kvm_xkb_on_sync_done(void *data, struct wl_callback *callback, uint32_t serial)
+{
+	(void)callback; (void)serial;
+	*(int *)data = 1;
+}
+static const struct wl_callback_listener g_xkbSyncListener = { kvm_xkb_on_sync_done };
+
+// Deadline-bounded stand-in for wl_display_roundtrip. This runs on the slave's only thread; an
+// unbounded roundtrip against a hung compositor would stop the master2slave drain and re-arm the
+// agent-wide pipe stall that kvm_drm_write_all exists to prevent. Returns 1 when the sync
+// callback fired, 0 on timeout or connection error (caller disconnects; ASCII fallback remains).
+static int kvm_xkb_roundtrip_deadline(uint64_t deadlineMs)
+{
+	union wl_argument args[1];
+	struct wl_callback *cb;
+	int done = 0;
+
+	if (g_xkbDisplay == NULL) { return 0; }
+	args[0].o = NULL;
+	cb = (struct wl_callback *)x_wl_proxy_marshal_array_constructor((struct wl_proxy *)g_xkbDisplay,
+		0 /*WL_DISPLAY_SYNC*/, args, x_wl_callback_interface);
+	if (cb == NULL) { return 0; }
+	x_wl_proxy_add_listener((struct wl_proxy *)cb, (void (**)(void))&g_xkbSyncListener, &done);
+
+	while (!done)
+	{
+		struct pollfd pfd;
+		uint64_t now;
+		int pr;
+
+		if (x_wl_display_dispatch_pending(g_xkbDisplay) < 0) { break; }
+		if (done) { break; }
+		while (x_wl_display_prepare_read(g_xkbDisplay) != 0)
+		{
+			if (x_wl_display_dispatch_pending(g_xkbDisplay) < 0) { goto out; }
+		}
+		x_wl_display_flush(g_xkbDisplay);
+
+		now = kvm_xkb_now_ms();
+		pfd.fd = x_wl_display_get_fd(g_xkbDisplay);
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		pr = (now >= deadlineMs) ? 0 : poll(&pfd, 1, (int)(deadlineMs - now));
+		if (pr <= 0)
+		{
+			int savedErrno = errno;
+			x_wl_display_cancel_read(g_xkbDisplay);
+			if (pr < 0 && savedErrno == EINTR && kvm_xkb_now_ms() < deadlineMs) { continue; }
+			break;
+		}
+		if (x_wl_display_read_events(g_xkbDisplay) < 0) { break; }
+	}
+out:
+	// Destroy before returning: the listener writes into this frame's 'done', so a late-arriving
+	// event dispatched by a future pump must find the proxy already dead.
+	x_wl_proxy_destroy((struct wl_proxy *)cb);
+	return done;
+}
+
+#define KVM_XKB_CONNECT_TIMEOUT_MS 2000
+
 static int kvm_xkb_try_connect(void)
 {
+	uint64_t deadline;
 	if (!kvm_xkb_load_wayland() || !kvm_xkb_load_xkbcommon())
 	{
 		g_xkbLibsUnavailable = 1;
@@ -475,8 +551,14 @@ static int kvm_xkb_try_connect(void)
 		return 0;
 	}
 	x_wl_proxy_add_listener((struct wl_proxy *)g_xkbRegistry, (void (**)(void))&g_xkbRegistryListener, NULL);
-	x_wl_display_roundtrip(g_xkbDisplay);	// globals: binds the seat
-	x_wl_display_roundtrip(g_xkbDisplay);	// seat capabilities
+	deadline = kvm_xkb_now_ms() + KVM_XKB_CONNECT_TIMEOUT_MS;
+	if (!kvm_xkb_roundtrip_deadline(deadline) ||	// globals: binds the seat
+		!kvm_xkb_roundtrip_deadline(deadline))		// seat capabilities
+	{
+		if (kvm_xkb_debug()) { fprintf(stderr, "XKB: Wayland roundtrip timed out/failed during connect\n"); }
+		kvm_xkb_disconnect();
+		return 0;
+	}
 	if (g_xkbSeat == NULL || (g_xkbSeatCaps & WL_SEAT_CAPABILITY_KEYBOARD) == 0)
 	{
 		if (kvm_xkb_debug()) { fprintf(stderr, "XKB: no wl_seat with keyboard capability\n"); }
@@ -490,7 +572,12 @@ static int kvm_xkb_try_connect(void)
 		return 0;
 	}
 	x_wl_proxy_add_listener((struct wl_proxy *)g_xkbKeyboard, (void (**)(void))&g_xkbKeyboardListener, NULL);
-	x_wl_display_roundtrip(g_xkbDisplay);	// keymap event -> tables
+	if (!kvm_xkb_roundtrip_deadline(deadline))	// keymap event -> tables
+	{
+		if (kvm_xkb_debug()) { fprintf(stderr, "XKB: Wayland roundtrip timed out/failed waiting for keymap\n"); }
+		kvm_xkb_disconnect();
+		return 0;
+	}
 	if (!g_xkbTablesReady)
 	{
 		if (kvm_xkb_debug()) { fprintf(stderr, "XKB: no usable keymap received\n"); }

@@ -17,6 +17,7 @@ limitations under the License.
 #include "linux_kvm_drm_egl.h"
 #include "linux_kvm_drm.h"
 #include "meshcore/meshdefines.h"
+#include "microstack/ILibParsers.h"
 
 #include <inttypes.h>
 #include <limits.h>
@@ -522,6 +523,10 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width
 	if (g->surf == EGL_NO_SURFACE)
 	{
 		char err[KVM_DRM_EGL_MAX_ERROR];
+		// Also reset the cached size: a stale surf_w/h would make the next call at the old size
+		// short-circuit "true" with no surface at all.
+		g->surf_w = 0;
+		g->surf_h = 0;
 		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglCreatePbufferSurface(size) failed", eglGetError());
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
 		return false;
@@ -532,6 +537,8 @@ static bool kvm_drm_egl_ensure_gpu_target_size(kvm_drm_egl_context *g, int width
 	if (!eglMakeCurrent(g->dpy, g->surf, g->surf, g->ctx))
 	{
 		char err[KVM_DRM_EGL_MAX_ERROR];
+		g->surf_w = 0;
+		g->surf_h = 0;
 		kvm_drm_egl_format_egl_error(err, sizeof(err), "eglMakeCurrent(size) failed", eglGetError());
 		kvm_drm_egl_copy_error_message(out_error, out_error_size, err);
 		return false;

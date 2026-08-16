@@ -26,6 +26,8 @@ limitations under the License.
 #include <limits.h>
 #include <stdint.h>
 #include <time.h>
+#include <pwd.h>
+#include <grp.h>
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -838,7 +840,7 @@ void CheckDesktopSwitch(int checkres)
 	UNREFERENCED_PARAMETER(checkres);
 	if (g_kvmBackendDRM != 0) { return; }
 
-	if (change_display) 
+	if (change_display)
 	{
 		if (logFile) { fprintf(logFile, "CheckDesktopSwitch: SCREEN_SEL_TARGET=%d CURRENT_DISPLAY_ID=%d\n", SCREEN_SEL_TARGET, CURRENT_DISPLAY_ID); fflush(logFile); }
 		int old_height_count = TILE_HEIGHT_COUNT;
@@ -1213,7 +1215,23 @@ void* kvm_server_mainloop_x11(void* parm)
 
 	unsigned short currentDisplayId = 0;
 
-	if (sessionUid != 0) { ignore_result(setuid((uid_t)sessionUid)); }
+	if (sessionUid != 0)
+	{
+		// Full drop, not bare setuid: keeping gid 0 / root's supplementary groups would leave the
+		// X11 slave more privileged than the session user, and continuing as root after a failed
+		// setuid (EAGAIN under RLIMIT_NPROC) must not happen. The DRM path does the same in
+		// kvm_drm_drop_to_session_uid_with_caps().
+		struct passwd *pw = getpwuid((uid_t)sessionUid);
+		if (pw == NULL ||
+			initgroups(pw->pw_name, pw->pw_gid) != 0 ||
+			setgid(pw->pw_gid) != 0 ||
+			setuid((uid_t)sessionUid) != 0)
+		{
+			fprintf(stderr, "KVM: privilege drop to uid %d failed (errno=%d); aborting capture child\n", sessionUid, errno);
+			kvm_send_error("KVM privilege drop failed");
+			return (void *)-1;
+		}
+	}
 
 	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)
@@ -1739,12 +1757,8 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	int r;
 	int count = 0;
 	ILibProcessPipe_Pipe slave_out;
-	//printf("KVM: Restarting the KVM session for uid %d...\n", uid);
-	//if (authToken != NULL) { printf("KVM: Using XAuthToken: %s\n", authToken); }
-	//if (dispid != NULL) { printf("KVM: Using DisplayId: %s\n", dispid); }
-	//fflush(stdout);
 
-	if (g_slavekvm != 0) 
+	if (g_slavekvm != 0)
 	{
 		kill(g_slavekvm, SIGKILL);
 		waitpid(g_slavekvm, &r, 0);

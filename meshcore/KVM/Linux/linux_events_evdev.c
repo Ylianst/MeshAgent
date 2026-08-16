@@ -63,6 +63,7 @@ typedef struct kvm_evdev_state
 {
 	struct libevdev *dev;
 	struct libevdev_uinput *uinput;
+	int uinputFd;	// only >= 0 on the explicit-open fallback; libevdev closes managed fds itself
 	int active;
 } kvm_evdev_state;
 
@@ -72,8 +73,6 @@ static int g_kvm_evdev_capslock = 0;
 
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
-extern int CAPTURE_X;
-extern int CAPTURE_Y;
 extern int VSCREEN_WIDTH;
 extern int VSCREEN_HEIGHT;
 extern int g_kvmBackendDRM;
@@ -217,7 +216,14 @@ static unsigned int kvm_events_evdev_vk_to_keycode(unsigned char vk)
 	}
 	if (vk >= VK_F1 && vk <= VK_F24)
 	{
-		return KEY_F1 + (vk - VK_F1);
+		// Not KEY_F1 + n: Linux F-key codes are non-contiguous (F1-F10=59..68, then NUMLOCK/SCROLLLOCK,
+		// F11/F12=87/88, F13-F24=183..194), so the arithmetic form sent F11 as NumLock.
+		static const unsigned int fkeys[24] = {
+			KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10,
+			KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20,
+			KEY_F21, KEY_F22, KEY_F23, KEY_F24
+		};
+		return fkeys[vk - VK_F1];
 	}
 
 	switch (vk)
@@ -633,6 +639,7 @@ int kvm_events_evdev_init()
 		kvm_events_evdev_shutdown();
 	}
 	memset(&g_kvm_evdev_state, 0, sizeof(g_kvm_evdev_state));
+	g_kvm_evdev_state.uinputFd = -1;
 
 	g_kvm_evdev_state.dev = g_kvm_evdev_exports.libevdev_new();
 	if (g_kvm_evdev_state.dev == NULL)
@@ -645,19 +652,19 @@ int kvm_events_evdev_init()
 	r = g_kvm_evdev_exports.libevdev_enable_event_type(g_kvm_evdev_state.dev, EV_KEY);
 	if (r != 0)
 	{
-		printf("MeshAgent: libevdev_enable_event_type(EV_KEY) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
+		fprintf(stderr, "MeshAgent: libevdev_enable_event_type(EV_KEY) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
 		goto error;
 	}
 	r = g_kvm_evdev_exports.libevdev_enable_event_type(g_kvm_evdev_state.dev, EV_REL);
 	if (r != 0)
 	{
-		printf("MeshAgent: libevdev_enable_event_type(EV_REL) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
+		fprintf(stderr, "MeshAgent: libevdev_enable_event_type(EV_REL) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
 		goto error;
 	}
 	r = g_kvm_evdev_exports.libevdev_enable_event_type(g_kvm_evdev_state.dev, EV_ABS);
 	if (r != 0)
 	{
-		printf("MeshAgent: libevdev_enable_event_type(EV_ABS) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
+		fprintf(stderr, "MeshAgent: libevdev_enable_event_type(EV_ABS) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
 		goto error;
 	}
 
@@ -667,20 +674,20 @@ int kvm_events_evdev_init()
 	r = g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_ABS, ABS_X, &absInfo);
 	if (r != 0)
 	{
-		printf("MeshAgent: libevdev_enable_event_code(EV_ABS, ABS_X) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
+		fprintf(stderr, "MeshAgent: libevdev_enable_event_code(EV_ABS, ABS_X) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
 		goto error;
 	}
 	r = g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_ABS, ABS_Y, &absInfo);
 	if (r != 0)
 	{
-		printf("MeshAgent: libevdev_enable_event_code(EV_ABS, ABS_Y) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
+		fprintf(stderr, "MeshAgent: libevdev_enable_event_code(EV_ABS, ABS_Y) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
 		goto error;
 	}
 
 	r = g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_REL, REL_WHEEL, NULL);
 	if (r != 0)
 	{
-		printf("MeshAgent: libevdev_enable_event_code(EV_REL, REL_WHEEL) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
+		fprintf(stderr, "MeshAgent: libevdev_enable_event_code(EV_REL, REL_WHEEL) failed: %d (%s)\n", r, kvm_events_evdev_error_string(r));
 		goto error;
 	}
 	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_REL, REL_HWHEEL, NULL));
@@ -738,6 +745,10 @@ int kvm_events_evdev_init()
 				close(uinputFd);
 				uinputFd = -1;
 			}
+			else
+			{
+				g_kvm_evdev_state.uinputFd = uinputFd;
+			}
 		}
 		if (createRc != 0)
 		{
@@ -771,6 +782,11 @@ void kvm_events_evdev_shutdown()
 	{
 		g_kvm_evdev_exports.libevdev_uinput_destroy(g_kvm_evdev_state.uinput);
 		g_kvm_evdev_state.uinput = NULL;
+	}
+	if (g_kvm_evdev_state.uinputFd > 0)
+	{
+		close(g_kvm_evdev_state.uinputFd);
+		g_kvm_evdev_state.uinputFd = -1;
 	}
 	if (g_kvm_evdev_state.dev != NULL)
 	{

@@ -550,18 +550,23 @@ ifeq ($(KVM),1)
 LINUXKVMSOURCES = meshcore/KVM/Linux/linux_kvm.c meshcore/KVM/Linux/linux_kvm_wayland.c meshcore/KVM/Linux/linux_kvm_drm.c meshcore/KVM/Linux/linux_kvm_drm_egl.c meshcore/KVM/Linux/linux_kvm_rotated.c meshcore/KVM/Linux/linux_kvm_xkb.c meshcore/KVM/Linux/linux_events.c meshcore/KVM/Linux/linux_events_evdev.c meshcore/KVM/Linux/linux_tile.c meshcore/KVM/Linux/linux_compression.c
 MACOSKVMSOURCES = meshcore/KVM/MacOS/mac_kvm.c meshcore/KVM/MacOS/mac_events.c meshcore/KVM/MacOS/mac_tile.c meshcore/KVM/Linux/linux_compression.c
 CFLAGS += -D_LINKVM
+DRMLIBS =
+# The DRM/Wayland header probes only make sense on Linux goals; macOS/BSD also set KVM=1 but a
+# parse-time $(error) here would kill e.g. 'make macos' on hosts without wayland-client.
+ifneq (,$(filter linux pi,$(MAKECMDGOALS)))
     DRMCFLAGS = $(shell pkg-config --cflags libdrm egl glesv2 2>/dev/null)
     # libdrm/libEGL/libGLESv2 are dlopen'd at runtime (linux_kvm_drm*.c), not linked, so they stay
     # out of NEEDED and the agent runs without a DRM/GL stack. Headers still needed (DRMCFLAGS).
-    DRMLIBS =
     WAYLANDCLIENT = $(shell pkg-config --exists wayland-client 2>/dev/null && echo 1)
     ifneq ($(strip $(DRMCFLAGS)),)
         CFLAGS += $(DRMCFLAGS)
+    else
+        $(error Linux KVM builds require the libdrm, EGL and GLES development packages (pkg-config libdrm egl glesv2))
     endif
     ifneq ($(WAYLANDCLIENT),1)
         $(error Linux KVM builds require the wayland-client development package)
     endif
-    CFLAGS += -DHAVE_WAYLAND_CLIENT $(shell pkg-config --cflags wayland-client)
+    CFLAGS += $(shell pkg-config --cflags wayland-client)
     # libwayland-client is dlopen'd at runtime (linux_kvm_drm.c), not linked — headers only.
     # If the system headers are jpeg8 (JPEG_LIB_VERSION >= 80) and a v80 lib exists, default to it
     # so the linked lib matches the headers, else libjpeg aborts at runtime ("Wrong JPEG library
@@ -575,6 +580,7 @@ $(info MeshAgent: system libjpeg is v$(JPEG_HDR_VERSION) (jpeg8); auto-selecting
             endif
         endif
     endif
+endif
     ifneq ($(JPEGVER),)
         ifeq ($(LEGACY_LD),1)
             LINUXFLAGS = lib-jpeg-turbo/linux/$(ARCHNAME)/$(JPEGVER)/libturbojpeg.a
