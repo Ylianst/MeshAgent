@@ -314,10 +314,41 @@ static void mic_send_frame(const unsigned char *opus, int opusLen)
 	free(buf);
 }
 
+/* Report whether a capture endpoint actually exists, rather than assuming one
+ * does: a desktop with no microphone should hide the control instead of
+ * offering a button that can never work. */
+static int microphone_available(void)
+{
+	IMMDeviceEnumerator *en = NULL;
+	IMMDevice *dev = NULL;
+	HRESULT hr, co;
+	int ok = 0;
+
+	co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	hr = CoCreateInstance(&MESHMIC_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+	                      &MESHMIC_IID_IMMDeviceEnumerator, (void**)&en);
+	if (SUCCEEDED(hr) && en != NULL)
+	{
+		hr = en->lpVtbl->GetDefaultAudioEndpoint(en, eCapture, eConsole, &dev);
+		if (SUCCEEDED(hr) && dev != NULL) { ok = 1; dev->lpVtbl->Release(dev); }
+		en->lpVtbl->Release(en);
+	}
+	if (SUCCEEDED(co)) { CoUninitialize(); }
+	return ok;
+}
+
 static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
 {
 	unsigned char caps[MIC_CAPS_LEN];
+	int available, granted;
+
 	if (writeHandler == NULL) { return; }
+
+	mic_lock();
+	granted = g_consent;
+	available = (g_enc != NULL);
+	mic_unlock();
+	if (available) { available = microphone_available(); }
 
 	caps[0] = (unsigned char)((MNG_MIC_CAPS >> 8) & 0xFF);
 	caps[1] = (unsigned char)(MNG_MIC_CAPS & 0xFF);
@@ -326,7 +357,10 @@ static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, voi
 	caps[4] = 0;                              /* sample_rate: 0 = 48 kHz */
 	caps[5] = (unsigned char)MIC_CHANNELS;
 	caps[6] = (unsigned char)MIC_BITRATE_KBPS;
-	caps[7] = 0x07;                           /* DTX | FEC | capture_available */
+	/* bit0 microphone available, bit1 local user has granted consent.
+	 * The browser reads exactly these two bits to decide whether to show the
+	 * button and whether audio is expected. */
+	caps[7] = (unsigned char)((available ? 0x01 : 0x00) | (granted ? 0x02 : 0x00));
 	caps[8] = 2;                              /* platform: Windows */
 
 	writeHandler((char*)caps, MIC_CAPS_LEN, reserved);
