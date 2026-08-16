@@ -27,7 +27,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: lib-opus/windows/${{ matrix.platform == 'x86' && 'x86' || matrix.platform == 'x64' && 'x64' || 'arm64' }}/libopus.lib
-        key: opus-1.5.2-${{ matrix.platform }}-msvc-v1
+        key: opus-1.5.2-${{ matrix.platform }}-msvc-static-v2
 
     - name: Build Opus with MSVC
       if: steps.cache-opus.outputs.cache-hit != 'true'
@@ -57,18 +57,24 @@ jobs:
         # __except_handler4_common (x86-only SEH; x64/ARM64 silently tolerate
         # the mismatch, so this must be verified rather than assumed).
         #
-        # CMAKE_MSVC_RUNTIME_LIBRARY is only honoured when policy CMP0091 is
-        # NEW, so set that explicitly and also pass the /MT flags directly as a
-        # belt-and-braces fallback for older CMake.
+        # Opus exposes OPUS_STATIC_RUNTIME for exactly this. Prefer it over
+        # CMAKE_MSVC_RUNTIME_LIBRARY, which Opus does not opt into (it needs
+        # policy CMP0091 NEW) and which CMake therefore ignores with only a
+        # "Manually-specified variables were not used" warning.
         Write-Host "Configuring Opus for $arch (static CRT)"
         cmake -S "opus-$opusVersion" -B opus-build -A $arch `
-          -DCMAKE_POLICY_DEFAULT_CMP0091=NEW `
-          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
-          -DCMAKE_C_FLAGS_RELEASE="/MT /O2 /Ob2 /DNDEBUG" `
+          -DOPUS_STATIC_RUNTIME=ON `
           -DOPUS_BUILD_SHARED_LIBRARY=OFF `
           -DOPUS_BUILD_TESTING=OFF `
           -DOPUS_BUILD_PROGRAMS=OFF
         if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
+
+        # CMake only warns when an option is unknown, so confirm it was applied
+        # rather than trusting the command line.
+        $cached = & cmake -L opus-build 2>$null | Select-String 'OPUS_STATIC_RUNTIME'
+        Write-Host "cache: $cached"
+        if ($cached -notmatch '=ON') { throw "OPUS_STATIC_RUNTIME was not applied" }
+
         cmake --build opus-build --config Release --parallel
         if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
 
@@ -79,18 +85,23 @@ jobs:
 
         # Fail loudly here rather than at link time: if Opus ended up on the
         # dynamic CRT it will carry a DEFAULTLIB directive naming MSVCRT.
-        $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\2022" `
-                     -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+        $dumpbin = @("${env:ProgramFiles}\Microsoft Visual Studio\2022",
+                     "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022") |
+                   Where-Object { Test-Path $_ } |
+                   ForEach-Object { Get-ChildItem $_ -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue } |
                    Select-Object -First 1
-        if ($dumpbin) {
-          $directives = & $dumpbin.FullName /directives $built.FullName 2>$null
-          if ($directives -match '/DEFAULTLIB:"?MSVCRT') {
-            throw "Opus was built against the dynamic CRT (/MD); the agent needs /MT"
-          }
-          Write-Host "Verified: Opus uses the static CRT"
-        } else {
-          Write-Host "dumpbin not found; skipping CRT verification"
+        if (-not $dumpbin) { throw "dumpbin.exe not found; cannot verify the CRT" }
+
+        $directives = & $dumpbin.FullName /directives $built.FullName 2>$null
+        # LIBCMT = static CRT (what we want); MSVCRT = dynamic CRT (what breaks
+        # the x86 link with an unresolved __except_handler4_common).
+        if ($directives -match '/DEFAULTLIB:"?MSVCRT') {
+          throw "Opus was built against the dynamic CRT (/MD); the agent needs /MT"
         }
+        if ($directives -notmatch '/DEFAULTLIB:"?LIBCMT') {
+          throw "Opus does not reference the static CRT (LIBCMT); refusing to ship it"
+        }
+        Write-Host "Verified: Opus uses the static CRT (LIBCMT)"
 
         New-Item -ItemType Directory -Force -Path "lib-opus/windows/$outDir" | Out-Null
         Copy-Item $built.FullName "lib-opus/windows/$outDir/libopus.lib" -Force
