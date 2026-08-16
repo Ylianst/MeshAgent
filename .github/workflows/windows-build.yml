@@ -27,15 +27,17 @@ jobs:
       uses: actions/cache@v4
       with:
         path: lib-opus/windows/${{ matrix.platform == 'x86' && 'x86' || matrix.platform == 'x64' && 'x64' || 'arm64' }}/libopus.lib
-        key: opus-1.5.2-${{ matrix.platform }}-msvc-static-v2
+        key: opus-1.6.1-${{ matrix.platform }}-msvc-static-v3
 
     - name: Build Opus with MSVC
       if: steps.cache-opus.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
         $ErrorActionPreference = 'Stop'
-        # Keep this in step with the headers vendored in lib-opus/includes.
-        $opusVersion = '1.5.2'
+        # Must match the headers vendored in lib-opus/includes, which are
+        # Opus 1.6.1 verbatim. Building a different version here would compile
+        # the agent against one API and link another.
+        $opusVersion = '1.6.1'
         $arch = switch ('${{ matrix.platform }}') {
           'x86'   { 'Win32' }
           'x64'   { 'x64'   }
@@ -70,10 +72,15 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "cmake configure failed" }
 
         # CMake only warns when an option is unknown, so confirm it was applied
-        # rather than trusting the command line.
-        $cached = & cmake -L opus-build 2>$null | Select-String 'OPUS_STATIC_RUNTIME'
-        Write-Host "cache: $cached"
-        if ($cached -notmatch '=ON') { throw "OPUS_STATIC_RUNTIME was not applied" }
+        # rather than trusting the command line. Match the cache entry exactly:
+        # `cmake -L` also prints Opus's feature summary, which mentions the
+        # option without a value. (Note: -match/-notmatch FILTER when the left
+        # operand is an array, so compare against a single joined string.)
+        $cacheText = (& cmake -L opus-build 2>$null) -join "`n"
+        if ($cacheText -notmatch 'OPUS_STATIC_RUNTIME:BOOL=ON') {
+          throw "OPUS_STATIC_RUNTIME was not applied"
+        }
+        Write-Host "Verified: OPUS_STATIC_RUNTIME:BOOL=ON"
 
         cmake --build opus-build --config Release --parallel
         if ($LASTEXITCODE -ne 0) { throw "cmake build failed" }
@@ -92,7 +99,9 @@ jobs:
                    Select-Object -First 1
         if (-not $dumpbin) { throw "dumpbin.exe not found; cannot verify the CRT" }
 
-        $directives = & $dumpbin.FullName /directives $built.FullName 2>$null
+        # Join to a single string: -match/-notmatch filter arrays instead of
+        # returning a boolean, which silently inverts the intended test.
+        $directives = (& $dumpbin.FullName /directives $built.FullName 2>$null) -join "`n"
         # LIBCMT = static CRT (what we want); MSVCRT = dynamic CRT (what breaks
         # the x86 link with an unresolved __except_handler4_common).
         if ($directives -match '/DEFAULTLIB:"?MSVCRT') {
