@@ -165,6 +165,7 @@ typedef struct kvm_xkb_entry
 	uint16_t keycode;	// evdev
 	uint8_t shift;
 	uint8_t altgr;
+	uint8_t group;		// layout index the mapping belongs to
 } kvm_xkb_entry;
 
 typedef struct kvm_xkb_table
@@ -220,18 +221,19 @@ static int kvm_xkb_table_find(const kvm_xkb_table *table, uint32_t codepoint)
 	return -1;
 }
 
-// Unsorted linear check during build; tables are sorted once at the end.
-static int kvm_xkb_table_contains(const kvm_xkb_table *table, uint32_t codepoint)
+// Unsorted linear check during build; tables are sorted once at the end. One entry per
+// (codepoint, group) so lookup can prefer the group the user actually has active.
+static int kvm_xkb_table_contains(const kvm_xkb_table *table, uint32_t codepoint, uint8_t group)
 {
 	int i;
 	for (i = 0; i < table->count; ++i)
 	{
-		if (table->entries[i].codepoint == codepoint) { return 1; }
+		if (table->entries[i].codepoint == codepoint && table->entries[i].group == group) { return 1; }
 	}
 	return 0;
 }
 
-static int kvm_xkb_table_add(kvm_xkb_table *table, uint32_t codepoint, uint16_t keycode, uint8_t shift, uint8_t altgr)
+static int kvm_xkb_table_add(kvm_xkb_table *table, uint32_t codepoint, uint16_t keycode, uint8_t shift, uint8_t altgr, uint8_t group)
 {
 	if (table->count == table->capacity)
 	{
@@ -245,6 +247,7 @@ static int kvm_xkb_table_add(kvm_xkb_table *table, uint32_t codepoint, uint16_t 
 	table->entries[table->count].keycode = keycode;
 	table->entries[table->count].shift = shift;
 	table->entries[table->count].altgr = altgr;
+	table->entries[table->count].group = group;
 	table->count++;
 	return 1;
 }
@@ -257,12 +260,20 @@ static void kvm_xkb_table_reset(kvm_xkb_table *table)
 	table->capacity = 0;
 }
 
+// Order: codepoint, then modifier cost (plain before Shift before AltGr), then group — so within a
+// codepoint's run, the first entry is the overall cheapest and the first entry of any group is that
+// group's cheapest.
 static int kvm_xkb_entry_compare(const void *a, const void *b)
 {
-	uint32_t ca = ((const kvm_xkb_entry *)a)->codepoint;
-	uint32_t cb = ((const kvm_xkb_entry *)b)->codepoint;
-	if (ca < cb) { return -1; }
-	if (ca > cb) { return 1; }
+	const kvm_xkb_entry *ea = (const kvm_xkb_entry *)a;
+	const kvm_xkb_entry *eb = (const kvm_xkb_entry *)b;
+	int costa, costb;
+	if (ea->codepoint < eb->codepoint) { return -1; }
+	if (ea->codepoint > eb->codepoint) { return 1; }
+	costa = (int)ea->shift + 2 * (int)ea->altgr;
+	costb = (int)eb->shift + 2 * (int)eb->altgr;
+	if (costa != costb) { return costa < costb ? -1 : 1; }
+	if (ea->group != eb->group) { return ea->group < eb->group ? -1 : 1; }
 	return 0;
 }
 
@@ -316,7 +327,7 @@ int kvm_xkb_build_from_keymap_string(const char *keymapText)
 
 	for (scenario = 0; scenario < 4; ++scenario)
 	{
-		if (scenario > 0 && scenarioMasks[scenario] == scenarioMasks[scenario - 1]) { continue; }	// no AltGr modifier: skip duplicate passes
+		if (scenario >= 2 && altgrMask == 0) { break; }	// keymap has no AltGr modifier: scenarios 2/3 duplicate 0/1
 		for (group = 0; group < numLayouts; ++group)
 		{
 			for (caps = 0; caps < 2; ++caps)
@@ -327,8 +338,8 @@ int kvm_xkb_build_from_keymap_string(const char *keymapText)
 				{
 					uint32_t cp = g_xkbFn.state_key_get_utf32(state, kc);
 					if (cp < 0x20 || cp == 0x7F || kc < 8) { continue; }
-					if (kvm_xkb_table_contains(table, cp)) { continue; }
-					if (!kvm_xkb_table_add(table, cp, (uint16_t)(kc - 8), (uint8_t)(scenario & 1), (uint8_t)((scenario >> 1) & 1)))
+					if (kvm_xkb_table_contains(table, cp, (uint8_t)group)) { continue; }
+					if (!kvm_xkb_table_add(table, cp, (uint16_t)(kc - 8), (uint8_t)(scenario & 1), (uint8_t)((scenario >> 1) & 1), (uint8_t)group))
 					{
 						kvm_xkb_table_reset(&g_xkbCapsOff);
 						kvm_xkb_table_reset(&g_xkbCapsOn);
@@ -382,7 +393,15 @@ static void kvm_xkb_on_keymap(void *data, struct wl_keyboard *keyboard, uint32_t
 static void kvm_xkb_on_kb_enter(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys) { }
 static void kvm_xkb_on_kb_leave(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface) { }
 static void kvm_xkb_on_kb_key(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state) { }
-static void kvm_xkb_on_kb_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group) { }
+// Compositors that broadcast modifier state to unfocused keyboards keep us informed of the active
+// layout group (Alt+Shift switches land here); ones that don't leave the group at 0 and lookup
+// falls back to its cheapest-entry order, which is the pre-group-tracking behavior.
+static uint32_t g_xkbActiveGroup = 0;
+static void kvm_xkb_on_kb_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t depressed, uint32_t latched, uint32_t locked, uint32_t group)
+{
+	(void)data; (void)keyboard; (void)serial; (void)depressed; (void)latched; (void)locked;
+	g_xkbActiveGroup = group;
+}
 static void kvm_xkb_on_kb_repeat_info(void *data, struct wl_keyboard *keyboard, int32_t rate, int32_t delay) { }
 
 static const struct wl_keyboard_listener g_xkbKeyboardListener =
@@ -615,13 +634,27 @@ int kvm_xkb_lookup_unicode(uint32_t codepoint, int capslockOn, kvm_xkb_match *ma
 		if (kvm_xkb_debug() >= 2) { fprintf(stderr, "XKB: U+%04X not reachable on the session keymap\n", codepoint); }
 		return 0;
 	}
+	// The search landed somewhere in the codepoint's run; walk to its start (overall cheapest
+	// entry), then prefer the active group's cheapest so shared characters (digits, punctuation)
+	// inject on the layout the compositor will actually interpret them under.
+	while (i > 0 && table->entries[i - 1].codepoint == codepoint) { i--; }
+	{
+		int best = i;
+		int scan;
+		for (scan = i; scan < table->count && table->entries[scan].codepoint == codepoint; ++scan)
+		{
+			if ((uint32_t)table->entries[scan].group == g_xkbActiveGroup) { best = scan; break; }
+		}
+		i = best;
+	}
 	match->keycode = table->entries[i].keycode;
 	match->shift = table->entries[i].shift;
 	match->altgr = table->entries[i].altgr;
 	if (kvm_xkb_debug() >= 2)
 	{
-		fprintf(stderr, "XKB: U+%04X -> keycode %u shift=%d altgr=%d caps=%d\n",
-			codepoint, match->keycode, match->shift, match->altgr, capslockOn ? 1 : 0);
+		fprintf(stderr, "XKB: U+%04X -> keycode %u shift=%d altgr=%d caps=%d group=%u(active=%u)\n",
+			codepoint, match->keycode, match->shift, match->altgr, capslockOn ? 1 : 0,
+			(unsigned)table->entries[i].group, (unsigned)g_xkbActiveGroup);
 	}
 	return 1;
 }

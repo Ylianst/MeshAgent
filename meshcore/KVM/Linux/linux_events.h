@@ -438,6 +438,8 @@ struct keymap_t {
 
 extern int kvm_events_evdev_init();
 extern void kvm_events_evdev_shutdown();
+extern int kvm_events_evdev_lock_state();
+extern int kvm_events_evdev_wait_lock_state(int maxWaitMs);
 extern int kvm_events_evdev_is_active();
 extern void kvm_events_evdev_mouse_action(double absX, double absY, int button, short wheel);
 extern void kvm_events_evdev_key_action(unsigned char vk, int up);

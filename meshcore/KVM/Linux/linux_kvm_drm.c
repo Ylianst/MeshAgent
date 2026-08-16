@@ -18,6 +18,7 @@ limitations under the License.
 #include "linux_kvm_drm_egl.h"
 #include "linux_kvm.h"
 #include "linux_kvm_rotated.h"
+#include "linux_kvm_wayland.h"
 #include "linux_compression.h"
 #include "linux_tile.h"
 #include "meshcore/meshdefines.h"
@@ -2132,6 +2133,14 @@ typedef struct kvm_drm_wayland_output
 	uint32_t width;
 	uint32_t height;
 	int32_t transform; // WL_OUTPUT_TRANSFORM_* from wl_output.geometry
+	// Core-protocol fallback data for compositors without zxdg_output_manager_v1 (minimal greeter
+	// compositors): geometry position + current mode size describe the compositor space at scale 1.
+	int geom_x;
+	int geom_y;
+	int have_geometry;
+	uint32_t mode_width;
+	uint32_t mode_height;
+	int have_mode;
 } kvm_drm_wayland_output;
 
 typedef struct kvm_drm_wayland_layout_context
@@ -2146,16 +2155,26 @@ typedef struct kvm_drm_wayland_layout_context
 static void kvm_drm_wl_output_geometry(void *data, struct wl_output *wl_output, int32_t x, int32_t y, int32_t physical_width, int32_t physical_height, int32_t subpixel, const char *make, const char *model, int32_t transform)
 {
 	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
-	(void)wl_output; (void)x; (void)y; (void)physical_width; (void)physical_height; (void)subpixel; (void)make; (void)model;
+	(void)wl_output; (void)physical_width; (void)physical_height; (void)subpixel; (void)make; (void)model;
 	if (output != NULL)
 	{
 		output->transform = transform;
+		output->geom_x = x;
+		output->geom_y = y;
+		output->have_geometry = 1;
 	}
 }
 
 static void kvm_drm_wl_output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width, int32_t height, int32_t refresh)
 {
-	(void)data; (void)wl_output; (void)flags; (void)width; (void)height; (void)refresh;
+	kvm_drm_wayland_output *output = (kvm_drm_wayland_output *)data;
+	(void)wl_output; (void)refresh;
+	if (output != NULL && (flags & WL_OUTPUT_MODE_CURRENT) != 0 && width > 0 && height > 0)
+	{
+		output->mode_width = (uint32_t)width;
+		output->mode_height = (uint32_t)height;
+		output->have_mode = 1;
+	}
 }
 
 static void kvm_drm_wl_output_done(void *data, struct wl_output *wl_output)
@@ -2258,8 +2277,8 @@ static void kvm_drm_registry_global(void *data, struct wl_registry *registry, ui
 		memset(output, 0, sizeof(*output));
 		output->global_name = name;
 		output->version = version;
+		// Cap at v4 (name event); never bind above what the compositor advertises.
 		bind_version = version >= 4 ? 4 : version;
-		if (bind_version < 2) { bind_version = 2; }
 		output->wl_output = (struct wl_output *)kvm_wl_registry_bind(registry, name, p_wl_output_interface, bind_version);
 		if (output->wl_output != NULL)
 		{
@@ -2445,24 +2464,33 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	kvm_wl_registry_add_listener(ctx.registry, &kvm_drm_registry_listener, &ctx);
 	deadline = kvm_drm_now_ms() + KVM_DRM_XDG_QUERY_TIMEOUT_MS;
 	rtFailed = !kvm_drm_wl_roundtrip_deadline(ctx.display, deadline);
-	if (rtFailed || ctx.xdg_output_manager == NULL || ctx.output_count <= 0)
+	if (rtFailed || ctx.output_count <= 0)
 	{
-		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: registry roundtrip failed or missing globals (xdg_manager=%p wl_outputs=%d)\n", (void *)ctx.xdg_output_manager, ctx.output_count); }
+		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: registry roundtrip failed or no wl_outputs (rtFailed=%d wl_outputs=%d)\n", rtFailed, ctx.output_count); }
 		if (rtFailed) { backoffUntilMs = kvm_drm_now_ms() + KVM_DRM_XDG_BACKOFF_MS; }
 		kvm_drm_wayland_layout_context_cleanup(&ctx);
 		return false;
 	}
-
-	for (i = 0; i < ctx.output_count; ++i)
+	if (ctx.xdg_output_manager == NULL && drm_debug)
 	{
-		if (ctx.outputs[i].wl_output == NULL) { continue; }
-		ctx.outputs[i].xdg_output = zxdg_output_manager_v1_get_xdg_output(ctx.xdg_output_manager, ctx.outputs[i].wl_output);
-		if (ctx.outputs[i].xdg_output != NULL)
+		fprintf(stderr, "DRM: compositor has no zxdg_output_manager_v1; using wl_output geometry fallback\n");
+	}
+
+	if (ctx.xdg_output_manager != NULL)
+	{
+		for (i = 0; i < ctx.output_count; ++i)
 		{
-			zxdg_output_v1_add_listener(ctx.outputs[i].xdg_output, &kvm_drm_xdg_output_listener, &ctx.outputs[i]);
+			if (ctx.outputs[i].wl_output == NULL) { continue; }
+			ctx.outputs[i].xdg_output = zxdg_output_manager_v1_get_xdg_output(ctx.xdg_output_manager, ctx.outputs[i].wl_output);
+			if (ctx.outputs[i].xdg_output != NULL)
+			{
+				zxdg_output_v1_add_listener(ctx.outputs[i].xdg_output, &kvm_drm_xdg_output_listener, &ctx.outputs[i]);
+			}
 		}
 	}
 
+	// Also needed without the xdg manager: the wl_output geometry/mode/name events for outputs
+	// bound during the registry dispatch only arrive on a further roundtrip.
 	for (i = 0; i < 3; ++i)
 	{
 		if (!kvm_drm_wl_roundtrip_deadline(ctx.display, deadline))
@@ -2478,17 +2506,49 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	{
 		if (drm_debug)
 		{
-			fprintf(stderr, "DRM: xdg-output query: wl-output[%d] name='%s' have_name=%d have_pos=%d(%d,%d) have_size=%d(%ux%u) transform=%d\n",
+			fprintf(stderr, "DRM: xdg-output query: wl-output[%d] name='%s' have_name=%d have_pos=%d(%d,%d) have_size=%d(%ux%u) geom=%d(%d,%d) mode=%d(%ux%u) transform=%d\n",
 				i, ctx.outputs[i].name, ctx.outputs[i].have_name, ctx.outputs[i].have_position,
 				ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].have_size, ctx.outputs[i].width, ctx.outputs[i].height,
+				ctx.outputs[i].have_geometry, ctx.outputs[i].geom_x, ctx.outputs[i].geom_y,
+				ctx.outputs[i].have_mode, ctx.outputs[i].mode_width, ctx.outputs[i].mode_height,
 				ctx.outputs[i].transform);
 		}
-		if (ctx.outputs[i].have_name == 0 || ctx.outputs[i].have_position == 0 || ctx.outputs[i].have_size == 0)
+		if (ctx.xdg_output_manager != NULL)
 		{
-			continue;
+			if (ctx.outputs[i].have_name == 0 || ctx.outputs[i].have_position == 0 || ctx.outputs[i].have_size == 0)
+			{
+				continue;
+			}
+			kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height,
+				kvm_drm_rotation_from_wl_transform(ctx.outputs[i].transform), &matched, claimed);
 		}
-		kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1, ctx.outputs[i].x, ctx.outputs[i].y, ctx.outputs[i].width, ctx.outputs[i].height,
-			kvm_drm_rotation_from_wl_transform(ctx.outputs[i].transform), &matched, claimed);
+		else if (ctx.outputs[i].have_geometry && ctx.outputs[i].have_mode)
+		{
+			// No xdg-output: geometry position + current-mode size describe the compositor space at
+			// scale 1 (greeters). A 90/270 transform swaps the output's extent in compositor space,
+			// which the panel-native mode size does not reflect.
+			uint32_t fw = ctx.outputs[i].mode_width;
+			uint32_t fh = ctx.outputs[i].mode_height;
+			if ((ctx.outputs[i].transform & 1) != 0) { uint32_t t = fw; fw = fh; fh = t; }
+			if (ctx.outputs[i].have_name)
+			{
+				kvm_drm_apply_kwin_screen(tmp, output_count, ctx.outputs[i].name, 1,
+					ctx.outputs[i].geom_x, ctx.outputs[i].geom_y, fw, fh,
+					kvm_drm_rotation_from_wl_transform(ctx.outputs[i].transform), &matched, claimed);
+			}
+			else if (ctx.output_count == 1 && output_count == 1 && !claimed[0])
+			{
+				// wl_output v3 and older has no name event; with one output on both sides the
+				// pairing is unambiguous anyway.
+				tmp[0].x = ctx.outputs[i].geom_x;
+				tmp[0].y = ctx.outputs[i].geom_y;
+				tmp[0].width = fw;
+				tmp[0].height = fh;
+				tmp[0].rotation = kvm_drm_rotation_from_wl_transform(ctx.outputs[i].transform);
+				claimed[0] = true;
+				matched++;
+			}
+		}
 	}
 
 	if (matched != output_count)
@@ -2939,6 +2999,19 @@ void *kvm_server_mainloop_drm(void *parm)
 
 	kvm_drm_init_debug();
 	g_kvmBackendDRM = 1;
+	if (sessionUid <= 0)
+	{
+		// The master passes uid 0 at a display-manager greeter (consoleUid() only reports sessions
+		// at or above the login uid floor). Without the real session uid this child stays root with
+		// no XDG_RUNTIME_DIR/WAYLAND_DISPLAY, so the logical-layout and keymap queries can never
+		// reach the greeter's compositor: monitors pile up at 0,0 and unicode input turns ASCII-only.
+		int derivedUid = kvm_wayland_active_console_uid();
+		if (derivedUid > 0)
+		{
+			sessionUid = derivedUid;
+			if (drm_debug) { fprintf(stderr, "DRM: derived session uid %d from logind seat0\n", sessionUid); }
+		}
+	}
 	// Non-blocking for the slave's lifetime: kvm_drm_write_all() relies on it to multiplex tile
 	// writes against master2slave input drains, and every sender routes through there in DRM mode.
 	fcntl(slave2master[1], F_SETFL, fcntl(slave2master[1], F_GETFL, 0) | O_NONBLOCK);
@@ -2946,6 +3019,16 @@ void *kvm_server_mainloop_drm(void *parm)
 	if (!g_enableEvents)
 	{
 		kvm_send_error("evdev input injection unavailable");
+	}
+	else
+	{
+		// Initial lock state for the viewer indicator (the X11 path does this in kvm_init). The
+		// compositor pushed the current LED state while evdev init's post-create settle ran.
+		char ksbuf[5];
+		((unsigned short*)ksbuf)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);
+		((unsigned short*)ksbuf)[1] = (unsigned short)htons((unsigned short)5);
+		ksbuf[4] = (char)kvm_events_evdev_lock_state();
+		ignore_result(kvm_drm_slave_write(ksbuf, sizeof(ksbuf)));
 	}
 	CURRENT_DISPLAY_ID = 0;
 	SCREEN_NUM = 0;

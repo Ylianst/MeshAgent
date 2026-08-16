@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "linux_events.h"
+#include "linux_kvm_drm.h"
 #include "microstack/ILibParsers.h"
 #include "meshcore/meshdefines.h"
 
@@ -213,6 +214,17 @@ void KeyAction(unsigned char vk, int up, Display *display)
 	if (kvm_events_evdev_is_active())
 	{
 		kvm_events_evdev_key_action(vk, up);
+		if (up && (vk == 0x14 || vk == 0x90 || vk == 0x91))
+		{
+			// Mirror of the X11 block below: report the post-toggle lock state so the viewer's
+			// indicator follows. The compositor echoes the new state as EV_LED on our virtual
+			// keyboard; the bounded wait stands in for the X11 XSync round trip.
+			char ksbuf[5];
+			((unsigned short*)ksbuf)[0] = (unsigned short)htons((unsigned short)MNG_KVM_KEYSTATE);
+			((unsigned short*)ksbuf)[1] = (unsigned short)htons((unsigned short)5);
+			ksbuf[4] = (char)kvm_events_evdev_wait_lock_state(100);
+			ignore_result(kvm_drm_slave_write(ksbuf, sizeof(ksbuf)));
+		}
 		return;
 	}
 

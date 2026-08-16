@@ -242,10 +242,21 @@ function dispatchWrite(data, sid)
     }
 }
 
+var _waylandActive = { sticky: false, value: false, at: 0 };
 function lin_wayland_active()
 {
+    // The probe spawns several shell children (consoleUid + display-manager checks), which is far
+    // too heavy to run on every clipboard dispatch. Positive results stick for the process
+    // lifetime (mirrors the C-side latch in linux_kvm_wayland.c); negatives re-probe on a TTL.
+    if (_waylandActive.sticky) { return (true); }
+    var now = Date.now();
+    if (_waylandActive.at != 0 && (now - _waylandActive.at) < 10000) { return (_waylandActive.value); }
     var mi = require('monitor-info');
-    return (mi._kvmcheck_wayland ? mi._kvmcheck_wayland() : false);
+    var v = (mi._kvmcheck_wayland && mi._kvmcheck_wayland()) ? true : false;
+    _waylandActive.value = v;
+    _waylandActive.at = now;
+    if (v) { _waylandActive.sticky = true; }
+    return (v);
 }
 
 function lin_whereis(name)
@@ -282,8 +293,17 @@ function lin_wl_readtext(ret)
     ret.child.promise = ret;
     ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
     ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    // A dead/hung compositor socket otherwise leaves this child and the promise pending forever.
+    var pasteChild = ret.child;
+    ret.child.timeoutHandle = setTimeout(function () { pasteChild.timedout = true; try { pasteChild.kill(); } catch (e) { } }, 5000);
     ret.child.on('exit', function ()
     {
+        clearTimeout(this.timeoutHandle);
+        if (this.timedout)
+        {
+            this.promise._rej('wl-paste timed out (compositor unreachable?)');
+            return;
+        }
         // wl-paste reports an empty clipboard on stderr with a non-zero exit; surface that as empty, not an error.
         if (this.stdout.str.length == 0 && this.stderr.str.trim() != '' && this.stderr.str.indexOf('Nothing is copied') < 0)
         {
@@ -312,7 +332,14 @@ function lin_wl_copy(txt)
     ret.child = require('child_process').execFile(wl.copy, ['wl-copy'], { uid: id, env: lin_wayland_env(id) });
     ret.child.promise = ret;
     ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
-    ret.child.on('exit', function () { this.promise._res(); });
+    var copyChild = ret.child;
+    ret.child.timeoutHandle = setTimeout(function () { copyChild.timedout = true; try { copyChild.kill(); } catch (e) { } }, 5000);
+    ret.child.on('exit', function ()
+    {
+        clearTimeout(this.timeoutHandle);
+        if (this.timedout) { this.promise._rej('wl-copy timed out (compositor unreachable?)'); return; }
+        this.promise._res();
+    });
     ret.child.stdin.write(txt, function () { this.end(); });
     return (ret);
 }

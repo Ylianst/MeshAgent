@@ -1210,6 +1210,11 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 	{
 		ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ctx)), ptrs->kvmPipe);
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+		// Free the old pipe object like the EndSink teardown does; the restart below allocates a
+		// new one, and auto-recovery made this path fire on every child crash/logout, so the leak
+		// was no longer a rare manual-restart cost.
+		ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		ptrs->kvmPipe = NULL;
 		kvm_cleanup();
 
 		duk_peval_string(ctx, "require('user-sessions').consoleUid()");

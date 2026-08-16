@@ -27,4 +27,8 @@ kvm_screenreader_mode_t kvm_screenreader_mode();
 kvm_screenreader_mode_t kvm_screenreader_mode_for_uid(int uid);
 int kvm_is_wayland_session_for_uid(int uid);
 
+// Uid of seat0's active logind session (greeters included); -1 when unknown. Lets the DRM capture
+// child recover the session owner when the master could only pass uid 0 (display-manager greeter).
+int kvm_wayland_active_console_uid(void);
+
 #endif

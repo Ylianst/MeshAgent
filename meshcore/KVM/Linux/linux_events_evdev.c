@@ -70,6 +70,8 @@ typedef struct kvm_evdev_state
 static kvm_evdev_exports g_kvm_evdev_exports = {0};
 static kvm_evdev_state g_kvm_evdev_state = {0};
 static int g_kvm_evdev_capslock = 0;
+static int g_kvm_evdev_numlock = 0;
+static int g_kvm_evdev_scrolllock = 0;
 
 extern int SCREEN_WIDTH;
 extern int SCREEN_HEIGHT;
@@ -246,6 +248,11 @@ static unsigned int kvm_events_evdev_vk_to_keycode(unsigned char vk)
 		return KEY_PAUSE;
 	case VK_CAPITAL:
 		return KEY_CAPSLOCK;
+	// Same Japanese IME toggles the X11 keymap carries (XK_Kanji/XK_Kana_Shift).
+	case VK_KANA:
+		return KEY_KATAKANAHIRAGANA;
+	case VK_KANJI:
+		return KEY_ZENKAKUHANKAKU;
 	case VK_ESCAPE:
 		return KEY_ESC;
 	case VK_SPACE:
@@ -561,10 +568,11 @@ static int kvm_events_evdev_sync()
 	return kvm_events_evdev_write(EV_SYN, SYN_REPORT, 0);
 }
 
-// The compositor mirrors the keyboard CapsLock lock onto every keyboard device, including ours, as EV_LED.
-// Drain those updates so synthesized letters can honor the requested case instead of inverting under a
-// remote CapsLock. Stays at 0 (no effect) if libevdev_uinput_get_fd is unavailable or no LED is delivered.
-static void kvm_events_evdev_poll_capslock()
+// The compositor mirrors the keyboard lock state onto every keyboard device, including ours, as
+// EV_LED. Drain those updates so synthesized letters can honor the requested case instead of
+// inverting under a remote CapsLock, and so the viewer's lock indicator can be kept current.
+// State stays at 0 (no effect) if libevdev_uinput_get_fd is unavailable or no LED is delivered.
+static void kvm_events_evdev_poll_leds()
 {
 	struct input_event ev;
 	struct pollfd pfd;
@@ -581,8 +589,47 @@ static void kvm_events_evdev_poll_capslock()
 	{
 		if (read(fd, &ev, sizeof(ev)) != (ssize_t)sizeof(ev)) { break; }
 		if (ev.type == EV_LED && ev.code == LED_CAPSL) { g_kvm_evdev_capslock = ev.value ? 1 : 0; }
+		if (ev.type == EV_LED && ev.code == LED_NUML) { g_kvm_evdev_numlock = ev.value ? 1 : 0; }
+		if (ev.type == EV_LED && ev.code == LED_SCROLLL) { g_kvm_evdev_scrolllock = ev.value ? 1 : 0; }
 		pfd.revents = 0;
 	}
+}
+
+// Wire bitmask for MNG_KVM_KEYSTATE: Num=bit0, Scroll=bit1, Caps=bit2.
+int kvm_events_evdev_lock_state()
+{
+	kvm_events_evdev_poll_leds();
+	return (g_kvm_evdev_numlock ? 1 : 0) | (g_kvm_evdev_scrolllock ? 2 : 0) | (g_kvm_evdev_capslock ? 4 : 0);
+}
+
+// After injecting a lock key the compositor echoes the new state as EV_LED; wait (bounded) for that
+// echo so the state reported to the viewer reflects the toggle that was just made.
+int kvm_events_evdev_wait_lock_state(int maxWaitMs)
+{
+	int before = kvm_events_evdev_lock_state();
+	int fd = -1;
+	int waited = 0;
+
+	if (g_kvm_evdev_exports.libevdev_uinput_get_fd != NULL && g_kvm_evdev_state.uinput != NULL)
+	{
+		fd = g_kvm_evdev_exports.libevdev_uinput_get_fd(g_kvm_evdev_state.uinput);
+	}
+	if (fd < 0) { return before; }
+
+	while (waited < maxWaitMs)
+	{
+		struct pollfd pfd;
+		int now;
+		int step = (maxWaitMs - waited) > 20 ? 20 : (maxWaitMs - waited);
+		pfd.fd = fd;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
+		if (poll(&pfd, 1, step) <= 0) { waited += step; continue; }
+		now = kvm_events_evdev_lock_state();
+		if (now != before) { return now; }
+		waited += 1;	// events that changed nothing still count, so a chatty fd can't spin forever
+	}
+	return kvm_events_evdev_lock_state();
 }
 
 static int kvm_events_evdev_scale_axis(int value, int maxPixels)
@@ -692,10 +739,11 @@ int kvm_events_evdev_init()
 	}
 	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_REL, REL_HWHEEL, NULL));
 
-	// LED capability lets the compositor report the live CapsLock lock state back to us (see poll_capslock).
+	// LED capability lets the compositor report the live lock states back to us (see poll_leds).
 	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_type(g_kvm_evdev_state.dev, EV_LED));
 	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_LED, LED_CAPSL, NULL));
 	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_LED, LED_NUML, NULL));
+	ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_LED, LED_SCROLLL, NULL));
 
 	memset(keyEnabled, 0, sizeof(keyEnabled));
 	keyEnabled[BTN_LEFT] = g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_KEY, BTN_LEFT, NULL) == 0;
@@ -958,7 +1006,7 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 		return;
 	}
 
-	kvm_events_evdev_poll_capslock();
+	kvm_events_evdev_poll_leds();
 
 	// Resolve through the session's real XKB keymap first: it covers non-Latin and AltGr
 	// characters and remapped layouts (dvorak, azerty) that the fixed US-position table below
@@ -1050,6 +1098,17 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 {
 	UNREFERENCED_PARAMETER(unicode);
 	UNREFERENCED_PARAMETER(up);
+}
+
+int kvm_events_evdev_lock_state()
+{
+	return 0;
+}
+
+int kvm_events_evdev_wait_lock_state(int maxWaitMs)
+{
+	UNREFERENCED_PARAMETER(maxWaitMs);
+	return 0;
 }
 
 #endif

@@ -85,6 +85,27 @@ static int kvm_active_seat0_session_is_wayland(void)
 	return strcasecmp(type, "wayland") == 0 ? 1 : 0;
 }
 
+// Uid of seat0's active logind session, greeter sessions included; -1 when unknown. The JS-side
+// consoleUid() only reports sessions with uid >= the login floor, so at a display-manager greeter
+// the master hands the capture child uid 0 — this recovers the real (system-uid) session owner.
+int kvm_wayland_active_console_uid(void)
+{
+	char activeSession[64];
+	char uidStr[32];
+	char sessionPath[PATH_MAX];
+	int len = 0;
+
+	memset(activeSession, 0, sizeof(activeSession));
+	memset(uidStr, 0, sizeof(uidStr));
+	if (!kvm_read_systemd_value("/run/systemd/seats/seat0", "ACTIVE=", activeSession, sizeof(activeSession))) { return -1; }
+	if (activeSession[0] == 0) { return -1; }
+	len = snprintf(sessionPath, sizeof(sessionPath), "/run/systemd/sessions/%s", activeSession);
+	if (len <= 0 || len >= (int)sizeof(sessionPath)) { return -1; }
+	if (!kvm_read_systemd_value(sessionPath, "UID=", uidStr, sizeof(uidStr))) { return -1; }
+	if (uidStr[0] < '0' || uidStr[0] > '9') { return -1; }
+	return atoi(uidStr);
+}
+
 static int kvm_wayland_socket_exists(const char *runtimeDir, const char *socketName)
 {
 	char socketPath[PATH_MAX];
