@@ -629,11 +629,15 @@ void kvm_mic_start(void)
 		mic_unlock();
 		return;
 	}
-	/* Fail closed: never open the microphone without a local decision. */
+	/* Fail closed: never open the microphone without a local decision, and
+	 * never ask for one on a machine that has no microphone at all -- caps
+	 * already hides the button for exactly that case (see
+	 * microphone_available() above), so a prompt here would be asking about
+	 * a device the operator was never even offered. */
 	if (!g_consent)
 	{
 		mic_unlock();
-		notify_consent_needed();
+		if (microphone_available()) { notify_consent_needed(); }
 		return;
 	}
 	InterlockedExchange(&g_micShutdown, 0);
