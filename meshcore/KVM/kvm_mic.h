@@ -63,14 +63,24 @@ void kvm_mic_set_consent(int granted);
 int kvm_mic_has_consent(void);
 
 /*
- * kvm_mic_start - open the microphone and begin streaming to the browser.
- * Refuses unless consent has been granted. When refused for that reason
- * specifically (a real microphone exists, capture is not already running,
- * consent alone is missing), also emits MNG_MIC_CONSENT_NEEDED so the
- * agent's JavaScript layer can prompt the local user; safe to call
- * speculatively (e.g. once at KVM session start) for exactly this purpose.
+ * kvm_mic_start - open the microphone and begin streaming to the browser, or
+ * (re-)apply encoder settings to an already-open one.
+ *   frame / size: the whole MNG_MIC_START wire frame (cmd+len header
+ *   included), or NULL/0 to start/continue with whatever settings are
+ *   already in effect. A frame shorter than the 12-byte extended form is
+ *   treated the same as NULL/0 -- this is what keeps a legacy 4-byte START,
+ *   or one from a server that predates configurable encoding, behaving
+ *   exactly as before. See mic_apply_params() in the platform .c file for
+ *   the payload layout.
+ * Refuses to start unless consent has been granted. When refused for that
+ * reason specifically (a real microphone exists, consent alone is missing),
+ * also emits MNG_MIC_CONSENT_NEEDED so the agent's JavaScript layer can
+ * prompt the local user; safe to call speculatively (e.g. once at KVM
+ * session start) for exactly this purpose.
+ * If capture is already running, any settings in frame are applied to the
+ * live encoder in place (no interruption) instead of being ignored.
  */
-void kvm_mic_start(void);
+void kvm_mic_start(const unsigned char *frame, int size);
 
 /*
  * kvm_mic_stop - stop capture and revoke this session's consent, so a later

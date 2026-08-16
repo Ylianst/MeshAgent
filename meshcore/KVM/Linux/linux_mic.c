@@ -51,11 +51,13 @@ limitations under the License.
 
 #define MIC_SAMPLE_RATE   48000
 #define MIC_CHANNELS      1
-#define MIC_FRAME_MS      20
+#define MIC_FRAME_MS      20     /* default frame size until MNG_MIC_START says otherwise */
 #define MIC_FRAME_SAMPLES (MIC_SAMPLE_RATE * MIC_FRAME_MS / 1000)   /* 960 */
-#define MIC_MAX_PKT       512
+#define MIC_MAX_FRAME_MS      60 /* largest frame size MNG_MIC_START may request */
+#define MIC_MAX_FRAME_SAMPLES (MIC_SAMPLE_RATE * MIC_MAX_FRAME_MS / 1000)   /* 2880 */
+#define MIC_MAX_PKT       1500   /* Opus worst-case output at the bitrates/frame sizes this now allows */
 #define MIC_HEADER_LEN    7      /* type(2) len(2) seq(2) flags(1) */
-#define MIC_CAPS_LEN      9
+#define MIC_CAPS_LEN      10
 
 /* PulseAudio simple API, resolved at runtime. */
 typedef struct pa_simple pa_simple;
@@ -71,6 +73,9 @@ typedef void (*pa_simple_free_t)(pa_simple*);
 
 static OpusEncoder *g_enc = NULL;
 static void *g_pa_lib = NULL;
+static int g_application = OPUS_APPLICATION_VOIP; /* application mode the live g_enc was created with */
+static int g_frameSamples = MIC_FRAME_SAMPLES;     /* runtime frame size; MNG_MIC_START may change it */
+static int g_bitrateKbps = 28;                     /* currently-applied bitrate, for caps reporting */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int g_consent = 0;      /* only kvm_mic_set_consent() sets this */
 /* 1 between asking the JS layer to prompt and that prompt being resolved, so
@@ -152,11 +157,12 @@ static void mic_send(const unsigned char *payload, int payloadLen, int type)
 static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
 {
     unsigned char caps[MIC_CAPS_LEN];
-    int available, granted;
+    int available, granted, bitrateKbps;
 
     pthread_mutex_lock(&g_lock);
     available = (g_enc != NULL) && load_pulse();
     granted = g_consent;
+    bitrateKbps = g_bitrateKbps;
     pthread_mutex_unlock(&g_lock);
 
     caps[0] = (unsigned char)((MNG_MIC_CAPS >> 8) & 0xFF);
@@ -165,9 +171,10 @@ static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*),
     caps[3] = (unsigned char)MIC_CAPS_LEN;
     caps[4] = 0;                          /* sample rate: 0 = 48 kHz */
     caps[5] = (unsigned char)MIC_CHANNELS;
-    caps[6] = 28;                         /* bitrate, kbps */
+    caps[6] = (unsigned char)bitrateKbps; /* currently-applied bitrate, kbps */
     caps[7] = (unsigned char)((available ? 0x01 : 0x00) | (granted ? 0x02 : 0x00));
     caps[8] = 1;                          /* platform: Linux */
+    caps[9] = 1;                          /* protocol version: MNG_MIC_START accepts a settings payload */
 
     /* Send through the same path as audio frames so ordering is preserved. */
     if (g_slave_pipe_fd >= 0)
@@ -215,7 +222,7 @@ static void *capture_thread(void *arg)
     pa_simple_read_t fn_read = NULL;
     pa_simple_free_t fn_free = NULL;
     pa_sample_spec ss;
-    int16_t pcm[MIC_FRAME_SAMPLES * MIC_CHANNELS];
+    int16_t pcm[MIC_MAX_FRAME_SAMPLES * MIC_CHANNELS]; /* sized for the largest MNG_MIC_START may request */
     unsigned char opus[MIC_MAX_PKT];
     int err = 0;
 
@@ -245,19 +252,23 @@ static void *capture_thread(void *arg)
 
     for (;;)
     {
-        int bytes;
+        int bytes, frameSamples;
 
         /* Re-check consent every frame so a revocation takes effect at once,
-         * rather than after some buffer drains. */
+         * rather than after some buffer drains. Snapshot the frame size once
+         * per iteration so a live MNG_MIC_START settings change can't shift
+         * it between the read and the encode call within the same frame --
+         * it takes effect on the next iteration instead. */
         pthread_mutex_lock(&g_lock);
         if (g_shutdown || !g_consent || g_enc == NULL) { pthread_mutex_unlock(&g_lock); break; }
+        frameSamples = g_frameSamples;
         pthread_mutex_unlock(&g_lock);
 
-        if (fn_read(s, pcm, sizeof(pcm), &err) < 0) { break; }
+        if (fn_read(s, pcm, (size_t)frameSamples * MIC_CHANNELS * sizeof(int16_t), &err) < 0) { break; }
 
         pthread_mutex_lock(&g_lock);
         if (g_shutdown || !g_consent || g_enc == NULL) { pthread_mutex_unlock(&g_lock); break; }
-        bytes = opus_encode(g_enc, pcm, MIC_FRAME_SAMPLES, opus, MIC_MAX_PKT);
+        bytes = opus_encode(g_enc, pcm, frameSamples, opus, MIC_MAX_PKT);
         pthread_mutex_unlock(&g_lock);
 
         /* Opus returns 1 for a pure-DTX packet, which carries no audio. */
@@ -292,6 +303,9 @@ void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), voi
             opus_encoder_ctl(enc, OPUS_SET_DTX(1));
             opus_encoder_ctl(enc, OPUS_SET_COMPLEXITY(5));
             g_enc = enc;
+            g_application = OPUS_APPLICATION_VOIP;
+            g_frameSamples = MIC_FRAME_SAMPLES;
+            g_bitrateKbps = 28;
         }
         else if (enc != NULL) { opus_encoder_destroy(enc); }
     }
@@ -335,25 +349,122 @@ int kvm_mic_has_consent(void)
     return granted;
 }
 
-void kvm_mic_start(void)
+/* Apply an optional MNG_MIC_START settings payload. frame/size are the whole
+ * wire frame (cmd+len header included), matching every other case in the KVM
+ * command switch (see e.g. MNG_KVM_PAUSE in linux_kvm.c) -- fields therefore
+ * start at frame[4], not frame[0]. A NULL frame, or one shorter than the
+ * 12-byte extended form, leaves everything untouched: this is what makes a
+ * legacy 4-byte START (or one from a server that predates this feature)
+ * behave exactly as before. Must be called with g_lock held, and only when
+ * g_enc is known non-NULL.
+ *
+ * Every field except application mode can be changed on a live encoder via
+ * opus_encoder_ctl. Application mode is not safe to assume is live-updatable,
+ * so a change there destroys and recreates the encoder instead -- this only
+ * happens on an operator-initiated profile change, never per-frame, so the
+ * recreation cost is irrelevant. */
+static void mic_apply_params(const unsigned char *frame, int size)
+{
+    int bitrateKbps, application, vbr, vbrConstrained, bandwidth, frameMs, complexity, dtx, fec, lossPct;
+
+    if (frame == NULL || size < 12) { return; }
+
+    bitrateKbps = frame[4];
+    if (bitrateKbps == 0) { bitrateKbps = 28; }
+    else if (bitrateKbps < 6) { bitrateKbps = 6; }
+
+    switch (frame[5])
+    {
+        case 1:  application = OPUS_APPLICATION_AUDIO; break;
+        case 2:  application = OPUS_APPLICATION_RESTRICTED_LOWDELAY; break;
+        default: application = OPUS_APPLICATION_VOIP; break;
+    }
+
+    vbr = (frame[6] & 0x01) ? 1 : 0;
+    vbrConstrained = (frame[6] & 0x02) ? 1 : 0;
+
+    switch (frame[7])
+    {
+        case 1:  bandwidth = OPUS_BANDWIDTH_NARROWBAND; break;
+        case 2:  bandwidth = OPUS_BANDWIDTH_MEDIUMBAND; break;
+        case 3:  bandwidth = OPUS_BANDWIDTH_WIDEBAND; break;
+        case 4:  bandwidth = OPUS_BANDWIDTH_SUPERWIDEBAND; break;
+        case 5:  bandwidth = OPUS_BANDWIDTH_FULLBAND; break;
+        default: bandwidth = OPUS_AUTO; break;
+    }
+
+    frameMs = frame[8];
+    if (frameMs != 10 && frameMs != 20 && frameMs != 40 && frameMs != 60) { frameMs = 20; }
+
+    complexity = frame[9];
+    if (complexity > 10) { complexity = 10; }
+
+    dtx = (frame[10] & 0x01) ? 1 : 0;
+    fec = (frame[10] & 0x02) ? 1 : 0;
+
+    lossPct = frame[11];
+    if (lossPct > 100) { lossPct = 100; }
+
+    if (application != g_application)
+    {
+        int err = 0;
+        OpusEncoder *newEnc = opus_encoder_create(MIC_SAMPLE_RATE, MIC_CHANNELS, application, &err);
+        if (newEnc != NULL && err == OPUS_OK)
+        {
+            opus_encoder_destroy(g_enc);
+            g_enc = newEnc;
+            g_application = application;
+        }
+        /* else: keep capturing with the existing encoder/application rather
+         * than losing the session over one bad request. */
+    }
+
+    opus_encoder_ctl(g_enc, OPUS_SET_BITRATE(bitrateKbps * 1000));
+    opus_encoder_ctl(g_enc, OPUS_SET_VBR(vbr));
+    opus_encoder_ctl(g_enc, OPUS_SET_VBR_CONSTRAINT(vbrConstrained));
+    opus_encoder_ctl(g_enc, OPUS_SET_BANDWIDTH(bandwidth));
+    opus_encoder_ctl(g_enc, OPUS_SET_COMPLEXITY(complexity));
+    opus_encoder_ctl(g_enc, OPUS_SET_DTX(dtx));
+    opus_encoder_ctl(g_enc, OPUS_SET_INBAND_FEC(fec));
+    opus_encoder_ctl(g_enc, OPUS_SET_PACKET_LOSS_PERC(lossPct));
+
+    g_frameSamples = (MIC_SAMPLE_RATE * frameMs) / 1000;
+    g_bitrateKbps = bitrateKbps;
+}
+
+/* frame/size: the whole MNG_MIC_START wire frame, or NULL/0 when starting
+ * without a settings payload (e.g. from MNG_MIC_CONSENT) -- see
+ * mic_apply_params() above for the format and the legacy-compatibility rule. */
+void kvm_mic_start(const unsigned char *frame, int size)
 {
     int needConsentPrompt;
 
     pthread_mutex_lock(&g_lock);
 
     /* Fail closed: never open the microphone without a local decision. */
-    if (!g_consent || g_enc == NULL || !g_shutdown || g_pa_lib == NULL)
+    if (!g_consent || g_enc == NULL || g_pa_lib == NULL)
     {
         /* Only ask the JS layer to prompt when consent is genuinely why this
-         * refused: not when there is no microphone to prompt for, and not
-         * when capture is already running (that would just repeat itself on
-         * every duplicate MNG_MIC_START a browser happens to send). */
+         * refused: not when there is no microphone to prompt for. */
         needConsentPrompt = (!g_consent && g_enc != NULL && g_pa_lib != NULL && g_shutdown);
         if (needConsentPrompt) { g_promptOutstanding = 1; }
         pthread_mutex_unlock(&g_lock);
         if (needConsentPrompt) { notify_js(MNG_MIC_CONSENT_NEEDED); }
         return;
     }
+
+    mic_apply_params(frame, size);
+
+    if (!g_shutdown)
+    {
+        /* Already capturing: the settings above were applied to the live
+         * session above; nothing else to do. Avoids repeating a full
+         * stop/start on every duplicate MNG_MIC_START a browser sends, and is
+         * what lets the operator change profile without interrupting audio. */
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+
     g_shutdown = 0;
     if (pthread_create(&g_thread, NULL, capture_thread, NULL) != 0)
     {

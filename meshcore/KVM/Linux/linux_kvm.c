@@ -971,11 +971,13 @@ int kvm_server_inputdata(char* block, int blocklen)
 		/* Microphone playback. MNG_MIC_START only reaches here once the agent's
 		 * JavaScript layer has recorded the local user's consent. */
 		case MNG_MIC_CONSENT:
-			/* The local user accepted. Only the agent's consent flow sends this. */
+			/* The local user accepted. Only the agent's consent flow sends
+			 * this, and it carries no encoder-settings payload of its own --
+			 * continue with whatever is already in effect. */
 			kvm_mic_set_consent(1);
-			kvm_mic_start();
+			kvm_mic_start(NULL, 0);
 			break;
-		case MNG_MIC_START: kvm_mic_start(); break;
+		case MNG_MIC_START: kvm_mic_start((const unsigned char*)block, size); break;
 		case MNG_MIC_STOP:  kvm_mic_stop(); break;
 		case MNG_MIC_QUERY: kvm_mic_resend_caps(kvm_audio_pipe_write, NULL); break;
 		case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;

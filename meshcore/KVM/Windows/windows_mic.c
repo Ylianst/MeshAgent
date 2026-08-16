@@ -84,12 +84,14 @@ static const IID MESHMIC_IID_IAudioCaptureClient =
  * in MNG_MIC_CAPS and with the Linux implementation. */
 #define MIC_RATE        48000
 #define MIC_CHANNELS    1
-#define MIC_FRAME_MS        20
+#define MIC_FRAME_MS        20     /* default frame size until MNG_MIC_START says otherwise */
 #define MIC_FRAME_SAMPLES   (MIC_RATE * MIC_FRAME_MS / 1000)   /* 960 */
-#define MIC_MAX_PKT         512
+#define MIC_MAX_FRAME_MS      60   /* largest frame size MNG_MIC_START may request */
+#define MIC_MAX_FRAME_SAMPLES (MIC_RATE * MIC_MAX_FRAME_MS / 1000)   /* 2880 */
+#define MIC_MAX_PKT         1500   /* Opus worst-case output at the bitrates/frame sizes this now allows */
 #define MIC_BITRATE_BPS     28000
 #define MIC_BITRATE_KBPS    28
-#define MIC_CAPS_LEN        9
+#define MIC_CAPS_LEN        10
 #define MIC_POLL_MS         10
 
 /* ~250 ms of mono 48 kHz headroom before we start discarding. */
@@ -115,6 +117,9 @@ typedef struct MicResampler
 static OpusEncoder *g_enc = NULL;
 static ILibTransport_DoneState(*g_writeHandler)(char*, int, void*) = NULL;
 static void *g_reserved = NULL;
+static int g_application = OPUS_APPLICATION_VOIP; /* application mode the live g_enc was created with */
+static int g_frameSamples = MIC_FRAME_SAMPLES;     /* runtime frame size; MNG_MIC_START may change it */
+static int g_bitrateKbps = MIC_BITRATE_KBPS;       /* currently-applied bitrate, for caps reporting */
 static CRITICAL_SECTION g_lock;
 static volatile LONG g_lockReady = 0;
 static volatile LONG g_micShutdown = 1;   /* 1 = not capturing */
@@ -172,16 +177,16 @@ static void ring_push(MicRing *r, int16_t sample)
 	}
 }
 
-static int ring_pop_frame(MicRing *r, int16_t *out)
+static int ring_pop_frame(MicRing *r, int16_t *out, int count)
 {
 	int i;
-	if (r->count < MIC_FRAME_SAMPLES) { return 0; }
-	for (i = 0; i < MIC_FRAME_SAMPLES; ++i)
+	if (r->count < count) { return 0; }
+	for (i = 0; i < count; ++i)
 	{
 		out[i] = r->samples[r->readPos];
 		r->readPos = (r->readPos + 1) % MIC_RING_SAMPLES;
 	}
-	r->count -= MIC_FRAME_SAMPLES;
+	r->count -= count;
 	return 1;
 }
 
@@ -343,13 +348,14 @@ static int microphone_available(void)
 static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
 {
 	unsigned char caps[MIC_CAPS_LEN];
-	int available, granted;
+	int available, granted, bitrateKbps;
 
 	if (writeHandler == NULL) { return; }
 
 	mic_lock();
 	granted = g_consent;
 	available = (g_enc != NULL);
+	bitrateKbps = g_bitrateKbps;
 	mic_unlock();
 	if (available) { available = microphone_available(); }
 
@@ -359,12 +365,13 @@ static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, voi
 	caps[3] = (unsigned char)MIC_CAPS_LEN;
 	caps[4] = 0;                              /* sample_rate: 0 = 48 kHz */
 	caps[5] = (unsigned char)MIC_CHANNELS;
-	caps[6] = (unsigned char)MIC_BITRATE_KBPS;
+	caps[6] = (unsigned char)bitrateKbps;      /* currently-applied bitrate, kbps */
 	/* bit0 microphone available, bit1 local user has granted consent.
 	 * The browser reads exactly these two bits to decide whether to show the
 	 * button and whether audio is expected. */
 	caps[7] = (unsigned char)((available ? 0x01 : 0x00) | (granted ? 0x02 : 0x00));
 	caps[8] = 2;                              /* platform: Windows */
+	caps[9] = 1;                               /* protocol version: MNG_MIC_START accepts a settings payload */
 
 	writeHandler((char*)caps, MIC_CAPS_LEN, reserved);
 }
@@ -399,7 +406,15 @@ static void notify_js(int command)
 
 static void encode_pending(MicRing *ring, int16_t *pcm, unsigned char *opusBuf)
 {
-	while (ring_pop_frame(ring, pcm))
+	int frameSamples;
+
+	/* One snapshot per call: a live MNG_MIC_START settings change takes
+	 * effect starting with the next call rather than mid-drain here. */
+	mic_lock();
+	frameSamples = g_frameSamples;
+	mic_unlock();
+
+	while (ring_pop_frame(ring, pcm, frameSamples))
 	{
 		OpusEncoder *enc;
 		int bytes;
@@ -409,7 +424,7 @@ static void encode_pending(MicRing *ring, int16_t *pcm, unsigned char *opusBuf)
 		mic_unlock();
 		if (enc == NULL) { return; }
 
-		bytes = opus_encode(enc, pcm, MIC_FRAME_SAMPLES, opusBuf, MIC_MAX_PKT);
+		bytes = opus_encode(enc, pcm, frameSamples, opusBuf, MIC_MAX_PKT);
 		/* Opus returns 1 for a pure-DTX "nothing to send" packet; only frames
 		 * larger than that carry audio worth transmitting. */
 		if (bytes > 1) { mic_send_frame(opusBuf, bytes); }
@@ -471,7 +486,7 @@ static DWORD WINAPI mic_capture_thread(LPVOID param)
 	int bytesPerSample = 0;
 	MicResampler rs;
 	MicRing ring;
-	int16_t pcm[MIC_FRAME_SAMPLES];
+	int16_t pcm[MIC_MAX_FRAME_SAMPLES]; /* sized for the largest MNG_MIC_START may request */
 	unsigned char opusBuf[MIC_MAX_PKT];
 
 	UNREFERENCED_PARAMETER(param);
@@ -601,12 +616,17 @@ void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), voi
 	if (g_enc == NULL)
 	{
 		int err = 0;
+		/* VOIP, not AUDIO: this captures speech and room noise, not music --
+		 * matches linux_mic.c, which this used to disagree with. */
 		OpusEncoder *enc = opus_encoder_create(MIC_RATE, MIC_CHANNELS,
-		                                       OPUS_APPLICATION_AUDIO, &err);
+		                                       OPUS_APPLICATION_VOIP, &err);
 		if (enc != NULL && err == OPUS_OK)
 		{
 			encoder_configure(enc);
 			g_enc = enc;
+			g_application = OPUS_APPLICATION_VOIP;
+			g_frameSamples = MIC_FRAME_SAMPLES;
+			g_bitrateKbps = MIC_BITRATE_KBPS;
 		}
 		else if (enc != NULL)
 		{
@@ -620,14 +640,100 @@ void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), voi
 	if (haveEncoder) { mic_send_caps(writeHandler, reserved); }
 }
 
-void kvm_mic_start(void)
+/* Apply an optional MNG_MIC_START settings payload. frame/size are the whole
+ * wire frame (cmd+len header included), matching every other case in the KVM
+ * command switch -- fields therefore start at frame[4], not frame[0]. A NULL
+ * frame, or one shorter than the 12-byte extended form, leaves everything
+ * untouched: this is what makes a legacy 4-byte START (or one from a server
+ * that predates this feature) behave exactly as before. Must be called with
+ * g_lock held (via mic_lock()), and only when g_enc is known non-NULL.
+ *
+ * Every field except application mode can be changed on a live encoder via
+ * opus_encoder_ctl. Application mode is not safe to assume is live-updatable,
+ * so a change there destroys and recreates the encoder instead -- this only
+ * happens on an operator-initiated profile change, never per-frame, so the
+ * recreation cost is irrelevant. Mirrors linux_mic.c's mic_apply_params(). */
+static void mic_apply_params(const unsigned char *frame, int size)
+{
+	int bitrateKbps, application, vbr, vbrConstrained, bandwidth, frameMs, complexity, dtx, fec, lossPct;
+
+	if (frame == NULL || size < 12) { return; }
+
+	bitrateKbps = frame[4];
+	if (bitrateKbps == 0) { bitrateKbps = MIC_BITRATE_KBPS; }
+	else if (bitrateKbps < 6) { bitrateKbps = 6; }
+
+	switch (frame[5])
+	{
+		case 1:  application = OPUS_APPLICATION_AUDIO; break;
+		case 2:  application = OPUS_APPLICATION_RESTRICTED_LOWDELAY; break;
+		default: application = OPUS_APPLICATION_VOIP; break;
+	}
+
+	vbr = (frame[6] & 0x01) ? 1 : 0;
+	vbrConstrained = (frame[6] & 0x02) ? 1 : 0;
+
+	switch (frame[7])
+	{
+		case 1:  bandwidth = OPUS_BANDWIDTH_NARROWBAND; break;
+		case 2:  bandwidth = OPUS_BANDWIDTH_MEDIUMBAND; break;
+		case 3:  bandwidth = OPUS_BANDWIDTH_WIDEBAND; break;
+		case 4:  bandwidth = OPUS_BANDWIDTH_SUPERWIDEBAND; break;
+		case 5:  bandwidth = OPUS_BANDWIDTH_FULLBAND; break;
+		default: bandwidth = OPUS_AUTO; break;
+	}
+
+	frameMs = frame[8];
+	if (frameMs != 10 && frameMs != 20 && frameMs != 40 && frameMs != 60) { frameMs = 20; }
+
+	complexity = frame[9];
+	if (complexity > 10) { complexity = 10; }
+
+	dtx = (frame[10] & 0x01) ? 1 : 0;
+	fec = (frame[10] & 0x02) ? 1 : 0;
+
+	lossPct = frame[11];
+	if (lossPct > 100) { lossPct = 100; }
+
+	if (application != g_application)
+	{
+		int err = 0;
+		OpusEncoder *newEnc = opus_encoder_create(MIC_RATE, MIC_CHANNELS, application, &err);
+		if (newEnc != NULL && err == OPUS_OK)
+		{
+			opus_encoder_destroy(g_enc);
+			g_enc = newEnc;
+			g_application = application;
+		}
+		/* else: keep capturing with the existing encoder/application rather
+		 * than losing the session over one bad request. */
+	}
+
+	opus_encoder_ctl(g_enc, OPUS_SET_BITRATE(bitrateKbps * 1000));
+	opus_encoder_ctl(g_enc, OPUS_SET_VBR(vbr));
+	opus_encoder_ctl(g_enc, OPUS_SET_VBR_CONSTRAINT(vbrConstrained));
+	opus_encoder_ctl(g_enc, OPUS_SET_BANDWIDTH(bandwidth));
+	opus_encoder_ctl(g_enc, OPUS_SET_COMPLEXITY(complexity));
+	opus_encoder_ctl(g_enc, OPUS_SET_DTX(dtx));
+	opus_encoder_ctl(g_enc, OPUS_SET_INBAND_FEC(fec));
+	opus_encoder_ctl(g_enc, OPUS_SET_PACKET_LOSS_PERC(lossPct));
+
+	g_frameSamples = (MIC_RATE * frameMs) / 1000;
+	g_bitrateKbps = bitrateKbps;
+}
+
+/* frame/size: the whole MNG_MIC_START wire frame, or NULL/0 when starting
+ * without a settings payload (e.g. from MNG_MIC_CONSENT) -- see
+ * mic_apply_params() above for the format and the legacy-compatibility rule. */
+void kvm_mic_start(const unsigned char *frame, int size)
 {
 	HANDLE thread;
+	int alreadyRunning;
 
 	mic_lock_init();
 
 	mic_lock();
-	if (g_enc == NULL || g_thread != NULL)
+	if (g_enc == NULL)
 	{
 		mic_unlock();
 		return;
@@ -651,6 +757,20 @@ void kvm_mic_start(void)
 		}
 		return;
 	}
+
+	mic_apply_params(frame, size);
+
+	alreadyRunning = (g_thread != NULL);
+	if (alreadyRunning)
+	{
+		/* Already capturing: the settings above were applied to the live
+		 * session; nothing else to do. Avoids repeating a full stop/start on
+		 * every duplicate MNG_MIC_START a browser sends, and is what lets the
+		 * operator change profile without interrupting audio. */
+		mic_unlock();
+		return;
+	}
+
 	InterlockedExchange(&g_micShutdown, 0);
 	thread = CreateThread(NULL, 0, mic_capture_thread, NULL, 0, NULL);
 	if (thread == NULL)
