@@ -15,6 +15,7 @@ limitations under the License.
 */
 
 #include "linux_events.h"
+#include "linux_kvm_xkb.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -713,6 +714,16 @@ int kvm_events_evdev_init()
 		ignore_result(g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_KEY, keycode, NULL));
 	}
 
+	// The XKB unicode path can resolve to any key a real keyboard has (KEY_102ND on ISO boards,
+	// KEY_RO/KEY_YEN on JIS, ...), so advertise the whole keyboard range, not just the VK map.
+	for (keycode = 1; keycode <= 255; ++keycode)
+	{
+		if (!keyEnabled[keycode] && g_kvm_evdev_exports.libevdev_enable_event_code(g_kvm_evdev_state.dev, EV_KEY, keycode, NULL) == 0)
+		{
+			keyEnabled[keycode] = 1;
+		}
+	}
+
 	createManagedRc = g_kvm_evdev_exports.libevdev_uinput_create_from_device(g_kvm_evdev_state.dev, KVM_LIBEVDEV_UINPUT_OPEN_MANAGED, &g_kvm_evdev_state.uinput);
 	createRc = createManagedRc;
 	if (createRc != 0)
@@ -755,6 +766,7 @@ error:
 
 void kvm_events_evdev_shutdown()
 {
+	kvm_xkb_shutdown();
 	if (g_kvm_evdev_state.uinput != NULL)
 	{
 		g_kvm_evdev_exports.libevdev_uinput_destroy(g_kvm_evdev_state.uinput);
@@ -916,7 +928,9 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 {
 	unsigned int keycode = KEY_RESERVED;
 	int needsShift = 0;
+	int needsAltGr = 0;
 	int isAlpha = (unicode >= 'a' && unicode <= 'z') || (unicode >= 'A' && unicode <= 'Z');
+	kvm_xkb_match xkbMatch;
 	long delayUs = 0;
 
 	if (!kvm_events_evdev_is_active())
@@ -927,19 +941,38 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 	{
 		return;
 	}
-	if (!kvm_events_evdev_ascii_to_keycode(unicode, &keycode, &needsShift))
+
+	kvm_events_evdev_poll_capslock();
+
+	// Resolve through the session's real XKB keymap first: it covers non-Latin and AltGr
+	// characters and remapped layouts (dvorak, azerty) that the fixed US-position table below
+	// cannot express, and its CapsLock interaction is exact. The ASCII table stays as the
+	// fallback whenever Wayland/libxkbcommon are unavailable or the codepoint isn't reachable.
+	if (kvm_xkb_lookup_unicode((uint32_t)unicode, g_kvm_evdev_capslock, &xkbMatch))
+	{
+		keycode = xkbMatch.keycode;
+		needsShift = xkbMatch.shift;
+		needsAltGr = xkbMatch.altgr;
+	}
+	else if (kvm_events_evdev_ascii_to_keycode(unicode, &keycode, &needsShift))
+	{
+		// An active CapsLock already swaps letter case, so flip the Shift decision to land on the requested case.
+		if (g_kvm_evdev_capslock && isAlpha)
+		{
+			needsShift = !needsShift;
+		}
+	}
+	else
 	{
 		return;
 	}
 
-	// An active CapsLock already swaps letter case, so flip the Shift decision to land on the requested case.
-	kvm_events_evdev_poll_capslock();
-	if (g_kvm_evdev_capslock && isAlpha)
-	{
-		needsShift = !needsShift;
-	}
-
 	delayUs = kvm_events_evdev_key_delay_us();
+	if (needsAltGr)
+	{
+		if (kvm_events_evdev_write(EV_KEY, KEY_RIGHTALT, 1) != 0) { return; }
+		ignore_result(kvm_events_evdev_sync());
+	}
 	if (needsShift)
 	{
 		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 1) != 0) { return; }
@@ -953,6 +986,11 @@ void kvm_events_evdev_key_action_unicode(uint16_t unicode, int up)
 	if (needsShift)
 	{
 		if (kvm_events_evdev_write(EV_KEY, KEY_LEFTSHIFT, 0) != 0) { return; }
+		ignore_result(kvm_events_evdev_sync());
+	}
+	if (needsAltGr)
+	{
+		if (kvm_events_evdev_write(EV_KEY, KEY_RIGHTALT, 0) != 0) { return; }
 		ignore_result(kvm_events_evdev_sync());
 	}
 	if (delayUs > 0) { usleep(delayUs); }
