@@ -86,11 +86,24 @@ done
 # ------------------------------------------------------------------ 2. symbols
 note "Checking COM GUID linkage"
 if [ -f /tmp/windows_audio_x86_64.o ]; then
-    for G in CLSID_MMDeviceEnumerator IID_IMMDeviceEnumerator IID_IAudioClient IID_IAudioCaptureClient; do
-        if x86_64-w64-mingw32-nm --defined-only /tmp/windows_audio_x86_64.o | grep -q " $G\$"; then
-            pass "$G defined locally (no uuid.lib needed)"
+    # MSVC only emits a GUID when INITGUID was defined before the declaring
+    # header; MinGW always emits one via DECLSPEC_SELECTANY. So "is it defined
+    # here?" is not portable evidence. What must hold on BOTH toolchains is that
+    # the object leaves no COM identifier unresolved -- that is the failure MSVC
+    # reports as LNK2001. Check for that directly.
+    UNRESOLVED=$(x86_64-w64-mingw32-nm -u /tmp/windows_audio_x86_64.o \
+                 | grep -oE "(CLSID|IID)_[A-Za-z]+" | sort -u | tr '\n' ' ')
+    if [ -z "$UNRESOLVED" ]; then
+        pass "no unresolved COM identifiers (MSVC LNK2001 would fail here)"
+    else
+        fail "unresolved COM identifiers: $UNRESOLVED"
+    fi
+    for G in MESH_CLSID_MMDeviceEnumerator MESH_IID_IMMDeviceEnumerator \
+             MESH_IID_IAudioClient MESH_IID_IAudioCaptureClient; do
+        if x86_64-w64-mingw32-nm /tmp/windows_audio_x86_64.o | grep -q "$G"; then
+            pass "$G defined in this translation unit"
         else
-            fail "$G is not defined locally"
+            fail "$G missing"
         fi
     done
     UNDEF=$(x86_64-w64-mingw32-nm -u /tmp/windows_audio_x86_64.o \

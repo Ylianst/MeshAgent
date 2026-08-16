@@ -15,13 +15,67 @@ jobs:
         platform: [x64, x86, ARM64]
     steps:
     - uses: actions/checkout@v7
+
+    # The KVM audio support links libopus. A prebuilt .lib cannot be committed
+    # for this, because a static library must be produced by the same toolchain
+    # that consumes it: MSVC cannot link a MinGW/GCC archive (it fails with
+    # unresolved ___chkstk_ms / __mingw_vfprintf / __memcpy_chk). Building Opus
+    # here with the same MSVC that builds the agent keeps the two in step and
+    # covers x86, x64 and ARM64 from one definition.
+    - name: Cache Opus build
+      id: cache-opus
+      uses: actions/cache@v4
+      with:
+        path: lib-opus/windows/${{ matrix.platform == 'x86' && 'x86' || matrix.platform == 'x64' && 'x64' || 'arm64' }}/libopus.lib
+        key: opus-1.5.2-${{ matrix.platform }}-msvc-v1
+
+    - name: Build Opus with MSVC
+      if: steps.cache-opus.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        # Keep this in step with the headers vendored in lib-opus/includes.
+        $opusVersion = '1.5.2'
+        $arch = switch ('${{ matrix.platform }}') {
+          'x86'   { 'Win32' }
+          'x64'   { 'x64'   }
+          'ARM64' { 'ARM64' }
+        }
+        $outDir = switch ('${{ matrix.platform }}') {
+          'x86'   { 'x86'   }
+          'x64'   { 'x64'   }
+          'ARM64' { 'arm64' }
+        }
+
+        Write-Host "Fetching Opus $opusVersion"
+        Invoke-WebRequest -Uri "https://downloads.xiph.org/releases/opus/opus-$opusVersion.tar.gz" -OutFile opus.tar.gz
+        tar -xzf opus.tar.gz
+
+        Write-Host "Configuring Opus for $arch"
+        cmake -S "opus-$opusVersion" -B opus-build -A $arch `
+          -DOPUS_BUILD_SHARED_LIBRARY=OFF `
+          -DOPUS_BUILD_TESTING=OFF `
+          -DOPUS_BUILD_PROGRAMS=OFF `
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        cmake --build opus-build --config Release --parallel
+
+        $built = Get-ChildItem -Path opus-build -Recurse -Filter opus.lib |
+                 Where-Object { $_.FullName -match 'Release' } |
+                 Select-Object -First 1
+        if (-not $built) { throw "opus.lib was not produced" }
+
+        New-Item -ItemType Directory -Force -Path "lib-opus/windows/$outDir" | Out-Null
+        Copy-Item $built.FullName "lib-opus/windows/$outDir/libopus.lib" -Force
+        Write-Host "Installed lib-opus/windows/$outDir/libopus.lib ($([math]::Round($built.Length/1KB)) KB)"
+
     - name: Setup Visual Studio
       uses: microsoft/setup-msbuild@v3
+
     - name: Build ${{ matrix.platform }}
       run: msbuild MeshAgent-2022.sln /p:Configuration=Release /p:Platform=${{ matrix.platform }}
+
     - name: Upload ${{ matrix.platform }} artifacts
       uses: actions/upload-artifact@v7
       with:
         name: meshagent-windows-${{ matrix.platform }}
         path: Release/*.exe
-

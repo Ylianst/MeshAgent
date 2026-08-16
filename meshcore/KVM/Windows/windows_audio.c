@@ -28,9 +28,14 @@ limitations under the License.
  *     while the endpoint is idle, so an event-driven loop can stall until the
  *     remote user happens to play audio. Polling at 10 ms keeps latency low and
  *     always makes forward progress.
- *   - COM GUIDs are pulled in via <initguid.h> so the object identifiers get
- *     emitted into this translation unit. This avoids requiring uuid.lib /
- *     ksuser.lib on every Windows configuration.
+ *   - The COM GUIDs are defined locally at the bottom of this file rather than
+ *     relying on <initguid.h>. MSVC only emits a GUID when INITGUID is defined
+ *     *before* the declaring header is first seen, and mmdeviceapi.h is reached
+ *     indirectly through ILibParsers.h -> windows.h, so include order alone is
+ *     not dependable. Defining them here keeps the link working regardless of
+ *     header ordering and without pulling in uuid.lib / ksuser.lib.
+ *     (MinGW hides this problem because its DEFINE_GUID always uses
+ *     DECLSPEC_SELECTANY, so a cross-compile check will not catch it.)
  *   - The sample format is inspected at runtime (float32 / 16 / 24 / 32-bit PCM,
  *     any channel count, any sample rate) because the WASAPI mix format is
  *     chosen by the OS and varies widely across machines.
@@ -43,7 +48,6 @@ limitations under the License.
 #include "meshcore/KVM/kvm_audio.h"
 #include "meshcore/meshdefines.h"
 
-#include <initguid.h>
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
@@ -52,6 +56,22 @@ limitations under the License.
 #include <string.h>
 
 #include "opus/opus.h"
+
+/* Define the COM identifiers this file uses. The headers above only declare
+ * them (MSVC emits definitions solely when INITGUID was defined before the
+ * header was first included, which we cannot guarantee here — see the note at
+ * the top of the file). Values are from the Windows SDK and are fixed forever.
+ * Guarded so this stays correct if a future include order does define them. */
+#ifndef __IMMDeviceEnumerator_INTERFACE_DEFINED_GUIDS__
+static const CLSID MESH_CLSID_MMDeviceEnumerator =
+	{ 0xbcde0395, 0xe52f, 0x467c, { 0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e } };
+static const IID MESH_IID_IMMDeviceEnumerator =
+	{ 0xa95664d2, 0x9614, 0x4f35, { 0xa7, 0x46, 0xde, 0x8d, 0xb6, 0x36, 0x17, 0xe6 } };
+static const IID MESH_IID_IAudioClient =
+	{ 0x1cb9ad4c, 0xdbfa, 0x4c32, { 0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2 } };
+static const IID MESH_IID_IAudioCaptureClient =
+	{ 0xc8adbd64, 0xe71e, 0x48a0, { 0xa4, 0xde, 0x18, 0x5c, 0x39, 0x5c, 0xd3, 0x17 } };
+#endif
 
 #ifndef WAVE_FORMAT_PCM
 #define WAVE_FORMAT_PCM 0x0001
@@ -417,14 +437,14 @@ static DWORD WINAPI audio_capture_thread(LPVOID param)
 		comInitialised = 1;
 	}
 
-	hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
-	                      &IID_IMMDeviceEnumerator, (void**)&pEnum);
+	hr = CoCreateInstance(&MESH_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+	                      &MESH_IID_IMMDeviceEnumerator, (void**)&pEnum);
 	if (FAILED(hr) || pEnum == NULL) { goto done; }
 
 	hr = pEnum->lpVtbl->GetDefaultAudioEndpoint(pEnum, eRender, eConsole, &pDevice);
 	if (FAILED(hr) || pDevice == NULL) { goto done; }
 
-	hr = pDevice->lpVtbl->Activate(pDevice, &IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&pClient);
+	hr = pDevice->lpVtbl->Activate(pDevice, &MESH_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&pClient);
 	if (FAILED(hr) || pClient == NULL) { goto done; }
 
 	hr = pClient->lpVtbl->GetMixFormat(pClient, &pwfx);
@@ -440,7 +460,7 @@ static DWORD WINAPI audio_capture_thread(LPVOID param)
 	                                 200 * 10000LL, 0, pwfx, NULL);
 	if (FAILED(hr)) { goto done; }
 
-	hr = pClient->lpVtbl->GetService(pClient, &IID_IAudioCaptureClient, (void**)&pCapture);
+	hr = pClient->lpVtbl->GetService(pClient, &MESH_IID_IAudioCaptureClient, (void**)&pCapture);
 	if (FAILED(hr) || pCapture == NULL) { goto done; }
 
 	hr = pClient->lpVtbl->Start(pClient);
