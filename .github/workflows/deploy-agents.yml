@@ -1,0 +1,121 @@
+name: Deploy Agents to MeshCentral
+
+run-name: Publish built agents to MeshCentral-jugu
+
+# Runs after the Windows and Linux builds finish on the audio branch and
+# commits the resulting binaries into the MeshCentral repository, which is what
+# actually serves them to devices.
+#
+# Why here and not in the server's Docker entrypoint: the agents a server hands
+# out decide what every managed device installs, so they belong in git where
+# they are reviewable and revertible, and the runtime image stays
+# self-contained. Fetching them at container start would instead need GitHub
+# credentials on the production host and would let a failed download change
+# which agent devices receive.
+on:
+  workflow_run:
+    workflows: ["Windows Build", "Linux Build"]
+    types: [completed]
+    branches: [feature/audio-stream]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Optional: run ID to take artifacts from (defaults to latest)"
+        required: false
+
+concurrency:
+  # Windows and Linux finish at different times and both trigger this job;
+  # serialise so two runs cannot push to the same branch at once.
+  group: deploy-agents
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Never publish binaries from a failed build.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out MeshCentral
+        uses: actions/checkout@v7
+        with:
+          repository: jugurtha114/MeshCentral-jugu
+          ref: feature/audio-stream
+          token: ${{ secrets.MESHCENTRAL_DEPLOY_TOKEN }}
+          path: meshcentral
+
+      - name: Download agent artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          # Artifacts live on the run that triggered this workflow, not on this
+          # one, so they have to be fetched across runs.
+          run-id: ${{ github.event.inputs.run_id || github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Show what was downloaded
+        run: |
+          echo "Artifacts:"
+          find artifacts -type f 2>/dev/null | sed 's/^/  /' || echo "  (none)"
+
+      - name: Install Windows agents
+        id: windows
+        working-directory: meshcentral
+        run: |
+          if find ../artifacts -name 'MeshService*.exe' | grep -q .; then
+            node tools/install-windows-agents.js ../artifacts
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Windows agents in this run; skipping."
+          fi
+
+      - name: Install Linux agents
+        id: linux
+        working-directory: meshcentral
+        run: |
+          if find ../artifacts -name 'meshagent_*' | grep -q .; then
+            node tools/install-linux-agents.js ../artifacts
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No Linux agents in this run; skipping."
+          fi
+
+      - name: Commit and push
+        working-directory: meshcentral
+        run: |
+          if git diff --quiet -- agents/; then
+            echo "Agents are unchanged; nothing to commit."
+            exit 0
+          fi
+
+          git config user.name  'Jugurtha-Green'
+          git config user.email 'jugurthagreen@gmail.com'
+          git add agents/
+          git commit -m "Deploy agents built by ${{ github.event.workflow_run.name || 'manual dispatch' }}
+
+          Source run: ${{ github.event.workflow_run.html_url || github.server_url }}
+          MeshAgent commit: ${{ github.event.workflow_run.head_sha || github.sha }}"
+
+          # The other platform's job may have pushed while this one ran.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "Push rejected (attempt $attempt); rebasing on the remote."
+            git pull --rebase
+          done
+          echo "Could not push after 3 attempts." >&2
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Agent deployment"
+            echo ""
+            echo "- Windows installed: ${{ steps.windows.outputs.changed || 'no' }}"
+            echo "- Linux installed:   ${{ steps.linux.outputs.changed || 'no' }}"
+            echo ""
+            echo "Rebuild the MeshCentral Docker image to publish these to devices."
+          } >> "$GITHUB_STEP_SUMMARY"
