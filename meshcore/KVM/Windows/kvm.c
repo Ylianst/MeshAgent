@@ -29,6 +29,9 @@ limitations under the License.
 #include "microstack/ILibAsyncSocket.h"
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibRemoteLogging.h"
+#if defined(_KVM_AUDIO)
+#include "meshcore/KVM/kvm_audio.h"
+#endif
 #include <sas.h>
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -714,6 +717,11 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 			SCREEN_SEL_TARGET = x;
 		break;
 	}
+#if defined(_KVM_AUDIO)
+	case MNG_AUDIO_START: kvm_audio_start(); break;
+	case MNG_AUDIO_STOP:  kvm_audio_stop(); break;
+	case MNG_AUDIO_QUERY: kvm_audio_resend_caps(writeHandler, reserved); break;
+#endif
 	}
 	return size;
 }
@@ -1001,6 +1009,14 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// Send the list of displays
 	kvm_send_display_list(writeHandler, reserved);
 
+#if defined(_KVM_AUDIO)
+	// Advertise audio capability (MNG_AUDIO_CAPS) so the browser can show the
+	// audio button. This must run after hStdOut has been acquired above,
+	// otherwise the frame would be written to an invalid handle in slave mode.
+	// Capture itself stays idle until the browser sends MNG_AUDIO_START.
+	kvm_audio_init(writeHandler, reserved);
+#endif
+
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.
 	KVMDEBUG("kvm_server_mainloop / start3", (int)GetCurrentThreadId());
 
@@ -1207,6 +1223,9 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		tileInfo = NULL;
 	}
 	KVMDEBUG("kvm_server_mainloop / end1", (int)GetCurrentThreadId());
+#if defined(_KVM_AUDIO)
+	kvm_audio_cleanup();
+#endif
 	teardown_gdiplus();
 
 	KVMDEBUG("kvm_server_mainloop / end", (int)GetCurrentThreadId());
