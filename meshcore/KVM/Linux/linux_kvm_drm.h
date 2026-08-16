@@ -27,6 +27,11 @@ extern int g_kvmBackendDRM;
 
 void* kvm_server_mainloop_drm(void* parm);
 
+// Deadlock-safe write of one whole message to the slave->master pipe: waits out backpressure while
+// draining viewer input, instead of block-writing into a pipe the master may have paused. All
+// slave-side senders must use this in DRM mode (the pipe is non-blocking for the slave's lifetime).
+int kvm_drm_slave_write(const void *buffer, size_t len);
+
 // Reaches libdrm's drmPrimeHandleToFD via the single dlopen in linux_kvm_drm.c.
 int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd);
 

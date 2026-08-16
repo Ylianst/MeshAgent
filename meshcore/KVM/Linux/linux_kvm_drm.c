@@ -36,6 +36,8 @@ limitations under the License.
 #include <time.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <poll.h>
+#include <fcntl.h>
 
 #if defined(__linux__)
 #include <fcntl.h>
@@ -64,7 +66,9 @@ limitations under the License.
 	_(drmModeGetPlaneResources) _(drmModeFreePlaneResources) \
 	_(drmModeGetFB) _(drmModeFreeFB) \
 	_(drmModeGetFB2) _(drmModeFreeFB2) \
-	_(drmIoctl) _(drmPrimeHandleToFD) _(drmDropMaster) _(drmGetRenderDeviceNameFromFd)
+	_(drmIoctl) _(drmPrimeHandleToFD) _(drmDropMaster) _(drmGetRenderDeviceNameFromFd) \
+	_(drmModeObjectGetProperties) _(drmModeFreeObjectProperties) \
+	_(drmModeGetProperty) _(drmModeFreeProperty) _(drmSetClientCap)
 
 #define KVM_DRM_DECL_PTR(s) static __typeof__(s) *p_##s = NULL;
 KVM_DRM_LIBDRM_SYMBOLS(KVM_DRM_DECL_PTR)
@@ -107,6 +111,29 @@ static int kvm_drm_load_libdrm(void)
 #define drmPrimeHandleToFD p_drmPrimeHandleToFD
 #define drmDropMaster p_drmDropMaster
 #define drmGetRenderDeviceNameFromFd p_drmGetRenderDeviceNameFromFd
+#define drmModeObjectGetProperties p_drmModeObjectGetProperties
+#define drmModeFreeObjectProperties p_drmModeFreeObjectProperties
+#define drmModeGetProperty p_drmModeGetProperty
+#define drmModeFreeProperty p_drmModeFreeProperty
+#define drmSetClientCap p_drmSetClientCap
+
+// Old sysroots may predate these in drm.h/drm_mode.h; the values are kernel ABI.
+#ifndef DRM_CLIENT_CAP_UNIVERSAL_PLANES
+#define DRM_CLIENT_CAP_UNIVERSAL_PLANES 2
+#endif
+#ifndef DRM_MODE_ROTATE_0
+#define DRM_MODE_ROTATE_0   (1<<0)
+#define DRM_MODE_ROTATE_90  (1<<1)
+#define DRM_MODE_ROTATE_180 (1<<2)
+#define DRM_MODE_ROTATE_270 (1<<3)
+#endif
+#ifndef DRM_MODE_REFLECT_X
+#define DRM_MODE_REFLECT_X  (1<<4)
+#define DRM_MODE_REFLECT_Y  (1<<5)
+#endif
+#ifndef DRM_PLANE_TYPE_PRIMARY
+#define DRM_PLANE_TYPE_PRIMARY 1
+#endif
 
 // Lets linux_kvm_drm_egl.c reach libdrm through the single dlopen here.
 int kvm_drm_prime_handle_to_fd(int fd, unsigned int handle, unsigned int flags, int *prime_fd)
@@ -232,29 +259,118 @@ extern void kvm_send_display_list();
 extern int kvm_server_inputdata(char *block, int blocklen);
 extern void kvm_server_sighandler(int signum, siginfo_t *info, void *context);
 
+// Viewer input read off master2slave but not yet parsed. Parsing only happens between outbound
+// packets (kvm_drm_process_pending_input): input handlers reply via kvm_send_* onto the same pipe,
+// which would interleave into a half-written tile if run from inside kvm_drm_write_all.
+static char g_drmInputBuf[262144];
+static int g_drmInputLen = 0;
+
+// Write one whole packet to the (non-blocking) slave->master pipe, draining viewer input while
+// stalled. Under tunnel backpressure the master deliberately stops reading this pipe; a plain
+// blocking write() here then also stopped our master2slave reads, the master's event thread
+// blocked writing input into that second full pipe, and with the event loop dead the resume that
+// would drain everything could never arrive: both processes deadlocked until killed. Keeping the
+// input pipe drained while we wait keeps the master's event loop alive, so backpressure stays
+// what it is meant to be - a stall, not a hang.
 static int kvm_drm_write_all(int fd, const char *buffer, size_t len)
 {
 	size_t offset = 0;
-	ssize_t written = 0;
 
 	while (offset < len)
 	{
-		written = write(fd, buffer + offset, len - offset);
-		if (written < 0)
+		struct pollfd pfd[2];
+		nfds_t nfds = 1;
+		int inputSlot = -1;
+
+		if (g_shutdown) { return -1; }
+
+		pfd[0].fd = fd;
+		pfd[0].events = POLLOUT;
+		pfd[0].revents = 0;
+		if (master2slave[0] > 0)
 		{
-			if (errno == EINTR)
+			if (g_drmInputLen >= (int)sizeof(g_drmInputBuf))
 			{
-				continue;
+				// Only reachable if the viewer streams input for minutes into one stalled write.
+				// Give up so the parent restarts the session instead of re-arming the deadlock.
+				return -1;
 			}
-			return -1;
+			inputSlot = (int)nfds;
+			pfd[nfds].fd = master2slave[0];
+			pfd[nfds].events = POLLIN;
+			pfd[nfds].revents = 0;
+			nfds++;
 		}
-		if (written == 0)
+
+		if (poll(pfd, nfds, 1000) < 0)
 		{
+			if (errno == EINTR) { continue; }	// SIGTERM lands here; g_shutdown is re-checked above
 			return -1;
 		}
-		offset += (size_t)written;
+
+		if (inputSlot >= 0 && (pfd[inputSlot].revents & (POLLIN | POLLHUP | POLLERR)) != 0)
+		{
+			ssize_t rd = read(master2slave[0], g_drmInputBuf + g_drmInputLen, sizeof(g_drmInputBuf) - (size_t)g_drmInputLen);
+			if (rd > 0)
+			{
+				g_drmInputLen += (int)rd;
+			}
+			else if (rd == 0)
+			{
+				g_shutdown = 1;	// master closed its end: the session is going away
+				return -1;
+			}
+			else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
+			{
+				g_shutdown = 1;
+				return -1;
+			}
+		}
+
+		if ((pfd[0].revents & (POLLERR | POLLNVAL)) != 0) { return -1; }
+		if ((pfd[0].revents & POLLOUT) != 0)
+		{
+			ssize_t written = write(fd, buffer + offset, len - offset);
+			if (written < 0)
+			{
+				if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue; }
+				return -1;
+			}
+			offset += (size_t)written;
+		}
 	}
 	return 0;
+}
+
+// Entry point for the shared kvm_send_* helpers in linux_kvm.c: in DRM mode every write to the
+// pipe must take the draining path above, both for the deadlock and because the pipe is left
+// non-blocking for the slave's lifetime (a raw write() could truncate and desync the stream).
+int kvm_drm_slave_write(const void *buffer, size_t len)
+{
+	return kvm_drm_write_all(slave2master[1], (const char *)buffer, len);
+}
+
+// Parse whatever complete input messages have accumulated. A handler's kvm_send_* reply re-enters
+// the drain in kvm_drm_write_all and can grow g_drmInputLen mid-loop; appends land beyond
+// 'consumed', so re-reading g_drmInputLen each pass stays correct and leftovers keep any partial
+// trailing message intact for the next read to complete.
+static void kvm_drm_process_pending_input(void)
+{
+	int consumed = 0;
+	int msgLen = 0;
+
+	while ((msgLen = kvm_server_inputdata(g_drmInputBuf + consumed, g_drmInputLen - consumed)) != 0)
+	{
+		consumed += msgLen;
+	}
+	if (consumed > 0)
+	{
+		if (consumed < g_drmInputLen)
+		{
+			memmove(g_drmInputBuf, g_drmInputBuf + consumed, (size_t)(g_drmInputLen - consumed));
+		}
+		g_drmInputLen -= consumed;
+	}
 }
 
 static int kvm_drm_send_dirty_tiles(const unsigned char *rgbBuffer, size_t rgbSize, char **desktopBuffer, long long *desktopBufferSize)
@@ -896,6 +1012,9 @@ static bool kvm_drm_try_device(const char *path, kvm_drm_device *devices, int ma
 
 	if (*device_count >= max_devices || base >= max_outputs) { return false; }
 	if ((fd = open(path, O_RDWR | KVM_DRM_O_CLOEXEC | O_NONBLOCK)) < 0) { return false; }
+	// Without this cap the kernel hides primary planes from GetPlaneResources, and the
+	// plane-rotation query (and the plane-fb fallback) would only ever see overlays.
+	drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
 	if (!kvm_drm_collect_active_outputs_on_fd(fd, path, &outputs[base], max_outputs - base, &collected, true, true, out_error, out_error_size))
 	{
 		close(fd);
@@ -1517,14 +1636,216 @@ static void kvm_drm_get_rotated_dimensions(const kvm_drm_scanout_frame *frame, u
 	}
 }
 
-static kvm_drm_rotation kvm_drm_effective_output_rotation(const kvm_drm_output *output, const kvm_drm_scanout_frame *frame)
+// Map a DRM plane "rotation" property bitmask to quarter turns in the same angular direction as
+// the wl_output transform (both are specified counter-clockwise). Both reflections together are
+// exactly an extra 180; a single-axis mirror is not expressible as a rotation, so reject it.
+static int kvm_drm_plane_rotation_value_to_quarters(uint64_t value)
 {
+	int quarters;
+	uint64_t reflects = value & (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y);
+	if (value & DRM_MODE_ROTATE_0) { quarters = 0; }
+	else if (value & DRM_MODE_ROTATE_90) { quarters = 1; }
+	else if (value & DRM_MODE_ROTATE_180) { quarters = 2; }
+	else if (value & DRM_MODE_ROTATE_270) { quarters = 3; }
+	else { return -1; }
+	if (reflects == (DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y)) { quarters = (quarters + 2) % 4; }
+	else if (reflects != 0) { return -1; }
+	return quarters;
+}
+
+// Find the named property on a plane; returns the property id (0 if absent) and its current value.
+static uint32_t kvm_drm_find_plane_prop(int fd, uint32_t plane_id, const char *name, uint64_t *out_value)
+{
+	uint32_t prop_id = 0;
+	uint32_t i;
+	drmModeObjectProperties *props = drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE);
+	if (props == NULL) { return 0; }
+	for (i = 0; i < props->count_props && prop_id == 0; ++i)
+	{
+		drmModePropertyRes *prop = drmModeGetProperty(fd, props->props[i]);
+		if (prop == NULL) { continue; }
+		if (strcmp(prop->name, name) == 0)
+		{
+			prop_id = prop->prop_id;
+			if (out_value != NULL) { *out_value = props->prop_values[i]; }
+		}
+		drmModeFreeProperty(prop);
+	}
+	drmModeFreeObjectProperties(props);
+	return prop_id;
+}
+
+// Re-read the current value of a known property id on a plane.
+static int kvm_drm_read_plane_prop_value(int fd, uint32_t plane_id, uint32_t prop_id, uint64_t *out_value)
+{
+	int found = 0;
+	uint32_t i;
+	drmModeObjectProperties *props = drmModeObjectGetProperties(fd, plane_id, DRM_MODE_OBJECT_PLANE);
+	if (props == NULL) { return 0; }
+	for (i = 0; i < props->count_props; ++i)
+	{
+		if (props->props[i] == prop_id)
+		{
+			*out_value = props->prop_values[i];
+			found = 1;
+			break;
+		}
+	}
+	drmModeFreeObjectProperties(props);
+	return found;
+}
+
+// The scanout plane feeding a CRTC and its "rotation" property id are stable across frames, so the
+// per-frame cost is one plane fetch (rebind check) plus one property-values fetch.
+typedef struct kvm_drm_plane_rotation_cache
+{
+	int fd;
+	uint32_t crtc_id;
+	uint32_t plane_id;
+	uint32_t prop_id;
+	int last_logged_quarters;
+} kvm_drm_plane_rotation_cache;
+static kvm_drm_plane_rotation_cache g_planeRotationCache[KVM_DRM_MAX_OUTPUTS];
+static int g_planeRotationCacheCount = 0;
+
+// Current rotation the scanout hardware applies to the buffer feeding crtc_id, in quarter turns;
+// -1 when unknown (no matching plane, no "rotation" property, or a value we cannot express).
+// Prefers the plane presenting fb_id (the buffer we actually captured), falling back to the
+// CRTC's primary plane, so fullscreen direct scanout on an overlay plane resolves correctly.
+static int kvm_drm_get_plane_rotation_quarters(int fd, uint32_t crtc_id, uint32_t fb_id)
+{
+	uint64_t value = 0;
+	int slot = -1;
+	int i;
+	kvm_drm_plane_rotation_cache *entry = NULL;
+	drmModePlaneRes *pres = NULL;
+	uint32_t match_plane = 0, match_prop = 0;
+	uint32_t primary_plane = 0, primary_prop = 0;
+	uint64_t match_value = 0, primary_value = 0;
+
+	for (i = 0; i < g_planeRotationCacheCount; ++i)
+	{
+		if (g_planeRotationCache[i].fd == fd && g_planeRotationCache[i].crtc_id == crtc_id)
+		{
+			slot = i;
+			break;
+		}
+	}
+
+	if (slot >= 0 && g_planeRotationCache[slot].plane_id != 0)
+	{
+		entry = &g_planeRotationCache[slot];
+		drmModePlane *plane = drmModeGetPlane(fd, entry->plane_id);
+		if (plane != NULL && plane->crtc_id == crtc_id)
+		{
+			drmModeFreePlane(plane);
+			if (kvm_drm_read_plane_prop_value(fd, entry->plane_id, entry->prop_id, &value))
+			{
+				return kvm_drm_plane_rotation_value_to_quarters(value);
+			}
+		}
+		else if (plane != NULL)
+		{
+			drmModeFreePlane(plane);
+		}
+		entry->plane_id = 0;	// stale binding: rescan below
+	}
+
+	pres = drmModeGetPlaneResources(fd);
+	if (pres == NULL) { return -1; }
+	for (i = 0; i < (int)pres->count_planes && match_plane == 0; ++i)
+	{
+		drmModePlane *plane = drmModeGetPlane(fd, pres->planes[i]);
+		if (plane == NULL) { continue; }
+		if (plane->crtc_id == crtc_id && plane->fb_id != 0)
+		{
+			uint64_t rot = 0, type = 0;
+			uint32_t prop = kvm_drm_find_plane_prop(fd, plane->plane_id, "rotation", &rot);
+			if (prop != 0)
+			{
+				if (fb_id != 0 && plane->fb_id == fb_id)
+				{
+					match_plane = plane->plane_id;
+					match_prop = prop;
+					match_value = rot;
+				}
+				else if (primary_plane == 0 &&
+					kvm_drm_find_plane_prop(fd, plane->plane_id, "type", &type) != 0 &&
+					type == DRM_PLANE_TYPE_PRIMARY)
+				{
+					primary_plane = plane->plane_id;
+					primary_prop = prop;
+					primary_value = rot;
+				}
+			}
+		}
+		drmModeFreePlane(plane);
+	}
+	drmModeFreePlaneResources(pres);
+
+	if (match_plane == 0)
+	{
+		match_plane = primary_plane;
+		match_prop = primary_prop;
+		match_value = primary_value;
+	}
+	if (match_plane == 0) { return -1; }
+
+	if (slot < 0 && g_planeRotationCacheCount < KVM_DRM_MAX_OUTPUTS)
+	{
+		slot = g_planeRotationCacheCount++;
+		g_planeRotationCache[slot].last_logged_quarters = -2;
+	}
+	if (slot >= 0)
+	{
+		g_planeRotationCache[slot].fd = fd;
+		g_planeRotationCache[slot].crtc_id = crtc_id;
+		g_planeRotationCache[slot].plane_id = match_plane;
+		g_planeRotationCache[slot].prop_id = match_prop;
+	}
+	return kvm_drm_plane_rotation_value_to_quarters(match_value);
+}
+
+static kvm_drm_rotation kvm_drm_effective_output_rotation(int fd, const kvm_drm_output *output, const kvm_drm_scanout_frame *frame)
+{
+	if (output->rotation != KVM_DRM_ROTATION_0)
+	{
+		// The transform only says how the logical image relates to the panel, not who rotates it.
+		// When the compositor offloads the rotation to the plane hardware the scanout buffer stays
+		// in logical orientation (mutter does this for 180 on i915, which can't offload 90/270
+		// here), so compose the plane's own rotation with the transform-derived un-rotation:
+		// whatever the hardware already turns must not be turned again in software.
+		int planeQuarters = kvm_drm_get_plane_rotation_quarters(fd, output->crtc_id, frame->fb_id);
+		if (planeQuarters >= 0)
+		{
+			kvm_drm_rotation effective = (kvm_drm_rotation)((((int)output->rotation) + planeQuarters) % 4);
+			if (drm_debug >= 2)
+			{
+				int i;
+				for (i = 0; i < g_planeRotationCacheCount; ++i)
+				{
+					if (g_planeRotationCache[i].fd == fd && g_planeRotationCache[i].crtc_id == output->crtc_id &&
+						g_planeRotationCache[i].last_logged_quarters != planeQuarters)
+					{
+						fprintf(stderr, "DRM: CRTC %u plane %u rotation property=%d quarter(s); un-rotation %d -> effective %d\n",
+							output->crtc_id, g_planeRotationCache[i].plane_id, planeQuarters,
+							(int)output->rotation, (int)effective);
+						g_planeRotationCache[i].last_logged_quarters = planeQuarters;
+						break;
+					}
+				}
+			}
+			return effective;
+		}
+	}
 	if (output->rotation == KVM_DRM_ROTATION_90 || output->rotation == KVM_DRM_ROTATION_270)
 	{
-		// A 90/270 transform swaps the logical aspect relative to the scanout buffer. If the
-		// buffer orientation already matches the logical rect, the plane hardware is doing the
-		// rotation and the content needs no software pass. Square shapes give no signal; trust
-		// the transform then (compositors pre-rotate in the renderer on virtually all hardware).
+		// Fallback when the rotation property is unreadable: a 90/270 transform swaps the logical
+		// aspect relative to the scanout buffer. If the buffer orientation already matches the
+		// logical rect, the plane hardware is doing the rotation and the content needs no software
+		// pass. Square shapes give no signal; trust the transform then (compositors pre-rotate in
+		// the renderer on virtually all hardware). 180 has no aspect signal at all, which is why
+		// the property query above is the primary source.
 		if (frame->width != frame->height && output->width != output->height &&
 			(frame->width > frame->height) == (output->width > output->height))
 		{
@@ -2477,10 +2798,6 @@ static int kvm_drm_drop_to_session_uid_with_caps(int sessionUid, char *err, size
 void *kvm_server_mainloop_drm(void *parm)
 {
 	int sessionUid = (int)(intptr_t)parm;
-	char pchRequest2[30000];
-	int ptr = 0;
-	int ptr2 = 0;
-	int len = 0;
 	ssize_t cbBytesRead = 0;
 	int r = 0;
 	struct sigaction action;
@@ -2499,6 +2816,9 @@ void *kvm_server_mainloop_drm(void *parm)
 
 	kvm_drm_init_debug();
 	g_kvmBackendDRM = 1;
+	// Non-blocking for the slave's lifetime: kvm_drm_write_all() relies on it to multiplex tile
+	// writes against master2slave input drains, and every sender routes through there in DRM mode.
+	fcntl(slave2master[1], F_SETFL, fcntl(slave2master[1], F_GETFL, 0) | O_NONBLOCK);
 	g_enableEvents = kvm_events_evdev_init();
 	if (!g_enableEvents)
 	{
@@ -2657,33 +2977,19 @@ void *kvm_server_mainloop_drm(void *parm)
 			break;
 		}
 
-		if (selectResult > 0 && FD_ISSET(master2slave[0], &readset))
+		if (selectResult > 0 && FD_ISSET(master2slave[0], &readset) && g_drmInputLen < (int)sizeof(g_drmInputBuf))
 		{
-			cbBytesRead = read(master2slave[0], pchRequest2 + len, sizeof(pchRequest2) - len);
+			cbBytesRead = read(master2slave[0], g_drmInputBuf + g_drmInputLen, sizeof(g_drmInputBuf) - (size_t)g_drmInputLen);
 			if (cbBytesRead <= 0)
 			{
 				g_shutdown = 1;
 				break;
 			}
-
-			len += (int)cbBytesRead;
-			ptr = 0;
-			while ((ptr2 = kvm_server_inputdata((char *)pchRequest2 + ptr, len - ptr)) != 0)
-			{
-				ptr += ptr2;
-			}
-			if (ptr == len)
-			{
-				len = 0;
-				ptr = 0;
-			}
-			else if (ptr > 0)
-			{
-				memmove(pchRequest2, pchRequest2 + ptr, len - ptr);
-				len -= ptr;
-				ptr = 0;
-			}
+			g_drmInputLen += (int)cbBytesRead;
 		}
+		// Also covers input drained into the buffer while a frame write was stalled: those bytes
+		// don't wake select() again, so parse whenever anything is pending.
+		kvm_drm_process_pending_input();
 
 		if (change_display)
 		{
@@ -2819,7 +3125,7 @@ void *kvm_server_mainloop_drm(void *parm)
 				kvm_drm_rotation forcedRotation = KVM_DRM_ROTATION_0;
 				if (!kvm_drm_get_forced_rotation(&forcedRotation, 0))
 				{
-					frame.rotation = kvm_drm_effective_output_rotation(&outputs[outputIndex], &frame);
+					frame.rotation = kvm_drm_effective_output_rotation(dev->fd, &outputs[outputIndex], &frame);
 				}
 			}
 

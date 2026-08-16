@@ -148,6 +148,22 @@ FILE *logFile = NULL;
 int g_enableEvents = 0;
 extern int gRemoteMouseRenderDefault;
 
+// In DRM mode the slave->master pipe is non-blocking and shared with the tile stream, so every
+// sender must go through the draining writer in linux_kvm_drm.c: a raw write() could truncate a
+// message on a full pipe (desyncing the stream) or, blocking, re-arm the master<->slave pipe
+// deadlock that the draining writer exists to prevent.
+static void kvm_slave_send(const void *buffer, size_t len)
+{
+	if (g_kvmBackendDRM != 0)
+	{
+		ignore_result(kvm_drm_slave_write(buffer, len));
+	}
+	else
+	{
+		ignore_result(write(slave2master[1], buffer, len));
+	}
+}
+
 int remoteMouseX = 0, remoteMouseY = 0;
 
 extern void* tilebuffer;
@@ -301,7 +317,7 @@ void kvm_send_error(char *msg)
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
-	ignore_result(write(slave2master[1], buffer, msgLen + 2));
+	kvm_slave_send(buffer, msgLen + 4);
 }
 
 KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
@@ -441,7 +457,7 @@ void kvm_send_resolution()
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
 
-	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
+	kvm_slave_send(buffer, sizeof(buffer));
 }
 
 void kvm_send_display()
@@ -452,7 +468,7 @@ void kvm_send_display()
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)6);					// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons(sel);									// Display selection
 
-	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
+	kvm_slave_send(buffer, sizeof(buffer));
 }
 
 #define BUFSIZE 65535
@@ -573,7 +589,7 @@ void kvm_send_display_info()
 		((unsigned short*)buffer)[base + 3] = (unsigned short)htons((unsigned short)g_monitors[i].width);
 		((unsigned short*)buffer)[base + 4] = (unsigned short)htons((unsigned short)g_monitors[i].height);
 	}
-	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
+	kvm_slave_send(buffer, ILibMemory_Size(buffer));
 	ILibMemory_Free(buffer);
 }
 
@@ -627,7 +643,7 @@ void kvm_send_display_list()
 		currentSel = (unsigned short)CURRENT_DISPLAY_ID;
 	((unsigned short*)buffer)[i + 3] = (unsigned short)htons(currentSel);
 
-	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
+	kvm_slave_send(buffer, ILibMemory_Size(buffer));
 	free(displays);
 }
 
@@ -1026,7 +1042,7 @@ void kvm_server_jpegerror(char *msg)
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
 
-	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
+	kvm_slave_send(buffer, ILibMemory_Size(buffer));
 }
 
 #pragma pack(push, 1)
