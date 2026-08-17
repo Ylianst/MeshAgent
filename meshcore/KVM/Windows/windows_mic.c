@@ -48,6 +48,12 @@ limitations under the License.
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <propsys.h>
+/* PROPVARIANT/PropVariantInit/PropVariantClear: propsys.h itself only
+ * declares IPropertyStore, not the PROPVARIANT helpers used to read a value
+ * out of one -- pull those in explicitly rather than depend on windows.h
+ * happening to have reached propidl.h by some other transitive path. */
+#include <propidl.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,6 +74,15 @@ static const IID MESHMIC_IID_IAudioClient =
 	{ 0x1cb9ad4c, 0xdbfa, 0x4c32, { 0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2 } };
 static const IID MESHMIC_IID_IAudioCaptureClient =
 	{ 0xc8adbd64, 0xe71e, 0x48a0, { 0xa4, 0xde, 0x18, 0x5c, 0x39, 0x5c, 0xd3, 0x17 } };
+/* Used only by device enumeration (kvm_mic_query_devices / the deviceIndex
+ * half of MNG_MIC_START). Same reasoning as the four above -- defined by
+ * hand rather than trusting INITGUID's include-order requirement. */
+static const IID MESHMIC_IID_IMMDeviceCollection =
+	{ 0x0bd7a1be, 0x7a1a, 0x44db, { 0x83, 0x97, 0xcc, 0x53, 0x92, 0x38, 0x7b, 0x5e } };
+static const IID MESHMIC_IID_IPropertyStore =
+	{ 0x886d8eeb, 0x8cf2, 0x4446, { 0x8d, 0x02, 0xcd, 0xba, 0x1d, 0xbd, 0xcf, 0x99 } };
+static const PROPERTYKEY MESHMIC_PKEY_Device_FriendlyName =
+	{ { 0xa45c254e, 0xdf1c, 0x4efd, { 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0 } }, 14 };
 #endif
 
 #ifndef WAVE_FORMAT_PCM
@@ -93,6 +108,10 @@ static const IID MESHMIC_IID_IAudioCaptureClient =
 #define MIC_BITRATE_KBPS    28
 #define MIC_CAPS_LEN        10
 #define MIC_POLL_MS         10
+
+#define MIC_DEVICE_MAX_COUNT  32  /* MNG_MIC_DEVICE_LIST's count byte is also this bounded */
+#define MIC_DEVICE_NAME_MAX   63  /* display name sent to the browser; truncated, not rejected */
+#define MIC_DEVICE_ID_MAX     255 /* real WASAPI endpoint ID, used locally to reopen the device */
 
 /* ~250 ms of mono 48 kHz headroom before we start discarding. */
 #define MIC_RING_SAMPLES    (MIC_FRAME_SAMPLES * 12)
@@ -129,6 +148,16 @@ static int g_consent = 0;      /* only kvm_mic_set_consent() may set this */
 /* 1 between asking the JS layer to prompt and that prompt being resolved, so
  * a cancel is only ever sent for a prompt that is actually on screen. */
 static int g_promptOutstanding = 0;
+/* Enumerated by kvm_mic_query_devices(), indexed exactly as sent in
+ * MNG_MIC_DEVICE_LIST. g_deviceLabels are for display (browser-facing,
+ * truncated); g_deviceIds are the real WASAPI endpoint IDs (UTF-8, from
+ * IMMDevice::GetId) used locally to reopen a specific device, never sent
+ * anywhere. */
+static char g_deviceLabels[MIC_DEVICE_MAX_COUNT][MIC_DEVICE_NAME_MAX + 1];
+static char g_deviceIds[MIC_DEVICE_MAX_COUNT][MIC_DEVICE_ID_MAX + 1];
+static int g_deviceCount = 0;
+static int g_currentDeviceIndex = -1;   /* -1 = system default; else index into g_deviceIds */
+static char g_currentDeviceId[MIC_DEVICE_ID_MAX + 1] = {0}; /* resolved from g_currentDeviceIndex; capture thread reads this once at start */
 
 /* ------------------------------------------------------------------------ */
 /* Locking                                                                    */
@@ -345,6 +374,120 @@ static int microphone_available(void)
 	return ok;
 }
 
+/* Enumerate active capture endpoints and send MNG_MIC_DEVICE_LIST: mirrors
+ * linux_mic.c's kvm_mic_query_devices() wire format and index semantics
+ * (the returned order is this session's index space for a later
+ * MNG_MIC_START's device-index byte, valid only until the next call here).
+ * Every step is individually NULL/HRESULT-checked and simply contributes
+ * nothing on failure rather than aborting the whole enumeration -- one
+ * device this system finds troublesome (a bad property store, say)
+ * shouldn't hide every other one from the operator. */
+void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+{
+	IMMDeviceEnumerator *pEnum = NULL;
+	IMMDeviceCollection *pCollection = NULL;
+	HRESULT hr, co;
+	UINT count = 0, i;
+	int sentCount = 0;
+	unsigned char *outFrame;
+	int outLen, ptr;
+
+	co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+	hr = CoCreateInstance(&MESHMIC_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
+	                      &MESHMIC_IID_IMMDeviceEnumerator, (void**)&pEnum);
+	if (SUCCEEDED(hr) && pEnum != NULL)
+	{
+		hr = pEnum->lpVtbl->EnumAudioEndpoints(pEnum, eCapture, DEVICE_STATE_ACTIVE, &pCollection);
+		if (SUCCEEDED(hr) && pCollection != NULL)
+		{
+			hr = pCollection->lpVtbl->GetCount(pCollection, &count);
+			if (FAILED(hr)) { count = 0; }
+
+			for (i = 0; i < count && sentCount < MIC_DEVICE_MAX_COUNT; i++)
+			{
+				IMMDevice *pDevice = NULL;
+				hr = pCollection->lpVtbl->Item(pCollection, i, &pDevice);
+				if (FAILED(hr) || pDevice == NULL) { continue; }
+
+				{
+					LPWSTR devId = NULL;
+					IPropertyStore *pStore = NULL;
+					char label[MIC_DEVICE_NAME_MAX + 1];
+					int haveLabel = 0;
+
+					hr = pDevice->lpVtbl->GetId(pDevice, &devId);
+					if (FAILED(hr) || devId == NULL) { pDevice->lpVtbl->Release(pDevice); continue; }
+
+					hr = pDevice->lpVtbl->OpenPropertyStore(pDevice, STGM_READ, &pStore);
+					if (SUCCEEDED(hr) && pStore != NULL)
+					{
+						PROPVARIANT var;
+						PropVariantInit(&var);
+						hr = pStore->lpVtbl->GetValue(pStore, &MESHMIC_PKEY_Device_FriendlyName, &var);
+						if (SUCCEEDED(hr) && var.vt == VT_LPWSTR && var.pwszVal != NULL)
+						{
+							int n = WideCharToMultiByte(CP_UTF8, 0, var.pwszVal, -1, label, sizeof(label), NULL, NULL);
+							haveLabel = (n > 0);
+						}
+						PropVariantClear(&var);
+						pStore->lpVtbl->Release(pStore);
+					}
+					if (!haveLabel)
+					{
+						/* WideCharToMultiByte truncates silently at the
+						 * buffer size, which is exactly the behaviour
+						 * wanted here (see MIC_DEVICE_NAME_MAX) -- reuse it
+						 * for the fallback label too instead of a second
+						 * ad-hoc truncation. */
+						WideCharToMultiByte(CP_UTF8, 0, devId, -1, label, sizeof(label), NULL, NULL);
+					}
+					label[sizeof(label) - 1] = '\0';
+
+					strncpy(g_deviceLabels[sentCount], label, MIC_DEVICE_NAME_MAX);
+					g_deviceLabels[sentCount][MIC_DEVICE_NAME_MAX] = '\0';
+					WideCharToMultiByte(CP_UTF8, 0, devId, -1, g_deviceIds[sentCount], sizeof(g_deviceIds[sentCount]), NULL, NULL);
+					g_deviceIds[sentCount][MIC_DEVICE_ID_MAX] = '\0';
+					sentCount++;
+
+					CoTaskMemFree(devId);
+				}
+				pDevice->lpVtbl->Release(pDevice);
+			}
+			pCollection->lpVtbl->Release(pCollection);
+		}
+		pEnum->lpVtbl->Release(pEnum);
+	}
+	if (SUCCEEDED(co)) { CoUninitialize(); }
+
+	mic_lock_init();
+	mic_lock();
+	g_deviceCount = sentCount;
+
+	outLen = 5; /* header(4) + count(1) */
+	for (i = 0; i < (UINT)sentCount; i++) { outLen += 1 + (int)strlen(g_deviceLabels[i]); }
+
+	outFrame = (unsigned char*)malloc((size_t)outLen);
+	if (outFrame == NULL) { mic_unlock(); return; }
+
+	outFrame[0] = (unsigned char)((MNG_MIC_DEVICE_LIST >> 8) & 0xFF);
+	outFrame[1] = (unsigned char)(MNG_MIC_DEVICE_LIST & 0xFF);
+	outFrame[2] = (unsigned char)((outLen >> 8) & 0xFF);
+	outFrame[3] = (unsigned char)(outLen & 0xFF);
+	outFrame[4] = (unsigned char)sentCount;
+	ptr = 5;
+	for (i = 0; i < (UINT)sentCount; i++)
+	{
+		size_t len = strlen(g_deviceLabels[i]);
+		outFrame[ptr] = (unsigned char)len; ptr++;
+		memcpy(outFrame + ptr, g_deviceLabels[i], len);
+		ptr += (int)len;
+	}
+	mic_unlock();
+
+	if (writeHandler != NULL) { writeHandler((char*)outFrame, outLen, reserved); }
+	free(outFrame);
+}
+
 static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
 {
 	unsigned char caps[MIC_CAPS_LEN];
@@ -488,12 +631,25 @@ static DWORD WINAPI mic_capture_thread(LPVOID param)
 	MicRing ring;
 	int16_t pcm[MIC_MAX_FRAME_SAMPLES]; /* sized for the largest MNG_MIC_START may request */
 	unsigned char opusBuf[MIC_MAX_PKT];
+	char deviceId[MIC_DEVICE_ID_MAX + 1];
+	WCHAR deviceIdW[MIC_DEVICE_ID_MAX + 1];
 
 	UNREFERENCED_PARAMETER(param);
 
 	ring_init(&ring);
 	rs.pos = 0.0;
 	rs.prev = 0.0;
+
+	/* Read once at thread start, not per-frame like g_frameSamples: unlike
+	 * encoder settings, WASAPI has no "switch endpoint on a live stream"
+	 * primitive, so a device change is handled by kvm_mic_start() stopping
+	 * and restarting this thread entirely -- there is never a live value to
+	 * race with here. */
+	mic_lock_init();
+	mic_lock();
+	strncpy(deviceId, g_currentDeviceId, MIC_DEVICE_ID_MAX);
+	deviceId[MIC_DEVICE_ID_MAX] = '\0';
+	mic_unlock();
 
 	coHr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (coHr == RPC_E_CHANGED_MODE)
@@ -515,7 +671,18 @@ static DWORD WINAPI mic_capture_thread(LPVOID param)
 	                      &MESHMIC_IID_IMMDeviceEnumerator, (void**)&pEnum);
 	if (FAILED(hr) || pEnum == NULL) { goto done; }
 
-	hr = pEnum->lpVtbl->GetDefaultAudioEndpoint(pEnum, eCapture, eConsole, &pDevice);
+	if (deviceId[0] != '\0' && MultiByteToWideChar(CP_UTF8, 0, deviceId, -1, deviceIdW, MIC_DEVICE_ID_MAX + 1) > 0)
+	{
+		/* A specific device was selected (see kvm_mic_query_devices()); fall
+		 * back to the default endpoint if it no longer exists (unplugged
+		 * since selection) rather than failing the session outright. */
+		hr = pEnum->lpVtbl->GetDevice(pEnum, deviceIdW, &pDevice);
+		if (FAILED(hr) || pDevice == NULL) { hr = pEnum->lpVtbl->GetDefaultAudioEndpoint(pEnum, eCapture, eConsole, &pDevice); }
+	}
+	else
+	{
+		hr = pEnum->lpVtbl->GetDefaultAudioEndpoint(pEnum, eCapture, eConsole, &pDevice);
+	}
 	if (FAILED(hr) || pDevice == NULL) { goto done; }
 
 	hr = pDevice->lpVtbl->Activate(pDevice, &MESHMIC_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&pClient);
@@ -633,6 +800,12 @@ void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), voi
 			opus_encoder_destroy(enc);
 		}
 	}
+	/* Neither a device selection nor its enumerated list carries over from a
+	 * previous session -- the list itself is re-queried fresh per session
+	 * anyway (see p22QueryDevices() in default.handlebars). */
+	g_deviceCount = 0;
+	g_currentDeviceIndex = -1;
+	g_currentDeviceId[0] = '\0';
 	haveEncoder = (g_enc != NULL);
 	mic_unlock();
 
@@ -643,21 +816,29 @@ void kvm_mic_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), voi
 /* Apply an optional MNG_MIC_START settings payload. frame/size are the whole
  * wire frame (cmd+len header included), matching every other case in the KVM
  * command switch -- fields therefore start at frame[4], not frame[0]. A NULL
- * frame, or one shorter than the 12-byte extended form, leaves everything
+ * frame, or one shorter than the 13-byte extended form, leaves everything
  * untouched: this is what makes a legacy 4-byte START (or one from a server
  * that predates this feature) behave exactly as before. Must be called with
  * g_lock held (via mic_lock()), and only when g_enc is known non-NULL.
  *
- * Every field except application mode can be changed on a live encoder via
- * opus_encoder_ctl. Application mode is not safe to assume is live-updatable,
- * so a change there destroys and recreates the encoder instead -- this only
- * happens on an operator-initiated profile change, never per-frame, so the
- * recreation cost is irrelevant. Mirrors linux_mic.c's mic_apply_params(). */
-static void mic_apply_params(const unsigned char *frame, int size)
+ * Every field except application mode and input device can be changed on a
+ * live encoder/stream. Application mode is not safe to assume is
+ * live-updatable, so a change there destroys and recreates the encoder
+ * instead -- this only happens on an operator-initiated profile change,
+ * never per-frame, so the recreation cost is irrelevant. Input device has no
+ * live-switch primitive in WASAPI either, so a change there is reported back
+ * to the caller (return value 1), which is kvm_mic_start()'s cue to stop and
+ * restart the capture thread on the new endpoint. Mirrors linux_mic.c's
+ * mic_apply_params().
+ *
+ * Returns 1 if the input device selection changed (capture thread needs a
+ * restart to pick it up), 0 otherwise. */
+static int mic_apply_params(const unsigned char *frame, int size)
 {
 	int bitrateKbps, application, vbr, vbrConstrained, bandwidth, frameMs, complexity, dtx, fec, lossPct;
+	int deviceIndex, deviceChanged;
 
-	if (frame == NULL || size < 12) { return; }
+	if (frame == NULL || size < 13) { return 0; }
 
 	bitrateKbps = frame[4];
 	if (bitrateKbps == 0) { bitrateKbps = MIC_BITRATE_KBPS; }
@@ -695,6 +876,12 @@ static void mic_apply_params(const unsigned char *frame, int size)
 	lossPct = frame[11];
 	if (lossPct > 100) { lossPct = 100; }
 
+	/* 0xFF (or anything past the last enumerated device) = system default.
+	 * Out-of-range falls back rather than refusing, since the operator's
+	 * list may simply be stale (nothing re-queried since a device vanished). */
+	deviceIndex = frame[12];
+	if (deviceIndex >= g_deviceCount) { deviceIndex = -1; }
+
 	if (application != g_application)
 	{
 		int err = 0;
@@ -720,6 +907,22 @@ static void mic_apply_params(const unsigned char *frame, int size)
 
 	g_frameSamples = (MIC_RATE * frameMs) / 1000;
 	g_bitrateKbps = bitrateKbps;
+
+	deviceChanged = (deviceIndex != g_currentDeviceIndex);
+	if (deviceChanged)
+	{
+		g_currentDeviceIndex = deviceIndex;
+		if (deviceIndex >= 0)
+		{
+			strncpy(g_currentDeviceId, g_deviceIds[deviceIndex], MIC_DEVICE_ID_MAX);
+			g_currentDeviceId[MIC_DEVICE_ID_MAX] = '\0';
+		}
+		else
+		{
+			g_currentDeviceId[0] = '\0';
+		}
+	}
+	return deviceChanged;
 }
 
 /* frame/size: the whole MNG_MIC_START wire frame, or NULL/0 when starting
@@ -728,7 +931,8 @@ static void mic_apply_params(const unsigned char *frame, int size)
 void kvm_mic_start(const unsigned char *frame, int size)
 {
 	HANDLE thread;
-	int alreadyRunning;
+	HANDLE restartThread = NULL;
+	int deviceChanged;
 
 	mic_lock_init();
 
@@ -758,18 +962,32 @@ void kvm_mic_start(const unsigned char *frame, int size)
 		return;
 	}
 
-	mic_apply_params(frame, size);
+	deviceChanged = mic_apply_params(frame, size);
 
-	alreadyRunning = (g_thread != NULL);
-	if (alreadyRunning)
+	if (g_thread != NULL)
 	{
-		/* Already capturing: the settings above were applied to the live
-		 * session; nothing else to do. Avoids repeating a full stop/start on
-		 * every duplicate MNG_MIC_START a browser sends, and is what lets the
-		 * operator change profile without interrupting audio. */
-		mic_unlock();
-		return;
+		if (!deviceChanged)
+		{
+			/* Already capturing on the requested device: the settings above
+			 * were applied to the live session; nothing else to do. Avoids
+			 * repeating a full stop/start on every duplicate MNG_MIC_START a
+			 * browser sends, and is what lets the operator change profile
+			 * without interrupting audio. */
+			mic_unlock();
+			return;
+		}
+		/* WASAPI has no live "switch endpoint" primitive: restart the
+		 * capture thread on the new device, without touching consent (this
+		 * is not kvm_mic_stop() -- the session's permission stands). Falls
+		 * through to the same spawn path a fresh start uses below. */
+		InterlockedExchange(&g_micShutdown, 1);
+		restartThread = g_thread;
+		g_thread = NULL;
 	}
+
+	mic_unlock();
+	if (restartThread != NULL) { WaitForSingleObject(restartThread, 3000); CloseHandle(restartThread); }
+	mic_lock();
 
 	InterlockedExchange(&g_micShutdown, 0);
 	thread = CreateThread(NULL, 0, mic_capture_thread, NULL, 0, NULL);

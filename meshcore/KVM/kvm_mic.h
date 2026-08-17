@@ -67,20 +67,39 @@ int kvm_mic_has_consent(void);
  * (re-)apply encoder settings to an already-open one.
  *   frame / size: the whole MNG_MIC_START wire frame (cmd+len header
  *   included), or NULL/0 to start/continue with whatever settings are
- *   already in effect. A frame shorter than the 12-byte extended form is
+ *   already in effect. A frame shorter than the 13-byte extended form is
  *   treated the same as NULL/0 -- this is what keeps a legacy 4-byte START,
  *   or one from a server that predates configurable encoding, behaving
  *   exactly as before. See mic_apply_params() in the platform .c file for
- *   the payload layout.
+ *   the payload layout, including the trailing device-index byte (0xFF =
+ *   system default input; anything else indexes the most recent
+ *   kvm_mic_query_devices() result, out-of-range falling back to default).
  * Refuses to start unless consent has been granted. When refused for that
  * reason specifically (a real microphone exists, consent alone is missing),
  * also emits MNG_MIC_CONSENT_NEEDED so the agent's JavaScript layer can
  * prompt the local user; safe to call speculatively (e.g. once at KVM
  * session start) for exactly this purpose.
  * If capture is already running, any settings in frame are applied to the
- * live encoder in place (no interruption) instead of being ignored.
+ * live encoder in place (no interruption) instead of being ignored. Changing
+ * the input device specifically does restart capture (there is no live
+ * "switch device" primitive in either platform's audio API), but does not
+ * touch consent.
  */
 void kvm_mic_start(const unsigned char *frame, int size);
+
+/*
+ * kvm_mic_query_devices - enumerate available input devices and send the
+ * result as MNG_MIC_DEVICE_LIST: [count(1)][{nameLen(1), name(nameLen)}...],
+ * using writeHandler/reserved exactly like kvm_mic_resend_caps(). Names are
+ * truncated to a bounded length and the list capped at a bounded count (see
+ * the platform .c file) so a device with a pathological name, or a system
+ * with an unreasonable number of them, can't produce an oversized frame.
+ * The returned order becomes this session's index space for a subsequent
+ * MNG_MIC_START's device-index byte, valid only until the next call to this
+ * function. Safe to call whether or not capture is currently running;
+ * enumeration itself needs no consent, since nothing is captured by it.
+ */
+void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved);
 
 /*
  * kvm_mic_stop - stop capture and revoke this session's consent, so a later

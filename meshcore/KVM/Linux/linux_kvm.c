@@ -981,6 +981,7 @@ int kvm_server_inputdata(char* block, int blocklen)
 		case MNG_MIC_STOP:  kvm_mic_stop(); break;
 		case MNG_MIC_QUERY: kvm_mic_resend_caps(kvm_audio_pipe_write, NULL); break;
 		case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
+		case MNG_MIC_DEVICE_QUERY: kvm_mic_query_devices(kvm_audio_pipe_write, NULL); break;
 #endif
 	}
 	return size;

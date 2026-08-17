@@ -97,7 +97,14 @@ typedef enum RemoteManagementCommands
 	// down a prompt nobody is waiting on any more (the operator changed
 	// their mind, or clicked by mistake). Leaving it up would ask the local
 	// user to decide about a request that no longer exists.
-	MNG_MIC_CONSENT_CANCEL = 102
+	MNG_MIC_CONSENT_CANCEL = 102,
+	// Input device enumeration, so the operator can pick something other
+	// than the system's default microphone. QUERY carries no payload;
+	// LIST's ordering is only valid for that one round-trip (see
+	// kvm_mic_query_devices() for the wire format) -- a later MNG_MIC_START
+	// referencing a device by index must use the most recently sent list.
+	MNG_MIC_DEVICE_QUERY = 103,
+	MNG_MIC_DEVICE_LIST = 104
 }RemoteManagementCommands;
 
 

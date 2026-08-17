@@ -13,8 +13,9 @@ jobs:
           sudo apt clean all && sudo apt update && 
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
-          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf && 
-          sudo apt-get install -y libxrandr-dev
+          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
+          sudo apt-get install -y libxrandr-dev &&
+          sudo apt-get install -y libpulse-dev
       # AUDIO=1 enables the Opus/PulseAudio KVM audio path. Only the
       # KVM-enabled targets get it, and only those with a committed
       # lib-opus/linux/$(ARCHNAME)/libopus.a: x86 (5), x86-64 (6), arm64 (26).
@@ -43,7 +44,7 @@ jobs:
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential libpulse-dev
       - name: Build ARM64 Linux
         run: make -j4 linux ARCHID=26 AUDIO=1 && make clean
       - name: Upload Artifacts

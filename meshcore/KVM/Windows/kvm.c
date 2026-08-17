@@ -735,6 +735,7 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 	case MNG_MIC_STOP:  kvm_mic_stop(); break;
 	case MNG_MIC_QUERY: kvm_mic_resend_caps(writeHandler, reserved); break;
 	case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
+	case MNG_MIC_DEVICE_QUERY: kvm_mic_query_devices(writeHandler, reserved); break;
 #endif
 	}
 	return size;
