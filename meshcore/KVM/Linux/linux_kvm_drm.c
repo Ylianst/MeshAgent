@@ -2973,6 +2973,9 @@ static int kvm_drm_drop_to_session_uid_with_caps(int sessionUid, char *err, size
 	}
 
 	ignore_result(prctl(PR_SET_KEEPCAPS, 0L, 0L, 0L, 0L));
+	// HOME is inherited from the root service; point it at the session user so Mesa's shader
+	// cache works instead of warning about /root ("Failed to create /root/.cache ... denied").
+	if (pw->pw_dir != NULL && pw->pw_dir[0] != 0) { setenv("HOME", pw->pw_dir, 1); }
 	return 0;
 }
 
@@ -2995,21 +2998,23 @@ void *kvm_server_mainloop_drm(void *parm)
 	int reportedScreenSel = -1;
 	uint64_t lastOutputRefreshMs = 0;
 	uint64_t lastRefreshFailureLogMs = 0;
+	int consoleUidMismatch = 0;
 	char lastRefreshFailure[KVM_DRM_MAX_ERROR];
 
 	kvm_drm_init_debug();
 	g_kvmBackendDRM = 1;
-	if (sessionUid <= 0)
 	{
-		// The master passes uid 0 at a display-manager greeter (consoleUid() only reports sessions
-		// at or above the login uid floor). Without the real session uid this child stays root with
-		// no XDG_RUNTIME_DIR/WAYLAND_DISPLAY, so the logical-layout and keymap queries can never
-		// reach the greeter's compositor: monitors pile up at 0,0 and unicode input turns ASCII-only.
+		// Trust logind's notion of the console over the uid the master derived. The master passes
+		// uid 0 at a display-manager greeter (consoleUid() only reports sessions at or above the
+		// login uid floor), and right after a logout it can still see the dying user session and
+		// pass THAT uid — either way this child would point at a runtime dir with no compositor,
+		// so the logical-layout and keymap queries fail: monitors pile up at 0,0 and unicode input
+		// turns ASCII-only. When logind cannot answer, keep whatever the master passed.
 		int derivedUid = kvm_wayland_active_console_uid();
-		if (derivedUid > 0)
+		if (derivedUid > 0 && derivedUid != sessionUid)
 		{
+			if (drm_debug) { fprintf(stderr, "DRM: using logind seat0 active uid %d (master passed %d)\n", derivedUid, sessionUid); }
 			sessionUid = derivedUid;
-			if (drm_debug) { fprintf(stderr, "DRM: derived session uid %d from logind seat0\n", sessionUid); }
 		}
 	}
 	// Non-blocking for the slave's lifetime: kvm_drm_write_all() relies on it to multiplex tile
@@ -3221,6 +3226,25 @@ void *kvm_server_mainloop_drm(void *parm)
 
 		if (lastOutputRefreshMs == 0 || nowMs - lastOutputRefreshMs >= 1000)
 		{
+			// Session handover while capture keeps working (logout -> greeter, user switch): the
+			// runtime-dir check in the capturedOutputs<=0 block only runs when scanout is lost, but
+			// DRM captures straight across a handover, so this child would stay bound to the dead
+			// session's uid/env forever. Exit for re-fork once logind consistently reports a
+			// different console owner; consecutive checks filter the flapping mid-transition.
+			int liveConsoleUid = kvm_wayland_active_console_uid();
+			if (liveConsoleUid > 0 && liveConsoleUid != sessionUid)
+			{
+				if (++consoleUidMismatch >= 3)
+				{
+					if (drm_debug) { fprintf(stderr, "DRM: console session uid changed %d -> %d; exiting for re-fork\n", sessionUid, liveConsoleUid); }
+					g_shutdown = 1;
+					break;
+				}
+			}
+			else
+			{
+				consoleUidMismatch = 0;
+			}
 			kvm_drm_output refreshed[KVM_DRM_MAX_OUTPUTS];
 			kvm_drm_desktop_layout refreshedLayout;
 			int refreshedCount = 0;
