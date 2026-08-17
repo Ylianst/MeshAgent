@@ -560,7 +560,13 @@ static int kvm_xkb_try_connect(void)
 	g_xkbDisplay = x_wl_display_connect(NULL);
 	if (g_xkbDisplay == NULL)
 	{
-		if (kvm_xkb_debug()) { fprintf(stderr, "XKB: wl_display_connect failed (WAYLAND_DISPLAY=%s)\n", getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "unset"); }
+		if (kvm_xkb_debug())
+		{
+			fprintf(stderr, "XKB: wl_display_connect failed (errno=%d, WAYLAND_DISPLAY=%s, XDG_RUNTIME_DIR=%s)\n",
+				errno,
+				getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "unset",
+				getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "unset");
+		}
 		return 0;
 	}
 	g_xkbRegistry = kvm_xkb_wl_display_get_registry(g_xkbDisplay);

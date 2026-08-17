@@ -51,6 +51,8 @@ limitations under the License.
 #include <sys/mman.h>
 
 #include <dlfcn.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <drm_fourcc.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -2452,7 +2454,14 @@ static bool kvm_drm_apply_xdg_output_layout(kvm_drm_output *outputs, int output_
 	ctx.display = wl_display_connect(NULL);
 	if (ctx.display == NULL)
 	{
-		if (drm_debug) { fprintf(stderr, "DRM: xdg-output query: wl_display_connect(NULL) failed (WAYLAND_DISPLAY=%s)\n", getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "(unset)"); }
+		if (drm_debug)
+		{
+			fprintf(stderr, "DRM: xdg-output query: wl_display_connect(NULL) failed (errno=%d, WAYLAND_DISPLAY=%s, XDG_RUNTIME_DIR=%s, euid=%d)\n",
+				errno,
+				getenv("WAYLAND_DISPLAY") ? getenv("WAYLAND_DISPLAY") : "(unset)",
+				getenv("XDG_RUNTIME_DIR") ? getenv("XDG_RUNTIME_DIR") : "(unset)",
+				(int)geteuid());
+		}
 		return false;
 	}
 	ctx.registry = kvm_wl_display_get_registry(ctx.display);
@@ -2676,10 +2685,29 @@ static bool kvm_drm_apply_kwin_layout(kvm_drm_output *outputs, int output_count,
 	return true;
 }
 
+// A socket FILE existing does not mean a compositor is behind it: a crashed/previous session can
+// leave a stale wayland-0 while the live one listens on wayland-1. Only a successful connect() is
+// proof of life.
+static int kvm_drm_wayland_socket_alive(const char *runtimeDir, const char *name)
+{
+	struct sockaddr_un addr;
+	int fd, r, len;
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	len = snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/%s", runtimeDir, name);
+	if (len <= 0 || len >= (int)sizeof(addr.sun_path)) { return 0; }
+	if ((fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)) < 0) { return 0; }
+	r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+	close(fd);
+	return r == 0 ? 1 : 0;
+}
+
 static void kvm_drm_prepare_session_environment(int sessionUid)
 {
 	char runtimeDir[64];
 	char busAddress[96];
+	char *envDisplay;
 	DIR *dir = NULL;
 	struct dirent *ent = NULL;
 	if (sessionUid <= 0)
@@ -2690,21 +2718,30 @@ static void kvm_drm_prepare_session_environment(int sessionUid)
 	snprintf(busAddress, sizeof(busAddress), "unix:path=/run/user/%d/bus", sessionUid);
 	if (getenv("XDG_RUNTIME_DIR") == NULL) { setenv("XDG_RUNTIME_DIR", runtimeDir, 1); }
 	if (getenv("DBUS_SESSION_BUS_ADDRESS") == NULL) { setenv("DBUS_SESSION_BUS_ADDRESS", busAddress, 1); }
-	if (getenv("WAYLAND_DISPLAY") == NULL)
+
+	envDisplay = getenv("WAYLAND_DISPLAY");
+	if (envDisplay != NULL && kvm_drm_wayland_socket_alive(runtimeDir, envDisplay))
 	{
-		dir = opendir(runtimeDir);
-		if (dir != NULL)
+		return;
+	}
+	if (envDisplay != NULL && drm_debug)
+	{
+		fprintf(stderr, "DRM: WAYLAND_DISPLAY=%s does not accept connections in %s; scanning for a live socket\n", envDisplay, runtimeDir);
+	}
+	dir = opendir(runtimeDir);
+	if (dir != NULL)
+	{
+		while ((ent = readdir(dir)) != NULL)
 		{
-			while ((ent = readdir(dir)) != NULL)
+			if (strncmp(ent->d_name, "wayland-", 8) == 0 && strstr(ent->d_name, ".lock") == NULL &&
+				kvm_drm_wayland_socket_alive(runtimeDir, ent->d_name))
 			{
-				if (strncmp(ent->d_name, "wayland-", 8) == 0 && strstr(ent->d_name, ".lock") == NULL)
-				{
-					setenv("WAYLAND_DISPLAY", ent->d_name, 1);
-					break;
-				}
+				if (drm_debug) { fprintf(stderr, "DRM: using live Wayland socket %s/%s\n", runtimeDir, ent->d_name); }
+				setenv("WAYLAND_DISPLAY", ent->d_name, 1);
+				break;
 			}
-			closedir(dir);
 		}
+		closedir(dir);
 	}
 }
 
