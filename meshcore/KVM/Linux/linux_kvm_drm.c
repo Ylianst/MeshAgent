@@ -2716,8 +2716,21 @@ static void kvm_drm_prepare_session_environment(int sessionUid)
 	}
 	snprintf(runtimeDir, sizeof(runtimeDir), "/run/user/%d", sessionUid);
 	snprintf(busAddress, sizeof(busAddress), "unix:path=/run/user/%d/bus", sessionUid);
-	if (getenv("XDG_RUNTIME_DIR") == NULL) { setenv("XDG_RUNTIME_DIR", runtimeDir, 1); }
-	if (getenv("DBUS_SESSION_BUS_ADDRESS") == NULL) { setenv("DBUS_SESSION_BUS_ADDRESS", busAddress, 1); }
+	// Override, don't fill in: inherited values describe the PARENT's session, never the captured
+	// one — under sudo, Fedora's pam session exports root's XDG_RUNTIME_DIR=/run/user/0, which sent
+	// every wl_display_connect into root's 0700 runtime dir (EACCES) while the socket scan below,
+	// using the constructed path, found the right socket. Keep inherited values only for exotic
+	// setups where the session has no /run/user/<uid> at all.
+	if (access(runtimeDir, F_OK) == 0)
+	{
+		setenv("XDG_RUNTIME_DIR", runtimeDir, 1);
+		setenv("DBUS_SESSION_BUS_ADDRESS", busAddress, 1);
+	}
+	else
+	{
+		if (getenv("XDG_RUNTIME_DIR") == NULL) { setenv("XDG_RUNTIME_DIR", runtimeDir, 1); }
+		if (getenv("DBUS_SESSION_BUS_ADDRESS") == NULL) { setenv("DBUS_SESSION_BUS_ADDRESS", busAddress, 1); }
+	}
 
 	envDisplay = getenv("WAYLAND_DISPLAY");
 	if (envDisplay != NULL && kvm_drm_wayland_socket_alive(runtimeDir, envDisplay))
