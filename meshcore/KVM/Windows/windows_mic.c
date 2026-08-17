@@ -158,6 +158,7 @@ static char g_deviceIds[MIC_DEVICE_MAX_COUNT][MIC_DEVICE_ID_MAX + 1];
 static int g_deviceCount = 0;
 static int g_currentDeviceIndex = -1;   /* -1 = system default; else index into g_deviceIds */
 static char g_currentDeviceId[MIC_DEVICE_ID_MAX + 1] = {0}; /* resolved from g_currentDeviceIndex; capture thread reads this once at start */
+static int g_enumInProgress = 0;                    /* guards against two concurrent kvm_mic_query_devices() calls; lock-protected like g_deviceCount */
 
 /* ------------------------------------------------------------------------ */
 /* Locking                                                                    */
@@ -374,6 +375,12 @@ static int microphone_available(void)
 	return ok;
 }
 
+typedef struct
+{
+	ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+	void *reserved;
+} MicEnumThreadArgs;
+
 /* Enumerate active capture endpoints and send MNG_MIC_DEVICE_LIST: mirrors
  * linux_mic.c's kvm_mic_query_devices() wire format and index semantics
  * (the returned order is this session's index space for a later
@@ -381,9 +388,15 @@ static int microphone_available(void)
  * Every step is individually NULL/HRESULT-checked and simply contributes
  * nothing on failure rather than aborting the whole enumeration -- one
  * device this system finds troublesome (a bad property store, say)
- * shouldn't hide every other one from the operator. */
-void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+ * shouldn't hide every other one from the operator.
+ *
+ * Runs on its own thread -- see kvm_mic_query_devices() below for why this
+ * must never run directly on the caller's thread. */
+static DWORD WINAPI mic_query_devices_worker(LPVOID param)
 {
+	MicEnumThreadArgs *targs = (MicEnumThreadArgs*)param;
+	ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+	void *reserved;
 	IMMDeviceEnumerator *pEnum = NULL;
 	IMMDeviceCollection *pCollection = NULL;
 	HRESULT hr, co;
@@ -391,6 +404,10 @@ void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, vo
 	int sentCount = 0;
 	unsigned char *outFrame;
 	int outLen, ptr;
+
+	writeHandler = targs->writeHandler;
+	reserved = targs->reserved;
+	free(targs);
 
 	co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	hr = CoCreateInstance(&MESHMIC_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL,
@@ -459,7 +476,9 @@ void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, vo
 	}
 	if (SUCCEEDED(co)) { CoUninitialize(); }
 
-	mic_lock_init();
+	/* mic_lock_init() already ran on the dispatch thread before this worker
+	 * was spawned (see kvm_mic_query_devices() below), so the lock is
+	 * guaranteed ready here. */
 	mic_lock();
 	g_deviceCount = sentCount;
 
@@ -467,7 +486,7 @@ void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, vo
 	for (i = 0; i < (UINT)sentCount; i++) { outLen += 1 + (int)strlen(g_deviceLabels[i]); }
 
 	outFrame = (unsigned char*)malloc((size_t)outLen);
-	if (outFrame == NULL) { mic_unlock(); return; }
+	if (outFrame == NULL) { g_enumInProgress = 0; mic_unlock(); return 0; }
 
 	outFrame[0] = (unsigned char)((MNG_MIC_DEVICE_LIST >> 8) & 0xFF);
 	outFrame[1] = (unsigned char)(MNG_MIC_DEVICE_LIST & 0xFF);
@@ -486,6 +505,58 @@ void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, vo
 
 	if (writeHandler != NULL) { writeHandler((char*)outFrame, outLen, reserved); }
 	free(outFrame);
+
+	mic_lock();
+	g_enumInProgress = 0;
+	mic_unlock();
+	return 0;
+}
+
+/* Dispatch-thread-facing entry point: only spawns mic_query_devices_worker()
+ * and returns immediately, never blocking. This is called synchronously
+ * from the same single-threaded KVM command dispatch that also processes
+ * MNG_MIC_START -- running enumeration inline here would delay every other
+ * KVM command (mouse, keyboard, and critically the very mic-start that
+ * triggers the consent prompt) behind however long WASAPI/COM enumeration
+ * takes, exactly the class of bug mic_capture_thread already exists to
+ * avoid for the streaming side. A rapid double-click (or the browser's own
+ * auto-refresh) that arrives while a query is still in flight is coalesced
+ * into a no-op rather than started concurrently, since two overlapping
+ * enumerations would stomp each other's g_deviceCount/g_deviceLabels/
+ * g_deviceIds. */
+void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+{
+	MicEnumThreadArgs *targs;
+	HANDLE thread;
+
+	mic_lock_init();
+
+	mic_lock();
+	if (g_enumInProgress) { mic_unlock(); return; }
+	g_enumInProgress = 1;
+	mic_unlock();
+
+	targs = (MicEnumThreadArgs*)malloc(sizeof(MicEnumThreadArgs));
+	if (targs == NULL)
+	{
+		mic_lock();
+		g_enumInProgress = 0;
+		mic_unlock();
+		return;
+	}
+	targs->writeHandler = writeHandler;
+	targs->reserved = reserved;
+
+	thread = CreateThread(NULL, 0, mic_query_devices_worker, targs, 0, NULL);
+	if (thread == NULL)
+	{
+		free(targs);
+		mic_lock();
+		g_enumInProgress = 0;
+		mic_unlock();
+		return;
+	}
+	CloseHandle(thread); /* fire-and-forget: nothing needs to join this */
 }
 
 static void mic_send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
@@ -539,6 +610,37 @@ static void notify_js(int command)
 	frame[1] = (unsigned char)(command & 0xFF);
 	frame[2] = 0x00;
 	frame[3] = 0x04;
+
+	writeHandler((char*)frame, (int)sizeof(frame), reserved);
+}
+
+/* Same signal as notify_js(MNG_MIC_CONSENT_NEEDED), extended with one byte:
+ * whether the browser request that triggered this asked to skip the
+ * interactive local-user prompt entirely (the Mic panel, as opposed to the
+ * Desktop panel's own mic button -- see agent-desktop-0.0.2.js's
+ * SendMicStart()). This is a *request*, not a grant: native still never
+ * opens the microphone without g_consent regardless of this flag, and the
+ * actual decision to honour it is made by the trusted agent JS layer
+ * (agents/meshcore.js's micConsentHandleStart(), the same place that
+ * already decides whether server policy requires a prompt at all) rather
+ * than by native code trusting a byte the browser supplied directly. */
+static void notify_js_consent_needed(int skipPrompt)
+{
+	ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+	void *reserved;
+	unsigned char frame[5];
+
+	mic_lock();
+	writeHandler = g_writeHandler;
+	reserved = g_reserved;
+	mic_unlock();
+	if (writeHandler == NULL) { return; }
+
+	frame[0] = (unsigned char)((MNG_MIC_CONSENT_NEEDED >> 8) & 0xFF);
+	frame[1] = (unsigned char)(MNG_MIC_CONSENT_NEEDED & 0xFF);
+	frame[2] = 0x00;
+	frame[3] = 0x05;
+	frame[4] = (unsigned char)(skipPrompt ? 1 : 0);
 
 	writeHandler((char*)frame, (int)sizeof(frame), reserved);
 }
@@ -933,6 +1035,12 @@ void kvm_mic_start(const unsigned char *frame, int size)
 	HANDLE thread;
 	HANDLE restartThread = NULL;
 	int deviceChanged;
+	int skipConsentPrompt = 0;
+
+	/* Read before mic_apply_params() ever runs: this must still be seen on
+	 * the very request that finds !g_consent and refuses below, which is
+	 * exactly the frame mic_apply_params() never gets called for. */
+	if (frame != NULL && size >= 13) { skipConsentPrompt = (frame[10] & 0x04) ? 1 : 0; }
 
 	mic_lock_init();
 
@@ -957,7 +1065,7 @@ void kvm_mic_start(const unsigned char *frame, int size)
 			mic_lock();
 			g_promptOutstanding = 1;
 			mic_unlock();
-			notify_js(MNG_MIC_CONSENT_NEEDED);
+			notify_js_consent_needed(skipConsentPrompt);
 		}
 		return;
 	}

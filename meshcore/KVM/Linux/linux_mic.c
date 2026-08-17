@@ -129,6 +129,7 @@ static char g_deviceSources[MIC_DEVICE_MAX_COUNT][MIC_SOURCE_NAME_MAX + 1];
 static int g_deviceCount = 0;
 static int g_currentDeviceIndex = -1;              /* -1 = system default; else index into g_deviceSources */
 static char g_currentSourceName[MIC_SOURCE_NAME_MAX + 1] = {0}; /* resolved from g_currentDeviceIndex; capture_thread reads this once at start */
+static volatile int g_enumInProgress = 0;          /* guards against two concurrent kvm_mic_query_devices() calls */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int g_consent = 0;      /* only kvm_mic_set_consent() sets this */
 /* 1 between asking the JS layer to prompt and that prompt being resolved, so
@@ -262,6 +263,38 @@ static void notify_js(int command)
     frame[1] = (unsigned char)(command & 0xFF);
     frame[2] = 0x00;
     frame[3] = 0x04;
+
+    if (g_slave_pipe_fd >= 0)
+    {
+        ssize_t written = write(g_slave_pipe_fd, (char*)frame, sizeof(frame));
+        (void)written;
+        fsync(g_slave_pipe_fd);
+    }
+    else if (g_writeHandler != NULL)
+    {
+        g_writeHandler((char*)frame, (int)sizeof(frame), g_reserved);
+    }
+}
+
+/* Same signal as notify_js(MNG_MIC_CONSENT_NEEDED), extended with one byte:
+ * whether the browser request that triggered this asked to skip the
+ * interactive local-user prompt entirely (the Mic panel, as opposed to the
+ * Desktop panel's own mic button -- see agent-desktop-0.0.2.js's
+ * SendMicStart()). This is a *request*, not a grant: native still never
+ * opens the microphone without g_consent regardless of this flag, and the
+ * actual decision to honour it is made by the trusted agent JS layer
+ * (agents/meshcore.js's micConsentHandleStart(), the same place that
+ * already decides whether server policy requires a prompt at all) rather
+ * than by native code trusting a byte the browser supplied directly. */
+static void notify_js_consent_needed(int skipPrompt)
+{
+    unsigned char frame[5];
+
+    frame[0] = (unsigned char)((MNG_MIC_CONSENT_NEEDED >> 8) & 0xFF);
+    frame[1] = (unsigned char)(MNG_MIC_CONSENT_NEEDED & 0xFF);
+    frame[2] = 0x00;
+    frame[3] = 0x05;
+    frame[4] = (unsigned char)(skipPrompt ? 1 : 0);
 
     if (g_slave_pipe_fd >= 0)
     {
@@ -480,8 +513,20 @@ static void mic_enum_source_info_cb(pa_context *c, const pa_source_info *info, i
     pthread_mutex_unlock(&g_lock);
 }
 
-void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+typedef struct
 {
+    ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+    void *reserved;
+} mic_enum_thread_args_t;
+
+/* Runs the actual (potentially several-second) enumeration body on its own
+ * thread -- see kvm_mic_query_devices() below for why this must never run
+ * directly on the caller's thread. */
+static void *mic_query_devices_worker(void *arg)
+{
+    mic_enum_thread_args_t *targs = (mic_enum_thread_args_t*)arg;
+    ILibTransport_DoneState(*writeHandler)(char*, int, void*);
+    void *reserved;
     pa_mainloop *loop = NULL;
     pa_mainloop_api *api;
     pa_context *ctx = NULL;
@@ -504,6 +549,10 @@ void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, vo
     pa_operation_unref_t fn_op_unref;
     pa_context_disconnect_t fn_ctx_disconnect;
     pa_context_unref_t fn_ctx_unref;
+
+    writeHandler = targs->writeHandler;
+    reserved = targs->reserved;
+    free(targs);
 
     pthread_mutex_lock(&g_lock);
     g_deviceCount = 0;
@@ -585,7 +634,7 @@ send:
     for (i = 0; i < count; i++) { outLen += 1 + (int)strlen(g_deviceLabels[i]); }
 
     outFrame = (unsigned char*)malloc((size_t)outLen);
-    if (outFrame == NULL) { pthread_mutex_unlock(&g_lock); return; }
+    if (outFrame == NULL) { g_enumInProgress = 0; pthread_mutex_unlock(&g_lock); return NULL; }
 
     outFrame[0] = (unsigned char)((MNG_MIC_DEVICE_LIST >> 8) & 0xFF);
     outFrame[1] = (unsigned char)(MNG_MIC_DEVICE_LIST & 0xFF);
@@ -615,6 +664,57 @@ send:
         writeHandler((char*)outFrame, outLen, reserved);
     }
     free(outFrame);
+
+    pthread_mutex_lock(&g_lock);
+    g_enumInProgress = 0;
+    pthread_mutex_unlock(&g_lock);
+    return NULL;
+}
+
+/* Enumerate input devices and send MNG_MIC_DEVICE_LIST, without ever
+ * blocking the caller: this dispatch-thread-facing entry point only spawns
+ * mic_query_devices_worker() (detached) and returns immediately. The actual
+ * PulseAudio round-trip can take up to MIC_ENUM_TIMEOUT_MS*2 in the worst
+ * case (a hung or slow-to-answer daemon), and this function is called
+ * synchronously from the same single-threaded KVM command dispatch loop
+ * that also processes MNG_MIC_START -- running the enumeration inline here
+ * would delay every other KVM command (mouse, keyboard, and critically the
+ * very mic-start that triggers the consent prompt) behind it, exactly the
+ * class of bug capture_thread already exists to avoid for the streaming
+ * side. A rapid double-click (or the browser's own auto-refresh) that
+ * arrives while a query is still in flight is coalesced into a no-op rather
+ * than started concurrently, since two overlapping enumerations would
+ * stomp each other's g_deviceCount/g_deviceLabels/g_deviceSources. */
+void kvm_mic_query_devices(ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
+{
+    mic_enum_thread_args_t *targs;
+    pthread_t t;
+
+    pthread_mutex_lock(&g_lock);
+    if (g_enumInProgress) { pthread_mutex_unlock(&g_lock); return; }
+    g_enumInProgress = 1;
+    pthread_mutex_unlock(&g_lock);
+
+    targs = (mic_enum_thread_args_t*)malloc(sizeof(mic_enum_thread_args_t));
+    if (targs == NULL)
+    {
+        pthread_mutex_lock(&g_lock);
+        g_enumInProgress = 0;
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    targs->writeHandler = writeHandler;
+    targs->reserved = reserved;
+
+    if (pthread_create(&t, NULL, mic_query_devices_worker, targs) != 0)
+    {
+        free(targs);
+        pthread_mutex_lock(&g_lock);
+        g_enumInProgress = 0;
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    pthread_detach(t); /* fire-and-forget: nothing needs to join this */
 }
 
 /* Apply an optional MNG_MIC_START settings payload. frame/size are the whole
@@ -736,7 +836,13 @@ void kvm_mic_start(const unsigned char *frame, int size)
 {
     int needConsentPrompt;
     int deviceChanged;
+    int skipConsentPrompt = 0;
     pthread_t restartThread = (pthread_t)0;
+
+    /* Read before mic_apply_params() ever runs: this must still be seen on
+     * the very request that finds !g_consent and refuses below, which is
+     * exactly the frame mic_apply_params() never gets called for. */
+    if (frame != NULL && size >= 13) { skipConsentPrompt = (frame[10] & 0x04) ? 1 : 0; }
 
     pthread_mutex_lock(&g_lock);
 
@@ -748,7 +854,7 @@ void kvm_mic_start(const unsigned char *frame, int size)
         needConsentPrompt = (!g_consent && g_enc != NULL && g_pa_lib != NULL && g_shutdown);
         if (needConsentPrompt) { g_promptOutstanding = 1; }
         pthread_mutex_unlock(&g_lock);
-        if (needConsentPrompt) { notify_js(MNG_MIC_CONSENT_NEEDED); }
+        if (needConsentPrompt) { notify_js_consent_needed(skipConsentPrompt); }
         return;
     }
 

@@ -73,11 +73,16 @@ int kvm_mic_has_consent(void);
  *   exactly as before. See mic_apply_params() in the platform .c file for
  *   the payload layout, including the trailing device-index byte (0xFF =
  *   system default input; anything else indexes the most recent
- *   kvm_mic_query_devices() result, out-of-range falling back to default).
+ *   kvm_mic_query_devices() result, out-of-range falling back to default)
+ *   and the miscFlags bit requesting that the interactive local-user prompt
+ *   be skipped (see MNG_MIC_CONSENT_NEEDED below -- this is only a request
+ *   the agent's JS layer may honour, never a grant native code makes itself).
  * Refuses to start unless consent has been granted. When refused for that
  * reason specifically (a real microphone exists, consent alone is missing),
- * also emits MNG_MIC_CONSENT_NEEDED so the agent's JavaScript layer can
- * prompt the local user; safe to call speculatively (e.g. once at KVM
+ * also emits MNG_MIC_CONSENT_NEEDED -- carrying that same skip-prompt
+ * request as a one-byte payload, see notify_js_consent_needed() in the
+ * platform .c file -- so the agent's JavaScript layer can prompt the local
+ * user (or decide not to); safe to call speculatively (e.g. once at KVM
  * session start) for exactly this purpose.
  * If capture is already running, any settings in frame are applied to the
  * live encoder in place (no interruption) instead of being ignored. Changing

@@ -858,12 +858,21 @@ void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *
 #if defined(_KVM_AUDIO)
 	/* Native asked for a consent prompt (see kvm_mic_start()). This is an
 	 * internal signal, not something the browser has any use for, so it is
-	 * consumed here rather than forwarded up the duplex stream. */
+	 * consumed here rather than forwarded up the duplex stream. Byte 4, when
+	 * present, is whether the browser request that triggered this asked to
+	 * skip the interactive prompt (the Mic panel, not the Desktop panel's
+	 * own mic button) -- see notify_js_consent_needed() in
+	 * linux_mic.c/windows_mic.c. Older agent builds only ever send the bare
+	 * 4-byte signal, so this defaults to "not requested" rather than reading
+	 * past the buffer. */
 	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_NEEDED)
 	{
 		if (duk_ctx_is_alive(ptrs->ctx))
 		{
-			duk_peval_string(ptrs->ctx, "try { onMicConsentNeeded(); } catch (ex) { }");
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onMicConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
 			duk_pop(ptrs->ctx);
 		}
 		ILibMemory_Free(user);
@@ -937,12 +946,17 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 	 * consumed here rather than forwarded up the duplex stream. On Windows
 	 * this path only runs when already on the chain thread; the off-thread
 	 * case is handled by the _Chain variant above, which the marshal at the
-	 * top of this function dispatches to. */
+	 * top of this function dispatches to. Byte 4, when present, is whether
+	 * the browser request that triggered this asked to skip the interactive
+	 * prompt -- see the matching comment on the _Chain variant above. */
 	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_NEEDED))
 	{
 		if (duk_ctx_is_alive(ptrs->ctx))
 		{
-			duk_peval_string(ptrs->ctx, "try { onMicConsentNeeded(); } catch (ex) { }");
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onMicConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
 			duk_pop(ptrs->ctx);
 		}
 		return ILibTransport_DoneState_COMPLETE;
