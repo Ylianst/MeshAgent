@@ -1,5 +1,5 @@
 name: macOS Build
-run-name: Build Windows versions of MeshAgent
+run-name: Build MacOS versions of MeshAgent
 on:
   push:
   pull_request:
