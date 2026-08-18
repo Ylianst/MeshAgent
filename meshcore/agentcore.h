@@ -187,6 +187,7 @@ typedef struct MeshAgentHostContainer
 	DpiAwarenessFunc dpiAwareness;
 	char DNS_LOCK[255];
 	char ID_LOCK[255];
+	int authenticodeChecked;
 #endif
 
 	int showModuleNames;
