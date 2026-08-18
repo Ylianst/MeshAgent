@@ -4911,6 +4911,24 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 		}
 	}
 
+	if (ILibSimpleDataStore_Get(agentHost->masterDb, "logRotate", NULL, 0) != 0)
+	{
+		int len = ILibSimpleDataStore_Get(agentHost->masterDb, "logRotate", ILibScratchPad, sizeof(ILibScratchPad));
+		if (len < sizeof(ILibScratchPad))
+		{
+			uint64_t val = 0;
+			if (ILib_atoi_uint64(&val, ILibScratchPad, len) == 0 && val > 0)
+			{
+				ILibCriticalLog_CapMode = ILibAppendStringToDisk_Cap_Rotate;
+				ILibCriticalLog_RotateCount = (int)val; // value doubles as how many rotated logs to keep
+			}
+		}
+	}
+	if (ILibCriticalLog_CapMode == ILibAppendStringToDisk_Cap_Stop && ILibSimpleDataStore_Get(agentHost->masterDb, "logTruncate", NULL, 0) != 0)
+	{
+		ILibCriticalLog_CapMode = ILibAppendStringToDisk_Cap_Truncate;
+	}
+
 #ifdef WIN32
 	if (agentHost->noCertStore == 0) { agentHost->noCertStore = ILibSimpleDataStore_Get(agentHost->masterDb, "nocertstore", NULL, 0); }
 #endif
