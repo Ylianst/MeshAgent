@@ -45,6 +45,7 @@ limitations under the License.
 #ifdef _POSIX
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 #ifdef _OPENBSD
@@ -57,13 +58,14 @@ int gRemoteMouseRenderDefault = 0;
 	#ifdef WIN32
 		#include "KVM/Windows/kvm.h"
 	#endif
-	#ifdef _POSIX
-		#ifndef __APPLE__
-			#include "KVM/Linux/linux_kvm.h"
-		#else
-			#include "KVM/MacOS/mac_kvm.h"
+		#ifdef _POSIX
+			#ifndef __APPLE__
+				#include "KVM/Linux/linux_kvm.h"
+				#include "KVM/Linux/linux_kvm_wayland.h"
+			#else
+				#include "KVM/MacOS/mac_kvm.h"
+			#endif
 		#endif
-	#endif
 #endif
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -977,7 +979,13 @@ void ILibDuktape_MeshAgent_RemoteDesktop_EndSink(ILibDuktape_DuplexStream *strea
 		duk_del_prop_string(ptrs->ctx, -1, REMOTE_DESKTOP_STREAM);
 		duk_pop(ptrs->ctx);											// ...
 #if defined(_LINKVM) && defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		memset(ptrs, 0, sizeof(RemoteDesktop_Ptrs));
 	}
@@ -1039,7 +1047,13 @@ duk_ret_t ILibDuktape_MeshAgent_RemoteDesktop_Finalizer(duk_context *ctx)
 		duk_pop(ptrs->ctx);											// ...
 #ifdef _LINKVM
 #if defined(_POSIX) && !defined(__APPLE__)
-		if (ptrs->kvmPipe != NULL) { ILibProcessPipe_FreePipe(ptrs->kvmPipe); }
+		if (ptrs->kvmPipe != NULL)
+		{
+			// Cancel the pending broken-pipe timer before freeing, else it fires ~4s later on freed memory.
+			ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ptrs->ctx)), ptrs->kvmPipe);
+			ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+			ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		}
 #endif
 		kvm_cleanup();
 #endif
@@ -1195,6 +1209,11 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 	{
 		ILibLifeTime_Remove(ILibGetBaseTimer(duk_ctx_chain(ctx)), ptrs->kvmPipe);
 		ILibProcessPipe_Pipe_SetBrokenPipeHandler(ptrs->kvmPipe, NULL);
+		// Free the old pipe object like the EndSink teardown does; the restart below allocates a
+		// new one, and auto-recovery made this path fire on every child crash/logout, so the leak
+		// was no longer a rare manual-restart cost.
+		ILibProcessPipe_FreePipe(ptrs->kvmPipe);
+		ptrs->kvmPipe = NULL;
 		kvm_cleanup();
 
 		duk_peval_string(ctx, "require('user-sessions').consoleUid()");
@@ -1203,9 +1222,20 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
 		duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
 		duk_dup(ctx, -3);												//[uid][getXInfo][this][uid]
-		if (duk_pcall_method(ctx, 1) != 0) { duk_eval_string(ctx, "console.log('error');"); return(0); }								//[uid][xinfo]
-		x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
-		d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+		if (duk_pcall_method(ctx, 1) != 0)															//[uid][xinfo|error]
+		{
+			// getXInfo() has no X server to query on a Wayland/greeter session and throws. The DRM
+			// backend does not need XAUTHORITY/DISPLAY, so don't abort the restart (that is what left
+			// the session dead until a manual restart).
+			Duktape_Console_LogEx(ctx, ILibDuktape_LogType_Info1, "userChanged: getXInfo failed (%s); restarting without X env", duk_safe_to_string(ctx, -1));
+			x = NULL;
+			d = NULL;
+		}
+		else
+		{
+			x = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
+			d = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
+		}
 
 
 		duk_push_heapptr(ctx, s);							// [stream]
@@ -1216,6 +1246,18 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 		ptrs->kvmPipe = kvm_relay_restart(0, agent->pipeManager, ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, ptrs, id, x, d);
 	}
 	return(0);
+}
+
+// Called (deferred, on the microstack thread) by the KVM parent in linux_kvm.c when a capture child
+// exits unexpectedly (logout / user-switch / crash). Re-derives the current console session and
+// re-forks the capture child by reusing the exact same recovery as a live user-sessions 'changed'
+// event, so the DRM/Wayland and X11 backends share one restart path.
+void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs)
+{
+	RemoteDesktop_Ptrs *ptrs = (RemoteDesktop_Ptrs*)reservedPtrs;
+	if (ptrs == NULL || !ILibMemory_CanaryOK(ptrs) || ptrs->ctx == NULL) { return; }		// stream torn down
+	if (!duk_ctx_is_alive(ptrs->ctx)) { return; }
+	duk_peval_string_noresult(ptrs->ctx, "try { require('user-sessions').emit('changed'); } catch (e) {}");
 }
 #endif
 
@@ -1351,12 +1393,12 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 		// For Linux, we need to determine where the XAUTHORITY is:
 		char *updateXAuth = NULL;
 		char *updateDisplay = NULL;
-		char *xdm = NULL;
+		int waylandSession = kvm_is_wayland_session_for_uid(console_uid);
 		int needPop = 0;
 		duk_eval_string(ctx, "require('user-sessions').Self()");
 		int self = duk_get_int(ctx, -1); duk_pop(ctx);
 
-		if (self==0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL)
+		if (!waylandSession && (self == 0 || getenv("XAUTHORITY") == NULL || getenv("DISPLAY") == NULL))
 		{
 			if (duk_peval_string(ctx, "require('monitor-info').getXInfo") == 0)
 			{
@@ -1367,15 +1409,6 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 					{
 						updateXAuth = Duktape_GetStringPropertyValue(ctx, -1, "xauthority", NULL);
 						updateDisplay = Duktape_GetStringPropertyValue(ctx, -1, "display", NULL);
-						xdm = Duktape_GetStringPropertyValue(ctx, -1, "xdm", "");
-
-						if (strcmp(xdm, "xwayland") == 0)
-						{
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "This platform is configured to use Xwayland");
-							ILibDuktape_MeshAgent_RemoteDesktop_SendError(ptrs, "please modify config to use Xorg");
-							duk_pop(ctx);
-							return(1);
-						}
 
 						if (console_uid != 0 && updateXAuth == NULL)
 						{

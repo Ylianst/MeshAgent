@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 #include "linux_kvm.h"
+#include "linux_kvm_wayland.h"
+#include "linux_kvm_drm.h"
 #include "meshcore/meshdefines.h"
 #include "microstack/ILibParsers.h"
 #include "microstack/ILibAsyncSocket.h"
@@ -22,7 +24,10 @@ limitations under the License.
 #include "microstack/ILibProcessPipe.h"
 #include <sys/wait.h>
 #include <limits.h>
+#include <stdint.h>
 #include <time.h>
+#include <pwd.h>
+#include <grp.h>
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -132,8 +137,6 @@ int slave2master[2];
 char CURRENT_XDISPLAY[256];
 int CURRENT_DISPLAY_ID = -1;
 
-typedef struct kvm_monitor_info { int id, x, y, width, height; } kvm_monitor_info;
-#define KVM_MAX_MONITORS 16
 kvm_monitor_info g_monitors[KVM_MAX_MONITORS];
 int g_monitor_count = 0;
 int SCREEN_SEL = 0;         // 0 = all monitors, 1..N = specific physical monitor
@@ -146,6 +149,22 @@ int VSCREEN_HEIGHT = 0;
 FILE *logFile = NULL;
 int g_enableEvents = 0;
 extern int gRemoteMouseRenderDefault;
+
+// In DRM mode the slave->master pipe is non-blocking and shared with the tile stream, so every
+// sender must go through the draining writer in linux_kvm_drm.c: a raw write() could truncate a
+// message on a full pipe (desyncing the stream) or, blocking, re-arm the master<->slave pipe
+// deadlock that the draining writer exists to prevent.
+static void kvm_slave_send(const void *buffer, size_t len)
+{
+	if (g_kvmBackendDRM != 0)
+	{
+		ignore_result(kvm_drm_slave_write(buffer, len));
+	}
+	else
+	{
+		ignore_result(write(slave2master[1], buffer, len));
+	}
+}
 
 int remoteMouseX = 0, remoteMouseY = 0;
 
@@ -294,10 +313,13 @@ void kvm_send_error(char *msg)
 	int msgLen = strnlen_s(msg, 255);
 	char buffer[512];
 
+	// Otherwise this only reaches the MeshCentral viewer, so the error never shows in the agent's own log.
+	fprintf(stderr, "KVM error: %s\n", msg); fflush(stderr);
+
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_ERROR);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
-	ignore_result(write(slave2master[1], buffer, msgLen + 2));
+	kvm_slave_send(buffer, msgLen + 4);
 }
 
 KVM_MouseCursors kvm_fetch_currentCursor(Display *cursordisplay)
@@ -437,20 +459,18 @@ void kvm_send_resolution()
 	((unsigned short*)buffer)[2] = (unsigned short)htons((unsigned short)SCREEN_WIDTH);		// X position
 	((unsigned short*)buffer)[3] = (unsigned short)htons((unsigned short)SCREEN_HEIGHT);	// Y position
 
-	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
+	kvm_slave_send(buffer, sizeof(buffer));
 }
 
 void kvm_send_display()
 {
 	char buffer[6];
-	unsigned short sel = (g_monitor_count > 0)
-		? ((SCREEN_SEL == 0) ? (unsigned short)65535 : (unsigned short)SCREEN_SEL)
-		: (unsigned short)CURRENT_DISPLAY_ID;
+	unsigned short sel = (g_monitor_count > 0) ? ((SCREEN_SEL == 0) ? (unsigned short)65535 : (unsigned short)SCREEN_SEL) : (unsigned short)CURRENT_DISPLAY_ID;
 	((unsigned short*)buffer)[0] = (unsigned short)htons((unsigned short)MNG_KVM_SET_DISPLAY);	// Write the type
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)6);					// Write the size
 	((unsigned short*)buffer)[2] = (unsigned short)htons(sel);									// Display selection
 
-	ignore_result(write(slave2master[1], buffer, sizeof(buffer)));
+	kvm_slave_send(buffer, sizeof(buffer));
 }
 
 #define BUFSIZE 65535
@@ -467,6 +487,53 @@ int lockfileCheckFn(const struct dirent *ent) {
 	}
 
 	return 0;
+}
+
+void kvm_apply_monitor_selection()
+{
+	if (SCREEN_SEL > 0 && (SCREEN_SEL - 1) < g_monitor_count)
+	{
+		int idx = SCREEN_SEL - 1;
+		CAPTURE_X    = g_monitors[idx].x;
+		CAPTURE_Y    = g_monitors[idx].y;
+		SCREEN_WIDTH  = g_monitors[idx].width;
+		SCREEN_HEIGHT = g_monitors[idx].height;
+	}
+	else
+	{
+		SCREEN_SEL   = 0;
+		SCREEN_SEL_TARGET = 0;
+		CAPTURE_X    = 0;
+		CAPTURE_Y    = 0;
+		SCREEN_WIDTH  = VSCREEN_WIDTH;
+		SCREEN_HEIGHT = VSCREEN_HEIGHT;
+	}
+}
+
+void kvm_update_monitor_layout(kvm_monitor_info *monitors, int monitorCount, int virtualWidth, int virtualHeight)
+{
+	int i;
+	if (monitorCount < 0) { monitorCount = 0; }
+	if (monitorCount > KVM_MAX_MONITORS) { monitorCount = KVM_MAX_MONITORS; }
+
+	g_monitor_count = 0;
+	for (i = 0; i < monitorCount; ++i)
+	{
+		if (monitors[i].width <= 0 || monitors[i].height <= 0) { continue; }
+		g_monitors[g_monitor_count] = monitors[i];
+		g_monitors[g_monitor_count].id = g_monitor_count + 1;
+		g_monitor_count++;
+	}
+
+	VSCREEN_WIDTH = virtualWidth;
+	VSCREEN_HEIGHT = virtualHeight;
+	if (g_monitor_count == 0 && (VSCREEN_WIDTH <= 0 || VSCREEN_HEIGHT <= 0))
+	{
+		VSCREEN_WIDTH = SCREEN_WIDTH;
+		VSCREEN_HEIGHT = SCREEN_HEIGHT;
+	}
+
+	kvm_apply_monitor_selection();
 }
 
 // Enumerate physical monitors via XRandR into g_monitors[] and update capture region.
@@ -501,23 +568,7 @@ static void kvm_enumerate_monitors()
 			xrandr_exports->XRRFreeScreenResources(res);
 		}
 	}
-	// Update the capture region based on current SCREEN_SEL
-	if (SCREEN_SEL > 0 && (SCREEN_SEL - 1) < g_monitor_count)
-	{
-		int idx = SCREEN_SEL - 1;
-		CAPTURE_X    = g_monitors[idx].x;
-		CAPTURE_Y    = g_monitors[idx].y;
-		SCREEN_WIDTH  = g_monitors[idx].width;
-		SCREEN_HEIGHT = g_monitors[idx].height;
-	}
-	else
-	{
-		SCREEN_SEL   = 0;
-		CAPTURE_X    = 0;
-		CAPTURE_Y    = 0;
-		SCREEN_WIDTH  = VSCREEN_WIDTH;
-		SCREEN_HEIGHT = VSCREEN_HEIGHT;
-	}
+	kvm_apply_monitor_selection();
 }
 
 // Send MNG_KVM_DISPLAY_INFO: per-monitor geometry (ID, X, Y, W, H) matching Windows format.
@@ -540,7 +591,7 @@ void kvm_send_display_info()
 		((unsigned short*)buffer)[base + 3] = (unsigned short)htons((unsigned short)g_monitors[i].width);
 		((unsigned short*)buffer)[base + 4] = (unsigned short)htons((unsigned short)g_monitors[i].height);
 	}
-	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
+	kvm_slave_send(buffer, ILibMemory_Size(buffer));
 	ILibMemory_Free(buffer);
 }
 
@@ -594,7 +645,7 @@ void kvm_send_display_list()
 		currentSel = (unsigned short)CURRENT_DISPLAY_ID;
 	((unsigned short*)buffer)[i + 3] = (unsigned short)htons(currentSel);
 
-	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
+	kvm_slave_send(buffer, ILibMemory_Size(buffer));
 	free(displays);
 }
 
@@ -786,6 +837,9 @@ int kvm_init(int displayNo)
 
 void CheckDesktopSwitch(int checkres)
 {
+	UNREFERENCED_PARAMETER(checkres);
+	if (g_kvmBackendDRM != 0) { return; }
+
 	if (change_display)
 	{
 		if (logFile) { fprintf(logFile, "CheckDesktopSwitch: SCREEN_SEL_TARGET=%d CURRENT_DISPLAY_ID=%d\n", SCREEN_SEL_TARGET, CURRENT_DISPLAY_ID); fflush(logFile); }
@@ -990,7 +1044,7 @@ void kvm_server_jpegerror(char *msg)
 	((unsigned short*)buffer)[1] = (unsigned short)htons((unsigned short)(msgLen + 4));	// Write the size
 	memcpy_s(buffer + 4, msgLen, msg, msgLen);
 
-	ignore_result(write(slave2master[1], buffer, ILibMemory_Size(buffer)));
+	kvm_slave_send(buffer, ILibMemory_Size(buffer));
 }
 
 #pragma pack(push, 1)
@@ -1127,8 +1181,10 @@ void kvm_server_sighandler(int signum, siginfo_t *info, void *context)
 {
 	g_shutdown = 1;
 }
-void* kvm_server_mainloop(void* parm)
+
+void* kvm_server_mainloop_x11(void* parm)
 {
+	int sessionUid = (int)(intptr_t)parm;
 	int maxsleep;
 	Window rr, cr;
 	int rx, ry, wx, wy, rs;
@@ -1158,6 +1214,24 @@ void* kvm_server_mainloop(void* parm)
 	XEvent XE;
 
 	unsigned short currentDisplayId = 0;
+
+	if (sessionUid != 0)
+	{
+		// Full drop, not bare setuid: keeping gid 0 / root's supplementary groups would leave the
+		// X11 slave more privileged than the session user, and continuing as root after a failed
+		// setuid (EAGAIN under RLIMIT_NPROC) must not happen. The DRM path does the same in
+		// kvm_drm_drop_to_session_uid_with_caps().
+		struct passwd *pw = getpwuid((uid_t)sessionUid);
+		if (pw == NULL ||
+			initgroups(pw->pw_name, pw->pw_gid) != 0 ||
+			setgid(pw->pw_gid) != 0 ||
+			setuid((uid_t)sessionUid) != 0)
+		{
+			fprintf(stderr, "KVM: privilege drop to uid %d failed (errno=%d); aborting capture child\n", sessionUid, errno);
+			kvm_send_error("KVM privilege drop failed");
+			return (void *)-1;
+		}
+	}
 
 	if (logFile) { fprintf(logFile, "Checking $DISPLAY\n"); fflush(logFile); }
 	for (char **env = environ; *env; ++env)
@@ -1545,6 +1619,18 @@ void* kvm_server_mainloop(void* parm)
 	return (void*)0;
 }
 
+void* kvm_server_mainloop(void* parm)
+{
+	int sessionUid = (int)(intptr_t)parm;
+	kvm_screenreader_mode_t screenreaderMode = kvm_screenreader_mode_for_uid(sessionUid);
+	if (screenreaderMode == KVM_SCREENREADER_MODE_DRM)
+	{
+		if (logFile) { fprintf(logFile, "Using DRM KVM backend\n"); fflush(logFile); }
+		return kvm_server_mainloop_drm(parm);
+	}
+	return kvm_server_mainloop_x11(parm);
+}
+
 void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t bufferLen, size_t* bytesConsumed)
 {
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
@@ -1582,8 +1668,55 @@ void kvm_relay_readSink(ILibProcessPipe_Pipe sender, char *buffer, size_t buffer
 
 #include "../../../microstack/ILibParsers.h"
 
+// --- KVM capture auto-recovery (session handover) -----------------------------------------------
+// When a capture child exits unexpectedly (logout / user-switch / crash) the child's pipe breaks and
+// kvm_relay_brokenPipeSink() runs (a deliberate viewer teardown clears this handler to NULL first, so
+// it never runs then). Instead of only telling the viewer the child died, we ask the agent to
+// re-derive the CURRENT console session uid and re-fork. Rate-limited so a genuinely unrecoverable
+// child cannot storm-fork.
+#define KVM_AUTORECOVER_DELAY_MS   1500		// let the session settle before re-deriving the uid
+#define KVM_AUTORECOVER_MAX_BURST  5		// consecutive quick re-forks before we give up
+#define KVM_AUTORECOVER_RESET_MS   30000	// a child that ran at least this long was healthy: reset the burst
+
+static uint64_t g_lastKvmForkMs = 0;		// monotonic ms when the current child was forked
+
+// Implemented in agentcore.c: re-derive consoleUid()/X env and re-fork the capture child (reuses the
+// same path as a live user-sessions 'changed' event).
+extern void ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(void *reservedPtrs);
+
+static uint64_t kvm_relay_now_ms(void)
+{
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) { return 0; }
+	return (((uint64_t)ts.tv_sec) * 1000ULL) + (((uint64_t)ts.tv_nsec) / 1000000ULL);
+}
+
+// Decide whether an unexpected child exit should trigger an automatic re-fork. Reuses g_restartcount
+// as a burst gate, cleared whenever the previous child ran long enough to be considered healthy.
+static int kvm_relay_should_autorecover(void)
+{
+	uint64_t now = kvm_relay_now_ms();
+	if (g_lastKvmForkMs != 0 && (now - g_lastKvmForkMs) >= KVM_AUTORECOVER_RESET_MS)
+	{
+		g_restartcount = 0;
+	}
+	if (g_restartcount >= KVM_AUTORECOVER_MAX_BURST) { return 0; }	// give up; fall back to the viewer notice
+	g_restartcount++;
+	g_totalRestartCount++;
+	return 1;
+}
+
+// Deferred off the broken-pipe callback (so we don't re-enter pipe teardown) to perform the recovery.
+static void kvm_relay_autoRecoverSink(void *sender)
+{
+	if (!ILibMemory_CanaryOK(sender)) { return; }	// pipe freed (deliberate teardown) before the timer fired
+	if (g_shutdown || g_slavekvm != 0) { return; }	// shutting down, or a child is already running again
+	ILibDuktape_MeshAgent_RemoteDesktop_KvmAutoRecover(((void**)ILibMemory_Extra(sender))[1]);
+}
+
 void kvm_relay_brokenPipeSink_2(void *sender)
 {
+	if (!ILibMemory_CanaryOK(sender)) { return; } // pipe was freed before this 4s timer fired
 	ILibKVM_WriteHandler writeHandler = (ILibKVM_WriteHandler)((void**)ILibMemory_Extra(sender))[0];
 	void *reserved = ((void**)ILibMemory_Extra(sender))[1];
 	char msg[] = "KVM Child process has unexpectedly exited";
@@ -1606,7 +1739,17 @@ void kvm_relay_brokenPipeSink(ILibProcessPipe_Pipe sender)
 		g_slavekvm = 0;
 	}
 
-	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 4000, kvm_relay_brokenPipeSink_2, NULL);	
+	// The child exited without a deliberate teardown (teardown clears this handler first). Try to
+	// auto-recover the session (logout / user-switch) rather than just reporting the child death.
+	// Gated by g_shutdown and a burst limit so an unrecoverable child can't fork-storm; on giving up
+	// we fall through to the original "child unexpectedly exited" viewer notice.
+	if (!g_shutdown && kvm_relay_should_autorecover())
+	{
+		ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, KVM_AUTORECOVER_DELAY_MS, kvm_relay_autoRecoverSink, NULL);
+		return;
+	}
+
+	ILibLifeTime_AddEx(ILibGetBaseTimer(chain), sender, 4000, kvm_relay_brokenPipeSink_2, NULL);
 }
 
 void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler writeHandler, void *reserved, int uid, char* authToken, char *dispid)
@@ -1615,7 +1758,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	int count = 0;
 	ILibProcessPipe_Pipe slave_out;
 
-	if (g_slavekvm != 0) 
+	if (g_slavekvm != 0)
 	{
 		kill(g_slavekvm, SIGKILL);
 		waitpid(g_slavekvm, &r, 0);
@@ -1651,7 +1794,6 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		close(master2slave[1]);
 
 		if (SLAVELOG != 0) { logFile = fopen("/tmp/slave", "w"); }
-		if (uid != 0) { ignore_result(setuid(uid)); }
 
 		if (g_ILibCrashDump_path != NULL)
 		{
@@ -1670,12 +1812,17 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 		if (authToken != NULL) { setenv("XAUTHORITY", authToken, 1); }
 		if (dispid != NULL) { setenv("DISPLAY", dispid, 1); }
 
-		kvm_server_mainloop((void*)0);
+		kvm_server_mainloop((void*)(intptr_t)uid);
 		exit(0);
 		return(NULL);
 	}
-	else 
+	else
 	{ //master
+		// A child is (re)running now: clear any stale shutdown flag left by kvm_cleanup() on a restart
+		// path, and stamp the fork time so the auto-recovery burst gate can tell a healthy child (ran a
+		// while) from a fork storm (dies immediately).
+		g_shutdown = 0;
+		g_lastKvmForkMs = kvm_relay_now_ms();
 		close(slave2master[1]);
 		close(master2slave[0]);
 		logFile = fopen("/tmp/master", "w");
