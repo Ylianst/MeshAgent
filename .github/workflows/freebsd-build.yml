@@ -19,7 +19,12 @@ jobs:
         uses: vmactions/freebsd-vm@v1
         with:
           release: "13.5"
-          prepare: pkg install -y gmake
+          # The makefile generates ILibDuktape_Commit.h only when git works — without git the
+          # build fails on a missing header. safe.directory is needed because the rsynced
+          # repo is owned by the runner uid, not the VM user, so git refuses it otherwise.
+          prepare: |
+            pkg install -y gmake git
+            git config --global --add safe.directory '*'
           run: gmake -j4 freebsd ARCHID=30
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.1
