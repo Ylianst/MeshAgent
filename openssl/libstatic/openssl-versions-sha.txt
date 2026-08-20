@@ -1,0 +1,58 @@
+OpenSSL source tarball versions and checksums
+=============================================
+
+The version + sha256 pair to paste into the workflow_dispatch form of
+.github/workflows/build-openssl-job.yml. The workflows derive the upstream
+release tag from the version themselves (1.x is tagged OpenSSL_1_1_1w, 3.x
+and later openssl-3.5.7), so these two fields are all a rebuild needs.
+
+Latest release of every OpenSSL line, as of 2026-08-20. The sha256 values are
+upstream's own openssl-<version>.tar.gz.sha256 release assets, not computed
+locally; 1.1.1w matches the pin already in state.txt and build/env.sh, and the
+3.5.7 and 3.0.21 tarballs were downloaded and re-hashed to confirm the
+published asset matches the artifact. Support dates are from
+openssl-library.org/policies/releasestrat/.
+
+version   released     support ends        sha256
+--------  -----------  ------------------  ----------------------------------------------------------------
+1.1.1w    2023-09-11   ended 2023-09-11    cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8
+3.0.21    2026-06-09   2026-09-07  (LTS)   617e29af8e421f46649484a4937e48c685e47f46488167c982f88bc4ec1d522f
+3.1.8     2025-02-11   ended               d319da6aecde3aa6f426b44bbf997406d95275c5c59ab6f6ef53caaa079f456f
+3.2.6     2025-09-30   ended 2025-11-23    89681a9ddaa9ed7cf25ea8ef61338db805200bae47d00510490623547380c148
+3.3.7     2026-04-07   ended 2026-04-09    4900be54e81c4dfe00bb1a10dad33fd8414833573c40d0e9e3274d4ed32e53a2
+3.4.6     2026-06-09   2026-10-22          a57b8a1f09b502c904352c8a5386987675f2d6c52bc155f9a2f416faea1c0473
+3.5.7     2026-06-09   2030-04-08  (LTS)   a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8
+3.6.3     2026-06-09   2026-11-01          243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1
+4.0.1     2026-06-09   2027-05-14          2db3f3a0d6ea4b59e1f094ace2c8cd536dffb87cdc39084c5afa1e6f7f37dd09
+
+Picking a line
+--------------
+3.5.7   The migration target named in state.txt, and the only line with a
+        long horizon: LTS through 2030-04-08. Build-verified against this
+        repo's flag set (see state.txt).
+3.0.21  LTS, but support ends 2026-09-07 - weeks after this file was written.
+        Fine for a comparison build, not a landing place.
+4.0.1   Newest line, supported to 2027-05-14. Configure accepts this repo's
+        flag set with four deprecation warnings (no-hw, no-ssl, no-ssl3,
+        no-engine) and exits 0.
+3.4.6 / 3.6.3
+        Supported only into late 2026.
+3.1.8 / 3.2.6 / 3.3.7
+        Their lines have ended; listed for completeness, do not build against
+        them.
+1.1.1w  What every archive in this directory is built from today. Unsupported
+        since the day it shipped - see state.txt.
+
+Refreshing this file
+--------------------
+Upstream publishes the checksum beside each tarball; re-read it rather than
+computing one locally:
+
+  v=3.5.7
+  case $v in 1.*) tag="OpenSSL_$(echo $v | tr . _)";; *) tag="openssl-$v";; esac
+  curl -sSL https://github.com/openssl/openssl/releases/download/$tag/openssl-$v.tar.gz.sha256
+
+3.x prints "<sha256> *openssl-<version>.tar.gz"; 1.1.1w prints the bare hash.
+
+  newest tags:   gh api repos/openssl/openssl/releases -q '.[].tag_name'
+  support dates: https://openssl-library.org/policies/releasestrat/

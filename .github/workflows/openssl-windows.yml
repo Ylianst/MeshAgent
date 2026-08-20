@@ -1,0 +1,109 @@
+name: openssl-windows
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      sha256:
+        required: true
+        type: string
+      force:
+        required: true
+        type: boolean
+      version_suffix:
+        required: false
+        default: false
+        type: boolean
+
+env:
+  OSSL_FLAGS: >-
+    no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic
+    no-hw no-dso no-shared -no-asm no-rc5 no-idea no-md4
+    no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast no-md2
+    no-mdc2 no-engine no-ocsp no-cms
+
+jobs:
+  build:
+    runs-on: ${{ matrix.platform == 'arm64' && 'windows-11-arm' || 'windows-2022' }}
+    env:
+      # Set (to -<version>) writes this run's archives beside the committed ones
+      # instead of overwriting them, so several versions can coexist.
+      SFX: ${{ inputs.version_suffix && format('-{0}', inputs.version) || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: win32, vcconf: VC-WIN32,     msvc_arch: x86,   suffix: 32,    debugflag: "",        asm: "1" }
+          - { platform: win32, vcconf: VC-WIN32,     msvc_arch: x86,   suffix: 32,    debugflag: "--debug", asm: "1", dsuffix: d }
+          - { platform: win64, vcconf: VC-WIN64A,    msvc_arch: x64,   suffix: 64,    debugflag: "",        asm: "1" }
+          - { platform: win64, vcconf: VC-WIN64A,    msvc_arch: x64,   suffix: 64,    debugflag: "--debug", asm: "1", dsuffix: d }
+        # no arm64 agent yet, so disable for now
+        #  - { platform: arm64, vcconf: VC-WIN64-ARM, msvc_arch: arm64, suffix: ARM64, debugflag: "" }
+        #  - { platform: arm64, vcconf: VC-WIN64-ARM, msvc_arch: arm64, suffix: ARM64, debugflag: "--debug", dsuffix: d }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check whether the archive already matches the requested version
+        id: check
+        shell: pwsh
+        run: |
+          $path = "openssl/libstatic/libcrypto${{ matrix.suffix }}MT${{ matrix.dsuffix }}${env:SFX}.lib"
+          $skip = $false
+          if ((Test-Path $path) -and ("${{ inputs.force }}" -ne "true")) {
+            $m = Select-String -Path $path -Pattern "OpenSSL ${{ inputs.version }} " -Encoding Ascii -ErrorAction SilentlyContinue
+            if ($m) { $skip = $true }
+          }
+          $skipStr = if ($skip) { "true" } else { "false" }
+          "skip=$skipStr" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($skip) { Write-Host "::notice::$path already at OpenSSL ${{ inputs.version }} and force=false - skipping rebuild." }
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: steps.check.outputs.skip != 'true'
+        with:
+          arch: ${{ matrix.msvc_arch }}
+      - uses: ilammy/setup-nasm@v1
+        if: steps.check.outputs.skip != 'true' && matrix.asm
+      - name: Install Strawberry Perl (Configure needs it)
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: choco install -y strawberryperl --no-progress
+      - name: Download and verify source
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}"
+          # 1.x releases are tagged OpenSSL_1_1_1w; 3.x and later, openssl-3.5.7.
+          $tag = if ($v -like '1.*') { "OpenSSL_" + ($v -replace '\.','_') } else { "openssl-$v" }
+          curl.exe -sSL -o ossl.tar.gz "https://github.com/openssl/openssl/releases/download/$tag/openssl-$v.tar.gz"
+          $hash = (Get-FileHash ossl.tar.gz -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "${{ inputs.sha256 }}") { throw "checksum mismatch: $hash" }
+          tar xzf ossl.tar.gz
+          Rename-Item "openssl-${{ inputs.version }}" src
+      - name: Configure (asm ${{ matrix.asm && 'enabled' || 'disabled' }}), patch CRT to static, build
+        if: steps.check.outputs.skip != 'true'
+        shell: cmd
+        run: |
+          cd src
+          set FLAGS=%OSSL_FLAGS%
+          if "${{ matrix.asm }}"=="1" set FLAGS=%FLAGS:-no-asm=%
+          perl Configure ${{ matrix.vcconf }} ${{ matrix.debugflag }} %FLAGS%
+          if "${{ matrix.debugflag }}"=="" (powershell -Command "(Get-Content makefile) -replace '/MD\b', '/MT' | Set-Content makefile") else (powershell -Command "(Get-Content makefile) -replace '/MDd\b', '/MTd' | Set-Content makefile")
+          rem build_libs only - the repo ships just the two .lib files
+          nmake build_libs
+      - name: Verify version stamped into archive
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $m = Select-String -Path src/libcrypto.lib -Pattern "OpenSSL ${{ inputs.version }} " -Encoding Ascii
+          if (-not $m) { throw "version string OpenSSL ${{ inputs.version }} not found in libcrypto.lib" }
+      - name: Stage repo layout
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out/openssl/libstatic | Out-Null
+          Copy-Item src/libcrypto.lib "out/openssl/libstatic/libcrypto${{ matrix.suffix }}MT${{ matrix.dsuffix }}${env:SFX}.lib"
+          Copy-Item src/libssl.lib    "out/openssl/libstatic/libssl${{ matrix.suffix }}MT${{ matrix.dsuffix }}${env:SFX}.lib"
+      - uses: actions/upload-artifact@v7.0.1
+        if: ${{ steps.check.outputs.skip != 'true' }}
+        with:
+          name: openssl-windows-${{ matrix.platform }}${{ matrix.dsuffix }}
+          path: out/
