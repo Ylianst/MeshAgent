@@ -4011,6 +4011,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 			useproxy = len;
 		}
 	}
+	else
+	{
+		agent->triedNoProxy_Index = agent->serverIndex;
+	}
 #ifndef MICROSTACK_NOTLS
 	ILibParseUriResult result = ILibParseUri(serverUrl, &host, &port, &path, useproxy ? NULL : &meshServer);
 #else
