@@ -2428,6 +2428,36 @@ int agent_VerifyMeshCertificates(MeshAgentHostContainer *agent)
 	if (i != 1) { return 1; } // Bad certificates
 	return 0;
 }
+
+// Load the optional mTLS client certificate. This is only used for the outgoing connection to
+// the server, it does not replace the agent certificate and has no effect on the NodeID.
+// The PEM file has to hold the private key first, followed by the certificate.
+void agent_LoadClientCertificate(MeshAgentHostContainer *agent)
+{
+	char certfile[1024];
+	int len;
+
+	agent->clientcert.flags = 0;
+	agent->clientcert.x509 = NULL;
+	agent->clientcert.pkey = NULL;
+
+	if (agent->masterDb == NULL) { return; }
+	len = ILibSimpleDataStore_Get(agent->masterDb, "ClientCertPem", NULL, 0);
+	if (len <= 0 || len >= (int)sizeof(certfile)) { return; }
+
+	ILibSimpleDataStore_Get(agent->masterDb, "ClientCertPem", certfile, (int)sizeof(certfile));
+	certfile[sizeof(certfile) - 1] = 0;
+
+	if (util_from_pem(certfile, &(agent->clientcert)) == -1)
+	{
+		// util_from_pem does not clean up after itself, so the key may be set even on failure
+		if (agent->clientcert.pkey != NULL) { EVP_PKEY_free(agent->clientcert.pkey); agent->clientcert.pkey = NULL; }
+		agent->clientcert.x509 = NULL;
+		ILIBLOGMESSAGEX("Unable to load mTLS client certificate: %s", certfile);
+		return;
+	}
+	ILIBLOGMESSAGEX("Loaded mTLS client certificate: %s", certfile);
+}
 #endif
 
 
@@ -5371,7 +5401,11 @@ int MeshAgent_AgentMode(MeshAgentHostContainer *agentHost, int paramLen, char **
 #endif
 
 #ifndef MICROSTACK_NOTLS
-	if (agentHost->selftlscert.x509 == NULL) {
+	agent_LoadClientCertificate(agentHost);
+	if (agentHost->clientcert.x509 != NULL) {
+		// An mTLS client certificate was configured, use that one instead.
+		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, &(agentHost->clientcert), NULL, ValidateMeshServer, agentHost);
+	} else if (agentHost->selftlscert.x509 == NULL) {
 		// We don't have a TLS certificate, so setup the client without one.
 		ILibWebClient_EnableHTTPS(agentHost->httpClientManager, NULL, NULL, ValidateMeshServer, agentHost);
 	} else {
@@ -6358,6 +6392,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 {
 #ifndef MICROSTACK_NOTLS
+	util_freecert(&agent->clientcert);
 	util_freecert(&agent->selftlscert);
 	util_freecert(&agent->selfcert);
 #endif
