@@ -2456,6 +2456,9 @@ void agent_LoadClientCertificate(MeshAgentHostContainer *agent)
 		ILIBLOGMESSAGEX("Unable to load mTLS client certificate: %s", certfile);
 		return;
 	}
+
+	// Also hand it to the script engine, the relay tunnels are opened from there
+	ILibDuktape_ClientCert = &(agent->clientcert);
 	ILIBLOGMESSAGEX("Loaded mTLS client certificate: %s", certfile);
 }
 #endif
@@ -6392,6 +6395,7 @@ int MeshAgent_Start(MeshAgentHostContainer *agentHost, int paramLen, char **para
 void MeshAgent_Destroy(MeshAgentHostContainer* agent)
 {
 #ifndef MICROSTACK_NOTLS
+	ILibDuktape_ClientCert = NULL;
 	util_freecert(&agent->clientcert);
 	util_freecert(&agent->selftlscert);
 	util_freecert(&agent->selfcert);

@@ -87,6 +87,12 @@ typedef struct ILibDuktape_net_server_session
 int ILibDuktape_TLS_ctx2socket = -1;
 int ILibDuktape_TLS_ctx2server = -1;
 
+#ifndef MICROSTACK_NOTLS
+// Optional mTLS client certificate, set by the agent when "ClientCertPem" is configured.
+// Only used for outgoing TLS connections, see ILibDuktape_TLS_connect().
+struct util_cert *ILibDuktape_ClientCert = NULL;
+#endif
+
 #ifdef WIN32
 #define ILibDuktape_net_IPC_BUFFERSIZE	4096
 typedef struct ILibDuktape_net_WindowsIPC
@@ -2451,7 +2457,16 @@ duk_ret_t ILibDuktape_TLS_connect(duk_context *ctx)
 	{
 		return(ILibDuktape_Error(ctx, "Invalid SecureContext Object"));
 	}
-	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */																					
+	SSL_CTX_set_verify(data->ssl_ctx, SSL_VERIFY_PEER, ILibDuktape_TLS_verify); /* Ask for authentication */
+
+	// If the agent has an mTLS client certificate, present it on outgoing connections. The caller
+	// can still supply its own certificate with "pfx", in that case we leave it alone.
+	if ((ILibDuktape_ClientCert != NULL) && (ILibDuktape_ClientCert->x509 != NULL) && (duk_has_prop_string(ctx, 0, "pfx") == 0))
+	{
+		SSL_CTX_use_certificate(data->ssl_ctx, ILibDuktape_ClientCert->x509);
+		SSL_CTX_use_PrivateKey(data->ssl_ctx, ILibDuktape_ClientCert->pkey);
+	}
+
 	if (duk_has_prop_string(ctx, 0, "ALPNProtocols"))
 	{
 		duk_uarridx_t i;

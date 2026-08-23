@@ -28,6 +28,12 @@ limitations under the License.
 #define ILibDuktape_SOCKET2OPTIONS	"\xFF_NET_SOCKET2OPTIONS"
 void ILibDuktape_net_init(duk_context *ctx, void *chain);
 
+#ifndef MICROSTACK_NOTLS
+// Optional mTLS client certificate used for outgoing TLS connections made from the script engine
+struct util_cert;
+extern struct util_cert *ILibDuktape_ClientCert;
+#endif
+
 typedef struct ILibDuktape_globalTunnel_data
 {
 	struct sockaddr_in6 proxyServer;

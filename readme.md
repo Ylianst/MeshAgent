@@ -38,7 +38,7 @@ Here is a list of the possible keys that are currently supported by the agent. N
 |---|---|
 | `AgentCapabilities` | Bitmask specifying supported agent capabilities. |
 | `agentName` | If set, sent to the server instead of the hostname. |
-| `ClientCertPem` | Path to a PEM file holding a private key followed by a certificate. If set, this certificate is presented as the TLS client certificate when connecting to the server, for example when the server sits behind a reverse proxy that requires mTLS. Does not affect the agent identity certificate or the NodeID. |
+| `ClientCertPem` | Path to a PEM file holding a private key followed by a certificate. If set, this certificate is presented as the TLS client certificate on the control channel and on relay tunnels, for example when the server sits behind a reverse proxy that requires mTLS. Does not affect the agent identity certificate or the NodeID. |
 | `compactDirtyMinimum` | Minimum dirty bytes threshold for the `db.compact()` operation. |
 | `consoleTextMaxRate` | Rate limit for `sendConsoleText`. Default is 10 messages per second. |
 | `controlChannelDebug` | If set, logs/displays control channel messages (except JSON messages). |
