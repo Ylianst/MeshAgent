@@ -989,11 +989,12 @@ int kvm_server_inputdata(char* block, int blocklen)
 		 * rule that MNG_CAM_START only opens the camera once the agent's
 		 * JavaScript layer has recorded the local user's consent. */
 		case MNG_CAM_CONSENT:
-			/* The local user accepted. Only the agent's consent flow sends
-			 * this, and it carries no settings payload of its own --
-			 * continue with whatever is already in effect. */
+			/* The local user accepted. MNG_CAM_CONSENT itself carries no
+			 * payload saying which request it is answering -- native tracks
+			 * that internally and replays exactly what was actually asked
+			 * for (stream start, snapshot, or both), with its settings. */
 			kvm_cam_set_consent(1);
-			kvm_cam_start(NULL, 0);
+			kvm_cam_consent_granted();
 			break;
 		case MNG_CAM_START: kvm_cam_start((const unsigned char*)block, size); break;
 		case MNG_CAM_STOP:  kvm_cam_stop(); break;

@@ -63,7 +63,7 @@ limitations under the License.
 #define CAM_DEFAULT_HEIGHT   480
 #define CAM_DEFAULT_FPS      15
 #define CAM_DEFAULT_QUALITY  75
-#define CAM_SNAPSHOT_QUALITY 92   /* a still is sent once, so it can afford quality the stream cannot */
+#define CAM_SNAPSHOT_QUALITY 100  /* a still is sent once, so it always defaults to the camera's best */
 #define CAM_DEFAULT_THRESHOLD 3   /* mean absolute luma difference; sensor noise alone sits well under this */
 
 #define CAM_MAX_FPS          60
@@ -113,12 +113,48 @@ static int g_initialised = 0;
 static ILibTransport_DoneState(*g_writeHandler)(char*, int, void*) = NULL;
 static void *g_reserved = NULL;
 
-/* A snapshot asked for while the stream is running is served from the stream
- * rather than by opening the camera a second time -- V4L2 devices are
- * single-open, so a second open would simply fail. The capture thread checks
- * this and diverts the next frame it already has in hand. */
+/* A snapshot always captures independently, at its own requested resolution
+ * (by default, the camera's largest) rather than whatever the live stream
+ * happens to be running at. V4L2 devices are single-open, so if the stream is
+ * running when a snapshot is asked for, cam_snapshot_worker() pauses it for
+ * the moment it takes to grab one frame, then restarts it -- see
+ * g_snapshotPausedStream below. */
 static volatile int g_snapshotPending = 0;
 static int g_snapshotQuality = CAM_SNAPSHOT_QUALITY;
+/* The resolution this snapshot -- in flight, or waiting on consent -- was
+ * actually asked for; 0x0 means "the camera's best", resolved by
+ * cam_find_max_resolution() in the worker. Deliberately separate from
+ * g_width/g_height, which describe the stream. */
+static int g_pendingSnapWidth = 0;
+static int g_pendingSnapHeight = 0;
+/* -1 = system default, matching g_currentDeviceIndex's convention; else an
+ * index into the last enumeration, already bounds-checked when stashed. */
+static int g_pendingSnapDeviceIndex = -1;
+/* 1 while a snapshot has the stream paused to reuse the (single-open) device
+ * at its own resolution -- guards kvm_cam_start() from racing it to spawn a
+ * second capture thread for the same device. See cam_snapshot_worker(). */
+static volatile int g_snapshotPausedStream = 0;
+
+/* MNG_CAM_CONSENT (the local user's answer) is one generic signal shared by
+ * every kind of request that can need it, since the agent's JS layer has no
+ * way to know -- and no business deciding -- which kind originally asked.
+ * Native remembers that itself: whichever of kvm_cam_start()/kvm_cam_snapshot
+ * found consent missing ORs its bit in here, and kvm_cam_consent_granted()
+ * acts on exactly what is set, nothing more. A bitmask rather than one
+ * pending "kind" so a rapid Start-then-Snapshot click before the local user
+ * answers does not silently lose whichever request came first. */
+#define CAM_PENDING_START    0x01
+#define CAM_PENDING_SNAPSHOT 0x02
+static volatile int g_pendingAction = 0;
+/* The whole MNG_CAM_START frame that triggered the currently-outstanding
+ * consent prompt, so kvm_cam_consent_granted() can apply the settings it
+ * actually asked for. kvm_cam_start()'s fail-closed branch deliberately never
+ * calls cam_apply_params() -- nothing should be touched before consent is
+ * real -- so without this, the operator's chosen profile would silently be
+ * replaced by whatever the encoder's compiled-in defaults happen to be. */
+#define CAM_START_FRAME_LEN 14
+static unsigned char g_pendingStartFrame[CAM_START_FRAME_LEN];
+static int g_pendingStartFrameLen = 0;
 
 /* Previous frame reduced to 1/8-scale luma, for static-scene suppression.
  * Reallocated only when the dimensions change. */
@@ -475,6 +511,63 @@ static void cam_dev_release(cam_dev_t *d, struct v4l2_buffer *buf)
     xioctl(d->fd, VIDIOC_QBUF, buf);
 }
 
+/*
+ * Find a device's largest resolution for one pixel format via
+ * VIDIOC_ENUM_FRAMESIZES. Returns 0 and fills outW/outH on success, non-zero
+ * if the device can't be opened or offers nothing in this format.
+ *
+ * A UVC webcam (the common case) enumerates a short list of exact DISCRETE
+ * sizes, so every one is checked and the largest by area kept. A device that
+ * reports STEPWISE or CONTINUOUS sizing instead exposes its bounds directly
+ * in a single entry -- there is nothing to iterate, and every later index
+ * would just describe the same range.
+ */
+static int cam_find_max_resolution(const char *path, unsigned int pixelformat, int *outW, int *outH)
+{
+    int fd, i, found = 0;
+    int bestW = 0, bestH = 0;
+    long bestArea = 0;
+
+    fd = open(path, O_RDWR | O_NONBLOCK, 0);
+    if (fd < 0) { return -1; }
+
+    for (i = 0; i < 64; i++)
+    {
+        struct v4l2_frmsizeenum fse;
+        memset(&fse, 0, sizeof(fse));
+        fse.index = (unsigned int)i;
+        fse.pixel_format = pixelformat;
+        if (xioctl(fd, VIDIOC_ENUM_FRAMESIZES, &fse) < 0) { break; }
+
+        if (fse.type == V4L2_FRMSIZE_TYPE_DISCRETE)
+        {
+            long area = (long)fse.discrete.width * (long)fse.discrete.height;
+            if (area > bestArea)
+            {
+                bestArea = area;
+                bestW = (int)fse.discrete.width;
+                bestH = (int)fse.discrete.height;
+                found = 1;
+            }
+        }
+        else
+        {
+            bestW = (int)fse.stepwise.max_width;
+            bestH = (int)fse.stepwise.max_height;
+            found = 1;
+            break;
+        }
+    }
+
+    close(fd);
+    if (!found || bestW <= 0 || bestH <= 0) { return -1; }
+    if (bestW > CAM_MAX_WIDTH) { bestW = CAM_MAX_WIDTH; }
+    if (bestH > CAM_MAX_HEIGHT) { bestH = CAM_MAX_HEIGHT; }
+    *outW = bestW;
+    *outH = bestH;
+    return 0;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Encoding helpers                                                          */
 /* ------------------------------------------------------------------------ */
@@ -789,7 +882,7 @@ static void *capture_thread(void *arg)
         struct v4l2_buffer buf;
         unsigned char *data = NULL;
         size_t len = 0;
-        int r, quality, suppress, threshold, wantSnapshot, snapQuality;
+        int r, quality, suppress, threshold;
         uint64_t nowT;
 
         pthread_mutex_lock(&g_lock);
@@ -797,8 +890,6 @@ static void *capture_thread(void *arg)
         quality = g_quality;
         suppress = g_suppress;
         threshold = g_threshold;
-        wantSnapshot = g_snapshotPending;
-        snapQuality = g_snapshotQuality;
         pthread_mutex_unlock(&g_lock);
 
         r = cam_dev_grab(&dev, &buf, &data, &len);
@@ -816,9 +907,8 @@ static void *capture_thread(void *arg)
 
         /* Software frame pacing. V4L2's S_PARM is advisory and widely ignored,
          * so the rate the operator asked for is enforced here regardless of
-         * what the driver decided to deliver. A pending snapshot bypasses it:
-         * the operator is waiting on that one specifically. */
-        if (!wantSnapshot && nextDue != 0 && nowT < nextDue)
+         * what the driver decided to deliver. */
+        if (nextDue != 0 && nowT < nextDue)
         {
             cam_dev_release(&dev, &buf);
             continue;
@@ -829,19 +919,11 @@ static void *capture_thread(void *arg)
         {
             /* The camera already produced a JPEG. Do not re-encode it. */
             int send = 1;
-            if (suppress && threshold > 0 && !wantSnapshot)
+            if (suppress && threshold > 0)
             {
                 int tw = 0, th = 0;
                 unsigned char *thumb = jpeg_thumbnail(data, (unsigned long)len, &tw, &th);
                 if (thumb != NULL) { send = scene_changed(thumb, tw, th, threshold); }
-            }
-
-            if (wantSnapshot)
-            {
-                send_snapshot(data, (unsigned long)len, dev.width, dev.height, 1, (unsigned int)(now_ms() - nowT));
-                pthread_mutex_lock(&g_lock);
-                g_snapshotPending = 0;
-                pthread_mutex_unlock(&g_lock);
             }
             if (send) { send_frame(data, (unsigned long)len, 1); }
         }
@@ -851,27 +933,19 @@ static void *capture_thread(void *arg)
             unsigned char *jpeg;
             int send = 1;
 
-            if (suppress && threshold > 0 && !wantSnapshot)
+            if (suppress && threshold > 0)
             {
                 int tw = 0, th = 0;
                 unsigned char *thumb = yuyv_thumbnail(data, dev.width, dev.height, &tw, &th);
                 if (thumb != NULL) { send = scene_changed(thumb, tw, th, threshold); }
             }
 
-            if (send || wantSnapshot)
+            if (send)
             {
-                jpeg = encode_yuyv_jpeg(data, dev.width, dev.height,
-                                        wantSnapshot ? snapQuality : quality, &jlen);
+                jpeg = encode_yuyv_jpeg(data, dev.width, dev.height, quality, &jlen);
                 if (jpeg != NULL)
                 {
-                    if (wantSnapshot)
-                    {
-                        send_snapshot(jpeg, jlen, dev.width, dev.height, 0, (unsigned int)(now_ms() - nowT));
-                        pthread_mutex_lock(&g_lock);
-                        g_snapshotPending = 0;
-                        pthread_mutex_unlock(&g_lock);
-                    }
-                    if (send) { send_frame(jpeg, jlen, 0); }
+                    send_frame(jpeg, jlen, 0);
                     tjFree(jpeg);
                 }
             }
@@ -884,7 +958,6 @@ static void *capture_thread(void *arg)
     pthread_mutex_lock(&g_lock);
     g_shutdown = 1;
     g_passthroughActive = 0;
-    g_snapshotPending = 0;
     reset_scene_state();
     pthread_mutex_unlock(&g_lock);
     return NULL;
@@ -1122,6 +1195,13 @@ void kvm_cam_init(ILibTransport_DoneState(*writeHandler)(char*, int, void*), voi
     g_forceRaw = 0;
     g_passthroughActive = 0;
     g_snapshotPending = 0;
+    g_snapshotQuality = CAM_SNAPSHOT_QUALITY;
+    g_pendingSnapWidth = 0;
+    g_pendingSnapHeight = 0;
+    g_pendingSnapDeviceIndex = -1;
+    g_snapshotPausedStream = 0;
+    g_pendingAction = 0;
+    g_pendingStartFrameLen = 0;
     g_initialised = 1;
     reset_scene_state();
     pthread_mutex_unlock(&g_lock);
@@ -1164,6 +1244,7 @@ void kvm_cam_start(const unsigned char *frame, int size)
     int needConsentPrompt;
     int restart;
     int skipConsentPrompt = 0;
+    int stashLen;
     pthread_t restartThread = (pthread_t)0;
 
     /* Read before cam_apply_params() ever runs: this must still be seen on the
@@ -1176,6 +1257,15 @@ void kvm_cam_start(const unsigned char *frame, int size)
     /* Fail closed: never open the camera without a local decision. */
     if (!g_consent)
     {
+        /* Remembered so kvm_cam_consent_granted() can apply the settings this
+         * request actually asked for once the local user answers, instead of
+         * silently falling back to whatever was in effect before. */
+        g_pendingAction |= CAM_PENDING_START;
+        stashLen = (frame != NULL && size > 0) ? size : 0;
+        if (stashLen > CAM_START_FRAME_LEN) { stashLen = CAM_START_FRAME_LEN; }
+        if (stashLen > 0) { memcpy(g_pendingStartFrame, frame, (size_t)stashLen); }
+        g_pendingStartFrameLen = stashLen;
+
         needConsentPrompt = g_initialised && g_shutdown;
         if (needConsentPrompt) { g_promptOutstanding = 1; }
         pthread_mutex_unlock(&g_lock);
@@ -1184,6 +1274,17 @@ void kvm_cam_start(const unsigned char *frame, int size)
     }
 
     restart = cam_apply_params(frame, size);
+
+    if (g_snapshotPausedStream)
+    {
+        /* A snapshot is using the (single-open) device right now. The
+         * settings above were still applied, and cam_snapshot_worker() reads
+         * g_width/g_height/g_fps fresh when it restarts capture, so there is
+         * nothing left to do here -- spawning a second thread would race the
+         * worker for the same device. */
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
 
     if (!g_shutdown)
     {
@@ -1219,17 +1320,56 @@ void kvm_cam_start(const unsigned char *frame, int size)
 }
 
 /*
- * One-shot capture used when nothing is streaming. Runs on its own thread for
- * the same reason enumeration does: opening a camera and waiting for its first
- * usable frame can take a noticeable moment, and the KVM command thread must
- * not be parked for it.
+ * Ends a snapshot attempt: clears the pending flag and, if a live stream was
+ * paused to free up the (single-open) device, hands it back. Called from
+ * every exit out of cam_snapshot_worker() so a failed capture never leaves
+ * the stream stopped forever.
+ */
+static void cam_snapshot_finish(int wasStreaming)
+{
+    pthread_mutex_lock(&g_lock);
+    g_snapshotPending = 0;
+    if (wasStreaming && g_consent)
+    {
+        /* capture_thread() re-reads g_width/g_height/g_fps/g_currentPath
+         * fresh at its own startup, so any MNG_CAM_START that arrived while
+         * this snapshot had the device (and was held off by
+         * g_snapshotPausedStream in kvm_cam_start()) is picked up correctly
+         * here without this function needing to know about it. */
+        g_shutdown = 0;
+        g_snapshotPausedStream = 0;
+        if (pthread_create(&g_thread, NULL, capture_thread, NULL) != 0)
+        {
+            g_shutdown = 1;
+            g_thread = (pthread_t)0;
+        }
+    }
+    else
+    {
+        g_snapshotPausedStream = 0;
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+/*
+ * One-shot capture, independent of whatever the live stream is doing. Runs
+ * on its own thread for the same reason enumeration does: opening a camera
+ * and waiting for its first usable frame can take a noticeable moment, and
+ * the KVM command thread must not be parked for it.
+ *
+ * Always captures at its own resolution (the operator's request, or the
+ * camera's true maximum when none was given) rather than reusing whatever
+ * the stream happens to be running at -- if the stream owns the device, it
+ * is paused for the moment this takes and then restarted.
  */
 static void *cam_snapshot_worker(void *arg)
 {
     cam_thread_args_t *targs = (cam_thread_args_t*)arg;
     cam_dev_t dev;
     char path[CAM_DEVICE_PATH_MAX + 1];
-    int width, height, quality, forceRaw, attempts;
+    int width, height, quality, forceRaw, attempts, deviceIndex;
+    int wasStreaming;
+    pthread_t oldThread = (pthread_t)0;
     uint64_t started;
 
     free(targs);
@@ -1238,22 +1378,59 @@ static void *cam_snapshot_worker(void *arg)
     if (!g_consent)
     {
         /* Consent was withdrawn between the request and this thread starting. */
+        g_snapshotPending = 0;
         pthread_mutex_unlock(&g_lock);
         return NULL;
     }
-    strncpy(path, g_currentPath, sizeof(path) - 1);
+
+    wasStreaming = !g_shutdown;
+    if (wasStreaming)
+    {
+        g_shutdown = 1;
+        g_snapshotPausedStream = 1;
+        oldThread = g_thread;
+        g_thread = (pthread_t)0;
+    }
+
+    deviceIndex = g_pendingSnapDeviceIndex;
+    if (deviceIndex >= 0 && deviceIndex < g_deviceCount)
+    {
+        strncpy(path, g_devicePaths[deviceIndex], sizeof(path) - 1);
+    }
+    else
+    {
+        strncpy(path, g_currentPath, sizeof(path) - 1);
+    }
     path[sizeof(path) - 1] = '\0';
-    width = g_width; height = g_height; quality = g_snapshotQuality; forceRaw = g_forceRaw;
+    width = g_pendingSnapWidth;
+    height = g_pendingSnapHeight;
+    quality = g_snapshotQuality;
+    forceRaw = g_forceRaw;
     pthread_mutex_unlock(&g_lock);
 
-    if (path[0] == '\0') { strncpy(path, "/dev/video0", sizeof(path) - 1); }
+    /* Join outside the lock: capture_thread() takes it on every frame. */
+    if (oldThread != (pthread_t)0) { pthread_join(oldThread, NULL); }
+
+    if (path[0] == '\0') { strncpy(path, "/dev/video0", sizeof(path) - 1); path[sizeof(path) - 1] = '\0'; }
+
+    /* 0x0 means "the camera's best": resolve its true maximum via
+     * VIDIOC_ENUM_FRAMESIZES rather than falling back to CAM_DEFAULT_*,
+     * which is what used to make a snapshot silently inherit whatever
+     * (often lower) resolution the stream happened to be running at. */
+    if (width <= 0 || height <= 0)
+    {
+        if (cam_find_max_resolution(path, V4L2_PIX_FMT_MJPEG, &width, &height) != 0 &&
+            cam_find_max_resolution(path, V4L2_PIX_FMT_YUYV, &width, &height) != 0)
+        {
+            width = CAM_DEFAULT_WIDTH;
+            height = CAM_DEFAULT_HEIGHT;
+        }
+    }
 
     started = now_ms();
     if (cam_dev_open(&dev, path, width, height, CAM_DEFAULT_FPS, forceRaw) != 0)
     {
-        pthread_mutex_lock(&g_lock);
-        g_snapshotPending = 0;
-        pthread_mutex_unlock(&g_lock);
+        cam_snapshot_finish(wasStreaming);
         return NULL;
     }
 
@@ -1296,31 +1473,48 @@ static void *cam_snapshot_worker(void *arg)
     }
 
     cam_dev_close(&dev);
-    pthread_mutex_lock(&g_lock);
-    g_snapshotPending = 0;
-    pthread_mutex_unlock(&g_lock);
+    cam_snapshot_finish(wasStreaming);
     return NULL;
 }
 
 void kvm_cam_snapshot(const unsigned char *frame, int size, ILibTransport_DoneState(*writeHandler)(char*, int, void*), void *reserved)
 {
     int skipConsentPrompt = 0;
-    int needConsentPrompt, streaming, quality = 0, deviceIndex = -1;
+    int needConsentPrompt;
+    int haveRequest = (frame != NULL && size >= 12);
+    int reqWidth = 0, reqHeight = 0, reqQuality = 0, reqDeviceIndex = -1;
     cam_thread_args_t *targs;
     pthread_t t;
 
-    if (frame != NULL && size >= 12)
+    if (haveRequest)
     {
-        quality = frame[8];
-        deviceIndex = frame[9];
+        reqWidth = (frame[4] << 8) | frame[5];
+        reqHeight = (frame[6] << 8) | frame[7];
+        reqQuality = frame[8];
+        reqDeviceIndex = frame[9];
         skipConsentPrompt = (frame[10] & 0x02) ? 1 : 0;
     }
 
     pthread_mutex_lock(&g_lock);
 
+    /* Stashed unconditionally, even when consent turns out to be missing
+     * below: kvm_cam_consent_granted() replays this call with frame==NULL
+     * once the local user answers, and it must see the operator's actual
+     * request rather than whatever a previous snapshot (or nothing) left
+     * behind. */
+    if (haveRequest)
+    {
+        g_pendingSnapWidth = reqWidth;
+        g_pendingSnapHeight = reqHeight;
+        g_snapshotQuality = (reqQuality > 0 && reqQuality <= 100) ? reqQuality : CAM_SNAPSHOT_QUALITY;
+        if (reqDeviceIndex >= 0 && reqDeviceIndex < g_deviceCount) { g_pendingSnapDeviceIndex = reqDeviceIndex; }
+        else { g_pendingSnapDeviceIndex = -1; }
+    }
+
     /* A still is not a lesser intrusion than a stream: same gate. */
     if (!g_consent)
     {
+        g_pendingAction |= CAM_PENDING_SNAPSHOT;
         needConsentPrompt = g_initialised;
         if (needConsentPrompt) { g_promptOutstanding = 1; }
         pthread_mutex_unlock(&g_lock);
@@ -1328,32 +1522,14 @@ void kvm_cam_snapshot(const unsigned char *frame, int size, ILibTransport_DoneSt
         return;
     }
 
-    if (quality > 0 && quality <= 100) { g_snapshotQuality = quality; }
-    else { g_snapshotQuality = CAM_SNAPSHOT_QUALITY; }
-
-    if (deviceIndex != 0xFF && deviceIndex >= 0 && deviceIndex < g_deviceCount && deviceIndex != g_currentDeviceIndex)
-    {
-        /* Only honoured when nothing is streaming; switching the device out
-         * from under a live stream would restart it, which is not what asking
-         * for a photograph should do. */
-        if (g_shutdown)
-        {
-            g_currentDeviceIndex = deviceIndex;
-            strncpy(g_currentPath, g_devicePaths[deviceIndex], sizeof(g_currentPath) - 1);
-            g_currentPath[sizeof(g_currentPath) - 1] = '\0';
-        }
-    }
-
     if (g_snapshotPending) { pthread_mutex_unlock(&g_lock); return; }   /* coalesce rapid clicks */
     g_snapshotPending = 1;
-    streaming = !g_shutdown;
     pthread_mutex_unlock(&g_lock);
 
-    /* If a stream is already running it owns the device -- V4L2 is
-     * single-open, so a second open would simply fail. Let the capture thread
-     * divert its next frame instead; it clears g_snapshotPending when done. */
-    if (streaming) { return; }
-
+    /* Always its own capture -- see cam_snapshot_worker(), which pauses and
+     * resumes a live stream around it rather than diverting one of the
+     * stream's own frames, so a still lands at the resolution actually
+     * asked for even while a lower-resolution stream is running. */
     targs = (cam_thread_args_t*)malloc(sizeof(cam_thread_args_t));
     if (targs == NULL)
     {
@@ -1376,6 +1552,35 @@ void kvm_cam_snapshot(const unsigned char *frame, int size, ILibTransport_DoneSt
     pthread_detach(t);
 }
 
+/*
+ * kvm_cam_consent_granted - the local user just said yes to a prompt this
+ * module raised itself. Acts on exactly what g_pendingAction records was
+ * actually being asked for -- MNG_CAM_CONSENT carries no payload of its own
+ * to say which, so native has to remember. A snapshot fires before a start
+ * so a Snapshot-while-stream-is-off click never gets upgraded into a stream
+ * the operator never asked for.
+ */
+void kvm_cam_consent_granted(void)
+{
+    int action;
+    unsigned char startFrame[CAM_START_FRAME_LEN];
+    int startFrameLen;
+
+    pthread_mutex_lock(&g_lock);
+    action = g_pendingAction;
+    g_pendingAction = 0;
+    startFrameLen = g_pendingStartFrameLen;
+    if (startFrameLen > 0) { memcpy(startFrame, g_pendingStartFrame, (size_t)startFrameLen); }
+    g_pendingStartFrameLen = 0;
+    pthread_mutex_unlock(&g_lock);
+
+    if (action & CAM_PENDING_SNAPSHOT) { kvm_cam_snapshot(NULL, 0, g_writeHandler, g_reserved); }
+    if ((action & CAM_PENDING_START) || action == 0)
+    {
+        kvm_cam_start(startFrameLen > 0 ? startFrame : NULL, startFrameLen);
+    }
+}
+
 void kvm_cam_stop(void)
 {
     pthread_t thread;
@@ -1391,6 +1596,8 @@ void kvm_cam_stop(void)
     /* Stopping ends the session's permission; the next start prompts again. */
     g_consent = 0;
     g_snapshotPending = 0;
+    g_pendingAction = 0;
+    g_pendingStartFrameLen = 0;
     thread = g_thread;
     g_thread = (pthread_t)0;
     pthread_mutex_unlock(&g_lock);
@@ -1430,6 +1637,8 @@ void kvm_cam_cleanup(void)
     g_consent = 0;
     g_promptOutstanding = 0;
     g_snapshotPending = 0;
+    g_pendingAction = 0;
+    g_pendingStartFrameLen = 0;
     thread = g_thread;
     g_thread = (pthread_t)0;
     pthread_mutex_unlock(&g_lock);

@@ -97,6 +97,18 @@ void kvm_cam_set_consent(int granted);
 int kvm_cam_has_consent(void);
 
 /*
+ * kvm_cam_consent_granted - the local user just said yes to a prompt this
+ * module raised itself via MNG_CAM_CONSENT_NEEDED (MNG_CAM_CONSENT carries no
+ * payload saying which kind of request it was answering). Call this instead
+ * of kvm_cam_start(NULL, 0) from the MNG_CAM_CONSENT dispatch case: native
+ * remembers whether the outstanding request was a stream start, a snapshot,
+ * or both, and replays exactly that -- including the settings the original
+ * MNG_CAM_START asked for, which would otherwise be silently discarded in
+ * favour of whatever was already in effect.
+ */
+void kvm_cam_consent_granted(void);
+
+/*
  * kvm_cam_start - open the camera and begin streaming, or re-apply settings
  * to an already-running capture.
  *
