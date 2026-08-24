@@ -890,6 +890,40 @@ void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *
 	}
 #endif
 
+#if defined(_KVM_CAMERA)
+	/* The camera's exact counterparts of the two microphone signals above, and
+	 * consumed here for the same reason: they are internal native -> agent JS
+	 * messages that the browser has no use for, so they must not be forwarded
+	 * up the duplex stream. Byte 4, when present, carries the skip-prompt
+	 * request from the originating MNG_CAM_START (see
+	 * notify_js_consent_needed() in linux_cam.c/windows_cam.c); a bare 4-byte
+	 * signal from an older build defaults it to "not requested" rather than
+	 * reading past the buffer. */
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_NEEDED)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onCamConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_CANCEL)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onCamConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+#endif
+
 	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
 	ILibMemory_Free(user);
 }
@@ -966,6 +1000,35 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 		if (duk_ctx_is_alive(ptrs->ctx))
 		{
 			duk_peval_string(ptrs->ctx, "try { onMicConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+#endif
+
+#if defined(_KVM_CAMERA)
+	/* Camera equivalents of the two microphone signals above -- same
+	 * consume-don't-forward rule, same skip-prompt byte. On Windows this path
+	 * only runs when already on the chain thread; the off-thread case is
+	 * handled by the _Chain variant above, which the marshal at the top of
+	 * this function dispatches to. */
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_NEEDED))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onCamConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_CANCEL))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onCamConsentCancelled(); } catch (ex) { }");
 			duk_pop(ptrs->ctx);
 		}
 		return ILibTransport_DoneState_COMPLETE;

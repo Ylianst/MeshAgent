@@ -42,6 +42,7 @@ limitations under the License.
 #if defined(_KVM_AUDIO)
 #include "meshcore/KVM/kvm_audio.h"
 #include "meshcore/KVM/kvm_mic.h"
+#include "meshcore/KVM/kvm_cam.h"
 extern int slave2master[2];
 static ILibTransport_DoneState kvm_audio_pipe_write(char *buf, int len, void *reserved)
 {
@@ -983,6 +984,24 @@ int kvm_server_inputdata(char* block, int blocklen)
 		case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
 		case MNG_MIC_DEVICE_QUERY: kvm_mic_query_devices(kvm_audio_pipe_write, NULL); break;
 #endif
+#if defined(_KVM_CAMERA)
+		/* Webcam. Mirrors the microphone block above exactly, including the
+		 * rule that MNG_CAM_START only opens the camera once the agent's
+		 * JavaScript layer has recorded the local user's consent. */
+		case MNG_CAM_CONSENT:
+			/* The local user accepted. Only the agent's consent flow sends
+			 * this, and it carries no settings payload of its own --
+			 * continue with whatever is already in effect. */
+			kvm_cam_set_consent(1);
+			kvm_cam_start(NULL, 0);
+			break;
+		case MNG_CAM_START: kvm_cam_start((const unsigned char*)block, size); break;
+		case MNG_CAM_STOP:  kvm_cam_stop(); break;
+		case MNG_CAM_QUERY: kvm_cam_resend_caps(kvm_audio_pipe_write, NULL); break;
+		case MNG_CAM_DATA:  kvm_cam_feed(block, size); break;
+		case MNG_CAM_DEVICE_QUERY: kvm_cam_query_devices(kvm_audio_pipe_write, NULL); break;
+		case MNG_CAM_SNAPSHOT: kvm_cam_snapshot((const unsigned char*)block, size, kvm_audio_pipe_write, NULL); break;
+#endif
 	}
 	return size;
 }
@@ -1566,6 +1585,9 @@ void* kvm_server_mainloop(void* parm)
 	kvm_audio_cleanup();
 	kvm_mic_cleanup();
 #endif
+#if defined(_KVM_CAMERA)
+	kvm_cam_cleanup();
+#endif
 	close(slave2master[1]);
 	close(master2slave[0]);
 	slave2master[1] = 0;
@@ -1678,6 +1700,13 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	kvm_audio_init(kvm_audio_pipe_write, NULL);
 	kvm_mic_set_slave_fd(slave2master[1]);
 	kvm_mic_init(kvm_audio_pipe_write, NULL);
+#endif
+#if defined(_KVM_CAMERA)
+	/* Same pipe and the same "prepare state, advertise capability, open
+	 * nothing" contract the microphone has: no device is touched and no
+	 * consent is granted here. */
+	kvm_cam_set_slave_fd(slave2master[1]);
+	kvm_cam_init(kvm_audio_pipe_write, NULL);
 #endif
 
 	// Two Phase is ok here, because all our fork/vfork calls always happen on the same thread

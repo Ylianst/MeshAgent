@@ -104,7 +104,37 @@ typedef enum RemoteManagementCommands
 	// kvm_mic_query_devices() for the wire format) -- a later MNG_MIC_START
 	// referencing a device by index must use the most recently sent list.
 	MNG_MIC_DEVICE_QUERY = 103,
-	MNG_MIC_DEVICE_LIST = 104
+	MNG_MIC_DEVICE_LIST = 104,
+	// Camera: the device's own webcam, streamed to the operator as a sequence
+	// of complete JPEG frames. Deliberately not a video codec -- UVC webcams
+	// already emit MJPEG in hardware, so the common path forwards the camera's
+	// own bytes untouched and spends no CPU encoding at all (see kvm_cam.h).
+	// Mirrors the microphone commands above in both shape and consent rules;
+	// pointing a camera at someone is at least as sensitive as listening.
+	MNG_CAM_QUERY = 105,					// Ask for camera availability + consent state
+	MNG_CAM_CAPS = 106,						// Camera availability / consent advertisement
+	MNG_CAM_START = 107,					// Request capture; prompts the local user
+	MNG_CAM_STOP = 108,						// Stop capture and revoke the session's consent
+	MNG_CAM_DATA = 109,						// One complete JPEG frame (device -> browser)
+	// Sent only by the agent's own consent flow once the local user accepts.
+	// Kept separate from MNG_CAM_START for the same reason MNG_MIC_CONSENT is:
+	// a browser frame may request capture but can never grant permission.
+	MNG_CAM_CONSENT = 110,
+	// Native -> agent JS only; never sent to the browser. Exact counterparts of
+	// MNG_MIC_CONSENT_NEEDED / MNG_MIC_CONSENT_CANCEL, intercepted and dropped
+	// by agentcore.c on the way up so they never reach the tunnel.
+	MNG_CAM_CONSENT_NEEDED = 111,
+	MNG_CAM_CONSENT_CANCEL = 112,
+	// Camera enumeration, so the operator can pick something other than the
+	// system default. Same index-space rule as the microphone's: a LIST's
+	// ordering is only valid until the next LIST.
+	MNG_CAM_DEVICE_QUERY = 113,
+	MNG_CAM_DEVICE_LIST = 114,
+	// Single still capture, independent of whether streaming is running.
+	// SNAPSHOT_DATA carries a small metadata header ahead of the JPEG so the
+	// browser can label what it is showing (see kvm_cam.h for the layout).
+	MNG_CAM_SNAPSHOT = 115,
+	MNG_CAM_SNAPSHOT_DATA = 116
 }RemoteManagementCommands;
 
 
