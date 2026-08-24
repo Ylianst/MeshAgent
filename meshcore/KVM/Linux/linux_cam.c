@@ -149,8 +149,26 @@ typedef struct
 /* Transport                                                                 */
 /* ------------------------------------------------------------------------ */
 
+/*
+ * Every outbound frame goes through here, and it is serialized on its own
+ * mutex rather than g_lock.
+ *
+ * Serialization is required, not defensive: a pipe write is only atomic up to
+ * PIPE_BUF (4 KiB), and a camera frame is far larger, so two threads writing
+ * at once would interleave their bytes and corrupt both frames. That can
+ * genuinely happen -- the one-shot snapshot worker only spawns when nothing is
+ * streaming, but the operator can start the stream while that worker is still
+ * in flight, putting two writers on this fd at the same moment.
+ *
+ * A separate mutex is used because callers reach this both holding and not
+ * holding g_lock, and because a frame write must never block the capture
+ * thread's settings checks behind it.
+ */
+static pthread_mutex_t g_sendLock = PTHREAD_MUTEX_INITIALIZER;
+
 static void cam_write_out(const char *buf, int len)
 {
+    pthread_mutex_lock(&g_sendLock);
     if (g_slave_pipe_fd >= 0)
     {
         ssize_t written = write(g_slave_pipe_fd, buf, (size_t)len);
@@ -161,6 +179,7 @@ static void cam_write_out(const char *buf, int len)
     {
         g_writeHandler((char*)buf, len, g_reserved);
     }
+    pthread_mutex_unlock(&g_sendLock);
 }
 
 /*
@@ -235,15 +254,19 @@ static void send_caps(ILibTransport_DoneState(*writeHandler)(char*, int, void*),
     caps[12] = (unsigned char)quality;
     caps[13] = (unsigned char)devCount;
 
-    if (g_slave_pipe_fd >= 0)
+    /* Through cam_write_out() like every other frame, so this cannot land in
+     * the middle of one the capture thread is writing. writeHandler/reserved
+     * are the same pair stashed at init; honour an explicitly supplied one
+     * only when there is no slave pipe to prefer. */
+    if ((g_slave_pipe_fd < 0) && (writeHandler != NULL) && (writeHandler != g_writeHandler))
     {
-        ssize_t written = write(g_slave_pipe_fd, (char*)caps, CAM_CAPS_LEN);
-        (void)written;
-        fsync(g_slave_pipe_fd);
-    }
-    else if (writeHandler != NULL)
-    {
+        pthread_mutex_lock(&g_sendLock);
         writeHandler((char*)caps, CAM_CAPS_LEN, reserved);
+        pthread_mutex_unlock(&g_sendLock);
+    }
+    else
+    {
+        cam_write_out((char*)caps, CAM_CAPS_LEN);
     }
 }
 
@@ -949,15 +972,16 @@ static void *cam_query_devices_worker(void *arg)
     }
     pthread_mutex_unlock(&g_lock);
 
-    if (g_slave_pipe_fd >= 0)
+    /* Serialized like every other frame -- see cam_write_out(). */
+    if ((g_slave_pipe_fd < 0) && (writeHandler != NULL) && (writeHandler != g_writeHandler))
     {
-        ssize_t written = write(g_slave_pipe_fd, (char*)outFrame, (size_t)outLen);
-        (void)written;
-        fsync(g_slave_pipe_fd);
-    }
-    else if (writeHandler != NULL)
-    {
+        pthread_mutex_lock(&g_sendLock);
         writeHandler((char*)outFrame, outLen, reserved);
+        pthread_mutex_unlock(&g_sendLock);
+    }
+    else
+    {
+        cam_write_out((char*)outFrame, outLen);
     }
     free(outFrame);
 
