@@ -651,7 +651,7 @@ function monitorinfo()
                     child.stdin.write('            active=val[i];');
                     child.stdin.write('         }');
                     child.stdin.write('      }');
-                    child.stdin.write('      if(active=="active") { print display; break; }');
+                    child.stdin.write('      if(active=="active" && display!="") { print display; break; }');
                     child.stdin.write('   }');
                     child.stdin.write("}'\nexit\n");
                     child.waitExit();
