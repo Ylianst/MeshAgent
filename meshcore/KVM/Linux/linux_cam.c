@@ -65,6 +65,14 @@ limitations under the License.
 #define CAM_DEFAULT_QUALITY  75
 #define CAM_SNAPSHOT_QUALITY 100  /* a still is sent once, so it always defaults to the camera's best */
 #define CAM_DEFAULT_THRESHOLD 3   /* mean absolute luma difference; sensor noise alone sits well under this */
+/* Frames to discard at the start of every fresh live-stream open before the
+ * first one is eligible to be sent, mirroring cam_snapshot_worker()'s
+ * existing "skip the first 3" exposure-settling wait -- without this the
+ * stream's very first visible frame(s) can be dark or half-exposed on
+ * cameras with real auto-exposure/white-balance settling time, and static-
+ * scene suppression would otherwise lock onto that bad frame as its baseline
+ * until the next genuine scene change happened to clear it. */
+#define CAM_WARMUP_FRAMES    3
 
 #define CAM_MAX_FPS          60
 #define CAM_MAX_WIDTH        4096
@@ -179,6 +187,12 @@ typedef struct
     int width;
     int height;
     int isMjpeg;
+    /* The actual V4L2 fourcc granted (V4L2_PIX_FMT_MJPEG/YUYV/UYVY/NV12) --
+     * isMjpeg alone used to be enough when raw meant "YUYV, no other option",
+     * but cam_dev_open() now falls back through several raw formats for
+     * wider real-hardware coverage, so the non-MJPEG path needs to know
+     * which one it actually got. */
+    unsigned int pixfmt;
 } cam_dev_t;
 
 /* ------------------------------------------------------------------------ */
@@ -376,9 +390,16 @@ static void cam_dev_close(cam_dev_t *d)
  * Open one capture device and start streaming from it.
  * Returns 0 on success, non-zero on failure (with everything cleaned up).
  *
- * MJPEG is requested first and raw YUYV used only if the camera cannot
- * provide it, because an MJPEG frame is already a finished JPEG and can be
- * forwarded without spending any CPU on it at all.
+ * Tries pixel formats in order of decreasing cheapness/likelihood rather
+ * than just "MJPEG, then one raw fallback": MJPEG first, since it is already
+ * a finished JPEG and can be forwarded without spending any CPU on it at
+ * all; then YUYV, the common raw format on plain USB UVC webcams; then
+ * UYVY, a near-identical byte-order variant some webcams and USB capture
+ * dongles report instead; then NV12, the ISP-native planar format on many
+ * ARM/CSI-connected cameras -- relevant because ARM boards are an explicit
+ * target for this agent (see kvm_cam.h). forceRaw simply drops MJPEG from
+ * the list instead of special-casing it, so the raw fallback order is
+ * identical whether or not MJPEG was ever tried.
  */
 static int cam_dev_open(cam_dev_t *d, const char *path, int width, int height, int fps, int forceRaw)
 {
@@ -388,6 +409,9 @@ static int cam_dev_open(cam_dev_t *d, const char *path, int width, int height, i
     struct v4l2_streamparm parm;
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     unsigned int caps;
+    unsigned int candidates[4];
+    int candidateCount = 0;
+    int fmtIndex;
     int i;
 
     memset(d, 0, sizeof(*d));
@@ -402,30 +426,28 @@ static int cam_dev_open(cam_dev_t *d, const char *path, int width, int height, i
     if (!(caps & V4L2_CAP_VIDEO_CAPTURE)) { goto fail; }
     if (!(caps & V4L2_CAP_STREAMING)) { goto fail; }
 
-    memset(&fmt, 0, sizeof(fmt));
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = (unsigned int)width;
-    fmt.fmt.pix.height = (unsigned int)height;
-    fmt.fmt.pix.field = V4L2_FIELD_ANY;
-    fmt.fmt.pix.pixelformat = forceRaw ? V4L2_PIX_FMT_YUYV : V4L2_PIX_FMT_MJPEG;
+    if (!forceRaw) { candidates[candidateCount++] = V4L2_PIX_FMT_MJPEG; }
+    candidates[candidateCount++] = V4L2_PIX_FMT_YUYV;
+    candidates[candidateCount++] = V4L2_PIX_FMT_UYVY;
+    candidates[candidateCount++] = V4L2_PIX_FMT_NV12;
 
-    if (xioctl(d->fd, VIDIOC_S_FMT, &fmt) < 0)
+    for (fmtIndex = 0; fmtIndex < candidateCount; fmtIndex++)
     {
-        /* Fall back to the other family rather than giving up: a camera that
-         * refuses MJPEG usually still offers YUYV, and vice versa. */
         memset(&fmt, 0, sizeof(fmt));
         fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         fmt.fmt.pix.width = (unsigned int)width;
         fmt.fmt.pix.height = (unsigned int)height;
         fmt.fmt.pix.field = V4L2_FIELD_ANY;
-        fmt.fmt.pix.pixelformat = forceRaw ? V4L2_PIX_FMT_MJPEG : V4L2_PIX_FMT_YUYV;
-        if (xioctl(d->fd, VIDIOC_S_FMT, &fmt) < 0) { goto fail; }
+        fmt.fmt.pix.pixelformat = candidates[fmtIndex];
+        if (xioctl(d->fd, VIDIOC_S_FMT, &fmt) == 0) { break; }
     }
+    if (fmtIndex >= candidateCount) { goto fail; }
 
     /* The driver rewrites S_FMT with what it actually granted, which may be a
      * different size than asked for; everything downstream must use these. */
     d->width = (int)fmt.fmt.pix.width;
     d->height = (int)fmt.fmt.pix.height;
+    d->pixfmt = fmt.fmt.pix.pixelformat;
     d->isMjpeg = (fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_MJPEG) ? 1 : 0;
     if (d->width <= 0 || d->height <= 0) { goto fail; }
 
@@ -610,22 +632,117 @@ static void yuyv_to_rgb(const unsigned char *src, unsigned char *dst, int width,
 }
 
 /*
- * Encode a raw YUYV frame to JPEG. Returns a tjAlloc'd buffer the caller must
- * free with tjFree(), or NULL.
+ * Packed UYVY (4:2:2) to RGB24 -- the same format as YUYV with the four bytes
+ * in a different order (U Y0 V Y1 instead of Y0 U Y1 V), reported by some
+ * webcams and USB capture dongles instead of YUYV. Identical math to
+ * yuyv_to_rgb(), just reading the bytes at their UYVY offsets.
  */
-static unsigned char *encode_yuyv_jpeg(const unsigned char *yuyv, int width, int height, int quality, unsigned long *outLen)
+static void uyvy_to_rgb(const unsigned char *src, unsigned char *dst, int width, int height)
+{
+    int i, total = width * height;
+
+    for (i = 0; i < total; i += 2)
+    {
+        int u = src[0], y0 = src[1], v = src[2], y1 = src[3];
+        int c, d, e, j;
+        const int yv[2] = { y0, y1 };
+
+        d = u - 128;
+        e = v - 128;
+        for (j = 0; j < 2; j++)
+        {
+            int r, g, b;
+            c = yv[j] - 16;
+            if (c < 0) { c = 0; }
+            r = (298 * c + 409 * e + 128) >> 8;
+            g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+            b = (298 * c + 516 * d + 128) >> 8;
+            if (r < 0) { r = 0; } else if (r > 255) { r = 255; }
+            if (g < 0) { g = 0; } else if (g > 255) { g = 255; }
+            if (b < 0) { b = 0; } else if (b > 255) { b = 255; }
+            dst[0] = (unsigned char)r;
+            dst[1] = (unsigned char)g;
+            dst[2] = (unsigned char)b;
+            dst += 3;
+        }
+        src += 4;
+    }
+}
+
+/*
+ * Planar NV12 (4:2:0) to RGB24: a full-resolution Y plane followed by a
+ * half-resolution-in-both-dimensions interleaved U/V plane. No plain USB UVC
+ * webcam needs this (they overwhelmingly offer MJPEG or YUYV), but it is the
+ * ISP-native output format on many ARM/CSI-connected cameras -- boards this
+ * agent explicitly targets (see kvm_cam.h) -- so without this fallback such
+ * a camera would enumerate successfully in V4L2 yet be entirely unusable
+ * here.
+ */
+static void nv12_to_rgb(const unsigned char *src, unsigned char *dst, int width, int height)
+{
+    const unsigned char *yPlane = src;
+    const unsigned char *uvPlane = src + ((size_t)width * (size_t)height);
+    int x, y;
+
+    for (y = 0; y < height; y++)
+    {
+        const unsigned char *yRow = yPlane + (size_t)y * (size_t)width;
+        const unsigned char *uvRow = uvPlane + (size_t)(y / 2) * (size_t)width;
+        unsigned char *dstRow = dst + (size_t)y * (size_t)width * 3;
+
+        for (x = 0; x < width; x++)
+        {
+            int c = yRow[x] - 16;
+            int d = uvRow[(x / 2) * 2] - 128;
+            int e = uvRow[(x / 2) * 2 + 1] - 128;
+            int r, g, b;
+
+            if (c < 0) { c = 0; }
+            r = (298 * c + 409 * e + 128) >> 8;
+            g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+            b = (298 * c + 516 * d + 128) >> 8;
+            if (r < 0) { r = 0; } else if (r > 255) { r = 255; }
+            if (g < 0) { g = 0; } else if (g > 255) { g = 255; }
+            if (b < 0) { b = 0; } else if (b > 255) { b = 255; }
+
+            dstRow[x * 3 + 0] = (unsigned char)r;
+            dstRow[x * 3 + 1] = (unsigned char)g;
+            dstRow[x * 3 + 2] = (unsigned char)b;
+        }
+    }
+}
+
+/*
+ * Dispatch to the right *_to_rgb() converter for whatever raw format
+ * cam_dev_open() actually negotiated. Shared by capture_thread() and
+ * cam_snapshot_worker() so the format list lives in exactly one place.
+ * V4L2_PIX_FMT_YUYV is the fallback default for any pixfmt this doesn't
+ * otherwise recognise, matching this function's behaviour before UYVY/NV12
+ * existed.
+ */
+static void raw_to_rgb(unsigned int pixfmt, const unsigned char *src, unsigned char *dst, int width, int height)
+{
+    if (pixfmt == V4L2_PIX_FMT_UYVY) { uyvy_to_rgb(src, dst, width, height); }
+    else if (pixfmt == V4L2_PIX_FMT_NV12) { nv12_to_rgb(src, dst, width, height); }
+    else { yuyv_to_rgb(src, dst, width, height); }
+}
+
+/*
+ * Encode an already-converted RGB24 frame to JPEG. Returns a tjAlloc'd
+ * buffer the caller must free with tjFree(), or NULL. Conversion is the
+ * caller's job (see raw_to_rgb()) rather than folded in here, since there
+ * are now three raw source formats sharing this one encode step.
+ */
+static unsigned char *encode_rgb_jpeg(const unsigned char *rgb, int width, int height, int quality, unsigned long *outLen)
 {
     tjhandle enc = NULL;
-    unsigned char *rgb = NULL, *jpeg = NULL;
+    unsigned char *jpeg = NULL;
     unsigned long jpegLen = 0;
 
-    if (width <= 0 || height <= 0) { return NULL; }
-    rgb = (unsigned char*)malloc((size_t)width * (size_t)height * 3);
-    if (rgb == NULL) { return NULL; }
-    yuyv_to_rgb(yuyv, rgb, width, height);
+    if (width <= 0 || height <= 0 || rgb == NULL) { return NULL; }
 
     enc = tjInitCompress();
-    if (enc == NULL) { free(rgb); return NULL; }
+    if (enc == NULL) { return NULL; }
 
     if (tjCompress2(enc, rgb, width, 0, height, TJPF_RGB, &jpeg, &jpegLen,
                     TJSAMP_420, quality, TJFLAG_FASTDCT) < 0)
@@ -635,7 +752,6 @@ static unsigned char *encode_yuyv_jpeg(const unsigned char *yuyv, int width, int
     }
 
     tjDestroy(enc);
-    free(rgb);
     if (jpeg == NULL || jpegLen == 0) { return NULL; }
     *outLen = jpegLen;
     return jpeg;
@@ -727,6 +843,66 @@ static unsigned char *yuyv_thumbnail(const unsigned char *yuyv, int width, int h
     *outW = sw;
     *outH = sh;
     return thumb;
+}
+
+/* Subsample packed UYVY straight to a luma thumbnail. Same idea as
+ * yuyv_thumbnail(), but the luma byte sits at offset 1 in each pair rather
+ * than offset 0. */
+static unsigned char *uyvy_thumbnail(const unsigned char *uyvy, int width, int height, int *outW, int *outH)
+{
+    int sw = width / 8, sh = height / 8, x, y;
+    unsigned char *thumb;
+
+    if (sw <= 0 || sh <= 0) { return NULL; }
+    thumb = (unsigned char*)malloc((size_t)sw * (size_t)sh);
+    if (thumb == NULL) { return NULL; }
+
+    for (y = 0; y < sh; y++)
+    {
+        const unsigned char *row = uyvy + (size_t)(y * 8) * (size_t)width * 2;
+        for (x = 0; x < sw; x++)
+        {
+            thumb[y * sw + x] = row[(size_t)(x * 8) * 2 + 1];
+        }
+    }
+    *outW = sw;
+    *outH = sh;
+    return thumb;
+}
+
+/* Subsample NV12's Y plane straight to a luma thumbnail. The Y plane is
+ * already a standalone 8bpp grayscale image at full resolution, so this
+ * needs no chroma involvement at all -- simpler than YUYV/UYVY's
+ * interleaved packing. */
+static unsigned char *nv12_thumbnail(const unsigned char *nv12, int width, int height, int *outW, int *outH)
+{
+    int sw = width / 8, sh = height / 8, x, y;
+    unsigned char *thumb;
+
+    if (sw <= 0 || sh <= 0) { return NULL; }
+    thumb = (unsigned char*)malloc((size_t)sw * (size_t)sh);
+    if (thumb == NULL) { return NULL; }
+
+    for (y = 0; y < sh; y++)
+    {
+        const unsigned char *row = nv12 + (size_t)(y * 8) * (size_t)width;
+        for (x = 0; x < sw; x++)
+        {
+            thumb[y * sw + x] = row[x * 8];
+        }
+    }
+    *outW = sw;
+    *outH = sh;
+    return thumb;
+}
+
+/* Dispatch to the right *_thumbnail() for whatever raw format was
+ * negotiated -- the thumbnail-side counterpart of raw_to_rgb(). */
+static unsigned char *raw_thumbnail(unsigned int pixfmt, const unsigned char *src, int width, int height, int *outW, int *outH)
+{
+    if (pixfmt == V4L2_PIX_FMT_UYVY) { return uyvy_thumbnail(src, width, height, outW, outH); }
+    if (pixfmt == V4L2_PIX_FMT_NV12) { return nv12_thumbnail(src, width, height, outW, outH); }
+    return yuyv_thumbnail(src, width, height, outW, outH);
 }
 
 /*
@@ -841,6 +1017,7 @@ static void *capture_thread(void *arg)
     int width, height, fps, forceRaw;
     uint64_t nextDue = 0;
     uint64_t interval;
+    int framesSeen = 0;
 
     (void)arg;
 
@@ -903,6 +1080,17 @@ static void *capture_thread(void *arg)
         if (g_shutdown || !g_consent) { pthread_mutex_unlock(&g_lock); cam_dev_release(&dev, &buf); break; }
         pthread_mutex_unlock(&g_lock);
 
+        /* Discard the first few real frames unconditionally -- see
+         * CAM_WARMUP_FRAMES. Counted on every grabbed frame regardless of
+         * pacing, matching cam_snapshot_worker()'s own "attempts", not just
+         * the ones that would otherwise be sent at the requested fps. */
+        if (framesSeen < CAM_WARMUP_FRAMES)
+        {
+            framesSeen++;
+            cam_dev_release(&dev, &buf);
+            continue;
+        }
+
         nowT = now_ms();
 
         /* Software frame pacing. V4L2's S_PARM is advisory and widely ignored,
@@ -931,22 +1119,29 @@ static void *capture_thread(void *arg)
         {
             unsigned long jlen = 0;
             unsigned char *jpeg;
+            unsigned char *rgb;
             int send = 1;
 
             if (suppress && threshold > 0)
             {
                 int tw = 0, th = 0;
-                unsigned char *thumb = yuyv_thumbnail(data, dev.width, dev.height, &tw, &th);
+                unsigned char *thumb = raw_thumbnail(dev.pixfmt, data, dev.width, dev.height, &tw, &th);
                 if (thumb != NULL) { send = scene_changed(thumb, tw, th, threshold); }
             }
 
             if (send)
             {
-                jpeg = encode_yuyv_jpeg(data, dev.width, dev.height, quality, &jlen);
-                if (jpeg != NULL)
+                rgb = (unsigned char*)malloc((size_t)dev.width * (size_t)dev.height * 3);
+                if (rgb != NULL)
                 {
-                    send_frame(jpeg, jlen, 0);
-                    tjFree(jpeg);
+                    raw_to_rgb(dev.pixfmt, data, rgb, dev.width, dev.height);
+                    jpeg = encode_rgb_jpeg(rgb, dev.width, dev.height, quality, &jlen);
+                    if (jpeg != NULL)
+                    {
+                        send_frame(jpeg, jlen, 0);
+                        tjFree(jpeg);
+                    }
+                    free(rgb);
                 }
             }
         }
@@ -1420,7 +1615,9 @@ static void *cam_snapshot_worker(void *arg)
     if (width <= 0 || height <= 0)
     {
         if (cam_find_max_resolution(path, V4L2_PIX_FMT_MJPEG, &width, &height) != 0 &&
-            cam_find_max_resolution(path, V4L2_PIX_FMT_YUYV, &width, &height) != 0)
+            cam_find_max_resolution(path, V4L2_PIX_FMT_YUYV, &width, &height) != 0 &&
+            cam_find_max_resolution(path, V4L2_PIX_FMT_UYVY, &width, &height) != 0 &&
+            cam_find_max_resolution(path, V4L2_PIX_FMT_NV12, &width, &height) != 0)
         {
             width = CAM_DEFAULT_WIDTH;
             height = CAM_DEFAULT_HEIGHT;
@@ -1461,11 +1658,18 @@ static void *cam_snapshot_worker(void *arg)
         else
         {
             unsigned long jlen = 0;
-            unsigned char *jpeg = encode_yuyv_jpeg(data, dev.width, dev.height, quality, &jlen);
-            if (jpeg != NULL)
+            unsigned char *jpeg;
+            unsigned char *rgb = (unsigned char*)malloc((size_t)dev.width * (size_t)dev.height * 3);
+            if (rgb != NULL)
             {
-                send_snapshot(jpeg, jlen, dev.width, dev.height, 0, (unsigned int)(now_ms() - started));
-                tjFree(jpeg);
+                raw_to_rgb(dev.pixfmt, data, rgb, dev.width, dev.height);
+                jpeg = encode_rgb_jpeg(rgb, dev.width, dev.height, quality, &jlen);
+                if (jpeg != NULL)
+                {
+                    send_snapshot(jpeg, jlen, dev.width, dev.height, 0, (unsigned int)(now_ms() - started));
+                    tjFree(jpeg);
+                }
+                free(rgb);
             }
         }
         cam_dev_release(&dev, &buf);
