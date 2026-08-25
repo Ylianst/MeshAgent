@@ -330,17 +330,34 @@ static void cam_send(int cmd, const unsigned char *hdr, int hdrLen, const unsign
 /* Report whether a capture device actually exists, rather than assuming one
  * does -- mirrors windows_mic.c's microphone_available(). A cheap probe: ask
  * Media Foundation to enumerate video capture sources and see if the count is
- * non-zero, without activating (opening) any of them. */
+ * non-zero, without activating (opening) any of them.
+ *
+ * Wraps its own CoInitializeEx/CoUninitialize, exactly like
+ * microphone_available() does, rather than assuming the calling thread
+ * already has COM initialized: this is called from send_caps(), which runs
+ * on the KVM command dispatch thread for kvm_cam_init()/kvm_cam_set_consent()/
+ * kvm_cam_stop()/kvm_cam_resend_caps() -- a thread nothing else in this file
+ * ever calls CoInitializeEx on. Omitting this made MFCreateAttributes() fail
+ * with CO_E_NOTINITIALIZED on every call from that thread, so a real, present
+ * camera was reported as "no usable camera" until the device happened to get
+ * enumerated some other way first (e.g. a query triggered from a thread that
+ * does have COM initialized) and g_deviceCount cached a non-zero count. */
 static int camera_available(void)
 {
     IMFAttributes *pAttributes = NULL;
     IMFActivate **ppDevices = NULL;
     UINT32 count = 0;
-    HRESULT hr;
+    HRESULT hr, co;
     int ok = 0;
 
+    co = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
     hr = MFCreateAttributes(&pAttributes, 1);
-    if (FAILED(hr) || pAttributes == NULL) { return 0; }
+    if (FAILED(hr) || pAttributes == NULL)
+    {
+        if (SUCCEEDED(co)) { CoUninitialize(); }
+        return 0;
+    }
 
     hr = pAttributes->lpVtbl->SetGUID(pAttributes, &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
                                       &MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
@@ -357,6 +374,7 @@ static int camera_available(void)
         CoTaskMemFree(ppDevices);
     }
     pAttributes->lpVtbl->Release(pAttributes);
+    if (SUCCEEDED(co)) { CoUninitialize(); }
     return ok;
 }
 
