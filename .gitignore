@@ -341,3 +341,6 @@ microscript/ILibDuktape_Commit.h
 # compiled builds: meshagent_<arch>, DEBUG_meshagent_<arch>
 /meshagent_*
 /DEBUG_meshagent_*
+
+# Built during the Windows CI build (must match the MSVC toolchain)
+lib-opus/windows/*/libopus.lib

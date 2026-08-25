@@ -15,12 +15,22 @@ jobs:
           sudo apt clean all && sudo apt update && 
           sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
-          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf && 
-          sudo apt-get install -y libxrandr-dev
+          sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
+          sudo apt-get install -y libxrandr-dev &&
+          sudo apt-get install -y libpulse-dev
+      # AUDIO=1 enables the Opus/PulseAudio KVM audio path. Only the
+      # KVM-enabled targets get it, and only those with a committed
+      # lib-opus/linux/$(ARCHNAME)/libopus.a: x86 (5), x86-64 (6), arm64 (26).
+      # The NOKVM and Alpine targets below must stay without it.
+      #
+      # CAMERA=1 enables the V4L2 webcam path on the same KVM-enabled targets.
+      # It needs no extra package or library: V4L2 is kernel ioctls via
+      # linux/videodev2.h (from libc6-dev, already present), and the JPEG work
+      # it does uses the libjpeg-turbo the KVM build already links.
       - name: Build 32 Bit Linux
-        run: make -j4 linux ARCHID=5 && make clean
+        run: make -j4 linux ARCHID=5 AUDIO=1 CAMERA=1 && make clean
       - name: Build 64 Bit Linux
-        run: make -j4 linux ARCHID=6 && make clean
+        run: make -j4 linux ARCHID=6 AUDIO=1 CAMERA=1 && make clean
       - name: Build 32 Bit NOKVM Linux
         run: make -j4 linux ARCHID=19 && make clean
       - name: Build 64 Bit NOKVM Linux
@@ -41,9 +51,9 @@ jobs:
       - name: Install Packages
         run: |
           sudo apt clean all && sudo apt update &&
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg-dev libxrandr-dev build-essential libpulse-dev
       - name: Build ARM64 Linux
-        run: make -j4 linux ARCHID=26 && make clean
+        run: make -j4 linux ARCHID=26 AUDIO=1 CAMERA=1 && make clean
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:

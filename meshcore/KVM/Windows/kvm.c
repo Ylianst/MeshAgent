@@ -29,6 +29,13 @@ limitations under the License.
 #include "microstack/ILibAsyncSocket.h"
 #include "microstack/ILibProcessPipe.h"
 #include "microstack/ILibRemoteLogging.h"
+#if defined(_KVM_AUDIO)
+#include "meshcore/KVM/kvm_audio.h"
+#include "meshcore/KVM/kvm_mic.h"
+#endif
+#if defined(_KVM_CAMERA)
+#include "meshcore/KVM/kvm_cam.h"
+#endif
 #include <sas.h>
 
 #if defined(WIN32) && !defined(_WIN32_WCE) && !defined(_MINCORE)
@@ -714,6 +721,45 @@ int kvm_server_inputdata(char *block, int blocklen, ILibKVM_WriteHandler writeHa
 			SCREEN_SEL_TARGET = x;
 		break;
 	}
+#if defined(_KVM_AUDIO)
+	case MNG_AUDIO_START: kvm_audio_start(); break;
+	case MNG_AUDIO_STOP:  kvm_audio_stop(); break;
+	case MNG_AUDIO_QUERY: kvm_audio_resend_caps(writeHandler, reserved); break;
+	/* Microphone playback. MNG_MIC_START only reaches here once the agent's
+	 * JavaScript layer has recorded the local user's consent. */
+	case MNG_MIC_CONSENT:
+		/* The local user accepted. Only the agent's consent flow sends this,
+		 * and it carries no encoder-settings payload of its own -- continue
+		 * with whatever is already in effect. */
+		kvm_mic_set_consent(1);
+		kvm_mic_start(NULL, 0);
+		break;
+	case MNG_MIC_START: kvm_mic_start((const unsigned char*)block, size); break;
+	case MNG_MIC_STOP:  kvm_mic_stop(); break;
+	case MNG_MIC_QUERY: kvm_mic_resend_caps(writeHandler, reserved); break;
+	case MNG_MIC_DATA:  kvm_mic_feed(block, size); break;
+	case MNG_MIC_DEVICE_QUERY: kvm_mic_query_devices(writeHandler, reserved); break;
+#endif
+#if defined(_KVM_CAMERA)
+	/* Webcam. Mirrors the microphone block above structurally, but
+	 * MNG_CAM_CONSENT uses kvm_cam_consent_granted() rather than the
+	 * kvm_mic_start(NULL, 0) pattern the microphone case above still uses --
+	 * see linux_kvm.c's identical MNG_CAM_CONSENT case: native tracks
+	 * whether the outstanding request was a stream start, a snapshot, or
+	 * both, and replays exactly that (with its original settings) rather
+	 * than assuming a start, which is what let a photo silently begin
+	 * streaming too. */
+	case MNG_CAM_CONSENT:
+		kvm_cam_set_consent(1);
+		kvm_cam_consent_granted();
+		break;
+	case MNG_CAM_START: kvm_cam_start((const unsigned char*)block, size); break;
+	case MNG_CAM_STOP:  kvm_cam_stop(); break;
+	case MNG_CAM_QUERY: kvm_cam_resend_caps(writeHandler, reserved); break;
+	case MNG_CAM_DATA:  kvm_cam_feed(block, size); break;
+	case MNG_CAM_DEVICE_QUERY: kvm_cam_query_devices(writeHandler, reserved); break;
+	case MNG_CAM_SNAPSHOT: kvm_cam_snapshot((const unsigned char*)block, size, writeHandler, reserved); break;
+#endif
 	}
 	return size;
 }
@@ -1001,6 +1047,29 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 	// Send the list of displays
 	kvm_send_display_list(writeHandler, reserved);
 
+#if defined(_KVM_AUDIO)
+	// Advertise audio capability (MNG_AUDIO_CAPS) so the browser can show the
+	// audio button. This must run after hStdOut has been acquired above,
+	// otherwise the frame would be written to an invalid handle in slave mode.
+	// Capture itself stays idle until the browser sends MNG_AUDIO_START.
+	kvm_audio_init(writeHandler, reserved);
+	kvm_mic_init(writeHandler, reserved);
+
+	// Deliberately no speculative kvm_mic_start() here. Asking at session
+	// open prompted the local user about the microphone whenever anyone
+	// opened a desktop session, including the common case where the operator
+	// only wants the screen and never touches the microphone. The prompt now
+	// happens only when the operator actually asks to listen
+	// (MNG_MIC_START), which is what the local user is being asked about.
+#endif
+#if defined(_KVM_CAMERA)
+	// Advertise camera capability (MNG_CAM_CAPS) so the browser can show the
+	// Camera panel. Same ordering requirement as kvm_audio_init() above, and
+	// the same "no speculative start" rule as the microphone: capture stays
+	// idle until the browser sends MNG_CAM_START or MNG_CAM_SNAPSHOT.
+	kvm_cam_init(writeHandler, reserved);
+#endif
+
 	Sleep(100); // Pausing here seems to fix connection issues, especially with WebRTC. TODO: Investigate why.
 	KVMDEBUG("kvm_server_mainloop / start3", (int)GetCurrentThreadId());
 
@@ -1023,6 +1092,18 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		CheckDesktopSwitch(1, writeHandler, reserved);
 		if (g_shutdown)
 			break;
+
+		if (g_remotepause)
+		{
+			// Video suppressed (e.g. an audio/mic-only session): skip mouse-
+			// cursor tracking and the screen capture/tile-send below
+			// entirely. KVM command handling (including the switch case
+			// that clears g_remotepause) runs on its own thread
+			// (kvm_mainloopinput), so nothing here needs to keep running
+			// for an unpause to arrive.
+			Sleep((FRAME_RATE_TIMER > 0) ? FRAME_RATE_TIMER : 100);
+			continue;
+		}
 
 		// Enter Alertable State, so we can dispatch any packets if necessary.
 		// We are doing it here, in case we need to merge any data with the bitmaps
@@ -1207,6 +1288,13 @@ DWORD WINAPI kvm_server_mainloop_ex(LPVOID parm)
 		tileInfo = NULL;
 	}
 	KVMDEBUG("kvm_server_mainloop / end1", (int)GetCurrentThreadId());
+#if defined(_KVM_AUDIO)
+	kvm_audio_cleanup();
+	kvm_mic_cleanup();
+#endif
+#if defined(_KVM_CAMERA)
+	kvm_cam_cleanup();
+#endif
 	teardown_gdiplus();
 
 	KVMDEBUG("kvm_server_mainloop / end", (int)GetCurrentThreadId());

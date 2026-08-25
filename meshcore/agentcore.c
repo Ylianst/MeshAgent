@@ -45,6 +45,7 @@ limitations under the License.
 #ifdef _POSIX
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <arpa/inet.h>
 #endif
 
 #ifdef _OPENBSD
@@ -60,6 +61,10 @@ int gRemoteMouseRenderDefault = 0;
 	#ifdef _POSIX
 		#ifndef __APPLE__
 			#include "KVM/Linux/linux_kvm.h"
+			#if defined(_KVM_AUDIO)
+				#include "KVM/kvm_audio.h"
+				#include "KVM/kvm_mic.h"
+			#endif
 		#else
 			#include "KVM/MacOS/mac_kvm.h"
 		#endif
@@ -849,6 +854,75 @@ void ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink_Chain(void *chain, void *
 	char *buffer = (char*)user;
 	size_t bufferLen = ILibMemory_Size(user);
 
+#if defined(_KVM_AUDIO)
+	/* Native asked for a consent prompt (see kvm_mic_start()). This is an
+	 * internal signal, not something the browser has any use for, so it is
+	 * consumed here rather than forwarded up the duplex stream. Byte 4, when
+	 * present, is whether the browser request that triggered this asked to
+	 * skip the interactive prompt (the Mic panel, not the Desktop panel's
+	 * own mic button) -- see notify_js_consent_needed() in
+	 * linux_mic.c/windows_mic.c. Older agent builds only ever send the bare
+	 * 4-byte signal, so this defaults to "not requested" rather than reading
+	 * past the buffer. */
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_NEEDED)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onMicConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_CANCEL)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onMicConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+#endif
+
+#if defined(_KVM_CAMERA)
+	/* The camera's exact counterparts of the two microphone signals above, and
+	 * consumed here for the same reason: they are internal native -> agent JS
+	 * messages that the browser has no use for, so they must not be forwarded
+	 * up the duplex stream. Byte 4, when present, carries the skip-prompt
+	 * request from the originating MNG_CAM_START (see
+	 * notify_js_consent_needed() in linux_cam.c/windows_cam.c); a bare 4-byte
+	 * signal from an older build defaults it to "not requested" rather than
+	 * reading past the buffer. */
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_NEEDED)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onCamConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+	if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_CANCEL)
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onCamConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		ILibMemory_Free(user);
+		return;
+	}
+#endif
+
 	ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen);
 	ILibMemory_Free(user);
 }
@@ -899,6 +973,67 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink(char *
 		Duktape_Console_LogEx(ptrs->ctx, ILibDuktape_LogType_Info1, "%s", buffer + 4);
 	}
 
+#if defined(_KVM_AUDIO)
+	/* Native asked for a consent prompt (see kvm_mic_start()). This is an
+	 * internal signal, not something the browser has any use for, so it is
+	 * consumed here rather than forwarded up the duplex stream. On Windows
+	 * this path only runs when already on the chain thread; the off-thread
+	 * case is handled by the _Chain variant above, which the marshal at the
+	 * top of this function dispatches to. Byte 4, when present, is whether
+	 * the browser request that triggered this asked to skip the interactive
+	 * prompt -- see the matching comment on the _Chain variant above. */
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_NEEDED))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onMicConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_CONSENT_CANCEL))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onMicConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+#endif
+
+#if defined(_KVM_CAMERA)
+	/* Camera equivalents of the two microphone signals above -- same
+	 * consume-don't-forward rule, same skip-prompt byte. On Windows this path
+	 * only runs when already on the chain thread; the off-thread case is
+	 * handled by the _Chain variant above, which the marshal at the top of
+	 * this function dispatches to. */
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_NEEDED))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			char evalBuf[64];
+			int skipPrompt = (bufferLen >= 5 && ((unsigned char*)buffer)[4] != 0) ? 1 : 0;
+			snprintf(evalBuf, sizeof(evalBuf), "try { onCamConsentNeeded(%d); } catch (ex) { }", skipPrompt);
+			duk_peval_string(ptrs->ctx, evalBuf);
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+	if ((buffer != NULL) && (bufferLen >= 4) && (ntohs(((unsigned short*)buffer)[0]) == MNG_CAM_CONSENT_CANCEL))
+	{
+		if (duk_ctx_is_alive(ptrs->ctx))
+		{
+			duk_peval_string(ptrs->ctx, "try { onCamConsentCancelled(); } catch (ex) { }");
+			duk_pop(ptrs->ctx);
+		}
+		return ILibTransport_DoneState_COMPLETE;
+	}
+#endif
+
 	if (ptrs->stream != NULL)
 	{
 		if (ILibDuktape_DuplexStream_WriteData(ptrs->stream, buffer, bufferLen) != ILibTransport_DoneState_ERROR)
@@ -936,8 +1071,23 @@ ILibTransport_DoneState ILibDuktape_MeshAgent_RemoteDesktop_WriteSink(ILibDuktap
 	else
 #endif
 	{
-		kvm_relay_feeddata(buffer, bufferLen);
-	}
+#if defined(_KVM_AUDIO)
+			/* Intercept MNG_AUDIO_QUERY (94): re-send CAPS now that the relay is live */
+			if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_AUDIO_QUERY)
+			{
+				kvm_audio_resend_caps(ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
+				return ILibTransport_DoneState_COMPLETE;
+			}
+			/* Same for MNG_MIC_QUERY (95), so the browser learns the playback
+			 * capability and consent state without starting anything. */
+			if (bufferLen >= 4 && ntohs(((unsigned short*)buffer)[0]) == MNG_MIC_QUERY)
+			{
+				kvm_mic_resend_caps(ILibDuktape_MeshAgent_RemoteDesktop_KVM_WriteSink, user);
+				return ILibTransport_DoneState_COMPLETE;
+			}
+#endif
+			kvm_relay_feeddata(buffer, bufferLen);
+		}
 #endif
 #endif
 	return ILibTransport_DoneState_COMPLETE;

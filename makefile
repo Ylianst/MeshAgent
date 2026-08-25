@@ -570,6 +570,24 @@ CFLAGS += -D_LINKVM
 		endif
 	endif
 	BSDFLAGS = /usr/local/lib/libjpeg.a
+	# Mesh Agent KVM Audio: Opus capture/encode for Linux (PulseAudio via dlopen) + macOS
+	ifeq ($(AUDIO),1)
+		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_audio.c meshcore/KVM/Linux/linux_mic.c
+		CFLAGS += -D_KVM_AUDIO
+		LINUXFLAGS += lib-opus/linux/$(ARCHNAME)/libopus.a
+		MACOSFLAGS += ./lib-opus/macos/$(ARCHNAME)/libopus.a
+		INCDIRS += -Ilib-opus/includes
+	endif
+	# Mesh Agent KVM Camera: V4L2 webcam capture for Linux. Adds no third-party
+	# library of its own: V4L2 is kernel ioctls (so there is nothing to dlopen
+	# and nothing that can be missing at runtime), and the JPEG work it does --
+	# encoding the fallback for cameras that cannot produce MJPEG themselves,
+	# and the cheap scaled decode behind static-scene suppression -- uses the
+	# libjpeg-turbo already linked just above for desktop tiles.
+	ifeq ($(CAMERA),1)
+		LINUXKVMSOURCES += meshcore/KVM/Linux/linux_cam.c
+		CFLAGS += -D_KVM_CAMERA
+	endif
 endif
 
 ifeq ($(LMS),0)

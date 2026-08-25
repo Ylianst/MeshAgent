@@ -1,0 +1,26 @@
+# Cross-compile validation environment for the Windows KVM audio path.
+#
+# The Windows agent is normally built with Visual Studio (MeshService*.vcxproj),
+# which cannot run here. This image provides MinGW-w64 — which ships the real
+# Microsoft WASAPI headers (mmdeviceapi.h / audioclient.h) — plus Wine, so
+# meshcore/KVM/Windows/windows_audio.c can be compiled against genuine Windows
+# API definitions and executed as a real PE binary before shipping.
+#
+# Build:
+#   docker build -f docker/Dockerfile.windows-audio-check -t meshagent-winaudio .
+# Run:
+#   docker run --rm -v "$PWD:/src" -w /src meshagent-winaudio \
+#     bash docker/check-windows-audio.sh
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc-mingw-w64-x86-64 \
+        gcc-mingw-w64-i686 \
+        binutils \
+        file \
+        wine \
+        wine64 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV WINEDEBUG=-all
+WORKDIR /src
