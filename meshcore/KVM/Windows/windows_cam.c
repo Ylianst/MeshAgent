@@ -542,11 +542,25 @@ static HRESULT cam_pick_native_type(IMFSourceReader *reader, DWORD streamIndex, 
         IMFMediaType *t = NULL;
         GUID sub;
         UINT32 w = 0, h = 0;
+        UINT64 packedSize = 0;
         HRESULT hr = reader->lpVtbl->GetNativeMediaType(reader, streamIndex, i, &t);
         if (hr == MF_E_NO_MORE_TYPES || FAILED(hr) || t == NULL) { break; }
 
+        /* MF_MT_FRAME_SIZE is a packed UINT64 attribute (high 32 bits width,
+         * low 32 bits height) -- unpacked by hand via the plain IMFAttributes
+         * vtable method rather than the MFGetAttributeSize() convenience
+         * wrapper, which turned out to link as an external symbol nothing in
+         * this project's linked import libs actually provides (caught by
+         * CI: LNK2019 unresolved external symbol MFGetAttributeSize, all
+         * three architectures). GetUINT64 needs nothing beyond the vtable
+         * call every other method in this file already uses successfully. */
         if (SUCCEEDED(t->lpVtbl->GetGUID(t, &MF_MT_SUBTYPE, &sub)) && IsEqualGUID(&sub, subtype) &&
-            SUCCEEDED(MFGetAttributeSize(t, &MF_MT_FRAME_SIZE, &w, &h)) && w > 0 && h > 0)
+            SUCCEEDED(t->lpVtbl->GetUINT64(t, &MF_MT_FRAME_SIZE, &packedSize)))
+        {
+            w = (UINT32)(packedSize >> 32);
+            h = (UINT32)(packedSize & 0xFFFFFFFFu);
+        }
+        if (w > 0 && h > 0)
         {
             int exact = (wantW > 0 && wantH > 0 && (int)w == (UINT32)wantW && (int)h == (UINT32)wantH);
             long area = (long)w * (long)h;
