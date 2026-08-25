@@ -181,6 +181,14 @@ static int g_mfStarted = 0;
  * worker threads via g_liveCallback's OnReadSample. "Is a stream running" is
  * therefore tracked by g_liveReader being non-NULL, not by a thread handle. */
 static IMFSourceReader *g_liveReader = NULL;
+/* Held alongside g_liveReader purely so cam_teardown_live() can Shutdown() it
+ * explicitly. Dropping our reference and letting the reader's own release
+ * eventually destroy it would free the device only whenever COM got around to
+ * it, and this device is single-open: cam_snapshot_worker() pauses the live
+ * stream precisely so it can reopen the same camera at its own resolution, so
+ * "released eventually" is not good enough -- it has to be free the moment
+ * teardown returns. */
+static IMFMediaSource *g_liveSource = NULL;
 static void *g_liveCallback = NULL;   /* CamReaderCallback*; void* so this header block needn't forward-declare the struct */
 static volatile LONG g_liveShutdown = 1;  /* 1 = no live stream armed */
 static HANDLE g_liveStopEvent = NULL;     /* signalled from OnFlush()/a declining OnReadSample() -- see cam_teardown_live() */
@@ -672,7 +680,16 @@ static int cam_dev_open(cam_dev_t *d, const char *deviceId, int width, int heigh
     CoTaskMemFree(ppDevices);
 
     hr = pActivate->lpVtbl->ActivateObject(pActivate, &IID_IMFMediaSource, (void**)&d->source);
-    pActivate->lpVtbl->ShutdownObject(pActivate);
+    /* Deliberately NOT calling pActivate->ShutdownObject() here. It shuts down
+     * the object ActivateObject just created ("call ShutdownObject when you
+     * are done using the object"), so calling it at this point tore down the
+     * media source before a single frame could be read -- every later call on
+     * it returned MF_E_SHUTDOWN, which is why Windows could enumerate and
+     * report a camera (enumeration never activates anything) yet fail to open
+     * one for either live streaming or a snapshot. Releasing the activation
+     * object alone is correct: it does not disturb the source, and
+     * cam_dev_close() shuts the source down directly when capture really is
+     * finished. */
     pActivate->lpVtbl->Release(pActivate);
     if (FAILED(hr) || d->source == NULL) { return -1; }
 
@@ -1381,16 +1398,25 @@ static const IMFSourceReaderCallbackVtbl g_camCallbackVtbl =
 static int cam_teardown_live(void)
 {
     IMFSourceReader *reader;
+    IMFMediaSource *source;
     void *callback;
 
     cam_lock();
     reader = g_liveReader;
+    source = g_liveSource;
     callback = g_liveCallback;
     g_liveReader = NULL;
+    g_liveSource = NULL;
     g_liveCallback = NULL;
     cam_unlock();
 
-    if (reader == NULL) { return 0; }
+    if (reader == NULL)
+    {
+        /* Nothing streaming, but a half-built session could still hold a
+         * source (setup failed after activating it) -- do not leak it. */
+        if (source != NULL) { source->lpVtbl->Shutdown(source); source->lpVtbl->Release(source); }
+        return 0;
+    }
 
     InterlockedExchange(&g_liveShutdown, 1);
     if (g_liveStopEvent != NULL) { ResetEvent(g_liveStopEvent); }
@@ -1398,6 +1424,9 @@ static int cam_teardown_live(void)
     if (g_liveStopEvent != NULL) { WaitForSingleObject(g_liveStopEvent, CAM_STOP_WAIT_MS); }
 
     reader->lpVtbl->Release(reader);
+    /* After the reader is gone: shutting the source down first would make the
+     * reader's own teardown operate on an already-dead source. */
+    if (source != NULL) { source->lpVtbl->Shutdown(source); source->lpVtbl->Release(source); }
     if (callback != NULL) { ((IMFSourceReaderCallback*)callback)->lpVtbl->Release((IMFSourceReaderCallback*)callback); }
     return 1;
 }
@@ -1467,6 +1496,10 @@ static DWORD WINAPI cam_capture_setup_thread(LPVOID param)
     g_height = dev.height;
     g_passthroughActive = dev.isMjpeg;
     g_liveReader = dev.reader;
+    /* Ownership of both handed to the globals; cam_teardown_live() releases
+     * them (and Shutdown()s the source). Deliberately NOT cam_dev_close(&dev)
+     * here, which would tear down the very session just published. */
+    g_liveSource = dev.source;
     g_liveCallback = cb;
     InterlockedExchange(&g_liveShutdown, 0);
     g_setupInProgress = 0;
@@ -1476,13 +1509,6 @@ static DWORD WINAPI cam_capture_setup_thread(LPVOID param)
     /* Kick off the async chain; every subsequent frame re-arms itself from
      * within camcb_OnReadSample. Nothing further happens on this thread. */
     dev.reader->lpVtbl->ReadSample(dev.reader, MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, NULL, NULL, NULL, NULL);
-
-    /* dev.reader now holds its own reference to dev.source (see
-     * MFCreateSourceReaderFromMediaSource's standard COM ownership
-     * contract), so this function's own reference to it can be dropped --
-     * do NOT call cam_dev_close(&dev) here, which would Shutdown() the
-     * source out from under the reader just handed off to g_liveReader. */
-    dev.source->lpVtbl->Release(dev.source);
 
     if (comInitialised) { CoUninitialize(); }
     return 0;
