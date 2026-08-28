@@ -1041,11 +1041,11 @@ void* ILibMemory_SmartReAllocate(void *ptr, size_t len)
 {
 	if (ILibMemory_CanaryOK(ptr))
 	{
-		size_t originalRawSize = ILibMemory_Init_Size(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
+		size_t originalRawSize = ILibMemory_Init_SizeEx(ILibMemory_Size(ptr), ILibMemory_ExtraSize(ptr));
 		size_t originalSize = ILibMemory_Size(ptr);
 		size_t originalExtraSize = ILibMemory_ExtraSize(ptr);
 		if (originalExtraSize) { len = (len + sizeof(void *) - 1) & ~(sizeof(void *) - 1); }
-		size_t newRawSize = ILibMemory_Init_Size(len, originalExtraSize);
+		size_t newRawSize = ILibMemory_Init_SizeEx(len, originalExtraSize);
 
 		if (newRawSize < originalRawSize && originalExtraSize > 0)
 		{
