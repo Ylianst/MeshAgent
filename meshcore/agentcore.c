@@ -1199,6 +1199,23 @@ duk_ret_t ILibDuktape_MeshAgent_userChanged(duk_context *ctx)
 
 		duk_peval_string(ctx, "require('user-sessions').consoleUid()");
 		int id = duk_to_int(ctx, -1);
+
+		// Same greeter case as getRemoteDesktop, on the logout/user-switch re-fork: the login screen's
+		// X server and cookie are root-owned, so capture as root rather than the DM's own uid.
+		if (id != 0)
+		{
+			int gdmuid = -1;
+			if (duk_peval_string(ctx, "require('user-sessions').gdmUid") == 0 && duk_is_number(ctx, -1)) { gdmuid = duk_get_int(ctx, -1); }
+			duk_pop(ctx);
+			if (gdmuid == id)
+			{
+				id = 0;
+				// getXInfo() below reads its uid arg off the stack top, so swap consoleUid()'s result for id
+				duk_pop(ctx);
+				duk_push_int(ctx, id);
+			}
+		}
+
 		duk_eval_string(ctx, "require('monitor-info')");				//[uid][monitor-info]
 		duk_get_prop_string(ctx, -1, "getXInfo");						//[uid][monitor-info][getXInfo]
 		duk_swap_top(ctx, -2);											//[uid][getXInfo][this]
@@ -1330,6 +1347,24 @@ duk_ret_t ILibDuktape_MeshAgent_getRemoteDesktop(duk_context *ctx)
 				}
 			}
 		}
+
+		// At a DM greeter the X server and its Xauthority are root-owned (e.g. LightDM's
+		// /var/run/lightdm/root/:0, mode 0600). consoleUid() returns the DM's own service uid here, so
+		// the capture child setuid()s to it and can no longer read that cookie: XOpenDisplay fails and
+		// the child exits. Capture as root instead; getXInfo(0) already resolves the root server's
+		// cookie. gdmUid==console_uid only holds at the greeter (a real login is uid>=1000).
+		if (TSID == -1 && console_uid != 0)
+		{
+			int gdmuid = -1;
+			if (duk_peval_string(ctx, "require('user-sessions').gdmUid") == 0 && duk_is_number(ctx, -1)) { gdmuid = duk_get_int(ctx, -1); }
+			duk_pop(ctx);
+			if (gdmuid == console_uid)
+			{
+				Duktape_Console_LogEx(ctx, ILibDuktape_LogType_Info1, "No user logged in; capturing display-manager greeter as root (was uid %d)", console_uid);
+				console_uid = 0;
+			}
+		}
+
 		duk_push_int(ctx, console_uid); duk_put_prop_string(ctx, -2, REMOTE_DESKTOP_UID);
 		duk_push_this(ctx);																// [MeshAgent]
 		if (!duk_has_prop_string(ctx, -1, MESH_USER_CHANGED_CB))
