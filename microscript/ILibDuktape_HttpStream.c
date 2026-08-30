@@ -4976,9 +4976,9 @@ duk_ret_t ILibDuktape_WebSocket_bytesSent_ratio(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
 	ws = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
 
-	long double ratio = (long double)ws->actualSent / (long double)ws->uncompressedSent;
+	double ratio = (double)ws->actualSent / (double)ws->uncompressedSent;
 	ratio = (1 - ratio) * 100;
-	duk_push_number(ctx, floor((double)ratio));
+	duk_push_number(ctx, floor(ratio));
 	
 	return(1);
 }
@@ -4989,9 +4989,9 @@ duk_ret_t ILibDuktape_WebSocket_bytesReceived_ratio(duk_context *ctx)
 	duk_get_prop_string(ctx, -1, ILibDuktape_WSDEC2WS);						// [WebSocket_Decoded][WebSocket]
 	ws = (ILibDuktape_WebSocket_State*)Duktape_GetBufferProperty(ctx, -1, ILibDuktape_WebSocket_StatePtr);
 
-	long double ratio = (long double)ws->actualReceived / (long double)ws->uncompressedReceived;
+	double ratio = (double)ws->actualReceived / (double)ws->uncompressedReceived;
 	ratio = (1 - ratio) * 100;
-	duk_push_number(ctx, floor((double)ratio));
+	duk_push_number(ctx, floor(ratio));
 
 	return(1);
 }
