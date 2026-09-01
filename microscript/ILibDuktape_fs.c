@@ -307,6 +307,9 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 	int retVal;
 	FILE *f;
 	char *key = ILibScratchPad;
+#ifdef WIN32
+	char binFlags[8];
+#endif
 
 	duk_push_this(ctx);													// [fs]
 	duk_get_prop_string(ctx, -1, FS_NextFD);							// [fs][fd]
@@ -315,6 +318,12 @@ int ILibDuktape_fs_openSyncEx(duk_context *ctx, char *path, char *flags, char *m
 
 	sprintf_s(ILibScratchPad, sizeof(ILibScratchPad), "%d", retVal);
 #ifdef WIN32
+	// node has no text mode, so force binary on Windows, as it's default mode is text.
+	if (strchr(flags, 'b') == NULL && strchr(flags, 't') == NULL)
+	{
+		sprintf_s(binFlags, sizeof(binFlags), "%.6sb", flags);
+		flags = binFlags;
+	}
 	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, path), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
 #else
 	f = fopen(path, flags);
@@ -1111,7 +1120,7 @@ duk_ret_t ILibDuktape_fs_createWriteStream(duk_context *ctx)
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 #endif
-	char *flags = "w";
+	char *flags = "wb";
 	int fd = 0;
 	FILE *f;
 	ILibDuktape_fs_writeStreamData *data;
@@ -1284,7 +1293,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 #else
 	char *path = ILibDuktape_fs_fixLinuxPath((char*)duk_require_string(ctx, 0));
 #endif
-	char *flags = "r";
+	char *flags = "rb";
 	int fd = 0;
 	FILE *f;
 	ILibDuktape_fs_readStreamData *data;
@@ -1296,7 +1305,7 @@ duk_ret_t ILibDuktape_fs_createReadStream(duk_context *ctx)
 	if (nargs > 1)
 	{
 		fd = Duktape_GetIntPropertyValue(ctx, 1, "fd", 0);
-		flags = Duktape_GetStringPropertyValue(ctx, 1, "flags", "r");
+		flags = Duktape_GetStringPropertyValue(ctx, 1, "flags", "rb");
 		if (duk_has_prop_string(ctx, 1, "autoClose"))
 		{
 			duk_get_prop_string(ctx, 1, "autoClose");
@@ -2448,6 +2457,9 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	char *filePath = (char*)duk_require_string(ctx, 0);
 	FILE *f;
 	long fileLen;
+#ifdef WIN32
+	char binFlags[8];
+#endif
 
 #ifdef WIN32
 	char *flags = "rbN";
@@ -2461,6 +2473,12 @@ duk_ret_t ILibDuktape_fs_readFileSync(duk_context *ctx)
 	}
 
 #ifdef WIN32
+	// An options object can replace the "rbN" default above, force binary
+	if (strchr(flags, 'b') == NULL && strchr(flags, 't') == NULL)
+	{
+		sprintf_s(binFlags, sizeof(binFlags), "%.6sb", flags);
+		flags = binFlags;
+	}
 	_wfopen_s(&f, (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, filePath), (const wchar_t*)ILibDuktape_String_UTF8ToWide(ctx, flags));
 #else
 	f = fopen(filePath, flags);
