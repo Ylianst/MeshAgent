@@ -1678,7 +1678,7 @@ void* kvm_relay_restart(int paused, void *processPipeMgr, ILibKVM_WriteHandler w
 	{ //master
 		close(slave2master[1]);
 		close(master2slave[0]);
-		logFile = fopen("/tmp/master", "w");
+		if (SLAVELOG != 0) { logFile = fopen("/tmp/master", "w"); }
 		char tmp[255];
 		sprintf_s(tmp, sizeof(tmp), "Child KVM (pid=%d)", g_slavekvm);
 
