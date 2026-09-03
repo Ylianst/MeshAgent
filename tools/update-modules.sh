@@ -4,9 +4,9 @@
 # depends on which is used.
 # Done through update-modules.js, run in a built agent binary by default or under node with -node.
 #
-# usage: update-modules.sh [-current | -export[=dir] | -list] [-add=name1,name2] [-remove=name1,name2] [-sync] [-dryrun] [-striplegacy] [-binarypath=path | -node]
+# usage: update-modules.sh [-update | -export[=dir] | -list] [-add=name1,name2] [-remove=name1,name2] [-sync] [-dryrun] [-striplegacy] [-binarypath=path | -node]
 #
-#   -current          update every embedded module whose modules/<name>.js changed. Leaves entries
+#   -update           update every embedded module whose modules/<name>.js changed. Leaves entries
 #                     whose source file is gone in place, and does not add anything new
 #   -add=list         comma-separated module names to update, or add as a new entry when a name is
 #                     not embedded yet (each needs a matching modules/<name>.js)
@@ -35,7 +35,7 @@ fi
 AGENT= ADD= REMOVE= SYNC=0 DRYRUN=0 EXPORT= LIST=0 USE_NODE=0 STRIPLEGACY=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        -current) ;;
+        -update) ;;
         -list) LIST=1 ;;
         -sync) SYNC=1 ;;
         -dryrun) DRYRUN=1 ;;
@@ -86,5 +86,13 @@ else
     fi
 fi
 
+if ! command -v base64 >/dev/null 2>&1; then
+    echo "base64 is not on PATH, needed to pass the script via -b64exec." >&2
+    exit 1
+fi
+
+#circumvent 4096 character limit pre-#376 fix
+SCRIPT_B64=$(printf '%s' "$SCRIPT" | base64 | tr -d '\n')
+
 echo "Using agent: $AGENT"
-exec "$AGENT" -exec "$SCRIPT"
+exec "$AGENT" -b64exec "$SCRIPT_B64"

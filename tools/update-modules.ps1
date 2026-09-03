@@ -2,7 +2,7 @@
 # The file changed (in microscript, ILibDuktape_Polyfills.c or ILibDuktape_EmbeddedModules.c) depends on which is used.
 # Done through update-modules.js, run in a built agent binary by default or under node with -node.
 param(
-    [switch]$Current,
+    [switch]$Update,
     [string[]]$Add = @(),
     [string[]]$Remove = @(),
     [switch]$Sync,
@@ -19,9 +19,9 @@ param(
 
 if ($PSBoundParameters.Count -eq 0) {
     @'
-usage: update-modules.ps1 [-Current | -Export [dir] | -List] [-Add name1,name2] [-Remove name1,name2] [-Sync] [-DryRun] [-StripLegacy] [-BinaryPath path | -Node]
+usage: update-modules.ps1 [-Update | -Export [dir] | -List] [-Add name1,name2] [-Remove name1,name2] [-Sync] [-DryRun] [-StripLegacy] [-BinaryPath path | -Node]
 
-  -Current        update every embedded module whose modules\<name>.js changed. Leaves entries
+  -Update         update every embedded module whose modules\<name>.js changed. Leaves entries
                   whose source file is gone in place, and does not add anything new
   -Add list       comma-separated module names to update, or add as a new entry when a name is
                   not embedded yet (each needs a matching modules\<name>.js)
@@ -80,8 +80,11 @@ try {
         }
     }
 
+    #circumvent 4096 character limit pre-#376 fix
+    $ScriptB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Script))
+
     Write-Host "Using agent: $Agent"
-    & $Agent -exec $Script
+    & $Agent -b64exec $ScriptB64
     exit $LASTEXITCODE
 }
 finally {
