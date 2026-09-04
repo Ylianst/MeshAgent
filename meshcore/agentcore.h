@@ -231,6 +231,7 @@ typedef struct MeshAgentHostContainer
 #endif
 	struct util_cert selfcert;
 	struct util_cert selftlscert;
+	struct util_cert clientcert;			// Optional mTLS client cert, set with the "ClientCertPem" setting
 	char serverWebHash[UTIL_SHA384_HASHSIZE];
 #endif
 
