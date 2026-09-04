@@ -1,0 +1,112 @@
+name: openssl-bsd
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      sha256:
+        required: true
+        type: string
+      force:
+        required: true
+        type: boolean
+      version_suffix:
+        required: false
+        default: false
+        type: boolean
+
+env:
+  OSSL_FLAGS: >-
+    no-weak-ssl-ciphers no-srp no-psk no-comp no-zlib no-zlib-dynamic
+    no-hw no-dso no-shared -no-asm no-rc5 no-idea no-md4
+    no-rmd160 no-ssl no-ssl3 no-seed no-camellia no-bf no-cast no-md2
+    no-mdc2 no-engine no-ocsp no-cms
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      # Set (to -<version>) writes this run's archives beside the committed ones
+      # instead of overwriting them, so several versions can coexist.
+      SFX: ${{ inputs.version_suffix && format('-{0}', inputs.version) || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check whether both archives already match the requested version
+        id: check
+        run: |
+          skip=true
+          for os in freebsd openbsd; do
+            f="openssl/libstatic/bsd/${os}_x86-64/libcrypto${SFX}.a"
+            { [ -f "$f" ] && strings "$f" | grep -qF "OpenSSL ${{ inputs.version }} "; } || { skip=false; break; }
+          done
+          [ "${{ inputs.force }}" = "true" ] && skip=false
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          [ "$skip" = "true" ] && echo "::notice::bsd archives already at OpenSSL ${{ inputs.version }} and force=false - skipping rebuild."
+          true
+      - name: Install clang and lld
+        if: steps.check.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Download and verify source
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          # 1.x releases are tagged OpenSSL_1_1_1w; 3.x and later, openssl-3.5.7.
+          case "${{ inputs.version }}" in
+            1.*) tag="OpenSSL_$(echo "${{ inputs.version }}" | tr . _)" ;;
+            *)   tag="openssl-${{ inputs.version }}" ;;
+          esac
+          curl -sSL --connect-timeout 20 --max-time 300 -o ossl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/$tag/openssl-${{ inputs.version }}.tar.gz"
+          echo "${{ inputs.sha256 }}  ossl.tar.gz" | sha256sum -c -
+      - name: Build freebsd_x86-64 and openbsd_x86-64 (clang cross + minimal sysroot)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          for os in freebsd openbsd; do
+            case $os in
+              freebsd)
+                # base.txz alone has the headers
+                rel=https://download.freebsd.org/releases/amd64/amd64/14.3-RELEASE
+                tarballs="base.txz"; triple=x86_64-unknown-freebsd14.3; maketgt="build_libs"
+                manifest=$(curl -sSL --fail --connect-timeout 20 --max-time 300 "$rel/MANIFEST")
+                sha_for() { echo "$manifest" | awk -v f="$1" '$1==f{print $2}'; }
+                ;;
+              openbsd)
+                # comp79.tgz (compiler/headers set) is required too - base79.tgz has no /usr/include.
+                rel=https://cdn.openbsd.org/pub/OpenBSD/7.9/amd64
+                tarballs="base79.tgz comp79.tgz"; triple=x86_64-unknown-openbsd7.9; maketgt="build_libs"
+                manifest=$(curl -sSL --fail --connect-timeout 20 --max-time 300 "$rel/SHA256")
+                sha_for() { echo "$manifest" | awk -v f="SHA256 ($1) = " 'index($0, f) == 1 {print $4}'; }
+                ;;
+            esac
+            sysroot="$GITHUB_WORKSPACE/sysroot-$os"
+            rm -rf "$sysroot" && mkdir -p "$sysroot"
+            for tarball in $tarballs; do
+              sha=$(sha_for "$tarball")
+              [ -n "$sha" ] || { echo "ERROR: couldn't fetch $os checksum for $tarball" >&2; exit 1; }
+              curl -sSL --fail --connect-timeout 20 --max-time 300 -o "$tarball" "$rel/$tarball"
+              echo "$sha  $tarball" | sha256sum -c -
+              tar xf "$tarball" -C "$sysroot"
+            done
+            rm -rf src && mkdir src && tar xzf ossl.tar.gz -C src --strip-components=1
+            # No -j here: parallel make's jobserver pipe hang
+            ( cd src && CC="clang --target=$triple --sysroot=$sysroot" LDFLAGS="-fuse-ld=lld" \
+              ./Configure BSD-x86_64 ${OSSL_FLAGS/-no-asm/} enable-ec_nistp_64_gcc_128 && \
+              make $maketgt )
+            d="out/openssl/libstatic/bsd/${os}_x86-64"
+            mkdir -p "$d"
+            cp src/libcrypto.a "$d/libcrypto${SFX}.a"
+            cp src/libssl.a "$d/libssl${SFX}.a"
+          done
+      - name: Verify version stamped into archives
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          for f in $(find out -name "libcrypto${SFX}.a"); do
+            v=$(strings "$f" | grep -oE 'OpenSSL [0-9]+\.[0-9]+\.[0-9]+[a-z]?' | sort -u | tr '\n' ' ')
+            echo "$f -> $v"
+            strings "$f" | grep -qF "OpenSSL ${{ inputs.version }} "
+          done
+      - uses: actions/upload-artifact@v7.0.1
+        if: ${{ steps.check.outputs.skip != 'true' }}
+        with:
+          name: openssl-bsd
+          path: out/
