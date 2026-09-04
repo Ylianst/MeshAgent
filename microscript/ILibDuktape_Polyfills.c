@@ -1183,12 +1183,10 @@ void ILibDuktape_Polyfills_timer_elapsed(void *obj)
 	}
 	else
 	{
-		if (ptrs->timerType == ILibDuktape_Timer_Type_IMMEDIATE)
-		{
-			duk_push_heap_stash(ctx);
-			duk_del_prop_string(ctx, -1, Duktape_GetStashKey(ptrs->object));
-			duk_pop(ctx);
-		}
+		// setTimeout/setImmediate: release reference now it has fired.
+		duk_push_heap_stash(ctx);
+		duk_del_prop_string(ctx, -1, Duktape_GetStashKey(ptrs->object));
+		duk_pop(ctx);
 
 		duk_del_prop_string(ctx, -2, "\xFF_callback");
 		duk_del_prop_string(ctx, -2, "\xFF_argArray");
@@ -1236,11 +1234,6 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 	case ILibDuktape_Timer_Type_IMMEDIATE:
 		ILibDuktape_WriteID(ctx, "Timers.immediate");	
 		metadata = "setImmediate()";
-		// We're only saving a reference for immediates
-		duk_push_heap_stash(ctx);															//[retVal][stash]
-		duk_dup(ctx, -2);																	//[retVal][stash][immediate]
-		duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));		//[retVal][stash]
-		duk_pop(ctx);																		//[retVal]
 		break;
 	case ILibDuktape_Timer_Type_INTERVAL:
 		ILibDuktape_WriteID(ctx, "Timers.interval");
@@ -1251,6 +1244,13 @@ duk_ret_t ILibDuktape_Polyfills_timer_set(duk_context *ctx)
 		metadata = "setTimeout()";
 		break;
 	}
+
+	// save all timer references so they can't be GC'd while running
+	duk_push_heap_stash(ctx);															//[retVal][stash]
+	duk_dup(ctx, -2);																	//[retVal][stash][timer]
+	duk_put_prop_string(ctx, -2, Duktape_GetStashKey(duk_get_heapptr(ctx, -1)));		//[retVal][stash]
+	duk_pop(ctx);																		//[retVal]
+
 	ILibDuktape_CreateFinalizer(ctx, ILibDuktape_Polyfills_timer_finalizer);
 	
 	ptrs = (ILibDuktape_Timer*)Duktape_PushBuffer(ctx, sizeof(ILibDuktape_Timer));	//[retVal][ptrs]
@@ -1309,12 +1309,10 @@ duk_ret_t ILibDuktape_Polyfills_timer_clear(duk_context *ctx)
 	duk_get_prop_string(ctx, 0, ILibDuktape_Timer_Ptrs);
 	ptrs = (ILibDuktape_Timer*)Duktape_GetBuffer(ctx, -1, NULL);
 
-	if (ptrs->timerType == ILibDuktape_Timer_Type_IMMEDIATE)
-	{
-		duk_push_heap_stash(ctx);
-		duk_del_prop_string(ctx, -1, Duktape_GetStashKey(ptrs->object));
-		duk_pop(ctx);
-	}
+	// release timer reference so it can be GC'd
+	duk_push_heap_stash(ctx);
+	duk_del_prop_string(ctx, -1, Duktape_GetStashKey(ptrs->object));
+	duk_pop(ctx);
 
 	ILibLifeTime_Remove(ILibGetBaseTimer(Duktape_GetChain(ctx)), ptrs);
 	return 0;
