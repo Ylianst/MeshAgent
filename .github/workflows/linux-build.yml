@@ -13,7 +13,7 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386 &&
           sudo apt clean all && sudo apt update && 
-          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential &&
+          sudo apt-get install -y libx11-dev libxtst-dev libxext-dev libjpeg62-dev build-essential musl-tools &&
           sudo apt-get install -y linux-libc-dev:i386 libc6-dev-i386 libjpeg62-dev:i386 &&
           sudo apt-get install -y libc6-armel-cross libc6-dev-armel-cross binutils-arm-linux-gnueabi libncurses5-dev gcc-arm-linux-gnueabihf &&
           sudo apt-get install -y libxrandr-dev libwayland-dev libdrm-dev libegl-dev libgles-dev
