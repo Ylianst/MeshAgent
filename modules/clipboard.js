@@ -142,7 +142,7 @@ function dispatchRead(sid)
         id = sid;
     }
 
-    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && (require('clipboard').xclip || lin_wayland_active())))
     {
         return (module.exports.read());
     }
@@ -202,7 +202,7 @@ function dispatchWrite(data, sid)
         id = sid;
     }
 
-    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && require('clipboard').xclip))
+    if (id == 0 || process.platform == 'darwin' || process.platform == 'freebsd' || (process.platform == 'linux' && (require('clipboard').xclip || lin_wayland_active())))
     {
         return(module.exports(data));
     }
@@ -240,6 +240,108 @@ function dispatchWrite(data, sid)
         }
 
     }
+}
+
+var _waylandActive = { sticky: false, value: false, at: 0 };
+function lin_wayland_active()
+{
+    // The probe spawns several shell children (consoleUid + display-manager checks), which is far
+    // too heavy to run on every clipboard dispatch. Positive results stick for the process
+    // lifetime (mirrors the C-side latch in linux_kvm_wayland.c); negatives re-probe on a TTL.
+    if (_waylandActive.sticky) { return (true); }
+    var now = Date.now();
+    if (_waylandActive.at != 0 && (now - _waylandActive.at) < 10000) { return (_waylandActive.value); }
+    var mi = require('monitor-info');
+    var v = (mi._kvmcheck_wayland && mi._kvmcheck_wayland()) ? true : false;
+    _waylandActive.value = v;
+    _waylandActive.at = now;
+    if (v) { _waylandActive.sticky = true; }
+    return (v);
+}
+
+function lin_whereis(name)
+{
+    var child = require('child_process').execFile('/bin/sh', ['sh']);
+    child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
+    child.stdin.write("whereis " + name + " | awk '{ print $2; }'\nexit\n");
+    child.waitExit();
+    return (child.stdout.str.trim() != '' ? child.stdout.str.trim() : null);
+}
+
+function lin_wayland_env(uid)
+{
+    var fs = require('fs');
+    var runtimeDir = '/run/user/' + uid;
+    var disp = process.env['WAYLAND_DISPLAY'];
+    if (!(disp && fs.existsSync(runtimeDir + '/' + disp)))
+    {
+        disp = fs.existsSync(runtimeDir + '/wayland-1') ? 'wayland-1' : 'wayland-0';
+    }
+    return ({ WAYLAND_DISPLAY: disp, XDG_RUNTIME_DIR: runtimeDir });
+}
+
+function lin_wl_readtext(ret)
+{
+    var wl = require('clipboard').wlclipboard;
+    if (!wl) { ret._rej('wl-clipboard (wl-paste) required for clipboard on Wayland'); return (ret); }
+
+    var id;
+    try { id = require('user-sessions').consoleUid(); }
+    catch (e) { ret._rej(e); return (ret); }
+
+    ret.child = require('child_process').execFile(wl.paste, ['wl-paste', '--no-newline'], { uid: id, env: lin_wayland_env(id) });
+    ret.child.promise = ret;
+    ret.child.stdout.str = ''; ret.child.stdout.on('data', function (c) { this.str += c.toString(); });
+    ret.child.stderr.str = ''; ret.child.stderr.on('data', function (c) { this.str += c.toString(); });
+    // A dead/hung compositor socket otherwise leaves this child and the promise pending forever.
+    var pasteChild = ret.child;
+    ret.child.timeoutHandle = setTimeout(function () { pasteChild.timedout = true; try { pasteChild.kill(); } catch (e) { } }, 5000);
+    ret.child.on('exit', function ()
+    {
+        clearTimeout(this.timeoutHandle);
+        if (this.timedout)
+        {
+            this.promise._rej('wl-paste timed out (compositor unreachable?)');
+            return;
+        }
+        // wl-paste reports an empty clipboard on stderr with a non-zero exit; surface that as empty, not an error.
+        if (this.stdout.str.length == 0 && this.stderr.str.trim() != '' && this.stderr.str.indexOf('Nothing is copied') < 0)
+        {
+            this.promise._rej(this.stderr.str.trim());
+        }
+        else
+        {
+            this.promise._res(this.stdout.str);
+        }
+    });
+    return (ret);
+}
+
+function lin_wl_copy(txt)
+{
+    var ret = new promise(function (res, rej) { this._res = res; this._rej = rej; });
+    var wl = require('clipboard').wlclipboard;
+    if (!wl) { ret._rej('wl-clipboard (wl-copy) required for clipboard on Wayland'); return (ret); }
+
+    var id;
+    try { id = require('user-sessions').consoleUid(); }
+    catch (e) { ret._rej(e); return (ret); }
+
+    // wl-copy forks a background process to keep owning the selection until another client replaces it,
+    // so the foreground child exits as soon as the text is read; that lingering owner is expected.
+    ret.child = require('child_process').execFile(wl.copy, ['wl-copy'], { uid: id, env: lin_wayland_env(id) });
+    ret.child.promise = ret;
+    ret.child.stderr.on('data', function (c) { console.log(c.toString()); });
+    var copyChild = ret.child;
+    ret.child.timeoutHandle = setTimeout(function () { copyChild.timedout = true; try { copyChild.kill(); } catch (e) { } }, 5000);
+    ret.child.on('exit', function ()
+    {
+        clearTimeout(this.timeoutHandle);
+        if (this.timedout) { this.promise._rej('wl-copy timed out (compositor unreachable?)'); return; }
+        this.promise._res();
+    });
+    ret.child.stdin.write(txt, function () { this.end(); });
+    return (ret);
 }
 
 function lin_xclip_readtext(ret)
@@ -293,6 +395,11 @@ function lin_readtext()
     {
         ret._rej(exc);
         return (ret);
+    }
+
+    if (lin_wayland_active())
+    {
+        return (lin_wl_readtext(ret));
     }
 
     var X11 = require('monitor-info')._X11;
@@ -454,6 +561,11 @@ function lin_xclip_copy(txt)
 
 function lin_copytext(txt)
 {
+    if (lin_wayland_active())
+    {
+        return (lin_wl_copy(txt));
+    }
+
     var X11 = require('monitor-info')._X11;
     if (!X11)
     {
@@ -654,6 +766,17 @@ switch(process.platform)
                     }
 
                     return (child.stdout.str.trim() != "" ? child.stdout.str.trim() : null);
+                }
+            });
+        Object.defineProperty(module.exports, "wlclipboard",
+            {
+                get: function ()
+                {
+                    if (this._wlclipboard !== undefined) { return (this._wlclipboard); }
+                    var copy = lin_whereis('wl-copy');
+                    var paste = lin_whereis('wl-paste');
+                    Object.defineProperty(this, "_wlclipboard", { value: (copy && paste) ? { copy: copy, paste: paste } : null });
+                    return (this._wlclipboard);
                 }
             });
         break;
