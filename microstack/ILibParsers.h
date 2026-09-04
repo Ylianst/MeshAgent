@@ -479,11 +479,30 @@ int ILibIsRunningOnChainThread(void* chain);
 	#define ILibMemory_Extra(ptr) (ILibMemory_ExtraSize(ptr)>0?((char*)(ptr) + ILibMemory_Size((ptr)) + sizeof(ILibMemory_Header)):NULL)
 	#define ILibMemory_FromRaw(ptr) ((char*)(ptr) + sizeof(ILibMemory_Header))
 
-	#define ILibMemory_Size_Validate(primaryLen, extraLen) (((size_t)(primaryLen)<(UINT32_MAX - (size_t)(extraLen)))&&((size_t)(extraLen)<(UINT32_MAX-(size_t)(primaryLen)))&&((size_t)((primaryLen) + (extraLen))<(UINT32_MAX - sizeof(ILibMemory_Header)))&&((extraLen)==0 || ((size_t)((primaryLen)+(extraLen)+sizeof(ILibMemory_Header))<(UINT32_MAX-sizeof(ILibMemory_Header)))))
+	// Un-macro'd for the same reason as ILibMemory_Init_SizeEx below: MSVC x86 LTCG miscompiles a conditional built from runtime-sized values when it determines a malloc size.
+	// An oversized length would reach malloc uncaught.
+	static inline int ILibMemory_Size_ValidateEx(size_t primaryLen, size_t extraLen)
+	{
+		if (primaryLen >= (UINT32_MAX - extraLen)) { return(0); }
+		if (extraLen >= (UINT32_MAX - primaryLen)) { return(0); }
+		if ((primaryLen + extraLen) >= (UINT32_MAX - sizeof(ILibMemory_Header))) { return(0); }
+		if (extraLen > 0 && ((primaryLen + extraLen + sizeof(ILibMemory_Header)) >= (UINT32_MAX - sizeof(ILibMemory_Header)))) { return(0); }
+		return(1);
+	}
+	// The macro form stays under this name so code outside this tree that still calls it keeps working.
+	#define ILibMemory_Size_Validate(primaryLen, extraLen) ILibMemory_Size_ValidateEx((size_t)(primaryLen), (size_t)(extraLen))
 	#define ILibMemory_Init_Size(primaryLen, extraLen) (primaryLen + extraLen + sizeof(ILibMemory_Header) + (extraLen>0?sizeof(ILibMemory_Header) + (((primaryLen + sizeof(ILibMemory_Header)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)):0))
+	// Un-macro'd because with non-constant sizes, MSVC x86 LTCG (v143 and v145, v142 verified unaffected) drops the macro's conditional part (extraLen > 0 ? header + roundup : 0).
+	// So the first block with a non-zero extraLen got 44 bytes instead of 88. This gave a 0xC0000374 (STATUS_HEAP_CORRUPTION) error at startup.
+	static inline size_t ILibMemory_Init_SizeEx(size_t primaryLen, size_t extraLen)
+	{
+		size_t total = primaryLen + extraLen + sizeof(ILibMemory_Header);
+		if (extraLen > 0) { total += sizeof(ILibMemory_Header) + (((primaryLen + sizeof(ILibMemory_Header)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1)); }
+		return(total);
+	}
 	void* ILibMemory_Init(void *ptr, size_t primarySize, size_t extraSize, ILibMemory_Types memType);
-	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_Validate(len,0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
-	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_InitEx(ILibMemory_Size_Validate(primaryLen,extraLen)?malloc(ILibMemory_Init_Size(primaryLen, extraLen)):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocate(len) ILibMemory_InitEx(ILibMemory_Size_ValidateEx((size_t)(len),0)?malloc(ILibMemory_Init_Size(len, 0)):NULL, (int)len, 0, ILibMemory_Types_HEAP)
+	#define ILibMemory_SmartAllocateEx(primaryLen, extraLen) ILibMemory_InitEx(ILibMemory_Size_ValidateEx((size_t)(primaryLen),(size_t)(extraLen))?malloc(ILibMemory_Init_SizeEx((size_t)(primaryLen), (size_t)(extraLen))):NULL, (int)primaryLen, (int)extraLen, ILibMemory_Types_HEAP)
 	#define ILibMemory_SmartAllocate_FromString(str) ILibMemory_SmartAllocate_FromStringEx(str, 0)
 	char* ILibMemory_SmartAllocate_FromStringEx(char *str, size_t strLen);
 	void* ILibMemory_SmartReAllocate(void *ptr, size_t len);
