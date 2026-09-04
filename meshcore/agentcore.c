@@ -649,7 +649,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Received encrypted discovery response...\n");
-			ILIBLOGMESSAGEX("Received encrypted discovery response...\n");
+			ILIBLOGMESSAGEX("Received encrypted discovery response...");
 		}
 	}
 	else
@@ -662,7 +662,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Received unencrypted discovery response...\n");
-			ILIBLOGMESSAGEX("Received unencrypted discovery response...\n");
+			ILIBLOGMESSAGEX("Received unencrypted discovery response...");
 		}
 	}
 
@@ -679,7 +679,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("FoundServer: %s\n", agentHost->multicastServerUrl);
-			ILIBLOGMESSAGEX("FoundServer: %s\n", agentHost->multicastServerUrl);
+			ILIBLOGMESSAGEX("FoundServer: %s", agentHost->multicastServerUrl);
 		}
 
 		if (agentHost->serverConnectionState == 0) { MeshServer_ConnectEx(agentHost); }
@@ -689,7 +689,7 @@ void UDPSocket_OnData(ILibAsyncUDPSocket_SocketModule socketModule, char* buffer
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Failed to parse response...\n");
-			ILIBLOGMESSAGEX("Failed to parse response...\n");
+			ILIBLOGMESSAGEX("Failed to parse response...");
 		}
 	}
 }
@@ -2793,7 +2793,7 @@ void MeshServer_selfupdate_continue(MeshAgentHostContainer *agent)
 		// Windows Console Mode updater
 		if (duk_peval_string(agent->meshCoreCtx, "require('agent-installer').consoleUpdate();") != 0)
 		{
-			printf("%s", duk_safe_to_string(agent->meshCoreCtx, -1));
+			printf("%s\n", duk_safe_to_string(agent->meshCoreCtx, -1));
 		}
 	}
 	else
@@ -2891,7 +2891,19 @@ duk_ret_t MeshServer_selfupdate_unzip_error(duk_context *ctx)
 	return(0);
 }
 
-// Process MeshCentral server commands. 
+// The MeshCommands_Binary identifier for a control channel command number, minus its MeshCommand_ prefix, generated from the MESH_COMMANDS list in agentcore.h
+static const char* MeshCommand_Name(unsigned short command)
+{
+	switch (command)
+	{
+#define MESH_COMMAND_NAME(id, value) case id: return(&#id[sizeof("MeshCommand_") - 1]);
+		MESH_COMMANDS(MESH_COMMAND_NAME)
+#undef MESH_COMMAND_NAME
+		default: return((command & 0xFF00) == 0x7B00 ? "JSON" : "unknown");
+	}
+}
+
+// Process MeshCentral server commands.
 void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAgentHostContainer *agent, char *cmd, int cmdLen)
 {
 	unsigned short command = ntohs(((unsigned short*)cmd)[0]);
@@ -2899,8 +2911,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 	if (agent->controlChannelDebug != 0)
 	{
-		printf("ProcessCommand(%u)...\n", command);
-		ILIBLOGMESSAGEX("ProcessCommand(%u)...", command);
+		printf("ProcessCommand (%u) %s\n", command, MeshCommand_Name(command));
+		ILIBLOGMESSAGEX("ProcessCommand (%u) %s", command, MeshCommand_Name(command));
 	}
 
 #ifndef MICROSTACK_NOTLS
@@ -2914,7 +2926,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthRequest: // This is basic authentication information from the server, we need to sign this and return the signature.
 			if (cmdLen == sizeof(MeshCommand_BinaryPacket_AuthRequest))
 			{
-				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Request..."); }
+				if (agent->controlChannelDebug != 0) { printf("Processing Authentication Request...\n"); ILIBLOGMESSAGEX("Processing Authentication Request..."); }
 				MeshCommand_BinaryPacket_AuthRequest *AuthRequest = (MeshCommand_BinaryPacket_AuthRequest*)cmd;
 				int signLen;
 				SHA512_CTX c;
@@ -2989,7 +3001,7 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		case MeshCommand_AuthVerify: // This is the signature from the server. We need to check everything is ok.
 			if (cmdLen > 8)
 			{
-				if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Processing Authentication Verification..."); }
+				if (agent->controlChannelDebug != 0) { printf("Processing Authentication Verification...\n"); ILIBLOGMESSAGEX("Processing Authentication Verification..."); }
 
 				MeshCommand_BinaryPacket_AuthVerify_Header *avh = (MeshCommand_BinaryPacket_AuthVerify_Header*)cmd;
 #ifdef WIN32
@@ -3019,8 +3031,9 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 						X509_pubkey_digest(serverCert, EVP_sha256(), (unsigned char*)ILibScratchPad, (unsigned int*)&hashlen); // OpenSSL 1.1, SHA256 (For older .mshx policy file)
 						if (memcmp(ILibScratchPad, agent->serverHash, UTIL_SHA256_HASHSIZE) != 0) 
 						{
-							printf("Server certificate mismatch\r\n"); break; // TODO: Disconnect
+							printf("Server certificate mismatch\r\n");	// TODO: Disconnect
 							if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server certificate mismatch"); }
+							break;
 						}
 					}
 
@@ -3161,8 +3174,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 
 	if (agent->controlChannelDebug != 0) 
 	{
-		printf("BinaryCommand(%u, %u)...\n", command, requestid);
-		ILIBLOGMESSAGEX("BinaryCommand(%u, %u)...", command, requestid); 
+		printf("BinaryCommand (%u) %s, request %u\n", command, MeshCommand_Name(command), requestid);
+		ILIBLOGMESSAGEX("BinaryCommand (%u) %s, request %u", command, MeshCommand_Name(command), requestid);
 	}
 
 
@@ -3297,8 +3310,8 @@ void MeshServer_ProcessCommand(ILibWebClient_StateObject WebStateObject, MeshAge
 		}
 		case MeshCommand_CoreOk: // Message from the server indicating our meshcore is ok. No update needed.
 		{
-			printf("Server verified meshcore...");
-			
+			printf("Server verified meshcore...\n");
+			if (agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Server verified meshcore..."); }
 			duk_eval_string(agent->meshCoreCtx, "_MSH().setuid;");
 			if (duk_is_null_or_undefined(agent->meshCoreCtx, -1) == 0)
 			{
@@ -3538,7 +3551,7 @@ void MeshServer_ControlChannel_IdleTimeout_PongTimeout(void *object)
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): PONG TIMEOUT");
 	}
 	ILibWebClient_Disconnect(agent->controlChannel);
 	agent->controlChannel = NULL;
@@ -3550,7 +3563,7 @@ void MeshServer_ControlChannel_IdleTimeout(ILibWebClient_StateObject WebStateObj
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Sending Ping");
 	}
 
 	ILibLifeTime_Add(ILibGetBaseTimer(agent->chain), Agent2PingData(agent), 5, MeshServer_ControlChannel_IdleTimeout_PongTimeout, NULL);
@@ -3569,7 +3582,7 @@ void MeshServer_ControlChannel_PongSink(ILibWebClient_StateObject WebStateObject
 	if (agent->controlChannelDebug != 0)
 	{
 		printf("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received\n");
-		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received\n");
+		ILIBLOGMESSAGEX("AgentCore/MeshServer_ControlChannel_IdleTimeout(): Pong Received");
 	}
 
 #ifdef _REMOTELOGGING
@@ -4179,8 +4192,10 @@ void MeshServer_ConnectEx(MeshAgentHostContainer *agent)
 	if (useproxy != 0 || meshServer.sin6_family != AF_UNSPEC)
 	{
 		if (useproxy == 0) { strcpy_s(agent->serverip, sizeof(agent->serverip), ILibRemoteLogging_ConvertAddress((struct sockaddr*)&meshServer)); }
-		printf("Connecting %sto: %s\n", useproxy!=0?"(via proxy) ":"", agent->serveruri);
-		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) { ILIBLOGMESSAGEX("Connecting %sto: %s", useproxy != 0 ? "(via proxy) " : "", agent->serveruri); }
+		printf("Connecting %sto: %s\n", useproxy != 0 ? "(via proxy) " : "", agent->serveruri);
+		if (agent->logUpdate != 0 || agent->controlChannelDebug != 0) {
+			ILIBLOGMESSAGEX("Connecting %sto: %s", useproxy != 0 ? "(via proxy) " : "", agent->serveruri);
+		}
 
 		ILibWebClient_AddWebSocketRequestHeaders(req, 65535, MeshServer_OnSendOK);
 
@@ -4292,7 +4307,7 @@ void MeshServer_Agent_SelfTest(MeshAgentHostContainer *agent)
 
 	if (duk_peval_string(agent->meshCoreCtx, "require('agent-selftest')();") != 0)
 	{
-		printf("   -> Loading Test Script.................[FAILED] %s", duk_safe_to_string(agent->meshCoreCtx, -1));
+		printf("   -> Loading Test Script.................[FAILED] %s\n", duk_safe_to_string(agent->meshCoreCtx, -1));
 		exit(1);
 	}
 	duk_pop(agent->meshCoreCtx);
@@ -4365,16 +4380,17 @@ void MeshServer_Connect(MeshAgentHostContainer *agent)
 	SLAVELOG = ILibSimpleDataStore_Get(agent->masterDb, "slaveKvmLog", NULL, 0);
 #endif
 
-	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("PLATFORM_TYPE: %d", agent->platformType); }
-	if (agent->logUpdate != 0) { ILIBLOGMESSAGEX("Running as Service: %d", agent->JSRunningAsService); }
-
-	if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
-	if (agent->controlChannelDebug != 0)
+	if (agent->logUpdate != 0)
 	{
-		ILIBLOGMESSSAGE("Attempting to connect to Server...");
-		printf("Attempting to connect to Server...\n");
+		ILIBLOGMESSAGEX("PLATFORM_TYPE: %d", agent->platformType);
+		ILIBLOGMESSAGEX("Running as Service: %d", agent->JSRunningAsService);
 	}
-	else if (agent->logUpdate != 0) { ILIBLOGMESSSAGE("Attempting to connect to Server..."); }
+
+	if (agent->logUpdate != 0 || agent->controlChannelDebug != 0)
+	{
+		printf("Attempting to connect to Server...\n");
+		ILIBLOGMESSSAGE("Attempting to connect to Server...");
+	}
 
 	if (agent->retryTime == 0)
 	{
@@ -4679,7 +4695,7 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 	if (agentHost->controlChannelDebug != 0)
 	{
 		printf("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
-		ILIBLOGMESSAGEX("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)\n", agentHost->serverConnectionState);
+		ILIBLOGMESSAGEX("MeshAgent_AgentMode_IPAddressChanged_Handler(%d)", agentHost->serverConnectionState);
 	}
 
 	if (agentHost->multicastDiscovery != NULL)
@@ -4687,7 +4703,7 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Resetting MulticastSocketv4\n");
-			ILIBLOGMESSAGEX("Resetting MulticastSocketv4\n");
+			ILIBLOGMESSAGEX("Resetting MulticastSocketv4");
 		}
 		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery, 0);
 	}
@@ -4696,7 +4712,7 @@ void MeshAgent_AgentMode_IPAddressChanged_Handler(ILibIPAddressMonitor sender, v
 		if (agentHost->controlChannelDebug != 0)
 		{
 			printf("Resetting MulticastSocketv6\n");
-			ILIBLOGMESSAGEX("Resetting MulticastSocketv6\n");
+			ILIBLOGMESSAGEX("Resetting MulticastSocketv6");
 		}
 		ILibMulticastSocket_ResetMulticast(agentHost->multicastDiscovery2, 0);
 	}
